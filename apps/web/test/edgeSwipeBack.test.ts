@@ -105,6 +105,10 @@ test("a claimed drag follows the finger, peeks the layer beneath, and a long rel
     // Hand-off: the exit animation reads where the finger left each layer.
     assert.equal(f.layer.style.transform, "", "the inline drag position is dropped…");
     assert.equal(f.layer.style.getPropertyValue("--stack-from"), "592px", "…and published for the exit to start from");
+    assert.match(f.layer.style.getPropertyValue("--stack-swipe-ease"), /^cubic-bezier\(0\.32, [\d.]+, [\d.]+, 1\)$/,
+      "the exit's curve starts at the finger's speed");
+    assert.equal(f.under.style.getPropertyValue("--stack-swipe-ease"), f.layer.style.getPropertyValue("--stack-swipe-ease"),
+      "both layers share it");
     assert.match(f.under.style.getPropertyValue("--stack-uncover-from"), /\* -0\.4\d+\)/);
     assert.equal(f.under.hasAttribute("data-peek"), false);
     assert.equal(f.under.style.getPropertyValue("--stack-peek-x"), "");
@@ -253,7 +257,7 @@ test("right-to-left layouts swipe from the right edge toward the left", () => {
   doc.documentElement.dir = "rtl";
   try {
     touch("touchstart", f.inner, { x: WIDTH - 6, y: 300 });
-    for (let i = 1; i <= 6; i++) touch("touchmove", f.inner, { x: WIDTH - 6 - 100 * i, y: 301 }, 40);
+    for (let i = 1; i <= 20; i++) touch("touchmove", f.inner, { x: WIDTH - 6 - 30 * i, y: 301 });
     assert.equal(f.layer.style.transform, "translate3d(-600px, 0, 0)", "the layer travels toward the inline end, mirrored");
     touch("touchend", f.inner);
     assert.equal(f.backs, 1);

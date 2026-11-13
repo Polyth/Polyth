@@ -5,19 +5,32 @@
 // also treating the drag as a tap, a scroll or a long-press.
 //
 // What moves is not its business. A claim calls `begin()`, and the returned
-// session paints each frame and performs the commit (normally by publishing
-// where the finger left the layer and flipping the state whose CSS animation
-// carries on from there) or undoes the drag once it is home. The decisions are
-// pure and live in mobileGestures.ts.
+// session paints each frame and performs the commit or undoes the drag once it
+// is home. The decisions are pure and live in mobileGestures.ts.
+//
+// Three things keep the motion in one piece:
+//   - the claim: the layer leaves rest at the finger's speed and closes its gap
+//     to the finger over a moment, however long the claim itself took (the
+//     surface a swipe pulls in is mounted right then);
+//   - the release: the rest of the travel is a spring that carries on at the
+//     finger's speed. A session that implements `settle()` runs it as a
+//     compositor animation started in the same task as the release, and only
+//     then is told to commit, so the state change it makes (a React commit,
+//     focus, inert) happens under a layer that is already moving;
+//   - a session without `settle()` commits at once and hands its position to a
+//     CSS animation of its own (`settleMs`, `easing`).
 //
 // Input cost: the always-on `touchstart` listener is passive, so it never holds
 // up scrolling. Only a touch that may become a swipe adds the non-passive
 // `touchmove`/`touchend` listeners it needs to cancel the browser's handling,
 // and they go away with that touch.
 import {
+  CLAIM_SETTLE_WINDOW_MS,
+  CLAIM_STALL_MS,
   EDGE_SWIPE_COMMIT_PROGRESS,
   EDGE_SWIPE_FLICK_MIN_TRAVEL,
-  caughtUpTravel,
+  claimGapAt,
+  claimGapDurationMs,
   directedTravel,
   edgeSwipeCommits,
   edgeSwipeProgress,
@@ -25,9 +38,12 @@ import {
   releaseVelocity,
   scrollerTakesSwipe,
   settleDurationMs,
-  stackEase,
+  settleEasing,
+  settleSamples,
+  springSettle,
   swipeIntent,
   type InlineDirection,
+  type SettleCurve,
   type SwipeZone,
   type TravelSample,
 } from "./mobileGestures.ts";
@@ -73,11 +89,39 @@ export interface SwipeRelease {
   velocity: number;
   /** How long the hand-off should take to finish the travel (0 with motion off). */
   settleMs: number;
+  /** The timing function a CSS hand-off over `settleMs` leaves the finger at the finger's speed with. */
+  easing: string;
+}
+
+/** The rest of a released layer's travel, for a session that runs it off the main thread. */
+export interface SwipeSettle {
+  /** `commit`: on to the destination. `home`: back to where the drag began. */
+  outcome: "commit" | "home";
+  durationMs: number;
+  /** Travel `ms` into the settle. */
+  travelAt(ms: number): number;
+  /**
+   * Keyframes for one element: `frame` maps a travel to that element's style.
+   * They are evenly spaced samples of the spring, so play them with a linear
+   * easing over `durationMs` (see `animateSettle`).
+   */
+  keyframes(frame: (travel: number, progress: number) => Keyframe): Keyframe[];
 }
 
 export interface SwipeSession {
   /** Render one frame `travel` px along the swipe (0 = where the drag began). */
   paint(travel: number, progress: number): void;
+  /**
+   * Optional. Run the rest of the travel as animations the compositor owns
+   * and return them; the controller ends them once the gesture is over.
+   * While they run the session's CSS must leave the layer to them (no
+   * `!important` transform, no entrance that replays underneath), and where
+   * the layer rests afterwards must be where they end. `commit()` and
+   * `cancel()` are then called after the animation has started: on a commit,
+   * one frame later; coming home, when it has arrived. Return null (no Web
+   * Animations, nothing to move) to be painted frame by frame instead.
+   */
+  settle?(settle: SwipeSettle): Animation | readonly Animation[] | null;
   /** The release completes the gesture. */
   commit(release: SwipeRelease): void;
   /** The drag sprang home (its last paint was at 0) or was abandoned: undo `begin`. */
@@ -235,6 +279,33 @@ export function parkLeavingLayer(el: HTMLElement, transform: string, ms = 160): 
   }, ms);
 }
 
+/**
+ * Play a settle on `el`: the spring's samples as linear keyframes, held at
+ * their end until the controller takes them back. Null where the Web
+ * Animations API is missing.
+ */
+export function animateSettle(
+  el: HTMLElement,
+  settle: SwipeSettle,
+  frame: (travel: number, progress: number) => Keyframe,
+  pseudoElement?: string,
+): Animation | null {
+  if (typeof el.animate !== "function") return null;
+  return el.animate(settle.keyframes(frame), {
+    duration: settle.durationMs,
+    easing: "linear",
+    fill: "forwards",
+    ...(pseudoElement ? { pseudoElement } : {}),
+  });
+}
+
+/** How many stalled frames right after a claim are absorbed into the gap (the mount, then its effects). */
+const CLAIM_STALLS_ABSORBED = 2;
+/** How long after a release the commit is delivered when no frame comes (a hidden page). */
+const COMMIT_FALLBACK_MS = 120;
+/** Slack after a settle's own duration before it is taken as finished without its event. */
+const SETTLE_FINISH_SLACK_MS = 160;
+
 /** Whether the user is selecting text the swipe would otherwise drag across. */
 function selectingText(win: Window): boolean {
   const selection = win.getSelection?.();
@@ -243,7 +314,7 @@ function selectingText(win: Window): boolean {
 
 /** Attach to a document; returns the cleanup. */
 export function attachSwipeSurface(options: SwipeSurfaceOptions, doc: Document = document): () => void {
-  type Mode = "idle" | "tracking" | "ignored" | "dragging" | "settling";
+  type Mode = "idle" | "tracking" | "ignored" | "dragging" | "settling" | "committing";
   const owner = {};
   let mode: Mode = "idle";
   let touchId: number | null = null;
@@ -251,8 +322,16 @@ export function attachSwipeSurface(options: SwipeSurfaceOptions, doc: Document =
   let startInfo: SwipeStart | null = null;
   /** Where the layer is painted, px along the swipe (what a release hands over). */
   let travel = 0;
-  /** The finger's travel when the swipe claimed the touch (the gap the layer closes). */
-  let claimTravel = 0;
+  /** Where the finger is, px along the swipe (what decides the release). */
+  let reach = 0;
+  /** The layer's gap to the finger when it last began to close, and when that was. */
+  let gap = 0;
+  let gapStamp = 0;
+  /** When the swipe claimed the touch, and how many stalled frames right after it the gap may still absorb. */
+  let claimStamp = 0;
+  let stallsLeft = 0;
+  /** The last move: where the finger was, when, and when the page heard of it. */
+  let lastMove: { stamp: number; finger: number; heardAt: number } | null = null;
   /** Where the layer was when this finger caught it (non-zero only for a catch mid spring-home). */
   let base = 0;
   /** This drag began by catching a layer on its way home. */
@@ -261,6 +340,11 @@ export function attachSwipeSurface(options: SwipeSurfaceOptions, doc: Document =
   let samples: TravelSample[] = [];
   let session: SwipeSession | null = null;
   let frame = 0;
+  let gapFrame = 0;
+  /** A spring home the compositor is running: where it is at any moment, and how to stop it. */
+  let homing: { curve: SettleCurve; animations: Animation[]; startedAt: number; stop(): void } | null = null;
+  /** A commit whose animation has started and whose state change is one frame away. */
+  let pendingCommit: (() => void) | null = null;
 
   const root = doc.documentElement;
   const win = doc.defaultView ?? window;
@@ -326,10 +410,22 @@ export function attachSwipeSurface(options: SwipeSurfaceOptions, doc: Document =
     doc.removeEventListener("touchcancel", onTouchCancel, active);
   };
 
+  /** Take a compositor spring-home back (the layer is then wherever its styles put it). */
+  const endHoming = (): void => {
+    const run = homing;
+    homing = null;
+    if (!run) return;
+    run.stop();
+    for (const animation of run.animations) animation.cancel();
+  };
+
   /** Back to idle; the session (if any) has already been told how it ended. */
   const reset = (): void => {
     if (frame) win.cancelAnimationFrame(frame);
     frame = 0;
+    if (gapFrame) win.cancelAnimationFrame(gapFrame);
+    gapFrame = 0;
+    endHoming();
     if (claims.get(doc) === owner) {
       claims.delete(doc);
       delete root.dataset.stackSwiping;
@@ -340,7 +436,12 @@ export function attachSwipeSurface(options: SwipeSurfaceOptions, doc: Document =
     startInfo = null;
     touchId = null;
     travel = 0;
-    claimTravel = 0;
+    reach = 0;
+    gap = 0;
+    gapStamp = 0;
+    claimStamp = 0;
+    stallsLeft = 0;
+    lastMove = null;
     base = 0;
     caught = false;
     armed = false;
@@ -349,17 +450,82 @@ export function attachSwipeSurface(options: SwipeSurfaceOptions, doc: Document =
   };
 
   const width = (): number => startInfo?.width ?? (root.clientWidth || win.innerWidth);
+  const settleBase = (): number => motionDurationMs(options.motion ?? "--motion-stack");
+
+  /** What is left, at `stamp`, of the gap between the layer and the finger. */
+  const gapAt = (stamp: number): number => claimGapAt(gap, stamp - gapStamp);
+  const openGap = (size: number, stamp: number): void => {
+    gap = Math.max(0, size);
+    gapStamp = stamp;
+  };
+
+  /** Put the layer where the finger has it at `stamp`, less whatever gap is still closing. */
+  const paintDrag = (stamp: number): void => {
+    const move = lastMove;
+    if (!move) return;
+    const w = width();
+    travel = Math.min(w, Math.max(0, base + move.finger - gapAt(stamp)));
+    session?.paint(travel, edgeSwipeProgress(travel, w));
+  };
+
+  // The gap closes with time, not with the finger: a finger that stops while
+  // the layer is still catching up must not leave it short.
+  const closeGap = (): void => {
+    gapFrame = 0;
+    const move = lastMove;
+    if (mode !== "dragging" || !move) return;
+    const stamp = move.stamp + (win.performance.now() - move.heardAt);
+    paintDrag(stamp);
+    if (gapAt(stamp) > 0.25) gapFrame = win.requestAnimationFrame(closeGap);
+  };
+
+  /** Hand the spring to the session's compositor animations; empty when it paints frame by frame. */
+  const startSettle = (live: SwipeSession, curve: SettleCurve, outcome: SwipeSettle["outcome"]): Animation[] => {
+    if (!live.settle || curve.durationMs <= 0) return [];
+    const w = width();
+    const samples = settleSamples(curve);
+    const last = samples.length - 1;
+    let started: Animation | readonly Animation[] | null;
+    try {
+      started = live.settle({
+        outcome,
+        durationMs: curve.durationMs,
+        travelAt: curve.travelAt,
+        keyframes: (frameAt) => samples.map((at, index) => ({ ...frameAt(at, edgeSwipeProgress(at, w)), offset: index / last })),
+      });
+    } catch {
+      // A host that rejects the animation still gets its layer home: painted instead.
+      started = null;
+    }
+    if (!started) return [];
+    return "length" in started ? [...started] : [started];
+  };
+
+  /** Call `done` when a settle's animations have run (their event, or a timer where none comes). */
+  const whenSettled = (animations: readonly Animation[], durationMs: number, done: () => void): (() => void) => {
+    const lead = animations[0]!;
+    let over = false;
+    const stop = (): void => {
+      over = true;
+      win.clearTimeout(timer);
+      lead.removeEventListener("finish", fire);
+    };
+    const fire = (): void => {
+      if (over) return;
+      stop();
+      done();
+    };
+    const timer = win.setTimeout(fire, durationMs + SETTLE_FINISH_SLACK_MS);
+    lead.addEventListener("finish", fire);
+    return stop;
+  };
 
   const springHome = (velocity: number): void => {
     const live = session;
     const from = travel;
-    const duration = settleDurationMs({
-      remaining: from,
-      width: width(),
-      velocity: -velocity,
-      base: motionDurationMs(options.motion ?? "--motion-stack"),
-    });
-    if (!live || from <= 0 || duration <= 0) {
+    const w = width();
+    const curve = springSettle({ from, to: 0, velocity, base: settleBase(), range: [0, w] });
+    if (!live || from <= 0 || curve.durationMs <= 0) {
       live?.paint(0, 0);
       live?.cancel();
       reset();
@@ -367,14 +533,27 @@ export function attachSwipeSurface(options: SwipeSurfaceOptions, doc: Document =
     }
     mode = "settling";
     unfollow();
-    const t0 = win.performance.now();
+    if (gapFrame) win.cancelAnimationFrame(gapFrame);
+    gapFrame = 0;
+    const arrive = (): void => {
+      travel = 0;
+      live.paint(0, 0);
+      // The session puts the layer back at rest before the animation lets go of it.
+      live.cancel();
+      reset();
+    };
+    const startedAt = win.performance.now();
+    const animations = startSettle(live, curve, "home");
+    if (animations.length > 0) {
+      homing = { curve, animations, startedAt, stop: whenSettled(animations, curve.durationMs, arrive) };
+      return;
+    }
     const tick = (now: number): void => {
-      const k = Math.min(1, (now - t0) / duration);
-      // The CSS hand-offs' own curve, so a spring home and a settle move alike.
-      const at = from * (1 - stackEase(k));
+      const elapsed = now - startedAt;
+      const at = curve.travelAt(elapsed);
       travel = at;
-      live.paint(at, edgeSwipeProgress(at, width()));
-      if (k < 1) {
+      live.paint(at, edgeSwipeProgress(at, w));
+      if (elapsed < curve.durationMs) {
         frame = win.requestAnimationFrame(tick);
         return;
       }
@@ -389,19 +568,60 @@ export function attachSwipeSurface(options: SwipeSurfaceOptions, doc: Document =
     const live = session;
     if (!live) return reset();
     const w = width();
+    const token = settleBase();
+    const remaining = w - travel;
+    const curve = springSettle({ from: travel, to: w, velocity, base: token, range: [0, w] });
+    const animations = startSettle(live, curve, "commit");
+    if (animations.length === 0) {
+      // The session finishes the travel itself: a CSS hand-off from here.
+      const settleMs = settleDurationMs({ remaining, width: w, velocity, base: token });
+      const release: SwipeRelease = {
+        travel, width: w, velocity, settleMs, easing: settleEasing({ remaining, velocity, durationMs: settleMs }),
+      };
+      reset();
+      live.commit(release);
+      return;
+    }
+    // The layer is already on its way, off the main thread. The commit (a state
+    // change that may cost several frames) comes one frame later, under it.
     const release: SwipeRelease = {
-      travel,
-      width: w,
-      velocity,
-      settleMs: settleDurationMs({
-        remaining: w - travel,
-        width: w,
-        velocity,
-        base: motionDurationMs(options.motion ?? "--motion-stack"),
-      }),
+      travel, width: w, velocity, settleMs: curve.durationMs,
+      easing: settleEasing({ remaining, velocity, durationMs: curve.durationMs }),
     };
-    reset();
-    live.commit(release);
+    mode = "committing";
+    unfollow();
+    if (gapFrame) win.cancelAnimationFrame(gapFrame);
+    gapFrame = 0;
+    let delivered = false;
+    let arrived = false;
+    let commitFrame = 0;
+    let commitTimer = 0;
+    // The animations hold the layer at its destination until the committed
+    // state rests there too; only then are they taken back.
+    const letGo = (): void => {
+      if (delivered && arrived) for (const animation of animations) animation.cancel();
+    };
+    const deliver = (): void => {
+      if (delivered) return;
+      delivered = true;
+      win.cancelAnimationFrame(commitFrame);
+      win.clearTimeout(commitTimer);
+      pendingCommit = null;
+      reset();
+      live.commit(release);
+      letGo();
+    };
+    whenSettled(animations, curve.durationMs, () => {
+      arrived = true;
+      letGo();
+    });
+    pendingCommit = deliver;
+    commitFrame = win.requestAnimationFrame(() => {
+      // After this frame: the animation has reached the compositor by then.
+      win.clearTimeout(commitTimer);
+      commitTimer = win.setTimeout(deliver, 0);
+    });
+    commitTimer = win.setTimeout(deliver, COMMIT_FALLBACK_MS);
   };
 
   /** A finger lands on a layer that is springing home: it stops where it is and follows this finger. */
@@ -415,10 +635,20 @@ export function attachSwipeSurface(options: SwipeSurfaceOptions, doc: Document =
     const touch = event.touches[0]!;
     if (frame) win.cancelAnimationFrame(frame);
     frame = 0;
+    const run = homing;
+    if (run) {
+      // The compositor has it: read where it is, pin it there, take the animation back.
+      const elapsed = run.animations[0]!.currentTime;
+      travel = run.curve.travelAt(typeof elapsed === "number" ? elapsed : win.performance.now() - run.startedAt);
+      live.paint(travel, edgeSwipeProgress(travel, info.width));
+      endHoming();
+    }
     start = { x: touch.clientX, y: touch.clientY };
     touchId = touch.identifier;
     base = travel;
-    claimTravel = 0;
+    reach = travel;
+    openGap(0, event.timeStamp);
+    lastMove = null;
     caught = true;
     samples = [{ t: event.timeStamp, travel: base }];
     mode = "dragging";
@@ -476,7 +706,9 @@ export function attachSwipeSurface(options: SwipeSurfaceOptions, doc: Document =
     start = { x: touch.clientX, y: touch.clientY };
     touchId = touch.identifier;
     travel = 0;
-    claimTravel = 0;
+    reach = 0;
+    openGap(0, event.timeStamp);
+    lastMove = null;
     base = 0;
     armed = false;
     samples = [{ t: event.timeStamp, travel: 0 }];
@@ -509,6 +741,7 @@ export function attachSwipeSurface(options: SwipeSurfaceOptions, doc: Document =
     const touch = touchById(event.touches, touchId);
     if (!touch || !startInfo) return;
     const finger = directedTravel(start.x, touch.clientX, startInfo.rtl, options.direction);
+    const stamp = event.timeStamp;
     if (mode === "tracking") {
       const intent = swipeIntent(start, { x: touch.clientX, y: touch.clientY }, {
         rtl: startInfo.rtl,
@@ -522,21 +755,38 @@ export function attachSwipeSurface(options: SwipeSurfaceOptions, doc: Document =
         unfollow();
         return;
       }
-      claimTravel = Math.max(0, finger);
+      // The layer is at rest and the finger is already this far along: the
+      // lead is closed over the next moment instead of in one frame.
+      openGap(finger, stamp);
+      claimStamp = stamp;
+      stallsLeft = CLAIM_STALLS_ABSORBED;
+    } else if (
+      stallsLeft > 0
+      && lastMove
+      && stamp - claimStamp <= CLAIM_SETTLE_WINDOW_MS
+      && stamp - lastMove.stamp > CLAIM_STALL_MS
+      && finger > lastMove.finger
+    ) {
+      // The page stalled (mounting the surface, its first effects) while the
+      // finger went on. The layer was not seen to move in that time, so it
+      // carries on from where it was last painted and closes this lead too.
+      // Only the claim's own aftermath is treated so: a page that is simply
+      // slow keeps the layer under the finger, frame by late frame.
+      stallsLeft -= 1;
+      openGap(base + finger - travel, stamp);
     }
     // The browser must not also scroll or rubber-band under a claimed drag.
     if (event.cancelable) event.preventDefault();
     const w = width();
-    // The layer leaves rest smoothly and is under the finger within the next
-    // few pixels; a caught layer moves on from where it was caught.
-    travel = Math.min(w, Math.max(0, base + caughtUpTravel(finger, claimTravel)));
+    lastMove = { stamp, finger, heardAt: win.performance.now() };
+    reach = Math.min(w, Math.max(0, base + finger));
+    paintDrag(stamp);
+    if (!gapFrame && gapAt(stamp) > 0.25) gapFrame = win.requestAnimationFrame(closeGap);
     // Release speed is the finger's own, not the catch-up's.
-    samples.push({ t: event.timeStamp, travel: base + finger });
+    samples.push({ t: stamp, travel: base + finger });
     if (samples.length > SAMPLE_LIMIT) samples.shift();
-    const progress = edgeSwipeProgress(travel, w);
-    session?.paint(travel, progress);
-    // One detent as the drag crosses the point where letting go completes it.
-    const past = progress >= EDGE_SWIPE_COMMIT_PROGRESS;
+    // One detent as the finger crosses the point where letting go completes it.
+    const past = edgeSwipeProgress(reach, w) >= EDGE_SWIPE_COMMIT_PROGRESS;
     if (past !== armed) {
       armed = past;
       selectionFeedback();
@@ -555,9 +805,10 @@ export function attachSwipeSurface(options: SwipeSurfaceOptions, doc: Document =
     if (event.cancelable) event.preventDefault();
     const velocity = releaseVelocity(samples);
     // A layer only caught (not moved on) carries on home: the finger stopped
-    // it, it did not ask for the other outcome.
-    if (caught && Math.abs(travel - base) < EDGE_SWIPE_FLICK_MIN_TRAVEL) springHome(0);
-    else if (edgeSwipeCommits({ travel, width: width(), velocity })) complete(velocity);
+    // it, it did not ask for the other outcome. What the finger asked for is
+    // judged by where the finger is; the layer may still be closing its gap.
+    if (caught && Math.abs(reach - base) < EDGE_SWIPE_FLICK_MIN_TRAVEL) springHome(0);
+    else if (edgeSwipeCommits({ travel: reach, width: width(), velocity })) complete(velocity);
     else springHome(velocity);
   };
 
@@ -593,6 +844,8 @@ export function attachSwipeSurface(options: SwipeSurfaceOptions, doc: Document =
     doc.removeEventListener("visibilitychange", onVisibility);
     win.removeEventListener("pagehide", abandonTouch);
     stopSwallowing();
+    // A release already under way is completed, not undone: its layer is moving.
+    pendingCommit?.();
     const live = session;
     reset();
     // Detaching mid-drag puts everything back where it was. A commit already

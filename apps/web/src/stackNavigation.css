@@ -19,21 +19,16 @@
  * `--stack-from` lets an interactive gesture hand its release position to the
  * exit so the layer carries on from where the finger left it. A released swipe
  * also shortens the motion to the rest of its travel (`--stack-out-settle`,
- * `--stack-uncover-settle`, `--stack-in-settle`), so a flick is never slowed
- * down and the two layers still finish together; a tap keeps --motion-stack.
- * Those duration overrides are separate longhand rules: the shorthands below
- * stay the one statement of the grammar.
+ * `--stack-uncover-settle`) and bends the start of the curve to the finger's
+ * speed (`--stack-swipe-ease`), so a flick is never slowed down, a slow release
+ * never leaps, and the two layers still finish together; a tap keeps
+ * --motion-stack and its curve. Those overrides are separate longhand rules:
+ * the shorthands below stay the one statement of the grammar. (A Workspace
+ * pulled in from Chat is not handed to CSS at all: see `data-swipe-handoff`.)
  */
 
 @keyframes stack-in {
   from { transform: translate3d(calc(var(--stack-dir, 1) * 100%), 0, 0); }
-  to { transform: translate3d(0, 0, 0); }
-}
-
-/* A Workspace pulled in by a swipe from Chat carries on from the finger
-   (PhoneShellSwipes.tsx publishes --stack-enter-from, unsigned like --stack-from). */
-@keyframes stack-swipe-in {
-  from { transform: translate3d(calc(var(--stack-dir, 1) * var(--stack-enter-from, 100%)), 0, 0); }
   to { transform: translate3d(0, 0, 0); }
 }
 
@@ -93,6 +88,7 @@
 
   :is(html, html[dir="rtl"]) .railbar > :is(.rail-fullscreen, .panel-sheet).rail-exiting {
     animation-duration: var(--stack-out-settle, var(--motion-stack));
+    animation-timing-function: var(--stack-swipe-ease, var(--motion-stack-ease));
   }
 
   /* The leading edge casts a soft shadow onto whatever it travels over. At rest
@@ -144,6 +140,7 @@
 
   body .sheet-backdrop[data-stack].is-closing > .workspace-panel-sheet.sheet.is-closing {
     animation-duration: var(--stack-out-settle, var(--motion-stack));
+    animation-timing-function: var(--stack-swipe-ease, var(--motion-stack-ease));
   }
 
   /* The leading edge casts the same soft shadow as a package window's; at
@@ -172,9 +169,13 @@
     transform: translate3d(calc(var(--stack-dir, 1) * 100%), 0, 0);
   }
 
-  /* Released past the commit point: the arrival carries on from the finger. */
-  body .sheet-backdrop[data-stack="enter"]:not([data-swipe-peek]) > .workspace-panel-sheet.sheet[data-swipe-handoff="enter"] {
-    animation: stack-swipe-in var(--stack-in-settle, var(--motion-stack)) var(--motion-stack-ease) backwards;
+  /* Released past the commit point: the swipe controller's spring is already
+     bringing the layer in from the finger (swipeSurface.ts `settle`), so the
+     open state must not start `stack-in` underneath it. The mark stays for as
+     long as the layer rests in this phase; every later phase (covered,
+     revealed, closing) has its own animation and does not match. */
+  body .sheet-backdrop[data-stack="enter"]:not([data-swipe-peek], .is-closing) > .workspace-panel-sheet.sheet[data-swipe-handoff="rest"] {
+    animation: none;
   }
 
   /* The retreat dims the layer: a veil over the sheet itself, composited with
@@ -214,6 +215,7 @@
   body .sheet-backdrop[data-stack="revealed"] > .workspace-panel-sheet.sheet,
   body .sheet-backdrop[data-stack="revealed"] > .workspace-panel-sheet.sheet::after {
     animation-duration: var(--stack-uncover-settle, var(--motion-stack));
+    animation-timing-function: var(--stack-swipe-ease, var(--motion-stack-ease));
   }
 }
 

@@ -9,9 +9,11 @@
 // `--stack-uncover-from` / `--stack-dim-from`), the inline drag styles are
 // removed in the same task, and `onBack()` flips the state that already drives
 // the stack's exit animation. That animation starts where the finger left off,
-// so a drag and a button tap end in exactly the same motion. `--stack-settle`
-// shortens both layers' animations together to the rest of the travel, so a
-// flick is not slowed down and the pair still covers the screen as one.
+// so a drag and a button tap end in exactly the same motion. The settle time
+// shortens both layers' animations together to the rest of the travel, and
+// `--stack-swipe-ease` bends the start of their curve to the finger's speed,
+// so a flick is not slowed down, a slow release does not leap, and the pair
+// still covers the screen as one.
 import { edgeSwipeProgress, type SwipeZone } from "./mobileGestures.ts";
 import { stackMotionDurationMs } from "./motionPresence.ts";
 import { attachSwipeSurface, holdHandoff, parkLeavingLayer, SWIPE_OPT_OUT } from "./swipeSurface.ts";
@@ -84,7 +86,7 @@ export function attachEdgeSwipeBack(options: EdgeSwipeBackOptions, doc: Document
           }
         },
         cancel: clear,
-        commit({ travel, settleMs }) {
+        commit({ travel, settleMs, easing }) {
           const progress = edgeSwipeProgress(travel, width);
           // Publish where the finger left each layer, then drop the inline
           // styles in the same task: the exit animation takes over from these.
@@ -94,7 +96,7 @@ export function attachEdgeSwipeBack(options: EdgeSwipeBackOptions, doc: Document
           // Both layers finish in the rest of the travel time, together.
           if (settleMs > 0) {
             holdHandoff(layer, {
-              pacing: { "--stack-out-settle": `${settleMs}ms` },
+              pacing: { "--stack-out-settle": `${settleMs}ms`, "--stack-swipe-ease": easing },
               animations: ["stack-out"],
               fallbackMs: 0,
             });
@@ -102,7 +104,7 @@ export function attachEdgeSwipeBack(options: EdgeSwipeBackOptions, doc: Document
               // The value sits on the layer's host (it reaches the veil too);
               // the settle itself runs on the sheet inside it.
               holdHandoff(under, {
-                pacing: { "--stack-uncover-settle": `${settleMs}ms` },
+                pacing: { "--stack-uncover-settle": `${settleMs}ms`, "--stack-swipe-ease": easing },
                 animations: ["stack-uncover", "stack-dim-out"],
                 fallbackMs: 0,
                 watch: options.underMotion?.() ?? (under.firstElementChild as HTMLElement | null) ?? under,

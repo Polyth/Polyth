@@ -5,6 +5,12 @@
 // follows the finger, and on release either opens for real, carrying on from
 // where the finger left it, or springs back and unmounts unseen.
 //
+// The release is a compositor animation started by the controller before
+// anything else happens (swipeSurface.ts `settle`). Opening for real (a React
+// commit that makes the surface modal, moves focus and marks Chat inert)
+// follows one frame later, under a layer that is already moving, so its cost
+// never shows as a pause between the finger and the settle.
+//
 // Mounted once for the phone shell. The listeners exist only while swipe
 // navigation is on; whether a touch may start a swipe is decided per touch,
 // because Chat must be the top layer (anything above it owns its gestures).
@@ -18,15 +24,18 @@ import {
   showMobileWorkspaceHome,
 } from "../../mobileWorkspaceNavigation.ts";
 import { packageLayerPresented } from "../../mobileLayerStack.ts";
-import { motionDurationMs, stackMotionDurationMs } from "../../motionPresence.ts";
 import { useUiSettings } from "../../uiPrefs.ts";
-import { attachSwipeSurface, holdHandoff, type SwipeSession, type SwipeStart } from "../../swipeSurface.ts";
+import { animateSettle, attachSwipeSurface, type SwipeSession, type SwipeStart } from "../../swipeSurface.ts";
 import { chatSwipeAllowed, setSwipePeek, swipeZoneInHost, transientSurfaceOpen } from "../../shellSwipe.ts";
 
 const NAVIGATOR = "#polyth-session-drawer";
 const WORKSPACE_SHEET = ".sheet-backdrop[data-stack] > .workspace-panel-sheet";
-/** Slack after a hand-off's own duration before its values are taken back regardless. */
-const HANDOFF_SLACK_MS = 320;
+/**
+ * Marks a surface that arrived under the finger: its entrance animation must
+ * not replay over the settle that brought it in (MobileNavigator.css,
+ * stackNavigation.css).
+ */
+const ARRIVED = "rest";
 
 function chatIsTop(): boolean {
   const state = getState();
@@ -48,22 +57,23 @@ function peekElement(target: "navigator" | "workspace", selector: string): HTMLE
   return el;
 }
 
-let releaseNavigatorHandoff: (() => void) | null = null;
-
 /** The Navigator rides in from the inline-start side, its trailing edge under the finger's travel. */
 function navigatorOpenSession({ rtl, width }: SwipeStart): SwipeSession | null {
-  releaseNavigatorHandoff?.();
   const nav = peekElement("navigator", NAVIGATOR);
   if (!nav) return null;
   nav.setAttribute("data-swiping", "true");
   const offset = (travel: number): number => (travel - width) * (rtl ? -1 : 1);
+  const at = (travel: number): string => `translate3d(${offset(travel)}px, 0, 0)`;
   const clear = (): void => {
     nav.removeAttribute("data-swiping");
     nav.style.removeProperty("transform");
   };
   return {
     paint(travel) {
-      nav.style.transform = `translate3d(${offset(travel)}px, 0, 0)`;
+      nav.style.transform = at(travel);
+    },
+    settle(settle) {
+      return animateSettle(nav, settle, (travel) => ({ transform: at(travel) }));
     },
     cancel() {
       // Unseen either way (the peek rests off-screen), so the unmount need not
@@ -71,20 +81,12 @@ function navigatorOpenSession({ rtl, width }: SwipeStart): SwipeSession | null {
       clear();
       setSwipePeek(null);
     },
-    commit({ travel, settleMs }) {
-      // With motion off there is nothing to hand to: the drawer just lands.
-      if (settleMs > 0) {
-        releaseNavigatorHandoff = holdHandoff(nav, {
-          from: { "--nav-swipe-from": `${offset(travel)}px` },
-          pacing: { "--nav-swipe-settle": `${settleMs}ms` },
-          attrs: { "data-swipe-handoff": "open" },
-          animations: ["mobile-navigator-swipe-in"],
-          fallbackMs: motionDurationMs("--motion-surface") + HANDOFF_SLACK_MS,
-        });
-      }
-      // The open state replaces the peek in one synchronous commit, and the
-      // inline position goes in the same task: the entrance animation starts
-      // from the published position without a frame in between.
+    commit() {
+      // The drawer is arriving (or, with motion off, simply lands): the open
+      // state must not start an entrance of its own underneath.
+      nav.setAttribute("data-swipe-handoff", ARRIVED);
+      // The open state replaces the peek in one synchronous commit, so the
+      // peek's resting position and the inline one go in the same task.
       flushSync(() => {
         setSwipePeek(null);
         hideMobileWorkspaceHome();
@@ -96,24 +98,23 @@ function navigatorOpenSession({ rtl, width }: SwipeStart): SwipeSession | null {
   };
 }
 
-let releaseWorkspaceHandoff: (() => void) | null = null;
-
 /** The Workspace rides in from the inline-end side, the way its button-driven `stack-in` does. */
 function workspaceOpenSession({ rtl, width }: SwipeStart): SwipeSession | null {
-  releaseWorkspaceHandoff?.();
-  releaseWorkspaceHandoff = null;
   const sheet = peekElement("workspace", WORKSPACE_SHEET);
   if (!sheet) return null;
   sheet.style.willChange = "transform";
   const offset = (travel: number): number => (width - travel) * (rtl ? -1 : 1);
+  const at = (travel: number): string => `translate3d(${offset(travel)}px, 0, 0)`;
   const clear = (): void => {
     sheet.style.removeProperty("transform");
     sheet.style.removeProperty("will-change");
   };
-  const fallbackMs = stackMotionDurationMs() + HANDOFF_SLACK_MS;
   return {
     paint(travel) {
-      sheet.style.transform = `translate3d(${offset(travel)}px, 0, 0)`;
+      sheet.style.transform = at(travel);
+    },
+    settle(settle) {
+      return animateSettle(sheet, settle, (travel) => ({ transform: at(travel) }));
     },
     cancel() {
       // Off-screen again (or abandoned mid-drag): the layer host unmounts a
@@ -121,16 +122,8 @@ function workspaceOpenSession({ rtl, width }: SwipeStart): SwipeSession | null {
       clear();
       setSwipePeek(null);
     },
-    commit({ travel, settleMs }) {
-      if (settleMs > 0) {
-        releaseWorkspaceHandoff = holdHandoff(sheet, {
-          from: { "--stack-enter-from": `${width - travel}px` },
-          pacing: { "--stack-in-settle": `${settleMs}ms` },
-          attrs: { "data-swipe-handoff": "enter" },
-          animations: ["stack-swipe-in"],
-          fallbackMs,
-        });
-      }
+    commit() {
+      sheet.setAttribute("data-swipe-handoff", ARRIVED);
       flushSync(() => {
         setSwipePeek(null);
         showMobileWorkspaceHome();

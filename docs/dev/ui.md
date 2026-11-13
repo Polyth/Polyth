@@ -3621,30 +3621,54 @@ host.surfaces.register({
     with horizontal gestures that are neither should mark them.
   - *Peek:* a Chat swipe mounts the surface the moment it claims the touch
     (`flushSync`), as an inert, non-modal peek resting off-screen and moved by
-    an inline transform. A release past the commit point (35% or a flick)
-    replaces the peek with the open state in one synchronous commit; anything
-    else springs it home and unmounts it without an exit (a peek never takes
-    focus, so nothing is handed back).
+    an inline transform. A release past the commit point (35% or a flick,
+    judged by where the finger is) opens it for real; anything else springs
+    it home and unmounts it without an exit (a peek never takes focus, so
+    nothing is handed back).
   - *Animation vs. inline drag:* a dragged surface is moved by an inline
     transform, and an animation (even a finished `both`/`forwards` one)
     outranks inline styles. The open Navigator's entrance fills forwards, so
     `MobileNavigator.css` drops its animation while `data-swiping` is set, and
     a drag that springs home leaves `data-swipe-handoff="rest"` so the entrance
     does not replay. Any new draggable surface needs the same.
-  - *Hand-off:* a release publishes where the finger left the layer
-    (`--nav-swipe-from`, `--stack-enter-from`, `--stack-from`) and a duration
-    for the rest of the travel (`--nav-swipe-settle`, `--stack-in-settle`,
-    `--stack-out-settle`, `--stack-uncover-settle`) computed by
-    `settleDurationMs` — the share of the distance left, never slower than the
-    finger (the curve's initial slope matches the release speed), at least
-    120ms, at most the token. The stack grammar's shorthands stay unchanged;
-    the swipe durations are separate longhand overrides, and the Navigator and
-    swipe-entered Workspace use dedicated two-stop keyframes selected by
-    `data-swipe-handoff`. `holdHandoff` takes start positions back when their
-    animation ends, but keeps durations and the selecting attribute until a
-    different animation starts on that element (or it is cancelled or
-    replaced): a CSS animation re-reads its timing even when finished, so
-    restoring a longer duration would wake it mid-travel.
+  - *Release (the rule for every new swipe surface):* the rest of the travel
+    is a critically damped spring that starts at the finger's own speed
+    (`springSettle`: no leap from a slow release, no brake on a flick, no
+    overshoot; about as long as the surface's duration token). A session
+    that implements `settle()` plays it with `animateSettle` — the spring's
+    samples as a linear Web Animation, so it runs on the compositor — and the
+    controller starts it **in the same task as the release**, before anything
+    else. Only one frame later does it call `commit()`, where the session
+    changes state. That order is the point: opening a surface for real is a
+    React commit that makes it modal, moves focus and marks Chat inert, which
+    can cost several frames on a long chat, and done first it showed as the
+    layer freezing between the finger and its settle. The animation holds the
+    layer at its destination (`fill: forwards`) until the commit has landed
+    and it has finished; then the controller cancels it, so where the
+    committed state rests must be where the settle ends. The Navigator
+    (open and close) and the Workspace pulled in from Chat work this way:
+    `commit()` first marks the element (`data-swipe-handoff="rest"`, or
+    `"close"` for a drawer swiped away, which the closing state then parks
+    off-screen) so its own entrance or exit does not play underneath. No
+    inherited custom property is written on these surfaces at a release: one
+    restyles the whole subtree. Where the Web Animations API is missing, and
+    with motion off, there is no settle and the layer lands at once.
+  - *CSS hand-off (Back, phone Settings, the tablet drawer):* a session
+    without `settle()` commits in the release's task and hands its position
+    to a CSS animation of its own: where the finger left the layer
+    (`--stack-from`), a duration for the rest of the travel
+    (`--stack-out-settle`, `--stack-uncover-settle`; `settleDurationMs` — the
+    share of the distance left, never slower than the finger, at least 120ms,
+    at most the token) and a curve bent to the finger's speed
+    (`--stack-swipe-ease`; `settleEasing` — the stack curve's shape with its
+    initial slope set to speed × duration ÷ distance, so a slow release eases
+    in instead of leaping). The stack grammar's shorthands stay unchanged;
+    the swipe duration and curve are separate longhand overrides.
+    `holdHandoff` takes start positions back when their animation ends, but
+    keeps pacing values until a different animation starts on that element
+    (or it is cancelled or replaced): a CSS animation re-reads its timing
+    even when finished, so restoring a longer duration would wake it
+    mid-travel.
   - *Motion and performance settings:* following the finger is direct
     manipulation and always tracks; every autonomous part (settle, spring
     home) is 0ms under `prefers-reduced-motion`, Reduce motion
@@ -3663,16 +3687,26 @@ host.surfaces.register({
     Settings drop their own container focus ring (it lies outside the
     viewport at rest and would ride the moving edge); the leading edge casts
     `--shadow-stack-edge` / `--shadow-drawer-edge`.
-  - *No jump at the claim:* a swipe is recognised only past its slop; the
-    layer then leaves rest with the finger and closes that gap over the next
-    claim distance at twice the finger's speed (`caughtUpTravel`), after which
-    it sits exactly under the finger. Release speed is the finger's own.
+  - *No jump at the claim:* a swipe is recognised only past its slop, and
+    claiming it can cost frames of its own (the peek is mounted right then).
+    The layer therefore keeps a gap to the finger that closes over time
+    (`claimGapAt`, 110–200ms by its size, smoothstep): it leaves rest at the
+    finger's speed, with no kick, and is exactly under the finger a moment
+    later, also when the finger stops meanwhile (a frame loop closes it). A
+    stalled frame right after the claim — a move arriving more than 34ms
+    after the previous one, at most two of them and within 320ms — is
+    absorbed into the gap, so the layer carries on from where it was last
+    painted instead of jumping the distance the finger covered unseen. Later
+    late frames track the finger as they come. Release speed is the finger's
+    own.
   - *Catching:* a finger that lands on a layer springing home stops it where
     it is and drags it on from there (same session); one that only catches it
     and lifts lets it carry on home (a tap never completes the other way).
-    The spring home and every
-    scripted settle follow `--motion-stack-ease` (`stackEase`), like the CSS
-    hand-offs. A touch whose end never arrives — the page hidden mid-drag
+    A spring home is the same
+    spring as a release, started at the finger's speed: on the compositor for
+    a session with `settle()` (a catch reads where the animation is, pins the
+    layer there and takes the animation back), painted frame by frame
+    otherwise. A touch whose end never arrives — the page hidden mid-drag
     (`visibilitychange`/`pagehide`), or a new touch while the old one is gone
     — springs the layer home instead of stranding the claim.
   - *Owners and extent:* `data-owns-swipe` keeps a swipe from every surface

@@ -11,6 +11,8 @@ import {
   SETTLE_MIN_MS,
   SURFACE_SWIPE_SLOP,
   caughtUpTravel,
+  claimGapAt,
+  claimGapDurationMs,
   cubicBezier,
   directedTravel,
   edgeSwipeCommits,
@@ -24,6 +26,9 @@ import {
   releaseVelocity,
   scrollerTakesSwipe,
   settleDurationMs,
+  settleEasing,
+  settleSamples,
+  springSettle,
   stackEase,
   swipeIntent,
 } from "../src/mobileGestures.ts";
@@ -189,4 +194,89 @@ test("scripted settles follow the stack curve the CSS hand-offs use", () => {
   }
   // Front-loaded like the CSS curve: more than half the way in the first quarter.
   assert.ok(stackEase(0.25) > 0.5);
+});
+
+test("the gap a claim leaves closes over a moment: whole at first, gone on time, never a step", () => {
+  assert.equal(claimGapDurationMs(0), 110, "a small gap still takes a few frames");
+  assert.equal(claimGapDurationMs(18), 126);
+  assert.equal(claimGapDurationMs(400), 200, "a large one is never sluggish");
+  assert.equal(claimGapAt(18, 0), 18, "the claim frame keeps the layer at rest");
+  assert.equal(claimGapAt(18, 126), 0, "under the finger when the time is up");
+  assert.equal(claimGapAt(18, 5000), 0);
+  assert.equal(claimGapAt(0, 10), 0, "nothing to close");
+  // Smooth at both ends: the first and last frames barely change it.
+  assert.ok(18 - claimGapAt(18, 8) < 0.25, "the layer starts at the finger's speed, with no kick");
+  assert.ok(claimGapAt(18, 118) < 0.25, "and meets the finger without a step");
+  let previous = 18;
+  for (let ms = 4; ms <= 126; ms += 4) {
+    const left = claimGapAt(18, ms);
+    assert.ok(left <= previous && previous - left < 1, `monotonic and gradual at ${ms}ms`);
+    previous = left;
+  }
+});
+
+test("a released layer carries on at the finger's speed and comes to rest without overshoot", () => {
+  const base = 300;
+  const speedAt = (curve: { travelAt(ms: number): number }, ms: number) => (curve.travelAt(ms + 1) - curve.travelAt(ms)) / 1;
+  for (const velocity of [0, 0.4, 1.2, 3]) {
+    const curve = springSettle({ from: 180, to: 390, velocity, base, range: [0, 390] });
+    assert.equal(curve.travelAt(0), 180);
+    assert.equal(curve.travelAt(curve.durationMs), 390, "it ends exactly at the destination");
+    assert.ok(Math.abs(speedAt(curve, 0) - velocity) < 0.12, `leaves at ${velocity} px/ms: ${speedAt(curve, 0).toFixed(3)}`);
+    assert.ok(curve.durationMs > 0 && curve.durationMs <= 360, `done in about the token: ${curve.durationMs}`);
+    let previous = 180;
+    for (let ms = 4; ms <= curve.durationMs; ms += 4) {
+      const at = curve.travelAt(ms);
+      assert.ok(at >= previous - 1e-9 && at <= 390 + 1e-9, `monotonic, no overshoot at ${ms}ms (${velocity})`);
+      previous = at;
+    }
+    assert.ok(390 - curve.travelAt(curve.durationMs - 1) <= 1, "no visible snap at the end");
+  }
+  // From a standstill it matches the tap animation's pace: mostly there by the middle of the token.
+  const still = springSettle({ from: 0, to: 390, velocity: 0, base, range: [0, 390] });
+  assert.ok(still.travelAt(150) / 390 > 0.85 && still.travelAt(150) / 390 < 0.93);
+  // A hard flick with little left to go arrives sooner, still without passing the end.
+  const flick = springSettle({ from: 340, to: 390, velocity: 3, base, range: [0, 390] });
+  assert.ok(flick.durationMs < 120, `a flick is not slowed down: ${flick.durationMs}`);
+});
+
+test("a spring home turns round smoothly and stays inside the layer's range", () => {
+  // Let go 120px out while still moving outward at 0.3 px/ms: it runs on a little, then comes home.
+  const home = springSettle({ from: 120, to: 0, velocity: 0.3, base: 300, range: [0, 390] });
+  assert.ok(Math.abs((home.travelAt(1) - home.travelAt(0)) - 0.3) < 0.1, "it leaves at the finger's speed, outward");
+  let peak = 0;
+  for (let ms = 0; ms <= home.durationMs; ms += 1) peak = Math.max(peak, home.travelAt(ms));
+  assert.ok(peak > 120 && peak < 126, `a small, smooth turn: ${peak.toFixed(1)}`);
+  assert.equal(home.travelAt(home.durationMs), 0);
+  // At the edge of its range there is nowhere to run on to.
+  const pinned = springSettle({ from: 388, to: 0, velocity: 2, base: 300, range: [0, 390] });
+  for (let ms = 0; ms <= pinned.durationMs; ms += 4) assert.ok(pinned.travelAt(ms) <= 390);
+  // Nothing to do: already there, or motion is off.
+  assert.equal(springSettle({ from: 0.2, to: 0, velocity: 0, base: 300 }).durationMs, 0);
+  assert.equal(springSettle({ from: 200, to: 0, velocity: 1, base: 0 }).durationMs, 0);
+  assert.equal(springSettle({ from: 200, to: 0, velocity: 1, base: 0 }).travelAt(50), 0);
+});
+
+test("a settle is handed over as evenly spaced samples the compositor can interpolate", () => {
+  const curve = springSettle({ from: 180, to: 390, velocity: 0.5, base: 300, range: [0, 390] });
+  const samples = settleSamples(curve);
+  assert.equal(samples[0], 180);
+  assert.equal(samples.at(-1), 390);
+  assert.ok(samples.length >= curve.durationMs / 9 && samples.length <= 96, `about one per 120Hz frame: ${samples.length}`);
+  for (let i = 1; i < samples.length; i++) assert.ok(samples[i]! - samples[i - 1]! < 30, "no sample-to-sample leap");
+});
+
+test("a CSS hand-off's curve starts at the finger's speed", () => {
+  // At the speed the stack curve assumes (slope 2.25) it is the stack curve itself.
+  assert.equal(settleEasing({ remaining: 200, velocity: 3, durationMs: 150 }), "cubic-bezier(0.32, 0.72, 0, 1)");
+  assert.equal(settleEasing({ remaining: 200, velocity: 9, durationMs: 150 }), "cubic-bezier(0.32, 0.72, 0, 1)", "never steeper");
+  // From a standstill it eases in instead of leaping.
+  assert.equal(settleEasing({ remaining: 200, velocity: 0, durationMs: 218 }), "cubic-bezier(0.32, 0, 0.2, 1)");
+  assert.equal(settleEasing({ remaining: 200, velocity: -1, durationMs: 218 }), "cubic-bezier(0.32, 0, 0.2, 1)");
+  // In between, the first control point's slope is velocity × duration ÷ distance.
+  const match = /^cubic-bezier\(0\.32, ([\d.]+), ([\d.]+), 1\)$/.exec(settleEasing({ remaining: 200, velocity: 0.5, durationMs: 200 }))!;
+  assert.ok(Math.abs(Number(match[1]) / 0.32 - 0.5) < 0.01);
+  const ease = cubicBezier(0.32, Number(match[1]), Number(match[2]), 1);
+  assert.ok(Math.abs(ease(0.01) / 0.01 - 0.5) < 0.08, "the curve really leaves at that speed");
+  assert.equal(settleEasing({ remaining: 0, velocity: 1, durationMs: 0 }), "cubic-bezier(0.32, 0.72, 0, 1)", "nothing to match: the house curve");
 });

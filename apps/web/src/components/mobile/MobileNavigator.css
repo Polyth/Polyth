@@ -208,13 +208,14 @@ html[data-appearance="light"] .mobile-navigator {
    A swipe from Chat mounts the drawer as a peek: inert, resting off-screen on
    the inline-start side, moved by the finger through an inline transform
    (PhoneShellSwipes.tsx). A swipe on the open drawer drags it the same way
-   (data-swiping). On release the finger's position is handed to a plain
-   two-stop travel — --nav-swipe-from to rest, or to off-screen — paced by the
-   rest of the distance (--nav-swipe-settle) on the stack curve, so the drawer
-   leaves the finger at the finger's speed. Taps keep the entrance/exit above.
-   Reduced motion and low-resource mode remove the animation globally, and
-   the drawer simply lands where it is going. The `:is(html, …)` prefix lets
-   these outrank the RTL animation-name rules. */
+   (data-swiping). On release the rest of the travel is a spring the swipe
+   controller runs on the compositor from the finger's own speed
+   (swipeSurface.ts `settle`), started before the drawer's state changes. So
+   nothing here animates a release: these rules only keep the drawer's own
+   entrance and exit out of the way and say where it rests once the spring
+   lets go. Taps keep the entrance/exit above. Reduced motion and low-resource
+   mode skip the spring, and the drawer simply lands where it is going. The
+   `:is(html, …)` prefix lets these outrank the RTL animation-name rules. */
 :is(html, html[dir="rtl"]) .mobile-navigator.is-peeking {
   pointer-events: none;
   animation: none;
@@ -248,20 +249,20 @@ html[data-appearance="light"] .mobile-navigator {
   animation: none;
 }
 
-:is(html, html[dir="rtl"]) .mobile-navigator[data-swipe-handoff="open"]:not(.is-closing, .is-peeking) {
-  animation: mobile-navigator-swipe-in var(--nav-swipe-settle, var(--motion-surface)) var(--motion-stack-ease) both;
-}
-
+/* Swiped closed: the spring already took the drawer off-screen, so the closing
+   state parks it there until it unmounts instead of playing the exit. */
 :is(html, html[dir="rtl"]) .mobile-navigator.is-closing[data-swipe-handoff="close"] {
-  animation: mobile-navigator-swipe-out var(--nav-swipe-settle, var(--motion-surface)) var(--motion-stack-ease) both;
+  animation: none;
+  transform: translate3d(calc(var(--stack-dir, 1) * -100%), 0, 0);
 }
 
 /* A drag of the open drawer must be able to move it. The entrance animation
-   (and a swipe-open hand-off) fills forwards with `transform: none`, and an
-   animation outranks an inline style, so without this the drawer ignores the
-   finger and only the release animates. A drag that springs home leaves
-   data-swipe-handoff="rest" so the entrance does not replay when data-swiping
-   goes; it is inert once the drawer starts closing. */
+   fills forwards with `transform: none`, and an animation outranks an inline
+   style, so without this the drawer ignores the finger and only the release
+   animates. A drawer that arrived under the finger, and a drag that springs
+   home, carry data-swipe-handoff="rest" so the entrance does not play over
+   the spring or replay when data-swiping goes; it is inert once the drawer
+   starts closing. */
 :is(html, html[dir="rtl"]) .mobile-navigator:is([data-swiping], [data-swipe-handoff="rest"]):not(.is-closing, .is-peeking) {
   animation: none;
 }
@@ -291,19 +292,6 @@ html[data-appearance="light"] .mobile-navigator {
     transform: translate3d(calc(var(--stack-dir, 1) * var(--stack-parallax, 28%)), 0, 0);
     visibility: hidden;
   }
-}
-
-/* --nav-swipe-from is a signed physical offset, so one pair serves RTL too. */
-@keyframes mobile-navigator-swipe-in {
-  from { transform: translate3d(var(--nav-swipe-from, 0px), 0, 0); }
-  /* `none`, not a zero translate: the open drawer must not become a
-     containing block for its fixed-position menus. */
-  to { transform: none; }
-}
-
-@keyframes mobile-navigator-swipe-out {
-  from { transform: translate3d(var(--nav-swipe-from, 0px), 0, 0); }
-  to { transform: translate3d(calc(var(--stack-dir, 1) * -100%), 0, 0); }
 }
 
 @keyframes mobile-nav-toolbar-in {

@@ -39,9 +39,16 @@ test("a dragged open Navigator is not pinned by its forwards-filling entrance an
   const rule = css.match(/:is\(html, html\[dir="rtl"\]\) \.mobile-navigator:is\(\[data-swiping\][^{]*\{([^}]*)\}/);
   assert.ok(rule, "a data-swiping rule that removes the animation exists");
   assert.match(rule[1]!, /animation:\s*none/);
+  // A drawer that arrived under the finger carries the same mark: its entrance
+  // must not play beneath the settle that brought it in.
   assert.match(rule[0], /data-swipe-handoff="rest"/);
-  // It must come after the swipe-open hand-off rule of equal specificity.
-  assert.ok(css.indexOf(rule[0]) > css.indexOf('[data-swipe-handoff="open"]:not'));
+  // Swiped closed, it is parked off-screen rather than animated out again.
+  const parked = css.match(/\.mobile-navigator\.is-closing\[data-swipe-handoff="close"\]\s*\{([^}]*)\}/);
+  assert.ok(parked, "a parked rule for the swiped-away drawer exists");
+  assert.match(parked[1]!, /animation:\s*none/);
+  assert.match(parked[1]!, /transform:\s*translate3d\(calc\(var\(--stack-dir, 1\) \* -100%\)/);
+  // The release is the controller's spring: no CSS hand-off, no inherited custom property.
+  assert.doesNotMatch(css, /--nav-swipe-from|mobile-navigator-swipe-(in|out)/);
 });
 
 test("a long press in the Navigator never selects text or raises the iOS callout", async () => {

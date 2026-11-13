@@ -199,11 +199,13 @@
     pointer-events: none;
     animation: stack-out var(--motion-stack) var(--motion-stack-ease) both;
     animation-duration: var(--stack-out-settle, var(--motion-stack));
+    animation-timing-function: var(--stack-swipe-ease, var(--motion-stack-ease));
   }
   /* `backwards`: the list is dragged next, and a forwards fill would outrank it. */
   .settings-shell[data-stage-motion="pop"] > .settings-nav {
     animation: stack-uncover var(--motion-stack) var(--motion-stack-ease) backwards;
     animation-duration: var(--stack-uncover-settle, var(--motion-stack));
+    animation-timing-function: var(--stack-swipe-ease, var(--motion-stack-ease));
   }
 
   /* The covered list dims as it retreats (a veil composited with opacity
@@ -224,6 +226,7 @@
   .settings-shell[data-stage-motion="pop"] > .settings-nav::after {
     animation: stack-dim-out var(--motion-stack) var(--motion-stack-ease) both;
     animation-duration: var(--stack-uncover-settle, var(--motion-stack));
+    animation-timing-function: var(--stack-swipe-ease, var(--motion-stack-ease));
   }
 
   /* While a finger pulls a page away, the list peeks in behind it, positioned

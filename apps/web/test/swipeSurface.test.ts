@@ -340,19 +340,229 @@ test("a cancelled, replaced or never-animated hand-off is released", async () =>
   assert.equal(layer.style.getPropertyValue("--uncover"), "");
 });
 
-test("a claimed drag leaves rest with the finger instead of jumping the claim distance", () => {
+test("a claimed drag leaves rest at the finger's speed and closes its gap in a moment", () => {
   page();
   const probe = controller("toward-end");
   try {
-    drag(el("row"), 300, 360, { steps: 10, stepMs: 16 });
+    // 6px every 16ms: the claim comes 18px in, at rest.
+    drag(el("row"), 300, 480, { steps: 30, stepMs: 16 });
     assert.equal(probe.begins, 1);
     assert.equal(probe.paints[0], 0, "the frame that claims paints the layer at rest");
+    assert.ok(probe.paints[1]! <= 7, `it leaves at the finger's speed, with no kick: ${probe.paints[1]}`);
     for (let i = 1; i < probe.paints.length; i++) {
-      // 6px finger steps: at most twice that while closing the gap.
-      assert.ok(probe.paints[i]! - probe.paints[i - 1]! <= 12.001, `no jump between frames: ${probe.paints.join(", ")}`);
+      const step = probe.paints[i]! - probe.paints[i - 1]!;
+      assert.ok(step >= 0 && step <= 10, `no jump between frames (${step.toFixed(1)}): ${probe.paints.join(", ")}`);
     }
-    assert.equal(probe.paints.at(-1), 60, "…and it is exactly under the finger once caught up");
+    assert.equal(probe.paints.at(-1), 180, "…and it is exactly under the finger once caught up");
     touch("touchend", el("row"));
+  } finally {
+    probe.detach();
+  }
+});
+
+test("a claim that stalls the page does not become a jump: the layer carries on from rest", () => {
+  page();
+  const probe = controller("toward-end");
+  try {
+    touch("touchstart", el("row"), { x: 300, y: 300 });
+    touch("touchmove", el("row"), { x: 306, y: 301 });
+    touch("touchmove", el("row"), { x: 318, y: 301 });
+    assert.deepEqual(probe.paints, [0], "claimed 18px in, at rest");
+    // Mounting the surface took 150ms; the finger is 60px further by the next move.
+    touch("touchmove", el("row"), { x: 378, y: 301 }, 150);
+    assert.equal(probe.paints.at(-1), 0, "the late frame leaves the layer where it was last seen");
+    const after: number[] = [];
+    for (let x = 384; x <= 480; x += 6) {
+      touch("touchmove", el("row"), { x, y: 301 });
+      after.push(probe.paints.at(-1)!);
+    }
+    for (let i = 1; i < after.length; i++) {
+      const step = after[i]! - after[i - 1]!;
+      assert.ok(step >= 0 && step <= 16, `it catches up without a lurch (${step.toFixed(1)}): ${after.join(", ")}`);
+    }
+    touch("touchmove", el("row"), { x: 500, y: 301 }, 250);
+    assert.equal(probe.paints.at(-1), 200, "and then it is under the finger");
+    // A page that is simply slow is not absorbed for ever: late frames track the finger.
+    touch("touchmove", el("row"), { x: 560, y: 301 }, 250);
+    assert.equal(probe.paints.at(-1), 260);
+    touch("touchend", el("row"));
+  } finally {
+    probe.detach();
+  }
+});
+
+test("a quick flick is judged by the finger, not by a layer still closing its gap", () => {
+  page();
+  const probe = controller("toward-end");
+  try {
+    // 40px in 48ms and gone: the layer has barely left rest, the finger is past the flick distance.
+    drag(el("row"), 300, 340, { steps: 4, stepMs: 12 });
+    assert.ok(probe.paints.at(-1)! < 24, `still catching up: ${probe.paints.at(-1)}`);
+    touch("touchend", el("row"), undefined, 4);
+    assert.equal(probe.commits.length, 1, "the flick completes");
+    assert.equal(probe.commits[0]!.travel, probe.paints.at(-1), "from where the layer actually is");
+    assert.match(probe.commits[0]!.easing, /^cubic-bezier\(0\.32, [\d.]+, [\d.]+, 1\)$/);
+  } finally {
+    probe.detach();
+  }
+});
+
+// ---- a session that settles on the compositor -------------------------------
+
+class FakeAnimation extends dom.EventTarget {
+  currentTime: number | null = 0;
+  cancelled = false;
+  cancel() { this.cancelled = true; }
+  finish() { this.dispatchEvent(new dom.Event("finish") as never); }
+}
+
+interface SettlingProbe extends Probe {
+  settles: Array<{ outcome: string; durationMs: number; frames: Keyframe[]; travelAt(ms: number): number; animation: FakeAnimation }>;
+  log: string[];
+}
+
+function settlingController(direction: InlineDirection): SettlingProbe {
+  const probe: SettlingProbe = {
+    begins: 0, paints: [], commits: [], cancels: 0, enabled: true, zone: "surface", decline: false, detach: () => {},
+    settles: [], log: [],
+  };
+  probe.detach = attachSwipeSurface({
+    surface: () => doc.getElementById("surface"),
+    direction,
+    zone: () => probe.zone,
+    enabled: () => probe.enabled,
+    begin: () => {
+      probe.begins += 1;
+      return {
+        paint: (travel) => { probe.paints.push(travel); },
+        settle: (settle) => {
+          const animation = new FakeAnimation();
+          probe.settles.push({
+            outcome: settle.outcome,
+            durationMs: settle.durationMs,
+            travelAt: settle.travelAt,
+            frames: settle.keyframes((travel) => ({ transform: `translateX(${travel.toFixed(2)}px)` })),
+            animation,
+          });
+          probe.log.push(`settle:${settle.outcome}`);
+          return animation as unknown as Animation;
+        },
+        commit: (release) => { probe.commits.push(release); probe.log.push("commit"); },
+        cancel: () => { probe.cancels += 1; probe.log.push("cancel"); },
+      };
+    },
+  }, doc);
+  return probe;
+}
+
+const translate = (frame: Keyframe): number => Number(/translateX\(([-\d.]+)px\)/.exec(String(frame.transform))![1]);
+
+test("a release starts its settle at once and commits a frame later, under it", async () => {
+  page();
+  const probe = settlingController("toward-end");
+  try {
+    drag(el("row"), 100, 700, { steps: 30, stepMs: 16 });
+    assert.equal(probe.paints.at(-1), 600);
+    touch("touchend", el("row"));
+    assert.deepEqual(probe.log, ["settle:commit"], "the animation is started in the release's own task; nothing else yet");
+    const [settle] = probe.settles;
+    assert.ok(settle!.durationMs > 0 && settle!.durationMs <= 360, `about the token: ${settle!.durationMs}`);
+    const xs = settle!.frames.map(translate);
+    assert.equal(xs[0], 600, "from where the finger left the layer");
+    assert.equal(xs.at(-1), WIDTH, "to the destination");
+    for (let i = 1; i < xs.length; i++) assert.ok(xs[i]! >= xs[i - 1]! - 1e-6, "never backwards, never past the end");
+    assert.deepEqual(settle!.frames.map((frame) => frame.offset).slice(0, 2), [0, 1 / (xs.length - 1)], "evenly spaced samples");
+    // It leaves at the finger's speed (20px per 16ms) instead of leaping or stalling.
+    const perMs = settle!.travelAt(1) - settle!.travelAt(0);
+    assert.ok(perMs > 1.15 && perMs < 1.6, `leaves at about the finger's 1.25 px/ms: ${perMs.toFixed(2)}`);
+    assert.equal(doc.documentElement.dataset.stackSwiping, "true", "the claim is held until the commit lands");
+
+    await sleep(30);
+    assert.deepEqual(probe.log, ["settle:commit", "commit"]);
+    assert.equal(probe.commits[0]!.travel, 600);
+    assert.equal(probe.commits[0]!.settleMs, settle!.durationMs);
+    assert.equal(doc.documentElement.dataset.stackSwiping, undefined);
+    assert.equal(settle!.animation.cancelled, false, "the animation holds the layer until it has arrived");
+    settle!.animation.finish();
+    assert.equal(settle!.animation.cancelled, true, "then the committed state takes over");
+    assert.equal(probe.cancels, 0);
+  } finally {
+    probe.detach();
+  }
+});
+
+test("an animation that ends before the commit keeps holding the layer until the commit has landed", async () => {
+  page();
+  const probe = settlingController("toward-end");
+  try {
+    drag(el("row"), 100, 700, { steps: 30, stepMs: 16 });
+    touch("touchend", el("row"));
+    const animation = probe.settles[0]!.animation;
+    animation.finish();
+    assert.equal(animation.cancelled, false, "nothing to rest on yet");
+    await sleep(30);
+    assert.deepEqual(probe.log, ["settle:commit", "commit"]);
+    assert.equal(animation.cancelled, true);
+  } finally {
+    probe.detach();
+  }
+});
+
+test("detaching between the release and its commit completes the commit", () => {
+  page();
+  const probe = settlingController("toward-end");
+  drag(el("row"), 100, 700, { steps: 30, stepMs: 16 });
+  touch("touchend", el("row"));
+  assert.deepEqual(probe.log, ["settle:commit"]);
+  probe.detach();
+  assert.deepEqual(probe.log, ["settle:commit", "commit"], "the layer is already moving: the release is not undone");
+  assert.equal(probe.cancels, 0);
+});
+
+test("a short release springs home on the compositor and is undone when it arrives", async () => {
+  page();
+  const probe = settlingController("toward-end");
+  try {
+    drag(el("row"), 300, 400, { steps: 25, stepMs: 16 });
+    touch("touchend", el("row"), undefined, 300);
+    assert.deepEqual(probe.log, ["settle:home"]);
+    const [settle] = probe.settles;
+    const xs = settle!.frames.map(translate);
+    assert.equal(xs[0], 100);
+    assert.equal(xs.at(-1), 0);
+    const paints = probe.paints.length;
+    await sleep(30);
+    assert.equal(probe.paints.length, paints, "no frame-by-frame painting while the compositor has it");
+    settle!.animation.finish();
+    assert.equal(probe.paints.at(-1), 0, "the last paint is home");
+    assert.deepEqual(probe.log, ["settle:home", "cancel"]);
+    assert.equal(settle!.animation.cancelled, true, "taken back once the session has put the layer at rest");
+    assert.equal(probe.commits.length, 0);
+  } finally {
+    probe.detach();
+  }
+});
+
+test("a finger catches a compositor spring-home where the animation is, and carries on", async () => {
+  page();
+  const probe = settlingController("toward-end");
+  try {
+    drag(el("row"), 300, 420, { steps: 6, stepMs: 60 });
+    touch("touchend", el("row"), undefined, 300);
+    const [settle] = probe.settles;
+    settle!.animation.currentTime = settle!.durationMs * 0.25;
+    touch("touchstart", el("row"), { x: 200, y: 300 });
+    const caughtAt = probe.paints.at(-1)!;
+    assert.ok(caughtAt > 0 && caughtAt < 120, `pinned mid-way: ${caughtAt}`);
+    assert.equal(settle!.animation.cancelled, true, "the animation lets go of the layer");
+    for (const x of [210, 220, 230]) touch("touchmove", el("row"), { x, y: 301 }, 80);
+    assert.ok(Math.abs(probe.paints.at(-1)! - (caughtAt + 30)) < 1e-9, "it moves on from there, 1:1");
+    assert.equal(probe.begins, 1, "the same session continues");
+    assert.equal(probe.cancels, 0);
+    touch("touchend", el("row"), undefined, 300);
+    assert.equal(probe.settles.length, 2, "and springs home again when let go");
+    probe.settles[1]!.animation.finish();
+    assert.equal(probe.cancels, 1);
   } finally {
     probe.detach();
   }

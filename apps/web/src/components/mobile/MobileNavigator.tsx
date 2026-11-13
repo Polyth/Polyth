@@ -55,9 +55,9 @@ import { successFeedback, tapFeedback } from "../../haptics.ts";
 import { copyText } from "../../utils.ts";
 import { canManageSession, sharingMarkerLabel } from "../../sessionSharing.ts";
 import { conversationUnread, hasMentionAttention, setSessionMuted, unreadBadgeText } from "../../sessionPeople.ts";
-import { motionDurationMs, scheduleSurfaceExit } from "../../motionPresence.ts";
+import { scheduleSurfaceExit } from "../../motionPresence.ts";
 import { swipeZoneInHost, useSwipePeek } from "../../shellSwipe.ts";
-import { attachSwipeSurface, holdHandoff, parkLeavingLayer } from "../../swipeSurface.ts";
+import { animateSettle, attachSwipeSurface } from "../../swipeSurface.ts";
 import { useUiSettings } from "../../uiPrefs.ts";
 import { presentSettingsFrom } from "../../settingsPresentation.ts";
 import { announce } from "../a11y/live.tsx";
@@ -1088,6 +1088,9 @@ export default function MobileNavigator() {
 
   useEffect(() => {
     if (drawerOpen) {
+      // Reopened before a swiped-away drawer unmounted: it is no longer parked.
+      const nav = navRef.current;
+      if (nav?.getAttribute("data-swipe-handoff") === "close") nav.removeAttribute("data-swipe-handoff");
       setDrawerMounted(true);
       setDrawerExit("leave");
       return;
@@ -1114,33 +1117,31 @@ export default function MobileNavigator() {
         const nav = navRef.current;
         if (!nav) return null;
         nav.setAttribute("data-swiping", "true");
-        const offset = (travel: number): number => -travel * (rtl ? -1 : 1);
+        const at = (travel: number): string => `translate3d(${-travel * (rtl ? -1 : 1)}px, 0, 0)`;
         const clear = (): void => {
           nav.removeAttribute("data-swiping");
           nav.style.removeProperty("transform");
         };
         return {
           paint(travel) {
-            nav.style.transform = `translate3d(${offset(travel)}px, 0, 0)`;
+            nav.style.transform = at(travel);
+          },
+          // The release runs on the compositor from the finger's own speed;
+          // closing the drawer for real follows under it (swipeSurface.ts).
+          settle(settle) {
+            return animateSettle(nav, settle, (travel) => ({ transform: at(travel) }));
           },
           cancel() {
             clear();
             // Sprang home: keep the entrance animation from replaying.
             nav.setAttribute("data-swipe-handoff", "rest");
           },
-          commit({ travel, settleMs }) {
-            if (settleMs > 0) {
-              holdHandoff(nav, {
-                from: { "--nav-swipe-from": `${offset(travel)}px` },
-                pacing: { "--nav-swipe-settle": `${settleMs}ms` },
-                attrs: { "data-swipe-handoff": "close" },
-                animations: ["mobile-navigator-swipe-out"],
-                fallbackMs: motionDurationMs("--motion-surface") + 320,
-              });
-            }
+          commit() {
+            // Already off-screen (or, with motion off, simply gone): the
+            // closing state parks it there instead of playing its exit.
+            nav.setAttribute("data-swipe-handoff", "close");
             flushSync(() => setSidebarOpen(false));
             clear();
-            if (settleMs <= 0) parkLeavingLayer(nav, `translate3d(${rtl ? "" : "-"}100%, 0, 0)`);
           },
         };
       },

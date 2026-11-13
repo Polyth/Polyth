@@ -2,8 +2,10 @@
 // the Navigator in from the inline-start side or the Workspace in from the
 // inline-end side, each as an inert peek that follows the finger; a release
 // opens it from where the finger left it, a short one unmounts it unseen, and
-// the open Navigator swipes closed the way it came. Also pins the gates: the
-// Swipe navigation setting, edge-only mode, and "Chat must be the top layer".
+// the open Navigator swipes closed the way it came. The release itself is an
+// animation started at once; the state change follows a frame later, under it.
+// Also pins the gates: the Swipe navigation setting, edge-only mode, and "Chat
+// must be the top layer".
 import test from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
@@ -91,6 +93,12 @@ function touch(type: "touchstart" | "touchmove" | "touchend", target: Element, p
   return event;
 }
 
+/** Lift the finger and let the release's state change land (it follows the animation by a frame). */
+async function release(target: Element, stepMs = 40) {
+  touch("touchend", target, undefined, stepMs);
+  await sleep(40);
+}
+
 /** Touch down at `fromX`, move to `toX` in even steps; the caller decides how it ends. */
 function pull(target: Element, fromX: number, toX: number, { steps = 8, stepMs = 40 } = {}) {
   touch("touchstart", target, { x: fromX, y: 400 });
@@ -158,15 +166,17 @@ test("a swipe from Chat pulls the Navigator in as a peek and a long release open
     assert.equal(drawer!.style.transform, `translate3d(${400 - WIDTH}px, 0, 0)`, "its trailing edge follows the finger");
 
     touch("touchend", chat());
-    assert.equal(store.getState().sidebarOpen, true, "the release opens it");
+    assert.equal(store.getState().sidebarOpen, false, "the release moves the drawer first: nothing has re-rendered yet");
+    assert.equal(drawer!.classList.contains("is-peeking"), true);
+    await sleep(40);
+    assert.equal(store.getState().sidebarOpen, true, "…and opens it a frame later, under the settle");
     assert.equal(getSwipePeek(), null);
     assert.equal(drawer, navigatorEl(), "the peek becomes the open drawer, not a remount");
     assert.equal(drawer!.dataset.drawerState, "open");
     assert.equal(drawer!.classList.contains("is-peeking"), false);
-    assert.equal(drawer!.style.transform, "", "the inline position is handed over…");
-    assert.equal(drawer!.style.getPropertyValue("--nav-swipe-from"), `${400 - WIDTH}px`, "…to the entrance");
-    assert.match(drawer!.style.getPropertyValue("--nav-swipe-settle"), /^\d+ms$/);
-    assert.equal(drawer!.getAttribute("data-swipe-handoff"), "open");
+    assert.equal(drawer!.style.transform, "", "the inline position is gone: the settle carried it on");
+    assert.equal(drawer!.getAttribute("data-swipe-handoff"), "rest", "the entrance must not replay over it");
+    assert.equal(drawer!.style.getPropertyValue("--nav-swipe-from"), "", "no inherited custom property restyles the drawer's subtree");
   } finally {
     await reset();
     await unmount();
@@ -201,13 +211,17 @@ test("the open Navigator swipes closed toward the inline start and hands its pos
     pull(toolbar, 800, 300);
     assert.equal(drawer.getAttribute("data-swiping"), "true");
     assert.equal(drawer.style.transform, "translate3d(-500px, 0, 0)");
-    touch("touchend", toolbar);
+    await release(toolbar);
     assert.equal(store.getState().sidebarOpen, false);
     assert.ok(drawer.classList.contains("is-closing"));
-    assert.equal(drawer.getAttribute("data-swipe-handoff"), "close");
-    assert.equal(drawer.style.getPropertyValue("--nav-swipe-from"), "-500px");
+    assert.equal(drawer.getAttribute("data-swipe-handoff"), "close", "parked off-screen instead of playing the exit");
     assert.equal(drawer.hasAttribute("data-swiping"), false);
     assert.equal(drawer.style.transform, "");
+
+    // Reopened before it unmounted: no longer parked, so it can be seen again.
+    await act(async () => { store.setSidebarOpen(true); });
+    assert.equal(navigatorEl(), drawer);
+    assert.equal(drawer.hasAttribute("data-swipe-handoff"), false);
   } finally {
     await reset();
     await unmount();
@@ -247,7 +261,7 @@ test("a leftward swipe over a session row closes the Navigator; the row keeps on
     assert.equal(row.querySelector(".mobile-nav-swipe-tray.is-trailing"), null, "no trailing tray by default (Archive swipes from the leading side)");
     const title = row.querySelector(".mobile-nav-session-title") ?? row;
     pull(title, 700, 300);
-    touch("touchend", title);
+    await release(title);
     assert.equal(store.getState().sidebarOpen, false, "the swipe closed the Navigator from the middle of a row");
   } finally {
     await reset();
@@ -268,13 +282,15 @@ test("a swipe from Chat toward the inline start pulls the Workspace in and opens
     assert.equal(workspacePanel()!.style.transform, `translate3d(${WIDTH - 500}px, 0, 0)`);
 
     touch("touchend", chat());
+    assert.equal(nav.getMobileWorkspaceNavigationSnapshot().homeOpen, false, "the layer moves first; it opens a frame later");
+    await sleep(40);
     assert.equal(nav.getMobileWorkspaceNavigationSnapshot().homeOpen, true);
     assert.equal(backdrop!.hasAttribute("data-swipe-peek"), false);
     assert.equal(backdrop!.dataset.stack, "enter");
     const panel = workspacePanel()!;
     assert.equal(panel.hasAttribute("inert"), false, "now it is the active layer");
-    assert.equal(panel.getAttribute("data-swipe-handoff"), "enter");
-    assert.equal(panel.style.getPropertyValue("--stack-enter-from"), `${WIDTH - 500}px`);
+    assert.equal(panel.getAttribute("data-swipe-handoff"), "rest", "stack-in must not replay over the settle");
+    assert.equal(panel.style.getPropertyValue("--stack-enter-from"), "");
     assert.equal(panel.style.transform, "");
   } finally {
     await reset();
@@ -316,7 +332,7 @@ test("chat swipes follow the setting and only start while Chat is the top layer"
     touch("touchend", chat());
     assert.equal(navigatorEl(), null, "edges only: not from the middle");
     pull(chat(), 10, 800);
-    touch("touchend", chat());
+    await release(chat());
     assert.equal(store.getState().sidebarOpen, true, "…but from the inline-start edge");
     await reset();
 
