@@ -69,7 +69,7 @@ import type { ComposerAddMenuItem, ComposerContributionContext, ComposerDraftCon
 import SlotHost from "./slots/SlotHost.tsx";
 import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
 import MobileComposerRail, { MobileComposerEditEntry } from "./mobile/MobileComposerRail.tsx";
-import { mobileRailKey, subscribeMobileRailEditRequest } from "../composer/mobileRail.ts";
+import { mobileRailKey, mobileRailSpaceId, subscribeMobileRailEditRequest } from "../composer/mobileRail.ts";
 import { setNewChatModel } from "../composer/newChatModel.ts";
 import { useHeroWidgetPrefs } from "./mobile/HeroWidgets.tsx";
 import { activeBrowserAccountId } from "../accountStorage.ts";
@@ -4103,7 +4103,8 @@ function ComposerBody({
     return true;
   };
   const phoneLayout = isPhone;
-  useEffect(() => setMobileRailEditing(false), [phoneLayout, spaceId, activeProjectId]);
+  const railSpaceId = mobileRailSpaceId(activeProject, spaceId);
+  useEffect(() => setMobileRailEditing(false), [phoneLayout, railSpaceId, activeProjectId]);
   // Arranging the buttons puts the keyboard away so the whole rail is in view.
   const editMobileRail = (editing: boolean) => {
     setMobileRailEditing(editing);
@@ -4961,8 +4962,8 @@ function ComposerBody({
         <ComposerFileInput inputRef={cameraInputRef} onFiles={attachFiles} accept="image/*" capture="environment" />
       {selectingConversation ? null : phoneLayout ? (
         <MobileComposerRail
-          key={`${activeBrowserAccountId()}:${spaceId}:${activeProjectId ?? ""}`}
-          storageKey={mobileRailKey(spaceId ?? "", activeProjectId)}
+          key={`${activeBrowserAccountId()}:${railSpaceId}:${activeProjectId ?? ""}`}
+          storageKey={mobileRailKey(railSpaceId, activeProjectId)}
           context={slotContext}
           add={addControl}
           primary={primaryAction}

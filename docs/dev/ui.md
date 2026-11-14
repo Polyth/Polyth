@@ -2604,7 +2604,11 @@ the project still inherits the buttons the user arranged elsewhere. A scope
 with no record of its own shows the arrangement most recently edited in the
 same Space (`readEffectiveMobileRail`) and gets its own record only once it is
 edited, so a project the user has not arranged yet does not fall back to the
-package defaults. Records keep the `{v:1,slots}` shape: the leading run, then
+package defaults. The Space part of the key is the active project's own
+`spaceId` (`mobileRailSpaceId`), falling back to the Spaces store, which
+`init()` loads at boot; a key never waits for Space chrome (the phone
+navigator's title) to be shown, or a chat opened straight from launch would
+read and write an empty Space's record. Records keep the `{v:1,slots}` shape: the leading run, then
 `slot:gap` and the run beside Send. A client that predates the runs reads the
 gap as an unknown launcher id and keeps it, rather than stripping and pushing
 back the record; positional records from such a client (`null` lanes) are

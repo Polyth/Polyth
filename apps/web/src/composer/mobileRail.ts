@@ -91,6 +91,15 @@ function legacyArrangement(key: string): string | null {
   return parseArrangement(accountStorageGet(key));
 }
 
+/** The Space whose records the rail reads and writes. A project names its
+ *  own Space and is known as soon as the project list, or the remembered
+ *  navigator, is. The Spaces store only answers after its own request, which
+ *  a phone opened straight into a chat used to send only once the navigator
+ *  appeared, so the rail read another (empty) Space's arrangement. */
+export function mobileRailSpaceId(project: { spaceId?: string } | null | undefined, activeSpaceId: string | null | undefined): string {
+  return project?.spaceId || activeSpaceId || "";
+}
+
 /** One arrangement per Space + project, or per Space while every project
  *  shares one interface (`projectInterfaceScope`). */
 export function mobileRailKey(spaceId: string, projectId: string | null): string {

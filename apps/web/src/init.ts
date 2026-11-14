@@ -5,6 +5,7 @@ import { installDevicePresence } from "./devicePresence.ts";
 import { adoptPreconnectedSync, adoptedSocketOpenBefore, syncSocketUrl } from "./syncPreconnect.ts";
 import { sessionIdsToRefresh } from "./sessionStatus.ts";
 import { applyRemoteClientSettings, initSettingsSync } from "./settingsSync.ts";
+import { loadSpaces } from "./spaces.ts";
 import { displaySessionTitle, isPlaceholderTitle, modelToMarkdown } from "./format.ts";
 import { friendlyError } from "./settings.ts";
 import { formatAppUrl, parseAppUrl, settingsPageFromSearch } from "./router.ts";
@@ -869,6 +870,10 @@ export function init(): Promise<void> {
   // Promise.all/allSettled before publishing any result is forbidden — a slow
   // or failed catalog request can never delay, erase, or roll back projects.
   const initialHydration = refreshProjects("initial");
+  // The active Space keys per-Space client records (the phone composer's
+  // buttons, harness visibility, checkout choices). Only Space chrome asked
+  // for it before, so a phone launched straight into a chat never learned it.
+  void loadSpaces();
   // The navigator the last launch showed paints while that list is out; the
   // first screen is restored from it, and the answer then validates it.
   // A remembered list that could not restore the selection (it lacked the

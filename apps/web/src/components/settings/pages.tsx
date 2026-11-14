@@ -70,7 +70,7 @@ import ProjectAppearanceDialog from "../ProjectAppearanceDialog.tsx";
 import { listProjectSettings, subscribeProjectSettings } from "../../projectSettings.ts";
 import { SHARED_PRESENTATION_SCOPE, useProjectInterfaceMode, type ProjectInterfaceMode } from "../../projectInterfaceScope.ts";
 import { chooseProjectInterface, copyProjectPresentationToShared } from "../../projectPresentationSync.ts";
-import { mobileRailScopeKey, parseMobileRail, readMobileRail, writeMobileRail } from "../../composer/mobileRail.ts";
+import { mobileRailScopeKey, mobileRailSpaceId, parseMobileRail, readMobileRail, writeMobileRail } from "../../composer/mobileRail.ts";
 import { useSpaces } from "../../spaces.ts";
 import { isPackageEnabled, subscribePackages } from "../../packages/registry.ts";
 import {
@@ -1694,7 +1694,7 @@ function ProjectProfileRows({ projectId }: { projectId: string }) {
  * which arrangement this account sees and never rewrites a project's record. */
 function ProjectInterfaceSection({ activeProject }: { activeProject: Project | undefined }) {
   const mode = useProjectInterfaceMode();
-  const spaceId = useSpaces().activeSpaceId ?? "";
+  const spaceId = mobileRailSpaceId(activeProject, useSpaces().activeSpaceId);
   const activeId = activeProject?.id ?? null;
   // Phone composer buttons live in their own map (mobileRail), not in the
   // presentation records, so they are carried across here.
