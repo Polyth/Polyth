@@ -429,6 +429,29 @@ export interface SubagentState {
   agents: Array<{ sessionId: string; label: string; status: string; currentTask?: string }>;
 }
 
+/** What an active rollback did to the files on disk (`session/rewound.files`),
+ *  reduced to what the marker says. Absent on markers older than file
+ *  rollback, and when the files were simply not involved. */
+export interface RewindMarkerFiles {
+  mode: "restored" | "kept" | "unavailable";
+  restored: number;
+  kept: number;
+  reason?: string;
+}
+
+const rewindMarkerFiles = (value: unknown): RewindMarkerFiles | undefined => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const files = value as { mode?: unknown; restored?: unknown; kept?: unknown; reason?: unknown };
+  if (files.mode !== "restored" && files.mode !== "kept" && files.mode !== "unavailable") return undefined;
+  const count = (n: unknown): number => typeof n === "number" && Number.isSafeInteger(n) && n > 0 ? n : 0;
+  return {
+    mode: files.mode,
+    restored: count(files.restored),
+    kept: count(files.kept),
+    ...(typeof files.reason === "string" ? { reason: files.reason } : {}),
+  };
+};
+
 export interface RenderModel {
   messages: RenderMessage[];
   permissions: PendingPermission[];
@@ -466,7 +489,7 @@ export interface RenderModel {
   /** Active rewind marker. `draft` is replay-derived from the target
    *  `user/message` (raw ?? text + attachments); `restoredText` only appears
    *  when an old marker carried it (compat). */
-  rewind: { markerSeq: number; atSeq: number; restoredText?: string; draft?: SeedDraft } | null;
+  rewind: { markerSeq: number; atSeq: number; restoredText?: string; draft?: SeedDraft; files?: RewindMarkerFiles } | null;
   /** Lineage of a `session/forked` child (per-message forks carry a draft). */
   fork: ForkState | null;
   version: number; // bumps on every applied event (cheap change signal)
@@ -1343,11 +1366,13 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           : restoredText !== undefined
             ? { text: restoredText }
             : undefined;
+      const files = rewindMarkerFiles(d.files);
       model.rewind = {
         markerSeq: ev.seq,
         atSeq,
         ...(restoredText !== undefined ? { restoredText } : {}),
         ...(draft ? { draft } : {}),
+        ...(files ? { files } : {}),
       };
       break;
     }

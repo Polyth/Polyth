@@ -1,7 +1,7 @@
 import { Fragment, createContext, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { createTimelineDerivation } from "../timelineDerivation.ts";
-import type { HarnessSelection, SessionEvent, SessionPerson } from "@polyth/contracts";
+import type { HarnessSelection, RewindFilesOutcome, RewindFilesPreview, SessionEvent, SessionPerson } from "@polyth/contracts";
 import { renderMarkdown } from "../markdown.tsx";
 import { ConversationRepliesContext, createConversationReplies, followingReplies } from "../markdown/conversationReplies.ts";
 import { chatDividerParts, emojiOnlyCount, fmtDuration } from "../format.ts";
@@ -111,6 +111,7 @@ import {
 } from "../rewindMotion.ts";
 import AttachmentPills from "./AttachmentPills.tsx";
 import RewindMarker from "./RewindMarker.tsx";
+import RewindFilesDialog, { rewindMarkerFilesLabel, type RewindFilesPhase } from "./RewindFilesDialog.tsx";
 import IsolationNotice from "./IsolationNotice.tsx";
 import SelectionMenu from "./SelectionMenu.tsx";
 import SlotHost, { useSlotVersion } from "./slots/SlotHost.ts";
@@ -4352,19 +4353,23 @@ export default function Timeline({
   // fades before the server confirms. With motion on, the confirmation plays
   // the choreography (see the revert layout effects) and the draft waits for
   // its glide; motion off applies both in the confirming commit.
-  const revert = useCallback((message: UserMsg | QuestionMsg) => {
-    if (!sessionId) return;
-    if (revertPendingRef.current === sessionId) return;
-    // A question keeps its place; the cut starts at the person's answer.
-    const atSeq = message.kind === "question" ? message.answeredSeq : message.eventSeq;
-    if (atSeq === undefined) return;
+  // `files`: "restore" also puts back what the cut turns changed on disk,
+  // "keep" records the person chose the conversation only. `quiet` lets the
+  // files dialog own a failure instead of the timeline notice.
+  const performRewind = useCallback((
+    message: UserMsg | QuestionMsg,
+    atSeq: number,
+    files?: "restore" | "keep",
+    quiet = false,
+  ): Promise<SessionEvent | null> => {
+    if (!sessionId) return Promise.resolve(null);
     revertPendingRef.current = sessionId;
     setRevertPendingSession(sessionId);
     revertDraft.current = null;
     if (!timelineLiftMotionDisabled()) {
       setRevertChoreography({ sessionId, atSeq, markerSeq: null, phase: "confirming" });
     }
-    void api.rewind(sessionId, atSeq).then((marker) => {
+    return api.rewind(sessionId, atSeq, files ? { files } : undefined).then((marker) => {
       const draft: RewindDraft = message.kind === "question"
         ? {
             sessionId,
@@ -4386,15 +4391,18 @@ export default function Timeline({
       if (choreographed) revertDraft.current = draft;
       applyEvent(marker); // WS re-delivery dedupes by seq
       if (!choreographed) applyRewindDraftRef.current(draft);
+      return marker;
     }).catch((err) => {
       const exit = revertExitRef.current;
       if (exit?.phase === "confirming" && exit.sessionId === sessionId && exit.atSeq === atSeq) {
         setRevertChoreography(null);
       }
       revertDraft.current = null;
+      if (quiet) throw err;
       const text = mutationErrorMessage("revert", err);
       announce(text, { role: "user", eventSeq: atSeq });
       setUiError(text);
+      return null;
     }).finally(() => {
       if (revertPendingRef.current === sessionId) {
         revertPendingRef.current = null;
@@ -4404,6 +4412,106 @@ export default function Timeline({
     // setRevertChoreography only touches a ref and a state setter.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, announce]);
+  // The files dialog: open only when a rollback would change files on disk.
+  const [filesDialog, setFilesDialog] = useState<{
+    sessionId: string;
+    message: UserMsg;
+    atSeq: number;
+    preview: RewindFilesPreview;
+    phase: RewindFilesPhase;
+    error: string | null;
+  } | null>(null);
+  const filesInvokerRef = useRef<HTMLElement | null>(null);
+  const revert = useCallback((message: UserMsg | QuestionMsg) => {
+    if (!sessionId) return;
+    if (revertPendingRef.current === sessionId) return;
+    // A question keeps its place; the cut starts at the person's answer.
+    const atSeq = message.kind === "question" ? message.answeredSeq : message.eventSeq;
+    if (atSeq === undefined) return;
+    // An answer sits inside the turn that asked: its files cannot be split.
+    if (message.kind === "question") { void performRewind(message, atSeq); return; }
+    const source = sessionId;
+    filesInvokerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    revertPendingRef.current = source;
+    setRevertPendingSession(source);
+    // An older server (or a failed preview) keeps the conversation-only
+    // rollback it always had.
+    const previewing: Promise<RewindFilesPreview | null> = typeof api.previewRewindFiles === "function"
+      ? api.previewRewindFiles(source, atSeq).catch(() => null)
+      : Promise.resolve(null);
+    void previewing.then((preview) => {
+      if (revertPendingRef.current === source) {
+        revertPendingRef.current = null;
+        setRevertPendingSession(null);
+      }
+      if (preview?.available && preview.restore.length > 0) {
+        setFilesDialog({ sessionId: source, message, atSeq, preview, phase: "idle", error: null });
+        return;
+      }
+      // Nothing on disk would change: the instant rollback it always was. A
+      // rollback that leaves changed files behind still records why.
+      const recordWhy = preview !== null && !preview.turnRunning
+        && (preview.keep.length > 0 || preview.reason === "branch-changed");
+      void performRewind(message, atSeq, recordWhy ? "restore" : undefined);
+    });
+  }, [sessionId, performRewind]);
+  const runFilesRollback = (dialog: NonNullable<typeof filesDialog>, attempt = 0) => {
+    setFilesDialog({ ...dialog, phase: "applying", error: null });
+    void performRewind(dialog.message, dialog.atSeq, "restore", true).then((marker) => {
+      setFilesDialog(null);
+      const files = (marker?.data as { files?: RewindFilesOutcome } | undefined)?.files;
+      if (files?.mode === "restored") announce(tr("timeline.rewindFiles.done", { count: files.restored }));
+    }).catch((err: unknown) => {
+      // The stop the person asked for may still be settling on the server.
+      if (attempt < 3 && (err as { code?: unknown } | null)?.code === "conflict" && dialog.preview.turnRunning) {
+        window.setTimeout(() => runFilesRollback(dialog, attempt + 1), 500);
+        return;
+      }
+      setFilesDialog((current) => current && { ...current, phase: "idle", error: tr("timeline.rewindFiles.error") });
+    });
+  };
+  const confirmFilesRollback = () => {
+    const dialog = filesDialog;
+    if (!dialog || dialog.phase !== "idle") return;
+    if (dialog.preview.turnRunning && turnWorking) {
+      // Files are written only after the turn has really stopped.
+      setFilesDialog({ ...dialog, phase: "stopping", error: null });
+      void api.abort(dialog.sessionId, "timeline").catch(() => undefined);
+      return;
+    }
+    runFilesRollback(dialog);
+  };
+  const conversationOnlyRollback = () => {
+    const dialog = filesDialog;
+    if (!dialog || dialog.phase !== "idle") return;
+    setFilesDialog({ ...dialog, phase: "applying", error: null });
+    void performRewind(dialog.message, dialog.atSeq, "keep", true).then(() => setFilesDialog(null)).catch(() => {
+      setFilesDialog((current) => current && { ...current, phase: "idle", error: tr("timeline.rewindFiles.error") });
+    });
+  };
+  const filesDialogRef = useRef(filesDialog);
+  filesDialogRef.current = filesDialog;
+  const filesDialogStopping = filesDialog?.phase === "stopping";
+  useEffect(() => {
+    if (!filesDialogStopping) return;
+    if (!turnWorking) {
+      const current = filesDialogRef.current;
+      if (current?.phase === "stopping") runFilesRollback(current);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setFilesDialog((current) => current?.phase === "stopping"
+        ? { ...current, phase: "idle", error: tr("timeline.rewindFiles.stopTimeout") }
+        : current);
+    }, 30_000);
+    return () => window.clearTimeout(timer);
+    // runFilesRollback reads only setters and the dialog it is given.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filesDialogStopping, turnWorking]);
+  // A dialog belongs to the chat it was opened for.
+  useEffect(() => {
+    setFilesDialog((current) => current && current.sessionId !== sessionId ? null : current);
+  }, [sessionId]);
   // Fork and edit: navigation happens only after the child is published; a
   // failure keeps the source selected with a bounded explanation (spec).
   const fork = useCallback((message: UserMsg) => {
@@ -4419,14 +4527,38 @@ export default function Timeline({
   // Focus lands on the invoking control when it survives, otherwise on the
   // restored target's Revert action — never on BODY.
   const [confirmRestore, setConfirmRestore] = useState(false);
+  // Restored files edited since the rollback: restore asks before leaving them.
+  const [filesRestoreAsk, setFilesRestoreAsk] = useState<number | null>(null);
   const rewindMarkerSeq = model.rewind?.markerSeq;
+  const rewindMarkerSeqRef = useRef(rewindMarkerSeq);
+  rewindMarkerSeqRef.current = rewindMarkerSeq;
+  const markerFiles = model.rewind?.files ? rewindMarkerFilesLabel(model.rewind.files) : undefined;
   // A confirmation belongs to one marker; a new or resolved rewind drops it.
-  useEffect(() => { setConfirmRestore(false); }, [rewindMarkerSeq]);
-  const restore = (opts?: { confirmed?: boolean; invoker?: HTMLElement | null }) => {
+  useEffect(() => { setConfirmRestore(false); setFilesRestoreAsk(null); }, [rewindMarkerSeq]);
+  const restore = (opts?: { confirmed?: boolean; filesConfirmed?: boolean; invoker?: HTMLElement | null }) => {
     if (!sessionId || !model.rewind) return;
     const draftState = draftStateOf(loadSeedRecord(sessionId), loadDraft(sessionId));
     if (draftState === "edited" && !opts?.confirmed) {
       setConfirmRestore(true);
+      return;
+    }
+    // One question at a time: the draft first, then files changed since.
+    const rolledFiles = model.rewind.files;
+    if (rolledFiles?.mode === "restored" && rolledFiles.restored > 0 && !opts?.filesConfirmed) {
+      const markerSeq = model.rewind.markerSeq;
+      const previewing = typeof api.previewRewindRestore === "function"
+        ? api.previewRewindRestore(sessionId).catch(() => null)
+        : Promise.resolve(null);
+      void previewing.then((preview) => {
+        // The marker may have been resolved (or replaced) meanwhile.
+        if (markerSeq !== rewindMarkerSeqRef.current) return;
+        if (preview && preview.keep.length > 0) {
+          setConfirmRestore(false);
+          setFilesRestoreAsk(preview.keep.length);
+          return;
+        }
+        restore({ ...opts, confirmed: true, filesConfirmed: true });
+      });
       return;
     }
     const atSeq = model.rewind.atSeq;
@@ -4439,7 +4571,11 @@ export default function Timeline({
       discardComposerSeed(sessionId);
       requestComposerReplace("");
       setConfirmRestore(false);
-      announce(tr("timeline.originalTimelineRestored"));
+      setFilesRestoreAsk(null);
+      const restoredFiles = (cleared.data as { files?: { restored?: number } } | undefined)?.files?.restored;
+      announce(restoredFiles
+        ? tr("timeline.restoreFilesDone", { count: restoredFiles })
+        : tr("timeline.originalTimelineRestored"));
       requestAnimationFrame(() => {
         if (invoker && document.contains(invoker)) { invoker.focus({ preventScroll: true }); return; }
         const el = ref.current;
@@ -4672,12 +4808,16 @@ export default function Timeline({
             running={rewindRunning}
             confirming={confirmRestore}
             canPeek={rewoundRows.length > 0}
+            {...(markerFiles ? { files: markerFiles } : {})}
+            filesConfirm={filesRestoreAsk}
             onRestore={(invoker) => restore({ invoker })}
             onConfirmRestore={(invoker) => restore({ confirmed: true, invoker })}
             onKeepEditing={() => {
               setConfirmRestore(false);
               focusComposer();
             }}
+            onConfirmFilesRestore={(invoker) => restore({ confirmed: true, filesConfirmed: true, invoker })}
+            onCancelFilesRestore={() => setFilesRestoreAsk(null)}
             renderRewound={() => rewoundRows.map(renderRewindRow)}
           />
         )}
@@ -4723,6 +4863,15 @@ export default function Timeline({
         />
       )}
       {latestReveal && (latestRevealTarget ? createPortal(latestReveal, latestRevealTarget) : latestReveal)}
+      <RewindFilesDialog
+        preview={filesDialog?.preview ?? null}
+        phase={filesDialog?.phase ?? "idle"}
+        error={filesDialog?.error ?? null}
+        onRestore={confirmFilesRollback}
+        onConversationOnly={conversationOnlyRollback}
+        onClose={() => setFilesDialog(null)}
+        restoreFocusRef={filesInvokerRef}
+      />
       </div>
       <SelectionMenu container={ref} />
       {sessionId && selectionState.dialogOpen && (

@@ -2905,9 +2905,33 @@ question quoted above its answer to edit and send as the replacement turn.
 Declined questions and a subagent's mirrored question offer no revert; Fork is
 not offered because a mid-turn prefix has no exact native branch point.
 
+**Revert & edit with files:** when rolling back to a prompt would change
+files on disk, Revert & edit first asks once, in `RewindFilesDialog`
+(`ResponsiveOverlay`: a small dialog on desktop, a sheet on a phone). The list
+is the preview — "Will be restored · N" with each file's name, folder and what
+the agent did (`edited +a −b`, `new — will be deleted`, `deleted — will come
+back`, `changed by a command`), then a collapsed "Will stay as is · M" with a
+reason per file (changed after the agent, another chat may have changed it…).
+Uncertain files are never restored and the dialog offers no override. Two
+buttons decide: "Roll back and restore files" (initial focus) and
+"Conversation only"; Esc/scrim cancel; one standing note says commits, pushes
+and ignored files stay. While the turn runs, an info notice says the agent
+will be stopped and the primary becomes "Stop and roll back": files are
+written only once the turn has stopped. The dialog stays open (busy) until
+the server confirms; a failure shows in it and moves nothing. A rollback that
+would change no file — nothing changed, not a repository, a remote project,
+no snapshot — stays the instant, dialog-free action. Groups are told apart by
+a fill, not a border, and red counts use `--red-on-wash`.
+
 **Rewind cut and replacement:** an active Revert & edit is represented by one
 quiet cut marker at the end of the retained prefix. It does not count or narrate
-the hidden branch; the branch appears only through an explicit peek, and a still
+the hidden branch; when the rollback restored or left files it carries one
+disk-state suffix instead (`· files restored: 4`, `· files restored: 4 of 5`,
+`· files unchanged`, the reason in its accessible name and tooltip). Restore
+puts those files back too; if some were edited since, the marker's inline
+confirm asks first ("Files changed after the rollback: N. They'll stay as they
+are. Restore the rest?") — after an edited draft's question, one question at a
+time. There is no toast. The branch appears only through an explicit peek, and a still
 running old turn is represented by the existing activity dock rather than a
 second transcript row. Submitting the replacement removes the cut marker and
 mounts the optimistic prompt in the same commit, so the established composer →

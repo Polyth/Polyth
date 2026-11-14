@@ -2946,6 +2946,7 @@ export async function boot(opts: BootOptions = {}) {
     permissions: guardedPermissions(requireSvc<SessionDeps["permissions"]>("permissions"), (projectId) => projects.spaceOfProject(projectId)),
     guardedSpace: spaceHasGuardedMember,
     permissionScopeCheck: () => svc<NonNullable<ReturnType<NonNullable<SessionDeps["permissionScopeCheck"]>>>>("permissions.scope-check"),
+    checkpoints: () => svc<NonNullable<ReturnType<NonNullable<SessionDeps["checkpoints"]>>>>("workspace.checkpoints"),
     instructionProvisioned: async (sessionId, harnessId) => {
       if (!capabilityController) return false;
       const proj = await store.projection(sessionId);
@@ -2962,6 +2963,18 @@ export async function boot(opts: BootOptions = {}) {
       }, harnessId);
     },
     cleanupSessionResources: async ({ projection, releaseExecution }) => {
+      // A deleted chat's file checkpoints go with it: only its refs are
+      // dropped (git prunes the objects), before any worktree is released.
+      const checkpoints = svc<NonNullable<ReturnType<NonNullable<SessionDeps["checkpoints"]>>>>("workspace.checkpoints");
+      if (checkpoints) {
+        const project = await projects.get(projection.projectId).catch(() => undefined);
+        const cwd = project && !project.remote
+          ? projection.isolation?.worktreePath ?? projection.worktreePath ?? project.path
+          : undefined;
+        await checkpoints.forget(projection.id, cwd).catch((error: unknown) => {
+          console.warn(`[polyth] could not drop checkpoints of ${projection.id}`, error);
+        });
+      }
       if (projection.isolation?.kind !== "git-worktree" && !projection.workspace?.repositories.some((row) => row.isolation)) return;
       const isolation = svc<{
         cleanupForSessionDelete(

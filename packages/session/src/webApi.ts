@@ -1,5 +1,7 @@
 // Typed fetch wrappers for every REST endpoint in PLAN.md §5.
 import type {
+  RewindFilesPreview,
+  RewindRestorePreview,
   TokenUsage,
   AgentDescriptor,
   AgentProfile,
@@ -1168,10 +1170,16 @@ export const api = {
     jfetch<{ ok: true }>(`/api/sessions/${id}/queue/${encodeURIComponent(queueId)}`, { method: "DELETE" }),
   fork: (id: string, atSeq?: number) =>
     jfetch<ForkResult>(`/api/sessions/${id}/fork`, json("POST", atSeq === undefined ? {} : { atSeq })),
-  rewind: (id: string, atSeq: number) =>
-    jfetch<SessionEvent>(`/api/sessions/${id}/rewind`, json("POST", { atSeq })),
+  /** `files: "restore"` also puts back what the cut turns changed on disk;
+   *  `"keep"` records that the person chose conversation only. */
+  rewind: (id: string, atSeq: number, options?: { files?: "restore" | "keep" }) =>
+    jfetch<SessionEvent>(`/api/sessions/${id}/rewind`, json("POST", options?.files ? { atSeq, files: options.files } : { atSeq })),
+  previewRewindFiles: (id: string, atSeq: number, signal?: AbortSignal) =>
+    jfetch<RewindFilesPreview>(`/api/sessions/${id}/rewind/preview?atSeq=${atSeq}`, signal ? { signal } : {}),
   clearRewind: (id: string) =>
     jfetch<SessionEvent>(`/api/sessions/${id}/rewind/clear`, { method: "POST" }),
+  previewRewindRestore: (id: string, signal?: AbortSignal) =>
+    jfetch<RewindRestorePreview>(`/api/sessions/${id}/rewind/clear/preview`, signal ? { signal } : {}),
   pinContext: (id: string, sourceEventSeq: number) =>
     jfetch<SessionEvent>(`/api/sessions/${id}/context/pins/${sourceEventSeq}`, { method: "POST" }),
   unpinContext: (id: string, sourceEventSeq: number) =>

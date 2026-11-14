@@ -6,7 +6,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createSessionJobs } from "./sessionJobs.ts";
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, sep as pathSep } from "node:path";
+import { realpath } from "node:fs/promises";
 import { isDeepStrictEqual } from "node:util";
 import { selectAgentToolSessionOwner } from "./agentToolSession.ts";
 import { ownsLegacySessionState, personAccessRequestOf, personMessageShares } from "./sessionPeople.ts";
@@ -67,6 +68,9 @@ import type { ProjectService } from "@polyth/contracts";
 import { compactionDue, effectiveCompactionPreference, parseCompactionPreference, type CompactionPreference } from "@polyth/contracts/compaction-policy";
 import { extractSecureSafeEnvRefs } from "@polyth/credential-vault";
 import { redactSecrets } from "@polyth/plugins";
+import type { WorkspaceCheckpointService, WorkspaceCheckpointTurn, WorkspaceRestoreInput } from "@polyth/plugins";
+import type { RewindFilesOutcome, RewindFilesPreview, RewindFilesUnavailableReason, RewindRestorePreview, WorkspaceCheckpointData } from "@polyth/contracts";
+import { cwdInsideRoot, rewindCheckpointTurns, WORKSPACE_CHECKPOINT_EVENT } from "./rewindFiles.ts";
 import { isolationBlocksUserMutation, isolationNeedsRecovery, isManagedIsolationBranch, normalizeIsolation, publishedIsolationMerge } from "@polyth/contracts";
 import {
   projectRepositories,
@@ -770,6 +774,10 @@ export function createSessionService(deps: {
    *  leave a request Auto-Approve would answer for a person; resolved per call
    *  so the permissions package may load or reload after the session service. */
   permissionScopeCheck?: () => PermissionScopeCheck | undefined;
+  /** Git-owned per-turn workspace checkpoints behind a rollback that also
+   *  restores files. Resolved per call so the git package may load, reload
+   *  or be removed after the session service; absent → conversation-only. */
+  checkpoints?: () => WorkspaceCheckpointService | undefined;
   runtimes: RuntimePool;
   broadcast: Broadcaster;
   /** Config/runtime replacement admission gate. `admit` atomically joins the
@@ -4970,12 +4978,169 @@ export function createSessionService(deps: {
 
   /** In-memory release of a turn whose terminal stop is already durable:
    *  frees the turn slot, fires completion hooks and dispatches the queue. */
+  // ------------------------------------------------ workspace checkpoints
+  // Every admitted turn is bracketed by two snapshots of the checkout: one
+  // before the prompt reaches the runtime, one when the turn stops. A rollback
+  // then puts back, file by file, what those turns changed (rewindFiles.ts,
+  // `WorkspaceCheckpointService` in the git package).
+  const CHECKPOINT_BEFORE_BUDGET_MS = 3_000;
+  const CHECKPOINT_AFTER_BUDGET_MS = 5_000;
+  /** The turn whose `after` snapshot is still owed, per session. */
+  const checkpointTurns = new Map<string, { promptSeq: number; cwd: string }>();
+  /** An `after` snapshot being taken: a rollback waits for it. */
+  const pendingAfterCheckpoints = new Map<string, Promise<void>>();
+
+  const recordCheckpoint = async (
+    sessionId: string,
+    cwd: string,
+    promptSeq: number,
+    phase: "before" | "after",
+  ): Promise<boolean> => {
+    const service = deps.checkpoints?.();
+    if (!service) return false;
+    try {
+      const result = await service.capture({
+        cwd,
+        sessionId,
+        promptSeq,
+        phase,
+        budgetMs: phase === "before" ? CHECKPOINT_BEFORE_BUDGET_MS : CHECKPOINT_AFTER_BUDGET_MS,
+      });
+      // A checkout that is not a repository never records anything: every
+      // turn of such a project would otherwise add two empty facts.
+      if ("unavailable" in result && result.unavailable === "not-git") return false;
+      const data: WorkspaceCheckpointData = "commit" in result
+        ? {
+            promptSeq,
+            phase,
+            commit: result.commit,
+            root: result.root,
+            ...(result.skipped.length > 0 ? { skipped: result.skipped } : {}),
+            ...(result.skippedMore ? { skippedMore: result.skippedMore } : {}),
+          }
+        : { promptSeq, phase, unavailable: result.unavailable };
+      await appendAndBroadcast(sessionId, WORKSPACE_CHECKPOINT_EVENT, data as unknown as JsonObject, { ignorable: true });
+      return "commit" in result;
+    } catch (error) {
+      console.warn(`[polyth] workspace checkpoint (${phase}) failed for ${sessionId}`, error);
+      return false;
+    }
+  };
+
+  /** Before delivery: the snapshot must hold the files as they were before
+   *  the agent saw the prompt. Bounded; a slow or failed snapshot only makes
+   *  this turn's files unrestorable, it never blocks the send. */
+  const checkpointBeforeTurn = async (sessionId: string, cwd: string | undefined, promptSeq: number | undefined): Promise<void> => {
+    checkpointTurns.delete(sessionId);
+    if (!cwd || promptSeq === undefined) return;
+    if (await recordCheckpoint(sessionId, cwd, promptSeq, "before")) {
+      checkpointTurns.set(sessionId, { promptSeq, cwd });
+    }
+  };
+
+  const checkpointAfterTurn = async (sessionId: string, requestsOpen: boolean): Promise<void> => {
+    const owed = checkpointTurns.get(sessionId);
+    if (!owed) return;
+    // A stop that leaves a request open may be followed by another stop of
+    // the same turn; the newest `after` wins.
+    if (!requestsOpen) checkpointTurns.delete(sessionId);
+    const capture = recordCheckpoint(sessionId, owed.cwd, owed.promptSeq, "after").then(() => undefined);
+    pendingAfterCheckpoints.set(sessionId, capture);
+    try {
+      await capture;
+    } finally {
+      if (pendingAfterCheckpoints.get(sessionId) === capture) pendingAfterCheckpoints.delete(sessionId);
+    }
+  };
+
+  type RewindFilesContext =
+    | { ok: true; service: WorkspaceCheckpointService; cwd: string; turns: WorkspaceCheckpointTurn[]; runningPromptSeq?: number }
+    | { ok: false; reason: RewindFilesUnavailableReason };
+
+  /** The session's checkout, resolved now: a checkpoint is only ever applied
+   *  to the checkout it was taken in. */
+  const checkpointCheckout = async (proj: SessionProjection, root: string | undefined): Promise<string | undefined> => {
+    if (!root) return undefined;
+    const project = await projects.get(proj.projectId);
+    if (!project || project.remote) return undefined;
+    try {
+      const cwd = await realpath(workspaceExecutionPath(project, proj));
+      return cwdInsideRoot(cwd, root, pathSep) ? cwd : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const rewindFilesContext = async (
+    proj: SessionProjection,
+    events: readonly SessionEvent[],
+    atSeq: number,
+  ): Promise<RewindFilesContext> => {
+    const project = await projects.get(proj.projectId);
+    if (!project) return { ok: false, reason: "error" };
+    if (project.remote) return { ok: false, reason: "remote" };
+    const service = deps.checkpoints?.();
+    if (!service) return { ok: false, reason: "service-missing" };
+    const found = rewindCheckpointTurns(effectiveHistory(events).events, events, atSeq, { running: turnActive(proj.id) });
+    if (!found.ok) return found;
+    const cwd = await checkpointCheckout(proj, found.root);
+    if (!cwd) return { ok: false, reason: "no-snapshot" };
+    return {
+      ok: true,
+      service,
+      cwd,
+      turns: found.turns,
+      ...(found.runningPromptSeq !== undefined ? { runningPromptSeq: found.runningPromptSeq } : {}),
+    };
+  };
+
+  /** Put back the files the turns from `atSeq` on changed. Throws when the
+   *  rollback itself fails, so no marker is written. */
+  const rollBackFiles = async (sessionId: string, proj: SessionProjection, atSeq: number): Promise<RewindFilesOutcome> => {
+    if (turnActive(sessionId)) {
+      throw Object.assign(new Error("stop the running turn before rolling back its files"), { code: "conflict" });
+    }
+    // A stop being processed owes its `after` snapshot; take it now rather
+    // than reporting the newest turn as unsnapshotted.
+    if (checkpointTurns.has(sessionId) && !pendingAfterCheckpoints.has(sessionId)) {
+      await checkpointAfterTurn(sessionId, false);
+    }
+    await pendingAfterCheckpoints.get(sessionId);
+    const context = await rewindFilesContext(proj, await store.events(sessionId), atSeq);
+    if (!context.ok) return { mode: "unavailable", reason: context.reason, restored: 0, kept: 0 };
+    if (context.runningPromptSeq !== undefined) {
+      throw Object.assign(new Error("stop the running turn before rolling back its files"), { code: "conflict" });
+    }
+    return context.service.applyRewind({ cwd: context.cwd, sessionId, turns: context.turns });
+  };
+
+  /** The files outcome the active marker recorded, when it put files back. */
+  const rolledBackFiles = (events: readonly SessionEvent[], markerSeq: number): RewindFilesOutcome | undefined => {
+    const marker = events.find((event) => event.seq === markerSeq && event.type === "session/rewound");
+    const files = (marker?.data as { files?: RewindFilesOutcome } | undefined)?.files;
+    return files?.mode === "restored" && files.undo && files.rolled && (files.paths?.length ?? 0) > 0 ? files : undefined;
+  };
+
+  const restoreFilesContext = async (
+    proj: SessionProjection,
+    rolled: RewindFilesOutcome,
+  ): Promise<{ service: WorkspaceCheckpointService; input: WorkspaceRestoreInput } | undefined> => {
+    const service = deps.checkpoints?.();
+    if (!service || !rolled.undo || !rolled.rolled || !rolled.paths) return undefined;
+    const cwd = await checkpointCheckout(proj, rolled.root);
+    if (!cwd) return undefined;
+    return { service, input: { cwd, undo: rolled.undo, rolled: rolled.rolled, paths: rolled.paths } };
+  };
+
   const finishStoppedTurn = async (
     sessionId: string,
     stop: { turnId?: string; reason: "completed" | "aborted" | "error"; requestsOpen: boolean },
   ): Promise<void> => {
     lastTurnId.delete(sessionId);
     admitting.delete(sessionId);
+    // Before anything is told the turn ended (and before the queue dispatches
+    // the next turn, whose own snapshot must come after this one).
+    await checkpointAfterTurn(sessionId, stop.requestsOpen);
     // Native titles can arrive on SSE or only through the session
     // list. Re-check here in case the turn ended before the start-path
     // poll observed a late provider title.
@@ -8446,6 +8611,14 @@ export function createSessionService(deps: {
       if (memoryContribution.selected.some((item) => (item as { layer?: unknown }).layer === "person")) {
         await markPersonalContext(sessionId);
       }
+    }
+
+    // The files as they are before the runtime sees this prompt: what a later
+    // rollback to it puts back. Local checkouts only.
+    if (!turnProject.remote) {
+      let checkpointCwd: string | undefined;
+      try { checkpointCwd = workspaceExecutionPath(turnProject, proj); } catch { checkpointCwd = undefined; }
+      await checkpointBeforeTurn(sessionId, checkpointCwd, message?.seq);
     }
 
     admitting.add(sessionId);
@@ -13655,7 +13828,7 @@ export function createSessionService(deps: {
       });
     },
 
-    async rewind(sessionId, atSeq): Promise<SessionEvent> {
+    async rewind(sessionId, atSeq, options): Promise<SessionEvent> {
       return withSessionLock(sessionId, async () => {
         const { proj, events } = await assertMutable(sessionId, { allowActiveTurn: true });
         assertHasAgent(proj);
@@ -13686,18 +13859,89 @@ export function createSessionService(deps: {
         // The marker carries no prompt copy: the target user/message already
         // owns raw text and attachments, and the draft derives from replay.
         // A harness hint guessed the reply that the rewind just removed.
+        // Files first: if putting them back fails, the conversation stays as
+        // it was, so the marker never claims a rollback the disk did not get.
+        let files: RewindFilesOutcome | undefined;
+        if (options?.files === "restore") {
+          files = await rollBackFiles(sessionId, proj, atSeq);
+        } else if (options?.files === "keep") {
+          files = { mode: "kept", restored: 0, kept: 0 };
+        }
         clearPromptSuggestion(sessionId);
-        return appendAndBroadcast(sessionId, "session/rewound", { atSeq });
+        return appendAndBroadcast(sessionId, "session/rewound", {
+          atSeq,
+          ...(files ? { files: files as unknown as JsonObject } : {}),
+        });
       });
+    },
+
+    async previewRewindFiles(sessionId, atSeq): Promise<RewindFilesPreview> {
+      if (!Number.isSafeInteger(atSeq) || atSeq <= 0) {
+        throw Object.assign(new Error("atSeq must be a positive event sequence"), { code: "invalid-input" });
+      }
+      const proj = await store.projection(sessionId);
+      if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      const events = await store.events(sessionId);
+      const running = turnActive(sessionId);
+      const unavailable = (reason: RewindFilesUnavailableReason): RewindFilesPreview =>
+        ({ available: false, reason, turnRunning: running, restore: [], keep: [] });
+      const context = await rewindFilesContext(proj, events, atSeq);
+      if (!context.ok) return unavailable(context.reason);
+      let turns = context.turns;
+      if (context.runningPromptSeq !== undefined) {
+        // The running turn has no `after` yet: preview against the files as
+        // they are now. Its real `after` replaces this ref when it stops.
+        const provisional = await context.service.capture({
+          cwd: context.cwd,
+          sessionId,
+          promptSeq: context.runningPromptSeq,
+          phase: "after",
+          budgetMs: CHECKPOINT_AFTER_BUDGET_MS,
+        });
+        if (!("commit" in provisional)) return unavailable("no-snapshot");
+        turns = turns.map((turn) => turn.promptSeq === context.runningPromptSeq ? { ...turn, after: provisional.commit } : turn);
+      }
+      const plan = await context.service.previewRewind({ cwd: context.cwd, sessionId, turns });
+      return { ...plan, turnRunning: running };
     },
 
     async clearRewind(sessionId): Promise<SessionEvent> {
       return withSessionLock(sessionId, async () => {
-        const { events } = await assertMutable(sessionId, { allowActiveTurn: true });
+        const { proj, events } = await assertMutable(sessionId, { allowActiveTurn: true });
         const rewind = activeRewind(events);
         if (!rewind) throw Object.assign(new Error("session has no active rewind"), { code: "conflict" });
-        return appendAndBroadcast(sessionId, "session/rewind-cleared", { rewindSeq: rewind.markerSeq });
+        const rolled = rolledBackFiles(events, rewind.markerSeq);
+        let files: { restored: number; kept: number } | undefined;
+        if (rolled) {
+          if (turnActive(sessionId)) {
+            throw Object.assign(new Error("stop the running turn before restoring files"), { code: "conflict" });
+          }
+          const context = await restoreFilesContext(proj, rolled);
+          if (context) {
+            const result = await context.service.applyRestore(context.input);
+            files = { restored: result.restored, kept: result.kept };
+          } else {
+            files = { restored: 0, kept: rolled.paths?.length ?? rolled.restored };
+          }
+        }
+        return appendAndBroadcast(sessionId, "session/rewind-cleared", {
+          rewindSeq: rewind.markerSeq,
+          ...(files ? { files } : {}),
+        });
       });
+    },
+
+    async previewRewindRestore(sessionId): Promise<RewindRestorePreview> {
+      const proj = await store.projection(sessionId);
+      if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      const events = await store.events(sessionId);
+      const rewind = activeRewind(events);
+      if (!rewind) throw Object.assign(new Error("session has no active rewind"), { code: "conflict" });
+      const rolled = rolledBackFiles(events, rewind.markerSeq);
+      if (!rolled) return { restore: 0, keep: [] };
+      const context = await restoreFilesContext(proj, rolled);
+      if (!context) return { restore: 0, keep: (rolled.paths ?? []).map((path) => ({ path, reason: "unsupported" as const })) };
+      return context.service.previewRestore(context.input);
     },
 
     async runShell(sessionId, command, person) {

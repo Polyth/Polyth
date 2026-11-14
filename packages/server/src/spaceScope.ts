@@ -306,6 +306,8 @@ function scopeSessions(
   assign("resumeNow", bySession(base.resumeNow));
   assign("rewind", bySession(base.rewind));
   assign("clearRewind", bySession(base.clearRewind));
+  assign("previewRewindFiles", bySession(base.previewRewindFiles));
+  assign("previewRewindRestore", bySession(base.previewRewindRestore));
   if (base.runShell) {
     const runShell = base.runShell.bind(base);
     // The signed-in person runs it: their own Credential Vault entries

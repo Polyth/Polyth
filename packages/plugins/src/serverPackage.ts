@@ -33,8 +33,13 @@ import type {
   ProjectService,
   RemoteAccessPolicy,
   RequestIngress,
+  RewindFileKept,
+  RewindFilesOutcome,
+  RewindFilesPreview,
+  RewindRestorePreview,
   RouteHandler,
   SessionEvent,
+  WorkspaceCheckpointUnavailable,
   SessionIsolation,
   SessionPersistence,
   SessionProjection,
@@ -447,6 +452,66 @@ export interface ServerSessionIsolationService {
 
 export const SERVER_SESSION_ISOLATION =
   serverServiceKey<ServerSessionIsolationService>("isolation");
+
+/** One admitted turn of the session being rolled back, oldest first. */
+export interface WorkspaceCheckpointTurn {
+  /** Seq of the user/message that started the turn. */
+  promptSeq: number;
+  /** Snapshot commits taken before the prompt reached the runtime and after
+   *  the turn stopped. */
+  before: string;
+  after: string;
+  /** Paths this chat's edit tools reported during the turn, absolute or
+   *  relative to `cwd`; the service normalises them and drops outsiders. */
+  touched: string[];
+  /** Repo-relative paths either snapshot left out (too large). */
+  skipped?: string[];
+}
+
+export type WorkspaceCheckpointCaptureResult =
+  | { commit: string; root: string; skipped: string[]; skippedMore?: number }
+  | { unavailable: WorkspaceCheckpointUnavailable };
+
+/** What a redo needs: the snapshots a rollback recorded and what it wrote. */
+export interface WorkspaceRestoreInput {
+  cwd: string;
+  undo: string;
+  rolled: string;
+  /** Repo-relative paths the rollback restored. */
+  paths: string[];
+}
+
+/** Git-owned per-turn checkpoints and the file-by-file rollback built on them.
+ *  A file is only ever written when it still holds exactly the content the
+ *  compare names (what the agent left, or what the rollback wrote): every
+ *  other file stays as it is and is reported, never merged or overwritten.
+ *  The user's index, HEAD and branches are never changed. Callers authorize
+ *  the session and resolve its checkout before calling. */
+export interface WorkspaceCheckpointService {
+  /** Snapshot the checkout's working tree under the session's checkpoint
+   *  refs. Gives up (`timeout`) rather than exceed `budgetMs`. */
+  capture(input: {
+    cwd: string;
+    sessionId: string;
+    promptSeq: number;
+    phase: "before" | "after";
+    budgetMs: number;
+  }): Promise<WorkspaceCheckpointCaptureResult>;
+  /** What a rollback of `turns` would put back now. Read-only. */
+  previewRewind(input: { cwd: string; sessionId: string; turns: WorkspaceCheckpointTurn[] }): Promise<Omit<RewindFilesPreview, "turnRunning">>;
+  /** Put back every file the preview would, re-checking each one right
+   *  before writing it. `mode: "unavailable"` when nothing could be. */
+  applyRewind(input: { cwd: string; sessionId: string; turns: WorkspaceCheckpointTurn[] }): Promise<RewindFilesOutcome>;
+  previewRestore(input: WorkspaceRestoreInput): Promise<RewindRestorePreview>;
+  /** Redo: write back the pre-rollback content of every restored file that
+   *  still holds exactly what the rollback wrote. */
+  applyRestore(input: WorkspaceRestoreInput): Promise<{ restored: number; kept: number; keptFiles: RewindFileKept[] }>;
+  /** Drop a deleted session's checkpoint refs. */
+  forget(sessionId: string, cwd?: string): Promise<void>;
+}
+
+export const SERVER_WORKSPACE_CHECKPOINTS =
+  serverServiceKey<WorkspaceCheckpointService>("workspace.checkpoints");
 
 /** The account's starred model-picker entries as harness-qualified
  *  `harness::provider/model` keys, in the user's saved order. Read-only and

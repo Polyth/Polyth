@@ -451,7 +451,7 @@ starts Node or OpenCode. See `docs/mobile/architecture.md`.
 ## REST surface
 
 Core: `/api/health`, `/api/projects` (+`/create`, DELETE), `/api/sessions`
-(list/create/snapshot/events/message/shell/fork/rewind/rewind-clear/abort/archive/restore/bulk;
+(list/create/snapshot/events/message/shell/fork/rewind/rewind-preview/rewind-clear/rewind-clear-preview/abort/archive/restore/bulk;
 `message` accepts `attachments` — shape-checked, path-traversal-rejected and
 existence-verified against the session root before anything is logged or queued;
 URL attachments are link-only and never fetched server-side),
@@ -608,7 +608,7 @@ a high-risk request is never resolved this way), `permission/delegated`
 
 Session lifecycle: `session/created`, `session/forked`, `session/archived`,
 `session/restored`, `session/metadata-changed`, `session/imported`,
-`session/history-imported`, `session/rewound`, `session/rewind-cleared`,
+`session/history-imported`, `session/rewound`, `session/rewind-cleared`, `workspace/checkpoint`,
 `session/project-moved` (see [Moving a chat](#moving-a-chat-to-another-project)). Rewind
 markers soft-splice model history in `deriveMessages`; replacement sends reset
 the backend session before appending a new tail. A rewind targets a visible
@@ -617,6 +617,37 @@ question (never a subagent mirror); the latter keeps the question and cuts from
 the answer onward. A runtime that branches natively (OpenCode) may keep the
 original answer inside the cut question's tool call; the edited reply then
 arrives as the next message (source-inspected, not live-verified).
+
+**Rolling back files with the conversation.** The server snapshots a local
+session's checkout at every turn it admits — just before the prompt reaches
+the runtime — and again when that turn stops, through the git package's
+`WorkspaceCheckpointService` (`SERVER_WORKSPACE_CHECKPOINTS`, resolved lazily
+by the composition root; `packages/git/src/checkpoints.ts`). A snapshot is a
+dangling commit of the whole working tree built in a private copy of the
+real index (ignore rules honoured, untracked files over 20 MiB left out),
+held under `refs/polyth/checkpoints/<session>/<promptSeq>-before|after`, and
+recorded as an ignorable `workspace/checkpoint` event (`WorkspaceCheckpointData`).
+Remote projects, non-repositories and an absent git package record nothing.
+`GET /api/sessions/:id/rewind/preview?atSeq=` (`RewindFilesPreview`) and
+`POST …/rewind { atSeq, files: "restore" | "keep" }` then work file by file:
+a path returns to its content before the first cut turn that changed it only
+while it still holds exactly what the last turn that changed it left
+(`changed-after` otherwise), it was not changed between the chat's turns
+(`between-steps`), and either this chat's edit tools named it or no other
+chat's checkpoint window overlapped the change (`other-chat`; command
+changes are attributed only then, `byCommand`). Nothing is merged; HEAD, the
+index and branches are never touched; each file is re-checked right before a
+temp-file-and-rename write. Files go first: a failed rollback writes no
+marker. The marker records the outcome (`session/rewound.files`,
+`RewindFilesOutcome`) with an undo and a rolled snapshot, and
+`POST …/rewind/clear` writes back the pre-rollback content of every restored
+file still exactly as the rollback left it (`GET …/rewind/clear/preview`).
+Files are restored only while no turn runs; a rollback that starts at a
+question's answer, or at a prompt steered into another prompt's turn, is
+conversation-only. A replacement send keeps the files rolled back; the undo
+refs stay in git but no restore is offered. Deleting a chat drops its
+checkpoint refs. Tests: `packages/git/test/checkpoints.test.ts`,
+`packages/server/test/rewindFiles.test.ts`.
 
 ### Moving a chat to another project
 

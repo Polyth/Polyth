@@ -34,7 +34,7 @@ Full catalog in `docs/dev/styles.md`. The roles new UI reaches for:
 | Selection/hover washes | `--surface-overlay`, `--surface-overlay-hover`, `--surface-overlay-strong` |
 | Borders | `--border` (structural) · `--border-soft` (subtle) · `--control-border` (controls) · `--surface-divider` (separator) · `--hair`/`--hair-strong` (hairlines) · `--focus-ring` + `--focus-wash` (focus) |
 | Ink | `--text` → `--text-dim` → `--muted` → `--faint`; `--accent-text` for accent-coloured small text (`--accent` is a fill) |
-| Signals | `--green/--amber/--red/--blue/--purple` + `--*-wash` surfaces + `--green-on-wash`/`--amber-on-wash` ink |
+| Signals | `--green/--amber/--red/--blue/--purple` + `--*-wash` surfaces + `--green-on-wash`/`--amber-on-wash`/`--red-on-wash` ink |
 | Spacing | `--space-1..6` (4/8/12/16/24/32), `--gutter`, `--screen-gutter` |
 | Control geometry | `--control-h-sm/-h/-h-lg` (32/40/48), `--control-pad-x(-sm)`, `--control-gap`, `--tap`, `--hit-min` |
 | Radius | `--radius-control/card/surface/sheet` (+ `--radius-composer`), all × `--corner-radius-scale` |

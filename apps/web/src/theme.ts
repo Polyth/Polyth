@@ -877,6 +877,9 @@ export function themeCssVars(spec: ThemeSpec): Record<string, string> {
     "--amber-rgb": amberRgb,
     "--red": t.red, "--blue": t.blue, "--purple": t.purple,
     "--red-ink": readableInk(t.red),
+    // Red text (a removed-lines count) on a tinted or translucent surface:
+    // the raw signal red falls under 4.5:1 there on dark themes.
+    "--red-on-wash": signalOnWash(t.red, surfaces, dark),
     "--surface-overlay": rgba(t.text, dark ? 0.022 : 0.025),
     "--surface-overlay-hover": rgba(t.text, dark ? 0.045 : 0.04),
     "--surface-overlay-strong": rgba(t.text, dark ? 0.09 : 0.08),

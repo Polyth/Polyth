@@ -875,12 +875,128 @@ export interface SessionRewoundData {
   /** The reverted user/message seq. That message and its following tail are hidden. */
   atSeq: number;
   restoredText?: string;
+  /** What the rollback did to the files on disk. Absent on markers written
+   *  before file rollback existed (and by older clients): files untouched. */
+  files?: RewindFilesOutcome;
 }
 export interface SessionRewindClearedData {
   /** Seq of the session/rewound marker being resolved. */
   rewindSeq: number;
   /** True when a new send replaces the hidden tail; false/absent means redo. */
   replaced?: boolean;
+  /** Files a redo put back as they were before the rollback. */
+  files?: { restored: number; kept: number };
+}
+
+// ------------------------------------------------- workspace checkpoints
+//
+// The server snapshots a session's checkout at every turn it admits (before
+// the prompt reaches the runtime) and again when that turn stops. A rewind may
+// then put the files that turn changed back, file by file, only where the
+// file still holds exactly what the agent left. Event type:
+// `workspace/checkpoint` (ignorable; never model history).
+
+/** Why a checkpoint could not be taken. */
+export type WorkspaceCheckpointUnavailable =
+  | "not-git"
+  | "remote"
+  | "timeout"
+  | "error"
+  | "service-missing";
+
+export interface WorkspaceCheckpointData {
+  /** Seq of the user/message whose admitted turn this checkpoint brackets. */
+  promptSeq: number;
+  phase: "before" | "after";
+  /** Snapshot commit (a full working-tree tree, ignore rules honoured). */
+  commit?: string;
+  /** Repository top-level the snapshot covers. */
+  root?: string;
+  unavailable?: WorkspaceCheckpointUnavailable;
+  /** Repo-relative paths left out of the snapshot (too large), capped. */
+  skipped?: string[];
+  skippedMore?: number;
+}
+
+/** Why a rollback leaves every file as it is. */
+export type RewindFilesUnavailableReason =
+  | "no-changes"
+  | "not-git"
+  | "remote"
+  | "no-snapshot"
+  | "mid-turn"
+  | "branch-changed"
+  | "service-missing"
+  | "error";
+
+/** Why one changed file stays as it is. */
+export type RewindFileKeepReason =
+  /** Its content differs from what the agent left: someone edited it since. */
+  | "changed-after"
+  /** Another chat was working in this checkout while it changed. */
+  | "other-chat"
+  /** It changed between this chat's turns, outside them. */
+  | "between-steps"
+  /** It was too large to snapshot. */
+  | "too-large"
+  /** A submodule or another entry the rollback cannot write. */
+  | "unsupported"
+  /** Writing it failed (permissions, disk). */
+  | "write-failed";
+
+export interface RewindFileChange {
+  /** Repo-relative path. */
+  path: string;
+  /** What the agent did to it: rollback undoes that. */
+  kind: "modified" | "added" | "deleted";
+  additions?: number;
+  deletions?: number;
+  binary?: boolean;
+  /** Changed by a command, not an edit tool; attributed because no other
+   *  chat worked in the checkout meanwhile. */
+  byCommand?: boolean;
+}
+
+export interface RewindFileKept {
+  path: string;
+  reason: RewindFileKeepReason;
+}
+
+/** GET /api/sessions/:id/rewind/preview?atSeq= — what a rollback to that
+ *  message would do to the files. Read-only. */
+export interface RewindFilesPreview {
+  /** False: the rollback is conversation-only; `reason` says why. */
+  available: boolean;
+  reason?: RewindFilesUnavailableReason;
+  /** The session's turn is still running; files restore only after it stops. */
+  turnRunning: boolean;
+  restore: RewindFileChange[];
+  keep: RewindFileKept[];
+}
+
+/** Persisted on `session/rewound.files`. Lists are capped; counts are exact. */
+export interface RewindFilesOutcome {
+  /** restored: files were put back; kept: the person chose conversation only;
+   *  unavailable: nothing could be put back (`reason`). */
+  mode: "restored" | "kept" | "unavailable";
+  reason?: RewindFilesUnavailableReason;
+  restored: number;
+  kept: number;
+  /** Snapshot of the checkout just before the rollback wrote anything. */
+  undo?: string;
+  /** Snapshot right after the rollback: what a redo compares against. */
+  rolled?: string;
+  root?: string;
+  /** Restored repo-relative paths (capped at 500). */
+  paths?: string[];
+  keptFiles?: RewindFileKept[];
+}
+
+/** GET /api/sessions/:id/rewind/clear/preview — what a redo would put back. */
+export interface RewindRestorePreview {
+  restore: number;
+  /** Files changed since the rollback: a redo leaves them as they are. */
+  keep: RewindFileKept[];
 }
 
 // ---------------------------------------------------------------- fork lineage
@@ -2870,10 +2986,17 @@ export interface SessionService {
    *  fork — the child prefix ends strictly BEFORE the target user message and
    *  the excluded prompt returns as an editable draft. */
   fork(sessionId: string, atSeq?: number): Promise<ForkResult>;
-  /** Soft-rewind to a user message without mutating prior events. */
-  rewind?(sessionId: string, atSeq: number): Promise<SessionEvent>;
-  /** Restore the tail hidden by the active rewind marker. */
+  /** Soft-rewind to a user message without mutating prior events.
+   *  `files: "restore"` also puts back the files the cut turns changed (only
+   *  while no turn runs); the default keeps every file as it is. */
+  rewind?(sessionId: string, atSeq: number, options?: { files?: "restore" | "keep" }): Promise<SessionEvent>;
+  /** What a rollback to `atSeq` would do to the files. Read-only. */
+  previewRewindFiles?(sessionId: string, atSeq: number): Promise<RewindFilesPreview>;
+  /** Restore the tail hidden by the active rewind marker, and the files that
+   *  rollback put back where they are still exactly as it left them. */
   clearRewind?(sessionId: string): Promise<SessionEvent>;
+  /** What clearRewind would put back on disk. Read-only. */
+  previewRewindRestore?(sessionId: string): Promise<RewindRestorePreview>;
   /** Execute a composer `!` command through the shell permission family. */
   /** `person`: the signed-in person running it; their Credential Vault
    *  entries resolve first. Absent → Space entries only. */

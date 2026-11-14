@@ -692,7 +692,7 @@ export function canonicalSessionService(
 
   const activeMethodNames = new Set<PropertyKey>([
     "send", "abort", "pause", "continuePaused", "replyPermission", "delegatePermission", "replyDelegatedPermission", "replyQuestion", "cancelResume", "setResumeCompact", "resumeNow",
-    "rewind", "clearRewind", "runShell", "compact", "replySecret", "rename", "requestAutomaticTitle", "organize",
+    "rewind", "clearRewind", "previewRewindFiles", "previewRewindRestore", "runShell", "compact", "replySecret", "rename", "requestAutomaticTitle", "organize",
     "queueList", "queueEditStart", "queueEdit", "queueSendNow", "queueEditCancel", "queueReorder", "queueRemove",
     "pinContext", "unpinContext", "autoAcceptGet", "autoAcceptSet", "confirmBorrowedRuntimeEpoch",
     "saveDraft", "markRead", "postPersonMessage", "decidePersonAccess", "setPersonMute", "runtimeFeatures", "renameWorktreeBranch", "patchIsolation", "rebindWorkspace",

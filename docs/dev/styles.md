@@ -142,6 +142,7 @@ these inks.
 | `--blue` | Informational signal. |
 | `--purple` | Auxiliary/syntax signal. |
 | `--green-on-wash` | Accessible success text on a success wash. |
+| `--red-on-wash` | Accessible red text (a removed-lines count) on a red wash or a translucent fill; the raw `--red` falls under 4.5:1 there on dark themes. |
 | `--amber-on-wash` | Accessible warning text on a warning wash. |
 | `--amber-rgb` | Warning channels for alpha-based CSS. |
 | `--green-wash` | Success-tinted surface. |

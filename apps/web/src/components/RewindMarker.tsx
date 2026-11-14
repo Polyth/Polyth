@@ -15,9 +15,13 @@ export default function RewindMarker({
   running,
   confirming,
   canPeek,
+  files,
+  filesConfirm = null,
   onRestore,
   onConfirmRestore,
   onKeepEditing,
+  onConfirmFilesRestore,
+  onCancelFilesRestore,
   renderRewound,
 }: {
   /** The rewound turn is still executing until the replacement interrupts it. */
@@ -26,6 +30,15 @@ export default function RewindMarker({
   confirming: boolean;
   /** The hidden rows are loaded and can be previewed in place. */
   canPeek: boolean;
+  /** What the rollback did to the files on disk: one short suffix (counted
+   *  disk state, never the hidden branch) and, for assistive tech and the
+   *  pointer tooltip, why files stayed as they are. */
+  files?: { suffix: string; detail?: string };
+  /** Restore found this many restored files edited since the rollback and
+   *  asks whether to restore the rest (they stay as they are). */
+  filesConfirm?: number | null;
+  onConfirmFilesRestore?: (invoker: HTMLElement) => void;
+  onCancelFilesRestore?: () => void;
   onRestore: (invoker: HTMLElement) => void;
   onConfirmRestore: (invoker: HTMLElement) => void;
   onKeepEditing: () => void;
@@ -35,6 +48,7 @@ export default function RewindMarker({
   const [peek, setPeek] = useState<"closed" | "open" | "closing">("closed");
   const peekId = useId();
   const keepEditingRef = useRef<HTMLButtonElement>(null);
+  const cancelFilesRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (peek !== "closing") return;
@@ -46,6 +60,10 @@ export default function RewindMarker({
   useEffect(() => {
     if (confirming) keepEditingRef.current?.focus();
   }, [confirming]);
+  const askingFiles = !confirming && filesConfirm !== null && filesConfirm > 0;
+  useEffect(() => {
+    if (askingFiles) cancelFilesRef.current?.focus();
+  }, [askingFiles]);
 
   const open = peek === "open";
   const restoreFromMarker = (invoker: HTMLElement) => {
@@ -56,6 +74,11 @@ export default function RewindMarker({
     <>
       <Icon icon={UndoIcon} size="sm" className="rewind-marker-icon" />
       <span className="rewind-marker-label">{tr("timeline.rewindMarkerLabel")}</span>
+      {files && (
+        <span className="rewind-marker-files" {...(files.detail ? { title: files.detail } : {})}>
+          {files.suffix}
+        </span>
+      )}
       {running && (
         <Spinner size="sm" label={tr("timeline.rewindStillRunning")} />
       )}
@@ -67,7 +90,7 @@ export default function RewindMarker({
       className="rewind-marker"
       role="group"
       aria-label={tr("timeline.rewindMarkerName")}
-      data-state={confirming ? "confirming" : "idle"}
+      data-state={confirming || askingFiles ? "confirming" : "idle"}
       data-peek={peek}
     >
       <div className="rewind-marker-rule">
@@ -86,6 +109,21 @@ export default function RewindMarker({
               onClick={(event) => onConfirmRestore(event.currentTarget)}
             >{tr("timeline.discardDraftAndRestore")}</Button>
           </div>
+        ) : askingFiles ? (
+          <div className="rewind-marker-confirm" role="group" aria-label={tr("timeline.confirmRestore")}>
+            <span className="rewind-marker-question">{tr("timeline.restoreFilesConfirm", { count: filesConfirm ?? 0 })}</span>
+            <Button
+              size="sm"
+              variant="ghost"
+              ref={cancelFilesRef}
+              onClick={() => onCancelFilesRestore?.()}
+            >{tr("common.cancel")}</Button>
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={(event) => onConfirmFilesRestore?.(event.currentTarget)}
+            >{tr("common.restore")}</Button>
+          </div>
         ) : (
           <div className="rewind-marker-controls">
             {canPeek ? (
@@ -96,6 +134,7 @@ export default function RewindMarker({
                 aria-controls={peekId}
                 aria-label={[
                   tr("timeline.rewindMarkerLabel"),
+                  ...(files ? [files.suffix, ...(files.detail ? [files.detail] : [])] : []),
                   ...(running ? [tr("timeline.rewindStillRunning")] : []),
                   open ? tr("timeline.hideRewoundMessages") : tr("timeline.showRewoundMessages"),
                 ].join(". ")}

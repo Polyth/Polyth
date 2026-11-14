@@ -613,6 +613,7 @@ test(`a short transcript's hold adapts to late layout and ${reset === "reader sc
 test("revert: in-place exit, then removal and one glide, then marker and draft", async () => {
   const t = await mountTimeline();
   const originalRewind = api.rewind;
+  const originalPreview = api.previewRewindFiles;
   try {
     const seeded = [...t.turn(1, "First prompt."), ...t.turn(2, "Second prompt."), ...t.turn(3, "Third prompt to revert.")];
     await t.push(...seeded);
@@ -630,11 +631,15 @@ test("revert: in-place exit, then removal and one glide, then marker and draft",
       requested.push(atSeq);
       return new Promise<SessionEvent>((resolve) => { respond = resolve; });
     };
+    // No file would change: the rollback stays the instant, dialog-free one.
+    api.previewRewindFiles = async () => ({ available: false, reason: "no-changes", turnRunning: false, restore: [], keep: [] });
     const before = recorded.length;
     await act(async () => {
       el.querySelector<HTMLButtonElement>(`[data-revert-seq="${promptSeq}"]`)!.click();
     });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     assert.deepEqual(requested, [promptSeq]);
+    assert.equal(document.querySelector(".rewind-files"), null, "no files dialog when nothing on disk changes");
     assert.equal(el.querySelector(".rewind-leaving"), null, "nothing fades before the server confirms");
     assert.equal(recorded.length, before, "nothing moves before the server confirms");
 
@@ -662,6 +667,46 @@ test("revert: in-place exit, then removal and one glide, then marker and draft",
     assert.equal(drainComposerReplacement(), "Third prompt to revert.", "the draft is restored after the glide");
   } finally {
     api.rewind = originalRewind;
+    api.previewRewindFiles = originalPreview;
+    await t.cleanup();
+  }
+});
+
+test("revert with changed files: one dialog decides, files restore or conversation only", async () => {
+  const t = await mountTimeline();
+  const originalRewind = api.rewind;
+  const originalPreview = api.previewRewindFiles;
+  try {
+    const seeded = [...t.turn(1, "First prompt."), ...t.turn(2, "Prompt that edited files.")];
+    await t.push(...seeded);
+    const promptSeq = seeded.find((event) => event.type === "user/message" && (event.data as { text?: string }).text === "Prompt that edited files.")!.seq;
+    const el = t.timeline();
+    const calls: Array<{ atSeq: number; files?: string }> = [];
+    api.rewind = async (_id: string, atSeq: number, options?: { files?: "restore" | "keep" }) => {
+      calls.push({ atSeq, ...(options?.files ? { files: options.files } : {}) });
+      return t.event("session/rewound", { atSeq, ...(options?.files === "restore" ? { files: { mode: "restored", restored: 1, kept: 0 } } : {}) });
+    };
+    api.previewRewindFiles = async () => ({
+      available: true,
+      turnRunning: false,
+      restore: [{ path: "src/a.ts", kind: "modified", additions: 3, deletions: 1 }],
+      keep: [{ path: "src/b.ts", reason: "changed-after" }],
+    });
+
+    await act(async () => { el.querySelector<HTMLButtonElement>(`[data-revert-seq="${promptSeq}"]`)!.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    assert.deepEqual(calls, [], "nothing rolls back before the person decides");
+    const dialog = document.querySelector<HTMLElement>(".rewind-files");
+    assert.ok(dialog, "the files dialog opens");
+    assert.ok(dialog.textContent?.includes("src/") && dialog.textContent?.includes("a.ts"), "the file to restore is listed");
+    const primary = document.querySelector<HTMLButtonElement>(".rewind-files-primary");
+    assert.ok(primary, "the restore decision is offered");
+    await act(async () => { primary.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    assert.deepEqual(calls, [{ atSeq: promptSeq, files: "restore" }]);
+  } finally {
+    api.rewind = originalRewind;
+    api.previewRewindFiles = originalPreview;
     await t.cleanup();
   }
 });

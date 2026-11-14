@@ -1212,13 +1212,31 @@ async function dispatchHttp(
         if (!rewind) throw Object.assign(new Error("session rewind unavailable"), { code: "unsupported" });
         const b = await loadBody();
         if (b.atSeq === undefined) throw Object.assign(new Error("atSeq required"), { code: "invalid-input" });
-        return json(res, 200, await rewind(m[1]!, Number(b.atSeq)));
+        if (b.files !== undefined && b.files !== "restore" && b.files !== "keep") {
+          throw Object.assign(new Error("files must be \"restore\" or \"keep\""), { code: "invalid-input" });
+        }
+        const files = b.files as "restore" | "keep" | undefined;
+        return json(res, 200, await rewind(m[1]!, Number(b.atSeq), files ? { files } : undefined));
+      }
+      m = path.match(/^\/api\/sessions\/([^/]+)\/rewind\/preview$/);
+      if (m && method === "GET") {
+        const previewRewindFiles = space().sessions.previewRewindFiles;
+        if (!previewRewindFiles) throw Object.assign(new Error("file rollback unavailable"), { code: "unsupported" });
+        const atSeq = Number(url.searchParams.get("atSeq"));
+        if (!Number.isSafeInteger(atSeq) || atSeq <= 0) throw Object.assign(new Error("atSeq must be a positive integer"), { code: "invalid-input" });
+        return json(res, 200, await previewRewindFiles(m[1]!, atSeq));
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/rewind\/clear$/);
       if (m && method === "POST") {
         const clearRewind = space().sessions.clearRewind;
         if (!clearRewind) throw Object.assign(new Error("session rewind unavailable"), { code: "unsupported" });
         return json(res, 200, await clearRewind(m[1]!));
+      }
+      m = path.match(/^\/api\/sessions\/([^/]+)\/rewind\/clear\/preview$/);
+      if (m && method === "GET") {
+        const previewRewindRestore = space().sessions.previewRewindRestore;
+        if (!previewRewindRestore) throw Object.assign(new Error("file rollback unavailable"), { code: "unsupported" });
+        return json(res, 200, await previewRewindRestore(m[1]!));
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/shell$/);
       if (m && method === "POST") {

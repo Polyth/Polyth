@@ -29,10 +29,12 @@ import {
 import { resolveWorkspaceContext, workspaceExecutionPath, workspaceRepository } from "@polyth/contracts/workspace";
 import {
   SERVER_SESSION_ISOLATION,
+  SERVER_WORKSPACE_CHECKPOINTS,
   serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
+import { createWorkspaceCheckpoints } from "./checkpoints.ts";
 import {
   buildLocalConflictResolutionPrompt,
   createGitService,
@@ -1334,6 +1336,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   // walkthrough capture — published at load time under the well-known key.
   const git = createGitService();
   host.services.provide(serverServiceKey<GitService>("git"), git);
+  host.services.provide(SERVER_WORKSPACE_CHECKPOINTS, createWorkspaceCheckpoints());
   // Provider packages (GitHub, GitLab, …) register their account credentials here.
   const credentialRegistry = createSourceControlCredentialRegistry();
   host.services.provide(serverServiceKey<SourceControlCredentialRegistry>(SOURCE_CONTROL_CREDENTIAL_REGISTRY), credentialRegistry);

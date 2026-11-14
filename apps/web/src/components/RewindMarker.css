@@ -76,6 +76,19 @@ button.rewind-marker-peek:focus-visible {
   white-space: nowrap;
 }
 
+/* The disk-state suffix: "· files restored: 4". Quieter than the label and
+   the first thing to truncate on a narrow chat. */
+.rewind-marker-files {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rewind-marker-files::before {
+  content: "·";
+  margin-inline-end: 0.35em;
+}
+
 .rewind-marker-chevron {
   flex: none;
   color: var(--faint);
