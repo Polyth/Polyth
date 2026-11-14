@@ -1,0 +1,254 @@
+/* The Monitoring widget. Scoped to .pkg-monw; canonical tokens only. */
+.pkg-monw {
+  container-type: inline-size;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: 0;
+  padding: var(--space-3);
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-body);
+}
+.pkg-monw[data-size="s"] { gap: var(--space-2); }
+.pkg-monw :focus-visible,
+.pkg-monw-settings :focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.pkg-monw-loading,
+.pkg-monw-note { margin: 0; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.pkg-monw-error { margin: 0; color: var(--red); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+
+/* Which machine, and whether the numbers are live: one quiet line. */
+.pkg-monw-head { display: flex; align-items: center; gap: var(--space-2); min-width: 0; color: var(--text-dim); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.pkg-monw-head strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: var(--font-label); font-weight: 600; }
+.pkg-monw-head .pkg-monw-where { flex: none; color: var(--muted); }
+.pkg-monw-head .pkg-monw-age { flex: none; margin-inline-start: auto; color: var(--muted); }
+.pkg-monw-age[data-cursor] { color: var(--text); font-weight: 550; }
+.pkg-monw-dot { flex: none; width: var(--space-2); height: var(--space-2); border: 0; border-radius: var(--radius-circle); background: var(--green); }
+.pkg-monw-dot[data-tone="warn"] { background: var(--amber); }
+.pkg-monw-dot[data-tone="bad"] { background: var(--red); }
+.pkg-monw-dot[data-tone="off"] { background: transparent; border: 1.5px solid var(--muted); }
+.pkg-monw[data-size="s"] .pkg-monw-head :is(.pkg-monw-where, .pkg-monw-age) { display: none; }
+
+/* Look 1 — the answer. */
+.pkg-monw-verdict { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.pkg-monw-verdict h3 { margin: 0; color: var(--text); font-size: var(--font-heading); font-weight: 650; line-height: 1.2; letter-spacing: -.01em; text-wrap: balance; }
+.pkg-monw[data-size="l"] .pkg-monw-verdict h3 { font-size: var(--font-title); }
+.pkg-monw-verdict p { margin: 0; max-width: 52ch; color: var(--text-dim); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.pkg-monw-verdict p b { color: var(--text); font-weight: 550; }
+.pkg-monw-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-block-start: var(--space-1); }
+.pkg-monw small.u { margin-inline-start: 1px; color: var(--text-dim); font-size: .78em; font-weight: 550; letter-spacing: 0; }
+.pkg-monw-vital[data-over] small.u,
+.pkg-monw-line[data-over] > strong small.u,
+.pkg-monw-gauge[data-over] small.u { color: inherit; }
+
+.pkg-monw-vitals { display: grid; grid-template-columns: repeat(var(--n, 3), minmax(0, 1fr)); gap: var(--space-3); margin-block-start: auto; padding-block-start: var(--space-3); border-block-start: 1px solid var(--hair); }
+.pkg-monw[data-size="m"] .pkg-monw-vitals { margin-block-start: 0; }
+.pkg-monw-vital { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pkg-monw-vital > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: var(--font-meta); }
+.pkg-monw-vital strong { font-size: var(--font-heading); font-weight: 650; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+.pkg-monw-vital[data-over] strong { color: var(--amber); }
+.pkg-monw-meter { position: relative; height: 3px; margin-block-start: var(--space-1); border-radius: var(--radius-round); background: var(--surface-overlay-strong); }
+.pkg-monw-meter > i { position: absolute; inset-block: 0; inset-inline-start: 0; border-radius: inherit; background: var(--text-dim); }
+.pkg-monw-vital[data-over] .pkg-monw-meter > i { background: var(--amber); }
+.pkg-monw-meter > b { position: absolute; inset-block: -3px; width: 2px; margin-inline-start: -1px; border-radius: var(--radius-round); background: var(--text); opacity: .7; }
+
+/* A chart anywhere in the widget. */
+.pkg-monw-plot { position: relative; min-height: 0; }
+.pkg-monw-plot svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.pkg-monw-plot[data-band] svg { width: calc(100% - 2.6rem); }
+.pkg-monw-plot[data-band="one"] svg { width: calc(100% - 4.4rem); }
+.pkg-monw-plot .base { stroke: var(--hair); }
+.pkg-monw-plot .area { fill: var(--text); opacity: .06; }
+.pkg-monw-plot .area[data-over] { fill: var(--amber); opacity: .16; }
+.pkg-monw-plot .line { fill: none; stroke: var(--text-dim); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.pkg-monw-plot .line[data-over] { stroke: var(--amber); }
+.pkg-monw-plot .limit { stroke: var(--muted); stroke-dasharray: 2 4; opacity: .8; }
+.pkg-monw-plot .zone { fill: var(--surface-overlay); }
+.pkg-monw-plot .split { stroke: var(--hair-strong); }
+.pkg-monw-plot .forecast { fill: none; stroke: var(--amber); stroke-width: 1.4; stroke-dasharray: 1 4; stroke-linecap: round; }
+.pkg-monw-plot .forecast[data-tone="watch"] { stroke: var(--text-dim); }
+.pkg-monw-plot .cursor { stroke: var(--text-dim); stroke-width: 1; }
+.pkg-monw-plot .cursor-dot { fill: var(--text); stroke: var(--panel); stroke-width: 2; }
+.pkg-monw-plot-label { position: absolute; left: 0; color: var(--muted); font-size: var(--font-meta); line-height: 1; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pkg-monw-plot-label[data-warn] { color: var(--amber); }
+.pkg-monw-scale { position: absolute; right: 0; color: var(--faint); font-size: var(--font-meta); line-height: 1; font-variant-numeric: tabular-nums; }
+.pkg-monw-fdot { position: absolute; width: 7px; height: 7px; margin: -3.5px 2.6rem 0 0; border-radius: var(--radius-circle); background: var(--text-dim); }
+.pkg-monw-fdot[data-tone="warn"] { background: var(--amber); }
+.pkg-monw-zone-label { position: absolute; bottom: 6px; margin-inline-start: 6px; color: var(--faint); font-size: var(--font-meta); line-height: 1; }
+.pkg-monw-chart { display: flex; flex-direction: column; gap: var(--space-1); flex: 1; min-height: 0; margin: 0; }
+.pkg-monw[data-size="l"] .pkg-monw-chart { margin-block-start: var(--space-1); }
+.pkg-monw-chart-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--space-2); }
+.pkg-monw-chart-head strong { font-size: var(--font-label); font-weight: 550; }
+.pkg-monw-chart-head span { color: var(--muted); font-size: var(--font-meta); }
+.pkg-monw-chart .pkg-monw-plot { flex: 1; min-height: 56px; }
+.pkg-monw-axis { display: flex; justify-content: space-between; color: var(--faint); font-size: var(--font-meta); font-variant-numeric: tabular-nums; }
+
+/* Look 2 — instruments. */
+.pkg-monw-gauges { flex: 1; display: grid; grid-template-columns: repeat(var(--n, 3), minmax(0, 1fr)); gap: var(--space-2); align-items: center; min-height: 0; }
+.pkg-monw-gauge { position: relative; display: flex; flex-direction: column; align-items: center; min-width: 0; min-height: 0; }
+.pkg-monw-gauge-dial { position: relative; width: 100%; max-width: 132px; }
+.pkg-monw-gauge svg { display: block; width: 100%; aspect-ratio: 1; overflow: visible; }
+.pkg-monw-gauge .track { fill: none; stroke: var(--surface-overlay-strong); stroke-linecap: round; }
+.pkg-monw-gauge .arc { fill: none; stroke: var(--text-dim); stroke-linecap: round; }
+.pkg-monw-gauge[data-over] .arc { stroke: var(--amber); }
+.pkg-monw-gauge .tick { stroke: var(--text-dim); stroke-width: 2; stroke-linecap: round; }
+.pkg-monw-gauge-read { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; pointer-events: none; }
+.pkg-monw-gauge-read strong { font-size: var(--font-title); font-weight: 650; letter-spacing: -.02em; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.pkg-monw-gauge-read small { color: var(--muted); font-size: var(--font-meta); font-variant-numeric: tabular-nums; }
+.pkg-monw-gauge[data-over] .pkg-monw-gauge-read strong { color: var(--amber); }
+.pkg-monw-gauge-label { display: block; max-width: 100%; margin-block-start: calc(-1 * var(--space-2)); overflow: hidden; text-align: center; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); font-size: var(--font-meta); font-weight: 550; }
+.pkg-monw[data-size="s"] .pkg-monw-gauge-read strong { font-size: var(--font-heading); }
+
+/* Look 3 — lines. */
+.pkg-monw-lines { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.pkg-monw-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto minmax(30px, 1fr); column-gap: var(--space-3); flex: 1; min-height: 0; padding-block: var(--space-2); border-block-start: 1px solid var(--hair); }
+.pkg-monw-line:first-child { border-block-start: 0; padding-block-start: 0; }
+.pkg-monw-line > span { font-size: var(--font-label); font-weight: 550; }
+.pkg-monw-line > strong { grid-row: 1 / span 2; grid-column: 2; align-self: center; font-size: var(--font-heading); font-weight: 650; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+.pkg-monw-line[data-over] > strong { color: var(--amber); }
+.pkg-monw-line > small { color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.pkg-monw-line > small[data-warn] { color: var(--amber); }
+.pkg-monw-line > .pkg-monw-plot { grid-column: 1 / -1; min-height: 30px; margin-block-start: var(--space-2); }
+.pkg-monw-lines[data-wide] .pkg-monw-line { grid-template-columns: minmax(9rem, 1fr) minmax(0, 2.4fr) 5.5rem; grid-template-rows: auto auto; align-items: center; }
+.pkg-monw-lines[data-wide] .pkg-monw-line > span { grid-column: 1; grid-row: 1; }
+.pkg-monw-lines[data-wide] .pkg-monw-line > small { grid-column: 1; grid-row: 2; }
+.pkg-monw-lines[data-wide] .pkg-monw-line > .pkg-monw-plot { grid-column: 2; grid-row: 1 / span 2; height: 100%; min-height: 40px; margin: 0; }
+.pkg-monw-lines[data-wide] .pkg-monw-line > strong { grid-column: 3; grid-row: 1 / span 2; text-align: end; }
+
+/* Look 4 — rhythm of the week. */
+.pkg-monw-rhythm { flex: 1; display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; column-gap: var(--space-2); row-gap: var(--space-1); min-height: 0; }
+.pkg-monw-days { display: grid; grid-template-rows: repeat(7, minmax(0, 1fr)); row-gap: 3px; color: var(--muted); font-size: var(--font-meta); line-height: 1; white-space: nowrap; }
+.pkg-monw-days span { display: flex; align-items: center; }
+.pkg-monw-days span:last-child { color: var(--text-dim); font-weight: 550; }
+.pkg-monw-cells { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); grid-template-rows: repeat(7, minmax(0, 1fr)); gap: 3px; min-height: 0; }
+.pkg-monw-cells i { border-radius: calc(var(--radius-control) * 0.4); background: color-mix(in srgb, var(--text) var(--a), transparent); }
+.pkg-monw-cells i[data-over] { background: var(--amber); outline: 1.5px solid var(--amber); outline-offset: 1px; }
+.pkg-monw-cells i[data-now] { outline: 1.5px solid var(--text); }
+.pkg-monw-hours { grid-column: 2; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); color: var(--faint); font-size: var(--font-meta); font-variant-numeric: tabular-nums; }
+.pkg-monw-insight { margin: 0; color: var(--text-dim); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.pkg-monw-insight b { color: var(--text); font-weight: 550; }
+
+/* Look 5 — every machine. */
+.pkg-monw-fleet-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--space-2); }
+.pkg-monw-fleet-head strong { font-size: var(--font-label); font-weight: 650; }
+.pkg-monw-fleet-head span { color: var(--muted); font-size: var(--font-meta); }
+.pkg-monw-fleet-head span em { font-style: normal; color: var(--amber); }
+.pkg-monw-fleet { display: flex; flex-direction: column; min-width: 0; }
+button.pkg-monw-host { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; column-gap: var(--space-2); width: 100%; min-height: max(var(--control-h), var(--hit-min, var(--control-h))); margin: 0; padding-block: var(--space-1); padding-inline: 0; border: 0; border-block-start: 1px solid var(--hair); border-radius: 0; background: none; color: inherit; font: inherit; text-align: start; cursor: pointer; transition: background-color var(--motion-fast) var(--motion-ease); }
+button.pkg-monw-host:hover { background: var(--surface-overlay); }
+button.pkg-monw-host:first-child { border-block-start: 0; }
+.pkg-monw-host-text { display: flex; flex-direction: column; min-width: 0; }
+.pkg-monw-host-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-label); font-weight: 550; }
+.pkg-monw-host-text span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: var(--font-meta); }
+.pkg-monw-host-text span[data-warn] { color: var(--amber); }
+.pkg-monw-host[data-off] .pkg-monw-host-text strong { color: var(--text-dim); }
+.pkg-monw-chev { display: inline-flex; color: var(--faint); }
+.pkg-monw-fleet + .pkg-monw-foot { margin-block-start: auto; color: var(--faint); }
+.pkg-monw-foot { color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.pkg-monw-foot b { color: var(--text-dim); font-weight: 550; }
+.pkg-monw-foot[data-warn] b { color: var(--amber); }
+
+/* The three-bar glyph: load, memory, disk at a glance. */
+.pkg-monw-bars { display: inline-grid; grid-auto-flow: column; gap: 2px; align-items: end; height: 18px; }
+.pkg-monw-bars i { position: relative; width: 4px; height: 100%; overflow: hidden; border-radius: var(--radius-round); background: var(--surface-overlay-strong); }
+.pkg-monw-bars i::after { content: ""; position: absolute; inset-inline: 0; bottom: 0; height: var(--v); border-radius: inherit; background: var(--text-dim); }
+.pkg-monw-bars i[data-over]::after { background: var(--amber); }
+
+/* Selectors live at the foot, with a real hit area. */
+.pkg-monw-footbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-1) var(--space-3); margin-block-start: auto; min-width: 0; }
+.pkg-monw-switch { display: inline-flex; margin-inline: calc(-1 * var(--space-2)); }
+.pkg-monw-switch button { min-width: 0; min-height: var(--hit-min, 28px); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-control); background: none; color: var(--muted); font: inherit; font-size: var(--font-meta); cursor: pointer; transition: color var(--motion-fast) var(--motion-ease); }
+.pkg-monw-switch button:hover { color: var(--text-dim); }
+.pkg-monw-switch button[aria-selected="true"] { color: var(--text); font-weight: 650; }
+.pkg-monw-legend { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--faint); font-size: var(--font-meta); }
+.pkg-monw-legend i { width: 10px; height: 10px; border-radius: calc(var(--radius-control) * 0.4); background: color-mix(in srgb, var(--text) var(--a), transparent); }
+.pkg-monw-legend i[data-over] { margin-inline-start: var(--space-2); background: var(--amber); outline: 1.5px solid var(--amber); outline-offset: 1px; }
+
+/* Settings with a live preview. */
+.pkg-monw-settings { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+.pkg-monw-settings-preview { display: flex; overflow: hidden; height: 214px; border: 1px solid var(--hair-strong); border-radius: var(--radius-card); background: var(--panel); }
+.pkg-monw-settings-preview .pkg-monw { flex: 1; }
+.pkg-monw-settings-body { display: flex; flex-direction: column; }
+.pkg-monw-settings-body .set-row,
+.pkg-monw-settings-body .settings-row,
+.pkg-monw-settings-body .pkg-monw-row { padding-block: var(--space-3); border-block-start: 1px solid var(--hair); }
+.pkg-monw-settings-body > :first-child { border-block-start: 0; }
+.pkg-monw-settings-looks { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-2); padding-block: var(--space-2) var(--space-3); }
+.pkg-monw-settings-look { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); min-width: 0; min-height: var(--hit-min, 28px); padding: 0; border: 0; background: none; color: var(--text-dim); font: inherit; font-size: var(--font-meta); cursor: pointer; }
+.pkg-monw-settings-thumb { display: grid; place-items: center; width: 100%; aspect-ratio: 1.15; border: 1px solid var(--hair-strong); border-radius: var(--radius-control); background: var(--panel); color: var(--text-dim); }
+.pkg-monw-settings-thumb svg { width: 62%; height: 62%; }
+.pkg-monw-settings-look[aria-checked="true"] { color: var(--text); font-weight: 550; }
+.pkg-monw-settings-look[aria-checked="true"] .pkg-monw-settings-thumb { border-color: var(--accent); outline: 1px solid var(--accent); color: var(--text); }
+.pkg-monw-settings-metrics { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); padding-block-start: var(--space-2); }
+.pkg-monw-settings-metrics .ui-checkbox { min-height: var(--hit-min, 28px); }
+.pkg-monw-settings-note { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); padding-block-start: var(--space-3); border-block-start: 1px solid var(--hair); color: var(--muted); font-size: var(--font-meta); }
+
+/* Fallbacks for hosts that do not ship SettingsRow/Switch (both are optional in the SDK). */
+.pkg-monw-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.pkg-monw-row.is-stacked { flex-direction: column; align-items: stretch; gap: var(--space-2); }
+.pkg-monw-row-text { min-width: 0; }
+.pkg-monw-row-label { font-size: var(--font-label); }
+.pkg-monw-row-hint { color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.pkg-monw-row-control { flex: none; }
+.pkg-monw-row.is-stacked .pkg-monw-row-control { flex: 1 1 auto; min-width: 0; }
+.pkg-monw-local-switch { position: relative; width: calc(var(--control-h) * 1.1); min-height: var(--hit-min, 28px); padding: 0; border: 0; background: none; cursor: pointer; }
+.pkg-monw-local-switch > span { position: absolute; inset-inline: 0; top: 50%; height: calc(var(--control-h-sm) * 0.55); border-radius: var(--radius-round); background: var(--surface-overlay-strong); transform: translateY(-50%); transition: background-color var(--motion-normal) var(--motion-ease); }
+.pkg-monw-local-switch > span::after { content: ""; position: absolute; top: 50%; inset-inline-start: 2px; width: calc(var(--control-h-sm) * 0.45); height: calc(var(--control-h-sm) * 0.45); border-radius: var(--radius-circle); background: var(--panel); transform: translateY(-50%); transition: inset-inline-start var(--motion-normal) var(--motion-ease); }
+.pkg-monw-local-switch[aria-checked="true"] > span { background: var(--accent); }
+.pkg-monw-local-switch[aria-checked="true"] > span::after { inset-inline-start: calc(100% - var(--control-h-sm) * 0.45 - 2px); }
+
+/* Before the ResizeObserver has measured the box, the container still narrows the head. */
+@container (max-width: 22rem) {
+  .pkg-monw-head .pkg-monw-where,
+  .pkg-monw-head .pkg-monw-age { display: none; }
+  .pkg-monw-chart-head span { display: none; }
+  .pkg-monw-legend > span { display: none; }
+}
+
+/* Glass themes paint plain buttons on hover; these are type and rows, not buttons with a fill. */
+.pkg-monw-switch button:hover:where(:not(:disabled)),
+.pkg-monw-settings-look:hover:where(:not(:disabled)) { background: transparent; }
+button.pkg-monw-host:hover:where(:not(:disabled)) { background: var(--surface-overlay); }
+
+/* Live review fixes. */
+.pkg-monw-chart .pkg-monw-plot { max-height: 11rem; }
+.pkg-monw-axis[data-forecast] { position: relative; height: calc(var(--font-meta-lh, 1.4) * 1em); }
+.pkg-monw-axis[data-forecast] > span { position: absolute; top: 0; white-space: nowrap; }
+.pkg-monw-axis[data-forecast] > span:nth-child(1) { inset-inline-start: 0; }
+.pkg-monw-axis[data-forecast] > span:nth-child(2) { inset-inline-start: 78%; transform: translateX(-50%); }
+.pkg-monw-axis[data-forecast] > span:nth-child(3) { inset-inline-end: 0; }
+.pkg-monw-line { overflow: hidden; }
+.pkg-monw-line > small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pkg-monw-days, .pkg-monw-cells { grid-template-rows: repeat(7, minmax(0.75rem, 1fr)); }
+.pkg-monw-rhythm { overflow: hidden; }
+.pkg-monw-settings-body { padding-block-end: var(--space-6); }
+/* Narrow rows keep their own height; spare room goes below them, not into gaps. */
+.pkg-monw-lines:not([data-wide]) .pkg-monw-line { flex: 0 0 auto; grid-template-rows: auto auto 3rem; }
+.pkg-monw-plot-empty { grid-column: 1 / -1; align-self: center; color: var(--faint); font-size: var(--font-meta); }
+.pkg-monw-lines[data-wide] .pkg-monw-plot-empty { grid-column: 2; grid-row: 1 / span 2; }
+.pkg-monw-days, .pkg-monw-cells { grid-template-rows: repeat(7, minmax(0.5rem, 1fr)); }
+.pkg-monw-cells { row-gap: 2px; }
+.pkg-monw-days { row-gap: 2px; }
+/* Every row keeps its own height; spare room sits under the last one. */
+.pkg-monw-line { flex: 0 0 auto; }
+.pkg-monw-chart .pkg-monw-plot { max-height: 14rem; }
+
+/* The phone Workspace panel sizes a widget by its content, not a fixed box:
+   every part brings its own height instead of sharing out free space. */
+.pkg-monw[data-panel] { flex: none; overflow: visible; }
+.pkg-monw[data-panel] .pkg-monw-chart { flex: none; }
+.pkg-monw[data-panel] .pkg-monw-chart .pkg-monw-plot { flex: none; height: 7rem; }
+.pkg-monw[data-panel] .pkg-monw-rhythm { flex: none; }
+.pkg-monw[data-panel] :is(.pkg-monw-days, .pkg-monw-cells) { grid-template-rows: repeat(7, 0.7rem); }
+.pkg-monw[data-panel][data-size="s"] :is(.pkg-monw-days, .pkg-monw-cells) { grid-template-rows: repeat(7, 0.5rem); }
+.pkg-monw[data-panel] .pkg-monw-lines, .pkg-monw[data-panel] .pkg-monw-gauges { flex: none; }
+.pkg-monw[data-panel] .pkg-monw-vitals, .pkg-monw[data-panel] .pkg-monw-footbar { margin-block-start: 0; }
+/* A disk without its own history: today's fill against its limit, where the line would be. */
+.pkg-monw-row-meter { grid-column: 1 / -1; align-self: center; min-width: 0; }
+.pkg-monw-lines[data-wide] .pkg-monw-row-meter { grid-column: 2; grid-row: 1 / span 2; }
+.pkg-monw-lines:not([data-wide]) .pkg-monw-line:has(> .pkg-monw-row-meter) { grid-template-rows: auto auto auto; }
+/* The meter is a span; outside the vitals' flex column it must be a block to have a width. */
+.pkg-monw-row-meter, .pkg-monw-row-meter > .pkg-monw-meter { display: block; }
+.pkg-monw-row-meter { margin-block: var(--space-3) var(--space-2); }

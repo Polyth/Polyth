@@ -2,11 +2,42 @@ import { defineWebPackage } from "@polyth/web-sdk";
 import { MonitoringView } from "./MonitoringView.tsx";
 import { monitoringWords } from "./strings.ts";
 import "./styles.css";
+import "./widget.css";
+import { MonitoringWidget } from "./MonitoringWidget.tsx";
+import { MonitoringWidgetSettings } from "./WidgetSettings.tsx";
 
 export default defineWebPackage((host) => () => {
   const t = monitoringWords(host.ui.locale.get());
   const title = t("Monitoring", "Моніторинг");
   const off = [
+    host.widgets.registerPlugin({
+      id: "monitoring",
+      name: title,
+      widgets: [{
+        id: "monitoring.machine",
+        title: t("Monitoring", "Моніторинг"),
+        description: t("Is the machine OK at a glance: a summary, scales, charts or the rhythm of the week",
+          "Чи все гаразд із машиною з першого погляду: підсумок, шкали, графіки або ритм тижня"),
+        kind: "widget",
+        defaultSlot: "workspace.main",
+        supportedSlots: ["workspace.main", "workspace.left", "workspace.right", "workspace.bottom"],
+        category: title,
+        capabilities: ["monitoring"],
+        defaultSize: { w: 6, h: 6 },
+        recommendedSize: { w: 6, h: 6 },
+        minSize: { w: 2, h: 3 },
+        maxSize: { w: 12, h: 14 },
+        audience: "standard",
+        scope: "workspace",
+        resizable: true,
+        duplicatable: true,
+        defaultVisible: false,
+        panelSizes: ["compact", "standard", "wide", "large"],
+        panelDefaultSize: "standard",
+        render: (context) => <MonitoringWidget {...context} host={host} />,
+        settingsRender: (context) => <MonitoringWidgetSettings {...context} host={host} />,
+      }],
+    }),
     host.surfaces.register({
       id: "monitoring", title, description: t("Is the machine OK, and if not, why", "Чи все гаразд із комп’ютером, а якщо ні, то чому"),
       capabilityId: "monitoring", order: 56,
