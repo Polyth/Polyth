@@ -9,9 +9,19 @@ import { authBootstrapPhase } from "./authBootstrap.ts";
 import { preconnectSync, syncSocketUrl } from "./syncPreconnect.ts";
 import { installBuildFreshnessWatcher } from "./buildFreshness.ts";
 import { offerWebUpdate } from "./webUpdateNotice.ts";
-import { isNativeMobile, prepareMobileLaunch } from "@polyth/mobile/runtime";
+import {
+  isNativeMobile,
+  isPolythLinkLoopbackOrigin,
+  prepareMobileLaunch,
+  returnToMobileConnectionHub,
+} from "@polyth/mobile/runtime";
 import { releaseLaunchCurtain, setLaunchLeaveCover } from "@polyth/mobile/launch";
-import { launchVeil } from "./launchVeil.ts";
+import { launchVeil, reloadBehindVeil } from "./launchVeil.ts";
+import {
+  UNRENDERED_LAUNCH_MS,
+  UNRENDERED_RELOAD_KEY,
+  unrenderedLaunchFallback,
+} from "./launchFailsafe.ts";
 import { desktopBridge } from "./desktopBridge.ts";
 import "./styles.css";
 import "./moduleContent.css";
@@ -46,6 +56,38 @@ import "./chatMotion.ts";
 // page offers it (Reload / Later) instead of reloading under the person.
 installBuildFreshnessWatcher(undefined, { offerReload: offerWebUpdate });
 
+// Last resort: a page that never rendered must neither hide behind its veil
+// forever nor lift it onto an empty page (launchFailsafe.ts). Armed before the
+// first await, so a boot stuck on a native call or a Link read is covered too.
+// A rendered page owns its veil.
+setTimeout(() => {
+  if (document.getElementById("root")?.hasChildNodes()) return;
+  recoverUnrenderedLaunch();
+}, UNRENDERED_LAUNCH_MS);
+
+function recoverUnrenderedLaunch(): void {
+  const now = Date.now();
+  let lastReloadAt: number | null = null;
+  try {
+    const stored = Number(sessionStorage.getItem(UNRENDERED_RELOAD_KEY));
+    if (stored > 0) lastReloadAt = stored;
+  } catch { /* storage unavailable: treat as never reloaded */ }
+  const fallback = unrenderedLaunchFallback({
+    native: isNativeMobile(),
+    loopback: isPolythLinkLoopbackOrigin(location.origin),
+    lastReloadAt,
+    now,
+  });
+  if (fallback === "hub") {
+    void returnToMobileConnectionHub(`${location.pathname}${location.search}${location.hash}`, { resume: true });
+  } else if (fallback === "reload") {
+    try { sessionStorage.setItem(UNRENDERED_RELOAD_KEY, String(now)); } catch { /* reload once anyway */ }
+    reloadBehindVeil();
+  } else {
+    void launchVeil.lift();
+  }
+}
+
 // Auth and locale start in parallel. The app graph itself waits for auth
 // prefetch so a remembered multi-user session restores its browser-local
 // account namespace before account-scoped modules evaluate.
@@ -58,11 +100,6 @@ if (isNativeMobile()) {
   setLaunchLeaveCover(() => launchVeil.restore());
   void launchVeil.ready().then(() => releaseLaunchCurtain());
 }
-// Last resort: a page that never rendered (its app graph failed to load) must
-// not hide behind its veil forever. A rendered page owns its veil.
-setTimeout(() => {
-  if (!document.getElementById("root")?.hasChildNodes()) void launchVeil.lift();
-}, 15_000);
 if (desktopBridge()?.surface === "hub") {
   // The desktop app's server list, on its own origin with no server behind it.
   await ensureLocale(getLocaleSnapshot());

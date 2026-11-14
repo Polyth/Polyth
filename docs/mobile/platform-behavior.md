@@ -193,6 +193,25 @@ loading is shown in between.
   the fresh-chat screen, not an opaque phone stage.
 - Desktop browsers (fine pointer, wider than 620 px) remove the veil before
   their first paint.
+- **A page that never renders is never left blank.** Before its first render
+  the shell waits on reads with no deadline of their own. The Link proxy holds
+  an `/api/auth/status` answer for up to 120 s (`response_head_timeout_ms`), and
+  a native bridge call can stall. Lifting the veil onto the empty `#root` showed
+  a blank white page with nothing to tap, so the app no longer does that
+  (`apps/web/src/launchFailsafe.ts`, armed in `main.tsx` before its first
+  await):
+  - The phone app's page from its Link proxy goes back to the hub after 15 s
+    with `?resume=1`. The hub opens the server again over a fresh connection,
+    at most once a minute (`RESUME_COOLDOWN_MS`), then shows its server list.
+    The inline script in `index.html` does the same at 20 s for a page whose
+    scripts never ran.
+  - The bundled hub reloads itself once a minute at most, then shows what is
+    underneath. Browsers and the desktop app still lift the veil.
+  - On iOS, `PolythPageRecovery` (`SceneDelegate.swift`) sits in front of
+    Capacitor's navigation delegate. When WebKit kills the open server's page,
+    Capacitor only calls `reload()`. If that reload cannot reach the proxy
+    because its listener is still coming back from the suspension, the page
+    goes to the hub's `?resume=1` instead of staying blank.
 - Each app launch opens the Link loopback proxy on a new port, so the shell's
   origin storage starts empty. The synced settings arrive from the server, and
   the first render does not wait for them: the look of the last launch is
@@ -228,9 +247,10 @@ loading is shown in between.
 
 Verification status: the web veil, the reveal and the hub transitions are
 checked in Chromium filmstrips, and the veil matches the generated iOS launch
-image within 1 CSS px. The native halves (storyboard layout, Android splash
-attributes, curtain timing) are source-inspected only and need a device
-check.
+image within 1 CSS px. The unrendered-page fallbacks are unit-tested
+(`launchFailsafe.test.ts`, `launchVeil.test.ts`). The native halves
+(storyboard layout, Android splash attributes, curtain timing,
+`PolythPageRecovery`) are source-inspected only and need a device check.
 
 ## Safe areas and keyboard
 

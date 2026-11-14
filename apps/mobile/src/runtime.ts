@@ -8,6 +8,8 @@ import { consumeNativeServerChoice, presentNativeServerMenu, type ServerMenuAnch
 
 const HOSTS_KEY = "polyth.mobile.hosts.v1";
 const PENDING_DEEP_LINK_KEY = "polyth.mobile.pending-deep-link.v1";
+/** How long leaving for the hub waits on the native write of the page's path. */
+const HUB_PATH_WRITE_BUDGET_MS = 1_500;
 const PROXY_RECOVERY_ERROR = "proxy-recovery-failed";
 const MAX_RECENT_HOSTS = 5;
 
@@ -280,7 +282,13 @@ export async function returnToMobileConnectionHub(
   try {
     const canonical = deepLinkPath ? canonicalMobilePath(deepLinkPath) : undefined;
     if (canonical) {
-      await Preferences.set({ key: PENDING_DEEP_LINK_KEY, value: canonical });
+      // Bounded: this is also the way out of a page whose native bridge
+      // stalled, and a write that never answers must not keep it there. A
+      // late write only means the hub opens the server at its start page.
+      await Promise.race([
+        Preferences.set({ key: PENDING_DEEP_LINK_KEY, value: canonical }),
+        new Promise<void>((resolve) => setTimeout(resolve, HUB_PATH_WRITE_BUDGET_MS)),
+      ]);
     }
   } finally {
     // The page's veil comes back and the native curtain covers the swap: the
