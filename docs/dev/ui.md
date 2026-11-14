@@ -2421,7 +2421,9 @@ phone a card gives it a whole tap target as its own end zone and a picture
 tile its top-end quarter. A removed file keeps its place for 8 s
 (`ATTACHMENT_RESTORE_MS`) as a *restore slot*: a dashed button of the card's
 exact width, so nothing shifts under the pointer and a slip is one click to
-take back, at the place the file had. The draft drops the file at once
+take back, at the place the file had. Its glyph is a rewind in time
+(`HistoryIcon`, Lucide `rotate-ccw-clock`, from `icons.ts`), not Undo: undo is
+the editor's and the message revert's action. The draft drops the file at once
 (`detachAttachment`; a send never carries a slot) and the slot's click puts it
 back (`insertAttachment`); a browser capture is discarded only when its slot
 goes. A click within 400 ms of the removal is the same double click and is
