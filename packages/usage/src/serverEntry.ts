@@ -445,6 +445,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         ...(options.limit !== undefined ? { limit: options.limit } : {}),
         ...(options.harnessId ? { harnessId: options.harnessId } : {}),
         ...(options.pairs ? { pairs: options.pairs } : {}),
+        ...(options.exclude?.length ? { exclude: options.exclude } : {}),
       });
     },
   });

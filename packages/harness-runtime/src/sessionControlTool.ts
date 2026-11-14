@@ -12,6 +12,7 @@ import type {
 } from "@polyth/contracts";
 import { isolationBlocksUserMutation } from "@polyth/contracts";
 import {
+  SERVER_DELEGATION_POLICY,
   SERVER_MODEL_ROUTING,
   SERVER_SESSION_ISOLATION,
   SERVER_SESSION_WATCHES,
@@ -105,7 +106,7 @@ export const polythSessionsSkill = {
     description: "Orchestrate Polyth sessions and delegated subagents in any project.",
     instructions: `Use the available polyth tool (its harness may prefix the name) to work with canonical Polyth sessions. This is a Polyth product capability — available in every project and not dependent on project-specific skill installs.
 ${DESCRIPTION}
-For delegated/subagent work, always use agent.spawn (title + optional prompt/harness). To choose the worker, call agent.models first — one cheap call returning ranked lines "N. ★ <harness> <provider>/<model> (<what an alias runs>) · <turns>t/<sessions>s · quota NN%" plus one quota line per source. Models are named as each harness's live catalog lists them (Claude Code takes alias rows such as anthropic/opus, not the concrete claude-… id it reports), and models a harness no longer offers are left out; skip BLOCKED/UNAVAILABLE rows, prefer favorites with headroom, match model strength to the task, and pass harnessId plus model {providerID, modelID} exactly as listed — never an id from memory or another harness. Optional parameters: harnessId (one harness), limit (rows, default 12), windowDays (default 30). Never invoke a harness-native Agent, Task, task, agent, invoke_subagent, or equivalent delegation tool. agent.spawn creates a canonical child Polyth Session with parentId set to the calling Session, so nested delegation remains a real session tree. Drive children with session.send / session.debug / session.messages. For asynchronous delegation, prefer agent.spawn with watchCaller=true so the calling session is woken exactly once when the child completes, fails, or aborts (a person pausing it also wakes you, as "paused", and the watch stays armed until it ends; only that person can continue it); use session.watch for other event-driven links and never poll session.get in a loop. Keep delegated work bounded and report findings via the peer observation skill instead of copying full transcripts. Respect cross-project approvals and Space isolation; never assume access to another project without an explicit grant.
+For delegated/subagent work, always use agent.spawn (title + optional prompt/harness). To choose the worker, call agent.models first — one cheap call returning ranked lines "N. ★ <harness> <provider>/<model> (<what an alias runs>) · <turns>t/<sessions>s · quota NN%" plus one quota line per source. Models are named as each harness's live catalog lists them (Claude Code takes alias rows such as anthropic/opus, not the concrete claude-… id it reports), and models a harness no longer offers are left out; skip BLOCKED/UNAVAILABLE rows, prefer favorites with headroom, match model strength to the task, and pass harnessId plus model {providerID, modelID} exactly as listed — never an id from memory or another harness. When the person set a routing policy (Settings → Orchestration), the output starts with "Routing policy": classify the work by its roles and use the model it names for that role; it takes precedence over the ranked list, its "never delegate to" models are left out of the list, and its concurrency limits apply. Optional parameters: harnessId (one harness), limit (rows, default 12), windowDays (default 30). Never invoke a harness-native Agent, Task, task, agent, invoke_subagent, or equivalent delegation tool. agent.spawn creates a canonical child Polyth Session with parentId set to the calling Session, so nested delegation remains a real session tree. Drive children with session.send / session.debug / session.messages. For asynchronous delegation, prefer agent.spawn with watchCaller=true so the calling session is woken exactly once when the child completes, fails, or aborts (a person pausing it also wakes you, as "paused", and the watch stays armed until it ends; only that person can continue it); use session.watch for other event-driven links and never poll session.get in a loop. Keep delegated work bounded and report findings via the peer observation skill instead of copying full transcripts. Respect cross-project approvals and Space isolation; never assume access to another project without an explicit grant.
 Messaging another chat (session.send with sessionId + text) — pick parameters.delivery by urgency:
 - queue (default): the chat finishes what it is doing first; your message waits behind its current turn and anything queued before it. Use it for ordinary follow-ups, answers and new work.
 - interrupt: stop the chat's running turn now and run your message next. Use it when the running work is wrong, obsolete or blocking you. Partial work from the stopped turn stays in history.
@@ -409,21 +410,41 @@ export function registerPolythSessionControl(
 
       if (action === "agent.models") {
         const routing = host.services.get(SERVER_MODEL_ROUTING);
+        const harnessId = harness(parameters.harnessId);
+        const onlyHarness = harnessId?.mode === "pinned" ? harnessId.harnessId : undefined;
+        // The person's own routing policy (an optional package) leads and
+        // hides what they never delegate to. A policy that cannot be read
+        // leaves the plain shortlist rather than failing the call.
+        const policy = host.services.get(SERVER_DELEGATION_POLICY);
+        const brief = policy
+          ? await policy.brief(space, onlyHarness ? { harnessId: onlyHarness } : {}).catch((error: unknown) => {
+            console.warn("[harness-runtime] delegation policy unavailable for agent.models", error);
+            return undefined;
+          })
+          : undefined;
+        const withBrief = (text: string): string => brief ? `${brief.text}\n\n${text}` : text;
         if (!routing) {
           return {
-            output: "Model routing is unavailable: the Usage package is disabled. Choose from the user's favorites, or omit model on agent.spawn for Polyth Auto.",
-            metadata: { action },
+            output: withBrief("Model routing is unavailable: the Usage package is disabled. Choose from the user's favorites, or omit model on agent.spawn for Polyth Auto."),
+            metadata: { action, ...(brief ? { policy: true } : {}) },
           };
         }
-        const harnessId = harness(parameters.harnessId);
         const report = await routing.candidates(space, {
           ...(parameters.limit !== undefined ? { limit: boundedLimit(parameters.limit, 12, 50) } : {}),
           ...(parameters.windowDays !== undefined ? { windowDays: boundedLimit(parameters.windowDays, 30, 365) } : {}),
-          ...(harnessId?.mode === "pinned" ? { harnessId: harnessId.harnessId } : {}),
+          ...(onlyHarness ? { harnessId: onlyHarness } : {}),
+          ...(brief?.exclude.length ? { exclude: brief.exclude } : {}),
         });
         return {
-          output: report.text,
-          metadata: { action, candidates: report.candidates.length, omitted: report.omitted, unlisted: report.unlisted },
+          output: withBrief(report.text),
+          metadata: {
+            action,
+            candidates: report.candidates.length,
+            omitted: report.omitted,
+            unlisted: report.unlisted,
+            ...(brief ? { policy: true } : {}),
+            ...(report.excluded ? { excluded: report.excluded } : {}),
+          },
         };
       }
 

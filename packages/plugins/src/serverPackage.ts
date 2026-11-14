@@ -559,6 +559,8 @@ export interface ServerModelRoutingCandidate {
   available: boolean;
   /** Worst applicable quota window as a 0..1 fraction; absent when unknown. */
   quotaUsed?: number;
+  /** The window `quotaUsed` was read from: its label, reset and pace. */
+  quotaWindow?: { sourceId: string; label: string; resetsAt?: number; pace?: "under" | "on-track" | "over" };
   /** Earliest reset of an exhausted window when `blocked`. */
   blockedUntil?: number;
   blocked: boolean;
@@ -583,6 +585,8 @@ export interface ServerModelRoutingReport {
   /** Used or starred pairs left out because their harness's live catalog no
    *  longer offers them. */
   unlisted: number;
+  /** Pairs left out because the caller's `exclude` named them; absent = 0. */
+  excluded?: number;
   /** No live model catalog could be read: candidates keep the names
    *  telemetry and favorites used, unverified. */
   catalogUnavailable?: boolean;
@@ -590,18 +594,49 @@ export interface ServerModelRoutingReport {
   text: string;
 }
 
+export interface ServerModelRoutingOptions {
+  limit?: number;
+  windowDays?: number;
+  harnessId?: string;
+  /** Rank exactly these `harness::provider/model` keys, used or not: a
+   *  caller with its own allow-list gets their quota headroom without the
+   *  shortlist's usage filter. */
+  pairs?: readonly string[];
+  /** `harness::provider/model` keys never to list (a person's "never
+   *  delegate to"). Matched after catalog naming, so an alias row and the
+   *  model it runs are the same pair. */
+  exclude?: readonly string[];
+}
+
 /** Usage-owned delegation shortlist: favorites ∪ most-used harness/model
  *  pairs, named as the live catalogs name them and annotated with live quota
  *  headroom. */
 export interface ServerModelRoutingService {
-  /** `pairs` (`harness::provider/model` keys) ranks exactly those pairs,
-   *  used or not: a caller with its own allow-list gets their quota headroom
-   *  without the shortlist's usage filter. */
-  candidates(space: SpaceContext, options?: { limit?: number; windowDays?: number; harnessId?: string; pairs?: readonly string[] }): Promise<ServerModelRoutingReport>;
+  candidates(space: SpaceContext, options?: ServerModelRoutingOptions): Promise<ServerModelRoutingReport>;
 }
 
 export const SERVER_MODEL_ROUTING =
   serverServiceKey<ServerModelRoutingService>("models.routing");
+
+/** A person's delegation routing policy, resolved against live quota: which
+ *  model each kind of delegated work goes to now, what to skip and what never
+ *  to use. Provided by an optional package; the session control tool prints
+ *  `brief.text`, a blank line, then the shortlist built with `exclude`. */
+export interface ServerDelegationPolicyBrief {
+  /** Agent-facing lines placed before the shortlist. */
+  text: string;
+  /** `harness::provider/model` keys to leave out of the shortlist. */
+  exclude: string[];
+}
+
+export interface ServerDelegationPolicyService {
+  /** Undefined when the person behind `space` leaves routing to Polyth's
+   *  automatic ranking. `harnessId` narrows the brief to one harness. */
+  brief(space: SpaceContext, options?: { harnessId?: string }): Promise<ServerDelegationPolicyBrief | undefined>;
+}
+
+export const SERVER_DELEGATION_POLICY =
+  serverServiceKey<ServerDelegationPolicyService>("delegation.policy");
 
 export type ServerSessionTitleMode = "fallback" | "always";
 

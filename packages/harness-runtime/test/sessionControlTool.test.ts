@@ -15,6 +15,7 @@ import type {
 } from "@polyth/contracts";
 import {
   createServerServiceRegistry,
+  SERVER_DELEGATION_POLICY,
   SERVER_MODEL_ROUTING,
   SERVER_SESSION_ISOLATION,
   SERVER_SESSION_WATCHES,
@@ -432,6 +433,49 @@ test("agent.models returns the usage-owned shortlist for the caller's Space, or 
 
   const fallback = await run(false);
   assert.match(fallback.result.output, /Usage package is disabled/);
+});
+
+test("agent.models leads with the person's routing policy and hides what it excludes; a failing policy leaves the plain shortlist", async () => {
+  const run = async (brief: (space: SpaceContext, options?: { harnessId?: string }) => Promise<{ text: string; exclude: string[] } | undefined>) => {
+    const registry = createCapabilityContributionRegistry();
+    const services = createServerServiceRegistry();
+    services.provide(serverServiceKey("harness.capabilities"), registry);
+    const calls: Array<{ kind: string; space: SpaceContext; options: unknown }> = [];
+    services.provide(SERVER_MODEL_ROUTING, {
+      async candidates(callerSpace, options) {
+        calls.push({ kind: "routing", space: callerSpace, options });
+        return { windowDays: 30, generatedAt: 1, candidates: [], quotas: [], omitted: 0, unlisted: 0, excluded: 1, text: "Delegation candidates" };
+      },
+    });
+    services.provide(SERVER_DELEGATION_POLICY, {
+      async brief(callerSpace, options) {
+        calls.push({ kind: "policy", space: callerSpace, options });
+        return brief(callerSpace, options);
+      },
+    });
+    const host = { services, forSpace: () => ({}) } as unknown as ServerPackageHost;
+    const registration = registerPolythSessionControl(host);
+    registry.resolve(context);
+    const execute = registry.executor("harness-runtime.polyth-control")!;
+    const result = await execute({ action: "agent.models", parameters: { harnessId: "claude" } }, toolContext);
+    await registration.dispose();
+    return { result, calls };
+  };
+
+  const ruled = await run(async () => ({ text: "Routing policy: explore → claude anthropic/sonnet", exclude: ["claude::anthropic/opus"] }));
+  assert.equal(ruled.result.output, "Routing policy: explore → claude anthropic/sonnet\n\nDelegation candidates");
+  assert.deepEqual(ruled.calls.map((call) => call.kind), ["policy", "routing"]);
+  assert.equal(ruled.calls[0]!.space.userId, "user-a", "the policy of the person the turn acts for");
+  assert.deepEqual(ruled.calls[0]!.options, { harnessId: "claude" });
+  assert.deepEqual(ruled.calls[1]!.options, { harnessId: "claude", exclude: ["claude::anthropic/opus"] });
+  assert.deepEqual(ruled.result.metadata, { action: "agent.models", candidates: 0, omitted: 0, unlisted: 0, policy: true, excluded: 1 });
+
+  const automatic = await run(async () => undefined);
+  assert.equal(automatic.result.output, "Delegation candidates");
+  assert.deepEqual(automatic.calls[1]!.options, { harnessId: "claude" });
+
+  const broken = await run(async () => { throw new Error("policy store unreadable"); });
+  assert.equal(broken.result.output, "Delegation candidates");
 });
 
 test("agent.spawn can isolate a child in its own worktree, and the delegator merges, resolves or discards it", async () => {

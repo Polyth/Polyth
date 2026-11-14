@@ -1,0 +1,35 @@
+{
+  "name": "@polyth/orchestration",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./i18n": "./src/i18n/index.ts",
+    "./i18n/*": "./src/i18n/*.ts",
+    "./widgets": "./widgets/index.tsx"
+  },
+  "polyth": {
+    "editions": ["workstation"],
+    "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Orchestration",
+      "description": "Choose which models delegated agents run on and for what kind of work, with quota fallbacks, models never to use and a live view of what agents see.",
+      "core": false,
+      "enabled": true,
+      "settingsGroup": "Workspace",
+      "icon": "hierarchy",
+      "hasSettings": true,
+      "category": "workspace",
+      "projectAffinity": {}
+    }
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}
