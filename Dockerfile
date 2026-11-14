@@ -19,7 +19,7 @@ ARG POLYTH_LINK=host
 # ---------------------------------------------------------------------------
 # Workspace manifests only, so dependency installation stays cached while
 # source files change.
-FROM node:22-bookworm@sha256:18a6d90fd60542269850c80ca03b29b1d9b14d6b221ac7ee8e35b0d33ef904bd AS manifests
+FROM node:22-bookworm@sha256:e13726ca604184d7a91fcacab1fc09eefd642dc28e79ac34e85540dd93b78cfb AS manifests
 WORKDIR /src
 COPY . .
 # scripts/check-node.mjs is the root preinstall hook.
@@ -28,7 +28,7 @@ RUN find . -type f ! -name package.json ! -name package-lock.json \
  && find . -depth -type d -empty -delete
 
 # ---------------------------------------------------------------------------
-FROM node:22-bookworm@sha256:18a6d90fd60542269850c80ca03b29b1d9b14d6b221ac7ee8e35b0d33ef904bd AS build
+FROM node:22-bookworm@sha256:e13726ca604184d7a91fcacab1fc09eefd642dc28e79ac34e85540dd93b78cfb AS build
 WORKDIR /opt/polyth
 ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1 \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
