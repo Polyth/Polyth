@@ -197,6 +197,22 @@ function packageStore(host: ServerPackageHost): ServerPackageHost["store"] {
           return Reflect.apply(method, target, [sessionId, ...rest]);
         };
       }
+      if (property === "latestSeqs") {
+        // Seq numbers only, fenced to the named Space inside the query. The
+        // caller takes that Space from a context the gateway validated.
+        const value = Reflect.get(target, property, receiver);
+        if (typeof value !== "function") return value;
+        const method = value as (...args: unknown[]) => unknown;
+        return (scope: { spaceId: string; projectId?: string }) => {
+          if (typeof scope?.spaceId !== "string" || !scope.spaceId) throw unavailable("a Space is required to read session tails");
+          const ctx = host.systemSpaceContext(scope.spaceId);
+          if (ctx.spaceId !== scope.spaceId) throw unavailable("canonical system Space context is unavailable");
+          return Reflect.apply(method, target, [{
+            spaceId: scope.spaceId,
+            ...(typeof scope.projectId === "string" ? { projectId: scope.projectId } : {}),
+          }]);
+        };
+      }
       if (property === "patchProjection") {
         const value = Reflect.get(target, property, receiver);
         if (typeof value !== "function") return value;

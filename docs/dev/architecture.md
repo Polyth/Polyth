@@ -1134,7 +1134,7 @@ out-of-tree browser scripts.
 ## Persistence layout (`POLYTH_DATA_DIR`, default `./data`)
 
 `sessions.db` (events, projections, queue, folders, labels, profiles),
-per-Space `packages/knowledge/knowledge.db`, per-Space `packages/usage/analytics-v1.json` (rebuildable analytics checkpoint), host-account `packages/usage/usage-limits-v1.json` (last-good provider/harness limit snapshots plus bounded pace samples), `projects.json`, per-Space `packages/planner/planner.json`, per-Space `packages/agents/schedule.json` (formerly `packages/schedule/`; the shared `schedule.json` keeps only tasks whose project has no resolvable Space; the pre-split copy is kept once as `schedule.json.pre-space-split`),
+per-Space `packages/knowledge/knowledge.db`, per-Space `packages/usage/analytics-v2/` (rebuildable analytics checkpoint, 64 files by session-id hash; replaces the single `analytics-v1.json`, which is moved over on first read), host-account `packages/usage/usage-limits-v1.json` (last-good provider/harness limit snapshots plus bounded pace samples), `projects.json`, per-Space `packages/planner/planner.json`, per-Space `packages/agents/schedule.json` (formerly `packages/schedule/`; the shared `schedule.json` keeps only tasks whose project has no resolvable Space; the pre-split copy is kept once as `schedule.json.pre-space-split`),
 `behavior.md`, `mcp.json`, `plugins/` + `trusted-plugins/`, `packages/<id>/`
 (each removable package's deployment-wide data, e.g. `packages/ssh/ssh.json`,
 `packages/walkthrough/walkthroughs.json`, `packages/dictation/{models,voices,runtime}`;

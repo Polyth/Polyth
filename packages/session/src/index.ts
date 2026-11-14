@@ -2753,6 +2753,18 @@ export function createStore(dbPath: string): Store {
     return Promise.resolve(Number(row.s));
   }
 
+  function latestSeqs(scope: { spaceId: string; projectId?: string }): Promise<Map<string, number>> {
+    // One primary-key seek per session, with no event row read or parsed.
+    const tail = "COALESCE((SELECT MAX(e.seq) FROM events e WHERE e.session_id = p.session_id), 0) AS s";
+    const rows = (scope.projectId === undefined
+      ? prep(`SELECT p.session_id AS id, ${tail} FROM projections p WHERE p.space_id = ?`).all(scope.spaceId)
+      : prep(`SELECT p.session_id AS id, ${tail} FROM projections p WHERE p.space_id = ? AND p.project_id = ?`)
+          .all(scope.spaceId, scope.projectId)) as unknown as Array<{ id: string; s: number }>;
+    const tails = new Map<string, number>();
+    for (const row of rows) tails.set(row.id, Number(row.s));
+    return Promise.resolve(tails);
+  }
+
   function eventBytes(sessionId: string): Promise<number> {
     const row = prep("SELECT COALESCE(SUM(LENGTH(CAST(data AS BLOB))), 0) AS size FROM events WHERE session_id = ?")
       .get(sessionId) as { size: number };
@@ -5083,6 +5095,7 @@ export function createStore(dbPath: string): Store {
     hasEventOfType,
     lastTurnEventType,
     latestSeq,
+    latestSeqs,
     eventBytes,
     eventsOfTypes,
     eventAt,

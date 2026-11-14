@@ -389,6 +389,14 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
           .events(sessionId, 0, { limit: 1, prefetch: true });
         return tail.at(-1)?.seq ?? 0;
       },
+      // Every tail of the Space in one indexed read instead of one guarded
+      // call per session. A store that cannot answer keeps the per-session check.
+      async latestSeqs(space, scope) {
+        return host.store?.latestSeqs?.({
+          spaceId: space.spaceId,
+          ...(scope?.projectId ? { projectId: scope.projectId } : {}),
+        });
+      },
       async visibleSessions(space) {
         if (space.userId.startsWith("system:")) return undefined;
         return new Set((await host.forSpace(space).sessions.list()).map((session) => session.id));

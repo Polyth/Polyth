@@ -3344,6 +3344,13 @@ export interface SessionPersistence {
    *  must treat turn closure as unproven. */
   lastTurnEventType?(sessionId: string): Promise<"started" | "stopped" | undefined>;
   latestSeq(sessionId: string): Promise<number>;
+  /**
+   * Newest event seq of every session in one Space (optionally one project),
+   * in a single indexed read; 0 for a session without events. The Space fence
+   * is part of the query: a session of another Space is never in the result.
+   * Optional so fakes stay valid.
+   */
+  latestSeqs?(scope: { spaceId: string; projectId?: string }): Promise<Map<string, number>>;
   /** Bytes of this chat's stored history. Optional so fakes stay valid. */
   eventBytes?(sessionId: string): Promise<number>;
   copyTo(srcSessionId: string, dstSessionId: string, upToSeq?: number): Promise<void>;

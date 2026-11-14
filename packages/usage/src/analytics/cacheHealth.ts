@@ -63,14 +63,14 @@ const providerOf = (observation: UsageObservation): string =>
 const sameCache = (a: UsageObservation, b: UsageObservation): boolean =>
   providerOf(a) === providerOf(b) && (a.modelId ?? "") === (b.modelId ?? "");
 
-interface SessionCacheScan {
+export interface SessionCacheScan {
   health: UsageCacheHealth | null;
   /** Re-written tokens keyed by observation id. */
   rewrites: Array<[string, number]>;
 }
 
 /** One session's observations in time order. */
-const scanSession = (observations: readonly UsageObservation[]): SessionCacheScan => {
+export const scanSession = (observations: readonly UsageObservation[]): SessionCacheScan => {
   const rewrites: Array<[string, number]> = [];
   const burn: UsageCacheBurn = { rewrites: 0, tokens: 0 };
   // Lifetime proven per provider by a hit after a longer gap than its default.

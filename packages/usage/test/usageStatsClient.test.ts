@@ -316,3 +316,47 @@ test("a persisted identity and report paint the first frame of a fresh tab, then
     local.clear();
   }
 });
+
+test("a full browser store gives up its oldest reports so the newest one is kept", async () => {
+  const fresh = () => import(`../widgets/usage/usageStatsClient.ts?tab=${Math.random()}`) as Promise<typeof import("../widgets/usage/usageStatsClient.ts")>;
+  // A store with a byte budget, like a phone's origin quota shared with everything else.
+  const items = new Map<string, string>([["polyth.other", "x".repeat(1_500)]]);
+  const quota = 6_000;
+  const local = {
+    get length() { return items.size; },
+    key: (index: number) => [...items.keys()][index] ?? null,
+    getItem: (name: string) => items.get(name) ?? null,
+    removeItem: (name: string) => { items.delete(name); },
+    clear: () => items.clear(),
+    setItem(name: string, value: string) {
+      let used = name.length + value.length;
+      for (const [other, stored] of items) if (other !== name) used += other.length + stored.length;
+      if (used > quota) throw new DOMException("quota", "QuotaExceededError");
+      items.set(name, value);
+    },
+  } as Storage;
+  const previous = (globalThis as { localStorage?: Storage }).localStorage;
+  Object.assign(globalThis, { localStorage: local });
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input) === "/api/usage/identity") return Response.json({ serverInstanceId: "quota", spaceId: "space-a" });
+    return Response.json(report("quota", 1, JSON.parse(String(init!.body)) as UsageStatsQuery));
+  }) as typeof fetch;
+  try {
+    const client = await fresh();
+    const identity = await client.ensureUsageIdentity(true);
+    const ranges = ["7d", "30d", "90d", "all"] as const;
+    for (const range of ranges) {
+      await client.requestUsageStats({ range, timezone: "UTC" });
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+    // Each stored report is about 1.4 kB: three fit beside the other data, not four.
+    const reload = await fresh();
+    assert.equal(reload.peekCachedUsageStats(identity, { range: "all", timezone: "UTC" })?.query.range, "all", "the newest report is stored");
+    assert.equal(reload.peekCachedUsageStats(identity, { range: "7d", timezone: "UTC" }), null, "the oldest one made room for it");
+    assert.equal(reload.peekCachedUsageStats(identity, { range: "90d", timezone: "UTC" })?.query.range, "90d");
+    assert.equal(items.get("polyth.other")?.length, 1_500, "nothing but usage reports is evicted");
+  } finally {
+    globalThis.fetch = originalFetch;
+    Object.assign(globalThis, { localStorage: previous });
+  }
+});
