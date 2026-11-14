@@ -89,7 +89,7 @@ There are five permanent GitHub Actions workflows:
 |---|---|---|
 | `ci.yml` | Push to `devel`/`master`, pull request to them, manual | Repository validation |
 | `promote.yml` | Manual only | Rebuild `master` from `devel`, verify, fast-forward |
-| `nightly.yml` | Schedule/dispatch once enabled, manual | `devel` nightly prereleases; manual `stable` update-feed releases |
+| `nightly.yml` | Dispatch (the *Nightly release captain* agent, or manual); no cron | `devel` nightly prereleases; manual `stable` update-feed releases |
 | `build-apps.yml` | Manual only | Unpublished smoke/download artifacts |
 | `release.yml` | Manual only, enforced `master` | Signed/publishable release artifacts and GitHub Release |
 
@@ -278,17 +278,19 @@ the feed of desktop clients on the **Nightly** [channel](#release-channels). It 
 builder's scripts (`remote-build.mjs`, `update-feed.mjs`, `release-notes.mjs`) on this repository's
 own runners; no deploy key or second repository is involved.
 
-- **Off until enabled.** Scheduled and dispatched runs start only when the repository variable
+- **Off until enabled.** Dispatched runs start only when the repository variable
   `POLYTH_NIGHTLY` is `1`; a manual **Actions → Nightly → Run workflow** always works (any ref,
   one target or `all`). Enable it once the repository is public: private-repository macOS and
   Windows minutes are expensive, and while the external builder still publishes nightlies, two feeds
   would compete.
-- **Triggers.** Three schedule slots at 03:17, 07:47 and 12:17 UTC (05:17, 09:47, 14:17 Kyiv in
-  winter, an hour later in summer; the cron entries carry no `timezone`, because with
-  `timezone: Europe/Kyiv` no slot fired in this repository) and `repository_dispatch` type
-  `nightly` (`client_payload.ref` overrides `devel`). Only the first run of each Kyiv day that did
-  not fail builds, and a `devel` commit that the newest nightly already holds (its release-notes
-  source marker) is not rebuilt.
+- **Triggers — no cron.** `nightly.yml` has no `schedule`. The *Nightly release captain* agent
+  ([Preparing the nightly](#preparing-the-nightly)) starts each night's build once the source is
+  ready: `gh api -X POST repos/Polyth/Polyth/dispatches -f event_type=nightly`, or
+  `github.event.client_payload.ref` to build another ref, or a manual **Actions → Nightly → Run
+  workflow**. Nothing builds a night the captain did not ask for, and a person can always start one.
+  A dispatch can arrive twice, so only the first run of each Kyiv day that did not fail builds, and a
+  `devel` commit that the newest nightly already holds (its release-notes source marker) is not
+  rebuilt; a manual run is never deduplicated and is the retry path.
 - **Gate.** The `verify` job runs `release-quality.mjs` on the exact commit first; a red gate
   publishes nothing.
 - **Version.** `X.Y.Z` from the `devel` manifests plus build number `N` = run number +
@@ -296,7 +298,7 @@ own runners; no deploy key or second repository is involved.
   exceed `Z` and stay ≤ 999 (Android `versionCode`), so raise the offset when a patch release
   outruns the run number. The public repository starts with the offset above the external
   builder's newest build number (set at the cutover), because installed builder builds never
-  downgrade; every scheduled slot, skipped or not, consumes a run number.
+  downgrade; every dispatched run, skipped or not, consumes a run number.
 - **Publication.** Only a full (`all`) run publishes: draft, upload, then public prerelease, never
   marked Latest. The three newest nightlies are kept; stable releases are never pruned.
 - **Stable.** A manual run with `channel` `stable` (set `ref` to `master`) builds
@@ -340,7 +342,7 @@ Every **stable** release also carries the [workstation edition](../security/work
 
 | Channel | Trigger | Version / tag | GitHub release | Desktop metadata |
 |---|---|---|---|---|
-| Nightly | Automatic: `nightly.yml` schedule 03:17/07:47/12:17 UTC or `repository_dispatch` (first successful run of the Kyiv day only) | `X.Y.N-nightly` | prerelease | `latest*.yml` + `nightly*.yml` |
+| Nightly | The *Nightly release captain* agent dispatches `nightly.yml` after the source is ready (or a manual run); `repository_dispatch`; first successful run of the Kyiv day only | `X.Y.N-nightly` | prerelease | `latest*.yml` + `nightly*.yml` |
 | Stable | Manual: **Actions → Nightly → Run workflow**, channel `stable`, ref `master` | `X.Y.N` | release, marked **Latest** | `latest*.yml` + `beta*.yml` |
 
 The manual form also takes `ref` (default `devel`; use `master` for `stable`) and `target`; only `target=all` publishes a release. A manual `nightly` run is for retrying a failed nightly and is not deduplicated. Every channel's `ios-app` job uploads to TestFlight; only `stable` runs also distribute to external testers ([iOS / TestFlight](#ios--testflight)). Releases from before the channel split (`v0.1.132`–`v0.1.137`, plain `X.Y.N`) count as stable.
@@ -356,9 +358,9 @@ Downgrades stay off, so switching to a channel whose newest build is older waits
 
 ### Preparing the nightly
 
-The nightly build compiles whatever is on its source branch at 06:00 Kyiv — `devel` for both [`nightly.yml`](#nightly-builds-from-devel) and the external builder — so source readiness is decided the night before. The captain template below names `master`, the branch most projects build from; this repository's captain has its charter edited to verify and push `devel` instead, and never pushes `master`, which only [promotion](#branches-devel-and-master) and the release workflow write. The `@polyth/agents` **Agents** feature ships a *Nightly release captain* template that owns the night's unmerged work, pushes verified green `master` before release, and leaves the source ready for the scheduled nightly build and night release: it inspects every open session and isolated worktree, judges and criticises each one against its actual diff, finishes or discards the ones it can settle, merges completed work and de-isolates and archives it, keeps a decision that genuinely needs a person by pinning that session with the options written down, makes small reversible fixes and missing tests, delegates bounded work to Polyth subagents, verifies the blocking gates the nightly runs, and pushes `master` to `origin` once all gates are green. Its charter is a starting point each project reviews and edits in the agent editor; it never signs or publishes, and it does not replace explicit release authorization or the decision to ship.
+The nightly build compiles whatever is on its source branch when it is dispatched — the *Nightly release captain* agent dispatches it once the source is ready and green, so source readiness and the build are the same decision instead of two clocks that must line up. The captain template below names `master`, the branch most projects build from; this repository's captain has its charter edited to verify and push `devel` instead, and never pushes `master`, which only [promotion](#branches-devel-and-master) and the release workflow write. This repository has no nightly cron at all: `nightly.yml` has **no `schedule`**, and the host crontab has no nightly dispatch either, so a night the captain does not build has no nightly. The `@polyth/agents` **Agents** feature ships a *Nightly release captain* template that owns the night's unmerged work, pushes verified green `master` before release, and leaves the source ready for the nightly build and night release: it inspects every open session and isolated worktree, judges and criticises each one against its actual diff, finishes or discards the ones it can settle, merges completed work and de-isolates and archives it, keeps a decision that genuinely needs a person by pinning that session with the options written down, makes small reversible fixes and missing tests, delegates bounded work to Polyth subagents, verifies the blocking gates the nightly runs, pushes `master` to `origin` once all gates are green and then dispatches the nightly. Its charter is a starting point each project reviews and edits in the agent editor; it never signs or publishes, and it does not replace explicit release authorization or the decision to ship.
 
-The captain's authority is deliberately wider than an ordinary session's: it works in the project's own sessions and may commit and merge unmerged work, and pushes verified green `master` to origin for the scheduled nightly build, because leaving finished work unmerged or unpushed is the defect it exists to remove. It must therefore leave nothing behind — every session it touched ends merged and archived, pinned for a person, discarded on purpose, or reported as blocked. Signing, publishing, live-data migration and weakening a security bound or a test remain the person's decisions.
+The captain's authority is deliberately wider than an ordinary session's: it works in the project's own sessions and may commit and merge unmerged work, and pushes verified green `master` to origin for the nightly build it then dispatches itself, because leaving finished work unmerged or unpushed is the defect it exists to remove. It must therefore leave nothing behind — every session it touched ends merged and archived, pinned for a person, discarded on purpose, or reported as blocked. Signing, publishing, live-data migration and weakening a security bound or a test remain the person's decisions.
 
 One tool boundary currently bounds that authority: `agent.merge`, `agent.discard` and `agent.resolve` accept only a session the caller itself spawned (`sessionControlTool.ts`, the `session.parentId !== ctx.sessionId` guard), so the captain cannot merge or de-isolate an isolated worktree that belongs to another top-level session. For such a session the captain reviews the diff, reports it, and either delegates a child it owns to carry the work to `master` or records the pending decision for a person; it does not leave the claim that it merged work it cannot reach.
 
@@ -401,7 +403,7 @@ Exports:
 
 ## Release checklist
 
-0. Let the *Nightly release captain* agent (see [Preparing the nightly](#preparing-the-nightly)) leave the nightly source branch green and pushed before the 06:00 Kyiv nightly dispatch.
+0. Let the *Nightly release captain* agent (see [Preparing the nightly](#preparing-the-nightly)) leave the nightly source branch green, pushed and dispatched — it starts the nightly itself; nothing fires on a clock.
 1. Promote the `devel` commit to release with **Promote devel to master** ([branches](#branches-devel-and-master)) only after CI on `devel` is green; a refused drift check means a `master` hotfix must reach `devel` first.
 2. Leave `bump_version` on `auto` for the deterministic increment (or force `patch`/`minor`/`major`; use `none` to release the version already on `master`). The workflow applies the aligned version, pushes the bump commit itself and forwards it to `devel` — do not edit the manifests by hand.
 3. Run **Build apps** first when you only need smoke artifacts.

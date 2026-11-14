@@ -7,21 +7,18 @@ run-name: "${{ github.event_name == 'workflow_dispatch' && inputs.channel || 'ni
 # channel `stable` (ref `master`) publishes the update feed's `vX.Y.N` Latest
 # release the same way.
 #
-# Scheduled and dispatched runs stay off until the repository variable
-# POLYTH_NIGHTLY is `1`; a manual run always works. GitHub delays scheduled
-# events, so an external `repository_dispatch` (type `nightly`) may trigger the
-# morning build and the schedule slots act as fallbacks: only the first nightly
-# of each Kyiv day that did not fail builds, and a devel commit that already
-# has a nightly is not built again.
+# There is deliberately no cron here. The *Nightly release captain* agent decides
+# when the source is worth building and starts the run itself — `repository_dispatch`
+# type `nightly` (`gh api -X POST repos/Polyth/Polyth/dispatches -f event_type=nightly`)
+# or **Actions → Nightly → Run workflow**. Nothing builds a night the captain did
+# not ask for.
 #
-# The slots are plain UTC (05:17/09:47/14:17 Kyiv in winter, an hour later in
-# summer): with `timezone: Europe/Kyiv` no slot ever fired in this repository
-# (2026-10-31 to 2026-11-01). The plan job computes the Kyiv day itself.
+# Dispatched runs stay off until the repository variable POLYTH_NIGHTLY is `1`; a
+# manual run always works. A dispatch can still arrive twice (a retry, a second
+# trigger), so only the first nightly of each Kyiv day that did not fail builds,
+# and a devel commit that already has a nightly is not built again. The plan job
+# computes the Kyiv day itself.
 on:
-  schedule:
-    - cron: '17 3 * * *'
-    - cron: '47 7 * * *'
-    - cron: '17 12 * * *'
   repository_dispatch:
     types: [nightly]
   workflow_dispatch:
@@ -56,20 +53,6 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Repositories lose scheduled workflows after 60 days without activity;
-  # re-enabling through the API resets that timer.
-  keepalive:
-    if: github.event_name == 'schedule' && vars.POLYTH_NIGHTLY == '1'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 2
-    permissions:
-      actions: write
-    steps:
-      - name: Keep schedule enabled
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh api -X PUT "repos/${GITHUB_REPOSITORY}/actions/workflows/nightly.yml/enable"
-
   plan:
     if: github.event_name == 'workflow_dispatch' || vars.POLYTH_NIGHTLY == '1'
     runs-on: ubuntu-24.04
@@ -131,7 +114,7 @@ jobs:
             const runs = (await api('actions/workflows/nightly.yml/runs?per_page=30')).workflow_runs
               .filter((run) => run.event !== 'workflow_dispatch');
             const today = kyivDay(runs.find((run) => run.id === current)?.created_at ?? Date.now());
-            // A failed nightly does not count: the next fallback slot retries it.
+            // A failed nightly does not count: the next dispatch retries it.
             const earlier = runs.find((run) => run.id < current && kyivDay(run.created_at) === today
               && (run.status !== 'completed' || run.conclusion === 'success'));
             if (earlier) {
