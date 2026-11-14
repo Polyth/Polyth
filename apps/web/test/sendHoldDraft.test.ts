@@ -13,6 +13,7 @@ import {
   SEND_HOLD_STEP_MS,
   parseSendHoldMs,
   sendHoldMs,
+  sendPressOutcome,
 } from "../src/sendHold.ts";
 import { UI_DEFAULTS, parseUiSettings } from "../src/uiPrefs.ts";
 
@@ -60,8 +61,36 @@ test("the composer arms the hold for the chosen length, or not at all when it is
   const startHold = composer.slice(composer.indexOf("const startHold = useCallback"), composer.indexOf("const onPrimaryPointerDown"));
   assert.match(startHold, /const holdMs = sendHoldRef\.current;\n\s*if \(holdMs <= 0 \|\| !canParkRef\.current\(\)\) return;/,
     "an off gesture starts no ring and no timer");
-  assert.match(startHold, /\}, holdMs\);/, "the timer is the person's length");
+  assert.match(startHold, /setTimeout\(completeHold, holdMs\);/, "the timer is the person's length");
   assert.doesNotMatch(composer, /SEND_HOLD_MS/, "no hardcoded hold survives in the composer");
+});
+
+test("every press ends as a send or a draft, split at the hold length with no gap", () => {
+  assert.equal(sendPressOutcome(0, 500), "send");
+  assert.equal(sendPressOutcome(499, 500), "send", "just short of the hold sends");
+  assert.equal(sendPressOutcome(500, 500), "draft", "the hold length itself keeps a draft");
+  assert.equal(sendPressOutcome(5_000, 500), "draft");
+  assert.equal(sendPressOutcome(5_000, SEND_HOLD_OFF), "send", "with the gesture off every press sends");
+});
+
+test("the release decides the outcome, so a busy page cannot turn a full hold into a send", () => {
+  const composer = read("components/Composer.tsx");
+  const settle = composer.slice(composer.indexOf("const settleHold = useCallback"), composer.indexOf("const onPrimaryPointerDown"));
+  assert.match(settle, /sendPressOutcome\(performance\.now\(\) - hold\.startedAt, hold\.holdMs\) === "draft"\) completeHold\(\);/,
+    "a release at or past the hold length keeps the draft even before the timer ran");
+  const up = composer.slice(composer.indexOf("const onPrimaryPointerUp = useCallback"), composer.indexOf("const onPrimaryPointerLeave"));
+  assert.match(up, /const held = settleHold\(\);\n\s*if \(event\.pointerType !== "touch"/,
+    "mouse and touch releases are both settled before anything else");
+});
+
+test("the browser cannot pan a held Send away, which used to drop the press entirely", () => {
+  // A finger rolls a few pixels while it holds. With panning allowed the
+  // browser took that for a scroll and cancelled the press: no send, no draft.
+  const styles = read("styles.css");
+  const rule = /:is\(\.send, \.composer-delivery\) \{([^}]*)\}/.exec(styles);
+  assert.ok(rule, "Send has its own gesture rule");
+  assert.match(rule[1]!, /touch-action: none;/, "a held Send is never handed to the browser as a pan");
+  assert.match(rule[1]!, /-webkit-touch-callout: none;/);
 });
 
 test("the ring is drawn for the chosen length, and its hint disappears when the gesture is off", () => {

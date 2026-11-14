@@ -295,10 +295,16 @@ chat's scoped draft record, saves the draft to the server at once
 spawn surface starts. In an open chat the text stays in the composer and is
 saved at once. Once kept, Send shows a check for a beat; there is no
 notification, because the result is visible in place.
-A release before the hold completes sends: touch/pen Send is admitted on
+Every press ends as exactly one of the two, split at the hold length with no
+gap (`sendPressOutcome`): a release before it sends, a release at or after it
+keeps the draft, and the release decides, so a busy page whose timer has not
+run yet still keeps a full hold as a draft. Touch/pen Send is admitted on
 `pointerup` (pointerdown is cancelled so the editor keeps focus; a finger slid
-off Send does not send), and the click that ends a hold is swallowed. An empty
-composer or a queued-message edit never starts a hold.
+off Send does not send), and the click that ends a hold is swallowed. Send has
+`touch-action: none`: with panning allowed, a finger that rolled a few pixels
+while holding was taken for a scroll, the browser cancelled the press, and the
+message was neither sent nor kept. An empty composer or a queued-message edit
+never starts a hold.
 
 **What counts as on Send.** The disc is 36px; its touch box is larger (the
 `::after` grown to `--hit-min`), and the browser also gives Send a press that

@@ -195,7 +195,7 @@ import {
 } from "@polyth/models/web-prefs";
 import { hiddenModelMatcher } from "@polyth/models";
 import { getUiSettings, setUiSettings, useUiSettings } from "../uiPrefs.ts";
-import { sendHoldMs } from "../sendHold.ts";
+import { sendHoldMs, sendPressOutcome } from "../sendHold.ts";
 import { isResizableImage, shouldAskImageSize } from "../imageUploadSize.ts";
 import ImageSizePrompt, { useImageSizeChoice } from "./ImageSizePrompt.tsx";
 import { migrateFavoritesOnce, profilesLoaded, useProfiles } from "../profiles.ts";
@@ -3317,7 +3317,10 @@ function ComposerBody({
   // their click; keyboard activation retains the normal click path.
   // Every press the browser gives to Send sends on release, wherever in its
   // touch box it landed; only a finger that left Send does not
-  // (composer/sendRelease.ts).
+  // (composer/sendRelease.ts). The release also settles the hold: shorter
+  // than the hold length sends, the length or longer keeps the draft, with no
+  // gap between them (sendPressOutcome). Send refuses panning in CSS, since a
+  // pan cancels the press and used to leave a held message neither sent nor kept.
   const primaryActivationRef = useRef<{ touch: boolean; keyboard: boolean; staleTouchClick: boolean; down: { x: number; y: number } | null }>(
     { touch: false, keyboard: false, staleTouchClick: false, down: null },
   );
@@ -3330,7 +3333,12 @@ function ComposerBody({
     && !peopleModeRef.current && !activeModeRef.current && !queueEdit && !creatingSession && !sendPending && !compactPending
     && Boolean(sessionIdRef.current || activeProjectId)
     && ((inputRef.current?.getText() ?? text).trim() !== "" || attachments.length > 0);
-  const holdRef = useRef<{ timer: ReturnType<typeof setTimeout> | null; fired: boolean }>({ timer: null, fired: false });
+  // `startedAt`/`holdMs` time the armed hold, so the release itself decides
+  // between the two outcomes (`sendPressOutcome`) rather than whichever of the
+  // timer and the release the page got to first.
+  const holdRef = useRef<{ timer: ReturnType<typeof setTimeout> | null; fired: boolean; startedAt: number | null; holdMs: number }>(
+    { timer: null, fired: false, startedAt: null, holdMs: 0 },
+  );
   const [holding, setHolding] = useState(false);
   const [parked, setParked] = useState(false);
   const parkedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -3338,35 +3346,55 @@ function ComposerBody({
     const hold = holdRef.current;
     if (hold.timer !== null) clearTimeout(hold.timer);
     hold.timer = null;
+    hold.startedAt = null;
     setHolding(false);
   }, []);
   useEffect(() => () => {
     cancelHold();
     if (parkedTimerRef.current !== null) clearTimeout(parkedTimerRef.current);
   }, [cancelHold]);
+  const completeHold = useCallback(() => {
+    const hold = holdRef.current;
+    if (hold.timer !== null) clearTimeout(hold.timer);
+    hold.timer = null;
+    hold.startedAt = null;
+    setHolding(false);
+    if (!canParkRef.current()) return;
+    hold.fired = true;
+    sendRef.current?.(undefined, undefined, false, true);
+    successFeedback();
+    announce(tr("composer.savedAsDraft"));
+    if (parkedTimerRef.current !== null) clearTimeout(parkedTimerRef.current);
+    setParked(true);
+    parkedTimerRef.current = setTimeout(() => {
+      parkedTimerRef.current = null;
+      setParked(false);
+    }, SEND_PARKED_MS);
+  }, []);
   const startHold = useCallback(() => {
     const hold = holdRef.current;
     if (hold.timer !== null) clearTimeout(hold.timer);
+    hold.timer = null;
     hold.fired = false;
+    hold.startedAt = null;
     const holdMs = sendHoldRef.current;
     if (holdMs <= 0 || !canParkRef.current()) return;
+    hold.startedAt = performance.now();
+    hold.holdMs = holdMs;
     setHolding(true);
-    hold.timer = setTimeout(() => {
-      hold.timer = null;
-      setHolding(false);
-      if (!canParkRef.current()) return;
-      hold.fired = true;
-      sendRef.current?.(undefined, undefined, false, true);
-      successFeedback();
-      announce(tr("composer.savedAsDraft"));
-      if (parkedTimerRef.current !== null) clearTimeout(parkedTimerRef.current);
-      setParked(true);
-      parkedTimerRef.current = setTimeout(() => {
-        parkedTimerRef.current = null;
-        setParked(false);
-      }, SEND_PARKED_MS);
-    }, holdMs);
-  }, []);
+    hold.timer = setTimeout(completeHold, holdMs);
+  }, [completeHold]);
+  // The release settles an armed hold: one that lasted the hold length keeps
+  // the draft now, even when a busy page has not run the timer yet; a shorter
+  // one is cancelled and the press sends. True when the press kept a draft.
+  const settleHold = useCallback((): boolean => {
+    const hold = holdRef.current;
+    if (!hold.fired && hold.timer !== null && hold.startedAt !== null
+      && sendPressOutcome(performance.now() - hold.startedAt, hold.holdMs) === "draft") completeHold();
+    const held = hold.fired;
+    cancelHold();
+    return held;
+  }, [cancelHold, completeHold]);
   const onPrimaryPointerDown = useCallback((event: PointerEvent<HTMLButtonElement>) => {
     const activation = primaryActivationRef.current;
     if (event.pointerType !== "touch" && event.pointerType !== "pen") {
@@ -3384,8 +3412,7 @@ function ComposerBody({
     startHold();
   }, [startHold]);
   const onPrimaryPointerUp = useCallback((event: PointerEvent<HTMLButtonElement>) => {
-    const held = holdRef.current.fired;
-    cancelHold();
+    const held = settleHold();
     if (event.pointerType !== "touch" && event.pointerType !== "pen") return;
     const down = primaryActivationRef.current.down;
     primaryActivationRef.current.down = null;
@@ -3401,7 +3428,7 @@ function ComposerBody({
       rect: control.getBoundingClientRect(),
       overControl: under ? control.contains(under) : null,
     })) send();
-  }, [cancelHold, send]);
+  }, [settleHold, send]);
   // Leaving ends a hold; the browser taking the touch for a pan ends the
   // gesture. No click follows a cancelled touch, so nothing is left to
   // consume: forget it, or it would swallow the next pointerless click

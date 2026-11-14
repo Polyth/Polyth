@@ -83,10 +83,16 @@ async function fixture(): Promise<string> {
     <script>
       // Sending a new chat's first message creates its session: that request is the send.
       window.__sends = 0;
+      window.__parked = false;
       window.fetch = async (url, init) => {
         if (init && init.method === "POST" && String(url).endsWith("/api/sessions")) window.__sends += 1;
         return new Response("{}", { status: 404 });
       };
+      new MutationObserver(() => {
+        if (document.querySelector(".mobile-composer-primary button.send[data-parked]")) {
+          window.__parked = true;
+        }
+      }).observe(document.documentElement, { attributes: true, subtree: true, attributeFilter: ["data-parked"] });
     </script></head>
     <body><div id="root"><div class="app"><div class="focus-conversation">
       <div class="timeline-wrap"><div class="timeline"><div class="msg assistant"><div class="bubble">Hello</div></div></div></div>
@@ -109,8 +115,22 @@ after(async () => {
   await browser?.close();
 });
 
-type Probe = { __sends: number };
-type Press = { dx: number; dy: number; slide?: { dx: number; dy: number } };
+type Probe = { __sends: number; __parked?: boolean };
+type PressOutcome = "send" | "draft" | "nothing";
+type Press = {
+  dx?: number;
+  dy?: number;
+  holdMs?: number;
+  slide?: { dx: number; dy: number };
+  drift?: { dx: number; dy: number };
+};
+type PressResult = {
+  sends: number;
+  outcome: PressOutcome;
+  parked: boolean;
+  overSend: boolean;
+  size: number;
+};
 
 /** A fresh composer holding a draft; returns Send's drawn disc. */
 async function draft(text: string): Promise<{ x: number; y: number; size: number }> {
@@ -135,31 +155,65 @@ async function draft(text: string): Promise<{ x: number; y: number; size: number
   });
 }
 
-/** One real finger: down, an optional slide, up. Returns how many sends it made. */
-async function press(text: string, { dx, dy, slide }: Press): Promise<{ sends: number; overSend: boolean; size: number }> {
+/** One real finger: down, an optional slide or drift, up. Returns how many sends it made and the classified outcome. */
+async function press(
+  text: string,
+  { dx = 0, dy = 0, holdMs, slide, drift }: Press = {},
+): Promise<PressResult> {
   assert.ok(page && cdp);
   const send = await draft(text);
   const x = send.x + dx;
   const y = send.y + dy;
-  const overSend = await page.evaluate(([x, y]) => {
-    const under = document.elementFromPoint(x!, y!);
+  const move = drift ?? slide;
+  const endX = x + (move?.dx ?? 0);
+  const endY = y + (move?.dy ?? 0);
+  const duration = holdMs ?? (move ? 100 : 60);
+
+  const overSend = await page.evaluate(([px, py]) => {
+    const under = document.elementFromPoint(px!, py!);
     return Boolean(under?.closest(".mobile-composer-primary button.send"));
-  }, [x, y]);
+  }, [endX, endY]);
+
+  const started = Date.now();
   await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
-  await page.waitForTimeout(60);
-  if (slide) {
-    const steps = Math.max(1, Math.ceil(Math.hypot(slide.dx, slide.dy) / 4));
+
+  if (move) {
+    const steps = Math.max(1, Math.min(10, Math.ceil(Math.hypot(move.dx, move.dy) / 3)));
+    const stepDelay = Math.min(30, Math.max(10, Math.floor((duration * 0.5) / steps)));
     for (let step = 1; step <= steps; step += 1) {
+      await page.waitForTimeout(stepDelay);
       await cdp.send("Input.dispatchTouchEvent", {
-        type: "touchMove", touchPoints: [{ x: x + (slide.dx * step) / steps, y: y + (slide.dy * step) / steps }],
+        type: "touchMove",
+        touchPoints: [{ x: x + (move.dx * step) / steps, y: y + (move.dy * step) / steps }],
       });
-      await page.waitForTimeout(16);
     }
   }
+
+  const elapsed = Date.now() - started;
+  const remaining = duration - elapsed;
+  if (remaining > 0) {
+    await page.waitForTimeout(remaining);
+  }
+
   await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   // Past the click the browser dispatches after the touch: it must not send again.
   await page.waitForTimeout(400);
-  return { sends: await page.evaluate(() => (window as unknown as Probe).__sends), overSend, size: send.size };
+
+  const probe = await page.evaluate(() => {
+    const parked = Boolean((window as unknown as Probe).__parked
+      || document.querySelector(".mobile-composer-primary button.send[data-parked]"));
+    const sends = (window as unknown as Probe).__sends;
+    const outcome: PressOutcome = parked ? "draft" : sends >= 1 ? "send" : "nothing";
+    return { sends, parked, outcome };
+  });
+
+  return {
+    sends: probe.sends,
+    outcome: probe.outcome,
+    parked: probe.parked,
+    overSend,
+    size: send.size,
+  };
 }
 
 test("a tap anywhere in Send's touch box sends exactly once", { skip: !CHROME }, async () => {
@@ -184,4 +238,39 @@ test("a finger that settles on Send's ring still sends; one that leaves Send doe
   assert.equal(settled.sends, 1, `pressed on the disc, lifted on the ring: sends (sent ${settled.sends})`);
   const left = await press("hello", { dx: 0, dy: 0, slide: { dx: -90, dy: -60 } });
   assert.equal(left.sends, 0, `a finger dragged away from Send does not send (sent ${left.sends})`);
+});
+
+test("touch on Send: quick tap (60 ms) sends", { skip: !CHROME }, async () => {
+  const result = await press("hello", { holdMs: 60 });
+  assert.notEqual(result.outcome, "nothing", "quick tap must not end as nothing");
+  assert.equal(result.outcome, "send", "quick tap sends");
+});
+
+// A finger rolls while it holds. With panning allowed on Send, a 20 px roll
+// was taken for a scroll and the browser cancelled the press: the message was
+// neither sent nor kept (measured with `touch-action: manipulation`).
+test("touch on Send: hold 300 ms with a 20 px drift still over Send sends", { skip: !CHROME }, async () => {
+  const result = await press("hello", { holdMs: 300, drift: { dx: 0, dy: -20 } });
+  assert.equal(result.overSend, true, "the drift ends still over Send");
+  assert.notEqual(result.outcome, "nothing", "a short hold that drifted must not end as nothing");
+  assert.equal(result.outcome, "send", "a short hold that drifted sends");
+});
+
+test("touch on Send: hold 300 ms with no drift sends", { skip: !CHROME }, async () => {
+  const result = await press("hello", { holdMs: 300 });
+  assert.notEqual(result.outcome, "nothing", "300 ms hold without drift must not end as nothing");
+  assert.equal(result.outcome, "send", "300 ms hold without drift sends");
+});
+
+test("touch on Send: hold 800 ms keeps a draft", { skip: !CHROME }, async () => {
+  const result = await press("hello", { holdMs: 800 });
+  assert.notEqual(result.outcome, "nothing", "800 ms hold must not end as nothing");
+  assert.equal(result.outcome, "draft", "800 ms hold keeps a draft");
+});
+
+test("touch on Send: hold 800 ms with a 20 px drift keeps a draft", { skip: !CHROME }, async () => {
+  const result = await press("hello", { holdMs: 800, drift: { dx: 0, dy: -20 } });
+  assert.equal(result.overSend, true, "the drift ends still over Send");
+  assert.notEqual(result.outcome, "nothing", "a full hold that drifted must not end as nothing");
+  assert.equal(result.outcome, "draft", "a full hold that drifted keeps a draft");
 });

@@ -9941,10 +9941,13 @@ body:not([data-glass="off"]) .turn-rate-limit .turn-rate-limit-model .picker-chi
    draws around Send over the person's hold length (`--send-hold-ms`, published
    by the composer from `sendHold.ts`) while the button settles a touch; once
    kept, the plane turns into a check for a beat. The platform long-press
-   callout and text selection stay out of the gesture. A reduced-motion profile
-   still gets the ring, drawn whole as the hold is armed: it is the only sign
-   that the press was read as a hold. */
-:is(.send, .composer-delivery) { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+   callout, text selection and panning stay out of the gesture: a finger that
+   rolls a few pixels while it holds would otherwise be taken for a scroll, and
+   the browser cancels a press it pans, so the message was neither sent nor
+   kept. A slide is still judged on release (composer/sendRelease.ts). A
+   reduced-motion profile still gets the ring, drawn whole as the hold is
+   armed: it is the only sign that the press was read as a hold. */
+:is(.send, .composer-delivery) { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; touch-action: none; }
 .composer-rail .send { position: relative; overflow: visible; }
 /* The ring is a box, not a bare SVG: an SVG resolves a percentage height
    against its own intrinsic box, which drew the ring as an oval on any button

@@ -4,6 +4,9 @@
 // as a draft by accident; one that is too long reads as a Send that stopped
 // working. `SEND_HOLD_OFF` is the off switch the composer reads as "always send
 // at once", so the duration survives being turned off and on again.
+// Every press ends in exactly one of the two: shorter than the hold sends,
+// the hold or longer keeps a draft (`sendPressOutcome`). Only a press the
+// person abandons — a finger slid off Send — does neither.
 
 /** Shortest hold that is still visibly deliberate. */
 export const SEND_HOLD_MIN_MS = 250;
@@ -30,4 +33,12 @@ export function parseSendHoldMs(value: unknown): number {
 /** The hold the composer arms, or `SEND_HOLD_OFF` when the gesture is off. */
 export function sendHoldMs(prefs: { sendHoldDraft: boolean; sendHoldDraftMs: number }): number {
   return prefs.sendHoldDraft ? parseSendHoldMs(prefs.sendHoldDraftMs) : SEND_HOLD_OFF;
+}
+
+/** What a press on Send that ended after `heldMs` does: the two outcomes have
+ *  no gap between them. Released before the hold length, it sends; held for
+ *  the length or longer, it keeps a draft — even when the timer that saves the
+ *  draft has not run yet because the page was busy. */
+export function sendPressOutcome(heldMs: number, holdMs: number): "send" | "draft" {
+  return holdMs > SEND_HOLD_OFF && heldMs >= holdMs ? "draft" : "send";
 }
