@@ -358,7 +358,13 @@ build's APNs environment; Android: the FCM token with `platform: "android"`).
 The page registers them with its own server (`POST /api/native-push`) over the
 same Polyth Link connection it uses for everything else, and re-sends them on
 every foreground so a rotated token arrives. The phone never talks to a push
-service itself.
+service itself. One token is one app install: registered under another person
+or another Link device identity (the phone changed account or re-paired), it
+replaces the older registrations of that token and the Live Activity rows of
+those identities, so a phone never keeps getting an account's alerts after it
+moved on. The same person and device in another Space keeps its own row.
+Duplicates a server stored before this rule go when it next starts (the
+token's most recently updated owner stays).
 
 The server sends through [Polyth's push service](#polyths-push-service)
 (`https://push.polyth.app`), which holds the app's APNs key and Firebase
@@ -389,6 +395,41 @@ alerts still appear while the app is open. APNs/FCM provider delivery, signing, 
 configuration, and device lifecycle behavior remain external-verification work;
 the repository tests do not make provider calls.
 
+### Only the device in use
+
+While a person works on one of their devices, only that device alerts them.
+Every open page tells the server over `/ws` whether its person is using it
+(`presence {clientId, active, idleMs}`, `apps/web/src/devicePresence.ts`):
+in use means the page is visible and was touched (pointer, key, wheel, touch)
+in the last 5 minutes. Opening or showing the page counts as a touch. The
+page reports when that changes, at most every 15 s while it is touched, and
+every minute while in use; hiding it reports at once.
+
+The server (`packages/server/src/devicePresence.ts`, memory only) keeps each
+report for 150 s and names, per person and Space, the device touched most
+recently. A device is the paired phone's Link endpoint, a browser's
+remembered device, or for a loopback page (the desktop app, a browser on the
+host) the install id the page keeps in local storage. Only a page allowed to
+read notifications counts: a restricted device could otherwise silence the
+person's other devices.
+
+While a device is in use:
+
+- native push and browser Web Push go only to that device (an older browser
+  subscription that does not name its device counts as another device); a
+  test push the person asks for still goes everywhere;
+- a phone that is not in use loses its Live Activity at once (the server
+  pushes `end` with immediate dismissal, and that phone's page ends it
+  locally when open);
+- every other open page plays no sound and shows no OS notification for
+  task outcomes and messages (`presence/state {activeElsewhere: true}`); the
+  inbox row, the bell and in-page cards still reach every device.
+
+With no device in use (all hidden or idle, or no page open) every device is
+alerted, as before. A restart forgets presence. The phone counts as in use
+only while the app is open, so a locked phone always defers to a device in
+use and gets the alerts once that one goes idle.
+
 ### Polyth's push service
 
 APNs and FCM deliver only for keys of the team that publishes the app, so the
@@ -402,7 +443,8 @@ each device token and each sender address. Only a server the phone registered
 with knows the token. `POLYTH_NATIVE_PUSH_RELAY_ORIGIN` points a server at
 another deployment of the same service; `off` turns it off.
 
-A server sends to all of a person's devices at once. A send the service
+A server sends to all of a person's devices at once, or only to the one in
+use ([Only the device in use](#only-the-device-in-use)). A send the service
 provably never received is tried once more after a second. That covers a
 DNS failure, a refused or unreachable connection, a connect timeout, and the
 service's own `503`, which it answers before calling any provider. A reset,
@@ -415,7 +457,8 @@ in the server's memory and goes again after 5 s, 15 s, 30 s, 1, 2 and then
 every 5 minutes until its [lifetime](native-push-content.md#push-service)
 ends. A send that succeeds on the same route sends what waits at once. A
 newer alert for the same transition replaces the waiting one, a new
-registration of the phone drops it, and at most 500 wait (oldest dropped). A
+registration of the phone or the person sitting down at another device drops
+it, and at most 500 wait (oldest dropped). A
 restart forgets them; the inbox row stays either way.
 
 Each change in the service's health is logged once (`[native-push] push
@@ -537,8 +580,10 @@ extension (shared `PolythActivityAttributes.swift`).
      (`LIVE_ACTIVITY_PUSH_TRUST_MS`) instead of two. When the shown chat is no
      longer live and no counted chat is, the server sends `end`: a finished or
      failed chat stays ten minutes, a vanished or unreadable one leaves at
-     once. Tracking survives a server restart and lapses after 8 hours (iOS
-     ends the activity then); a token APNs retires is dropped.
+     once, and so does every island while the person uses another device
+     ([Only the device in use](#only-the-device-in-use); re-evaluated as soon
+     as that changes). Tracking survives a server restart and lapses after 8
+     hours (iOS ends the activity then); a token APNs retires is dropped.
   A push cannot switch the island to another chat (that needs its title); a
   question from another chat moves only the count, and an alert still
   announces it.

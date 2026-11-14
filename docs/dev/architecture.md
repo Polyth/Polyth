@@ -536,7 +536,9 @@ answers 401 `unauthorized` without a valid session cookie, and `/ws` +
 ## WS protocol (`/ws`)
 
 Client → server: `subscribe {sessionId, afterSeq}`, `browser/subscribe
-{browserSessionId, afterRevision}`, `dictation/start {dictationId}`, and live dictation
+{browserSessionId, afterRevision}`, `presence {clientId, active, idleMs}` (whether
+the person is using this page; see [Only the device in use](../mobile/platform-behavior.md#only-the-device-in-use)),
+`dictation/start {dictationId}`, and live dictation
 audio as binary frames (`packages/dictation/src/wire.ts`; JSON/base64 audio is refused on
 the socket). A finished recording is uploaded over HTTP instead (`POST
 /api/dictation/sessions/:id/audio`, see the polyth-voice skill).
@@ -548,6 +550,8 @@ sockets only, skipping a row whose project is outside the recipient's Space or
 account project limits, as on `/api/notifications` — never buffered into
 gap-fill state; REST `after=<ts>` owns reconnect catch-up),
 `browser/frame {revision, mime, data}`, `browser/event`,
+`presence/state {activeElsewhere}` (to a page that reported presence, whenever
+its person starts or stops working on another device),
 `dictation/state|ack|transcript|error`, `error {code}`.
 
 The client (`apps/web/src/sync.ts`) resends its subscription on reconnect and dedupes by

@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { createECDH, randomBytes } from "node:crypto";
 import type { ActivityInput, DeliveryInput, Destination } from "@polyth/push-relay";
 import { createNativePushService, nativePushRoutes, nativePushTag, PUSH_SERVICE_ORIGIN, relaySender, type PushProbe, type PushSender, type SendResult } from "../src/nativePush.ts";
 
@@ -344,4 +345,171 @@ test("GET /api/native-push/delivery answers any signed-in principal for its own 
   assert.deepEqual(asked, [{ userId: alice.userId, spaceId: alice.spaceId }]);
   assert.equal((answers[0] as { phones: number }).phones, 2);
   await assert.rejects(routes(rc("/api/native-push") as never), { code: "forbidden" });
+});
+
+// --- Only the device in use (devicePresence.ts) ---
+const phoneA = { ...alice, deviceId: "phone-a", deviceEndpointId: "end_a" };
+const phoneB = { ...alice, deviceId: "phone-b", deviceEndpointId: "end_b" };
+const subA = `sub_${"a".repeat(22)}`;
+const subB = `sub_${"b".repeat(22)}`;
+const tokA = "aa".repeat(32);
+const tokB = "bb".repeat(32);
+const presenceAuthority = () => ({ hostEndpointId: async () => "host-endpoint", validate: async () => true });
+const contentKeyFor = () => {
+  const ecdh = createECDH("prime256v1");
+  ecdh.generateKeys();
+  return { p256dh: ecdh.getPublicKey().toString("base64url"), auth: randomBytes(16).toString("base64url") };
+};
+
+test("re-registering the same subscription without a content key keeps it; a new subscription without one has none", async () => {
+  const relay = new FakeSender();
+  const service = createNativePushService({ file: file(), relay, authority: presenceAuthority });
+  const msg = { userId: alice.userId, spaceId: alice.spaceId, ...send, title: "T", body: "B" };
+  try {
+    await service.register({ ...alice, subscriptionId: subA, providerToken: tokA, environment: "production", contentKey: contentKeyFor() });
+    await service.send(msg);
+    assert.equal(typeof relay.alerts[0]!.input.sealed, "string");
+    await service.register({ ...alice, subscriptionId: subA, providerToken: "cc".repeat(32), environment: "production" });
+    await service.send({ ...msg, notificationId: "n-2", transitionKey: "k2" });
+    assert.equal(typeof relay.alerts[1]!.input.sealed, "string", "same subscription id keeps its key");
+    await service.register({ ...alice, subscriptionId: subB, providerToken: tokB, environment: "production" });
+    await service.send({ ...msg, notificationId: "n-3", transitionKey: "k3" });
+    assert.equal(relay.alerts[2]!.input.sealed, undefined, "a new subscription id stores no key");
+  } finally { service.close(); }
+});
+
+test("with an active device only that phone is alerted; a non-phone device alerts none; nobody active alerts all", async () => {
+  const relay = new FakeSender();
+  let active: string | undefined;
+  const service = createNativePushService({ file: file(), relay, authority: presenceAuthority, activeDevice: () => active });
+  const tokens = () => relay.alerts.map((call) => call.destination.providerToken).sort();
+  try {
+    await service.register({ ...phoneA, subscriptionId: subA, providerToken: tokA, environment: "production" });
+    await service.register({ ...phoneB, subscriptionId: subB, providerToken: tokB, environment: "production" });
+    const to = { userId: alice.userId, spaceId: alice.spaceId, ...send };
+    await service.send(to);
+    assert.deepEqual(tokens(), [tokA, tokB].sort(), "undefined: everyone");
+    relay.alerts.length = 0;
+    active = "device:end_a";
+    assert.deepEqual(await service.send({ ...to, notificationId: "n-2", transitionKey: "k2" }), { sent: 1 });
+    assert.deepEqual(tokens(), [tokA]);
+    relay.alerts.length = 0;
+    active = "client:abcdefghijklmnop";
+    assert.deepEqual(await service.send({ ...to, notificationId: "n-3", transitionKey: "k3" }), { sent: 0 });
+    assert.equal(relay.alerts.length, 0);
+  } finally { service.close(); }
+});
+
+test("a queued retry for a phone is dropped once another device is active", async () => {
+  let clock = 1_000_000;
+  const relay = new FakeSender();
+  let active: string | undefined;
+  const service = createNativePushService({
+    file: file(), relay, now: () => clock, retryDelaysMs: [1_000], authority: presenceAuthority, activeDevice: () => active,
+  });
+  try {
+    await service.register({ ...phoneA, subscriptionId: subA, providerToken: tokA, environment: "production" });
+    relay.result = "unsent";
+    await service.send({ userId: alice.userId, spaceId: alice.spaceId, ...send });
+    assert.equal((await service.delivery(phoneA)).pending, 1);
+    active = "device:end_b";
+    clock += 1_000;
+    await service.flushRetries();
+    assert.equal(relay.alerts.length, 1, "not retried");
+    assert.equal((await service.delivery(phoneA)).pending, 0);
+  } finally { service.close(); }
+});
+
+test("the Live Activity ends at once on a phone that is not in use, and only for that account", async () => {
+  let now = 1_800_000_000_000;
+  const start = now - 30_000;
+  const relay = new FakeSender();
+  const activity: Array<{ account: string; input: ActivityInput }> = [];
+  let current = "";
+  relay.deliverActivity = async (_destination, input) => { activity.push({ account: current, input }); return "success"; };
+  let active: string | undefined;
+  const service = createNativePushService({
+    file: file(), now: () => now, apns: () => relay,
+    authority: presenceAuthority,
+    // Only Alice has a device in use; Bob never reports.
+    activeDevice: (account) => account.userId === alice.userId ? active : undefined,
+    activityViews: async (_account, ids) => new Map(ids.map((id) => [id, { status: "working" as const, lastTurnAt: start, updatedAt: start }])),
+  });
+  const token = "cd".repeat(80);
+  const shown = { state: "working", startedAt: start, waiting: 0, working: 0 };
+  const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 50));
+  try {
+    for (const [person, endpoint] of [[alice, "end_a"], [bob, "end_bob"]] as const) {
+      current = person.userId;
+      const device = { ...person, deviceEndpointId: endpoint };
+      await service.registerActivity({ ...device, providerToken: token, environment: "production" });
+      await service.trackActivity({ ...device, track: { sessionId: `chat-${person.userId}`, others: [], shown } });
+    }
+    active = "device:end_a";
+    service.presenceChanged({ userId: alice.userId, spaceId: alice.spaceId });
+    await settle();
+    await service.flushActivities();
+    assert.equal(activity.length, 0, "the phone in use keeps its island (nothing changed)");
+    current = alice.userId;
+    active = "device:somewhere_else";
+    service.presenceChanged({ userId: alice.userId, spaceId: alice.spaceId });
+    await settle();
+    assert.equal(activity.length, 1, "only Alice's tracked activity was touched");
+    assert.equal(activity[0]!.account, alice.userId);
+    assert.equal(activity[0]!.input.event, "end");
+    assert.equal(activity[0]!.input.dismissAt, Math.floor(now / 1_000));
+    assert.equal(await service.untrackActivity({ ...alice, deviceEndpointId: "end_a" }), false, "the track was removed");
+    assert.equal(await service.untrackActivity({ ...bob, deviceEndpointId: "end_bob" }), true, "Bob's track is intact");
+  } finally { service.close(); }
+});
+
+// --- One app install, one registration ---
+test("a token registered under another person or device identity replaces the older rows; the same device in another Space keeps its own", async () => {
+  const relay = new FakeSender();
+  const service = createNativePushService({ file: file(), relay, authority: presenceAuthority });
+  const subC = `sub_${"c".repeat(22)}`;
+  const subD = `sub_${"d".repeat(22)}`;
+  const toAlice = { userId: alice.userId, spaceId: alice.spaceId, ...send };
+  const toAliceOther = { userId: alice.userId, spaceId: "sp_other", ...send, transitionKey: "k-other" };
+  try {
+    await service.register({ ...phoneA, subscriptionId: subA, providerToken: tokA, environment: "production" });
+    await service.register({ ...phoneA, spaceId: "sp_other", subscriptionId: subB, providerToken: tokA, environment: "production" });
+    assert.deepEqual(await service.send(toAlice), { sent: 1 });
+    assert.deepEqual(await service.send(toAliceOther), { sent: 1 }, "another Space of the same person and device is not a duplicate");
+    // The same install re-paired under a new device identity: the old one is stale.
+    await service.register({ ...phoneB, subscriptionId: subC, providerToken: tokA, environment: "production" });
+    relay.alerts.length = 0;
+    assert.deepEqual(await service.send({ ...toAlice, transitionKey: "k2" }), { sent: 1 }, "one alert, not one per identity");
+    assert.deepEqual(relay.alerts.map((call) => call.input.subscriptionId), [subC]);
+    assert.deepEqual(await service.send({ ...toAliceOther, transitionKey: "k3" }), { sent: 0 });
+    // Then it moved to another person's account: Alice's phone row goes too.
+    await service.register({ ...bob, subscriptionId: subD, providerToken: tokA, environment: "production" });
+    assert.deepEqual(await service.send({ ...toAlice, transitionKey: "k4" }), { sent: 0 }, "Alice's alerts no longer reach Bob's phone");
+    assert.deepEqual(await service.send({ userId: bob.userId, spaceId: bob.spaceId, ...send }), { sent: 1 });
+  } finally { service.close(); }
+});
+
+test("duplicates already stored are removed on load: the token's newest owner stays, with its Live Activity", async () => {
+  const path = file();
+  const row = (who: typeof alice, subscriptionId: string, updatedAt: number) => ({
+    ...who, hostEndpointId: "host-endpoint", subscriptionId, providerToken: tokA, environment: "production", createdAt: 1, updatedAt,
+  });
+  const activity = (who: typeof alice, providerToken: string) => ({
+    ...who, hostEndpointId: "host-endpoint", providerToken, environment: "production", createdAt: 1, updatedAt: 1,
+  });
+  writeFileSync(path, JSON.stringify({
+    version: 1,
+    subscriptions: [row(alice, subA, 10), row(bob, subB, 20), { ...row(alice, subA, 5), spaceId: "sp_other", providerToken: tokB }],
+    activities: [activity(alice, "dd".repeat(32)), activity(bob, "ee".repeat(32))],
+  }));
+  const relay = new FakeSender();
+  const service = createNativePushService({ file: path, relay, authority: presenceAuthority });
+  try {
+    const stored = JSON.parse(readFileSync(path, "utf8")) as { subscriptions: Array<{ userId: string; providerToken: string }>; activities: Array<{ userId: string }> };
+    assert.deepEqual(stored.subscriptions.map((entry) => [entry.userId, entry.providerToken]), [[bob.userId, tokA], [alice.userId, tokB]],
+      "the older owner of tokA goes; Alice's row with another token stays");
+    assert.deepEqual(stored.activities.map((entry) => entry.userId), [bob.userId], "the stale identity's island row goes with it");
+    assert.deepEqual(await service.send({ userId: alice.userId, spaceId: alice.spaceId, ...send }), { sent: 0 });
+    assert.deepEqual(await service.send({ userId: bob.userId, spaceId: bob.spaceId, ...send }), { sent: 1 });
+  } finally { service.close(); }
 });

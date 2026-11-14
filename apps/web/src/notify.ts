@@ -13,6 +13,7 @@ import {
 import { isNativeMobile } from "@polyth/mobile/runtime";
 import { webPushDeliveryActive } from "./push.ts";
 import { notificationCentre } from "./notificationCentre.ts";
+import { activeElsewhere } from "./devicePresence.ts";
 import {
   nativePushLocalProjectionEnabled,
   requestNativeNotificationPermission,
@@ -318,8 +319,10 @@ export function alertPersonMessage(record: NotificationRecord): void {
     return;
   }
   if (plan.banner) showPeopleCard(record);
-  if (plan.sound) playCompletionSound();
-  if (plan.os) {
+  // The person works on another device: that one sounds and alerts, not this.
+  const away = activeElsewhere();
+  if (plan.sound && !away) playCompletionSound();
+  if (plan.os && !away) {
     const tag = peopleNotificationTag(record.sessionId);
     presentNative({ key: record.key, kind: record.kind, sessionId: record.sessionId, title: record.title, body: record.body }, tag, true);
   }
@@ -449,6 +452,8 @@ export function installNotify(): void {
       emitted.add(spec.key);
       if (emitted.size > 500) emitted.delete(emitted.values().next().value!);
 
+      // The person works on another device: only that one sounds or alerts.
+      if (activeElsewhere()) continue;
       if (ui.notifySound && (spec.kind === "completed" || spec.kind === "failed")) playCompletionSound();
       if (!ui.notifyOnComplete) continue;
       // Foreground events on the active session stay quiet by default; with

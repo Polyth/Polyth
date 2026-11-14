@@ -1,6 +1,7 @@
 // Bootstrapping + user actions: REST load, WS wiring, session lifecycle.
 import { api, errorCodeOf } from "@polyth/session/web-api";
 import { SyncClient, type SyncFreshness, type SyncStatus } from "./sync.ts";
+import { installDevicePresence } from "./devicePresence.ts";
 import { adoptPreconnectedSync, adoptedSocketOpenBefore, syncSocketUrl } from "./syncPreconnect.ts";
 import { sessionIdsToRefresh } from "./sessionStatus.ts";
 import { applyRemoteClientSettings, initSettingsSync } from "./settingsSync.ts";
@@ -1290,6 +1291,13 @@ function startSync(): void {
   });
   sync.onStatus(publishSyncStatus);
   sync.onFreshness(publishSyncFreshness);
+  // Which of the person's devices is in use: only that one is alerted.
+  const presenceSync = sync;
+  installDevicePresence({
+    sendPresence: (report) => presenceSync.sendPresence(report),
+    onOpen: (cb) => presenceSync.onOpen(cb),
+    onEvent: (cb) => presenceSync.onEvent(cb),
+  });
   window.addEventListener("online", () => sync?.setRetryHints({ online: true }));
   window.addEventListener("offline", () => sync?.setRetryHints({ online: false }));
   document.addEventListener("visibilitychange", () => {

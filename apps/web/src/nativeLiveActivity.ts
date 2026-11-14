@@ -13,6 +13,7 @@ import {
   type NativeLiveActivityContext,
 } from "@polyth/mobile/native";
 import { activeBrowserAccountId } from "./accountStorage.ts";
+import { activeElsewhere, subscribeActiveElsewhere } from "./devicePresence.ts";
 import { getSyncFreshness, openNativeAppPath, subscribeSyncFreshness } from "./init.ts";
 import {
   LiveActivityPublisher,
@@ -39,6 +40,9 @@ function presentedSessions(): SessionProjection[] {
 }
 
 function evaluate() {
+  // The person works on another device: the island leaves this phone at once
+  // (no final card) and the server stops pushing to it.
+  if (activeElsewhere()) return { snapshot: null, final: () => undefined };
   const state = getState();
   const activeId = state.activeSessionId;
   const sessions = presentedSessions();
@@ -145,6 +149,7 @@ export async function installLiveActivity(): Promise<void> {
   let removed = false;
   if (context.push) void connectPush(tracker).then((stop) => { if (removed) stop(); else stopPush = stop; });
   const unsubscribe = subscribeStore(() => publisher.schedule());
+  const stopPresence = subscribeActiveElsewhere(() => publisher.schedule());
   const stopFreshness = subscribeSyncFreshness(() => {
     const now = confirmed();
     if (wasConfirmed !== now) confirmedAt = Date.now();
@@ -165,6 +170,7 @@ export async function installLiveActivity(): Promise<void> {
   teardown = () => {
     removed = true;
     unsubscribe();
+    stopPresence();
     stopFreshness();
     stopOpen();
     stopPush();

@@ -171,6 +171,7 @@ import {
   summarizeSessionFirst,
 } from "./smallModel.ts";
 import { createWsGateway, type WsGateway } from "./ws.ts";
+import { createDevicePresence } from "./devicePresence.ts";
 import { createRouteRegistry } from "./routeRegistry.ts";
 import { createPackageLifecycle } from "./packageLifecycle.ts";
 import {
@@ -2326,9 +2327,13 @@ export async function boot(opts: BootOptions = {}) {
   // --- Web push (VAPID keys minted once into the data dir) + the
   // notifier bridging the session service's attention/turn-stopped seam.
   // Auto-accepted permissions never reach this seam, so they never push.
+  // Which device each person is using now: alerts and the phone's Live
+  // Activity go only there while they work (pages report it over /ws).
+  const devicePresence = createDevicePresence();
   const push = createPushService({
     file: `${dataDir}/push.json`,
     hasAccess: notificationAccess,
+    activeDevice: devicePresence.activeDevice,
   });
   // NTF-01: durable inbox recorded at the ONE transition-tight seam — the
   // notifier's send sink, after buildPushPayload. Order per record: JSON
@@ -2348,6 +2353,7 @@ export async function boot(opts: BootOptions = {}) {
     relay: workstationPushDisabled(process.env) ? undefined : relaySender(process.env.POLYTH_NATIVE_PUSH_RELAY_ORIGIN),
     apns: workstationPushDisabled(process.env) ? () => undefined : apnsFromDir(`${dataDir}/native-push`),
     authority: () => svc<import("./nativePush.ts").NativePushAuthority>("tunnel.native-push"),
+    activeDevice: devicePresence.activeDevice,
     // A Live Activity only ever reflects chats this person could open in the
     // navigator: same Space, visible project, readable row (as the WS fan-out).
     activityViews: async ({ userId, spaceId }, sessionIds) => {
@@ -2365,6 +2371,7 @@ export async function boot(opts: BootOptions = {}) {
     },
   });
   liveActivityTouched = nativePush.sessionTouched;
+  devicePresence.subscribe(nativePush.presenceChanged);
   // One recipient's delivery leg: durable inbox row -> recipient-filtered WS
   // broadcast -> independent Web/native push. Shared by the turn notifier and
   // by person-message notifications so neither duplicates the ordering.
@@ -3615,6 +3622,7 @@ export async function boot(opts: BootOptions = {}) {
     svc<BrowserForWs>("browser"),
     svc<DictationForWs>("dictation"),
     spaceGateway,
+    { presence: devicePresence },
   );
   // WebSocket upgrades bypass the request handler, so they repeat the
   // listener's one trusted-proxy transport decision instead of inheriting it.
@@ -3703,6 +3711,7 @@ export async function boot(opts: BootOptions = {}) {
       live?.close();
       liveActivityTouched = null;
       nativePush.close();
+      devicePresence.close();
       await runtimeStorageMaintenance.dispose();
       await packageLifecycle.stopIngress();
       httpAdmission.stop();

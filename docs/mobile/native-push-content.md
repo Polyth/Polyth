@@ -32,7 +32,13 @@ App's own copy. See [Live Activity](platform-behavior.md#live-activity-dynamic-i
     `$(AppIdentifierPrefix)com.polyth.mobile` first in `keychain-access-groups`
     so every existing item keeps its default group.
 - Lifetime: created by `enable`, replaced by a re-enable, deleted with its
-  mapping (disable, forgotten connection, fresh-install wipe).
+  mapping (disable, forgotten connection, fresh-install wipe). It belongs to
+  its subscription id: `getStatus` returns the public half with the
+  registration (iOS reads it back from the Keychain, Android from the
+  mapping), so the foreground re-send carries it, and the host keeps a stored
+  key when the same subscription id is re-sent without one (an older app's
+  status omitted it, and each foreground re-send used to wipe the key, so
+  every phone showed the generic text).
 
 ## Bridge and claim
 
@@ -43,7 +49,9 @@ App's own copy. See [Live Activity](platform-behavior.md#live-activity-dynamic-i
   contentKey? }`. The host validates `contentKey` (p256dh decodes to 65 bytes,
   starts with `0x04` and is a point on P-256; auth decodes to 16 bytes) and
   answers `invalid-input` otherwise. It stores the key with the subscription in
-  `native-push.json` (mode 0600). No key means the generic text, as before.
+  `native-push.json` (mode 0600). No key for a new subscription id means the
+  generic text, as before; no key for the stored subscription id keeps the
+  stored one.
 
 ## Sealing (host)
 

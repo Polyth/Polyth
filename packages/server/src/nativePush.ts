@@ -16,6 +16,7 @@ import type { NotificationKind, SessionProjection } from "@polyth/contracts";
 import type { ActivityInput, DeliveryInput, Destination, Environment, Platform, ProviderClass } from "@polyth/push-relay";
 import type { RouteHandler } from "./http.ts";
 import { b64u, encryptWebPush } from "./push.ts";
+import { pairedDeviceKey } from "./devicePresence.ts";
 
 import { pushTtlSeconds } from "@polyth/push-relay/providers";
 
@@ -213,6 +214,24 @@ const destinationOf = (entry: NativeSubscription): Destination => entry.platform
   : { subscriptionId: entry.subscriptionId, version: 1, platform: "ios", environment: entry.environment!, providerToken: entry.providerToken };
 const accountDeviceKey = (input: { userId: string; spaceId: string; deviceEndpointId: string }): string =>
   `${input.userId}\0${input.spaceId}\0${input.deviceEndpointId}`;
+/** One provider token is one app install. Registered again under another
+ *  person or another device identity, the older row is what that install used
+ *  before it re-paired or changed account: its alerts would reach a phone that
+ *  no longer speaks for that account. The same person and device in another
+ *  Space keeps its own row. */
+const supersedes = (current: NativeSubscription, row: NativeSubscription): boolean =>
+  row !== current && row.providerToken === current.providerToken
+  && (row.userId !== current.userId || row.deviceEndpointId !== current.deviceEndpointId);
+/** Rows left by an install's earlier identities: for each token, everything
+ *  not owned by the person and device of its most recent registration. */
+const staleDuplicates = (rows: readonly NativeSubscription[]): Set<NativeSubscription> => {
+  const latest = new Map<string, NativeSubscription>();
+  for (const row of rows) {
+    const seen = latest.get(row.providerToken);
+    if (!seen || row.updatedAt > seen.updatedAt) latest.set(row.providerToken, row);
+  }
+  return new Set(rows.filter((row) => supersedes(latest.get(row.providerToken)!, row)));
+};
 const unavailable = () => Object.assign(new Error("native push unavailable"), { code: "unavailable" });
 const invalid = (what: string) => Object.assign(new Error(`${what} is invalid`), { code: "invalid-input" });
 
@@ -396,6 +415,9 @@ export interface NativePushService {
   untrackActivity(account: { userId: string; spaceId: string; deviceId: string; deviceEndpointId: string }): Promise<boolean>;
   /** A chat's events or row changed; tracked islands re-evaluate shortly. */
   sessionTouched(sessionId: string): void;
+  /** The person started or stopped using a device: their tracked islands
+   *  re-evaluate now (one on a phone not in use leaves). */
+  presenceChanged(account: { userId: string; spaceId: string }): void;
   /** Evaluate every tracked island now (heartbeat tick; tests). */
   flushActivities(): Promise<void>;
   /** How native push reaches this person's phones and whether it works. */
@@ -452,6 +474,9 @@ export function createNativePushService(opts: {
    *  logged by `relaySender`); never a token or payload. */
   log?: (line: string) => void;
   retryDelaysMs?: readonly number[];
+  /** The device this person is using in that Space (devicePresence.ts). While
+   *  there is one, a phone that is not it gets no alert and no island. */
+  activeDevice?: (account: { userId: string; spaceId: string }) => string | undefined;
 }): NativePushService {
   const pick = (platform: Platform): { route: Route; sender: PushSender } | undefined => {
     const apns = platform === "ios" ? opts.apns?.() : undefined;
@@ -494,6 +519,19 @@ export function createNativePushService(opts: {
     mkdirSync(dirname(opts.file), { recursive: true });
     atomicWriteSync(opts.file, `${JSON.stringify(state)}\n`, 0o600);
   };
+  /** Drops an install's earlier registrations and the Live Activity rows of
+   *  those identities (same person, Space and device); true when any went. */
+  const forgetStale = (stale: ReadonlySet<NativeSubscription>): boolean => {
+    if (!stale.size) return false;
+    const keys = new Set([...stale].map(accountDeviceKey));
+    state.subscriptions = state.subscriptions.filter((row) => !stale.has(row));
+    if (state.activities) state.activities = state.activities.filter((row) => !keys.has(accountDeviceKey(row)));
+    return true;
+  };
+  // Duplicates stored before registration removed them go on the first load.
+  if (forgetStale(staleDuplicates(state.subscriptions))) {
+    try { save(); } catch { /* the next write persists it */ }
+  }
   /** The pinned host identity when this device may receive native push at all. */
   const verify = async (input: { userId: string; spaceId: string; deviceId: string; deviceEndpointId: string }): Promise<string | undefined> => {
     const authority = opts.authority?.();
@@ -503,6 +541,11 @@ export function createNativePushService(opts: {
   };
   const current = (input: { userId: string; spaceId: string; deviceId: string; deviceEndpointId: string }) =>
     state.subscriptions.find((entry) => accountDeviceKey(entry) === accountDeviceKey(input));
+  /** The person works on another device right now: this phone stays quiet. */
+  const elsewhere = (entry: { userId: string; spaceId: string; deviceEndpointId: string }): boolean => {
+    const active = opts.activeDevice?.({ userId: entry.userId, spaceId: entry.spaceId });
+    return active !== undefined && active !== pairedDeviceKey(entry.deviceEndpointId);
+  };
   const activities = (): NativeActivity[] => state.activities ?? [];
   const currentActivity = (input: { userId: string; spaceId: string; deviceEndpointId: string }) =>
     activities().find((entry) => accountDeviceKey(entry) === accountDeviceKey(input));
@@ -612,8 +655,9 @@ export function createNativePushService(opts: {
       if (pending.get(item.key) !== item) return;
       const entry = state.subscriptions.find((row) => accountDeviceKey(row) === item.deviceKey);
       // Unregistered, or registered anew (its sealed text was for the old key), or too old to show.
+      // The person has since sat down at another device: that one was told.
       if (!entry || entry.subscriptionId !== item.subscriptionId || entry.providerToken !== item.providerToken
-        || entry.contentKey?.p256dh !== item.contentKey || at >= item.deadline) { pending.delete(item.key); return; }
+        || entry.contentKey?.p256dh !== item.contentKey || at >= item.deadline || elsewhere(entry)) { pending.delete(item.key); return; }
       const result = await deliverTo(entry, item.input);
       if (pending.get(item.key) !== item) return;
       if (!result || !RETRYABLE.has(result)) { pending.delete(item.key); return; }
@@ -649,7 +693,9 @@ export function createNativePushService(opts: {
     const views = await opts.activityViews({ userId: entry.userId, spaceId: entry.spaceId }, [track.sessionId, ...track.others]);
     const focus = views.get(track.sessionId);
     const content = liveActivityContent(focus, track.others.map((id) => views.get(id)));
-    const ended = !LIVE_STATES.has(content.state) && content.waiting + content.working === 0;
+    // The person works on another device: the island leaves this phone at once.
+    const away = elsewhere(entry);
+    const ended = away || (!LIVE_STATES.has(content.state) && content.waiting + content.working === 0);
     const changed = !sameContent(content, track.sent);
     if (!changed && !ended && at - track.pushedAt < LIVE_ACTIVITY_HEARTBEAT_MS) return;
     const seconds = Math.floor(at / 1_000);
@@ -664,8 +710,9 @@ export function createNativePushService(opts: {
         waiting: content.waiting,
         working: content.working,
         staleAt: seconds + LIVE_ACTIVITY_PUSH_TRUST_MS / 1_000,
-        // A chat that is gone (or no longer readable) leaves at once; a finished one stays briefly.
-        ...(ended ? { dismissAt: focus ? seconds + LIVE_ACTIVITY_DISMISS_MS / 1_000 : seconds } : {}),
+        // A chat that is gone (or no longer readable) leaves at once, and so
+        // does an island on a phone not in use; a finished one stays briefly.
+        ...(ended ? { dismissAt: focus && !away ? seconds + LIVE_ACTIVITY_DISMISS_MS / 1_000 : seconds } : {}),
         urgent: changed || ended,
       },
     ).catch((): SendResult => "transient");
@@ -706,6 +753,12 @@ export function createNativePushService(opts: {
       settling.set(key, timer);
     }
   };
+  const presenceChanged = (account: { userId: string; spaceId: string }): void => {
+    for (const entry of activities()) {
+      if (!entry.track || entry.userId !== account.userId || entry.spaceId !== account.spaceId) continue;
+      void runActivity(accountDeviceKey(entry));
+    }
+  };
   const heartbeat = opts.activityViews ? setInterval(() => { void flushActivities(); }, 60_000) : undefined;
   heartbeat?.unref?.();
 
@@ -730,14 +783,20 @@ export function createNativePushService(opts: {
       const hostEndpointId = await verify(input);
       if (!hostEndpointId || !senderFor(platform)) throw unavailable();
       const previous = current(input);
+      // The key belongs to the subscription id: the device mints both in
+      // `enable`. A re-send of the same subscription without a key (a token
+      // rotation, a foreground re-sync from a build whose status omits it)
+      // keeps it; a new subscription without a key gets the generic text.
+      const key = contentKey ?? (previous?.subscriptionId === input.subscriptionId ? previous.contentKey : undefined);
       const entry: NativeSubscription = {
         userId: input.userId, spaceId: input.spaceId, deviceId: input.deviceId, deviceEndpointId: input.deviceEndpointId, hostEndpointId,
         subscriptionId: input.subscriptionId, providerToken: input.providerToken,
         ...(platform === "android" ? { platform } : { environment: input.environment as Environment }),
         createdAt: previous?.createdAt ?? now(), updatedAt: now(),
-        // A registration without a key clears the previous one.
-        ...(contentKey ? { contentKey } : {}),
+        ...(key ? { contentKey: key } : {}),
       };
+      // The same install under another person or device identity is stale.
+      forgetStale(new Set(state.subscriptions.filter((row) => supersedes(entry, row))));
       state.subscriptions = [...state.subscriptions.filter((row) => accountDeviceKey(row) !== accountDeviceKey(input)), entry];
       save();
       return { subscriptionId: entry.subscriptionId };
@@ -763,7 +822,10 @@ export function createNativePushService(opts: {
       let sent = 0;
       // Every device at once: a slow or unreachable phone must not delay the others.
       const firstAt = now();
-      await Promise.all(state.subscriptions.filter((row) => row.userId === input.userId && row.spaceId === input.spaceId).map(async (entry) => {
+      // While the person works on one device, only that one is told; the
+      // inbox row reaches every device either way.
+      const devices = state.subscriptions.filter((row) => row.userId === input.userId && row.spaceId === input.spaceId && !elsewhere(row));
+      await Promise.all(devices.map(async (entry) => {
         let sealed: string | undefined;
         if (entry.contentKey && typeof input.title === "string" && typeof input.body === "string") {
           try { sealed = sealNativeContent(entry.contentKey, input.title, input.body); } catch { /* generic text */ }
@@ -854,6 +916,7 @@ export function createNativePushService(opts: {
       };
     },
     sessionTouched,
+    presenceChanged,
     flushActivities,
     flushRetries,
     close() {

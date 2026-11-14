@@ -1594,6 +1594,25 @@ final class PolythPushPlugin: CAPPlugin, CAPBridgedPlugin, UNUserNotificationCen
         return prefix + Self.contentGroupSuffix
     }
 
+    /** The public half of a subscription's content key, read back from the
+     * Keychain so a status re-send registers it again (the private half never
+     * leaves the Keychain). Nil when this subscription has none. */
+    private func contentPublicKey(_ subscriptionId: String) -> [String: String]? {
+        // No access group: the search covers every group this app can reach.
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: Self.contentService,
+            kSecAttrAccount: subscriptionId,
+            kSecReturnData: true,
+            kSecMatchLimit: kSecMatchLimitOne,
+        ]
+        var output: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &output) == errSecSuccess,
+              let value = output as? Data, value.count == 48,
+              let privateKey = try? P256.KeyAgreement.PrivateKey(rawRepresentation: value.prefix(32)) else { return nil }
+        return ["p256dh": base64URL(privateKey.publicKey.x963Representation), "auth": base64URL(Data(value.suffix(16)))]
+    }
+
     private func contentRemove(_ subscriptionId: String) {
         // No access group: the delete covers every group this app can reach.
         SecItemDelete([kSecClass: kSecClassGenericPassword, kSecAttrService: Self.contentService, kSecAttrAccount: subscriptionId] as CFDictionary)
@@ -1706,6 +1725,8 @@ final class PolythPushPlugin: CAPPlugin, CAPBridgedPlugin, UNUserNotificationCen
                         var status: [String: Any] = ["state": "enabled", "subscriptionId": item.subscriptionId]
                         // Direct mode: the page re-sends it, so a rotated token reaches its server.
                         if let token = item.providerToken { status["providerToken"] = token; status["environment"] = environment }
+                        // With its content key, or the re-send would register the subscription without one.
+                        if item.providerToken != nil, let contentKey = self.contentPublicKey(item.subscriptionId) { status["contentKey"] = contentKey }
                         call.resolve(status)
                     }
                     else { call.resolve(["state": "disabled"]) }

@@ -234,3 +234,26 @@ test("the claim bridge validates the content key, drops an invalid one, and keep
   assert.doesNotMatch(source, /privateKey|private_key|pkcs8/i);
   assert.match(web, /claim: \(claim\) => request<\{ subscriptionId: string \}>\("\/api\/native-push", json\("POST", \{ \.\.\.claim \}\)\)/);
 });
+
+test("both platforms return the content key's public half in getStatus, so a re-send keeps it", async () => {
+  const [ios, android] = await Promise.all([
+    readFile(new URL("../ios/App/App/AppDelegate.swift", import.meta.url), "utf8"),
+    readFile(new URL("../android/app/src/main/java/com/polyth/mobile/PolythPushPlugin.java", import.meta.url), "utf8"),
+  ]);
+  assert.match(ios, /func contentPublicKey\(_ subscriptionId: String\) -> \[String: String\]\?/);
+  assert.match(ios, /status\["contentKey"\] = contentKey/);
+  assert.match(ios, /self\.contentPublicKey\(item\.subscriptionId\)/);
+  assert.match(android, /mapping\.optString\("contentPublic", ""\)/);
+  assert.match(android, /mapping\.optString\("contentAuth", ""\)/);
+  assert.match(android, /result\.put\("contentKey", new JSObject\(\)\.put\("p256dh", contentPublic\)\.put\("auth", contentAuth\)\)/);
+});
+
+test("refreshNativePushStatus keeps the content key inside the registration, never on the status", async () => {
+  const source = await readFile(new URL("../src/nativePush.ts", import.meta.url), "utf8");
+  assert.match(source, /const registration = parseNativePushClaim\(raw\)/);
+  assert.match(source, /providerToken: _token, environment: _environment, platform: _platform, contentKey: _contentKey, \.\.\.status/);
+  assert.match(source, /\{ \.\.\.status, registration \}/);
+  const claim = { subscriptionId: `sub_${"s".repeat(22)}`, providerToken: "ab".repeat(32), environment: "production" };
+  const key = { p256dh: Buffer.alloc(65, 4).toString("base64url"), auth: Buffer.alloc(16, 1).toString("base64url") };
+  assert.deepEqual(parseNativePushClaim({ ...claim, contentKey: key })?.contentKey, key, "a valid key stays on the registration");
+});

@@ -145,7 +145,7 @@ test("send seals for an entry with a key and omits sealed without one", async ()
   assert.deepEqual(Object.keys(plain.delivered[0]!).sort(), ["kind", "notificationId", "subscriptionId", "tag", "version"]);
 });
 
-test("a key persists (0600, survives restart) and a re-registration without one clears it", async () => {
+test("a key persists (0600, survives restart); a re-send of its subscription without one keeps it, a new subscription clears it", async () => {
   const device = newKey();
   const first = harness();
   await register(first.service, device.key);
@@ -153,9 +153,16 @@ test("a key persists (0600, survives restart) and a re-registration without one 
   const restarted = harness(first.persisted);
   await restarted.service.send(sendInput);
   assert.ok(typeof restarted.delivered[0]!.sealed === "string");
+  // The foreground re-send of the same subscription (an app whose status
+  // omits the key) must not wipe it: that left every phone on generic text.
   await register(restarted.service);
   await restarted.service.send(sendInput);
-  assert.equal("sealed" in restarted.delivered[1]!, false);
+  assert.ok(typeof restarted.delivered[1]!.sealed === "string");
+  assert.deepEqual(JSON.parse(open(b(restarted.delivered[1]!.sealed as string), device.priv, device.pub, device.auth).toString()), { v: 1, title: "Done", body: "It worked" });
+  // A re-enable mints a new subscription id; without a key it gets none.
+  await restarted.service.register({ ...alice, subscriptionId: `sub_${"B".repeat(22)}`, providerToken: "ab".repeat(32), environment: "production" });
+  await restarted.service.send(sendInput);
+  assert.equal("sealed" in restarted.delivered[2]!, false);
   assert.equal("contentKey" in (JSON.parse(readFileSync(first.persisted, "utf8")).subscriptions[0] as object), false);
 });
 

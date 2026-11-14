@@ -18,6 +18,7 @@ import { projectVisibleToUser } from "./accountLimits.ts";
 import type { Broadcaster } from "./sessions.ts";
 import type { SpaceGateway } from "./spaces.ts";
 import type { NotificationAccount } from "./notifications.ts";
+import { presenceDeviceKey, type DevicePresence } from "./devicePresence.ts";
 import { parseSpaceCookie } from "./spaces.ts";
 import { sessionSummary } from "./sessionSummary.ts";
 import { BROADCAST_LIFECYCLES, rowForReader, sessionAccess } from "./sessionSharing.ts";
@@ -131,6 +132,10 @@ interface Sub {
   /** Immutable identity resolved at WS attach; never a client-provided id. */
   notificationAccount: NotificationAccount | null;
   sessions: SessionService;
+  /** The device this page reported presence for (devicePresence.ts). */
+  presenceDevice?: string;
+  /** What this page was last told: is its person working on another device? */
+  presenceElsewhere?: boolean;
 }
 
 const MAX_MESSAGES_PER_SECOND = 20;
@@ -189,6 +194,8 @@ export interface WsGatewayOptions {
   bufferedAmount?: (ws: WebSocket) => number;
   maxCanonicalFrameBytes?: number;
   streamBatchMs?: number;
+  /** Which device each person is using; pages report it with `presence`. */
+  presence?: DevicePresence;
 }
 
 export interface WsGateway extends Broadcaster {
@@ -452,6 +459,28 @@ export function createWsGateway(
     }
   };
 
+  // --- Device presence: a page that reported which device it is learns
+  // whether its person is working on another one, so it keeps quiet there.
+  const presence = options?.presence;
+  const sendPresenceState = (ws: WebSocket, sub: Sub): void => {
+    if (!presence || !sub.presenceDevice) return;
+    const account = currentNotificationAccount(ws, sub);
+    if (!account) return;
+    const active = presence.activeDevice(account);
+    const elsewhere = active !== undefined && active !== sub.presenceDevice;
+    if (sub.presenceElsewhere === elsewhere) return;
+    sub.presenceElsewhere = elsewhere;
+    send(ws, { type: "presence/state", activeElsewhere: elsewhere });
+  };
+  const stopPresence = presence?.subscribe((account) => {
+    if (closed) return;
+    for (const [ws, sub] of [...clients]) {
+      const own = sub.notificationAccount;
+      if (!sub.presenceDevice || !own || own.userId !== account.userId || own.spaceId !== account.spaceId) continue;
+      sendPresenceState(ws, sub);
+    }
+  });
+
   const requireCap = (ws: WebSocket, sub: Sub, capability: string): boolean => {
     const live = currentPrincipal(ws, sub);
     if (!allowWsCapability(live, capability)) {
@@ -553,6 +582,7 @@ export function createWsGateway(
       attachAuth.pairedSockets?.unbind(ws);
       clearStreamBuffer(sub);
       clients.delete(ws);
+      presence?.drop(ws);
       syncBrowserVisibility(sub.browserSessionId);
     });
     ws.on("message", async (raw) => {
@@ -565,6 +595,7 @@ export function createWsGateway(
         browserSessionId?: string; afterRevision?: number;
         tabId?: string; visible?: boolean; quality?: number;
         dictationId?: string;
+        clientId?: unknown; active?: unknown; idleMs?: unknown;
       } = {};
 
       try {
@@ -656,7 +687,24 @@ export function createWsGateway(
         if (!dto) send(ws, { type: "dictation/error", dictationId: msg.dictationId, code: "not-found" });
         else send(ws, { type: "dictation/state", dictationId: dto.id, session: dto });
         return;
-      }      if (msg.type === "browser/subscribe" && browser) {
+      }
+      if (msg.type === "presence") {
+        // Only a page that may receive this person's notifications can claim
+        // to be the device they use: otherwise a restricted device would
+        // silence the others and nothing would be told at all.
+        if (!presence) return;
+        const live = currentPrincipal(ws, sub);
+        const account = currentNotificationAccount(ws, sub);
+        if (!account || !allowWsCapability(live, REMOTE_CAPABILITY.coreNotificationsRead)) return;
+        const device = presenceDeviceKey(live, msg.clientId);
+        if (!device) return;
+        if (sub.presenceDevice !== device) sub.presenceElsewhere = undefined;
+        sub.presenceDevice = device;
+        presence.report(ws, account, device, msg.active === true, typeof msg.idleMs === "number" ? msg.idleMs : 0);
+        sendPresenceState(ws, sub);
+        return;
+      }
+      if (msg.type === "browser/subscribe" && browser) {
         if (!requireCap(ws, sub, REMOTE_CAPABILITY.browserUse)) return;
         const nextId = msg.browserSessionId ?? null;
         if (nextId && !canViewBrowser(sub, nextId)) {
@@ -1114,6 +1162,8 @@ export function createWsGateway(
       if (closed) return;
       closed = true;
       clearInterval(flusher);
+      stopPresence?.();
+      for (const ws of clients.keys()) presence?.drop(ws);
       for (const disposal of browserDisposals.splice(0)) {
         try { disposal.dispose(); } catch { /* already disposed */ }
       }

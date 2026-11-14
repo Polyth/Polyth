@@ -155,6 +155,12 @@ public final class PolythPushPlugin extends Plugin {
                 // The current registration, re-sent on foreground so a rotated FCM token reaches the server.
                 result.put("state", "enabled"); result.put("subscriptionId", mapping.optString("subscriptionId"));
                 result.put("platform", "android"); result.put("providerToken", mapping.optString("providerToken"));
+                // With its content key's public half, or the re-send would register the subscription without one.
+                String contentPublic = mapping.optString("contentPublic", "");
+                String contentAuth = mapping.optString("contentAuth", "");
+                if (!contentPublic.isEmpty() && !contentAuth.isEmpty()) {
+                    result.put("contentKey", new JSObject().put("p256dh", contentPublic).put("auth", contentAuth));
+                }
             }
         } catch (Exception ignored) {
             result.put("state", "failed"); result.put("reason", "registration-failed");
