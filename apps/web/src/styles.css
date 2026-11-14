@@ -14996,17 +14996,14 @@ color: var(--muted);
     animation: island-swap var(--motion-normal) var(--motion-ease);
   }
   .mobile-session-title-island[data-leading-indicator] .mobile-island-text { grid-column: 2; }
+  /* One line, always, cut with an ellipsis at the end (the marks before the
+     name stay): every chat's title sits at the same height in the bar. */
   .mobile-island-title-text {
     min-width: 0;
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
+    display: block;
     overflow: hidden;
-    max-height: calc(var(--font-session-title-compact-lh) * 2);
-    white-space: normal;
-    overflow-wrap: anywhere;
-    text-wrap: balance;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
   .mobile-island-text > * { max-width: 100%; }
   /* Package marks lead the name inside its text: one centred group on the
@@ -15030,19 +15027,6 @@ color: var(--muted);
     font-size: var(--font-meta);
     font-weight: 400;
     line-height: var(--font-meta-lh);
-  }
-  /* With that line the name keeps to one line, so both fit the bar. */
-  .mobile-island-text:has(> .mobile-island-owner) .mobile-island-title-text {
-    display: block;
-    max-height: none;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-  }
-  .mobile-session-floats[data-title-mode="button"] .mobile-island-title-text {
-    display: block;
-    max-height: none;
-    white-space: nowrap;
-    text-overflow: ellipsis;
   }
   .mobile-session-selector > .mobile-island-dot { grid-column: 1; justify-self: center; }
   .mobile-island-dot {

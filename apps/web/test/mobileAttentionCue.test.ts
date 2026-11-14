@@ -174,6 +174,9 @@ test("mobile header title has no arrow, keeps its context on a quiet line, and k
   assert.match(styles, /\.mobile-island-title-text > \.session-header-status \{[^}]*display: inline-flex;[^}]*color: var\(--muted\);/);
   assert.match(styles, /\.mobile-island-title-text > \.session-header-status > \* \{ color: inherit; \}/);
   assert.match(styles, /\.mobile-island-title-text > \.session-header-status svg \{ width: \.85em; height: \.85em;/);
+  // One line, always, cut at the end: every chat's title sits at the same height.
+  assert.match(styles, /\.mobile-island-title-text \{[^}]*display: block;[^}]*white-space: nowrap;[^}]*text-overflow: ellipsis;/);
+  assert.doesNotMatch(styles, /\.mobile-island-title-text \{[^}]*line-clamp/);
   assert.match(styles, /\.mobile-island-text > \.mobile-island-owner \{[^}]*color: var\(--muted\);[^}]*font-size: var\(--font-meta\);/);
 
   // Title reserves a leading column only for an attention dot.

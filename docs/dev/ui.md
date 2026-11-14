@@ -1791,7 +1791,8 @@ host.slots.register({
   session status control (on the phone inline before the title text, like a
   browser address pill's lock, in the same centred line and baseline; marks
   take a muted ink and a glyph sized from the title, and the title has no
-  dropdown arrow); `Header.tsx` also mounts `app.header.center`;
+  dropdown arrow and always keeps to one line, cut with an ellipsis at the end, so it sits at
+  the same height for every chat); `Header.tsx` also mounts `app.header.center`;
   `StatusBar.tsx` mounts `app.statusbar.leading/trailing` while the opt-in
   status bar is on (§4.10); `App.tsx` mounts `app.layers` once over the whole
   shell for package-owned floating layers (voice mode, or a renderless
@@ -4480,9 +4481,9 @@ page's package registers an onboarding tour (`settingsPageToPackageId` +
 workspace package registers its own tour from its web entry with
 `host.onboarding.registerTour` (disposed with the package); only framework
 pages and external managed packages keep host-registered tours in
-`packages/onboarding/builtinTours.ts`. Pages
+`apps/web/src/packages/onboarding/builtinTours.ts`. Pages
 do not render their own help buttons. A built-in tour step may carry a
-web-local `link: { settingsPage, label }` (`packages/onboarding/types.ts`);
+web-local `link: { settingsPage, label }` (`apps/web/src/packages/onboarding/types.ts`);
 the overlay renders it as a button that completes the tour and calls
 `openSettingsPage`. The Providers & Models tour opens on such a step, pointing
 new accounts at Harnesses (installing more harnesses is optional).
@@ -5383,7 +5384,7 @@ beside a toolbar) stays in place.
   its countdown only when the patch names a `duration`. Ticks (progress, a
   running clock, a busy flag) go through `update`, a new stage through `show`.
 - A package's `host.notifications` is scoped by its activation
-  (`packages/activation.ts`): its ids are stored as `<package>:<id>` (the
+  (`apps/web/src/packages/activation.ts`): its ids are stored as `<package>:<id>` (the
   handle reports the package's own id), it can update or dismiss only what it
   showed, everything it left on screen is dismissed when it is disposed, and
   `show` after disposal is refused.

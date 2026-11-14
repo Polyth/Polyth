@@ -280,7 +280,7 @@ test("glass overlays and transparent session titles obey effect and text setting
         };
       });
       assert.equal(title.height, height, `menu ${menuScale}, chat ${chatScale}: header follows menu size`);
-      assert.equal(title.textHeight, title.lineHeight * 2, "long title stays at two complete lines");
+      assert.equal(Math.round(title.textHeight), Math.round(title.lineHeight), "a long title keeps to one line and ends in an ellipsis");
       assert.ok(title.clearance >= title.height, "transcript reserves the taller header's space");
       assert.ok(title.runway >= title.height, "chat text scaling does not shrink the transcript's top runway");
       assert.equal(title.background, "rgba(0, 0, 0, 0)");

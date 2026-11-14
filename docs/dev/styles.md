@@ -208,7 +208,7 @@ when the locale switches between LTR and RTL.
 | `--control-pad-x` | Horizontal padding for standard controls. |
 | `--control-gap` | Gap between a control's glyph and its label. |
 | `--mobile-island-height` | Density-scaled floating mobile navigation height. |
-| `--mobile-session-header-height` | Phone session-title touch height and conversation clearance, including two lines at the selected menu text size. |
+| `--mobile-session-header-height` | Phone session-title touch height and conversation clearance, room for the one-line title plus the owner's line at the selected menu text size, so it stays the same height for every chat. |
 | `--activity-row-height` | Density-scaled compact activity/tool row height. |
 | `--agent-dock-height` | Density-scaled expanded active-agent dock height. |
 | `--composer-height` | Density-scaled resting conversation composer height. |

@@ -127,7 +127,7 @@ Title authority stays canonical. A harness declares `title: "native"` only when 
 
 Runtime session lists retain native receipts even when a semantic title is unavailable. Their title must then be a recognized placeholder, such as `New session`, so polling leaves canonical fallback and Custom Titles eligible. The Claude adapter reports only the SDK's `customTitle` (a `/rename` title or Claude Code's own AI title, written a few seconds into the first turn) and uses this placeholder until one exists; `SDKSessionInfo.summary` falls back to the last or first prompt and is never a title. It reads the title after each completed request, at the turn's result and whenever the session list is polled. An engine label must not claim native-title authority. When a Custom Titles generator fails, the server uses a harness's native title before a truncated prompt.
 
-New sessions persist `{ mode: "auto" }` separately from `resolvedHarnessId`. Auto uses deterministic priority and ID ordering (shipped defaults: Claude Code 0, OpenCode 10, Pi 20, Antigravity 30, Codex 50, DeepSeek 55, Cursor 60, Command Code 65; Harness Settings saves per-Space overrides), and stays on the persisted route. A Polyth-owned bundled runtime — the desktop's downloaded OpenCode — registers with a fallback priority, so Auto probes an enabled, installed and authenticated harness that the user has on the host first and keeps the download for when none is runnable; an explicit pin or a saved preference still overrides it. An explicit pin never silently selects another harness. Auto can try another ready factory when constructing a new, unbound session fails before native creation. Persisted routes do not use this fallback path.
+New sessions persist `{ mode: "auto" }` separately from `resolvedHarnessId`. Auto uses deterministic priority and ID ordering (shipped defaults: Claude Code 0, OpenCode 10, Pi 20, Antigravity 30, Codex 50, DeepSeek 55, GitHub Copilot 55, Cursor 60, Command Code 65; Harness Settings saves per-Space overrides), and stays on the persisted route. A Polyth-owned bundled runtime — the desktop's downloaded OpenCode — registers with a fallback priority, so Auto probes an enabled, installed and authenticated harness that the user has on the host first and keeps the download for when none is runnable; an explicit pin or a saved preference still overrides it. An explicit pin never silently selects another harness. Auto can try another ready factory when constructing a new, unbound session fails before native creation. Persisted routes do not use this fallback path.
 
 A synchronized native leg can be reattached where the adapter supports verified continuity. Returning A → B → A creates a fresh A leg. A mismatch between the leg's effective dialogue checkpoint and current canonical history also forces fresh continuity. Profile intent survives switching, while the old profile's model/account selection is cleared. Model catalogs come from the selected session runtime; harness identity is not encoded into `providerID`.
 
@@ -725,7 +725,7 @@ endpoint, and opens Customize straight into the editor for the new project
 copy. Space and project edits use revisions;
 foreign-Space project or installation IDs fail without revealing their existence.
 
-Every server has an owner ([Spaces §14.6](spaces-and-tenancy.md#146-stage-5--remaining-stores-mcp-servers-implemented)).
+Every server has an owner ([Spaces §14.6](spaces-and-tenancy.md#146-stage-5--remaining-stores-implemented)).
 Global and project servers belong to the Space: only Space admins add, edit,
 remove, check or override them; other members see them with arguments, URL
 paths/queries and secret values withheld (`redacted`, `canManage: false`). A
@@ -795,8 +795,9 @@ and only native absence/disabled readback can confirm negative intent where that
 readback exists. User-owned provider files are not rewritten.
 
 The deterministic cross-harness check is
-`packages/server/test/projectMcpHarnesses.test.ts`; protocol and isolation checks
-are `mcpProbe.test.ts` and `mcpManagement.test.ts` in the same test directory. UI
+`packages/backend-acp/test/hostProjectMcpHarnesses.test.ts`; protocol and isolation
+checks are `packages/server/test/mcpProbe.test.ts` and
+`packages/server/test/mcpManagement.test.ts`. UI
 interaction checks live in `packages/harness-runtime/test/mcpPage.test.ts`.
 Run them with Node's explicit `--experimental-strip-types --test` under the
 [bounded verification runner](../agents/verification.md). Installed native process

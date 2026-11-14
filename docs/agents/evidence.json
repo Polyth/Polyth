@@ -114,22 +114,16 @@
       "observation": "CI versus Link test ownership and explicit baseline exclusion"
     },
     {
-      "path": ".github/workflows/android-release.yml",
-      "gitBlob": "74213521e79a520090a14abf768aaa4c4d0f59b7",
+      "path": ".github/workflows/build-apps.yml",
+      "gitBlob": "97220574c92398efce687e9d6492b7e520501cc9",
       "reviewCoverage": "tree-only",
-      "observation": "Release workflow exists; read before release edits"
+      "observation": "Manual unpublished app builds (replaced android-release.yml and desktop-release.yml); never publishes"
     },
     {
-      "path": ".github/workflows/desktop-release.yml",
-      "gitBlob": "4d51656189002ff6cd3c4409cf2c34b11d596a04",
+      "path": ".github/workflows/release.yml",
+      "gitBlob": "5f961d8f3b489ed8a205ea90233002a2a908d3ad",
       "reviewCoverage": "tree-only",
-      "observation": "Release workflow exists; not audited end to end"
-    },
-    {
-      "path": ".github/workflows/polyth-link.yml",
-      "gitBlob": "d753eca09f3c8a50121a5e8debea4f1e78cc304d",
-      "reviewCoverage": "tree-only",
-      "observation": "Dedicated Link validation exists"
+      "observation": "Manual master-only publication workflow; Link cargo tests now run as ci.yml jobs (polyth-link.yml is gone). Read before release edits"
     },
     {
       "path": "docs/dev/styles.md",
