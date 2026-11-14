@@ -8,6 +8,7 @@ import { prefetchAuthStatus } from "./authPrefetch.ts";
 import { authBootstrapPhase } from "./authBootstrap.ts";
 import { preconnectSync, syncSocketUrl } from "./syncPreconnect.ts";
 import { installBuildFreshnessWatcher } from "./buildFreshness.ts";
+import { installInputModality } from "./inputModality.ts";
 import { offerWebUpdate } from "./webUpdateNotice.ts";
 import {
   isNativeMobile,
@@ -55,6 +56,9 @@ import "./chatMotion.ts";
 // frozen WebView learns of the server's freshly rebuilt shell; the healthy
 // page offers it (Reload / Later) instead of reloading under the person.
 installBuildFreshnessWatcher(undefined, { offerReload: offerWebUpdate });
+
+// Touch vs keyboard, read by CSS that hides script-restored focus rings after a tap.
+installInputModality();
 
 // Last resort: a page that never rendered must neither hide behind its veil
 // forever nor lift it onto an empty page (launchFailsafe.ts). Armed before the

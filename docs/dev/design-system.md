@@ -547,7 +547,12 @@ on touch. Keyboard: every flow reachable by Tab; arrow keys inside menus,
 tabs, and listboxes; visible `:focus-visible` ring everywhere (global rule).
 The one exception is a search field that owns focus for its whole surface
 (command palette, picker filter wells): it signals focus with its glyph and
-fill instead of a ring.
+fill instead of a ring. `<html data-input-modality="pointer|keyboard">`
+(`apps/web/src/inputModality.ts`) records the last input: the phone header
+icon buttons (☰, ✎, ⧉) show keyboard focus as the accent glyph colour, not a
+ring (the island clips an outline), and drop even that in pointer modality,
+as does the title's ring: WebKit matches `:focus-visible` when a closing sheet
+hands focus back from script after a tap. Any non-modifier key restores it.
 
 ## 14. Adoption and deprecation
 

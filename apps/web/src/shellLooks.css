@@ -1328,7 +1328,7 @@ body[data-shell-look="paper"]:not(#\#) .mobile-nav-search {
 }
 
 /* At rest only: pressed and open islands keep the shared accent glyph. */
-body[data-shell-look="paper"]:not(#\#) :is(.mobile-float-navigation, .mobile-float-actions) .ui-icon-btn:not(:active, [aria-expanded="true"]) {
+body[data-shell-look="paper"]:not(#\#) :is(.mobile-float-navigation, .mobile-float-actions) .ui-icon-btn:not(:active, [aria-expanded="true"], :focus-visible) {
   color: var(--text-dim);
 }
 
@@ -2941,7 +2941,7 @@ body[data-shell-look="editorial"]:not(#\#) .mobile-nav-project-name {
 }
 
 /* At rest only: pressed and open islands keep the shared accent glyph. */
-body[data-shell-look="editorial"]:not(#\#) :is(.mobile-float-navigation, .mobile-float-actions) .ui-icon-btn:not(:active, [aria-expanded="true"]) {
+body[data-shell-look="editorial"]:not(#\#) :is(.mobile-float-navigation, .mobile-float-actions) .ui-icon-btn:not(:active, [aria-expanded="true"], :focus-visible) {
   color: var(--text-dim);
 }
 

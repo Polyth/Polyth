@@ -20072,11 +20072,24 @@ body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="s
     padding-inline: var(--space-1);
   }
 
-  body:not([data-shift-held]) .mobile-float-navigation > .ui-icon-btn:focus-visible,
-  body:not([data-shift-held]) .mobile-float-actions > .ui-icon-btn:focus-visible {
-    outline: 2px solid var(--focus-ring);
-    outline-offset: 3px;
-    box-shadow: 0 0 0 4px var(--focus-wash);
+  /* Keyboard focus is the glyph's accent, like a press: the island clips
+     its content, so an outline showed as a cut-off frame and a pale plate. */
+  :is(.mobile-float-navigation, .mobile-float-actions) > .ui-icon-btn:focus-visible {
+    outline: none;
+    box-shadow: none;
+    color: var(--accent-text);
+  }
+
+  /* A sheet or the Workspace closing hands focus back to its header control
+     from script, and WebKit then matches :focus-visible even after a tap: the
+     ✎/⧉/☰ glyph wore a dark ring until the next touch. After a pointer or
+     touch the focus cue stays off (inputModality.ts); any key brings it back. */
+  html[data-input-modality="pointer"] :is(.mobile-float-navigation, .mobile-float-actions) > .ui-icon-btn:focus-visible:not(:active, [aria-expanded="true"]) {
+    color: var(--text-dim);
+  }
+  html[data-input-modality="pointer"] .mobile-session-title-island .mobile-session-selector:focus-visible {
+    outline: none;
+    box-shadow: none;
   }
 }
 
