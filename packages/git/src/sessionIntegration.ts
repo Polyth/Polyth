@@ -139,10 +139,13 @@ export interface IsolationTestHooks {
 
 export interface IsolationIntegrationDeps {
   git: GitService;
-  generateCommitMessage?: (session: SessionProjection, root: string) => Promise<string>;
+  /** Writes the integration commit's message for the change staged at
+   *  `root`, which lands on `context.targetBranch`. */
+  generateCommitMessage?: (session: SessionProjection, root: string, context: { targetBranch: string }) => Promise<string>;
   /** How long integration waits for a generated message before it commits
-   *  with the deterministic fallback. Defaults to COMMIT_MESSAGE_WAIT_MS. */
-  commitMessageWaitMs?: number;
+   *  with the deterministic fallback. Defaults to COMMIT_MESSAGE_WAIT_MS; a
+   *  function lets a style that asks for a body wait longer. */
+  commitMessageWaitMs?: number | ((session: SessionProjection) => number | Promise<number>);
   managed?: ManagedWorktreeService;
   sessions: IsolationSessionApi;
   projects: IsolationProjectApi;
@@ -256,6 +259,13 @@ const unpublished = (error: unknown): unknown => {
  *  while it waits, so a slow or unavailable small model must never block or
  *  fail the merge itself. */
 const COMMIT_MESSAGE_WAIT_MS = 12_000;
+
+/** Note an AI target repair on the title line, so a message with a body
+ *  keeps its body intact. */
+export const markTargetRepair = (message: string): string => {
+  const [title = "", ...body] = message.split("\n");
+  return [`${title.trimEnd()} (AI target repair)`, ...body].join("\n");
+};
 
 const repairRef = (sessionId: string): string => `${REPAIR_REF_PREFIX}${sessionId}`;
 const receiptRefName = (sessionId: string): string => `${RECEIPT_REF_PREFIX}${sessionId}`;
@@ -2076,12 +2086,19 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
       ? session.title.trim()
       : `Merge isolated session into ${isolation.targetBranch}`;
     if (!deps.generateCommitMessage) return fallback;
+    const configuredWait = deps.commitMessageWaitMs;
+    const waitMs = typeof configuredWait === "function"
+      ? await Promise.resolve().then(() => configuredWait(session)).catch(() => COMMIT_MESSAGE_WAIT_MS)
+      : configuredWait ?? COMMIT_MESSAGE_WAIT_MS;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timedOut = new Promise<"timeout">((resolveTimeout) => {
-      timer = setTimeout(() => resolveTimeout("timeout"), deps.commitMessageWaitMs ?? COMMIT_MESSAGE_WAIT_MS);
+      timer = setTimeout(() => resolveTimeout("timeout"), waitMs);
     });
     try {
-      const generated = await Promise.race([deps.generateCommitMessage(session, integrationPath), timedOut]);
+      const generated = await Promise.race([
+        deps.generateCommitMessage(session, integrationPath, { targetBranch: isolation.targetBranch }),
+        timedOut,
+      ]);
       if (generated === "timeout") {
         isolationLog("commit-message-fallback", { sessionId: session.id, reason: "timeout" });
         return fallback;
@@ -2162,7 +2179,7 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
       const staged = await git.diff(integrationPath, { staged: true });
       if (!staged.diff.trim()) return { kind: "empty" };
       const baseMessage = await commitMessageFor(session, isolation, integrationPath);
-      const message = isolation.targetRepair ? `${baseMessage} (AI target repair)` : baseMessage;
+      const message = isolation.targetRepair ? markTargetRepair(baseMessage) : baseMessage;
       const identity = await commitIdentityFor(isolation.targetPath);
       const committed = await git.commitStagedTree(integrationPath, message, identity);
       const intent: IsolationPublishIntent = {

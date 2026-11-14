@@ -865,17 +865,38 @@ runtime test does not establish native process release or device behavior.
 ### Isolated integration commit messages
 
 Git generates the integration commit message from the staged squash diff before
-publishing the target ref. Source Control settings select the session's effective
-model (default), the account's configured small model, or a custom harness/model
-through the shared `@polyth/models/model-picker`. The selection persists within
-the Space via `/api/git/commit-settings`, with revision checks on updates. It
-applies to isolated integration; the ordinary Git message suggestion keeps its
-small-model default. The message is best-effort: integration waits at most
-`COMMIT_MESSAGE_WAIT_MS` (12 s) and, on a timeout or generator failure, commits
-with the session title (or `Merge isolated session into <target>`) and logs
-`isolation commit-message-fallback`. An unavailable model never blocks or fails
-the merge. Empty integrations do not invoke the generator. AI target repair retains its
-commit-message suffix.
+publishing the target ref. The Space's commit settings
+(`packages/git/src/commitSettings.ts`, `/api/git/commit-settings`, revision-checked;
+GET also returns `canEdit`, PUT is Space-admin only because every member's
+integrations run with them) hold two things:
+
+- **Model:** the session's effective model (default), the account's small model,
+  or a custom harness/model through the shared `@polyth/models/model-picker`.
+- **Style** (optional; absent = built-in rule): a free-text `titleRule` and
+  `detailsRule` (each trimmed, at most `COMMIT_RULE_MAX` = 1500 characters;
+  empty = built-in), `details` (`auto` | `always` | `never`) and `matchHistory`
+  (show the model the target branch's 12 latest commit subjects as examples).
+  An all-default style is stored as no style. Settings → Source control →
+  Workflow → Commit messages offers ready-made styles (Standard, [Type] Title,
+  Conventional Commits) that only fill the two rule fields client-side.
+
+`buildCommitMessagePrompt` (`packages/git/src/serverEntry.ts`) keeps the old
+built-in prompt byte-for-byte when there is no style and no context. Otherwise
+the rules are instructions, and the chat title, target branch, recent subjects
+and diff are tagged data. Following history without a title rule replaces the
+built-in title line with "follow the form of the recent commits", so the
+history is not outranked by the default rule. A style that wants a body raises the output budget
+from 120 to 400 tokens; `never` keeps only the first line of the answer.
+
+The same style drives **Generate** in Source control; its model is the custom
+model when one is chosen, otherwise the small model (no chat is in play there).
+The message is best-effort: integration waits at most 12 s (25 s when the style
+wants a body, `commitMessageWaitMs`) and, on a timeout or generator failure,
+commits with the session title (or `Merge isolated session into <target>`) and
+logs `isolation commit-message-fallback`. An unavailable model or an unreadable
+settings file never blocks or fails the merge. Empty integrations do not invoke
+the generator. AI target repair appends its suffix to the title line
+(`markTargetRepair`), so a body stays intact.
 
 A merge-back failure that provably left the target branch untouched (before the
 publish intent is persisted, or with an intent whose receipt is absent) is tagged

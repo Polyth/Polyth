@@ -1664,9 +1664,16 @@ and no installation fallback.
   personal ones are never bound to a project, and the SSH/HTTPS guide behind a
   disclosure); then the `settings.integrations.project` slot (context
   `{ projectId }`; GitHub shows the repository and the gh sign-in there).
-- **Workflow** — Commit messages (the Space's model choice), Branch names (the
-  template with a live example) and Merge conflicts (where the agent resolves
-  them and the prefilled request), each section with a reset.
+- **Workflow** — Commit messages (the Space's model and commit style: a Style
+  select of ready-made rules, each with an example title, plus "Your own
+  rules"; the Title rule and Details rule fields stay folded while the style is
+  Standard; Details When needed/Always/Never; Follow recent commits; a static
+  example for a ready-made style; one `SaveBar` for the whole section because
+  the rules shape every member's next commit; members without Space-admin
+  rights get the same content as `ReadonlyRow`s, decided by the server's
+  `canEdit`), Branch names (the template with a live example) and Merge
+  conflicts (where the agent resolves them and the prefilled request), each
+  section with a reset.
 - **Display** — Changes (with an inert preview rendered by the real
   `ChangeSection` from sample files, so tree/list, line counts and density show
   their effect), Diffs and History, each section with a reset to
@@ -1684,7 +1691,8 @@ contribution, `ProjectGitIdentity.tsx`): the owner picks that project's
 identity or creates one for it; anyone else sees their own commit identity and
 a link to change it. Search items: `git.personProfile`, `git.personAccounts`,
 `git.sourceControlProfiles`, `git.defaultIdentity`, `git.projectIdentity`,
-`git.authentication`, `git.commitMessageModel`, `git.branchTemplate`,
+`git.authentication`, `git.commitMessageModel`, `git.commitStyle`,
+`git.commitDetails`, `git.commitHistory`, `git.branchTemplate`,
 `git.conflictAgentTarget`, `git.display`, `git.servicePolicy`. The identity
 dialog's label/field grid becomes one column in narrow containers.
 

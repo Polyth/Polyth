@@ -116,8 +116,62 @@ details.source-control-auth-guide[open] > summary.source-control-auth-summary {
   line-height: var(--font-meta-lh);
 }
 
-.git-commit-note[role="alert"] {
-  color: var(--red);
+/* Rules are prose for the model: interface font, full row width. */
+.settings-row .git-commit-rule {
+  width: 100%;
+  /* The field grows with its text; a drag grip would fight that. */
+  resize: none;
+}
+
+.git-commit-loading {
+  display: grid;
+  gap: var(--space-2);
+  padding-block: var(--space-2);
+}
+
+/* The example has a fill and no border, so it reads the same with
+   interface borders hidden. */
+.git-commit-example {
+  padding: var(--space-3) 0 var(--space-1);
+}
+
+.git-commit-example-label {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.git-commit-example pre {
+  max-width: 72ch;
+  margin: var(--space-1) 0 0;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.git-commit-example-own {
+  margin: var(--space-3) 0 var(--space-1);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.git-commit-rule-text {
+  margin: 0;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.git-commit-save-error {
+  margin-top: var(--space-3);
 }
 
 @media (prefers-reduced-motion: reduce) {

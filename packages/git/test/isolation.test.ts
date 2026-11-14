@@ -25,6 +25,7 @@ import {
 import {
   branchLockSize,
   createIsolationService,
+  markTargetRepair,
   withBranchLock,
   type IsolationIntegrationDeps,
   type IsolationSessionApi,
@@ -181,8 +182,8 @@ const harness = (root: string, opts?: {
   git?: GitService;
   managed?: ManagedWorktreeService;
   testHooks?: IsolationTestHooks;
-  generateCommitMessage?: (session: SessionProjection, root: string) => Promise<string>;
-  commitMessageWaitMs?: number;
+  generateCommitMessage?: (session: SessionProjection, root: string, context: { targetBranch: string }) => Promise<string>;
+  commitMessageWaitMs?: number | ((session: SessionProjection) => number | Promise<number>);
   closeWorkspaceProcesses?: (cwd: string) => Promise<void>;
   actingGit?: IsolationIntegrationDeps["actingGit"];
   preserveSessionMedia?: IsolationIntegrationDeps["preserveSessionMedia"];
@@ -2725,17 +2726,41 @@ test("push refuses the target branch and unchanged workspaces", async () => {
 test("integration commits the generated message from the staged squash diff", async () => {
   const root = repo();
   const { isolation, sessions } = harness(root, {
-    generateCommitMessage: async (session, path) => {
+    generateCommitMessage: async (session, path, context) => {
       assert.equal(session.title, "Unrelated session title");
+      assert.equal(context.targetBranch, "main");
       assert.match((await git.diff(path, { staged: true })).diff, /export const feature = true/);
-      return "Add feature flag";
+      return "[Feature] Add feature flag\n\n- Export a feature flag for the new path";
     },
   });
   const created = await isolation.createIsolatedSession({ projectId: "p1", title: "Unrelated session title" });
   const session = await sessions.snapshot(created.id);
   writeFileSync(join(session.isolation!.worktreePath, "feature.ts"), "export const feature = true;\n");
   await isolation.mergeBack(created.id);
-  assert.equal(runGit(root, "log", "-1", "--format=%s"), "Add feature flag");
+  assert.equal(runGit(root, "log", "-1", "--format=%s"), "[Feature] Add feature flag");
+  assert.equal(runGit(root, "log", "-1", "--format=%b"), "- Export a feature flag for the new path");
+});
+
+test("an AI target repair is noted on the title line and keeps the body", () => {
+  assert.equal(markTargetRepair("Add flag"), "Add flag (AI target repair)");
+  assert.equal(markTargetRepair("Add flag\n\n- detail"), "Add flag (AI target repair)\n\n- detail");
+});
+
+test("the commit-message wait may be chosen per session", async () => {
+  const root = repo();
+  const waited: string[] = [];
+  const { isolation, sessions } = harness(root, {
+    commitMessageWaitMs: async (session) => { waited.push(session.id); return 20; },
+    generateCommitMessage: () => new Promise<string>((resolveLate) => setTimeout(() => resolveLate("Too late"), 2_000)),
+  });
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const session = await sessions.snapshot(created.id);
+  writeFileSync(join(session.isolation!.worktreePath, "feature.ts"), "export const feature = true;\n");
+  const started = Date.now();
+  assert.equal((await isolation.mergeBack(created.id)).ok, true);
+  assert.ok(Date.now() - started < 1_500, "integration ignored the per-session wait");
+  assert.deepEqual(waited, [created.id]);
+  assert.equal(runGit(root, "log", "-1", "--format=%s"), "Merge isolated session into main");
 });
 
 test("an unavailable commit-message model falls back to the session title instead of failing integration", async () => {
