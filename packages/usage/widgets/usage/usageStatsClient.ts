@@ -148,28 +148,48 @@ const storedReportKeys = (): string[] => {
   return keys;
 };
 
+/** Persisted report keys, least recently written first. */
+const storedReportsOldestFirst = (store: Storage): string[] =>
+  storedReportKeys().map((storedKey) => {
+    try {
+      return { storedKey, savedAt: (JSON.parse(store.getItem(storedKey) ?? "{}") as { savedAt?: number }).savedAt ?? 0 };
+    } catch {
+      return { storedKey, savedAt: 0 };
+    }
+  }).sort((a, b) => a.savedAt - b.savedAt).map((entry) => entry.storedKey);
+
 const writeStored = (key: string, report: UsageStatsReport): void => {
   const store = storage();
   if (!store) return;
   try {
     const serialized = JSON.stringify({ report, savedAt: Date.now() });
+    const target = storageKey(key);
     if (serialized.length > MAX_STORED_REPORT_BYTES) {
-      store.removeItem(storageKey(key));
+      store.removeItem(target);
       return;
     }
-    store.setItem(storageKey(key), serialized);
-    // Bound the persisted footprint by the oldest write, not by key order.
-    const stored = storedReportKeys();
-    if (stored.length > MAX_STORED_ENTRIES) {
-      const dated = stored.map((storedKey) => {
-        try {
-          return { storedKey, savedAt: (JSON.parse(store.getItem(storedKey) ?? "{}") as { savedAt?: number }).savedAt ?? 0 };
-        } catch {
-          return { storedKey, savedAt: 0 };
-        }
-      }).sort((a, b) => a.savedAt - b.savedAt);
-      for (const entry of dated.slice(0, stored.length - MAX_STORED_ENTRIES)) store.removeItem(entry.storedKey);
+    const put = (): boolean => {
+      try {
+        store.setItem(target, serialized);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    if (!put()) {
+      // The origin's storage is full (a phone allows about 5 MB for everything
+      // Polyth keeps). Long ranges are the largest reports, so they were the
+      // ones silently dropped and shown as a skeleton on every open. Make room
+      // from the oldest reports instead.
+      for (const storedKey of storedReportsOldestFirst(store)) {
+        if (storedKey === target) continue;
+        store.removeItem(storedKey);
+        if (put()) break;
+      }
     }
+    // Bound the persisted footprint by the oldest write, not by key order.
+    const stored = storedReportsOldestFirst(store);
+    for (const storedKey of stored.slice(0, Math.max(0, stored.length - MAX_STORED_ENTRIES))) store.removeItem(storedKey);
   } catch {
     // Private browsing and storage quotas must not make analytics unavailable.
   }

@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { tr, type TranslationKey } from "../i18n/index.ts";
 
 const MOVE_KEYS = {
@@ -17,8 +18,11 @@ type MoveControlsProps = {
   nextLabel?: string;
 };
 
-/** Explicit keyboard/touch alternative for every drag-reorder surface. */
-export default function MoveControls({
+/** Explicit keyboard/touch alternative for every drag-reorder surface.
+ *  Memoized so a parent list that re-renders (live rows, toggles) does not
+ *  repaint controls whose props are unchanged; pass a stable `onMove` to keep
+ *  that benefit. */
+export default memo(function MoveControls({
   label,
   index,
   count,
@@ -59,4 +63,4 @@ export default function MoveControls({
       </button>
     </span>
   );
-}
+});

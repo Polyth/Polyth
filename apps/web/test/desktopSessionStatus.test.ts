@@ -11,7 +11,7 @@ test("desktop status shares the live chat column geometry", async () => {
   assert.match(header, /--sidebar-inline-size/);
   assert.match(header, /--header-leading-inline-end/);
   assert.match(header, /--header-trailing-inline-size/);
-  assert.match(header, /session && \(\s*<DesktopSessionStatus\s+showTrigger=\{showSessionStatus\}\s+trailing=/);
+  assert.match(header, /session && \(\s*<DesktopSessionStatus\s+showTrigger=\{showSessionStatus\}\s+leading=\{<SessionBack sessionId=\{session\.id\} presentation="bar" \/>\}\s+trailing=/);
   assert.match(header, /slot="session\.header\.status"/);
   assert.match(rail, /--workspace-pane-inline-size/);
   assert.match(styles, /\.desktop-session-status[^}]+--sidebar-inline-size[^}]+--workspace-pane-inline-size/);

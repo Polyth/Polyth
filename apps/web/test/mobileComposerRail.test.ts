@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { register } from "node:module";
 import { Window } from "happy-dom";
-import { getMobileRailMap, MOBILE_RAIL_GAP, mobileRailColumns, mobileRailFromSlots, mobileRailKey, mobileRailMapEntry, mobileRailPreference, moveMobileRailLauncher, parseMobileRail, parseMobileRailMap, readEffectiveMobileRail, readMobileRail, replaceMobileRailMap, writeMobileRail } from "../src/composer/mobileRail.ts";
+import { getMobileRailMap, MOBILE_RAIL_GAP, mobileRailColumns, mobileRailFromSlots, mobileRailKey, mobileRailMapEntry, mobileRailPreference, mobileRailSpaceId, moveMobileRailLauncher, parseMobileRail, parseMobileRailMap, readEffectiveMobileRail, readMobileRail, replaceMobileRailMap, writeMobileRail } from "../src/composer/mobileRail.ts";
 import { composerLayoutState } from "../src/composerLayout.ts";
 
 register("./tsxHooks.mjs", import.meta.url);
@@ -208,6 +208,32 @@ test("mobile preferences stay within their Space and sync as one account prefere
   // a second project is a second entry of the same preference.
   writeMobileRail(mobileRailKey("space-a", "project-b"), { start: ["host:add", "widget:two"], end: [] });
   assert.deepEqual(Object.keys(getMobileRailMap()).sort(), [key, mobileRailKey("space-a", "project-b")].sort());
+});
+
+test("the rail keys on the project's Space before the Spaces list answers", async () => {
+  localStorage.clear();
+  // The user's arrangement lives under the real Space; an edit made while the
+  // Space was not yet known left another one under the empty Space.
+  writeMobileRail(mobileRailKey("spc_home", "@all-projects"), { start: ["host:add"], end: ["widget:voice-mode.start", "widget:voice.mic"] });
+  writeMobileRail(mobileRailKey("", "@all-projects"), { start: ["host:add", "widget:permissions.auto-approve-composer-action"], end: ["widget:workflow.composer-action"] });
+  const project = { id: "project-1", spaceId: "spc_home" };
+  // A phone opened straight into a chat: the project is known, the Spaces store is not.
+  const key = mobileRailKey(mobileRailSpaceId(project, null), "@all-projects");
+  assert.equal(key, mobileRailKey("spc_home", "@all-projects"));
+  assert.deepEqual(ids(parseMobileRail(readEffectiveMobileRail(key))), [["host:add"], ["widget:voice-mode.start", "widget:voice.mic"]]);
+  assert.equal(mobileRailSpaceId(undefined, "spc_home"), "spc_home", "without a project the Spaces store names the Space");
+  assert.equal(mobileRailSpaceId({ spaceId: "" }, "spc_home"), "spc_home", "an empty project Space is not a Space");
+  assert.equal(mobileRailSpaceId(undefined, null), "");
+  // Both readers of the map resolve the Space this way, and boot asks for the
+  // Spaces list itself instead of waiting for Space chrome to be shown.
+  const composer = await readFile(new URL("../src/components/Composer.tsx", import.meta.url), "utf8");
+  assert.match(composer, /storageKey=\{mobileRailKey\(railSpaceId, activeProjectId\)\}/);
+  assert.match(composer, /const railSpaceId = mobileRailSpaceId\(activeProject, spaceId\)/);
+  const settings = await readFile(new URL("../src/components/settings/pages.tsx", import.meta.url), "utf8");
+  assert.match(settings, /const spaceId = mobileRailSpaceId\(activeProject, useSpaces\(\)\.activeSpaceId\)/);
+  const init = await readFile(new URL("../src/init.ts", import.meta.url), "utf8");
+  const boot = init.slice(init.indexOf("export function init(): Promise<void>"));
+  assert.match(boot.slice(0, boot.indexOf("startSync();")), /void loadSpaces\(\);/);
 });
 
 test("a project not arranged yet starts from the latest arrangement in its Space", () => {

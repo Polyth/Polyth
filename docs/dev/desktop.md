@@ -497,7 +497,8 @@ cases apart:
 ## Low-resource mode
 
 Desktop settings includes an opt-in low-resource mode for older machines. It
-disables interface animations, haptics, and live backdrop blur immediately.
+disables interface animations and live backdrop blur immediately (the desktop
+has no vibration motor; haptics are a per-device phone setting).
 After restart it also:
 
 - defers the OpenCode model/agent catalog until the first user interaction;
@@ -509,7 +510,7 @@ After restart it also:
 - starts with a smaller 1100×720 window when no saved bounds exist.
 
 The independent **Reduce animations and effects** setting applies the same
-motion, haptic, and glass reduction without changing runtime or cache limits.
+motion and glass reduction without changing runtime or cache limits.
 
 OpenCode starts normally as soon as the user interacts with the application, so
 agent, model, terminal, and workflow behavior remains available.

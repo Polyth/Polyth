@@ -45,7 +45,7 @@ test("agent styles use canonical tokens only and stay inside the package roots",
     // Split the selector list on top-level commas only (`:is(a, b)` stays whole).
     for (const part of selector.split(/,(?![^(]*\))/)) {
       // .agents-page is the agents' page in place of Chat; .agent-nav the rows in the navigator;
-      // .agent-chip the agent named in the header of its own session in Chat.
+      // .agent-chip the agent mark inside the host Back of its own session in Chat.
       assert.match(part.trim(), /^(\.agents-page|\.agent-nav|\.agent-chip|:root|from|to|\d+%)/, `"${part.trim()}" is scoped to a package root`);
     }
   }

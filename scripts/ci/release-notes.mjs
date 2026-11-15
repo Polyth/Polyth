@@ -54,7 +54,7 @@ const VERB_SECTIONS = [
   ["maintenance", /^(document|documents|docs|test|tests|type|types|refactor|rename|move|extract|bump|pin|upgrade|lint|format|tidy|revert|clean|cleanup|перевір\S*|ci|chore)$/i],
 ];
 /** A commit touching only these paths is maintenance whatever its subject says. */
-const MAINTENANCE_PATH = /(^|\/)(docs?|tests?|__tests__|\.agents|\.github|\.claude|\.pi)\/|\.(test|spec)\.[cm]?[jt]sx?$|\.md$|^AGENTS\.md$|^scripts\/test\//;
+const MAINTENANCE_PATH = /(^|\/)(docs?|tests?|__tests__|\.agents|\.github|\.claude|\.pi)\/|\.(test|spec)\.[cm]?[jt]sx?$|\.md$|^AGENTS\.md$|^scripts\/test\/|(^|\/)(package-lock\.json|npm-shrinkwrap\.json|Cargo\.lock)$/;
 const NOISE_SUBJECT = /^(wip\b|fixup!|squash!|amend!|merge (branch|remote-tracking|pull request|origin))/i;
 
 const NOREPLY_LOGIN = /^(?:\d+\+)?([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))@users\.noreply\.github\.com$/i;

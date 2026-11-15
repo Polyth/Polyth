@@ -74,6 +74,7 @@ import {
   SERVER_PERSON_DATA_VOLUME,
   SESSION_ATTENTION_SERVICE,
   SESSION_PURPOSES,
+  SESSION_START_STEPS,
   SERVER_BEHAVIOR_SECTIONS,
   serverServiceKey,
   type HttpServerContext,
@@ -138,6 +139,7 @@ import { workstationPushDisabled } from "./workstationPolicy.ts";
 import { registerDiscoveredPackages, registerServerPackage } from "./packageDiscovery.ts";
 import { queueRoutes } from "./routes/queue.ts";
 import { createBehaviorSectionRegistry, createBehaviorService } from "./behavior.ts";
+import { createSessionStartStepRegistry } from "./sessionStartSteps.ts";
 import { createClientSettings, modelFavoriteKeys } from "./clientSettings.ts";
 import { parseCompactionPreference } from "@polyth/contracts/compaction-policy";
 import { createFailedStartupCleanupPolicy, type SessionAccountDeps } from "./failedStartupCleanup.ts";
@@ -171,6 +173,7 @@ import {
   summarizeSessionFirst,
 } from "./smallModel.ts";
 import { createWsGateway, type WsGateway } from "./ws.ts";
+import { createDevicePresence } from "./devicePresence.ts";
 import { createRouteRegistry } from "./routeRegistry.ts";
 import { createPackageLifecycle } from "./packageLifecycle.ts";
 import {
@@ -2078,6 +2081,9 @@ export async function boot(opts: BootOptions = {}) {
     }
   };
   services.provide(SERVER_BEHAVIOR_SECTIONS, behaviorSections.registry(reprojectBehavior));
+  // Package-owned steps of a chat's start (`SessionStartRequest.extensions`).
+  const sessionStartSteps = createSessionStartStepRegistry();
+  services.provide(SESSION_START_STEPS, sessionStartSteps);
   const behavior = createBehaviorService({
     file: `${dataDir}/behavior.md`,
     policyFile: `${dataDir}/behavior-policy.json`,
@@ -2326,9 +2332,13 @@ export async function boot(opts: BootOptions = {}) {
   // --- Web push (VAPID keys minted once into the data dir) + the
   // notifier bridging the session service's attention/turn-stopped seam.
   // Auto-accepted permissions never reach this seam, so they never push.
+  // Which device each person is using now: alerts and the phone's Live
+  // Activity go only there while they work (pages report it over /ws).
+  const devicePresence = createDevicePresence();
   const push = createPushService({
     file: `${dataDir}/push.json`,
     hasAccess: notificationAccess,
+    activeDevice: devicePresence.activeDevice,
   });
   // NTF-01: durable inbox recorded at the ONE transition-tight seam — the
   // notifier's send sink, after buildPushPayload. Order per record: JSON
@@ -2348,6 +2358,7 @@ export async function boot(opts: BootOptions = {}) {
     relay: workstationPushDisabled(process.env) ? undefined : relaySender(process.env.POLYTH_NATIVE_PUSH_RELAY_ORIGIN),
     apns: workstationPushDisabled(process.env) ? () => undefined : apnsFromDir(`${dataDir}/native-push`),
     authority: () => svc<import("./nativePush.ts").NativePushAuthority>("tunnel.native-push"),
+    activeDevice: devicePresence.activeDevice,
     // A Live Activity only ever reflects chats this person could open in the
     // navigator: same Space, visible project, readable row (as the WS fan-out).
     activityViews: async ({ userId, spaceId }, sessionIds) => {
@@ -2365,6 +2376,7 @@ export async function boot(opts: BootOptions = {}) {
     },
   });
   liveActivityTouched = nativePush.sessionTouched;
+  devicePresence.subscribe(nativePush.presenceChanged);
   // One recipient's delivery leg: durable inbox row -> recipient-filtered WS
   // broadcast -> independent Web/native push. Shared by the turn notifier and
   // by person-message notifications so neither duplicates the ordering.
@@ -2894,6 +2906,7 @@ export async function boot(opts: BootOptions = {}) {
       return descriptor?.kind === "tool" ? redactToolInput(input, descriptor.inputSchema) : input;
     },
     projects, runtimes, broadcast, queue: store, org: store, profiles: store, behavior, secureSafe,
+    startSteps: sessionStartSteps,
     harnesses: {
       staticFeatures: (harnessId) =>
         harnesses.providers().find((provider) => provider.descriptor.id === harnessId)?.staticFeatures,
@@ -2946,6 +2959,7 @@ export async function boot(opts: BootOptions = {}) {
     permissions: guardedPermissions(requireSvc<SessionDeps["permissions"]>("permissions"), (projectId) => projects.spaceOfProject(projectId)),
     guardedSpace: spaceHasGuardedMember,
     permissionScopeCheck: () => svc<NonNullable<ReturnType<NonNullable<SessionDeps["permissionScopeCheck"]>>>>("permissions.scope-check"),
+    checkpoints: () => svc<NonNullable<ReturnType<NonNullable<SessionDeps["checkpoints"]>>>>("workspace.checkpoints"),
     instructionProvisioned: async (sessionId, harnessId) => {
       if (!capabilityController) return false;
       const proj = await store.projection(sessionId);
@@ -2962,6 +2976,18 @@ export async function boot(opts: BootOptions = {}) {
       }, harnessId);
     },
     cleanupSessionResources: async ({ projection, releaseExecution }) => {
+      // A deleted chat's file checkpoints go with it: only its refs are
+      // dropped (git prunes the objects), before any worktree is released.
+      const checkpoints = svc<NonNullable<ReturnType<NonNullable<SessionDeps["checkpoints"]>>>>("workspace.checkpoints");
+      if (checkpoints) {
+        const project = await projects.get(projection.projectId).catch(() => undefined);
+        const cwd = project && !project.remote
+          ? projection.isolation?.worktreePath ?? projection.worktreePath ?? project.path
+          : undefined;
+        await checkpoints.forget(projection.id, cwd).catch((error: unknown) => {
+          console.warn(`[polyth] could not drop checkpoints of ${projection.id}`, error);
+        });
+      }
       if (projection.isolation?.kind !== "git-worktree" && !projection.workspace?.repositories.some((row) => row.isolation)) return;
       const isolation = svc<{
         cleanupForSessionDelete(
@@ -3044,6 +3070,12 @@ export async function boot(opts: BootOptions = {}) {
         });
         void goalService()?.onSessionStopped(sessionId).catch((error) => {
           console.error("[polyth] goal dependency settlement failed", error);
+        });
+      },
+      startFailed(sessionId) {
+        // Its watchers hear the failed start as the end of the work.
+        void sessionWatches.kick(sessionId).catch((error) => {
+          console.error("[polyth] session watch kick failed", error);
         });
       },
       pauseEnded(sessionId, outcome) {
@@ -3602,6 +3634,7 @@ export async function boot(opts: BootOptions = {}) {
     svc<BrowserForWs>("browser"),
     svc<DictationForWs>("dictation"),
     spaceGateway,
+    { presence: devicePresence },
   );
   // WebSocket upgrades bypass the request handler, so they repeat the
   // listener's one trusted-proxy transport decision instead of inheriting it.
@@ -3690,6 +3723,7 @@ export async function boot(opts: BootOptions = {}) {
       live?.close();
       liveActivityTouched = null;
       nativePush.close();
+      devicePresence.close();
       await runtimeStorageMaintenance.dispose();
       await packageLifecycle.stopIngress();
       httpAdmission.stop();

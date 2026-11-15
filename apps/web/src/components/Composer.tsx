@@ -37,9 +37,11 @@ import {
 import {
   sendMessage,
   abortSession,
-  createSession,
+  createSessionWithStart,
   createDefaultWorktree,
-  startIsolatedSession,
+  startIsolatedSessionWithStart,
+  startTaken,
+  startWorktreeSession,
   rememberProjectModelSelection,
   reconnectSync,
   recheckRuntimeCatalog,
@@ -69,7 +71,7 @@ import type { ComposerAddMenuItem, ComposerContributionContext, ComposerDraftCon
 import SlotHost from "./slots/SlotHost.tsx";
 import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
 import MobileComposerRail, { MobileComposerEditEntry } from "./mobile/MobileComposerRail.tsx";
-import { mobileRailKey, subscribeMobileRailEditRequest } from "../composer/mobileRail.ts";
+import { mobileRailKey, mobileRailSpaceId, subscribeMobileRailEditRequest } from "../composer/mobileRail.ts";
 import { setNewChatModel } from "../composer/newChatModel.ts";
 import { useHeroWidgetPrefs } from "./mobile/HeroWidgets.tsx";
 import { activeBrowserAccountId } from "../accountStorage.ts";
@@ -164,7 +166,7 @@ import ContextLiquid, { contextLiquidLabel, useActiveContextGauge } from "./Cont
 import ContextPie, { contextPieVisible } from "./ContextPie.tsx";
 import ChatMemoryReminder from "./ChatMemoryReminder.tsx";
 import { chatMemoryState } from "../chatMemory.ts";
-import QueuedMessageList, { latestSteerableQueuedItem } from "./QueuedMessageList.tsx";
+import QueuedMessageList, { latestSteerableQueuedItem, queueItemText } from "./QueuedMessageList.tsx";
 import {
   composerContributionsVersion,
   composerMode,
@@ -174,12 +176,14 @@ import {
   listenComposerModeRequests,
   publishComposerActiveMode,
   runComposerSessionCreatedHooks,
+  collectComposerSessionStartExtensions,
   subscribeComposerContributions,
 } from "../composer/contributions.ts";
 import { detectModeTrigger, isModeLeaveKey, modeText } from "../composer/modes.ts";
+import { releaseSends } from "../composer/sendRelease.ts";
 import "../composer/composerModes.css";
 import { announce } from "./a11y/live.tsx";
-import { successFeedback } from "../haptics.ts";
+import { successFeedback, tapFeedback } from "../haptics.ts";
 import {
   composerThinkingChoice,
   getModelThinking,
@@ -194,6 +198,8 @@ import {
 } from "@polyth/models/web-prefs";
 import { hiddenModelMatcher } from "@polyth/models";
 import { getUiSettings, setUiSettings, useUiSettings } from "../uiPrefs.ts";
+import { sendHoldMs } from "../sendHold.ts";
+import { createSendHoldPress } from "../composer/sendHoldPress.ts";
 import { isResizableImage, shouldAskImageSize } from "../imageUploadSize.ts";
 import ImageSizePrompt, { useImageSizeChoice } from "./ImageSizePrompt.tsx";
 import { migrateFavoritesOnce, profilesLoaded, useProfiles } from "../profiles.ts";
@@ -206,8 +212,11 @@ import type {
   HarnessSelection,
   ModelDescriptor,
   ModelRef,
+  JsonObject,
   QueueItemDto,
   SessionProjection,
+  SessionStartRequest,
+  StartSessionResult,
 } from "@polyth/contracts";
 import { friendlyError, isMutationOutcomeUnknown, matchesSendShortcut, modKeyLabel, parseModelRef } from "../settings.ts";
 import { Icon } from "../icons.tsx";
@@ -293,8 +302,6 @@ async function loadComposerCatalog(projectId: string): Promise<ComposerCatalogRe
 
 const PROFILE_MISSING_NOTE = tr("composer.profileUnavailableChooseAnother");
 const MODEL_WARNING_DELAY_MS = 8_000;
-/** Press and hold Send keeps the message as a draft chat instead. */
-const SEND_HOLD_MS = 500;
 /** How long Send shows its "kept as a draft" check after a hold. */
 const SEND_PARKED_MS = 1_400;
 
@@ -898,6 +905,28 @@ function shouldReadStagedPhoto(metadata: { mimeType: string; size: number }): bo
 const EMPTY_MENTION_LEVELS: readonly SessionAccessLevel[] = [];
 const EMPTY_MENTION_CANDIDATES: SessionMentionCandidateDto[] = [];
 
+/** Start failures whose attachments a composer already gave back (per
+ *  session and event), so a remount or a removed pill does not re-add them. */
+const restoredStartFailures = new Set<string>();
+
+/** What the person has typed since Send, per chat that is still starting:
+ *  first on the new-chat surface, then in the chat's own composer. The start
+ *  swaps composer instances (hero, transcript before the chat has an id,
+ *  transcript with it), and the stored draft is hidden while the first prompt
+ *  is in flight, so each mounting composer takes this as live input. Keyed by
+ *  `unboundSpawnKey` until the chat id is known, then by the chat. Dropped
+ *  when draft autosave resumes. */
+const carriedStartInput = new Map<string, string>();
+
+const spawnInputKey = (requestId: number): string => `spawn:${requestId}`;
+
+/** The start the new-chat surface is showing while its chat has no id yet. */
+const unboundSpawnKey = (): string | null => {
+  const current = getState();
+  const spawn = current.sessionSpawn;
+  return spawn && spawn.sessionId === null && isActiveSessionSpawning(current) ? spawnInputKey(spawn.requestId) : null;
+};
+
 export default function Composer(props: { variant?: "docked" | "widget" }) {
   // Primitive selector: the wrapper re-renders only when access changes.
   // View-only still writes to people — people mode is the only mode there.
@@ -1064,6 +1093,19 @@ function ComposerBody({
     () => inputRef.current?.getText() ?? committedTextRef.current,
   );
   const model = useActiveModel();
+  // A failed start put its text back in this chat's draft (server-side, via
+  // draft sync); its attachments come back as pills here, once, and only into
+  // a composer that holds none.
+  const startFailure = model.startFailure;
+  useEffect(() => {
+    const id = session?.id;
+    if (!id || !startFailure || startFailure.attachments.length === 0) return;
+    const key = `${id}\0${startFailure.eventSeq}`;
+    if (restoredStartFailures.has(key)) return;
+    restoredStartFailures.add(key);
+    if (pendingAttachments(id).length > 0) return;
+    for (const attachment of startFailure.attachments) addAttachment(id, attachment);
+  }, [session?.id, startFailure]);
   const working = model.turn?.status === "working";
   // While a turn runs, its primary action doubles as the context gauge.
   const contextGauge = useActiveContextGauge(model);
@@ -1125,6 +1167,7 @@ function ComposerBody({
     if (event && event.detail !== 0 && Date.now() - stopPointerAt.current > 1000) return;
     abortPendingRef.current = true;
     setAbortPending(true);
+    tapFeedback();
     try {
       await abortSession("composer");
     } finally {
@@ -1402,6 +1445,11 @@ function ComposerBody({
   const sendShortcut = isPhone ? settings.mobileSendShortcut : settings.desktopSendShortcut;
   const sendKey = sendShortcut === "none" ? `${modKeyLabel()}↵` : sendShortcut === "shift-enter" ? "⇧↵" : "↵";
   const uiPrefs = useUiSettings();
+  // The hold that turns Send into "keep as a draft" is the person's setting
+  // (Settings > Chat): its length, or off entirely. A ref keeps the pointer
+  // callbacks — which are created once — reading the current value.
+  const sendHoldRef = useRef(0);
+  sendHoldRef.current = sendHoldMs(uiPrefs);
   const promptHistoryNav = usePromptHistory({
     sessionId: session?.id ?? null,
     projectId: activeProjectId,
@@ -1624,15 +1672,21 @@ function ComposerBody({
         ? adoptServerDraft(session.id, serverDraft ?? "", session.draftUpdatedAt).text
         : loadDraft(session.id))
       : newSessionIntent?.draft ?? "";
-    const t = visibleComposerDraft(localDraft, inFlight);
+    // Typed on the new-chat surface while this chat was being created.
+    const carriedKey = session?.id ?? unboundSpawnKey();
+    const carried = (carriedKey ? carriedStartInput.get(carriedKey) : undefined) || undefined;
+    if (carried !== undefined && session?.id) pendingLocalTextRef.current = { scopeKey: sessionScopeKeyRef.current, text: carried };
+    const t = carried ?? visibleComposerDraft(localDraft, inFlight);
     setText(t);
-    const restoredSelection = takeComposerSelection(sessionScopeKeyRef.current, t);
+    const restoredSelection = carried !== undefined
+      ? { anchor: carried.length }
+      : takeComposerSelection(sessionScopeKeyRef.current, t);
     // On a reload the project is active before its unsent chat is restored,
     // so the first mount has no intent and seeds "". Saving that would replace
     // the stored prompt before boot reads it back.
     restoringDraftRef.current = true;
     try {
-      inputRef.current?.replaceText(t, inFlight ? undefined : restoredSelection ?? undefined, inFlight ? { silent: true } : undefined);
+      inputRef.current?.replaceText(t, inFlight && carried === undefined ? undefined : restoredSelection ?? undefined, inFlight ? { silent: true } : undefined);
     } finally {
       restoringDraftRef.current = false;
     }
@@ -1729,14 +1783,14 @@ function ComposerBody({
     // The same swap must not throw the writer out of the input. On touch the
     // keyboard has its own rules, so only a mouse or trackpad screen carries it.
     const active = document.activeElement;
-    const nextChat = getState().activeSessionId ?? sessionIdRef.current;
+    const nextChat = getState().activeSessionId ?? sessionIdRef.current ?? unboundSpawnKey();
     if (nextChat && primaryPointerIsFine() && active?.hasAttribute("data-composer-input") && rootRef.current?.contains(active)) {
       composerFocusCarry = nextChat;
       queueMicrotask(() => { composerFocusCarry = null; });
     }
   }, []);
   useLayoutEffect(() => {
-    if (composerFocusCarry !== null && composerFocusCarry === sessionIdRef.current) inputRef.current?.focus();
+    if (composerFocusCarry !== null && composerFocusCarry === (sessionIdRef.current ?? unboundSpawnKey())) inputRef.current?.focus();
   }, []);
 
   // Debounced local persistence while typing (refresh-safe). Server sync runs
@@ -1744,6 +1798,8 @@ function ComposerBody({
   useEffect(() => {
     const id = session?.id;
     if (!id || queueEdit?.sessionId === id || creatingSession || sendPending || inFlightPrompt) return;
+    // The start is over: the stored draft is visible again and saved below.
+    carriedStartInput.delete(id);
     if (promptHistoryNavRef.current.isBrowsing()) return;
     const scopeKey = scopedDraftCacheKey(id);
     const t = setTimeout(() => {
@@ -2439,8 +2495,10 @@ function ComposerBody({
         // immediately after this queued message is updated.
         saveDraft(target, draftBefore);
         setQueueEdit({ id: reserved.id, sessionId: target, draftBefore });
-        setText(reserved.text);
-        inputRef.current?.replaceText(reserved.text);
+        // The words the queue row showed; saving replaces the whole prompt.
+        const shown = queueItemText(reserved);
+        setText(shown);
+        inputRef.current?.replaceText(shown);
         inputRef.current?.focus();
         setInputFocused(true);
         announce(tr("composer.editingQueuedMessageValueInComposer", { position: reserved.position + 1 }));
@@ -2972,7 +3030,41 @@ function ComposerBody({
     };
     // One creation path for a sent and a parked new chat: the same route,
     // workspace target and lane, so a draft later sends as it would have now.
-    const createNewChat = async (projectId: string, activate: (id: string) => boolean): Promise<string> => {
+    const createNewChat = async (projectId: string, activate: (id: string) => boolean): Promise<string> =>
+      (await createNewChatWith(projectId, activate)).id;
+    // With `start` the create also carries the first turn (one request); the
+    // reply says whether the server took it (`startTaken`).
+    const createNewChatWith = async (
+      projectId: string,
+      activate: (id: string) => boolean,
+      start?: SessionStartRequest,
+    ): Promise<StartSessionResult> => {
+      if (start && (newSessionTarget.kind === "new-worktree" || newSessionTarget.kind === "branch")) {
+        try {
+          return await startWorktreeSession(projectId, newSessionTarget.kind === "branch"
+            ? { kind: "branch", branch: newSessionTarget.branch, ...(newSessionTarget.base ? { base: newSessionTarget.base } : {}) }
+            : { kind: "new-worktree", ...(newSessionTarget.base ? { base: newSessionTarget.base } : {}) }, {
+            harness: creationHarness,
+            ...(newSessionRepositoryIds ? { repositoryIds: newSessionRepositoryIds } : {}),
+            ...(newSessionIntent?.title ? { title: newSessionIntent.title } : {}),
+            ...(sentModel ? { model: sentModel } : {}),
+            ...(cfgSent.agent ? { agent: cfgSent.agent } : {}),
+            ...(lanePurpose ? { purpose: lanePurpose } : {}),
+            ...(followsPersonDefault ? { personDefaultHarnessId: followsPersonDefault } : {}),
+            start,
+            precache: true,
+            activate,
+          });
+        } catch (error) {
+          // ponytail: a server without POST /api/worktrees/sessions answers 404
+          // and made nothing; take the client worktree step and a plain create
+          // (the caller then runs the old chain). Drop once no supported server
+          // lacks `start`.
+          if ((error as { status?: unknown } | null)?.status !== 404) throw error;
+          assertScopeStillCurrent();
+        }
+        return createNewChatWith(projectId, activate);
+      }
       if (newSessionTarget.kind === "isolation") {
         if (newSessionTarget.checkout) {
           await api.createWorktree(
@@ -2983,7 +3075,7 @@ function ComposerBody({
           );
           assertScopeStillCurrent();
         }
-        return startIsolatedSession(projectId, {
+        return startIsolatedSessionWithStart(projectId, {
           harness: creationHarness,
           ...(newSessionRepositoryIds ? { repositoryIds: newSessionRepositoryIds } : {}),
           ...(newSessionIntent?.title ? { title: newSessionIntent.title } : {}),
@@ -2992,6 +3084,7 @@ function ComposerBody({
           ...(newSessionTarget.base ? { targetBranch: newSessionTarget.base } : {}),
           ...(lanePurpose ? { purpose: lanePurpose } : {}),
           ...(followsPersonDefault ? { personDefaultHarnessId: followsPersonDefault } : {}),
+          ...(start ? { start } : {}),
           precache: true,
           activate,
         });
@@ -3017,7 +3110,7 @@ function ComposerBody({
           )).path;
           assertScopeStillCurrent();
         }
-        return createSession(projectId, {
+        return createSessionWithStart(projectId, {
           harness: creationHarness,
           ...(newSessionRepositoryIds ? { repositoryIds: newSessionRepositoryIds } : {}),
           ...(newSessionIntent?.title ? { title: newSessionIntent.title } : {}),
@@ -3026,6 +3119,7 @@ function ComposerBody({
           ...(worktreePath ? { worktreePath } : {}),
           ...(lanePurpose ? { purpose: lanePurpose } : {}),
           ...(followsPersonDefault ? { personDefaultHarnessId: followsPersonDefault } : {}),
+          ...(start ? { start } : {}),
           precache: true,
           activate,
         });
@@ -3182,7 +3276,9 @@ function ComposerBody({
       });
       const spawnSurface = sendSurfaceKey(null, activeProjectId);
       markSendPending(spawnSurface, true);
+      carriedStartInput.set(spawnInputKey(spawnRequestId), "");
       let created: string | undefined;
+      let carriedDraft: string | undefined;
       // The created session is admitting from the moment it exists, before its
       // composer mounts, until the first prompt's admission settles.
       let admitting: string | undefined;
@@ -3202,11 +3298,46 @@ function ComposerBody({
           if (echoId) bindPendingSend(echoId, id);
           markCreatedAdmitting(id);
           const current = getState();
-          return current.sessionSpawn?.requestId === spawnRequestId
+          const stillHere = current.sessionSpawn?.requestId === spawnRequestId
             && current.activeProjectId === activeProjectId
             && current.activeSessionId === null;
+          // The input stays usable while the chat starts, and words typed
+          // since Send belong to the new chat. Read them from the shared
+          // record, not this instance's input: the transcript composer may
+          // already have replaced the hero's.
+          const spawnKey = spawnInputKey(spawnRequestId);
+          if (carriedStartInput.has(spawnKey)) {
+            const live = carriedStartInput.get(spawnKey) ?? "";
+            carriedStartInput.delete(spawnKey);
+            carriedDraft = live.trim() && live !== t ? live : "";
+            if (stillHere) carriedStartInput.set(id, carriedDraft);
+          }
+          return stillHere;
         };
-        created = await createNewChat(activeProjectId, stillOnSpawnSurface);
+        // One request: the create carries the first turn, its approval
+        // setting and package start steps. A shell command has no turn to
+        // carry and keeps the old chain.
+        const collectedStarts = command === null
+          ? collectComposerSessionStartExtensions({ projectId: activeProjectId, text: t })
+          : [];
+        const extensions: Record<string, JsonObject> = {
+          ...(newSessionGoal ? { "goals.attach": { objective: t } } : {}),
+        };
+        for (const { extension, payload } of collectedStarts) extensions[extension.id] = payload as JsonObject;
+        const autoTitleFirstTurn = getState().settings.autoTitleSessions && !newSessionIntent?.title;
+        const start: SessionStartRequest | undefined = command === null ? {
+          firstTurn: {
+            text: t,
+            ...(atts.length > 0 ? { attachments: atts } : {}),
+            ...(selectedNativeCommand ? { command: selectedNativeCommand } : {}),
+            ...(autoTitleFirstTurn ? { autoTitle: true } : {}),
+          },
+          ...(wire !== undefined ? { agentProfileId: wire } : {}),
+          ...(newSessionAutoApprove !== "inherit" ? { autoAccept: newSessionAutoApprove } : {}),
+          ...(Object.keys(extensions).length > 0 ? { extensions } : {}),
+        } : undefined;
+        const result = await createNewChatWith(activeProjectId, stillOnSpawnSurface, start);
+        created = result.id;
         markCreatedAdmitting(created);
         assertScopeStillCurrent();
         bindSessionSpawn(spawnRequestId, created);
@@ -3214,6 +3345,31 @@ function ComposerBody({
           bindPendingSend(echoId, created);
           submittedDraftRevisionRef.current = { sessionId: created, revision: revisionAfterSubmit };
         }
+        const carryDraft = (id: string) => {
+          if (!carriedDraft) return;
+          const scope = { ...reliabilityScopeAtSend, projectId: activeProjectId, sessionId: id };
+          updateScopedDraftRecord(id, { text: carriedDraft, dirty: true, conflict: undefined }, scope);
+          syncDraftToServer(id, carriedDraft, scope);
+        };
+        if (start && startTaken(result)) {
+          // The server owns the rest of the start: the prompt is queued
+          // durably with the chat, so only local state follows the send.
+          carryDraft(created);
+          clearNewSessionDraft(activeProjectId, reliabilityScopeAtSend);
+          if (scopedDraftCacheKey(null) === scopedDraftCacheKey(null, reliabilityScopeAtSend)) {
+            clearAttachments(null);
+          }
+          clearDraftExecutionConfig(activeProjectId);
+          promptHistoryNav.reload();
+          consumeComposerConfig(target, cfgSent);
+          if (sessionIdRef.current === target) setCfg(loadComposerConfig(target));
+          setNewSessionAutoApprove("inherit");
+          setNewSessionGoal(false);
+          return;
+        }
+        // ponytail: an older server ignored `start` (no queueId/turnId): run
+        // the client chain it expects. Drop once no supported server lacks
+        // `start`.
         let createdDraft: StagedDraft | undefined;
         if (command === null) {
           createdDraft = stageTargetDraft(created, {
@@ -3242,7 +3398,13 @@ function ComposerBody({
         }
         assertScopeStillCurrent();
         await runComposerSessionCreatedHooks({ projectId: activeProjectId, sessionId: created, text: t });
+        for (const { extension, payload } of collectedStarts) {
+          if (!extension.legacy) continue;
+          assertScopeStillCurrent();
+          await extension.legacy({ projectId: activeProjectId, sessionId: created, text: t }, payload);
+        }
         await deliver(created, createdDraft, true);
+        carryDraft(created);
         setNewSessionAutoApprove("inherit");
         setNewSessionGoal(false);
       })()
@@ -3277,6 +3439,7 @@ function ComposerBody({
           }
         })
         .finally(() => {
+          carriedStartInput.delete(spawnInputKey(spawnRequestId));
           finishSessionSpawn(spawnRequestId);
           markSendPending(spawnSurface, false);
           if (admitting) markSendPending(admitting, false);
@@ -3303,85 +3466,151 @@ function ComposerBody({
   useEffect(() => { sendRef.current = send; }, [send]);
 
   // Press and hold Send keeps the message as a draft chat instead of sending
-  // it: a ring fills around Send over the hold, then Send shows a check. Only
-  // a message that can be kept starts a hold; anything else is a plain press.
-  // Touch/pen Send is admitted on pointerup — once the gesture is known not
-  // to be a hold — and pointerdown is cancelled so the editor keeps focus and
-  // the keyboard stays open for the next message. The delayed click from the
-  // same gesture is consumed so it cannot send twice. Mouse holds swallow
-  // their click; keyboard activation retains the normal click path.
-  const primaryActivationRef = useRef({ touch: false, keyboard: false, staleTouchClick: false });
+  // it: a ring winds round Send over the hold; once the hold length has passed
+  // with the finger down, Send turns to a check, and letting go keeps the
+  // draft. Only a message that can be kept starts a hold; anything else is a
+  // plain press. Touch/pen Send is admitted on pointerup — once the gesture is
+  // known not to be a hold — and pointerdown is cancelled so the editor keeps
+  // focus and the keyboard stays open for the next message. The delayed click
+  // from the same gesture is consumed so it cannot send twice. Mouse holds
+  // swallow their click; keyboard activation retains the normal click path.
+  // Every press the browser gives to Send sends on release, wherever in its
+  // touch box it landed; only a finger that left Send does not
+  // (composer/sendRelease.ts). The release alone settles the hold, measured
+  // between the input's own time stamps (composer/sendHoldPress.ts): shorter
+  // than the hold length sends, the length or longer keeps the draft, with no
+  // gap between them, however busy the page was meanwhile. Send refuses
+  // panning in CSS, since a pan cancels the press and used to leave a held
+  // message neither sent nor kept.
+  const primaryActivationRef = useRef<{ touch: boolean; keyboard: boolean; staleTouchClick: boolean; down: { x: number; y: number } | null }>(
+    { touch: false, keyboard: false, staleTouchClick: false, down: null },
+  );
   const canParkRef = useRef<() => boolean>(() => false);
   // People mode sends a person message, never a draft chat: holding Send there
-  // must not announce a saved draft while the message goes out to people.
-  canParkRef.current = () => !peopleModeRef.current && !activeModeRef.current && !queueEdit && !creatingSession && !sendPending && !compactPending
+  // must not announce a saved draft while the message goes out to people. The
+  // gesture itself is a setting: its length is the person's, and 0 turns it
+  // off, in which case a press is never a hold.
+  canParkRef.current = () => sendHoldRef.current > 0
+    && !peopleModeRef.current && !activeModeRef.current && !queueEdit && !creatingSession && !sendPending && !compactPending
     && Boolean(sessionIdRef.current || activeProjectId)
     && ((inputRef.current?.getText() ?? text).trim() !== "" || attachments.length > 0);
-  const holdRef = useRef<{ timer: ReturnType<typeof setTimeout> | null; fired: boolean }>({ timer: null, fired: false });
-  const [holding, setHolding] = useState(false);
+  // `parked` is Send's check: shown as the cue while a full hold is still
+  // down (`holdCueRef`), and for a beat once the draft is kept.
+  // `holdSpentRef` marks a press that kept a draft, so its click cannot send.
   const [parked, setParked] = useState(false);
   const parkedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cancelHold = useCallback(() => {
-    const hold = holdRef.current;
-    if (hold.timer !== null) clearTimeout(hold.timer);
-    hold.timer = null;
-    setHolding(false);
-  }, []);
-  useEffect(() => () => {
-    cancelHold();
-    if (parkedTimerRef.current !== null) clearTimeout(parkedTimerRef.current);
-  }, [cancelHold]);
-  const startHold = useCallback(() => {
-    const hold = holdRef.current;
-    if (hold.timer !== null) clearTimeout(hold.timer);
-    hold.fired = false;
-    if (!canParkRef.current()) return;
-    setHolding(true);
-    hold.timer = setTimeout(() => {
-      hold.timer = null;
-      setHolding(false);
+  const holdCueRef = useRef(false);
+  const holdSpentRef = useRef(false);
+  const holdPress = useMemo(() => createSendHoldPress({
+    onFull: () => {
       if (!canParkRef.current()) return;
-      hold.fired = true;
-      sendRef.current?.(undefined, undefined, false, true);
+      holdCueRef.current = true;
       successFeedback();
-      announce(tr("composer.savedAsDraft"));
       if (parkedTimerRef.current !== null) clearTimeout(parkedTimerRef.current);
+      parkedTimerRef.current = null;
       setParked(true);
-      parkedTimerRef.current = setTimeout(() => {
-        parkedTimerRef.current = null;
-        setParked(false);
-      }, SEND_PARKED_MS);
-    }, SEND_HOLD_MS);
+    },
+  }), []);
+  useEffect(() => () => {
+    holdPress.dispose();
+    if (parkedTimerRef.current !== null) clearTimeout(parkedTimerRef.current);
+  }, [holdPress]);
+  // A cue for a hold that turned out shorter (its lift was queued behind a
+  // busy page) is taken back: that press sends.
+  const dropHoldCue = useCallback(() => {
+    if (!holdCueRef.current) return;
+    holdCueRef.current = false;
+    setParked(false);
   }, []);
+  // A press that lasted the hold keeps the message as a draft. The press is
+  // spent either way: when the message can no longer be kept (a send began
+  // meanwhile), it stays in the field rather than going out as a send the
+  // person held back.
+  const keepHeldDraft = useCallback(() => {
+    const cued = holdCueRef.current;
+    holdCueRef.current = false;
+    holdSpentRef.current = true;
+    if (!canParkRef.current()) {
+      if (cued) setParked(false);
+      return;
+    }
+    if (!cued) successFeedback();
+    sendRef.current?.(undefined, undefined, false, true);
+    announce(tr("composer.savedAsDraft"));
+    if (parkedTimerRef.current !== null) clearTimeout(parkedTimerRef.current);
+    setParked(true);
+    parkedTimerRef.current = setTimeout(() => {
+      parkedTimerRef.current = null;
+      setParked(false);
+    }, SEND_PARKED_MS);
+  }, []);
+  const startHold = useCallback((event: PointerEvent<HTMLButtonElement>) => {
+    holdSpentRef.current = false;
+    const holdMs = sendHoldRef.current;
+    if (holdMs <= 0 || !canParkRef.current()) return;
+    holdPress.arm(event.currentTarget, event.timeStamp, holdMs);
+  }, [holdPress]);
+  // The release settles an armed hold. True when the press kept a draft.
+  const settleHold = useCallback((timeStamp: number): boolean => {
+    if (holdPress.release(timeStamp) === "draft") {
+      keepHeldDraft();
+      return true;
+    }
+    dropHoldCue();
+    return false;
+  }, [holdPress, keepHeldDraft, dropHoldCue]);
+  // A press that ends off Send keeps a draft only if it had already lasted
+  // the hold; anything shorter was abandoned and does nothing.
+  const abandonHold = useCallback((timeStamp: number) => {
+    if (holdPress.abandon(timeStamp) === "draft") keepHeldDraft();
+    else dropHoldCue();
+  }, [holdPress, keepHeldDraft, dropHoldCue]);
   const onPrimaryPointerDown = useCallback((event: PointerEvent<HTMLButtonElement>) => {
     const activation = primaryActivationRef.current;
     if (event.pointerType !== "touch" && event.pointerType !== "pen") {
       activation.touch = false;
       activation.keyboard = false;
       activation.staleTouchClick = false;
-      if (event.button === 0) startHold();
+      if (event.button === 0) startHold(event);
       return;
     }
     activation.touch = true;
     activation.keyboard = false;
     activation.staleTouchClick = false;
+    activation.down = { x: event.clientX, y: event.clientY };
     event.preventDefault();
-    startHold();
+    startHold(event);
   }, [startHold]);
   const onPrimaryPointerUp = useCallback((event: PointerEvent<HTMLButtonElement>) => {
-    const held = holdRef.current.fired;
-    cancelHold();
+    const held = settleHold(event.timeStamp);
     if (event.pointerType !== "touch" && event.pointerType !== "pen") return;
+    const down = primaryActivationRef.current.down;
+    primaryActivationRef.current.down = null;
     if (held) return;
-    // A finger that slid off Send before lifting changed its mind.
-    const rect = event.currentTarget.getBoundingClientRect();
-    const inside = event.clientX >= rect.left && event.clientX <= rect.right
-      && event.clientY >= rect.top && event.clientY <= rect.bottom;
-    if (inside || (rect.width === 0 && rect.height === 0)) send();
-  }, [cancelHold, send]);
-  const onPrimaryPointerCancel = useCallback(() => {
-    cancelHold();
-  }, [cancelHold]);
+    // A finger that slid off Send before lifting changed its mind. A touch is
+    // captured by the button it began on, so the event's target cannot tell;
+    // the page is hit-tested where the finger lifted instead.
+    const control = event.currentTarget;
+    const under = control.ownerDocument.elementFromPoint?.(event.clientX, event.clientY) ?? null;
+    if (releaseSends({
+      down,
+      up: { x: event.clientX, y: event.clientY },
+      rect: control.getBoundingClientRect(),
+      overControl: under ? control.contains(under) : null,
+    })) send();
+  }, [settleHold, send]);
+  // Leaving ends a hold; the browser taking the touch for a pan ends the
+  // gesture. No click follows a cancelled touch, so nothing is left to
+  // consume: forget it, or it would swallow the next pointerless click
+  // (an assistive activation). A leave is not that: it precedes the click.
+  const onPrimaryPointerLeave = useCallback((event: PointerEvent<HTMLButtonElement>) => {
+    abandonHold(event.timeStamp);
+  }, [abandonHold]);
+  const onPrimaryPointerCancel = useCallback((event: PointerEvent<HTMLButtonElement>) => {
+    abandonHold(event.timeStamp);
+    primaryActivationRef.current.touch = false;
+    primaryActivationRef.current.down = null;
+  }, [abandonHold]);
   const onPrimaryKeyDown = useCallback((event: KeyboardEvent<HTMLButtonElement>) => {
     if (event.key !== "Enter" && event.key !== " ") return;
     const activation = primaryActivationRef.current;
@@ -3392,8 +3621,8 @@ function ComposerBody({
   const onPrimaryClick = useCallback((event: MouseEvent<HTMLButtonElement>) => {
     const activation = primaryActivationRef.current;
     const keyboardClick = event.detail === 0;
-    if (holdRef.current.fired && !keyboardClick) {
-      holdRef.current.fired = false;
+    if (holdSpentRef.current && !keyboardClick) {
+      holdSpentRef.current = false;
       activation.touch = false;
       return;
     }
@@ -3694,6 +3923,8 @@ function ComposerBody({
       // Observe the submit-time clear and newer typing even while admission
       // owns persistence. Reconciliation must use the current input when it
       // resumes, never the pending edit from before Send.
+      const startKey = sessionIdRef.current ?? unboundSpawnKey();
+      if (startKey && carriedStartInput.has(startKey)) carriedStartInput.set(startKey, val);
       if (sessionIdRef.current !== null) {
         pendingLocalTextRef.current = { scopeKey: sessionScopeKeyRef.current, text: val };
         // Typing is the signal a turn is coming; a restored or synced draft
@@ -4071,7 +4302,8 @@ function ComposerBody({
     return true;
   };
   const phoneLayout = isPhone;
-  useEffect(() => setMobileRailEditing(false), [phoneLayout, spaceId, activeProjectId]);
+  const railSpaceId = mobileRailSpaceId(activeProject, spaceId);
+  useEffect(() => setMobileRailEditing(false), [phoneLayout, railSpaceId, activeProjectId]);
   // Arranging the buttons puts the keyboard away so the whole rail is in view.
   const editMobileRail = (editing: boolean) => {
     setMobileRailEditing(editing);
@@ -4289,6 +4521,13 @@ function ComposerBody({
   const runningPrimaryTitle = !queueEdit && !rewindActive && followUp === "queue"
     ? tr("composer.queueMessageUntilTheCurrentResponseFinishes")
     : runningPrimaryLabel;
+  // The ring is drawn by CSS over the person's own hold length. With the
+  // gesture off there is no ring at all, so nothing is published and no
+  // "hold to save" hint is promised.
+  const sendHoldStyle = sendHoldRef.current > 0
+    ? { "--send-hold-ms": `${sendHoldRef.current}ms` } as CSSProperties
+    : undefined;
+  const holdHint = uiPrefs.sendHoldDraft ? ` · ${tr("composer.holdToSaveDraft")}` : "";
   const runningPrimaryGlyph = queueEdit
     ? <CheckIcon />
     : !rewindActive && followUp === "queue"
@@ -4391,16 +4630,18 @@ function ComposerBody({
             onPointerDown={onPrimaryPointerDown}
             onPointerUp={onPrimaryPointerUp}
             onPointerCancel={onPrimaryPointerCancel}
-            onPointerLeave={onPrimaryPointerCancel}
+            onPointerLeave={onPrimaryPointerLeave}
             onContextMenu={(event) => event.preventDefault()}
             onKeyDown={onPrimaryKeyDown}
             onClick={onPrimaryClick}
-            data-holding={holding || undefined}
+            data-parked={parked || undefined}
+            style={sendHoldStyle}
             aria-label={runningPrimaryTitle}
-            title={withContextLabel(runningPrimaryTitle)}
+            title={withContextLabel(`${runningPrimaryTitle}${holdHint}`)}
           >
-            {runningPrimaryGlyph}
+            {parked ? <CheckIcon aria-hidden="true" /> : runningPrimaryGlyph}
             <span className="composer-action-label">{runningPrimaryLabel}</span>
+            <span className="send-hold-ring" aria-hidden="true" />
           </button>
           <Menu
             label={tr("composer.moreActiveRunActions")}
@@ -4449,17 +4690,15 @@ function ComposerBody({
       )
             ) : (
       <button className="send" onPointerDown={onPrimaryPointerDown} onPointerUp={onPrimaryPointerUp}
-        onPointerCancel={onPrimaryPointerCancel} onPointerLeave={onPrimaryPointerCancel}
+        onPointerCancel={onPrimaryPointerCancel} onPointerLeave={onPrimaryPointerLeave}
         onContextMenu={(event) => event.preventDefault()} onKeyDown={onPrimaryKeyDown} onClick={onPrimaryClick}
-        data-holding={holding || undefined}
         data-parked={parked || undefined}
-        title={`${shellMode ? tr("composer.runShellCommand") : tr("composer.sendMessage")} (${sendKey}) · ${tr("composer.holdToSaveDraft")}`}
+        style={sendHoldStyle}
+        title={`${shellMode ? tr("composer.runShellCommand") : tr("composer.sendMessage")} (${sendKey})${holdHint}`}
         aria-label={shellMode ? tr("composer.runShellCommand") : tr("composer.sendMessage")}
         disabled={sendDisabled && !parked}>
         <span className="send-plane" aria-hidden="true">{parked ? <Icon.check /> : <Icon.send />}</span>
-        <svg className="send-hold-ring" viewBox="0 0 48 48" aria-hidden="true">
-          <circle cx="24" cy="24" r="22.5" pathLength="100" />
-        </svg>
+        <span className="send-hold-ring" aria-hidden="true" />
       </button>
             )}
     </>
@@ -4823,7 +5062,6 @@ function ComposerBody({
         <AdaptiveTextInput
           ref={inputRef}
           data-composer-input=""
-          disabled={creatingSession}
           initialText={text}
           rows={3}
           className="composer-editor"
@@ -4913,8 +5151,8 @@ function ComposerBody({
         <ComposerFileInput inputRef={cameraInputRef} onFiles={attachFiles} accept="image/*" capture="environment" />
       {selectingConversation ? null : phoneLayout ? (
         <MobileComposerRail
-          key={`${activeBrowserAccountId()}:${spaceId}:${activeProjectId ?? ""}`}
-          storageKey={mobileRailKey(spaceId ?? "", activeProjectId)}
+          key={`${activeBrowserAccountId()}:${railSpaceId}:${activeProjectId ?? ""}`}
+          storageKey={mobileRailKey(railSpaceId, activeProjectId)}
           context={slotContext}
           add={addControl}
           primary={primaryAction}

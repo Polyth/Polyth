@@ -183,8 +183,16 @@ const SECRET_PATH = [
   /\/proc\/[^/\s]+\/environ$/,
 ];
 
+/** Drop trailing `/` (and `\\` when asked) with a linear scan; `/[\\/]+$/` is
+ * quadratic on a long run of separators that is not at the end. */
+const trimTrailingSlashes = (value: string, backslash = false): string => {
+  let end = value.length;
+  while (end > 0 && (value[end - 1] === "/" || (backslash && value[end - 1] === "\\"))) end--;
+  return value.slice(0, end);
+};
+
 const isSecretPath = (word: string): boolean => {
-  const value = word.trim().replace(/^file:\/\//, "").replace(/[\\/]+$/, "");
+  const value = trimTrailingSlashes(word.trim().replace(/^file:\/\//, ""), true);
   return value.length > 0 && SECRET_PATH.some((pattern) => pattern.test(value));
 };
 
@@ -1537,4 +1545,4 @@ export function describeBlastRadius(
 
 /** The parsing behind the assessment, for the workspace tool policy
  * (`workspacePolicy.ts`), so one command is read the same way by both. */
-export const riskParsing = { parseShell, commandOf, gitCommand, placeOf, isSecretPath, normalizeAbsolute, base };
+export const riskParsing = { parseShell, commandOf, gitCommand, placeOf, isSecretPath, normalizeAbsolute, base, trimTrailingSlashes };

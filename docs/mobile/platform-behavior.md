@@ -61,6 +61,11 @@
   `GET /api/sessions/create-operations/:key` (≈24 s backoff) and continues with
   the created session, or resends the same key once the probe answers `absent`
   — a resend returns the first session (and its worktrees), never a duplicate.
+  A New Chat send carries its first prompt in the same request (`start`, see
+  [session start](../architecture/multi-harness.md)): once the server answers
+  with a `queueId` or `turnId` the client owes nothing more, so a phone that
+  goes to the background right after Send still gets its turn. A resend with
+  the same key queues that prompt at most once.
   A managed checkout left for the key without a canonical session (crash
   between allocation and create) fails closed with `conflict` and is preserved
   for recovery, never re-allocated or rolled back by the resend.
@@ -76,9 +81,13 @@
   it appears in the list, otherwise send again; the text is restored). Other
   actions with an unknown outcome use the context-free
   `settings.mutationOutcomeUnknown` copy, which names no session or draft.
-  Standalone worktree creation (`POST /api/worktrees`,
-  used for a new-worktree/branch New Chat) is not keyed yet and keeps that
-  outcome.
+  A new-worktree/branch New Chat is keyed the same way: `POST
+  /api/worktrees/sessions` allocates the linked worktree on the server and then
+  creates the chat in it, serialized per key, so a resend returns the first
+  chat and allocates nothing. A worktree allocated for a create that then
+  failed before its canonical row stays in place; the next send picks a new
+  codename. Standalone worktree creation (`POST /api/worktrees`, the worktree
+  manager) is not keyed and keeps that outcome.
 - A composer model catalog whose request failed is asked again on Reconnect,
   sync reconnect, a return to the foreground or `online`; a network failure
   also retries every 10 s while visible and reads "Can't reach Polyth.
@@ -193,6 +202,25 @@ loading is shown in between.
   the fresh-chat screen, not an opaque phone stage.
 - Desktop browsers (fine pointer, wider than 620 px) remove the veil before
   their first paint.
+- **A page that never renders is never left blank.** Before its first render
+  the shell waits on reads with no deadline of their own. The Link proxy holds
+  an `/api/auth/status` answer for up to 120 s (`response_head_timeout_ms`), and
+  a native bridge call can stall. Lifting the veil onto the empty `#root` showed
+  a blank white page with nothing to tap, so the app no longer does that
+  (`apps/web/src/launchFailsafe.ts`, armed in `main.tsx` before its first
+  await):
+  - The phone app's page from its Link proxy goes back to the hub after 15 s
+    with `?resume=1`. The hub opens the server again over a fresh connection,
+    at most once a minute (`RESUME_COOLDOWN_MS`), then shows its server list.
+    The inline script in `index.html` does the same at 20 s for a page whose
+    scripts never ran.
+  - The bundled hub reloads itself once a minute at most, then shows what is
+    underneath. Browsers and the desktop app still lift the veil.
+  - On iOS, `PolythPageRecovery` (`SceneDelegate.swift`) sits in front of
+    Capacitor's navigation delegate. When WebKit kills the open server's page,
+    Capacitor only calls `reload()`. If that reload cannot reach the proxy
+    because its listener is still coming back from the suspension, the page
+    goes to the hub's `?resume=1` instead of staying blank.
 - Each app launch opens the Link loopback proxy on a new port, so the shell's
   origin storage starts empty. The synced settings arrive from the server, and
   the first render does not wait for them: the look of the last launch is
@@ -228,9 +256,10 @@ loading is shown in between.
 
 Verification status: the web veil, the reveal and the hub transitions are
 checked in Chromium filmstrips, and the veil matches the generated iOS launch
-image within 1 CSS px. The native halves (storyboard layout, Android splash
-attributes, curtain timing) are source-inspected only and need a device
-check.
+image within 1 CSS px. The unrendered-page fallbacks are unit-tested
+(`launchFailsafe.test.ts`, `launchVeil.test.ts`). The native halves
+(storyboard layout, Android splash attributes, curtain timing,
+`PolythPageRecovery`) are source-inspected only and need a device check.
 
 ## Safe areas and keyboard
 
@@ -312,6 +341,29 @@ would regress the scoped-permission model.
   browser clipboard/fallback path elsewhere.
 - Light haptics confirm a successful connection and a successful native file
   selection. Navigation and routine taps remain silent.
+- All web-shell haptics go through `apps/web/src/haptics.ts`: five semantic
+  kinds (`selection`, `tap`, `success`, `warning`, `error`). The native app
+  plays them through Capacitor Haptics (iOS Taptic patterns for
+  success/warning/error); Android browsers use `navigator.vibrate`; iOS Safari
+  has no vibration API and stays silent. Settings → Notifications →
+  **Vibration** is a per-device choice kept in `localStorage`
+  (`polyth.haptics`, never synced): *Touch and events* (default), *Touch only*
+  or *Off*. The row is disabled on a device that cannot vibrate (desktop
+  Chromium exposes `vibrate()` without a motor, so a browser counts only with a
+  coarse primary pointer).
+- Touch haptics follow a completed local action: gestures crossing their
+  threshold, sheet menus, drops, hold-to-draft, Stop (`tap`), approving (`success`) or
+  rejecting (`warning`) a permission request, and copying (`selection`).
+- Live events vibrate through `eventHaptic()` from the notification router
+  (`notify.ts`), only for the kinds chosen in "Notify about": turn finished
+  `success`, turn failed `error`, agent question or permission request
+  `warning`, delegated agent finished `selection`, mention or person message
+  `tap`. They play only while the page is visible (in the background the push
+  notification speaks), never on the device where the person is not active,
+  never for a chat's first sighting or a replayed event (the router primes and
+  deduplicates), and within 700 ms a later event plays only if it is stronger.
+  Connection loss and recovery do not vibrate: a phone resume shows the
+  catch-up pill on every unlock and false liveness losses happen.
 - Outbound Share uses the platform share sheet for downloaded artifacts.
 
 Receiving arbitrary files/text from another app ("Share into Polyth") is
@@ -338,7 +390,13 @@ build's APNs environment; Android: the FCM token with `platform: "android"`).
 The page registers them with its own server (`POST /api/native-push`) over the
 same Polyth Link connection it uses for everything else, and re-sends them on
 every foreground so a rotated token arrives. The phone never talks to a push
-service itself.
+service itself. One token is one app install: registered under another person
+or another Link device identity (the phone changed account or re-paired), it
+replaces the older registrations of that token and the Live Activity rows of
+those identities, so a phone never keeps getting an account's alerts after it
+moved on. The same person and device in another Space keeps its own row.
+Duplicates a server stored before this rule go when it next starts (the
+token's most recently updated owner stays).
 
 The server sends through [Polyth's push service](#polyths-push-service)
 (`https://push.polyth.app`), which holds the app's APNs key and Firebase
@@ -369,6 +427,41 @@ alerts still appear while the app is open. APNs/FCM provider delivery, signing, 
 configuration, and device lifecycle behavior remain external-verification work;
 the repository tests do not make provider calls.
 
+### Only the device in use
+
+While a person works on one of their devices, only that device alerts them.
+Every open page tells the server over `/ws` whether its person is using it
+(`presence {clientId, active, idleMs}`, `apps/web/src/devicePresence.ts`):
+in use means the page is visible and was touched (pointer, key, wheel, touch)
+in the last 5 minutes. Opening or showing the page counts as a touch. The
+page reports when that changes, at most every 15 s while it is touched, and
+every minute while in use; hiding it reports at once.
+
+The server (`packages/server/src/devicePresence.ts`, memory only) keeps each
+report for 150 s and names, per person and Space, the device touched most
+recently. A device is the paired phone's Link endpoint, a browser's
+remembered device, or for a loopback page (the desktop app, a browser on the
+host) the install id the page keeps in local storage. Only a page allowed to
+read notifications counts: a restricted device could otherwise silence the
+person's other devices.
+
+While a device is in use:
+
+- native push and browser Web Push go only to that device (an older browser
+  subscription that does not name its device counts as another device); a
+  test push the person asks for still goes everywhere;
+- a phone that is not in use loses its Live Activity at once (the server
+  pushes `end` with immediate dismissal, and that phone's page ends it
+  locally when open);
+- every other open page plays no sound and shows no OS notification for
+  task outcomes and messages (`presence/state {activeElsewhere: true}`); the
+  inbox row, the bell and in-page cards still reach every device.
+
+With no device in use (all hidden or idle, or no page open) every device is
+alerted, as before. A restart forgets presence. The phone counts as in use
+only while the app is open, so a locked phone always defers to a device in
+use and gets the alerts once that one goes idle.
+
 ### Polyth's push service
 
 APNs and FCM deliver only for keys of the team that publishes the app, so the
@@ -382,16 +475,40 @@ each device token and each sender address. Only a server the phone registered
 with knows the token. `POLYTH_NATIVE_PUSH_RELAY_ORIGIN` points a server at
 another deployment of the same service; `off` turns it off.
 
-A server sends to all of a person's devices at once. A send the service
+A server sends to all of a person's devices at once, or only to the one in
+use ([Only the device in use](#only-the-device-in-use)). A send the service
 provably never received is tried once more after a second. That covers a
 DNS failure, a refused or unreachable connection, a connect timeout, and the
 service's own `503`, which it answers before calling any provider. A reset,
 a response timeout or any other answer may have reached the phone already,
 so the server never repeats those and does not send a second notification.
+
+An alert that still did not arrive, or that the service or provider refused
+before delivery (a limit, a missing or rejected APNs/FCM credential), waits
+in the server's memory and goes again after 5 s, 15 s, 30 s, 1, 2 and then
+every 5 minutes until its [lifetime](native-push-content.md#push-service)
+ends. A send that succeeds on the same route sends what waits at once. A
+newer alert for the same transition replaces the waiting one, a new
+registration of the phone or the person sitting down at another device drops
+it, and at most 500 wait (oldest dropped). A
+restart forgets them; the inbox row stays either way.
+
 Each change in the service's health is logged once (`[native-push] push
-service … is not delivering: …` and later `… delivers again`). The log line
-names the cause, for example a network code or a missing APNs/FCM
-credential, and never a token or payload.
+service … is not delivering: …` and later `… delivers again`; `own APNs key
+…` for [Own APNs key](#own-apns-key)). The log line names the cause, for
+example a network code or a missing APNs/FCM credential, and never a token or
+payload.
+
+Settings → Notifications shows **Delivery to phones** once the person has a
+registered phone, on the computer as well as on the phone
+(`GET /api/native-push/delivery`, any signed-in principal, own account only).
+It is what the server last saw for each route and platform the person's
+phones use: real sends, plus the service's `GET /v1/health`, checked when the
+page asks and the last observation is older than a minute. That answer says
+whether the service is reachable and holds an APNs key / Firebase account; a
+key Apple or Google rejected shows only after a send. The row names the
+problem (unreachable, rate-limited, no usable key, key rejected) and how many
+alerts wait. A server with neither route reports `route: "none"`.
 
 ### Own APNs key
 
@@ -495,8 +612,10 @@ extension (shared `PolythActivityAttributes.swift`).
      (`LIVE_ACTIVITY_PUSH_TRUST_MS`) instead of two. When the shown chat is no
      longer live and no counted chat is, the server sends `end`: a finished or
      failed chat stays ten minutes, a vanished or unreadable one leaves at
-     once. Tracking survives a server restart and lapses after 8 hours (iOS
-     ends the activity then); a token APNs retires is dropped.
+     once, and so does every island while the person uses another device
+     ([Only the device in use](#only-the-device-in-use); re-evaluated as soon
+     as that changes). Tracking survives a server restart and lapses after 8
+     hours (iOS ends the activity then); a token APNs retires is dropped.
   A push cannot switch the island to another chat (that needs its title); a
   question from another chat moves only the count, and an alert still
   announces it.

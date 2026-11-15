@@ -3,6 +3,16 @@
 import { useSyncExternalStore } from "react";
 import { tr } from "./i18n/index.ts";
 
+/** Viewport rect of the control a confirmation was asked from (a menu row, a
+ *  swipe-tray button). On a phone the confirmation then opens as a card at
+ *  that spot, grown out of it, instead of a bottom sheet. */
+export interface AlertOrigin {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
 export type AlertRequest =
   | {
     kind: "confirm";
@@ -13,6 +23,7 @@ export type AlertRequest =
     /** Keep a composer-held software keyboard open across the confirmation
      *  (the full-access prompt). See ModalSurfaceOptions.keepKeyboard. */
     keepKeyboard?: boolean;
+    origin?: AlertOrigin;
     resolve: (value: boolean) => void;
   }
   | {
@@ -44,9 +55,10 @@ function replaceCurrent(): void {
 
 export function confirmAlert(
   message: string,
-  options: { title?: string; confirmLabel?: string; destructive?: boolean; keepKeyboard?: boolean } = {},
+  options: { title?: string; confirmLabel?: string; destructive?: boolean; keepKeyboard?: boolean; origin?: AlertOrigin } = {},
 ): Promise<boolean> {
   replaceCurrent();
+  const origin = options.origin;
   return new Promise<boolean>((resolve) => {
     current = {
       kind: "confirm",
@@ -55,6 +67,8 @@ export function confirmAlert(
       confirmLabel: options.confirmLabel ?? tr("common.continue"),
       destructive: options.destructive ?? true,
       ...(options.keepKeyboard ? { keepKeyboard: true } : {}),
+      // A plain copy: a DOMRect's fields are getters on its prototype.
+      ...(origin ? { origin: { left: origin.left, top: origin.top, width: origin.width, height: origin.height } } : {}),
       resolve,
     };
     emit();
@@ -79,6 +93,37 @@ export function promptAlert(
     };
     emit();
   });
+}
+
+export interface AnchoredAlertPlacement {
+  /** Card offsets inside the backdrop band, in px. */
+  left: number;
+  top: number;
+  /** Where the origin's centre falls on the card: its transform-origin. */
+  originX: number;
+  originY: number;
+}
+
+/**
+ * Place an anchored confirmation card over the control it was asked from:
+ * centred on that control's centre, then kept inside the band (the backdrop
+ * box, already limited to the visible viewport) less its safe insets. The
+ * transform-origin follows the control, so the card grows out of the spot the
+ * finger just lifted from even when the clamp moves it away.
+ */
+export function placeAnchoredAlert(input: {
+  origin: AlertOrigin;
+  card: { width: number; height: number };
+  band: { left: number; top: number; width: number; height: number };
+  insets: { top: number; right: number; bottom: number; left: number };
+}): AnchoredAlertPlacement {
+  const { origin, card, band, insets } = input;
+  const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(Math.max(min, max), value));
+  const centreX = origin.left + origin.width / 2 - band.left;
+  const centreY = origin.top + origin.height / 2 - band.top;
+  const left = clamp(centreX - card.width / 2, insets.left, band.width - insets.right - card.width);
+  const top = clamp(centreY - card.height / 2, insets.top, band.height - insets.bottom - card.height);
+  return { left, top, originX: centreX - left, originY: centreY - top };
 }
 
 export function resolveAlert(value: boolean | string | null): void {

@@ -1,6 +1,7 @@
 import type {
   ComposerMode,
   ComposerSessionCreatedHook,
+  ComposerSessionStartExtension,
   Unregister,
   WebNotificationHandle,
   WebNotificationInput,
@@ -297,6 +298,14 @@ export function createPackageActivation(
                   registerSessionCreatedHook: (hook: ComposerSessionCreatedHook) => {
                     if (disposed) return reject("composer.registerSessionCreatedHook");
                     return track(host.composer!.registerSessionCreatedHook!(hook));
+                  },
+                }
+              : {}),
+            ...(host.composer.registerSessionStartExtension
+              ? {
+                  registerSessionStartExtension: (extension: ComposerSessionStartExtension) => {
+                    if (disposed) return reject("composer.registerSessionStartExtension");
+                    return track(host.composer!.registerSessionStartExtension!(extension));
                   },
                 }
               : {}),

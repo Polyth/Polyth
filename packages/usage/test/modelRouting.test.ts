@@ -359,6 +359,28 @@ test("an explicit allow-list ranks exactly its pairs, used or not, with their he
   assert.deepEqual(report.quotas.map((quota) => quota.sourceId).sort(), ["claude", "codex"]);
 });
 
+test("an exclusion hides the model under every row that runs it, counts it, and says so", () => {
+  const report = buildModelRouting({
+    now: NOW,
+    observations: [
+      observation("claude", "anthropic", "claude-opus-5-5"),
+      observation("claude", "anthropic", "claude-sonnet-5-5"),
+    ],
+    // `default` runs the same Opus as the excluded `opus` row.
+    favorites: ["claude::anthropic/default", "claude::anthropic/sonnet"],
+    snapshots: [snapshot("claude", [["7d", 40, NOW + DAY]], { pace: { "7d": { usageFraction: 0.4, timeFraction: 0.2, pace: "over" } } })],
+    catalog: claudeCatalog(),
+    available: () => true,
+    exclude: ["claude::anthropic/opus", "claude::anthropic/retired"],
+  });
+  assert.deepEqual(report.candidates.map((c) => c.modelID), ["sonnet"],
+    "the starred default runs the excluded Opus (and carries its turns), so it is hidden too");
+  assert.equal(report.excluded, 1);
+  assert.equal(report.unlisted, 0, "an exclusion the catalog no longer lists is not a retired favorite");
+  assert.match(report.text, /1 model is hidden by the routing policy above/);
+  assert.deepEqual(report.candidates[0]!.quotaWindow, { sourceId: "claude", label: "7d", resetsAt: NOW + DAY, pace: "over" });
+});
+
 test("an Antigravity account's third-party window does not block its Gemini models", () => {
   const report = buildModelRouting({
     now: NOW,

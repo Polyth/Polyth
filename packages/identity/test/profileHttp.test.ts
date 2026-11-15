@@ -98,3 +98,64 @@ test("profile rename keeps opaque identity and session while enforcing revision 
   assert.equal(f.control.all("SELECT 1 FROM auth_sessions").length, 1);
   assert.equal(f.control.all("SELECT 1 FROM audit_events WHERE action='identity.profile-renamed'").length, 1);
 });
+
+test("a person moves their own login over HTTP: password confirmed, sessions kept, old login stops working", async t => {
+  const f = await httpFixture(t);
+  const before = await f.request("/api/auth/me");
+  assert.equal(before.value.login, "owner");
+
+  // Like a password change, it needs a recent password confirmation.
+  f.advance(5 * 60_000);
+  const stale = await f.request("/api/auth/me/login", { login: "Max.K", expectedRevision: before.value.revision });
+  assert.equal(stale.response.status, 403);
+  assert.equal(stale.value.error, "reauth-required");
+  assert.equal((await f.request("/api/auth/reauthenticate", { password: "owner test passphrase" })).response.status, 200);
+
+  const moved = await f.request("/api/auth/me/login", { login: "Max.K", expectedRevision: before.value.revision });
+  assert.equal(moved.response.status, 200);
+  assert.equal(moved.value.id, before.value.id);
+  assert.equal(moved.value.login, "max.k", "stored lowercased, like sign-in reads it");
+  assert.equal(moved.value.displayName, before.value.displayName, "the name agents use is separate");
+  assert.equal((await f.request("/api/auth/me")).response.status, 200, "no session ends");
+
+  const invalid = await f.request("/api/auth/me/login", { login: "bad login!", expectedRevision: moved.value.revision });
+  assert.equal(invalid.response.status, 400);
+  assert.equal((await f.identity.credentials.login({ login: "max.k", password: "owner test passphrase" })).session.userId, before.value.id);
+  await assert.rejects(f.identity.credentials.login({ login: "owner", password: "owner test passphrase" }), { code: "invalid-credentials" });
+  assert.equal(f.control.all("SELECT 1 FROM audit_events WHERE action='identity.login-changed'").length, 1);
+});
+
+test("the owner moves another account's login; taken, reserved and managed logins are refused", async t => {
+  const f = await httpFixture(t);
+  const ownerSession = await f.request("/api/auth/me");
+  const created = await f.request("/api/auth/accounts", { login: "olia", name: "Оля", password: "olia test passphrase" });
+  assert.equal(created.response.status, 200);
+  const id = String(created.value.id);
+
+  const taken = await f.request(`/api/auth/accounts/${id}/login`, { login: "owner", expectedRevision: created.value.revision });
+  assert.equal(taken.response.status, 409, "the owner's login is in use");
+  assert.equal(taken.value.error, "login-taken", "told apart from a stale revision");
+  const moved = await f.request(`/api/auth/accounts/${id}/login`, { login: "olha", expectedRevision: created.value.revision });
+  assert.equal(moved.response.status, 200);
+  assert.equal(moved.value.login, "olha");
+  assert.equal(moved.value.name, "Оля");
+  assert.equal(moved.value.current, false);
+  const replay = await f.request(`/api/auth/accounts/${id}/login`, { login: "olga", expectedRevision: created.value.revision });
+  assert.equal(replay.response.status, 409, "revision checked");
+  assert.equal((await f.identity.credentials.login({ login: "olha", password: "olia test passphrase" })).session.userId, id);
+
+  // Once the owner leaves `owner`, nobody else may take it: setup and the
+  // recovery file hand that login to the instance owner only.
+  const self = await f.request("/api/auth/me");
+  assert.equal((await f.request("/api/auth/me/login", { login: "max", expectedRevision: self.value.revision })).response.status, 200);
+  assert.equal((await f.request(`/api/auth/accounts/${id}/login`, { login: "owner", expectedRevision: moved.value.revision })).response.status, 409);
+  assert.equal((await f.request("/api/auth/accounts", { login: "owner", name: "Fake", password: "fake test passphrase" })).response.status, 409);
+  const back = await f.request("/api/auth/me");
+  assert.equal((await f.request("/api/auth/me/login", { login: "owner", expectedRevision: back.value.revision })).response.status, 200, "the owner may take it back");
+
+  f.control.transaction(() => f.control.run("UPDATE users SET managed=1 WHERE id=?", id));
+  const managed = await f.request(`/api/auth/accounts/${id}/login`, { login: "olga", expectedRevision: moved.value.revision });
+  assert.equal(managed.response.status, 403);
+  assert.equal(managed.value.error, "managed-identity");
+  assert.ok(ownerSession.value.id);
+});

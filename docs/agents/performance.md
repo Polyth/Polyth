@@ -190,7 +190,7 @@ for at most `LIVENESS_BUSY_LIMIT`.
 
 ## Session spawn timing
 
-`SessionService.create` starts a bounded, in-memory sample after validating the
+`SessionService.create` and `SessionService.start` start a bounded, in-memory sample after validating the
 canonical identity and workspace, before runtime acquisition. Authenticated,
 Space-scoped session debug (`GET /api/agent/sessions/:sessionId/debug` or Polyth
 `session.debug`) exposes it as the optional `spawnTiming` field. Debug reads do
@@ -203,6 +203,7 @@ reuse metadata; they contain no prompt, path, tool input or error text.
 | `runtimeAcquireMs` | First runtime lookup, including harness resolution, provisioning and waiting for an existing creation flight. |
 | `nativeSessionCreateMs` | First dispatched native create/ensure operation, excluding canonical preparation and subsequent reconciliation. |
 | `turnAdmissionMs` | First delivered turn admission attempt, from claiming dispatch through its settled receipt, including uncertain or rejected outcomes. Merely enqueueing a prompt does not fill it. |
+| `startReplyMs` | A start only: from validated creation to its reply, once the row and the first turn's queue row are durable and before the runtime exists. Absent on `create`. |
 | `firstRuntimeEventMs` | From validated creation to the first accepted runtime turn-content event after a Polyth admission attempt, at canonical ingress after persistence. Idle discovery, native lifecycle markers alone, duplicate/refused observations and stale generations do not supply it. |
 | `warmRuntimeHit` | For OpenCode, reuse of an initialized physical runtime entry. Joining its pending initial creation is cold. This flag does not probe the daemon's health or certify that recovery will be unnecessary. Fresh session-lifetime factories report false; workspace providers without physical evidence leave it absent. |
 | `runtimeSpawnMs` | Observed owned-local OpenCode physical launch to health readiness, excluding binary discovery, engine inspection, config preparation and capability readback. Absent on warm acquisitions, remote launches and uninstrumented providers. |

@@ -3,7 +3,7 @@
 // docs/dev/ui.md §4.5 "Settings page contract"; these primitives implement it
 // for built-in pages and for package pages that import this module.
 import {
-  useEffect, useId, useRef, useState,
+  createContext, useContext, useEffect, useId, useRef, useState,
   type ComponentProps, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode,
 } from "react";
 import { readErrorDiagnostics } from "@polyth/contracts";
@@ -77,6 +77,10 @@ export function ReadonlyRow({ label, hint, value, mono = false, action, itemId }
   );
 }
 
+/** Heading level of a `Section` title. A group that holds whole sections (the
+ *  other-devices group) sets 4 so its sections sit under its own heading. */
+export const SectionHeadingLevel = createContext<3 | 4>(3);
+
 /** A titled group of rows. The shell owns the page title; sections are the
  *  only headings inside a page. `action` is a small header control (usually
  *  `<ResetLink>`); `tone="danger"` frames destructive actions at page end. */
@@ -89,6 +93,7 @@ export function Section({ title, hint, action, itemId, tone, children }: {
   children: ReactNode;
 }) {
   const headingId = useId();
+  const Heading = useContext(SectionHeadingLevel) === 4 ? "h4" : "h3";
   return (
     <section
       className={`settings-section${tone === "danger" ? " is-danger" : ""}`}
@@ -97,7 +102,7 @@ export function Section({ title, hint, action, itemId, tone, children }: {
     >
       <div className="settings-section-head">
         <div className="settings-section-copy">
-          <h3 className="settings-section-title" id={headingId}>{title}</h3>
+          <Heading className="settings-section-title" id={headingId}>{title}</Heading>
           {hint && <p className="settings-section-hint">{hint}</p>}
         </div>
         {action && <div className="settings-section-action">{action}</div>}

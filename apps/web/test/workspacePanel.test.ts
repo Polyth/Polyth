@@ -351,7 +351,9 @@ test("Workspace editing and Add page CSS load after the widget fixes; editing mo
   assert.match(gallery, /\.workspace-gallery\s*\{[^}]*animation:\s*stack-in var\(--motion-stack\) var\(--motion-stack-ease\) backwards/s);
   assert.match(gallery, /\.workspace-gallery\.is-closing\s*\{[^}]*animation-duration:\s*var\(--stack-out-settle, var\(--motion-stack\)\)/s);
   assert.match(gallery, /\.is-gallery-open > :is\(\.sheet-head, \.sheet-body\)\s*\{[^}]*visibility:\s*hidden;[^}]*stack-cover/s);
-  assert.match(gallery, /\.is-gallery-open\[data-peek\] > :is\(\.sheet-head, \.sheet-body\)/);
+  // The peek is not tied to the open state: it outlasts the Back by the release spring,
+  // and its position is not `!important`, so that spring can animate over it.
+  assert.match(gallery, /\.workspace-panel-sheet\[data-peek\] > :is\(\.sheet-head, \.sheet-body\)\s*\{[^}]*transform:\s*translate3d\(var\(--stack-peek-x, 0px\), 0, 0\);/s);
   // A large, 16px search field (no iOS zoom on focus).
   assert.match(gallery, /\.workspace-gallery-search\s*\{[^}]*min-height:\s*var\(--control-h-lg\)/s);
   assert.match(gallery, /\.workspace-gallery-search input\s*\{[^}]*font-size:\s*var\(--font-input\)/s);

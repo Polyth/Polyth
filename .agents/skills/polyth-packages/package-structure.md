@@ -135,7 +135,7 @@ grows feature logic, move it into the shared core.
 ## 3. Generated artifacts
 
 - A committed build output (for example `dist/server.mjs`) is generated, never
-  edited. It needs one documented command (`npm run build:managed` writing the
+  edited. It needs one documented command (for example `npm run build:managed`, writing the
   real output path, not `/tmp`) and a CI/test **freshness check** that rebuilds
   and fails when the committed file differs. Syntax checks (`node --check`) and
   smoke imports do not prove freshness.

@@ -228,6 +228,22 @@ the device; project data stays with its owning project.
 | Device navigation or recovery state | `localStorage`/sessionStorage only for active route/session/profile, Chat/Canvas mode, open windows/tabs, Files/Git/Terminal selections, drafts, recent-item history, auth/account recovery, scroll/pending interaction, the workspace Edit toggle, and per-device terminal touch input (pinch size, extra keys, bell vibration; [terminal.md](terminal.md#preferences)) |
 | Shared server setting (other devices must see it) | server/package settings persistence + route |
 
+One appearance-specific exception to the "durable account UI preference" row:
+the Appearance settings page's **Sync appearance with server** toggle
+(`settingsSync.ts`, device-local key `polyth.appearanceSync.v1`, default ON).
+ON preserves the account-owned behavior above. OFF keeps this device's own
+look: the sync boundary neither applies remote appearance changes nor pushes
+this device's, while every other setting keeps syncing. The appearance fields
+are enumerated once as `APPEARANCE_PRODUCT_KEYS` / `APPEARANCE_UI_KEYS` /
+`APPEARANCE_PREFERENCE_IDS` in `settingsSync.ts` and derive from the Appearance
+page's own controls (theme, appearance mode, style, accent, density, text and
+rail sizes, rounding, glass, hide-borders, shell look/layout, wallpaper preset
+and custom themes). Turning OFF freezes the current look; turning ON adopts the
+server's look (not the frozen local one) with no flicker and no push of the
+frozen look. While OFF, the pushed blob carries the server's appearance — never
+the local one — so a server that ignores the flag neither loses its account
+appearance nor receives this device's. The flag itself never reaches the blob.
+
 When two mechanisms look plausible, prefer the one with the smallest blast
 radius: slot contribution over surface, surface over workspace surface,
 settings page over new overlay. A widget is for user-configurable content;
@@ -257,20 +273,64 @@ capability reasons and catalog states, and a hairline closes the list with
 setting, and catalog details sit below labels so they cannot squeeze them off
 the edge.
 
-**Drafts.** Pressing and holding Send (500 ms, idle Send and the running-turn
-delivery button alike) keeps the message as a draft instead of sending it. A
-draft is an ordinary canonical session, never a separate list or menu. On a new
-chat the hold creates the chat through the same path as Send (route, workspace
+**Drafts.** Pressing and holding Send (idle Send and the running-turn delivery
+button alike) keeps the message as a draft instead of sending it. The gesture
+is a preference, not a constant (Settings > Chat > Send with): **Hold Send to
+save a draft** switches it on or off, and **Hold length** moves it between
+250 ms and 2 s in 50 ms steps (install default 500 ms; `sendHold.ts`). Turning
+it off makes every press send at once and removes the "hold to save" hint from
+Send's tooltip, while the chosen length is kept for when it is turned back on.
+The row's summary names the current state ("hold 500 ms" / "no hold") for the
+device the row is read on, and its length row carries a specimen Send that runs
+the composer's own press and ring (`composer/sendHoldPress.ts`), so the
+duration can be felt before leaving Settings.
+The ring around Send winds from the top over the chosen length
+(`--send-hold-ms`), on both Send variants. It is a bordered box in Send's own
+shape (`--radius-round` + its 4px offset), not an SVG circle: a circle cut
+across the corners of a rounded-square Send, and the phone's 18px glyph rule
+once shrank it into Send's corner. The press sets `data-send-hold` on the
+control (`arming` → `full` → `release`) without a React render, and starts the
+ring at the press's real age, so it closes exactly when the hold is reached.
+A quick tap ends before the ring fades in. When the hold is reached with the
+finger still down, the ring stands whole, Send springs back and turns to a
+check; letting go keeps the draft. A release fades the ring where it stood. The
+gesture is pointer-only: there is no keyboard
+equivalent for "keep as a draft" yet, and the trial Send is decorative for
+assistive tech because the track announces its value. A draft is an ordinary
+canonical session, never a separate list or menu. On a new chat the hold
+creates the chat through the same path as Send (route, workspace
 target, lane, auto-approve), moves the text and attachment pills into that
 chat's scoped draft record, saves the draft to the server at once
 (`saveDraftToServerNow`) and stays on the cleared new chat; no turn, echo or
 spawn surface starts. In an open chat the text stays in the composer and is
-saved at once. A ring draws around Send over the hold and Send shows a check
-for a beat; there is no notification, because the result is visible in place.
-A release before the hold completes sends: touch/pen Send is admitted on
+saved at once. Once kept, Send keeps its check for a beat; there is no
+notification, because the result is visible in place.
+Every press ends as exactly one of the two, split at the hold length with no
+gap (`sendPressOutcome`): a release before it sends, a release at or after it
+keeps the draft. The release alone decides, measured between the input's own
+time stamps (`inputTime`), never by when a handler ran and never by the timer,
+which only cues. On a page busy after the press (a streaming turn, a long
+render) a quick tap's lift waits in the queue; timed by the handler, or kept
+by a timer that won the race, that tap became a draft instead of a send or a
+new chat. A press that leaves Send or is cancelled keeps a draft only if it had
+already lasted the hold. Touch/pen Send is admitted on
 `pointerup` (pointerdown is cancelled so the editor keeps focus; a finger slid
-off Send does not send), and the click that ends a hold is swallowed. An empty
-composer or a queued-message edit never starts a hold.
+off Send does not send), and the click that ends a hold is swallowed. Send has
+`touch-action: none`: with panning allowed, a finger that rolled a few pixels
+while holding was taken for a scroll, the browser cancelled the press, and the
+message was neither sent nor kept. An empty composer or a queued-message edit
+never starts a hold.
+
+**What counts as on Send.** The disc is 36px; its touch box is larger (the
+`::after` grown to `--hit-min`), and the browser also gives Send a press that
+lands a few pixels outside that box. Since touch Send does not wait for the
+click, `releaseSends` (`apps/web/src/composer/sendRelease.ts`) decides what the
+click would have: a finger that did not travel (`SEND_TAP_SLOP_PX`) sends
+wherever the browser let it land, and one that travelled sends if it lifted over
+Send's hit-tested box. Never judge the release against the drawn disc alone:
+that left the ring between the disc and the touch box dead, about 40% of the
+target, with Send showing the press and sending nothing.
+`composerSendTouchTarget.test.ts` taps the box with real touches.
 
 **IME composition.** Phone keyboards (Gboard and others) keep the word being
 typed in an open IME composition, and `AdaptiveTextInput` commits draft edits
@@ -282,7 +342,10 @@ the word (focus changes are not reported for it), so the sent text and the
 submit-time clear see the final draft. A composition the browser drops without
 `compositionend` (Chromium does so when script writes `value`) is closed by the
 next non-composition `input` or by blur, never left to ignore later typing.
-Enter during a composition still never sends.
+Enter during a composition still never sends. Text the platform writes without
+any `input` event (dictation and some phone keyboards have) is committed at the
+field's next caret move, key release or focus, so Send's enabled state cannot
+stay behind a draft the field visibly holds.
 
 Both navigators and the new chat's recent list show drafts among all chats
 with an accent **Draft** `Badge` (`apps/web/src/sessionDraft.ts`). A chat that
@@ -326,9 +389,13 @@ them: `registerAddMenuItem` adds one Add-menu row (after the mention row; `short
 is no longer drawn) whose `activate`
 gets project/session ids, the draft, `openDialog(render)`, `insertText` and
 `error`; `registerPasteHandler` sees pasted text before the default paste and
-consumes it by returning true (GitHub URLs); `registerSessionCreatedHook` runs,
-in registration order and awaited, after a send creates a new session (handoff
-imports). Registrations are disposed with the package activation.
+consumes it by returning true (GitHub URLs); `registerSessionStartExtension`
+adds a start step: its `collect({ projectId, text })` is asked once per Send on
+a new chat and its payload rides that chat's single start request as
+`start.extensions[id]` (handoff imports); `legacy(context, payload)` runs only
+when an older server ignored `start`. `registerSessionCreatedHook` runs, in
+registration order and awaited, after a send creates a new session on that
+older-server path. Registrations are disposed with the package activation.
 
 **Composer modes.** `registerMode(mode)` adds a `ComposerMode`: a package-owned
 destination for the draft (By the way's side questions,
@@ -657,7 +724,8 @@ stays the authority and refuses anything the UI should not have offered.
   otherwise says whether the Space or specific people can open it. Private
   own chats carry no marker.
 - **Header**: someone else's chat names its owner — the desktop caption
-  ("Shared by {name}"), the phone title row after the status slot.
+  ("Shared by {name}"), on the phone the name alone in a quiet line under the
+  title.
 - **Access-shaped chrome**: rename, archive, delete, swipe actions and
   double-click rename need `manage`; below `collaborate` the composer is
   people-only (see "People in a chat").
@@ -820,8 +888,10 @@ Contract and server rules: [Spaces §14.8](../architecture/spaces-and-tenancy.md
     {names}" (a failure keeps the card); the same answer stays available under
     the message in the chat. Lifetimes: 8 s (`message`), 10 s
     (`mention`); the desktop stack widens to 360px while one shows. Plus the
-    completion sound and, with "Only in background" off, the OS alert, when
-    the kind is chosen in Settings → Notifications;
+    completion sound, a light event vibration (phones; see
+    [haptics](../mobile/platform-behavior.md#downloads-sharing-clipboard-and-haptics))
+    and, with "Only in background" off, the OS alert, when the kind is chosen
+    in Settings → Notifications;
   - Polyth hidden: the chosen OS alert (one per chat, `renotify`), unless
     Web Push is active, which covers it from the service worker.
   Reading a chat (on screen) clears its card, unread people inbox rows and
@@ -1621,9 +1691,16 @@ and no installation fallback.
   personal ones are never bound to a project, and the SSH/HTTPS guide behind a
   disclosure); then the `settings.integrations.project` slot (context
   `{ projectId }`; GitHub shows the repository and the gh sign-in there).
-- **Workflow** — Commit messages (the Space's model choice), Branch names (the
-  template with a live example) and Merge conflicts (where the agent resolves
-  them and the prefilled request), each section with a reset.
+- **Workflow** — Commit messages (the Space's model and commit style: a Style
+  select of ready-made rules, each with an example title, plus "Your own
+  rules"; the Title rule and Details rule fields stay folded while the style is
+  Standard; Details When needed/Always/Never; Follow recent commits; a static
+  example for a ready-made style; one `SaveBar` for the whole section because
+  the rules shape every member's next commit; members without Space-admin
+  rights get the same content as `ReadonlyRow`s, decided by the server's
+  `canEdit`), Branch names (the template with a live example) and Merge
+  conflicts (where the agent resolves them and the prefilled request), each
+  section with a reset.
 - **Display** — Changes (with an inert preview rendered by the real
   `ChangeSection` from sample files, so tree/list, line counts and density show
   their effect), Diffs and History, each section with a reset to
@@ -1641,7 +1718,8 @@ contribution, `ProjectGitIdentity.tsx`): the owner picks that project's
 identity or creates one for it; anyone else sees their own commit identity and
 a link to change it. Search items: `git.personProfile`, `git.personAccounts`,
 `git.sourceControlProfiles`, `git.defaultIdentity`, `git.projectIdentity`,
-`git.authentication`, `git.commitMessageModel`, `git.branchTemplate`,
+`git.authentication`, `git.commitMessageModel`, `git.commitStyle`,
+`git.commitDetails`, `git.commitHistory`, `git.branchTemplate`,
 `git.conflictAgentTarget`, `git.display`, `git.servicePolicy`. The identity
 dialog's label/field grid becomes one column in narrow containers.
 
@@ -1731,7 +1809,18 @@ host.slots.register({
   a contribution must render `null` when the route is not its concern. `ContextPie.tsx`
   mounts `composer.context.details` inside its card; `Header.tsx` and
   `MobileSessionHeader.tsx` mount `session.header.status` beside the shared
-  session status control; `Header.tsx` also mounts `app.header.center`;
+  session status control (on the phone inline before the title text, like a
+  browser address pill's lock, in the same centred line and baseline; marks
+  take a muted ink and a glyph sized from the title, and the title has no
+  dropdown arrow and always keeps to one line, cut with an ellipsis at the end, so it sits at
+  the same height for every chat); both lead the title with Back from the chat
+  (`SessionBack.tsx`, the `ui/SessionBackButton.tsx` control: a quiet
+  `header-control` pill before the desktop title, an icon button before the
+  menu in the phone's leading island). A delegated child (subagent, workflow
+  unit) goes Back to its parent chat when that chat is in the person's list;
+  any other chat mounts `session.header.back` (context: `sessionId`,
+  `presentation` `bar`|`island`), where the package that owns the session
+  renders the same `SessionBackButton` or nothing; `Header.tsx` also mounts `app.header.center`;
   `StatusBar.tsx` mounts `app.statusbar.leading/trailing` while the opt-in
   status bar is on (§4.10); `App.tsx` mounts `app.layers` once over the whole
   shell for package-owned floating layers (voice mode, or a renderless
@@ -1966,8 +2055,9 @@ one `purpose` (and their delegated children) in its own UI instead of the
 ordinary lists — an agent's runs are read from its diary. Claims are
 reference-counted and released with the package; opening such a session is
 unchanged. The Agents package reaches those sessions instead from the agent's
-menus (a Conversations drill-in) and its conversation's heads, and names the
-agent in the header of its own session in Chat (`session.header.status`); a
+menus (a Conversations drill-in) and its conversation's heads, and leads the
+header of its own session in Chat with Back to the agent's page
+(`session.header.back`: the host Back with the agent's mark and name); a
 working agent's row shows its own glyph with a travelling arc rather than the
 chat spinner.
 A session an automation started without a person carries
@@ -2149,8 +2239,50 @@ overwrite the next prompt. Rejected sends restore the submitted text only when
 no newer input edit has taken its place; when the sending composer is gone, the
 one now showing that chat takes the text back into its empty input.
 
+**First send is one request:** Send on a fresh chat makes one keyed create
+that carries the first turn (`SessionStartRequest`: `firstTurn`, the
+agent profile, the approval setting unless it inherits, and start steps —
+`goals.attach` for the goal toggle plus every registered start extension).
+Main or an existing worktree uses `createSession`, Isolate uses
+`createIsolatedSession` (a picked isolation checkout still creates its
+worktree first), a new worktree or branch uses `startWorktreeSession`. A reply
+with `queueId` or `turnId` means the server owns the start; the client only
+binds the echo and spawn, carries text typed meanwhile into the chat, clears the
+new-chat draft and pills and reloads prompt history. A bare `{ id }` (an older
+server) runs the old chain below plus each extension's `legacy`; a 404 from
+`startWorktreeSession` falls back to the client worktree step. A lost reply is
+resolved by the create-operation probe and, for a start, one resend with the
+same key; anything else stays outcome-unknown. The input is never disabled
+while the chat starts; only Send is held until the new id is bound, then a
+follow-up is an ordinary send the server queues behind the first turn.
+
+A start swaps composer instances (hero, the transcript composer before the chat
+has an id when the create is slower than the hero hold, the transcript composer
+with it), and a chat's stored draft is hidden while its first prompt is in
+flight. Text typed since Send therefore lives in `carriedStartInput`
+(`Composer.tsx`), keyed by the spawn until the id is known and by the chat
+after: each mounting composer takes it as live input, focus follows the same
+key (`composerFocusCarry`), and the entry is dropped when draft autosave
+resumes. It is also written to the chat's draft and synced, so a reload keeps
+it.
+
+While the chat starts, its first prompt waits on the server queue with the
+`delivery/fallback-queued` reason `session-starting`: the timeline shows that
+row as the prompt (the submit-frame echo hands over to it), the queue list
+never shows it as a chip and never calls it stalled, and the "Spawning agent…"
+dock shows while such a row waits — also after a reload or on another device.
+The projection status is no guide while it does (`reconciling`, then `idle`
+until the prompt is admitted), so `sessionStartingFromServer` reads the row and
+only excludes `failed` and `archived`; tying it to `reconciling` flashed the
+new-chat hero back twice per start. `session/start-failed` shows an error
+`Notice` with the server's reason in the timeline; the server has put the text
+back in the author's draft, which arrives through ordinary draft sync. A
+failed or unknown chat that never ran is swept from the store only when it
+holds no draft (`isEmptyZombie`), so a failed start stays listed as a draft.
+Pinned by `composerSessionStart.test.ts` and `sessionStartEvents.test.ts`.
+
 **First send is detached from navigation:** once Send is pressed on a fresh
-chat, create → setup (auto-approve, goal, handoff) → first prompt runs to
+chat, the create (and, on an older server, setup and the first prompt) runs to
 completion even if the user opens another chat or project meanwhile. Only a
 changed connection, account or Space (`persistenceScopeIsCurrent`) aborts it;
 the captured project/session name the target, not the current view. The new
@@ -2367,7 +2499,9 @@ phone a card gives it a whole tap target as its own end zone and a picture
 tile its top-end quarter. A removed file keeps its place for 8 s
 (`ATTACHMENT_RESTORE_MS`) as a *restore slot*: a dashed button of the card's
 exact width, so nothing shifts under the pointer and a slip is one click to
-take back, at the place the file had. The draft drops the file at once
+take back, at the place the file had. Its glyph is a rewind in time
+(`HistoryIcon`, Lucide `rotate-ccw-clock`, from `icons.ts`), not Undo: undo is
+the editor's and the message revert's action. The draft drops the file at once
 (`detachAttachment`; a send never carries a slot) and the slot's click puts it
 back (`insertAttachment`); a browser capture is discarded only when its slot
 goes. A click within 400 ms of the removal is the same double click and is
@@ -2550,7 +2684,11 @@ the project still inherits the buttons the user arranged elsewhere. A scope
 with no record of its own shows the arrangement most recently edited in the
 same Space (`readEffectiveMobileRail`) and gets its own record only once it is
 edited, so a project the user has not arranged yet does not fall back to the
-package defaults. Records keep the `{v:1,slots}` shape: the leading run, then
+package defaults. The Space part of the key is the active project's own
+`spaceId` (`mobileRailSpaceId`), falling back to the Spaces store, which
+`init()` loads at boot; a key never waits for Space chrome (the phone
+navigator's title) to be shown, or a chat opened straight from launch would
+read and write an empty Space's record. Records keep the `{v:1,slots}` shape: the leading run, then
 `slot:gap` and the run beside Send. A client that predates the runs reads the
 gap as an unknown launcher id and keeps it, rather than stripping and pushing
 back the record; positional records from such a client (`null` lanes) are
@@ -2859,9 +2997,33 @@ question quoted above its answer to edit and send as the replacement turn.
 Declined questions and a subagent's mirrored question offer no revert; Fork is
 not offered because a mid-turn prefix has no exact native branch point.
 
+**Revert & edit with files:** when rolling back to a prompt would change
+files on disk, Revert & edit first asks once, in `RewindFilesDialog`
+(`ResponsiveOverlay`: a small dialog on desktop, a sheet on a phone). The list
+is the preview — "Will be restored · N" with each file's name, folder and what
+the agent did (`edited +a −b`, `new — will be deleted`, `deleted — will come
+back`, `changed by a command`), then a collapsed "Will stay as is · M" with a
+reason per file (changed after the agent, another chat may have changed it…).
+Uncertain files are never restored and the dialog offers no override. Two
+buttons decide: "Roll back and restore files" (initial focus) and
+"Conversation only"; Esc/scrim cancel; one standing note says commits, pushes
+and ignored files stay. While the turn runs, an info notice says the agent
+will be stopped and the primary becomes "Stop and roll back": files are
+written only once the turn has stopped. The dialog stays open (busy) until
+the server confirms; a failure shows in it and moves nothing. A rollback that
+would change no file — nothing changed, not a repository, a remote project,
+no snapshot — stays the instant, dialog-free action. Groups are told apart by
+a fill, not a border, and red counts use `--red-on-wash`.
+
 **Rewind cut and replacement:** an active Revert & edit is represented by one
 quiet cut marker at the end of the retained prefix. It does not count or narrate
-the hidden branch; the branch appears only through an explicit peek, and a still
+the hidden branch; when the rollback restored or left files it carries one
+disk-state suffix instead (`· files restored: 4`, `· files restored: 4 of 5`,
+`· files unchanged`, the reason in its accessible name and tooltip). Restore
+puts those files back too; if some were edited since, the marker's inline
+confirm asks first ("Files changed after the rollback: N. They'll stay as they
+are. Restore the rest?") — after an edited draft's question, one question at a
+time. There is no toast. The branch appears only through an explicit peek, and a still
 running old turn is represented by the existing activity dock rather than a
 second transcript row. Submitting the replacement removes the cut marker and
 mounts the optimistic prompt in the same commit, so the established composer →
@@ -3008,7 +3170,24 @@ measured from the card's outer edge: marks are centred on the model logo's colum
 (`--composer-stack-text`), trailing glyphs end where the marks start
 (`--composer-stack-end`). The phone's resting row, which shows no model line,
 stands on the same grid: Add centres on the marks' column and the Stop/Send disc
-ends with the trailing column. In the compact shell's uncapped frame the status line
+ends with the trailing column.
+
+**The composer's icon grid** continues those columns inside the card, on every
+width, pointer, look and state (composerAdaptive.css "Composer icon grid"):
+the model logo and Add centre on `--composer-stack-mark`, the Stop/Send disc ends
+on `--composer-stack-end`, the model line centres `--composer-row-mid` (half the
+resting row) below the card's top edge and the rail the same distance above its
+bottom edge. Every quiet rail control centres one 20px glyph in one square box,
+so neighbouring glyphs are evenly spaced, and the disc stands off by the same
+visible space. The card names that space `--composer-glyph-gap` (24px on a
+phone, 28px on another touch screen, 12px with a mouse) and the model line keeps
+it too: from the model's caret to the context pie and from glyph to glyph after
+it. Every glyph-only item on that line, a package's included, is its glyph plus
+`--composer-line-inset` on each side (peak pricing's dot follows it); chips with
+words keep their own padding. On a phone the engaged card keeps the resting row's geometry, so
+Add, the quick launcher and Send hold still while the card opens and closes.
+`apps/web/test/composerIconGrid.test.ts` measures these rules in the real
+Composer across looks, phone, tablet and desktop. In the compact shell's uncapped frame the status line
 spans the composer's full width. A line reads `--composer-stack-row` tall; on touch, a line
 that opens something keeps its full target by reaching up into the timeline's
 bottom space (`--composer-stack-reach`). Their inks follow the wallpaper wash
@@ -3504,8 +3683,9 @@ host.surfaces.register({
   - *Interactive Back:* dragging toward the inline end (`edgeSwipeBack.ts`,
     attached by `ModuleView` and the Workspace) makes the layer follow the
     finger while the Workspace peeks in behind it; a release past the commit
-    point, or a flick, hands its position to the same exit animation through
-    `--stack-from`, and anything else springs home. It stands down only while
+    point, or a flick, springs both layers on to the end of the Back from the
+    finger's own speed (see *Release* and *Back under a spring* below), and
+    anything else springs home. It stands down only while
     an Edit item is lifted. Where it may start follows the swipe setting
     below (default: anywhere on the layer). A settle-back that a layer can be
     dragged from next (`stack-uncover` on the Workspace, the Settings list)
@@ -3543,12 +3723,30 @@ host.surfaces.register({
     gesture), and the installed Capacitor app keeps every swipe. This is a
     capability decision (`isNativeMobile()` plus `(any-pointer: coarse)`), not
     user-agent or device sniffing, and it is independent of the setting above.
+  - *Session-row quick actions (phone Navigator):* a row reveals an icon tray
+    per side — leading (swipe toward the inline end) and trailing (toward the
+    inline start) — configured in General (`ui.rowSwipeLeading` default
+    `["pin","archive"]`, `ui.rowSwipeTrailing` default `[]`, `ui.rowSwipeFull`
+    default on; items `general.rowSwipeLeading|Trailing|Full`). Choices: pin,
+    archive (manage access), mute (conversations only), delete (manage access);
+    order is kept and the first one is the full-swipe action. The row tracks
+    the finger 1:1, rubber-bands past the tray and settles with the release
+    velocity (a fast flick opens or closes below the distance threshold).
+    Dragging past 60% of the row (again from an open tray) commits the first
+    action with a haptic tick at the threshold and on commit; archive slides the
+    row out first, pin/mute snap back. Delete never commits from a swipe: only
+    its tray button, behind the usual confirmation. Pure maths and setting
+    normalisation: `components/mobile/sessionRowSwipe.ts`. Reduced motion and
+    low-resource mode keep the 1:1 tracking and drop every transition.
   - *Who keeps a touch:* away from the edge a swipe must clear 12px and be
     clearly horizontal (1.6:1) or it gives up; it never starts in editable
     content (`input`, `textarea`, `select`, `contenteditable`, sliders), while
     text is selected, in a subtree marked `data-owns-swipe` (empty = both
     directions, or `toward-end`/`toward-start` for one; a session row owns
-    `toward-end` at rest and both while Pin is showing; an edge start still
+    the directions that have quick actions at rest (`toward-end` by default,
+    both once trailing actions are configured, nothing when none are) and both
+    while a tray is showing; the Navigator still closes from every non-row
+    area, and from a row's side that has no tray; an edge start still
     navigates over any owner), or in one marked `data-no-edge-swipe` (owns
     even the edge). At the moment of decision it
     also yields to an ancestor with `touch-action: none` (drag handles,
@@ -3557,30 +3755,87 @@ host.surfaces.register({
     with horizontal gestures that are neither should mark them.
   - *Peek:* a Chat swipe mounts the surface the moment it claims the touch
     (`flushSync`), as an inert, non-modal peek resting off-screen and moved by
-    an inline transform. A release past the commit point (35% or a flick)
-    replaces the peek with the open state in one synchronous commit; anything
-    else springs it home and unmounts it without an exit (a peek never takes
-    focus, so nothing is handed back).
+    an inline transform. A release past the commit point (35% or a flick,
+    judged by where the finger is) opens it for real; anything else springs
+    it home and unmounts it without an exit (a peek never takes focus, so
+    nothing is handed back).
   - *Animation vs. inline drag:* a dragged surface is moved by an inline
     transform, and an animation (even a finished `both`/`forwards` one)
     outranks inline styles. The open Navigator's entrance fills forwards, so
     `MobileNavigator.css` drops its animation while `data-swiping` is set, and
     a drag that springs home leaves `data-swipe-handoff="rest"` so the entrance
     does not replay. Any new draggable surface needs the same.
-  - *Hand-off:* a release publishes where the finger left the layer
-    (`--nav-swipe-from`, `--stack-enter-from`, `--stack-from`) and a duration
-    for the rest of the travel (`--nav-swipe-settle`, `--stack-in-settle`,
-    `--stack-out-settle`, `--stack-uncover-settle`) computed by
-    `settleDurationMs` — the share of the distance left, never slower than the
-    finger (the curve's initial slope matches the release speed), at least
-    120ms, at most the token. The stack grammar's shorthands stay unchanged;
-    the swipe durations are separate longhand overrides, and the Navigator and
-    swipe-entered Workspace use dedicated two-stop keyframes selected by
-    `data-swipe-handoff`. `holdHandoff` takes start positions back when their
-    animation ends, but keeps durations and the selecting attribute until a
-    different animation starts on that element (or it is cancelled or
-    replaced): a CSS animation re-reads its timing even when finished, so
-    restoring a longer duration would wake it mid-travel.
+  - *Release (the rule for every new swipe surface):* the rest of the travel
+    is a critically damped spring that starts at the finger's own speed
+    (`springSettle`: no leap from a slow release, no brake on a flick, no
+    overshoot; about as long as the surface's duration token). A session
+    that implements `settle()` plays it with `animateSettle` — the spring's
+    samples as a linear Web Animation, so it runs on the compositor — and the
+    controller starts it **in the same task as the release**, before anything
+    else. Only when the animations report that they have started
+    (`Animation.ready`, about a frame; 120ms at most) does it call
+    `commit()`, where the session changes state. Not sooner: a commit that
+    restyles the layer makes the browser re-send its animations to the
+    compositor, and one whose start time the page has not heard yet is
+    re-sent from its beginning, so the layer arrived and then travelled a
+    second time. That order is the point: opening a surface for real is a
+    React commit that makes it modal, moves focus and marks Chat inert, which
+    can cost several frames on a long chat, and done first it showed as the
+    layer freezing between the finger and its settle. The animation holds the
+    layer at its destination (`fill: forwards`) until the commit has landed
+    and it has finished; then the controller cancels it, so where the
+    committed state rests must be where the settle ends. The Navigator
+    (open and close) and the Workspace pulled in from Chat work this way:
+    `commit()` first marks the element (`data-swipe-handoff="rest"`, or
+    `"close"` for a drawer swiped away, which the closing state then parks
+    off-screen) so its own entrance or exit does not play underneath. No
+    inherited custom property is written on these surfaces at a release: one
+    restyles the whole subtree. Where the Web Animations API is missing, and
+    with motion off, there is no settle and the layer lands at once.
+  - *No CSS animation may start under a spring (the rule that makes the
+    above hold):* a CSS animation that begins on an element, for a property
+    the compositor is already animating there, makes the browser re-send the
+    spring, and for one frame the layer shows where the page last computed
+    it, which after a long commit is far behind. So the committed state must
+    not start an entrance, exit or settle-back on a sprung element until the
+    spring is over; whatever starts then must already be at its end.
+  - *Back under a spring (`edgeSwipeBack.ts`: package windows, the
+    Workspace, the Workspace's Add page, a Settings page, `swipeBack`
+    sheets):* `settle()` springs the layer, the moving parts of the layer
+    beneath (`underMotion`, one element or several) and its veil (`underDim`,
+    default the first part's `::after`) together. The peek rules position the
+    layer beneath **without `!important`** so those animations outrank them,
+    and are not tied to the covered phase. `commit()` then marks the layer
+    `data-swipe-handoff="out"` (`animation: none !important`, one rule in
+    `stackNavigation.css`) and parks it by its inline transform where the
+    spring ends, keeps the layer beneath peeking at rest (its veil swallows
+    taps meanwhile), and calls `onBack()`, which `useEdgeSwipeBack` runs in
+    `flushSync`: outside an event React would otherwise render a frame
+    later. Both marks go after the spring's duration; the exit and
+    settle-back that start then are parked at their end (`--stack-from: 100%`,
+    `--stack-uncover-from` at rest, a 1ms settle-back) and are never seen. A
+    layer whose owner unmounts it at once leaves an exit ghost
+    (`exitGhost.ts`): the spring is started again on the ghost with the same
+    `startTime` (not `currentTime`, which is a frame old and, after the
+    unmount, many frames behind). Dismissing phone Settings by swipe does the
+    same with its own ghost.
+  - *CSS hand-off (the tablet drawer; every Back where the Web Animations
+    API is missing):* a session without `settle()` commits in the release's
+    task and hands its position to a CSS animation of its own: where the
+    finger left the layer
+    (`--stack-from`), a duration for the rest of the travel
+    (`--stack-out-settle`, `--stack-uncover-settle`; `settleDurationMs` — the
+    share of the distance left, never slower than the finger, at least 120ms,
+    at most the token) and a curve bent to the finger's speed
+    (`--stack-swipe-ease`; `settleEasing` — the stack curve's shape with its
+    initial slope set to speed × duration ÷ distance, so a slow release eases
+    in instead of leaping). The stack grammar's shorthands stay unchanged;
+    the swipe duration and curve are separate longhand overrides.
+    `holdHandoff` takes start positions back when their animation ends, but
+    keeps pacing values until a different animation starts on that element
+    (or it is cancelled or replaced): a CSS animation re-reads its timing
+    even when finished, so restoring a longer duration would wake it
+    mid-travel.
   - *Motion and performance settings:* following the finger is direct
     manipulation and always tracks; every autonomous part (settle, spring
     home) is 0ms under `prefers-reduced-motion`, Reduce motion
@@ -3599,16 +3854,26 @@ host.surfaces.register({
     Settings drop their own container focus ring (it lies outside the
     viewport at rest and would ride the moving edge); the leading edge casts
     `--shadow-stack-edge` / `--shadow-drawer-edge`.
-  - *No jump at the claim:* a swipe is recognised only past its slop; the
-    layer then leaves rest with the finger and closes that gap over the next
-    claim distance at twice the finger's speed (`caughtUpTravel`), after which
-    it sits exactly under the finger. Release speed is the finger's own.
+  - *No jump at the claim:* a swipe is recognised only past its slop, and
+    claiming it can cost frames of its own (the peek is mounted right then).
+    The layer therefore keeps a gap to the finger that closes over time
+    (`claimGapAt`, 110–200ms by its size, smoothstep): it leaves rest at the
+    finger's speed, with no kick, and is exactly under the finger a moment
+    later, also when the finger stops meanwhile (a frame loop closes it). A
+    stalled frame right after the claim — a move arriving more than 34ms
+    after the previous one, at most two of them and within 320ms — is
+    absorbed into the gap, so the layer carries on from where it was last
+    painted instead of jumping the distance the finger covered unseen. Later
+    late frames track the finger as they come. Release speed is the finger's
+    own.
   - *Catching:* a finger that lands on a layer springing home stops it where
     it is and drags it on from there (same session); one that only catches it
     and lifts lets it carry on home (a tap never completes the other way).
-    The spring home and every
-    scripted settle follow `--motion-stack-ease` (`stackEase`), like the CSS
-    hand-offs. A touch whose end never arrives — the page hidden mid-drag
+    A spring home is the same
+    spring as a release, started at the finger's speed: on the compositor for
+    a session with `settle()` (a catch reads where the animation is, pins the
+    layer there and takes the animation back), painted frame by frame
+    otherwise. A touch whose end never arrives — the page hidden mid-drag
     (`visibilitychange`/`pagehide`), or a new touch while the old one is gone
     — springs the layer home instead of stranding the claim.
   - *Owners and extent:* `data-owns-swipe` keeps a swipe from every surface
@@ -3649,6 +3914,15 @@ host.surfaces.register({
   - *Dialogs* rise into place on wide screens and sink out; at phone widths
     (where they are bottom sheets) they rise from the bottom edge and go back
     down.
+  - *Anchored confirmations:* a `confirmAlert` given an `origin` (the viewport
+    rect of the control it was asked from) is, at phone widths, a card over
+    that control instead of a bottom sheet: `placeAnchoredAlert` (`alerts.ts`)
+    centres it on the control inside the visible band, and it grows out of
+    the control (its `transform-origin`) and shrinks back. Menus pass the chosen
+    row's rect to `onSelect({ origin })`, so a menu's Delete forwards it — the
+    phone Navigator's session menu does. The card's scrim tints in on its
+    colour without a backdrop blur: a fading ancestor cuts the card's glass
+    off from the page until the fade ends, then it snaps.
   - *Phone Settings* is a full-screen layer of the stack grammar on every
     page: page-scoped CSS (`.settings-page-<id>`) never re-sizes the scrim or
     the shell (`mobileViewportLayers.test.ts` renders General and Usage). Opened from
@@ -4206,6 +4480,39 @@ empty or error markup.
   track and clips only during the motion, so focus rings survive at rest.
   `onOpened` fires when it has finished growing: measure then, since a fixed
   delay races a slow first render of the settings inside.
+- **Settings for other devices.** A setting that takes effect on one kind of
+  screen only is declared as a `DeviceBlock({ devices, labels, items, ownSection?, render })`
+  (`components/settings/OtherDevicesSection.tsx`). The device is the shell this
+  screen draws (`useSettingsDevice()`: wide → `desktop`, compact → `tablet`,
+  phone → `phone`); name in `devices` every shell whose code actually reads
+  the setting. Blocks for this device render open in their own place
+  (`blocksOnDevice`), above everything for other devices. The rest wait at the
+  end of the page in `OtherDevicesSection`: one closed group per other device,
+  largest screen first (desktop, tablet, phone), titled for it ("For desktop")
+  with its blocks' `labels` as the summary line while closed (it wraps between
+  labels only). A closed group reads as a fold one step quieter than a
+  section, like the page's other folds: a 600 `--text-dim` title with its
+  chevron right after it and a `--faint` summary; the whole row is the
+  ≥`--hit-min` button. A block for several hidden devices sits in each of
+  their groups, so every group is that device's whole list. Its rows and
+  `labels` don't repeat the device the heading names ("Session title", not
+  "Mobile session title"); the registry keeps the qualified label, since a
+  search result shows no group. Opening a group
+  hides the summary and shows its loose rows straight under the group's
+  heading (so a section title
+  still shown on the page is never repeated), then blocks with `ownSection` as
+  whole sections one heading level down (`SectionHeadingLevel`). Each group is
+  closed on every visit and opens for a `settingsTarget` among its `items`
+  (the first group when two hold it), so search and deep links still land; a
+  page that points at such a setting again bumps `revision` to reopen it.
+  Nothing is stored about it. General (gestures), Appearance (window layout,
+  rails, status bar, tablet toolbar), Chat (send keys, prompt rail and
+  bookmarks, phone chat title — Chat keeps this screen's ones inside its
+  summary rows, and a preview part whose setting waits opens its group) and
+  Behavior (shared pinned window) use it; pinned in
+  `apps/web/test/settingsOtherDevices.test.ts`. A setting goes into a block
+  only when the code that reads it is limited to some shells; pointer-only
+  behavior (hover reveals) and native-app-only rows are other axes.
 - **Control vocabulary.** Boolean → `Toggle` (never a lone checkbox).
   ≤4 mutually exclusive options → `Seg`. More options → `Select` (from
   `components/ui`). Several independent choices of one kind → `CheckGroup`.
@@ -4278,9 +4585,9 @@ page's package registers an onboarding tour (`settingsPageToPackageId` +
 workspace package registers its own tour from its web entry with
 `host.onboarding.registerTour` (disposed with the package); only framework
 pages and external managed packages keep host-registered tours in
-`packages/onboarding/builtinTours.ts`. Pages
+`apps/web/src/packages/onboarding/builtinTours.ts`. Pages
 do not render their own help buttons. A built-in tour step may carry a
-web-local `link: { settingsPage, label }` (`packages/onboarding/types.ts`);
+web-local `link: { settingsPage, label }` (`apps/web/src/packages/onboarding/types.ts`);
 the overlay renders it as a button that completes the tour and calls
 `openSettingsPage`. The Providers & Models tour opens on such a step, pointing
 new accounts at Harnesses (installing more harnesses is optional).
@@ -4770,7 +5077,11 @@ closed search pill and the filter dot follow the lens. Every phone row menu
 is the stroked horizontal ellipsis (`MoreIcon`), the session island's menu
 trigger included; the desktop sidebar keeps `MoreVerticalIcon`, and the
 Agents group draws whichever its host does. Their press wash is a circle
-round the glyph and their targets are the full row height. Search's Back
+round the glyph and their targets are the full row height. The toolbar's
+tools and a project's New chat and ⋯ press as that circle alone: their
+square 44px boxes clear the shared button press shadow, whose glyph-blind
+frame drew off-centre round New chat (`mobileNavigatorLayout.test.ts`
+forces `:active` to hold this). Search's Back
 and a row's ⋯ keep a 44px target that runs out to the edge through a
 transparent `::after`; press rules set `background-color` only.
 Hierarchy is size and weight together: a project name uses the user's
@@ -5181,7 +5492,7 @@ beside a toolbar) stays in place.
   its countdown only when the patch names a `duration`. Ticks (progress, a
   running clock, a busy flag) go through `update`, a new stage through `show`.
 - A package's `host.notifications` is scoped by its activation
-  (`packages/activation.ts`): its ids are stored as `<package>:<id>` (the
+  (`apps/web/src/packages/activation.ts`): its ids are stored as `<package>:<id>` (the
   handle reports the package's own id), it can update or dismiss only what it
   showed, everything it left on screen is dismissed when it is disposed, and
   `show` after disposal is refused.
@@ -5536,7 +5847,8 @@ thumbnail strip.
   column's corners survive the largest Corner rounding).
 - Surface motion: `surfaceMotion.test.ts` (Chromium: exit ghosts, phone
   Settings arrival edge, stages and dismissal, the covered Navigator, sheet and
-  dialog edges, the toast, the RTL-mirrored tablet drawer; plus the exit
+  dialog edges, the anchored confirmation (`anchoredAlert.test.ts` places it),
+  the toast, the RTL-mirrored tablet drawer; plus the exit
   wiring), `sheetDrag.test.ts` (drag-to-dismiss), `swipeSurface.test.ts`
   (catch-up, catching a spring-home, lost touches, owners, extent),
   `settingsNavigation.test.ts` "phone Settings knows the edge…" (origin, stage

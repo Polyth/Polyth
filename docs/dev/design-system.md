@@ -34,7 +34,7 @@ Full catalog in `docs/dev/styles.md`. The roles new UI reaches for:
 | Selection/hover washes | `--surface-overlay`, `--surface-overlay-hover`, `--surface-overlay-strong` |
 | Borders | `--border` (structural) · `--border-soft` (subtle) · `--control-border` (controls) · `--surface-divider` (separator) · `--hair`/`--hair-strong` (hairlines) · `--focus-ring` + `--focus-wash` (focus) |
 | Ink | `--text` → `--text-dim` → `--muted` → `--faint`; `--accent-text` for accent-coloured small text (`--accent` is a fill) |
-| Signals | `--green/--amber/--red/--blue/--purple` + `--*-wash` surfaces + `--green-on-wash`/`--amber-on-wash` ink |
+| Signals | `--green/--amber/--red/--blue/--purple` + `--*-wash` surfaces + `--green-on-wash`/`--amber-on-wash`/`--red-on-wash` ink |
 | Spacing | `--space-1..6` (4/8/12/16/24/32), `--gutter`, `--screen-gutter` |
 | Control geometry | `--control-h-sm/-h/-h-lg` (32/40/48), `--control-pad-x(-sm)`, `--control-gap`, `--tap`, `--hit-min` |
 | Radius | `--radius-control/card/surface/sheet` (+ `--radius-composer`), all × `--corner-radius-scale` |
@@ -547,7 +547,12 @@ on touch. Keyboard: every flow reachable by Tab; arrow keys inside menus,
 tabs, and listboxes; visible `:focus-visible` ring everywhere (global rule).
 The one exception is a search field that owns focus for its whole surface
 (command palette, picker filter wells): it signals focus with its glyph and
-fill instead of a ring.
+fill instead of a ring. `<html data-input-modality="pointer|keyboard">`
+(`apps/web/src/inputModality.ts`) records the last input: the phone header
+icon buttons (☰, ✎, ⧉) show keyboard focus as the accent glyph colour, not a
+ring (the island clips an outline), and drop even that in pointer modality,
+as does the title's ring: WebKit matches `:focus-visible` when a closing sheet
+hands focus back from script after a tap. Any non-modifier key restores it.
 
 ## 14. Adoption and deprecation
 

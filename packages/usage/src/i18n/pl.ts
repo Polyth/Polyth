@@ -72,6 +72,8 @@ export const pl: UsageMessages = {
   "usage.showAll": "Pokaż wszystkie ({count})",
   "usage.showLess": "Pokaż mniej",
   "usage.showBlock": "Pokaż {block}",
+  "usage.hideBlock": "Ukryj {block}",
+  "usage.hiddenBlocks": "Ukryte",
   "usage.tokenMix": "Struktura tokenów",
   "usage.tokenMixDescription": "Jak zapisane tokeny dzielą się na nowe wejście, pamięć podręczną i wyjście.",
   "usage.trendVsPrevious": "{value} w porównaniu z poprzednim okresem: {period}",

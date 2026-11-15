@@ -196,6 +196,8 @@ export const CORE_REMOTE_ACCESS: RemoteAccessPolicy = {
     { methods: ["GET"], path: "/api/native-push", capability: REMOTE_CAPABILITY.coreNotificationsRead, mutation: false },
     { methods: ["POST"], path: "/api/native-push", capability: REMOTE_CAPABILITY.coreNotificationsRead, mutation: true },
     { methods: ["DELETE"], path: "/api/native-push", capability: REMOTE_CAPABILITY.coreNotificationsRead, mutation: true },
+    // Whether this person's phones get pushes, and why not (Settings → Notifications).
+    { methods: ["GET"], path: "/api/native-push/delivery", capability: REMOTE_CAPABILITY.coreNotificationsRead, mutation: false },
     // The phone's Live Activity: its relay claim and the chat its island shows.
     { methods: ["GET"], path: "/api/native-push/live-activity", capability: REMOTE_CAPABILITY.coreNotificationsRead, mutation: false },
     { methods: ["POST", "PUT", "DELETE"], path: "/api/native-push/live-activity", capability: REMOTE_CAPABILITY.coreNotificationsRead, mutation: true },

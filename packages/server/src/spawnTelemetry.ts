@@ -24,6 +24,8 @@ export interface SpawnTelemetry {
   time<T>(sessionId: string, phase: SpawnTimingPhase, action: () => Promise<T>, token?: SpawnTelemetryToken): Promise<T>;
   update(sessionId: string, partial: SpawnRuntimeMetadata, token?: SpawnTelemetryToken): void;
   firstRuntimeEvent(sessionId: string, token?: SpawnTelemetryToken): void;
+  /** Elapsed from validated creation to now, recorded once (a start's reply). */
+  mark(sessionId: string, stage: "startReplyMs", token?: SpawnTelemetryToken): void;
   get(sessionId: string): SpawnTimingSnapshot | undefined;
   forget(sessionId: string): void;
   /** Drops every sample (service dispose). Outstanding tokens become inert. */
@@ -118,6 +120,14 @@ export function createSpawnTelemetry(options: SpawnTelemetryOptions = {}): Spawn
       const end = safeRead(now);
       const elapsed = end === undefined ? undefined : duration(entry.startMono, end);
       if (elapsed !== undefined) entry.sample.firstRuntimeEventMs = elapsed;
+    },
+
+    mark(sessionId, stage, token) {
+      const entry = live(sessionId, token);
+      if (!entry || entry.sample[stage] !== undefined) return;
+      const end = safeRead(now);
+      const elapsed = end === undefined ? undefined : duration(entry.startMono, end);
+      if (elapsed !== undefined) entry.sample[stage] = elapsed;
     },
 
     get(sessionId) {

@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Node 22.18 or newer (the repository uses Node type stripping).
+- Node 22.16 or newer (the root `engines` field and `.nvmrc`; the repository uses Node type stripping).
 - A reachable Polyth server for interactive testing.
 - Android Studio plus an Android SDK/JDK for Android builds.
 - macOS with Xcode for iOS builds.

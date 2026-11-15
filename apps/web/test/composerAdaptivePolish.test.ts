@@ -58,8 +58,13 @@ test("the configuration row sits above the editor and reuses the quiet chip", as
   assert.ok(row > -1 && row < editor, "the model/effort row is rendered above the editor");
   assert.match(
     css,
-    /\.composer-simple \.composer-config-row \{[^}]*gap:\s*var\(--space-2\);[^}]*padding:\s*var\(--space-2\) var\(--space-4\) 0;/s,
-    "the model and thinking effort sit side-by-side at the start of the configuration row",
+    /\.composer-simple \.composer-config-row \{[^}]*gap:\s*var\(--space-1\);[^}]*padding:\s*calc\(var\(--composer-row-mid\) - 1px - var\(--composer-line-h\) \/ 2\) var\(--space-4\) 0;/s,
+    "the model and thinking effort sit side-by-side at the start of the configuration row, centred on the icon grid's top line",
+  );
+  assert.match(
+    css,
+    /\.composer-simple \.composer-config-row \.model-picker-trigger \{[^}]*padding-inline-end:\s*calc\(var\(--composer-line-inset\) - 1px\);/s,
+    "past its caret the model chip keeps the line's inset, so the glyphs after it keep the rail's rhythm (composerIconGrid.test.ts measures it)",
   );
   assert.match(
     css,
@@ -182,8 +187,8 @@ test("the running primary is one solid disc beside a bare chevron, with no ring 
   );
   assert.match(
     rail,
-    /\.composer-mobile\.composer-mobile-grid \.mobile-composer-rail \{[^}]*padding:\s*0 var\(--space-4\) var\(--space-2\);/s,
-    "the phone rail keeps the editor's 16px trailing gutter",
+    /\.composer-mobile\.composer-mobile-grid \.mobile-composer-rail \{[^}]*padding:\s*0\s+calc\(var\(--composer-stack-end\) - \(var\(--tap\) - var\(--composer-action-size\)\) \/ 2 - 1px\)\s+calc\(var\(--composer-row-mid\) - var\(--tap\) \/ 2 - 1px\)\s+calc\(var\(--composer-stack-mark\) - var\(--tap\) \/ 2 - 1px\);/s,
+    "the engaged phone rail keeps the resting row's columns and line (composerIconGrid.test.ts measures them)",
   );
   assert.match(
     styles,

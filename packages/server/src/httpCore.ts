@@ -2,7 +2,7 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import { readFile } from "node:fs/promises";
 import { existsSync, readFileSync, statSync, unlinkSync, mkdirSync } from "node:fs";
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { constants as zlibConstants, gzip, gzipSync } from "node:zlib";
 import { extname, join, normalize, resolve, sep, dirname } from "node:path";
 import {
@@ -20,12 +20,13 @@ import {
   type RequestIngress,
   type ResumeTurnOptions,
   type RouteHandler,
-  type RouteRequest
+  type RouteRequest,
+  type SessionStartRequest,
 } from "@polyth/contracts";
 import type { ProjectService } from "@polyth/contracts";
 import type { CompactionPreference } from "@polyth/contracts/compaction-policy";
 import { REPOSITORY_SCOPE_ID_MAX } from "@polyth/contracts/workspace";
-import type { RuntimePool } from "./sessions.ts";
+import { validateStartRequest, type RuntimePool } from "./sessions.ts";
 import { parseTurnCommand } from "./turnCommand.ts";
 import {
   parseSpaceCookie,
@@ -63,7 +64,8 @@ import { logHttp500 } from "./httpLog.ts";
 import { httpErrorDiagnostics } from "./errorDiagnostics.ts";
 import { streamHistoryResponse } from "./historyResponse.ts";
 import { withProjectIconRef } from "./projectIconRefs.ts";
-import { createSessionOnce, sessionCreateOperationStatus, sessionIdForCreateOperation } from "./sessionCreateIdempotency.ts";
+import { createSessionOnce, sessionCreateOperationStatus, sessionIdForCreateOperation, startSessionOnce } from "./sessionCreateIdempotency.ts";
+import { accountScopedClientOperationId } from "@polyth/session/create-operation";
 import { clampWaitMs, type SessionEventWaiters } from "./sessionEventWaiters.ts";
 import type { HttpAdmission } from "./httpAdmission.ts";
 
@@ -105,15 +107,29 @@ const clientOperationId = (value: unknown): string | undefined => {
   return value.toLowerCase();
 };
 
-/** The renderer's UUID is not a global authority. Fold the authenticated
- * account (from the resolved SpaceContext, never the body) into the durable
- * record key so an identical token from another account cannot alias it. */
-export const accountScopedClientOperationId = (operationId: string, userId: string): string => {
-  const digest = createHash("sha256").update(userId).update("\0").update(operationId).digest();
-  digest[6] = (digest[6]! & 0x0f) | 0x40;
-  digest[8] = (digest[8]! & 0x3f) | 0x80;
-  const hex = digest.toString("hex");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+// One derivation for every route that admits a turn under a client key
+// (package routes use the same export).
+export { accountScopedClientOperationId };
+
+/** `POST /api/sessions` `start`, strictly shaped at the boundary. The command
+ *  goes through the same parser as `/message`. */
+const sessionStartRequestInput = (value: unknown): SessionStartRequest => {
+  validateStartRequest(value);
+  const { firstTurn } = value;
+  const command = firstTurn ? parseTurnCommand(firstTurn.command) : undefined;
+  return {
+    ...(firstTurn ? {
+      firstTurn: {
+        text: firstTurn.text,
+        ...(firstTurn.attachments ? { attachments: firstTurn.attachments } : {}),
+        ...(command ? { command } : {}),
+        ...(firstTurn.autoTitle === true ? { autoTitle: true } : {}),
+      },
+    } : {}),
+    ...(value.agentProfileId !== undefined ? { agentProfileId: value.agentProfileId } : {}),
+    ...(value.autoAccept !== undefined ? { autoAccept: value.autoAccept } : {}),
+    ...(value.extensions !== undefined ? { extensions: value.extensions } : {}),
+  };
 };
 
 const harnessSelectionInput = (value: unknown): HarnessSelection | undefined => {
@@ -894,24 +910,46 @@ async function dispatchHttp(
         const repositoryIds = repositoryIdsInput(b.repositoryIds);
         const requestedOperationId = clientOperationId(b.clientOperationId);
         const projectId = String(b.projectId);
+        const fields = {
+          projectId,
+          ...(repositoryIds ? { repositoryIds } : {}),
+          ...(harness ? { harness } : {}),
+          ...(b.title ? { title: String(b.title) } : {}),
+          ...(b.purpose !== undefined ? { purpose: b.purpose as string } : {}),
+          ...(b.model ? { model: b.model as { providerID: string; modelID: string } } : {}),
+          ...(b.agent ? { agent: String(b.agent) } : {}),
+          ...(b.worktreePath ? { worktreePath: String(b.worktreePath) } : {}),
+        };
+        const recordRecipient = (sessionId: string) => recordNotificationRecipient(deps.notificationRecipients
+          ? () => deps.notificationRecipients!.created(sessionId, space().ctx)
+          : undefined);
         const create = async (id?: string) => {
           const ref = await space().sessions.create({
-            projectId,
-            ...(repositoryIds ? { repositoryIds } : {}),
-            ...(harness ? { harness } : {}),
-            ...(b.title ? { title: String(b.title) } : {}),
-            ...(b.purpose !== undefined ? { purpose: b.purpose as string } : {}),
-            ...(b.model ? { model: b.model as { providerID: string; modelID: string } } : {}),
-            ...(b.agent ? { agent: String(b.agent) } : {}),
-            ...(b.worktreePath ? { worktreePath: String(b.worktreePath) } : {}),
+            ...fields,
             // Derived from the account+Space-scoped key, never client-chosen.
             ...(id ? { id } : {}),
           });
-          await recordNotificationRecipient(deps.notificationRecipients
-            ? () => deps.notificationRecipients!.created(ref.id, space().ctx)
-            : undefined);
+          await recordRecipient(ref.id);
           return ref;
         };
+        if (b.start !== undefined) {
+          // The server owns the whole start: the row, the first turn's queue
+          // row, then the runtime and its delivery.
+          const start = sessionStartRequestInput(b.start);
+          if (!requestedOperationId) throw Object.assign(new Error("start requires clientOperationId"), { code: "invalid-input" });
+          const sessions = space().sessions;
+          if (!sessions.start) throw Object.assign(new Error("session start unavailable"), { code: "unsupported" });
+          // The first turn's key is scoped exactly as `/message` scopes it.
+          const turnKey = accountScopedClientOperationId(requestedOperationId, space().ctx.userId);
+          const { result, created } = await startSessionOnce(
+            sessions,
+            sessionIdForCreateOperation(requestedOperationId, space().ctx),
+            projectId,
+            (id) => sessions.start!({ ...fields, id, start, clientOperationId: turnKey }),
+          );
+          if (created) await recordRecipient(result.id);
+          return json(res, 200, result);
+        }
         if (!requestedOperationId) return json(res, 200, await create());
         const { ref } = await createSessionOnce(
           space().sessions,
@@ -1212,13 +1250,31 @@ async function dispatchHttp(
         if (!rewind) throw Object.assign(new Error("session rewind unavailable"), { code: "unsupported" });
         const b = await loadBody();
         if (b.atSeq === undefined) throw Object.assign(new Error("atSeq required"), { code: "invalid-input" });
-        return json(res, 200, await rewind(m[1]!, Number(b.atSeq)));
+        if (b.files !== undefined && b.files !== "restore" && b.files !== "keep") {
+          throw Object.assign(new Error("files must be \"restore\" or \"keep\""), { code: "invalid-input" });
+        }
+        const files = b.files as "restore" | "keep" | undefined;
+        return json(res, 200, await rewind(m[1]!, Number(b.atSeq), files ? { files } : undefined));
+      }
+      m = path.match(/^\/api\/sessions\/([^/]+)\/rewind\/preview$/);
+      if (m && method === "GET") {
+        const previewRewindFiles = space().sessions.previewRewindFiles;
+        if (!previewRewindFiles) throw Object.assign(new Error("file rollback unavailable"), { code: "unsupported" });
+        const atSeq = Number(url.searchParams.get("atSeq"));
+        if (!Number.isSafeInteger(atSeq) || atSeq <= 0) throw Object.assign(new Error("atSeq must be a positive integer"), { code: "invalid-input" });
+        return json(res, 200, await previewRewindFiles(m[1]!, atSeq));
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/rewind\/clear$/);
       if (m && method === "POST") {
         const clearRewind = space().sessions.clearRewind;
         if (!clearRewind) throw Object.assign(new Error("session rewind unavailable"), { code: "unsupported" });
         return json(res, 200, await clearRewind(m[1]!));
+      }
+      m = path.match(/^\/api\/sessions\/([^/]+)\/rewind\/clear\/preview$/);
+      if (m && method === "GET") {
+        const previewRewindRestore = space().sessions.previewRewindRestore;
+        if (!previewRewindRestore) throw Object.assign(new Error("file rollback unavailable"), { code: "unsupported" });
+        return json(res, 200, await previewRewindRestore(m[1]!));
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/shell$/);
       if (m && method === "POST") {

@@ -424,3 +424,61 @@ html[dir="rtl"] .chat-preview-thought:not([data-open]) svg { transform: scaleX(-
   background: var(--accent);
   color: var(--accent-ink);
 }
+
+/* Hold-to-keep-as-a-draft: the length track (a shared size stepper, in ms)
+   beside a specimen Send that runs the chosen hold for real. The specimen is
+   the point of the row — a number alone cannot say whether 1200 ms feels long —
+   so it keeps the accent disc of the real button and its ring, and never sends
+   anything. It is decorative for assistive tech; the track announces the value. */
+.chat-hold-field {
+  /* A stacked disclosure row aligns its controls to the start, so the field
+     claims the row's width before laying its two pieces out. */
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+/* This row has no size specimen of its own — the trial Send beside it is that
+   specimen — so the stepper drops its empty specimen column instead of leaving
+   a gap between the track and the millisecond readout. */
+.chat-hold-field .size-stepper { grid-template-columns: auto minmax(96px, 1fr) auto auto; }
+.chat-hold-field .size-stepper-specimen { display: none; }
+.chat-hold-specimen {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  white-space: nowrap;
+}
+.chat-hold-send {
+  position: relative;
+  display: grid;
+  place-items: center;
+  /* The real Send's own size and shape, so the trial answers "how does my
+     button feel". Its finger target still reaches the shared minimum through
+     ::after. The ring, its phases and the reduced-motion profile are the
+     composer's own (`.send-hold-ring` in styles.css); this rule only places
+     the disc. */
+  width: var(--composer-action-size, 34px);
+  height: var(--composer-action-size, 34px);
+  border-radius: var(--radius-round);
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: var(--inset-hi);
+  cursor: pointer;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  /* A quick settle on release; the press itself follows the chosen length. */
+  transition: transform var(--motion-surface) var(--motion-ease);
+}
+.chat-hold-send[data-parked] > svg { animation: send-parked-pop var(--motion-surface) var(--motion-ease); }
+@media (max-width: 700px) {
+  .chat-hold-caption { white-space: normal; }
+}

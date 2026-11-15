@@ -41,6 +41,8 @@ const { default: AgentSessionChip } = await import("../widgets/AgentSessionChip.
 const { conversationDays, agentConversations } = await import("../widgets/agentThreads.ts");
 const { threadChoice } = await import("../widgets/AgentComposer.tsx");
 
+const buttonNamed = (root: ParentNode, name: string) =>
+  [...root.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === name);
 const delay = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function mounted(component: ReactNode) {
@@ -533,17 +535,113 @@ test("while the agent works, its step shows at the end of its conversation, a me
   await view.unmount();
 });
 
-test("an agent's session opened in Chat names its agent in the header; an ordinary chat shows nothing", async () => {
+test("nights read as one row each; the newest report says when and how long, and what only the person can do", async () => {
+  resetRegistry();
+  localStorage.clear();
+  const daysAgo = (days: number) => {
+    const at = new Date(now);
+    at.setDate(at.getDate() - days);
+    at.setHours(1, 0, 0, 0);
+    return now - at.getTime();
+  };
+  const task = watcher({
+    seenAt: now,
+    history: [
+      run({
+        runId: "r3", ago: 70 * MIN, finishedAt: now - 12 * MIN, sessionId: "s-3", signal: "update",
+        headline: "devel fixed; 2 PRs merged", summary: "Security is clear and devel is green.\n\n| PR | Result |\n| - | - |\n| #31 | merged |",
+        needs: [
+          { text: "Electron 45 · PR #32", detail: "waits for your smoke test", url: "https://github.com/acme/app/pull/32" },
+          { text: "Rotate the deploy key", url: "javascript:alert(1)" },
+        ],
+        timeline: [
+          { at: now - 68 * MIN, text: "CI on devel is red." },
+          { at: now - 60 * MIN, text: "CI on devel", kind: "wait", until: now - 39 * MIN },
+        ],
+      }),
+      run({ runId: "r2", ago: daysAgo(2), sessionId: "s-2", signal: "alert", headline: "Apple agreement expired" }),
+      run({ runId: "r1", ago: daysAgo(3), sessionId: "s-1", signal: "quiet", headline: "Nothing new" }),
+    ],
+  });
+  fakeServer([task]);
+  const { host } = fakeHost();
+  const view = await mounted(createElement(AgentsPage, { host, resource: "agent-w" }));
+  await act(async () => { await delay(30); });
+  const feed = view.container.querySelector(".agent-feed")!;
+  assert.equal(feed.querySelectorAll(".agent-divider").length, 0, "days of the agent's own rows need no divider");
+
+  const quiet = feed.querySelector(".agent-quiet")!;
+  assert.ok(quiet.querySelector('.agent-tone[data-tone="quiet"]'), "a quiet night has a ring");
+  assert.equal(quiet.querySelector(".agent-quiet-label")!.textContent, "Nothing new");
+  const alert = feed.querySelector('.agent-report[data-compact="line"]')!;
+  assert.ok(alert.querySelector('.agent-tone[data-tone="alert"]'), "an alert has a red dot");
+  assert.doesNotMatch(alert.querySelector(".agent-row-when")!.textContent ?? "", /:/, "an earlier night says its day, not its time");
+  assert.equal(alert.querySelector(".agent-row-length")!.textContent, "2 min");
+  assert.match(alert.querySelector(".agent-report-line-title")!.textContent ?? "", /^Needs attention: Apple agreement expired$/,
+    "the alert says so in words too");
+
+  const latest = feed.querySelector('.agent-report[data-latest]')!;
+  assert.match(latest.querySelector(".agent-report-when")!.textContent ?? "", /^(Today|Yesterday) · .+ · 58 min$/);
+  assert.equal(latest.querySelector(".agent-report-headline")!.textContent, "devel fixed; 2 PRs merged");
+  const needs = latest.querySelector(".agent-needs")!;
+  assert.match(needs.textContent ?? "", /Electron 45 · PR #32.*waits for your smoke test/);
+  const links = [...needs.querySelectorAll<HTMLAnchorElement>("a")];
+  assert.equal(links.length, 1, "only a web link opens");
+  assert.equal(links[0]!.textContent, "Open PR");
+  assert.equal(links[0]!.getAttribute("href"), "https://github.com/acme/app/pull/32");
+  assert.equal(links[0]!.getAttribute("rel"), "noopener noreferrer");
+
+  await act(async () => { buttonNamed(latest, "Full report")!.click(); });
+  const steps = latest.querySelector(".agent-steps")!;
+  assert.match(steps.textContent ?? "", /CI on devel is red\./);
+  assert.match(steps.querySelector('li[data-kind="wait"]')!.textContent ?? "", /Waited 21 min · CI on devel/);
+  await view.unmount();
+});
+
+test("a run that waits for its background work says so, never a finished report", async () => {
+  resetRegistry();
+  localStorage.clear();
+  const task = watcher({
+    seenAt: now,
+    history: [{
+      runId: "r9", startedAt: now - 10 * MIN, status: "running", trigger: "schedule", sessionId: "s-9", steps: 12,
+      activity: { kind: "text", text: "I'll write the report once CI finishes.", at: now - 8 * MIN },
+      background: { since: now - 8 * MIN, tasks: ["CI on devel 0fd2ca9e5"] },
+    }],
+  });
+  fakeServer([task]);
+  const { host } = fakeHost();
+  const view = await mounted(createElement(AgentsPage, { host, resource: "agent-w" }));
+  await act(async () => { await delay(30); });
+  const live = view.container.querySelector(".agent-live[data-waiting]")!;
+  assert.ok(live, "the run is still at work");
+  assert.match(live.querySelector(".agent-live-line")!.textContent ?? "", /CI on devel 0fd2ca9e5/);
+  assert.equal(live.querySelector(".agent-live-said")!.textContent, "I'll write the report once CI finishes.");
+  assert.match(live.querySelector(".agent-live-state")!.textContent ?? "", /^Waiting · 8 min so far$/);
+  assert.equal(view.container.querySelectorAll(".agent-report").length, 0, "no report before it reports");
+  assert.match(view.container.querySelector(".agent-head-status")!.textContent ?? "", /Waiting on background work/);
+  await view.unmount();
+});
+
+test("an agent's session opened in Chat leads its header with Back to the agent; an ordinary chat shows nothing", async () => {
   resetRegistry();
   fakeServer([answered()]);
   const { host, opened } = fakeHost({ "s-b": { id: "s-b", purpose: "agent" }, "chat-1": { id: "chat-1" } });
   const agentSession = await mounted(createElement(AgentSessionChip, { host, sessionId: "s-b" }));
   await act(async () => { await delay(30); });
-  const chip = agentSession.container.querySelector<HTMLButtonElement>(".agent-chip")!;
-  assert.match(chip.textContent ?? "", /Watcher/);
-  await act(async () => { chip.click(); await delay(10); });
+  const back = agentSession.container.querySelector<HTMLButtonElement>(".session-back.agent-chip")!;
+  assert.ok(back, "the host's Back control, not a package look-alike");
+  assert.match(back.textContent ?? "", /Watcher/);
+  assert.equal(back.getAttribute("aria-label"), "Back to Watcher");
+  assert.ok(back.querySelector(".agent-mark"), "the agent's mark rides in the Back");
+  await act(async () => { back.click(); await delay(10); });
   assert.deepEqual(opened.at(-1), { pageId: "agents", resource: "agent-w" }, "the way back to the agent");
   await agentSession.unmount();
+  const phone = await mounted(createElement(AgentSessionChip, { host, sessionId: "s-b", presentation: "island" }));
+  await act(async () => { await delay(30); });
+  const island = phone.container.querySelector<HTMLButtonElement>(".session-back--island")!;
+  assert.equal(island.getAttribute("aria-label"), "Back to Watcher");
+  await phone.unmount();
   const ordinary = await mounted(createElement(AgentSessionChip, { host, sessionId: "chat-1" }));
   await act(async () => { await delay(30); });
   assert.equal(ordinary.container.innerHTML, "");

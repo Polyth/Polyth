@@ -2,7 +2,8 @@
 // surface — an anchored Quiet Glass popover on every form factor (search,
 // keyboard navigation, provider groups, and favorites with drag reorder on
 // desktop; the compact phone surface keeps the same choices without search or
-// edit mode: harness tabs and provider groups are its whole navigation).
+// HTML5 drag: harness tabs and provider groups are its whole navigation, and a
+// held favorite or provider lifts and drags as the navigator's projects do).
 // Every row stays calm (name + one meta line); the full technical card
 // (context, modalities, reasoning, tools, pricing, availability) lives behind
 // an explicit per-row details view, never on the row itself.
@@ -10,6 +11,7 @@
 // the shell bundle; the Models package stylesheet only attaches on activation.
 import "./model-picker-styles.css";
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   lazy,
@@ -52,6 +54,7 @@ import { isImeComposing } from "@polyth/web-sdk";
 import { Icon } from "@polyth/web/icons";
 import ProviderLogo from "./ProviderLogo.tsx";
 import { tr } from "@polyth/web/i18n";
+import { ARRANGE_LIST_LIFT_MS, useArrange } from "../../../apps/web/src/workspaceArrange.ts";
 import { modelSupportsThinking, providerLabel, thinkingVariantLabel } from "./modelPresentation.ts";
 import { setModelThinking, thinkingModelKey, useThinkingPrefs } from "./thinkingPrefs.ts";
 import {
@@ -473,6 +476,43 @@ export default function ModelPicker({
       .filter((model) => rank.has(modelKey(model)) && !isFavorite(prefs, modelKey(model)))
       .sort((left, right) => (rank.get(modelKey(left)) ?? 0) - (rank.get(modelKey(right)) ?? 0));
   }, [filtered, prefs.favorites, prefs.recents, flatCatalog]);
+  // Phone: a held favorite or provider lifts and drags (workspaceArrange.ts),
+  // as the navigator's projects and the Usage limit panels do; a tap still picks.
+  const favoritesRef = useRef<HTMLElement | null>(null);
+  const providersRef = useRef<HTMLDivElement | null>(null);
+  const holdArranges = phone && open && !flatCatalog && !q;
+  const favoriteArrange = useArrange({
+    items: favorites.map((model) => ({ id: modelKey(model), shape: "row" as const })),
+    enabled: holdArranges && favorites.length > 1,
+    touchLiftMs: ARRANGE_LIST_LIFT_MS,
+    scroller: () => listRef.current,
+    ghostHost: () => favoritesRef.current,
+    onCommit: (next, id) => {
+      const target = favorites[next.indexOf(id)];
+      if (target) reorderModelFavorites(id, modelKey(target));
+    },
+  });
+  const providerArrange = useArrange({
+    items: providers.map((provider) => ({ id: provider.id, shape: "row" as const })),
+    enabled: holdArranges && providers.length > 1,
+    touchLiftMs: ARRANGE_LIST_LIFT_MS,
+    scroller: () => listRef.current,
+    ghostHost: () => providersRef.current,
+    // The copy shows the provider's head, not its open model list.
+    ghostSource: (item) => item.querySelector<HTMLElement>(".model-provider-head"),
+    onCommit: (next, id) => {
+      const target = providers[next.indexOf(id)];
+      if (target) reorderModelProviders(providerIds, id, target.id, preferenceHarnessId);
+    },
+  });
+  const favoritesElement = useCallback((element: HTMLElement | null) => {
+    favoritesRef.current = element;
+    favoriteArrange.engine.listRef(element);
+  }, [favoriteArrange.engine]);
+  const providersElement = useCallback((element: HTMLDivElement | null) => {
+    providersRef.current = element;
+    providerArrange.engine.listRef(element);
+  }, [providerArrange.engine]);
   const expandedProviders = useMemo(
     () => new Set(prefs.expandedProviders),
     [prefs.expandedProviders],
@@ -898,7 +938,7 @@ export default function ModelPicker({
       <div
         key={key}
         id={`model-option-${key}`}
-        className={`model-picker-row${selected ? " current" : ""}${activeKey === key ? " active" : ""}${dragging?.kind === "favorite" && dragging.id === key ? " dragging" : ""}${dropTarget === key ? " drop-target" : ""}`}
+        className={`model-picker-row${selected ? " current" : ""}${activeKey === key ? " active" : ""}${favoriteDrag && favoriteArrange.draggingId === key ? " is-arrange-held" : ""}${dragging?.kind === "favorite" && dragging.id === key ? " dragging" : ""}${dropTarget === key ? " drop-target" : ""}`}
         role="option"
         aria-selected={selected}
         aria-disabled={unavailable || undefined}
@@ -914,6 +954,7 @@ export default function ModelPicker({
             setShowDetails(true);
           }
         }}
+        {...(favoriteDrag && phone ? favoriteArrange.engine.itemProps(key) : {})}
         {...(favoriteDrag ? {
           draggable: !phone && !q,
           onDragStart: (event: DragEvent) => {
@@ -1102,20 +1143,26 @@ export default function ModelPicker({
                 {/* Favorites, then recents: one unlabeled quick block. The
                     filled star already marks a favorite; titles were chrome. */}
                 {(shownFavorites.length > 0 || recents.length > 0) && (
-                  <section className="model-provider-section model-picker-quick">
-                    {shownFavorites.map((model) => row(model, "favorites"))}
+                  <section ref={favoritesElement} className="model-provider-section model-picker-quick">
+                    {(favoriteArrange.draggingId
+                      ? favoriteArrange.order.flatMap((key) => shownFavorites.filter((model) => modelKey(model) === key))
+                      : shownFavorites).map((model) => row(model, "favorites"))}
                     {recents.filter((model) => flatRowIndex.has(modelKey(model))).map((model) => row(model, "recent"))}
                   </section>
                 )}
-                {providers.map((provider) => {
+                <div ref={providersElement} className="model-picker-providers">
+                {(providerArrange.draggingId
+                  ? providerArrange.order.flatMap((id) => providers.filter((provider) => provider.id === id))
+                  : providers).map((provider) => {
                   const expanded = isExpanded(provider.id);
                   const items = provider.models.filter((model) => !isFavorite(prefs, modelKey(model)) && !prefs.recents.includes(modelKey(model)));
                   if (items.length === 0) return null;
                   const shown = items.filter((model) => flatRowIndex.has(modelKey(model)));
                   return (
                     <section
-                      className={`model-provider-section${dragging?.kind === "provider" && dragging.id === provider.id ? " dragging" : ""}`}
+                      className={`model-provider-section${dragging?.kind === "provider" && dragging.id === provider.id ? " dragging" : ""}${providerArrange.draggingId === provider.id ? " is-arrange-held" : ""}`}
                       key={provider.id}
+                      {...(phone ? providerArrange.engine.itemProps(provider.id) : {})}
                       draggable={!phone && !q}
                       onDragStart={(event) => startDrag(event, "provider", provider.id)}
                       onDragOver={allowDrop}
@@ -1150,6 +1197,7 @@ export default function ModelPicker({
                     </section>
                   );
                 })}
+                </div>
                 {/* Search reaches every runnable harness: matches elsewhere
                     follow this harness's own, grouped under the harness. */}
                 {elsewhere.map((group) => {

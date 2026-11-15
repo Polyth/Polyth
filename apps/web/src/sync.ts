@@ -17,6 +17,8 @@ export type SyncInbound =
   | { type: "worktrees/changed"; projectId: string }
   /** The reader lost access to this chat (made private, or they were removed). */
   | { type: "session/removed"; sessionId: string }
+  /** Answer to this page's `presence`: is its person working on another device? */
+  | { type: "presence/state"; activeElsewhere: boolean }
   | { type: "error"; code: string; message: string };
 
 export type SyncListener = (msg: SyncInbound) => void;
@@ -162,6 +164,7 @@ export function isSyncInbound(raw: unknown): raw is SyncInbound {
     return typeof m.projectId === "string" && m.projectId.length > 0;
   }
   if (m.type === "session/removed") return typeof m.sessionId === "string" && m.sessionId.length > 0;
+  if (m.type === "presence/state") return typeof m.activeElsewhere === "boolean";
   return m.type === "error" && typeof m.code === "string" && typeof m.message === "string";
 }
 
@@ -648,6 +651,19 @@ export class SyncClient {
       if (this.closed || generation !== this.socketGeneration || !this.canRetry() || this.ws !== null) return;
       this.startConnect(url, true);
     }, delay);
+  }
+
+  /** Tells the server whether this page's person is using it
+   *  (devicePresence.ts). False while no socket is open: `onOpen` re-reports. */
+  sendPresence(report: { clientId: string; active: boolean; idleMs: number }): boolean {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WS_OPEN) return false;
+    try {
+      ws.send(JSON.stringify({ type: "presence", clientId: report.clientId, active: report.active, idleMs: report.idleMs }));
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private sendSubscribe(ws = this.ws, generation = this.socketGeneration): void {

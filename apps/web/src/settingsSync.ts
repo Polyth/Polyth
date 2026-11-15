@@ -28,7 +28,7 @@ import {
   subscribeModelPrefs,
   subscribeThinkingPrefs,
 } from "@polyth/models/web-prefs";
-import { normalizeSettings } from "./settings.ts";
+import { normalizeSettings, type PolythSettings } from "./settings.ts";
 import { hasClientPersistenceBackend } from "./clientPersistence.ts";
 import {
   encodeSettingsLook,
@@ -40,7 +40,7 @@ import {
   type SettingsLook,
 } from "./settingsSnapshot.ts";
 import { getState, subscribeStore, updateSettings } from "./store.ts";
-import { getUiSettings, parseUiSettings, setUiSettings, subscribeUiSettings } from "./uiPrefs.ts";
+import { getUiSettings, parseUiSettings, setUiSettings, subscribeUiSettings, type UiSettings } from "./uiPrefs.ts";
 import {
   getSessionDefaults,
   parseSessionDefaults,
@@ -116,6 +116,153 @@ const SETTLE_FALLBACK_MS = 5000;
 // Older server blobs contain navigation and recently-used history. Drop those
 // keys on read; they are local to the device that produced them.
 const DEVICE_LOCAL_PREFERENCES = new Set(["core.mobile-workspace", "core.recent-widgets"]);
+
+// ---- per-device appearance sync ------------------------------------------------
+// "Sync appearance with server" is a device-local choice: it never reaches the
+// account blob. When it is OFF this device keeps its own look — it neither
+// applies remote appearance changes nor pushes its own — while every other
+// setting keeps syncing. The fields that count as "appearance" are exactly the
+// Appearance settings page's own controls, enumerated here so the sync boundary
+// and the page cannot drift apart.
+
+/** Product settings that shape the look, from the Appearance page. */
+export const APPEARANCE_PRODUCT_KEYS = [
+  "theme", "appearanceMode", "themeStyle", "accentColor", "density",
+  "fontSize", "chatFontSize", "fontFamily",
+] as const satisfies readonly (keyof PolythSettings)[];
+
+/** UI settings that shape the look, from the Appearance page. */
+export const APPEARANCE_UI_KEYS = [
+  "density", "fontSize", "headerFontSize", "subheaderFontSize", "terminalFontSize",
+  "editorFontSize", "rounding", "glassEffect", "hideBorders", "shellLook",
+  "mirrorLayout", "chatWidth", "topRailSurface", "shellLayout", "shellBarStyle",
+  "floatingColumns", "shellToolsDock", "shellActionsDock", "shellTitle",
+  "topRailSize", "rightRailSize", "leftRailSize", "railSpacing",
+] as const satisfies readonly (keyof UiSettings)[];
+
+/** Account preferences that shape the look (wallpaper preset, custom themes). */
+export const APPEARANCE_PREFERENCE_IDS = ["core.background", "core.custom-themes"] as const;
+
+/** Device-local storage key for the toggle. It is deliberately outside the
+ *  synced blob and outside the product/UI settings stores, so it can never be
+ *  captured into a PUT or read back from a server snapshot. */
+const APPEARANCE_SYNC_KEY = "polyth.appearanceSync.v1";
+const appearanceSyncListeners = new Set<() => void>();
+let appearanceSyncEnabled = readAppearanceSyncFlag();
+
+function readAppearanceSyncFlag(): boolean {
+  try { return localStorage.getItem(APPEARANCE_SYNC_KEY) !== "0"; } catch { return true; }
+}
+
+/** Whether this device pushes/pulls the appearance fields. Defaults ON. */
+export function isAppearanceSyncEnabled(): boolean {
+  return appearanceSyncEnabled;
+}
+
+/** Change the toggle. OFF freezes the current local look; ON adopts the
+ *  server look (the least surprising: the account's look wins over this
+ *  device's frozen one, with no flicker and no push of the frozen look). */
+export function setAppearanceSyncEnabled(enabled: boolean): void {
+  if (appearanceSyncEnabled === enabled) return;
+  appearanceSyncEnabled = enabled;
+  try {
+    if (enabled) localStorage.removeItem(APPEARANCE_SYNC_KEY);
+    else localStorage.setItem(APPEARANCE_SYNC_KEY, "0");
+  } catch { /* private mode */ }
+  if (enabled) adoptServerAppearance();
+  for (const listener of appearanceSyncListeners) listener();
+  // Re-baseline so the transition itself does not trigger a push: turning ON
+  // has just overwritten the local look with the server's, and turning OFF
+  // must not re-send the (now frozen) local look as though it were new.
+  if (started && localRevision >= 0) {
+    initialBaseline = currentBlob();
+    lastSyncedJson = JSON.stringify(initialBaseline);
+  }
+}
+
+export function subscribeAppearanceSync(listener: () => void): () => void {
+  appearanceSyncListeners.add(listener);
+  return () => { appearanceSyncListeners.delete(listener); };
+}
+
+/** Copy the appearance fields from the last confirmed server record into the
+ *  local stores, so a freshly re-enabled sync starts from the account's look
+ *  rather than pushing this device's frozen one. A null record (server not yet
+ *  answered) leaves the local look as it is. */
+function adoptServerAppearance(): void {
+  const remote = lastServerSettings;
+  if (remote === null) return;
+  const wasApplying = applying;
+  applying = true;
+  try {
+    if (isObject(remote.product)) {
+      const next = { ...getState().settings } as Record<string, unknown>;
+      for (const key of APPEARANCE_PRODUCT_KEYS) {
+        if (Object.prototype.hasOwnProperty.call(remote.product, key)) next[key] = remote.product[key];
+      }
+      updateSettings(normalizeSettings(next));
+    }
+    if (isObject(remote.ui)) {
+      const next = { ...getUiSettings() } as Record<string, unknown>;
+      for (const key of APPEARANCE_UI_KEYS) {
+        if (Object.prototype.hasOwnProperty.call(remote.ui, key)) next[key] = remote.ui[key];
+      }
+      setUiSettings(parseUiSettings(JSON.stringify(next)));
+    }
+    if (isObject(remote.preferences)) {
+      for (const id of APPEARANCE_PREFERENCE_IDS) {
+        if (!Object.prototype.hasOwnProperty.call(remote.preferences, id)) continue;
+        const adapter = preferenceAdapters.get(id);
+        const value = remote.preferences[id];
+        if (adapter && isJsonValue(value)) {
+          try { adapter.write(value); capturePreference(id, adapter.read()); } catch { /* unavailable */ }
+        }
+      }
+    }
+  } finally {
+    applying = wasApplying;
+  }
+}
+
+/** When sync is OFF, the pushed blob must carry the server's appearance (so it
+ *  is neither overwritten by nor erased from the account) rather than this
+ *  device's own. Appearance keys the server has no word on are dropped. */
+function gateAppearanceForPush(
+  product: Record<string, unknown>,
+  ui: Record<string, unknown>,
+  preferences: Record<string, unknown>,
+): void {
+  if (appearanceSyncEnabled) return;
+  const serverProduct = lastServerSettings && isObject(lastServerSettings.product) ? lastServerSettings.product : null;
+  const serverUi = lastServerSettings && isObject(lastServerSettings.ui) ? lastServerSettings.ui : null;
+  const serverPreferences = lastServerSettings && isObject(lastServerSettings.preferences) ? lastServerSettings.preferences : null;
+  for (const key of APPEARANCE_PRODUCT_KEYS) {
+    if (serverProduct && Object.prototype.hasOwnProperty.call(serverProduct, key)) product[key] = serverProduct[key];
+    else delete product[key];
+  }
+  for (const key of APPEARANCE_UI_KEYS) {
+    if (serverUi && Object.prototype.hasOwnProperty.call(serverUi, key)) ui[key] = serverUi[key];
+    else delete ui[key];
+  }
+  for (const id of APPEARANCE_PREFERENCE_IDS) {
+    if (serverPreferences && Object.prototype.hasOwnProperty.call(serverPreferences, id)) preferences[id] = serverPreferences[id];
+    else delete preferences[id];
+  }
+}
+
+/** Copy the appearance fields from `local` into a copy of the merged `target`,
+ *  so a remote snapshot never overwrites this device's look while the toggle
+ *  is OFF. The input is never mutated: `mergeLocal` can return the remote
+ *  object verbatim, and mutating it would corrupt the stored server record. */
+function withLocalAppearance(target: unknown, local: unknown, keys: readonly string[]): unknown {
+  if (!isObject(target) || !isObject(local)) return target;
+  const copy: Record<string, unknown> = { ...target };
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(local, key)) copy[key] = local[key];
+  }
+  return copy;
+}
+
 
 let localRevision = -1;
 let lastSyncedJson = "";
@@ -213,6 +360,25 @@ interface SettingsBlob {
 }
 
 function currentBlob(): SettingsBlob {
+  const product = { ...getState().settings } as Record<string, unknown>;
+  const ui = { ...getUiSettings() } as Record<string, unknown>;
+  const preferences = currentPreferences() as Record<string, unknown>;
+  gateAppearanceForPush(product, ui, preferences);
+  return {
+    product: product as unknown as SettingsBlob["product"],
+    ui: ui as unknown as SettingsBlob["ui"],
+    sessionDefaults: getSessionDefaults(),
+    modelPrefs: getModelPrefs(),
+    modelVisibility: getModelVisibilityPrefs(),
+    preferences: preferences as Record<string, JsonValue>,
+  };
+}
+
+/** The stores as they stand right now, appearance included and ungated. Used
+ *  as the merge base in `applyRemote`, so a remote snapshot cannot overwrite an
+ *  appearance change the toggle keeps local, nor erase a local field a
+ *  mergeLocal walk would otherwise take from the server. */
+function localSnapshot(): SettingsBlob {
   return {
     product: getState().settings,
     ui: getUiSettings(),
@@ -478,15 +644,25 @@ function applyRemote(dto: ClientSettingsDto): void {
   const normalizedPreferences = normalizeRemotePreferences(rawIncoming.preferences);
   const incoming = { ...rawIncoming, preferences: normalizedPreferences.preferences };
   settleRememberedLook(incoming);
-  const before = currentBlob();
+  const before = localSnapshot();
   const base = lastServerSettings ?? initialBaseline ?? before;
   const mergeSection = (key: keyof SettingsBlob): unknown => {
     const remote = incoming[key];
     if (!isObject(remote)) return before[key];
     return mergeLocal(base[key], before[key], remote);
   };
-  const mergedProduct = mergeSection("product");
-  const mergedUi = mergeSection("ui");
+  // The toggle OFF keeps this device's look: remote appearance changes are
+  // never applied, while every other section still merges normally. Re-assert
+  // the local values for exactly the appearance fields after the merge. This
+  // must not mutate the incoming/remote object (mergeLocal can hand it back
+  // verbatim), or the server record we just stored would lose the account's
+  // real appearance and the next adopt/push would see the local look instead.
+  const mergedProduct = !appearanceSyncEnabled
+    ? withLocalAppearance(mergeSection("product"), before.product, APPEARANCE_PRODUCT_KEYS)
+    : mergeSection("product");
+  const mergedUi = !appearanceSyncEnabled
+    ? withLocalAppearance(mergeSection("ui"), before.ui, APPEARANCE_UI_KEYS)
+    : mergeSection("ui");
   const mergedDefaults = mergeSection("sessionDefaults");
   const mergedModels = mergeSection("modelPrefs");
   // The visibility section is server-owned: when the record has one, take it as
@@ -496,7 +672,9 @@ function applyRemote(dto: ClientSettingsDto): void {
     ? parseModelVisibilityPrefs(incoming.modelVisibility)
     : before.modelVisibility;
   const mergedPreferences = isObject(incoming.preferences)
-    ? mergeLocal(base.preferences ?? {}, before.preferences, incoming.preferences)
+    ? (appearanceSyncEnabled
+      ? mergeLocal(base.preferences ?? {}, before.preferences, incoming.preferences)
+      : withLocalAppearance(mergeLocal(base.preferences ?? {}, before.preferences, incoming.preferences), before.preferences, APPEARANCE_PREFERENCE_IDS))
     : before.preferences;
   applying = true;
   try {
@@ -759,6 +937,7 @@ export function resetSettingsSyncForTest(): void {
   settled = false;
   preferenceValues.clear();
   for (const [id, adapter] of preferenceAdapters) capturePreference(id, adapter.read());
+  appearanceSyncEnabled = readAppearanceSyncFlag();
   resetRememberedLookForTest();
 }
 

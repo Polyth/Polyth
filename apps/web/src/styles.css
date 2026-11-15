@@ -4886,6 +4886,30 @@ body[data-desktop-low-resource="true"] :is(.sync-catch-up, .sync-catch-up[data-s
 .alert-dialog-body { display: flex; flex-direction: column; gap: var(--space-3); }
 .alert-dialog-body p { margin: 0; color: var(--text-dim); line-height: 1.5; white-space: pre-line; }
 .alert-dialog-body input { width: 100%; }
+/* Anchored confirmation. Phone widths show dialogs as bottom sheets; a
+   confirmation asked from a control on screen (confirmAlert's `origin`, e.g.
+   Delete in a session row's menu) is a card over that control instead, placed
+   by AlertDialog.tsx and grown out of it (surfaceMotion.css). Its backdrop
+   keeps the scrim but not the blur: fading a full-screen backdrop-filter in
+   under a sliding glass sheet is what made that sheet stutter on phones. */
+@media (max-width: 700px) {
+  .dialog-backdrop.alert-anchored-backdrop { align-items: flex-start; }
+  body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .dialog-backdrop.alert-anchored-backdrop {
+    background: var(--scrim);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .dialog-panel.alert-dialog.is-anchored {
+    position: absolute;
+    top: var(--alert-anchor-top, 50%);
+    left: var(--alert-anchor-left, 12px);
+    width: min(400px, calc(100% - 24px - var(--safe-left) - var(--safe-right)));
+    max-height: calc(100% - 2 * max(var(--space-5), var(--safe-top)));
+    border: 1px solid var(--material-glass-border);
+    border-radius: var(--radius-sheet);
+    transform-origin: var(--alert-anchor-origin, 50% 50%);
+  }
+}
 .workspace { position: relative; }
 .view-icon-named { width: auto; gap: 5px; padding: 0 8px; }
 .view-icon-label { font-size: var(--font-meta); font-weight: 650; white-space: nowrap; }
@@ -5524,9 +5548,13 @@ body[data-desktop-low-resource="true"] .lock-mark-frame {
   display: inline-flex; align-items: center; justify-content: center;
   background: transparent; border: 0; position: relative;
 }
+/* The off track is an ink tint, not a surface fill with a hairline: on a pane
+   of the same tone, and in the default Borderless mode where hairlines go
+   transparent, a --raised track left only the knob visible. */
 .switch-track {
+  --switch-off-track: color-mix(in srgb, var(--text) 16%, transparent);
   display: block; flex: none; width: 38px; height: 22px; padding: 2px;
-  border-radius: var(--radius-switch); background: var(--raised); border: 1px solid var(--hair);
+  border-radius: var(--radius-switch); background: var(--switch-off-track); border: 1px solid transparent;
   transition: background var(--motion-normal) var(--motion-ease), border-color var(--motion-normal) var(--motion-ease);
 }
 .switch::after {
@@ -5541,11 +5569,11 @@ body[data-desktop-low-resource="true"] .lock-mark-frame {
 /* Keep the enlarged outer hit box transparent on hover: the global
    button:hover:where(:not(:disabled)) fill would otherwise repaint it (including 44px phone/coarse
    targets, and it would also paint a disabled switch). The genuine cue is a
-   border tint on unchecked tracks only, so checked accent and disabled
-   behavior are untouched. */
+   deeper ink tint on unchecked tracks only (it survives Borderless), so
+   checked accent and disabled behavior are untouched. */
 @media (hover: hover) {
   .switch:hover:where(:not(:disabled)) { background: transparent; }
-  .switch:hover:not(:disabled):not([aria-checked="true"]) .switch-track { border-color: var(--border); }
+  .switch:hover:not(:disabled):not([aria-checked="true"]) .switch-track { --switch-off-track: color-mix(in srgb, var(--text) 24%, transparent); }
 }
 .switch i {
   display: block; width: 16px; height: 16px; border-radius: var(--radius-switch); background: var(--muted);
@@ -5654,12 +5682,14 @@ body[data-desktop-low-resource="true"] .lock-mark-frame {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
   transition: border-color var(--motion-fast) var(--motion-ease), transform var(--motion-fast) var(--motion-ease);
 }
-.size-stepper-track:hover::-webkit-slider-thumb,
+.size-stepper-track:hover::-webkit-slider-thumb { border-color: var(--accent); transform: scale(1.12); }
 .size-stepper-track:hover::-moz-range-thumb { border-color: var(--accent); transform: scale(1.12); }
 /* A 4px track cannot carry a usable focus outline, so focus reads on the
    thumb instead. */
 .size-stepper-track:focus-visible { outline: none; box-shadow: none; }
-.size-stepper-track:focus-visible::-webkit-slider-thumb,
+/* Split per engine: Chromium drops a whole selector list that contains a
+   pseudo-element it does not know, which left the focused thumb invisible. */
+.size-stepper-track:focus-visible::-webkit-slider-thumb { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-wash); }
 .size-stepper-track:focus-visible::-moz-range-thumb { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-wash); }
 .size-stepper-specimen {
   display: grid; place-items: center; flex: none; min-width: var(--space-5);
@@ -8157,6 +8187,35 @@ body[data-glass="clear"] .prompt-nav-panel { --prompt-nav-panel-blur: 22px; }
   justify-content: center;
 }
 .session-header-status:empty { display: none; }
+/* Back from the open chat (ui/SessionBackButton.tsx): a quiet header control
+   before the title, as tall as the title's own button; the arrow, an
+   optional mark (an agent's glyph) and where it leads, cut short first. */
+.session-back--bar {
+  /* Its own width up to the cap; the title's button gives way first. */
+  flex: none;
+  align-self: stretch;
+  min-width: 0;
+  max-inline-size: min(14rem, 34%);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding-block: 0;
+  padding-inline: var(--space-2) var(--space-3);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-meta);
+  font-weight: 550;
+  line-height: 1.2;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+.session-back--bar .session-back-arrow { flex: none; }
+.session-back--bar .session-back-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-back .session-back-arrow:dir(rtl),
+.session-back--island svg:dir(rtl) { transform: scaleX(-1); }
+/* Its touch target is the `.header-control::after` one. */
+@media (pointer: coarse) { .session-back--bar { position: relative; } }
 .desktop-session-status-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--muted); }
 .desktop-session-status-dot.working { background: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
 .desktop-session-status-dot.needs-approval, .desktop-session-status-dot.needs-reply { background: var(--amber); }
@@ -9911,52 +9970,81 @@ body:not([data-glass="off"]) .turn-rate-limit .turn-rate-limit-model .picker-chi
 }
 .send-plane { display: inline-grid; place-items: center; }
 .send-plane svg { width: 19px; height: 19px; }
-/* Press and hold Send keeps the message as a draft chat. A hairline ring
-   draws around Send over the 500 ms hold (SEND_HOLD_MS) while the button
-   settles a touch; once kept, the plane turns into a check for a beat. The
-   platform long-press callout and text selection stay out of the gesture. */
-:is(.send, .composer-delivery) { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+/* Press and hold Send keeps the message as a draft chat
+   (composer/sendHoldPress.ts, which sets `data-send-hold` on the control
+   without a React render). A hairline ring in Send's own shape winds round
+   it from the top over the person's hold length (`--send-hold-ms`), started
+   at the press's real age (`--send-hold-age`) so that it closes exactly when
+   the hold is reached, while the button settles a touch. A quick tap ends
+   before the ring fades in. Once the hold is reached with the finger still
+   down (`full`), the ring stands whole, the button springs back and its glyph
+   turns to a check (`data-parked`): letting go keeps the draft. A release
+   (`release`) fades the ring out where it stood.
+   The ring is a bordered box masked by a turning cone, not an SVG circle: it
+   takes each theme's corner radius, where a circle cut across the corners of a
+   rounded-square Send, and no `.send svg` sizing rule can shrink it (the phone
+   composer's 18px glyph rule drew the circle in Send's corner).
+   The platform long-press callout, text selection, tap flash and panning stay
+   out of the gesture: a finger that rolls a few pixels while it holds would
+   otherwise be taken for a scroll, and the browser cancels a press it pans,
+   so the message was neither sent nor kept. A slide is still judged on
+   release (composer/sendRelease.ts). A reduced-motion profile still gets the
+   ring, drawn whole and quiet as the hold is armed: it is the only sign that
+   the press was read as a hold. */
+@property --send-hold-turn { syntax: "<number>"; inherits: false; initial-value: 0; }
+:is(.send, .composer-delivery) {
+  -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
 .composer-rail .send { position: relative; overflow: visible; }
-/* The doubled class outranks the rail's icon sizing (phone `.send svg`). */
-.composer-rail .send > svg.send-hold-ring.send-hold-ring {
+.send-hold-ring {
   position: absolute;
   inset: -4px;
-  width: calc(100% + 8px);
-  height: calc(100% + 8px);
-  max-width: none;
-}
-.send-hold-ring {
-  overflow: visible;
-  pointer-events: none;
+  display: block;
+  box-sizing: border-box;
+  border: 2px solid currentColor;
+  border-radius: calc(var(--send-hold-radius, var(--radius-round)) + 4px);
   color: var(--context-liquid-tone, var(--accent));
+  pointer-events: none;
   opacity: 0;
-  transform: rotate(-90deg);
-  transition: opacity var(--motion-fast) var(--motion-ease);
+  --send-hold-turn: 0;
+  -webkit-mask-image: conic-gradient(#000 calc(var(--send-hold-turn) * 1turn), transparent 0);
+  mask-image: conic-gradient(#000 calc(var(--send-hold-turn) * 1turn), transparent 0);
+  transition: opacity var(--motion-surface) var(--motion-ease);
 }
-.send-hold-ring circle {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-dasharray: 100;
-  stroke-dashoffset: 100;
-  vector-effect: non-scaling-stroke;
+/* One animation through every phase, so the release can freeze it in place. */
+[data-send-hold] > .send-hold-ring {
+  animation: send-hold-wind var(--send-hold-ms, 500ms) linear var(--send-hold-age, 0ms) both;
 }
-.send[data-holding] .send-hold-ring { opacity: 1; }
-.send[data-holding] .send-hold-ring circle { animation: send-hold-fill 500ms linear forwards; }
-:is(.composer-rail, .composer-send-split) :is(.send, .composer-delivery)[data-holding] {
+[data-send-hold="arming"] > .send-hold-ring {
+  opacity: 1;
+  transition: opacity var(--motion-fast) var(--motion-ease) calc(var(--send-hold-ms, 500ms) * .15);
+}
+[data-send-hold="full"] > .send-hold-ring { opacity: 1; transition: opacity var(--motion-fast) var(--motion-ease); }
+[data-send-hold="release"] > .send-hold-ring { animation-play-state: paused; }
+:is(.composer-rail .send, .chat-hold-send)[data-send-hold="arming"] {
   transform: scale(0.94);
-  transition: transform 500ms var(--motion-ease);
+  transition: transform var(--send-hold-ms, 500ms) var(--motion-ease);
 }
-.send[data-parked] .send-plane svg { animation: send-parked-pop var(--motion-surface) var(--motion-ease); }
-@keyframes send-hold-fill { to { stroke-dashoffset: 0; } }
+:is(.composer-rail .send, .chat-hold-send):is([data-send-hold="full"], [data-send-hold="release"]) {
+  transform: none;
+  transition: transform var(--motion-surface) var(--motion-ease);
+}
+.send[data-parked] .send-plane > svg,
+.send[data-parked] > svg { animation: send-parked-pop var(--motion-surface) var(--motion-ease); }
+@keyframes send-hold-wind { from { --send-hold-turn: 0; } to { --send-hold-turn: 1; } }
 @keyframes send-parked-pop { from { transform: scale(.6); opacity: 0; } to { transform: none; opacity: 1; } }
-/* Without motion the hold still shows: the ring is drawn whole at once. */
+/* Without motion the hold still shows: the ring is drawn whole at once. A
+   whole ring would read as "already kept", so the armed state is drawn quiet
+   and the check at the end is the completion cue. */
 @media (prefers-reduced-motion: reduce) {
-  .send[data-holding] .send-hold-ring circle { stroke-dashoffset: 0; }
-  :is(.composer-rail, .composer-send-split) :is(.send, .composer-delivery)[data-holding] { transform: none; }
+  [data-send-hold] > .send-hold-ring { animation: none; --send-hold-turn: 1; }
+  [data-send-hold="arming"] > .send-hold-ring { opacity: .35; transition-delay: 0s; }
+  :is(.composer-rail .send, .chat-hold-send)[data-send-hold] { transform: none; }
 }
-:is(html[data-reduce-animations="true"], body[data-desktop-low-resource="true"]) .send[data-holding] .send-hold-ring circle { stroke-dashoffset: 0; }
+:is(html[data-reduce-animations="true"], body[data-desktop-low-resource="true"]) [data-send-hold] > .send-hold-ring { animation: none; --send-hold-turn: 1; }
+:is(html[data-reduce-animations="true"], body[data-desktop-low-resource="true"]) [data-send-hold="arming"] > .send-hold-ring { opacity: .35; transition-delay: 0s; }
+:is(html[data-reduce-animations="true"], body[data-desktop-low-resource="true"]) :is(.composer-rail .send, .chat-hold-send)[data-send-hold] { transform: none; }
 body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display: none !important; }
 
 /* Canvas tiles and right-side workspace editor. */
@@ -14499,6 +14587,7 @@ width: var(--tap);
   color: var(--text-dim);
 }
 .reorder-control:disabled { opacity: .32; }
+
 @media (pointer: coarse) {
 
   .msg.user .msg-action-btn, .focus-conversation .msg .msg-action-btn, .reorder-control{
@@ -14844,6 +14933,31 @@ color: var(--muted);
   }
 }
 
+/* iOS 26+ Safari lays its scroll edge effect, a soft blurred band, under the
+   status bar, and the band reaches into the page: it blurred the top half of
+   the floating islands below (the native app turns the band off in
+   SceneDelegate.swift; a page cannot). WebKit drops the band only for a fixed
+   top edge: its hit test at the middle of the top edge, 4px down and ignoring
+   `pointer-events`, has to land in a fixed or sticky box at least 90% of the
+   viewport wide with a backdrop filter or a solid fill
+   (LocalFrameView::fixedContainerEdges); Safari then paints the status bar in
+   the page's colour. The islands start lower and are narrower, and a backdrop
+   filter on their row would bound the islands' own glass to it. The phone
+   header (Header.tsx) renders this strip for that hit test: full width, above
+   the conversation and under the islands, an identity backdrop filter (any
+   value but `none` counts), so it paints nothing and never takes a tap.
+   phoneTopEdge.test.ts replays the hit test. */
+.phone-top-edge {
+  position: fixed;
+  inset-block-start: 0;
+  inset-inline: 0;
+  z-index: calc(var(--z-shell) + 1);
+  block-size: max(var(--space-2), var(--conversation-chrome-inset));
+  pointer-events: none;
+  -webkit-backdrop-filter: opacity(1);
+  backdrop-filter: opacity(1);
+}
+
 /* Phone uses one three-segment shell bar for every workspace surface. The
    bar floats so the chat timeline can keep its own scroll root; the sibling
    clearance rules below keep non-chat surfaces from sitting underneath it. */
@@ -14860,7 +14974,9 @@ color: var(--muted);
       max(var(--conversation-chrome-inset), var(--safe-right));
     z-index: calc(var(--z-shell) + 2);
     display: grid;
-    grid-template-columns: max(var(--tap), var(--mobile-island-height)) minmax(0, 1fr) auto;
+    /* The leading island is one tap wide, or two when it also holds Back
+       (SessionBack.tsx) before the menu. */
+    grid-template-columns: minmax(max(var(--tap), var(--mobile-island-height)), auto) minmax(0, 1fr) auto;
     align-items: center;
     gap: var(--space-2);
     padding: 0;
@@ -14903,7 +15019,7 @@ color: var(--muted);
     gap: var(--space-1);
   }
   /* The glass island is inline-flex: stretch the row across it so the title
-     centres in the whole pill and the arrow reaches the far edge, and let the
+     centres in the whole pill, and let the
      island's own min-height (border included) size it like its neighbours. */
   .mobile-session-title-island > .mobile-session-title-row { flex: 1 1 auto; height: auto; align-self: stretch; align-items: stretch; }
   .mobile-session-floats[data-title-mode="button"] .mobile-session-selector { min-height: 0; height: auto; }
@@ -14913,7 +15029,7 @@ color: var(--muted);
     width: 100%;
     height: 100%;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) var(--icon-md);
+    grid-template-columns: minmax(0, 1fr);
     align-items: center;
     gap: var(--space-2);
     padding: 0 var(--space-3);
@@ -14944,14 +15060,17 @@ color: var(--muted);
   .mobile-session-selector[data-live="true"] {
     border-color: color-mix(in srgb, var(--accent-line) 70%, var(--border-soft));
   }
+  /* The title, and under it one quiet line of context. No arrow: the whole
+     title is the control, and the line only appears when it has something. */
   .mobile-island-text {
     grid-column: 1;
     min-width: 0;
     width: 100%;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: var(--space-1);
+    gap: 0;
     overflow: hidden;
     text-align: center;
     text-overflow: ellipsis;
@@ -14959,35 +15078,39 @@ color: var(--muted);
     animation: island-swap var(--motion-normal) var(--motion-ease);
   }
   .mobile-session-title-island[data-leading-indicator] .mobile-island-text { grid-column: 2; }
+  /* One line, always, cut with an ellipsis at the end (the marks before the
+     name stay): every chat's title sits at the same height in the bar. */
   .mobile-island-title-text {
     min-width: 0;
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    overflow: hidden;
-    max-height: calc(var(--font-session-title-compact-lh) * 2);
-    white-space: normal;
-    overflow-wrap: anywhere;
-    text-wrap: balance;
-  }
-  .mobile-island-text .session-header-status {
-    flex: none;
-    display: inline-flex;
-    align-items: center;
-  }
-  .mobile-island-text .session-header-status:empty {
-    display: none;
-  }
-  .mobile-session-floats[data-title-mode="button"] .mobile-island-title-text {
     display: block;
-    max-height: none;
+    overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
   }
+  .mobile-island-text > * { max-width: 100%; }
+  /* Package marks lead the name inside its text: one centred group on the
+     title's baseline, sized and inked from the title itself (a desktop
+     mark's colour and box do not follow it here). */
+  .mobile-island-title-text > .session-header-status {
+    display: inline-flex;
+    align-items: center;
+    gap: .2em;
+    margin-inline-end: .3em;
+    vertical-align: -.1em;
+    color: var(--muted);
+  }
+  .mobile-island-title-text > .session-header-status:empty { display: none; }
+  .mobile-island-title-text > .session-header-status > * { color: inherit; }
+  .mobile-island-title-text > .session-header-status > :has(> svg:only-child) { width: auto; height: auto; }
+  .mobile-island-title-text > .session-header-status svg { width: .85em; height: .85em; stroke-width: 2.4; }
+  /* Someone else's chat: the owner's name, a quiet line under the title. */
+  .mobile-island-text > .mobile-island-owner {
+    color: var(--muted);
+    font-size: var(--font-meta);
+    font-weight: 400;
+    line-height: var(--font-meta-lh);
+  }
   .mobile-session-selector > .mobile-island-dot { grid-column: 1; justify-self: center; }
-  .mobile-session-selector > svg,
-  .mobile-session-selector-arrow { grid-column: -2; justify-self: center; width: var(--icon-sm); height: var(--icon-sm); color: var(--muted); }
   .mobile-island-dot {
     width: var(--space-2);
     height: var(--space-2);
@@ -20018,11 +20141,24 @@ body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="s
     padding-inline: var(--space-1);
   }
 
-  body:not([data-shift-held]) .mobile-float-navigation > .ui-icon-btn:focus-visible,
-  body:not([data-shift-held]) .mobile-float-actions > .ui-icon-btn:focus-visible {
-    outline: 2px solid var(--focus-ring);
-    outline-offset: 3px;
-    box-shadow: 0 0 0 4px var(--focus-wash);
+  /* Keyboard focus is the glyph's accent, like a press: the island clips
+     its content, so an outline showed as a cut-off frame and a pale plate. */
+  :is(.mobile-float-navigation, .mobile-float-actions) > .ui-icon-btn:focus-visible {
+    outline: none;
+    box-shadow: none;
+    color: var(--accent-text);
+  }
+
+  /* A sheet or the Workspace closing hands focus back to its header control
+     from script, and WebKit then matches :focus-visible even after a tap: the
+     ✎/⧉/☰ glyph wore a dark ring until the next touch. After a pointer or
+     touch the focus cue stays off (inputModality.ts); any key brings it back. */
+  html[data-input-modality="pointer"] :is(.mobile-float-navigation, .mobile-float-actions) > .ui-icon-btn:focus-visible:not(:active, [aria-expanded="true"]) {
+    color: var(--text-dim);
+  }
+  html[data-input-modality="pointer"] .mobile-session-title-island .mobile-session-selector:focus-visible {
+    outline: none;
+    box-shadow: none;
   }
 }
 
@@ -20690,7 +20826,6 @@ body[data-glass="off"] :is(.scrim, .dialog-backdrop, .sheet-backdrop) {
     opacity: 1;
     pointer-events: auto;
   }
-  .pane-tab-group.active > .reorder-controls { display: none; }
 }
 
 /* macOS and Windows own their caption controls: native traffic lights
@@ -21043,6 +21178,53 @@ body.desktop-app[data-desktop-platform="win32"][data-desktop-controls-position] 
 .settings-section.is-danger .settings-section-title { color: var(--red); }
 .settings-section.is-danger .settings-section-head { border-bottom-color: color-mix(in srgb, var(--red) 30%, var(--hair)); }
 .settings-reset-link.ui-btn--ghost { color: var(--accent); padding-inline: var(--space-2); }
+/* Settings for other devices (OtherDevicesSection): one closed group per
+   device at the page end. Each reads as a fold, one step quieter than the
+   sections above (the page's "More options" / "Customize each size" folds):
+   a 600 dim title with its chevron right after it, and, while closed, the
+   labels it holds on a faint line. The whole row is the button, so the hit
+   area stays full width; the hairline sits on the heading so the hover wash
+   can reach past the text edge. Closed groups stack as one short list; an
+   open one keeps the ordinary section gap before the next. Inside, the
+   hidden sections keep their own look one heading level down. */
+.settings-other-devices:not([data-open]) + .settings-other-devices { margin-top: var(--space-1); }
+.settings-other-devices-heading {
+  margin: 0; font: inherit;
+  border-bottom: 1px solid var(--hair);
+}
+.settings-other-devices-toggle {
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px;
+  width: calc(100% + 2 * var(--space-2)); min-height: max(var(--hit-min), var(--control-h));
+  margin: 0 calc(-1 * var(--space-2)) var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: 0; border-radius: var(--radius-control); background: transparent; color: inherit;
+  font: inherit; text-align: start; cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease);
+}
+.settings-other-devices-title-line { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; }
+.settings-other-devices-toggle .settings-section-title { font-weight: 600; color: var(--text-dim); }
+.settings-other-devices-toggle .settings-section-hint { color: var(--faint); text-wrap: pretty; }
+@media (hover: hover) and (pointer: fine) {
+  .settings-other-devices-toggle:hover { background: var(--surface-overlay-hover); }
+  .settings-other-devices-toggle:hover :is(.settings-section-title, .settings-other-devices-chevron) { color: var(--text); }
+}
+.settings-other-devices-toggle:active { background: var(--surface-overlay-hover); }
+.settings-other-devices-toggle:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.settings-other-devices[data-open="true"] .settings-other-devices-toggle .settings-section-title { color: var(--text); }
+.settings-other-devices-label { white-space: nowrap; }
+.settings-other-devices-chevron {
+  flex: none; display: grid; place-items: center; color: var(--faint);
+  transition: transform var(--motion-normal) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+.settings-other-devices[data-open="true"] .settings-other-devices-chevron { transform: rotate(180deg); color: var(--text-dim); }
+.settings-other-devices-rows { margin-top: var(--space-1); }
+.settings-other-devices-body > .settings-section:first-of-type { margin-top: var(--space-3); }
+.settings-other-devices-rows + .settings-section { margin-top: var(--space-5); }
+.settings-other-devices-body[data-motion="opening"] { animation: settings-other-devices-open var(--motion-normal) var(--motion-ease) both; }
+@keyframes settings-other-devices-open {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
 
 /* ItemList / ItemRow — a grouped list of like items (Packages). One quiet
    surface; every row keeps the same trailing geometry (controls, then a

@@ -32,6 +32,7 @@ export const uk: ModelsMessages = {
   "modelpicker.pricing": "Ціни",
   "modelpicker.pricingPerMTok": "{input} вхід · {output} вихід за 1 млн токенів",
   "modelpicker.provider": "Постачальник",
+  "modelpicker.providers": "Провайдери",
   "modelpicker.reasoning": "Міркування",
   "modelpicker.removeFavorite": "Видалити з вибраного",
   "modelpicker.removeValueFromFavorites": "Видалити {name} з вибраного",

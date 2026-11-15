@@ -58,6 +58,7 @@ import { useUiSettings } from "../uiPrefs.ts";
 import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
 import { RailWidgetItemView, useRailWidgetItems } from "./RailZoneWidgets.tsx";
 import DesktopSessionStatus from "./DesktopSessionStatus.tsx";
+import SessionBack from "./SessionBack.tsx";
 import SpaceSwitcher from "./SpaceSwitcher.tsx";
 import { railIconFor } from "../railIcons.ts";
 import { switchWorkspaceMode } from "../workbench/profileNavigation.ts";
@@ -582,6 +583,7 @@ export default function Header() {
       {showTitle && session && (
         <DesktopSessionStatus
           showTrigger={showSessionStatus}
+          leading={<SessionBack sessionId={session.id} presentation="bar" />}
           trailing={sessionStatusContribution}
           caption={[
             compact ? projectName : undefined,
@@ -612,6 +614,9 @@ export default function Header() {
     return (
       <>
         {pageOpen ? null : chatSurface ? <MobileSessionHeader /> : <MobileViewHeader />}
+        {/* Tells iOS Safari the top edge has fixed chrome, so it drops its
+            blurred status-bar band from the floating islands (styles.css). */}
+        <div className="phone-top-edge" aria-hidden="true" />
         {/* Swipes from Chat pull the Navigator or the Workspace in. */}
         <PhoneShellSwipes />
         {/* One Workspace layer for the whole phone shell: it must outlive the

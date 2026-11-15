@@ -54,6 +54,8 @@ test("commits group by conventional type, leading verb and touched paths", () =>
     ["Виправити падіння", ["apps/web/src/a.ts"], "fixes", "Виправити падіння"],
     ["ci: pin node", [".github/workflows/ci.yml"], "maintenance", "Pin node"],
     ["perf(server): batch reads", ["packages/server/src/a.ts"], "improvements", "Batch reads"],
+    ["[Fix] Lock the @polyth/orchestration workspace", ["package-lock.json"], "maintenance", "[Fix] Lock the @polyth/orchestration workspace"],
+    ["Pin the native bridge", ["packages/link/Cargo.lock"], "maintenance", "Pin the native bridge"],
   ];
   for (const [subject, files, section, title] of cases) {
     assert.deepEqual(classifyCommit({ subject, files }), { section, title }, subject);

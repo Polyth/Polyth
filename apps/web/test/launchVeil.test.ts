@@ -68,6 +68,40 @@ test("index.html paints the veil before any script and drops it only on desktop"
   }
 });
 
+test("index.html never lifts the veil onto an empty page of the phone app's Link proxy", () => {
+  const run = (env: { platform: string; protocol: string; hostname: string; rendered?: boolean }) => {
+    mountVeil();
+    if (env.rendered) document.getElementById("root")!.appendChild(document.createElement("div"));
+    let failsafe: (() => void) | undefined;
+    const replaced: string[] = [];
+    const windowLike = {
+      Capacitor: { isNativePlatform: () => true, getPlatform: () => env.platform },
+      location: { protocol: env.protocol, hostname: env.hostname, replace: (url: string) => replaced.push(url) },
+    };
+    new Function("window", "document", "matchMedia", "setTimeout", activation)(
+      windowLike, document, () => ({ matches: false }), (callback: () => void, ms: number) => {
+        assert.equal(ms, 20000);
+        failsafe = callback;
+        return 0;
+      },
+    );
+    assert.ok(failsafe, "failsafe armed");
+    failsafe!();
+    return { replaced, hidden: document.getElementById("polyth-launch")!.hidden };
+  };
+  // The open server's page: back to the hub, which opens the server again.
+  assert.deepEqual(run({ platform: "ios", protocol: "http:", hostname: "127.0.0.1" }),
+    { replaced: ["capacitor://localhost?resume=1"], hidden: false });
+  assert.deepEqual(run({ platform: "android", protocol: "http:", hostname: "127.0.0.1" }),
+    { replaced: ["https://localhost?resume=1"], hidden: false });
+  // A rendered page owns its veil.
+  assert.deepEqual(run({ platform: "ios", protocol: "http:", hostname: "127.0.0.1", rendered: true }),
+    { replaced: [], hidden: false });
+  // The bundled hub has nowhere to go back to: it shows what is underneath.
+  assert.deepEqual(run({ platform: "ios", protocol: "capacitor:", hostname: "localhost" }),
+    { replaced: [], hidden: true });
+});
+
 test("a long wait breathes and shows one status line; reduced motion keeps it still", () => {
   const veil = mountVeil();
   assert.equal(launchVeil.active, true);

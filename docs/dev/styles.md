@@ -142,6 +142,7 @@ these inks.
 | `--blue` | Informational signal. |
 | `--purple` | Auxiliary/syntax signal. |
 | `--green-on-wash` | Accessible success text on a success wash. |
+| `--red-on-wash` | Accessible red text (a removed-lines count) on a red wash or a translucent fill; the raw `--red` falls under 4.5:1 there on dark themes. |
 | `--amber-on-wash` | Accessible warning text on a warning wash. |
 | `--amber-rgb` | Warning channels for alpha-based CSS. |
 | `--green-wash` | Success-tinted surface. |
@@ -207,12 +208,13 @@ when the locale switches between LTR and RTL.
 | `--control-pad-x` | Horizontal padding for standard controls. |
 | `--control-gap` | Gap between a control's glyph and its label. |
 | `--mobile-island-height` | Density-scaled floating mobile navigation height. |
-| `--mobile-session-header-height` | Phone session-title touch height and conversation clearance, including two lines at the selected menu text size. |
+| `--mobile-session-header-height` | Phone session-title touch height and conversation clearance, room for the one-line title plus the owner's line at the selected menu text size, so it stays the same height for every chat. |
 | `--activity-row-height` | Density-scaled compact activity/tool row height. |
 | `--agent-dock-height` | Density-scaled expanded active-agent dock height. |
 | `--composer-height` | Density-scaled resting conversation composer height. |
 | `--composer-action-size` | Density-scaled visible send/stop action size. The disc reads this size on every pointer; a touch target grows past its edge through `::after`. |
 | `--composer-stack-mark`, `--composer-stack-text`, `--composer-stack-end` | The columns of the pending stack above the composer, measured from the composer card's outer edge: marks are centred on the model logo's column, labels start at the model name, trailing glyphs end where the marks start. Packages that draw a line there (planner, code hosting, git) use them with a fallback. |
+| `--composer-row-mid` | Half the resting composer row: how far the composer card's model line centres below its top edge and its rail above its bottom edge (the composer's icon grid, [ui](ui.md) "The composer's icon grid"). |
 | `--composer-stack-row`, `--composer-stack-control` | One line's height in that stack and the size of a control on it. |
 | `--composer-stack-reach` | How far a line that opens something reaches up into the timeline's bottom space to keep its full touch target while it reads one row tall: 0 on fine pointers. |
 | `--composer-max-input-height` | Font-scaled five-line composer input ceiling. |
@@ -581,17 +583,19 @@ The Appearance page runs from the whole to the parts: **Look**, **Color**
 workspace background, its **Panel transparency** and **Hide interface
 borders**), **Window layout** (the layout cards with each layout's own
 options, the top bar style and **Mirror layout**), **Text**, **Layout**
-(density, rail size and spacing, rounding, status bar) and the **Tablet
+(density, rounding, rail size and spacing, status bar) and the **Tablet
 toolbar**. `shellLooks.test.ts` pins the section order and which section owns
-each of those rows.
+each of those rows. Settings for another kind of screen leave that order and
+wait closed at the page end (ui.md §4.5 "Settings for other devices"): a
+phone hides Window layout, the rail and status bar rows and the Tablet
+toolbar; a tablet hides Window layout; a desktop hides the Tablet toolbar.
 
 Each family of sizes leads with one control and keeps its per-part rows one
 click under it (`SizeDetails` in `pages.tsx`): **Text size** moves all six
 text sizes by the same step (`shiftTextSizes`; the number shown is the chat
 size), and the rail presets set all four rail values. A settings-search hit
 or deep link on a collapsed row reaches the page as its `settingsTarget` and
-opens that group. The tablet toolbar editor is open at tablet width and waits
-behind *Show* elsewhere. Schemes that ship with a style share its name
+opens that group. Schemes that ship with a style share its name
 (Polyth, Big Sur, macOS 27), so their rows in the picker add "made for the …
 style". Behaviour rows live with their owners: swipe navigation in General,
 the dictation button and composer quick actions in Chat → Composer

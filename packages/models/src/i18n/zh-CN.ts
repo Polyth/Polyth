@@ -32,6 +32,7 @@ export const zhCN: ModelsMessages = {
   "modelpicker.pricing": "价格",
   "modelpicker.pricingPerMTok": "每 MTok 输入 {input} · 输出 {output}",
   "modelpicker.provider": "提供商",
+  "modelpicker.providers": "提供商",
   "modelpicker.reasoning": "推理",
   "modelpicker.removeFavorite": "移除收藏",
   "modelpicker.removeValueFromFavorites": "从收藏中移除 {name}",

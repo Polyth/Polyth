@@ -57,6 +57,7 @@ export const ar: TerminalMessages = {
   "terminalview.processExited": "انتهت العملية",
   "terminalview.processExitedCodeValue": "انتهت العملية (الرمز {code})",
   "terminalview.reconnecting": "إعادة الربط",
+  "terminalview.renameValue": "إعادة تسمية {title}",
   "terminalview.repository": "المستودع",
   "terminalview.repositoryMissing": "{path} · مفقود",
   "terminalview.resetTerminal": "إعادة تعيين الطرفية",

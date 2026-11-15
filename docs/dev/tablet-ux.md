@@ -295,8 +295,9 @@ bar instead of a reduced desktop header:
   trigger shows the active state when the current destination is inside it.
 - **Editing.** Settings → Appearance → *Tablet toolbar*
   (`CompactShortcutsEditor`, item `appearance.compactShortcuts`, searchable)
-  pins/unpins and reorders. The editor is open at tablet width; elsewhere it
-  waits behind *Show*, and a routed `itemId` opens it. *Customize shortcuts…* deep-links there with
+  pins/unpins and reorders. The section shows at tablet width; elsewhere it
+  waits in the page's closed "For tablet" group (ui.md §4.5 "Settings for
+  other devices"), and a routed `itemId` opens that group. *Customize shortcuts…* deep-links there with
   `openSettingsPage("appearance", { itemId })`; `SettingsView` scrolls any
   routed `itemId` into view. Ids of disabled packages stay stored and return
   with the package. Only `MOBILE_SHORTCUT_IDS` can be pinned; other package

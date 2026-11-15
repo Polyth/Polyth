@@ -272,6 +272,35 @@ test("phone sheets and dialogs rise from the bottom edge; centered ones rise in 
   assert.equal((await box("#dialog"))!.animation, "rise-out");
 });
 
+test("an anchored phone confirmation grows out of the control it was asked from", { skip: !CHROME }, async () => {
+  // AlertDialog.tsx sets these three properties from placeAnchoredAlert.
+  const card = `<div class="dialog-panel alert-dialog is-anchored" id="dialog" style="height:180px;--alert-anchor-left:12px;--alert-anchor-top:300px;--alert-anchor-origin:200px 40px">Delete?</div>`;
+  await load(`<div class="dialog-backdrop alert-anchored-backdrop" id="backdrop">${card}</div>`);
+  assert.equal((await box("#dialog"))!.animation, "alert-anchor-in", "not a bottom sheet");
+  // `backwards`: once finished it no longer applies, so look at the start first.
+  assert.ok(await freeze("#dialog", "alert-anchor-in", 0));
+  const start = (await box("#dialog"))!;
+  // scale(0.6) about (200, 40): that point stays put and the card closes in on it.
+  assert.deepEqual([start.left, start.top], [12 + 200 * 0.4, 300 + 40 * 0.4]);
+  assert.ok(await freeze("#dialog", "alert-anchor-in", 1));
+  const rest = (await box("#dialog"))!;
+  assert.deepEqual([rest.left, rest.top], [12, 300], "the card sits where AlertDialog placed it");
+  const filter = await page!.evaluate(() => getComputedStyle(document.querySelector("#backdrop")!).backdropFilter);
+  assert.equal(filter, "none", "no full-screen blur fading in behind a small card");
+  // An ancestor below full opacity would cut the card's glass off from the page.
+  assert.equal((await box("#backdrop"))!.animation, "alert-scrim-in");
+  assert.ok(await freeze("#backdrop", "alert-scrim-in", 0.5));
+  const scrim = await page!.evaluate(() => getComputedStyle(document.querySelector("#backdrop")!).opacity);
+  assert.equal(scrim, "1", "the scrim tints in on its colour, not its opacity");
+
+  await load(`<div class="dialog-backdrop alert-anchored-backdrop" id="backdrop" data-exit-ghost="dialog">${card}</div>`);
+  assert.equal((await box("#dialog"))!.animation, "alert-anchor-out", "it shrinks back toward the control");
+  assert.equal((await box("#backdrop"))!.animation, "alert-scrim-out");
+
+  await load(`<div class="dialog-backdrop alert-anchored-backdrop">${card}</div>`, { width: 1024 });
+  assert.equal((await box("#dialog"))!.animation, "rise", "wide screens keep the centred dialog");
+});
+
 test("a notification follows the finger on translate while the stack owns its transform", { skip: !CHROME }, async () => {
   await load(`<div class="notify-stack" data-shell="desktop" style="--notify-stack-h: 80px"><div class="notify-card" id="card" style="transform: translate3d(0, -20px, 0)">Saved nothing</div></div>`);
   await page!.waitForTimeout(600);

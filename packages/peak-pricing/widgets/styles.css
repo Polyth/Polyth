@@ -15,7 +15,9 @@
   gap: 6px;
   max-width: 100%;
   overflow: hidden;
-  padding-inline: 6px 8px;
+  /* The ring keeps the composer line's inset before it (its 1px edge
+     included), so it stands one glyph gap from the glyph ahead. */
+  padding-inline: calc(var(--composer-line-inset, 7px) - 1px) 8px;
   cursor: pointer;
 }
 
@@ -94,20 +96,16 @@
 }
 
 /* ---- dot only ------------------------------------------------------------ */
-/* No words and no chip chrome: an 8px phase dot inside its arc, its ring 2px
-   after the model chip whatever the row's own gap (measured into
-   --peak-pricing-row-gap). The 24×30 hit box reaches at most 2px into that
-   chip's trailing padding, so the ring stays outside its hover surface. */
-.peak-pricing:not([data-surface="statusbar"])[data-display="dot"] {
-  margin-inline-start: calc(2px - var(--peak-pricing-row-gap, 2px) - 4px);
-}
-
+/* No words and no chip chrome: an 8px phase dot inside its arc. On the
+   composer's model line the ring keeps the host's line inset on each side
+   (--composer-line-inset, the composer's icon grid), so it stands one glyph
+   gap from its neighbours like the context pie; elsewhere it is a 24×30 box. */
 .peak-pricing-chip:not(.sb)[data-display="dot"] {
   position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
+  width: calc(16px + 2 * var(--composer-line-inset, 4px));
   height: 30px;
   padding: 0;
   border: 0;
@@ -153,14 +151,12 @@
   outline-offset: -1px;
 }
 
-/* Touch: a 44px target. It grows toward the inline end so the dot keeps its
-   2px gap and nothing reaches over the model chip. */
+/* Touch: a tap-tall target, as wide as the line's rhythm allows (the host's
+   inset is larger on touch), the ring centred in it. */
 @media (pointer: coarse) {
   .peak-pricing-chip:not(.sb)[data-display="dot"] {
-    width: var(--tap);
+    width: calc(16px + 2 * var(--composer-line-inset, 14px));
     min-height: var(--tap);
-    justify-content: flex-start;
-    padding-inline-start: 4px;
   }
 }
 
@@ -183,7 +179,7 @@
 @media (max-width: 480px) {
   .peak-pricing-chip.config-chip {
     min-height: var(--tap);
-    padding-inline: 6px;
+    padding-inline: calc(var(--composer-line-inset, 7px) - 1px) 6px;
   }
 }
 

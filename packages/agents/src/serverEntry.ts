@@ -1158,9 +1158,12 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       const target = sessionId;
       // The session validates the files again and hands them to the model.
       const attachments = wake.attachments?.length ? { attachments: wake.attachments } : {};
+      // The composed wake (charter, notebook, journal, events) is the agent's
+      // machinery: the chat shows only what the person wrote, or nothing.
+      const displayText = wake.input?.trim() ?? "";
       const delivered = await withRouteFailover(routes, route, async (execution) => {
         await assertRouteSignedIn(task, execution);
-        return sender.send(target, { text, ...attachments, ...execution, ...profileOf(task) }, scheduleTurnAdmission(task));
+        return sender.send(target, { text, displayText, ...attachments, ...execution, ...profileOf(task) }, scheduleTurnAdmission(task));
       });
       route = delivered.route;
       const sent = delivered.value;
@@ -1178,11 +1181,13 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         ...(sent?.turnId ? { turnId: sent.turnId } : {}),
       };
     },
-    settle: (task, run, signal, onWaiting, onActivity) => settleScheduledRun(run, {
+    settle: (task, run, signal, onWaiting, onActivity, onBackground, stopRequested) => settleScheduledRun(run, {
       signal,
       events: (sessionId, afterSeq) => host.store.events(sessionId, afterSeq),
       ...(onWaiting ? { onWaiting } : {}),
       ...(onActivity ? { onActivity } : {}),
+      ...(onBackground ? { onBackground } : {}),
+      ...(stopRequested ? { stopRequested } : {}),
       ...(run.sessionId && scheduleExecutionRoutes(task).length > 1 ? {
         backup: run.backup ?? 0,
         // The provider refused or ran out mid-run: continue the same turn on

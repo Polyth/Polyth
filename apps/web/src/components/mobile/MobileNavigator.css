@@ -208,13 +208,14 @@ html[data-appearance="light"] .mobile-navigator {
    A swipe from Chat mounts the drawer as a peek: inert, resting off-screen on
    the inline-start side, moved by the finger through an inline transform
    (PhoneShellSwipes.tsx). A swipe on the open drawer drags it the same way
-   (data-swiping). On release the finger's position is handed to a plain
-   two-stop travel — --nav-swipe-from to rest, or to off-screen — paced by the
-   rest of the distance (--nav-swipe-settle) on the stack curve, so the drawer
-   leaves the finger at the finger's speed. Taps keep the entrance/exit above.
-   Reduced motion and low-resource mode remove the animation globally, and
-   the drawer simply lands where it is going. The `:is(html, …)` prefix lets
-   these outrank the RTL animation-name rules. */
+   (data-swiping). On release the rest of the travel is a spring the swipe
+   controller runs on the compositor from the finger's own speed
+   (swipeSurface.ts `settle`), started before the drawer's state changes. So
+   nothing here animates a release: these rules only keep the drawer's own
+   entrance and exit out of the way and say where it rests once the spring
+   lets go. Taps keep the entrance/exit above. Reduced motion and low-resource
+   mode skip the spring, and the drawer simply lands where it is going. The
+   `:is(html, …)` prefix lets these outrank the RTL animation-name rules. */
 :is(html, html[dir="rtl"]) .mobile-navigator.is-peeking {
   pointer-events: none;
   animation: none;
@@ -248,20 +249,20 @@ html[data-appearance="light"] .mobile-navigator {
   animation: none;
 }
 
-:is(html, html[dir="rtl"]) .mobile-navigator[data-swipe-handoff="open"]:not(.is-closing, .is-peeking) {
-  animation: mobile-navigator-swipe-in var(--nav-swipe-settle, var(--motion-surface)) var(--motion-stack-ease) both;
-}
-
+/* Swiped closed: the spring already took the drawer off-screen, so the closing
+   state parks it there until it unmounts instead of playing the exit. */
 :is(html, html[dir="rtl"]) .mobile-navigator.is-closing[data-swipe-handoff="close"] {
-  animation: mobile-navigator-swipe-out var(--nav-swipe-settle, var(--motion-surface)) var(--motion-stack-ease) both;
+  animation: none;
+  transform: translate3d(calc(var(--stack-dir, 1) * -100%), 0, 0);
 }
 
 /* A drag of the open drawer must be able to move it. The entrance animation
-   (and a swipe-open hand-off) fills forwards with `transform: none`, and an
-   animation outranks an inline style, so without this the drawer ignores the
-   finger and only the release animates. A drag that springs home leaves
-   data-swipe-handoff="rest" so the entrance does not replay when data-swiping
-   goes; it is inert once the drawer starts closing. */
+   fills forwards with `transform: none`, and an animation outranks an inline
+   style, so without this the drawer ignores the finger and only the release
+   animates. A drawer that arrived under the finger, and a drag that springs
+   home, carry data-swipe-handoff="rest" so the entrance does not play over
+   the spring or replay when data-swiping goes; it is inert once the drawer
+   starts closing. */
 :is(html, html[dir="rtl"]) .mobile-navigator:is([data-swiping], [data-swipe-handoff="rest"]):not(.is-closing, .is-peeking) {
   animation: none;
 }
@@ -291,19 +292,6 @@ html[data-appearance="light"] .mobile-navigator {
     transform: translate3d(calc(var(--stack-dir, 1) * var(--stack-parallax, 28%)), 0, 0);
     visibility: hidden;
   }
-}
-
-/* --nav-swipe-from is a signed physical offset, so one pair serves RTL too. */
-@keyframes mobile-navigator-swipe-in {
-  from { transform: translate3d(var(--nav-swipe-from, 0px), 0, 0); }
-  /* `none`, not a zero translate: the open drawer must not become a
-     containing block for its fixed-position menus. */
-  to { transform: none; }
-}
-
-@keyframes mobile-navigator-swipe-out {
-  from { transform: translate3d(var(--nav-swipe-from, 0px), 0, 0); }
-  to { transform: translate3d(calc(var(--stack-dir, 1) * -100%), 0, 0); }
 }
 
 @keyframes mobile-nav-toolbar-in {
@@ -581,11 +569,13 @@ button.mobile-nav-place:active:where(:not(:disabled)) {
   background-color: color-mix(in srgb, var(--text) 7%, transparent);
 }
 
-/* The circle is the press. The shared press wash (styles.css: an inset
-   shadow over the button's box) would fill the whole square target round
-   it. */
+/* The circle is the press. The shared press washes (styles.css: inset
+   shadows over the button's box) would frame the whole square target round
+   it, off-centre from a glyph the cluster's rhythm places. The later of them,
+   button:not(:disabled):active, is (0,2,1), so New chat and ⋯ need the
+   navigator's scope to clear it; a tool's child combinator already does. */
 .mobile-nav-tools > .mobile-nav-tool:active:where(:not(:disabled)),
-.mobile-nav-project-action:active:where(:not(:disabled)) {
+.mobile-navigator .mobile-nav-project-action:active:where(:not(:disabled)) {
   box-shadow: none;
 }
 
@@ -1388,20 +1378,68 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
   overflow: hidden;
 }
 
-/* Not just aria-hidden: without this the "Pin to top" label paints through
- * the row's transparent background at rest, showing on every row. */
+/* Not just aria-hidden: without this the tray buttons paint through the
+ * row's transparent background at rest, showing on every row. */
 .mobile-nav-session-underlay[aria-hidden="true"] {
   visibility: hidden;
 }
 
+/* One tray per swipe side. Its width is the row's travel, so the buttons share
+   exactly the revealed area; the row moves 1:1 with the finger and the tray
+   follows without its own transition. The leading tray sits at the inline
+   start (revealed by a swipe toward the inline end), the trailing one at the
+   inline end, so RTL mirrors without extra rules. */
+.mobile-nav-swipe-tray {
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+  min-inline-size: 0;
+}
+
 .mobile-nav-swipe-action {
-  width: 82px;
-  padding: 0 var(--space-2);
-  color: var(--muted);
-  background: color-mix(in srgb, var(--material-glass) var(--material-glass-readable-control-fill), transparent);
+  --swipe-tone: var(--muted);
+  flex: 1 1 0;
+  min-inline-size: 0;
+  /* Exactly the row's height: the clip ends there, so a taller minimum (the
+     balanced and compact rows are 34–38px) would hang below it and centre the
+     glyph low. The tile is the whole revealed row, wide enough to tap. */
+  min-block-size: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--swipe-tone);
+  background: color-mix(in srgb, var(--swipe-tone) 16%, color-mix(in srgb, var(--material-glass) var(--material-glass-readable-control-fill), transparent));
   border: 0;
-  font-size: var(--font-meta);
-  font-weight: 600;
+  overflow: hidden;
+}
+.mobile-nav-swipe-action.is-pin { --swipe-tone: var(--accent); }
+.mobile-nav-swipe-action.is-archive { --swipe-tone: var(--green); }
+.mobile-nav-swipe-action.is-mute { --swipe-tone: var(--amber); }
+.mobile-nav-swipe-action.is-delete { --swipe-tone: var(--red); }
+
+/* The glyphs scale and fade in with the reveal, so a half-open tray never
+   shows full-size icons crowding a narrow strip. */
+.mobile-nav-swipe-action > .ui-icon {
+  flex: none;
+  opacity: var(--swipe-progress, 0);
+  transform: scale(calc(0.55 + 0.45 * var(--swipe-progress, 0)));
+}
+
+/* Past the commit threshold the side's first action takes the whole revealed
+   area (the others fold away) and deepens: releasing now runs it. */
+.mobile-nav-swipe-tray.is-committing > .mobile-nav-swipe-action {
+  transition: flex-grow var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease);
+}
+.mobile-nav-swipe-tray.is-committing > .mobile-nav-swipe-action:not(.is-first) {
+  flex-grow: 0;
+}
+.mobile-nav-swipe-tray.is-committing > .mobile-nav-swipe-action.is-first {
+  background: color-mix(in srgb, var(--swipe-tone) 30%, color-mix(in srgb, var(--material-glass) var(--material-glass-readable-control-fill), transparent));
+}
+.mobile-nav-swipe-tray.is-committing > .mobile-nav-swipe-action.is-first > .ui-icon {
+  transform: scale(1.2);
+  transition: transform var(--motion-fast) var(--motion-ease);
 }
 
 .mobile-nav-session-row {
@@ -1413,7 +1451,8 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
   min-height: var(--nav-row-session);
   border-radius: var(--radius-control);
   background: transparent;
-  transition: transform 150ms cubic-bezier(.2,.75,.2,1);
+  /* Velocity-aware: the row sets --swipe-settle from the release speed. */
+  transition: transform var(--swipe-settle, 220ms) cubic-bezier(.2,.75,.2,1);
   /* The fill (current, selected, failed) is painted by ::before so it can
      start --nav-row-inset before the status mark, or, when the status slot
      shows nothing (data-lead="empty", from sessionLeadMark), the same inset
@@ -1447,6 +1486,21 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
 
 .mobile-nav-session-swipe:is(.is-swiped, .is-dragging) > .mobile-nav-session-row {
   will-change: transform;
+}
+
+/* Reduced motion and low-resource mode: the row still follows the finger and
+   lands where it is going, with nothing animated in between. */
+@media (prefers-reduced-motion: reduce) {
+  .mobile-nav-session-swipe > .mobile-nav-session-row,
+  .mobile-nav-swipe-tray.is-committing > .mobile-nav-swipe-action,
+  .mobile-nav-swipe-tray.is-committing > .mobile-nav-swipe-action > .ui-icon {
+    transition: none;
+  }
+}
+body[data-desktop-low-resource="true"] .mobile-nav-session-swipe > .mobile-nav-session-row,
+body[data-desktop-low-resource="true"] .mobile-nav-swipe-tray.is-committing > .mobile-nav-swipe-action,
+body[data-desktop-low-resource="true"] .mobile-nav-swipe-tray.is-committing > .mobile-nav-swipe-action > .ui-icon {
+  transition: none;
 }
 
 .mobile-nav-session-row.is-active {

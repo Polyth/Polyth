@@ -279,13 +279,19 @@ test("a released swipe finishes both layers together, from the finger, in the re
       const pkg = document.getElementById("pkg")!;
       pkg.style.setProperty("--stack-from", "200px");
       pkg.style.setProperty("--stack-out-settle", "150ms");
+      pkg.style.setProperty("--stack-swipe-ease", "cubic-bezier(0.32, 0.2, 0.144, 1)");
       const ws = document.getElementById("ws")!;
       ws.style.setProperty("--stack-uncover-from", `calc(var(--stack-dir, 1) * var(--stack-parallax, 28%) * -${remaining})`);
       ws.style.setProperty("--stack-dim-from", String(remaining));
       ws.style.setProperty("--stack-uncover-settle", "150ms");
+      ws.style.setProperty("--stack-swipe-ease", "cubic-bezier(0.32, 0.2, 0.144, 1)");
     }, (1 - progress).toFixed(4));
     assert.deepEqual(await durations(), ["pkg:stack-out:150", "wsPanel:stack-dim-out:150", "wsPanel:stack-uncover:150"],
       `${dir}: the pair shares one shortened duration`);
+    // …and one curve, bent to the finger's speed at the release.
+    assert.deepEqual(await page.evaluate(() => ["#pkg", "#wsPanel"].map((selector) =>
+      getComputedStyle(document.querySelector(selector)!).animationTimingFunction)),
+      ["cubic-bezier(0.32, 0.2, 0.144, 1)", "cubic-bezier(0.32, 0.2, 0.144, 1)"], `${dir}: the pair shares the release's curve`);
     await freeze("#pkg", "stack-out", 0);
     const start = await rectOf("#pkg");
     assert.ok(Math.abs(Math.abs(start.left) - 200) < 0.5, `${dir}: the exit starts where the finger let go (${start.left})`);
@@ -297,21 +303,31 @@ test("a released swipe finishes both layers together, from the finger, in the re
       else assert.ok(workspace.left <= pkg.right + 0.5, `${dir} @${fraction}: no gap`);
     }
 
-    // PhoneShellSwipes.tsx released a Workspace pulled in from Chat 120px short of home.
+    // PhoneShellSwipes.tsx released a Workspace pulled in from Chat 120px short
+    // of home: the swipe controller's own animation brings it in (a script
+    // animation, started before the state changed), so the open state must not
+    // play `stack-in` underneath it, nor when that animation lets go.
     await load(fixture({ withPackage: false, workspaceStack: "enter" }), dir);
-    await page.evaluate(() => {
+    const sign = dir === "ltr" ? 1 : -1;
+    await page.evaluate((offset) => {
       const panel = document.getElementById("wsPanel")!;
-      panel.setAttribute("data-swipe-handoff", "enter");
-      panel.style.setProperty("--stack-enter-from", "120px");
-      panel.style.setProperty("--stack-in-settle", "180ms");
-    });
-    assert.deepEqual(await durations(), ["wsPanel:stack-swipe-in:180"], `${dir}: the arrival carries on from the finger`);
-    await freeze("#wsPanel", "stack-swipe-in", 0);
+      panel.setAttribute("data-swipe-handoff", "rest");
+      const settle = panel.animate(
+        [{ transform: `translate3d(${offset}px, 0, 0)` }, { transform: "translate3d(0px, 0, 0)" }],
+        { duration: 180, easing: "linear", fill: "forwards" },
+      );
+      settle.pause();
+      settle.currentTime = 0;
+      (window as unknown as { settle: Animation }).settle = settle;
+    }, 120 * sign);
+    assert.deepEqual(await durations(), ["wsPanel:undefined:180"], `${dir}: only the settle moves the layer, no stack-in`);
     const from = await rectOf("#wsPanel");
-    assert.ok(Math.abs(Math.abs(from.left) - 120) < 0.5, `${dir}: it starts 120px out (${from.left})`);
-    assert.equal(Math.sign(from.left), dir === "ltr" ? 1 : -1, `${dir}: on the inline-end side`);
-    await freeze("#wsPanel", "stack-swipe-in", 1);
-    assert.ok(Math.abs((await rectOf("#wsPanel")).left) < 0.5, `${dir}: and lands home`);
+    assert.ok(Math.abs(from.left - 120 * sign) < 0.5, `${dir}: it carries on from the finger, 120px out (${from.left})`);
+    await page.evaluate(() => { (window as unknown as { settle: Animation }).settle.currentTime = 90; });
+    assert.ok(Math.abs((await rectOf("#wsPanel")).left - 60 * sign) < 0.5, `${dir}: halfway`);
+    await page.evaluate(() => { (window as unknown as { settle: Animation }).settle.cancel(); });
+    assert.deepEqual(await durations(), [], `${dir}: letting go starts nothing`);
+    assert.ok(Math.abs((await rectOf("#wsPanel")).left) < 0.5, `${dir}: and the layer rests home`);
   }
   // A tap keeps the grammar's own duration.
   await load(fixture({ withPackage: false, workspaceStack: "enter" }));

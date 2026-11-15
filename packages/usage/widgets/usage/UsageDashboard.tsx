@@ -5,11 +5,14 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
   type PointerEvent,
   type ReactNode,
 } from "react";
+import { flushSync } from "react-dom";
 import type { SurfaceComponentProps } from "@polyth/web-sdk";
+import { useShellMode } from "../../../../apps/web/src/responsiveShell.ts";
 import { tr } from "../../../../apps/web/src/i18n/index.ts";
 import { subscribeSessionEvents, useStore } from "../../../../apps/web/src/store.ts";
 import {
@@ -22,12 +25,15 @@ import {
   Icon,
   IconButton,
   LayersIcon,
+  MinusIcon,
+  PlusIcon,
   RefreshIcon,
   Select,
   Switch,
   Tabs,
   UndoIcon,
 } from "../../../../apps/web/src/components/ui/index.ts";
+import { useArrange } from "../../../../apps/web/src/workspaceArrange.ts";
 import { useUsageStats } from "./usageStatsClient.ts";
 import { LimitsView } from "./LimitsView.tsx";
 import {
@@ -151,6 +157,8 @@ function ReportBlocks({
   metric,
   session,
   onArrange,
+  editing,
+  onEditing,
 }: {
   scope: UsageLayoutScope;
   report: UsageStatsReport;
@@ -159,6 +167,10 @@ function ReportBlocks({
   metric: UsageChartMetric;
   session: Parameters<typeof SessionOverview>[0]["session"];
   onArrange: () => void;
+  /** Phone Home Screen editing: blocks sway, − hides, a drag reorders. */
+  editing: boolean;
+  /** Set on a phone: holding a block turns editing on and lifts it. */
+  onEditing?: (editing: boolean) => void;
 }) {
   const setMetric = useCallback((next: UsageChartMetric) => updateUsageDashboardPrefs({ metric: next }), []);
   const render = (id: UsageBlockId): ReactNode => {
@@ -178,12 +190,94 @@ function ReportBlocks({
       case "sessions": return <SessionsBlock report={report} />;
     }
   };
-  const blocks = visibleUsageBlocks(layout);
+  // Blocks with nothing to draw for this report keep their slot but are not
+  // drawn, so they are not arrangeable either.
+  const drawn = visibleUsageBlocks(layout)
+    .map((id) => ({ id, content: render(id) }))
+    .filter((entry) => entry.content !== null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const editingRef = useRef(editing);
+  editingRef.current = editing;
+  const arrange = useArrange({
+    items: drawn.map(({ id }) => ({ id, shape: "row" as const })),
+    enabled: editing,
+    scroller: () => listRef.current?.closest<HTMLElement>(".usage-clean") ?? null,
+    ghostHost: () => listRef.current,
+    // As the phone Workspace: holding a block turns editing on and the same
+    // press carries on as a drag.
+    ...(onEditing ? {
+      activate: () => {
+        if (editingRef.current) return false;
+        editingRef.current = true;
+        flushSync(() => onEditing(true));
+        return true;
+      },
+    } : {}),
+    onCommit: (next) => {
+      // Hidden and undrawn blocks keep their slots; the drawn ones take the new order.
+      const moved = new Set<string>(next);
+      let cursor = 0;
+      updateUsageLayout(scope, { ...layout, order: layout.order.map((id) => moved.has(id) ? next[cursor++] as UsageBlockId : id) });
+    },
+  });
+  const listElement = useCallback((element: HTMLDivElement | null) => {
+    listRef.current = element;
+    arrange.engine.listRef(element);
+  }, [arrange.engine]);
+  const byId = new Map(drawn.map((entry) => [entry.id, entry.content]));
+  const shown: UsageBlockId[] = arrange.draggingId
+    ? arrange.order.filter((id): id is UsageBlockId => byId.has(id as UsageBlockId))
+    : drawn.map(({ id }) => id);
+  const setHidden = (id: UsageBlockId, hidden: boolean) => {
+    arrange.engine.animateNextLayout();
+    updateUsageLayout(scope, {
+      ...layout,
+      hidden: hidden ? [...new Set([...layout.hidden, id])] : layout.hidden.filter((candidate) => candidate !== id),
+    });
+  };
   return (
-    <div className="usage-clean-stack">
+    <div
+      ref={listElement}
+      className="usage-clean-stack"
+      data-arrange-editing={editing || undefined}
+      data-arranging={arrange.draggingId ? "" : undefined}
+    >
       <CoverageNote report={report} />
-      {blocks.map((id) => <div key={id} className="usage-clean-block" data-block={id}>{render(id)}</div>)}
-      {blocks.length === 0 ? (
+      {shown.map((id, index) => (
+        <div
+          key={id}
+          className={`usage-clean-block${arrange.draggingId === id ? " is-arrange-held" : ""}`}
+          data-block={id}
+          style={{ "--jiggle-phase": index % 7 } as CSSProperties}
+          {...(editing || onEditing ? arrange.engine.itemProps(id) : {})}
+          {...(editing ? { tabIndex: 0, "aria-label": blockTitle(id), onKeyDown: (event: KeyboardEvent<HTMLElement>) => arrange.engine.onArrangeKey(id, event) } : {})}
+        >
+          <div className="usage-clean-block-body" inert={editing || undefined}>{byId.get(id)}</div>
+          {editing && (
+            <button
+              type="button"
+              className="arrange-badge"
+              data-arrange-control=""
+              aria-label={tr("usage.hideBlock", { block: blockTitle(id) })}
+              onClick={() => setHidden(id, true)}
+            >
+              <Icon icon={MinusIcon} size="sm" />
+            </button>
+          )}
+        </div>
+      ))}
+      {editing && layout.hidden.length > 0 && (
+        <section className="usage-clean-hidden" aria-label={tr("usage.hiddenBlocks")}>
+          <h3>{tr("usage.hiddenBlocks")}</h3>
+          {layout.hidden.map((id) => (
+            <button key={id} type="button" className="usage-clean-hidden-row" onClick={() => setHidden(id, false)} aria-label={tr("usage.showBlock", { block: blockTitle(id) })}>
+              <span className="arrange-badge arrange-badge--add" aria-hidden="true"><Icon icon={PlusIcon} size="sm" /></span>
+              <span><strong>{blockTitle(id)}</strong><small>{blockDescription(id, scope)}</small></span>
+            </button>
+          ))}
+        </section>
+      )}
+      {drawn.length === 0 && !editing ? (
         <EmptyState
           variant="panel"
           title={tr("usage.allBlocksHidden")}
@@ -196,12 +290,6 @@ function ReportBlocks({
   );
 }
 
-/**
- * Reorder and show/hide the blocks of one scope. Rows are compact so the whole
- * layout fits on screen: drag the handle (pointer or touch), use the arrow
- * buttons, or focus the handle and press ↑/↓. Moves apply instantly and are
- * announced; there is no reorder animation.
- */
 function ArrangePanel({ scope, layout, onDone }: { scope: UsageLayoutScope; layout: UsageBlockLayout; onDone: () => void }) {
   const listRef = useRef<HTMLOListElement>(null);
   const [preview, setPreview] = useState<UsageBlockId[] | null>(null);
@@ -350,6 +438,9 @@ export function UsageDashboard({ active = true, projectId: shellProjectId, sessi
   const setView = useCallback((next: UsageView) => updateUsageDashboardPrefs({ view: next }), []);
   const [projectId, setProjectId] = useState<string | null>(activeProjectId);
   const [arranging, setArranging] = useState(false);
+  // Phone: Home Screen editing in place of the arrange panel.
+  const phone = useShellMode() === "phone";
+  const [editing, setEditing] = useState(false);
   const timezone = useMemo(() => viewerTimezone(), []);
   const range = prefs.range;
 
@@ -370,8 +461,15 @@ export function UsageDashboard({ active = true, projectId: shellProjectId, sessi
   }, [activeProjectId, projectId, projects]);
 
   useEffect(() => {
+    if (view === "limits" || !phone) setEditing(false);
     if (view === "limits") setArranging(false);
-  }, [view]);
+  }, [view, phone]);
+  useEffect(() => {
+    if (!editing) return;
+    const onKey = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") setEditing(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [editing]);
 
   const enabled = view !== "limits" && (
     view === "global" || (view === "session" ? !!activeSessionId : !!projectId)
@@ -475,12 +573,16 @@ export function UsageDashboard({ active = true, projectId: shellProjectId, sessi
                   : ""}
             </span>
             <span className="usage-clean-toolbar-actions">
-              <IconButton
-                icon={LayersIcon}
-                label={hiddenCount > 0 ? `${tr("usage.customizeLayout")} · ${tr("usage.layoutHiddenCount", { count: hiddenCount })}` : tr("usage.customizeLayout")}
-                pressed={arranging}
-                onClick={() => setArranging((value) => !value)}
-              />
+              {phone && editing ? (
+                <Button size="sm" variant="primary" className="usage-clean-done" onClick={() => setEditing(false)}>{tr("usage.done")}</Button>
+              ) : (
+                <IconButton
+                  icon={LayersIcon}
+                  label={hiddenCount > 0 ? `${tr("usage.customizeLayout")} · ${tr("usage.layoutHiddenCount", { count: hiddenCount })}` : tr("usage.customizeLayout")}
+                  pressed={arranging}
+                  onClick={() => phone ? setEditing(true) : setArranging((value) => !value)}
+                />
+              )}
               <IconButton
                 icon={RefreshIcon}
                 label={tr("usage.refresh")}
@@ -550,7 +652,9 @@ export function UsageDashboard({ active = true, projectId: shellProjectId, sessi
             range={range}
             metric={prefs.metric}
             session={activeSession}
-            onArrange={() => setArranging(true)}
+            onArrange={() => phone ? setEditing(true) : setArranging(true)}
+            editing={phone && editing}
+            {...(phone ? { onEditing: setEditing } : {})}
           />
         </div>
       ) : (

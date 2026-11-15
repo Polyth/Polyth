@@ -57,6 +57,7 @@ export const zhCN: TerminalMessages = {
   "terminalview.processExited": "进程退出",
   "terminalview.processExitedCodeValue": "进程已退出（代码 {code}）",
   "terminalview.reconnecting": "重连中",
+  "terminalview.renameValue": "重命名 {title}",
   "terminalview.repository": "仓库",
   "terminalview.repositoryMissing": "{path} · 缺失",
   "terminalview.resetTerminal": "重置终端",

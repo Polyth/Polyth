@@ -73,7 +73,7 @@ const statusFor: Readonly<Record<string, number>> = {
   unauthorized: 401, 'invalid-credentials': 401, 'invalid-claim': 401,
   forbidden: 403, 'wrong-origin': 403, 'insecure-transport': 403, 'reauth-required': 403, 'managed-identity': 403,
   'not-found': 404, expired: 410,
-  conflict: 409, 'last-owner': 409, 'last-auth-method': 409, 'invalid-transition': 409, 'setup-completed': 409,
+  conflict: 409, 'login-taken': 409, 'last-owner': 409, 'last-auth-method': 409, 'invalid-transition': 409, 'setup-completed': 409,
   replayed: 409, cancelled: 409, 'uncertain-exchange': 409, 'provider-scope-escalation': 409,
   'private-network-approval-required': 409, 'owner-credential-required': 409,
   'owner-confirmation-required': 403,
@@ -88,6 +88,7 @@ const accountLimitsPath = /^\/api\/auth\/accounts\/([A-Za-z0-9][A-Za-z0-9_-]{0,1
 const accountPermissionsPath = /^\/api\/auth\/accounts\/([A-Za-z0-9][A-Za-z0-9_-]{0,199})\/permissions$/;
 const accountProfilePath = /^\/api\/auth\/accounts\/([A-Za-z0-9][A-Za-z0-9_-]{0,199})\/profile$/;
 const accountPasswordPath = /^\/api\/auth\/accounts\/([A-Za-z0-9][A-Za-z0-9_-]{0,199})\/password$/;
+const accountLoginPath = /^\/api\/auth\/accounts\/([A-Za-z0-9][A-Za-z0-9_-]{0,199})\/login$/;
 const providerEnabledPath = /^\/api\/auth\/providers\/([a-z0-9][a-z0-9_-]{0,63})\/enabled$/;
 const linkPath = /^\/api\/auth\/links\/(lid_[a-f0-9-]{36})$/;
 const cliTokenPath = /^\/api\/auth\/cli\/tokens\/(tok_[a-f0-9-]{36})$/;
@@ -432,6 +433,8 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
             await identity.credentials.changePassword(token!, text(body, 'password')); res.setHeader('Set-Cookie', cookie(cookieName, '', 0)); send(200, { ok: true });
           } else if (req.method === 'POST' && path === '/api/auth/me') {
             send(200, identity.accounts.renameSelf(token!, text(body, 'name'), Number(body.expectedRevision)));
+          } else if (req.method === 'POST' && path === '/api/auth/me/login') {
+            send(200, identity.accounts.changeLogin(token!, text(body, 'login'), Number(body.expectedRevision)));
           } else if (req.method === 'POST' && path === '/api/auth/accounts') {
             const account = await identity.accounts.createLocal(token!, {
               login: text(body, 'login'), name: text(body, 'name'), password: text(body, 'password'),
@@ -478,6 +481,7 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
             const permissionsMatch = req.method === 'POST' ? accountPermissionsPath.exec(path) : null;
             const profileMatch = req.method === 'POST' ? accountProfilePath.exec(path) : null;
             const passwordMatch = req.method === 'POST' ? accountPasswordPath.exec(path) : null;
+            const loginMatch = req.method === 'POST' ? accountLoginPath.exec(path) : null;
             if (guardrailsMatch) {
               if (!Object.hasOwn(body, 'guardrails')) throw controlError('invalid-input', 'guardrails is required');
               send(200, identity.guardrails.set(token!, guardrailsMatch[1]!, body.guardrails, Number(body.expectedRevision)));
@@ -489,6 +493,9 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
               send(200, identity.permissions.set(token!, permissionsMatch[1]!, body.permissions, Number(body.expectedRevision)));
             } else if (profileMatch) {
               const account = identity.accounts.renameAccount(token!, profileMatch[1]!, text(body, 'name'), Number(body.expectedRevision));
+              send(200, { ...account, name: account.displayName, current: account.id === actor.userId });
+            } else if (loginMatch) {
+              const account = identity.accounts.changeAccountLogin(token!, loginMatch[1]!, text(body, 'login'), Number(body.expectedRevision));
               send(200, { ...account, name: account.displayName, current: account.id === actor.userId });
             } else if (passwordMatch) {
               const account = await identity.accounts.resetPassword(token!, passwordMatch[1]!, text(body, 'password'));

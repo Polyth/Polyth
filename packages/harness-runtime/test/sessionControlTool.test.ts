@@ -15,6 +15,7 @@ import type {
 } from "@polyth/contracts";
 import {
   createServerServiceRegistry,
+  SERVER_DELEGATION_POLICY,
   SERVER_MODEL_ROUTING,
   SERVER_SESSION_ISOLATION,
   SERVER_SESSION_WATCHES,
@@ -432,6 +433,49 @@ test("agent.models returns the usage-owned shortlist for the caller's Space, or 
 
   const fallback = await run(false);
   assert.match(fallback.result.output, /Usage package is disabled/);
+});
+
+test("agent.models leads with the person's routing policy and hides what it excludes; a failing policy leaves the plain shortlist", async () => {
+  const run = async (brief: (space: SpaceContext, options?: { harnessId?: string }) => Promise<{ text: string; exclude: string[] } | undefined>) => {
+    const registry = createCapabilityContributionRegistry();
+    const services = createServerServiceRegistry();
+    services.provide(serverServiceKey("harness.capabilities"), registry);
+    const calls: Array<{ kind: string; space: SpaceContext; options: unknown }> = [];
+    services.provide(SERVER_MODEL_ROUTING, {
+      async candidates(callerSpace, options) {
+        calls.push({ kind: "routing", space: callerSpace, options });
+        return { windowDays: 30, generatedAt: 1, candidates: [], quotas: [], omitted: 0, unlisted: 0, excluded: 1, text: "Delegation candidates" };
+      },
+    });
+    services.provide(SERVER_DELEGATION_POLICY, {
+      async brief(callerSpace, options) {
+        calls.push({ kind: "policy", space: callerSpace, options });
+        return brief(callerSpace, options);
+      },
+    });
+    const host = { services, forSpace: () => ({}) } as unknown as ServerPackageHost;
+    const registration = registerPolythSessionControl(host);
+    registry.resolve(context);
+    const execute = registry.executor("harness-runtime.polyth-control")!;
+    const result = await execute({ action: "agent.models", parameters: { harnessId: "claude" } }, toolContext);
+    await registration.dispose();
+    return { result, calls };
+  };
+
+  const ruled = await run(async () => ({ text: "Routing policy: explore → claude anthropic/sonnet", exclude: ["claude::anthropic/opus"] }));
+  assert.equal(ruled.result.output, "Routing policy: explore → claude anthropic/sonnet\n\nDelegation candidates");
+  assert.deepEqual(ruled.calls.map((call) => call.kind), ["policy", "routing"]);
+  assert.equal(ruled.calls[0]!.space.userId, "user-a", "the policy of the person the turn acts for");
+  assert.deepEqual(ruled.calls[0]!.options, { harnessId: "claude" });
+  assert.deepEqual(ruled.calls[1]!.options, { harnessId: "claude", exclude: ["claude::anthropic/opus"] });
+  assert.deepEqual(ruled.result.metadata, { action: "agent.models", candidates: 0, omitted: 0, unlisted: 0, policy: true, excluded: 1 });
+
+  const automatic = await run(async () => undefined);
+  assert.equal(automatic.result.output, "Delegation candidates");
+  assert.deepEqual(automatic.calls[1]!.options, { harnessId: "claude" });
+
+  const broken = await run(async () => { throw new Error("policy store unreadable"); });
+  assert.equal(broken.result.output, "Delegation candidates");
 });
 
 test("agent.spawn can isolate a child in its own worktree, and the delegator merges, resolves or discards it", async () => {
@@ -943,5 +987,58 @@ test("session.send queues behind a busy chat by default, or interrupts or steers
     session: { status: string; paused?: boolean };
   };
   assert.equal(got.session.paused, true, "the delegator sees the pause, not just an idle session");
+  await registration.dispose();
+});
+
+test("agent.spawn sends its prompt with the create when the server can start a chat", async () => {
+  const project: Project = { id: "p1", name: "Current", path: "/projects/p1", spaceId: space.spaceId, createdAt: 1 };
+  const rows = new Map<string, SessionProjection>([["caller", projection("caller")]]);
+  const starts: Array<Record<string, unknown>> = [];
+  const calls: string[] = [];
+  let startStatus: SessionProjection["status"] = "reconciling";
+  const sessions = {
+    async snapshot(id: string) {
+      const row = rows.get(id);
+      if (!row) throw Object.assign(new Error("not found"), { code: "not-found" });
+      return row;
+    },
+    async create() { calls.push("create"); return { id: "never" }; },
+    async send() { calls.push("send"); return { turnId: "never" }; },
+    async start(input: CreateSessionInput & { start: unknown }) {
+      starts.push(input as unknown as Record<string, unknown>);
+      const id = `started-${starts.length}`;
+      rows.set(id, { ...projection(id, input.projectId, input.title ?? ""), status: startStatus, ...(input.parentId ? { parentId: input.parentId } : {}) });
+      return { id, queueId: `q-${starts.length}` };
+    },
+  } as unknown as SessionService;
+  const registry = createCapabilityContributionRegistry();
+  const services = createServerServiceRegistry();
+  services.provide(serverServiceKey("harness.capabilities"), registry);
+  const host = {
+    services,
+    forSpace: () => ({
+      projects: { async list() { return [project]; }, async get() { return project; } } as unknown as ProjectService,
+      sessions,
+    }),
+  } as unknown as ServerPackageHost;
+  const registration = registerPolythSessionControl(host);
+  registry.resolve(context);
+  const execute = registry.executor("harness-runtime.polyth-control")!;
+  const spawn = async () => JSON.parse((await execute({
+    action: "agent.spawn",
+    parameters: { title: "Worker", prompt: "do the work" },
+  }, toolContext)).output) as { session: { id: string; status: string }; sendResult?: { queueId?: string }; startFailed?: string };
+
+  const spawned = await spawn();
+  assert.equal(spawned.session.id, "started-1");
+  assert.deepEqual(spawned.sendResult, { queueId: "q-1" });
+  assert.equal(spawned.startFailed, undefined);
+  assert.deepEqual(calls, [], "one start replaces the create and the send");
+  assert.equal(starts[0]!.parentId, "caller");
+  assert.deepEqual(starts[0]!.start, { firstTurn: { text: "do the work" } });
+
+  // A start that already failed is said plainly: no watch will report it.
+  startStatus = "failed";
+  assert.match((await spawn()).startFailed ?? "", /could not start/);
   await registration.dispose();
 });

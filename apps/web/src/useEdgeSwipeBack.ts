@@ -2,6 +2,7 @@
 // listeners attach only while the layer can actually be popped; the callbacks
 // always read the newest closures, so a re-render never re-attaches them.
 import { useEffect, useRef } from "react";
+import { flushSync } from "react-dom";
 import { attachEdgeSwipeBack } from "./edgeSwipeBack.ts";
 import type { SwipeZone } from "./mobileGestures.ts";
 
@@ -12,8 +13,10 @@ export interface UseEdgeSwipeBackOptions {
   layer(): HTMLElement | null;
   /** The layer revealed beneath it, when there is one to peek at. */
   under?(): HTMLElement | null;
-  /** The element that plays `under`'s settle-back (default: its first child). */
-  underMotion?(): HTMLElement | null;
+  /** The element(s) of `under` that move with the peek and the settle-back (default: its first child). */
+  underMotion?(): HTMLElement | readonly HTMLElement[] | null;
+  /** The element that dims `under` (default: the `::after` veil of the first moving element). */
+  underDim?(): HTMLElement | null;
   /** Checked per touch on top of `enabled` (e.g. nothing modal open over the layer). */
   canStart?(): boolean;
   /** Where a swipe may start (read per touch): the edge (default) or anywhere on the layer. */
@@ -31,9 +34,13 @@ export function useEdgeSwipeBack(options: UseEdgeSwipeBackOptions): void {
       layer: () => latest.current.layer(),
       under: () => latest.current.under?.() ?? null,
       underMotion: () => latest.current.underMotion?.() ?? null,
+      underDim: () => latest.current.underDim?.() ?? null,
       enabled: () => latest.current.enabled && (latest.current.canStart?.() ?? true),
       zone: () => latest.current.zone ?? "edge",
-      onBack: () => latest.current.onBack(),
+      // The Back arrives a frame after the release, outside any event: commit
+      // it in that task, so the exit state and the spring that is already
+      // running never show a frame apart.
+      onBack: () => flushSync(() => latest.current.onBack()),
     });
   }, [options.enabled]);
 }

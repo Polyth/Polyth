@@ -119,6 +119,50 @@ that look like problems.
 
 There is no external alert delivery or Prometheus integration.
 
+## The widget
+
+`monitoring.machine` is one canvas and phone-panel widget (`defaultVisible: false`,
+duplicatable) whose look is a per-instance choice. Its rules live without a DOM in
+`widgets/widgetModel.ts`; the views are `MonitoringWidget.tsx` (data, size, states),
+`widgetLooks.tsx` and `WidgetSettings.tsx`.
+
+- **Looks.** Summary (verdict sentence; at the large size a chart of the subject),
+  Scales (270° dials with the limit tick), Charts (sparkline rows with a shared
+  cursor and a range switch) and Rhythm (seven days × 24 hours of load or memory with
+  one sentence about the pattern). Choosing **All machines** as the machine shows every
+  readable machine instead: one snapshot each, at most 12, the ones that need a look
+  first.
+- **Config.** `{look, machine, metrics, range, forecast, quiet, rhythmMetric}`,
+  always read through `widgetConfigOf`. `machine` is `current` (the project the widget
+  sits in), `all`, or a `machineId`; a chosen machine that is gone is said plainly
+  rather than replaced. An empty `metrics` means problems first (`vitalsOf` order);
+  otherwise exactly the picked vitals, in that order. Limits are not per widget: they
+  are the project's policy, shared with the window.
+- **Tone.** `warn` while anything is over its limit (amber, one primary action: ask an
+  agent, or open its existing incident chat); `watch` when the fullest disk will reach
+  its limit within 7 days (words only, no amber); `ok`; `lost` when the host cannot be
+  read. Quiet mode hides everything but the dot and the name, and only while the tone is
+  `ok`.
+- **Forecast.** A least-squares line through the last 7 days of the fullest disk's
+  readings (at least 12 readings over 12 hours). It is shown only for growth of at
+  least 0.05 points a day and no further out than 30 days. Under the limit it says when
+  the disk reaches the limit; over it, when the disk fills. Charts draw it in its own
+  zone after a break, never as a continuation of the line.
+- **Scales on small charts.** Load grows to fit and always shows its limit. A
+  percentage starts at zero, or, where the row has room to label it, at a round floor
+  below the readings and the limit. Only load is filled under its limit; a
+  percentage near full would paint a slab. A chart with fewer than 3 readings says so
+  instead of drawing an empty frame.
+- **History is per machine, not per disk.** It keeps the fullest disk's percent, so
+  only that disk gets a line or a forecast; every other disk shows its current fill
+  against its limit.
+- **Phone panel.** The Workspace panel gives a widget its content height, so with
+  `context.panelSize` the root is marked `data-panel` and each part brings its own
+  height; compact Charts keep the single worst row and compact Rhythm only the grid.
+- **Polling.** A snapshot every 15 seconds locally and 30 over SSH, history every 5
+  minutes, and only the history the current look and size draw. One `/hosts` request is
+  shared by every instance for a minute.
+
 ## Agent rules and permissions
 
 The System administration profile gives sessions the `sysadmin` purpose and
@@ -193,5 +237,8 @@ Run the package's behavior and security tests with Node type stripping:
 `node --experimental-strip-types --test packages/monitoring/test/*.test.ts`.
 Use the repository's bounded-check wrapper on shared Linux hosts. Package entry
 changes also require server discovery, plugin lifecycle, web containment and
-`npm run build:web`. Inspect the Monitoring surface in an isolated agent-beta
-instance; a simulated SSH transport is not live remote-host evidence.
+`npm run build:web`. Inspect the Monitoring surface and the widget in an isolated
+agent-beta instance; a simulated SSH transport is not live remote-host evidence.
+`test/widgetModel.test.ts` covers the widget's config, machine choice, forecast, tone,
+rhythm and fleet order; run it once more under another `TZ`, because the rhythm groups
+readings by local day and hour.

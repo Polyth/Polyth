@@ -12,7 +12,7 @@ import { formatNumber, tr } from "../i18n/index.ts";
 import { Icon } from "../icons.tsx";
 import { motionIsReduced } from "../motionPresence.ts";
 import AttachmentPreview from "./AttachmentPreview.tsx";
-import { UndoIcon } from "./ui/icons.ts";
+import { HistoryIcon } from "./ui/icons.ts";
 
 const KIND_ICONS: Record<string, () => ReactElement> = {
   file: Icon.file,
@@ -251,7 +251,10 @@ export default function AttachmentPills({ attachments, onRemove, removed, onRest
                     onRestore?.(a.id);
                   }}
                 >
-                  <span className="att-icon" aria-hidden><UndoIcon /></span>
+                  {/* The slot puts back what was just removed, so it wears a
+                      rewind in time (rotate-ccw-clock): undo is the editor's and
+                      the message revert's action. */}
+                  <span className="att-icon" aria-hidden><HistoryIcon /></span>
                   {!imagePreview && (
                     <span className="att-text">
                       <span className="att-name">{tr("attachmentpills.restore")}</span>

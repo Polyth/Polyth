@@ -72,6 +72,8 @@ export const zhCN: UsageMessages = {
   "usage.showAll": "显示全部 {count} 项",
   "usage.showLess": "显示更少",
   "usage.showBlock": "显示 {block}",
+  "usage.hideBlock": "隐藏{block}",
+  "usage.hiddenBlocks": "已隐藏",
   "usage.tokenMix": "Token 构成",
   "usage.tokenMixDescription": "已记录 Token 在新输入、缓存和输出之间的分布。",
   "usage.trendVsPrevious": "与前 {period} 相比 {value}",

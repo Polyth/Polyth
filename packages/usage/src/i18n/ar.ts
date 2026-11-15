@@ -72,6 +72,8 @@ export const ar: UsageMessages = {
   "usage.showAll": "عرض الكل ({count})",
   "usage.showLess": "عرض أقل",
   "usage.showBlock": "إظهار {block}",
+  "usage.hideBlock": "إخفاء {block}",
+  "usage.hiddenBlocks": "مخفية",
   "usage.tokenMix": "مزيج الرموز",
   "usage.tokenMixDescription": "كيف تتوزع الرموز المسجلة بين الإدخال الجديد والذاكرة المؤقتة والإخراج.",
   "usage.trendVsPrevious": "{value} مقارنة بـ{period} السابقة",

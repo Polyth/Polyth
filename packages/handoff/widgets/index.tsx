@@ -1,13 +1,13 @@
 import "./styles.css";
 import { createElement, useRef, useState } from "react";
-import { defineWebPackage, type MessageActionSlotMeta } from "@polyth/web-sdk";
+import { defineWebPackage, createApiTransport, type MessageActionSlotMeta } from "@polyth/web-sdk";
 import type { HandoffResultImportedData } from "@polyth/contracts";
 import {
   getPairedProvenance,
   noteImportPending,
   pairUserMessage,
 } from "../src/provenancePairing.ts";
-import { flushNewSessionHandoffImport } from "../src/newSessionProvenance.ts";
+import { flushNewSessionHandoffImport, takeNewSessionHandoffPending } from "../src/newSessionProvenance.ts";
 import { HandoffIcon, Popover } from "../../../apps/web/src/components/ui/index.ts";
 
 function ProvenanceChip(props: {
@@ -81,14 +81,27 @@ export default defineWebPackage((host) => () => {
         } satisfies MessageActionSlotMeta,
       },
     }),
-    // A handoff imported into a brand-new session persists its provenance once
-    // that session exists, before the first message is delivered.
-    ...(host.composer?.registerSessionCreatedHook
-      ? [host.composer.registerSessionCreatedHook({
-          id: "handoff.new-session-import",
-          run: ({ projectId, sessionId, text }) => flushNewSessionHandoffImport(projectId, sessionId, text),
+    // A handoff imported into a brand-new session travels with the start
+    // request; only an older server needs the post-creation flush.
+    ...(host.composer?.registerSessionStartExtension
+      ? [host.composer.registerSessionStartExtension({
+          id: "handoff.import",
+          collect: ({ projectId, text }) => {
+            const pending = takeNewSessionHandoffPending(projectId, text);
+            return pending ? { provenance: pending.provenance, textHash: pending.textHash } : undefined;
+          },
+          legacy: async (context, payload) => {
+            await createApiTransport().post("/api/handoff/imports", { sessionId: context.sessionId, ...payload });
+          },
         })]
-      : []),
+      : host.composer?.registerSessionCreatedHook
+        // ponytail: fallback for hosts without registerSessionStartExtension;
+        // removed once no supported host lacks it.
+        ? [host.composer.registerSessionCreatedHook({
+            id: "handoff.new-session-import",
+            run: ({ projectId, sessionId, text }) => flushNewSessionHandoffImport(projectId, sessionId, text),
+          })]
+        : []),
   ];
   return () => off.toReversed().forEach((dispose) => dispose());
 });

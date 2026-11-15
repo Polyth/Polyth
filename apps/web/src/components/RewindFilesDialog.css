@@ -1,0 +1,128 @@
+/* Rollback with files: one decision over a text-only preview. Groups are told
+   apart by a fill, never a border — "Hide interface borders" is on by
+   default and clears every border colour. */
+.rewind-files-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.rewind-files-subtitle,
+.rewind-files-footnote {
+  margin: 0;
+  color: var(--muted);
+  font: var(--font-meta);
+}
+.rewind-files-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.rewind-files-group-label {
+  margin: 0;
+  color: var(--muted);
+  font: var(--font-label);
+}
+.rewind-files-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay-strong);
+  overflow: hidden;
+}
+.rewind-files-list[hidden] { display: none; }
+.rewind-files-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+}
+.rewind-files-row + .rewind-files-row {
+  box-shadow: inset 0 1px 0 var(--surface-overlay-strong);
+}
+.rewind-files-path {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.rewind-files-name {
+  flex: none;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+  font-weight: 600;
+}
+.rewind-files-dir {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font: var(--font-meta);
+}
+.rewind-files-state {
+  display: inline-flex;
+  flex: none;
+  align-items: baseline;
+  gap: var(--space-2);
+  color: var(--muted);
+  font: var(--font-meta);
+  white-space: nowrap;
+}
+.rewind-files-lines {
+  display: inline-flex;
+  gap: var(--space-1);
+  font-variant-numeric: tabular-nums;
+}
+.rewind-files-added { color: var(--green-on-wash); }
+.rewind-files-removed { color: var(--red-on-wash, var(--red)); }
+.rewind-files-disclosure {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  align-self: flex-start;
+  min-height: max(var(--hit-min), 32px);
+  margin: 0 calc(-1 * var(--space-1));
+  padding: 0 var(--space-1);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .rewind-files-disclosure:hover { background: var(--surface-overlay-hover); }
+}
+.rewind-files-disclosure:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.rewind-files-chevron { transition: transform var(--motion-fast, 120ms) ease; }
+.rewind-files-group[data-open] .rewind-files-chevron { transform: rotate(90deg); }
+.rewind-files-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+@media (prefers-reduced-motion: reduce) {
+  .rewind-files-chevron { transition: none; }
+}
+/* Phone sheet: the two buttons stack full width, the decision first. */
+.sheet-foot .rewind-files-actions {
+  flex-direction: column-reverse;
+}
+.sheet-foot .rewind-files-actions .ui-btn {
+  width: 100%;
+  min-height: 48px;
+}

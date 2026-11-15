@@ -79,6 +79,16 @@ test("navigation excludes active and replaced rewinds, includes attachment-only 
   assert.equal(parseSessionPrompt({ id: "bad", seq: 1, data: "bad JSON" }), null);
 });
 
+test("an agent's composed wake is navigated and recalled by the words the chat shows", () => {
+  const wake = JSON.stringify({ text: "Charter…\n---\nYou were woken by your schedule.", displayText: "" });
+  const reply = JSON.stringify({ text: "Charter…\n---\nInput from the user:\nhow is it going?", displayText: "how is it going?" });
+  assert.equal(parseSessionPrompt({ id: "w", seq: 1, data: wake }), null);
+  assert.equal(parseSessionPrompt({ id: "r", seq: 2, data: reply })?.preview, "how is it going?");
+  const row = { sessionId: "s", projectId: null, worktreePath: null, id: "r", seq: 2, time: 1, type: "user/message" };
+  assert.equal(parsePromptHistoryCandidate({ ...row, data: wake }), null);
+  assert.equal(parsePromptHistoryCandidate({ ...row, data: reply })?.text, "how is it going?");
+});
+
 test("prompt history is a scoped view over composer submissions with stable newest-last order", async () => {
   const store = tmpStore();
   await store.upsertProjection(proj({ id: "sA", projectId: "pA", spaceId: "space-1" }));

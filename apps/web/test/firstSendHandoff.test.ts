@@ -91,6 +91,10 @@ test("a replaced dock is a status handover, not a fresh entrance", async () => {
   assert.match(surface, /if \(sessionSpawn === null\) liveDockSeen\.current = false/);
   assert.match(surface, /if \(working\) liveDockSeen\.current = true/);
   assert.match(surface, /!working && !liveDockSeen\.current && \(spawning \|\| awaitingTurn\)/);
+  // A chat the server says is starting keeps the startup dock after the
+  // client spawn record is gone (reload, another device, one-request start).
+  assert.match(surface, /const spawning = clientSpawning \|\| serverStarting;/);
+  assert.match(surface, /sessionStartingFromServer\(sessionRecord\?\.status/);
 });
 
 test("a repeated first send creates one chat, and a failed one gives the prompt back", async () => {

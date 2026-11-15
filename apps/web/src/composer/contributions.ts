@@ -7,11 +7,13 @@ import type {
   ComposerPasteHandler,
   ComposerSessionCreatedContext,
   ComposerSessionCreatedHook,
+  ComposerSessionStartExtension,
 } from "@polyth/web-sdk";
 
 const addMenuItems = new Map<string, ComposerAddMenuItem>();
 const pasteHandlers = new Map<string, ComposerPasteHandler>();
 const sessionCreatedHooks = new Map<string, ComposerSessionCreatedHook>();
+const sessionStartExtensions = new Map<string, ComposerSessionStartExtension>();
 const modes = new Map<string, ComposerMode>();
 /** Mode each mounted composer is in, keyed by its session id ("" = new chat). */
 const activeModes = new Map<string, string>();
@@ -92,6 +94,39 @@ export function listComposerSessionCreatedHooks(): ComposerSessionCreatedHook[] 
  *  stops the sequence and reaches the composer's send path unchanged. */
 export async function runComposerSessionCreatedHooks(context: ComposerSessionCreatedContext): Promise<void> {
   for (const hook of [...sessionCreatedHooks.values()]) await hook.run(context);
+}
+
+/** Register (or same-id replace) one package start step. Its `collect`
+ *  payload rides the new chat's single start request (`start.extensions`). */
+export function registerComposerSessionStartExtension(extension: ComposerSessionStartExtension): () => void {
+  sessionStartExtensions.set(extension.id, extension);
+  bump();
+  return () => {
+    if (sessionStartExtensions.get(extension.id) === extension) {
+      sessionStartExtensions.delete(extension.id);
+      bump();
+    }
+  };
+}
+
+export interface CollectedSessionStartExtension {
+  extension: ComposerSessionStartExtension;
+  payload: Record<string, unknown>;
+}
+
+/** Ask every start extension once, in registration order. An extension that
+ *  throws contributes nothing rather than blocking the Send. */
+export function collectComposerSessionStartExtensions(context: { projectId: string; text: string }): CollectedSessionStartExtension[] {
+  const collected: CollectedSessionStartExtension[] = [];
+  for (const extension of [...sessionStartExtensions.values()]) {
+    let payload: Record<string, unknown> | undefined;
+    try { payload = extension.collect(context); } catch (error) {
+      console.warn(`[composer] start extension ${extension.id} failed to collect`, error);
+      continue;
+    }
+    if (payload && typeof payload === "object") collected.push({ extension, payload });
+  }
+  return collected;
 }
 
 /** Register (or same-id replace) one composer mode. A superseded

@@ -77,8 +77,34 @@ test("the last Report line sets the signal and headline; Remember lines become n
   assert.match(report.body, /inside a code sample/, "fenced protocol text is content");
   assert.doesNotMatch(report.body, /3 commits landed/);
 
-  assert.deepEqual(parseAgentReport("Report: quiet"), { signal: "quiet", body: "", remember: [] });
+  assert.deepEqual(parseAgentReport("Report: quiet"), { signal: "quiet", body: "", remember: [], needs: [] });
   assert.equal(parseAgentReport("All good.").signal, undefined);
+});
+
+test("Needs you lines become the person's to-dos: what, why and a web link, never body text", () => {
+  const report = parseAgentReport([
+    "Two PRs merged.",
+    "Needs you: Electron 45 · PR #32 — major desktop upgrade; CI is green, it waits for your smoke test — https://github.com/acme/app/pull/32.",
+    "- **Needs you:** [Renew the Apple agreement](https://developer.apple.com/account) — nightly mac builds fail until then",
+    "Needs you: Rotate the token - javascript:alert(1)",
+    "Needs you: Electron 45 · PR #32 — said twice",
+    "```",
+    "Needs you: inside a code sample",
+    "```",
+    "Report: update — 2 merged, Electron waits for you",
+  ].join("\n"));
+  assert.deepEqual(report.needs, [
+    {
+      text: "Electron 45 · PR #32",
+      detail: "major desktop upgrade; CI is green, it waits for your smoke test",
+      url: "https://github.com/acme/app/pull/32",
+    },
+    { text: "Renew the Apple agreement", detail: "nightly mac builds fail until then", url: "https://developer.apple.com/account" },
+    { text: "Rotate the token", detail: "javascript:alert(1)" },
+  ]);
+  assert.doesNotMatch(report.body, /Electron 45|Apple agreement|Rotate/);
+  assert.match(report.body, /inside a code sample/, "fenced protocol text is content");
+  assert.match(REPORT_INSTRUCTIONS, /Needs you: <what>/);
 });
 
 test("the protocol says the headline shows above the message, so the message does not repeat it", () => {

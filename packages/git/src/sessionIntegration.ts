@@ -41,7 +41,10 @@ import type {
   SessionProjection,
   SessionDebugDto,
   SessionRef,
+  SessionService,
+  SessionStartRequest,
   SessionWorkspace,
+  StartSessionResult,
 } from "@polyth/contracts";
 import {
   isolationBlocksUserMutation,
@@ -139,10 +142,13 @@ export interface IsolationTestHooks {
 
 export interface IsolationIntegrationDeps {
   git: GitService;
-  generateCommitMessage?: (session: SessionProjection, root: string) => Promise<string>;
+  /** Writes the integration commit's message for the change staged at
+   *  `root`, which lands on `context.targetBranch`. */
+  generateCommitMessage?: (session: SessionProjection, root: string, context: { targetBranch: string }) => Promise<string>;
   /** How long integration waits for a generated message before it commits
-   *  with the deterministic fallback. Defaults to COMMIT_MESSAGE_WAIT_MS. */
-  commitMessageWaitMs?: number;
+   *  with the deterministic fallback. Defaults to COMMIT_MESSAGE_WAIT_MS; a
+   *  function lets a style that asks for a body wait longer. */
+  commitMessageWaitMs?: number | ((session: SessionProjection) => number | Promise<number>);
   managed?: ManagedWorktreeService;
   sessions: IsolationSessionApi;
   projects: IsolationProjectApi;
@@ -196,7 +202,10 @@ export interface IsolationIntegrationDeps {
 export type PreserveSessionMedia = NonNullable<IsolationIntegrationDeps["preserveSessionMedia"]>;
 
 /** Whoever asked for a new isolated chat: its creator and owner. */
-export type IsolationRequesterSessions = Pick<IsolationSessionApi, "create" | "snapshot">;
+export type IsolationRequesterSessions = Pick<IsolationSessionApi, "create" | "snapshot"> & Pick<SessionService, "start">;
+
+/** A start sent with the create: the requester's `start` owns the first turn. */
+export type IsolatedSessionStart = { start?: SessionStartRequest; clientOperationId?: string };
 
 /** Whoever asked to isolate an existing chat: reads and rebinds it with their
  *  own Space scope and management rights. */
@@ -256,6 +265,13 @@ const unpublished = (error: unknown): unknown => {
  *  while it waits, so a slow or unavailable small model must never block or
  *  fail the merge itself. */
 const COMMIT_MESSAGE_WAIT_MS = 12_000;
+
+/** Note an AI target repair on the title line, so a message with a body
+ *  keeps its body intact. */
+export const markTargetRepair = (message: string): string => {
+  const [title = "", ...body] = message.split("\n");
+  return [`${title.trimEnd()} (AI target repair)`, ...body].join("\n");
+};
 
 const repairRef = (sessionId: string): string => `${REPAIR_REF_PREFIX}${sessionId}`;
 const receiptRefName = (sessionId: string): string => `${RECEIPT_REF_PREFIX}${sessionId}`;
@@ -2076,12 +2092,19 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
       ? session.title.trim()
       : `Merge isolated session into ${isolation.targetBranch}`;
     if (!deps.generateCommitMessage) return fallback;
+    const configuredWait = deps.commitMessageWaitMs;
+    const waitMs = typeof configuredWait === "function"
+      ? await Promise.resolve().then(() => configuredWait(session)).catch(() => COMMIT_MESSAGE_WAIT_MS)
+      : configuredWait ?? COMMIT_MESSAGE_WAIT_MS;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timedOut = new Promise<"timeout">((resolveTimeout) => {
-      timer = setTimeout(() => resolveTimeout("timeout"), deps.commitMessageWaitMs ?? COMMIT_MESSAGE_WAIT_MS);
+      timer = setTimeout(() => resolveTimeout("timeout"), waitMs);
     });
     try {
-      const generated = await Promise.race([deps.generateCommitMessage(session, integrationPath), timedOut]);
+      const generated = await Promise.race([
+        deps.generateCommitMessage(session, integrationPath, { targetBranch: isolation.targetBranch }),
+        timedOut,
+      ]);
       if (generated === "timeout") {
         isolationLog("commit-message-fallback", { sessionId: session.id, reason: "timeout" });
         return fallback;
@@ -2162,7 +2185,7 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
       const staged = await git.diff(integrationPath, { staged: true });
       if (!staged.diff.trim()) return { kind: "empty" };
       const baseMessage = await commitMessageFor(session, isolation, integrationPath);
-      const message = isolation.targetRepair ? `${baseMessage} (AI target repair)` : baseMessage;
+      const message = isolation.targetRepair ? markTargetRepair(baseMessage) : baseMessage;
       const identity = await commitIdentityFor(isolation.targetPath);
       const committed = await git.commitStagedTree(integrationPath, message, identity);
       const intent: IsolationPublishIntent = {
@@ -2296,7 +2319,7 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
   // Validation, managed checkout allocation and canonical create for one
   // session id. Callers hold withSession(sessionId).
   const createIsolatedSessionLocked = async (
-    input: CreateIsolatedSessionInput,
+    input: CreateIsolatedSessionInput & IsolatedSessionStart,
     sessionId: string,
     delegatedBy?: SessionProjection,
     requester: IsolationRequesterSessions = deps.sessions,
@@ -2368,7 +2391,7 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
       }
       const workspace = workspaceForIsolationAllocations(selected, allocations);
       const execution = allocations.find((allocation) => allocation.repositoryId === selected.executionRepositoryId)!;
-      const created = await requester.create({
+      const createInput: CreateSessionInput = {
         id: sessionId,
         projectId: project.id,
         ...(delegatedBy ? { parentId: delegatedBy.id } : {}),
@@ -2382,7 +2405,16 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
         // Keep the scalar projection bound to the canonical execution
         // repository until all consumers understand workspace rows.
         isolation: execution.isolation,
-      });
+      };
+      // A requester without `start` (older host) only creates; the caller sees
+      // no queueId/turnId and sends the first turn itself.
+      const created: StartSessionResult = input.start && requester.start
+        ? await requester.start({
+          ...createInput,
+          start: input.start,
+          ...(input.clientOperationId ? { clientOperationId: input.clientOperationId } : {}),
+        })
+        : await requester.create(createInput);
       if (created.id !== sessionId) {
         throw err("conflict", "session identity does not match the managed workspace");
       }
@@ -2429,10 +2461,10 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
     }
   };
   const createIsolatedSessionUnderLock = (
-    input: CreateIsolatedSessionInput,
+    input: CreateIsolatedSessionInput & IsolatedSessionStart,
     sessionId: string,
     requester?: IsolationRequesterSessions,
-  ): Promise<SessionRef> =>
+  ): Promise<StartSessionResult> =>
     withSession(sessionId, () => createIsolatedSessionLocked(input, sessionId, undefined, requester));
 
   // Callers hold withSession(sessionId).
@@ -2520,9 +2552,9 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
      *  `options.sessions` is the requesting person's scoped session service:
      *  the chat is theirs and starts with the Space's default audience. */
     async createIsolatedSession(
-      input: CreateIsolatedSessionInput,
+      input: CreateIsolatedSessionInput & IsolatedSessionStart,
       options: { sessionId?: string; sessions?: IsolationRequesterSessions } = {},
-    ): Promise<SessionRef> {
+    ): Promise<StartSessionResult> {
       if (options.sessionId === undefined) return createIsolatedSessionUnderLock(input, randomUUID(), options.sessions);
       const sessionId = options.sessionId;
       if (!UUID_RE.test(sessionId)) throw err("invalid-input", "session id is invalid");
@@ -2541,6 +2573,20 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
             status: 409,
             mutationOutcome: "rejected",
             sessionId,
+          });
+        }
+        // The first request may have stopped between the row and the queued
+        // turn: `start` on the existing row queues it once and creates nothing.
+        const requester: IsolationRequesterSessions = options.sessions ?? deps.sessions;
+        if (input.start && requester.start) {
+          return requester.start({
+            id: sessionId,
+            projectId: prior.projectId,
+            ...(prior.worktreePath ? { worktreePath: prior.worktreePath } : {}),
+            ...(prior.workspace ? { workspace: prior.workspace } : {}),
+            ...(prior.isolation ? { isolation: prior.isolation } : {}),
+            start: input.start,
+            ...(input.clientOperationId ? { clientOperationId: input.clientOperationId } : {}),
           });
         }
         return { id: sessionId };

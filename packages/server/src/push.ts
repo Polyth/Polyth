@@ -377,7 +377,9 @@ export interface PushSubscriptionDto {
 
 export interface PushService {
   publicKey(): string;
-  subscribe(account: NotificationAccount, raw: unknown): PushSubscriptionDto;
+  /** `device` names the subscribing device so alerts can skip it while its
+   *  person works on another one. */
+  subscribe(account: NotificationAccount, raw: unknown, device?: string): PushSubscriptionDto;
   /** Isolated legacy test seam; persisted rows still receive an owner. */
   subscribe(raw: unknown): PushSubscriptionDto;
   unsubscribe(account: NotificationAccount, endpoint: string): boolean;
@@ -425,6 +427,9 @@ async function responseDetail(res: Response): Promise<string> {
 
 interface StoredPushSubscription extends PushSubscriptionDto {
   recipient: NotificationAccount;
+  /** The device that subscribed (devicePresence.ts `presenceDeviceKey`);
+   *  absent for subscriptions made before devices were told apart. */
+  device?: string;
 }
 
 interface PushFile {
@@ -459,6 +464,9 @@ export function createPushService(opts: {
   hasAccess?: (account: NotificationAccount) => boolean;
   /** Diagnostic sink for push-service rejections; defaults to console.warn. */
   log?: (line: string) => void;
+  /** The device this person is using in that Space (devicePresence.ts).
+   *  While there is one, only its own subscription is sent an alert. */
+  activeDevice?: (account: NotificationAccount) => string | undefined;
 }): PushService {
   const contact = opts.contact ?? "mailto:polyth@localhost";
   const fetchFn = opts.fetchFn ?? fetch;
@@ -476,7 +484,8 @@ export function createPushService(opts: {
         subs: Array.isArray(raw.subs)
           ? raw.subs.filter((s): s is StoredPushSubscription =>
               !!s && typeof s.endpoint === "string" &&
-              typeof s.keys?.p256dh === "string" && typeof s.keys?.auth === "string" && validAccount(s.recipient))
+              typeof s.keys?.p256dh === "string" && typeof s.keys?.auth === "string" && validAccount(s.recipient)
+              && (s.device === undefined || typeof s.device === "string"))
           : [],
       };
     }
@@ -501,7 +510,7 @@ export function createPushService(opts: {
   return {
     publicKey: () => ensure().vapid.publicKey,
 
-    subscribe(first: NotificationAccount | unknown, second?: unknown) {
+    subscribe(first: NotificationAccount | unknown, second?: unknown, device?: string) {
       const account = second === undefined ? LEGACY_TEST_ACCOUNT : first as NotificationAccount;
       const raw = second === undefined ? first : second;
       if (!validAccount(account) || !hasAccess(account)) throw Object.assign(new Error("subscription account is invalid"), { code: "invalid-input" });
@@ -516,12 +525,13 @@ export function createPushService(opts: {
         throw Object.assign(new Error("subscription keys are malformed"), { code: "invalid-input" });
       }
       const s = ensure();
-      const sub: StoredPushSubscription = { endpoint, keys: { p256dh, auth }, recipient: { ...account } };
+      const sub: StoredPushSubscription = { endpoint, keys: { p256dh, auth }, recipient: { ...account }, ...(device ? { device } : {}) };
       const current = s.subs.find((entry) => entry.endpoint === endpoint);
       if (current
         && sameAccount(current.recipient, account)
         && current.keys.p256dh === p256dh
-        && current.keys.auth === auth) {
+        && current.keys.auth === auth
+        && current.device === sub.device) {
         return { endpoint: current.endpoint, keys: current.keys };
       }
       // A browser push endpoint is one delivery destination, never a shared
@@ -563,7 +573,11 @@ export function createPushService(opts: {
       const payload = second === undefined ? first as PushPayload : second;
       if (!validAccount(account) || !hasAccess(account)) return { sent: 0, dropped: 0, failed: 0, droppedEndpoints: [] };
       const s = ensure();
-      const owned = s.subs.filter((sub) => sameAccount(sub.recipient, account));
+      // While the person works on one device only its own browser is alerted
+      // (an unnamed older subscription counts as another device). A test push
+      // the person asked for goes everywhere.
+      const active = payload.test === true ? undefined : opts.activeDevice?.(account);
+      const owned = s.subs.filter((sub) => sameAccount(sub.recipient, account) && (active === undefined || sub.device === active));
       if (owned.length === 0) return { sent: 0, dropped: 0, failed: 0, droppedEndpoints: [] };
       const plaintext = Buffer.from(JSON.stringify(payload));
       // A person's message is worth delivering after a phone wakes from doze

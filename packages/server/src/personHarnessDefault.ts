@@ -14,19 +14,23 @@ export function personDefaultSessionService(
   ctx: SpaceContext,
   resolve: PersonHarnessDefault,
 ): SessionService {
+  // Only a chat that names nothing: an explicit harness (Auto included),
+  // a model, an agent profile, a subagent of a parent or an adopted native
+  // session keeps its own routing. A broken or missing preference never
+  // blocks starting a chat.
+  const pinned = async <T extends Parameters<SessionService["create"]>[0]>(input: T, profileId?: unknown): Promise<T> => {
+    if (input.harness || input.model || input.parentId || input.backendSessionId
+      || (input as { agentProfileId?: unknown }).agentProfileId || profileId) return input;
+    const harnessId = await resolve(ctx).catch(() => undefined);
+    const harness: HarnessSelection | undefined = harnessId ? { mode: "pinned", harnessId } : undefined;
+    return harness ? { ...input, harness } : input;
+  };
   return {
     ...base,
-    create: async (input) => {
-      // Only a chat that names nothing: an explicit harness (Auto included),
-      // a model, an agent profile, a subagent of a parent or an adopted
-      // native session keeps its own routing.
-      if (input.harness || input.model || input.parentId || input.backendSessionId
-        || (input as { agentProfileId?: unknown }).agentProfileId) return base.create(input);
-      // A broken or missing preference never blocks starting a chat.
-      const harnessId = await resolve(ctx).catch(() => undefined);
-      const harness: HarnessSelection | undefined = harnessId ? { mode: "pinned", harnessId } : undefined;
-      return base.create(harness ? { ...input, harness } : input);
-    },
+    ...(base.start
+      ? { start: async (input, admission) => base.start!(await pinned(input, input.start?.agentProfileId), admission) }
+      : {}),
+    create: async (input) => base.create(await pinned(input)),
   };
 }
 

@@ -245,8 +245,7 @@ test("glass overlays and transparent session titles obey effect and text setting
           <div class="mobile-float-navigation"></div>
           <div class="mobile-session-title-island"><div class="mobile-session-title-row">
             <button class="mobile-session-selector">
-              <span class="mobile-island-text"><span class="mobile-island-title-text">Компактний прозорий заголовок поточної сесії з повною назвою</span></span>
-              <span class="mobile-session-selector-arrow">⌄</span>
+              <span class="mobile-island-text"><span class="mobile-island-title-text"><span class="session-header-status"></span>Компактний прозорий заголовок поточної сесії з повною назвою</span></span>
             </button>
           </div></div>
           <div class="mobile-float-actions"><button>+</button><button>⌘</button></div>
@@ -281,7 +280,7 @@ test("glass overlays and transparent session titles obey effect and text setting
         };
       });
       assert.equal(title.height, height, `menu ${menuScale}, chat ${chatScale}: header follows menu size`);
-      assert.equal(title.textHeight, title.lineHeight * 2, "long title stays at two complete lines");
+      assert.equal(Math.round(title.textHeight), Math.round(title.lineHeight), "a long title keeps to one line and ends in an ellipsis");
       assert.ok(title.clearance >= title.height, "transcript reserves the taller header's space");
       assert.ok(title.runway >= title.height, "chat text scaling does not shrink the transcript's top runway");
       assert.equal(title.background, "rgba(0, 0, 0, 0)");

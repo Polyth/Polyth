@@ -16,7 +16,7 @@
 // no Node imports.
 import { assessPermissionRisk, riskParsing } from "./risk.ts";
 
-const { parseShell, commandOf, gitCommand, placeOf, isSecretPath, normalizeAbsolute, base } = riskParsing;
+const { parseShell, commandOf, gitCommand, placeOf, isSecretPath, normalizeAbsolute, base, trimTrailingSlashes } = riskParsing;
 
 export const WORKSPACE_TOOLS = ["bash", "read", "write", "edit", "grep", "glob"] as const;
 export type WorkspaceTool = (typeof WORKSPACE_TOOLS)[number];
@@ -241,9 +241,9 @@ function pathRuleMatches(spec: string, path: string, context: WorkspacePolicyCon
     pattern = `${normalizeAbsolute(context.home)}/${spec.slice(2)}`;
   } else if (spec.startsWith("/")) pattern = `${root}${spec}`;
   else if (spec.startsWith("./")) pattern = `${root}/${spec.slice(2)}`;
-  else if (spec.replace(/\/+$/, "").includes("/")) pattern = `${root}/${spec}`;
+  else if (trimTrailingSlashes(spec).includes("/")) pattern = `${root}/${spec}`;
   else pattern = `/**/${spec}`;
-  pattern = pattern.replace(/\/+$/, "");
+  pattern = trimTrailingSlashes(pattern);
   let body = "";
   for (let index = 0; index < pattern.length; index++) {
     const char = pattern[index]!;

@@ -122,7 +122,9 @@ export async function refreshNativePushStatus(): Promise<NativePushStatus> {
   // projection until the authenticated server confirms the same subscription.
   nativeProjectionEnabled = false;
   const registration = parseNativePushClaim(raw);
-  const { providerToken: _token, environment: _environment, platform: _platform, ...status } = raw as NativePushStatus & { providerToken?: unknown; environment?: unknown; platform?: unknown };
+  // The registration (token, environment, content key) travels only inside
+  // `registration`, which the foreground re-send hands to the server whole.
+  const { providerToken: _token, environment: _environment, platform: _platform, contentKey: _contentKey, ...status } = raw as NativePushStatus & { providerToken?: unknown; environment?: unknown; platform?: unknown; contentKey?: unknown };
   return registration && status.state === "enabled" ? { ...status, registration } : status;
 }
 

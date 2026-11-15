@@ -3,8 +3,10 @@
 // source because older builds shared it with product-level settings.
 import { useSyncExternalStore } from "react";
 import { parseImageUploadPreference, type ImageUploadPreference } from "./imageUploadSize.ts";
+import { parseSendHoldMs, SEND_HOLD_DEFAULT_MS } from "./sendHold.ts";
 import type { NotificationKind, PromptHistoryScope } from "@polyth/contracts";
 import { clampPromptHistoryLimit, parsePromptHistoryScope, PROMPT_HISTORY_DEFAULT_LIMIT } from "@polyth/contracts";
+import { parseRowSwipeActions, parseRowSwipeFull, ROW_SWIPE_DEFAULTS, type RowSwipeActionId } from "./components/mobile/sessionRowSwipe.ts";
 import {
   ASSISTANT_MESSAGE_ACTIONS_DEFAULT,
   cloneMessageActionLayout,
@@ -229,10 +231,22 @@ export interface UiSettings {
   /** Composer target control visibility. */
   showGoals: boolean;
   showQuickActions: boolean;
+  /** Pressing and holding Send keeps the message as a draft instead of sending
+   *  it; off makes Send send at once (docs/dev/ui.md, "Drafts"). */
+  sendHoldDraft: boolean;
+  /** How long that hold takes, in ms (`sendHold.ts`). Kept while the gesture
+   *  is off, so turning it back on restores the person's own length. */
+  sendHoldDraftMs: number;
   /** The opt-in status bar under the workspace; off until the user turns it on. */
   statusBar: StatusBarMode;
   /** Phone swipe navigation (Navigator, Workspace, package Back). */
   swipeNavigation: SwipeNavigationMode;
+  /** Navigator session-row quick actions: a swipe toward the inline end. The first one runs on a full swipe. */
+  rowSwipeLeading: RowSwipeActionId[];
+  /** Navigator session-row quick actions: a swipe toward the inline start. */
+  rowSwipeTrailing: RowSwipeActionId[];
+  /** Whether dragging a row far enough commits its side's first action. */
+  rowSwipeFull: boolean;
   /** While a package window is pinned, opening another one keeps the pinned
    *  frame — same mode, width, edge and strip height; only content changes. */
   sharedPinnedWindow: boolean;
@@ -329,8 +343,13 @@ export const UI_DEFAULTS: UiSettings = {
   showAutoApprove: true,
   showGoals: true,
   showQuickActions: true,
+  sendHoldDraft: true,
+  sendHoldDraftMs: SEND_HOLD_DEFAULT_MS,
   statusBar: "off",
   swipeNavigation: "surface",
+  rowSwipeLeading: [...ROW_SWIPE_DEFAULTS.leading],
+  rowSwipeTrailing: [...ROW_SWIPE_DEFAULTS.trailing],
+  rowSwipeFull: ROW_SWIPE_DEFAULTS.fullSwipe,
   sharedPinnedWindow: true,
   sharedPinnedWindowVersion: SHARED_PINNED_WINDOW_VERSION,
   mcpServers: [],
@@ -498,12 +517,17 @@ export function parseUiSettings(raw: string | null): UiSettings {
       showAutoApprove: data.showAutoApprove !== false,
       showGoals: data.showGoals !== false,
       showQuickActions: data.showQuickActions !== false,
+      sendHoldDraft: data.sendHoldDraft !== false,
+      sendHoldDraftMs: parseSendHoldMs(data.sendHoldDraftMs),
       statusBar: STATUS_BAR_MODES.includes(data.statusBar as StatusBarMode)
         ? data.statusBar as StatusBarMode
         : UI_DEFAULTS.statusBar,
       swipeNavigation: SWIPE_NAVIGATION_MODES.includes(data.swipeNavigation as SwipeNavigationMode)
         ? data.swipeNavigation as SwipeNavigationMode
         : UI_DEFAULTS.swipeNavigation,
+      rowSwipeLeading: parseRowSwipeActions(data.rowSwipeLeading, ROW_SWIPE_DEFAULTS.leading),
+      rowSwipeTrailing: parseRowSwipeActions(data.rowSwipeTrailing, ROW_SWIPE_DEFAULTS.trailing),
+      rowSwipeFull: parseRowSwipeFull(data.rowSwipeFull),
       sharedPinnedWindow: data.sharedPinnedWindowVersion === SHARED_PINNED_WINDOW_VERSION
         ? data.sharedPinnedWindow !== false
         : true,

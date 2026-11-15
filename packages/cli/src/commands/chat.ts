@@ -95,10 +95,26 @@ export const chat: Command = {
       if (!sessionId) {
         const project = await resolveProject(client, str(args, "project"));
         const title = str(args, "title") ?? (text.replace(/\s+/g, " ").trim().slice(0, 60) || "CLI chat");
-        const created = await client.post<{ id: string }>("/api/sessions", { projectId: project.id, title, ...(model ? { model } : {}) });
+        const created = await client.post<{ id: string; queueId?: string; turnId?: string }>("/api/sessions", {
+          projectId: project.id,
+          title,
+          ...(model ? { model } : {}),
+          start: { firstTurn: { text } },
+          clientOperationId: randomUUID(),
+        });
         sessionId = created.id;
         o.err(style.dim(o.color, `session ${created.id}`));
-        await startFollowing(sessionId, await highWater(client, sessionId));
+        // The server took the first prompt with the create: everything in a
+        // brand-new chat is new, so follow from its first event.
+        const started = Boolean(created.queueId || created.turnId);
+        await startFollowing(sessionId, started ? 0 : await highWater(client, sessionId));
+        if (started) {
+          if (!delivery || delivery === "interrupt") busy = true;
+          return;
+        }
+        // ponytail: a server that predates `start` answers without queueId or
+        // turnId; post the first prompt as today. Removed when no supported
+        // server ignores `start`.
       }
       await client.post(`/api/sessions/${encodeURIComponent(sessionId)}/message`, {
         text, clientOperationId: randomUUID(), ...(delivery ? { delivery } : {}), ...(model ? { model } : {}),

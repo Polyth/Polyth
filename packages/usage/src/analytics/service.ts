@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { mkdirSync, rmSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { atomicWriteSync } from "@polyth/plugins";
 import type {
   Project,
@@ -8,7 +8,12 @@ import type {
   SessionProjection,
   SpaceContext,
 } from "@polyth/contracts";
-import { buildUsageStatsReport, type UsageSessionMetadata } from "./aggregate.ts";
+import {
+  createUsageReportBuild,
+  createUsageSessionRollup,
+  type UsageSessionMetadata,
+  type UsageSessionRollup,
+} from "./aggregate.ts";
 import { collectSessionObservations } from "./collect.ts";
 import { localDateKey } from "./time.ts";
 import type {
@@ -25,6 +30,13 @@ export interface UsageAnalyticsSource {
   projections(space: SpaceContext, scope?: UsageSyncScope): Promise<SessionProjection[]>;
   events(space: SpaceContext, sessionId: string): Promise<SessionEvent[]>;
   latestSeq?(space: SpaceContext, sessionId: string): Promise<number>;
+  /**
+   * The newest event seq of every session in the Space (or one project) in a
+   * single read. Preferred over `latestSeq`: a report otherwise asks once per
+   * session, which is the whole cost of opening Usage on a large Space.
+   * Resolves undefined when the store cannot answer it.
+   */
+  latestSeqs?(space: SpaceContext, scope?: { projectId?: string }): Promise<ReadonlyMap<string, number> | undefined>;
   /** The sessions this reader may open; undefined when they see the whole
    *  Space. Reports and observations only ever include these. */
   visibleSessions?(space: SpaceContext): Promise<ReadonlySet<string> | undefined>;
@@ -48,6 +60,10 @@ interface SessionState {
   fingerprint: string;
   seq: number;
   observations: UsageObservation[];
+  /** The checkpoint file this session is written to. */
+  shard: number;
+  /** Built on the first report that reads the session, dropped with it. */
+  rollup?: UsageSessionRollup;
 }
 
 interface CachedReport {
@@ -63,7 +79,10 @@ interface CachedReport {
 interface SpaceState {
   sessions: Map<string, SessionState>;
   lastSyncAt: number;
-  dirty: boolean;
+  /** Checkpoint files whose sessions changed since they were written. */
+  dirtyShards: Set<number>;
+  /** The single-file checkpoint of older versions is still on disk. */
+  legacy: boolean;
   /** Bumped whenever a session's observations change (added, removed, re-collected). */
   revision: number;
   /** Bumped when only a session's title or status changed. A built report stays
@@ -73,9 +92,31 @@ interface SpaceState {
   reports: Map<string, CachedReport>;
 }
 
-/** The checkpoint is a cold-start cache; writing it is a full serialization. */
+/** The checkpoint is a cold-start cache, written a while after a change. */
 const PERSIST_DELAY_MS = 10_000;
+/**
+ * The checkpoint is split by session id into this many files. One file held a
+ * large Space's whole history (over 100 MB): every write serialized all of it
+ * and stopped the server for more than a second, every ten seconds of work.
+ * Now a change rewrites the file of the session that changed.
+ */
+const CHECKPOINT_SHARDS = 64;
+
+const shardOf = (sessionId: string): number => {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < sessionId.length; index += 1) {
+    hash = Math.imul(hash ^ sessionId.charCodeAt(index), 0x01000193);
+  }
+  return (hash >>> 0) % CHECKPOINT_SHARDS;
+};
+
+const yieldToLoop = (): Promise<void> => new Promise((resolve) => { setImmediate(resolve); });
 const MAX_CACHED_REPORTS = 32;
+/** A range nobody opened yet is prepared in slices this long, yielding between them. */
+const BUILD_SLICE_MS = 12;
+
+const rollupOf = (id: string, session: SessionState): UsageSessionRollup =>
+  session.rollup ??= createUsageSessionRollup(id, session.observations);
 
 /**
  * A cached report rebuilt "now" differs only in its clock fields: no
@@ -128,7 +169,8 @@ interface SyncedScope {
   revision: number;
   metadataRevision: number;
   metadata: Map<string, UsageSessionMetadata>;
-  observations: UsageObservation[];
+  /** The sessions in scope, as they were when this materialization finished. */
+  sessions: Map<string, SessionState>;
 }
 
 interface UsageSyncScope {
@@ -209,15 +251,16 @@ const isObservation = (value: unknown): value is UsageObservation => {
     (row.quality === "exact" || row.quality === "derived" || row.quality === "estimated");
 };
 
-const readPersisted = (file: string, spaceId: string): Map<string, SessionState> => {
-  const result = new Map<string, SessionState>();
+/** Sessions of one checkpoint file; a damaged or foreign file yields none. */
+const parseCheckpoint = (text: string, spaceId: string, version: 1 | 2): SessionState[] => {
+  const result: SessionState[] = [];
   try {
-    const raw = JSON.parse(readFileSync(file, "utf8")) as {
+    const raw = JSON.parse(text) as {
       version?: unknown;
       spaceId?: unknown;
       sessions?: unknown;
     };
-    if (raw.version !== 1 || raw.spaceId !== spaceId || !Array.isArray(raw.sessions)) return result;
+    if (raw.version !== version || raw.spaceId !== spaceId || !Array.isArray(raw.sessions)) return result;
     for (const value of raw.sessions) {
       if (!value || typeof value !== "object" || Array.isArray(value)) continue;
       const row = value as {
@@ -231,7 +274,7 @@ const readPersisted = (file: string, spaceId: string): Map<string, SessionState>
       if (typeof row.id !== "string" || typeof row.title !== "string" || typeof row.fingerprint !== "string") continue;
       if (typeof row.seq !== "number" || !Array.isArray(row.observations)) continue;
       const observations = row.observations.filter(isObservation);
-      result.set(row.id, {
+      result.push({
         metadata: {
           id: row.id,
           title: row.title,
@@ -242,6 +285,7 @@ const readPersisted = (file: string, spaceId: string): Map<string, SessionState>
         fingerprint: row.fingerprint,
         seq: row.seq,
         observations,
+        shard: shardOf(row.id),
       });
     }
   } catch {
@@ -281,69 +325,151 @@ export function createUsageAnalyticsService(
     if (failure?.status === "rejected") throw failure.reason;
   };
 
-  const fileFor = (space: SpaceContext): string | undefined => {
-    const directory = options.storageDir?.(space);
-    return directory ? `${directory}/analytics-v1.json` : undefined;
-  };
+  const loading = new Map<string, Promise<SpaceState>>();
 
-  const stateFor = (space: SpaceContext): SpaceState => {
-    const existing = spaces.get(space.spaceId);
-    if (existing) return existing;
-    const file = fileFor(space);
+  const pathsFor = (space: SpaceContext): { legacy: string; shards: string } | undefined => {
+    const directory = options.storageDir?.(space);
+    return directory ? { legacy: `${directory}/analytics-v1.json`, shards: `${directory}/analytics-v2` } : undefined;
+  };
+  const shardFile = (directory: string, shard: number): string =>
+    `${directory}/${shard.toString(16).padStart(2, "0")}.json`;
+
+  const loadState = async (space: SpaceContext): Promise<SpaceState> => {
     const state: SpaceState = {
-      sessions: file ? readPersisted(file, space.spaceId) : new Map(),
+      sessions: new Map(),
       lastSyncAt: 0,
-      dirty: false,
+      dirtyShards: new Set(),
+      legacy: false,
       revision: 0,
       metadataRevision: 0,
       reports: new Map(),
     };
-    spaces.set(space.spaceId, state);
-    contexts.set(space.spaceId, space);
+    const paths = pathsFor(space);
+    if (!paths) return state;
+    const written = new Set<number>();
+    for (let shard = 0; shard < CHECKPOINT_SHARDS; shard += 1) {
+      let text: string;
+      try {
+        text = await readFile(shardFile(paths.shards, shard), "utf8");
+      } catch {
+        continue;
+      }
+      written.add(shard);
+      for (const session of parseCheckpoint(text, space.spaceId, 2)) state.sessions.set(session.metadata.id, session);
+      // Parsing is the synchronous part: let other requests run between files.
+      await yieldToLoop();
+    }
+    let legacy: string | undefined;
+    try {
+      legacy = await readFile(paths.legacy, "utf8");
+    } catch {
+      legacy = undefined;
+    }
+    if (legacy !== undefined) {
+      // Move the old single file over once. A shard already written holds newer
+      // state than the old file, also after an interrupted move.
+      state.legacy = true;
+      for (const session of parseCheckpoint(legacy, space.spaceId, 1)) {
+        if (written.has(session.shard)) continue;
+        state.sessions.set(session.metadata.id, session);
+        state.dirtyShards.add(session.shard);
+      }
+    }
     return state;
   };
 
-  const persist = (space: SpaceContext, state: SpaceState): void => {
-    const file = fileFor(space);
-    if (!file || !state.dirty) return;
+  const stateFor = (space: SpaceContext): Promise<SpaceState> => {
+    const existing = spaces.get(space.spaceId);
+    if (existing) return Promise.resolve(existing);
+    const pending = loading.get(space.spaceId);
+    if (pending) return pending;
+    const load: Promise<SpaceState> = loadState(space).then((state) => {
+      // Invalidated while it was being read: read it again.
+      if (loading.get(space.spaceId) !== load) return stateFor(space);
+      loading.delete(space.spaceId);
+      spaces.set(space.spaceId, state);
+      contexts.set(space.spaceId, space);
+      if (state.legacy) schedulePersist(space, state);
+      return state;
+    });
+    loading.set(space.spaceId, load);
+    return load;
+  };
+
+  const writeShard = (space: SpaceContext, state: SpaceState, shard: number): boolean => {
+    const paths = pathsFor(space);
+    if (!paths) return false;
     try {
-      mkdirSync(dirname(file), { recursive: true });
-      atomicWriteSync(file, JSON.stringify({
-        version: 1,
-        spaceId: space.spaceId,
-        sessions: [...state.sessions.entries()].map(([id, session]) => ({
+      mkdirSync(paths.shards, { recursive: true });
+      const sessions: unknown[] = [];
+      for (const [id, session] of state.sessions) {
+        if (session.shard !== shard) continue;
+        sessions.push({
           id,
           title: session.metadata.title,
           status: session.metadata.status,
           fingerprint: session.fingerprint,
           seq: session.seq,
           observations: session.observations,
-        })),
-      }));
-      state.dirty = false;
+        });
+      }
+      atomicWriteSync(shardFile(paths.shards, shard), JSON.stringify({ version: 2, spaceId: space.spaceId, sessions }));
+      state.dirtyShards.delete(shard);
+      return true;
     } catch {
       // Analytics remains available from the in-memory index; persistence is a
       // performance optimization and never a reason to blank the report.
+      return false;
     }
   };
 
-  const schedulePersist = (space: SpaceContext, state: SpaceState): void => {
-    if (!fileFor(space)) return;
-    const previous = timers.get(space.spaceId);
-    if (previous) clearTimeout(previous);
-    const timer = setTimeout(() => {
-      timers.delete(space.spaceId);
-      persist(space, state);
-    }, PERSIST_DELAY_MS);
+  /** Once every session it held is in a shard, the old single file can go. */
+  const dropLegacy = (space: SpaceContext, state: SpaceState): void => {
+    const paths = pathsFor(space);
+    if (!paths || !state.legacy || state.dirtyShards.size > 0) return;
+    try {
+      rmSync(paths.legacy, { force: true });
+      state.legacy = false;
+    } catch { /* retried with the next write */ }
+  };
+
+  /** Shutdown: write everything that changed now. */
+  const persist = (space: SpaceContext, state: SpaceState): void => {
+    for (const shard of [...state.dirtyShards]) {
+      if (!writeShard(space, state, shard)) return;
+    }
+    dropLegacy(space, state);
+  };
+
+  /** One file per event-loop turn, so a large backlog never stalls the server. */
+  const persistStep = (space: SpaceContext, state: SpaceState): void => {
+    timers.delete(space.spaceId);
+    if (spaces.get(space.spaceId) !== state) return;
+    const shard = state.dirtyShards.values().next().value;
+    // A failed write waits for the next sync to schedule it again.
+    if (shard !== undefined && !writeShard(space, state, shard)) return;
+    if (state.dirtyShards.size > 0) arm(space, state, 0);
+    else dropLegacy(space, state);
+  };
+
+  const arm = (space: SpaceContext, state: SpaceState, delay: number): void => {
+    const timer = setTimeout(() => persistStep(space, state), delay);
     timer.unref?.();
     timers.set(space.spaceId, timer);
+  };
+
+  const schedulePersist = (space: SpaceContext, state: SpaceState): void => {
+    // A pending write is left alone: re-arming it on every sync kept a busy
+    // Space from ever writing its checkpoint.
+    if (!pathsFor(space) || timers.has(space.spaceId)) return;
+    arm(space, state, PERSIST_DELAY_MS);
   };
 
   const syncSpaceUnlocked = async (
     space: SpaceContext,
     scope?: UsageSyncScope,
   ): Promise<SyncedScope> => {
-    const state = stateFor(space);
+    const state = await stateFor(space);
     const listed = await options.source.projections(space, scope);
     const projections = scope?.sessionIds
       ? listed.filter((projection) => scope.sessionIds!.has(projection.id))
@@ -351,6 +477,11 @@ export function createUsageAnalyticsService(
     const authoritativeListing = scope === undefined;
     const currentIds = new Set<string>();
     const changed: SessionProjection[] = [];
+    // One read for every tail; a session scope is a handful of ids and keeps
+    // the per-session check.
+    const tails = options.source.latestSeqs && !scope?.sessionIds
+      ? await options.source.latestSeqs(space, scope?.projectId ? { projectId: scope.projectId } : undefined)
+      : undefined;
     let projectionCursor = 0;
     const inspectProjection = async (): Promise<void> => {
       while (projectionCursor < projections.length) {
@@ -362,17 +493,19 @@ export function createUsageAnalyticsService(
         const previous = state.sessions.get(projection.id);
         if (previous && previous.fingerprint !== fingerprint && upgradeLegacyFingerprint(previous.fingerprint) === fingerprint) {
           previous.fingerprint = fingerprint;
-          state.dirty = true;
+          state.dirtyShards.add(previous.shard);
         }
         if (!previous || previous.fingerprint !== fingerprint) {
           changed.push(projection);
         } else {
           // Check durable tails even when projection side effects lag behind.
-          const latest = options.source.latestSeq ? await options.source.latestSeq(space, projection.id) : previous.seq;
+          const latest = tails
+            ? tails.get(projection.id) ?? previous.seq
+            : options.source.latestSeq ? await options.source.latestSeq(space, projection.id) : previous.seq;
           if (latest > previous.seq) changed.push(projection);
           const metadata = { id: projection.id, title: projection.title, status: projection.status };
           if (previous.metadata.title !== metadata.title || previous.metadata.status !== metadata.status) {
-            state.dirty = true;
+            state.dirtyShards.add(previous.shard);
             state.metadataRevision += 1;
           }
           previous.metadata = metadata;
@@ -380,30 +513,26 @@ export function createUsageAnalyticsService(
       }
     };
     await runWorkers(projections.length, inspectProjection);
+    const forget = (id: string): void => {
+      const session = state.sessions.get(id);
+      if (!session) return;
+      state.sessions.delete(id);
+      state.dirtyShards.add(session.shard);
+      state.revision += 1;
+    };
     if (authoritativeListing) {
       for (const id of [...state.sessions.keys()]) {
-        if (!currentIds.has(id)) {
-          state.sessions.delete(id);
-          state.dirty = true;
-          state.revision += 1;
-        }
+        if (!currentIds.has(id)) forget(id);
       }
     } else if (scope?.sessionIds) {
       for (const id of scope.sessionIds) {
-        if (!currentIds.has(id) && state.sessions.delete(id)) {
-          state.dirty = true;
-          state.revision += 1;
-        }
+        if (!currentIds.has(id)) forget(id);
       }
     } else if (scope?.projectId) {
       for (const [id, session] of [...state.sessions.entries()]) {
         const belongsToProject = session.observations.some((observation) =>
           observation.projectId === scope.projectId);
-        if (belongsToProject && !currentIds.has(id)) {
-          state.sessions.delete(id);
-          state.dirty = true;
-          state.revision += 1;
-        }
+        if (belongsToProject && !currentIds.has(id)) forget(id);
       }
     }
 
@@ -418,8 +547,9 @@ export function createUsageAnalyticsService(
           fingerprint: projectionFingerprint(projection),
           seq: events.at(-1)?.seq ?? 0,
           observations,
+          shard: shardOf(projection.id),
         });
-        state.dirty = true;
+        state.dirtyShards.add(shardOf(projection.id));
         state.revision += 1;
       }
     };
@@ -427,24 +557,24 @@ export function createUsageAnalyticsService(
     state.lastSyncAt = now();
     // A small scoped report must not copy the entire warm Space index.
     const metadata = new Map<string, UsageSessionMetadata>();
-    const observations: UsageObservation[] = [];
+    const sessions = new Map<string, SessionState>();
     for (const id of currentIds) {
       const session = state.sessions.get(id);
       if (!session) continue;
       metadata.set(id, session.metadata);
-      for (const observation of session.observations) observations.push(observation);
+      sessions.set(id, session);
     }
-    if (state.dirty) schedulePersist(space, state);
-    return { state, revision: state.revision, metadataRevision: state.metadataRevision, metadata, observations };
+    if (state.dirtyShards.size > 0) schedulePersist(space, state);
+    return { state, revision: state.revision, metadataRevision: state.metadataRevision, metadata, sessions };
   };
 
   /** The part of a materialization one reader may see. */
   const readable = (synced: SyncedScope, visible: ReadonlySet<string> | undefined) => {
-    if (!visible) return { metadata: synced.metadata, observations: synced.observations, fingerprint: "" };
+    if (!visible) return { metadata: synced.metadata, sessions: synced.sessions, fingerprint: "" };
     const metadata = new Map([...synced.metadata].filter(([id]) => visible.has(id)));
-    const observations = synced.observations.filter((observation) => visible.has(observation.sessionId));
+    const sessions = new Map([...synced.sessions].filter(([id]) => visible.has(id)));
     const fingerprint = createHash("sha256").update([...metadata.keys()].sort().join("\n")).digest("hex");
-    return { metadata, observations, fingerprint };
+    return { metadata, sessions, fingerprint };
   };
 
   // A report is built from one coherent materialization. Serialize sync waves
@@ -475,7 +605,7 @@ export function createUsageAnalyticsService(
       // call means the report request that follows finds a warm index.
       if (!spaces.has(space.spaceId)) {
         const warm = setImmediate(() => {
-          try { stateFor(space); } catch { /* the report request reads it itself */ }
+          void stateFor(space).catch(() => undefined); // the report request reads it itself
         });
         warm.unref?.();
       }
@@ -503,7 +633,7 @@ export function createUsageAnalyticsService(
         const at = now();
         const day = localDateKey(at, query.timezone);
         const { state } = synced;
-        const { metadata, observations, fingerprint } = readable(synced, visible);
+        const { metadata, sessions, fingerprint } = readable(synced, visible);
         const cached = state.reports.get(key);
         let report: UsageStatsReport;
         if (cached && cached.revision === synced.revision && cached.members === metadata.size
@@ -514,15 +644,25 @@ export function createUsageAnalyticsService(
           }
           report = restampReport(cached.report, at);
         } else {
-          report = buildUsageStatsReport({
+          const rollups: UsageSessionRollup[] = [];
+          for (const [id, session] of sessions) rollups.push(rollupOf(id, session));
+          const build = createUsageReportBuild({
             serverInstanceId,
             spaceId: space.spaceId,
             query,
-            observations,
+            rollups,
             projects: projectInfo(projects),
             sessions: metadata,
             now: at,
           });
+          // Sessions unchanged since the last report for this range keep their
+          // share, so only a range nobody opened yet has real work. Spread that
+          // over event-loop turns: the server keeps answering everyone else.
+          for (let sliceEnd = performance.now() + BUILD_SLICE_MS; !build.warm(() => performance.now() > sliceEnd);) {
+            await new Promise<void>((resolve) => { setImmediate(resolve); });
+            sliceEnd = performance.now() + BUILD_SLICE_MS;
+          }
+          report = build.finish();
           state.reports.delete(key);
           state.reports.set(key, {
             revision: synced.revision,
@@ -544,11 +684,28 @@ export function createUsageAnalyticsService(
     async observations(space, from) {
       const visible = await options.source.visibleSessions?.(space);
       const synced = await syncSpace(space);
-      return readable(synced, visible).observations.filter((observation) => observation.timestamp >= from);
+      const observations: UsageObservation[] = [];
+      for (const session of readable(synced, visible).sessions.values()) {
+        for (const observation of session.observations) {
+          if (observation.timestamp >= from) observations.push(observation);
+        }
+      }
+      return observations;
     },
     invalidate(spaceId) {
-      if (spaceId) spaces.delete(spaceId);
-      else spaces.clear();
+      // A write scheduled for the dropped index must not hold the slot of the next one.
+      for (const [id, timer] of timers) {
+        if (spaceId && id !== spaceId) continue;
+        clearTimeout(timer);
+        timers.delete(id);
+      }
+      if (spaceId) {
+        spaces.delete(spaceId);
+        loading.delete(spaceId);
+      } else {
+        spaces.clear();
+        loading.clear();
+      }
     },
     stop() {
       for (const timer of timers.values()) clearTimeout(timer);

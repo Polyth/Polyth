@@ -75,10 +75,11 @@ test("the pinned tablet tools are editable from Settings and its search", async 
     read("../src/components/SettingsView.tsx"),
   ]);
   assert.equal(COMPACT_SHORTCUTS_SETTINGS_ITEM, "appearance.compactShortcuts");
-  // Outside tablet width the editor waits behind Show; a routed target (the
-  // bar's own Customize link) opens it.
-  assert.match(pages, /itemId=\{COMPACT_SHORTCUTS_SETTINGS_ITEM\}[\s\S]{0,1200}?\{tabletShown && <CompactShortcutsEditor \/>\}/);
-  assert.match(pages, /const TABLET_ITEMS = new Set\(\[COMPACT_SHORTCUTS_SETTINGS_ITEM\]\)/);
+  // A tablet-only block: outside tablet width the editor waits in the closed
+  // other-devices group, and a routed target (the bar's own Customize link)
+  // opens it (behaviour: settingsOtherDevices.test.ts).
+  assert.match(pages, /const tabletBlock: DeviceBlock = \{\s*devices: \["tablet"\],[\s\S]{0,200}?items: \[COMPACT_SHORTCUTS_SETTINGS_ITEM\]/);
+  assert.match(pages, /itemId=\{COMPACT_SHORTCUTS_SETTINGS_ITEM\}[\s\S]{0,200}?<CompactShortcutsEditor \/>/);
   assert.match(registry, /id: "appearance\.compactShortcuts", pageId: "appearance"/);
   assert.match(view, /candidate\.dataset\.settingsItem === targetItemId/, "a routed item target scrolls into view");
 });

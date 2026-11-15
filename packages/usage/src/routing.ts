@@ -43,6 +43,10 @@ export interface ModelRoutingInput {
    *  were used (a caller's own allow-list); pairs the live catalog no longer
    *  offers are left out like any other. */
   pairs?: readonly string[];
+  /** Never list these `harness::provider/model` keys. Matched after catalog
+   *  naming and by the model an alias runs, so excluding `opus` also hides a
+   *  `default` row that runs the same model. */
+  exclude?: readonly string[];
 }
 
 /** `harness::provider/model`; the model id itself may contain `/`. */
@@ -77,6 +81,8 @@ interface Tally extends Pair {
   runs?: string;
   /** Ids a `<model>/<period>` quota window may name: the row and what it runs. */
   quotaModel: string;
+  /** The concrete model this selection runs (the row itself when concrete). */
+  concrete: string;
 }
 
 const pairKey = (harnessId: string, providerID: string, modelID: string): string =>
@@ -152,7 +158,7 @@ function rankModelRouting(input: ModelRoutingInput): Omit<ServerModelRoutingRepo
   const onlyHarness = input.harnessId ? canonicalHarnessId(input.harnessId) : undefined;
 
   // What telemetry reported, before naming it as a catalog row.
-  const observed = new Map<string, Omit<Tally, "listed" | "runs" | "quotaModel">>();
+  const observed = new Map<string, Omit<Tally, "listed" | "runs" | "quotaModel" | "concrete">>();
   for (const observation of input.observations) {
     if (observation.timestamp < from || !observation.modelId) continue;
     const harnessId = canonicalHarnessId(observation.harnessId);
@@ -194,6 +200,7 @@ function rankModelRouting(input: ModelRoutingInput): Omit<ServerModelRoutingRepo
         listed: resolution.kind === "listed",
         ...(runs ? { runs: friendlyModelId(runs) } : {}),
         quotaModel: runs ? `${selection.modelID} ${runs}` : selection.modelID,
+        concrete: runs ?? selection.modelID,
       };
       tallies.set(key, tally);
     }
@@ -232,6 +239,33 @@ function rankModelRouting(input: ModelRoutingInput): Omit<ServerModelRoutingRepo
     }
   }
 
+  // Exclusions name a model, not a spelling of it: the row a key resolves to
+  // and the concrete model that row runs are both hidden.
+  const sameModel = (harnessId: string, providerID: string, modelID: string): string =>
+    pairKey(harnessId, canonicalProviderId(providerID) || providerID.trim(), modelID);
+  const excludedRows = new Set<string>();
+  const excludedModels = new Set<string>();
+  for (const raw of input.exclude ?? []) {
+    const parsed = parseFavoriteKey(raw);
+    if (!parsed) continue;
+    const resolution = resolve(parsed, starred(parsed.harnessId));
+    if (resolution.kind === "unlisted") continue;
+    const row = resolution.kind === "listed" ? resolution.row : undefined;
+    const providerID = row?.providerID ?? parsed.providerID;
+    const modelID = row?.modelID ?? parsed.modelID;
+    excludedRows.add(pairKey(parsed.harnessId, providerID, modelID));
+    excludedModels.add(sameModel(parsed.harnessId, providerID, row?.resolvedModelID ?? modelID));
+  }
+  let excluded = 0;
+  const kept = ([key, tally]: [string, Tally]): boolean => {
+    if (only && !only.has(key)) return false;
+    if (excludedRows.has(key) || excludedModels.has(sameModel(tally.harnessId, tally.providerID, tally.concrete))) {
+      excluded += 1;
+      return false;
+    }
+    return true;
+  };
+
   const snapshots = input.snapshots;
   const sourcesOf = (pair: { harnessId: string; providerID: string; modelID: string }): Set<string> =>
     new Set(currentLimitSources(
@@ -240,8 +274,9 @@ function rankModelRouting(input: ModelRoutingInput): Omit<ServerModelRoutingRepo
     ));
 
   const sourcesByPair = new Map<string, Set<string>>();
-  const candidates: ServerModelRoutingCandidate[] = [...tallies.entries()].filter(([key]) => !only || only.has(key)).map(([key, tally]) => {
+  const candidates: ServerModelRoutingCandidate[] = [...tallies.entries()].filter(kept).map(([key, tally]) => {
     let quotaUsed: number | undefined;
+    let quotaWindow: ServerModelRoutingCandidate["quotaWindow"];
     let blockedUntil: number | undefined;
     let blocked = false;
     const sources = sourcesOf(tally);
@@ -253,6 +288,15 @@ function rankModelRouting(input: ModelRoutingInput): Omit<ServerModelRoutingRepo
         // A window whose reset already passed no longer constrains anything.
         if (window.resetsAt !== undefined && window.resetsAt <= input.now) continue;
         const used = Math.min(1, window.used / window.limit);
+        if (quotaUsed === undefined || used > quotaUsed) {
+          const pace = snapshot.pace[window.id]?.pace;
+          quotaWindow = {
+            sourceId: snapshot.providerId,
+            label: window.label,
+            ...(window.resetsAt !== undefined ? { resetsAt: window.resetsAt } : {}),
+            ...(pace ? { pace } : {}),
+          };
+        }
         quotaUsed = Math.max(quotaUsed ?? 0, used);
         if (used >= 1) {
           blocked = true;
@@ -274,6 +318,7 @@ function rankModelRouting(input: ModelRoutingInput): Omit<ServerModelRoutingRepo
       ...(tally.lastUsedAt ? { lastUsedAt: tally.lastUsedAt } : {}),
       available,
       ...(quotaUsed !== undefined ? { quotaUsed } : {}),
+      ...(quotaWindow ? { quotaWindow } : {}),
       ...(blockedUntil !== undefined ? { blockedUntil } : {}),
       blocked,
     };
@@ -325,6 +370,7 @@ function rankModelRouting(input: ModelRoutingInput): Omit<ServerModelRoutingRepo
     quotas,
     omitted: candidates.length - shown.length,
     unlisted: unlisted.size,
+    ...(excluded ? { excluded } : {}),
     ...(input.catalog?.length ? {} : { catalogUnavailable: true }),
   };
 }
@@ -368,6 +414,9 @@ export function formatModelRouting(report: Omit<ServerModelRoutingReport, "text"
   if (report.omitted > 0) lines.push(`(+${report.omitted} more; raise parameters.limit)`);
   if (report.unlisted > 0) {
     lines.push(`(${report.unlisted} used or starred model${report.unlisted === 1 ? " is" : "s are"} no longer offered by ${report.unlisted === 1 ? "its harness" : "their harnesses"}; left out)`);
+  }
+  if (report.excluded) {
+    lines.push(`(${report.excluded} model${report.excluded === 1 ? " is" : "s are"} hidden by the routing policy above; never delegate to ${report.excluded === 1 ? "it" : "them"})`);
   }
   if (report.quotas.length) {
     lines.push("Quotas:");

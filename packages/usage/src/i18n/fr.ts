@@ -72,6 +72,8 @@ export const fr: UsageMessages = {
   "usage.showAll": "Tout afficher ({count})",
   "usage.showLess": "Afficher moins",
   "usage.showBlock": "Afficher {block}",
+  "usage.hideBlock": "Masquer {block}",
+  "usage.hiddenBlocks": "Masqués",
   "usage.tokenMix": "Répartition des jetons",
   "usage.tokenMixDescription": "Répartition des jetons enregistrés entre entrée nouvelle, cache et sortie.",
   "usage.trendVsPrevious": "{value} par rapport aux {period} précédents",

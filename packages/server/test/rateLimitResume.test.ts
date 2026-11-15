@@ -151,6 +151,36 @@ test("a rate-limit stop plans a resume on the projection and the terminal event"
   await h.store.close();
 });
 
+test("a limit stop without a parsed wait honours the reset its error text states", async () => {
+  // Pi relays OpenCode Go's 429 with only a classification; the reset lives in
+  // the message. Without reading it the session hammered the provider every
+  // 15 min for hours.
+  const h = harness();
+  const { id } = await h.sessions.create({ projectId: "p1", title: "T" });
+  await h.sessions.send(id, { text: "keep going" });
+  await flush();
+
+  const before = Date.now();
+  h.emit(id, {
+    type: "turn/stopped",
+    turnId: "t1",
+    reason: "error",
+    code: "rate-limited",
+    error: '429: {"type":"GoUsageLimitError","message":"OpenCode Go usage limit reached (5-hour, resets in 1h 51m)."}',
+    retry: { scope: "rate", provider: "opencode-go", retryable: true },
+  });
+  await flush();
+
+  const proj = await h.store.projection(id);
+  assert.equal(proj!.resume!.retryAfterSec, 6660);
+  assert.ok(proj!.resume!.resumeAt >= before + 6660_000);
+  const stop = (await h.store.events(id)).findLast((e) => e.type === "turn/stopped");
+  const retry = (stop!.data as { retry?: { resumeAt?: number; retryAfterSec?: number } }).retry;
+  assert.equal(retry?.retryAfterSec, 6660);
+  assert.equal(retry?.resumeAt, proj!.resume!.resumeAt);
+  await h.store.close();
+});
+
 test("observation-path rate-limit stop still plans a durable resume", async () => {
   const h = harness();
   const { id } = await h.sessions.create({ projectId: "p1", title: "T" });
@@ -189,6 +219,28 @@ test("cancelResume clears the plan and records turn/resume-cancelled", async () 
   assert.equal(proj?.status, "failed");
   const cancelled = (await h.store.events(id)).find((e) => e.type === "turn/resume-cancelled");
   assert.equal((cancelled!.data as { reason?: string }).reason, "user");
+  await h.store.close();
+});
+
+test("Stop on a session waiting out a limit cancels the resume timer", async () => {
+  const h = harness();
+  const { id } = await h.sessions.create({ projectId: "p1", title: "T" });
+  await h.sessions.send(id, { text: "keep going" });
+  await flush();
+  h.emit(id, LIMIT_STOP);
+  await flush();
+  assert.ok((await h.store.projection(id))?.resume, "the limit stop should plan a resume");
+
+  await h.sessions.abort(id, { source: "subagent-dock" });
+  await flush();
+
+  const proj = await h.store.projection(id);
+  assert.equal(proj?.resume, undefined);
+  assert.equal(proj?.autoRetry, undefined);
+  const cancelled = (await h.store.events(id)).find((e) => e.type === "turn/resume-cancelled");
+  assert.equal((cancelled!.data as { reason?: string }).reason, "user");
+  // Nothing was resent: the only started turn is the original send.
+  assert.equal(h.startedTexts.length, 1);
   await h.store.close();
 });
 

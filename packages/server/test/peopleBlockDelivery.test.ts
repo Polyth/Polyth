@@ -69,7 +69,7 @@ function fixture(t: test.TestContext, memory?: MemoryRuntimeService, options: { 
     security.control.transaction(() => security.control.run(`INSERT INTO resources(id,kind,org_id,space_id,parent_id,owner_principal_id,created_by,visibility,lifecycle,created_at_ms,updated_at_ms)
       VALUES(?,'session','org_home','spc_home','p',?,?,?,'active',1,1)`, id, owner, owner, visibility));
   };
-  return { sessions, store, requests, steered, openResource };
+  return { sessions, store, requests, steered, openResource, security };
 }
 
 const OLIA = { userId: "usr_olia", name: "Оля" };
@@ -112,12 +112,30 @@ test("a personal note reaching the model marks the chat before delivery", async 
   assert.equal((await f.store.projection(id))?.personalContext, true);
 });
 
-test("one person's Space gets no block", async (t) => {
+test("a chat nobody is recorded as reading, sent by no one, gets no block", async (t) => {
   const f = fixture(t);
   const { id } = await f.sessions.create({ projectId: "p", title: "T" });
   await f.sessions.send(id, { text: "Hello", clientOperationId: "op-1" });
   // No canonical row for this chat: nothing says who reads it, so nothing is claimed.
   assert.ok(!f.requests[0]!.text.includes("<polyth-people>"));
+});
+
+test("alone in a Space, the model still learns the name its person chose, and a rename shows on the next turn", async (t) => {
+  const f = fixture(t);
+  f.security.control.transaction(() => f.security.control.run("DELETE FROM space_memberships WHERE principal_id='usr_taras'"));
+  const { id } = await f.sessions.create({ projectId: "p", title: "T" });
+  f.openResource(id, "private");
+  await f.sessions.send(id, { text: "Привіт", clientOperationId: "op-1" }, { author: { userId: "usr_olia" } });
+  assert.match(f.requests[0]!.text, /<polyth-people>\nSpeaking now: "Оля", the name they chose to be called\./);
+  assert.doesNotMatch(f.requests[0]!.text, /read by|Only "/);
+  const prepared = (await f.store.events(id)).find((event) => event.type === "context/people-prepared");
+  assert.ok(prepared, "recorded before delivery, like the shared-Space block");
+
+  f.security.control.transaction(() => f.security.control.run("UPDATE users SET display_name='Капітанка' WHERE id='usr_olia'"));
+  const next = await f.sessions.create({ projectId: "p", title: "Next" });
+  f.openResource(next.id, "private");
+  await f.sessions.send(next.id, { text: "Ще раз", clientOperationId: "op-2" }, { author: { userId: "usr_olia" } });
+  assert.match(f.requests.at(-1)!.text, /Speaking now: "Капітанка"/);
 });
 
 test("someone joining another person's running turn is named, and the line is recorded first", async (t) => {

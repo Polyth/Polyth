@@ -703,3 +703,36 @@ test("a reply on the newest page needs one read even without turn/started in it"
   assert.equal(sent[0]!.body, "All green.");
   assert.equal(calls.length, 1, "the walk stops at the page that already holds the reply");
 });
+
+test("web push goes only to the subscription of the device in use; a test push goes to all", async () => {
+  const file = join(mkdtempSync(join(tmpdir(), "polyth-push-")), "push.json");
+  const urls: string[] = [];
+  const fetchFn = (async (url: unknown) => { urls.push(String(url)); return { ok: true, status: 201 } as Response; }) as typeof fetch;
+  let active: string | undefined;
+  const svc = createPushService({ file, fetchFn, log: () => {}, activeDevice: () => active });
+  const account = { userId: "usr_owner", spaceId: "sp_owner" };
+  const sub = (name: string) => {
+    const keys = browserKeys();
+    return { endpoint: `https://push.example.net/${name}`, keys: { p256dh: keys.p256dh, auth: b64u(keys.authSecret) } };
+  };
+  svc.subscribe(account, sub("phone"), "device:phone");
+  svc.subscribe(account, sub("browser"), "browser:remembered");
+  svc.subscribe(account, sub("old"));
+  const payload = buildPushPayload("permission", { sessionId: "ses_9", sessionTitle: "Deploy" });
+  const sentTo = () => urls.splice(0).map((url) => url.split("/").pop()).sort();
+
+  assert.equal((await svc.send(account, payload)).sent, 3, "nobody active: all");
+  assert.deepEqual(sentTo(), ["browser", "old", "phone"]);
+  active = "browser:remembered";
+  assert.equal((await svc.send(account, payload)).sent, 1);
+  assert.deepEqual(sentTo(), ["browser"], "an unnamed old subscription is skipped");
+  assert.equal((await svc.send(account, { ...payload, test: true })).sent, 3, "a test push goes everywhere");
+  sentTo();
+  active = "device:nobody-subscribed";
+  assert.equal((await svc.send(account, payload)).sent, 0);
+  // The device survives a restart.
+  active = "device:phone";
+  const again = createPushService({ file, fetchFn, log: () => {}, activeDevice: () => active });
+  assert.equal((await again.send(account, payload)).sent, 1);
+  assert.deepEqual(sentTo(), ["phone"]);
+});

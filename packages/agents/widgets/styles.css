@@ -1483,6 +1483,20 @@
 .agents-page .agent-live-glyph { display: inline-grid; flex: none; place-items: center; align-self: center; color: var(--muted); }
 .agents-page .agent-live-glyph svg { width: 15px; height: 15px; }
 .agents-page .agent-live-preview { min-width: 0; overflow: hidden; color: var(--muted); text-overflow: ellipsis; }
+/* Waiting for background work: what it waits on takes the line; the agent's
+   last words say what comes next. */
+.agents-page .agent-live-step .agent-live-wait { max-width: 100%; }
+.agents-page .agent-live-said {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-response);
+  line-height: var(--font-response-lh);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
 .agents-page .agent-live-meta {
   display: flex;
   flex-wrap: wrap;
@@ -1496,6 +1510,8 @@
 .agents-page .agent-live-state { color: color-mix(in srgb, var(--agent-tint) 80%, var(--text-dim)); font-weight: 600; }
 .agents-page .agent-live-steps::before { content: "·"; margin-inline-end: var(--space-2); }
 .agents-page .agent-conversation[data-color="neutral"] .agent-live-state { color: var(--accent-text); }
+/* Waiting is calm: no agent colour, which a red agent would make read as trouble. */
+.agents-page .agent-live[data-waiting] .agent-live-state { color: var(--text-dim); }
 .agents-page .agent-live-open {
   padding: 0;
   border: 0;
@@ -1538,18 +1554,14 @@
   font-size: var(--font-meta);
   line-height: var(--font-meta-lh);
 }
-.agents-page .agent-report-meta > * + *::before { content: "·"; margin-inline-end: var(--space-2); color: var(--faint); font-weight: 400; }
+.agents-page .agent-report-meta > .agent-report-when ~ *::before { content: "·"; margin-inline-end: var(--space-2); color: var(--faint); font-weight: 400; }
+.agents-page .agent-report-meta > .agent-tone { align-self: center; }
+.agents-page .agent-report-meta time { font-variant-numeric: tabular-nums; }
 /* What the run says about itself: the one coloured word, softened toward the
    muted ink so a bright palette's yellow never shouts. */
 .agents-page .agent-report-signal { font-weight: 600; }
 .agents-page .agent-report-signal[data-signal="alert"] { color: color-mix(in oklab, var(--amber) 72%, var(--muted)); }
 .agents-page .agent-report-signal[data-signal="failed"] { color: color-mix(in oklab, var(--red) 72%, var(--muted)); }
-.agents-page .agent-report-head {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-4);
-  min-width: 0;
-}
 .agents-page .agent-report-headline {
   flex: 1 1 auto;
   min-width: 0;
@@ -1563,7 +1575,7 @@
 }
 .agents-page .agent-report[data-signal="failed"] .agent-report-headline { color: color-mix(in srgb, var(--red) 70%, var(--text)); }
 /* Every time: the column's end, in quiet figures. */
-.agents-page :is(.agent-report-head, .agent-report-line, .agent-quiet-toggle, .agent-quiet-list) time {
+.agents-page .agent-quiet-list time {
   flex: none;
   color: var(--faint);
   font-size: var(--font-meta);
@@ -1722,16 +1734,19 @@
 }
 .agents-page .agent-report-note .ui-input { flex: 1 1 auto; }
 
-/* A report read before, with newer ones after it: one row, its headline at
-   the start and its time at the end. Runs of rows (and quiet checks) sit
-   together like a list; the whole row is the target. */
+/* A report read before, with newer ones after it, and quiet checks: one row
+   each, on one grid down the page: the mark, the day (or the time), the
+   headline in two lines at most, the run's length at the column's end. Runs
+   of rows sit together like a list; the whole row is the target. */
 .agents-page :is(.agent-report-line, .agent-quiet-toggle) {
-  display: flex;
+  display: grid;
+  grid-template-columns: 8px calc(var(--font-meta) * 5.2) minmax(0, 1fr) auto;
   align-items: baseline;
-  gap: var(--space-4);
+  column-gap: var(--space-3);
   width: 100%;
   min-width: 0;
   padding-inline: 0;
+  padding-block: calc((max(28px, var(--hit-min)) - var(--font-response) * 1.4) / 2);
   border: 0;
   background: none;
   color: inherit;
@@ -1739,18 +1754,32 @@
   text-align: start;
   cursor: pointer;
 }
-.agents-page .agent-report-line { padding-block: calc((max(28px, var(--hit-min)) - var(--font-response) * 1.4) / 2); }
-.agents-page .agent-report-line-title {
-  flex: 1 1 auto;
+.agents-page .agent-quiet-toggle[data-static] { cursor: default; }
+/* The mark sits on the first line's middle. */
+.agents-page :is(.agent-report-line, .agent-quiet-toggle) > .agent-tone {
+  align-self: start;
+  margin-block-start: calc(var(--font-response) * .7 - 4px);
+}
+.agents-page :is(.agent-row-when, .agent-row-length) {
+  color: var(--faint);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.agents-page .agent-row-when { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.agents-page :is(.agent-report-line-title, .agent-quiet-label) {
+  display: -webkit-box;
   min-width: 0;
   overflow: hidden;
   color: var(--text-dim);
   font-size: var(--font-response);
   line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   transition: color var(--motion-fast) var(--motion-ease);
 }
+.agents-page .agent-quiet-label { color: var(--muted); }
 .agents-page .agent-report[data-signal="failed"] .agent-report-line-title { color: color-mix(in srgb, var(--red) 70%, var(--text)); }
 .agents-page .agent-report-fold {
   position: relative;
@@ -1769,6 +1798,86 @@
 .agents-page :is(.agent-report[data-compact="line"], .agent-quiet) + :is(.agent-report[data-compact="line"], .agent-quiet) {
   margin-block-start: calc(var(--conversation-message-gap) * -1);
 }
+/* A day of rows alone (no divider) goes on the list above it; a day that
+   opens a report keeps the air of a new day. */
+.agents-page .agent-day + .agent-day[data-bare]:not(:has(.agent-report:not([data-compact="line"]), .agent-live)) {
+  margin-block-start: calc(var(--conversation-message-gap) * -1);
+}
+
+/* The mark: what kind of news a run brought. A dot for news (the accent for
+   an update, red for an alert or a failure), a ring for nothing new. */
+.agents-page .agent-tone {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.agents-page .agent-tone:is([data-tone="alert"], [data-tone="failed"]) { background: var(--red); }
+.agents-page .agent-tone:is([data-tone="quiet"], [data-tone="muted"]) {
+  background: none;
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--faint) 80%, transparent);
+}
+.agents-page .agent-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* What only the person can do: the entry's last words, each with its way to
+   do it at the row's end. No surface: the label's colour marks it. */
+.agents-page .agent-needs { display: grid; gap: var(--space-2); margin-block-start: var(--space-3); }
+.agents-page .agent-needs-label {
+  margin: 0;
+  color: color-mix(in oklab, var(--amber) 72%, var(--muted));
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: var(--font-meta-lh);
+}
+.agents-page .agent-needs-list { display: grid; gap: var(--space-3); margin: 0; padding: 0; list-style: none; }
+.agents-page .agent-need { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.agents-page .agent-need-words { display: grid; flex: 1 1 auto; gap: 2px; min-width: 0; }
+.agents-page .agent-need-text {
+  color: var(--text);
+  font-size: var(--font-response);
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.agents-page .agent-need-detail {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  overflow-wrap: anywhere;
+}
+.agents-page .agent-need-open { flex: none; text-decoration: none; }
+
+/* How the run went: the full report's account, time by time. */
+.agents-page .agent-steps { margin-block-start: var(--space-1); }
+.agents-page .agent-steps-list { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.agents-page .agent-steps-list li {
+  display: grid;
+  grid-template-columns: calc(var(--font-meta) * 5.2) minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: var(--space-3);
+}
+.agents-page .agent-steps-list time {
+  color: var(--faint);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.agents-page .agent-steps-text {
+  color: var(--text-dim);
+  font-size: var(--font-response);
+  line-height: var(--font-response-lh);
+  overflow-wrap: anywhere;
+}
+.agents-page .agent-steps-list li[data-kind="wait"] .agent-steps-text { color: var(--muted); }
+.agents-page .agent-steps-wait { color: var(--text-dim); font-weight: 600; }
 
 /* The person's words, as in Chat, from the other side; no outline, so the
    bubble is the one soft shape on the page. */
@@ -1786,22 +1895,17 @@
 
 /* Quiet checks: a row like a read report's, in the quietest ink. */
 .agents-page .agent-quiet { display: grid; gap: var(--space-1); }
-.agents-page .agent-quiet-toggle {
-  padding-block: calc((max(28px, var(--hit-min)) - var(--font-meta) * var(--font-meta-lh)) / 2);
-  color: var(--faint);
-  font-size: var(--font-meta);
-  line-height: var(--font-meta-lh);
-}
-.agents-page .agent-quiet-label { flex: 1 1 auto; min-width: 0; transition: color var(--motion-fast) var(--motion-ease); }
 @media (hover: hover) {
-  .agents-page .agent-quiet-toggle:hover:where(:not(:disabled)) .agent-quiet-label { color: var(--text-dim); }
+  .agents-page .agent-quiet-toggle:not([data-static]):hover:where(:not(:disabled)) .agent-quiet-label { color: var(--text-dim); }
 }
 .agents-page .agent-quiet-toggle[aria-expanded="true"] .agent-quiet-label { color: var(--text-dim); }
 .agents-page .agent-quiet-list {
   display: grid;
   gap: var(--space-1);
   margin: 0 0 var(--space-1);
+  /* Under the row's words, past its mark and day. */
   padding: 0;
+  padding-inline-start: calc(8px + var(--font-meta) * 5.2 + var(--space-3) * 2);
   list-style: none;
   color: var(--faint);
   font-size: var(--font-meta);
@@ -2198,32 +2302,5 @@
 .agents-page .agent-memory-feedback,
 .agents-page .agent-memory-context { margin-block-start: var(--space-4); }
 
-/* ---- An agent's session in Chat names its agent in the header -------------- */
-.agent-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  max-inline-size: min(22rem, 40vw);
-  min-block-size: max(var(--control-h-sm), var(--hit-min));
-  padding-block: 0;
-  padding-inline: var(--space-1) var(--space-2);
-  border: 0;
-  border-radius: var(--radius-round);
-  background: transparent;
-  color: var(--text-dim);
-  font: inherit;
-  font-size: var(--font-meta);
-  font-weight: 550;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-  transition: background var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
-}
-@media (hover: hover) {
-  .agent-chip:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); color: var(--text); }
-}
-.agent-chip:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
-.agent-chip .agent-chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.agent-chip .agent-chip-chevron { flex: none; color: var(--faint); }
-.agent-chip .agent-chip-chevron:dir(rtl) { transform: scaleX(-1); }
 .agents-page .agent-feed-empty .agent-mark { --mark: 36px; justify-self: center; margin-block-end: var(--space-1); }
 .agents-page .agents-home-glyph .agent-mark { --mark: var(--icon-lg); }

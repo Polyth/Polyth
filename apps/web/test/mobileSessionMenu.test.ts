@@ -141,9 +141,9 @@ test("island buttons press and stay open as a colour change, with no plate or se
   assert.match(state![1]!, /color: var\(--accent-text\)/);
   assert.match(state![1]!, /transform: none/);
   assert.doesNotMatch(state![1]!, /background|box-shadow|filter/, "no plate or glow");
-  // Looks that recolour island glyphs do so at rest only.
+  // Looks that recolour island glyphs do so at rest only (keyboard focus is a colour too).
   for (const look of ["paper", "editorial"]) {
-    assert.match(looks, new RegExp(`data-shell-look="${look}"\\]:not\\(#\\\\#\\) :is\\(\\.mobile-float-navigation, \\.mobile-float-actions\\) \\.ui-icon-btn:not\\(:active, \\[aria-expanded="true"\\]\\)`));
+    assert.match(looks, new RegExp(`data-shell-look="${look}"\\]:not\\(#\\\\#\\) :is\\(\\.mobile-float-navigation, \\.mobile-float-actions\\) \\.ui-icon-btn:not\\(:active, \\[aria-expanded="true"\\], :focus-visible\\)`));
   }
   // New session leads; in a chat the ⋯ menu ends the island and holds Open tools.
   // A new chat has no menu, so it keeps the Open tools button after New session.

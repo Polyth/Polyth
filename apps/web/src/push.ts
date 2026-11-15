@@ -5,6 +5,7 @@
 // unsupported and the in-page notifier remains the only channel.
 import { api } from "@polyth/session/web-api";
 import { tr } from "./i18n/index.ts";
+import { presenceClientId } from "./devicePresence.ts";
 
 let registeredPushEndpoint: string | null = null;
 
@@ -59,7 +60,9 @@ export async function pushSubscription(): Promise<PushSubscription | null> {
 }
 
 async function registerPushSubscription(sub: PushSubscription): Promise<void> {
-  await api.pushSubscribe(sub.toJSON());
+  // Names this device like its presence reports, so an alert skips this
+  // browser while its person works on another device.
+  await api.pushSubscribe({ ...sub.toJSON(), clientId: presenceClientId() });
   registeredPushEndpoint = sub.endpoint;
 }
 

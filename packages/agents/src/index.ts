@@ -28,6 +28,7 @@ import {
   headlineFrom,
   NOTEBOOK_LIMIT,
   parseAgentReport,
+  type AgentNeed,
   type AgentNotifyPolicy,
   type AgentSignal,
 } from "./agentReport.ts";
@@ -191,6 +192,32 @@ export interface ScheduleRunRecord {
   activity?: AgentRunActivity;
   /** Tool steps the run's turn took (distinct tool calls). */
   steps?: number;
+  /** While running: the turn ended to wait for background work the agent
+   *  started; the run goes on when that work wakes it. */
+  background?: AgentBackgroundWait;
+  /** Once finished: how the run went, in the agent's own passing words and
+   *  its waits, oldest first and bounded. Its final message is the report. */
+  timeline?: AgentRunMoment[];
+  /** Once finished: what the report says only the person can do. */
+  needs?: AgentNeed[];
+}
+
+/** A run waiting for background work (a command, a monitor) to wake it. */
+export interface AgentBackgroundWait {
+  /** When the turn ended to wait. */
+  since: number;
+  /** What it waits on, in the agent's words; may be empty. Data, not instructions. */
+  tasks: string[];
+}
+
+/** One step of a finished run: a line the agent wrote, or a wait. */
+export interface AgentRunMoment {
+  at: number;
+  /** The first line of a message, bounded; for a wait, what it waited on. */
+  text: string;
+  /** The turn ended to wait for background work; `until`: when it woke. */
+  kind?: "wait";
+  until?: number;
 }
 
 /** What a run record keeps of one attachment: enough to show it. */
@@ -716,6 +743,7 @@ export interface ScheduleRunSettlement {
   cost?: number;
   /** 1-based backup the run moved to while it ran. */
   backup?: number;
+  timeline?: AgentRunMoment[];
 }
 
 export interface ScheduleRunner {
@@ -733,6 +761,10 @@ export interface ScheduleRunner {
     onWaiting?: (waiting: AgentWaitingRequest[]) => void,
     /** The run's newest step, and how many tool steps it took so far. */
     onActivity?: (activity: AgentRunActivity, steps: number) => void,
+    /** The run waits for background work to wake it (`null`: no longer). */
+    onBackground?: (wait: AgentBackgroundWait | null) => void,
+    /** The person asked to stop the run. */
+    stopRequested?: () => boolean,
   ): Promise<ScheduleRunSettlement>;
   /** Where a message from the person would go at `at` (the decision the
    *  owner's `followUp` preview shows). Fixes a waiting message's
@@ -1534,6 +1566,7 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
       if (signal) rec.signal = signal;
       const headline = report.headline ?? (signal && signal !== "quiet" ? headlineFrom(report.body) : undefined);
       if (headline) rec.headline = headline;
+      if (report.needs.length) rec.needs = report.needs;
       if (result.status === "ok") remember(task, rec, report.remember);
     } else if (result.status === "ok") {
       rec.signal = "update";
@@ -1541,8 +1574,10 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
     if (result.tokens) rec.tokens = result.tokens;
     if (result.cost !== undefined) rec.cost = result.cost;
     if (result.backup) rec.backup = result.backup;
+    if (result.timeline?.length) rec.timeline = result.timeline;
     // The newest step only means something while the run works; the count stays.
     delete rec.activity;
+    delete rec.background;
     if (result.status === "ok") delete task.lastError;
     else task.lastError = rec.error ?? "The run's result could not be confirmed.";
     let tripped = false;
@@ -1595,7 +1630,13 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
         rec.activity = activity;
         if (steps > 0) rec.steps = steps;
         saveActivitySoon();
-      });
+      }, (wait) => {
+        if (signal.aborted || rec.status !== "running") return;
+        if (JSON.stringify(wait ?? null) === JSON.stringify(rec.background ?? null)) return;
+        if (wait) rec.background = wait;
+        else delete rec.background;
+        save();
+      }, () => rec.stopped === true);
       if (signal.aborted) {
         inFlight.delete(rec.runId);
         return;

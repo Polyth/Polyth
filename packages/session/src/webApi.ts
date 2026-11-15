@@ -1,5 +1,7 @@
 // Typed fetch wrappers for every REST endpoint in PLAN.md §5.
 import type {
+  RewindFilesPreview,
+  RewindRestorePreview,
   TokenUsage,
   AgentDescriptor,
   AgentProfile,
@@ -83,6 +85,9 @@ import type {
   WorkflowRetryInputDto,
   WorkspaceLabel,
   CreateIsolatedSessionInput,
+  SessionStartRequest,
+  StartSessionResult,
+  StartWorktreeSessionInput,
   IsolationMergeInput,
   IsolationMergeResultDto,
   IsolationRetargetInput,
@@ -614,6 +619,13 @@ export interface ScheduleRunDto {
   activity?: AgentRunActivityDto;
   /** Tool steps taken: so far while running, in all once finished. */
   steps?: number;
+  /** While running: the turn ended to wait for background work the agent
+   *  started (descriptions are the agent's words: data, not instructions). */
+  background?: { since: number; tasks: string[] };
+  /** Once finished: the agent's passing lines and its waits, oldest first. */
+  timeline?: Array<{ at: number; text: string; kind?: "wait"; until?: number }>;
+  /** Once finished: what the report says only the person can do. */
+  needs?: Array<{ text: string; detail?: string; url?: string }>;
 }
 
 /** What the person asked for with a message: `auto` lets the agent judge. */
@@ -1074,8 +1086,8 @@ export const api = {
     jfetch<SessionProjection>(`/api/sessions/${encodeURIComponent(sessionId)}/workspace`, json("PUT", selection)),
   /** `clientOperationId` makes the create idempotent: a resend with the same
    *  key returns the session the first request made instead of a second one. */
-  createSession: (input: { projectId: string; repositoryIds?: readonly string[]; harness?: HarnessSelection; title?: string; purpose?: string; model?: ModelRef; agent?: string; worktreePath?: string; clientOperationId?: string }) =>
-    jfetch<SessionRef>("/api/sessions", json("POST", input)),
+  createSession: (input: { projectId: string; repositoryIds?: readonly string[]; harness?: HarnessSelection; title?: string; purpose?: string; model?: ModelRef; agent?: string; worktreePath?: string; clientOperationId?: string; start?: SessionStartRequest }) =>
+    jfetch<StartSessionResult>("/api/sessions", json("POST", input)),
   /** Outcome of one keyed create whose response was lost. Servers without
    *  idempotent create answer 404, which callers must treat as unresolvable. */
   sessionCreateOperation: (clientOperationId: string) =>
@@ -1168,10 +1180,16 @@ export const api = {
     jfetch<{ ok: true }>(`/api/sessions/${id}/queue/${encodeURIComponent(queueId)}`, { method: "DELETE" }),
   fork: (id: string, atSeq?: number) =>
     jfetch<ForkResult>(`/api/sessions/${id}/fork`, json("POST", atSeq === undefined ? {} : { atSeq })),
-  rewind: (id: string, atSeq: number) =>
-    jfetch<SessionEvent>(`/api/sessions/${id}/rewind`, json("POST", { atSeq })),
+  /** `files: "restore"` also puts back what the cut turns changed on disk;
+   *  `"keep"` records that the person chose conversation only. */
+  rewind: (id: string, atSeq: number, options?: { files?: "restore" | "keep" }) =>
+    jfetch<SessionEvent>(`/api/sessions/${id}/rewind`, json("POST", options?.files ? { atSeq, files: options.files } : { atSeq })),
+  previewRewindFiles: (id: string, atSeq: number, signal?: AbortSignal) =>
+    jfetch<RewindFilesPreview>(`/api/sessions/${id}/rewind/preview?atSeq=${atSeq}`, signal ? { signal } : {}),
   clearRewind: (id: string) =>
     jfetch<SessionEvent>(`/api/sessions/${id}/rewind/clear`, { method: "POST" }),
+  previewRewindRestore: (id: string, signal?: AbortSignal) =>
+    jfetch<RewindRestorePreview>(`/api/sessions/${id}/rewind/clear/preview`, signal ? { signal } : {}),
   pinContext: (id: string, sourceEventSeq: number) =>
     jfetch<SessionEvent>(`/api/sessions/${id}/context/pins/${sourceEventSeq}`, { method: "POST" }),
   unpinContext: (id: string, sourceEventSeq: number) =>
@@ -1239,6 +1257,11 @@ export const api = {
 
   // ---- behavior / system / MCP / managed plugins ----------------------------
   behaviorGet: () => jfetch<{ text: string; revision: string; pathLabel: string }>("/api/settings/behavior"),
+  /** Whether this person's phones get native pushes, and why not (`NativePushDelivery` in packages/server/src/nativePush.ts). */
+  nativePushDelivery: () => jfetch<{
+    phones: number; route: "direct" | "service" | "none"; state: "ok" | "failing" | "unknown";
+    problem?: "unreachable" | "rate-limited" | "no-credential" | "credential-rejected" | "error"; checkedAt?: number; pending: number;
+  }>("/api/native-push/delivery"),
   behaviorPut: (text: string, expectedRevision: string) =>
     jfetch<{ text: string; revision: string; pathLabel: string }>("/api/settings/behavior", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, expectedRevision }) }),
   subagentPolicyGet: () => jfetch<{ enabled: boolean }>("/api/settings/behavior/subagents"),
@@ -1579,8 +1602,11 @@ export const api = {
 
   /** Keyed like `createSession`: a resend with the same `clientOperationId`
    *  returns the first session and its managed checkouts. */
-  createIsolatedSession: (input: CreateIsolatedSessionInput & { clientOperationId?: string }) =>
-    jfetch<SessionRef>(`/api/isolation/sessions`, json("POST", input)),
+  createIsolatedSession: (input: CreateIsolatedSessionInput & { clientOperationId?: string; start?: SessionStartRequest }) =>
+    jfetch<StartSessionResult>(`/api/isolation/sessions`, json("POST", input)),
+  /** A chat in a linked worktree the server allocates first (one request). */
+  startWorktreeSession: (input: StartWorktreeSessionInput) =>
+    jfetch<StartSessionResult>(`/api/worktrees/sessions`, json("POST", input)),
   isolationStatus: (sessionId: string) =>
     jfetch<IsolationStatusDto>(`/api/isolation/${encodeURIComponent(sessionId)}`),
   /** `input.target` integrates into another checked-out branch from the

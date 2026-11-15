@@ -59,13 +59,19 @@ export default defineWebPackage((host) => () => {
       },
       render: (context) => createElement(AgentNavSection, { host, context: context as AgentNavContext }),
     }),
-    // An agent's own session, opened in Chat, names its agent in the header.
+    // An agent's own session, opened in Chat, leads its header with Back to
+    // the agent: the host's Back control, named and marked as the agent.
     host.slots.register({
-      slot: "session.header.status",
+      slot: "session.header.back",
       id: "schedule.agent-session",
       order: 15,
-      render: ({ sessionId }) => typeof sessionId === "string"
-        ? createElement(AgentSessionChip, { key: sessionId, host, sessionId })
+      render: ({ sessionId, presentation }) => typeof sessionId === "string"
+        ? createElement(AgentSessionChip, {
+          key: sessionId,
+          host,
+          sessionId,
+          presentation: presentation === "island" ? "island" : "bar",
+        })
         : null,
     }),
     // A decision on an agent's own session can hold for its next sessions too.

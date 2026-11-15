@@ -4,7 +4,7 @@ import test from "node:test";
 
 import {
   ApnsProvider, type ApnsRequest, type ApnsTransport, FcmProvider, type FcmRequest, type FcmTransport,
-  FetchFcmTransport, ProviderTransportError, ServiceAccountAccessTokenProvider,
+  FetchFcmTransport, ProviderTransportError, pushTtlSeconds, ServiceAccountAccessTokenProvider,
 } from "../src/index.ts";
 import type { ActivityInput, DeliveryInput, Destination, ProviderReply } from "../src/types.ts";
 
@@ -79,7 +79,7 @@ test("FCM uses HTTP v1 only, caches access tokens, selects stable channels, and 
   assert.match(fake.calls[0]!.url, /^https:\/\/fcm\.googleapis\.com\/v1\/projects\/polyth-project\/messages:send$/);
   const payload = JSON.parse(fake.calls[0]!.body).message;
   assert.deepEqual(payload.android, {
-    ttl: "300s",
+    ttl: "43200s",
     notification: { channel_id: "polyth_attention", tag: message.tag },
   });
   assert.deepEqual(payload.data, {
@@ -174,6 +174,18 @@ test("APNs adds mutable-content and a top-level sealed only when sealed is prese
   assert.equal(fake.calls[2]!.body, fake.calls[0]!.body);
 });
 
+test("an alert lives as long as it is worth seeing: hours for what a person must act on", async () => {
+  const pair = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  const apns = new ApnsFake();
+  const ios = new ApnsProvider({ teamId: "TEAM123", keyId: "KEY123", p8: pair.privateKey.export({ type: "pkcs8", format: "pem" }).toString(), topic: "com.polyth.app", transport: apns, nowSeconds: () => 1_000 });
+  const expected = { question: 43_200, permission: 43_200, failed: 43_200, mention: 43_200, message: 43_200, completed: 3_600, subagent: 300 } as const;
+  for (const [kind, ttl] of Object.entries(expected) as Array<[keyof typeof expected, number]>) {
+    assert.equal(pushTtlSeconds(kind), ttl);
+    assert.equal(await ios.deliver(iosDestination, { ...message, kind }), "success");
+    assert.equal(apns.calls.at(-1)!.headers["apns-expiration"], String(1_000 + ttl), kind);
+  }
+});
+
 test("FCM sends data-only high-priority with sealed, and the unchanged notification message without", async () => {
   const fake = new FcmFake();
   const provider = new FcmProvider({ project: "proj", accessTokenProvider: { getAccessToken: async () => ({ accessToken: "access-token-abcdefgh", expiresAt: Date.now() + 3_600_000 }) }, transport: fake });
@@ -183,13 +195,13 @@ test("FCM sends data-only high-priority with sealed, and the unchanged notificat
     token: android.providerToken,
     notification: { title: "Polyth", body: "A task needs permission" },
     data: { version: "1", subscriptionId: message.subscriptionId, notificationId: message.notificationId, kind: "permission", tag: message.tag },
-    android: { ttl: "300s", notification: { channel_id: "polyth_attention", tag: message.tag } },
+    android: { ttl: "43200s", notification: { channel_id: "polyth_attention", tag: message.tag } },
   } });
   const sealed = JSON.parse(fake.calls[1]!.body) as { message: Record<string, unknown> };
   assert.deepEqual(sealed.message, {
     token: android.providerToken,
     data: { version: "1", subscriptionId: message.subscriptionId, notificationId: message.notificationId, kind: "permission", tag: message.tag, sealed: SEALED },
-    android: { priority: "high", ttl: "300s" },
+    android: { priority: "high", ttl: "43200s" },
   });
   await provider.deliver(android, { ...message, sealed: "A".repeat(4200) });
   assert.equal(fake.calls[2]!.body, fake.calls[0]!.body, "oversize falls back to the generic message");

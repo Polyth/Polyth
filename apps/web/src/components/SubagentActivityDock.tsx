@@ -31,6 +31,7 @@ import type { SessionProjection } from "@polyth/contracts";
 import { resolveModelPresentation } from "@polyth/contracts/model-presentation";
 import { useHarnessColors } from "@polyth/models/runtime-catalog";
 import { api } from "@polyth/session/web-api";
+import { successFeedback, warningFeedback } from "../haptics.ts";
 import ProviderLogo from "../../../../packages/models/widgets/ProviderLogo.tsx";
 import { fmtDuration } from "../format.ts";
 import { guardedMayAllow, useGuardrails } from "../guardrails.ts";
@@ -346,6 +347,7 @@ export function SubagentBranchScope({ sessionId, model, children }: {
 
   const reply = useCallback((request: PendingPermission, action: "once" | "reject") => {
     setAnswered((previous) => new Set([...previous, request.requestId]));
+    if (action === "reject") warningFeedback(); else successFeedback();
     // The mirror lives in the parent's log; the server forwards the answer.
     void api.replyPermission(request.sessionId, request.requestId, action).catch((error: unknown) => {
       setAnswered((previous) => {

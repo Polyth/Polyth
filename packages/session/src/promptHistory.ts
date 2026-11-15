@@ -33,9 +33,13 @@ export function parseSessionPrompt(row: Pick<PromptHistoryCandidateRow, "id" | "
   let data: unknown;
   try { data = JSON.parse(row.data); } catch { return null; }
   if (!data || typeof data !== "object" || Array.isArray(data)) return null;
-  const payload = data as { text?: unknown; githubConflictResolution?: unknown; hiddenUserMessage?: unknown; autoResume?: unknown };
+  const payload = data as { text?: unknown; displayText?: unknown; githubConflictResolution?: unknown; hiddenUserMessage?: unknown; autoResume?: unknown };
   if (payload.githubConflictResolution === true || payload.hiddenUserMessage === true || payload.autoResume === true) return null;
-  const text = stripRecoveryContextBlocks(typeof payload.text === "string" ? payload.text : "");
+  // A prompt shown as other words (an agent's composed wake) is navigated by
+  // those words; an empty one is not on screen to navigate to.
+  if (payload.displayText === "") return null;
+  const shown = typeof payload.displayText === "string" ? payload.displayText : payload.text;
+  const text = stripRecoveryContextBlocks(typeof shown === "string" ? shown : "");
   const first = text.split("\n", 1)[0]?.trim() || text.trim().split("\n", 1)[0] || "";
   return { id: row.id, seq: row.seq, preview: first.length > 128 ? `${first.slice(0, 127)}…` : first };
 }
@@ -82,7 +86,9 @@ function parseStoredAttachments(raw: unknown): AttachmentRef[] {
   return out;
 }
 
-function promptTextFromEventData(data: { raw?: unknown; text?: unknown }): string {
+function promptTextFromEventData(data: { raw?: unknown; text?: unknown; displayText?: unknown }): string {
+  // Recall offers what the person saw, never an agent's composed wake text.
+  if (typeof data.displayText === "string") return data.displayText;
   if (typeof data.raw === "string" && data.raw.length > 0) return data.raw;
   if (typeof data.text === "string") return data.text;
   return "";
@@ -111,6 +117,7 @@ export function parsePromptHistoryCandidate(row: PromptHistoryCandidateRow): Pro
   const payload = data as {
     raw?: unknown;
     text?: unknown;
+    displayText?: unknown;
     attachments?: unknown;
     githubConflictResolution?: unknown;
     hiddenUserMessage?: unknown;

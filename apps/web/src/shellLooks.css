@@ -1328,7 +1328,7 @@ body[data-shell-look="paper"]:not(#\#) .mobile-nav-search {
 }
 
 /* At rest only: pressed and open islands keep the shared accent glyph. */
-body[data-shell-look="paper"]:not(#\#) :is(.mobile-float-navigation, .mobile-float-actions) .ui-icon-btn:not(:active, [aria-expanded="true"]) {
+body[data-shell-look="paper"]:not(#\#) :is(.mobile-float-navigation, .mobile-float-actions) .ui-icon-btn:not(:active, [aria-expanded="true"], :focus-visible) {
   color: var(--text-dim);
 }
 
@@ -1917,10 +1917,6 @@ body[data-shell-look="air"]:not(#\#) :is(.mobile-float-navigation, .mobile-float
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
   body[data-shell-look="air"]:not(#\#) .workspace-panel-sheet .workspace-panel-items {
     gap: var(--space-3) var(--space-2);
-  }
-
-  body[data-shell-look="air"]:not(#\#) .workspace-panel-sheet .workspace-panel-launcher {
-    grid-template-rows: calc(var(--icon-xl) + var(--space-3)) calc(2em * var(--font-meta-lh));
   }
 
   body[data-shell-look="air"]:not(#\#) .workspace-panel-sheet .workspace-panel-launcher > svg {
@@ -2945,7 +2941,7 @@ body[data-shell-look="editorial"]:not(#\#) .mobile-nav-project-name {
 }
 
 /* At rest only: pressed and open islands keep the shared accent glyph. */
-body[data-shell-look="editorial"]:not(#\#) :is(.mobile-float-navigation, .mobile-float-actions) .ui-icon-btn:not(:active, [aria-expanded="true"]) {
+body[data-shell-look="editorial"]:not(#\#) :is(.mobile-float-navigation, .mobile-float-actions) .ui-icon-btn:not(:active, [aria-expanded="true"], :focus-visible) {
   color: var(--text-dim);
 }
 

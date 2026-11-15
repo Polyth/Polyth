@@ -378,3 +378,10 @@ test("members see the sharing policy read-only, and installs without it see noth
     await view.unmount();
   }
 });
+
+test("presence/state is a recognised message only with a boolean activeElsewhere", () => {
+  assert.equal(isSyncInbound({ type: "presence/state", activeElsewhere: true }), true);
+  assert.equal(isSyncInbound({ type: "presence/state", activeElsewhere: false }), true);
+  assert.equal(isSyncInbound({ type: "presence/state", activeElsewhere: "true" }), false);
+  assert.equal(isSyncInbound({ type: "presence/state" }), false);
+});

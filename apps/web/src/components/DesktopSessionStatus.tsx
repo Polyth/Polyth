@@ -143,10 +143,13 @@ function useOpenerColumnWidth(open: boolean, anchor: HTMLElement | null): number
  * The popover can also open from the above-composer agent status dock. */
 export default function DesktopSessionStatus({
   showTrigger = true,
+  leading,
   trailing,
   caption,
 }: {
   showTrigger?: boolean;
+  /** Before the title, outside its button: the way back (SessionBack.tsx). */
+  leading?: ReactNode;
   trailing?: ReactNode;
   /** Small context line above the title (the project on tablet widths). */
   caption?: string | undefined;
@@ -223,6 +226,7 @@ export default function DesktopSessionStatus({
     if (!showTrigger) return null;
     return <div className="desktop-session-status desktop-session-status--conversation">
       <div className="desktop-session-status-row">
+        {leading}
         <div className="desktop-session-status-trigger">
           <span className="desktop-session-status-mask">
             {conversationPeople.length > 0
@@ -329,6 +333,7 @@ export default function DesktopSessionStatus({
 
   return <div className="desktop-session-status">
     <div className="desktop-session-status-row">
+      {leading}
       <button
         ref={headerRef}
         type="button"

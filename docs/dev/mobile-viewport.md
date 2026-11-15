@@ -243,6 +243,19 @@ truth. Electron retains its original frame and transparent-window handling.
     controller hides all four edge effects of the WebView's scroll view; the
     page paints its own chrome behind the bars. Source-checked in the same
     test; device-verified 2026-11-10 (1.2.327).
+  - **Safari has no switch for that band.** iOS Safari draws the same soft
+    band under the status bar, and it reaches into the page: report
+    2026-11-15, the floating islands' icons blurred in their top half in the
+    browser only. WebKit hides the band when its top-edge hit test (middle of
+    the edge, 4px down, `pointer-events` ignored) lands in a fixed or sticky
+    box at least 90% of the viewport wide with a backdrop filter or a solid
+    fill (`LocalFrameView::fixedContainerEdges`, `_shouldHideTopScrollPocket`),
+    and paints the status bar in the page colour instead. The phone header
+    renders `.phone-top-edge` for that test: full width, under the islands,
+    an identity backdrop filter, no taps (`styles.css`). Never put the
+    backdrop filter on the islands' row: it would bound their own glass.
+    Replayed in Chromium by `apps/web/test/phoneTopEdge.test.ts`; not
+    device-verified.
   - **Safe area after a load.** WebKit can give a freshly loaded document a
     zero `env(safe-area-inset-*)` until the WebView's next visible-rect
     update. Device report 2026-11-10: the phone bar sat under the status bar

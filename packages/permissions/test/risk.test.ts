@@ -7,6 +7,7 @@ import {
   assessPermissionRisk,
   autoApproveMayAnswer,
   isSessionPlanPermission,
+  riskParsing,
   type PermissionRiskInput,
   type PermissionRiskReason,
 } from "../src/risk.ts";
@@ -320,4 +321,19 @@ test("session todo-list tools are recognized by permission name only", () => {
   ]) assert.equal(plan(name), false, name);
   // Patterns are free text: a shell command named like a todo tool is not one.
   assert.equal(plan("bash", ["todowrite"]), false);
+});
+
+test("trailing-slash trimming is linear on long separator runs (CodeQL js/polynomial-redos)", () => {
+  const { trimTrailingSlashes, isSecretPath } = riskParsing;
+  assert.equal(trimTrailingSlashes("a/b//"), "a/b");
+  assert.equal(trimTrailingSlashes("a\\/"), "a\\");
+  assert.equal(trimTrailingSlashes("a\\/", true), "a");
+  assert.equal(trimTrailingSlashes("///"), "");
+  assert.equal(isSecretPath("~/.ssh/id_rsa/"), isSecretPath("~/.ssh/id_rsa"));
+  // The old `/[\\/]+$/` took ~n²/2 steps here; a linear scan is instant.
+  const hostile = "/".repeat(200_000) + "x";
+  const started = performance.now();
+  assert.equal(trimTrailingSlashes(hostile, true), hostile);
+  assert.equal(isSecretPath(hostile), false);
+  assert.ok(performance.now() - started < 1_000);
 });

@@ -10,7 +10,7 @@
 // It never guesses a provider: a route without a time-of-day schedule renders
 // nothing, and the schedule is provider identity, not harness identity.
 import "./styles.css";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ModelDescriptor } from "@polyth/contracts";
 import { Popover, Tooltip } from "@polyth/web/ui";
 import { useShellMode } from "@polyth/web/responsive-shell";
@@ -115,7 +115,6 @@ export default function PeakPricingIndicator({ model, harnessId, surface = "comp
   // live countdown, so it needs the one-second tick even in compact/dot.
   const [revealed, setRevealed] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const rootRef = useRef<HTMLSpanElement>(null);
   const state = useMemo(() => (schedule ? priceStateAt(now, schedule) : undefined), [now, schedule]);
   const until = state?.until;
   const interval = tickIntervalFor(prefs.display, open || (prefs.tooltip && revealed));
@@ -159,26 +158,6 @@ export default function PeakPricingIndicator({ model, harnessId, surface = "comp
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [schedule, until, interval]);
-
-  // Dot-only sits 2px after the model chip whatever gap the composer layout
-  // puts between its chips (2px, 4px on the hero row, 8px on phones): read
-  // the row's own gap and pull in by the difference. Only this element's
-  // custom property is written; the row is never touched.
-  const dotMode = !bar && prefs.display === "dot" && state !== undefined;
-  useLayoutEffect(() => {
-    const root = rootRef.current;
-    const row = root?.parentElement;
-    if (!dotMode || !root || !row) return;
-    const measure = () => {
-      const gap = Number.parseFloat(getComputedStyle(row).columnGap);
-      root.style.setProperty("--peak-pricing-row-gap", `${Number.isFinite(gap) ? gap : 0}px`);
-    };
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(row);
-    return () => observer.disconnect();
-  }, [dotMode]);
 
   // A route change must not leave the previous route's card open.
   useEffect(() => setOpen(false), [schedule?.id, route?.billing]);
@@ -275,7 +254,6 @@ export default function PeakPricingIndicator({ model, harnessId, surface = "comp
 
   return (
     <span
-      ref={rootRef}
       className="peak-pricing"
       data-display={prefs.display}
       {...(bar ? { "data-surface": surface } : {})}

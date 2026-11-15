@@ -723,13 +723,31 @@ export function agentSessionRoutes(deps: AgentSessionRouteDeps): RouteHandler {
       if (!Number.isSafeInteger(atSeq) || atSeq <= 0) {
         return invalid("atSeq must be a positive integer");
       }
-      json(200, await sessions.rewind(sessionId, atSeq));
+      if (input.files !== undefined && input.files !== "restore" && input.files !== "keep") {
+        return invalid("files must be \"restore\" or \"keep\"");
+      }
+      const files = input.files as "restore" | "keep" | undefined;
+      json(200, await sessions.rewind(sessionId, atSeq, files ? { files } : undefined));
+      return true;
+    }
+
+    if (suffix === "/rewind/preview" && method === "GET") {
+      if (!sessions.previewRewindFiles) return unsupported("file rollback is unavailable");
+      const atSeq = integerQuery(url, "atSeq", 0, 1, Number.MAX_SAFE_INTEGER);
+      if (atSeq <= 0) return invalid("atSeq must be a positive integer");
+      json(200, await sessions.previewRewindFiles(sessionId, atSeq));
       return true;
     }
 
     if (suffix === "/rewind/clear" && method === "POST") {
       if (!sessions.clearRewind) return unsupported("session rewind is unavailable");
       json(200, await sessions.clearRewind(sessionId));
+      return true;
+    }
+
+    if (suffix === "/rewind/clear/preview" && method === "GET") {
+      if (!sessions.previewRewindRestore) return unsupported("file rollback is unavailable");
+      json(200, await sessions.previewRewindRestore(sessionId));
       return true;
     }
 

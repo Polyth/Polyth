@@ -59,6 +59,7 @@ export const en = {
   "terminalview.processExited": "process exited",
   "terminalview.processExitedCodeValue": "process exited (code {code})",
   "terminalview.reconnecting": "Reconnecting",
+  "terminalview.renameValue": "Rename {title}",
   "terminalview.repository": "Repository",
   "terminalview.repositoryMissing": "{path} · missing",
   "terminalview.resetTerminal": "Reset terminal",

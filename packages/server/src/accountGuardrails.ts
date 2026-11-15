@@ -77,17 +77,19 @@ export function guardedSessionService(base: SessionService, guardrails: AccountG
   // Own-property copy: callers may spread the facade, which a prototype
   // chain would silently drop.
   const guarded: SessionService = { ...base };
-  guarded.create = async (input) => {
-    const route = input.model || input.harness
-      ? guardedRoute(guardrails, input.model, input.harness)
-      : guardrails.models[0]
-        ? {
-            model: { providerID: guardrails.models[0].providerID, modelID: guardrails.models[0].modelID },
-            harness: { mode: "pinned", harnessId: guardrails.models[0].harnessId } as HarnessSelection,
-          }
-        : {};
-    return base.create({ ...input, ...route });
-  };
+  const createRoute = (input: { model?: ModelRef; harness?: HarnessSelection }) => input.model || input.harness
+    ? guardedRoute(guardrails, input.model, input.harness)
+    : guardrails.models[0]
+      ? {
+          model: { providerID: guardrails.models[0].providerID, modelID: guardrails.models[0].modelID },
+          harness: { mode: "pinned", harnessId: guardrails.models[0].harnessId } as HarnessSelection,
+        }
+      : {};
+  guarded.create = async (input) => base.create({ ...input, ...createRoute(input) });
+  if (base.start) {
+    const start = base.start.bind(base);
+    guarded.start = async (input, admission) => start({ ...input, ...createRoute(input) }, admission);
+  }
   guarded.send = async (sessionId, input, admission) => {
     const route = guardedRoute(guardrails, input.model, input.harness);
     const { model: _model, harness: _harness, ...rest } = input;

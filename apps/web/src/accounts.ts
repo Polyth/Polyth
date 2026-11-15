@@ -166,6 +166,10 @@ export async function accountState(): Promise<AccountState> {
   };
 }
 
+/** The longest account name the server accepts (identity `displayName`). The
+ *  name is what agents and people call someone; Git commit names stay separate. */
+export const ACCOUNT_NAME_MAX = 80;
+
 export async function renameCurrentAccount(
   account: Pick<AccountChoice, "id" | "revision">,
   name: string,
@@ -326,6 +330,29 @@ export async function renameAccount(account: Pick<AccountChoice, "id" | "revisio
   const result = await authJson(`/api/auth/accounts/${encodeURIComponent(account.id)}/profile`, {
     name: name.trim(),
     expectedRevision: revisionOf(account, "renaming"),
+  });
+  if (!result.response.ok) throw authFailure(result.response, result.body);
+}
+
+/** Sign-in names the server accepts (identity `loginName`): stored lowercase. */
+export const ACCOUNT_LOGIN_MAX = 64;
+export const normalizeLogin = (value: string): string => value.trim().toLowerCase();
+export const validLogin = (value: string): boolean => /^[a-z0-9][a-z0-9._-]{0,63}$/.test(normalizeLogin(value));
+
+/** A person moves their own sign-in to a new login (needs a recent password
+ *  confirmation; no session ends). This browser's lock screen follows it. */
+export async function changeCurrentLogin(account: Pick<AccountChoice, "id" | "revision" | "login">, login: string): Promise<void> {
+  const next = normalizeLogin(login);
+  const result = await authJson("/api/auth/me/login", { login: next, expectedRevision: revisionOf(account, "changing the login") });
+  if (!result.response.ok) throw authFailure(result.response, result.body);
+  if (!account.login || currentBrowserLogin() === account.login) rememberLogin(next);
+}
+
+/** Instance owner moves another account to a new login; its password stays. */
+export async function changeAccountLogin(account: Pick<AccountChoice, "id" | "revision">, login: string): Promise<void> {
+  const result = await authJson(`/api/auth/accounts/${encodeURIComponent(account.id)}/login`, {
+    login: normalizeLogin(login),
+    expectedRevision: revisionOf(account, "changing the login"),
   });
   if (!result.response.ok) throw authFailure(result.response, result.body);
 }

@@ -33,12 +33,20 @@ import type {
   ProjectService,
   RemoteAccessPolicy,
   RequestIngress,
+  RewindFileKept,
+  RewindFilesOutcome,
+  RewindFilesPreview,
+  RewindRestorePreview,
   RouteHandler,
   SessionEvent,
+  WorkspaceCheckpointUnavailable,
   SessionIsolation,
   SessionPersistence,
+  SessionPerson,
   SessionProjection,
   SessionRef,
+  SessionStartRequest,
+  StartSessionResult,
   SecureSafeService,
   SessionService,
   SessionPrivacy,
@@ -414,9 +422,9 @@ export interface ServerSessionIsolationService {
    *  in their Space and owned by them; the project is checked there. Refuses a
    *  project that is not a local Git repository. */
   createIsolatedSession(
-    input: CreateIsolatedSessionInput,
-    options?: { sessions?: Pick<SessionService, "create" | "snapshot"> },
-  ): Promise<SessionRef>;
+    input: CreateIsolatedSessionInput & { start?: SessionStartRequest; clientOperationId?: string },
+    options?: { sessions?: Pick<SessionService, "create" | "start" | "snapshot"> },
+  ): Promise<StartSessionResult>;
   createDelegatedSession(input: ServerDelegatedSessionInput): Promise<ServerDelegatedSessionCreated>;
   /** The parent's delegated isolated children that still hold an isolation record. */
   delegatedChildren(parentSessionId: string): Promise<DelegatedIsolationDto[]>;
@@ -447,6 +455,66 @@ export interface ServerSessionIsolationService {
 
 export const SERVER_SESSION_ISOLATION =
   serverServiceKey<ServerSessionIsolationService>("isolation");
+
+/** One admitted turn of the session being rolled back, oldest first. */
+export interface WorkspaceCheckpointTurn {
+  /** Seq of the user/message that started the turn. */
+  promptSeq: number;
+  /** Snapshot commits taken before the prompt reached the runtime and after
+   *  the turn stopped. */
+  before: string;
+  after: string;
+  /** Paths this chat's edit tools reported during the turn, absolute or
+   *  relative to `cwd`; the service normalises them and drops outsiders. */
+  touched: string[];
+  /** Repo-relative paths either snapshot left out (too large). */
+  skipped?: string[];
+}
+
+export type WorkspaceCheckpointCaptureResult =
+  | { commit: string; root: string; skipped: string[]; skippedMore?: number }
+  | { unavailable: WorkspaceCheckpointUnavailable };
+
+/** What a redo needs: the snapshots a rollback recorded and what it wrote. */
+export interface WorkspaceRestoreInput {
+  cwd: string;
+  undo: string;
+  rolled: string;
+  /** Repo-relative paths the rollback restored. */
+  paths: string[];
+}
+
+/** Git-owned per-turn checkpoints and the file-by-file rollback built on them.
+ *  A file is only ever written when it still holds exactly the content the
+ *  compare names (what the agent left, or what the rollback wrote): every
+ *  other file stays as it is and is reported, never merged or overwritten.
+ *  The user's index, HEAD and branches are never changed. Callers authorize
+ *  the session and resolve its checkout before calling. */
+export interface WorkspaceCheckpointService {
+  /** Snapshot the checkout's working tree under the session's checkpoint
+   *  refs. Gives up (`timeout`) rather than exceed `budgetMs`. */
+  capture(input: {
+    cwd: string;
+    sessionId: string;
+    promptSeq: number;
+    phase: "before" | "after";
+    budgetMs: number;
+  }): Promise<WorkspaceCheckpointCaptureResult>;
+  /** What a rollback of `turns` would put back now. Read-only. */
+  previewRewind(input: { cwd: string; sessionId: string; turns: WorkspaceCheckpointTurn[] }): Promise<Omit<RewindFilesPreview, "turnRunning">>;
+  /** Put back every file the preview would, re-checking each one right
+   *  before writing it. `mode: "unavailable"` when nothing could be. */
+  applyRewind(input: { cwd: string; sessionId: string; turns: WorkspaceCheckpointTurn[] }): Promise<RewindFilesOutcome>;
+  previewRestore(input: WorkspaceRestoreInput): Promise<RewindRestorePreview>;
+  /** Redo: write back the pre-rollback content of every restored file that
+   *  still holds exactly what the rollback wrote. */
+  applyRestore(input: WorkspaceRestoreInput): Promise<{ restored: number; kept: number; keptFiles: RewindFileKept[] }>;
+  /** Drop a deleted session's checkpoint refs. */
+  forget(sessionId: string, cwd?: string): Promise<void>;
+}
+
+export const SERVER_WORKSPACE_CHECKPOINTS =
+  serverServiceKey<WorkspaceCheckpointService>("workspace.checkpoints");
 
 /** The account's starred model-picker entries as harness-qualified
  *  `harness::provider/model` keys, in the user's saved order. Read-only and
@@ -494,6 +562,8 @@ export interface ServerModelRoutingCandidate {
   available: boolean;
   /** Worst applicable quota window as a 0..1 fraction; absent when unknown. */
   quotaUsed?: number;
+  /** The window `quotaUsed` was read from: its label, reset and pace. */
+  quotaWindow?: { sourceId: string; label: string; resetsAt?: number; pace?: "under" | "on-track" | "over" };
   /** Earliest reset of an exhausted window when `blocked`. */
   blockedUntil?: number;
   blocked: boolean;
@@ -518,6 +588,8 @@ export interface ServerModelRoutingReport {
   /** Used or starred pairs left out because their harness's live catalog no
    *  longer offers them. */
   unlisted: number;
+  /** Pairs left out because the caller's `exclude` named them; absent = 0. */
+  excluded?: number;
   /** No live model catalog could be read: candidates keep the names
    *  telemetry and favorites used, unverified. */
   catalogUnavailable?: boolean;
@@ -525,18 +597,49 @@ export interface ServerModelRoutingReport {
   text: string;
 }
 
+export interface ServerModelRoutingOptions {
+  limit?: number;
+  windowDays?: number;
+  harnessId?: string;
+  /** Rank exactly these `harness::provider/model` keys, used or not: a
+   *  caller with its own allow-list gets their quota headroom without the
+   *  shortlist's usage filter. */
+  pairs?: readonly string[];
+  /** `harness::provider/model` keys never to list (a person's "never
+   *  delegate to"). Matched after catalog naming, so an alias row and the
+   *  model it runs are the same pair. */
+  exclude?: readonly string[];
+}
+
 /** Usage-owned delegation shortlist: favorites ∪ most-used harness/model
  *  pairs, named as the live catalogs name them and annotated with live quota
  *  headroom. */
 export interface ServerModelRoutingService {
-  /** `pairs` (`harness::provider/model` keys) ranks exactly those pairs,
-   *  used or not: a caller with its own allow-list gets their quota headroom
-   *  without the shortlist's usage filter. */
-  candidates(space: SpaceContext, options?: { limit?: number; windowDays?: number; harnessId?: string; pairs?: readonly string[] }): Promise<ServerModelRoutingReport>;
+  candidates(space: SpaceContext, options?: ServerModelRoutingOptions): Promise<ServerModelRoutingReport>;
 }
 
 export const SERVER_MODEL_ROUTING =
   serverServiceKey<ServerModelRoutingService>("models.routing");
+
+/** A person's delegation routing policy, resolved against live quota: which
+ *  model each kind of delegated work goes to now, what to skip and what never
+ *  to use. Provided by an optional package; the session control tool prints
+ *  `brief.text`, a blank line, then the shortlist built with `exclude`. */
+export interface ServerDelegationPolicyBrief {
+  /** Agent-facing lines placed before the shortlist. */
+  text: string;
+  /** `harness::provider/model` keys to leave out of the shortlist. */
+  exclude: string[];
+}
+
+export interface ServerDelegationPolicyService {
+  /** Undefined when the person behind `space` leaves routing to Polyth's
+   *  automatic ranking. `harnessId` narrows the brief to one harness. */
+  brief(space: SpaceContext, options?: { harnessId?: string }): Promise<ServerDelegationPolicyBrief | undefined>;
+}
+
+export const SERVER_DELEGATION_POLICY =
+  serverServiceKey<ServerDelegationPolicyService>("delegation.policy");
 
 export type ServerSessionTitleMode = "fallback" | "always";
 
@@ -564,6 +667,35 @@ export interface SessionPurposeRegistry {
 
 export const SESSION_PURPOSES =
   serverServiceKey<SessionPurposeRegistry>("session.purposes");
+
+/** What a start step is told about the chat being started. `author` is the
+ *  server's admission fact. Derive the Space from `session`, never from the
+ *  payload. */
+export interface SessionStartStepContext {
+  projectId: string;
+  /** The first prompt of this start, when it has one. */
+  firstTurnText?: string;
+  author?: SessionPerson;
+}
+
+/** One package-owned step of a chat's start, fed by
+ *  `SessionStartRequest.extensions[id]`. It replaces a client request that
+ *  used to follow session creation. */
+export interface SessionStartStep {
+  /** Reject a malformed payload before anything is created. */
+  validate?(payload: JsonObject, ctx: SessionStartStepContext): void | Promise<void>;
+  /** Runs once the chat's row exists and before its first turn is queued.
+   *  Idempotent: a resent start runs it again. A throw fails the start. */
+  run(payload: JsonObject, ctx: SessionStartStepContext & { session: SessionProjection }): Promise<void>;
+}
+
+/** Register in `onEnable`, dispose in `onDisable`; one owner per id. */
+export interface SessionStartStepRegistry {
+  register(id: string, step: SessionStartStep): Disposable;
+}
+
+export const SESSION_START_STEPS =
+  serverServiceKey<SessionStartStepRegistry>("session.start-steps");
 
 /** Package-owned, model-visible sections appended to the deployment-wide
  *  global behavior every harness receives. `section()` is read synchronously

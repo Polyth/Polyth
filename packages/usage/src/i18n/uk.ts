@@ -169,6 +169,8 @@ export const uk: UsageMessages = {
   "usage.showAll": "Показати всі ({count})",
   "usage.showLess": "Показати менше",
   "usage.showBlock": "Показувати «{block}»",
+  "usage.hideBlock": "Сховати «{block}»",
+  "usage.hiddenBlocks": "Приховані",
   "usage.tokenMix": "Склад токенів",
   "usage.tokenMixDescription": "Як записані токени розподіляються між новими вхідними, кешем і вихідними.",
   "usage.trendVsPrevious": "{value} порівняно з попереднім періодом ({period})",

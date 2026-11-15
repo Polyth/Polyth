@@ -7,8 +7,10 @@ import type {
 import {
   localOnlyRemoteAccess,
   serverServiceKey,
+  SESSION_START_STEPS,
   type ServerPackage,
   type ServerPackageHost,
+  type SessionStartStep,
 } from "@polyth/plugins";
 import { createBuiltinSources } from "./builtins.ts";
 import { createBundleService, hashText, type BundleViewer } from "./bundles.ts";
@@ -19,6 +21,49 @@ const STATUS: Record<string, number> = {
   "not-found": 404,
   "invalid-input": 400,
 };
+
+export type HandoffImport = {
+  sessionId: string;
+  provenance: HandoffResultImportedData["provenance"];
+  textHash: string;
+};
+
+/** The one import both the route and the start step record. `once` skips an
+ *  identical import already in the log: a resent start runs its step again.
+ *  The route never asks for it, so an import into a long chat reads no log. */
+export async function recordHandoffImport(host: ServerPackageHost, input: HandoffImport, once = false): Promise<void> {
+  if (once) {
+    const provenance = JSON.stringify(input.provenance);
+    const already = (await host.store.events(input.sessionId)).some((event) => event.type === "handoff/result-imported"
+      && event.data.textHash === input.textHash
+      && JSON.stringify(event.data.provenance) === provenance);
+    if (already) return;
+  }
+  await host.events.append(input.sessionId, "handoff/result-imported", {
+    provenance: input.provenance,
+    textHash: input.textHash,
+  }, { ignorable: true, producerPlugin: "handoff" });
+}
+
+function importPayload(payload: Record<string, unknown>): Omit<HandoffImport, "sessionId"> {
+  const provenance = payload.provenance as HandoffResultImportedData["provenance"] | undefined;
+  const textHash = String(payload.textHash ?? "");
+  if (!provenance || !textHash) {
+    throw Object.assign(new Error("provenance and textHash required"), { code: "invalid-input" });
+  }
+  return { provenance, textHash };
+}
+
+export function handoffImportStep(host: ServerPackageHost): SessionStartStep {
+  return {
+    validate(payload: JsonObject) {
+      importPayload(payload);
+    },
+    async run(payload, ctx) {
+      await recordHandoffImport(host, { sessionId: ctx.session.id, ...importPayload(payload) }, true);
+    },
+  };
+}
 
 export function handoffRoutes(deps: {
   host: ServerPackageHost;
@@ -176,21 +221,17 @@ export function handoffRoutes(deps: {
       if (path === "/api/handoff/imports" && method === "POST") {
         const input = await body();
         const sessionId = String(input.sessionId ?? "");
-        const provenance = input.provenance as HandoffResultImportedData["provenance"] | undefined;
-        const textHash = String(input.textHash ?? "");
-        if (!sessionId || !provenance || !textHash) {
+        if (!sessionId) {
           json(400, { error: "invalid-input", message: "sessionId, provenance, and textHash required" });
           return true;
         }
+        const imported = importPayload(input);
         const session = await spaces.sessions.snapshot(sessionId).catch(() => null);
         if (!session) {
           json(404, { error: "not-found", message: "session not found" });
           return true;
         }
-        await host.events.append(sessionId, "handoff/result-imported", {
-          provenance,
-          textHash,
-        }, { ignorable: true, producerPlugin: "handoff" });
+        await recordHandoffImport(host, { sessionId, ...imported });
         json(200, { ok: true });
         return true;
       }
@@ -216,11 +257,18 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     registry.register(provider);
   }
   let routes: RouteHandler | null = null;
+  let startStep: { dispose(): void | Promise<void> } | undefined;
   return {
     remoteAccess: localOnlyRemoteAccess(["handoff"]) satisfies RemoteAccessPolicy,
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
       routes ??= handoffRoutes({ host, registry, bundles, warnTokenThreshold });
+      startStep = host.services.get(SESSION_START_STEPS)?.register("handoff.import", handoffImportStep(host));
+    },
+    onDisable() {
+      void startStep?.dispose();
+      startStep = undefined;
+      routes = null;
     },
   };
 }

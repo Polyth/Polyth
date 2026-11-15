@@ -155,3 +155,16 @@ test("only a visible countdown ticks every second", () => {
   // An open summary or card shows the live countdown in any display.
   assert.equal(tickIntervalFor("dot", true), 1000);
 });
+
+test("on the composer's model line the ring follows the host's line rhythm", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const css = await readFile(new URL("../widgets/styles.css", import.meta.url), "utf8");
+  // Dot only: the glyph plus the host's line inset on each side, centred, on any
+  // pointer — the composer's icon grid spaces it like the context pie.
+  assert.match(css, /\.peak-pricing-chip:not\(\.sb\)\[data-display="dot"\] \{[^}]*justify-content:\s*center;[^}]*width:\s*calc\(16px \+ 2 \* var\(--composer-line-inset, 4px\)\);/s);
+  assert.match(css, /@media \(pointer: coarse\) \{\s*\.peak-pricing-chip:not\(\.sb\)\[data-display="dot"\] \{[^}]*width:\s*calc\(16px \+ 2 \* var\(--composer-line-inset, 14px\)\);/s);
+  // Never pulled toward a neighbour: the line's rhythm is the host's.
+  assert.doesNotMatch(css, /--peak-pricing-row-gap|justify-content:\s*flex-start/);
+  // With words, the ring keeps the same inset before it.
+  assert.match(css, /\.peak-pricing-chip\.config-chip \{[^}]*padding-inline:\s*calc\(var\(--composer-line-inset, 7px\) - 1px\) 8px;/s);
+});

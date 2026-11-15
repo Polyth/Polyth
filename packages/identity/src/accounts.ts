@@ -2,6 +2,7 @@ import { controlError, type ControlPlane } from '@polyth/control-plane';
 import { validateNewPassword, type PasswordService } from './passwords.ts';
 import { displayName, loginName, opaqueId } from './validation.ts';
 import { requireOwnerCredential } from './access.ts';
+import { OWNER_LOGIN } from './ownerCredential.ts';
 import type { SessionService } from './sessions.ts';
 import type { IdentityUser } from './types.ts';
 
@@ -36,6 +37,26 @@ export function createAccounts(control: ControlPlane, passwords: PasswordService
     `SELECT r.user_id FROM instance_roles r JOIN principals p ON p.id=r.user_id
       WHERE r.role='owner' AND p.status='active' AND p.kind='user' ORDER BY r.user_id LIMIT 1`,
   )?.user_id;
+  /** `owner` is the login setup and owner protection hand the instance owner
+   *  (and the recovery file names); nobody else may take it, even once freed. */
+  const reservedLogin = (login: string, userId?: string): boolean => login === OWNER_LOGIN && !(userId && hasOwnerRole(userId));
+  /** Moves an account's password sign-in to another login. The password,
+   *  passkeys (keyed by account ID), recovery codes and sessions stay; only
+   *  the name typed at sign-in changes. Never shown to agents or Git. */
+  const setLogin = (actor: string, userId: string, login: string, revision: number): IdentityUser => {
+    const user = get(userId);
+    if (user.managed) throw controlError('managed-identity', 'This account signs in through its identity provider');
+    if (user.revision !== revision) throw controlError('conflict', 'Account changed; refresh before saving');
+    if (!user.login) throw controlError('invalid-input', 'This account has no password sign-in');
+    if (user.login === login) return user;
+    if (reservedLogin(login, userId) || control.get('SELECT 1 FROM password_credentials WHERE login_name=? AND user_id<>?', login, userId)) {
+      throw controlError('login-taken', 'Login name is already in use');
+    }
+    control.run('UPDATE password_credentials SET login_name=? WHERE user_id=?', login, userId);
+    control.run('UPDATE principals SET revision=revision+1 WHERE id=?', userId);
+    control.audit(actor, 'identity.login-changed', userId);
+    return get(userId);
+  };
   /** Owners see every account; anyone else only their own. */
   const listFor = (userId: string): IdentityUser[] => {
     if (!hasOwnerRole(userId)) return [get(userId)];
@@ -84,7 +105,7 @@ export function createAccounts(control: ControlPlane, passwords: PasswordService
       return control.transaction(() => {
         requireOwnerCredential(control);
         const actor = owner(token);
-        if (control.get('SELECT 1 FROM password_credentials WHERE login_name=?', login)) throw controlError('conflict', 'Login name is already in use');
+        if (reservedLogin(login) || control.get('SELECT 1 FROM password_credentials WHERE login_name=?', login)) throw controlError('login-taken', 'Login name is already in use');
         const id = opaqueId('usr'), time = now();
         control.run("INSERT INTO principals(id,kind,status) VALUES(?,'user','active')", id);
         control.run('INSERT INTO users(id,display_name,created_at_ms,updated_at_ms) VALUES(?,?,?,?)', id, name, time, time);
@@ -118,6 +139,21 @@ export function createAccounts(control: ControlPlane, passwords: PasswordService
         control.audit(actor, 'identity.profile-renamed', userId);
         return get(userId);
       });
+    },
+    /** A person changes their own login. Like a password change it needs a
+     *  recent password confirmation; unlike one, no session ends. */
+    changeLogin(token: string, login: string, revision: number) {
+      expected(revision); const normalized = loginName(login);
+      return control.transaction(() => {
+        const actor = sessions.require(token, true);
+        return setLogin(actor.userId, actor.userId, normalized, revision);
+      });
+    },
+    /** Instance owner moves another account to a new login (e.g. a typo or a
+     *  new naming scheme). Its holder signs in with the new login from then on. */
+    changeAccountLogin(token: string, userId: string, login: string, revision: number) {
+      expected(revision); const normalized = loginName(login);
+      return control.transaction(() => setLogin(owner(token), userId, normalized, revision));
     },
     /**
      * Instance owner sets a new password for another local account, e.g. one

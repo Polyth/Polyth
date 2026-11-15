@@ -32,6 +32,7 @@ export const es: ModelsMessages = {
   "modelpicker.pricing": "Precios",
   "modelpicker.pricingPerMTok": "{input} de entrada · {output} de salida por MTok",
   "modelpicker.provider": "Proveedor",
+  "modelpicker.providers": "Proveedores",
   "modelpicker.reasoning": "Razonamiento",
   "modelpicker.removeFavorite": "Eliminar favorito",
   "modelpicker.removeValueFromFavorites": "Eliminar {name} de favoritos",

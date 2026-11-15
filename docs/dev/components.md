@@ -180,6 +180,17 @@ viewport**:
   them; a mode in a sheet's title row is `action: { kind: "switch", … }`
   rather than a toggling text button (see [UI architecture](ui.md), "Surface
   motion").
+- Phone reordering is the Home Screen gesture on the one engine,
+  `workspaceArrange.ts` (`useArrange`): a still hold lifts the item under the
+  finger and the same press drags it while neighbours glide. A surface with an
+  edit mode (phone Workspace, Usage blocks) passes `activate`, so the hold also
+  turns editing on; while editing, its list carries `data-arrange-editing`,
+  which gives the items the shared sway, and `.arrange-badge` is the corner −
+  (`--add`: the green + of a hidden item); one *Done* and Escape end it. A
+  choosing list (navigator projects, Usage limit panels, model picker
+  favorites and providers) only lifts on hold, a tap still chooses. Never add
+  a second drag engine or tap-only arrows on phone; `MoveControls` stays the
+  keyboard path of inline desktop lists.
 - Inputs keep the 16px font floor (`--font-input`) to prevent mobile zoom.
 - Hover styling belongs inside `@media (hover: hover)`: touch engines keep
   `:hover` on the last tapped control, which reads as a stuck highlight and

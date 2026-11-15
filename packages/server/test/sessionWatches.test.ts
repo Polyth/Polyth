@@ -614,3 +614,18 @@ test("a wake into a paused session waits until its pause ends", async () => {
   await h.coordinator.close();
   await h.store.close();
 });
+
+test("a failed start wakes the watcher as a failure: no turn will ever stop", async () => {
+  const h = harness();
+  await seed(h.store, "source", "target");
+  await h.coordinator.create(space, { sourceSessionId: "source", targetSessionId: "target" });
+
+  await h.store.append("source", "session/start-failed", { code: "runtime-unavailable", message: "no runtime" });
+  await h.coordinator.kick("source");
+
+  assert.equal(h.sends.length, 1);
+  assert.equal(h.sends[0]!.sessionId, "target");
+  assert.match(h.sends[0]!.input.text, /failed/);
+  await h.coordinator.close();
+  await h.store.close();
+});

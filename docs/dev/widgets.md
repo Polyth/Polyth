@@ -475,6 +475,12 @@ placement and visibility mutations still go through `widgetLayout.ts`.
   owns a second quota or cumulative-session statistics path. The server query
   boundary, observation semantics and limits widget behavior are documented in
   [`packages/usage/README.md`](../../packages/usage/README.md).
+- **`packages/monitoring/widgets/`** — one widget with a per-instance look
+  (Summary, Scales, Charts, Rhythm), all four `panelSizes`, and a custom
+  `settingsRender` that previews the real widget and shows only the rows that
+  apply to the chosen look. The size comes from a `ResizeObserver` on its own
+  box (or `context.panelSize`), and the rules sit in a DOM-free
+  `widgetModel.ts`. See [monitoring](monitoring.md#the-widget).
 - **`packages/goals/widgets/index.tsx`** — widgets defaulting to non-canvas
   slots (`session.header.actions`, `composer.leading`) with capability
   registration.

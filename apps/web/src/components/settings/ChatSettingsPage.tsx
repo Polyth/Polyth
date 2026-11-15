@@ -1,7 +1,10 @@
 // Settings > Chat. It reads as a summary: a live preview, one Level of detail,
 // then one-line rows that show their current value and open in place, one at a
-// time. The rarely used settings wait under "More options". The level is derived
-// from the preferences it writes, so nothing about it is stored (chatSettingsModel).
+// time. The rarely used settings wait under "More options", and the ones for
+// another kind of screen (the other device's send key, the wide-window rail,
+// the phone's chat title) in a closed group per device at the end. The level is
+// derived from the preferences it writes, so nothing about it is stored
+// (chatSettingsModel).
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { clampPromptHistoryLimit } from "@polyth/contracts";
 import type { SettingsNavigationTarget } from "@polyth/web-sdk";
@@ -26,6 +29,8 @@ import {
   type ChatRowId,
 } from "./chatSettingsModel.ts";
 import MessageActionsEditor, { useMessageActionRows } from "./MessageActionsEditor.tsx";
+import SendHoldField from "./SendHoldField.tsx";
+import { blocksOnDevice, onDevice, OtherDevicesSection, useSettingsDevice, type DeviceBlock, type SettingsDevice } from "./OtherDevicesSection.tsx";
 import { DisclosureRow, ItemList, NumberField, ResetLink, Row, Section, Seg, Toggle } from "./parts.tsx";
 import "./ShellLookPicker.css";
 import "./ChatSettingsPage.css";
@@ -61,6 +66,28 @@ const LEVEL_SCHEMATICS: Record<ChatDetailLevel, ReactNode> = {
     </>
   ),
 };
+
+/** Chat settings that work on some kinds of screen only, one entry per
+ *  `DeviceBlock` in ChatPage. The send keys split on the phone shell
+ *  (Composer.tsx); the rail and the wide bookmark show above 1100px and the
+ *  narrow bookmark at or below it (styles.css .prompt-nav / .prompt-bookmark);
+ *  the title is the phone header's (MobileSessionHeader, phone shell only). */
+const CHAT_DEVICE_SCOPES = {
+  desktopSend: { devices: ["desktop", "tablet"], items: ["chat.sendOnEnter"] },
+  phoneSend: { devices: ["phone"], items: ["chat.mobileSendShortcut"] },
+  rail: { devices: ["desktop"], items: ["chat.promptNavigator", "chat.promptNavigatorSide", "chat.promptBookmarkDesktop"] },
+  narrowBookmark: { devices: ["tablet", "phone"], items: ["chat.pinLatestPrompt"] },
+  title: { devices: ["phone"], items: ["chat.mobileSessionTitle"] },
+} as const satisfies Record<string, { devices: readonly SettingsDevice[]; items: readonly string[] }>;
+
+/** The row a routed setting opens on this screen: none when the setting waits
+ *  in another device's group (that group opens instead). */
+function chatRowHere(itemId: string | undefined, screen: SettingsDevice): ChatRowId | null {
+  const scope = Object.values(CHAT_DEVICE_SCOPES)
+    .find((entry) => (entry.items as readonly string[]).includes(itemId ?? ""));
+  if (scope && !(scope.devices as readonly SettingsDevice[]).includes(screen)) return null;
+  return chatRowOfItem(itemId);
+}
 
 const STEP_STYLES: ReadonlyArray<readonly [ActivityBlockStyle, TranslationKey, ReactNode]> = [
   ["thread", "settings.pages.activityStyleThread", (
@@ -159,12 +186,17 @@ export function ChatPage({ settingsTarget }: { settingsTarget?: SettingsNavigati
   const touchPointer = useTouchPointer();
   const bookmarkPosition = usePromptBookmarkPosition();
   const target = settingsTarget?.itemId;
-  const [openRow, setOpenRow] = useState<ChatRowId | null>(() => chatRowOfItem(target));
+  // The screen these settings are read on (the preview's `device` is only
+  // what the sample draws). Its own send key, rail and title show in the rows.
+  const screen = useSettingsDevice();
+  const [openRow, setOpenRow] = useState<ChatRowId | null>(() => chatRowHere(target, screen));
   const [moreOpen, setMoreOpen] = useState(() => chatItemInMore(target));
   // A routed target lands on its setting's final position, so its row opens at
   // once; the routed effect in SettingsView scrolls to it on the next frames.
   const [animateRows, setAnimateRows] = useState(!target);
   const [device, setDevice] = useState<ChatPreviewDevice>(touchPointer ? "phone" : "computer");
+  // A preview part whose setting waits in another device's group.
+  const [groupPick, setGroupPick] = useState<{ itemId: string; revision: number } | null>(null);
   const pageRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const stopHold = useRef<() => void>(() => undefined);
@@ -172,15 +204,39 @@ export function ChatPage({ settingsTarget }: { settingsTarget?: SettingsNavigati
 
   useEffect(() => {
     if (!target) return;
-    const row = chatRowOfItem(target);
+    // A routed setting outranks an earlier preview pick.
+    setGroupPick(null);
+    const row = chatRowHere(target, screen);
     if (row) {
       setAnimateRows(false);
       setOpenRow(row);
     }
     if (chatItemInMore(target)) setMoreOpen(true);
+    // The screen is read once per target: crossing a breakpoint keeps the row.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [target]);
 
   useEffect(() => () => stopHold.current(), []);
+
+  // Point at a setting the preview picked inside another device's group, once
+  // the group has opened (its own effect opens it, then it renders).
+  useEffect(() => {
+    if (!groupPick || typeof requestAnimationFrame !== "function") return;
+    let second = 0;
+    const first = requestAnimationFrame(() => {
+      second = requestAnimationFrame(() => {
+        const item = pageRef.current?.querySelector<HTMLElement>(`[data-settings-item="${groupPick.itemId}"]`);
+        if (!item) return;
+        item.scrollIntoView({ block: "nearest" });
+        item.classList.add("flash");
+        window.setTimeout(() => item.classList.remove("flash"), 1600);
+      });
+    });
+    return () => {
+      cancelAnimationFrame(first);
+      cancelAnimationFrame(second);
+    };
+  }, [groupPick]);
 
   const revealOpenRow = (row: ChatRowId) => {
     // The hold ends here: it would read this scroll as drift and undo it.
@@ -191,9 +247,10 @@ export function ChatPage({ settingsTarget }: { settingsTarget?: SettingsNavigati
 
   const showRow = (row: ChatRowId) => {
     // Show the device these settings are about: the title is the phone's, and
-    // the rail needs a wide window unless a phone bookmark shows.
+    // the row's navigation is this screen's (the rail on a wide window, the
+    // bookmark on narrower ones).
     if (row === "header") setDevice("phone");
-    if (row === "navigation" && !ui.pinLatestPrompt) setDevice("computer");
+    if (row === "navigation") setDevice(screen === "desktop" ? "computer" : "phone");
     if (openRow === row) {
       revealOpenRow(row);
       return;
@@ -224,6 +281,15 @@ export function ChatPage({ settingsTarget }: { settingsTarget?: SettingsNavigati
   };
 
   const onPreviewPick = (part: ChatPreviewPart) => {
+    if (part === "header" && screen !== "phone") {
+      // The phone's title has no row here: open the phone's group at it.
+      revealWhenOpen.current = null;
+      setAnimateRows(true);
+      setOpenRow(null);
+      setDevice("phone");
+      setGroupPick({ itemId: "chat.mobileSessionTitle", revision: (groupPick?.revision ?? 0) + 1 });
+      return;
+    }
     if (part !== "answer") {
       showRow(CHAT_PREVIEW_ROW[part]);
       return;
@@ -290,9 +356,14 @@ export function ChatPage({ settingsTarget }: { settingsTarget?: SettingsNavigati
     options.find(([id]) => id === value)?.[1] ?? "";
   const desktopKey = settings.desktopSendShortcut === "enter" ? "Enter" : "Shift+Enter";
   const phoneSend = optionLabel(mobileSendOptions, settings.mobileSendShortcut);
-  const sendValue = `${desktopKey} · ${settings.mobileSendShortcut === "none"
-    ? tr("settings.chatPage.sendPhoneButton")
-    : tr("settings.chatPage.sendPhoneKey", { key: phoneSend })}`;
+  // The summary is what fits the row's value column on the narrowest pane, so
+  // it names this screen's key — the only one the row holds — plus the hold.
+  const holdValue = ui.sendHoldDraft
+    ? tr("settings.chatPage.sendHoldSummary", { ms: String(ui.sendHoldDraftMs) })
+    : tr("settings.chatPage.sendHoldSummaryOff");
+  const sendValue = `${screen === "phone"
+    ? (settings.mobileSendShortcut === "none" ? tr("settings.chatPage.sendPhoneButton") : phoneSend)
+    : desktopKey} · ${holdValue}`;
   const userActions = useMessageActionRows("user");
   const replyActions = useMessageActionRows("assistant");
   const actionsValue = (rows: typeof userActions) => {
@@ -312,9 +383,12 @@ export function ChatPage({ settingsTarget }: { settingsTarget?: SettingsNavigati
     ui.showDictate ? tr("settings.chatPage.valueDictation") : "",
     ui.showQuickActions ? tr("settings.pages.composerQuickActions") : "",
   ].filter(Boolean).join(" · ") || tr("common.none");
-  const bookmarkOn = ui.pinLatestPrompt || ui.promptBookmarkDesktop;
+  // The rail and the wide bookmark need a wide window (styles.css hides both
+  // up to 1100px); the narrow bookmark is the tablet's and the phone's.
+  const wideScreen = screen === "desktop";
+  const bookmarkOn = wideScreen ? ui.promptBookmarkDesktop : ui.pinLatestPrompt;
   const navigationValue = [
-    ui.promptNavigator === "off"
+    !wideScreen || ui.promptNavigator === "off"
       ? ""
       : ui.promptNavigatorSide === "left" ? tr("settings.chatPage.railLeft") : tr("settings.chatPage.railRight"),
     bookmarkOn ? tr("settings.chatPage.valueBookmark") : "",
@@ -326,6 +400,122 @@ export function ChatPage({ settingsTarget }: { settingsTarget?: SettingsNavigati
       : openRow === "paste"
         ? optionLabel(pasteOptions, ui.largeTextPasteBehavior)
         : undefined;
+
+  // Settings of one kind of screen (docs/dev/ui.md "Settings for other
+  // devices"); where each works is in CHAT_DEVICE_SCOPES.
+  const desktopSendBlock: DeviceBlock = {
+    ...CHAT_DEVICE_SCOPES.desktopSend,
+    labels: [tr("settings.pages.desktopSendShortcut")],
+    render: () => (
+      <Row label={tr("settings.pages.desktopSendShortcut")} hint={tr("settings.pages.sendShortcutHint")} itemId="chat.sendOnEnter">
+        <Seg
+          label={tr("settings.pages.desktopSendShortcut")}
+          value={settings.desktopSendShortcut}
+          options={[["enter", "Enter"], ["shift-enter", "Shift+Enter"]]}
+          onChange={(desktopSendShortcut) => {
+            setDevice("computer");
+            updateSettings({ desktopSendShortcut, sendOnEnter: desktopSendShortcut === "enter" });
+          }}
+        />
+      </Row>
+    ),
+  };
+  const phoneSendBlock: DeviceBlock = {
+    ...CHAT_DEVICE_SCOPES.phoneSend,
+    labels: [tr("settings.chatPage.phoneSendShortcut")],
+    render: () => (
+      <Row label={tr("settings.chatPage.phoneSendShortcut")} hint={tr("settings.pages.mobileSendShortcutHint")} itemId="chat.mobileSendShortcut">
+        <Seg
+          label={tr("settings.pages.mobileSendShortcut")}
+          value={settings.mobileSendShortcut}
+          options={mobileSendOptions}
+          onChange={(mobileSendShortcut) => {
+            setDevice("phone");
+            updateSettings({ mobileSendShortcut });
+          }}
+        />
+      </Row>
+    ),
+  };
+  const railBlock: DeviceBlock = {
+    ...CHAT_DEVICE_SCOPES.rail,
+    labels: [tr("settings.pages.promptRail"), tr("settings.pages.promptBookmarkDesktop")],
+    render: () => (
+      <>
+        <Row label={tr("settings.pages.promptRail")} hint={tr("settings.pages.promptRailHint")} itemId="chat.promptNavigator">
+          <Toggle
+            on={ui.promptNavigator !== "off"}
+            onChange={(on) => {
+              setDevice("computer");
+              setUiSettings({ promptNavigator: on ? "auto" : "off" });
+            }}
+            label={tr("settings.pages.promptRail")}
+          />
+        </Row>
+        {ui.promptNavigator !== "off" && (
+          <Row label={tr("settings.pages.promptRailSide")} hint={tr("settings.pages.promptRailSideHint")} itemId="chat.promptNavigatorSide">
+            <Seg
+              label={tr("settings.pages.promptRailSide")}
+              value={ui.promptNavigatorSide}
+              options={[
+                ["left", tr("settings.pages.promptNavigatorSideLeft")],
+                ["right", tr("settings.pages.promptNavigatorSideRight")],
+              ]}
+              onChange={(promptNavigatorSide) => {
+                setDevice("computer");
+                setUiSettings({ promptNavigatorSide });
+              }}
+            />
+          </Row>
+        )}
+        <Row label={tr("settings.pages.promptBookmarkDesktop")} hint={tr("settings.pages.promptBookmarkDesktopHint")} itemId="chat.promptBookmarkDesktop">
+          <Toggle
+            on={ui.promptBookmarkDesktop}
+            onChange={(promptBookmarkDesktop) => {
+              setDevice("computer");
+              setUiSettings({ promptBookmarkDesktop });
+            }}
+            label={tr("settings.pages.promptBookmarkDesktop")}
+          />
+        </Row>
+      </>
+    ),
+  };
+  const narrowBookmarkBlock: DeviceBlock = {
+    ...CHAT_DEVICE_SCOPES.narrowBookmark,
+    labels: [tr("settings.pages.promptBookmarkMobile")],
+    render: () => (
+      <Row label={tr("settings.pages.promptBookmarkMobile")} hint={tr("settings.pages.promptBookmarkMobileHint")} itemId="chat.pinLatestPrompt">
+        <Toggle
+          on={ui.pinLatestPrompt}
+          onChange={(pinLatestPrompt) => {
+            setDevice("phone");
+            setUiSettings({ pinLatestPrompt });
+          }}
+          label={tr("settings.pages.promptBookmarkMobile")}
+        />
+      </Row>
+    ),
+  };
+  const titleSeg = (
+    <Seg
+      label={tr("settings.pages.mobileSessionTitle")}
+      value={ui.mobileSessionTitle}
+      options={mobileTitleOptions}
+      onChange={(mobileSessionTitle) => setUiSettings({ mobileSessionTitle })}
+    />
+  );
+  // On a phone it is a row of its own (below); elsewhere it waits, labelled.
+  const titleBlock: DeviceBlock = {
+    ...CHAT_DEVICE_SCOPES.title,
+    labels: [tr("settings.chatPage.phoneSessionTitle")],
+    render: () => (
+      <Row label={tr("settings.chatPage.phoneSessionTitle")} hint={tr("settings.pages.mobileSessionTitleHint")} itemId="chat.mobileSessionTitle">
+        {titleSeg}
+      </Row>
+    ),
+  };
+  const deviceBlocks = [desktopSendBlock, phoneSendBlock, railBlock, narrowBookmarkBlock, titleBlock];
 
   return (
     <div ref={pageRef} className="chat-settings">
@@ -448,28 +638,24 @@ export function ChatPage({ settingsTarget }: { settingsTarget?: SettingsNavigati
           <Section title={tr("settings.chatPage.typingGroup")}>
             <ItemList>
               <DisclosureRow {...rowProps("send")} label={tr("settings.chatPage.sendWith")} value={sendValue}>
-                <Row label={tr("settings.pages.desktopSendShortcut")} hint={tr("settings.pages.sendShortcutHint")} itemId="chat.sendOnEnter">
-                  <Seg
-                    label={tr("settings.pages.desktopSendShortcut")}
-                    value={settings.desktopSendShortcut}
-                    options={[["enter", "Enter"], ["shift-enter", "Shift+Enter"]]}
-                    onChange={(desktopSendShortcut) => {
-                      setDevice("computer");
-                      updateSettings({ desktopSendShortcut, sendOnEnter: desktopSendShortcut === "enter" });
-                    }}
+                {blocksOnDevice([desktopSendBlock, phoneSendBlock], screen)}
+                <Row label={tr("settings.chatPage.sendHoldDraft")} hint={tr("settings.chatPage.sendHoldDraftHint")} itemId="chat.sendHoldDraft">
+                  <Toggle
+                    on={ui.sendHoldDraft}
+                    onChange={(sendHoldDraft) => setUiSettings({ sendHoldDraft })}
+                    label={tr("settings.chatPage.sendHoldDraft")}
                   />
                 </Row>
-                <Row label={tr("settings.pages.mobileSendShortcut")} hint={tr("settings.pages.mobileSendShortcutHint")} itemId="chat.mobileSendShortcut">
-                  <Seg
-                    label={tr("settings.pages.mobileSendShortcut")}
-                    value={settings.mobileSendShortcut}
-                    options={mobileSendOptions}
-                    onChange={(mobileSendShortcut) => {
-                      setDevice("phone");
-                      updateSettings({ mobileSendShortcut });
-                    }}
-                  />
-                </Row>
+                {/* The length is only meaningful while the gesture exists, so it
+                    follows the switch instead of sitting greyed out beside it. */}
+                {ui.sendHoldDraft && (
+                  <Row label={tr("settings.chatPage.sendHoldDuration")} hint={tr("settings.chatPage.sendHoldDurationHint")} itemId="chat.sendHoldDuration" layout="stacked">
+                    <SendHoldField
+                      ms={ui.sendHoldDraftMs}
+                      onChange={(sendHoldDraftMs) => setUiSettings({ sendHoldDraftMs })}
+                    />
+                  </Row>
+                )}
               </DisclosureRow>
               <DisclosureRow
                 {...rowProps("followUp")}
@@ -535,52 +721,7 @@ export function ChatPage({ settingsTarget }: { settingsTarget?: SettingsNavigati
                 </Row>
               </DisclosureRow>
               <DisclosureRow {...rowProps("navigation")} label={tr("settings.pages.promptNavigatorGroup")} value={navigationValue}>
-                <Row label={tr("settings.pages.promptRail")} hint={tr("settings.pages.promptRailHint")} itemId="chat.promptNavigator">
-                  <Toggle
-                    on={ui.promptNavigator !== "off"}
-                    onChange={(on) => {
-                      setDevice("computer");
-                      setUiSettings({ promptNavigator: on ? "auto" : "off" });
-                    }}
-                    label={tr("settings.pages.promptRail")}
-                  />
-                </Row>
-                {ui.promptNavigator !== "off" && (
-                  <Row label={tr("settings.pages.promptRailSide")} hint={tr("settings.pages.promptRailSideHint")} itemId="chat.promptNavigatorSide">
-                    <Seg
-                      label={tr("settings.pages.promptRailSide")}
-                      value={ui.promptNavigatorSide}
-                      options={[
-                        ["left", tr("settings.pages.promptNavigatorSideLeft")],
-                        ["right", tr("settings.pages.promptNavigatorSideRight")],
-                      ]}
-                      onChange={(promptNavigatorSide) => {
-                        setDevice("computer");
-                        setUiSettings({ promptNavigatorSide });
-                      }}
-                    />
-                  </Row>
-                )}
-                <Row label={tr("settings.pages.promptBookmarkMobile")} hint={tr("settings.pages.promptBookmarkMobileHint")} itemId="chat.pinLatestPrompt">
-                  <Toggle
-                    on={ui.pinLatestPrompt}
-                    onChange={(pinLatestPrompt) => {
-                      setDevice("phone");
-                      setUiSettings({ pinLatestPrompt });
-                    }}
-                    label={tr("settings.pages.promptBookmarkMobile")}
-                  />
-                </Row>
-                <Row label={tr("settings.pages.promptBookmarkDesktop")} hint={tr("settings.pages.promptBookmarkDesktopHint")} itemId="chat.promptBookmarkDesktop">
-                  <Toggle
-                    on={ui.promptBookmarkDesktop}
-                    onChange={(promptBookmarkDesktop) => {
-                      setDevice("computer");
-                      setUiSettings({ promptBookmarkDesktop });
-                    }}
-                    label={tr("settings.pages.promptBookmarkDesktop")}
-                  />
-                </Row>
+                {blocksOnDevice([railBlock, narrowBookmarkBlock], screen)}
                 {bookmarkOn && (
                   <Row label={tr("settings.pages.pinLatestPromptPosition")} hint={tr("settings.pages.bookmarkPositionPlainHint")} itemId="chat.pinLatestPromptPosition">
                     <Button
@@ -592,20 +733,17 @@ export function ChatPage({ settingsTarget }: { settingsTarget?: SettingsNavigati
                   </Row>
                 )}
               </DisclosureRow>
-              <DisclosureRow
-                {...rowProps("header")}
-                label={tr("settings.pages.mobileSessionTitle")}
-                value={optionLabel(mobileTitleOptions, ui.mobileSessionTitle)}
-              >
-                <Row hint={tr("settings.pages.mobileSessionTitleHint")} layout="stacked" itemId="chat.mobileSessionTitle">
-                  <Seg
-                    label={tr("settings.pages.mobileSessionTitle")}
-                    value={ui.mobileSessionTitle}
-                    options={mobileTitleOptions}
-                    onChange={(mobileSessionTitle) => setUiSettings({ mobileSessionTitle })}
-                  />
-                </Row>
-              </DisclosureRow>
+              {onDevice(titleBlock, screen) && (
+                <DisclosureRow
+                  {...rowProps("header")}
+                  label={tr("settings.chatPage.phoneSessionTitle")}
+                  value={optionLabel(mobileTitleOptions, ui.mobileSessionTitle)}
+                >
+                  <Row hint={tr("settings.pages.mobileSessionTitleHint")} layout="stacked" itemId="chat.mobileSessionTitle">
+                    {titleSeg}
+                  </Row>
+                </DisclosureRow>
+              )}
             </ItemList>
           </Section>
 
@@ -666,6 +804,12 @@ export function ChatPage({ settingsTarget }: { settingsTarget?: SettingsNavigati
               </Row>
             </div>
           )}
+          <OtherDevicesSection
+            device={screen}
+            blocks={deviceBlocks}
+            target={groupPick?.itemId ?? target}
+            revision={groupPick?.revision ?? 0}
+          />
         </div>
       </div>
     </div>

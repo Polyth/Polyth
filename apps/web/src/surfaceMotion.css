@@ -67,7 +67,9 @@
 /* ---- dialogs -----------------------------------------------------------------
    A dialog rises into place on wide screens and sinks back out. Phone-width
    shells present dialogs as bottom sheets, so there they rise from the bottom
-   edge and go back down it, like every other sheet. */
+   edge and go back down it, like every other sheet — except an anchored
+   confirmation (styles.css "Anchored confirmation"), a card that grows out of
+   the control it was asked from (its transform-origin) and shrinks back. */
 .dialog-backdrop {
   animation: fade var(--motion-normal) var(--motion-ease);
 }
@@ -87,6 +89,34 @@
   .dialog-backdrop[data-exit-ghost="dialog"] > .dialog-panel {
     animation: sheet-slide-out var(--motion-stack) var(--motion-stack-ease) both !important;
   }
+  .dialog-panel.alert-dialog.is-anchored {
+    animation: alert-anchor-in var(--motion-surface) var(--motion-ease) backwards;
+  }
+  .dialog-backdrop[data-exit-ghost="dialog"] > .dialog-panel.alert-dialog.is-anchored {
+    animation: alert-anchor-out var(--motion-fast) var(--motion-ease) both !important;
+  }
+  /* Its scrim tints in and out on its colour, never its opacity: an ancestor
+     below full opacity is the card's backdrop root, so the card's glass would
+     see nothing behind it until the fade ended, then snap to the page. */
+  .dialog-backdrop.alert-anchored-backdrop {
+    animation: alert-scrim-in var(--motion-surface) var(--motion-ease) backwards;
+  }
+  .dialog-backdrop.alert-anchored-backdrop[data-exit-ghost="dialog"] {
+    animation: alert-scrim-out var(--motion-fast) var(--motion-ease) both !important;
+  }
+}
+
+@keyframes alert-scrim-in { from { background-color: transparent; } }
+@keyframes alert-scrim-out { to { background-color: transparent; } }
+
+@keyframes alert-anchor-in {
+  from { opacity: 0; transform: scale(0.6); }
+  45% { opacity: 1; }
+  to { opacity: 1; transform: none; }
+}
+@keyframes alert-anchor-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: scale(0.92); }
 }
 
 @keyframes rise-out {
@@ -169,11 +199,13 @@
     pointer-events: none;
     animation: stack-out var(--motion-stack) var(--motion-stack-ease) both;
     animation-duration: var(--stack-out-settle, var(--motion-stack));
+    animation-timing-function: var(--stack-swipe-ease, var(--motion-stack-ease));
   }
   /* `backwards`: the list is dragged next, and a forwards fill would outrank it. */
   .settings-shell[data-stage-motion="pop"] > .settings-nav {
     animation: stack-uncover var(--motion-stack) var(--motion-stack-ease) backwards;
     animation-duration: var(--stack-uncover-settle, var(--motion-stack));
+    animation-timing-function: var(--stack-swipe-ease, var(--motion-stack-ease));
   }
 
   /* The covered list dims as it retreats (a veil composited with opacity
@@ -194,17 +226,19 @@
   .settings-shell[data-stage-motion="pop"] > .settings-nav::after {
     animation: stack-dim-out var(--motion-stack) var(--motion-stack-ease) both;
     animation-duration: var(--stack-uncover-settle, var(--motion-stack));
+    animation-timing-function: var(--stack-swipe-ease, var(--motion-stack-ease));
   }
 
   /* While a finger pulls a page away, the list peeks in behind it, positioned
      by the gesture (edgeSwipeBack.ts) instead of the retreat animation. */
   .settings-shell > .settings-nav[data-peek] {
     visibility: visible !important;
-    transform: translate3d(var(--stack-peek-x, 0px), 0, 0) !important;
+    transform: translate3d(var(--stack-peek-x, 0px), 0, 0);
     animation: none !important;
   }
   .settings-shell > .settings-nav[data-peek]::after {
-    opacity: var(--stack-peek-dim, 1) !important;
+    opacity: var(--stack-peek-dim, 1);
+    pointer-events: auto;
     animation: none !important;
   }
 

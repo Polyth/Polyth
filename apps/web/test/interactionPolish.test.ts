@@ -21,10 +21,12 @@ test("queue reorders by dragging while pane tabs retain keyboard controls", asyn
   assert.match(pane, /<MoveControls/);
   assert.match(pane, /moveTab\(p, t\.id, targetIndex\)/);
   assert.match(css, /@media \(max-width: 480px\)[\s\S]*?\.pane-tab-group\.active > \.reorder-controls\s*\{\s*display:\s*inline-flex/);
-  assert.match(css, /@media \(any-pointer: coarse\)[\s\S]*?\.pane-tab-group\.active > \.reorder-controls\s*\{\s*display:\s*none/);
+  // The active tab is an explicit selection, not sticky hover: its ←/→ stay
+  // the touch route to reorder tabs, so no touch rule may hide them again.
+  assert.doesNotMatch(css, /\.pane-tab-group\.active > \.reorder-controls\s*\{\s*display:\s*none/);
 });
 
-test("terminal tabs omit rename chrome; other double-click shortcuts have mobile alternatives", async () => {
+test("terminal rename has a touch path on the active tab only; other double-click shortcuts have mobile alternatives", async () => {
   const [terminal, sessions, sidebar, folder] = await Promise.all([
     read("../../../packages/terminal/widgets/TerminalView.tsx"),
     read("../src/components/sidebar/SessionList.tsx"),
@@ -33,7 +35,8 @@ test("terminal tabs omit rename chrome; other double-click shortcuts have mobile
   ]);
 
   assert.match(terminal, /onDoubleClick=\{\(\) => startRename\(t\)\}/);
-  assert.doesNotMatch(terminal, /className="term-tab-rename-action"/);
+  // Touch renames from one pencil on the active tab, never on every tab.
+  assert.match(terminal, /t\.id === tab\?\.id && renaming !== t\.id && \(\s*<IconButton[\s\S]*?className="term-tab-rename-btn"/);
   // Double-click renames only for people who may manage the chat.
   assert.match(sessions, /onDoubleClick=\{\(\) => \{ if \(manage && !selectMode\) \{ setTitle/);
   // The rename shortcut's touch alternative is the row menu (long-press,

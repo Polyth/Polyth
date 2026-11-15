@@ -9,7 +9,7 @@ const httpError = (status: number, code: string, extra: Record<string, unknown> 
   Object.assign(new Error(code), { status, code, ...extra });
 
 function script(steps: {
-  create: Array<() => Promise<{ id: string }>>;
+  create: Array<() => Promise<{ id: string; queueId?: string; turnId?: string }>>;
   status?: Array<() => Promise<SessionCreateOperationStatusDto>>;
 }) {
   const keys: string[] = [];
@@ -95,4 +95,23 @@ test("a link that stays down ends as outcome unknown after the bounded backoff",
   );
   assert.deepEqual(waits, [...SESSION_CREATE_RESOLVE_DELAYS_MS]);
   assert.equal(s.calls.filter((call) => call === "create").length, 1, "no resend without a dedupe-capable answer");
+});
+
+test("a lost start response is resent with the same key to learn whether the start was taken", async () => {
+  const s = script({
+    create: [async () => { throw loadFailed(); }, async () => ({ id: "s1", queueId: "q1" })],
+    status: [async () => ({ state: "created", sessionId: "s1" })],
+  });
+  assert.deepEqual(await createSessionWithRecovery({ ...s.deps, resendWhenCreated: true }), { id: "s1", queueId: "q1" });
+  assert.deepEqual(s.calls, ["create", "status", "create"]);
+  assert.equal(new Set(s.keys).size, 1, "the resend carries the one idempotency key");
+});
+
+test("a start whose chat exists but whose resend is refused stays outcome unknown, never a plain failure", async () => {
+  const s = script({
+    create: [async () => { throw loadFailed(); }, async () => { throw httpError(500, "internal"); }],
+    status: [async () => ({ state: "created", sessionId: "s1" })],
+  });
+  await assert.rejects(createSessionWithRecovery({ ...s.deps, resendWhenCreated: true }),
+    (error: { mutationOutcome?: string }) => error.mutationOutcome === "unknown");
 });

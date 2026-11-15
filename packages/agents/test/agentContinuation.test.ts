@@ -21,6 +21,7 @@ import {
   settleScheduledRun,
   threadDecision,
   validateRunAttachments,
+  type AgentBackgroundWait,
   type AgentRunActivity,
   type AgentWake,
   type ScheduleRunner,
@@ -142,6 +143,8 @@ function heldRunner(extra: Pick<ScheduleRunner, "thread"> & {
   const wakes: AgentWake[] = [];
   const pending: Array<(result: ScheduleRunSettlement) => void> = [];
   let activity: ((activity: AgentRunActivity, steps: number) => void) | undefined;
+  let background: ((wait: AgentBackgroundWait | null) => void) | undefined;
+  let stopRequested: (() => boolean) | undefined;
   const runner: ScheduleRunner = {
     ...(extra.thread ? { thread: extra.thread } : {}),
     async run(task, _runId, wake) {
@@ -151,8 +154,10 @@ function heldRunner(extra: Pick<ScheduleRunner, "thread"> & {
       await extra.admit?.(n);
       return { sessionId: `s${n}`, markerSeq: 1, key: rollingKeyOf(task) };
     },
-    settle(_task, _run, signal, _onWaiting, onActivity) {
+    settle(_task, _run, signal, _onWaiting, onActivity, onBackground, stopped) {
       activity = onActivity;
+      background = onBackground;
+      stopRequested = stopped;
       return new Promise((resolve, reject) => {
         const detached = () => reject(Object.assign(new Error("detached"), { name: "AbortError" }));
         if (signal.aborted) return detached();
@@ -169,6 +174,8 @@ function heldRunner(extra: Pick<ScheduleRunner, "thread"> & {
     runner,
     wakes,
     activity: (next: AgentRunActivity, steps: number) => activity!(next, steps),
+    background: (wait: AgentBackgroundWait | null) => background!(wait),
+    stopRequested: () => stopRequested!(),
     finish: async (result: ScheduleRunSettlement = { status: "ok" }) => {
       pending.shift()!(result);
       for (let i = 0; i < 6; i += 1) await flush();
@@ -689,6 +696,37 @@ test("the run shows its newest step while it works; the file follows at most onc
   assert.doesNotMatch(readFileSync(file, "utf8"), /"activity"/);
 });
 
+test("a run waiting for its background work says so until it reports; the report keeps its steps and to-dos", async (t) => {
+  const file = tempFile(t);
+  const held = heldRunner();
+  const svc = createScheduleService({ file, runner: held.runner, now: () => 1 });
+  const agent = svc.create({ projectId: "p", prompt: "x", kind: "every", everyMinutes: 60, manualOnly: true });
+  await svc.runNow(agent.id);
+  await flush();
+  held.background({ since: 5, tasks: ["Wait for CI on devel"] });
+  assert.deepEqual(svc.runsOf(agent.id)[0]!.background, { since: 5, tasks: ["Wait for CI on devel"] });
+  assert.equal(svc.runsOf(agent.id)[0]!.status, "running", "still working while it waits");
+  assert.match(readFileSync(file, "utf8"), /Wait for CI on devel/, "a restart finds the wait");
+  held.background(null);
+  assert.equal(svc.runsOf(agent.id)[0]!.background, undefined);
+  held.background({ since: 9, tasks: [] });
+  assert.equal(held.stopRequested(), false);
+  svc.requestStop(agent.id);
+  assert.equal(held.stopRequested(), true, "a stop reaches a run that has no turn to abort");
+
+  await held.finish({
+    status: "ok",
+    summary: "CI is green.\n\nNeeds you: PR #32 — smoke test — https://github.com/acme/app/pull/32\nReport: update — devel fixed",
+    timeline: [{ at: 2, text: "Pushed the fix." }, { at: 3, text: "Wait for CI on devel", kind: "wait", until: 8 }],
+  });
+  const [run] = svc.runsOf(agent.id);
+  assert.equal(run!.background, undefined, "a finished run waits for nothing");
+  assert.equal(run!.headline, "devel fixed");
+  assert.equal(run!.summary, "CI is green.");
+  assert.deepEqual(run!.needs, [{ text: "PR #32", detail: "smoke test", url: "https://github.com/acme/app/pull/32" }]);
+  assert.equal(run!.timeline?.length, 2);
+});
+
 test("an event run's script note is not the person's words, also in records saved before schema 5", async (t) => {
   const quiet: ScheduleRunRecord = { runId: "q", startedAt: 1, status: "ok", trigger: "event", sessionId: "s-q", signal: "quiet", note: "Look at the deploy" };
   assert.equal(followUpRun([quiet]), undefined, "a quiet run with only a note is no exchange with the person");
@@ -814,7 +852,7 @@ async function host(t: { after(fn: () => void): void }) {
   const project = { id: "prj", path: dir, name: "P", createdAt: 1, spaceId: "spc" };
   const logs = new Map<string, SessionEvent[]>();
   const states = new Map<string, SessionState>();
-  const sent: Array<{ sessionId: string; text: string; attachments?: unknown[] }> = [];
+  const sent: Array<{ sessionId: string; text: string; displayText?: string; attachments?: unknown[] }> = [];
   const replies: string[] = [];
   const purposes = new Map<string, string>();
   const origins = new Map<string, unknown>();
@@ -837,8 +875,13 @@ async function host(t: { after(fn: () => void): void }) {
       return { id };
     },
     async snapshot(id: string) { return { id, projectId: "prj", status: states.get(id)?.status ?? "idle", purpose: purposes.get(id) }; },
-    async send(sessionId: string, input: { text: string; attachments?: unknown[] }) {
-      sent.push({ sessionId, text: input.text, ...(input.attachments ? { attachments: input.attachments } : {}) });
+    async send(sessionId: string, input: { text: string; displayText?: string; attachments?: unknown[] }) {
+      sent.push({
+        sessionId,
+        text: input.text,
+        ...(input.displayText !== undefined ? { displayText: input.displayText } : {}),
+        ...(input.attachments ? { attachments: input.attachments } : {}),
+      });
       const n = sent.length;
       append(sessionId, "turn/started", {});
       append(sessionId, "tool/started", { callId: `call-${n}`, tool: "read", input: { path: "README.md" } });
@@ -957,6 +1000,9 @@ test("a fresh agent's report can be answered in its own conversation", async (t)
   assert.match(sent[1]!.text, /Your notebook changed[^\n]*\nPrefers very short reports\./);
   assert.match(sent[1]!.text, /Input from the user:\nWhat about the flaky test\?/);
   assert.match(sent[1]!.text, /Continue following your standing instructions/);
+  // The chat shows the person's words, never the composed wake around them.
+  assert.equal(sent[0]!.displayText, "", "a wake nobody wrote stays out of the chat");
+  assert.equal(sent[1]!.displayText, "What about the flaky test?");
   const reply = agents.runsOf(agent.id)[0]!;
   assert.equal(reply.continued, true);
   assert.equal(reply.key, report.key);

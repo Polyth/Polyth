@@ -229,6 +229,26 @@ const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(fu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // The platform can change the field without an `input` event (dictation and
+  // some phone keyboards have). The host would go on holding the old text and
+  // keep Send disabled over a visible draft, so the next sign of life in the
+  // field (a caret move, a lifted key, focus) commits what it holds. A no-op
+  // whenever the last edit was observed, and never during a composition.
+  const reconcile = () => {
+    const el = taRef.current;
+    if (!el || gate.current.composing || el.value === committed.current) return;
+    commitEdit(gate.current);
+    committed.current = el.value;
+    latest.current.onTextChange?.(el.value);
+  };
+  useEffect(() => {
+    const doc = taRef.current?.ownerDocument;
+    if (!doc) return;
+    const onSelectionChange = () => { if (doc.activeElement === taRef.current) reconcile(); };
+    doc.addEventListener("selectionchange", onSelectionChange);
+    return () => doc.removeEventListener("selectionchange", onSelectionChange);
+  }, []);
+
   // A field removed mid-composition must not leave its live text behind.
   useEffect(() => () => {
     if (gate.current.composing) latest.current.onComposingText?.(null);
@@ -322,8 +342,12 @@ const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(fu
       onCompositionStart={onCompositionStart}
       onCompositionEnd={onCompositionEnd}
       onKeyDown={onKeyDown}
+      onKeyUp={reconcile}
       onPaste={onPaste}
-      onFocus={() => { if (!refocusing.current) onFocusChange?.(true); }}
+      onFocus={() => {
+        reconcile();
+        if (!refocusing.current) onFocusChange?.(true);
+      }}
       onBlur={onBlur}
     />
   );

@@ -64,8 +64,9 @@ test("composer and session creation pass the active lane purpose", async () => {
     readFile(new URL("../src/components/sidebar/SessionList.tsx", import.meta.url), "utf8"),
   ]);
   assert.match(composer, /const lanePurpose = activeLanePurpose\(\)/);
-  assert.match(composer, /startIsolatedSession\([\s\S]*purpose: lanePurpose/);
-  assert.match(composer, /createSession\([\s\S]*purpose: lanePurpose/);
+  assert.match(composer, /startIsolatedSessionWithStart\([\s\S]*purpose: lanePurpose/);
+  assert.match(composer, /createSessionWithStart\([\s\S]*purpose: lanePurpose/);
+  assert.match(composer, /startWorktreeSession\([\s\S]*purpose: lanePurpose/);
   assert.match(composer, /newSessionLaneDraftId\(lanePurpose\)/);
   assert.match(init, /purpose\?: string/);
   assert.match(init, /purpose: input\.purpose/);

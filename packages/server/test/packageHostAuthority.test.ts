@@ -263,3 +263,33 @@ test("package store forwards profile management methods to the underlying store"
     "profileRemove:prof_1",
   ]);
 });
+
+test("package store reads session tails only for a named Space", async () => {
+  const calls: unknown[] = [];
+  const host = {
+    pluginId: "test-package",
+    deployment: "shared",
+    projects: {},
+    sessions: {},
+    store: {
+      async latestSeqs(scope: unknown) { calls.push(scope); return new Map([["ses_one", 7]]); },
+    },
+    systemSpaceContext(spaceId: string): SpaceContext {
+      return {
+        spaceId, spaceSlug: "home", userId: RUNTIME_SYSTEM_PRINCIPAL_ID,
+        role: "owner", deployment: "shared", storageDir: "/tmp/spaces/home",
+      };
+    },
+    forSpace() { throw new Error("no scoped service is needed for a tail read"); },
+    events: { async append() { throw new Error("unused"); } },
+  } as unknown as ServerPackageHost;
+  const governed = governPackageHost(host);
+
+  assert.deepEqual([...(await governed.store.latestSeqs!({ spaceId: "spc_home", projectId: "prj_one" }))], [["ses_one", 7]]);
+  // Only the Space and project reach the store, whatever else the caller passed.
+  await governed.store.latestSeqs!({ spaceId: "spc_home", extra: true } as never);
+  assert.deepEqual(calls, [{ spaceId: "spc_home", projectId: "prj_one" }, { spaceId: "spc_home" }]);
+  assert.throws(() => governed.store.latestSeqs!({} as never), /Space is required/);
+  assert.throws(() => governed.store.latestSeqs!({ spaceId: "" }), /Space is required/);
+  assert.equal(calls.length, 2);
+});

@@ -18,7 +18,7 @@ import type {
   WorkflowRunNodeDto,
   WorkflowRunOptionsDto,
 } from "@polyth/contracts";
-import { normalizeSessionPerson } from "@polyth/contracts";
+import { normalizeSessionPerson, SESSION_START_FAILED_EVENT } from "@polyth/contracts";
 import { extractChangedFiles } from "./pendingChanges.ts";
 import { normalizeQuestions, questionAnswerDraft, type AnswerMap } from "./questionSerializers.ts";
 import { tr } from "./i18n/index.ts";
@@ -72,6 +72,10 @@ export interface AssistantMsg {
   /** Final `assistant/message.time` — the semantic completion time, distinct
    *  from `time` (the first streamed chunk) */
   completedAt?: number;
+  /** Time of the prompt the chat does not draw (an agent's wake, a hidden
+   *  retry) that opened this reply's turn: the turn starts there, as it would
+   *  at a drawn prompt, so its footer does not measure from the reply. */
+  hiddenPromptAt?: number;
   /** The provider's own limit line ("You've hit your limit · resets …") that
    *  closed a rate-limited turn. The resume notice says the same, so the
    *  timeline does not render it as an answer. */
@@ -429,6 +433,29 @@ export interface SubagentState {
   agents: Array<{ sessionId: string; label: string; status: string; currentTask?: string }>;
 }
 
+/** What an active rollback did to the files on disk (`session/rewound.files`),
+ *  reduced to what the marker says. Absent on markers older than file
+ *  rollback, and when the files were simply not involved. */
+export interface RewindMarkerFiles {
+  mode: "restored" | "kept" | "unavailable";
+  restored: number;
+  kept: number;
+  reason?: string;
+}
+
+const rewindMarkerFiles = (value: unknown): RewindMarkerFiles | undefined => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const files = value as { mode?: unknown; restored?: unknown; kept?: unknown; reason?: unknown };
+  if (files.mode !== "restored" && files.mode !== "kept" && files.mode !== "unavailable") return undefined;
+  const count = (n: unknown): number => typeof n === "number" && Number.isSafeInteger(n) && n > 0 ? n : 0;
+  return {
+    mode: files.mode,
+    restored: count(files.restored),
+    kept: count(files.kept),
+    ...(typeof files.reason === "string" ? { reason: files.reason } : {}),
+  };
+};
+
 export interface RenderModel {
   messages: RenderMessage[];
   permissions: PendingPermission[];
@@ -459,6 +486,9 @@ export interface RenderModel {
   changedFiles: string[];
   /** The latest canonical user/message was intentionally omitted from chat. */
   lastUserMessageHidden: boolean;
+  /** Time of that omitted prompt while it is the latest (an agent's wake, a
+   *  hidden retry); replies it opens carry it as `hiddenPromptAt`. */
+  hiddenPromptAt?: number;
   /** A prompt-cache keep-alive turn is open (`user/message.keepAlive`): its
    *  prompt, turn boundaries and reply are maintenance, not conversation, so
    *  they stay out of the chat; its usage still updates context and totals. */
@@ -466,13 +496,16 @@ export interface RenderModel {
   /** Active rewind marker. `draft` is replay-derived from the target
    *  `user/message` (raw ?? text + attachments); `restoredText` only appears
    *  when an old marker carried it (compat). */
-  rewind: { markerSeq: number; atSeq: number; restoredText?: string; draft?: SeedDraft } | null;
+  rewind: { markerSeq: number; atSeq: number; restoredText?: string; draft?: SeedDraft; files?: RewindMarkerFiles } | null;
   /** Lineage of a `session/forked` child (per-message forks carry a draft). */
   fork: ForkState | null;
   version: number; // bumps on every applied event (cheap change signal)
   /** Bumps only on queue-affecting events (queue/*, delivery/fallback-queued)
    *  so the queue badge refetches per queue change, not per streamed chunk. */
   queueVersion: number;
+  /** `session/start-failed`: why a started chat never got its runtime. Gone
+   *  once a later prompt is admitted. */
+  startFailure?: { code: string; message: string; eventSeq: number; attachments: AttachmentRef[] } | null;
 }
 
 export function emptyModel(): RenderModel {
@@ -905,6 +938,21 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
   if (ev.type.startsWith("queue/") || ev.type === "delivery/fallback-queued") {
     model.queueVersion += 1;
   }
+  if (ev.type === SESSION_START_FAILED_EVENT) {
+    // Ignorable and maybe from a newer server: take only well-formed fields.
+    const data = d !== null && typeof d === "object" && !Array.isArray(d) ? d : {};
+    const message = str(data, "message");
+    model.startFailure = {
+      code: str(data, "code") ?? "start-failed",
+      message: message?.trim() ? message : "",
+      eventSeq: ev.seq,
+      attachments: Array.isArray(data.attachments)
+        ? (data.attachments as unknown[]).filter((item): item is AttachmentRef =>
+          item !== null && typeof item === "object" && typeof (item as { id?: unknown }).id === "string"
+          && typeof (item as { name?: unknown }).name === "string")
+        : [],
+    };
+  } else if (ev.type === "user/message" && model.startFailure) model.startFailure = null;
   switch (ev.type) {
     case "isolation/merged": {
       const branch = str(d, "targetBranch") ?? "";
@@ -995,13 +1043,19 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         earlier.delivered = true;
         touch(earlier);
       }
-      const text = stripRecoveryContextBlocks(str(d, "text") ?? "");
-      const rawValue = str(d, "raw");
+      // A prompt shown as other words (an agent's composed wake shows only the
+      // person's input) renders those; an empty display text is not shown.
+      const displayText = str(d, "displayText");
+      const text = stripRecoveryContextBlocks(displayText ?? str(d, "text") ?? "");
+      const rawValue = displayText === undefined ? str(d, "raw") : undefined;
       const raw = rawValue === undefined ? undefined : stripRecoveryContextBlocks(rawValue);
       const hiddenUserMessage = d.githubConflictResolution === true
         || d.hiddenUserMessage === true
-        || d.autoResume === true;
+        || d.autoResume === true
+        || displayText === "";
       model.lastUserMessageHidden = hiddenUserMessage;
+      if (hiddenUserMessage) model.hiddenPromptAt = ev.time;
+      else delete model.hiddenPromptAt;
       const pressure = Number((d as { contextPressure?: { level?: unknown } }).contextPressure?.level);
       if (Number.isFinite(pressure)) model.contextPressureLevel = pressure;
       if (!hiddenUserMessage) {
@@ -1137,6 +1191,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           reasoning: "",
           finalized: false,
           time: ev.time,
+          ...(model.hiddenPromptAt !== undefined ? { hiddenPromptAt: model.hiddenPromptAt } : {}),
           ...(model.turn?.model ? { model: model.turn.model } : {}),
           ...(model.turn?.agent ? { agent: model.turn.agent } : {}),
           ...(model.turn?.harnessId ? { harnessId: model.turn.harnessId } : {}),
@@ -1174,6 +1229,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           reasoning: "",
           finalized: false,
           time: ev.time,
+          ...(model.hiddenPromptAt !== undefined ? { hiddenPromptAt: model.hiddenPromptAt } : {}),
           ...(model.turn?.model ? { model: model.turn.model } : {}),
           ...(model.turn?.agent ? { agent: model.turn.agent } : {}),
           ...(model.turn?.harnessId ? { harnessId: model.turn.harnessId } : {}),
@@ -1343,11 +1399,13 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           : restoredText !== undefined
             ? { text: restoredText }
             : undefined;
+      const files = rewindMarkerFiles(d.files);
       model.rewind = {
         markerSeq: ev.seq,
         atSeq,
         ...(restoredText !== undefined ? { restoredText } : {}),
         ...(draft ? { draft } : {}),
+        ...(files ? { files } : {}),
       };
       break;
     }

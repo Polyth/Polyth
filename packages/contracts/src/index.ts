@@ -875,12 +875,128 @@ export interface SessionRewoundData {
   /** The reverted user/message seq. That message and its following tail are hidden. */
   atSeq: number;
   restoredText?: string;
+  /** What the rollback did to the files on disk. Absent on markers written
+   *  before file rollback existed (and by older clients): files untouched. */
+  files?: RewindFilesOutcome;
 }
 export interface SessionRewindClearedData {
   /** Seq of the session/rewound marker being resolved. */
   rewindSeq: number;
   /** True when a new send replaces the hidden tail; false/absent means redo. */
   replaced?: boolean;
+  /** Files a redo put back as they were before the rollback. */
+  files?: { restored: number; kept: number };
+}
+
+// ------------------------------------------------- workspace checkpoints
+//
+// The server snapshots a session's checkout at every turn it admits (before
+// the prompt reaches the runtime) and again when that turn stops. A rewind may
+// then put the files that turn changed back, file by file, only where the
+// file still holds exactly what the agent left. Event type:
+// `workspace/checkpoint` (ignorable; never model history).
+
+/** Why a checkpoint could not be taken. */
+export type WorkspaceCheckpointUnavailable =
+  | "not-git"
+  | "remote"
+  | "timeout"
+  | "error"
+  | "service-missing";
+
+export interface WorkspaceCheckpointData {
+  /** Seq of the user/message whose admitted turn this checkpoint brackets. */
+  promptSeq: number;
+  phase: "before" | "after";
+  /** Snapshot commit (a full working-tree tree, ignore rules honoured). */
+  commit?: string;
+  /** Repository top-level the snapshot covers. */
+  root?: string;
+  unavailable?: WorkspaceCheckpointUnavailable;
+  /** Repo-relative paths left out of the snapshot (too large), capped. */
+  skipped?: string[];
+  skippedMore?: number;
+}
+
+/** Why a rollback leaves every file as it is. */
+export type RewindFilesUnavailableReason =
+  | "no-changes"
+  | "not-git"
+  | "remote"
+  | "no-snapshot"
+  | "mid-turn"
+  | "branch-changed"
+  | "service-missing"
+  | "error";
+
+/** Why one changed file stays as it is. */
+export type RewindFileKeepReason =
+  /** Its content differs from what the agent left: someone edited it since. */
+  | "changed-after"
+  /** Another chat was working in this checkout while it changed. */
+  | "other-chat"
+  /** It changed between this chat's turns, outside them. */
+  | "between-steps"
+  /** It was too large to snapshot. */
+  | "too-large"
+  /** A submodule or another entry the rollback cannot write. */
+  | "unsupported"
+  /** Writing it failed (permissions, disk). */
+  | "write-failed";
+
+export interface RewindFileChange {
+  /** Repo-relative path. */
+  path: string;
+  /** What the agent did to it: rollback undoes that. */
+  kind: "modified" | "added" | "deleted";
+  additions?: number;
+  deletions?: number;
+  binary?: boolean;
+  /** Changed by a command, not an edit tool; attributed because no other
+   *  chat worked in the checkout meanwhile. */
+  byCommand?: boolean;
+}
+
+export interface RewindFileKept {
+  path: string;
+  reason: RewindFileKeepReason;
+}
+
+/** GET /api/sessions/:id/rewind/preview?atSeq= — what a rollback to that
+ *  message would do to the files. Read-only. */
+export interface RewindFilesPreview {
+  /** False: the rollback is conversation-only; `reason` says why. */
+  available: boolean;
+  reason?: RewindFilesUnavailableReason;
+  /** The session's turn is still running; files restore only after it stops. */
+  turnRunning: boolean;
+  restore: RewindFileChange[];
+  keep: RewindFileKept[];
+}
+
+/** Persisted on `session/rewound.files`. Lists are capped; counts are exact. */
+export interface RewindFilesOutcome {
+  /** restored: files were put back; kept: the person chose conversation only;
+   *  unavailable: nothing could be put back (`reason`). */
+  mode: "restored" | "kept" | "unavailable";
+  reason?: RewindFilesUnavailableReason;
+  restored: number;
+  kept: number;
+  /** Snapshot of the checkout just before the rollback wrote anything. */
+  undo?: string;
+  /** Snapshot right after the rollback: what a redo compares against. */
+  rolled?: string;
+  root?: string;
+  /** Restored repo-relative paths (capped at 500). */
+  paths?: string[];
+  keptFiles?: RewindFileKept[];
+}
+
+/** GET /api/sessions/:id/rewind/clear/preview — what a redo would put back. */
+export interface RewindRestorePreview {
+  restore: number;
+  /** Files changed since the rollback: a redo leaves them as they are. */
+  keep: RewindFileKept[];
 }
 
 // ---------------------------------------------------------------- fork lineage
@@ -1409,6 +1525,47 @@ export interface CreateSessionInput {
   backendSessionId?: string;
 }
 export interface SessionRef { id: string }
+/** What a new chat does once it exists. Sent with its create so the server
+ *  owns the whole start: no later client request is needed, and a client that
+ *  closes after the request cannot lose the prompt. */
+export interface SessionStartRequest {
+  /** First prompt. Queued durably with the chat and delivered once its
+   *  runtime is ready. Its model/agent are the chat's own creation route. */
+  firstTurn?: Pick<UserTurnInput, "text" | "attachments" | "command" | "autoTitle">;
+  /** As `UserTurnInput.agentProfileId`: a string selects a profile, `null`
+   *  clears a project default, omitted inherits it. */
+  agentProfileId?: string | null;
+  /** The chat's approval setting, present from its first projection. */
+  autoAccept?: AutoAcceptSetting;
+  /** Package start-step payloads keyed by step id (`SESSION_START_STEPS` in
+   *  `@polyth/plugins`). An unknown id is rejected before anything is created. */
+  extensions?: Record<string, JsonObject>;
+}
+export interface StartSessionInput extends CreateSessionInput {
+  start: SessionStartRequest;
+  /** Account-scoped key of the first turn's admission (`UserTurnInput.clientOperationId`).
+   *  A repeated start with the same key never queues the prompt twice. */
+  clientOperationId?: string;
+}
+/** `queueId` while the first turn waits for the runtime; `turnId` when the
+ *  runtime was already there and admitted it at once. */
+export interface StartSessionResult extends SessionRef {
+  queueId?: string;
+  turnId?: string;
+}
+/** `delivery/fallback-queued` reason of a start's first turn: the chat is
+ *  starting, not stalled. */
+export const SESSION_STARTING_QUEUE_REASON = "session-starting" as const;
+/** A started chat whose runtime could not be created. The first prompt left
+ *  the queue: `text` is back in its author's draft, and `attachments` name the
+ *  pills to restore. Ignorable; old reducers skip it. */
+export const SESSION_START_FAILED_EVENT = "session/start-failed" as const;
+export interface SessionStartFailedData {
+  code: string;
+  message: string;
+  text?: string;
+  attachments?: AttachmentRef[];
+}
 export interface TurnRef { turnId: string }
 /** Explicit per-turn/session memory narrowing. `inherit` preserves the
  * project/session policy; `off` can only reduce delivery or harvesting. */
@@ -1431,6 +1588,12 @@ export interface UserTurnInput {
    * canonical event remains durable for runtime continuity, but chat/prompt
    * recall must not render it as a second user submission. */
   hiddenUserMessage?: boolean;
+  /** Server-package only (never read from HTTP): what chat surfaces show for
+   * this prompt in place of its model-visible `text`; an empty string keeps
+   * the prompt out of the chat. Unlike `hiddenUserMessage` the prompt stays
+   * conversation: compaction, recovery and memory still read `text`. An
+   * agent's composed wake prompt uses it to show only the person's words. */
+  displayText?: string;
   /** Server-package only (never read from HTTP): a prompt-cache keep-alive.
    * The turn is cache maintenance, not conversation — it implies
    * `hiddenUserMessage`, chat surfaces hide its reply, and it fires no
@@ -2214,6 +2377,26 @@ export interface CreateIsolatedSessionInput {
   targetBranch?: string;
 }
 
+/** `POST /api/worktrees/sessions`: start a chat in a linked worktree the
+ *  server allocates first, so the client makes one request. `new-worktree`
+ *  picks a unique codename branch from `base` (or HEAD); `branch` opens or
+ *  creates the worktree of that branch. Keyed by `clientOperationId` like
+ *  `createSession`: a resend returns the first chat and its worktree. */
+export interface StartWorktreeSessionInput {
+  projectId: string;
+  target:
+    | { kind: "new-worktree"; base?: string }
+    | { kind: "branch"; branch: string; base?: string };
+  purpose?: string;
+  repositoryIds?: readonly string[];
+  harness?: HarnessSelection;
+  title?: string;
+  model?: ModelRef;
+  agent?: string;
+  start?: SessionStartRequest;
+  clientOperationId?: string;
+}
+
 export interface IsolationSuggestionDto {
   eligible: boolean;
   hasChanges: boolean;
@@ -2748,6 +2931,8 @@ export interface SessionSpawnTimingDto {
   runtimeAcquireMs?: number;
   nativeSessionCreateMs?: number;
   turnAdmissionMs?: number;
+  /** A start only: from validated creation to its reply (row and first turn durable). */
+  startReplyMs?: number;
   /** From validated creation to the first accepted runtime turn-content event. */
   firstRuntimeEventMs?: number;
   /** True only when acquisition reused an initialized runtime entry. */
@@ -2823,6 +3008,12 @@ export interface SessionService {
    *  continued instead of starting another. */
   restartRuntime?(sessionId: string): Promise<SessionProjection>;
   create(input: CreateSessionInput): Promise<SessionRef>;
+  /** Create a chat and own its whole start. Resolves once the canonical row
+   *  and the first turn's queue row are durable — before the runtime exists.
+   *  Runtime creation and delivery continue on the server, survive a restart,
+   *  and a failure leaves the chat `failed` with `SESSION_START_FAILED_EVENT`.
+   *  `admission` is server-only, as for `send`. */
+  start?(input: StartSessionInput, admission?: TurnAdmission): Promise<StartSessionResult>;
   /** Canonical membership mutation. Preserves session identity and rejects
    * stale revisions or an unsafe in-flight execution transition. */
   updateWorkspace?(sessionId: string, selection: SessionWorkspaceSelection): Promise<SessionProjection>;
@@ -2870,10 +3061,17 @@ export interface SessionService {
    *  fork — the child prefix ends strictly BEFORE the target user message and
    *  the excluded prompt returns as an editable draft. */
   fork(sessionId: string, atSeq?: number): Promise<ForkResult>;
-  /** Soft-rewind to a user message without mutating prior events. */
-  rewind?(sessionId: string, atSeq: number): Promise<SessionEvent>;
-  /** Restore the tail hidden by the active rewind marker. */
+  /** Soft-rewind to a user message without mutating prior events.
+   *  `files: "restore"` also puts back the files the cut turns changed (only
+   *  while no turn runs); the default keeps every file as it is. */
+  rewind?(sessionId: string, atSeq: number, options?: { files?: "restore" | "keep" }): Promise<SessionEvent>;
+  /** What a rollback to `atSeq` would do to the files. Read-only. */
+  previewRewindFiles?(sessionId: string, atSeq: number): Promise<RewindFilesPreview>;
+  /** Restore the tail hidden by the active rewind marker, and the files that
+   *  rollback put back where they are still exactly as it left them. */
   clearRewind?(sessionId: string): Promise<SessionEvent>;
+  /** What clearRewind would put back on disk. Read-only. */
+  previewRewindRestore?(sessionId: string): Promise<RewindRestorePreview>;
   /** Execute a composer `!` command through the shell permission family. */
   /** `person`: the signed-in person running it; their Credential Vault
    *  entries resolve first. Absent → Space entries only. */
@@ -3221,6 +3419,13 @@ export interface SessionPersistence {
    *  must treat turn closure as unproven. */
   lastTurnEventType?(sessionId: string): Promise<"started" | "stopped" | undefined>;
   latestSeq(sessionId: string): Promise<number>;
+  /**
+   * Newest event seq of every session in one Space (optionally one project),
+   * in a single indexed read; 0 for a session without events. The Space fence
+   * is part of the query: a session of another Space is never in the result.
+   * Optional so fakes stay valid.
+   */
+  latestSeqs?(scope: { spaceId: string; projectId?: string }): Promise<Map<string, number>>;
   /** Bytes of this chat's stored history. Optional so fakes stay valid. */
   eventBytes?(sessionId: string): Promise<number>;
   copyTo(srcSessionId: string, dstSessionId: string, upToSeq?: number): Promise<void>;
@@ -6235,6 +6440,12 @@ export interface TaskCompletedData extends TaskSelectedData {}
  *  server-managed manifest boundary can reject unknown slot names. */
 export const UI_SLOTS = [
   "app.nav", "app.header.actions", "app.window.controls", "session.header.actions", "session.header.status", "session.list.badges",
+  // Back from the open chat to the package page that owns it (an agent's
+  // session goes back to its agent). Context: sessionId and presentation
+  // ("bar" before the desktop title, "island" beside the phone menu). Render
+  // the host `SessionBackButton` or nothing; the host draws a delegated
+  // child's Back to its parent itself and then mounts no contribution.
+  "session.header.back",
   "sidebar.footer",
   "composer.leading", "composer.execution", "composer.trailing", "modelPicker.header", "contextRail.tabs",
   // Settings → Source control: the person's own hosting accounts, the Space
@@ -6518,6 +6729,9 @@ export interface QueueItemDto {
   command?: { id: string; args?: string };
   /** Preserve retry/regeneration presentation semantics through deferred delivery. */
   hiddenUserMessage?: boolean;
+  /** Preserve the chat presentation of a prompt whose model text differs
+   * (`UserTurnInput.displayText`); an empty string keeps it out of view. */
+  displayText?: string;
   /** Preserve the validated per-turn memory narrowing while queued. */
   memory?: MemoryNarrowing;
   /** A fenced prior-epoch admission is a draft for explicit review, never dispatchable. */
@@ -6526,7 +6740,7 @@ export interface QueueItemDto {
   author?: SessionPerson;
 }
 
-export interface QueueEnqueuedData { queueId: string; text: string; delivery: string; hiddenUserMessage?: boolean; memory?: MemoryNarrowing; author?: SessionPerson }
+export interface QueueEnqueuedData { queueId: string; text: string; delivery: string; hiddenUserMessage?: boolean; displayText?: string; memory?: MemoryNarrowing; author?: SessionPerson }
 export interface QueueDispatchedData { queueId: string }
 export interface QueueEditedData { queueId: string; text: string }
 export interface QueueReorderedData { ids: string[] }

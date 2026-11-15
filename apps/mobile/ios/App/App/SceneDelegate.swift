@@ -144,9 +144,68 @@ final class PolythKeyboardMotionPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 }
 
+/// Keeps a page WebKit killed from staying blank. Capacitor answers a killed
+/// web content process with reload() and a failed load with its optional error
+/// page, which this app does not have. When iOS ended the open server's page
+/// in the background and the reload could not reach the Link proxy (its
+/// listener was still coming back after the suspension), the WebView stayed
+/// a blank white page with nothing on it to recover from. This delegate sits in
+/// front of Capacitor's: every message it does not implement goes to Capacitor
+/// unchanged, and the ones it does implement call Capacitor first. Such a page
+/// goes to the Connection Hub, which opens the server again over a fresh
+/// connection (`?resume=1`, at most once a minute, then the hub's server list).
+final class PolythPageRecovery: NSObject, WKNavigationDelegate {
+    private let capacitor: WKNavigationDelegate
+    /// Main thread only: the open server's page was killed and no document
+    /// has replaced it yet.
+    private var serverPageLost = false
+
+    init(forwardingTo capacitor: WKNavigationDelegate) {
+        self.capacitor = capacitor
+        super.init()
+    }
+
+    override func responds(to aSelector: Selector!) -> Bool {
+        super.responds(to: aSelector) || capacitor.responds(to: aSelector)
+    }
+
+    override func forwardingTarget(for aSelector: Selector!) -> Any? {
+        capacitor.responds(to: aSelector) ? capacitor : super.forwardingTarget(for: aSelector)
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        serverPageLost = webView.url?.scheme?.lowercased() == "http" && webView.url?.host == "127.0.0.1"
+        capacitor.webViewWebContentProcessDidTerminate?(webView)
+    }
+
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        serverPageLost = false
+        capacitor.webView?(webView, didCommit: navigation)
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        capacitor.webView?(webView, didFailProvisionalNavigation: navigation, withError: error)
+        guard serverPageLost, !Self.superseded(error),
+              let hub = URL(string: "capacitor://localhost?resume=1") else { return }
+        serverPageLost = false
+        webView.load(URLRequest(url: hub))
+    }
+
+    /// Another load replaced this one, or a navigation policy stopped it:
+    /// something else already decided what the WebView shows next.
+    private static func superseded(_ error: Error) -> Bool {
+        let failure = error as NSError
+        if failure.domain == NSURLErrorDomain && failure.code == NSURLErrorCancelled { return true }
+        // WebKitErrorFrameLoadInterruptedByPolicyChange
+        return failure.domain == "WebKitErrorDomain" && failure.code == 102
+    }
+}
+
 final class PolythRootBridgeViewController: CAPBridgeViewController {
     private var pageCanvasObservation: NSKeyValueObservation?
     private var pageLoadingObservation: NSKeyValueObservation?
+    /// WKWebView holds its navigation delegate weakly.
+    private var pageRecovery: PolythPageRecovery?
 
     /// WebKit can hand a freshly loaded document a zero safe area and keep it
     /// until the WebView's next visible-rect update. Device report 2026-11-10
@@ -220,6 +279,13 @@ final class PolythRootBridgeViewController: CAPBridgeViewController {
 
     override func capacitorDidLoad() {
         super.capacitorDidLoad()
+        // Before the first page loads: WebKit reads which messages its
+        // navigation delegate answers when the delegate is assigned.
+        if let webView, let capacitor = webView.navigationDelegate {
+            let recovery = PolythPageRecovery(forwardingTo: capacitor)
+            pageRecovery = recovery
+            webView.navigationDelegate = recovery
+        }
         bridge?.registerPluginInstance(PolythLinkPlugin())
         bridge?.registerPluginInstance(PolythNavigationPlugin())
         bridge?.registerPluginInstance(PolythKeyboardMotionPlugin())

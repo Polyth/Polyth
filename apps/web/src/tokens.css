@@ -184,6 +184,13 @@
   --composer-stack-row: 28px;
   --composer-stack-control: 26px;
   --composer-stack-reach: calc(max(var(--composer-stack-row), var(--hit-min)) - var(--composer-stack-row));
+  /* The composer card's icon grid continues those columns inside the card
+     (composerAdaptive.css, "Composer icon grid"): the model logo and Add
+     centre on --composer-stack-mark, Send/Stop ends on --composer-stack-end,
+     and the model line and the rail centre this far from the card's top and
+     bottom edge. Half the resting row, so Add and Send hold still while the
+     phone card opens into its engaged form and closes again. */
+  --composer-row-mid: calc(var(--composer-height) / 2);
 
   /* Navigator highlight pill: the air between a pill's edge and the content
      it frames (state mark or title at the start, the last mark at the end),

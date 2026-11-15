@@ -1,0 +1,226 @@
+/* Orchestration settings page. Everything is scoped under `.orch-page` (or the
+   picker's own root) and reads canonical tokens, so density, motion,
+   transparency and "Hide interface borders" apply without extra rules. */
+
+.orch-page { display: flex; flex-direction: column; gap: var(--space-4); min-inline-size: 0; container: orch / inline-size; }
+.orch-notices { display: flex; flex-direction: column; gap: var(--space-2); }
+.orch-notices:empty { display: none; }
+.orch-skeleton { display: flex; flex-direction: column; gap: var(--space-2); }
+
+.orch-muted { color: var(--muted); }
+.orch-danger-text { color: var(--red); }
+.orch-hint { margin: var(--space-2) 0 0; color: var(--muted); font-size: var(--font-meta); line-height: 1.45; }
+.orch-hint--danger { color: var(--red); }
+.orch-inline-note { margin: 0 0 var(--space-2); color: var(--muted); font-size: var(--font-meta); }
+.orch-link {
+  appearance: none; background: none; border: 0; padding: 0; font: inherit; color: var(--accent);
+  cursor: pointer; text-decoration: underline; text-underline-offset: 2px;
+}
+.orch-link:hover:where(:not(:disabled)) { background: transparent; }
+.orch-meta { color: var(--muted); font-size: var(--font-meta); overflow-wrap: anywhere; }
+
+/* Ranked rows: the number sits where a row's mark normally is. */
+.orch-rank {
+  display: inline-grid; place-items: center; min-inline-size: 1.5em;
+  font-variant-numeric: tabular-nums; font-size: var(--font-meta); color: var(--text-dim); font-weight: 600;
+}
+.orch-star { color: var(--amber); margin-inline-end: var(--space-1); }
+.orch-trailing { display: inline-flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; justify-content: flex-end; }
+.orch-foot { margin-block-start: var(--space-2); color: var(--muted); font-size: var(--font-meta); }
+.orch-foot p { margin: 0; }
+.orch-refresh { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-2); font-size: var(--font-meta); min-inline-size: 0; }
+.orch-windows { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); justify-content: flex-end; font-size: var(--font-meta); }
+.orch-window { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Quota meter: thin bar and its number. */
+.orch-meter { display: inline-flex; align-items: center; gap: var(--space-2); --orch-meter: var(--accent); }
+.orch-meter--warning { --orch-meter: var(--amber); }
+.orch-meter--danger { --orch-meter: var(--red); }
+.orch-meter-bar {
+  inline-size: 64px; block-size: 6px; border-radius: var(--radius-round); overflow: hidden;
+  background: var(--surface-overlay-strong); flex: 0 0 auto;
+}
+.orch-meter-bar > i { display: block; block-size: 100%; background: var(--orch-meter); border-radius: inherit; }
+.orch-meter-value { font-variant-numeric: tabular-nums; font-size: var(--font-meta); min-inline-size: 3ch; text-align: end; }
+
+/* Status chips: always text, colour only supports it. */
+.orch-chip {
+  display: inline-flex; align-items: center; padding: 1px var(--space-2); border-radius: var(--radius-round);
+  font-size: var(--font-meta); line-height: 1.5; background: var(--surface-overlay); color: var(--text-dim);
+  white-space: nowrap;
+}
+.orch-chip--success { color: var(--green); }
+.orch-chip--warning { color: var(--amber); }
+.orch-chip--danger { color: var(--red); }
+.orch-chip--accent { color: var(--accent); background: color-mix(in oklab, var(--accent) 14%, transparent); font-weight: 600; }
+
+/* How it works */
+.orch-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); margin: 0; padding: 0; list-style: none; }
+.orch-steps li { display: flex; gap: var(--space-2); align-items: flex-start; font-size: var(--font-label); }
+.orch-step-n {
+  flex: 0 0 auto; display: inline-grid; place-items: center; inline-size: 1.5em; block-size: 1.5em;
+  border-radius: var(--radius-round); background: var(--surface-overlay-strong); font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Agent text */
+.orch-agent-text { position: relative; }
+.orch-agent-text pre {
+  margin: 0; padding: var(--space-3); padding-inline-end: calc(var(--control-h-sm) + var(--space-3));
+  max-block-size: 22lh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+  font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--font-meta); line-height: 1.5;
+  border-radius: var(--radius-md); background: var(--surface-overlay);
+}
+.orch-agent-copy { position: absolute; inset-block-start: var(--space-2); inset-inline-end: var(--space-2); }
+
+/* Roles */
+.orch-toolbar { display: flex; align-items: center; gap: var(--space-3); margin-block-end: var(--space-2); }
+.orch-pending { display: inline-flex; }
+.orch-role-label { display: flex; flex-direction: column; min-inline-size: 0; text-align: start; }
+.orch-role-desc { font-size: var(--font-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.orch-role-body { display: flex; flex-direction: column; gap: var(--space-3); padding-block: var(--space-2); }
+.orch-role-use { display: flex; align-items: center; gap: var(--space-2); }
+.orch-role-fields { display: flex; flex-direction: column; gap: var(--space-3); }
+.orch-field { display: flex; flex-direction: column; gap: var(--space-1); font-size: var(--font-label); }
+.orch-field-foot { display: flex; justify-content: space-between; gap: var(--space-2); font-size: var(--font-meta); }
+.orch-brief { margin: 0; font-size: var(--font-meta); }
+.orch-role-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); margin-block-start: var(--space-2); }
+.orch-delete-role { margin-inline-start: auto; }
+
+.orch-chain { display: flex; flex-direction: column; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.orch-chain-row {
+  display: grid; align-items: center; gap: var(--space-2) var(--space-3);
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  padding: var(--space-2); border-radius: var(--radius-md); background: var(--surface-overlay);
+}
+.orch-chain-row[data-picked="true"] { box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 45%, transparent); }
+.orch-chain-n {
+  display: inline-grid; place-items: center; inline-size: 1.75em; block-size: 1.75em; border-radius: var(--radius-round);
+  background: var(--surface-overlay-strong); font-variant-numeric: tabular-nums; font-size: var(--font-meta); font-weight: 600;
+}
+.orch-chain-name { display: flex; flex-direction: column; min-inline-size: 0; }
+.orch-chain-name > strong { overflow-wrap: anywhere; }
+.orch-chain-name > .orch-muted { font-size: var(--font-meta); overflow-wrap: anywhere; }
+.orch-chain-status { display: inline-flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; justify-content: flex-end; }
+.orch-chain-controls { display: inline-flex; align-items: center; gap: var(--space-1); }
+.orch-at-once { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--font-meta); }
+
+/* Safeguards */
+.orch-safeguards { display: flex; flex-direction: column; gap: var(--space-4); }
+.orch-over-pace { display: inline-flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; justify-content: flex-end; }
+
+/* Picker */
+.orch-picker { display: flex; flex-direction: column; gap: var(--space-3); min-block-size: 0; }
+.orch-picker-search-wrap { display: flex; align-items: center; gap: var(--space-2); color: var(--muted); }
+.orch-picker-search-wrap .ui-input { flex: 1 1 auto; }
+.orch-picker-list { display: flex; flex-direction: column; gap: var(--space-3); max-block-size: min(60vh, 28rem); overflow: auto; }
+.orch-picker-group { display: flex; flex-direction: column; gap: 2px; }
+.orch-picker-group-title { margin: 0; padding: var(--space-1) var(--space-2); font-size: var(--font-meta); font-weight: 600; color: var(--muted); }
+.orch-picker-loading { display: flex; flex-direction: column; gap: var(--space-2); }
+.orch-picker-empty { margin: 0; color: var(--muted); text-align: center; padding: var(--space-4); }
+.orch-picker-option {
+  appearance: none; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px var(--space-3);
+  text-align: start; inline-size: 100%; padding: var(--space-2); border: 0; border-radius: var(--radius-md);
+  background: transparent; color: inherit; font: inherit; cursor: pointer;
+}
+.orch-picker-option[data-active="true"] { background: var(--surface-overlay-strong); }
+.orch-picker-option:hover:where(:not([aria-disabled="true"])) { background: var(--surface-overlay-strong); }
+.orch-picker-option[data-muted="true"] { color: var(--muted); }
+.orch-picker-option[aria-disabled="true"] { cursor: not-allowed; }
+.orch-picker-main { display: flex; gap: var(--space-2); align-items: baseline; min-inline-size: 0; grid-column: 1 / -1; }
+.orch-picker-main em { color: var(--muted); font-style: normal; font-size: var(--font-meta); }
+.orch-picker-sub { color: var(--muted); font-size: var(--font-meta); }
+.orch-picker-chips { display: inline-flex; gap: var(--space-1); flex-wrap: wrap; justify-content: flex-end; grid-column: 2; grid-row: 2; }
+
+/* Hide interface borders: lines become the borderless edge. */
+:where([data-hide-borders="true"], .hide-borders) .orch-chain-row[data-picked="true"] { box-shadow: inset 0 0 0 1px var(--borderless-edge); }
+
+/* Liquid glass paints a white fill on plain button hover. */
+button.orch-picker-option:hover:where(:not(:disabled)),
+button.orch-link:hover:where(:not(:disabled)) { background: transparent; }
+button.orch-picker-option[data-active="true"]:hover:where(:not(:disabled)) { background: var(--surface-overlay-strong); }
+
+/* Seg is a flex row that fills its parent; keep it compact at the start. */
+.orch-page .orch-seg { display: flex; justify-content: flex-start; min-inline-size: 0; }
+.orch-page .orch-seg .seg { display: inline-flex; justify-content: flex-start; flex: 0 1 auto; }
+
+/* Rows without a leading mark; ranked rows show a plain number, no tile. */
+.orch-page .settings-list-row.orch-flat {
+  grid-template-columns: minmax(0, 1fr) auto var(--icon-sm);
+  grid-template-areas: "title trailing chevron" "desc trailing chevron" "error trailing chevron";
+}
+.orch-page .settings-list-row.orch-ranked .settings-list-tile {
+  inline-size: 2.5ch; block-size: auto; border: 0; background: none; box-shadow: none; align-self: center;
+}
+.orch-page .orch-ranked .orch-rank { color: var(--muted); }
+.orch-page .settings-list-title { min-inline-size: 0; }
+
+/* Select "At once": row-sized text, subtle fill (host default is a large white field). */
+.orch-at-once { min-inline-size: 0; }
+.orch-at-once .picker-select { inline-size: auto; min-inline-size: 0; }
+.orch-at-once .picker-select .picker-chip {
+  inline-size: auto; font-size: var(--font-meta); padding-inline: var(--space-2);
+  background: var(--surface-overlay-strong); border-color: transparent;
+}
+
+/* Narrow container: the pick moves under the description, nothing ellipsized. */
+.orch-role-pick { display: none; font-size: var(--font-meta); }
+.orch-role-body { min-inline-size: 0; }
+.orch-role-body > * { min-inline-size: 0; }
+.orch-chain-row > * { min-inline-size: 0; }
+
+@container orch (max-width: 520px) {
+  .orch-page .settings-disclosure-value:has(> .orch-sum) { display: none; }
+  .orch-role-pick { display: block; }
+  .orch-role-desc { white-space: normal; overflow: visible; text-overflow: clip; }
+  .orch-page .settings-list-row.orch-ranked {
+    grid-template-areas: "tile title chevron" "tile trailing trailing" "tile error error";
+    grid-template-columns: auto minmax(0, 1fr) var(--icon-sm);
+  }
+  .orch-page .settings-list-row.orch-quota-row {
+    grid-template-columns: minmax(0, 1fr) var(--icon-sm);
+    grid-template-areas: "title chevron" "trailing trailing" "error error";
+  }
+  .orch-page .orch-ranked .settings-list-trailing,
+  .orch-page .orch-quota-row .settings-list-trailing { justify-content: flex-start; }
+  .orch-trailing, .orch-windows { justify-content: flex-start; }
+  .orch-steps { grid-template-columns: 1fr; }
+  .orch-meter-bar { inline-size: 48px; }
+  .orch-chain-row { grid-template-columns: auto minmax(0, 1fr); }
+  .orch-chain-status { grid-column: 2; justify-content: flex-start; }
+  .orch-chain-controls { grid-column: 1 / -1; flex-wrap: wrap; justify-content: flex-start; min-inline-size: 0; }
+  .orch-delete-role { margin-inline-start: 0; }
+  .orch-over-pace { justify-content: flex-start; }
+  .orch-field-foot { flex-wrap: wrap; }
+}
+
+/* Picker (a portal, so a viewport query): each option is a vertical stack. */
+.orch-picker-option { grid-template-columns: minmax(0, 1fr); }
+.orch-picker-main { grid-column: 1; flex-wrap: wrap; }
+.orch-picker-sub { grid-column: 1; min-inline-size: 0; overflow-wrap: anywhere; }
+.orch-picker-chips { grid-column: 1; grid-row: auto; justify-content: flex-start; }
+.orch-picker-chips .orch-chip { font-size: calc(var(--font-meta) * 0.92); padding-block: 0; }
+
+/* Touch: real 44px boxes (glyphs stay small). */
+@media (pointer: coarse) {
+  .orch-page .ui-icon-btn--sm { inline-size: var(--tap); block-size: var(--tap); }
+  .orch-page .size-stepper-track {
+    block-size: var(--tap); min-block-size: var(--tap);
+    background-color: transparent;
+    background-image: linear-gradient(90deg, var(--accent) var(--p, 50%), var(--border) var(--p, 50%));
+    background-size: 100% 4px; background-repeat: no-repeat; background-position: center;
+  }
+  .orch-picker-option { min-block-size: var(--tap); }
+  .orch-link { min-block-size: var(--tap); }
+}
+
+/* Quota windows wrap inside the row instead of pushing it wider. */
+.orch-page .orch-quota-row .settings-list-trailing { flex-wrap: wrap; min-inline-size: 0; max-inline-size: 100%; }
+.orch-windows { min-inline-size: 0; }
+.orch-window { white-space: normal; }
+
+.orch-page .settings-list-row.orch-flat > .settings-list-tile { display: none; }
+@container orch (max-width: 520px) {
+  .orch-at-once { flex: 1 1 100%; }
+  .orch-chain-controls { gap: 0; }
+}

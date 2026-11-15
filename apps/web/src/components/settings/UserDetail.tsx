@@ -16,6 +16,11 @@ import {
 import { api } from "@polyth/session/web-api";
 import ModelPicker from "@polyth/models/model-picker";
 import {
+  ACCOUNT_LOGIN_MAX,
+  ACCOUNT_NAME_MAX,
+  changeAccountLogin,
+  normalizeLogin,
+  validLogin,
   accountGuardrails,
   accountLimits,
   accountPermissions,
@@ -148,9 +153,11 @@ export default function UserDetail({ account, name, spaceAccess, withReauth, onB
   const [saveStatus, setSaveStatus] = useState<SaveStatusState>("idle");
   const [saveError, setSaveError] = useState<string | undefined>(undefined);
   const [nameDraft, setNameDraft] = useState(name);
+  const [loginDraft, setLoginDraft] = useState(account.login ?? "");
   const [passwordOpen, setPasswordOpen] = useState(false);
 
   useEffect(() => { setNameDraft(name); }, [name]);
+  useEffect(() => { setLoginDraft(account.login ?? ""); }, [account.login]);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -280,6 +287,14 @@ export default function UserDetail({ account, name, spaceAccess, withReauth, onB
     const next = nameDraft.trim();
     if (!next || next === name) return;
     await run(() => renameAccount(account, next), tr("settings.users.renamed", { name: next }));
+  };
+
+  const nextLogin = normalizeLogin(loginDraft);
+  const loginChanged = !!account.login && !!nextLogin && nextLogin !== account.login;
+  const loginInvalid = loginChanged && !validLogin(nextLogin);
+  const changeLogin = async () => {
+    if (!loginChanged || loginInvalid || busy) return;
+    await run(() => changeAccountLogin(account, nextLogin), tr("settings.users.loginChanged", { name, login: nextLogin }));
   };
 
   const disable = async () => {
@@ -441,6 +456,7 @@ export default function UserDetail({ account, name, spaceAccess, withReauth, onB
               <TextInput
                 uiSize="sm"
                 value={nameDraft}
+                maxLength={ACCOUNT_NAME_MAX}
                 aria-label={tr("settings.users.name")}
                 disabled={busy || isDisabled}
                 onChange={(event) => setNameDraft(event.target.value)}
@@ -452,7 +468,30 @@ export default function UserDetail({ account, name, spaceAccess, withReauth, onB
             </span>
           </Row>
         )}
-        {account.login && <ReadonlyRow label={tr("settings.users.login")} value={`@${account.login}`} mono />}
+        {account.login && (account.managed ? (
+          <ReadonlyRow label={tr("settings.users.login")} value={`@${account.login}`} mono />
+        ) : (
+          <Row label={tr("settings.users.login")} hint={tr(loginInvalid ? "settings.users.loginInvalid" : "settings.users.loginChangeHint")}>
+            <span className="user-detail-inline">
+              <TextInput
+                uiSize="sm"
+                value={loginDraft}
+                maxLength={ACCOUNT_LOGIN_MAX}
+                autoComplete="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                aria-label={tr("settings.users.login")}
+                aria-invalid={loginInvalid || undefined}
+                disabled={busy || isDisabled}
+                onChange={(event) => setLoginDraft(event.target.value)}
+                onKeyDown={(event) => { if (isImeComposing(event)) return; if (event.key === "Enter") void changeLogin(); }}
+              />
+              {loginChanged && (
+                <Button size="sm" variant="quiet" disabled={busy || loginInvalid} onClick={() => void changeLogin()}>{tr("common.save")}</Button>
+              )}
+            </span>
+          </Row>
+        ))}
         {isDisabled ? (
           <ReadonlyRow label={tr("settings.users.signIn")} value={<Badge tone="danger">{tr("settings.users.disabled")}</Badge>} hint={tr("settings.users.signInDisabledHint")} />
         ) : !account.managed ? (

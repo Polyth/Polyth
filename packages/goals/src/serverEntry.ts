@@ -1,15 +1,37 @@
-import type { RouteHandler } from "@polyth/contracts";
+import type { JsonObject, RouteHandler, SessionEvent } from "@polyth/contracts";
 import {
   localOnlyRemoteAccess,
   serverServiceKey,
+  SESSION_START_STEPS,
   systemAppendSessionEvent,
   systemSessionsForSession,
   type ServerPackage,
   type ServerPackageHost,
+  type SessionStartStep,
 } from "@polyth/plugins";
 import { JUDGMENT_SERVICE, type JudgmentService } from "@polyth/judgment/server";
 import { createGoalJudgmentAudit, createGoalService, GOAL_AUDIT_USE, type GoalService, type GoalState } from "./index.ts";
 import { createGoalContextReader, latestGoalEvent } from "./sessionContext.ts";
+
+export function goalStartStep(deps: {
+  goals: GoalService;
+  events(sessionId: string): Promise<readonly SessionEvent[]>;
+}): SessionStartStep {
+  return {
+    validate(payload: JsonObject) {
+      if (typeof payload.objective !== "string" || !payload.objective.trim()) {
+        throw Object.assign(new Error("objective is required"), { code: "invalid-input", field: "objective" });
+      }
+    },
+    async run(payload, ctx) {
+      const objective = String(payload.objective ?? "").trim();
+      const sessionId = ctx.session.id;
+      if (!deps.goals.get(sessionId)) deps.goals.rehydrate(sessionId, await deps.events(sessionId));
+      if (deps.goals.get(sessionId)?.objective === objective) return;
+      await deps.goals.attach(sessionId, { objective }, ctx.author?.userId);
+    },
+  };
+}
 
 export function goalRoutes(goals: GoalService): RouteHandler {
   return async (rc) => {
@@ -57,6 +79,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   // The typed audit use registers on enable, or lazily on the first audit when
   // Judgment enabled later. Without Judgment the original auditor runs.
   let registered: { service: JudgmentService; off: () => void } | undefined;
+  let startStep: { dispose(): void | Promise<void> } | undefined;
   const judgment = (): JudgmentService | undefined => {
     const service = enabled ? host.services.get(JUDGMENT_SERVICE) : undefined;
     if (registered && registered.service !== service) {
@@ -154,12 +177,18 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         }
         return goalRoute(request);
       };
+      startStep = host.services.get(SESSION_START_STEPS)?.register("goals.attach", goalStartStep({
+        goals,
+        events: (sessionId) => host.store.events(sessionId),
+      }));
       void goals.recoverWaiting().catch((error) => console.error("[polyth] goal dependency enable recovery failed", error));
     },
     onDisable() {
       enabled = false;
       registered?.off();
       registered = undefined;
+      void startStep?.dispose();
+      startStep = undefined;
       goals.invalidateAudits();
       routes = null;
     },

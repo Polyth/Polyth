@@ -16,7 +16,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import type { QueueItemDto, SessionEvent } from "@polyth/contracts";
+import { SESSION_STARTING_QUEUE_REASON, type QueueItemDto, type SessionEvent } from "@polyth/contracts";
 import { queuePausedAfterUserInterrupt } from "@polyth/session/queue-pause";
 import { api } from "@polyth/session/web-api";
 import { setUiError, usePendingSends, useStore } from "../store.ts";
@@ -69,9 +69,20 @@ export function moveQueuedItem(
   return next.map((item, position) => ({ ...item, position }));
 }
 
+/** A queued prompt the chat does not show: a hidden retry, or one whose
+ *  display text is empty (an agent's composed wake). */
+export function queueItemHidden(item: Pick<QueueItemDto, "hiddenUserMessage" | "displayText">): boolean {
+  return item.hiddenUserMessage === true || item.displayText === "";
+}
+
+/** The words a queued prompt shows: its display text when it has one. */
+export function queueItemText(item: Pick<QueueItemDto, "text" | "displayText">): string {
+  return item.displayText ?? item.text;
+}
+
 /** The newest ordinary queue item is the one an empty follow-up Send promotes. */
 export function latestSteerableQueuedItem(items: readonly QueueItemDto[]): QueueItemDto | null {
-  return items.findLast((item) => !item.heldForReview && !item.hiddenUserMessage) ?? null;
+  return items.findLast((item) => !item.heldForReview && !queueItemHidden(item)) ?? null;
 }
 
 const QUEUE_LEFT_EVENT_TYPES = new Set(["queue/dispatched", "queue/removed"]);
@@ -101,6 +112,21 @@ export function departedQueueIds(events: readonly Pick<SessionEvent, "type" | "d
   return departed;
 }
 
+/** Queue ids of first prompts that wait for their chat to start
+ *  (`SESSION_STARTING_QUEUE_REASON`). The timeline shows each as the prompt,
+ *  so this list must not show it as a chip too. */
+export function startingQueueIds(events: readonly Pick<SessionEvent, "type" | "data">[]): Set<string> {
+  const ids = new Set<string>();
+  for (const event of events) {
+    if (event.type !== "delivery/fallback-queued") continue;
+    const data = event.data as { queueId?: unknown; reason?: unknown } | null | undefined;
+    if (data?.reason === SESSION_STARTING_QUEUE_REASON && typeof data.queueId === "string") ids.add(data.queueId);
+  }
+  if (ids.size === 0) return ids;
+  for (const id of departedQueueIds(events)) ids.delete(id);
+  return ids;
+}
+
 // Fallback reasons the queue does not drain from by itself: the session's
 // runtime could not be recovered (or its state is uncertain), so nothing will
 // dispatch until another send or an explicit Resume retries the recovery. The
@@ -125,6 +151,8 @@ export function queueStalledOnRecovery(
   for (const event of events) {
     if (event.type !== "delivery/fallback-queued") continue;
     const data = event.data as { queueId?: unknown; reason?: unknown } | undefined;
+    // A start's first turn waits for its runtime by design; never "stalled".
+    if (data?.reason === SESSION_STARTING_QUEUE_REASON) continue;
     if (typeof data?.queueId === "string" && waiting.has(data.queueId)
       && typeof data.reason === "string" && STALLED_QUEUE_REASONS.has(data.reason)) return true;
   }
@@ -255,7 +283,7 @@ function QueueSheet({
       <div ref={listRef} className="queue-sheet" role="list">
         {rows.map((item, at) => {
           const n = at + 1;
-          const text = item.hiddenUserMessage ? tr("queuedmessagelist.heldForReview") : item.text;
+          const text = item.hiddenUserMessage ? tr("queuedmessagelist.heldForReview") : queueItemText(item);
           return (
             <div
               key={item.id}
@@ -417,13 +445,15 @@ export default function QueuedMessageList({
     .map((echo) => echo.text.trim()));
   const hasItems = items.length > 0;
   const departed = useMemo(() => hasItems ? departedQueueIds(events ?? []) : NO_IDS, [events, hasItems]);
+  const starting = useMemo(() => hasItems ? startingQueueIds(events ?? []) : NO_IDS, [events, hasItems]);
   const visibleItems = items.filter((item) =>
     item.sessionId === sessionId
     && item.id !== editingId
     && !departed.has(item.id)
+    && !starting.has(item.id)
     && !scope.launched.has(item.id)
     && !(item.delivery === "interrupt" && inFlight.has(item.text.trim()))
-    && (!item.hiddenUserMessage || item.heldForReview));
+    && (!queueItemHidden(item) || item.heldForReview));
 
   // A row that leaves folds away in place instead of vanishing. The edited row
   // moves into the composer, and a session switch is not a departure.
@@ -501,7 +531,7 @@ export default function QueuedMessageList({
       ++scope.request;
       setItems(updated);
       onItemsChange?.(sessionId, updated);
-      const updatedVisible = updated.filter((item) => !item.hiddenUserMessage || item.heldForReview);
+      const updatedVisible = updated.filter((item) => !queueItemHidden(item) || item.heldForReview);
       const position = updatedVisible.findIndex((item) => item.id === movedId);
       announce(tr("queuedmessagelist.queuedMessageMovedToPositionValueOf", { value: position + 1, length: updatedVisible.length }));
     } catch {
@@ -638,7 +668,7 @@ export default function QueuedMessageList({
                     <Icon icon={QueueNextIcon} size="sm" />
                   </span>
                   <span className="queue-text">
-                    {item.hiddenUserMessage ? tr("queuedmessagelist.heldForReview") : item.text}
+                    {item.hiddenUserMessage ? tr("queuedmessagelist.heldForReview") : queueItemText(item)}
                   </span>
                 </div>
               );
@@ -701,8 +731,8 @@ export default function QueuedMessageList({
                     <Icon icon={DragHandleIcon} size="sm" />
                   </span>
                 )}
-                <span className="queue-text" title={item.hiddenUserMessage ? undefined : item.text}>
-                  {item.hiddenUserMessage ? tr("queuedmessagelist.heldForReview") : item.text}
+                <span className="queue-text" title={item.hiddenUserMessage ? undefined : queueItemText(item)}>
+                  {item.hiddenUserMessage ? tr("queuedmessagelist.heldForReview") : queueItemText(item)}
                 </span>
                 {item.heldForReview && !item.hiddenUserMessage && (
                   <span className="queue-held">{tr("queuedmessagelist.heldForReview")}</span>

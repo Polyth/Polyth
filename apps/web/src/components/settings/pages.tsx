@@ -11,9 +11,12 @@ import {
 } from "../../store.ts";
 import { useOrderedProjects } from "../../projectRecency.ts";
 import { RAIL_SIZE_MAX, RAIL_SIZE_MIN, RAIL_SIZE_STEP, RAIL_SPACING_MAX, RAIL_SPACING_MIN, RAIL_SPACING_STEP, UI_DEFAULTS, setUiSettings, useUiSettings, type GlassEffect, type StatusBarMode, type SwipeNavigationMode } from "../../uiPrefs.ts";
+import { ROW_SWIPE_ACTION_IDS, ROW_SWIPE_MAX_ACTIONS, type RowSwipeActionId } from "../mobile/sessionRowSwipe.ts";
+import { isAppearanceSyncEnabled, setAppearanceSyncEnabled, subscribeAppearanceSync } from "../../settingsSync.ts";
 import { projectIsolatesByDefault, projectIsolationLevel } from "@polyth/contracts";
 import { DEFAULT_SETTINGS, friendlyError, INTERFACE_FONTS, interfaceFontLabel, TEXT_SIZE_MAX, TEXT_SIZE_MIN } from "../../settings.ts";
 import { requestNotifyPermission } from "../../notify.ts";
+import { getHapticsMode, hapticsSupported, setHapticsMode, subscribeHapticsMode, tapFeedback, type HapticsMode } from "../../haptics.ts";
 import { DEFAULT_NOTIFY_TEMPLATE, renderTemplate } from "../../notifications.ts";
 import {
   describePushTest, disablePush, enablePush, reconcilePushSubscription, pushUnsupportedReason, sendTestPush,
@@ -23,7 +26,8 @@ import { desktopBridge } from "../../desktopBridge.ts";
 import { confirmAlert } from "../../alerts.ts";
 import { CheckGroup, EmptyState, ErrorState, PageHead, ResetLink, Row, SaveBar, Section, Seg, SizeStepper, Toggle } from "./parts.tsx";
 import CompactShortcutsEditor, { CompactShortcutsReset } from "./CompactShortcutsEditor.tsx";
-import { ShellLayoutSection } from "./ShellLayoutSection.tsx";
+import { ShellLayoutSection, SHELL_LAYOUT_ITEMS } from "./ShellLayoutSection.tsx";
+import { blocksOnDevice, OtherDevicesSection, useSettingsDevice, type DeviceBlock } from "./OtherDevicesSection.tsx";
 import {
   HEADER_SIZE_MAX, HEADER_SIZE_MIN, RAIL_PRESETS, railPresetOf, railPresetSizes, shiftTextSizes,
   type RailPreset, type TextSizes,
@@ -51,7 +55,7 @@ import type {
 import type { SettingsNavigationTarget } from "@polyth/web-sdk";
 import ModelPicker from "@polyth/models/model-picker";
 import { modelSupportsTextWorkflow } from "../../composer/discovery.ts";
-import { getLocale, getLocalePreference, LOCALES, LOCALE_NAMES, setLocale, systemLocale, tr, type LocalePreference } from "../../i18n/index.ts";
+import { getLocale, getLocalePreference, LOCALES, LOCALE_NAMES, setLocale, systemLocale, tr, type LocalePreference, type TranslationKey } from "../../i18n/index.ts";
 import {
   projectRemembersModelSelection,
   resolveSessionDefaultModel,
@@ -67,7 +71,7 @@ import ProjectAppearanceDialog from "../ProjectAppearanceDialog.tsx";
 import { listProjectSettings, subscribeProjectSettings } from "../../projectSettings.ts";
 import { SHARED_PRESENTATION_SCOPE, useProjectInterfaceMode, type ProjectInterfaceMode } from "../../projectInterfaceScope.ts";
 import { chooseProjectInterface, copyProjectPresentationToShared } from "../../projectPresentationSync.ts";
-import { mobileRailScopeKey, parseMobileRail, readMobileRail, writeMobileRail } from "../../composer/mobileRail.ts";
+import { mobileRailScopeKey, mobileRailSpaceId, parseMobileRail, readMobileRail, writeMobileRail } from "../../composer/mobileRail.ts";
 import { useSpaces } from "../../spaces.ts";
 import { isPackageEnabled, subscribePackages } from "../../packages/registry.ts";
 import {
@@ -145,14 +149,77 @@ function ThemeSwatches({ theme }: { theme: ThemeSpec }) {
   );
 }
 
-export function GeneralPage() {
+export function GeneralPage({ settingsTarget }: { settingsTarget?: SettingsNavigationTarget } = {}) {
   const settings = useStore((s) => s.settings);
   const ui = useUiSettings();
+  const device = useSettingsDevice();
   const languageOptions: { value: LocalePreference; label: string }[] = [
     { value: "system", label: tr("settings.pages.languageSystem", { language: LOCALE_NAMES[systemLocale()] }) },
     ...LOCALES.map((locale) => ({ value: locale, label: LOCALE_NAMES[locale] })),
   ];
   const languagePreference = getLocalePreference();
+  const gesturesGroup = tr("settings.pages.gesturesGroup");
+  // How the touch shells answer a swipe: behaviour, not appearance. Screen
+  // swipes work in the phone and tablet shells (shellSwipe.ts); chat-row
+  // swipes belong to the phone Navigator (Navigation.tsx, MobileNavigator).
+  const gestures: DeviceBlock[] = [
+    {
+      devices: ["phone", "tablet"],
+      labels: [tr("settings.pages.swipeNavigation")],
+      items: ["general.swipeNavigation"],
+      render: () => (
+        <Row label={tr("settings.pages.swipeNavigation")} hint={tr("settings.pages.swipeNavigationHint")} itemId="general.swipeNavigation">
+          <Seg<SwipeNavigationMode>
+            label={tr("settings.pages.swipeNavigation")}
+            value={ui.swipeNavigation}
+            options={[
+              ["surface", tr("settings.pages.swipeNavigationSurface")],
+              ["edge", tr("settings.pages.swipeNavigationEdge")],
+              ["off", tr("settings.pages.swipeNavigationOff")],
+            ]}
+            onChange={(swipeNavigation) => setUiSettings({ swipeNavigation })}
+          />
+        </Row>
+      ),
+    },
+    {
+      devices: ["phone"],
+      labels: [tr("settings.devices.rowSwipes")],
+      items: ["general.rowSwipeLeading", "general.rowSwipeTrailing", "general.rowSwipeFull"],
+      render: () => (
+        <>
+          {/* Quick actions of the Navigator's chat rows. Order is kept: the first is the full-swipe action. */}
+          {(["Leading", "Trailing"] as const).map((side) => {
+            const key = side === "Leading" ? "rowSwipeLeading" : "rowSwipeTrailing";
+            const otherKey = side === "Leading" ? "rowSwipeTrailing" : "rowSwipeLeading";
+            const label = side === "Leading" ? tr("settings.pages.rowSwipeLeading") : tr("settings.pages.rowSwipeTrailing");
+            const current = ui[key];
+            return (
+              <Row key={side} label={label} hint={tr("settings.pages.rowSwipeHint")} itemId={`general.rowSwipe${side}`}>
+                <CheckGroup<RowSwipeActionId>
+                  label={label}
+                  value={current}
+                  columns={2}
+                  options={ROW_SWIPE_ACTION_IDS.map((id) => ({ id, label: rowSwipeActionLabel(id) }))}
+                  onChange={(next) => {
+                    const kept = current.filter((id) => next.includes(id));
+                    const added = next.filter((id) => !current.includes(id));
+                    const chosen = [...kept, ...added].slice(0, ROW_SWIPE_MAX_ACTIONS);
+                    // One action lives on one side.
+                    setUiSettings({ [key]: chosen, [otherKey]: ui[otherKey].filter((id) => !chosen.includes(id)) });
+                  }}
+                />
+              </Row>
+            );
+          })}
+          <Row label={tr("settings.pages.rowSwipeFull")} hint={tr("settings.pages.rowSwipeFullHint")} itemId="general.rowSwipeFull">
+            <Toggle on={ui.rowSwipeFull} onChange={(rowSwipeFull) => setUiSettings({ rowSwipeFull })} label={tr("settings.pages.rowSwipeFull")} />
+          </Row>
+        </>
+      ),
+    },
+  ];
+  const gesturesHere = blocksOnDevice(gestures, device);
   return (
     <>
       <PageHead title={tr("settings.pages.general")} blurb={tr("settings.pages.applicationBasicsAndBrowserLocalBehavior")} />
@@ -183,22 +250,18 @@ export function GeneralPage() {
         <Row label={tr("settings.pages.relativeTimestamps")} hint={tr("settings.pages.showSessionActivityAs2mAgoInstead")} itemId="general.relativeTime">
           <Toggle on={settings.relativeTime} onChange={(relativeTime) => updateSettings({ relativeTime })} label={tr("settings.pages.relativeTimestamps")} />
         </Row>
-        {/* How the phone shell answers a swipe: behaviour, not appearance. */}
-        <Row label={tr("settings.pages.swipeNavigation")} hint={tr("settings.pages.swipeNavigationHint")} itemId="general.swipeNavigation">
-          <Seg<SwipeNavigationMode>
-            label={tr("settings.pages.swipeNavigation")}
-            value={ui.swipeNavigation}
-            options={[
-              ["surface", tr("settings.pages.swipeNavigationSurface")],
-              ["edge", tr("settings.pages.swipeNavigationEdge")],
-              ["off", tr("settings.pages.swipeNavigationOff")],
-            ]}
-            onChange={(swipeNavigation) => setUiSettings({ swipeNavigation })}
-          />
-        </Row>
       </Section>
+      {gesturesHere.length > 0 && <Section title={gesturesGroup}>{gesturesHere}</Section>}
+      <OtherDevicesSection device={device} blocks={gestures} target={settingsTarget?.itemId} />
     </>
   );
+}
+
+function rowSwipeActionLabel(id: RowSwipeActionId): string {
+  if (id === "pin") return tr("sidebar.sessionlist.pinToTop");
+  if (id === "archive") return tr("common.archive");
+  if (id === "mute") return tr("sidebar.sessionlist.muteConversation");
+  return tr("common.delete");
 }
 
 type ThemeStyleId = Exclude<ThemeStyleChoice, "auto">;
@@ -738,7 +801,6 @@ const TEXT_SIZE_ITEMS = new Set([
 const RAIL_SIZE_ITEMS = new Set([
   "appearance.leftRailSize", "appearance.rightRailSize", "appearance.topRailSize", "appearance.railSpacing",
 ]);
-const TABLET_ITEMS = new Set([COMPACT_SHORTCUTS_SETTINGS_ITEM]);
 const RAIL_PRESET_NAMES = {
   compact: "settings.pages.railSizeCompact",
   standard: "settings.pages.railSizeStandard",
@@ -783,17 +845,12 @@ function useOpenForTarget(items: ReadonlySet<string>, target: string | undefined
 export function AppearancePage({ settingsTarget }: { settingsTarget?: SettingsNavigationTarget } = {}) {
   const ui = useUiSettings();
   const settings = useStore((s) => s.settings);
-  const shellMode = useShellMode();
+  const device = useSettingsDevice();
   const target = settingsTarget?.itemId;
   const railPreset = railPresetOf(ui);
   // Hand-set rails open their own sizes, so the numbers stay in view.
   const [textOpen, setTextOpen] = useOpenForTarget(TEXT_SIZE_ITEMS, target);
   const [railOpen, setRailOpen] = useOpenForTarget(RAIL_SIZE_ITEMS, target, railPreset === null);
-  // The tablet bar only draws at tablet width; elsewhere it waits behind a
-  // button, and a link from the bar itself opens it.
-  const tabletWidth = shellMode === "compact";
-  const [tabletOpen, setTabletOpen] = useOpenForTarget(TABLET_ITEMS, target);
-  const tabletShown = tabletWidth || tabletOpen;
   const textSizes: TextSizes = {
     fontSize: settings.fontSize,
     chatFontSize: settings.chatFontSize,
@@ -843,9 +900,96 @@ export function AppearancePage({ settingsTarget }: { settingsTarget?: SettingsNa
   const rightRailSize = tr("settings.pages.rightRailSize");
   const topRailSize = tr("settings.pages.topRailSize");
   const railSpacing = tr("settings.pages.railSpacing");
+  const appearanceSyncOn = useSyncExternalStore(subscribeAppearanceSync, isAppearanceSyncEnabled);
+  const statusBar = tr("settings.pages.statusBar");
+  // Settings of one kind of screen. The window layout and its mirror apply to
+  // the wide shell only (shellLayout.ts, App.tsx); rails and the status bar to
+  // every shell with a Sidebar (Navigation.tsx, App.tsx); the tablet toolbar to
+  // the compact header (compactHeaderFit.ts).
+  const windowLayoutBlock: DeviceBlock = {
+    devices: ["desktop"],
+    labels: [tr("settings.shellLayout.title")],
+    items: SHELL_LAYOUT_ITEMS,
+    ownSection: true,
+    // The window's shape: the layout, its top bar and the mirror.
+    render: () => <ShellLayoutSection />,
+  };
+  const railsBlock: DeviceBlock = {
+    devices: ["desktop", "tablet"],
+    labels: [railSize, statusBar],
+    items: ["appearance.railSizes", ...RAIL_SIZE_ITEMS, "appearance.statusBar"],
+    render: () => (
+      <>
+        <Row label={railSize} hint={tr("settings.pages.railSizeHint")} itemId="appearance.railSizes">
+          {/* Hand-set rails match no preset, so no segment is pressed. */}
+          <Seg<RailPreset | "custom">
+            value={railPreset ?? "custom"}
+            label={railSize}
+            options={RAIL_PRESETS.map((preset) => [preset, tr(RAIL_PRESET_NAMES[preset])])}
+            onChange={(preset) => { if (preset !== "custom") setUiSettings(railPresetSizes(preset)); }}
+          />
+        </Row>
+        <SizeDetails open={railOpen} onToggle={() => setRailOpen(!railOpen)} label={tr("settings.pages.railSizesEach")}>
+          <Row label={leftRailSize} hint={tr("settings.pages.leftRailSizeHint")} itemId="appearance.leftRailSize">
+            <RailSizeRange value={ui.leftRailSize} label={leftRailSize} onChange={(leftRailSize) => setUiSettings({ leftRailSize })} />
+          </Row>
+          <Row label={rightRailSize} hint={tr("settings.pages.rightRailSizeHint")} itemId="appearance.rightRailSize">
+            <RailSizeRange value={ui.rightRailSize} label={rightRailSize} onChange={(rightRailSize) => setUiSettings({ rightRailSize })} />
+          </Row>
+          <Row label={topRailSize} hint={tr("settings.pages.topRailSizeHint")} itemId="appearance.topRailSize">
+            <RailSizeRange value={ui.topRailSize} label={topRailSize} onChange={(topRailSize) => setUiSettings({ topRailSize })} />
+          </Row>
+          <Row label={railSpacing} hint={tr("settings.pages.railSpacingHint")} itemId="appearance.railSpacing">
+            <SizeStepper
+              value={ui.railSpacing}
+              min={RAIL_SPACING_MIN}
+              max={RAIL_SPACING_MAX}
+              step={RAIL_SPACING_STEP}
+              label={railSpacing}
+              unit="px"
+              onChange={(railSpacing) => setUiSettings({ railSpacing })}
+            />
+          </Row>
+        </SizeDetails>
+        <Row label={statusBar} hint={tr("settings.pages.statusBarHint")} itemId="appearance.statusBar">
+          <Seg<StatusBarMode>
+            label={statusBar}
+            value={ui.statusBar}
+            options={[
+              ["off", tr("settings.pages.statusBarOff")],
+              ["workflows", tr("settings.pages.statusBarWorkflows")],
+              ["always", tr("settings.pages.statusBarAlways")],
+            ]}
+            onChange={(statusBar) => setUiSettings({ statusBar })}
+          />
+        </Row>
+      </>
+    ),
+  };
+  const tabletBlock: DeviceBlock = {
+    devices: ["tablet"],
+    labels: [tr("settings.pages.compactShortcuts")],
+    items: [COMPACT_SHORTCUTS_SETTINGS_ITEM],
+    ownSection: true,
+    render: () => (
+      <Section
+        title={tr("settings.pages.compactShortcuts")}
+        hint={tr("settings.pages.compactShortcutsHint")}
+        itemId={COMPACT_SHORTCUTS_SETTINGS_ITEM}
+        action={<CompactShortcutsReset />}
+      >
+        <CompactShortcutsEditor />
+      </Section>
+    ),
+  };
   return (
     <>
       <PageHead title={tr("settings.pages.appearance")} blurb={tr("settings.pages.visualPreferencesSavedInThisBrowserAnd")} />
+      <Section title={tr("settings.account.thisDevice")}>
+        <Row label={tr("settings.pages.syncAppearance")} hint={tr("settings.pages.syncAppearanceHint")} itemId="appearance.sync">
+          <Toggle on={appearanceSyncOn} onChange={setAppearanceSyncEnabled} label={tr("settings.pages.syncAppearance")} />
+        </Row>
+      </Section>
       <Section
         title={tr("settings.pages.shellLook")}
         hint={tr("settings.pages.shellLookHint")}
@@ -894,8 +1038,7 @@ export function AppearancePage({ settingsTarget }: { settingsTarget?: SettingsNa
           />
         </Row>
       </Section>
-      {/* The window's shape: the layout, its top bar and the mirror. */}
-      <ShellLayoutSection />
+      {blocksOnDevice([windowLayoutBlock], device)}
       <Section
         title={tr("settings.pages.textGroup")}
         action={<ResetLink disabled={fontSizesAreDefault} onClick={resetFontSizes} />}
@@ -1005,37 +1148,6 @@ export function AppearancePage({ settingsTarget }: { settingsTarget?: SettingsNa
             ["compact", tr("settings.pages.compact")],
           ]} onChange={(density) => { setUiSettings({ density }); updateSettings({ density }); }} />
         </Row>
-        <Row label={railSize} hint={tr("settings.pages.railSizeHint")} itemId="appearance.railSizes">
-          {/* Hand-set rails match no preset, so no segment is pressed. */}
-          <Seg<RailPreset | "custom">
-            value={railPreset ?? "custom"}
-            label={railSize}
-            options={RAIL_PRESETS.map((preset) => [preset, tr(RAIL_PRESET_NAMES[preset])])}
-            onChange={(preset) => { if (preset !== "custom") setUiSettings(railPresetSizes(preset)); }}
-          />
-        </Row>
-        <SizeDetails open={railOpen} onToggle={() => setRailOpen(!railOpen)} label={tr("settings.pages.railSizesEach")}>
-          <Row label={leftRailSize} hint={tr("settings.pages.leftRailSizeHint")} itemId="appearance.leftRailSize">
-            <RailSizeRange value={ui.leftRailSize} label={leftRailSize} onChange={(leftRailSize) => setUiSettings({ leftRailSize })} />
-          </Row>
-          <Row label={rightRailSize} hint={tr("settings.pages.rightRailSizeHint")} itemId="appearance.rightRailSize">
-            <RailSizeRange value={ui.rightRailSize} label={rightRailSize} onChange={(rightRailSize) => setUiSettings({ rightRailSize })} />
-          </Row>
-          <Row label={topRailSize} hint={tr("settings.pages.topRailSizeHint")} itemId="appearance.topRailSize">
-            <RailSizeRange value={ui.topRailSize} label={topRailSize} onChange={(topRailSize) => setUiSettings({ topRailSize })} />
-          </Row>
-          <Row label={railSpacing} hint={tr("settings.pages.railSpacingHint")} itemId="appearance.railSpacing">
-            <SizeStepper
-              value={ui.railSpacing}
-              min={RAIL_SPACING_MIN}
-              max={RAIL_SPACING_MAX}
-              step={RAIL_SPACING_STEP}
-              label={railSpacing}
-              unit="px"
-              onChange={(railSpacing) => setUiSettings({ railSpacing })}
-            />
-          </Row>
-        </SizeDetails>
         <Row label={tr("settings.pages.cornerRounding")} hint={tr("settings.pages.cornerRoundingHint")} itemId="appearance.rounding">
           <SizeStepper
             value={ui.rounding}
@@ -1046,43 +1158,10 @@ export function AppearancePage({ settingsTarget }: { settingsTarget?: SettingsNa
             onChange={(rounding) => setUiSettings({ rounding })}
           />
         </Row>
-        <Row label={tr("settings.pages.statusBar")} hint={tr("settings.pages.statusBarHint")} itemId="appearance.statusBar">
-          <Seg<StatusBarMode>
-            label={tr("settings.pages.statusBar")}
-            value={ui.statusBar}
-            options={[
-              ["off", tr("settings.pages.statusBarOff")],
-              ["workflows", tr("settings.pages.statusBarWorkflows")],
-              ["always", tr("settings.pages.statusBarAlways")],
-            ]}
-            onChange={(statusBar) => setUiSettings({ statusBar })}
-          />
-        </Row>
+        {blocksOnDevice([railsBlock], device)}
       </Section>
-      <Section
-        title={tr("settings.pages.compactShortcuts")}
-        hint={tr("settings.pages.compactShortcutsHint")}
-        itemId={COMPACT_SHORTCUTS_SETTINGS_ITEM}
-        action={(
-          <>
-            {tabletShown && <CompactShortcutsReset />}
-            {!tabletWidth && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="settings-disclosure-toggle"
-                iconEnd={tabletOpen ? ChevronUpIcon : ChevronDownIcon}
-                aria-expanded={tabletOpen}
-                onClick={() => setTabletOpen(!tabletOpen)}
-              >
-                {tabletOpen ? tr("settings.pages.hideDetails") : tr("settings.pages.showDetails")}
-              </Button>
-            )}
-          </>
-        )}
-      >
-        {tabletShown && <CompactShortcutsEditor />}
-      </Section>
+      {blocksOnDevice([tabletBlock], device)}
+      <OtherDevicesSection device={device} blocks={[windowLayoutBlock, railsBlock, tabletBlock]} target={target} />
     </>
   );
 }
@@ -1135,8 +1214,12 @@ export function NotificationsPage() {
     if (on) next.push(kind);
     setUiSettings({ notifyKinds: next });
   };
+  // Vibration is this device's own choice (localStorage), not a synced setting.
+  const hapticsMode = useSyncExternalStore(subscribeHapticsMode, getHapticsMode, getHapticsMode);
+  const canVibrate = useMemo(() => hapticsSupported(), []);
+  const eventVibration = canVibrate && hapticsMode === "all";
   const desktopOn = ui.notifyOnComplete;
-  const anyLocalAlert = desktopOn || ui.notifySound;
+  const anyLocalAlert = desktopOn || ui.notifySound || eventVibration;
   const desktopHint = denied
     ? tr("settings.pages.notificationsAreBlockedForThisSiteIn")
     : desktopOn && !granted
@@ -1167,13 +1250,34 @@ export function NotificationsPage() {
         <Row label={tr("settings.pages.completionSound")} hint={tr("settings.pages.completionSoundPlainHint")} itemId="notifications.sound">
           <Toggle on={ui.notifySound} onChange={(v) => setUiSettings({ notifySound: v })} label={tr("settings.pages.completionSound")} />
         </Row>
+        <Row
+          label={tr("settings.pages.vibration")}
+          hint={canVibrate ? tr("settings.pages.vibrationHint") : tr("settings.pages.vibrationUnsupported")}
+          itemId="notifications.haptics"
+          disabled={!canVibrate}
+        >
+          <Seg<HapticsMode>
+            label={tr("settings.pages.vibration")}
+            value={hapticsMode}
+            disabled={!canVibrate}
+            options={[
+              ["all", tr("settings.pages.vibrationAll")],
+              ["touch", tr("settings.pages.vibrationTouch")],
+              ["off", tr("settings.pages.vibrationOff")],
+            ]}
+            onChange={(next) => { setHapticsMode(next); tapFeedback(); /* a sample of the choice */ }}
+          />
+        </Row>
         {/* Browser Web Push can never work inside the native app's WebView
             (no service-worker push); the native row owns delivery there. */}
         {nativePushSettingsAvailable() ? <NativePushRow /> : <PushRow />}
+        <PhonePushDeliveryRow />
       </Section>
       <Section
         title={tr("settings.pages.triggersGroup")}
-        hint={anyLocalAlert ? tr("settings.pages.triggersGroupHint") : tr("settings.pages.triggersGroupOffHint")}
+        hint={canVibrate
+          ? anyLocalAlert ? tr("settings.pages.triggersGroupHintHaptics") : tr("settings.pages.triggersGroupOffHintHaptics")
+          : anyLocalAlert ? tr("settings.pages.triggersGroupHint") : tr("settings.pages.triggersGroupOffHint")}
       >
         <Row
           label={tr("settings.pages.notifyAbout")}
@@ -1289,6 +1393,43 @@ function NativePushRow() {
       </Row>
       {error && <div className="form-error settings-row-error" role="alert">{error}</div>}
     </>
+  );
+}
+
+type PhonePushDelivery = Awaited<ReturnType<typeof api.nativePushDelivery>>;
+const PHONE_PUSH_PROBLEM: Record<NonNullable<PhonePushDelivery["problem"]>, TranslationKey> = {
+  unreachable: "settings.pages.phonePushUnreachable",
+  "rate-limited": "settings.pages.phonePushRateLimited",
+  "no-credential": "settings.pages.phonePushNoCredential",
+  "credential-rejected": "settings.pages.phonePushCredentialRejected",
+  error: "settings.pages.phonePushError",
+};
+
+/** Whether this person's phones actually get pushes. A registered phone looks
+ *  "on" even when the push service is unreachable or holds no APNs key, so
+ *  the server's observed delivery is shown here, on the computer as well as
+ *  on the phone. Hidden until a phone is registered. */
+function PhonePushDeliveryRow() {
+  const [delivery, setDelivery] = useState<PhonePushDelivery | undefined>();
+  useEffect(() => {
+    let live = true;
+    void api.nativePushDelivery().then((next) => { if (live) setDelivery(next); }).catch(() => undefined);
+    return () => { live = false; };
+  }, []);
+  if (!delivery || delivery.phones === 0) return null;
+  const failing = delivery.state === "failing";
+  const reason = delivery.route === "none"
+    ? tr("settings.pages.phonePushOff")
+    : failing ? tr(PHONE_PUSH_PROBLEM[delivery.problem ?? "error"]) : tr("settings.pages.phonePushOkHint");
+  const hint = failing && delivery.pending > 0 ? `${reason} ${tr("settings.pages.phonePushPending", { count: delivery.pending })}` : reason;
+  return (
+    <Row label={tr("settings.pages.phonePushDelivery")} hint={hint} itemId="notifications.phoneDelivery">
+      {failing
+        ? <Badge tone="warning" dot>{tr("settings.pages.phonePushNotDelivering")}</Badge>
+        : delivery.state === "ok"
+          ? <Badge tone="success" dot>{tr("settings.pages.phonePushDelivering")}</Badge>
+          : <Badge>{tr("settings.pages.phonePushUnknown")}</Badge>}
+    </Row>
   );
 }
 
@@ -1426,8 +1567,9 @@ function BehaviorInstructionsEditor() {
   );
 }
 
-export function BehaviorPage() {
+export function BehaviorPage({ settingsTarget }: { settingsTarget?: SettingsNavigationTarget } = {}) {
   const ui = useUiSettings();
+  const device = useSettingsDevice();
   const commandsEnabled = useSyncExternalStore(subscribePackages, () => isPackageEnabled("commands"));
   const [favoriteSubagents, setFavoriteSubagents] = useState(true);
   const [savingFavoriteSubagents, setSavingFavoriteSubagents] = useState(false);
@@ -1472,6 +1614,21 @@ export function BehaviorPage() {
       setSavingWorkspaceInstructions(false);
     }
   };
+  // Only a wide window pins a package window: the tablet and phone shells open
+  // them as sheets with no pin (ContextRail.tsx `compact`).
+  const pinnedWindowBlock: DeviceBlock = {
+    devices: ["desktop"],
+    labels: [tr("settings.pages.sharedPinnedWindow")],
+    items: ["behavior.sharedPinnedWindow"],
+    ownSection: true,
+    render: () => (
+      <Section title={tr("settings.pages.sectionPackageWindows")}>
+        <Row label={tr("settings.pages.sharedPinnedWindow")} hint={tr("settings.pages.sharedPinnedWindowHint")} itemId="behavior.sharedPinnedWindow">
+          <Toggle on={ui.sharedPinnedWindow} onChange={(v) => setUiSettings({ sharedPinnedWindow: v })} label={tr("settings.pages.sharedPinnedWindow")} />
+        </Row>
+      </Section>
+    ),
+  };
   return (
     <>
       <PageHead title={tr("settings.pages.behavior")} blurb={tr("settings.pages.workspaceSafetyFlowAndGlobalAgentInstructions")} />
@@ -1515,11 +1672,8 @@ export function BehaviorPage() {
           <Toggle on={ui.editorAutosave} onChange={(v) => setUiSettings({ editorAutosave: v })} label={tr("settings.pages.editorAutosave")} />
         </Row>
       </Section>
-      <Section title={tr("settings.pages.sectionPackageWindows")}>
-        <Row label={tr("settings.pages.sharedPinnedWindow")} hint={tr("settings.pages.sharedPinnedWindowHint")} itemId="behavior.sharedPinnedWindow">
-          <Toggle on={ui.sharedPinnedWindow} onChange={(v) => setUiSettings({ sharedPinnedWindow: v })} label={tr("settings.pages.sharedPinnedWindow")} />
-        </Row>
-      </Section>
+      {blocksOnDevice([pinnedWindowBlock], device)}
+      <OtherDevicesSection device={device} blocks={[pinnedWindowBlock]} target={settingsTarget?.itemId} />
     </>
   );
 }
@@ -1578,7 +1732,7 @@ function ProjectProfileRows({ projectId }: { projectId: string }) {
  * which arrangement this account sees and never rewrites a project's record. */
 function ProjectInterfaceSection({ activeProject }: { activeProject: Project | undefined }) {
   const mode = useProjectInterfaceMode();
-  const spaceId = useSpaces().activeSpaceId ?? "";
+  const spaceId = mobileRailSpaceId(activeProject, useSpaces().activeSpaceId);
   const activeId = activeProject?.id ?? null;
   // Phone composer buttons live in their own map (mobileRail), not in the
   // presentation records, so they are carried across here.

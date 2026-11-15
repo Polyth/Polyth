@@ -6,7 +6,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createSessionJobs } from "./sessionJobs.ts";
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, sep as pathSep } from "node:path";
+import { realpath } from "node:fs/promises";
 import { isDeepStrictEqual } from "node:util";
 import { selectAgentToolSessionOwner } from "./agentToolSession.ts";
 import { ownsLegacySessionState, personAccessRequestOf, personMessageShares } from "./sessionPeople.ts";
@@ -41,6 +42,7 @@ import type {
   PersonAccessDecisionResult, PersonAccessOutcome, PersonAccessRequest, PersonAccessResolvedData,
   PersonMessageInput, PersonMessageResult, SessionMentionCandidateDto,
   CreateConversationInput, StartSessionFromConversationInput, StartSessionFromConversationResult,
+  SessionStartFailedData, SessionStartRequest, StartSessionInput, StartSessionResult,
   RuntimeCapabilities,
   RuntimeCommandDescriptor,
   RuntimeFeaturesDto,
@@ -59,6 +61,8 @@ import {
   CONVERSATION_SESSION_STARTED_EVENT,
   SESSION_PAUSE_ENDED_EVENT,
   SESSION_PROJECT_MOVED_EVENT,
+  SESSION_START_FAILED_EVENT,
+  SESSION_STARTING_QUEUE_REASON,
   normalizeSessionOrigin,
 } from "@polyth/contracts";
 import { sessionMentionCandidates, sessionAudience, sessionOutsiders, sessionShareApprover, sharingRootId, steerPeopleLine, turnPeopleBlock } from "./sessionSharing.ts";
@@ -67,6 +71,9 @@ import type { ProjectService } from "@polyth/contracts";
 import { compactionDue, effectiveCompactionPreference, parseCompactionPreference, type CompactionPreference } from "@polyth/contracts/compaction-policy";
 import { extractSecureSafeEnvRefs } from "@polyth/credential-vault";
 import { redactSecrets } from "@polyth/plugins";
+import type { SessionStartStep, WorkspaceCheckpointService, WorkspaceCheckpointTurn, WorkspaceRestoreInput } from "@polyth/plugins";
+import type { RewindFilesOutcome, RewindFilesPreview, RewindFilesUnavailableReason, RewindRestorePreview, WorkspaceCheckpointData } from "@polyth/contracts";
+import { cwdInsideRoot, rewindCheckpointTurns, WORKSPACE_CHECKPOINT_EVENT } from "./rewindFiles.ts";
 import { isolationBlocksUserMutation, isolationNeedsRecovery, isManagedIsolationBranch, normalizeIsolation, publishedIsolationMerge } from "@polyth/contracts";
 import {
   projectRepositories,
@@ -135,6 +142,7 @@ import {
   createResumeScheduler,
   planResume,
   rateLimitNoticeHint,
+  withProviderStatedWait,
   RESUME_FALLBACK_BACKOFF_SEC,
 } from "./resume.ts";
 import {
@@ -365,6 +373,7 @@ export interface QueueStore {
     hiddenUserMessage?: boolean,
     memory?: MemoryNarrowing,
     author?: SessionPerson,
+    displayText?: string,
   ): Promise<{ item: QueueItemDto; created: boolean }>;
   queueList(sessionId: string): Promise<QueueItemDto[]>;
   queueEdit(sessionId: string, queueId: string, text: string): Promise<QueueItemDto | undefined>;
@@ -757,6 +766,69 @@ export interface SessionTitleGenerator {
   generate(input: { sessionId: string; prompt: string }): Promise<string | undefined>;
 }
 
+/** `session/created.data.start`: the chat's start is server-owned. The first
+ *  turn's queue id is its admission key; `autoTitle` survives the queue. */
+interface StartMarker {
+  firstTurnQueueId?: string;
+  autoTitle?: true;
+}
+
+/** What a start adds to the row a create writes. */
+interface SessionRowStart {
+  autoAccept?: AutoAcceptSetting;
+  agentProfileId?: string | null;
+  marker: StartMarker;
+}
+
+/** A written row whose runtime is still to be provisioned. */
+interface CreatedSessionRow {
+  sessionId: string;
+  input: CreateSessionInput;
+  cwd: string;
+  projection: SessionProjection;
+  operation: DurableOperation;
+  /** Acquired before the row (create's agent-without-model check). */
+  rt?: AgentRuntime;
+  /** A start: failed-startup cleanup never removes it. */
+  started?: boolean;
+  /** A start defers create's agent-without-model check to provisioning. */
+  checkLaunchModel?: boolean;
+}
+
+const START_REQUEST_KEYS = new Set(["firstTurn", "agentProfileId", "autoAccept", "extensions"]);
+const START_FIRST_TURN_KEYS = new Set(["text", "attachments", "command", "autoTitle"]);
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value)
+  && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
+
+/** The service-side shape check of a start; the HTTP boundary checks too. */
+export function validateStartRequest(start: unknown): asserts start is SessionStartRequest {
+  const invalid = (message: string): Error => Object.assign(new Error(message), { code: "invalid-input" });
+  if (!isPlainObject(start)) throw invalid("start must be an object");
+  for (const key of Object.keys(start)) if (!START_REQUEST_KEYS.has(key)) throw invalid(`start.${key} is not supported`);
+  const { firstTurn, agentProfileId, autoAccept, extensions } = start;
+  if (firstTurn !== undefined) {
+    if (!isPlainObject(firstTurn)) throw invalid("start.firstTurn must be an object");
+    for (const key of Object.keys(firstTurn)) if (!START_FIRST_TURN_KEYS.has(key)) throw invalid(`start.firstTurn.${key} is not supported`);
+    if (typeof firstTurn.text !== "string") throw invalid("start.firstTurn.text must be a string");
+    if (firstTurn.attachments !== undefined && !Array.isArray(firstTurn.attachments)) throw invalid("start.firstTurn.attachments must be an array");
+    if (firstTurn.autoTitle !== undefined && typeof firstTurn.autoTitle !== "boolean") throw invalid("start.firstTurn.autoTitle must be a boolean");
+    if (firstTurn.command !== undefined && !isPlainObject(firstTurn.command)) throw invalid("start.firstTurn.command must be an object");
+  }
+  if (agentProfileId !== undefined && agentProfileId !== null && typeof agentProfileId !== "string") {
+    throw invalid("start.agentProfileId must be a string or null");
+  }
+  if (autoAccept !== undefined && autoAccept !== "on" && autoAccept !== "all" && autoAccept !== "off" && autoAccept !== "inherit") {
+    throw invalid("start.autoAccept must be on, all, off, or inherit");
+  }
+  if (extensions !== undefined) {
+    if (!isPlainObject(extensions)) throw invalid("start.extensions must be an object");
+    for (const [id, payload] of Object.entries(extensions)) {
+      if (!isPlainObject(payload)) throw invalid(`start.extensions.${id} must be an object`);
+    }
+  }
+}
+
 export function createSessionService(deps: {
   store: SessionPersistence;
   /** Package schemas can omit write-only inputs from canonical native tool events. */
@@ -769,6 +841,10 @@ export function createSessionService(deps: {
    *  leave a request Auto-Approve would answer for a person; resolved per call
    *  so the permissions package may load or reload after the session service. */
   permissionScopeCheck?: () => PermissionScopeCheck | undefined;
+  /** Git-owned per-turn workspace checkpoints behind a rollback that also
+   *  restores files. Resolved per call so the git package may load, reload
+   *  or be removed after the session service; absent → conversation-only. */
+  checkpoints?: () => WorkspaceCheckpointService | undefined;
   runtimes: RuntimePool;
   broadcast: Broadcaster;
   /** Config/runtime replacement admission gate. `admit` atomically joins the
@@ -788,6 +864,8 @@ export function createSessionService(deps: {
   expand?: ExpandInput;
   /** In-memory spawn timing recorder (diagnostic only; never history). */
   spawnTelemetry?: SpawnTelemetry;
+  /** Package start steps (`SESSION_START_STEPS`), read per start. */
+  startSteps?: { get(id: string): SessionStartStep | undefined };
   /** Backoff ladder (ms) for retrying a transient runtime-acquire failure on a
    *  new session's first acquire. Tests shorten it; omitted uses the default. */
   runtimeAcquireRetryMs?: readonly number[];
@@ -930,6 +1008,8 @@ export function createSessionService(deps: {
     /** A pause ended (`session/pause-ended`): the session was continued or
      *  stopped for good. Wakes held for it, and waits on it, can move on. */
     pauseEnded?(sessionId: string, outcome: "continued" | "stopped"): void;
+    /** A started chat could not start (`SESSION_START_FAILED_EVENT` is durable). */
+    startFailed?(sessionId: string): void;
     /** A live permission request no rule or automatic approval decided:
      *  its card waits for a person's decision (SERVER_PERMISSION_WAITING_BUS).
      *  Not called when a decided answer failed to deliver, nor for requests
@@ -2271,7 +2351,8 @@ export function createSessionService(deps: {
   };
 
   const delegatedChildHasWork = (events: readonly SessionEvent[]): boolean => events.some((event) =>
-    event.type.startsWith("assistant/")
+    event.type === SESSION_START_FAILED_EVENT
+    || event.type.startsWith("assistant/")
     || event.type.startsWith("tool/")
     || event.type.startsWith("question/")
     || event.type.startsWith("permission/")
@@ -4969,12 +5050,169 @@ export function createSessionService(deps: {
 
   /** In-memory release of a turn whose terminal stop is already durable:
    *  frees the turn slot, fires completion hooks and dispatches the queue. */
+  // ------------------------------------------------ workspace checkpoints
+  // Every admitted turn is bracketed by two snapshots of the checkout: one
+  // before the prompt reaches the runtime, one when the turn stops. A rollback
+  // then puts back, file by file, what those turns changed (rewindFiles.ts,
+  // `WorkspaceCheckpointService` in the git package).
+  const CHECKPOINT_BEFORE_BUDGET_MS = 3_000;
+  const CHECKPOINT_AFTER_BUDGET_MS = 5_000;
+  /** The turn whose `after` snapshot is still owed, per session. */
+  const checkpointTurns = new Map<string, { promptSeq: number; cwd: string }>();
+  /** An `after` snapshot being taken: a rollback waits for it. */
+  const pendingAfterCheckpoints = new Map<string, Promise<void>>();
+
+  const recordCheckpoint = async (
+    sessionId: string,
+    cwd: string,
+    promptSeq: number,
+    phase: "before" | "after",
+  ): Promise<boolean> => {
+    const service = deps.checkpoints?.();
+    if (!service) return false;
+    try {
+      const result = await service.capture({
+        cwd,
+        sessionId,
+        promptSeq,
+        phase,
+        budgetMs: phase === "before" ? CHECKPOINT_BEFORE_BUDGET_MS : CHECKPOINT_AFTER_BUDGET_MS,
+      });
+      // A checkout that is not a repository never records anything: every
+      // turn of such a project would otherwise add two empty facts.
+      if ("unavailable" in result && result.unavailable === "not-git") return false;
+      const data: WorkspaceCheckpointData = "commit" in result
+        ? {
+            promptSeq,
+            phase,
+            commit: result.commit,
+            root: result.root,
+            ...(result.skipped.length > 0 ? { skipped: result.skipped } : {}),
+            ...(result.skippedMore ? { skippedMore: result.skippedMore } : {}),
+          }
+        : { promptSeq, phase, unavailable: result.unavailable };
+      await appendAndBroadcast(sessionId, WORKSPACE_CHECKPOINT_EVENT, data as unknown as JsonObject, { ignorable: true });
+      return "commit" in result;
+    } catch (error) {
+      console.warn(`[polyth] workspace checkpoint (${phase}) failed for ${sessionId}`, error);
+      return false;
+    }
+  };
+
+  /** Before delivery: the snapshot must hold the files as they were before
+   *  the agent saw the prompt. Bounded; a slow or failed snapshot only makes
+   *  this turn's files unrestorable, it never blocks the send. */
+  const checkpointBeforeTurn = async (sessionId: string, cwd: string | undefined, promptSeq: number | undefined): Promise<void> => {
+    checkpointTurns.delete(sessionId);
+    if (!cwd || promptSeq === undefined) return;
+    if (await recordCheckpoint(sessionId, cwd, promptSeq, "before")) {
+      checkpointTurns.set(sessionId, { promptSeq, cwd });
+    }
+  };
+
+  const checkpointAfterTurn = async (sessionId: string, requestsOpen: boolean): Promise<void> => {
+    const owed = checkpointTurns.get(sessionId);
+    if (!owed) return;
+    // A stop that leaves a request open may be followed by another stop of
+    // the same turn; the newest `after` wins.
+    if (!requestsOpen) checkpointTurns.delete(sessionId);
+    const capture = recordCheckpoint(sessionId, owed.cwd, owed.promptSeq, "after").then(() => undefined);
+    pendingAfterCheckpoints.set(sessionId, capture);
+    try {
+      await capture;
+    } finally {
+      if (pendingAfterCheckpoints.get(sessionId) === capture) pendingAfterCheckpoints.delete(sessionId);
+    }
+  };
+
+  type RewindFilesContext =
+    | { ok: true; service: WorkspaceCheckpointService; cwd: string; turns: WorkspaceCheckpointTurn[]; runningPromptSeq?: number }
+    | { ok: false; reason: RewindFilesUnavailableReason };
+
+  /** The session's checkout, resolved now: a checkpoint is only ever applied
+   *  to the checkout it was taken in. */
+  const checkpointCheckout = async (proj: SessionProjection, root: string | undefined): Promise<string | undefined> => {
+    if (!root) return undefined;
+    const project = await projects.get(proj.projectId);
+    if (!project || project.remote) return undefined;
+    try {
+      const cwd = await realpath(workspaceExecutionPath(project, proj));
+      return cwdInsideRoot(cwd, root, pathSep) ? cwd : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const rewindFilesContext = async (
+    proj: SessionProjection,
+    events: readonly SessionEvent[],
+    atSeq: number,
+  ): Promise<RewindFilesContext> => {
+    const project = await projects.get(proj.projectId);
+    if (!project) return { ok: false, reason: "error" };
+    if (project.remote) return { ok: false, reason: "remote" };
+    const service = deps.checkpoints?.();
+    if (!service) return { ok: false, reason: "service-missing" };
+    const found = rewindCheckpointTurns(effectiveHistory(events).events, events, atSeq, { running: turnActive(proj.id) });
+    if (!found.ok) return found;
+    const cwd = await checkpointCheckout(proj, found.root);
+    if (!cwd) return { ok: false, reason: "no-snapshot" };
+    return {
+      ok: true,
+      service,
+      cwd,
+      turns: found.turns,
+      ...(found.runningPromptSeq !== undefined ? { runningPromptSeq: found.runningPromptSeq } : {}),
+    };
+  };
+
+  /** Put back the files the turns from `atSeq` on changed. Throws when the
+   *  rollback itself fails, so no marker is written. */
+  const rollBackFiles = async (sessionId: string, proj: SessionProjection, atSeq: number): Promise<RewindFilesOutcome> => {
+    if (turnActive(sessionId)) {
+      throw Object.assign(new Error("stop the running turn before rolling back its files"), { code: "conflict" });
+    }
+    // A stop being processed owes its `after` snapshot; take it now rather
+    // than reporting the newest turn as unsnapshotted.
+    if (checkpointTurns.has(sessionId) && !pendingAfterCheckpoints.has(sessionId)) {
+      await checkpointAfterTurn(sessionId, false);
+    }
+    await pendingAfterCheckpoints.get(sessionId);
+    const context = await rewindFilesContext(proj, await store.events(sessionId), atSeq);
+    if (!context.ok) return { mode: "unavailable", reason: context.reason, restored: 0, kept: 0 };
+    if (context.runningPromptSeq !== undefined) {
+      throw Object.assign(new Error("stop the running turn before rolling back its files"), { code: "conflict" });
+    }
+    return context.service.applyRewind({ cwd: context.cwd, sessionId, turns: context.turns });
+  };
+
+  /** The files outcome the active marker recorded, when it put files back. */
+  const rolledBackFiles = (events: readonly SessionEvent[], markerSeq: number): RewindFilesOutcome | undefined => {
+    const marker = events.find((event) => event.seq === markerSeq && event.type === "session/rewound");
+    const files = (marker?.data as { files?: RewindFilesOutcome } | undefined)?.files;
+    return files?.mode === "restored" && files.undo && files.rolled && (files.paths?.length ?? 0) > 0 ? files : undefined;
+  };
+
+  const restoreFilesContext = async (
+    proj: SessionProjection,
+    rolled: RewindFilesOutcome,
+  ): Promise<{ service: WorkspaceCheckpointService; input: WorkspaceRestoreInput } | undefined> => {
+    const service = deps.checkpoints?.();
+    if (!service || !rolled.undo || !rolled.rolled || !rolled.paths) return undefined;
+    const cwd = await checkpointCheckout(proj, rolled.root);
+    if (!cwd) return undefined;
+    return { service, input: { cwd, undo: rolled.undo, rolled: rolled.rolled, paths: rolled.paths } };
+  };
+
   const finishStoppedTurn = async (
     sessionId: string,
     stop: { turnId?: string; reason: "completed" | "aborted" | "error"; requestsOpen: boolean },
   ): Promise<void> => {
     lastTurnId.delete(sessionId);
     admitting.delete(sessionId);
+    // Before anything is told the turn ended (and before the queue dispatches
+    // the next turn, whose own snapshot must come after this one).
+    await checkpointAfterTurn(sessionId, stop.requestsOpen);
     // Native titles can arrive on SSE or only through the session
     // list. Re-check here in case the turn ended before the start-path
     // poll observed a late provider title.
@@ -5300,10 +5538,13 @@ export function createSessionService(deps: {
         let retry: RateLimitRetry | undefined;
         if (effectiveReason === "error" && ev.retry) {
           const eventsForResume = await store.events(sessionId);
+          // Adapters that only classify the failure leave the wait to us; the
+          // provider usually states it in the message ("resets in 1h 51m").
+          const hint = withProviderStatedWait(ev.retry, ev.error);
           if (sideEffects) {
-            retry = await scheduleResume(sessionId, ev.retry, eventsForResume);
+            retry = await scheduleResume(sessionId, hint, eventsForResume);
           } else {
-            const state = await plannedResumeState(sessionId, ev.retry, eventsForResume);
+            const state = await plannedResumeState(sessionId, hint, eventsForResume);
             retry = state ? retryFromResumeState(state) : undefined;
           }
         }
@@ -6606,7 +6847,8 @@ export function createSessionService(deps: {
           await store.upsertProjection(attachedProjection);
           publishProjection(attachedProjection);
         } else {
-          await updateProjectionQuietly(sessionId, { status: "unknown" });
+          // A start's provisioning still owns this create and the status with it.
+          if (!startFlights.has(sessionId)) await updateProjectionQuietly(sessionId, { status: "unknown" });
           throw Object.assign(new Error("backend session creation outcome is unknown"), {
             code: "outcome-unknown",
           });
@@ -7504,10 +7746,11 @@ export function createSessionService(deps: {
     sessionId: string, text: string, delivery: DeliveryMode, fallbackReason?: string,
     attachments?: AttachmentRef[], command?: QueueItemDto["command"], sourceOperationId?: string, clientOperationId?: string,
     clientRequestFingerprint?: string, hiddenUserMessage?: boolean, memory?: MemoryNarrowing, author?: SessionPerson,
+    displayText?: string,
   ): Promise<SendResult> => {
     if (!deps.queue) throw Object.assign(new Error("delivery queue unavailable"), { code: "unsupported" });
     const admission = await deps.queue.enqueue(
-      sessionId, text, delivery, attachments, clientOperationId, command, hiddenUserMessage, memory, author,
+      sessionId, text, delivery, attachments, clientOperationId, command, hiddenUserMessage, memory, author, displayText,
     );
     const item = admission.item;
     if (!admission.created) return { queueId: item.id, queued: true };
@@ -7519,6 +7762,7 @@ export function createSessionService(deps: {
       ...(attachments?.length ? { attachments: attachments as unknown as JsonObject[] } : {}),
       ...(command ? { command: command as unknown as JsonObject } : {}),
       ...(hiddenUserMessage ? { hiddenUserMessage: true } : {}),
+      ...(displayText !== undefined ? { displayText } : {}),
       ...(memory ? { memory: memory as unknown as JsonObject } : {}),
       ...(author ? { author: author as unknown as JsonObject } : {}),
       ...(sourceOperationId ? { sourceOperationId } : {}),
@@ -7711,6 +7955,9 @@ export function createSessionService(deps: {
    *  active stream: re-checked after every await. */
   const dispatchQueue = async (sessionId: string): Promise<void> => {
     if (!deps.queue) return;
+    // A start's first turn refused at dispatch (e.g. invalid-model) is a start
+    // failure: it leaves the queue for its author's draft.
+    let startTurnQueueId: string | undefined;
     try {
       await withSessionLock(sessionId, async () => {
         if (deps.isShuttingDown?.() || deps.admission?.fenced()) return;
@@ -7795,8 +8042,12 @@ export function createSessionService(deps: {
         const queuedAttachments = reserved.reservation.queueItem.attachments?.length
           ? await prepareAttachments(current, reserved.reservation.queueItem.attachments, sessionId)
           : undefined;
+        const startTurn = startFirstTurns.get(sessionId);
+        if (startTurn?.firstTurnQueueId === reserved.reservation.queueItem.id) startTurnQueueId = startTurn.firstTurnQueueId;
         await admitTurnCore(sessionId, current, rt, {
           text: reserved.reservation.queueItem.text,
+          // Queue rows carry no title intent; the start marker kept it.
+          ...(startTurnQueueId && startTurn?.autoTitle ? { autoTitle: true } : {}),
           ...(queuedAttachments?.length ? { attachments: queuedAttachments } : {}),
           ...(reserved.reservation.queueItem.command ? { command: reserved.reservation.queueItem.command } : {}),
           ...(() => {
@@ -7807,14 +8058,26 @@ export function createSessionService(deps: {
             return memory ? { memory } : {};
           })(),
           ...(reserved.reservation.queueItem.hiddenUserMessage ? { hiddenUserMessage: true } : {}),
+          ...(reserved.reservation.queueItem.displayText !== undefined
+            ? { displayText: reserved.reservation.queueItem.displayText }
+            : {}),
           // Admitted as whoever queued it, not whoever's action freed the queue.
           ...(reserved.reservation.queueItem.author ? { author: reserved.reservation.queueItem.author } : {}),
         }, {
           operation: reserved.reservation.operation,
           queueId: reserved.reservation.queueItem.id,
         });
+        if (startTurnQueueId) startFirstTurns.delete(sessionId);
       });
     } catch (err) {
+      // Only a definite refusal: the admission released the row back to the
+      // queue and failed the session. An unknown outcome keeps the turn.
+      if (startTurnQueueId && (await store.projection(sessionId))?.status === "failed"
+        && (await deps.queue.queueList(sessionId)).some((item) => item.id === startTurnQueueId)) {
+        await failStart(sessionId, err).catch((cause: unknown) => {
+          console.error(`[polyth] start failure for ${sessionId} was not recorded`, cause);
+        });
+      }
       if (QUIET_DISPATCH_ERRORS.has(String((err as { code?: unknown })?.code))) return;
       console.error(`[polyth] queued dispatch failed for ${sessionId}`, err);
     }
@@ -8169,6 +8432,7 @@ export function createSessionService(deps: {
       ...(reserved ? { queueId: reserved.queueId } : {}),
       ...(input.githubConflictResolution === true ? { githubConflictResolution: true } : {}),
       ...(hiddenUserMessage ? { hiddenUserMessage: true } : {}),
+      ...(typeof input.displayText === "string" && !hiddenUserMessage ? { displayText: input.displayText } : {}),
       ...(input.keepAlive === true ? { keepAlive: true } : {}),
       ...(input.attachments ? { attachments: input.attachments as unknown as JsonObject[] } : {}),
       ...(input.command ? { command: input.command as unknown as JsonObject } : {}),
@@ -8444,6 +8708,14 @@ export function createSessionService(deps: {
       }
     }
 
+    // The files as they are before the runtime sees this prompt: what a later
+    // rollback to it puts back. Local checkouts only.
+    if (!turnProject.remote) {
+      let checkpointCwd: string | undefined;
+      try { checkpointCwd = workspaceExecutionPath(turnProject, proj); } catch { checkpointCwd = undefined; }
+      await checkpointBeforeTurn(sessionId, checkpointCwd, message?.seq);
+    }
+
     admitting.add(sessionId);
     // A hidden message (e.g. a delegated-permission wake) is not the person's
     // request: it neither names the session nor cancels a title that is still
@@ -8634,6 +8906,7 @@ export function createSessionService(deps: {
             input.hiddenUserMessage === true || input.autoResume === true,
             input.memory,
             input.author,
+            input.displayText,
           );
         }
         rt = await ensureWired(sessionId, current);
@@ -8682,6 +8955,7 @@ export function createSessionService(deps: {
             input.hiddenUserMessage === true || input.autoResume === true,
             input.memory,
             input.author,
+            input.displayText,
         );
       }
       // A launch-locked runtime (e.g. Antigravity) freezes model/effort/agent
@@ -11342,6 +11616,529 @@ export function createSessionService(deps: {
   });
 
   let recoveryWork: Promise<void> | undefined;
+  // The first runtime acquisition is the stage, wherever a create takes it.
+  const acquireSpawnRuntime = async (sessionId: string, target: SessionProjection, cwd: string): Promise<AgentRuntime> => {
+    const runtime = await spawnTelemetry.time(sessionId, "runtimeAcquireMs", () => runtimeForWithReadinessRetry(target, cwd));
+    let info: ReturnType<NonNullable<RuntimePool["acquisitionInfo"]>>;
+    try { info = runtimes.acquisitionInfo?.(runtime, target.id); } catch { info = undefined; }
+    spawnTelemetry.update(sessionId, {
+      ...(info ?? {}),
+      ...(runtime.harnessId ? { harnessId: runtime.harnessId } : {}),
+    });
+    return runtime;
+  };
+
+  // ------------------------------------------------------------ session start
+  // A start writes the row, queues its first turn and replies; this flight
+  // then provisions the runtime and the idle dispatcher delivers the turn.
+  // `session/created` carries the durable marker, so a restart resumes a
+  // provisioning whose create never ran, and a failure hands back the turn.
+  const startFirstTurns = new Map<string, StartMarker>();
+  const startFlights = new Map<string, Promise<boolean>>();
+  // While a start admits its own first turn, a reconciling row queues it as
+  // "session-starting" rather than "session-reconciling".
+  const startAdmitting = new Set<string>();
+
+  const readStartMarker = async (sessionId: string): Promise<StartMarker | undefined> => {
+    const cached = startFirstTurns.get(sessionId);
+    if (cached) return cached;
+    const created = (await store.events(sessionId)).find((event) => event.type === "session/created");
+    const raw = (created?.data as { start?: unknown } | undefined)?.start;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+    const { firstTurnQueueId, autoTitle } = raw as { firstTurnQueueId?: unknown; autoTitle?: unknown };
+    return {
+      ...(typeof firstTurnQueueId === "string" ? { firstTurnQueueId } : {}),
+      ...(autoTitle === true ? { autoTitle: true } : {}),
+    };
+  };
+
+  /** A started chat that cannot run: its first turn leaves the queue for its
+   *  author's draft, and `SESSION_START_FAILED_EVENT` says why. `pending` is a
+   *  first turn that never reached the queue. */
+  const failStart = async (
+    sessionId: string,
+    error: unknown,
+    pending?: { text: string; attachments?: AttachmentRef[]; author?: SessionPerson },
+  ): Promise<void> => {
+    const code = typeof (error as { code?: unknown })?.code === "string" && (error as { code: string }).code
+      ? (error as { code: string }).code
+      : "start-failed";
+    // An uncertain outcome's message is a stable contract line; its `details`
+    // (already redacted and capped by `outcomeError`) say what happened.
+    const details = (error as { details?: unknown } | null)?.details;
+    const message = typeof details === "string" && details.trim()
+      ? details.trim()
+      : error instanceof Error && error.message.trim() ? error.message : "The chat could not start";
+    const marker = await readStartMarker(sessionId);
+    startFirstTurns.delete(sessionId);
+    let turn = pending;
+    if (marker?.firstTurnQueueId && deps.queue) {
+      const item = (await deps.queue.queueList(sessionId)).find((row) => row.id === marker.firstTurnQueueId);
+      if (item && await deps.queue.queueRemove(sessionId, item.id)) {
+        await appendAndBroadcast(sessionId, "queue/removed", { queueId: item.id }, { ignorable: true });
+        turn = {
+          text: item.text,
+          ...(item.attachments?.length ? { attachments: item.attachments } : {}),
+          ...(item.author ? { author: item.author } : {}),
+        };
+      }
+    }
+    if (turn?.text.trim()) {
+      // Never over newer typing: only an empty draft takes the text back.
+      const personId = turn.author?.userId;
+      const own = personId ? store.personStates?.([sessionId], personId)[sessionId]?.draft : undefined;
+      const legacy = personId && store.personStates ? undefined : (await store.projection(sessionId))?.draft;
+      if (!(own ?? legacy)?.trim()) {
+        await service.saveDraft?.(sessionId, turn.text, undefined, personId ? { userId: personId } : undefined)
+          .catch((cause: unknown) => console.warn(`[polyth] start draft restore failed for ${sessionId}`, cause));
+      }
+    }
+    const current = await store.projection(sessionId);
+    if (current?.status === "reconciling") await updateProjection(sessionId, { status: "failed" });
+    const data: SessionStartFailedData = {
+      code, message,
+      ...(turn?.text ? { text: turn.text } : {}),
+      ...(turn?.attachments?.length ? { attachments: turn.attachments } : {}),
+    };
+    await appendAndBroadcast(sessionId, SESSION_START_FAILED_EVENT, data as unknown as JsonObject, { ignorable: true });
+    deps.notify?.startFailed?.(sessionId);
+  };
+
+  /** A started chat whose native create ended uncertain: the runtime threw or
+   *  timed out, or Polyth restarted while it ran. It has no native session and
+   *  that create is never re-run, so the chat cannot take a turn. `reported`
+   *  is whether `SESSION_START_FAILED_EVENT` already says so. */
+  const uncertainStart = async (
+    projection: SessionProjection,
+  ): Promise<{ operation: DurableOperation; reported: boolean } | undefined> => {
+    if (projection.status !== "unknown" || projection.backendSessionId || projection.runtimeBinding) return undefined;
+    if (startFlights.has(projection.id)) return undefined;
+    const operation = (await durable.operations(projection.id)).filter((op) => op.mutationKind === "session-create").at(-1);
+    if (operation?.state !== "unknown") return undefined;
+    // Never-bound chats have a short log; this is not a hot path.
+    const events = await store.events(projection.id);
+    const created = events.find((event) => event.type === "session/created");
+    if (!(created?.data as { start?: unknown } | undefined)?.start) return undefined;
+    return { operation, reported: events.some((event) => event.type === SESSION_START_FAILED_EVENT) };
+  };
+
+  /** Run a start's provisioning once per chat; its failure is a start failure. */
+  const launchStartFlight = (sessionId: string, plan: () => Promise<CreatedSessionRow | undefined>): Promise<boolean> => {
+    const existing = startFlights.get(sessionId);
+    if (existing) return existing;
+    let settle!: (ready: boolean) => void;
+    const ready = new Promise<boolean>((resolveReady) => { settle = resolveReady; });
+    startFlights.set(sessionId, ready);
+    void (async () => {
+      let row: CreatedSessionRow | undefined;
+      try {
+        row = await plan();
+        // Nothing to provision: no flight exists by the time callers hear so.
+        if (!row && startFlights.get(sessionId) === ready) startFlights.delete(sessionId);
+        settle(Boolean(row));
+        if (row) await provisionCreatedSession(row);
+      } catch (error) {
+        settle(Boolean(row));
+        if (row) await failStart(sessionId, error);
+        else console.warn(`[polyth] start provisioning for ${sessionId} could not resume`, error);
+      }
+    })().catch((error: unknown) => console.error(`[polyth] start failure for ${sessionId} was not recorded`, error))
+      .finally(() => { if (startFlights.get(sessionId) === ready) startFlights.delete(sessionId); });
+    return ready;
+  };
+
+  /** Provision a started chat that has no native session: after a restart
+   *  (its create still `prepared`) or on a later send after a failed start
+   *  (`rejected`, with a fresh prepared create). An `executing`/`unknown`
+   *  create is never re-run: only its exact receipt recovers it. Resolves
+   *  true once the row is `reconciling` with a flight running. */
+  const resumeStartProvisioning = (sessionId: string, options: { afterRejection: boolean }): Promise<boolean> =>
+    launchStartFlight(sessionId, async () => {
+      const projection = await store.projection(sessionId);
+      if (!projection || projection.backendSessionId || projection.status === "archived" || isConversation(projection)) return undefined;
+      // Indexed operation rows first; the marker read is the rare part.
+      const latest = (await durable.operations(sessionId)).filter((op) => op.mutationKind === "session-create").at(-1);
+      if (!latest || (latest.state !== "prepared" && !(options.afterRejection && latest.state === "rejected"))) return undefined;
+      const marker = await readStartMarker(sessionId);
+      if (!marker) return undefined;
+      let operation = latest.state === "prepared" ? latest : undefined;
+      if (!operation) {
+        operation = (await broadcastTail(sessionId, () => durable.prepareOperation({
+          sessionId, mutationKind: "session-create",
+          intentEvent: { type: "session/native-create-requested", data: {}, ignorable: true },
+        }))).operation;
+      }
+      if (!operation) return undefined;
+      const project = await projects.get(projection.projectId);
+      if (!project) return undefined;
+      const cwd = await executionCwd(projection, project);
+      if (marker.firstTurnQueueId) startFirstTurns.set(sessionId, marker);
+      await updateProjection(sessionId, { status: "reconciling" });
+      spawnTelemetry.begin(sessionId);
+      const input: CreateSessionInput = {
+        projectId: projection.projectId,
+        title: projection.title,
+        ...(projection.harness ? { harness: projection.harness } : {}),
+        ...(projection.model ? { model: projection.model } : {}),
+        ...(projection.agent ? { agent: projection.agent } : {}),
+        ...(projection.worktreePath ? { worktreePath: projection.worktreePath } : {}),
+        ...(projection.workspace ? { workspace: projection.workspace } : {}),
+        ...(projection.isolation ? { isolation: projection.isolation } : {}),
+        ...(projection.parentId ? { parentId: projection.parentId } : {}),
+        ...(projection.purpose ? { purpose: projection.purpose } : {}),
+      };
+      return {
+        sessionId, input, cwd, operation, started: true,
+        projection: (await store.projection(sessionId)) ?? projection,
+        checkLaunchModel: Boolean(projection.agent && !projection.model),
+      };
+    });
+
+  /** The synchronous part of a create: validation, then the canonical row
+   *  (status `reconciling`) with its prepared session-create operation. */
+  const createSessionRow = async (input: CreateSessionInput, start?: SessionRowStart): Promise<CreatedSessionRow> => {
+    if (input.purpose !== undefined && (typeof input.purpose !== "string" || !SESSION_PURPOSE_ID.test(input.purpose))) {
+      throw Object.assign(new Error("purpose must be a short lowercase id"), { code: "invalid-input" });
+    }
+    const origin = input.origin === undefined ? undefined : normalizeSessionOrigin(input.origin);
+    if (origin === null) {
+      throw Object.assign(new Error("origin needs a package id, a known wake and a label"), { code: "invalid-input" });
+    }
+    const project = await projects.get(input.projectId);
+    if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
+    const projectProfileId = project.defaults?.agentProfileId ?? undefined;
+    const projectProfile = projectProfileId ? await deps.profiles?.profileGet(projectProfileId) : undefined;
+    // Stored profiles from before harness qualification retain a NULL
+    // harness. Their original catalog was OpenCode-owned, so preserve that
+    // compatibility without rewriting the row until the user edits it.
+    const projectProfileHarnessId = projectProfile ? projectProfile.harnessId ?? "opencode" : undefined;
+    const requestedHarness = input.harness;
+    // A supplied selection is user intent, including an explicit Auto. The
+    // project profile is only a default when the caller omitted harness.
+    const harness = requestedHarness
+      ?? (projectProfileHarnessId
+        ? { mode: "pinned" as const, harnessId: projectProfileHarnessId }
+        : project.defaults?.harness ?? { mode: "auto" as const });
+    const compatibleProjectProfile = projectProfile && (harness.mode === "auto"
+      || projectProfileHarnessId === harness.harnessId)
+      ? projectProfile
+      : undefined;
+    // A caller that names no model/agent (agent-facing handoffs such as the
+    // git conflict resolver) inherits the project's configured defaults.
+    // Without this the runtime falls back to its own native default and a
+    // session can silently run on a model the user never chose. Mirror the
+    // composer rule: a stored model is only a default while the project
+    // remembers model selection, and only when the caller did not pin a
+    // harness — defaults are harness-qualified, an explicit override is not.
+    const remembersModel = project.defaults?.rememberModelSelection ?? project.defaults?.model != null;
+    const defaultModel = remembersModel && !requestedHarness
+      ? project.defaults?.model ?? undefined
+      : undefined;
+    input = {
+      ...input,
+      harness,
+      ...(!input.model && defaultModel ? { model: defaultModel } : {}),
+      ...(!input.agent && !requestedHarness && project.defaults?.agent ? { agent: project.defaults.agent } : {}),
+    };
+    const sessionId = input.id?.trim() || randomUUID();
+    if (input.id) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sessionId)) {
+        throw Object.assign(new Error("session id is invalid"), { code: "invalid-input" });
+      }
+      if (await store.projection(sessionId)) {
+        throw Object.assign(new Error("session already exists"), { code: "conflict" });
+      }
+    }
+    let parent: SessionProjection | undefined;
+    let ancestorIds: Set<string> | undefined;
+    if (input.parentId) {
+      ancestorIds = await sessionAncestors(input.parentId);
+      parent = await store.projection(input.parentId);
+      if (parent && parent.projectId === input.projectId) {
+        if (input.worktreePath === undefined && parent.worktreePath) {
+          input = {
+            ...input,
+            worktreePath: parent.worktreePath,
+          };
+        }
+        if (input.workspace === undefined && parent.workspace) {
+          input = {
+            ...input,
+            workspace: cloneWorkspaceForChild(parent.workspace),
+          };
+        }
+      }
+    }
+    let worktree: { path: string; branch: string | null } | undefined;
+    if (input.worktreePath && deps.worktrees) {
+      const requested = resolve(input.worktreePath);
+      const executionId = input.workspace?.executionRepositoryId;
+      const checkoutRoot = executionId === undefined ? project.path
+        : projectRepositories(project).find((row) => row.id === executionId)?.path;
+      if (!checkoutRoot) throw Object.assign(new Error("workspace execution repository is not registered"), { code: "not-found" });
+      worktree = (await deps.worktrees.list(checkoutRoot))
+        .find((candidate) => resolve(candidate.path) === requested);
+      if (!worktree) {
+        throw Object.assign(new Error("worktree does not belong to this project"), { code: "invalid-input" });
+      }
+      if (isManagedIsolationBranch(worktree.branch) && !input.isolation) {
+        const owner = await isolationOwnerAt(worktree.path, sessionId);
+        const isDescendant = Boolean(owner && ancestorIds?.has(owner.id));
+        if (!isDescendant) {
+          throw Object.assign(new Error("Managed isolation workspaces belong to their canonical session"), { code: "conflict" });
+        }
+      }
+      input = { ...input, worktreePath: worktree.path };
+    }
+    const sessionWorkspace = createSessionWorkspace(project, {
+      repositoryIds: input.repositoryIds,
+      workspace: input.workspace,
+      worktreePath: input.worktreePath,
+      isolated: Boolean(input.isolation || input.worktreePath),
+    });
+    if (input.workspace) await validateWorkspacePaths({ projects, worktrees: deps.worktrees }, project, sessionWorkspace);
+    const requestedCwd = workspaceExecutionPath(project, {
+      id: sessionId,
+      projectId: project.id,
+      workspace: sessionWorkspace,
+      ...(input.worktreePath ? { worktreePath: input.worktreePath } : {}),
+    });
+    for (const row of sessionWorkspace.repositories) {
+      const owner = await isolationOwnerAt(row.path, sessionId);
+      if (owner && !ancestorIds?.has(owner.id)) {
+        throw Object.assign(new Error("an active isolation reserves this workspace"), { code: "invalid-input" });
+      }
+    }
+    if (worktree?.branch?.startsWith("polyth/isolate/")) {
+      const owner = await isolationOwnerAt(worktree.path, sessionId);
+      const isDescendant = Boolean(owner && ancestorIds?.has(owner.id));
+      if (!isDescendant) {
+        const isolation = input.isolation;
+        if (!isolation
+          || isolation.kind !== "git-worktree"
+          || resolve(isolation.worktreePath) !== resolve(worktree.path)
+          || isolation.worktreeBranch !== worktree.branch) {
+          throw Object.assign(new Error("managed isolation worktrees cannot host ordinary sessions"), {
+            code: "invalid-input",
+          });
+        }
+      }
+    }
+    const cwd = requestedCwd;
+    if (start) {
+      // Validated before anything is written, like the checks above.
+      if ((start.autoAccept === "on" || start.autoAccept === "all") && deps.guardedSpace?.(project.spaceId)) {
+        throw Object.assign(new Error(GUARDED_SPACE_AUTO_APPROVE_MESSAGE), { code: "forbidden" });
+      }
+      if (typeof start.agentProfileId === "string" && !(await deps.profiles?.profileGet(start.agentProfileId))) {
+        throw Object.assign(new Error("agent profile not found"), { code: "not-found" });
+      }
+    }
+    spawnTelemetry.begin(sessionId);
+    const now = Date.now();
+    let rt: AgentRuntime | undefined;
+    // A start replies before any runtime exists: its provisioning flight makes
+    // this check instead (`checkLaunchModel`).
+    if (input.agent && !input.model && !start) {
+      rt = await acquireSpawnRuntime(sessionId, { id: sessionId, projectId: project.id, title: input.title ?? "New session", status: "idle", createdAt: now, updatedAt: now, harness: input.harness }, cwd);
+      await requireLaunchModelForAutoAgent(rt, input.agent, input.model);
+    }
+    // A subagent/fork child starts under the nearest parent's policy,
+    // else its project's approval default — the indicator must be honest
+    // from the first projection broadcast.
+    const inheritedAutoAccept: AutoAcceptLevel = await chainAutoAcceptLevel(input.parentId, project.spaceId, project.id);
+    const startAutoAccept = start?.autoAccept && start.autoAccept !== "inherit" ? start.autoAccept : undefined;
+    const startProfile = start && start.agentProfileId !== undefined
+      ? (start.agentProfileId === null ? {} : { agentProfileId: start.agentProfileId })
+      : undefined;
+    const projection: SessionProjection = {
+      id: sessionId, projectId: project.id,
+      workspace: sessionWorkspace,
+      harness: input.harness ?? { mode: "auto" },
+      // Tenancy is inherited from the owning project — the one place a
+      // session's Space is decided. No caller can pass it in.
+      ...(project.spaceId ? { spaceId: project.spaceId } : {}),
+      ...(input.parentId ? { parentId: input.parentId } : {}),
+      // Delegated work acts for whoever ran the parent's turn when it was
+      // spawned, not for whoever writes to the parent later.
+      ...(parent?.actor ? { actor: { ...parent.actor, via: "delegation" as const } } : {}),
+      ...(input.purpose ? { purpose: input.purpose } : {}),
+      ...(origin ? { origin } : {}),
+      ...(startAutoAccept
+        ? { autoAcceptSetting: startAutoAccept, ...autoAcceptFlags(startAutoAccept === "on" ? "routine" : startAutoAccept) }
+        : inheritedAutoAccept !== "off" ? autoAcceptFlags(inheritedAutoAccept) : {}),
+      title: input.title || "New session",
+      titleSource: input.title && !isPlaceholderTitle(input.title, sessionId) ? "manual" : "placeholder",
+      ...(input.worktreePath ? {
+        worktreePath: input.worktreePath,
+        worktreeId: input.worktreePath,
+        worktreeState: "ready" as const,
+        ...(worktree?.branch ? { branch: worktree.branch } : parent?.branch ? { branch: parent.branch } : {}),
+      } : {}),
+      ...(input.isolation ? { isolation: input.isolation } : {}),
+      ...(input.model ? { model: input.model } : {}),
+      ...(input.agent ? { agent: input.agent } : {}),
+      ...(startProfile ?? (compatibleProjectProfile ? { agentProfileId: compatibleProjectProfile.id } : {})),
+      createdAt: now, updatedAt: now,
+      status: "reconciling",
+    };
+    const prepared = await broadcastTail(sessionId, () => durable.prepareSessionCreate({
+      projection,
+      createdEvent: {
+        type: "session/created",
+        data: {
+          title: projection.title, projectId: project.id,
+          harness: harness as unknown as JsonObject,
+          ...(input.purpose ? { purpose: input.purpose } : {}),
+          ...(origin ? { origin: origin as unknown as JsonObject } : {}),
+          ...(input.worktreePath ? { worktreePath: input.worktreePath } : {}),
+          workspace: sessionWorkspace as unknown as JsonObject,
+          ...(input.isolation ? { isolation: input.isolation as unknown as JsonObject } : {}),
+          ...(input.model ? { model: input.model as unknown as JsonObject } : {}),
+          ...(input.agent ? { agent: input.agent } : {}),
+          // Durable proof that the server owns this chat's start: restart
+          // resumes its provisioning and a failure hands back its first turn.
+          ...(start ? { start: start.marker as unknown as JsonObject } : {}),
+        },
+        ignorable: true,
+      },
+    }));
+    publishProjection(projection);
+    return {
+      sessionId, input, cwd, projection, operation: prepared.operation,
+      ...(rt ? { rt } : {}),
+      ...(start ? { started: true, checkLaunchModel: Boolean(input.agent && !input.model) } : {}),
+    };
+  };
+
+  /** The rest of a create: runtime, native create, binding and reconcile.
+   *  `create` awaits it; a start runs it as a background flight. */
+  const provisionCreatedSession = async (plan: CreatedSessionRow): Promise<void> => {
+    const { sessionId, input, cwd, projection } = plan;
+    let rt = plan.rt;
+    const prepared = { operation: plan.operation };
+    // A started chat keeps its first turn's words; failed-startup cleanup
+    // never takes it. Every other create keeps its existing cleanup.
+    const discard = plan.started ? async (): Promise<void> => {} : async (): Promise<void> => { await discardEmptyDelegatedChild(sessionId, "failed"); };
+    // The browser may need to clean up this exact canonical row after a
+    // confirmed creation failure. Keep the identifier on the error only;
+    // it is never forwarded to the runtime or persisted as model data.
+    const attachSessionId = (error: unknown): Error => {
+      const target = error instanceof Error ? error : new Error(String(error));
+      return Object.assign(target, { sessionId });
+    };
+    try {
+      rt ??= await acquireSpawnRuntime(sessionId, projection, cwd);
+      if (plan.checkLaunchModel) await requireLaunchModelForAutoAgent(rt, input.agent, input.model);
+    } catch (error) {
+      // Preserve what actually refused the runtime: a diagnostic that always
+      // reads "runtime-unavailable" hides the fence/readiness cause an
+      // operator needs. Only the thrown error is masked at the HTTP boundary.
+      const settleCode = typeof (error as { code?: unknown })?.code === "string" && (error as { code: string }).code
+        ? (error as { code: string }).code
+        : "runtime-unavailable";
+      const settleMessage = error instanceof Error && error.message.trim()
+        ? error.message
+        : "runtime could not be started before session creation";
+      await broadcastTail(sessionId, () => durable.settleOperation(prepared.operation.operationId, {
+        kind: "rejected",
+        code: settleCode,
+        message: settleMessage,
+      }));
+      await updateProjection(sessionId, { status: "failed" });
+      await discard();
+      // The ledger settled this create as rejected; say so instead of "outcome unknown".
+      const failure = attachSessionId(error);
+      if (!readErrorDiagnostics(failure).mutationOutcome) Object.assign(failure, { mutationOutcome: "rejected" });
+      throw failure;
+    }
+    try {
+      // A runtime acquired before the row existed could not record privacy.
+      if (rt.harnessId || rt.privateSession) {
+        await updateProjection(sessionId, {
+          ...(rt.harnessId ? { resolvedHarnessId: rt.harnessId } : {}),
+          ...(rt.privateSession ? { privateSession: true as const } : {}),
+        });
+      }
+    } catch (error) {
+      await discard();
+      throw error;
+    }
+    let outcome: MutationOutcome<{ backendSessionId: string }>;
+    try {
+      outcome = await runPreparedOperation<{ backendSessionId: string }, string>(
+        prepared.operation,
+        (operationId) => {
+          const request = { ...input, sessionId, cwd, titleSource: projection.titleSource };
+          return spawnTelemetry.time<MutationOutcome<{ backendSessionId: string }> | string>(sessionId, "nativeSessionCreateMs", () => rt.createSessionOperation
+            ? rt.createSessionOperation(request, operationId)
+            : rt.ensureSession(request));
+        },
+        (backendSessionId) => ({ backendSessionId }),
+      );
+    } catch (error) {
+      await updateProjection(sessionId, { status: "failed" });
+      await discard();
+      throw attachSessionId(error);
+    }
+    if (outcome.kind !== "confirmed") {
+      await updateProjection(sessionId, {
+        status: outcome.kind === "unknown" ? "unknown" : "failed",
+      });
+      await discard();
+      throw attachSessionId(outcomeError(outcome));
+    }
+    try {
+      const binding = await newRuntimeBinding(
+        rt,
+        outcome.value.backendSessionId,
+        cwd,
+        "empty",
+      );
+      // Creation can overlap a first send after the durable row is
+      // broadcast. Patch the latest projection so its queued route intent
+      // (and any other concurrently persisted metadata) is not replaced by
+      // the stale pre-runtime snapshot captured above.
+      const completed = await applyProjection(sessionId, (current) => ({
+        ...current,
+        ...(rt.privateSession ? { privateSession: true as const } : {}),
+        ...(rt.harnessId ? {
+          resolvedHarnessId: rt.harnessId,
+          runtimeLeg: { id: randomUUID(), harnessId: rt.harnessId, nativeSessionId: outcome.value.backendSessionId, startedAt: Date.now(), canonicalThroughSeq: 0, bootstrap: "empty" as const },
+        } : {}),
+        backendSessionId: outcome.value.backendSessionId,
+        runtimeBinding: binding,
+        status: "reconciling",
+        updatedAt: Date.now(),
+      }));
+      if (!completed) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      wire(sessionId, rt);
+      if (typeof (rt as ReliabilityRuntime).reconcile === "function") {
+        await reconcileSession(
+          sessionId,
+          completed,
+          rt,
+          "session-created",
+          prepared.operation.operationId,
+        );
+      } else if (typeof (rt as ReliabilityRuntime).endpoint !== "function") {
+        // Provider-neutral test/compatibility runtimes predate endpoint
+        // evidence. A confirmed create remains their admission boundary;
+        // managed OpenCode runtimes always expose endpoint + reconcile and
+        // cannot take this compatibility path.
+        await updateProjection(sessionId, { status: "idle" });
+        // A send that overlapped creation was queued as "session-reconciling";
+        // reaching idle must deliver it, as reconciliation's idle does.
+        void dispatchQueue(sessionId);
+      } else {
+        await updateProjection(sessionId, { status: "unknown" });
+      }
+    } catch (error) {
+      await discard();
+      throw error;
+    }
+  };
+
   const service: RuntimeEpochSessionService = {
     async summaries(input) {
       if (!store.summaries) throw Object.assign(new Error("session summaries unavailable"), { code: "unsupported" });
@@ -11353,6 +12150,9 @@ export function createSessionService(deps: {
     async activate(sessionId, options) {
       // Opening a conversation is a pure read: it has no runtime to warm.
       if (isConversation(await store.projection(sessionId))) return;
+      // A chat that is starting is already getting its runtime; opening it
+      // (the client does, as soon as the start replies) has nothing to warm.
+      if (startFlights.has(sessionId)) return;
       if (options?.intent === "open" && !await openNeedsRuntime(sessionId)) return;
       try {
         await sessionJobs.enqueue(sessionId);
@@ -11387,6 +12187,23 @@ export function createSessionService(deps: {
           if (serviceDisposed || deps.isShuttingDown?.()) break;
           if (isConversation(projection)) continue;
           const queued = deps.queue ? await deps.queue.queueList(projection.id) : [];
+          // A started chat whose create never ran resumes it; its idle
+          // dispatch then delivers the queued first turn.
+          if (!projection.backendSessionId && (projection.status === "unknown" || projection.status === "reconciling")
+            && await resumeStartProvisioning(projection.id, { afterRejection: false })) continue;
+          // A create that was running when Polyth stopped is not re-run. Its
+          // first turn would wait in the queue forever: hand it back instead.
+          const uncertain = await uncertainStart(projection);
+          if (uncertain && !uncertain.reported) {
+            const interrupted = uncertain.operation.code === "process-restarted";
+            await failStart(projection.id, Object.assign(
+              new Error(interrupted
+                ? "Polyth restarted while this chat was starting."
+                : uncertain.operation.message ?? "The chat could not start"),
+              { code: uncertain.operation.code ?? "outcome-unknown" },
+            )).catch((cause: unknown) => console.error(`[polyth] start failure for ${projection.id} was not recorded`, cause));
+            continue;
+          }
           if (!needsDelegatedSettlement(projection) && !queued.length && !await historyImportPending(projection)) continue;
           try { await sessionJobs.enqueue(projection.id); }
           catch { /* durable queue/import state is retained for explicit recovery */ }
@@ -11844,318 +12661,111 @@ export function createSessionService(deps: {
       return { safe: true };
     },
     async create(input: CreateSessionInput): Promise<SessionRef> {
-      if (input.purpose !== undefined && (typeof input.purpose !== "string" || !SESSION_PURPOSE_ID.test(input.purpose))) {
-        throw Object.assign(new Error("purpose must be a short lowercase id"), { code: "invalid-input" });
+      const row = await createSessionRow(input);
+      await provisionCreatedSession(row);
+      return { id: row.sessionId };
+    },
+
+    async start(request: StartSessionInput, admission?: TurnAdmission): Promise<StartSessionResult> {
+      const invalid = (message: string): Error => Object.assign(new Error(message), { code: "invalid-input" });
+      const { start, clientOperationId, ...input } = request;
+      validateStartRequest(start);
+      if (clientOperationId !== undefined && (typeof clientOperationId !== "string" || !clientOperationId.trim())) {
+        throw invalid("clientOperationId must be a non-empty string");
       }
-      const origin = input.origin === undefined ? undefined : normalizeSessionOrigin(input.origin);
-      if (origin === null) {
-        throw Object.assign(new Error("origin needs a package id, a known wake and a label"), { code: "invalid-input" });
-      }
-      const project = await projects.get(input.projectId);
-      if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
-      const projectProfileId = project.defaults?.agentProfileId ?? undefined;
-      const projectProfile = projectProfileId ? await deps.profiles?.profileGet(projectProfileId) : undefined;
-      // Stored profiles from before harness qualification retain a NULL
-      // harness. Their original catalog was OpenCode-owned, so preserve that
-      // compatibility without rewriting the row until the user edits it.
-      const projectProfileHarnessId = projectProfile ? projectProfile.harnessId ?? "opencode" : undefined;
-      const requestedHarness = input.harness;
-      // A supplied selection is user intent, including an explicit Auto. The
-      // project profile is only a default when the caller omitted harness.
-      const harness = requestedHarness
-        ?? (projectProfileHarnessId
-          ? { mode: "pinned" as const, harnessId: projectProfileHarnessId }
-          : project.defaults?.harness ?? { mode: "auto" as const });
-      const compatibleProjectProfile = projectProfile && (harness.mode === "auto"
-        || projectProfileHarnessId === harness.harnessId)
-        ? projectProfile
-        : undefined;
-      // A caller that names no model/agent (agent-facing handoffs such as the
-      // git conflict resolver) inherits the project's configured defaults.
-      // Without this the runtime falls back to its own native default and a
-      // session can silently run on a model the user never chose. Mirror the
-      // composer rule: a stored model is only a default while the project
-      // remembers model selection, and only when the caller did not pin a
-      // harness — defaults are harness-qualified, an explicit override is not.
-      const remembersModel = project.defaults?.rememberModelSelection ?? project.defaults?.model != null;
-      const defaultModel = remembersModel && !requestedHarness
-        ? project.defaults?.model ?? undefined
-        : undefined;
-      input = {
-        ...input,
-        harness,
-        ...(!input.model && defaultModel ? { model: defaultModel } : {}),
-        ...(!input.agent && !requestedHarness && project.defaults?.agent ? { agent: project.defaults.agent } : {}),
-      };
+      // The author is the server's admission fact, as for `send`. The key
+      // arrives account-scoped; it is never scoped again here.
+      const author = normalizeSessionPerson(admission?.author);
+      const firstTurn = start.firstTurn;
+      const turnKey = firstTurn ? clientOperationId ?? randomUUID() : undefined;
       const sessionId = input.id?.trim() || randomUUID();
-      // The browser may need to clean up this exact canonical row after a
-      // confirmed creation failure. Keep the identifier on the error only;
-      // it is never forwarded to the runtime or persisted as model data.
-      const attachSessionId = (error: unknown): Error => {
-        const target = error instanceof Error ? error : new Error(String(error));
-        return Object.assign(target, { sessionId });
+      const steps: Array<{ step: SessionStartStep; payload: JsonObject }> = [];
+      for (const [id, payload] of Object.entries(start.extensions ?? {})) {
+        const step = deps.startSteps?.get(id);
+        if (!step) throw invalid(`unknown start extension: ${id}`);
+        steps.push({ step, payload });
+      }
+      const stepContext = {
+        projectId: input.projectId,
+        ...(firstTurn?.text ? { firstTurnText: firstTurn.text } : {}),
+        ...(author ? { author } : {}),
       };
-      if (input.id) {
-        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sessionId)) {
-          throw Object.assign(new Error("session id is invalid"), { code: "invalid-input" });
-        }
-        if (await store.projection(sessionId)) {
-          throw Object.assign(new Error("session already exists"), { code: "conflict" });
-        }
-      }
-      let parent: SessionProjection | undefined;
-      let ancestorIds: Set<string> | undefined;
-      if (input.parentId) {
-        ancestorIds = await sessionAncestors(input.parentId);
-        parent = await store.projection(input.parentId);
-        if (parent && parent.projectId === input.projectId) {
-          if (input.worktreePath === undefined && parent.worktreePath) {
-            input = {
-              ...input,
-              worktreePath: parent.worktreePath,
-            };
-          }
-          if (input.workspace === undefined && parent.workspace) {
-            input = {
-              ...input,
-              workspace: cloneWorkspaceForChild(parent.workspace),
-            };
-          }
-        }
-      }
-      let worktree: { path: string; branch: string | null } | undefined;
-      if (input.worktreePath && deps.worktrees) {
-        const requested = resolve(input.worktreePath);
-        const executionId = input.workspace?.executionRepositoryId;
-        const checkoutRoot = executionId === undefined ? project.path
-          : projectRepositories(project).find((row) => row.id === executionId)?.path;
-        if (!checkoutRoot) throw Object.assign(new Error("workspace execution repository is not registered"), { code: "not-found" });
-        worktree = (await deps.worktrees.list(checkoutRoot))
-          .find((candidate) => resolve(candidate.path) === requested);
-        if (!worktree) {
-          throw Object.assign(new Error("worktree does not belong to this project"), { code: "invalid-input" });
-        }
-        if (isManagedIsolationBranch(worktree.branch) && !input.isolation) {
-          const owner = await isolationOwnerAt(worktree.path, sessionId);
-          const isDescendant = Boolean(owner && ancestorIds?.has(owner.id));
-          if (!isDescendant) {
-            throw Object.assign(new Error("Managed isolation workspaces belong to their canonical session"), { code: "conflict" });
-          }
-        }
-        input = { ...input, worktreePath: worktree.path };
-      }
-      const sessionWorkspace = createSessionWorkspace(project, {
-        repositoryIds: input.repositoryIds,
-        workspace: input.workspace,
-        worktreePath: input.worktreePath,
-        isolated: Boolean(input.isolation || input.worktreePath),
-      });
-      if (input.workspace) await validateWorkspacePaths({ projects, worktrees: deps.worktrees }, project, sessionWorkspace);
-      const requestedCwd = workspaceExecutionPath(project, {
-        id: sessionId,
-        projectId: project.id,
-        workspace: sessionWorkspace,
-        ...(input.worktreePath ? { worktreePath: input.worktreePath } : {}),
-      });
-      for (const row of sessionWorkspace.repositories) {
-        const owner = await isolationOwnerAt(row.path, sessionId);
-        if (owner && !ancestorIds?.has(owner.id)) {
-          throw Object.assign(new Error("an active isolation reserves this workspace"), { code: "invalid-input" });
-        }
-      }
-      if (worktree?.branch?.startsWith("polyth/isolate/")) {
-        const owner = await isolationOwnerAt(worktree.path, sessionId);
-        const isDescendant = Boolean(owner && ancestorIds?.has(owner.id));
-        if (!isDescendant) {
-          const isolation = input.isolation;
-          if (!isolation
-            || isolation.kind !== "git-worktree"
-            || resolve(isolation.worktreePath) !== resolve(worktree.path)
-            || isolation.worktreeBranch !== worktree.branch) {
-            throw Object.assign(new Error("managed isolation worktrees cannot host ordinary sessions"), {
-              code: "invalid-input",
-            });
-          }
-        }
-      }
-      const cwd = requestedCwd;
-      spawnTelemetry.begin(sessionId);
-      // The first runtime acquisition is the stage, wherever create takes it.
-      const acquireSpawnRuntime = async (target: SessionProjection): Promise<AgentRuntime> => {
-        const runtime = await spawnTelemetry.time(sessionId, "runtimeAcquireMs", () => runtimeForWithReadinessRetry(target, cwd));
-        let info: ReturnType<NonNullable<RuntimePool["acquisitionInfo"]>>;
-        try { info = runtimes.acquisitionInfo?.(runtime, target.id); } catch { info = undefined; }
-        spawnTelemetry.update(sessionId, {
-          ...(info ?? {}),
-          ...(runtime.harnessId ? { harnessId: runtime.harnessId } : {}),
+      for (const { step, payload } of steps) await step.validate?.(payload, stepContext);
+      if (firstTurn?.attachments?.length) {
+        sanitizeAttachments(firstTurn.attachments, {
+          maxBytes: deps.attachments?.maxBytes ?? 20 * 1024 * 1024,
+          projectId: input.projectId,
+          sessionId,
         });
-        return runtime;
-      };
-      const now = Date.now();
-      let rt: AgentRuntime | undefined;
-      if (input.agent && !input.model) {
-        rt = await acquireSpawnRuntime({ id: sessionId, projectId: project.id, title: input.title ?? "New session", status: "idle", createdAt: now, updatedAt: now, harness: input.harness });
-        await requireLaunchModelForAutoAgent(rt, input.agent, input.model);
       }
-      // A subagent/fork child starts under the nearest parent's policy,
-      // else its project's approval default — the indicator must be honest
-      // from the first projection broadcast.
-      const inheritedAutoAccept: AutoAcceptLevel = await chainAutoAcceptLevel(input.parentId, project.spaceId, project.id);
-      const projection: SessionProjection = {
-        id: sessionId, projectId: project.id,
-        workspace: sessionWorkspace,
-        harness: input.harness ?? { mode: "auto" },
-        // Tenancy is inherited from the owning project — the one place a
-        // session's Space is decided. No caller can pass it in.
-        ...(project.spaceId ? { spaceId: project.spaceId } : {}),
-        ...(input.parentId ? { parentId: input.parentId } : {}),
-        // Delegated work acts for whoever ran the parent's turn when it was
-        // spawned, not for whoever writes to the parent later.
-        ...(parent?.actor ? { actor: { ...parent.actor, via: "delegation" as const } } : {}),
-        ...(input.purpose ? { purpose: input.purpose } : {}),
-        ...(origin ? { origin } : {}),
-        ...(inheritedAutoAccept !== "off" ? autoAcceptFlags(inheritedAutoAccept) : {}),
-        title: input.title || "New session",
-        titleSource: input.title && !isPlaceholderTitle(input.title, sessionId) ? "manual" : "placeholder",
-        ...(input.worktreePath ? {
-          worktreePath: input.worktreePath,
-          worktreeId: input.worktreePath,
-          worktreeState: "ready" as const,
-          ...(worktree?.branch ? { branch: worktree.branch } : parent?.branch ? { branch: parent.branch } : {}),
-        } : {}),
-        ...(input.isolation ? { isolation: input.isolation } : {}),
-        ...(input.model ? { model: input.model } : {}),
-        ...(input.agent ? { agent: input.agent } : {}),
-        ...(compatibleProjectProfile ? { agentProfileId: compatibleProjectProfile.id } : {}),
-        createdAt: now, updatedAt: now,
-        status: "reconciling",
-      };
-      const prepared = await broadcastTail(sessionId, () => durable.prepareSessionCreate({
-        projection,
-        createdEvent: {
-          type: "session/created",
-          data: {
-            title: projection.title, projectId: project.id,
-            harness: harness as unknown as JsonObject,
-            ...(input.purpose ? { purpose: input.purpose } : {}),
-            ...(origin ? { origin: origin as unknown as JsonObject } : {}),
-            ...(input.worktreePath ? { worktreePath: input.worktreePath } : {}),
-            workspace: sessionWorkspace as unknown as JsonObject,
-            ...(input.isolation ? { isolation: input.isolation as unknown as JsonObject } : {}),
-            ...(input.model ? { model: input.model as unknown as JsonObject } : {}),
-            ...(input.agent ? { agent: input.agent } : {}),
-          },
-          ignorable: true,
-        },
-      }));
-      publishProjection(projection);
-      try {
-        rt ??= await acquireSpawnRuntime(projection);
-      } catch (error) {
-        // Preserve what actually refused the runtime: a diagnostic that always
-        // reads "runtime-unavailable" hides the fence/readiness cause an
-        // operator needs. Only the thrown error is masked at the HTTP boundary.
-        const settleCode = typeof (error as { code?: unknown })?.code === "string" && (error as { code: string }).code
-          ? (error as { code: string }).code
-          : "runtime-unavailable";
-        const settleMessage = error instanceof Error && error.message.trim()
-          ? error.message
-          : "runtime could not be started before session creation";
-        await broadcastTail(sessionId, () => durable.settleOperation(prepared.operation.operationId, {
-          kind: "rejected",
-          code: settleCode,
-          message: settleMessage,
-        }));
-        await updateProjection(sessionId, { status: "failed" });
-        await discardEmptyDelegatedChild(sessionId, "failed");
-        // The ledger settled this create as rejected; say so instead of "outcome unknown".
-        const failure = attachSessionId(error);
-        if (!readErrorDiagnostics(failure).mutationOutcome) Object.assign(failure, { mutationOutcome: "rejected" });
-        throw failure;
+      // A resend under the same id reuses the row: no second row, no second
+      // native create, and the first turn dedupes by its key.
+      const existing = input.id ? await store.projection(sessionId) : undefined;
+      if (existing && existing.projectId !== input.projectId) {
+        throw Object.assign(new Error("session already exists"), { code: "conflict" });
       }
+      const marker: StartMarker = {
+        ...(turnKey ? { firstTurnQueueId: turnKey } : {}),
+        ...(firstTurn?.autoTitle === true ? { autoTitle: true as const } : {}),
+      };
+      const row = existing ? undefined : await createSessionRow({ ...input, id: sessionId }, {
+        ...(start.autoAccept !== undefined ? { autoAccept: start.autoAccept } : {}),
+        ...(start.agentProfileId !== undefined ? { agentProfileId: start.agentProfileId } : {}),
+        marker,
+      });
+      if (row && turnKey) startFirstTurns.set(sessionId, marker);
+      const pending = firstTurn ? {
+        text: firstTurn.text,
+        ...(firstTurn.attachments?.length ? { attachments: firstTurn.attachments } : {}),
+        ...(author ? { author } : {}),
+      } : undefined;
+      // Before the provisioning flight exists, a new row's create is still
+      // `prepared`: settle it so a restart cannot resume a start that failed.
+      const failNewRow = async (error: unknown): Promise<void> => {
+        if (!row) return;
+        const code = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : "start-failed";
+        const message = error instanceof Error && error.message.trim() ? error.message : "The chat could not start";
+        await broadcastTail(sessionId, () => durable.settleOperation(row.operation.operationId, { kind: "rejected", code, message }))
+          .catch(() => undefined);
+        await failStart(sessionId, error, pending).catch((cause: unknown) => {
+          console.error(`[polyth] start failure for ${sessionId} was not recorded`, cause);
+        });
+      };
       try {
-        // A runtime acquired before the row existed could not record privacy.
-        if (rt.harnessId || rt.privateSession) {
-          await updateProjection(sessionId, {
-            ...(rt.harnessId ? { resolvedHarnessId: rt.harnessId } : {}),
-            ...(rt.privateSession ? { privateSession: true as const } : {}),
-          });
+        for (const { step, payload } of steps) {
+          const session = await store.projection(sessionId);
+          if (!session) throw Object.assign(new Error("session not found"), { code: "not-found" });
+          await step.run(payload, { ...stepContext, session });
         }
       } catch (error) {
-        await discardEmptyDelegatedChild(sessionId, "failed");
+        await failNewRow(error);
         throw error;
       }
-      let outcome: MutationOutcome<{ backendSessionId: string }>;
-      try {
-        outcome = await runPreparedOperation<{ backendSessionId: string }, string>(
-          prepared.operation,
-          (operationId) => {
-            const request = { ...input, sessionId, cwd, titleSource: projection.titleSource };
-            return spawnTelemetry.time<MutationOutcome<{ backendSessionId: string }> | string>(sessionId, "nativeSessionCreateMs", () => rt.createSessionOperation
-              ? rt.createSessionOperation(request, operationId)
-              : rt.ensureSession(request));
-          },
-          (backendSessionId) => ({ backendSessionId }),
-        );
-      } catch (error) {
-        await updateProjection(sessionId, { status: "failed" });
-        await discardEmptyDelegatedChild(sessionId, "failed");
-        throw attachSessionId(error);
-      }
-      if (outcome.kind !== "confirmed") {
-        await updateProjection(sessionId, {
-          status: outcome.kind === "unknown" ? "unknown" : "failed",
-        });
-        await discardEmptyDelegatedChild(sessionId, "failed");
-        throw attachSessionId(outcomeError(outcome));
-      }
-      try {
-        const binding = await newRuntimeBinding(
-          rt,
-          outcome.value.backendSessionId,
-          cwd,
-          "empty",
-        );
-        // Creation can overlap a first send after the durable row is
-        // broadcast. Patch the latest projection so its queued route intent
-        // (and any other concurrently persisted metadata) is not replaced by
-        // the stale pre-runtime snapshot captured above.
-        const completed = await applyProjection(sessionId, (current) => ({
-          ...current,
-          ...(rt.privateSession ? { privateSession: true as const } : {}),
-          ...(rt.harnessId ? {
-            resolvedHarnessId: rt.harnessId,
-            runtimeLeg: { id: randomUUID(), harnessId: rt.harnessId, nativeSessionId: outcome.value.backendSessionId, startedAt: Date.now(), canonicalThroughSeq: 0, bootstrap: "empty" as const },
-          } : {}),
-          backendSessionId: outcome.value.backendSessionId,
-          runtimeBinding: binding,
-          status: "reconciling",
-          updatedAt: Date.now(),
-        }));
-        if (!completed) throw Object.assign(new Error("session not found"), { code: "not-found" });
-        wire(sessionId, rt);
-        if (typeof (rt as ReliabilityRuntime).reconcile === "function") {
-          await reconcileSession(
-            sessionId,
-            completed,
-            rt,
-            "session-created",
-            prepared.operation.operationId,
-          );
-        } else if (typeof (rt as ReliabilityRuntime).endpoint !== "function") {
-          // Provider-neutral test/compatibility runtimes predate endpoint
-          // evidence. A confirmed create remains their admission boundary;
-          // managed OpenCode runtimes always expose endpoint + reconcile and
-          // cannot take this compatibility path.
-          await updateProjection(sessionId, { status: "idle" });
-        } else {
-          await updateProjection(sessionId, { status: "unknown" });
+      let result: StartSessionResult = { id: sessionId };
+      if (firstTurn && turnKey) {
+        startAdmitting.add(sessionId);
+        try {
+          const sent = await service.send(sessionId, {
+            text: firstTurn.text,
+            ...(firstTurn.attachments?.length ? { attachments: firstTurn.attachments } : {}),
+            ...(firstTurn.command ? { command: firstTurn.command } : {}),
+            ...(firstTurn.autoTitle === true ? { autoTitle: true } : {}),
+            clientOperationId: turnKey,
+          }, author ? { author } : undefined);
+          result = sent.turnId ? { id: sessionId, turnId: sent.turnId } : { id: sessionId, queueId: sent.queueId ?? turnKey };
+        } catch (error) {
+          await failNewRow(error);
+          throw error;
+        } finally {
+          startAdmitting.delete(sessionId);
         }
-      } catch (error) {
-        await discardEmptyDelegatedChild(sessionId, "failed");
-        throw error;
       }
-      return { id: sessionId };
+      // Provisioning starts only once the first turn is durable, so its idle
+      // dispatch always finds it. A resend resumes only a never-run create.
+      if (row) void launchStartFlight(sessionId, async () => row);
+      else void resumeStartProvisioning(sessionId, { afterRejection: false });
+      spawnTelemetry.mark(sessionId, "startReplyMs");
+      return result;
     },
 
     async updateWorkspace(sessionId, selection) {
@@ -12322,6 +12932,19 @@ export function createSessionService(deps: {
       let proj = await store.projection(sessionId);
       if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
       assertHasAgent(proj);
+      // A started chat whose runtime could not be created provisions again
+      // with a fresh create; this send then queues behind it and is admitted.
+      if (proj.status === "failed" && !proj.backendSessionId && !startAdmitting.has(sessionId)
+        && await resumeStartProvisioning(sessionId, { afterRejection: true })) {
+        proj = (await store.projection(sessionId)) ?? proj;
+      }
+      // Queueing is for a barrier that lifts. Nothing lifts this one: the chat
+      // has no native session to reconcile and its create is not re-run.
+      if (await uncertainStart(proj)) {
+        throw Object.assign(new Error("This chat could not start, so it cannot take messages. Send your message from a new chat."), {
+          code: "conflict", component: "validation", mutationOutcome: "not-started",
+        });
+      }
       if (await historyImportPending(proj)) throw Object.assign(new Error("history import is not complete"), { code: "conflict", component: "validation", mutationOutcome: "not-started" });
       assertIsolationExecutable(proj);
       // A keep-alive is worth sending only into an idle session, and it must
@@ -12351,6 +12974,7 @@ export function createSessionService(deps: {
           hiddenUserMessage,
           input.memory,
           input.author,
+          input.displayText,
         );
       }
       const effectiveMemory = mergeMemoryNarrowing(
@@ -12431,6 +13055,7 @@ export function createSessionService(deps: {
           hiddenUserMessage,
           input.memory,
           input.author,
+          input.displayText,
         );
       };
       // An automatic resume resends a stopped turn: queued, a `failed`
@@ -12458,6 +13083,7 @@ export function createSessionService(deps: {
           hiddenUserMessage,
           input.memory,
           input.author,
+          input.displayText,
         );
       }
       if (input.harness) {
@@ -12521,6 +13147,7 @@ export function createSessionService(deps: {
             hiddenUserMessage,
             input.memory,
             input.author,
+            input.displayText,
           );
         }
       }
@@ -12627,7 +13254,9 @@ export function createSessionService(deps: {
         if (barrier?.state === "blocked") return "reconciliation-blocked";
         if (barrier?.state === "reconciling") return "reconciliation-active";
         if (barrier?.state === "unknown" && !stoppedTurnRecorded) return "reconciliation-unknown";
-        if (projection.status === "reconciling") return "session-reconciling";
+        if (projection.status === "reconciling") {
+          return startAdmitting.has(sessionId) ? SESSION_STARTING_QUEUE_REASON : "session-reconciling";
+        }
         if (projection.status === "epoch-pending") return "session-epoch-pending";
         if (projection.status === "unknown" && !stoppedTurnRecorded) return "session-unknown";
         return undefined;
@@ -12645,6 +13274,7 @@ export function createSessionService(deps: {
         hiddenUserMessage,
         input.memory,
         input.author,
+        input.displayText,
       );
       // When the session stays uncertain after in-place recovery, a new user
       // message runs the same release → epoch → fresh-leg transaction a
@@ -12871,6 +13501,7 @@ export function createSessionService(deps: {
             hiddenUserMessage,
             input.memory,
             input.author,
+            input.displayText,
           );
         }
         if (delivery === "normal") {
@@ -12888,6 +13519,7 @@ export function createSessionService(deps: {
             hiddenUserMessage,
             input.memory,
             input.author,
+            input.displayText,
           );
         }
         if (delivery === "steer") {
@@ -12907,6 +13539,7 @@ export function createSessionService(deps: {
               hiddenUserMessage,
               input.memory,
               input.author,
+              input.displayText,
             );
           }
           const caps = await rt.capabilities().catch(() => null);
@@ -12933,6 +13566,7 @@ export function createSessionService(deps: {
                 hiddenUserMessage,
                 input.memory,
                 input.author,
+                input.displayText,
               );
             }
             // A person steering into a keep-alive makes it their turn.
@@ -12999,6 +13633,7 @@ export function createSessionService(deps: {
                 hiddenUserMessage,
                 input.memory,
                 input.author,
+                input.displayText,
               );
             }
             if (outcome.kind === "unknown") {
@@ -13116,6 +13751,7 @@ export function createSessionService(deps: {
             hiddenUserMessage,
             input.memory,
             input.author,
+            input.displayText,
           );
           void dispatchQueue(sessionId);
           return res;
@@ -13271,6 +13907,9 @@ export function createSessionService(deps: {
         ? options.source.trim().slice(0, 64)
         : undefined;
       const endedPause = await withSessionLock(sessionId, async () => {
+        // Stop ends a wait for a provider limit too: the countdown would
+        // otherwise resend the last message after the person stopped the work.
+        await clearResume(sessionId, "user");
         // Stop on a paused session ends the pause: the work is over.
         if ((await store.projection(sessionId))?.paused && !turnActive(sessionId)) {
           return endPause(sessionId, "stopped", source);
@@ -13648,7 +14287,7 @@ export function createSessionService(deps: {
       });
     },
 
-    async rewind(sessionId, atSeq): Promise<SessionEvent> {
+    async rewind(sessionId, atSeq, options): Promise<SessionEvent> {
       return withSessionLock(sessionId, async () => {
         const { proj, events } = await assertMutable(sessionId, { allowActiveTurn: true });
         assertHasAgent(proj);
@@ -13679,18 +14318,89 @@ export function createSessionService(deps: {
         // The marker carries no prompt copy: the target user/message already
         // owns raw text and attachments, and the draft derives from replay.
         // A harness hint guessed the reply that the rewind just removed.
+        // Files first: if putting them back fails, the conversation stays as
+        // it was, so the marker never claims a rollback the disk did not get.
+        let files: RewindFilesOutcome | undefined;
+        if (options?.files === "restore") {
+          files = await rollBackFiles(sessionId, proj, atSeq);
+        } else if (options?.files === "keep") {
+          files = { mode: "kept", restored: 0, kept: 0 };
+        }
         clearPromptSuggestion(sessionId);
-        return appendAndBroadcast(sessionId, "session/rewound", { atSeq });
+        return appendAndBroadcast(sessionId, "session/rewound", {
+          atSeq,
+          ...(files ? { files: files as unknown as JsonObject } : {}),
+        });
       });
+    },
+
+    async previewRewindFiles(sessionId, atSeq): Promise<RewindFilesPreview> {
+      if (!Number.isSafeInteger(atSeq) || atSeq <= 0) {
+        throw Object.assign(new Error("atSeq must be a positive event sequence"), { code: "invalid-input" });
+      }
+      const proj = await store.projection(sessionId);
+      if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      const events = await store.events(sessionId);
+      const running = turnActive(sessionId);
+      const unavailable = (reason: RewindFilesUnavailableReason): RewindFilesPreview =>
+        ({ available: false, reason, turnRunning: running, restore: [], keep: [] });
+      const context = await rewindFilesContext(proj, events, atSeq);
+      if (!context.ok) return unavailable(context.reason);
+      let turns = context.turns;
+      if (context.runningPromptSeq !== undefined) {
+        // The running turn has no `after` yet: preview against the files as
+        // they are now. Its real `after` replaces this ref when it stops.
+        const provisional = await context.service.capture({
+          cwd: context.cwd,
+          sessionId,
+          promptSeq: context.runningPromptSeq,
+          phase: "after",
+          budgetMs: CHECKPOINT_AFTER_BUDGET_MS,
+        });
+        if (!("commit" in provisional)) return unavailable("no-snapshot");
+        turns = turns.map((turn) => turn.promptSeq === context.runningPromptSeq ? { ...turn, after: provisional.commit } : turn);
+      }
+      const plan = await context.service.previewRewind({ cwd: context.cwd, sessionId, turns });
+      return { ...plan, turnRunning: running };
     },
 
     async clearRewind(sessionId): Promise<SessionEvent> {
       return withSessionLock(sessionId, async () => {
-        const { events } = await assertMutable(sessionId, { allowActiveTurn: true });
+        const { proj, events } = await assertMutable(sessionId, { allowActiveTurn: true });
         const rewind = activeRewind(events);
         if (!rewind) throw Object.assign(new Error("session has no active rewind"), { code: "conflict" });
-        return appendAndBroadcast(sessionId, "session/rewind-cleared", { rewindSeq: rewind.markerSeq });
+        const rolled = rolledBackFiles(events, rewind.markerSeq);
+        let files: { restored: number; kept: number } | undefined;
+        if (rolled) {
+          if (turnActive(sessionId)) {
+            throw Object.assign(new Error("stop the running turn before restoring files"), { code: "conflict" });
+          }
+          const context = await restoreFilesContext(proj, rolled);
+          if (context) {
+            const result = await context.service.applyRestore(context.input);
+            files = { restored: result.restored, kept: result.kept };
+          } else {
+            files = { restored: 0, kept: rolled.paths?.length ?? rolled.restored };
+          }
+        }
+        return appendAndBroadcast(sessionId, "session/rewind-cleared", {
+          rewindSeq: rewind.markerSeq,
+          ...(files ? { files } : {}),
+        });
       });
+    },
+
+    async previewRewindRestore(sessionId): Promise<RewindRestorePreview> {
+      const proj = await store.projection(sessionId);
+      if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      const events = await store.events(sessionId);
+      const rewind = activeRewind(events);
+      if (!rewind) throw Object.assign(new Error("session has no active rewind"), { code: "conflict" });
+      const rolled = rolledBackFiles(events, rewind.markerSeq);
+      if (!rolled) return { restore: 0, keep: [] };
+      const context = await restoreFilesContext(proj, rolled);
+      if (!context) return { restore: 0, keep: (rolled.paths ?? []).map((path) => ({ path, reason: "unsupported" as const })) };
+      return context.service.previewRestore(context.input);
     },
 
     async runShell(sessionId, command, person) {

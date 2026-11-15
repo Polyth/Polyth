@@ -975,6 +975,23 @@ export interface ComposerSessionCreatedHook {
   run(context: ComposerSessionCreatedContext): Promise<void>;
 }
 
+/** One package's payload for a new chat's server-side start step
+ *  (`SessionStartRequest.extensions[id]`, run by the step the package
+ *  registered under the same id in `SESSION_START_STEPS`). It replaces a
+ *  session-created hook: the server runs the step, so nothing depends on this
+ *  client after Send. */
+export interface ComposerSessionStartExtension {
+  /** The server start step's id. */
+  id: string;
+  /** Called once per Send on a new chat. Return the step's JSON payload, or
+   *  `undefined` to contribute nothing. Take pending state here: it is asked
+   *  for once. */
+  collect(context: { projectId: string; text: string }): Record<string, unknown> | undefined;
+  /** Only when the server is older and ignored the start: apply the collected
+   *  payload to the created session over the package's own route. */
+  legacy?(context: ComposerSessionCreatedContext, payload: Record<string, unknown>): Promise<void>;
+}
+
 export interface HandoffTargetRegistration {
   id: "current-session" | "queue" | "new-session" | "draft";
   label: string;
@@ -1740,6 +1757,10 @@ export interface WebPackageHost {
     /** Register an awaited post-creation step for the composer's new session.
      *  Optional for older hosts; feature-detect it. */
     registerSessionCreatedHook?(hook: ComposerSessionCreatedHook): Unregister;
+    /** Register a server start-step payload for the composer's new chat.
+     *  Optional for older hosts; feature-detect it and fall back to
+     *  `registerSessionCreatedHook`. */
+    registerSessionStartExtension?(extension: ComposerSessionStartExtension): Unregister;
     listAddMenuItems(): readonly ComposerAddMenuItem[];
     listPasteHandlers(): readonly ComposerPasteHandler[];
     /** All registered session-created hooks in registration order. Optional for

@@ -47,3 +47,16 @@ test("no page lifts the launch screen before its own veil is up", async () => {
   // A launch that never left the page lifts the cover and shows the hub.
   assert.match(hub, /controller\?\.launchStalled\(next\.connectionId\);[\s\S]*?releaseLaunchCurtain\(\);[\s\S]*?veil\?\.lift\(/);
 });
+
+test("an iOS server page WebKit killed and could not reload goes to the hub, not a blank WebView", async () => {
+  const scene = await source("../ios/App/App/SceneDelegate.swift");
+  // Installed in front of Capacitor's delegate before the first page loads.
+  assert.match(scene, /override func capacitorDidLoad\(\) \{\s*super\.capacitorDidLoad\(\)[\s\S]*?PolythPageRecovery\(forwardingTo: capacitor\)[\s\S]*?webView\.navigationDelegate = recovery[\s\S]*?registerPluginInstance\(PolythLinkPlugin\(\)\)/);
+  // Everything else still reaches Capacitor.
+  assert.match(scene, /override func forwardingTarget\(for aSelector: Selector!\) -> Any\? \{\s*capacitor\.responds\(to: aSelector\) \? capacitor/);
+  assert.match(scene, /capacitor\.webViewWebContentProcessDidTerminate\?\(webView\)/);
+  assert.match(scene, /capacitor\.webView\?\(webView, didFailProvisionalNavigation: navigation, withError: error\)\s*guard serverPageLost, !Self\.superseded\(error\)/);
+  // Only a lost Link proxy page, and only once per loss.
+  assert.match(scene, /serverPageLost = webView\.url\?\.scheme\?\.lowercased\(\) == "http" && webView\.url\?\.host == "127\.0\.0\.1"/);
+  assert.match(scene, /URL\(string: "capacitor:\/\/localhost\?resume=1"\)[\s\S]*?serverPageLost = false\s*webView\.load/);
+});

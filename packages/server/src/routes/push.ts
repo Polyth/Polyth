@@ -4,6 +4,7 @@
 import type { RouteHandler } from "../http.ts";
 import type { PushService } from "../push.ts";
 import { buildPushPayload } from "../push.ts";
+import { presenceDeviceKey } from "../devicePresence.ts";
 
 export function pushRoutes(push: PushService): RouteHandler {
   return async (rc) => {
@@ -17,7 +18,9 @@ export function pushRoutes(push: PushService): RouteHandler {
     }
     if (path === "/api/push/subscribe" && method === "POST") {
       const b = await rc.body();
-      push.subscribe(account, b);
+      // The same device key the page reports presence under, so an alert
+      // skips this browser while its person works on another device.
+      push.subscribe(account, b, presenceDeviceKey(rc.principal, b.clientId));
       rc.json(200, { ok: true, subscriptions: push.count(account) });
       return true;
     }

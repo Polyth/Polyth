@@ -6,7 +6,10 @@
 //
 // Policy per product decision: when the provider tells us how long to wait we
 // honour it in full (no ceiling); with no hint we use an escalating backoff so
-// a persistently wedged provider can't hot-loop resends. Capacity attempts are
+// a persistently wedged provider can't hot-loop resends. When an adapter only
+// classified the failure, the wait the provider stated in the stop's error
+// text ("resets in 1h 51m") still counts as told (`withProviderStatedWait`);
+// the ladder is for stops that say nothing. Capacity attempts are
 // unbounded — the user can always cancel the wait or switch model.
 //
 // A provider that refuses the request itself (scope "request") is a different
@@ -32,6 +35,80 @@ export const RESUME_RESET_BUFFER_MS = 2000;
 /** setTimeout's max delay; longer waits re-arm on the way down. */
 const MAX_TIMER_MS = 2_147_483_647;
 
+/** Longest wait a provider's own text can schedule (matches the adapters). */
+const MAX_STATED_WAIT_SEC = 30 * 86_400;
+
+const DURATION_UNIT = "(?:milliseconds?|ms|seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d)";
+const DURATION_PART = `\\d+(?:\\.\\d+)?\\s*${DURATION_UNIT}\\b`;
+/** `1h 51m`, `2 hours and 5 minutes`, `90s`, `1:51:00` — digits are required,
+ *  so "try again in a moment" never becomes a wait. */
+const DURATION = `(\\d{1,3}:\\d{2}(?::\\d{2})?|${DURATION_PART}(?:[\\s,]*(?:and\\s+)?${DURATION_PART})*)`;
+const STATED_WAIT_RES = [
+  new RegExp(`\\b(?:resets?|available again|try again|retry(?:ing)?(?: again)?|retry[-\\s]?after|wait)\\s+in\\s+${DURATION}`, "i"),
+  new RegExp(`\\b(?:retry[-\\s]?after|wait|please wait)[:\\s]+${DURATION}`, "i"),
+];
+
+const durationSec = (raw: string): number => {
+  if (raw.includes(":")) {
+    const parts = raw.split(":").map(Number);
+    if (!parts.every((n) => Number.isFinite(n))) return 0;
+    return parts.length === 3
+      ? parts[0]! * 3600 + parts[1]! * 60 + parts[2]!
+      : parts[0]! * 60 + parts[1]!;
+  }
+  let total = 0;
+  for (const match of raw.matchAll(new RegExp(`(\\d+(?:\\.\\d+)?)\\s*(${DURATION_UNIT})\\b`, "gi"))) {
+    const value = Number(match[1]);
+    const unit = match[2]!.toLowerCase();
+    if (unit === "ms" || unit.startsWith("milli")) total += value / 1000;
+    else if (unit.startsWith("d")) total += value * 86400;
+    else if (unit.startsWith("h")) total += value * 3600;
+    else if (unit.startsWith("m")) total += value * 60;
+    else total += value;
+  }
+  return total;
+};
+
+/**
+ * The wait a provider stated in its own error text ("usage limit reached
+ * (5-hour, resets in 1h 51m)", "try again in 20s", "resets at
+ * 2026-11-13T06:16:00Z"), or undefined when it stated none. Provider-neutral:
+ * adapters that only classify the failure still get the real reset time
+ * instead of the blind fallback ladder.
+ */
+export const providerStatedWait = (
+  text: string,
+  now = Date.now(),
+): { retryAfterSec?: number; resetAt?: number } | undefined => {
+  for (const re of STATED_WAIT_RES) {
+    const raw = text.match(re)?.[1];
+    if (!raw) continue;
+    const sec = Math.ceil(Math.min(MAX_STATED_WAIT_SEC, durationSec(raw)));
+    if (sec > 0) return { retryAfterSec: sec };
+  }
+  const iso = text.match(/\bresets?\s+at\s+(\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:?\d{2})?)/i)?.[1];
+  if (iso) {
+    const ms = Date.parse(iso);
+    if (Number.isFinite(ms) && ms > now && ms - now <= MAX_STATED_WAIT_SEC * 1000) {
+      return { resetAt: ms, retryAfterSec: Math.max(1, Math.ceil((ms - now) / 1000)) };
+    }
+  }
+  return undefined;
+};
+
+/** Fill a capacity hint's missing wait from the stop's error text. A wait the
+ *  adapter already parsed (structured headers, absolute reset) wins. */
+export const withProviderStatedWait = (
+  hint: RateLimitRetryHint,
+  errorText: string | undefined,
+  now = Date.now(),
+): RateLimitRetryHint => {
+  if (!errorText || hint.retryable === false || hint.scope === "request") return hint;
+  if ((hint.retryAfterSec ?? 0) > 0 || (hint.resetAt ?? 0) > 0) return hint;
+  const stated = providerStatedWait(errorText, now);
+  return stated ? { ...hint, ...stated } : hint;
+};
+
 /** Command Code's reserved provider-window notice, emitted as reasoning rather
  * than a terminal `session.error`. This runs server-side too so a restart while
  * the stream is quiet still recovers the wait. */
@@ -47,55 +124,10 @@ export const rateLimitNoticeHint = (text: string, now = Date.now()): RateLimitRe
         : provider;
   const resolvedProvider = normalized ?? (isUsageLimit || /\bcommand[_\s-]?code\b/i.test(text) ? "commandcode" : undefined);
 
-  let retryAfterSec = 0;
-  let resetAt: number | undefined;
-
-  const colonMatch = text.match(/resets?\s+in\s+(\d{1,2}:\d{2}(?::\d{2})?)/i);
-  if (colonMatch?.[1]) {
-    const parts = colonMatch[1].split(":").map(Number);
-    if (parts.length === 2 && parts.every((n) => Number.isFinite(n))) {
-      retryAfterSec = parts[0]! * 60 + parts[1]!;
-    } else if (parts.length === 3 && parts.every((n) => Number.isFinite(n))) {
-      retryAfterSec = parts[0]! * 3600 + parts[1]! * 60 + parts[2]!;
-    }
-  }
-
-  if (retryAfterSec === 0) {
-    const duration = text.match(
-      /resets?\s+in\s+((?:\d+(?:\.\d+)?\s*(?:s|m|h|d|sec|secs|second|seconds|min|mins|minute|minutes|hour|hours|day|days)\s*)+)/i,
-    )?.[1];
-    if (duration) {
-      for (const match of duration.matchAll(
-        /(\d+(?:\.\d+)?)\s*(s|m|h|d|sec|secs|second|seconds|min|mins|minute|minutes|hour|hours|day|days)/gi,
-      )) {
-        const value = Number(match[1]);
-        const unit = match[2]!.toLowerCase();
-        if (unit.startsWith("d")) retryAfterSec += value * 86400;
-        else if (unit.startsWith("h")) retryAfterSec += value * 3600;
-        else if (unit.startsWith("m")) retryAfterSec += value * 60;
-        else retryAfterSec += value;
-      }
-    }
-  }
-
-  if (retryAfterSec === 0) {
-    const isoMatch = text.match(/resets?\s+at\s+(\d{4}-\d{2}-\d{2}T[\d:.]+Z?)/i);
-    if (isoMatch?.[1]) {
-      const ms = Date.parse(isoMatch[1]);
-      if (!Number.isNaN(ms)) {
-        resetAt = ms;
-        retryAfterSec = Math.max(1, Math.ceil((ms - now) / 1000));
-      }
-    }
-  }
-
-  retryAfterSec = Math.ceil(retryAfterSec);
-
   return {
     scope: "rate",
     ...(resolvedProvider ? { provider: resolvedProvider } : {}),
-    ...(retryAfterSec > 0 ? { retryAfterSec } : {}),
-    ...(resetAt !== undefined ? { resetAt } : {}),
+    ...providerStatedWait(text, now),
   };
 };
 

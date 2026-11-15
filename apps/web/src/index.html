@@ -138,14 +138,22 @@
         } catch (e) {}
         var veil = document.getElementById("polyth-launch");
         if (native || touch) {
-          // The app lifts the veil itself. Only a page whose scripts never
-          // rendered anything falls back to showing what is underneath.
+          // The app lifts the veil itself. A page whose scripts never rendered
+          // anything must not lift it onto an empty, white page: the phone
+          // app's page from its local Link proxy goes back to the Connection
+          // Hub, which opens the server again (launchFailsafe.ts); any other
+          // page shows what is underneath.
           setTimeout(function () {
             var root = document.getElementById("root");
-            if (veil && root && !root.hasChildNodes()) {
-              veil.hidden = true;
-              document.documentElement.removeAttribute("data-launch");
+            if (!veil || !root || root.hasChildNodes()) return;
+            var where = window.location;
+            if (native && where && where.protocol === "http:" && where.hostname === "127.0.0.1") {
+              var ios = typeof capacitor.getPlatform === "function" && capacitor.getPlatform() === "ios";
+              where.replace((ios ? "capacitor://localhost" : "https://localhost") + "?resume=1");
+              return;
             }
+            veil.hidden = true;
+            document.documentElement.removeAttribute("data-launch");
           }, 20000);
           return;
         }

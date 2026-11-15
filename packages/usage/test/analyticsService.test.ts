@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { JsonObject, Project, SessionEvent, SessionProjection, SpaceContext } from "@polyth/contracts";
@@ -381,6 +381,153 @@ test("people in one Space share the index but each report shows only chats its r
     assert.equal(eventReads, 2);
   } finally {
     service.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("one bulk tail read replaces the per-session checks and still catches events ahead of projections", async () => {
+  const context = space("bulk-tails", "/unused");
+  const rows = Array.from({ length: 12 }, (_, index) => session(String(index), "p", 2_000));
+  let reads = 0;
+  let single = 0;
+  const bulk: Array<{ projectId?: string } | undefined> = [];
+  let advanced = false;
+  const service = createUsageAnalyticsService({
+    source: {
+      projections: async () => rows,
+      events: async (_space, id) => {
+        reads += 1;
+        return advanced && id === "0" ? usageEvents(id, Date.UTC(2026, 6, 1)) : [];
+      },
+      latestSeq: async () => { single += 1; return 0; },
+      latestSeqs: async (_space, scope) => {
+        bulk.push(scope);
+        // A session the listing knows but this read missed keeps its old tail.
+        return new Map(rows.slice(0, 11).map((row) => [row.id, advanced && row.id === "0" ? 3 : 0]));
+      },
+    },
+    now: () => Date.UTC(2026, 6, 10),
+  });
+  try {
+    const all = { range: "30d", timezone: "UTC" } as const;
+    await service.query(context, [project("p")], all);
+    await service.query(context, [project("p")], all);
+    assert.equal(single, 0, "no session is asked for its tail on its own");
+    assert.deepEqual(bulk, [undefined, undefined]);
+    assert.equal(reads, 12, "unchanged event logs are reused");
+    advanced = true;
+    const result = await service.query(context, [project("p")], { ...all, projectIds: ["p"] });
+    assert.deepEqual(bulk.at(-1), { projectId: "p" }, "a project report reads only that project's tails");
+    assert.equal(reads, 13, "only the advanced session log is rebuilt");
+    assert.equal(result.totals.tokens.total, 12);
+    // A session scope is a handful of ids: it keeps the per-session check.
+    await service.query(context, [project("p")], { ...all, sessionIds: ["1"] });
+    assert.equal(bulk.length, 3);
+    assert.equal(single, 1);
+  } finally {
+    service.stop();
+  }
+});
+
+test("a new event re-reads one session and every other session keeps its share of the report", async () => {
+  const context = space("incremental", "/unused");
+  const at = Date.UTC(2026, 6, 9);
+  const rows = Array.from({ length: 6 }, (_, index) => session(`s${index}`, index % 2 ? "p" : "q", 2_000));
+  const logs = new Map(rows.map((row, index) => [row.id, usageEvents(row.id, at - index * 3_600_000)]));
+  let clock = Date.UTC(2026, 6, 10);
+  const service = createUsageAnalyticsService({
+    source: {
+      projections: async () => rows,
+      events: async (_space, id) => [...logs.get(id)!],
+      latestSeqs: async () => new Map(rows.map((row) => [row.id, logs.get(row.id)!.at(-1)!.seq])),
+    },
+    now: () => clock,
+  });
+  try {
+    const projects = [project("p"), project("q")];
+    // Event logs only grow, so each range changes a session of its own.
+    for (const [range, changed] of [["30d", "s0"], ["all", "s2"]] as const) {
+      const query = { range, timezone: "UTC" } as const;
+      const before = await service.query(context, projects, query);
+      clock += 60_000;
+      logs.get(changed)!.push(event(changed, 4, clock - 1_000, "usage/recorded", {
+        turnId: "turn-1", model: { providerID: "claude", modelID: "sonnet" }, tokens: { input: 5, output: 1 }, cost: .02,
+      }));
+      const after = await service.query(context, projects, query);
+      assert.equal(after.totals.tokens.total, before.totals.tokens.total! + 6, range);
+      assert.equal(after.totals.sessions, 6);
+      const row = (report: typeof after, id: string) => report.sessions.find((item) => item.id === id)!;
+      assert.notEqual(row(after, changed).metrics, row(before, changed).metrics, "the changed session is recomputed");
+      for (const id of rows.map((item) => item.id).filter((id) => id !== changed)) {
+        assert.equal(row(after, id).metrics, row(before, id).metrics, `${range}: ${id} is merged from its stored share`);
+      }
+      // The same sessions seen through a project filter reuse those shares too.
+      const scoped = await service.query(context, [project("p")], { ...query, projectIds: ["p"] });
+      assert.equal(scoped.totals.sessions, 3);
+      assert.equal(row(scoped, "s1").metrics, row(after, "s1").metrics);
+    }
+  } finally {
+    service.stop();
+  }
+});
+
+test("the old single-file checkpoint moves into shards once and a change rewrites one shard", async () => {
+  const root = mkdtempSync(join(tmpdir(), "polyth-usage-shards-"));
+  const context = space("space-shards", root);
+  const at = Date.UTC(2026, 6, 9);
+  const rows = Array.from({ length: 40 }, (_, index) => session(`chat-${index}`, "p", 2_000));
+  const logs = new Map(rows.map((row) => [row.id, usageEvents(row.id, at)]));
+  let reads = 0;
+  const source = {
+    projections: async () => rows,
+    events: async (_space: SpaceContext, id: string) => { reads += 1; return [...logs.get(id)!]; },
+    latestSeqs: async () => new Map(rows.map((row) => [row.id, logs.get(row.id)!.at(-1)!.seq])),
+  };
+  const options = { source, storageDir: () => root, now: () => Date.UTC(2026, 6, 10) };
+  const query = { range: "30d", timezone: "UTC" } as const;
+  const shards = join(root, "analytics-v2");
+  const legacy = join(root, "analytics-v1.json");
+  try {
+    // Seed the layout older versions wrote: everything in one file.
+    const seed = createUsageAnalyticsService(options);
+    await seed.query(context, [project("p")], query);
+    seed.stop();
+    const sessions = readdirSync(shards).flatMap((name) =>
+      (JSON.parse(readFileSync(join(shards, name), "utf8")) as { sessions: unknown[] }).sessions);
+    assert.equal(sessions.length, 40);
+    rmSync(shards, { recursive: true });
+    writeFileSync(legacy, JSON.stringify({ version: 1, spaceId: "space-shards", sessions }));
+    reads = 0;
+
+    const moved = createUsageAnalyticsService(options);
+    assert.equal((await moved.query(context, [project("p")], query)).totals.sessions, 40);
+    assert.equal(reads, 0, "the old checkpoint still saves every event log read");
+    moved.stop();
+    assert.equal(existsSync(legacy), false, "the single file is gone once its sessions are in shards");
+    const files = readdirSync(shards);
+    assert.ok(files.length > 8 && files.length <= 64, `${files.length} shard files`);
+
+    // One session grows: only its shard is written again.
+    const old = new Date(Date.UTC(2020, 0, 1));
+    for (const name of files) utimesSync(join(shards, name), old, old);
+    logs.get("chat-7")!.push(event("chat-7", 4, at + 5_000, "usage/recorded", { turnId: "turn-1", tokens: { input: 1, output: 1 } }));
+    const grown = createUsageAnalyticsService(options);
+    assert.equal((await grown.query(context, [project("p")], query)).totals.tokens.total, 40 * 12 + 2);
+    assert.equal(reads, 1);
+    grown.stop();
+    const rewritten = readdirSync(shards).filter((name) => statSync(join(shards, name)).mtimeMs > old.getTime());
+    assert.equal(rewritten.length, 1);
+    assert.ok(readFileSync(join(shards, rewritten[0]!), "utf8").includes('"chat-7"'));
+
+    // A shard written after an interrupted move wins over the stale old file.
+    writeFileSync(legacy, JSON.stringify({ version: 1, spaceId: "space-shards", sessions }));
+    reads = 0;
+    const resumed = createUsageAnalyticsService(options);
+    assert.equal((await resumed.query(context, [project("p")], query)).totals.tokens.total, 40 * 12 + 2);
+    assert.equal(reads, 0);
+    resumed.stop();
+    assert.equal(existsSync(legacy), false);
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });

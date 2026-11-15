@@ -306,6 +306,8 @@ function scopeSessions(
   assign("resumeNow", bySession(base.resumeNow));
   assign("rewind", bySession(base.rewind));
   assign("clearRewind", bySession(base.clearRewind));
+  assign("previewRewindFiles", bySession(base.previewRewindFiles));
+  assign("previewRewindRestore", bySession(base.previewRewindRestore));
   if (base.runShell) {
     const runShell = base.runShell.bind(base);
     // The signed-in person runs it: their own Credential Vault entries
@@ -411,6 +413,17 @@ function scopeSessions(
       if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
       const author = admittedAuthor(ctx, admission?.author, people?.directory);
       return createConversation(input, author ? { author } : {});
+    });
+  }
+  if (base.start) {
+    const start = base.start.bind(base);
+    // As `send`: the first turn is authored by the authenticated person, and
+    // a private preset id stops here. The key arrives account-scoped.
+    scoped.start = (input, admission) => guarded(async () => {
+      const project = await projects.get(input.projectId);
+      if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
+      const author = admittedAuthor(ctx, admission?.author, people?.directory);
+      return start({ ...input, start: withoutPrivatePreset(input.start) }, author ? { author } : {});
     });
   }
   if (base.startSessionFromConversation) {

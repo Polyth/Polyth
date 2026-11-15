@@ -30,6 +30,49 @@ test("Users page lists accounts and drills into one management view", async () =
   assert.match(users, /useOwnerReauth/);
 });
 
+test("anyone renames themselves and the owner renames others, bounded like the server, and the hint says Git stays", async () => {
+  const self = await source("../src/components/settings/AccountDetail.tsx");
+  const other = await source("../src/components/settings/UserDetail.tsx");
+  const accounts = await source("../src/accounts.ts");
+  // The identity server accepts 1–80 printable characters; the field stops there too.
+  assert.match(accounts, /export const ACCOUNT_NAME_MAX = 80;/);
+  for (const view of [self, other]) {
+    assert.match(view, /value=\{nameDraft\}\s+maxLength=\{ACCOUNT_NAME_MAX\}/);
+  }
+  assert.match(self, /hint=\{tr\("settings\.account\.nameHint"\)\}/);
+  assert.match(other, /hint=\{tr\("settings\.users\.nameHint"\)\}/);
+  // The name is how agents and people address someone; the commit author is a separate Git profile.
+  for (const key of ["settings.account.nameHint", "settings.users.nameHint"] as const) {
+    assert.match(en[key], /Agents/);
+    assert.match(en[key], /Git commits stays as it is/);
+  }
+});
+
+test("anyone moves their own login and the owner moves others'; the hint says what stays", async () => {
+  const self = await source("../src/components/settings/AccountDetail.tsx");
+  const other = await source("../src/components/settings/UserDetail.tsx");
+  const accounts = await source("../src/accounts.ts");
+  // Same rule as identity `loginName`; the server stores it lowercase.
+  assert.match(accounts, /export const ACCOUNT_LOGIN_MAX = 64;/);
+  assert.match(accounts, /\/\^\[a-z0-9\]\[a-z0-9\._-\]\{0,63\}\$\/\.test\(normalizeLogin\(value\)\)/);
+  assert.match(accounts, /"\/api\/auth\/me\/login"/);
+  assert.match(accounts, /\/api\/auth\/accounts\/\$\{encodeURIComponent\(account\.id\)\}\/login/);
+  // The lock screen offers the last login typed in this browser: it follows the move.
+  assert.match(accounts, /if \(!account\.login \|\| currentBrowserLogin\(\) === account\.login\) rememberLogin\(next\);/);
+  assert.match(self, /await changeCurrentLogin\(account, nextLogin\);/);
+  assert.match(other, /changeAccountLogin\(account, nextLogin\)/);
+  for (const view of [self, other]) {
+    assert.match(view, /value=\{loginDraft\}\s+maxLength=\{ACCOUNT_LOGIN_MAX\}\s+autoComplete="off"\s+autoCapitalize="off"\s+spellCheck=\{false\}/);
+    assert.match(view, /account\.managed \? \(\s*<ReadonlyRow label=\{tr\("settings\.users\.login"\)\}/);
+    assert.match(view, /"settings\.users\.loginInvalid"/);
+  }
+  assert.match(en["settings.account.loginHint"], /passkeys and recovery codes work with the new one too\. Agents never see it\./);
+  assert.match(en["settings.users.loginChangeHint"], /tell them the new login/);
+  // A taken login reads as such, not as a stale revision.
+  const model = await source("../src/components/settings/usersModel.ts");
+  assert.match(model, /code === "login-taken"/);
+});
+
 test("the management view covers access, projects, assistants, daily limits and protection", async () => {
   const detail = await source("../src/components/settings/UserDetail.tsx");
   const titles = {

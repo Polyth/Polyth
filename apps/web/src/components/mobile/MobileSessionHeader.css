@@ -70,17 +70,6 @@
   }
 }
 
-.mobile-session-selector-arrow {
-  transform-origin: center;
-  transition:
-    transform var(--motion-normal) var(--motion-ease),
-    opacity var(--motion-fast) var(--motion-ease);
-}
-
-.mobile-session-selector[aria-expanded="true"] .mobile-session-selector-arrow {
-  transform: rotate(180deg);
-}
-
 .sheet-head-leading {
   display: inline-flex;
   align-items: center;
@@ -526,14 +515,11 @@
   font-weight: 650;
 }
 
-/* Someone else's chat: their name, quiet, after the title. */
+/* Someone else's chat: their name in the quiet line under the title. */
 .mobile-island-owner {
   flex: 0 1 auto;
-  max-width: 40%;
+  min-width: 0;
   overflow: hidden;
-  color: var(--muted);
-  font-size: var(--font-meta);
-  font-weight: 400;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

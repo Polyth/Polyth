@@ -9,6 +9,7 @@ import { draftTitleSource, sessionDraftMark } from "../../sessionDraft.ts";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import Timeline from "../Timeline.tsx";
 import Composer from "../Composer.tsx";
+import { sessionStartingFromServer } from "../../sessionStart.ts";
 import { focusComposer, isActiveSessionSpawning, overlaySessionProjection, setOverlay, setUiError, useActiveModel, usePendingSends, useStore, workspaceProjectId } from "../../store.ts";
 import { activateRuntime, openSession, prefetchSessionTail, restoreSession } from "../../init.ts";
 import { friendlyError } from "../../settings.ts";
@@ -607,9 +608,15 @@ function ChatSessionSurface() {
   const projectId = useStore(workspaceProjectId);
   const sessionId = useStore((s) => s.activeSessionId);
   const openingSessionId = useStore((s) => s.openingSessionId);
-  const spawning = useStore(isActiveSessionSpawning);
+  const clientSpawning = useStore(isActiveSessionSpawning);
   const sessionSpawn = useStore((s) => s.sessionSpawn);
   const sessionRecord = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
+  // The server says the chat is starting (its first prompt waits on the queue
+  // for the runtime): the same startup dock, also after a reload or elsewhere.
+  const serverStarting = useStore((s) => s.activeSessionId
+    ? sessionStartingFromServer(sessionRecord?.status, s.events[s.activeSessionId] ?? [])
+    : false);
+  const spawning = clientSpawning || serverStarting;
   const pendingSends = usePendingSends(sessionId);
   const session = overlaySessionProjection(sessionRecord, pendingSends) ?? null;
   const starterPickerOpen = useStore((s) => s.overlay === "starter-picker");
