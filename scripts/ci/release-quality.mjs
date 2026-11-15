@@ -38,6 +38,7 @@ const QUALITY_TEST_FILES = [
   "scripts/test/release-version.test.ts",
   "scripts/test/bump-version.test.ts",
   "scripts/test/releaseQuality.test.ts",
+  "scripts/test/release-notes.test.ts",
   "scripts/test/release-quality-gates.test.ts",
   "scripts/test/agentBeta.test.ts",
   "apps/desktop/test/configuration.test.ts",
