@@ -193,11 +193,13 @@ test("the conversation reads oldest first: your words before their run, quiet ch
   assert.equal(last.kind === "you" && last.pending, "sending", "a message on its way shows at the end");
 });
 
-test("a report opens on its first paragraph; the rest waits behind Read full report", () => {
+test("a report opens on its first paragraph; the rest waits behind Full report", () => {
   assert.deepEqual(reportLead("**The source is ready.** Master is 46 behind.\n\n### Sessions\n\n| a | b |\n| - | - |"),
     { lead: "The source is ready. Master is 46 behind.", rest: "### Sessions\n\n| a | b |\n| - | - |" },
     "a bold opening sentence reads as prose, not a second headline");
   assert.deepEqual(reportLead("Done in one line."), { lead: "Done in one line.", rest: "" });
+  assert.equal(reportLead("**1. Verdict:** All clear.\n\n**2. What I touched**").lead, "Verdict: All clear.",
+    "a bold numbered label opens the lead, never a one-item list");
   assert.deepEqual(reportLead("| a | b |\n| - | - |\n\nAfter."), { lead: "", rest: "| a | b |\n| - | - |\n\nAfter." },
     "a body that opens with a table has no lead");
   assert.equal(reportLead("```\ncode\n\nmore\n```").lead, "", "a code block is never cut in two");
@@ -220,14 +222,16 @@ test("the conversation shows reports, folds quiet checks, marks what is new and 
   assert.doesNotMatch(alert.querySelector(".agent-report-meta")!.textContent ?? "", /Scheduled/, "a scheduled wake goes without saying");
   assert.equal(alert.querySelector(".agent-report-notes"), null, "the notes wait behind the report's one link");
   assert.equal(alert.querySelectorAll(".agent-report-more").length, 1, "one link, never a second one for the notes");
-  const notes = buttonNamed(alert, /^(1 note|Read full report)$/)!;
+  const notes = buttonNamed(alert, /^(1 note|Full report)$/)!;
   assert.equal(notes.getAttribute("aria-expanded"), "false");
   await act(async () => { notes.click(); });
   const kept = alert.querySelector(".agent-report-notes")!;
   assert.equal(kept.querySelector(".agent-report-notes-label")!.textContent, "Noted", "the notes are a labelled section");
   assert.equal(kept.querySelector("li")!.textContent, "the user owns PR #412");
-  assert.equal(alert.querySelector(".agent-report-head time")?.textContent?.startsWith("0"), false, "no zero-padded hour");
-  assert.equal(alert.querySelector(".agent-report-facts")!.textContent, "2 min", "what the run cost sits in the footer");
+  const when = alert.querySelector(".agent-report-meta .agent-report-when")!.textContent ?? "";
+  assert.doesNotMatch(when, /(^|\s)0\d:/, "no zero-padded hour");
+  assert.match(when, /2 min$/, "how long the run took ends its first line");
+  assert.ok(alert.querySelector('.agent-report-meta .agent-tone[data-tone="alert"]'), "its mark leads the first line");
   assert.match(feed.querySelector(".agent-quiet-toggle")!.textContent ?? "", /Quiet checks: 2/);
   const update = [...feed.querySelectorAll(".agent-report")].find((entry) => /3 commits landed/.test(entry.textContent ?? ""))!;
   assert.equal(update.getAttribute("data-compact"), "line", "a report read before, with a newer one after it, is one line");

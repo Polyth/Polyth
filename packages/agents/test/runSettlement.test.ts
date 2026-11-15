@@ -122,3 +122,95 @@ test("while a request waits for a person the observer keeps looking, so a decisi
   assert.deepEqual(reports, [1, 0]);
   assert.ok(Math.max(...waits) <= 2_000, `never looked away for long: ${waits.join(", ")}`);
 });
+
+const launch = (seq: number, callId: string, description?: string) =>
+  ev(seq, "tool/started", { callId, tool: "Bash", input: { command: "watch ci", run_in_background: true, ...(description ? { description } : {}) } });
+const wake = (seq: number) => ev(seq, "user/message", { text: "A background task you started has finished…", hiddenUserMessage: true });
+
+test("a turn that ends to wait for its background work is not the run's end: the woken turn's report is", async () => {
+  const waits: Array<unknown> = [];
+  const source = feed([
+    [
+      ev(11, "turn/started"),
+      ev(12, "assistant/message", { text: "CI on devel is red: **the lockfile** misses a workspace." }),
+      launch(13, "c1", "Wait for CI on devel"),
+      ev(14, "assistant/message", { text: "Pushed the fix. I'll write the report once CI finishes." }),
+      ev(15, "turn/stopped", { reason: "completed" }),
+    ],
+    [],
+    [
+      wake(16),
+      ev(17, "turn/started"),
+      ev(18, "assistant/message", { text: "CI is green.\n\nNeeds you: PR #32 — smoke test\nReport: update — devel fixed, PR #32 waits for you" }),
+      ev(19, "turn/stopped", { reason: "completed" }),
+    ],
+  ]);
+  const settled = await settleScheduledRun(run, opts(source.events, { now: () => 20, onBackground: (wait: unknown) => { waits.push(wait); } }));
+  assert.equal(settled.status, "ok");
+  assert.match(settled.summary ?? "", /Report: update — devel fixed/);
+  assert.deepEqual(waits, [{ since: 15, tasks: ["Wait for CI on devel"] }, null]);
+  assert.deepEqual(settled.timeline, [
+    { at: 12, text: "CI on devel is red: the lockfile misses a workspace." },
+    { at: 14, text: "Pushed the fix. I'll write the report once CI finishes." },
+    { at: 15, text: "Wait for CI on devel", kind: "wait", until: 16 },
+  ], "the final message is the report, not a step");
+});
+
+test("a turn whose message carries its Report ends the run even while background work runs", async () => {
+  const source = feed([[
+    ev(11, "turn/started"),
+    launch(12, "c1"),
+    ev(13, "assistant/message", { text: "Report: quiet — nothing new" }),
+    ev(14, "turn/stopped", { reason: "completed" }),
+  ]]);
+  let waited = false;
+  const settled = await settleScheduledRun(run, opts(source.events, { onBackground: () => { waited = true; } }));
+  assert.equal(settled.status, "ok");
+  assert.equal(waited, false);
+});
+
+test("a waiting run ends with its last words when the session moves on, the wait runs out or the person stops it", async () => {
+  const waitingTurn = [
+    ev(11, "turn/started"),
+    ev(12, "tool/call", { callId: "m1", tool: "Monitor", status: "pending", input: {} }),
+    ev(13, "tool/started", { callId: "m1", tool: "Monitor", input: { description: "CI on devel" } }),
+    ev(14, "assistant/message", { text: "Watching CI." }),
+    ev(15, "turn/stopped", { reason: "completed" }),
+  ];
+  // Someone else's turn: the person wrote into the session, or another run began.
+  for (const next of [ev(16, "user/message", { text: "hi" }), ev(16, "schedule/run-started", { runId: "r2" })]) {
+    const moved = await settleScheduledRun(run, opts(feed([waitingTurn, [next], [ev(17, "turn/started")]]).events));
+    assert.equal(moved.status, "ok");
+    assert.equal(moved.summary, "Watching CI.");
+  }
+
+  let clock = 0;
+  const lost = await settleScheduledRun({ ...run, startedAt: 0 }, opts(feed([waitingTurn]).events, {
+    now: () => clock,
+    backgroundWaitMs: 60_000,
+    sleep: async (ms: number) => { clock += ms; },
+  }));
+  assert.equal(lost.status, "ok", "work lost with its process ends the wait");
+  assert.ok(clock >= 60_000 - 15 && clock < 120_000, `waited about the limit: ${clock}`);
+
+  let stop = false;
+  let polls = 0;
+  const stopped = await settleScheduledRun(run, opts(feed([waitingTurn]).events, {
+    now: () => 20,
+    stopRequested: () => stop,
+    sleep: async () => { if (++polls === 3) stop = true; },
+  }));
+  assert.deepEqual([stopped.status, stopped.error], ["failed", "Stopped before it finished."]);
+});
+
+test("a Monitor that wakes the agent twice still counts as one launch", async () => {
+  const source = feed([[
+    ev(11, "turn/started"),
+    ev(12, "tool/started", { callId: "m1", tool: "Monitor", input: { description: "CI" } }),
+    ev(13, "turn/stopped", { reason: "completed" }),
+    wake(14), ev(15, "turn/started"), ev(16, "turn/stopped", { reason: "completed" }),
+  ]]);
+  const settled = await settleScheduledRun(run, opts(source.events));
+  assert.equal(settled.status, "ok");
+  assert.deepEqual(settled.timeline?.map((moment) => moment.kind), ["wait"]);
+});

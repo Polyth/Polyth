@@ -277,7 +277,7 @@ test("the agents' home lists every agent by project with its last word; template
   const row = sections[0]!.querySelector(".agents-home-row")!;
   assert.match(row.querySelector(".agents-home-name")!.textContent ?? "", /Build watcher/);
   assert.match(row.querySelector(".agents-home-line")!.textContent ?? "", /Keeps CI green\./, "its purpose until it reports");
-  assert.match(row.querySelector(".agents-home-state")!.textContent ?? "", /Next (today|tomorrow)/i);
+  assert.match(row.querySelector(".agents-home-state")!.textContent ?? "", /Next check (today|tomorrow) at/i);
   assert.doesNotMatch(view.container.textContent ?? "", /Nightly release captain/, "templates do not crowd a home that has agents");
   await view.unmount();
 

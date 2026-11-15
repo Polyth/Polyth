@@ -1181,11 +1181,13 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         ...(sent?.turnId ? { turnId: sent.turnId } : {}),
       };
     },
-    settle: (task, run, signal, onWaiting, onActivity) => settleScheduledRun(run, {
+    settle: (task, run, signal, onWaiting, onActivity, onBackground, stopRequested) => settleScheduledRun(run, {
       signal,
       events: (sessionId, afterSeq) => host.store.events(sessionId, afterSeq),
       ...(onWaiting ? { onWaiting } : {}),
       ...(onActivity ? { onActivity } : {}),
+      ...(onBackground ? { onBackground } : {}),
+      ...(stopRequested ? { stopRequested } : {}),
       ...(run.sessionId && scheduleExecutionRoutes(task).length > 1 ? {
         backup: run.backup ?? 0,
         // The provider refused or ran out mid-run: continue the same turn on

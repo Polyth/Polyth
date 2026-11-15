@@ -1,8 +1,18 @@
 // Follows one admitted planner run through the target session's canonical
 // event log until its turn really stops. Only events after the run's own
 // `schedule/run-started` marker count; nothing here sends, retries or replays.
+//
+// A turn that ends while background work it started still runs (a command
+// or agent started in the background, a monitor) is not the run's end when
+// its last message carries no `Report:` line: the agent said it waits. The
+// run then waits, bounded, for that work to wake the agent (a hidden user
+// message), and the turns it wakes are the run's too. Its report is the
+// final message of the last of them.
 import type { JsonObject, SessionEvent, TokenUsage } from "@polyth/contracts";
-import type { AgentRunActivity, AgentWaitingRequest, ScheduleRunRecord, ScheduleRunSettlement } from "./index.ts";
+import { parseAgentReport } from "./agentReport.ts";
+import type {
+  AgentBackgroundWait, AgentRunActivity, AgentRunMoment, AgentWaitingRequest, ScheduleRunRecord, ScheduleRunSettlement,
+} from "./index.ts";
 
 export interface RunSettlementOptions {
   /** Canonical events of `sessionId` with seq > afterSeq, oldest first. */
@@ -29,7 +39,23 @@ export interface RunSettlementOptions {
   /** The run's turn took a step: its newest one, and how many distinct tool
    *  calls it made so far. Only the run's own turn counts. */
   onActivity?: (activity: AgentRunActivity, steps: number) => void;
+  /** The run waits for its background work to wake the agent; `null` once
+   *  it is woken. */
+  onBackground?: (wait: AgentBackgroundWait | null) => void;
+  /** How long a run waits for its background work; 0 never waits. */
+  backgroundWaitMs?: number;
+  /** The person asked to stop the run. A waiting run has no turn to abort,
+   *  so it ends here. */
+  stopRequested?: () => boolean;
 }
+
+/** A run that waits for background work: long enough for a CI run, short
+ *  enough that work lost with its process does not keep it "working". */
+const DEFAULT_BACKGROUND_WAIT_MS = 60 * 60_000;
+const WAITING_POLL_MS = 5_000;
+const MOMENTS_KEPT = 20;
+const MOMENT_CHARS = 160;
+const WAIT_TASKS = 3;
 
 const TOOL_INPUT_KEYS = 8;
 const TOOL_INPUT_CHARS = 240;
@@ -51,6 +77,25 @@ const newestLine = (text: string): string | undefined => {
   }
   return undefined;
 };
+
+/** The first line of a message, as plain words. */
+const firstLine = (text: string): string | undefined => {
+  for (const line of text.split("\n")) {
+    const plain = clipText(line.replace(/^\s*(#+|[-*+]|\d+[.)]|>)\s+/, "").replace(/[*_`]+/g, ""), MOMENT_CHARS);
+    if (plain) return plain;
+  }
+  return undefined;
+};
+
+/** A tool call that leaves work running past the turn (a background command
+ *  or agent, a monitor): its description, "" without one. Anything else:
+ *  undefined. */
+function backgroundLaunch(event: SessionEvent): string | undefined {
+  if (event.type !== "tool/started" && !(event.type === "tool/call" && str(event, "status") !== "pending")) return undefined;
+  const input = (event.data as JsonObject | undefined)?.input as JsonObject | undefined;
+  if (input?.run_in_background !== true && str(event, "tool") !== "Monitor") return undefined;
+  return typeof input?.description === "string" ? clipText(input.description, 120) : "";
+}
 
 /** A tool's input as the agent's page may show it: primitive values only,
  *  strings clipped, a handful of keys. Nested objects and lists are dropped. */
@@ -159,7 +204,19 @@ export async function settleScheduledRun(
     return { status: "unknown", error: "The run has no admission record to follow." };
   }
   // queued → (dispatched) → admitted → (turn/started) → turn → (turn/stopped)
-  let phase: "queued" | "admitted" | "turn" = run.queueId ? "queued" : "admitted";
+  // → waiting (background work runs) → (its wake) → admitted → …
+  let phase: "queued" | "admitted" | "turn" | "waiting" = run.queueId ? "queued" : "admitted";
+  const waitMs = opts.backgroundWaitMs ?? DEFAULT_BACKGROUND_WAIT_MS;
+  // Background work the run started (call id → description), and the wakes
+  // it has had so far.
+  const launched = new Map<string, string>();
+  let woken = 0;
+  let waitSince = 0;
+  // The turn's newest words: whether they carry a Report line.
+  let turnText = "";
+  // How the run went: the agent's passing lines and its waits.
+  const moments: Array<AgentRunMoment & { seq?: number }> = [];
+  let summarySeq: number | undefined;
   let cursor = run.markerSeq;
   let poll = minPoll;
   const open = new Map<string, AgentWaitingRequest>();
@@ -223,13 +280,28 @@ export async function settleScheduledRun(
       opts.onActivity!(latest, steps.size);
     }
   };
-  const result = (settled: ScheduleRunSettlement): ScheduleRunSettlement => ({
-    ...settled,
-    ...(backup !== startedOn ? { backup } : {}),
-    ...(summary ? { summary } : {}),
-    ...(tokens ? { tokens } : {}),
-    ...(cost !== undefined ? { cost } : {}),
-  });
+  const result = (settled: ScheduleRunSettlement): ScheduleRunSettlement => {
+    // The final message is the report itself, not a step on the way.
+    const timeline = moments
+      .filter((moment) => moment.seq === undefined || moment.seq !== summarySeq)
+      .slice(-MOMENTS_KEPT)
+      .map(({ seq: _seq, ...moment }) => moment);
+    return {
+      ...settled,
+      ...(backup !== startedOn ? { backup } : {}),
+      ...(summary ? { summary } : {}),
+      ...(tokens ? { tokens } : {}),
+      ...(cost !== undefined ? { cost } : {}),
+      ...(timeline.length ? { timeline } : {}),
+    };
+  };
+  const eventTime = (event: SessionEvent): number =>
+    typeof event.time === "number" && Number.isFinite(event.time) ? event.time : now();
+  /** What the run still waits on: the newest launches not yet followed by a wake. */
+  const waitingOn = (): string[] => {
+    const open = [...launched.values()].slice(-(launched.size - woken));
+    return [...new Set(open.filter(Boolean))].slice(-WAIT_TASKS);
+  };
   while (true) {
     if (opts.signal.aborted) throw abortError();
     let events: SessionEvent[];
@@ -250,6 +322,23 @@ export async function settleScheduledRun(
       } else if (requestId && REQUEST_CLOSED.has(event.type) && open.delete(requestId)) {
         report();
       }
+      if (phase === "waiting") {
+        if (event.type === "user/message" && (event.data as JsonObject | undefined)?.hiddenUserMessage === true) {
+          // Server work, no person: the background work woke the agent.
+          // A monitor may wake it more than once for one launch.
+          woken = Math.min(woken + 1, launched.size);
+          phase = "admitted";
+          const wait = moments.findLast((moment) => moment.kind === "wait");
+          if (wait) wait.until = eventTime(event);
+          opts.onBackground?.(null);
+          continue;
+        }
+        if (event.type === "user/message" || event.type === "turn/started" || event.type === "schedule/run-started") {
+          // The session went on with other work: the run ended with its last turn.
+          return result({ status: "ok" });
+        }
+        continue;
+      }
       if (phase === "queued") {
         if (event.type === "queue/dispatched" && str(event, "queueId") === run.queueId) phase = "admitted";
         else if (event.type === "queue/removed" && str(event, "queueId") === run.queueId) {
@@ -259,12 +348,24 @@ export async function settleScheduledRun(
       }
       if (event.type === "turn/started") {
         phase = "turn";
+        turnText = "";
         continue;
       }
       if (phase === "turn" && opts.onActivity) noteActivity(event);
+      if (phase === "turn") {
+        const launch = backgroundLaunch(event);
+        const callId = str(event, "callId");
+        if (launch !== undefined && callId) launched.set(callId, launch || launched.get(callId) || "");
+      }
       if (phase === "turn" && event.type === "assistant/message") {
         const text = str(event, "text")?.trim();
-        if (text) summary = text;
+        if (text) {
+          summary = text;
+          summarySeq = event.seq;
+          turnText = text;
+          const line = firstLine(text);
+          if (line) moments.push({ at: eventTime(event), text: line, seq: event.seq });
+        }
         continue;
       }
       if (phase === "turn" && event.type === "usage/recorded") {
@@ -277,6 +378,16 @@ export async function settleScheduledRun(
       }
       if (event.type !== "turn/stopped") continue;
       const reason = str(event, "reason");
+      if (reason === "completed" && phase === "turn" && waitMs > 0 && launched.size > woken
+        && !parseAgentReport(turnText).signal) {
+        // No report yet, and work it started still runs: it waits for that.
+        phase = "waiting";
+        waitSince = eventTime(event);
+        const tasks = waitingOn();
+        moments.push({ at: waitSince, text: tasks.join(" · "), kind: "wait" });
+        opts.onBackground?.({ since: waitSince, tasks });
+        continue;
+      }
       if (reason === "completed") return result({ status: "ok" });
       if (reason === "error" && opts.onRouteFailure && routeFailed(event)) {
         const moved = await opts.onRouteFailure(backup + 1).catch(() => false);
@@ -301,12 +412,22 @@ export async function settleScheduledRun(
         await opts.onApprovalTimeout(request).catch(() => {});
       }
     }
-    // A person's decision should reach the agent's page soon after the click.
-    const pollLimit = open.size ? Math.min(maxPoll, OPEN_REQUEST_POLL_MS) : maxPoll;
+    if (phase === "waiting") {
+      if (opts.stopRequested?.()) return result({ status: "failed", error: "Stopped before it finished." });
+      // Work lost with its process never wakes anyone: the run ends with
+      // what its last turn said.
+      // Only once caught up: a later page may hold the wake.
+      if (!events.length && now() - waitSince >= waitMs) return result({ status: "ok" });
+    }
+    // A person's decision should reach the agent's page soon after the click;
+    // a stop of a waiting run, too.
+    const pollLimit = open.size ? Math.min(maxPoll, OPEN_REQUEST_POLL_MS)
+      : phase === "waiting" ? Math.min(maxPoll, WAITING_POLL_MS) : maxPoll;
     poll = events.length ? minPoll : Math.min(pollLimit, Math.round(poll * 1.5));
     if (now() >= deadline) {
       return { status: "unknown", error: "No result was confirmed within the observation limit." };
     }
-    await sleep(Math.min(poll, Math.max(1, deadline - now())), opts.signal);
+    const until = phase === "waiting" ? Math.min(deadline, waitSince + waitMs) : deadline;
+    await sleep(Math.min(poll, Math.max(1, until - now())), opts.signal);
   }
 }

@@ -6,7 +6,7 @@ import { getLocale, tr } from "../../../apps/web/src/i18n/index.ts";
 export function formatWake(at: number, now = Date.now()): string {
   const locale = getLocale();
   const date = new Date(at);
-  const time = date.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
+  const time = date.toLocaleTimeString(locale, { hour: "numeric", minute: "2-digit" });
   const today = new Date(now);
   if (date.toDateString() === today.toDateString()) return tr("agents.todayAtValue", { time });
   const tomorrow = new Date(now);

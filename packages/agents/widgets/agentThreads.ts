@@ -249,6 +249,11 @@ export function continuesInto(followUp: AgentFollowUpDto | undefined, now = Date
 /** Every item of a day, for counting and placement. */
 export const dayItems = (day: ConversationDay): ConversationItem[] => day.threads.flatMap((thread) => thread.items);
 
+/** A day of the agent's own entries: nobody speaks in it and no conversation
+ *  begins in it, so it needs no divider; each of its rows says its day. */
+export const bareDay = (day: ConversationDay): boolean =>
+  day.threads.every((thread) => !thread.opening) && !dayItems(day).some((item) => item.kind === "you");
+
 /** One of the agent's conversations (sessions), for its "Conversations" menu. */
 export interface AgentConversationRef {
   sessionId: string;

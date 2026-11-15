@@ -17,7 +17,7 @@ import AttachmentPills from "../../../apps/web/src/components/AttachmentPills.ts
 import { ExecutionIcon } from "../../../apps/web/src/components/ExecutionIcon.tsx";
 import {
   Button, GlassDock, Icon,
-  ExternalLinkIcon, SessionIcon, ShieldAlertIcon, TextInput, ThumbsDownIcon, ThumbsUpIcon,
+  ExternalLinkIcon, ClockIcon, SessionIcon, ShieldAlertIcon, TextInput, ThumbsDownIcon, ThumbsUpIcon,
 } from "../../../apps/web/src/components/ui/index.ts";
 import { AgentMark } from "./AgentGlyph.tsx";
 import { tokenTotal } from "../src/agentPrompt.ts";
@@ -27,7 +27,7 @@ import { useNow } from "./agentClock.ts";
 import { optimistic } from "./agentsStore.ts";
 import AgentComposer, { type AgentMessage, type DroppedFiles } from "./AgentComposer.tsx";
 import {
-  carries, conversationDays, dayItems, queues,
+  bareDay, carries, conversationDays, dayItems, queues,
   type ConversationThread, type PendingMessage, type ThreadOpening,
 } from "./agentThreads.ts";
 
@@ -50,6 +50,33 @@ export function dayLabel(at: number, now = Date.now()): string {
   }
   return new Date(at).toLocaleDateString(locale, { weekday: "short", day: "numeric", month: "short" });
 }
+
+/** "Fri 13" for an earlier day; the time for today. A row says its own day
+ *  where no divider above it does. */
+function whenOf(at: number, now = Date.now()): string {
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  if (at >= today.getTime()) return timeOf(at);
+  // Weekday first in every language, so the column reads down the same way.
+  const parts = new Intl.DateTimeFormat(getLocale(), { weekday: "short", day: "numeric" }).formatToParts(new Date(at));
+  const part = (type: string) => parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("weekday").replace(/[.,]$/, "")} ${part("day")}`.trim();
+}
+
+/** "1:00 – 1:58 AM": when a run began and ended. */
+function spanOf(run: ScheduleRunDto): string {
+  if (!run.finishedAt || run.finishedAt - run.startedAt < 60_000) return timeOf(run.startedAt);
+  const format = new Intl.DateTimeFormat(getLocale(), { hour: "numeric", minute: "2-digit" });
+  try {
+    return format.formatRange(run.startedAt, run.finishedAt);
+  } catch {
+    return `${timeOf(run.startedAt)} – ${timeOf(run.finishedAt)}`;
+  }
+}
+
+/** How long a finished run took. */
+const durationOf = (run: ScheduleRunDto): string | null =>
+  run.finishedAt ? shortDuration(run.finishedAt - run.startedAt, UNITS()) : null;
 
 /** "26 Oct, 08:20" (or just the time today). */
 function momentOf(at: number, now = Date.now()): string {
@@ -76,6 +103,26 @@ function signalOf(run: ScheduleRunDto): Signal {
   if (run.status === "unknown") return "unknown";
   return run.signal === "alert" ? "alert" : "update";
 }
+
+/** The row's mark: what kind of news the run brought. */
+type Tone = "alert" | "update" | "quiet" | "failed" | "muted";
+function toneOf(run: ScheduleRunDto): Tone {
+  const signal = signalOf(run);
+  if (signal === "alert" || signal === "failed") return signal;
+  if (signal === "unknown" || signal === "stopped") return "muted";
+  return run.status === "skipped" || run.signal === "quiet" ? "quiet" : "update";
+}
+
+/** The mark itself; the words around it say what it means to a reader. */
+const ToneMark = ({ tone }: { tone: Tone }) => <span className="agent-tone" data-tone={tone} aria-hidden="true" />;
+
+/** Words as they read, without the Markdown around them. */
+const plainWords = (text: string): string =>
+  text.replace(/^#+\s*/, "").replace(/[*_`]+/g, "").replace(/\s+/g, " ").trim();
+
+/** A link the page may open: the web only. */
+const webLink = (url: string | undefined): string | undefined =>
+  url && /^https?:\/\/[^\s]+$/i.test(url) ? url : undefined;
 
 function headlineOf(run: ScheduleRunDto): string {
   if (run.headline) return run.headline;
@@ -175,7 +222,8 @@ function FeedbackNote({ feedback }: { feedback: FeedbackState }) {
   );
 }
 
-/** "38 min · 273K tokens · $6.26": what a run cost, said briefly. */
+/** "273K tokens · $6.26": what a run cost, said briefly (its length is on
+ *  the report's first line). */
 function runFacts(run: ScheduleRunDto): string {
   const tokens = tokenTotal(run.tokens);
   const locale = getLocale();
@@ -183,7 +231,6 @@ function runFacts(run: ScheduleRunDto): string {
     ? new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: tokens >= 1_000_000 ? 1 : 0 }).format(tokens)
     : tokens.toLocaleString(locale);
   return [
-    run.finishedAt ? shortDuration(run.finishedAt - run.startedAt, UNITS()) : null,
     tokens > 0 ? tr("agents.tokensValue", { count }) : null,
     run.cost !== undefined && run.cost > 0 ? `$${run.cost.toFixed(run.cost < 0.1 ? 3 : 2)}` : null,
   ].filter(Boolean).join(" · ");
@@ -200,36 +247,103 @@ export function reportLead(body: string): { lead: string; rest: string } {
   const rest = gap ? text.slice(gap.index + gap[0].length).trim() : "";
   const fences = first.match(/^\s*(```|~~~)/gm)?.length ?? 0;
   if (!first || fences % 2 === 1 || /^\s*(#|\||```|~~~|>|[-*+]\s|\d+[.)]\s)/.test(first)) return { lead: "", rest: text };
-  return { lead: first.replace(/^\*\*([^*\n]+)\*\*/, "$1").replace(/^__([^_\n]+)__/, "$1"), rest };
+  const plain = first.replace(/^\*\*([^*\n]+)\*\*/, "$1").replace(/^__([^_\n]+)__/, "$1");
+  // A bold numbered label ("**1. Verdict:** …") opens the report's first
+  // section; without its bold it must not turn into a list.
+  return { lead: plain !== first ? plain.replace(/^\d+[.)]\s+/, "") : plain, rest };
 }
 
-/** What a run said, as a ledger entry: the headline with its time at the
- *  column's end, then its opening paragraph. A status word comes first only
- *  when one is due. The rest of the report, with the notes it kept as its last
- *  section, opens from one quiet link; feedback and cost show on hover. A
- *  report read before, with newer ones after it, is one line until opened. */
-function Report({ task, run, compact, latest, onFeedback }: {
+/** What only the person can do, from the report's "Needs you" lines: the
+ *  words lead, the way to do it sits at the row's end. */
+function Needs({ needs }: { needs: NonNullable<ScheduleRunDto["needs"]> }) {
+  return (
+    <section className="agent-needs" aria-label={tr("agents.needsYou")}>
+      <h4 className="agent-needs-label">{tr("agents.needsYou")}</h4>
+      <ul className="agent-needs-list">
+        {needs.map((need, index) => {
+          const url = webLink(need.url);
+          return (
+            <li key={`${index}-${need.text}`} className="agent-need">
+              <span className="agent-need-words">
+                <span className="agent-need-text">{need.text}</span>
+                {need.detail && <span className="agent-need-detail">{need.detail}</span>}
+              </span>
+              {url && (
+                <a className="ui-btn ui-btn--quiet ui-btn--sm agent-need-open" href={url} target="_blank" rel="noopener noreferrer">
+                  {/\/pull\/\d+/.test(url) ? tr("agents.openPr") : tr("agents.openLink")}
+                </a>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+/** How the run went, in its own passing words and its waits: the full
+ *  report's account of a run that took a while. */
+function Timeline({ moments }: { moments: NonNullable<ScheduleRunDto["timeline"]> }) {
+  return (
+    <section className="agent-steps" aria-label={tr("agents.howItWent")}>
+      <h4 className="agent-report-notes-label">{tr("agents.howItWent")}</h4>
+      <ol className="agent-steps-list">
+        {moments.map((moment, index) => (
+          <li key={`${moment.at}-${index}`} data-kind={moment.kind}>
+            <time dateTime={new Date(moment.at).toISOString()}>{timeOf(moment.at)}</time>
+            <span className="agent-steps-text">
+              {moment.kind === "wait" ? (
+                <>
+                  <span className="agent-steps-wait">
+                    {moment.until
+                      ? tr("agents.waitedValue", { duration: shortDuration(moment.until - moment.at, UNITS()) })
+                      : tr("agents.waitedOpen")}
+                  </span>
+                  {moment.text && <> · {moment.text}</>}
+                </>
+              ) : moment.text}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+/** What a run said, as a ledger entry. Its first line says when it ran and
+ *  how long (and, when one is due, a status word); the headline follows, then
+ *  its opening paragraph. The rest of the report (how the run went, the notes
+ *  it kept) opens from one quiet link; what only the person can do closes the
+ *  entry. A report read before, with newer ones after it, is one row until
+ *  opened: its mark, its day, its headline, its length. `dated`: no divider
+ *  above says the day, so the entry does. */
+function Report({ task, run, compact, latest, dated, onFeedback }: {
   task: ScheduleTaskDto;
   run: ScheduleRunDto;
   compact?: boolean;
   /** The newest report on the page: on touch, the one that offers feedback. */
   latest?: boolean;
+  dated?: boolean;
   onFeedback: OnFeedback;
 }) {
   const [open, setOpen] = useState(!compact);
   const [full, setFull] = useState(false);
   const feedback = useFeedback(run, onFeedback);
   const signal = signalOf(run);
+  const tone = toneOf(run);
   const headline = headlineOf(run);
   const body = run.summary?.trim() ?? "";
-  // The headline came from the body's first line: never twice.
-  const shownBody = !run.headline && body.split("\n")[0]?.replace(/^#+\s*/, "").trim() === headline
-    ? body.split("\n").slice(1).join("\n").trim()
-    : body;
+  // A headline taken from the body's first line is never said twice.
+  const firstLine = body.split("\n")[0] ?? "";
+  const said = plainWords(headline).replace(/…$/, "");
+  const repeats = !!said && (plainWords(firstLine) === said || (headline.endsWith("…") && plainWords(firstLine).startsWith(said)));
+  const shownBody = repeats ? body.split("\n").slice(1).join("\n").trim() : body;
   const { lead, rest } = reportLead(shownBody);
   const facts = runFacts(run);
   const notes = run.remembered ?? [];
+  const moments = run.timeline ?? [];
   const wake = wakeLabel(run);
+  const duration = durationOf(run);
   const at = new Date(run.startedAt).toISOString();
   const markdown = (text: string, part: string) => (
     <div className={`msg assistant agent-report-body agent-report-${part}`}>
@@ -243,19 +357,27 @@ function Report({ task, run, compact, latest, onFeedback }: {
     </div>
   );
 
-  const time = <time dateTime={at}>{timeOf(run.startedAt)}</time>;
   if (!open) {
+    // Alerts and failures say so in words too, for a reader who cannot see the mark.
+    const word = signal === "alert" ? tr("agents.signalAlert") : signal === "failed" ? tr("agents.runFailed") : null;
     return (
       <li className="agent-turn agent-report" data-signal={signal} data-compact="line">
         <button type="button" className="agent-report-line" aria-expanded={false} onClick={() => setOpen(true)}>
-          <span className="agent-report-line-title">{headline}</span>
-          {time}
+          <ToneMark tone={tone} />
+          <time className="agent-row-when" dateTime={at}>{dated ? whenOf(run.startedAt) : timeOf(run.startedAt)}</time>
+          <span className="agent-report-line-title">
+            {word && <span className="agent-sr">{word}: </span>}
+            {headline}
+          </span>
+          {duration && <span className="agent-row-length">{duration}</span>}
         </button>
       </li>
     );
   }
 
-  // Said only when it is news: what went wrong, or why the run woke.
+  // When, for how long, and the news only when it is news.
+  const midnight = new Date(run.startedAt).setHours(0, 0, 0, 0);
+  const when = [dated ? dayLabel(midnight) : null, spanOf(run), duration].filter(Boolean).join(" · ");
   const status = [
     signal === "alert" ? <span key="signal" className="agent-report-signal" data-signal="alert">{tr("agents.signalAlert")}</span> : null,
     signal === "failed" && run.headline ? <span key="signal" className="agent-report-signal" data-signal="failed">{tr("agents.runFailed")}</span> : null,
@@ -263,12 +385,13 @@ function Report({ task, run, compact, latest, onFeedback }: {
     run.late ? <span key="late" className="agent-report-wake">{tr("agents.lateRun")}</span> : null,
     run.backup ? <span key="backup" className="agent-report-wake">{tr("agents.ranOnBackupValue", { count: run.backup })}</span> : null,
   ].filter(Boolean);
-  // One link: the rest of the report (its notes last), or the notes alone.
-  const more = rest || notes.length > 0;
+  // One link: the rest of the report (how it went, its notes last), or the notes alone.
+  const more = !!rest || moments.length > 1 || notes.length > 0;
   const moreLabel = full ? tr("agents.showLess")
-    : rest ? tr("agents.readFullReport")
+    : rest || moments.length > 1 ? tr("agents.readFullReport")
       : tr(notes.length === 1 ? "agents.notesOneValue" : "agents.notesValue", { count: notes.length });
   const tools = run.status === "ok" || facts;
+  const needs = run.status === "ok" ? run.needs ?? [] : [];
   return (
     <li
       className="agent-turn agent-report"
@@ -276,15 +399,16 @@ function Report({ task, run, compact, latest, onFeedback }: {
       data-compact={compact ? "open" : undefined}
       data-latest={latest || undefined}
     >
-      {status.length > 0 && <p className="agent-report-meta">{status}</p>}
-      <div className="agent-report-head">
-        <h3 className="agent-report-headline">{headline}</h3>
+      <p className="agent-report-meta">
+        <ToneMark tone={tone} />
         {compact ? (
-          <button type="button" className="agent-report-fold" aria-expanded aria-label={tr("agents.showLess")} onClick={() => setOpen(false)}>
-            {time}
+          <button type="button" className="agent-report-fold agent-report-when" aria-expanded aria-label={`${when} · ${tr("agents.showLess")}`} onClick={() => setOpen(false)}>
+            <time dateTime={at}>{when}</time>
           </button>
-        ) : time}
-      </div>
+        ) : <time className="agent-report-when" dateTime={at}>{when}</time>}
+        {status}
+      </p>
+      <h3 className="agent-report-headline">{headline}</h3>
       {run.note || run.events?.length ? (
         <ul className="agent-report-events">
           {/* The wake script's words, which may quote event data: what woke
@@ -296,6 +420,7 @@ function Report({ task, run, compact, latest, onFeedback }: {
       ) : null}
       {lead && markdown(lead, "lead")}
       {rest && full && markdown(rest, "full")}
+      {full && moments.length > 1 && <Timeline moments={moments} />}
       {full && notes.length > 0 && (
         <section className="agent-report-notes" aria-label={tr("agents.remembered")}>
           <h4 className="agent-report-notes-label">{tr("agents.remembered")}</h4>
@@ -319,6 +444,7 @@ function Report({ task, run, compact, latest, onFeedback }: {
         </footer>
       )}
       {feedback.noteOpen && <FeedbackNote feedback={feedback} />}
+      {needs.length > 0 && <Needs needs={needs} />}
     </li>
   );
 }
@@ -347,28 +473,43 @@ function YouBubble({ id, text, at, pending, attachments, attachmentCount }: {
   );
 }
 
-function QuietFold({ runs }: { runs: ScheduleRunDto[] }) {
+/** Quiet checks and skipped wakes: one row in the quietest ink. A lone check
+ *  reads as its own headline and length; several fold into a count and the
+ *  hours they span, and open into their list. */
+function QuietFold({ runs, dated }: { runs: ScheduleRunDto[]; dated?: boolean }) {
   const [open, setOpen] = useState(false);
   const first = runs[0]!;
   const last = runs.at(-1)!;
   const skipped = runs.filter((run) => run.status === "skipped").length;
   const checks = runs.length - skipped;
-  const range = runs.length > 1 ? `${timeOf(first.startedAt)}–${timeOf(last.startedAt)}` : timeOf(first.startedAt);
-  const label = [
+  const lone = runs.length === 1;
+  const words = (run: ScheduleRunDto) => run.status === "skipped"
+    ? run.error ?? tr("agents.runSkipped")
+    : run.headline || run.summary?.split("\n").find((line) => line.trim())?.replace(/^#+\s*/, "").trim() || tr("agents.signalQuiet");
+  const label = lone ? words(first) : [
     checks ? tr("agents.quietChecksValue", { count: checks }) : "",
     skipped ? tr("agents.skippedCountValue", { count: skipped }) : "",
   ].filter(Boolean).join(" · ");
+  const end = lone ? durationOf(first) : `${timeOf(first.startedAt)}–${timeOf(last.startedAt)}`;
+  const at = new Date(first.startedAt).toISOString();
+  const row = (
+    <>
+      <ToneMark tone="quiet" />
+      <time className="agent-row-when" dateTime={at}>{dated ? whenOf(first.startedAt) : timeOf(first.startedAt)}</time>
+      <span className="agent-quiet-label">{label}</span>
+      {end && <span className="agent-row-length">{end}</span>}
+    </>
+  );
+  // A lone check has nothing more to open.
+  if (lone) return <li className="agent-turn agent-quiet"><div className="agent-quiet-toggle" data-static="">{row}</div></li>;
   return (
     <li className="agent-turn agent-quiet" data-open={open || undefined}>
-      <button type="button" className="agent-quiet-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
-        <span className="agent-quiet-label">{label}</span>
-        <time>{range}</time>
-      </button>
+      <button type="button" className="agent-quiet-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>{row}</button>
       {open && (
         <ol className="agent-quiet-list">
           {runs.map((run) => (
             <li key={run.runId}>
-              <span>{run.status === "skipped" ? run.error ?? tr("agents.runSkipped") : run.summary?.split("\n")[0] || tr("agents.signalQuiet")}</span>
+              <span>{words(run)}</span>
               <time dateTime={new Date(run.startedAt).toISOString()}>{timeOf(run.startedAt)}</time>
             </li>
           ))}
@@ -381,6 +522,16 @@ function QuietFold({ runs }: { runs: ScheduleRunDto[] }) {
 /** One step's words, as the chat's live line says them. */
 function StepWords({ run, projectRoot }: { run: ScheduleRunDto; projectRoot: string | null }) {
   const activity = run.activity;
+  if (run.background) {
+    // What it waits on, in the agent's words (data): its own descriptions.
+    const what = run.background.tasks.join(" · ") || tr("agents.backgroundWork");
+    return (
+      <span className="agent-live-step">
+        <span className="agent-live-glyph" aria-hidden="true"><Icon icon={ClockIcon} size="sm" /></span>
+        <strong className="agent-live-wait">{what}</strong>
+      </span>
+    );
+  }
   if (!activity) {
     return <span className="agent-live-step"><strong>{run.sessionId ? tr("agents.liveStarting") : tr("agents.liveWaitingTurn")}</strong></span>;
   }
@@ -415,15 +566,24 @@ function LiveTurn({ agent, run, onOpenSession }: {
   const now = useNow(true);
   const projectRoot = useStore((state) => state.projectRegistry.projects.find((project) => project.id === agent.projectId)?.path ?? null);
   // One step keeps its line while its words grow; only a new step rises in.
-  const stepKey = run.activity ? `${run.activity.kind}:${run.activity.id ?? run.activity.at}` : "start";
+  // A wait is a step of its own.
+  const stepKey = run.background ? `wait:${run.background.since}`
+    : run.activity ? `${run.activity.kind}:${run.activity.id ?? run.activity.at}` : "start";
   // Words of the last few lines, so a line that is leaving keeps its own.
   const lines = useRef(new Map<string, ScheduleRunDto>());
   lines.current.set(stepKey, run);
   if (lines.current.size > 4) lines.current.delete(lines.current.keys().next().value!);
   const ticker = useTickerKey(stepKey);
   const elapsed = Math.max(0, (now || Date.now()) - run.startedAt);
+  const wait = run.background;
+  // While it waits, the agent's last words say what comes next.
+  const said = wait && run.activity?.kind === "text" ? run.activity.text : undefined;
   return (
-    <li className="agent-turn agent-live" aria-label={tr("agents.workingForValue", { duration: shortDuration(elapsed, UNITS()) })}>
+    <li
+      className="agent-turn agent-live"
+      data-waiting={wait ? "" : undefined}
+      aria-label={tr("agents.workingForValue", { duration: shortDuration(elapsed, UNITS()) })}
+    >
       <span className="agent-live-mark"><AgentMark icon={agent.icon} color={agent.color} working /></span>
       <div className="agent-live-body">
         <div className="agent-live-line">
@@ -432,8 +592,13 @@ function LiveTurn({ agent, run, onOpenSession }: {
             render={(key) => <StepWords run={lines.current.get(key) ?? run} projectRoot={projectRoot} />}
           />
         </div>
+        {said && <p className="agent-live-said">{said}</p>}
         <div className="agent-live-meta">
-          <span className="agent-live-state">{tr("agents.workingNow")}</span>
+          <span className="agent-live-state">
+            {wait
+              ? tr("agents.waitingSoFarValue", { duration: shortDuration(Math.max(0, (now || Date.now()) - wait.since), UNITS()) })
+              : tr("agents.workingNow")}
+          </span>
           <span className="agent-live-time">{fmtSessionElapsed(elapsed)}</span>
           {run.steps ? <span className="agent-live-steps">{tr("agents.stepsValue", { count: run.steps })}</span> : null}
           {run.sessionId && onOpenSession && (
@@ -607,9 +772,11 @@ function PermissionRequests({ host, task, run, requests, onOpenSession }: {
   );
 }
 
-function Thread({ agent, thread, headless, latest, onOpenSession, onFeedback }: {
+function Thread({ agent, thread, headless, dated, latest, onOpenSession, onFeedback }: {
   agent: ScheduleTaskDto;
   thread: ConversationThread;
+  /** No divider says the day: each row does. */
+  dated?: boolean;
   /** The key of the newest report on the page. */
   latest?: string;
   /** Its opening is said on the day's divider above it. */
@@ -652,7 +819,7 @@ function Thread({ agent, thread, headless, latest, onOpenSession, onFeedback }: 
               />
             );
           }
-          if (item.kind === "quiet") return <QuietFold key={item.key} runs={item.runs} />;
+          if (item.kind === "quiet") return <QuietFold key={item.key} runs={item.runs} {...(dated ? { dated } : {})} />;
           if (item.kind === "live") {
             return <LiveTurn key={item.key} agent={agent} run={item.run} {...(onOpenSession ? { onOpenSession } : {})} />;
           }
@@ -663,6 +830,7 @@ function Thread({ agent, thread, headless, latest, onOpenSession, onFeedback }: 
               run={item.run}
               compact={!!item.compact}
               latest={item.key === latest}
+              {...(dated ? { dated } : {})}
               onFeedback={onFeedback}
             />
           );
@@ -847,21 +1015,27 @@ export default function AgentConversation({ host, agent, live, onReview, onRun, 
             // A conversation that opens the day is said on the day's line.
             const first = day.threads[0];
             const joined = first?.opening && first.opening.kind !== "upcoming" ? first : undefined;
+            // A day of the agent's own entries, with no conversation to open or
+            // person speaking, needs no divider: each row says its day.
+            const bare = bareDay(day);
             return (
-              <section className="agent-day" key={day.key} aria-label={dayLabel(day.at)}>
-                <Divider
-                  heading
-                  day={dayLabel(day.at)}
-                  {...(joined?.opening ? { opening: joined.opening } : {})}
-                  {...(joined?.sessionId ? { sessionId: joined.sessionId } : {})}
-                  {...(joined && openSession ? { onOpenSession: openSession } : {})}
-                />
+              <section className="agent-day" key={day.key} aria-label={dayLabel(day.at)} data-bare={bare || undefined}>
+                {!bare && (
+                  <Divider
+                    heading
+                    day={dayLabel(day.at)}
+                    {...(joined?.opening ? { opening: joined.opening } : {})}
+                    {...(joined?.sessionId ? { sessionId: joined.sessionId } : {})}
+                    {...(joined && openSession ? { onOpenSession: openSession } : {})}
+                  />
+                )}
                 {day.threads.map((thread) => (
                   <Thread
                     key={thread.key}
                     agent={agent}
                     thread={thread}
                     headless={thread === joined}
+                    {...(bare ? { dated: true } : {})}
                     {...(latestReport ? { latest: latestReport } : {})}
                     {...(openSession ? { onOpenSession: openSession } : {})}
                     onFeedback={feedback}

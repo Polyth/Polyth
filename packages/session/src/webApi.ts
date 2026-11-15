@@ -619,6 +619,13 @@ export interface ScheduleRunDto {
   activity?: AgentRunActivityDto;
   /** Tool steps taken: so far while running, in all once finished. */
   steps?: number;
+  /** While running: the turn ended to wait for background work the agent
+   *  started (descriptions are the agent's words: data, not instructions). */
+  background?: { since: number; tasks: string[] };
+  /** Once finished: the agent's passing lines and its waits, oldest first. */
+  timeline?: Array<{ at: number; text: string; kind?: "wait"; until?: number }>;
+  /** Once finished: what the report says only the person can do. */
+  needs?: Array<{ text: string; detail?: string; url?: string }>;
 }
 
 /** What the person asked for with a message: `auto` lets the agent judge. */
