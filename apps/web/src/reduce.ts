@@ -18,7 +18,7 @@ import type {
   WorkflowRunNodeDto,
   WorkflowRunOptionsDto,
 } from "@polyth/contracts";
-import { normalizeSessionPerson } from "@polyth/contracts";
+import { normalizeSessionPerson, SESSION_START_FAILED_EVENT } from "@polyth/contracts";
 import { extractChangedFiles } from "./pendingChanges.ts";
 import { normalizeQuestions, questionAnswerDraft, type AnswerMap } from "./questionSerializers.ts";
 import { tr } from "./i18n/index.ts";
@@ -503,6 +503,9 @@ export interface RenderModel {
   /** Bumps only on queue-affecting events (queue/*, delivery/fallback-queued)
    *  so the queue badge refetches per queue change, not per streamed chunk. */
   queueVersion: number;
+  /** `session/start-failed`: why a started chat never got its runtime. Gone
+   *  once a later prompt is admitted. */
+  startFailure?: { code: string; message: string; eventSeq: number; attachments: AttachmentRef[] } | null;
 }
 
 export function emptyModel(): RenderModel {
@@ -935,6 +938,21 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
   if (ev.type.startsWith("queue/") || ev.type === "delivery/fallback-queued") {
     model.queueVersion += 1;
   }
+  if (ev.type === SESSION_START_FAILED_EVENT) {
+    // Ignorable and maybe from a newer server: take only well-formed fields.
+    const data = d !== null && typeof d === "object" && !Array.isArray(d) ? d : {};
+    const message = str(data, "message");
+    model.startFailure = {
+      code: str(data, "code") ?? "start-failed",
+      message: message?.trim() ? message : "",
+      eventSeq: ev.seq,
+      attachments: Array.isArray(data.attachments)
+        ? (data.attachments as unknown[]).filter((item): item is AttachmentRef =>
+          item !== null && typeof item === "object" && typeof (item as { id?: unknown }).id === "string"
+          && typeof (item as { name?: unknown }).name === "string")
+        : [],
+    };
+  } else if (ev.type === "user/message" && model.startFailure) model.startFailure = null;
   switch (ev.type) {
     case "isolation/merged": {
       const branch = str(d, "targetBranch") ?? "";

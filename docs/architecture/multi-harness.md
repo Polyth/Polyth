@@ -131,6 +131,30 @@ New sessions persist `{ mode: "auto" }` separately from `resolvedHarnessId`. Aut
 
 A synchronized native leg can be reattached where the adapter supports verified continuity. Returning A → B → A creates a fresh A leg. A mismatch between the leg's effective dialogue checkpoint and current canonical history also forces fresh continuity. Profile intent survives switching, while the old profile's model/account selection is cleared. Model catalogs come from the selected session runtime; harness identity is not encoded into `providerID`.
 
+### Session creation and start
+
+`SessionService.create` validates, writes the canonical row (`reconciling`) with a prepared `session-create` operation, then acquires the runtime, runs the native create, binds the leg and reconciles before it returns. A send that arrives in that window is queued (`session-reconciling`) and the first idle transition dispatches it — reconciliation's idle and the compatibility path for runtimes without `reconcile`/`endpoint` alike.
+
+`SessionService.start` (`POST /api/sessions` with `start`) owns the whole start of a new chat and replies before any runtime exists:
+
+1. Everything is validated before anything is written: create's checks, the `start` shape, `start.autoAccept`/`agentProfileId`, and every `start.extensions` id against `SESSION_START_STEPS` (unknown id → `invalid-input`) with each step's `validate`.
+2. The row is written exactly as create writes it, with `autoAccept`/`agentProfileId` already in the first projection. `session/created.data.start` records `{ firstTurnQueueId, autoTitle }`, the durable proof that the server owns this start.
+3. Registered start steps run after the row exists and before the first turn is queued; a throw fails the start.
+4. `start.firstTurn` goes through `send`'s admission (key dedupe, attachment preparation, author, autoTitle) and lands in the durable queue with `delivery/fallback-queued` reason `session-starting`. The queue id is the first turn's account-scoped key.
+5. The reply is `{ id, queueId }` (or `{ id, turnId }` if the runtime was already there). Only then does the provisioning flight start — create's runtime acquisition, its agent-without-model check, native create, binding and reconcile — so its idle dispatch always finds the queued turn. `autoTitle` reaches the dispatched turn from the start marker.
+
+Shipped start steps: `goals.attach` `{ objective }` (Goals) and `handoff.import` `{ provenance, textHash }` (Handoff); each package registers its step on enable, looks `SESSION_START_STEPS` up optionally and disposes it on disable. The git package's isolation and worktree routes pass `start` through (see [workspace](../dev/workspace.md)). `polyth chat` and `polyth new` send their first prompt as `start.firstTurn` and post it separately only to a server that answers without `queueId`/`turnId`.
+
+A resend with the same id and key reuses the row: no second row or native create, the first turn dedupes by its key, the same result comes back, and steps run again (they are idempotent). HTTP derives the id from the key exactly as for a keyed create and scopes the turn key as `/message` does; `start` never scopes it again.
+
+If provisioning fails, or the first turn is definitely refused at dispatch (`invalid-model`), the turn leaves the queue, its text goes to its author's empty draft, and the ignorable `session/start-failed` `{ code, message, text, attachments }` is appended. Such a chat is never removed by failed-startup cleanup. A chat whose runtime could not be created stays `failed`; a later send prepares a fresh `session-create` operation, provisions again and is then admitted from the queue. The event's `message` is the cause: for an uncertain outcome that is the runtime's own words (`details`), not the stable "reconciliation is required" line.
+
+A native create whose outcome is uncertain (the runtime threw or timed out, or Polyth stopped while it ran) is different: the chat is `unknown`, has no native session, and that create is never run again, so nothing can lift its admission barrier. The start still fails visibly (`session/start-failed`, prompt back in the draft), and a later send into it is refused with `conflict` / `not-started` instead of being queued forever; the person sends from a new chat. Replacing such a create with a fresh one is deliberately not done: an adapter keyed by the Polyth session id could end up with two legs for one chat.
+
+While a start's provisioning flight runs it owns the chat's create and status. `activate` (the web client opens the chat as soon as the start replies) returns without wiring, and the wiring path does not rewrite the status to `unknown` under the flight.
+
+Before this, boot turned a `reconciling` row whose create was still `prepared` into `unknown`; startup recovery wired it, found no native session and no exact receipt, and left it `unknown` with any queued prompt stranded. Now startup recovery resumes provisioning for a started chat whose create is still `prepared` and delivers its queued first turn. An `executing`/`unknown` create keeps the exact-receipt recovery and is never created again; startup recovery reports it once as a start failure (`process-restarted`) and hands the queued first turn back to the draft.
+
 ## Safe switch algorithm
 
 1. Under the existing session lock, persist a switch intent containing the target, timing and transition ID. Fence new turn admission; new messages can queue.

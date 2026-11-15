@@ -42,8 +42,11 @@ import type {
   WorkspaceCheckpointUnavailable,
   SessionIsolation,
   SessionPersistence,
+  SessionPerson,
   SessionProjection,
   SessionRef,
+  SessionStartRequest,
+  StartSessionResult,
   SecureSafeService,
   SessionService,
   SessionPrivacy,
@@ -419,9 +422,9 @@ export interface ServerSessionIsolationService {
    *  in their Space and owned by them; the project is checked there. Refuses a
    *  project that is not a local Git repository. */
   createIsolatedSession(
-    input: CreateIsolatedSessionInput,
-    options?: { sessions?: Pick<SessionService, "create" | "snapshot"> },
-  ): Promise<SessionRef>;
+    input: CreateIsolatedSessionInput & { start?: SessionStartRequest; clientOperationId?: string },
+    options?: { sessions?: Pick<SessionService, "create" | "start" | "snapshot"> },
+  ): Promise<StartSessionResult>;
   createDelegatedSession(input: ServerDelegatedSessionInput): Promise<ServerDelegatedSessionCreated>;
   /** The parent's delegated isolated children that still hold an isolation record. */
   delegatedChildren(parentSessionId: string): Promise<DelegatedIsolationDto[]>;
@@ -664,6 +667,35 @@ export interface SessionPurposeRegistry {
 
 export const SESSION_PURPOSES =
   serverServiceKey<SessionPurposeRegistry>("session.purposes");
+
+/** What a start step is told about the chat being started. `author` is the
+ *  server's admission fact. Derive the Space from `session`, never from the
+ *  payload. */
+export interface SessionStartStepContext {
+  projectId: string;
+  /** The first prompt of this start, when it has one. */
+  firstTurnText?: string;
+  author?: SessionPerson;
+}
+
+/** One package-owned step of a chat's start, fed by
+ *  `SessionStartRequest.extensions[id]`. It replaces a client request that
+ *  used to follow session creation. */
+export interface SessionStartStep {
+  /** Reject a malformed payload before anything is created. */
+  validate?(payload: JsonObject, ctx: SessionStartStepContext): void | Promise<void>;
+  /** Runs once the chat's row exists and before its first turn is queued.
+   *  Idempotent: a resent start runs it again. A throw fails the start. */
+  run(payload: JsonObject, ctx: SessionStartStepContext & { session: SessionProjection }): Promise<void>;
+}
+
+/** Register in `onEnable`, dispose in `onDisable`; one owner per id. */
+export interface SessionStartStepRegistry {
+  register(id: string, step: SessionStartStep): Disposable;
+}
+
+export const SESSION_START_STEPS =
+  serverServiceKey<SessionStartStepRegistry>("session.start-steps");
 
 /** Package-owned, model-visible sections appended to the deployment-wide
  *  global behavior every harness receives. `section()` is read synchronously

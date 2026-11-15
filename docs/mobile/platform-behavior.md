@@ -61,6 +61,11 @@
   `GET /api/sessions/create-operations/:key` (≈24 s backoff) and continues with
   the created session, or resends the same key once the probe answers `absent`
   — a resend returns the first session (and its worktrees), never a duplicate.
+  A New Chat send carries its first prompt in the same request (`start`, see
+  [session start](../architecture/multi-harness.md)): once the server answers
+  with a `queueId` or `turnId` the client owes nothing more, so a phone that
+  goes to the background right after Send still gets its turn. A resend with
+  the same key queues that prompt at most once.
   A managed checkout left for the key without a canonical session (crash
   between allocation and create) fails closed with `conflict` and is preserved
   for recovery, never re-allocated or rolled back by the resend.
@@ -76,9 +81,13 @@
   it appears in the list, otherwise send again; the text is restored). Other
   actions with an unknown outcome use the context-free
   `settings.mutationOutcomeUnknown` copy, which names no session or draft.
-  Standalone worktree creation (`POST /api/worktrees`,
-  used for a new-worktree/branch New Chat) is not keyed yet and keeps that
-  outcome.
+  A new-worktree/branch New Chat is keyed the same way: `POST
+  /api/worktrees/sessions` allocates the linked worktree on the server and then
+  creates the chat in it, serialized per key, so a resend returns the first
+  chat and allocates nothing. A worktree allocated for a create that then
+  failed before its canonical row stays in place; the next send picks a new
+  codename. Standalone worktree creation (`POST /api/worktrees`, the worktree
+  manager) is not keyed and keeps that outcome.
 - A composer model catalog whose request failed is asked again on Reconnect,
   sync reconnect, a return to the foreground or `online`; a network failure
   also retries every 10 s while visible and reads "Can't reach Polyth.

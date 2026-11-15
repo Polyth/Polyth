@@ -37,9 +37,11 @@ import {
 import {
   sendMessage,
   abortSession,
-  createSession,
+  createSessionWithStart,
   createDefaultWorktree,
-  startIsolatedSession,
+  startIsolatedSessionWithStart,
+  startTaken,
+  startWorktreeSession,
   rememberProjectModelSelection,
   reconnectSync,
   recheckRuntimeCatalog,
@@ -174,6 +176,7 @@ import {
   listenComposerModeRequests,
   publishComposerActiveMode,
   runComposerSessionCreatedHooks,
+  collectComposerSessionStartExtensions,
   subscribeComposerContributions,
 } from "../composer/contributions.ts";
 import { detectModeTrigger, isModeLeaveKey, modeText } from "../composer/modes.ts";
@@ -208,8 +211,11 @@ import type {
   HarnessSelection,
   ModelDescriptor,
   ModelRef,
+  JsonObject,
   QueueItemDto,
   SessionProjection,
+  SessionStartRequest,
+  StartSessionResult,
 } from "@polyth/contracts";
 import { friendlyError, isMutationOutcomeUnknown, matchesSendShortcut, modKeyLabel, parseModelRef } from "../settings.ts";
 import { Icon } from "../icons.tsx";
@@ -898,6 +904,28 @@ function shouldReadStagedPhoto(metadata: { mimeType: string; size: number }): bo
 const EMPTY_MENTION_LEVELS: readonly SessionAccessLevel[] = [];
 const EMPTY_MENTION_CANDIDATES: SessionMentionCandidateDto[] = [];
 
+/** Start failures whose attachments a composer already gave back (per
+ *  session and event), so a remount or a removed pill does not re-add them. */
+const restoredStartFailures = new Set<string>();
+
+/** What the person has typed since Send, per chat that is still starting:
+ *  first on the new-chat surface, then in the chat's own composer. The start
+ *  swaps composer instances (hero, transcript before the chat has an id,
+ *  transcript with it), and the stored draft is hidden while the first prompt
+ *  is in flight, so each mounting composer takes this as live input. Keyed by
+ *  `unboundSpawnKey` until the chat id is known, then by the chat. Dropped
+ *  when draft autosave resumes. */
+const carriedStartInput = new Map<string, string>();
+
+const spawnInputKey = (requestId: number): string => `spawn:${requestId}`;
+
+/** The start the new-chat surface is showing while its chat has no id yet. */
+const unboundSpawnKey = (): string | null => {
+  const current = getState();
+  const spawn = current.sessionSpawn;
+  return spawn && spawn.sessionId === null && isActiveSessionSpawning(current) ? spawnInputKey(spawn.requestId) : null;
+};
+
 export default function Composer(props: { variant?: "docked" | "widget" }) {
   // Primitive selector: the wrapper re-renders only when access changes.
   // View-only still writes to people — people mode is the only mode there.
@@ -1064,6 +1092,19 @@ function ComposerBody({
     () => inputRef.current?.getText() ?? committedTextRef.current,
   );
   const model = useActiveModel();
+  // A failed start put its text back in this chat's draft (server-side, via
+  // draft sync); its attachments come back as pills here, once, and only into
+  // a composer that holds none.
+  const startFailure = model.startFailure;
+  useEffect(() => {
+    const id = session?.id;
+    if (!id || !startFailure || startFailure.attachments.length === 0) return;
+    const key = `${id}\0${startFailure.eventSeq}`;
+    if (restoredStartFailures.has(key)) return;
+    restoredStartFailures.add(key);
+    if (pendingAttachments(id).length > 0) return;
+    for (const attachment of startFailure.attachments) addAttachment(id, attachment);
+  }, [session?.id, startFailure]);
   const working = model.turn?.status === "working";
   // While a turn runs, its primary action doubles as the context gauge.
   const contextGauge = useActiveContextGauge(model);
@@ -1630,15 +1671,21 @@ function ComposerBody({
         ? adoptServerDraft(session.id, serverDraft ?? "", session.draftUpdatedAt).text
         : loadDraft(session.id))
       : newSessionIntent?.draft ?? "";
-    const t = visibleComposerDraft(localDraft, inFlight);
+    // Typed on the new-chat surface while this chat was being created.
+    const carriedKey = session?.id ?? unboundSpawnKey();
+    const carried = (carriedKey ? carriedStartInput.get(carriedKey) : undefined) || undefined;
+    if (carried !== undefined && session?.id) pendingLocalTextRef.current = { scopeKey: sessionScopeKeyRef.current, text: carried };
+    const t = carried ?? visibleComposerDraft(localDraft, inFlight);
     setText(t);
-    const restoredSelection = takeComposerSelection(sessionScopeKeyRef.current, t);
+    const restoredSelection = carried !== undefined
+      ? { anchor: carried.length }
+      : takeComposerSelection(sessionScopeKeyRef.current, t);
     // On a reload the project is active before its unsent chat is restored,
     // so the first mount has no intent and seeds "". Saving that would replace
     // the stored prompt before boot reads it back.
     restoringDraftRef.current = true;
     try {
-      inputRef.current?.replaceText(t, inFlight ? undefined : restoredSelection ?? undefined, inFlight ? { silent: true } : undefined);
+      inputRef.current?.replaceText(t, inFlight && carried === undefined ? undefined : restoredSelection ?? undefined, inFlight ? { silent: true } : undefined);
     } finally {
       restoringDraftRef.current = false;
     }
@@ -1735,14 +1782,14 @@ function ComposerBody({
     // The same swap must not throw the writer out of the input. On touch the
     // keyboard has its own rules, so only a mouse or trackpad screen carries it.
     const active = document.activeElement;
-    const nextChat = getState().activeSessionId ?? sessionIdRef.current;
+    const nextChat = getState().activeSessionId ?? sessionIdRef.current ?? unboundSpawnKey();
     if (nextChat && primaryPointerIsFine() && active?.hasAttribute("data-composer-input") && rootRef.current?.contains(active)) {
       composerFocusCarry = nextChat;
       queueMicrotask(() => { composerFocusCarry = null; });
     }
   }, []);
   useLayoutEffect(() => {
-    if (composerFocusCarry !== null && composerFocusCarry === sessionIdRef.current) inputRef.current?.focus();
+    if (composerFocusCarry !== null && composerFocusCarry === (sessionIdRef.current ?? unboundSpawnKey())) inputRef.current?.focus();
   }, []);
 
   // Debounced local persistence while typing (refresh-safe). Server sync runs
@@ -1750,6 +1797,8 @@ function ComposerBody({
   useEffect(() => {
     const id = session?.id;
     if (!id || queueEdit?.sessionId === id || creatingSession || sendPending || inFlightPrompt) return;
+    // The start is over: the stored draft is visible again and saved below.
+    carriedStartInput.delete(id);
     if (promptHistoryNavRef.current.isBrowsing()) return;
     const scopeKey = scopedDraftCacheKey(id);
     const t = setTimeout(() => {
@@ -2980,7 +3029,41 @@ function ComposerBody({
     };
     // One creation path for a sent and a parked new chat: the same route,
     // workspace target and lane, so a draft later sends as it would have now.
-    const createNewChat = async (projectId: string, activate: (id: string) => boolean): Promise<string> => {
+    const createNewChat = async (projectId: string, activate: (id: string) => boolean): Promise<string> =>
+      (await createNewChatWith(projectId, activate)).id;
+    // With `start` the create also carries the first turn (one request); the
+    // reply says whether the server took it (`startTaken`).
+    const createNewChatWith = async (
+      projectId: string,
+      activate: (id: string) => boolean,
+      start?: SessionStartRequest,
+    ): Promise<StartSessionResult> => {
+      if (start && (newSessionTarget.kind === "new-worktree" || newSessionTarget.kind === "branch")) {
+        try {
+          return await startWorktreeSession(projectId, newSessionTarget.kind === "branch"
+            ? { kind: "branch", branch: newSessionTarget.branch, ...(newSessionTarget.base ? { base: newSessionTarget.base } : {}) }
+            : { kind: "new-worktree", ...(newSessionTarget.base ? { base: newSessionTarget.base } : {}) }, {
+            harness: creationHarness,
+            ...(newSessionRepositoryIds ? { repositoryIds: newSessionRepositoryIds } : {}),
+            ...(newSessionIntent?.title ? { title: newSessionIntent.title } : {}),
+            ...(sentModel ? { model: sentModel } : {}),
+            ...(cfgSent.agent ? { agent: cfgSent.agent } : {}),
+            ...(lanePurpose ? { purpose: lanePurpose } : {}),
+            ...(followsPersonDefault ? { personDefaultHarnessId: followsPersonDefault } : {}),
+            start,
+            precache: true,
+            activate,
+          });
+        } catch (error) {
+          // ponytail: a server without POST /api/worktrees/sessions answers 404
+          // and made nothing; take the client worktree step and a plain create
+          // (the caller then runs the old chain). Drop once no supported server
+          // lacks `start`.
+          if ((error as { status?: unknown } | null)?.status !== 404) throw error;
+          assertScopeStillCurrent();
+        }
+        return createNewChatWith(projectId, activate);
+      }
       if (newSessionTarget.kind === "isolation") {
         if (newSessionTarget.checkout) {
           await api.createWorktree(
@@ -2991,7 +3074,7 @@ function ComposerBody({
           );
           assertScopeStillCurrent();
         }
-        return startIsolatedSession(projectId, {
+        return startIsolatedSessionWithStart(projectId, {
           harness: creationHarness,
           ...(newSessionRepositoryIds ? { repositoryIds: newSessionRepositoryIds } : {}),
           ...(newSessionIntent?.title ? { title: newSessionIntent.title } : {}),
@@ -3000,6 +3083,7 @@ function ComposerBody({
           ...(newSessionTarget.base ? { targetBranch: newSessionTarget.base } : {}),
           ...(lanePurpose ? { purpose: lanePurpose } : {}),
           ...(followsPersonDefault ? { personDefaultHarnessId: followsPersonDefault } : {}),
+          ...(start ? { start } : {}),
           precache: true,
           activate,
         });
@@ -3025,7 +3109,7 @@ function ComposerBody({
           )).path;
           assertScopeStillCurrent();
         }
-        return createSession(projectId, {
+        return createSessionWithStart(projectId, {
           harness: creationHarness,
           ...(newSessionRepositoryIds ? { repositoryIds: newSessionRepositoryIds } : {}),
           ...(newSessionIntent?.title ? { title: newSessionIntent.title } : {}),
@@ -3034,6 +3118,7 @@ function ComposerBody({
           ...(worktreePath ? { worktreePath } : {}),
           ...(lanePurpose ? { purpose: lanePurpose } : {}),
           ...(followsPersonDefault ? { personDefaultHarnessId: followsPersonDefault } : {}),
+          ...(start ? { start } : {}),
           precache: true,
           activate,
         });
@@ -3190,7 +3275,9 @@ function ComposerBody({
       });
       const spawnSurface = sendSurfaceKey(null, activeProjectId);
       markSendPending(spawnSurface, true);
+      carriedStartInput.set(spawnInputKey(spawnRequestId), "");
       let created: string | undefined;
+      let carriedDraft: string | undefined;
       // The created session is admitting from the moment it exists, before its
       // composer mounts, until the first prompt's admission settles.
       let admitting: string | undefined;
@@ -3210,11 +3297,46 @@ function ComposerBody({
           if (echoId) bindPendingSend(echoId, id);
           markCreatedAdmitting(id);
           const current = getState();
-          return current.sessionSpawn?.requestId === spawnRequestId
+          const stillHere = current.sessionSpawn?.requestId === spawnRequestId
             && current.activeProjectId === activeProjectId
             && current.activeSessionId === null;
+          // The input stays usable while the chat starts, and words typed
+          // since Send belong to the new chat. Read them from the shared
+          // record, not this instance's input: the transcript composer may
+          // already have replaced the hero's.
+          const spawnKey = spawnInputKey(spawnRequestId);
+          if (carriedStartInput.has(spawnKey)) {
+            const live = carriedStartInput.get(spawnKey) ?? "";
+            carriedStartInput.delete(spawnKey);
+            carriedDraft = live.trim() && live !== t ? live : "";
+            if (stillHere) carriedStartInput.set(id, carriedDraft);
+          }
+          return stillHere;
         };
-        created = await createNewChat(activeProjectId, stillOnSpawnSurface);
+        // One request: the create carries the first turn, its approval
+        // setting and package start steps. A shell command has no turn to
+        // carry and keeps the old chain.
+        const collectedStarts = command === null
+          ? collectComposerSessionStartExtensions({ projectId: activeProjectId, text: t })
+          : [];
+        const extensions: Record<string, JsonObject> = {
+          ...(newSessionGoal ? { "goals.attach": { objective: t } } : {}),
+        };
+        for (const { extension, payload } of collectedStarts) extensions[extension.id] = payload as JsonObject;
+        const autoTitleFirstTurn = getState().settings.autoTitleSessions && !newSessionIntent?.title;
+        const start: SessionStartRequest | undefined = command === null ? {
+          firstTurn: {
+            text: t,
+            ...(atts.length > 0 ? { attachments: atts } : {}),
+            ...(selectedNativeCommand ? { command: selectedNativeCommand } : {}),
+            ...(autoTitleFirstTurn ? { autoTitle: true } : {}),
+          },
+          ...(wire !== undefined ? { agentProfileId: wire } : {}),
+          ...(newSessionAutoApprove !== "inherit" ? { autoAccept: newSessionAutoApprove } : {}),
+          ...(Object.keys(extensions).length > 0 ? { extensions } : {}),
+        } : undefined;
+        const result = await createNewChatWith(activeProjectId, stillOnSpawnSurface, start);
+        created = result.id;
         markCreatedAdmitting(created);
         assertScopeStillCurrent();
         bindSessionSpawn(spawnRequestId, created);
@@ -3222,6 +3344,31 @@ function ComposerBody({
           bindPendingSend(echoId, created);
           submittedDraftRevisionRef.current = { sessionId: created, revision: revisionAfterSubmit };
         }
+        const carryDraft = (id: string) => {
+          if (!carriedDraft) return;
+          const scope = { ...reliabilityScopeAtSend, projectId: activeProjectId, sessionId: id };
+          updateScopedDraftRecord(id, { text: carriedDraft, dirty: true, conflict: undefined }, scope);
+          syncDraftToServer(id, carriedDraft, scope);
+        };
+        if (start && startTaken(result)) {
+          // The server owns the rest of the start: the prompt is queued
+          // durably with the chat, so only local state follows the send.
+          carryDraft(created);
+          clearNewSessionDraft(activeProjectId, reliabilityScopeAtSend);
+          if (scopedDraftCacheKey(null) === scopedDraftCacheKey(null, reliabilityScopeAtSend)) {
+            clearAttachments(null);
+          }
+          clearDraftExecutionConfig(activeProjectId);
+          promptHistoryNav.reload();
+          consumeComposerConfig(target, cfgSent);
+          if (sessionIdRef.current === target) setCfg(loadComposerConfig(target));
+          setNewSessionAutoApprove("inherit");
+          setNewSessionGoal(false);
+          return;
+        }
+        // ponytail: an older server ignored `start` (no queueId/turnId): run
+        // the client chain it expects. Drop once no supported server lacks
+        // `start`.
         let createdDraft: StagedDraft | undefined;
         if (command === null) {
           createdDraft = stageTargetDraft(created, {
@@ -3250,7 +3397,13 @@ function ComposerBody({
         }
         assertScopeStillCurrent();
         await runComposerSessionCreatedHooks({ projectId: activeProjectId, sessionId: created, text: t });
+        for (const { extension, payload } of collectedStarts) {
+          if (!extension.legacy) continue;
+          assertScopeStillCurrent();
+          await extension.legacy({ projectId: activeProjectId, sessionId: created, text: t }, payload);
+        }
         await deliver(created, createdDraft, true);
+        carryDraft(created);
         setNewSessionAutoApprove("inherit");
         setNewSessionGoal(false);
       })()
@@ -3285,6 +3438,7 @@ function ComposerBody({
           }
         })
         .finally(() => {
+          carriedStartInput.delete(spawnInputKey(spawnRequestId));
           finishSessionSpawn(spawnRequestId);
           markSendPending(spawnSurface, false);
           if (admitting) markSendPending(admitting, false);
@@ -3756,6 +3910,8 @@ function ComposerBody({
       // Observe the submit-time clear and newer typing even while admission
       // owns persistence. Reconciliation must use the current input when it
       // resumes, never the pending edit from before Send.
+      const startKey = sessionIdRef.current ?? unboundSpawnKey();
+      if (startKey && carriedStartInput.has(startKey)) carriedStartInput.set(startKey, val);
       if (sessionIdRef.current !== null) {
         pendingLocalTextRef.current = { scopeKey: sessionScopeKeyRef.current, text: val };
         // Typing is the signal a turn is coming; a restored or synced draft
@@ -4902,7 +5058,6 @@ function ComposerBody({
         <AdaptiveTextInput
           ref={inputRef}
           data-composer-input=""
-          disabled={creatingSession}
           initialText={text}
           rows={3}
           className="composer-editor"

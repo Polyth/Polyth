@@ -387,8 +387,9 @@ export interface DurableSessionWatchProgress {
 export interface DurableSessionWatchStop {
   seq: number;
   data: JsonObject;
-  /** `turn/stopped`, or `session/pause-ended` (a stopped one ends paused
-   *  work). Absent from stores predating pauses: a turn stop. */
+  /** `turn/stopped`, `session/pause-ended` (a stopped one ends paused work)
+   *  or `session/start-failed` (a started chat that never ran). Absent from
+   *  stores predating pauses: a turn stop. */
   type?: string;
 }
 
@@ -1603,7 +1604,7 @@ export function createStore(dbPath: string): Store {
     const rows = prep(`
       SELECT seq, type, data
       FROM events
-      WHERE session_id = ? AND type IN ('turn/stopped', 'session/pause-ended') AND seq > ?
+      WHERE session_id = ? AND type IN ('turn/stopped', 'session/pause-ended', 'session/start-failed') AND seq > ?
       ORDER BY seq ASC
       LIMIT ?
     `).all(sourceSessionId, afterSeq, bounded) as unknown as Array<{ seq: number; type: string; data: string }>;

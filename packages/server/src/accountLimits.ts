@@ -148,6 +148,21 @@ export function limitedSessionService(
     return counted(authority, userId, limits, "chats", () =>
       base.create({ ...input, ...(harness ? { harness } : {}) }));
   };
+  if (base.start) {
+    const start = base.start.bind(base);
+    // A chat and, when it carries one, its first message.
+    limited.start = async (input, admission) => {
+      const limits = current();
+      if (limits && !accountMayUseProject(limits, input.projectId)) throw notFound();
+      const harness = limits?.harnesses
+        ? input.harness ? checkSelection(allowed, limits, input.harness) : defaultHarness(limits)
+        : input.harness;
+      const next = { ...input, ...(harness ? { harness } : {}) };
+      return counted(authority, userId, limits, "chats", () => input.start?.firstTurn
+        ? counted(authority, userId, limits, "messages", () => start(next, admission))
+        : start(next, admission));
+    };
+  }
   limited.fork = async (sessionId, atSeq) => {
     const limits = current();
     return counted(authority, userId, limits, "chats", () => base.fork(sessionId, atSeq));

@@ -9,7 +9,7 @@
 // client chooses no session id and cannot alias or probe another account's or
 // Space's sessions. Dedupe is by key, never a blind replay of an uncertain call.
 
-import type { SessionProjection, SessionRef, SessionService } from "@polyth/contracts";
+import type { SessionProjection, SessionRef, SessionService, StartSessionResult } from "@polyth/contracts";
 import { sessionIdForCreateOperation } from "@polyth/session/create-operation";
 
 export { sessionIdForCreateOperation };
@@ -83,5 +83,23 @@ export async function createSessionOnce(
       });
     }
     return { ref: { id: prior.id }, created: false };
+  });
+}
+
+/** Start once per key. Unlike a create, a resend does not stop at the existing
+ *  row: it reaches `start`'s own idempotent path, which queues the first turn
+ *  at most once and returns the same result. */
+export async function startSessionOnce(
+  sessions: Pick<SessionService, "snapshot">,
+  sessionId: string,
+  projectId: string,
+  start: (sessionId: string) => Promise<StartSessionResult>,
+): Promise<{ result: StartSessionResult; created: boolean }> {
+  return withCreateLock(sessionId, async () => {
+    const prior = await existing(sessions, sessionId);
+    if (prior && prior.projectId !== projectId) {
+      throw Object.assign(new Error("clientOperationId was already used for another session"), { code: "conflict" });
+    }
+    return { result: await start(sessionId), created: !prior };
   });
 }

@@ -16,7 +16,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import type { QueueItemDto, SessionEvent } from "@polyth/contracts";
+import { SESSION_STARTING_QUEUE_REASON, type QueueItemDto, type SessionEvent } from "@polyth/contracts";
 import { queuePausedAfterUserInterrupt } from "@polyth/session/queue-pause";
 import { api } from "@polyth/session/web-api";
 import { setUiError, usePendingSends, useStore } from "../store.ts";
@@ -112,6 +112,21 @@ export function departedQueueIds(events: readonly Pick<SessionEvent, "type" | "d
   return departed;
 }
 
+/** Queue ids of first prompts that wait for their chat to start
+ *  (`SESSION_STARTING_QUEUE_REASON`). The timeline shows each as the prompt,
+ *  so this list must not show it as a chip too. */
+export function startingQueueIds(events: readonly Pick<SessionEvent, "type" | "data">[]): Set<string> {
+  const ids = new Set<string>();
+  for (const event of events) {
+    if (event.type !== "delivery/fallback-queued") continue;
+    const data = event.data as { queueId?: unknown; reason?: unknown } | null | undefined;
+    if (data?.reason === SESSION_STARTING_QUEUE_REASON && typeof data.queueId === "string") ids.add(data.queueId);
+  }
+  if (ids.size === 0) return ids;
+  for (const id of departedQueueIds(events)) ids.delete(id);
+  return ids;
+}
+
 // Fallback reasons the queue does not drain from by itself: the session's
 // runtime could not be recovered (or its state is uncertain), so nothing will
 // dispatch until another send or an explicit Resume retries the recovery. The
@@ -136,6 +151,8 @@ export function queueStalledOnRecovery(
   for (const event of events) {
     if (event.type !== "delivery/fallback-queued") continue;
     const data = event.data as { queueId?: unknown; reason?: unknown } | undefined;
+    // A start's first turn waits for its runtime by design; never "stalled".
+    if (data?.reason === SESSION_STARTING_QUEUE_REASON) continue;
     if (typeof data?.queueId === "string" && waiting.has(data.queueId)
       && typeof data.reason === "string" && STALLED_QUEUE_REASONS.has(data.reason)) return true;
   }
@@ -428,10 +445,12 @@ export default function QueuedMessageList({
     .map((echo) => echo.text.trim()));
   const hasItems = items.length > 0;
   const departed = useMemo(() => hasItems ? departedQueueIds(events ?? []) : NO_IDS, [events, hasItems]);
+  const starting = useMemo(() => hasItems ? startingQueueIds(events ?? []) : NO_IDS, [events, hasItems]);
   const visibleItems = items.filter((item) =>
     item.sessionId === sessionId
     && item.id !== editingId
     && !departed.has(item.id)
+    && !starting.has(item.id)
     && !scope.launched.has(item.id)
     && !(item.delivery === "interrupt" && inFlight.has(item.text.trim()))
     && (!queueItemHidden(item) || item.heldForReview));

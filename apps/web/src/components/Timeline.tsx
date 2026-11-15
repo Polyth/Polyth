@@ -145,6 +145,7 @@ import { PlayIcon } from "./ui/icons.ts";
 import PausedMark from "./PausedMark.tsx";
 import type { TurnLimitState } from "../reduce.ts";
 import { transientTurnNoticeKey } from "../turnNotice.ts";
+import { startingQueuePrompts } from "../sessionStart.ts";
 import { shortMessage } from "../errorPresentation.ts";
 import ChatResponseFooter from "./ChatResponseFooter.tsx";
 import MessageQuickActions from "./MessageQuickActions.tsx";
@@ -2151,6 +2152,13 @@ export default function Timeline({
   const latestUserMessage = [...model.messages].reverse()
     .find((message) => message.kind === "user" && !message.undone);
   const pendingSends = usePendingSends(sessionId);
+  // A starting chat's first prompt waits on the server queue; it reads as the
+  // prompt (not a queue chip) here, also after a reload or on another device.
+  // The submit-frame echo hands over to it when its queue row lands.
+  const startingPrompts = useMemo(() => {
+    const rows = startingQueuePrompts(sessionEvents, sessionId);
+    return rows.filter((row) => !pendingSends.some((send) => send.text === row.text));
+  }, [sessionEvents, sessionId, pendingSends]);
   const observedPendingSend = useRef<string | null>(null);
   const newestPendingSendId = pendingSends[pendingSends.length - 1]?.id ?? null;
   const newestPendingDelivery = pendingSends[pendingSends.length - 1]?.delivery;
@@ -4718,7 +4726,7 @@ export default function Timeline({
         onTouchCancelCapture={(event) => { if (event.touches.length === 0) finishTouchScroll(); }}
       >
         <SlotHost slot="session.timeline.before" context={slotSummary} customizable />
-        {model.messages.length === 0 && !model.workflowRun && pendingSends.length === 0 && (
+        {model.messages.length === 0 && !model.workflowRun && pendingSends.length === 0 && startingPrompts.length === 0 && !model.startFailure && (
           <div className="empty">
             <div>{emptyCopy}</div>
           </div>
@@ -4826,7 +4834,13 @@ export default function Timeline({
             renderRewound={() => rewoundRows.map(renderRewindRow)}
           />
         )}
+        {startingPrompts.map((send) => <PendingPrompt key={send.id} send={send} />)}
         {pendingSends.map((send) => <PendingPrompt key={send.id} send={send} />)}
+        {model.startFailure && pendingSends.length === 0 && (
+          <Notice tone="error" className="timeline-start-failed" role="alert" heading={tr("timeline.startFailed")}>
+            {model.startFailure.message ? `${model.startFailure.message} ` : ""}{tr("timeline.startFailedHint")}
+          </Notice>
+        )}
         {turnBroken && turn.status === "failed" && turn.limit && sessionId && (
           <RateLimitNotice sessionId={sessionId} limit={turn.limit} turnError={turn.error} />
         )}

@@ -3,7 +3,8 @@
 import { getAccountLimits, getGuardrails, guardedProjectAddAllowed, limitedProjectAddAllowed } from "./guardrails.ts";
 import { useMemo, useSyncExternalStore } from "react";
 import { appendEventSegments, prependEventSegments } from "./eventSegments.ts";
-import { SESSION_SUMMARY_FIELDS } from "@polyth/contracts";
+import { SESSION_START_FAILED_EVENT, SESSION_SUMMARY_FIELDS } from "@polyth/contracts";
+import { sessionDraftLine } from "./sessionDraft.ts";
 import type {
   AgentDescriptor,
   AttachmentRef,
@@ -1910,7 +1911,8 @@ export function retiredPendingSends(
   let landed = 0;
   for (let i = merged.length - 1; i >= 0 && merged[i]!.seq > oldest.afterSeq; i -= 1) {
     const type = merged[i]!.type;
-    if (type === "user/message") {
+    // A failed start takes its first prompt back to the draft: no row comes.
+    if (type === "user/message" || type === SESSION_START_FAILED_EVENT) {
       landed += 1;
       continue;
     }
@@ -2217,6 +2219,13 @@ const hasCachedContent = (sessionId: string): boolean =>
 const keepVisible = (sessionId: string): boolean =>
   sessionId === state.activeSessionId || hasCachedContent(sessionId);
 
+/** An empty zombie: creation failed before any user turn and nothing of the
+ *  person's is in it. A chat holding a draft is not one: a failed start puts
+ *  its first prompt back there, and the navigator lists it as a draft. */
+const isEmptyZombie = (p: SessionProjection): boolean =>
+  !p.historyImport && (p.status === "failed" || p.status === "unknown") && p.lastTurnAt == null
+  && !sessionDraftLine(p) && !keepVisible(p.id);
+
 /** The project the open chat just moved to, here or on another device. A row
  *  that merely differs from the active project says nothing: that is ordinary
  *  mid-navigation state, so only a real change of the row's project counts. */
@@ -2245,8 +2254,7 @@ export function upsertSession(p: SessionProjection): void {
   // Drop empty zombie sessions — creation failed before any user turn. A
   // session whose history is already on screen (e.g. a workflow parent that
   // a runtime restart marked unknown) is not empty and must stay visible.
-  if (!p.historyImport && (p.status === "failed" || p.status === "unknown") && p.lastTurnAt == null
-    && !keepVisible(p.id)) {
+  if (isEmptyZombie(p)) {
     removeSession(p.id);
     return;
   }
@@ -2265,10 +2273,7 @@ export function upsertSession(p: SessionProjection): void {
 export function upsertSessions(list: readonly SessionProjection[]): void {
   if (list.length === 0) return;
   // Drop empty zombie sessions — creation failed before any user turn.
-  const zombieIds = new Set(
-    list.filter((p) => !p.historyImport && (p.status === "failed" || p.status === "unknown") && p.lastTurnAt == null
-      && !keepVisible(p.id)).map((p) => p.id),
-  );
+  const zombieIds = new Set(list.filter(isEmptyZombie).map((p) => p.id));
   const byId = new Map(list.filter((p) => !zombieIds.has(p.id)).map((p) => [p.id, p]));
   const sessions = state.sessions
     .filter((s) => !zombieIds.has(s.id))

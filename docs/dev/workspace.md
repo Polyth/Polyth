@@ -333,7 +333,14 @@ session dialog's isolated option (`POST /api/isolation/sessions`): a new chat
 with a managed checkout branched from the project's current checkout. Pass the
 requester's scoped `sessions` (`host.forSpace(rc.space).sessions`) so the chat
 is created in their Space and owned by them. Task trackers use it for
-**Isolated** task starts.
+**Isolated** task starts. An input with `start` (and the account-scoped
+`clientOperationId` of its first turn) goes to the requester's
+`SessionService.start` instead of `create`: the checkout is allocated first,
+then the chat starts in it and the reply carries the queued first turn. A
+resend for the same key calls `start` again on the existing chat with its
+recorded checkout, so nothing is allocated twice. `POST /api/worktrees/sessions`
+does the same for an ordinary linked worktree (a fresh codename branch, or the
+worktree of a named branch).
 
 ### Delegated isolation
 

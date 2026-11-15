@@ -60,6 +60,8 @@ const RECOVERY_LIFECYCLES: readonly ResourceLifecycle[] = ["active", "archived",
 const DELETE_LIFECYCLES: readonly ResourceLifecycle[] = [...RECOVERY_LIFECYCLES, "deleted"];
 /** Rows that canonical reconciliation finalizes once the domain projection is durable. */
 const PROVISIONING_LIFECYCLES: readonly ResourceLifecycle[] = ["provisioning", "quarantined"];
+/** A resent start may reach its row before canonical reconciliation finalized it. */
+const START_RESEND_LIFECYCLES: readonly ResourceLifecycle[] = ["active", ...PROVISIONING_LIFECYCLES];
 /** A navigator page is filled from at most this many store pages. */
 const SUMMARY_FILL_PAGES = 8;
 
@@ -162,6 +164,21 @@ export function accessControlledSessionService(ctx: SpaceContext, base: SessionS
           // A delegated subagent works inside its parent chat.
           if (input?.parentId) require(input.parentId, "collaborate");
           return create.call(target, input);
+        };
+      }
+      if (property === "start") {
+        const start = Reflect.get(target, property, receiver) as SessionService["start"];
+        if (typeof start !== "function") return start;
+        return async (input: Parameters<NonNullable<SessionService["start"]>>[0], ...rest: unknown[]) => {
+          if (input?.parentId) require(input.parentId, "collaborate");
+          // A resend reaches the row it made: it queues a turn there, so it
+          // needs what `send` needs. Any existing row this person cannot
+          // work in — another Space's included — answers not-found.
+          if (typeof input?.id === "string" && security.resources.resource(input.id)) {
+            require(input.id, "collaborate", START_RESEND_LIFECYCLES);
+            assertNotReprovisioning(input.id, ctx.userId);
+          }
+          return (start as (...args: unknown[]) => unknown).call(target, input, ...rest);
         };
       }
       if (property === "replyDelegatedPermission") {

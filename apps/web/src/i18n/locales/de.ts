@@ -2575,6 +2575,8 @@ export const de: AppMessages = {
   "timeline.thinking": "Denken",
   "timeline.turnAborted": "Zug abgebrochen",
   "timeline.turnFailed": "Zug fehlgeschlagen",
+  "timeline.startFailed": "Der Chat konnte nicht starten",
+  "timeline.startFailedHint": "Deine Nachricht ist wieder im Eingabefeld.",
   "timeline.unpinFromContext": "Aus dem Kontext lösen",
   "timeline.valueAdditionsValueDeletions": "{additions} Ergänzungen, {deletions} Löschungen",
   "timeline.valueCompleteOfValue": "{completed}/{total} abgeschlossen",

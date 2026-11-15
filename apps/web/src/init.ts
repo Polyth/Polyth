@@ -15,7 +15,7 @@ import { resolveActiveProjectId, shouldRefreshProjectsOnSyncOpen } from "./proje
 import { claimPersonalProjectAttempt } from "./personalProject.ts";
 import { projectIsolationLevel } from "@polyth/contracts";
 import { CONNECTION_RESTORED_EVENT, setConnectionGate } from "@polyth/contracts/transport-retry";
-import type { AttachmentRef, HarnessSelection, JsonObject, ManagedProjectInput, ModelRef, Project, ProjectCloneInput, ProjectDefaults, ProjectPatch, ResumeTurnOptions, SessionDeleteOptions, SessionEvent, SessionProjection } from "@polyth/contracts";
+import type { AttachmentRef, HarnessSelection, JsonObject, ManagedProjectInput, ModelRef, Project, ProjectCloneInput, ProjectDefaults, ProjectPatch, ResumeTurnOptions, SessionDeleteOptions, SessionEvent, SessionProjection, SessionStartRequest, StartSessionResult, StartWorktreeSessionInput } from "@polyth/contracts";
 import { suggestWorktreeBranch, temporaryWorktreeBranch } from "./worktreeSessions.ts";
 import { installPushDeepLinks, reconcilePushSubscription, registerServiceWorker } from "./push.ts";
 import { alertPersonMessage, installNotify } from "./notify.ts";
@@ -2105,6 +2105,8 @@ export interface CreateSessionOptions {
   /** Active chat lane. Omitted for an ordinary conversation. */
   purpose?: string;
   worktreePath?: string;
+  /** What the chat does once it exists, sent with the create (one request). */
+  start?: SessionStartRequest;
   /** Start loading the chat without waiting for its initial replay. */
   precache?: boolean;
   /** Decided once the id is authoritative: open the new chat (default) or
@@ -2127,6 +2129,8 @@ export interface IsolatedSessionOptions {
   purpose?: string;
   targetBranch?: string;
   sourceSessionId?: string;
+  /** As for `createSession`. */
+  start?: SessionStartRequest;
   precache?: boolean;
   activate?: (sessionId: string) => boolean;
   /** As for `createSession`. An isolated chat is created by the server's
@@ -2168,13 +2172,21 @@ export async function startIsolatedSession(
   projectId: string,
   opts: IsolatedSessionOptions = {},
 ): Promise<string> {
-  const { precache = false, activate, personDefaultHarnessId, ...requested } = opts;
+  return (await startIsolatedSessionWithStart(projectId, opts)).id;
+}
+
+/** `startIsolatedSession` that also answers whether the server took `start`. */
+export async function startIsolatedSessionWithStart(
+  projectId: string,
+  opts: IsolatedSessionOptions = {},
+): Promise<StartSessionResult> {
+  const { precache = false, activate, personDefaultHarnessId, start, ...requested } = opts;
   const input: typeof requested = personDefaultHarnessId
     ? { ...withoutRoute(requested), harness: { mode: "pinned", harnessId: personDefaultHarnessId } }
     : requested;
   const project = store.getState().projectRegistry.projects.find((candidate) => candidate.id === projectId);
   const { model, agent } = personDefaultHarnessId ? {} : compatibleCreationDefaults(project, opts);
-  let sessionId: string;
+  let result: StartSessionResult;
   try {
     const isolated = {
       projectId,
@@ -2186,17 +2198,20 @@ export async function startIsolatedSession(
       ...(input.sourceSessionId ? { sourceSessionId: input.sourceSessionId } : {}),
       ...(input.repositoryIds ? { repositoryIds: input.repositoryIds } : {}),
       ...(input.purpose ? { purpose: input.purpose } : {}),
+      ...(start ? { start } : {}),
     };
     // Keyed like createSession: a lost response resolves to the session (and
     // its managed worktree) the request made; a resend never allocates twice.
-    ({ id: sessionId } = await createSessionWithRecovery({
+    result = await createSessionWithRecovery({
       create: (clientOperationId) => api.createIsolatedSession({ ...isolated, clientOperationId }),
       status: (clientOperationId) => api.sessionCreateOperation(clientOperationId),
-    }));
+      ...(start ? { resendWhenCreated: true } : {}),
+    });
   } catch (error) {
     cleanupFailedStartupSessionFromError(error);
     throw error;
   }
+  const sessionId = result.id;
   await publishCreatedSession({
     id: sessionId,
     projectId,
@@ -2205,8 +2220,14 @@ export async function startIsolatedSession(
     ...(model ? { model } : {}),
     ...(agent ? { agent } : {}),
     ...(input.purpose ? { purpose: input.purpose } : {}),
-  }, { precache, activate });
-  return sessionId;
+  }, { precache, activate, starting: startTaken(result) });
+  return result;
+}
+
+/** The server took the create's `start` and owns the first turn. An older
+ *  server ignores `start` and answers the id alone. */
+export function startTaken(result: StartSessionResult): boolean {
+  return typeof result.queueId === "string" || typeof result.turnId === "string";
 }
 
 /** Instant spawn (UX): the id is authoritative and the session is seconds
@@ -2217,11 +2238,13 @@ export async function startIsolatedSession(
  *  away meanwhile keeps their place; the session is listed, not focused. */
 async function publishCreatedSession(
   seed: Omit<SessionProjection, "status" | "createdAt" | "updatedAt">,
-  opts: { precache: boolean; activate: ((sessionId: string) => boolean) | undefined },
+  opts: { precache: boolean; activate: ((sessionId: string) => boolean) | undefined; starting?: boolean },
 ): Promise<void> {
   const now = Date.now();
   const { id: sessionId, projectId } = seed;
-  store.seedSessionCache({ ...seed, status: "idle", createdAt: now, updatedAt: now });
+  // A started chat is reconciling until its runtime admits the first turn;
+  // the server's projection then takes over.
+  store.seedSessionCache({ ...seed, status: opts.starting ? "reconciling" : "idle", createdAt: now, updatedAt: now });
   rememberSessionHint(hydratedSessions, sessionId);
   if (opts.activate && !opts.activate(sessionId)) {
     void refreshSessions(projectId);
@@ -2283,7 +2306,12 @@ export async function createDefaultWorktree(
 }
 
 export async function createSession(projectId: string, opts: CreateSessionOptions = {}): Promise<string> {
-  const { precache = false, activate, personDefaultHarnessId, ...requested } = opts;
+  return (await createSessionWithStart(projectId, opts)).id;
+}
+
+/** `createSession` that also answers whether the server took `start`. */
+export async function createSessionWithStart(projectId: string, opts: CreateSessionOptions = {}): Promise<StartSessionResult> {
+  const { precache = false, activate, personDefaultHarnessId, start, ...requested } = opts;
   const input: typeof requested = personDefaultHarnessId ? withoutRoute(requested) : requested;
   const project = store.getState().projectRegistry.projects.find((candidate) => candidate.id === projectId);
   const { model, agent } = personDefaultHarnessId ? {} : compatibleCreationDefaults(project, opts);
@@ -2292,7 +2320,7 @@ export async function createSession(projectId: string, opts: CreateSessionOption
     && project?.defaults?.worktreeBehavior === "fresh-worktree"
     && projectIsolationLevel(project.defaults) !== "off"
   ) {
-    return startIsolatedSession(projectId, {
+    return startIsolatedSessionWithStart(projectId, {
       ...(opts.harness ? { harness: opts.harness } : {}),
       ...(opts.repositoryIds ? { repositoryIds: opts.repositoryIds } : {}),
       ...(opts.title ? { title: opts.title } : {}),
@@ -2300,30 +2328,34 @@ export async function createSession(projectId: string, opts: CreateSessionOption
       ...(opts.agent ? { agent: opts.agent } : {}),
       ...(opts.purpose ? { purpose: opts.purpose } : {}),
       ...(personDefaultHarnessId ? { personDefaultHarnessId } : {}),
+      ...(start ? { start } : {}),
       precache,
       ...(activate ? { activate } : {}),
     });
   }
   const worktreePath = opts.worktreePath;
-  let sessionId: string;
+  let result: StartSessionResult;
   try {
     // Keyed: a lost response (phone on Polyth Link) resolves to the session the
     // request made instead of an "outcome unknown" or a duplicate on resend.
-    ({ id: sessionId } = await createSessionWithRecovery({
+    result = await createSessionWithRecovery({
       create: (clientOperationId) => api.createSession({
         projectId,
         ...input,
         ...(model ? { model } : {}),
         ...(agent ? { agent } : {}),
         ...(worktreePath ? { worktreePath } : {}),
+        ...(start ? { start } : {}),
         clientOperationId,
       }),
       status: (clientOperationId) => api.sessionCreateOperation(clientOperationId),
-    }));
+      ...(start ? { resendWhenCreated: true } : {}),
+    });
   } catch (error) {
     cleanupFailedStartupSessionFromError(error);
     throw error;
   }
+  const sessionId = result.id;
   await publishCreatedSession({
     id: sessionId,
     projectId,
@@ -2333,8 +2365,51 @@ export async function createSession(projectId: string, opts: CreateSessionOption
     ...(agent ? { agent } : {}),
     ...(input.purpose ? { purpose: input.purpose } : {}),
     ...(worktreePath ? { worktreePath } : {}),
-  }, { precache, activate });
-  return sessionId;
+  }, { precache, activate, starting: startTaken(result) });
+  return result;
+}
+
+/** Start a chat in a linked worktree the server allocates (`new-worktree` or
+ *  `branch`): one keyed request instead of a client worktree step plus a
+ *  create. Throws `{ status: 404 }` from a server without the route. */
+export async function startWorktreeSession(
+  projectId: string,
+  target: StartWorktreeSessionInput["target"],
+  opts: Omit<CreateSessionOptions, "worktreePath"> = {},
+): Promise<StartSessionResult> {
+  const { precache = false, activate, personDefaultHarnessId, start, ...requested } = opts;
+  const input: typeof requested = personDefaultHarnessId ? withoutRoute(requested) : requested;
+  const project = store.getState().projectRegistry.projects.find((candidate) => candidate.id === projectId);
+  const { model, agent } = personDefaultHarnessId ? {} : compatibleCreationDefaults(project, opts);
+  let result: StartSessionResult;
+  try {
+    result = await createSessionWithRecovery({
+      create: (clientOperationId) => api.startWorktreeSession({
+        projectId,
+        target,
+        ...input,
+        ...(model ? { model } : {}),
+        ...(agent ? { agent } : {}),
+        ...(start ? { start } : {}),
+        clientOperationId,
+      }),
+      status: (clientOperationId) => api.sessionCreateOperation(clientOperationId),
+      ...(start ? { resendWhenCreated: true } : {}),
+    });
+  } catch (error) {
+    cleanupFailedStartupSessionFromError(error);
+    throw error;
+  }
+  await publishCreatedSession({
+    id: result.id,
+    projectId,
+    title: input.title ?? "",
+    ...(input.harness ? { harness: input.harness } : {}),
+    ...(model ? { model } : {}),
+    ...(agent ? { agent } : {}),
+    ...(input.purpose ? { purpose: input.purpose } : {}),
+  }, { precache, activate, starting: startTaken(result) });
+  return result;
 }
 
 export async function forkSession(sessionId: string, atSeq?: number): Promise<void> {

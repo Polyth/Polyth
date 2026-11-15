@@ -49,6 +49,7 @@ export {
   AGENT_EVENT_SOURCES,
   SESSION_ATTENTION_SERVICE,
   SESSION_PURPOSES,
+  SESSION_START_STEPS,
   SERVER_BEHAVIOR_SECTIONS,
   serverServiceKey,
   type AppendEventOptions,
@@ -97,6 +98,9 @@ export {
   type AgentEventSourceDescriptor,
   type AgentEventSources,
   type SessionPurposeRegistry,
+  type SessionStartStep,
+  type SessionStartStepContext,
+  type SessionStartStepRegistry,
   type ServerBehaviorSectionRegistry,
   type SessionRuntimeBinding,
 } from "./serverPackage.ts";

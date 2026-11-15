@@ -2575,6 +2575,8 @@ export const uk: AppMessages = {
   "timeline.thinking": "Міркування",
   "timeline.turnAborted": "Хід перервано",
   "timeline.turnFailed": "Хід завершився збоєм",
+  "timeline.startFailed": "Чат не вдалося запустити",
+  "timeline.startFailedHint": "Ваше повідомлення повернулося в поле вводу.",
   "timeline.unpinFromContext": "Відкріпити від контексту",
   "timeline.valueAdditionsValueDeletions": "Додано: {additions}, вилучено: {deletions}",
   "timeline.valueCompleteOfValue": "Завершено: {completed}/{total}",

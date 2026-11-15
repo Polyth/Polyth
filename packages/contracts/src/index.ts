@@ -1525,6 +1525,47 @@ export interface CreateSessionInput {
   backendSessionId?: string;
 }
 export interface SessionRef { id: string }
+/** What a new chat does once it exists. Sent with its create so the server
+ *  owns the whole start: no later client request is needed, and a client that
+ *  closes after the request cannot lose the prompt. */
+export interface SessionStartRequest {
+  /** First prompt. Queued durably with the chat and delivered once its
+   *  runtime is ready. Its model/agent are the chat's own creation route. */
+  firstTurn?: Pick<UserTurnInput, "text" | "attachments" | "command" | "autoTitle">;
+  /** As `UserTurnInput.agentProfileId`: a string selects a profile, `null`
+   *  clears a project default, omitted inherits it. */
+  agentProfileId?: string | null;
+  /** The chat's approval setting, present from its first projection. */
+  autoAccept?: AutoAcceptSetting;
+  /** Package start-step payloads keyed by step id (`SESSION_START_STEPS` in
+   *  `@polyth/plugins`). An unknown id is rejected before anything is created. */
+  extensions?: Record<string, JsonObject>;
+}
+export interface StartSessionInput extends CreateSessionInput {
+  start: SessionStartRequest;
+  /** Account-scoped key of the first turn's admission (`UserTurnInput.clientOperationId`).
+   *  A repeated start with the same key never queues the prompt twice. */
+  clientOperationId?: string;
+}
+/** `queueId` while the first turn waits for the runtime; `turnId` when the
+ *  runtime was already there and admitted it at once. */
+export interface StartSessionResult extends SessionRef {
+  queueId?: string;
+  turnId?: string;
+}
+/** `delivery/fallback-queued` reason of a start's first turn: the chat is
+ *  starting, not stalled. */
+export const SESSION_STARTING_QUEUE_REASON = "session-starting" as const;
+/** A started chat whose runtime could not be created. The first prompt left
+ *  the queue: `text` is back in its author's draft, and `attachments` name the
+ *  pills to restore. Ignorable; old reducers skip it. */
+export const SESSION_START_FAILED_EVENT = "session/start-failed" as const;
+export interface SessionStartFailedData {
+  code: string;
+  message: string;
+  text?: string;
+  attachments?: AttachmentRef[];
+}
 export interface TurnRef { turnId: string }
 /** Explicit per-turn/session memory narrowing. `inherit` preserves the
  * project/session policy; `off` can only reduce delivery or harvesting. */
@@ -2336,6 +2377,26 @@ export interface CreateIsolatedSessionInput {
   targetBranch?: string;
 }
 
+/** `POST /api/worktrees/sessions`: start a chat in a linked worktree the
+ *  server allocates first, so the client makes one request. `new-worktree`
+ *  picks a unique codename branch from `base` (or HEAD); `branch` opens or
+ *  creates the worktree of that branch. Keyed by `clientOperationId` like
+ *  `createSession`: a resend returns the first chat and its worktree. */
+export interface StartWorktreeSessionInput {
+  projectId: string;
+  target:
+    | { kind: "new-worktree"; base?: string }
+    | { kind: "branch"; branch: string; base?: string };
+  purpose?: string;
+  repositoryIds?: readonly string[];
+  harness?: HarnessSelection;
+  title?: string;
+  model?: ModelRef;
+  agent?: string;
+  start?: SessionStartRequest;
+  clientOperationId?: string;
+}
+
 export interface IsolationSuggestionDto {
   eligible: boolean;
   hasChanges: boolean;
@@ -2870,6 +2931,8 @@ export interface SessionSpawnTimingDto {
   runtimeAcquireMs?: number;
   nativeSessionCreateMs?: number;
   turnAdmissionMs?: number;
+  /** A start only: from validated creation to its reply (row and first turn durable). */
+  startReplyMs?: number;
   /** From validated creation to the first accepted runtime turn-content event. */
   firstRuntimeEventMs?: number;
   /** True only when acquisition reused an initialized runtime entry. */
@@ -2945,6 +3008,12 @@ export interface SessionService {
    *  continued instead of starting another. */
   restartRuntime?(sessionId: string): Promise<SessionProjection>;
   create(input: CreateSessionInput): Promise<SessionRef>;
+  /** Create a chat and own its whole start. Resolves once the canonical row
+   *  and the first turn's queue row are durable — before the runtime exists.
+   *  Runtime creation and delivery continue on the server, survive a restart,
+   *  and a failure leaves the chat `failed` with `SESSION_START_FAILED_EVENT`.
+   *  `admission` is server-only, as for `send`. */
+  start?(input: StartSessionInput, admission?: TurnAdmission): Promise<StartSessionResult>;
   /** Canonical membership mutation. Preserves session identity and rejects
    * stale revisions or an unsafe in-flight execution transition. */
   updateWorkspace?(sessionId: string, selection: SessionWorkspaceSelection): Promise<SessionProjection>;

@@ -16,7 +16,7 @@ import type {
   SessionProjection,
   SpaceContext,
 } from "@polyth/contracts";
-import type { ProjectService, RouteHandler, SessionAccessLevel, SessionEvent, SessionPersistence, SessionService } from "@polyth/contracts";
+import type { CreateSessionInput, ProjectService, RouteHandler, SessionAccessLevel, SessionEvent, SessionPersistence, SessionService, SessionStartRequest, StartSessionResult } from "@polyth/contracts";
 import { REMOTE_CAPABILITY, roleAtLeast, sessionAccessAtLeast } from "@polyth/contracts";
 import {
   SOURCE_CONTROL_CREDENTIAL_REGISTRY,
@@ -73,7 +73,8 @@ import {
   type IsolationService,
   type PreserveSessionMedia,
 } from "./sessionIntegration.ts";
-import { clientOperationIdInput, sessionIdForCreateOperation } from "@polyth/session/create-operation";
+import { accountScopedClientOperationId, clientOperationIdInput, sessionIdForCreateOperation } from "@polyth/session/create-operation";
+import { temporaryWorktreeBranch } from "@polyth/session/worktree-names";
 import { createTemporaryWorktreeBranchService, type TemporaryWorktreeBranchService } from "./temporaryWorktreeBranches.ts";
 
 const COMMIT_PROMPT_VERSION = 3;
@@ -325,7 +326,7 @@ export function gitRoutes(deps: {
   scopedProjects?: (space: import("@polyth/contracts").SpaceContext) => Pick<ProjectService, "get" | "add" | "addRemote">;
   /** The requester's scoped sessions, so a chat a person starts here is
    *  theirs; defaults to `sessions`. */
-  scopedSessions?: (space: import("@polyth/contracts").SpaceContext) => Pick<SessionService, "create">;
+  scopedSessions?: (space: import("@polyth/contracts").SpaceContext) => Pick<SessionService, "create" | "start" | "snapshot">;
   /** Space source-control identities (profiles), for cloning with an
    *  identity's SSH key. Optional so existing test fakes stay valid. */
   profiles?: { read(space: import("@polyth/contracts").SpaceContext): { state: SourceControlProfileState } };
@@ -365,6 +366,107 @@ export function gitRoutes(deps: {
     return project;
   };
   const projectRootOf = async (projectId: string | null | undefined): Promise<string> => (await projectOf(projectId)).path;
+
+  // One keyed start at a time: a resend that overtakes the original waits for
+  // it and then finds its chat instead of allocating a second worktree.
+  const worktreeStarts = new Map<string, Promise<unknown>>();
+  const serializedByKey = <T>(key: string | undefined, run: () => Promise<T>): Promise<T> => {
+    if (!key) return run();
+    const next = (worktreeStarts.get(key) ?? Promise.resolve()).then(run, run);
+    const settled = next.catch(() => undefined).finally(() => {
+      if (worktreeStarts.get(key) === settled) worktreeStarts.delete(key);
+    });
+    worktreeStarts.set(key, settled);
+    return next;
+  };
+
+  /** `POST /api/worktrees/sessions` (StartWorktreeSessionInput): allocate the
+   *  linked worktree, then create — or start — the chat in it, so the client
+   *  makes one request. */
+  const startWorktreeSession = async (input: Record<string, unknown>, space: SpaceContext): Promise<StartSessionResult> => {
+    const invalid = (message: string) => Object.assign(new Error(message), { code: "invalid-input" });
+    const projectId = String(input.projectId ?? "").trim();
+    if (!projectId) throw invalid("projectId required");
+    const target = input.target as { kind?: unknown; branch?: unknown; base?: unknown } | null | undefined;
+    if (target?.kind !== "new-worktree" && target?.kind !== "branch") throw invalid("target.kind must be new-worktree or branch");
+    const branchTarget = target.kind === "branch" ? String(target.branch ?? "").trim() : undefined;
+    if (target.kind === "branch" && !branchTarget) throw invalid("target.branch required");
+    if (branchTarget && isManagedBranch(branchTarget)) throw invalid("managed isolation branches cannot be used for ordinary worktrees");
+    const base = typeof target.base === "string" && target.base ? target.base : undefined;
+    if (input.repositoryIds !== undefined
+      && (!Array.isArray(input.repositoryIds) || !input.repositoryIds.every((id: unknown) => typeof id === "string"))) {
+      throw invalid("repositoryIds must be a list of strings");
+    }
+    const harness = harnessSelectionInput(input.harness);
+    const start = startRequestInput(input.start);
+    const requestedOperationId = clientOperationIdInput(input.clientOperationId);
+    const sessionId = requestedOperationId ? sessionIdForCreateOperation(requestedOperationId, space) : undefined;
+    const turnKey = requestedOperationId ? accountScopedClientOperationId(requestedOperationId, space.userId) : undefined;
+    // The requester's own Space decides whether the project exists for them.
+    const project = await (deps.scopedProjects?.(space) ?? deps.projects).get(projectId);
+    if (!project) throw Object.assign(new Error("unknown project"), { code: "not-found" });
+    const sessions: Pick<SessionService, "create" | "start" | "snapshot"> = deps.scopedSessions?.(space) ?? deps.sessions;
+    const begin = (createInput: CreateSessionInput): Promise<StartSessionResult> => start && sessions.start
+      ? sessions.start({ ...createInput, start, ...(turnKey ? { clientOperationId: turnKey } : {}) })
+      : sessions.create(createInput);
+    return serializedByKey(sessionId, async () => {
+      if (sessionId) {
+        const prior = await sessions.snapshot(sessionId).catch((error: unknown) => {
+          if ((error as { code?: unknown })?.code === "not-found") return undefined;
+          throw error;
+        });
+        if (prior) {
+          if (prior.projectId !== project.id || !prior.worktreePath || prior.isolation) {
+            throw Object.assign(new Error("clientOperationId was already used for another session"), { code: "conflict" });
+          }
+          if (prior.status === "failed") {
+            throw Object.assign(new Error("session creation failed"), {
+              code: "session-create-failed", status: 409, mutationOutcome: "rejected", sessionId,
+            });
+          }
+          // As for an isolated start: queue the first turn if the first
+          // request stopped before it, and allocate nothing.
+          return start && sessions.start
+            ? begin({ id: sessionId, projectId: project.id, worktreePath: prior.worktreePath, ...(prior.workspace ? { workspace: prior.workspace } : {}) })
+            : { id: sessionId };
+        }
+      }
+      const root = project.path;
+      let worktreePath: string | undefined;
+      if (branchTarget) {
+        worktreePath = (await git.worktrees.create(root, { branch: branchTarget, ...(base ? { base } : {}) })).path;
+      } else {
+        const taken = [
+          ...(await git.worktrees.list(root)).map((worktree) => worktree.branch).filter((branch): branch is string => !!branch),
+          ...(await git.branches(root)).branches.map((branch) => branch.name),
+        ];
+        // `newBranchOnly` makes Git the collision authority: another device
+        // may take a codename after the listing, so pick a different one.
+        for (let attempt = 0; attempt < 8 && !worktreePath; attempt += 1) {
+          const branch = temporaryWorktreeBranch(taken);
+          taken.push(branch);
+          try {
+            worktreePath = (await git.worktrees.create(root, { branch, ...(base ? { base } : {}), newBranchOnly: true })).path;
+          } catch (error) {
+            if ((error as { code?: unknown })?.code !== "conflict") throw error;
+          }
+        }
+        if (!worktreePath) throw Object.assign(new Error("could not allocate a unique worktree branch"), { code: "conflict" });
+      }
+      await announceTopology(project.id, root);
+      return begin({
+        ...(sessionId ? { id: sessionId } : {}),
+        projectId: project.id,
+        worktreePath,
+        ...(input.repositoryIds ? { repositoryIds: input.repositoryIds as string[] } : {}),
+        ...(harness ? { harness } : {}),
+        ...(typeof input.title === "string" && input.title ? { title: input.title } : {}),
+        ...(typeof input.purpose === "string" ? { purpose: input.purpose } : {}),
+        ...(input.model && typeof input.model === "object" ? { model: input.model as NonNullable<CreateSessionInput["model"]> } : {}),
+        ...(typeof input.agent === "string" && input.agent ? { agent: input.agent } : {}),
+      });
+    });
+  };
   /** The checkout's own Git identity as Polyth manages it. */
   const checkoutIdentity = async (root: string) => ({
     ...(await git.identity(root)),
@@ -906,6 +1008,11 @@ export function gitRoutes(deps: {
       return true;
     }
 
+    if (path === "/api/worktrees/sessions" && method === "POST") {
+      json(200, await startWorktreeSession(await body(), rc.space));
+      return true;
+    }
+
     if (method !== "POST") return false;
     if (path === "/api/git/identity") {
       requireIdentityAuthority(rc.space);
@@ -1121,6 +1228,26 @@ function checkoutTarget(raw: unknown): { branch: string; path: string } {
   return { branch: target.branch, path: target.path };
 }
 
+/** A `start` sent with a create. Only "is it an object" is decided here; the
+ *  session service's `start` validates its fields. */
+function startRequestInput(value: unknown): SessionStartRequest | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw Object.assign(new Error("start must be an object"), { code: "invalid-input" });
+  }
+  return value as SessionStartRequest;
+}
+
+function harnessSelectionInput(value: unknown): { mode: "auto" } | { mode: "pinned"; harnessId: string } | undefined {
+  if (value === undefined) return undefined;
+  const raw = value as { mode?: unknown; harnessId?: unknown } | null;
+  if (raw?.mode === "auto") return { mode: "auto" };
+  if (raw?.mode === "pinned" && typeof raw.harnessId === "string" && /^[a-z][a-z0-9-]*$/.test(raw.harnessId)) {
+    return { mode: "pinned", harnessId: raw.harnessId };
+  }
+  throw Object.assign(new Error("invalid harness selection"), { code: "invalid-input" });
+}
+
 export function isolationRoutes(deps: {
   isolation: IsolationService;
   /** The requester's scoped sessions, so a new isolated chat is owned by the
@@ -1139,13 +1266,7 @@ export function isolationRoutes(deps: {
       const input = await body();
       const projectId = String(input.projectId ?? "").trim();
       if (!projectId) throw Object.assign(new Error("projectId required"), { code: "invalid-input" });
-      const rawHarness = input.harness as { mode?: unknown; harnessId?: unknown } | undefined;
-      const harness = rawHarness?.mode === "auto"
-        ? { mode: "auto" as const }
-        : rawHarness?.mode === "pinned" && typeof rawHarness.harnessId === "string" && /^[a-z][a-z0-9-]*$/.test(rawHarness.harnessId)
-          ? { mode: "pinned" as const, harnessId: rawHarness.harnessId }
-          : undefined;
-      if (input.harness !== undefined && !harness) throw Object.assign(new Error("invalid harness selection"), { code: "invalid-input" });
+      const harness = harnessSelectionInput(input.harness);
       let repositoryIds: string[] | undefined;
       if (input.repositoryIds !== undefined) {
         if (!Array.isArray(input.repositoryIds)
@@ -1168,6 +1289,9 @@ export function isolationRoutes(deps: {
         ...(typeof input.agent === "string" ? { agent: input.agent } : {}),
         ...(typeof input.sourceSessionId === "string" ? { sourceSessionId: input.sourceSessionId } : {}),
         ...(typeof input.targetBranch === "string" ? { targetBranch: input.targetBranch } : {}),
+        // Its shape is validated by the session service's `start`.
+        ...(startRequestInput(input.start) ? { start: startRequestInput(input.start)! } : {}),
+        ...(requestedOperationId ? { clientOperationId: accountScopedClientOperationId(requestedOperationId, space.userId) } : {}),
       }, {
         ...(requestedOperationId ? { sessionId: sessionIdForCreateOperation(requestedOperationId, space) } : {}),
         ...(deps.scopedSessions ? { sessions: deps.scopedSessions(space) } : {}),
@@ -1342,6 +1466,7 @@ export const GIT_REMOTE_ACCESS: RemoteAccessPolicy = {
     { methods: ["POST"], path: "/api/git/identity", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/worktrees", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/worktrees/remove", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/worktrees/sessions", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/isolation/sessions", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/isolation/:sessionId/merge", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/isolation/:sessionId/retarget", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },

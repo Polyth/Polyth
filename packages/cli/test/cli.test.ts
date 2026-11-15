@@ -139,3 +139,38 @@ test("help, version and completion run without a server", async () => {
   assert.match(completionScript("fish"), /__fish_use_subcommand/);
   assert.match(completionScript("zsh"), /compdef _polyth polyth/);
 });
+
+test("a new chat sends its first prompt with the create, and only falls back on an older server", async () => {
+  const { newSession } = await import("../src/commands/sessions.ts");
+  const run = async (reply: Record<string, unknown>) => {
+    const posts: Array<{ path: string; body: Record<string, unknown> }> = [];
+    const client = {
+      target: { kind: "socket", socketPath: "/tmp/unused.sock", dataDir: "/tmp/unused" },
+      request: async () => { throw new Error("unused"); },
+      get: async (path: string) => path === "/api/projects" ? [{ id: "p1", name: "P", path: process.cwd() }] : [],
+      post: async (path: string, body?: unknown) => {
+        posts.push({ path, body: (body ?? {}) as Record<string, unknown> });
+        return path === "/api/sessions" ? reply : { ok: true };
+      },
+    };
+    const ctx = {
+      o: { json: false, color: false, width: 80, out() {}, err() {}, write() {}, data() {} },
+      client: () => client,
+    } as unknown as Parameters<typeof newSession.run>[0];
+    const args = parseArgs(["hello", "-p", "p1"], newSession.flags ?? []);
+    const code = await newSession.run(ctx, args);
+    return { code, posts };
+  };
+
+  const delivered = await run({ id: "s1", queueId: "q1" });
+  assert.equal(delivered.code, 0);
+  assert.deepEqual(delivered.posts.map((post) => post.path), ["/api/sessions"]);
+  const create = delivered.posts[0]!.body;
+  assert.deepEqual(create.start, { firstTurn: { text: "hello" } });
+  assert.match(String(create.clientOperationId), /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+
+  const older = await run({ id: "s1" });
+  assert.equal(older.code, 0);
+  assert.deepEqual(older.posts.map((post) => post.path), ["/api/sessions", "/api/sessions/s1/message"]);
+  assert.equal(older.posts[1]!.body.text, "hello");
+});

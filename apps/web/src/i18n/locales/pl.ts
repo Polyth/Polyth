@@ -2575,6 +2575,8 @@ export const pl: AppMessages = {
   "timeline.thinking": "Myślenie",
   "timeline.turnAborted": "Przerwano turę",
   "timeline.turnFailed": "Tura nieudana",
+  "timeline.startFailed": "Nie udało się uruchomić czatu",
+  "timeline.startFailedHint": "Twoja wiadomość wróciła do pola wpisywania.",
   "timeline.unpinFromContext": "Odepnij od kontekstu",
   "timeline.valueAdditionsValueDeletions": "{additions} dodanych, {deletions} usuniętych",
   "timeline.valueCompleteOfValue": "{completed}/{total} ukończono",

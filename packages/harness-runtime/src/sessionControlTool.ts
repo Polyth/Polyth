@@ -548,7 +548,8 @@ export function registerPolythSessionControl(
           });
           options.delegations?.noteDelegation(caller.id);
         }
-        const ref = delegated ? { id: delegated.id } : await scoped.sessions.create({
+        const prompt = typeof parameters.prompt === "string" ? parameters.prompt : undefined;
+        const fields = {
           projectId: targetProjectId,
           title: sessionTitle,
           ...(parentId ? { parentId } : {}),
@@ -556,8 +557,16 @@ export function registerPolythSessionControl(
           ...(selectedModel ? { model: selectedModel } : {}),
           ...(agent ? { agent } : {}),
           ...(requestedWorktreePath ? { worktreePath: requestedWorktreePath } : {}),
-        });
-        const prompt = typeof parameters.prompt === "string" ? parameters.prompt : undefined;
+        };
+        // A prompt travels with the create: the server queues it durably with
+        // the row and delivers it once the runtime is ready, so this call does
+        // not wait for the runtime and a restart cannot strand the prompt. A
+        // start that cannot run ends as `session/start-failed`, which a watch
+        // reports as a failure.
+        const started = !delegated && prompt !== undefined && scoped.sessions.start
+          ? await scoped.sessions.start({ ...fields, start: { firstTurn: { text: prompt } } })
+          : undefined;
+        const ref = delegated ? { id: delegated.id } : started ?? await scoped.sessions.create(fields);
         // An isolated child's result is unusable until merged, so its
         // delegator is woken by default when it terminates.
         const watchCaller = action === "agent.spawn"
@@ -572,8 +581,10 @@ export function registerPolythSessionControl(
             once: true,
           });
         }
-        let sendResult: unknown;
-        if (prompt !== undefined) {
+        let sendResult: unknown = started
+          ? (started.turnId ? { turnId: started.turnId } : { queueId: started.queueId })
+          : undefined;
+        if (prompt !== undefined && !started) {
           // A failed acknowledgement does not prove the child was not admitted.
           // Preserve its durable watch so a later terminal event still reaches
           // the caller; explicit unwatch/session deletion owns cleanup.
@@ -583,9 +594,15 @@ export function registerPolythSessionControl(
             ...(agent ? { agent } : {}),
           });
         }
+        const created = await scoped.sessions.snapshot(ref.id);
         return {
           output: JSON.stringify({
-            session: publicSession(await scoped.sessions.snapshot(ref.id)),
+            session: publicSession(created),
+            // A start that failed before its watch existed is reported here;
+            // a later one reaches the caller through the watch.
+            ...(started && created.status === "failed" ? {
+              startFailed: "This session could not start and its prompt was not delivered. Inspect it with session.debug, then spawn again with another harness or model.",
+            } : {}),
             ...(delegated ? {
               workspace: {
                 mode: "isolated",

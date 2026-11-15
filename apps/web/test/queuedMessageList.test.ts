@@ -91,6 +91,7 @@ const {
   latestSteerableQueuedItem,
   moveQueuedItem,
   queueStalledOnRecovery,
+  startingQueueIds,
 } = await import("../src/components/QueuedMessageList.tsx");
 const { applyEvents } = await import("../src/store.ts");
 
@@ -557,4 +558,35 @@ test("a stalled queue shows why it is waiting and Resume retries the oldest row"
     await act(async () => root.unmount());
     globalThis.fetch = originalFetch;
   }
+});
+
+test("a starting chat's first prompt is neither a queue chip nor a stall", async () => {
+  const originalFetch = globalThis.fetch;
+  const queued: QueueItemDto[] = [
+    { id: "first", sessionId: "starting", position: 0, text: "build the thing", delivery: "normal", createdAt: 1 },
+    { id: "follow", sessionId: "starting", position: 1, text: "and test it", delivery: "queue", createdAt: 2 },
+  ];
+  globalThis.fetch = (async () => response(queued)) as unknown as typeof fetch;
+  const events = [
+    { id: "starting-e1", sessionId: "starting", seq: 1, time: 1, v: 1,
+      type: "delivery/fallback-queued", data: { queueId: "first", reason: "session-starting" } },
+    { id: "starting-e2", sessionId: "starting", seq: 2, time: 1, v: 1,
+      type: "queue/enqueued", data: { queueId: "first", text: "build the thing", delivery: "normal" } },
+  ] as SessionEvent[];
+  applyEvents(events);
+  assert.deepEqual([...startingQueueIds(events)], ["first"]);
+  assert.equal(queueStalledOnRecovery(events, queued), false, "a starting chat is not stalled");
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(createElement(QueuedMessageList, { sessionId: "starting" })));
+    const chips = [...container.querySelectorAll<HTMLElement>("[data-queue-id]")].map((chip) => chip.dataset.queueId);
+    assert.deepEqual(chips, ["follow"], "only the follow-up is a chip");
+    assert.equal(container.querySelector(".queue-chip-stalled"), null);
+  } finally {
+    await act(async () => root.unmount());
+    globalThis.fetch = originalFetch;
+  }
+  // Once its canonical prompt lands with the queueId, the row is no longer starting.
+  assert.equal(startingQueueIds([...events, ev("user/message", { queueId: "first", text: "build the thing" })]).size, 0);
 });

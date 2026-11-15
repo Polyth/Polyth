@@ -374,9 +374,13 @@ them: `registerAddMenuItem` adds one Add-menu row (after the mention row; `short
 is no longer drawn) whose `activate`
 gets project/session ids, the draft, `openDialog(render)`, `insertText` and
 `error`; `registerPasteHandler` sees pasted text before the default paste and
-consumes it by returning true (GitHub URLs); `registerSessionCreatedHook` runs,
-in registration order and awaited, after a send creates a new session (handoff
-imports). Registrations are disposed with the package activation.
+consumes it by returning true (GitHub URLs); `registerSessionStartExtension`
+adds a start step: its `collect({ projectId, text })` is asked once per Send on
+a new chat and its payload rides that chat's single start request as
+`start.extensions[id]` (handoff imports); `legacy(context, payload)` runs only
+when an older server ignored `start`. `registerSessionCreatedHook` runs, in
+registration order and awaited, after a send creates a new session on that
+older-server path. Registrations are disposed with the package activation.
 
 **Composer modes.** `registerMode(mode)` adds a `ComposerMode`: a package-owned
 destination for the draft (By the way's side questions,
@@ -2220,8 +2224,50 @@ overwrite the next prompt. Rejected sends restore the submitted text only when
 no newer input edit has taken its place; when the sending composer is gone, the
 one now showing that chat takes the text back into its empty input.
 
+**First send is one request:** Send on a fresh chat makes one keyed create
+that carries the first turn (`SessionStartRequest`: `firstTurn`, the
+agent profile, the approval setting unless it inherits, and start steps —
+`goals.attach` for the goal toggle plus every registered start extension).
+Main or an existing worktree uses `createSession`, Isolate uses
+`createIsolatedSession` (a picked isolation checkout still creates its
+worktree first), a new worktree or branch uses `startWorktreeSession`. A reply
+with `queueId` or `turnId` means the server owns the start; the client only
+binds the echo and spawn, carries text typed meanwhile into the chat, clears the
+new-chat draft and pills and reloads prompt history. A bare `{ id }` (an older
+server) runs the old chain below plus each extension's `legacy`; a 404 from
+`startWorktreeSession` falls back to the client worktree step. A lost reply is
+resolved by the create-operation probe and, for a start, one resend with the
+same key; anything else stays outcome-unknown. The input is never disabled
+while the chat starts; only Send is held until the new id is bound, then a
+follow-up is an ordinary send the server queues behind the first turn.
+
+A start swaps composer instances (hero, the transcript composer before the chat
+has an id when the create is slower than the hero hold, the transcript composer
+with it), and a chat's stored draft is hidden while its first prompt is in
+flight. Text typed since Send therefore lives in `carriedStartInput`
+(`Composer.tsx`), keyed by the spawn until the id is known and by the chat
+after: each mounting composer takes it as live input, focus follows the same
+key (`composerFocusCarry`), and the entry is dropped when draft autosave
+resumes. It is also written to the chat's draft and synced, so a reload keeps
+it.
+
+While the chat starts, its first prompt waits on the server queue with the
+`delivery/fallback-queued` reason `session-starting`: the timeline shows that
+row as the prompt (the submit-frame echo hands over to it), the queue list
+never shows it as a chip and never calls it stalled, and the "Spawning agent…"
+dock shows while such a row waits — also after a reload or on another device.
+The projection status is no guide while it does (`reconciling`, then `idle`
+until the prompt is admitted), so `sessionStartingFromServer` reads the row and
+only excludes `failed` and `archived`; tying it to `reconciling` flashed the
+new-chat hero back twice per start. `session/start-failed` shows an error
+`Notice` with the server's reason in the timeline; the server has put the text
+back in the author's draft, which arrives through ordinary draft sync. A
+failed or unknown chat that never ran is swept from the store only when it
+holds no draft (`isEmptyZombie`), so a failed start stays listed as a draft.
+Pinned by `composerSessionStart.test.ts` and `sessionStartEvents.test.ts`.
+
 **First send is detached from navigation:** once Send is pressed on a fresh
-chat, create → setup (auto-approve, goal, handoff) → first prompt runs to
+chat, the create (and, on an older server, setup and the first prompt) runs to
 completion even if the user opens another chat or project meanwhile. Only a
 changed connection, account or Space (`persistenceScopeIsCurrent`) aborts it;
 the captured project/session name the target, not the current view. The new

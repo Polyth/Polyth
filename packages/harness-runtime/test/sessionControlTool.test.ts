@@ -989,3 +989,56 @@ test("session.send queues behind a busy chat by default, or interrupts or steers
   assert.equal(got.session.paused, true, "the delegator sees the pause, not just an idle session");
   await registration.dispose();
 });
+
+test("agent.spawn sends its prompt with the create when the server can start a chat", async () => {
+  const project: Project = { id: "p1", name: "Current", path: "/projects/p1", spaceId: space.spaceId, createdAt: 1 };
+  const rows = new Map<string, SessionProjection>([["caller", projection("caller")]]);
+  const starts: Array<Record<string, unknown>> = [];
+  const calls: string[] = [];
+  let startStatus: SessionProjection["status"] = "reconciling";
+  const sessions = {
+    async snapshot(id: string) {
+      const row = rows.get(id);
+      if (!row) throw Object.assign(new Error("not found"), { code: "not-found" });
+      return row;
+    },
+    async create() { calls.push("create"); return { id: "never" }; },
+    async send() { calls.push("send"); return { turnId: "never" }; },
+    async start(input: CreateSessionInput & { start: unknown }) {
+      starts.push(input as unknown as Record<string, unknown>);
+      const id = `started-${starts.length}`;
+      rows.set(id, { ...projection(id, input.projectId, input.title ?? ""), status: startStatus, ...(input.parentId ? { parentId: input.parentId } : {}) });
+      return { id, queueId: `q-${starts.length}` };
+    },
+  } as unknown as SessionService;
+  const registry = createCapabilityContributionRegistry();
+  const services = createServerServiceRegistry();
+  services.provide(serverServiceKey("harness.capabilities"), registry);
+  const host = {
+    services,
+    forSpace: () => ({
+      projects: { async list() { return [project]; }, async get() { return project; } } as unknown as ProjectService,
+      sessions,
+    }),
+  } as unknown as ServerPackageHost;
+  const registration = registerPolythSessionControl(host);
+  registry.resolve(context);
+  const execute = registry.executor("harness-runtime.polyth-control")!;
+  const spawn = async () => JSON.parse((await execute({
+    action: "agent.spawn",
+    parameters: { title: "Worker", prompt: "do the work" },
+  }, toolContext)).output) as { session: { id: string; status: string }; sendResult?: { queueId?: string }; startFailed?: string };
+
+  const spawned = await spawn();
+  assert.equal(spawned.session.id, "started-1");
+  assert.deepEqual(spawned.sendResult, { queueId: "q-1" });
+  assert.equal(spawned.startFailed, undefined);
+  assert.deepEqual(calls, [], "one start replaces the create and the send");
+  assert.equal(starts[0]!.parentId, "caller");
+  assert.deepEqual(starts[0]!.start, { firstTurn: { text: "do the work" } });
+
+  // A start that already failed is said plainly: no watch will report it.
+  startStatus = "failed";
+  assert.match((await spawn()).startFailed ?? "", /could not start/);
+  await registration.dispose();
+});

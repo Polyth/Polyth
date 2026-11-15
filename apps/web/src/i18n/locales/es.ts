@@ -2575,6 +2575,8 @@ export const es: AppMessages = {
   "timeline.thinking": "Pensando",
   "timeline.turnAborted": "Turno abortado",
   "timeline.turnFailed": "El turno falló",
+  "timeline.startFailed": "No se pudo iniciar el chat",
+  "timeline.startFailedHint": "Tu mensaje ha vuelto al campo de texto.",
   "timeline.unpinFromContext": "Desfijar del contexto",
   "timeline.valueAdditionsValueDeletions": "{additions} adiciones, {deletions} eliminaciones",
   "timeline.valueCompleteOfValue": "{completed}/{total} completado",

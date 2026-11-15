@@ -2578,6 +2578,8 @@ export const en = {
   "timeline.thinking": "Thinking",
   "timeline.turnAborted": "Turn aborted",
   "timeline.turnFailed": "Turn failed",
+  "timeline.startFailed": "The chat couldn’t start",
+  "timeline.startFailedHint": "Your message is back in the composer.",
   "timeline.unpinFromContext": "Unpin from context",
   "timeline.valueAdditionsValueDeletions": "{additions} additions, {deletions} deletions",
   "timeline.valueCompleteOfValue": "{completed}/{total} complete",

@@ -194,25 +194,30 @@ const sendFlags: FlagSpec[] = [
 async function sendAndMaybeWait(
   ctx: Context, client: Client, sessionId: string, text: string,
   args: Parameters<Command["run"]>[1], delivery: string | undefined, extra: Record<string, unknown> = {},
+  started?: Record<string, unknown>,
 ): Promise<number> {
-  const before = await highWater(client, sessionId);
+  const before = started ? 0 : await highWater(client, sessionId);
   const key = str(args, "idempotency-key");
   const clientOperationId = key ? await operationIdFor(`send\0${sessionId}\0${key}`) : randomUUID();
   const model = modelRef(str(args, "model"));
   let result: Record<string, unknown>;
-  try {
-    result = await client.post<Record<string, unknown>>(`/api/sessions/${enc(sessionId)}/message`, {
-      text, clientOperationId, ...(delivery ? { delivery } : {}), ...(model ? { model } : {}), ...extra,
-    });
-  } catch (error) {
-    // The server could not confirm delivery and reconciles it itself; never
-    // resend blindly. With --wait, keep following what actually happened.
-    if (!(error instanceof PolythError) || error.code !== "outcome-unknown") throw error;
-    if (!bool(args, "wait")) {
-      throw new PolythError(error.status, error.code, `${error.message}. Check \`polyth log ${sessionId.slice(0, 8)}\`${key ? "; retrying with the same --idempotency-key is safe" : ""}.`);
+  if (started) {
+    result = started;
+  } else {
+    try {
+      result = await client.post<Record<string, unknown>>(`/api/sessions/${enc(sessionId)}/message`, {
+        text, clientOperationId, ...(delivery ? { delivery } : {}), ...(model ? { model } : {}), ...extra,
+      });
+    } catch (error) {
+      // The server could not confirm delivery and reconciles it itself; never
+      // resend blindly. With --wait, keep following what actually happened.
+      if (!(error instanceof PolythError) || error.code !== "outcome-unknown") throw error;
+      if (!bool(args, "wait")) {
+        throw new PolythError(error.status, error.code, `${error.message}. Check \`polyth log ${sessionId.slice(0, 8)}\`${key ? "; retrying with the same --idempotency-key is safe" : ""}.`);
+      }
+      ctx.o.err(style.yellow(ctx.o.color, "Delivery is not confirmed yet; the server is reconciling it. Following the session…"));
+      result = { unconfirmed: true };
     }
-    ctx.o.err(style.yellow(ctx.o.color, "Delivery is not confirmed yet; the server is reconciling it. Following the session…"));
-    result = { unconfirmed: true };
   }
   if (!bool(args, "wait")) {
     if (ctx.o.json) ctx.o.data({ sessionId, ...result });
@@ -251,12 +256,13 @@ export const newSession: Command = {
     const title = str(args, "title") ?? (prompt ? truncate(oneLine(prompt), 60) : "CLI session");
     const harness = str(args, "harness");
     const model = modelRef(str(args, "model"));
-    const created = await client.post<{ id: string }>("/api/sessions", {
+    const created = await client.post<{ id: string; queueId?: string; turnId?: string }>("/api/sessions", {
       projectId: project.id,
       title,
       ...(harness ? { harness: { mode: "pinned", harnessId: harness } } : {}),
       ...(model ? { model } : {}),
       ...(str(args, "agent") ? { agent: str(args, "agent") } : {}),
+      ...(prompt ? { start: { firstTurn: { text: prompt } }, clientOperationId: randomUUID() } : {}),
     });
     if (!ctx.o.json) ctx.o.err(`${style.green(ctx.o.color, "✓")} session ${style.bold(ctx.o.color, created.id)} in ${project.name}`);
     if (!prompt) {
@@ -264,7 +270,13 @@ export const newSession: Command = {
       else ctx.o.out(created.id);
       return 0;
     }
-    return sendAndMaybeWait(ctx, client, created.id, prompt, args, undefined);
+    const started = created.queueId || created.turnId
+      ? { ...(created.queueId ? { queueId: created.queueId } : {}), ...(created.turnId ? { turnId: created.turnId } : {}) }
+      : undefined;
+    // ponytail: a server that predates `start` answers without queueId or
+    // turnId; send the first prompt as today. Removed when no supported server
+    // ignores `start`.
+    return sendAndMaybeWait(ctx, client, created.id, prompt, args, undefined, {}, started);
   },
 };
 

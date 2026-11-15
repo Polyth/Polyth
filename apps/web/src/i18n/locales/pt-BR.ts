@@ -2575,6 +2575,8 @@ export const ptBR: AppMessages = {
   "timeline.thinking": "Pensando",
   "timeline.turnAborted": "Turno abortado",
   "timeline.turnFailed": "O turno falhou",
+  "timeline.startFailed": "Não foi possível iniciar o chat",
+  "timeline.startFailedHint": "Sua mensagem voltou para o campo de texto.",
   "timeline.unpinFromContext": "Desafixar do contexto",
   "timeline.valueAdditionsValueDeletions": "{additions} adições, {deletions} remoções",
   "timeline.valueCompleteOfValue": "{completed}/{total} concluído",

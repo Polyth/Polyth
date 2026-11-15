@@ -2575,6 +2575,8 @@ export const fr: AppMessages = {
   "timeline.thinking": "Réflexion",
   "timeline.turnAborted": "Tour interrompu",
   "timeline.turnFailed": "Échec du tour",
+  "timeline.startFailed": "Le chat n’a pas pu démarrer",
+  "timeline.startFailedHint": "Votre message est de retour dans la zone de saisie.",
   "timeline.unpinFromContext": "Désépingler du contexte",
   "timeline.valueAdditionsValueDeletions": "{additions} ajouts, {deletions} suppressions",
   "timeline.valueCompleteOfValue": "{completed}/{total} terminé",

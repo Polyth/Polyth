@@ -6,7 +6,7 @@ import type {
   SessionService,
   SpaceContext,
 } from "@polyth/contracts";
-import { SESSION_PAUSE_ENDED_EVENT } from "@polyth/contracts";
+import { SESSION_PAUSE_ENDED_EVENT, SESSION_START_FAILED_EVENT } from "@polyth/contracts";
 import type {
   DurableSessionWatch,
   DurableSessionWatchStop,
@@ -50,6 +50,9 @@ const parseStop = ({ type, data }: DurableSessionWatchStop): {
   if (type === SESSION_PAUSE_ENDED_EVENT) {
     return { ...(data.outcome === "stopped" ? { reason: "aborted" as const } : {}), retrying: false };
   }
+  // A started chat whose runtime could not be created never runs a turn: its
+  // watcher hears the failure instead of waiting for a stop that cannot come.
+  if (type === SESSION_START_FAILED_EVENT) return { reason: "error", retrying: false };
   const stated = data.reason === "paused"
     ? undefined
     : REASONS.find((reason) => reason === data.reason);

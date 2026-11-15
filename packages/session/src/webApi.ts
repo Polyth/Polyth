@@ -85,6 +85,9 @@ import type {
   WorkflowRetryInputDto,
   WorkspaceLabel,
   CreateIsolatedSessionInput,
+  SessionStartRequest,
+  StartSessionResult,
+  StartWorktreeSessionInput,
   IsolationMergeInput,
   IsolationMergeResultDto,
   IsolationRetargetInput,
@@ -1076,8 +1079,8 @@ export const api = {
     jfetch<SessionProjection>(`/api/sessions/${encodeURIComponent(sessionId)}/workspace`, json("PUT", selection)),
   /** `clientOperationId` makes the create idempotent: a resend with the same
    *  key returns the session the first request made instead of a second one. */
-  createSession: (input: { projectId: string; repositoryIds?: readonly string[]; harness?: HarnessSelection; title?: string; purpose?: string; model?: ModelRef; agent?: string; worktreePath?: string; clientOperationId?: string }) =>
-    jfetch<SessionRef>("/api/sessions", json("POST", input)),
+  createSession: (input: { projectId: string; repositoryIds?: readonly string[]; harness?: HarnessSelection; title?: string; purpose?: string; model?: ModelRef; agent?: string; worktreePath?: string; clientOperationId?: string; start?: SessionStartRequest }) =>
+    jfetch<StartSessionResult>("/api/sessions", json("POST", input)),
   /** Outcome of one keyed create whose response was lost. Servers without
    *  idempotent create answer 404, which callers must treat as unresolvable. */
   sessionCreateOperation: (clientOperationId: string) =>
@@ -1592,8 +1595,11 @@ export const api = {
 
   /** Keyed like `createSession`: a resend with the same `clientOperationId`
    *  returns the first session and its managed checkouts. */
-  createIsolatedSession: (input: CreateIsolatedSessionInput & { clientOperationId?: string }) =>
-    jfetch<SessionRef>(`/api/isolation/sessions`, json("POST", input)),
+  createIsolatedSession: (input: CreateIsolatedSessionInput & { clientOperationId?: string; start?: SessionStartRequest }) =>
+    jfetch<StartSessionResult>(`/api/isolation/sessions`, json("POST", input)),
+  /** A chat in a linked worktree the server allocates first (one request). */
+  startWorktreeSession: (input: StartWorktreeSessionInput) =>
+    jfetch<StartSessionResult>(`/api/worktrees/sessions`, json("POST", input)),
   isolationStatus: (sessionId: string) =>
     jfetch<IsolationStatusDto>(`/api/isolation/${encodeURIComponent(sessionId)}`),
   /** `input.target` integrates into another checked-out branch from the

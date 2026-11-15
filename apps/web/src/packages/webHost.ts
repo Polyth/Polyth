@@ -101,6 +101,7 @@ import {
   registerComposerMode,
   registerComposerPasteHandler,
   registerComposerSessionCreatedHook,
+  registerComposerSessionStartExtension,
   requestComposerMode,
   subscribeComposerContributions,
 } from "../composer/contributions.ts";
@@ -388,6 +389,7 @@ export const webPackageHost: WebPackageHost = {
     registerAddMenuItem: registerComposerAddMenuItem,
     registerPasteHandler: registerComposerPasteHandler,
     registerSessionCreatedHook: registerComposerSessionCreatedHook,
+    registerSessionStartExtension: registerComposerSessionStartExtension,
     listAddMenuItems: listComposerAddMenuItems,
     listPasteHandlers: listComposerPasteHandlers,
     listSessionCreatedHooks: listComposerSessionCreatedHooks,

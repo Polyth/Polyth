@@ -41,7 +41,10 @@ import type {
   SessionProjection,
   SessionDebugDto,
   SessionRef,
+  SessionService,
+  SessionStartRequest,
   SessionWorkspace,
+  StartSessionResult,
 } from "@polyth/contracts";
 import {
   isolationBlocksUserMutation,
@@ -199,7 +202,10 @@ export interface IsolationIntegrationDeps {
 export type PreserveSessionMedia = NonNullable<IsolationIntegrationDeps["preserveSessionMedia"]>;
 
 /** Whoever asked for a new isolated chat: its creator and owner. */
-export type IsolationRequesterSessions = Pick<IsolationSessionApi, "create" | "snapshot">;
+export type IsolationRequesterSessions = Pick<IsolationSessionApi, "create" | "snapshot"> & Pick<SessionService, "start">;
+
+/** A start sent with the create: the requester's `start` owns the first turn. */
+export type IsolatedSessionStart = { start?: SessionStartRequest; clientOperationId?: string };
 
 /** Whoever asked to isolate an existing chat: reads and rebinds it with their
  *  own Space scope and management rights. */
@@ -2313,7 +2319,7 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
   // Validation, managed checkout allocation and canonical create for one
   // session id. Callers hold withSession(sessionId).
   const createIsolatedSessionLocked = async (
-    input: CreateIsolatedSessionInput,
+    input: CreateIsolatedSessionInput & IsolatedSessionStart,
     sessionId: string,
     delegatedBy?: SessionProjection,
     requester: IsolationRequesterSessions = deps.sessions,
@@ -2385,7 +2391,7 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
       }
       const workspace = workspaceForIsolationAllocations(selected, allocations);
       const execution = allocations.find((allocation) => allocation.repositoryId === selected.executionRepositoryId)!;
-      const created = await requester.create({
+      const createInput: CreateSessionInput = {
         id: sessionId,
         projectId: project.id,
         ...(delegatedBy ? { parentId: delegatedBy.id } : {}),
@@ -2399,7 +2405,16 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
         // Keep the scalar projection bound to the canonical execution
         // repository until all consumers understand workspace rows.
         isolation: execution.isolation,
-      });
+      };
+      // A requester without `start` (older host) only creates; the caller sees
+      // no queueId/turnId and sends the first turn itself.
+      const created: StartSessionResult = input.start && requester.start
+        ? await requester.start({
+          ...createInput,
+          start: input.start,
+          ...(input.clientOperationId ? { clientOperationId: input.clientOperationId } : {}),
+        })
+        : await requester.create(createInput);
       if (created.id !== sessionId) {
         throw err("conflict", "session identity does not match the managed workspace");
       }
@@ -2446,10 +2461,10 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
     }
   };
   const createIsolatedSessionUnderLock = (
-    input: CreateIsolatedSessionInput,
+    input: CreateIsolatedSessionInput & IsolatedSessionStart,
     sessionId: string,
     requester?: IsolationRequesterSessions,
-  ): Promise<SessionRef> =>
+  ): Promise<StartSessionResult> =>
     withSession(sessionId, () => createIsolatedSessionLocked(input, sessionId, undefined, requester));
 
   // Callers hold withSession(sessionId).
@@ -2537,9 +2552,9 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
      *  `options.sessions` is the requesting person's scoped session service:
      *  the chat is theirs and starts with the Space's default audience. */
     async createIsolatedSession(
-      input: CreateIsolatedSessionInput,
+      input: CreateIsolatedSessionInput & IsolatedSessionStart,
       options: { sessionId?: string; sessions?: IsolationRequesterSessions } = {},
-    ): Promise<SessionRef> {
+    ): Promise<StartSessionResult> {
       if (options.sessionId === undefined) return createIsolatedSessionUnderLock(input, randomUUID(), options.sessions);
       const sessionId = options.sessionId;
       if (!UUID_RE.test(sessionId)) throw err("invalid-input", "session id is invalid");
@@ -2558,6 +2573,20 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
             status: 409,
             mutationOutcome: "rejected",
             sessionId,
+          });
+        }
+        // The first request may have stopped between the row and the queued
+        // turn: `start` on the existing row queues it once and creates nothing.
+        const requester: IsolationRequesterSessions = options.sessions ?? deps.sessions;
+        if (input.start && requester.start) {
+          return requester.start({
+            id: sessionId,
+            projectId: prior.projectId,
+            ...(prior.worktreePath ? { worktreePath: prior.worktreePath } : {}),
+            ...(prior.workspace ? { workspace: prior.workspace } : {}),
+            ...(prior.isolation ? { isolation: prior.isolation } : {}),
+            start: input.start,
+            ...(input.clientOperationId ? { clientOperationId: input.clientOperationId } : {}),
           });
         }
         return { id: sessionId };

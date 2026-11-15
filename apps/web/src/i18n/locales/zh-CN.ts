@@ -2575,6 +2575,8 @@ export const zhCN: AppMessages = {
   "timeline.thinking": "思考",
   "timeline.turnAborted": "轮次已中止",
   "timeline.turnFailed": "轮次失败",
+  "timeline.startFailed": "无法启动聊天",
+  "timeline.startFailedHint": "你的消息已回到输入框。",
   "timeline.unpinFromContext": "从上下文取消固定",
   "timeline.valueAdditionsValueDeletions": "新增 {additions} 行，删除 {deletions} 行",
   "timeline.valueCompleteOfValue": "已完成 {completed}/{total}",

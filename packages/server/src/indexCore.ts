@@ -74,6 +74,7 @@ import {
   SERVER_PERSON_DATA_VOLUME,
   SESSION_ATTENTION_SERVICE,
   SESSION_PURPOSES,
+  SESSION_START_STEPS,
   SERVER_BEHAVIOR_SECTIONS,
   serverServiceKey,
   type HttpServerContext,
@@ -138,6 +139,7 @@ import { workstationPushDisabled } from "./workstationPolicy.ts";
 import { registerDiscoveredPackages, registerServerPackage } from "./packageDiscovery.ts";
 import { queueRoutes } from "./routes/queue.ts";
 import { createBehaviorSectionRegistry, createBehaviorService } from "./behavior.ts";
+import { createSessionStartStepRegistry } from "./sessionStartSteps.ts";
 import { createClientSettings, modelFavoriteKeys } from "./clientSettings.ts";
 import { parseCompactionPreference } from "@polyth/contracts/compaction-policy";
 import { createFailedStartupCleanupPolicy, type SessionAccountDeps } from "./failedStartupCleanup.ts";
@@ -2079,6 +2081,9 @@ export async function boot(opts: BootOptions = {}) {
     }
   };
   services.provide(SERVER_BEHAVIOR_SECTIONS, behaviorSections.registry(reprojectBehavior));
+  // Package-owned steps of a chat's start (`SessionStartRequest.extensions`).
+  const sessionStartSteps = createSessionStartStepRegistry();
+  services.provide(SESSION_START_STEPS, sessionStartSteps);
   const behavior = createBehaviorService({
     file: `${dataDir}/behavior.md`,
     policyFile: `${dataDir}/behavior-policy.json`,
@@ -2901,6 +2906,7 @@ export async function boot(opts: BootOptions = {}) {
       return descriptor?.kind === "tool" ? redactToolInput(input, descriptor.inputSchema) : input;
     },
     projects, runtimes, broadcast, queue: store, org: store, profiles: store, behavior, secureSafe,
+    startSteps: sessionStartSteps,
     harnesses: {
       staticFeatures: (harnessId) =>
         harnesses.providers().find((provider) => provider.descriptor.id === harnessId)?.staticFeatures,
@@ -3064,6 +3070,12 @@ export async function boot(opts: BootOptions = {}) {
         });
         void goalService()?.onSessionStopped(sessionId).catch((error) => {
           console.error("[polyth] goal dependency settlement failed", error);
+        });
+      },
+      startFailed(sessionId) {
+        // Its watchers hear the failed start as the end of the work.
+        void sessionWatches.kick(sessionId).catch((error) => {
+          console.error("[polyth] session watch kick failed", error);
         });
       },
       pauseEnded(sessionId, outcome) {

@@ -2575,6 +2575,8 @@ export const ar: AppMessages = {
   "timeline.thinking": "التفكير",
   "timeline.turnAborted": "تم إيقاف دور الوكيل",
   "timeline.turnFailed": "فشل دور الوكيل",
+  "timeline.startFailed": "تعذّر بدء المحادثة",
+  "timeline.startFailedHint": "عادت رسالتك إلى مربع الكتابة.",
   "timeline.unpinFromContext": "إزالة التثبيت من السياق",
   "timeline.valueAdditionsValueDeletions": "{additions} إضافات، {deletions} حذف",
   "timeline.valueCompleteOfValue": "{completed}/{total} مكتملة",

@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { CreateSessionInput, SessionProjection, SessionRef, SpaceContext } from "@polyth/contracts";
+import type { CreateSessionInput, SessionProjection, SessionRef, SpaceContext, StartSessionInput } from "@polyth/contracts";
 import { sessionIdForCreateOperation } from "@polyth/session/create-operation";
 import { createGitService } from "../src/index.ts";
 import { isolateBranchName, MANAGED_BRANCH_PREFIX } from "../src/managedWorktrees.ts";
@@ -79,7 +79,7 @@ function harness(root: string) {
     closeWorkspaceProcesses: async () => {},
   });
   return {
-    isolation, projections,
+    isolation, projections, sessions,
     creates: () => creates,
     hold() {
       let release!: () => void;
@@ -144,6 +144,46 @@ test("a leftover managed checkout without a canonical row fails closed and is no
   assert.equal(h.creates(), 0);
   assert.deepEqual(managedBranches(root), [isolateBranchName(sessionId)], "the ambiguous resource is preserved for recovery");
   assert.equal(worktreeCount(root), 2);
+});
+
+test("a start sent with the create goes to the requester's start, and a resend starts the existing chat again", async () => {
+  const root = repo();
+  const h = harness(root);
+  const sessionId = randomUUID();
+  const starts: StartSessionInput[] = [];
+  const requester = {
+    create: h.sessions.create,
+    snapshot: h.sessions.snapshot,
+    async start(input: StartSessionInput) {
+      starts.push(input);
+      if (!h.projections.has(input.id!)) await h.sessions.create(input);
+      return { id: input.id!, queueId: input.clientOperationId! };
+    },
+  };
+  const input = { projectId: "p1", start: { firstTurn: { text: "hello" } }, clientOperationId: "turn-key" };
+  const first = await h.isolation.createIsolatedSession(input, { sessionId, sessions: requester });
+  assert.deepEqual(first, { id: sessionId, queueId: "turn-key" });
+  assert.equal(starts[0]!.isolation?.worktreeBranch, isolateBranchName(sessionId));
+  assert.deepEqual(starts[0]!.start, input.start);
+  const again = await h.isolation.createIsolatedSession(input, { sessionId, sessions: requester });
+  assert.deepEqual(again, first);
+  assert.equal(starts.length, 2);
+  assert.equal(starts[1]!.worktreePath, starts[0]!.worktreePath, "the resend names the checkout the first request made");
+  assert.equal(starts[1]!.clientOperationId, "turn-key");
+  assert.equal(h.creates(), 1);
+  assert.equal(managedBranches(root).length, 1);
+});
+
+test("a requester without start only creates, so the reply carries no queued turn", async () => {
+  const root = repo();
+  const h = harness(root);
+  const sessionId = randomUUID();
+  const created = await h.isolation.createIsolatedSession(
+    { projectId: "p1", start: { firstTurn: { text: "hello" } }, clientOperationId: "turn-key" },
+    { sessionId },
+  );
+  assert.deepEqual(created, { id: sessionId });
+  assert.equal(h.creates(), 1);
 });
 
 test("POST /api/isolation/sessions derives the canonical id from (account, Space, key)", async () => {

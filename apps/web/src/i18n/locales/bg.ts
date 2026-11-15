@@ -2575,6 +2575,8 @@ export const bg: AppMessages = {
   "timeline.thinking": "Мислене",
   "timeline.turnAborted": "Ходът е прекъснат",
   "timeline.turnFailed": "Ходът беше неуспешен",
+  "timeline.startFailed": "Чатът не можа да стартира",
+  "timeline.startFailedHint": "Съобщението ви е обратно в полето за писане.",
   "timeline.unpinFromContext": "Откачване от контекста",
   "timeline.valueAdditionsValueDeletions": "{additions} добавени, {deletions} премахнати",
   "timeline.valueCompleteOfValue": "{completed}/{total} завършени",

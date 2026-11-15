@@ -15,6 +15,7 @@ import {
   type SessionService,
   type StartSessionFromConversationInput,
   type StartSessionFromConversationResult,
+  type StartSessionResult,
   type SpaceContext,
   type TurnAdmission,
 } from "@polyth/contracts";
@@ -256,6 +257,32 @@ export function canonicalSessionService(
     // Preserve that internal identity so the resource row, projection, marker,
     // and branch all describe the same canonical session.
     const sessionId = input.id?.trim() || randomUUID();
+    return provisionResource(sessionId, project.id, input.parentId, () => base.create({ ...input, id: sessionId }));
+  };
+
+  /** A start provisions its resource exactly as a create does. A resend
+   *  reaches the row it made: only an active row this principal can read. */
+  const start = async (
+    input: Parameters<NonNullable<SessionService["start"]>>[0],
+    admission?: Parameters<NonNullable<SessionService["start"]>>[1],
+  ): Promise<StartSessionResult> => {
+    requireMutation();
+    const project = await projects.get(input.projectId);
+    if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
+    const sessionId = input.id?.trim() || randomUUID();
+    if (await projectionIfPresent(sessionId)) {
+      await requireActive(sessionId);
+      return base.start!({ ...input, id: sessionId }, admission);
+    }
+    return provisionResource(sessionId, project.id, input.parentId, () => base.start!({ ...input, id: sessionId }, admission));
+  };
+
+  const provisionResource = async <T extends SessionRef>(
+    sessionId: string,
+    projectId: string,
+    accessParentId: string | undefined,
+    run: () => Promise<T>,
+  ): Promise<T> => {
     const operationId = randomUUID();
     // A delegated subagent follows its parent chat's sharing; any other new
     // chat starts with the Space's default audience (Spaces §14.3).
@@ -265,14 +292,14 @@ export function canonicalSessionService(
       kind: "session",
       orgId: org.id,
       spaceId: ctx.spaceId,
-      parentId: project.id,
-      ...(input.parentId ? { accessParentId: input.parentId } : {}),
+      parentId: projectId,
+      ...(accessParentId ? { accessParentId } : {}),
       ownerPrincipalId: ctx.userId,
       createdBy: ctx.userId,
-      visibility: input.parentId ? "inherit" : defaultSessionVisibility(ctx),
+      visibility: accessParentId ? "inherit" : defaultSessionVisibility(ctx),
     });
     try {
-      const result = await base.create({ ...input, id: sessionId });
+      const result = await run();
       const projection = await base.snapshot(result.id);
       if (result.id !== sessionId) throw recovery();
       security.resources.recordDomainReady(operationId, receipt(projection));
@@ -713,6 +740,7 @@ export function canonicalSessionService(
   return new Proxy(base, {
     get(target, property, receiver) {
       if (property === "create") return create;
+      if (property === "start") return target.start ? start : undefined;
       if (property === "createConversation") return createConversation;
       if (property === "startSessionFromConversation") return startSessionFromConversation;
       if (property === "fork") return fork;
