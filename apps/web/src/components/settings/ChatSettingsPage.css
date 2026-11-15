@@ -458,8 +458,11 @@ html[dir="rtl"] .chat-preview-thought:not([data-open]) svg { transform: scaleX(-
   position: relative;
   display: grid;
   place-items: center;
-  /* The real Send's own size, so the trial answers "how does my button feel".
-     Its finger target still reaches the shared minimum through ::after. */
+  /* The real Send's own size and shape, so the trial answers "how does my
+     button feel". Its finger target still reaches the shared minimum through
+     ::after. The ring, its phases and the reduced-motion profile are the
+     composer's own (`.send-hold-ring` in styles.css); this rule only places
+     the disc. */
   width: var(--composer-action-size, 34px);
   height: var(--composer-action-size, 34px);
   border-radius: var(--radius-round);
@@ -469,54 +472,13 @@ html[dir="rtl"] .chat-preview-thought:not([data-open]) svg { transform: scaleX(-
   cursor: pointer;
   touch-action: none;
   -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
   -webkit-user-select: none;
   user-select: none;
-  /* A quick settle on release; the press itself follows the chosen length
-     below, so the disc shrinks in step with its ring. */
+  /* A quick settle on release; the press itself follows the chosen length. */
   transition: transform var(--motion-surface) var(--motion-ease);
 }
-.chat-hold-send[data-state="holding"] {
-  transform: scale(0.94);
-  transition: transform var(--send-hold-ms, 500ms) var(--motion-ease);
-}
-/* The ring is a box, not a bare SVG: an SVG resolves a percentage height
-   against its own intrinsic box instead of this one, which drew an oval. */
-.chat-hold-ring {
-  position: absolute;
-  inset: -4px;
-  display: block;
-  overflow: visible;
-  pointer-events: none;
-  color: var(--context-liquid-tone, var(--accent));
-  opacity: 0;
-  transform: rotate(-90deg);
-  transition: opacity var(--motion-fast) var(--motion-ease);
-}
-.chat-hold-ring > svg { width: 100%; height: 100%; display: block; }
-.chat-hold-ring circle {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-dasharray: 100;
-  stroke-dashoffset: 100;
-  vector-effect: non-scaling-stroke;
-}
-.chat-hold-send[data-state="holding"] .chat-hold-ring { opacity: 1; }
-.chat-hold-send[data-state="holding"] .chat-hold-ring > svg { width: 100%; height: 100%; display: block; }
-.chat-hold-ring circle {
-  animation: send-hold-fill var(--send-hold-ms, 500ms) linear forwards;
-}
-@keyframes chat-hold-kept { from { transform: scale(.86); } to { transform: none; } }
-/* Reduced motion still shows the arm and the result: the ring is drawn whole
-   and the check appears, with no scaling and no fill-in animation. */
-@media (prefers-reduced-motion: reduce) {
-  .chat-hold-send[data-state="holding"] .chat-hold-ring > svg { width: 100%; height: 100%; display: block; }
-.chat-hold-ring circle { stroke-dashoffset: 0; }
-  .chat-hold-send[data-state="holding"] { transform: none; }
-}
-:is(html[data-reduce-animations="true"], body[data-desktop-low-resource="true"]) .chat-hold-send[data-state="holding"] .chat-hold-ring > svg { width: 100%; height: 100%; display: block; }
-.chat-hold-ring circle { stroke-dashoffset: 0; }
+.chat-hold-send[data-parked] > svg { animation: send-parked-pop var(--motion-surface) var(--motion-ease); }
 @media (max-width: 700px) {
   .chat-hold-caption { white-space: normal; }
 }

@@ -282,9 +282,19 @@ it off makes every press send at once and removes the "hold to save" hint from
 Send's tooltip, while the chosen length is kept for when it is turned back on.
 The row's summary names the current state ("hold 500 ms" / "no hold") for the
 device the row is read on, and its length row carries a specimen Send that runs
-the chosen hold for real, so the duration can be felt before leaving Settings.
-The ring around Send is drawn over the chosen length (`--send-hold-ms`), on
-both Send variants. The gesture is pointer-only: there is no keyboard
+the composer's own press and ring (`composer/sendHoldPress.ts`), so the
+duration can be felt before leaving Settings.
+The ring around Send winds from the top over the chosen length
+(`--send-hold-ms`), on both Send variants. It is a bordered box in Send's own
+shape (`--radius-round` + its 4px offset), not an SVG circle: a circle cut
+across the corners of a rounded-square Send, and the phone's 18px glyph rule
+once shrank it into Send's corner. The press sets `data-send-hold` on the
+control (`arming` → `full` → `release`) without a React render, and starts the
+ring at the press's real age, so it closes exactly when the hold is reached.
+A quick tap ends before the ring fades in. When the hold is reached with the
+finger still down, the ring stands whole, Send springs back and turns to a
+check; letting go keeps the draft. A release fades the ring where it stood. The
+gesture is pointer-only: there is no keyboard
 equivalent for "keep as a draft" yet, and the trial Send is decorative for
 assistive tech because the track announces its value. A draft is an ordinary
 canonical session, never a separate list or menu. On a new chat the hold
@@ -293,12 +303,17 @@ target, lane, auto-approve), moves the text and attachment pills into that
 chat's scoped draft record, saves the draft to the server at once
 (`saveDraftToServerNow`) and stays on the cleared new chat; no turn, echo or
 spawn surface starts. In an open chat the text stays in the composer and is
-saved at once. Once kept, Send shows a check for a beat; there is no
+saved at once. Once kept, Send keeps its check for a beat; there is no
 notification, because the result is visible in place.
 Every press ends as exactly one of the two, split at the hold length with no
 gap (`sendPressOutcome`): a release before it sends, a release at or after it
-keeps the draft, and the release decides, so a busy page whose timer has not
-run yet still keeps a full hold as a draft. Touch/pen Send is admitted on
+keeps the draft. The release alone decides, measured between the input's own
+time stamps (`inputTime`), never by when a handler ran and never by the timer,
+which only cues. On a page busy after the press (a streaming turn, a long
+render) a quick tap's lift waits in the queue; timed by the handler, or kept
+by a timer that won the race, that tap became a draft instead of a send or a
+new chat. A press that leaves Send or is cancelled keeps a draft only if it had
+already lasted the hold. Touch/pen Send is admitted on
 `pointerup` (pointerdown is cancelled so the editor keeps focus; a finger slid
 off Send does not send), and the click that ends a hold is swallowed. Send has
 `touch-action: none`: with panning allowed, a finger that rolled a few pixels

@@ -9970,59 +9970,81 @@ body:not([data-glass="off"]) .turn-rate-limit .turn-rate-limit-model .picker-chi
 }
 .send-plane { display: inline-grid; place-items: center; }
 .send-plane svg { width: 19px; height: 19px; }
-/* Press and hold Send keeps the message as a draft chat. A hairline ring
-   draws around Send over the person's hold length (`--send-hold-ms`, published
-   by the composer from `sendHold.ts`) while the button settles a touch; once
-   kept, the plane turns into a check for a beat. The platform long-press
-   callout, text selection and panning stay out of the gesture: a finger that
-   rolls a few pixels while it holds would otherwise be taken for a scroll, and
-   the browser cancels a press it pans, so the message was neither sent nor
-   kept. A slide is still judged on release (composer/sendRelease.ts). A
-   reduced-motion profile still gets the ring, drawn whole as the hold is
-   armed: it is the only sign that the press was read as a hold. */
-:is(.send, .composer-delivery) { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; touch-action: none; }
+/* Press and hold Send keeps the message as a draft chat
+   (composer/sendHoldPress.ts, which sets `data-send-hold` on the control
+   without a React render). A hairline ring in Send's own shape winds round
+   it from the top over the person's hold length (`--send-hold-ms`), started
+   at the press's real age (`--send-hold-age`) so that it closes exactly when
+   the hold is reached, while the button settles a touch. A quick tap ends
+   before the ring fades in. Once the hold is reached with the finger still
+   down (`full`), the ring stands whole, the button springs back and its glyph
+   turns to a check (`data-parked`): letting go keeps the draft. A release
+   (`release`) fades the ring out where it stood.
+   The ring is a bordered box masked by a turning cone, not an SVG circle: it
+   takes each theme's corner radius, where a circle cut across the corners of a
+   rounded-square Send, and no `.send svg` sizing rule can shrink it (the phone
+   composer's 18px glyph rule drew the circle in Send's corner).
+   The platform long-press callout, text selection, tap flash and panning stay
+   out of the gesture: a finger that rolls a few pixels while it holds would
+   otherwise be taken for a scroll, and the browser cancels a press it pans,
+   so the message was neither sent nor kept. A slide is still judged on
+   release (composer/sendRelease.ts). A reduced-motion profile still gets the
+   ring, drawn whole and quiet as the hold is armed: it is the only sign that
+   the press was read as a hold. */
+@property --send-hold-turn { syntax: "<number>"; inherits: false; initial-value: 0; }
+:is(.send, .composer-delivery) {
+  -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
 .composer-rail .send { position: relative; overflow: visible; }
-/* The ring is a box, not a bare SVG: an SVG resolves a percentage height
-   against its own intrinsic box, which drew the ring as an oval on any button
-   that was not square. */
-.composer-rail .send > .send-hold-ring { position: absolute; inset: -4px; display: block; max-width: none; }
-.send-hold-ring > svg { display: block; width: 100%; height: 100%; }
 .send-hold-ring {
-  overflow: visible;
-  pointer-events: none;
+  position: absolute;
+  inset: -4px;
+  display: block;
+  box-sizing: border-box;
+  border: 2px solid currentColor;
+  border-radius: calc(var(--send-hold-radius, var(--radius-round)) + 4px);
   color: var(--context-liquid-tone, var(--accent));
+  pointer-events: none;
   opacity: 0;
-  transform: rotate(-90deg);
-  transition: opacity var(--motion-fast) var(--motion-ease);
+  --send-hold-turn: 0;
+  -webkit-mask-image: conic-gradient(#000 calc(var(--send-hold-turn) * 1turn), transparent 0);
+  mask-image: conic-gradient(#000 calc(var(--send-hold-turn) * 1turn), transparent 0);
+  transition: opacity var(--motion-surface) var(--motion-ease);
 }
-.send-hold-ring circle {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-dasharray: 100;
-  stroke-dashoffset: 100;
-  vector-effect: non-scaling-stroke;
+/* One animation through every phase, so the release can freeze it in place. */
+[data-send-hold] > .send-hold-ring {
+  animation: send-hold-wind var(--send-hold-ms, 500ms) linear var(--send-hold-age, 0ms) both;
 }
-.send[data-holding] .send-hold-ring { opacity: 1; }
-.send[data-holding] .send-hold-ring circle { animation: send-hold-fill var(--send-hold-ms, 500ms) linear forwards; }
-:is(.composer-rail, .composer-send-split) :is(.send, .composer-delivery)[data-holding] {
+[data-send-hold="arming"] > .send-hold-ring {
+  opacity: 1;
+  transition: opacity var(--motion-fast) var(--motion-ease) calc(var(--send-hold-ms, 500ms) * .15);
+}
+[data-send-hold="full"] > .send-hold-ring { opacity: 1; transition: opacity var(--motion-fast) var(--motion-ease); }
+[data-send-hold="release"] > .send-hold-ring { animation-play-state: paused; }
+:is(.composer-rail .send, .chat-hold-send)[data-send-hold="arming"] {
   transform: scale(0.94);
   transition: transform var(--send-hold-ms, 500ms) var(--motion-ease);
 }
-.send[data-parked] .send-plane svg { animation: send-parked-pop var(--motion-surface) var(--motion-ease); }
-@keyframes send-hold-fill { to { stroke-dashoffset: 0; } }
-@keyframes send-parked-pop { from { transform: scale(.6); opacity: 0; } to { transform: none; opacity: 1; } }
-/* Without motion the hold still shows: the ring is drawn whole at once. */
-@media (prefers-reduced-motion: reduce) {
-  .send[data-holding] .send-hold-ring circle { stroke-dashoffset: 0; }
-  /* A whole ring would read as "already kept", so the armed state is drawn
-     quiet and the check at the end is the completion cue. */
-  .send[data-holding] .send-hold-ring { opacity: .35; }
-  :is(.composer-rail, .composer-send-split) :is(.send, .composer-delivery)[data-holding] { transform: none; }
+:is(.composer-rail .send, .chat-hold-send):is([data-send-hold="full"], [data-send-hold="release"]) {
+  transform: none;
+  transition: transform var(--motion-surface) var(--motion-ease);
 }
-:is(html[data-reduce-animations="true"], body[data-desktop-low-resource="true"]) .send[data-holding] .send-hold-ring circle { stroke-dashoffset: 0; }
-:is(html[data-reduce-animations="true"], body[data-desktop-low-resource="true"]) .send[data-holding] .send-hold-ring { opacity: .35; }
+.send[data-parked] .send-plane > svg,
+.send[data-parked] > svg { animation: send-parked-pop var(--motion-surface) var(--motion-ease); }
+@keyframes send-hold-wind { from { --send-hold-turn: 0; } to { --send-hold-turn: 1; } }
+@keyframes send-parked-pop { from { transform: scale(.6); opacity: 0; } to { transform: none; opacity: 1; } }
+/* Without motion the hold still shows: the ring is drawn whole at once. A
+   whole ring would read as "already kept", so the armed state is drawn quiet
+   and the check at the end is the completion cue. */
+@media (prefers-reduced-motion: reduce) {
+  [data-send-hold] > .send-hold-ring { animation: none; --send-hold-turn: 1; }
+  [data-send-hold="arming"] > .send-hold-ring { opacity: .35; transition-delay: 0s; }
+  :is(.composer-rail .send, .chat-hold-send)[data-send-hold] { transform: none; }
+}
+:is(html[data-reduce-animations="true"], body[data-desktop-low-resource="true"]) [data-send-hold] > .send-hold-ring { animation: none; --send-hold-turn: 1; }
+:is(html[data-reduce-animations="true"], body[data-desktop-low-resource="true"]) [data-send-hold="arming"] > .send-hold-ring { opacity: .35; transition-delay: 0s; }
+:is(html[data-reduce-animations="true"], body[data-desktop-low-resource="true"]) :is(.composer-rail .send, .chat-hold-send)[data-send-hold] { transform: none; }
 body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display: none !important; }
 
 /* Canvas tiles and right-side workspace editor. */

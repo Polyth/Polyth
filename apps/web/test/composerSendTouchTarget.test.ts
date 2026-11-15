@@ -81,18 +81,26 @@ async function fixture(): Promise<string> {
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <style>${css}</style>
     <script>
-      // Sending a new chat's first message creates its session: that request is the send.
+      // A new chat's first message creates its session with the first turn:
+      // that request is the send. A kept draft creates the session alone.
       window.__sends = 0;
-      window.__parked = false;
+      window.__drafts = 0;
       window.fetch = async (url, init) => {
-        if (init && init.method === "POST" && String(url).endsWith("/api/sessions")) window.__sends += 1;
+        if (init && init.method === "POST" && String(url).endsWith("/api/sessions")) {
+          if (String(init.body ?? "").includes('"firstTurn"')) window.__sends += 1;
+          else window.__drafts += 1;
+        }
         return new Response("{}", { status: 404 });
       };
-      new MutationObserver(() => {
-        if (document.querySelector(".mobile-composer-primary button.send[data-parked]")) {
-          window.__parked = true;
-        }
-      }).observe(document.documentElement, { attributes: true, subtree: true, attributeFilter: ["data-parked"] });
+      // A heavy page: the main thread stays busy right after Send's own
+      // pointerdown handler, so the lift waits in the queue behind it.
+      window.__busyAfterDown = 0;
+      window.addEventListener("pointerdown", () => {
+        const ms = window.__busyAfterDown;
+        if (!ms) return;
+        const start = performance.now();
+        while (performance.now() - start < ms) { /* busy */ }
+      });
     </script></head>
     <body><div id="root"><div class="app"><div class="focus-conversation">
       <div class="timeline-wrap"><div class="timeline"><div class="msg assistant"><div class="bubble">Hello</div></div></div></div>
@@ -115,7 +123,7 @@ after(async () => {
   await browser?.close();
 });
 
-type Probe = { __sends: number; __parked?: boolean };
+type Probe = { __sends: number; __drafts: number; __busyAfterDown: number };
 type PressOutcome = "send" | "draft" | "nothing";
 type Press = {
   dx?: number;
@@ -123,6 +131,8 @@ type Press = {
   holdMs?: number;
   slide?: { dx: number; dy: number };
   drift?: { dx: number; dy: number };
+  /** Keep the page busy this long right after Send's pointerdown. */
+  busyMs?: number;
 };
 type PressResult = {
   sends: number;
@@ -158,7 +168,7 @@ async function draft(text: string): Promise<{ x: number; y: number; size: number
 /** One real finger: down, an optional slide or drift, up. Returns how many sends it made and the classified outcome. */
 async function press(
   text: string,
-  { dx = 0, dy = 0, holdMs, slide, drift }: Press = {},
+  { dx = 0, dy = 0, holdMs, slide, drift, busyMs = 0 }: Press = {},
 ): Promise<PressResult> {
   assert.ok(page && cdp);
   const send = await draft(text);
@@ -174,7 +184,19 @@ async function press(
     return Boolean(under?.closest(".mobile-composer-primary button.send"));
   }, [endX, endY]);
 
+  await page.evaluate((ms) => { (window as unknown as Probe).__busyAfterDown = ms; }, busyMs);
   const started = Date.now();
+  if (busyMs) {
+    // A digitizer stamps each touch when it happens. CDP runs Input commands
+    // one at a time, so without explicit stamps a lift sent while the page is
+    // busy would be stamped only once the busy press was acknowledged.
+    const pressed = cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }], timestamp: started / 1000 });
+    await page.waitForTimeout(duration);
+    const lifted = cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [], timestamp: (started + duration) / 1000 });
+    await Promise.all([pressed, lifted]);
+    await page.waitForTimeout(400);
+    return result(send.size, overSend);
+  }
   await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
 
   if (move) {
@@ -198,22 +220,19 @@ async function press(
   await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   // Past the click the browser dispatches after the touch: it must not send again.
   await page.waitForTimeout(400);
+  return result(send.size, overSend);
+}
 
+/** What the press did, read from the requests it made. */
+async function result(size: number, overSend: boolean): Promise<PressResult> {
+  assert.ok(page);
   const probe = await page.evaluate(() => {
-    const parked = Boolean((window as unknown as Probe).__parked
-      || document.querySelector(".mobile-composer-primary button.send[data-parked]"));
-    const sends = (window as unknown as Probe).__sends;
-    const outcome: PressOutcome = parked ? "draft" : sends >= 1 ? "send" : "nothing";
-    return { sends, parked, outcome };
+    const { __sends: sends, __drafts: drafts } = window as unknown as Probe;
+    (window as unknown as Probe).__busyAfterDown = 0;
+    return { sends, drafts };
   });
-
-  return {
-    sends: probe.sends,
-    outcome: probe.outcome,
-    parked: probe.parked,
-    overSend,
-    size: send.size,
-  };
+  const outcome: PressOutcome = probe.drafts >= 1 ? "draft" : probe.sends >= 1 ? "send" : "nothing";
+  return { sends: probe.sends, outcome, parked: probe.drafts >= 1, overSend, size };
 }
 
 test("a tap anywhere in Send's touch box sends exactly once", { skip: !CHROME }, async () => {
@@ -273,4 +292,20 @@ test("touch on Send: hold 800 ms with a 20 px drift keeps a draft", { skip: !CHR
   assert.equal(result.overSend, true, "the drift ends still over Send");
   assert.notEqual(result.outcome, "nothing", "a full hold that drifted must not end as nothing");
   assert.equal(result.outcome, "draft", "a full hold that drifted keeps a draft");
+});
+
+// The lift of a quick tap can wait in the queue behind a busy page (a turn
+// streaming in, a long render). Timed by when the handler ran, or by a timer
+// that kept the draft while the finger was still down, the tap measured as a
+// full hold: Send made a draft instead of sending or starting the chat.
+test("touch on Send: a quick tap (60 ms) on a page busy for 700 ms still sends", { skip: !CHROME }, async () => {
+  const result = await press("hello", { holdMs: 60, busyMs: 700 });
+  assert.equal(result.outcome, "send", "the tap's own stamps say 60 ms: it sends");
+  assert.equal(result.sends, 1, `it sends once (sent ${result.sends})`);
+});
+
+test("touch on Send: a full hold (800 ms) on a page busy for 700 ms keeps a draft", { skip: !CHROME }, async () => {
+  const result = await press("hello", { holdMs: 800, busyMs: 700 });
+  assert.equal(result.outcome, "draft", "a hold that lasted keeps the draft however busy the page was");
+  assert.equal(result.sends, 0, "and sends nothing");
 });

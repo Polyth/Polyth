@@ -198,7 +198,8 @@ import {
 } from "@polyth/models/web-prefs";
 import { hiddenModelMatcher } from "@polyth/models";
 import { getUiSettings, setUiSettings, useUiSettings } from "../uiPrefs.ts";
-import { sendHoldMs, sendPressOutcome } from "../sendHold.ts";
+import { sendHoldMs } from "../sendHold.ts";
+import { createSendHoldPress } from "../composer/sendHoldPress.ts";
 import { isResizableImage, shouldAskImageSize } from "../imageUploadSize.ts";
 import ImageSizePrompt, { useImageSizeChoice } from "./ImageSizePrompt.tsx";
 import { migrateFavoritesOnce, profilesLoaded, useProfiles } from "../profiles.ts";
@@ -3465,19 +3466,22 @@ function ComposerBody({
   useEffect(() => { sendRef.current = send; }, [send]);
 
   // Press and hold Send keeps the message as a draft chat instead of sending
-  // it: a ring fills around Send over the hold, then Send shows a check. Only
-  // a message that can be kept starts a hold; anything else is a plain press.
-  // Touch/pen Send is admitted on pointerup — once the gesture is known not
-  // to be a hold — and pointerdown is cancelled so the editor keeps focus and
-  // the keyboard stays open for the next message. The delayed click from the
-  // same gesture is consumed so it cannot send twice. Mouse holds swallow
-  // their click; keyboard activation retains the normal click path.
+  // it: a ring winds round Send over the hold; once the hold length has passed
+  // with the finger down, Send turns to a check, and letting go keeps the
+  // draft. Only a message that can be kept starts a hold; anything else is a
+  // plain press. Touch/pen Send is admitted on pointerup — once the gesture is
+  // known not to be a hold — and pointerdown is cancelled so the editor keeps
+  // focus and the keyboard stays open for the next message. The delayed click
+  // from the same gesture is consumed so it cannot send twice. Mouse holds
+  // swallow their click; keyboard activation retains the normal click path.
   // Every press the browser gives to Send sends on release, wherever in its
   // touch box it landed; only a finger that left Send does not
-  // (composer/sendRelease.ts). The release also settles the hold: shorter
+  // (composer/sendRelease.ts). The release alone settles the hold, measured
+  // between the input's own time stamps (composer/sendHoldPress.ts): shorter
   // than the hold length sends, the length or longer keeps the draft, with no
-  // gap between them (sendPressOutcome). Send refuses panning in CSS, since a
-  // pan cancels the press and used to leave a held message neither sent nor kept.
+  // gap between them, however busy the page was meanwhile. Send refuses
+  // panning in CSS, since a pan cancels the press and used to leave a held
+  // message neither sent nor kept.
   const primaryActivationRef = useRef<{ touch: boolean; keyboard: boolean; staleTouchClick: boolean; down: { x: number; y: number } | null }>(
     { touch: false, keyboard: false, staleTouchClick: false, down: null },
   );
@@ -3490,36 +3494,48 @@ function ComposerBody({
     && !peopleModeRef.current && !activeModeRef.current && !queueEdit && !creatingSession && !sendPending && !compactPending
     && Boolean(sessionIdRef.current || activeProjectId)
     && ((inputRef.current?.getText() ?? text).trim() !== "" || attachments.length > 0);
-  // `startedAt`/`holdMs` time the armed hold, so the release itself decides
-  // between the two outcomes (`sendPressOutcome`) rather than whichever of the
-  // timer and the release the page got to first.
-  const holdRef = useRef<{ timer: ReturnType<typeof setTimeout> | null; fired: boolean; startedAt: number | null; holdMs: number }>(
-    { timer: null, fired: false, startedAt: null, holdMs: 0 },
-  );
-  const [holding, setHolding] = useState(false);
+  // `parked` is Send's check: shown as the cue while a full hold is still
+  // down (`holdCueRef`), and for a beat once the draft is kept.
+  // `holdSpentRef` marks a press that kept a draft, so its click cannot send.
   const [parked, setParked] = useState(false);
   const parkedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cancelHold = useCallback(() => {
-    const hold = holdRef.current;
-    if (hold.timer !== null) clearTimeout(hold.timer);
-    hold.timer = null;
-    hold.startedAt = null;
-    setHolding(false);
-  }, []);
+  const holdCueRef = useRef(false);
+  const holdSpentRef = useRef(false);
+  const holdPress = useMemo(() => createSendHoldPress({
+    onFull: () => {
+      if (!canParkRef.current()) return;
+      holdCueRef.current = true;
+      successFeedback();
+      if (parkedTimerRef.current !== null) clearTimeout(parkedTimerRef.current);
+      parkedTimerRef.current = null;
+      setParked(true);
+    },
+  }), []);
   useEffect(() => () => {
-    cancelHold();
+    holdPress.dispose();
     if (parkedTimerRef.current !== null) clearTimeout(parkedTimerRef.current);
-  }, [cancelHold]);
-  const completeHold = useCallback(() => {
-    const hold = holdRef.current;
-    if (hold.timer !== null) clearTimeout(hold.timer);
-    hold.timer = null;
-    hold.startedAt = null;
-    setHolding(false);
-    if (!canParkRef.current()) return;
-    hold.fired = true;
+  }, [holdPress]);
+  // A cue for a hold that turned out shorter (its lift was queued behind a
+  // busy page) is taken back: that press sends.
+  const dropHoldCue = useCallback(() => {
+    if (!holdCueRef.current) return;
+    holdCueRef.current = false;
+    setParked(false);
+  }, []);
+  // A press that lasted the hold keeps the message as a draft. The press is
+  // spent either way: when the message can no longer be kept (a send began
+  // meanwhile), it stays in the field rather than going out as a send the
+  // person held back.
+  const keepHeldDraft = useCallback(() => {
+    const cued = holdCueRef.current;
+    holdCueRef.current = false;
+    holdSpentRef.current = true;
+    if (!canParkRef.current()) {
+      if (cued) setParked(false);
+      return;
+    }
+    if (!cued) successFeedback();
     sendRef.current?.(undefined, undefined, false, true);
-    successFeedback();
     announce(tr("composer.savedAsDraft"));
     if (parkedTimerRef.current !== null) clearTimeout(parkedTimerRef.current);
     setParked(true);
@@ -3528,37 +3544,34 @@ function ComposerBody({
       setParked(false);
     }, SEND_PARKED_MS);
   }, []);
-  const startHold = useCallback(() => {
-    const hold = holdRef.current;
-    if (hold.timer !== null) clearTimeout(hold.timer);
-    hold.timer = null;
-    hold.fired = false;
-    hold.startedAt = null;
+  const startHold = useCallback((event: PointerEvent<HTMLButtonElement>) => {
+    holdSpentRef.current = false;
     const holdMs = sendHoldRef.current;
     if (holdMs <= 0 || !canParkRef.current()) return;
-    hold.startedAt = performance.now();
-    hold.holdMs = holdMs;
-    setHolding(true);
-    hold.timer = setTimeout(completeHold, holdMs);
-  }, [completeHold]);
-  // The release settles an armed hold: one that lasted the hold length keeps
-  // the draft now, even when a busy page has not run the timer yet; a shorter
-  // one is cancelled and the press sends. True when the press kept a draft.
-  const settleHold = useCallback((): boolean => {
-    const hold = holdRef.current;
-    if (!hold.fired && hold.timer !== null && hold.startedAt !== null
-      && sendPressOutcome(performance.now() - hold.startedAt, hold.holdMs) === "draft") completeHold();
-    const held = hold.fired;
-    cancelHold();
-    return held;
-  }, [cancelHold, completeHold]);
+    holdPress.arm(event.currentTarget, event.timeStamp, holdMs);
+  }, [holdPress]);
+  // The release settles an armed hold. True when the press kept a draft.
+  const settleHold = useCallback((timeStamp: number): boolean => {
+    if (holdPress.release(timeStamp) === "draft") {
+      keepHeldDraft();
+      return true;
+    }
+    dropHoldCue();
+    return false;
+  }, [holdPress, keepHeldDraft, dropHoldCue]);
+  // A press that ends off Send keeps a draft only if it had already lasted
+  // the hold; anything shorter was abandoned and does nothing.
+  const abandonHold = useCallback((timeStamp: number) => {
+    if (holdPress.abandon(timeStamp) === "draft") keepHeldDraft();
+    else dropHoldCue();
+  }, [holdPress, keepHeldDraft, dropHoldCue]);
   const onPrimaryPointerDown = useCallback((event: PointerEvent<HTMLButtonElement>) => {
     const activation = primaryActivationRef.current;
     if (event.pointerType !== "touch" && event.pointerType !== "pen") {
       activation.touch = false;
       activation.keyboard = false;
       activation.staleTouchClick = false;
-      if (event.button === 0) startHold();
+      if (event.button === 0) startHold(event);
       return;
     }
     activation.touch = true;
@@ -3566,10 +3579,10 @@ function ComposerBody({
     activation.staleTouchClick = false;
     activation.down = { x: event.clientX, y: event.clientY };
     event.preventDefault();
-    startHold();
+    startHold(event);
   }, [startHold]);
   const onPrimaryPointerUp = useCallback((event: PointerEvent<HTMLButtonElement>) => {
-    const held = settleHold();
+    const held = settleHold(event.timeStamp);
     if (event.pointerType !== "touch" && event.pointerType !== "pen") return;
     const down = primaryActivationRef.current.down;
     primaryActivationRef.current.down = null;
@@ -3590,14 +3603,14 @@ function ComposerBody({
   // gesture. No click follows a cancelled touch, so nothing is left to
   // consume: forget it, or it would swallow the next pointerless click
   // (an assistive activation). A leave is not that: it precedes the click.
-  const onPrimaryPointerLeave = useCallback(() => {
-    cancelHold();
-  }, [cancelHold]);
-  const onPrimaryPointerCancel = useCallback(() => {
-    cancelHold();
+  const onPrimaryPointerLeave = useCallback((event: PointerEvent<HTMLButtonElement>) => {
+    abandonHold(event.timeStamp);
+  }, [abandonHold]);
+  const onPrimaryPointerCancel = useCallback((event: PointerEvent<HTMLButtonElement>) => {
+    abandonHold(event.timeStamp);
     primaryActivationRef.current.touch = false;
     primaryActivationRef.current.down = null;
-  }, [cancelHold]);
+  }, [abandonHold]);
   const onPrimaryKeyDown = useCallback((event: KeyboardEvent<HTMLButtonElement>) => {
     if (event.key !== "Enter" && event.key !== " ") return;
     const activation = primaryActivationRef.current;
@@ -3608,8 +3621,8 @@ function ComposerBody({
   const onPrimaryClick = useCallback((event: MouseEvent<HTMLButtonElement>) => {
     const activation = primaryActivationRef.current;
     const keyboardClick = event.detail === 0;
-    if (holdRef.current.fired && !keyboardClick) {
-      holdRef.current.fired = false;
+    if (holdSpentRef.current && !keyboardClick) {
+      holdSpentRef.current = false;
       activation.touch = false;
       return;
     }
@@ -4621,18 +4634,14 @@ function ComposerBody({
             onContextMenu={(event) => event.preventDefault()}
             onKeyDown={onPrimaryKeyDown}
             onClick={onPrimaryClick}
-            data-holding={holding || undefined}
+            data-parked={parked || undefined}
             style={sendHoldStyle}
             aria-label={runningPrimaryTitle}
             title={withContextLabel(`${runningPrimaryTitle}${holdHint}`)}
           >
-            {runningPrimaryGlyph}
+            {parked ? <CheckIcon aria-hidden="true" /> : runningPrimaryGlyph}
             <span className="composer-action-label">{runningPrimaryLabel}</span>
-            <span className="send-hold-ring" aria-hidden="true">
-              <svg viewBox="0 0 48 48">
-                <circle cx="24" cy="24" r="22.5" pathLength="100" />
-              </svg>
-            </span>
+            <span className="send-hold-ring" aria-hidden="true" />
           </button>
           <Menu
             label={tr("composer.moreActiveRunActions")}
@@ -4683,18 +4692,13 @@ function ComposerBody({
       <button className="send" onPointerDown={onPrimaryPointerDown} onPointerUp={onPrimaryPointerUp}
         onPointerCancel={onPrimaryPointerCancel} onPointerLeave={onPrimaryPointerLeave}
         onContextMenu={(event) => event.preventDefault()} onKeyDown={onPrimaryKeyDown} onClick={onPrimaryClick}
-        data-holding={holding || undefined}
         data-parked={parked || undefined}
         style={sendHoldStyle}
         title={`${shellMode ? tr("composer.runShellCommand") : tr("composer.sendMessage")} (${sendKey})${holdHint}`}
         aria-label={shellMode ? tr("composer.runShellCommand") : tr("composer.sendMessage")}
         disabled={sendDisabled && !parked}>
         <span className="send-plane" aria-hidden="true">{parked ? <Icon.check /> : <Icon.send />}</span>
-        <span className="send-hold-ring" aria-hidden="true">
-          <svg viewBox="0 0 48 48">
-            <circle cx="24" cy="24" r="22.5" pathLength="100" />
-          </svg>
-        </span>
+        <span className="send-hold-ring" aria-hidden="true" />
       </button>
             )}
     </>
