@@ -594,6 +594,21 @@ account list carry `limits`/`usage`. The same change adds owner-only
 `POST /api/auth/accounts/:id/profile` (rename) and `/password` (reset; ends the
 account's sessions, refused for instance owners and IdP-managed accounts).
 
+Name and login are separate. The display name (`POST /api/auth/me`,
+`/accounts/:id/profile`) is what agents and people call someone (see "Who is
+speaking"); it never reaches Git. The login is only what is typed at sign-in and
+no agent sees it. A person moves their own login with `POST /api/auth/me/login`
+(elevated, like a password change); the instance owner moves another account's
+with `POST /api/auth/accounts/:id/login`. Both take `{login, expectedRevision}`,
+store it lowercased (`loginName`), keep the password, passkeys (keyed by account
+ID), recovery codes and sessions, bump the account revision and audit
+`identity.login-changed`. IdP-managed accounts are refused (`managed-identity`).
+A taken login answers `login-taken` (409, also from account creation) so a client
+can tell it from a stale revision. `owner` (the login setup and owner protection
+hand out, named in the recovery file) belongs only to an instance owner: nobody
+else may take it, even after the owner moves away from it. The browser's
+remembered sign-in login follows its own person's move (`changeCurrentLogin`).
+
 | Seam | Effect | Owner |
 |---|---|---|
 | Canonical read policy | a project off the list is not readable, and neither is any resource under it (its sessions, including the account's own); every project/session/package route reads through it | `resourceAccess.ts` `projectAllowed`, wired in `canonicalSecurity.ts` |
@@ -999,7 +1014,7 @@ from personal to shared only as text its owner confirmed.
 | Who is here | `sharedWith` counts who could open a project. `othersHere` says someone else really works in it: they own it, have an active chat or a private room in it, or hold a grant on it. A grant on one chat doesn't count: that chat's `sharing.named` speaks for itself. People interface follows `othersHere` ([UI](../dev/ui.md)). Memory's write target stays on who could open it, so what a person saves alone stays theirs if someone opens the project later | `projectResourceAuthority.ts`, `sessionSharing.ts`, `apps/web/src/privateRoom.ts` |
 | Memory | A room shares its project's memory and policy (`service.scope`). `chatAccess` derives the layers from the chat's real audience (`host.sessionPrivacy`), never from a request or a model argument: a chat private to its owner gets `project` + that person's layers, any other chat gets `project` only | `packages/memory/src/service.ts` |
 | Writing | In a private chat of a project others can open, `memory_remember` and harvest write to the person's notes. Someone working alone keeps writing to the project. `target: "shared"` from such a chat saves an active personal note, so nothing waits on the person. It is also offered for sharing when someone else really works in the project, the text fits in 600 characters and the chat has made no offer yet. Only the person shares it, as a copy of exactly that text, so earlier personal revisions stay personal. Sharing archives their note; Undo (`unpublish`) takes back their own unchanged copy and restores it | same |
-| Who is speaking | Every admitted turn in a Space with two or more members persists `context/people-prepared` before delivery: who speaks, who reads, which memory applies. A retry resends the recorded block. A person joining someone else's running turn (steer) gets a one-line version. Names are reduced to letters and ordinary punctuation, so a display name can't close the block or read as a command | `sessionSharing.ts`, `sessions.ts` |
+| Who is speaking | Every admitted turn in a Space with two or more members persists `context/people-prepared` before delivery: who speaks, who reads, which memory applies. In a Space with one person a person's turn persists the same event with only the speaker's line, so agents call them by the account name they chose (Settings → Users; the owner can rename others); server work gets none. A retry resends the recorded block. A person joining someone else's running turn (steer) gets a one-line version. Names keep letters, digits, emoji and everyday punctuation (`.,'’()&+!?_-`) up to 80 characters; anything else (`<>"`/`[]{}`…) becomes a space, so a display name can't close the block or start markup. The account name never reaches Git: Polyth commits carry the person's Git profile, the project's identity or the checkout's configuration (`resolveGitCommitIdentity`) | `sessionSharing.ts`, `sessions.ts`, `packages/git/src/actingPerson.ts` |
 | Whose fact | `about` on a record, labelled in the memory block (`· personal`, `· about Оля`). Harvest transcripts name each user line's author | `packages/knowledge/src/memory.ts` |
 | Reach | In a chat others read, `polyth`, `polyth_session_markers` and `memory_search_projects` hide rooms, personal projects and private chats; the last searches only projects every reader can open. `polyth_peer` stays inside one delegated tree | `sessionControlTool.ts`, `session-markers/agentTool.ts`, `service.ts` |
 | Staying private | A record with `layer: person` reaching the model sets `personalContext` on the chat and the chat it follows, before delivery. Such a chat and any chat in a room can only narrow: the harness's own context holds what the agent saw, so opening it would let the agent repeat that (`reason: personal-context` / `private-room`). A fork keeps the mark | `sessionSharing.ts` |

@@ -183,7 +183,7 @@ const ERROR_TEXT: Record<string, TranslationKey> = {
 export function accountErrorText(cause: unknown): string {
   const error = cause as { code?: unknown; status?: unknown; message?: unknown } | null;
   const code = typeof error?.code === "string" ? error.code : undefined;
-  if (code === "conflict" && typeof error?.message === "string" && /login/i.test(error.message)) {
+  if (code === "login-taken" || (code === "conflict" && typeof error?.message === "string" && /login/i.test(error.message))) {
     return tr("settings.users.errorLoginTaken");
   }
   if (code === "conflict" || error?.status === 409) return tr("settings.users.errorConflict");
