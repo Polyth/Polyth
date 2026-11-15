@@ -869,8 +869,10 @@ Contract and server rules: [Spaces §14.8](../architecture/spaces-and-tenancy.md
     {names}" (a failure keeps the card); the same answer stays available under
     the message in the chat. Lifetimes: 8 s (`message`), 10 s
     (`mention`); the desktop stack widens to 360px while one shows. Plus the
-    completion sound and, with "Only in background" off, the OS alert, when
-    the kind is chosen in Settings → Notifications;
+    completion sound, a light event vibration (phones; see
+    [haptics](../mobile/platform-behavior.md#downloads-sharing-clipboard-and-haptics))
+    and, with "Only in background" off, the OS alert, when the kind is chosen
+    in Settings → Notifications;
   - Polyth hidden: the chosen OS alert (one per chat, `renotify`), unless
     Web Push is active, which covers it from the service worker.
   Reading a chat (on screen) clears its card, unread people inbox rows and

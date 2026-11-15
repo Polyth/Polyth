@@ -1,6 +1,7 @@
 // Hover copy button for pre / diff / code blocks.
 import { useState } from "react";
 import { copyText } from "../utils.ts";
+import { selectionFeedback } from "../haptics.ts";
 import { tr } from "../i18n/index.ts";
 import { CopiedIcon, CopyIcon, IconButton } from "./ui/index.ts";
 
@@ -18,6 +19,7 @@ export default function CopyButton({ text, label = tr("copybutton.copyToClipboar
         e.stopPropagation();
         void copyText(text).then((ok) => {
           if (!ok) return;
+          selectionFeedback();
           setDone(true);
           setTimeout(() => setDone(false), 1200);
         });

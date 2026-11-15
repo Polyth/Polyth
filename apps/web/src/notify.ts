@@ -6,6 +6,7 @@ import { openSession } from "./init.ts";
 import { getUiSettings } from "./uiPrefs.ts";
 import {
   diffNotifications,
+  EVENT_HAPTIC,
   type NotificationSpec,
   type NotifyKind,
   type SessionSnapshot,
@@ -14,6 +15,7 @@ import { isNativeMobile } from "@polyth/mobile/runtime";
 import { webPushDeliveryActive } from "./push.ts";
 import { notificationCentre } from "./notificationCentre.ts";
 import { activeElsewhere } from "./devicePresence.ts";
+import { eventHaptic } from "./haptics.ts";
 import {
   nativePushLocalProjectionEnabled,
   requestNativeNotificationPermission,
@@ -321,6 +323,8 @@ export function alertPersonMessage(record: NotificationRecord): void {
   if (plan.banner) showPeopleCard(record);
   // The person works on another device: that one sounds and alerts, not this.
   const away = activeElsewhere();
+  // The banner shows every person message; a vibration only the chosen kinds.
+  if (!away && ui.notifyKinds.includes(record.kind)) eventHaptic(EVENT_HAPTIC[record.kind]);
   if (plan.sound && !away) playCompletionSound();
   if (plan.os && !away) {
     const tag = peopleNotificationTag(record.sessionId);
@@ -454,6 +458,7 @@ export function installNotify(): void {
 
       // The person works on another device: only that one sounds or alerts.
       if (activeElsewhere()) continue;
+      eventHaptic(EVENT_HAPTIC[spec.kind]);
       if (ui.notifySound && (spec.kind === "completed" || spec.kind === "failed")) playCompletionSound();
       if (!ui.notifyOnComplete) continue;
       // Foreground events on the active session stay quiet by default; with

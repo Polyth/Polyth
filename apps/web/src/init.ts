@@ -10,6 +10,7 @@ import { displaySessionTitle, isPlaceholderTitle, modelToMarkdown } from "./form
 import { friendlyError } from "./settings.ts";
 import { formatAppUrl, parseAppUrl, settingsPageFromSearch } from "./router.ts";
 import * as store from "./store.ts";
+import { successFeedback, warningFeedback } from "./haptics.ts";
 import { resolveActiveProjectId, shouldRefreshProjectsOnSyncOpen } from "./projectRegistry.ts";
 import { claimPersonalProjectAttempt } from "./personalProject.ts";
 import { projectIsolationLevel } from "@polyth/contracts";
@@ -2627,6 +2628,7 @@ export function replyPermission(
   reply: "once" | "always" | "reject",
   scope?: "session" | "project",
 ): void {
+  if (reply === "reject") warningFeedback(); else successFeedback();
   void api.replyPermission(sessionId, requestId, reply, scope).catch((err) => console.error("permission reply failed", err));
 }
 

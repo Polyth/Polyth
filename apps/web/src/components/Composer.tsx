@@ -180,7 +180,7 @@ import { detectModeTrigger, isModeLeaveKey, modeText } from "../composer/modes.t
 import { releaseSends } from "../composer/sendRelease.ts";
 import "../composer/composerModes.css";
 import { announce } from "./a11y/live.tsx";
-import { successFeedback } from "../haptics.ts";
+import { successFeedback, tapFeedback } from "../haptics.ts";
 import {
   composerThinkingChoice,
   getModelThinking,
@@ -1125,6 +1125,7 @@ function ComposerBody({
     if (event && event.detail !== 0 && Date.now() - stopPointerAt.current > 1000) return;
     abortPendingRef.current = true;
     setAbortPending(true);
+    tapFeedback();
     try {
       await abortSession("composer");
     } finally {

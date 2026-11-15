@@ -16,6 +16,7 @@ import {
 import type { UserMessageActionId } from "../messageActionLayout.ts";
 import { useUiSettings } from "../uiPrefs.ts";
 import { copyText } from "../utils.ts";
+import { selectionFeedback } from "../haptics.ts";
 import { setUiError, useStore } from "../store.ts";
 import { useTimelineProjectId, useTimelineSessionId } from "../timelineSession.ts";
 import { tr } from "../i18n/index.ts";
@@ -59,7 +60,7 @@ export default function MessageQuickActions({
     run: () => {
       void copyText(copyFormat === "markdown" ? copyMarkdown(message) : copyJson(message)).then((ok) => {
         const text = copyAnnouncement(ok ? copyFormat : "failed");
-        if (ok) confirm("copy");
+        if (ok) { selectionFeedback(); confirm("copy"); }
         announce(text, anchor);
         if (!ok) setUiError(text);
       });

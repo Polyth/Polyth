@@ -6,9 +6,23 @@
 
 import type { BackgroundWorkState, NotificationKind } from "@polyth/contracts";
 import { tr } from "./i18n/index.ts";
+import type { HapticKind } from "./haptics.ts";
 
 /** Native and centre delivery share one normative kind contract. */
 export type NotifyKind = NotificationKind;
+
+/** The vibration each live event gets (only for kinds the person chose in
+ *  "Notify about"; `eventHaptic` owns the on-screen and burst rules). An agent
+ *  waiting on the person is the strongest call short of a failure. */
+export const EVENT_HAPTIC: Record<NotifyKind, HapticKind> = {
+  completed: "success",
+  failed: "error",
+  question: "warning",
+  permission: "warning",
+  subagent: "selection",
+  mention: "tap",
+  message: "tap",
+};
 
 export interface SessionSnapshot {
   id: string;

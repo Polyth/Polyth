@@ -4,6 +4,7 @@ import { resolveModelPresentation } from "@polyth/contracts/model-presentation";
 import { api } from "@polyth/session/web-api";
 import { fmtCost, fmtTokens } from "../format.ts";
 import { sendMessage } from "../init.ts";
+import { selectionFeedback } from "../haptics.ts";
 import {
   assistantTime,
   normalizedDuration,
@@ -198,7 +199,7 @@ export default function ChatResponseFooter({
     action("copy", tr("timeline.copyAnswer"), () => {
       void copyText(m.text).then((ok) => {
         const text = ok ? tr("timeline.answerCopied") : tr("timeline.couldnTCopyAnswer");
-        if (ok) showConfirmation("copy");
+        if (ok) { selectionFeedback(); showConfirmation("copy"); }
         announce?.(text, actionAnchor);
         if (!ok) setUiError(text);
       });

@@ -201,6 +201,7 @@ const BUILTIN_ITEMS: SettingsSearchItem[] = [
   { id: "chat.promptHistoryLimit", pageId: "chat", label: tr("settings.registry.promptHistoryLimit"), description: tr("settings.pages.promptHistoryLimitHint"), keywords: ["history", "limit", "recall", "prompts"], focusTarget: "chat.promptHistoryLimit" },
   { id: "notifications.desktop", pageId: "notifications", label: tr("settings.registry.desktopNotification"), keywords: ["alert", "browser"], focusTarget: "notifications.desktop" },
   { id: "notifications.sound", pageId: "notifications", label: tr("settings.registry.completionSound"), keywords: ["beep", "audio"], focusTarget: "notifications.sound" },
+  { id: "notifications.haptics", pageId: "notifications", label: tr("settings.pages.vibration"), description: tr("settings.pages.vibrationHint"), keywords: ["haptics", "vibrate", "buzz", "taptic", "phone"], focusTarget: "notifications.haptics" },
   { id: "notifications.centreHistory", pageId: "notifications", label: tr("settings.registry.centreHistory"), description: tr("settings.registry.keepReadNotificationsVisibleInTheNotification"), keywords: ["inbox", "bell", "read", "notification centre"], focusTarget: "notifications.centreHistory" },
   { id: "behavior.confirmArchive", pageId: "behavior", label: tr("settings.registry.confirmBeforeArchivingSessions"), keywords: ["archive", "safety"], focusTarget: "behavior.confirmArchive" },
   { id: "behavior.autosave", pageId: "behavior", label: tr("settings.registry.editorAutosave"), keywords: ["save", "revision"], focusTarget: "behavior.autosave" },

@@ -763,7 +763,7 @@ function lift(source: HTMLElement, zoneId: RailZoneId, id: string, pointerId: nu
   };
   document.body.dataset.railDragging = "true";
   document.body.dataset.railDragOver = zoneId;
-  if (touch) navigator.vibrate?.(8);
+  if (touch) tapFeedback();
   const index = from ? insertionIndex(from.centers, zones.get(zoneId)!.spec.axis === "x" ? x : y) : 0;
   emit({ id, from: zoneId, over: zoneId, index, phase: "dragging" });
   // Next frame: the ghost rises (scale + shadow) from exactly where it sat.

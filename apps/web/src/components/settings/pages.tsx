@@ -16,6 +16,7 @@ import { isAppearanceSyncEnabled, setAppearanceSyncEnabled, subscribeAppearanceS
 import { projectIsolatesByDefault, projectIsolationLevel } from "@polyth/contracts";
 import { DEFAULT_SETTINGS, friendlyError, INTERFACE_FONTS, interfaceFontLabel, TEXT_SIZE_MAX, TEXT_SIZE_MIN } from "../../settings.ts";
 import { requestNotifyPermission } from "../../notify.ts";
+import { getHapticsMode, hapticsSupported, setHapticsMode, subscribeHapticsMode, tapFeedback, type HapticsMode } from "../../haptics.ts";
 import { DEFAULT_NOTIFY_TEMPLATE, renderTemplate } from "../../notifications.ts";
 import {
   describePushTest, disablePush, enablePush, reconcilePushSubscription, pushUnsupportedReason, sendTestPush,
@@ -1213,8 +1214,12 @@ export function NotificationsPage() {
     if (on) next.push(kind);
     setUiSettings({ notifyKinds: next });
   };
+  // Vibration is this device's own choice (localStorage), not a synced setting.
+  const hapticsMode = useSyncExternalStore(subscribeHapticsMode, getHapticsMode, getHapticsMode);
+  const canVibrate = useMemo(() => hapticsSupported(), []);
+  const eventVibration = canVibrate && hapticsMode === "all";
   const desktopOn = ui.notifyOnComplete;
-  const anyLocalAlert = desktopOn || ui.notifySound;
+  const anyLocalAlert = desktopOn || ui.notifySound || eventVibration;
   const desktopHint = denied
     ? tr("settings.pages.notificationsAreBlockedForThisSiteIn")
     : desktopOn && !granted
@@ -1245,6 +1250,24 @@ export function NotificationsPage() {
         <Row label={tr("settings.pages.completionSound")} hint={tr("settings.pages.completionSoundPlainHint")} itemId="notifications.sound">
           <Toggle on={ui.notifySound} onChange={(v) => setUiSettings({ notifySound: v })} label={tr("settings.pages.completionSound")} />
         </Row>
+        <Row
+          label={tr("settings.pages.vibration")}
+          hint={canVibrate ? tr("settings.pages.vibrationHint") : tr("settings.pages.vibrationUnsupported")}
+          itemId="notifications.haptics"
+          disabled={!canVibrate}
+        >
+          <Seg<HapticsMode>
+            label={tr("settings.pages.vibration")}
+            value={hapticsMode}
+            disabled={!canVibrate}
+            options={[
+              ["all", tr("settings.pages.vibrationAll")],
+              ["touch", tr("settings.pages.vibrationTouch")],
+              ["off", tr("settings.pages.vibrationOff")],
+            ]}
+            onChange={(next) => { setHapticsMode(next); tapFeedback(); /* a sample of the choice */ }}
+          />
+        </Row>
         {/* Browser Web Push can never work inside the native app's WebView
             (no service-worker push); the native row owns delivery there. */}
         {nativePushSettingsAvailable() ? <NativePushRow /> : <PushRow />}
@@ -1252,7 +1275,9 @@ export function NotificationsPage() {
       </Section>
       <Section
         title={tr("settings.pages.triggersGroup")}
-        hint={anyLocalAlert ? tr("settings.pages.triggersGroupHint") : tr("settings.pages.triggersGroupOffHint")}
+        hint={canVibrate
+          ? anyLocalAlert ? tr("settings.pages.triggersGroupHintHaptics") : tr("settings.pages.triggersGroupOffHintHaptics")
+          : anyLocalAlert ? tr("settings.pages.triggersGroupHint") : tr("settings.pages.triggersGroupOffHint")}
       >
         <Row
           label={tr("settings.pages.notifyAbout")}

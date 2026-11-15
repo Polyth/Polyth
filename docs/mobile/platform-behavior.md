@@ -332,6 +332,29 @@ would regress the scoped-permission model.
   browser clipboard/fallback path elsewhere.
 - Light haptics confirm a successful connection and a successful native file
   selection. Navigation and routine taps remain silent.
+- All web-shell haptics go through `apps/web/src/haptics.ts`: five semantic
+  kinds (`selection`, `tap`, `success`, `warning`, `error`). The native app
+  plays them through Capacitor Haptics (iOS Taptic patterns for
+  success/warning/error); Android browsers use `navigator.vibrate`; iOS Safari
+  has no vibration API and stays silent. Settings → Notifications →
+  **Vibration** is a per-device choice kept in `localStorage`
+  (`polyth.haptics`, never synced): *Touch and events* (default), *Touch only*
+  or *Off*. The row is disabled on a device that cannot vibrate (desktop
+  Chromium exposes `vibrate()` without a motor, so a browser counts only with a
+  coarse primary pointer).
+- Touch haptics follow a completed local action: gestures crossing their
+  threshold, sheet menus, drops, hold-to-draft, Stop (`tap`), approving (`success`) or
+  rejecting (`warning`) a permission request, and copying (`selection`).
+- Live events vibrate through `eventHaptic()` from the notification router
+  (`notify.ts`), only for the kinds chosen in "Notify about": turn finished
+  `success`, turn failed `error`, agent question or permission request
+  `warning`, delegated agent finished `selection`, mention or person message
+  `tap`. They play only while the page is visible (in the background the push
+  notification speaks), never on the device where the person is not active,
+  never for a chat's first sighting or a replayed event (the router primes and
+  deduplicates), and within 700 ms a later event plays only if it is stronger.
+  Connection loss and recovery do not vibrate: a phone resume shows the
+  catch-up pill on every unlock and false liveness losses happen.
 - Outbound Share uses the platform share sheet for downloaded artifacts.
 
 Receiving arbitrary files/text from another app ("Share into Polyth") is
