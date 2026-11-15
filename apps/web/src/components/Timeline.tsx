@@ -3756,6 +3756,11 @@ export default function Timeline({
         openAt = message.time;
         openSeq = message.eventSeq;
       } else if (message.kind === "assistant") {
+        // A prompt the chat does not draw (an agent's wake) opened a new turn.
+        if (message.hiddenPromptAt !== undefined && message.hiddenPromptAt > openAt) {
+          if (lastAssistant !== null) terminal.set(lastAssistant.eventSeq, openAt);
+          openAt = message.hiddenPromptAt;
+        }
         lastAssistant = message;
       }
     }

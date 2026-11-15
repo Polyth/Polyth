@@ -8187,6 +8187,35 @@ body[data-glass="clear"] .prompt-nav-panel { --prompt-nav-panel-blur: 22px; }
   justify-content: center;
 }
 .session-header-status:empty { display: none; }
+/* Back from the open chat (ui/SessionBackButton.tsx): a quiet header control
+   before the title, as tall as the title's own button; the arrow, an
+   optional mark (an agent's glyph) and where it leads, cut short first. */
+.session-back--bar {
+  /* Its own width up to the cap; the title's button gives way first. */
+  flex: none;
+  align-self: stretch;
+  min-width: 0;
+  max-inline-size: min(14rem, 34%);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding-block: 0;
+  padding-inline: var(--space-2) var(--space-3);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-meta);
+  font-weight: 550;
+  line-height: 1.2;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+.session-back--bar .session-back-arrow { flex: none; }
+.session-back--bar .session-back-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-back .session-back-arrow:dir(rtl),
+.session-back--island svg:dir(rtl) { transform: scaleX(-1); }
+/* Its touch target is the `.header-control::after` one. */
+@media (pointer: coarse) { .session-back--bar { position: relative; } }
 .desktop-session-status-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--muted); }
 .desktop-session-status-dot.working { background: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
 .desktop-session-status-dot.needs-approval, .desktop-session-status-dot.needs-reply { background: var(--amber); }
@@ -14898,7 +14927,9 @@ color: var(--muted);
       max(var(--conversation-chrome-inset), var(--safe-right));
     z-index: calc(var(--z-shell) + 2);
     display: grid;
-    grid-template-columns: max(var(--tap), var(--mobile-island-height)) minmax(0, 1fr) auto;
+    /* The leading island is one tap wide, or two when it also holds Back
+       (SessionBack.tsx) before the menu. */
+    grid-template-columns: minmax(max(var(--tap), var(--mobile-island-height)), auto) minmax(0, 1fr) auto;
     align-items: center;
     gap: var(--space-2);
     padding: 0;

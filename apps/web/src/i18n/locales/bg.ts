@@ -3606,6 +3606,7 @@ export const bg: AppMessages = {
   "sharing.lostAccess": "Този чат вече не е достъпен за вас.",
   "sharing.noPeople": "Още няма добавени хора.",
   "sharing.openParent": "Отваряне на споделянето на основния чат",
+  "sessionback.backToValue": "Назад към {name}",
   "sharing.owner": "Собственик",
   "sharing.people": "Хора",
   "sharing.policyAllowSpace": "Споделяне с цялото пространство",

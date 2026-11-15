@@ -3606,6 +3606,7 @@ export const zhCN: AppMessages = {
   "sharing.lostAccess": "你已无法访问该聊天。",
   "sharing.noPeople": "尚未添加任何人。",
   "sharing.openParent": "打开父聊天的共享设置",
+  "sessionback.backToValue": "返回{name}",
   "sharing.owner": "所有者",
   "sharing.people": "成员",
   "sharing.policyAllowSpace": "与整个 Space 共享",

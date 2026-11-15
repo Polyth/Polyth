@@ -659,7 +659,8 @@ function activityTrail(events: readonly SubagentEvent[]): TrailEntry[] {
   const str = (value: unknown) => (typeof value === "string" ? value : "");
   for (const { seq, type, data } of events) {
     if (type === "user/message") {
-      const text = str(data.text).trim();
+      // A prompt shown as other words (an agent's wake) trails by those words.
+      const text = str(typeof data.displayText === "string" ? data.displayText : data.text).trim();
       if (text) rows.push({ seq, role: "you", text });
     } else if (type === "assistant/chunk" || type === "assistant/message") {
       const partId = str(data.partId) || undefined;

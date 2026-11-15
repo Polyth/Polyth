@@ -30,6 +30,7 @@ export { default as ResponsiveOverlay, type ResponsiveOverlayProps } from "./Res
 export { GlassDock, GlassIsland, type GlassProps, type GlassStrength } from "./Glass.tsx";
 export { default as RunSummary, type RunSummaryProps, type RunSummaryState } from "./RunSummary.tsx";
 export { default as AgentStatusDock, type AgentStatusDockProps } from "./AgentStatusDock.tsx";
+export { default as SessionBackButton, type SessionBackButtonProps, type SessionBackPresentation } from "./SessionBackButton.tsx";
 export {
   useAnchoredPosition,
   type AnchoredPosition,

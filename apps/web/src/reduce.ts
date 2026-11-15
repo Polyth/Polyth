@@ -72,6 +72,10 @@ export interface AssistantMsg {
   /** Final `assistant/message.time` — the semantic completion time, distinct
    *  from `time` (the first streamed chunk) */
   completedAt?: number;
+  /** Time of the prompt the chat does not draw (an agent's wake, a hidden
+   *  retry) that opened this reply's turn: the turn starts there, as it would
+   *  at a drawn prompt, so its footer does not measure from the reply. */
+  hiddenPromptAt?: number;
   /** The provider's own limit line ("You've hit your limit · resets …") that
    *  closed a rate-limited turn. The resume notice says the same, so the
    *  timeline does not render it as an answer. */
@@ -482,6 +486,9 @@ export interface RenderModel {
   changedFiles: string[];
   /** The latest canonical user/message was intentionally omitted from chat. */
   lastUserMessageHidden: boolean;
+  /** Time of that omitted prompt while it is the latest (an agent's wake, a
+   *  hidden retry); replies it opens carry it as `hiddenPromptAt`. */
+  hiddenPromptAt?: number;
   /** A prompt-cache keep-alive turn is open (`user/message.keepAlive`): its
    *  prompt, turn boundaries and reply are maintenance, not conversation, so
    *  they stay out of the chat; its usage still updates context and totals. */
@@ -1018,13 +1025,19 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         earlier.delivered = true;
         touch(earlier);
       }
-      const text = stripRecoveryContextBlocks(str(d, "text") ?? "");
-      const rawValue = str(d, "raw");
+      // A prompt shown as other words (an agent's composed wake shows only the
+      // person's input) renders those; an empty display text is not shown.
+      const displayText = str(d, "displayText");
+      const text = stripRecoveryContextBlocks(displayText ?? str(d, "text") ?? "");
+      const rawValue = displayText === undefined ? str(d, "raw") : undefined;
       const raw = rawValue === undefined ? undefined : stripRecoveryContextBlocks(rawValue);
       const hiddenUserMessage = d.githubConflictResolution === true
         || d.hiddenUserMessage === true
-        || d.autoResume === true;
+        || d.autoResume === true
+        || displayText === "";
       model.lastUserMessageHidden = hiddenUserMessage;
+      if (hiddenUserMessage) model.hiddenPromptAt = ev.time;
+      else delete model.hiddenPromptAt;
       const pressure = Number((d as { contextPressure?: { level?: unknown } }).contextPressure?.level);
       if (Number.isFinite(pressure)) model.contextPressureLevel = pressure;
       if (!hiddenUserMessage) {
@@ -1160,6 +1173,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           reasoning: "",
           finalized: false,
           time: ev.time,
+          ...(model.hiddenPromptAt !== undefined ? { hiddenPromptAt: model.hiddenPromptAt } : {}),
           ...(model.turn?.model ? { model: model.turn.model } : {}),
           ...(model.turn?.agent ? { agent: model.turn.agent } : {}),
           ...(model.turn?.harnessId ? { harnessId: model.turn.harnessId } : {}),
@@ -1197,6 +1211,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           reasoning: "",
           finalized: false,
           time: ev.time,
+          ...(model.hiddenPromptAt !== undefined ? { hiddenPromptAt: model.hiddenPromptAt } : {}),
           ...(model.turn?.model ? { model: model.turn.model } : {}),
           ...(model.turn?.agent ? { agent: model.turn.agent } : {}),
           ...(model.turn?.harnessId ? { harnessId: model.turn.harnessId } : {}),

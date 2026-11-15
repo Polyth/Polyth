@@ -465,9 +465,11 @@ export interface Store extends SessionPersistence {
     hiddenUserMessage?: boolean,
     memory?: MemoryNarrowing,
     author?: SessionPerson,
+    displayText?: string,
   ): Promise<QueueEnqueueResult>;
   queueList(sessionId: string): Promise<QueueItemDto[]>;
-  /** Updates text, clears native command/review state; delivery, attachments, position, and timestamps stay unchanged. */
+  /** Updates text, clears native command/review state and any display text;
+   *  delivery, attachments, position, and timestamps stay unchanged. */
   queueEdit(sessionId: string, queueId: string, text: string): Promise<QueueItemDto | undefined>;
   /** Validates ids are an exact permutation for the session; positions update transactionally. */
   queueReorder(sessionId: string, ids: string[]): Promise<QueueItemDto[]>;
@@ -1378,6 +1380,15 @@ export function createStore(dbPath: string): Store {
         INSERT OR REPLACE INTO events_fts_keys (session_id, seq, fts_rowid)
         SELECT session_id, seq, rowid FROM events_fts
       `);
+    },
+    // v24: a queued prompt keeps its chat presentation (`displayText`, e.g. an
+    // agent's composed wake shown as only the person's words). Null keeps the
+    // model text as the shown text, as before.
+    () => {
+      const queueColumns = sqlitePrepare("PRAGMA table_info(session_queue)").all() as Array<{ name: string }>;
+      if (!queueColumns.some((column) => column.name === "display_text")) {
+        sqliteExec("ALTER TABLE session_queue ADD COLUMN display_text TEXT");
+      }
     },
   ];
   for (let v = getVersion(); v < MIGRATIONS.length; v++) {
@@ -3161,6 +3172,7 @@ export function createStore(dbPath: string): Store {
     reservation_operation_id: string | null;
     held_for_review: number;
     author: string | null;
+    display_text: string | null;
   }
 
   const parseQueueAuthor = (raw: string | null): SessionPerson | undefined => {
@@ -3223,6 +3235,7 @@ export function createStore(dbPath: string): Store {
       ...(attachments ? { attachments } : {}),
       ...(command ? { command } : {}),
       ...(r.hidden_user_message === 1 ? { hiddenUserMessage: true } : {}),
+      ...(typeof r.display_text === "string" ? { displayText: r.display_text } : {}),
       ...(memory ? { memory } : {}),
       ...(r.held_for_review === 1 ? { heldForReview: true } : {}),
       ...(author ? { author } : {}),
@@ -3239,6 +3252,7 @@ export function createStore(dbPath: string): Store {
     hiddenUserMessage?: boolean,
     memory?: MemoryNarrowing,
     author?: SessionPerson,
+    displayText?: string,
   ): Promise<QueueEnqueueResult> {
     const queueId = clientOperationId ?? randomUUID();
     const createdAt = Date.now();
@@ -3256,6 +3270,7 @@ export function createStore(dbPath: string): Store {
             && (existing.attachments ?? null) === (attachments?.length ? JSON.stringify(attachments) : null)
             && (existing.command ?? null) === serializedCommand
             && existing.hidden_user_message === (hiddenUserMessage ? 1 : 0)
+            && (existing.display_text ?? null) === (displayText ?? null)
             && (existing.memory ?? null) === (memory ? JSON.stringify(memory) : null);
           if (!same) throw Object.assign(new Error("client operation id is already bound to another queue admission"), { code: "client-operation-conflict" });
           return { item: rowToQueueItem(existing), created: false };
@@ -3264,7 +3279,7 @@ export function createStore(dbPath: string): Store {
       const row = prep("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM session_queue WHERE session_id = ?")
         .get(sessionId) as { next: number };
       prep(
-        "INSERT INTO session_queue (queue_id, session_id, position, text, delivery, created_at, attachments, command, hidden_user_message, memory, author) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO session_queue (queue_id, session_id, position, text, delivery, created_at, attachments, command, hidden_user_message, memory, author, display_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       ).run(
         queueId,
         sessionId,
@@ -3277,6 +3292,7 @@ export function createStore(dbPath: string): Store {
         hiddenUserMessage ? 1 : 0,
         memory ? JSON.stringify(memory) : null,
         person ? JSON.stringify(person) : null,
+        displayText ?? null,
       );
       return {
         item: {
@@ -3284,6 +3300,7 @@ export function createStore(dbPath: string): Store {
           ...(attachments?.length ? { attachments } : {}),
           ...(command ? { command } : {}),
           ...(hiddenUserMessage ? { hiddenUserMessage: true } : {}),
+          ...(displayText !== undefined ? { displayText } : {}),
           ...(memory ? { memory } : {}),
           ...(person ? { author: person } : {}),
         } satisfies QueueItemDto,
@@ -3301,7 +3318,7 @@ export function createStore(dbPath: string): Store {
 
   function queueEdit(sessionId: string, queueId: string, text: string): Promise<QueueItemDto | undefined> {
     const result = prep(
-      `UPDATE session_queue SET text = ?, command = NULL, hidden_user_message = 0, held_for_review = 0
+      `UPDATE session_queue SET text = ?, command = NULL, hidden_user_message = 0, held_for_review = 0, display_text = NULL
        WHERE session_id = ? AND queue_id = ? AND reservation_operation_id IS NULL`,
     )
       .run(text, sessionId, queueId);

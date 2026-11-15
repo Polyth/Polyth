@@ -640,6 +640,4 @@ export const uk: AgentsMessages = {
   "agents.liveWriting": "Пише",
   "agents.stepsValue": "Кроків: {count}",
   "agents.watchInSession": "Дивитися в сесії",
-  "agents.sessionOfValue": "Розмова агента «{name}»",
-  "agents.backToAgent": "Відкрити агента",
 };

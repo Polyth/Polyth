@@ -3609,6 +3609,7 @@ export const en = {
   "sharing.lostAccess": "That chat is no longer available to you.",
   "sharing.noPeople": "No one added yet.",
   "sharing.openParent": "Open the parent chat’s sharing",
+  "sessionback.backToValue": "Back to {name}",
   "sharing.owner": "Owner",
   "sharing.people": "People",
   "sharing.policyAllowSpace": "Sharing with the whole Space",

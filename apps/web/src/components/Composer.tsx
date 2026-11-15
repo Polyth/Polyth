@@ -164,7 +164,7 @@ import ContextLiquid, { contextLiquidLabel, useActiveContextGauge } from "./Cont
 import ContextPie, { contextPieVisible } from "./ContextPie.tsx";
 import ChatMemoryReminder from "./ChatMemoryReminder.tsx";
 import { chatMemoryState } from "../chatMemory.ts";
-import QueuedMessageList, { latestSteerableQueuedItem } from "./QueuedMessageList.tsx";
+import QueuedMessageList, { latestSteerableQueuedItem, queueItemText } from "./QueuedMessageList.tsx";
 import {
   composerContributionsVersion,
   composerMode,
@@ -2445,8 +2445,10 @@ function ComposerBody({
         // immediately after this queued message is updated.
         saveDraft(target, draftBefore);
         setQueueEdit({ id: reserved.id, sessionId: target, draftBefore });
-        setText(reserved.text);
-        inputRef.current?.replaceText(reserved.text);
+        // The words the queue row showed; saving replaces the whole prompt.
+        const shown = queueItemText(reserved);
+        setText(shown);
+        inputRef.current?.replaceText(shown);
         inputRef.current?.focus();
         setInputFocused(true);
         announce(tr("composer.editingQueuedMessageValueInComposer", { position: reserved.position + 1 }));

@@ -72,6 +72,7 @@ import { useUiSettings } from "../../uiPrefs.ts";
 import { POLYTH_MARK_SRC } from "../../brandAsset.ts";
 import { MobileStatusIcon } from "./MobileStatusIcon.tsx";
 import MobileSessionMenu from "./MobileSessionMenu.tsx";
+import SessionBack from "../SessionBack.tsx";
 import {
   closeSessionStatusPopover,
   useSessionStatusPopover,
@@ -927,6 +928,8 @@ export default function MobileSessionHeader() {
   return <>
     <div className="mobile-session-floats" data-title-mode={mobileSessionTitle} aria-label={tr("mobile.island.workspaceNavigation")}>
       <GlassIsland className="mobile-float-navigation">
+        {/* A subagent's Back to its parent chat, an agent's to its page. */}
+        {session && <SessionBack sessionId={session.id} presentation="island" />}
         <IconButton icon={MenuIcon} label={tr("mobile.island.openNavigation")} size="lg" variant="ghost" aria-expanded={sidebarOpen} onClick={() => {
           hideMobileWorkspaceHome();
           setRailPlugin(null);

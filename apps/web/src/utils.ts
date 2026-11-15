@@ -16,10 +16,18 @@ import { normalizeQuestions, questionsToMarkdown, type AnswerMap } from "./quest
 export function firstUserText(events: readonly SessionEvent[] | undefined): string | undefined {
   // A hidden message (e.g. a delegated-permission wake) is not the person's
   // request and must never title the session.
-  const ev = events?.find((e) => e.type === "user/message" && (e.data as JsonObject).hiddenUserMessage !== true);
-  const t = ev ? (ev.data as JsonObject).text : undefined;
+  const ev = events?.find((e) => e.type === "user/message"
+    && (e.data as JsonObject).hiddenUserMessage !== true
+    && (e.data as JsonObject).displayText !== "");
+  const t = ev ? shownUserText(ev.data as JsonObject) : undefined;
   const visible = typeof t === "string" ? stripRecoveryContextBlocks(t) : undefined;
   return visible && visible.trim() ? visible : undefined;
+}
+
+/** What chat surfaces show for a `user/message`: its display text when it has
+ *  one (an agent's composed wake shows only the person's words), else its text. */
+function shownUserText(data: JsonObject): unknown {
+  return typeof data.displayText === "string" ? data.displayText : data.text;
 }
 
 // Event arrays are replaced (never mutated) on change, so the derived title is
@@ -41,7 +49,7 @@ export function lastUserText(events: readonly SessionEvent[] | undefined): strin
   if (!events) return undefined;
   for (let i = events.length - 1; i >= 0; i--) {
     if (events[i]!.type !== "user/message") continue;
-    const t = (events[i]!.data as JsonObject).text;
+    const t = shownUserText(events[i]!.data as JsonObject);
     const visible = typeof t === "string" ? stripRecoveryContextBlocks(t) : undefined;
     if (visible && visible.trim()) return visible;
   }

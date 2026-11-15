@@ -370,6 +370,7 @@ export interface QueueStore {
     hiddenUserMessage?: boolean,
     memory?: MemoryNarrowing,
     author?: SessionPerson,
+    displayText?: string,
   ): Promise<{ item: QueueItemDto; created: boolean }>;
   queueList(sessionId: string): Promise<QueueItemDto[]>;
   queueEdit(sessionId: string, queueId: string, text: string): Promise<QueueItemDto | undefined>;
@@ -7673,10 +7674,11 @@ export function createSessionService(deps: {
     sessionId: string, text: string, delivery: DeliveryMode, fallbackReason?: string,
     attachments?: AttachmentRef[], command?: QueueItemDto["command"], sourceOperationId?: string, clientOperationId?: string,
     clientRequestFingerprint?: string, hiddenUserMessage?: boolean, memory?: MemoryNarrowing, author?: SessionPerson,
+    displayText?: string,
   ): Promise<SendResult> => {
     if (!deps.queue) throw Object.assign(new Error("delivery queue unavailable"), { code: "unsupported" });
     const admission = await deps.queue.enqueue(
-      sessionId, text, delivery, attachments, clientOperationId, command, hiddenUserMessage, memory, author,
+      sessionId, text, delivery, attachments, clientOperationId, command, hiddenUserMessage, memory, author, displayText,
     );
     const item = admission.item;
     if (!admission.created) return { queueId: item.id, queued: true };
@@ -7688,6 +7690,7 @@ export function createSessionService(deps: {
       ...(attachments?.length ? { attachments: attachments as unknown as JsonObject[] } : {}),
       ...(command ? { command: command as unknown as JsonObject } : {}),
       ...(hiddenUserMessage ? { hiddenUserMessage: true } : {}),
+      ...(displayText !== undefined ? { displayText } : {}),
       ...(memory ? { memory: memory as unknown as JsonObject } : {}),
       ...(author ? { author: author as unknown as JsonObject } : {}),
       ...(sourceOperationId ? { sourceOperationId } : {}),
@@ -7976,6 +7979,9 @@ export function createSessionService(deps: {
             return memory ? { memory } : {};
           })(),
           ...(reserved.reservation.queueItem.hiddenUserMessage ? { hiddenUserMessage: true } : {}),
+          ...(reserved.reservation.queueItem.displayText !== undefined
+            ? { displayText: reserved.reservation.queueItem.displayText }
+            : {}),
           // Admitted as whoever queued it, not whoever's action freed the queue.
           ...(reserved.reservation.queueItem.author ? { author: reserved.reservation.queueItem.author } : {}),
         }, {
@@ -8338,6 +8344,7 @@ export function createSessionService(deps: {
       ...(reserved ? { queueId: reserved.queueId } : {}),
       ...(input.githubConflictResolution === true ? { githubConflictResolution: true } : {}),
       ...(hiddenUserMessage ? { hiddenUserMessage: true } : {}),
+      ...(typeof input.displayText === "string" && !hiddenUserMessage ? { displayText: input.displayText } : {}),
       ...(input.keepAlive === true ? { keepAlive: true } : {}),
       ...(input.attachments ? { attachments: input.attachments as unknown as JsonObject[] } : {}),
       ...(input.command ? { command: input.command as unknown as JsonObject } : {}),
@@ -8811,6 +8818,7 @@ export function createSessionService(deps: {
             input.hiddenUserMessage === true || input.autoResume === true,
             input.memory,
             input.author,
+            input.displayText,
           );
         }
         rt = await ensureWired(sessionId, current);
@@ -8859,6 +8867,7 @@ export function createSessionService(deps: {
             input.hiddenUserMessage === true || input.autoResume === true,
             input.memory,
             input.author,
+            input.displayText,
         );
       }
       // A launch-locked runtime (e.g. Antigravity) freezes model/effort/agent
@@ -12528,6 +12537,7 @@ export function createSessionService(deps: {
           hiddenUserMessage,
           input.memory,
           input.author,
+          input.displayText,
         );
       }
       const effectiveMemory = mergeMemoryNarrowing(
@@ -12608,6 +12618,7 @@ export function createSessionService(deps: {
           hiddenUserMessage,
           input.memory,
           input.author,
+          input.displayText,
         );
       };
       // An automatic resume resends a stopped turn: queued, a `failed`
@@ -12635,6 +12646,7 @@ export function createSessionService(deps: {
           hiddenUserMessage,
           input.memory,
           input.author,
+          input.displayText,
         );
       }
       if (input.harness) {
@@ -12698,6 +12710,7 @@ export function createSessionService(deps: {
             hiddenUserMessage,
             input.memory,
             input.author,
+            input.displayText,
           );
         }
       }
@@ -12822,6 +12835,7 @@ export function createSessionService(deps: {
         hiddenUserMessage,
         input.memory,
         input.author,
+        input.displayText,
       );
       // When the session stays uncertain after in-place recovery, a new user
       // message runs the same release → epoch → fresh-leg transaction a
@@ -13048,6 +13062,7 @@ export function createSessionService(deps: {
             hiddenUserMessage,
             input.memory,
             input.author,
+            input.displayText,
           );
         }
         if (delivery === "normal") {
@@ -13065,6 +13080,7 @@ export function createSessionService(deps: {
             hiddenUserMessage,
             input.memory,
             input.author,
+            input.displayText,
           );
         }
         if (delivery === "steer") {
@@ -13084,6 +13100,7 @@ export function createSessionService(deps: {
               hiddenUserMessage,
               input.memory,
               input.author,
+              input.displayText,
             );
           }
           const caps = await rt.capabilities().catch(() => null);
@@ -13110,6 +13127,7 @@ export function createSessionService(deps: {
                 hiddenUserMessage,
                 input.memory,
                 input.author,
+                input.displayText,
               );
             }
             // A person steering into a keep-alive makes it their turn.
@@ -13176,6 +13194,7 @@ export function createSessionService(deps: {
                 hiddenUserMessage,
                 input.memory,
                 input.author,
+                input.displayText,
               );
             }
             if (outcome.kind === "unknown") {
@@ -13293,6 +13312,7 @@ export function createSessionService(deps: {
             hiddenUserMessage,
             input.memory,
             input.author,
+            input.displayText,
           );
           void dispatchQueue(sessionId);
           return res;

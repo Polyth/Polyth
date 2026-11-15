@@ -1547,6 +1547,12 @@ export interface UserTurnInput {
    * canonical event remains durable for runtime continuity, but chat/prompt
    * recall must not render it as a second user submission. */
   hiddenUserMessage?: boolean;
+  /** Server-package only (never read from HTTP): what chat surfaces show for
+   * this prompt in place of its model-visible `text`; an empty string keeps
+   * the prompt out of the chat. Unlike `hiddenUserMessage` the prompt stays
+   * conversation: compaction, recovery and memory still read `text`. An
+   * agent's composed wake prompt uses it to show only the person's words. */
+  displayText?: string;
   /** Server-package only (never read from HTTP): a prompt-cache keep-alive.
    * The turn is cache maintenance, not conversation — it implies
    * `hiddenUserMessage`, chat surfaces hide its reply, and it fires no
@@ -6365,6 +6371,12 @@ export interface TaskCompletedData extends TaskSelectedData {}
  *  server-managed manifest boundary can reject unknown slot names. */
 export const UI_SLOTS = [
   "app.nav", "app.header.actions", "app.window.controls", "session.header.actions", "session.header.status", "session.list.badges",
+  // Back from the open chat to the package page that owns it (an agent's
+  // session goes back to its agent). Context: sessionId and presentation
+  // ("bar" before the desktop title, "island" beside the phone menu). Render
+  // the host `SessionBackButton` or nothing; the host draws a delegated
+  // child's Back to its parent itself and then mounts no contribution.
+  "session.header.back",
   "sidebar.footer",
   "composer.leading", "composer.execution", "composer.trailing", "modelPicker.header", "contextRail.tabs",
   // Settings → Source control: the person's own hosting accounts, the Space
@@ -6648,6 +6660,9 @@ export interface QueueItemDto {
   command?: { id: string; args?: string };
   /** Preserve retry/regeneration presentation semantics through deferred delivery. */
   hiddenUserMessage?: boolean;
+  /** Preserve the chat presentation of a prompt whose model text differs
+   * (`UserTurnInput.displayText`); an empty string keeps it out of view. */
+  displayText?: string;
   /** Preserve the validated per-turn memory narrowing while queued. */
   memory?: MemoryNarrowing;
   /** A fenced prior-epoch admission is a draft for explicit review, never dispatchable. */
@@ -6656,7 +6671,7 @@ export interface QueueItemDto {
   author?: SessionPerson;
 }
 
-export interface QueueEnqueuedData { queueId: string; text: string; delivery: string; hiddenUserMessage?: boolean; memory?: MemoryNarrowing; author?: SessionPerson }
+export interface QueueEnqueuedData { queueId: string; text: string; delivery: string; hiddenUserMessage?: boolean; displayText?: string; memory?: MemoryNarrowing; author?: SessionPerson }
 export interface QueueDispatchedData { queueId: string }
 export interface QueueEditedData { queueId: string; text: string }
 export interface QueueReorderedData { ids: string[] }

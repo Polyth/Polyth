@@ -3606,6 +3606,7 @@ export const ar: AppMessages = {
   "sharing.lostAccess": "لم تعد هذه المحادثة متاحة لك.",
   "sharing.noPeople": "لم تتم إضافة أحد بعد.",
   "sharing.openParent": "فتح مشاركة المحادثة الأصلية",
+  "sessionback.backToValue": "العودة إلى {name}",
   "sharing.owner": "المالك",
   "sharing.people": "الأشخاص",
   "sharing.policyAllowSpace": "المشاركة مع المساحة كلها",

@@ -3606,6 +3606,7 @@ export const pt: AppMessages = {
   "sharing.lostAccess": "Esse chat já não está disponível para si.",
   "sharing.noPeople": "Ainda não adicionou ninguém.",
   "sharing.openParent": "Abrir a partilha do chat principal",
+  "sessionback.backToValue": "Voltar a {name}",
   "sharing.owner": "Proprietário",
   "sharing.people": "Pessoas",
   "sharing.policyAllowSpace": "Partilha com todo o Space",

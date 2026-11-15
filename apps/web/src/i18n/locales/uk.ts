@@ -3606,6 +3606,7 @@ export const uk: AppMessages = {
   "sharing.lostAccess": "Цей чат вам більше не доступний.",
   "sharing.noPeople": "Ще нікого не додано.",
   "sharing.openParent": "Відкрити доступ батьківського чату",
+  "sessionback.backToValue": "Назад до {name}",
   "sharing.owner": "Власник",
   "sharing.people": "Люди",
   "sharing.policyAllowSpace": "Доступ для всього простору",

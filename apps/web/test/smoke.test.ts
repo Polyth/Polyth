@@ -203,6 +203,34 @@ test("hidden repeated prompts stay out of chat and do not taint the visible prom
   assert.equal(model.messages.length, 1);
 });
 
+test("a prompt with display text shows those words; an empty one stays out of chat", () => {
+  const events = [
+    ev("user/message", { text: "Charter…\n---\nYou were woken by your schedule.", displayText: "" }),
+    ev("user/message", { text: "Charter…\n---\nYou were woken manually.\n\nInput from the user:\nhow is it going?", displayText: "how is it going?" }),
+  ];
+  const model = buildModel(events);
+  assert.equal(model.messages.length, 1, "the wake with nothing the person wrote is not drawn");
+  assert.equal((model.messages[0] as { kind: string; text: string }).text, "how is it going?");
+  assert.equal((model.messages[0] as { raw?: string }).raw, undefined);
+  assert.equal(model.lastUserMessageHidden, false);
+  assert.equal(reduceEvent(model, ev("user/message", { text: "Charter…", displayText: "" })).lastUserMessageHidden, true);
+  assert.equal(firstUserText(events), "how is it going?", "the composed charter never titles the chat");
+  assert.equal(lastUserText(events), "how is it going?");
+  assert.equal(firstUserText(events.slice(0, 1)), undefined);
+});
+
+test("a reply to a prompt the chat does not draw keeps that prompt's time as its turn start", () => {
+  const wake = ev("user/message", { text: "Charter…", displayText: "" });
+  let model = buildModel([wake, ev("assistant/message", { partId: "a1", text: "All quiet." })]);
+  const first = model.messages.find((message) => message.kind === "assistant") as { hiddenPromptAt?: number };
+  assert.equal(first.hiddenPromptAt, wake.time);
+  model = reduceEvent(model, ev("user/message", { text: "Charter…\nInput from the user:\nhi", displayText: "hi" }));
+  model = reduceEvent(model, ev("assistant/message", { partId: "a2", text: "Hello." }));
+  const second = model.messages.at(-1) as { kind: string; hiddenPromptAt?: number };
+  assert.equal(second.kind, "assistant");
+  assert.equal(second.hiddenPromptAt, undefined, "a drawn prompt is the turn's start itself");
+});
+
 test("a prompt-cache keep-alive turn stays out of chat but its usage counts", () => {
   let model = buildModel([
     ev("user/message", { text: "real question" }),

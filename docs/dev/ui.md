@@ -1794,7 +1794,14 @@ host.slots.register({
   browser address pill's lock, in the same centred line and baseline; marks
   take a muted ink and a glyph sized from the title, and the title has no
   dropdown arrow and always keeps to one line, cut with an ellipsis at the end, so it sits at
-  the same height for every chat); `Header.tsx` also mounts `app.header.center`;
+  the same height for every chat); both lead the title with Back from the chat
+  (`SessionBack.tsx`, the `ui/SessionBackButton.tsx` control: a quiet
+  `header-control` pill before the desktop title, an icon button before the
+  menu in the phone's leading island). A delegated child (subagent, workflow
+  unit) goes Back to its parent chat when that chat is in the person's list;
+  any other chat mounts `session.header.back` (context: `sessionId`,
+  `presentation` `bar`|`island`), where the package that owns the session
+  renders the same `SessionBackButton` or nothing; `Header.tsx` also mounts `app.header.center`;
   `StatusBar.tsx` mounts `app.statusbar.leading/trailing` while the opt-in
   status bar is on (§4.10); `App.tsx` mounts `app.layers` once over the whole
   shell for package-owned floating layers (voice mode, or a renderless
@@ -2029,8 +2036,9 @@ one `purpose` (and their delegated children) in its own UI instead of the
 ordinary lists — an agent's runs are read from its diary. Claims are
 reference-counted and released with the package; opening such a session is
 unchanged. The Agents package reaches those sessions instead from the agent's
-menus (a Conversations drill-in) and its conversation's heads, and names the
-agent in the header of its own session in Chat (`session.header.status`); a
+menus (a Conversations drill-in) and its conversation's heads, and leads the
+header of its own session in Chat with Back to the agent's page
+(`session.header.back`: the host Back with the agent's mark and name); a
 working agent's row shows its own glyph with a travelling arc rather than the
 chat spinner.
 A session an automation started without a person carries

@@ -2198,32 +2198,5 @@
 .agents-page .agent-memory-feedback,
 .agents-page .agent-memory-context { margin-block-start: var(--space-4); }
 
-/* ---- An agent's session in Chat names its agent in the header -------------- */
-.agent-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  max-inline-size: min(22rem, 40vw);
-  min-block-size: max(var(--control-h-sm), var(--hit-min));
-  padding-block: 0;
-  padding-inline: var(--space-1) var(--space-2);
-  border: 0;
-  border-radius: var(--radius-round);
-  background: transparent;
-  color: var(--text-dim);
-  font: inherit;
-  font-size: var(--font-meta);
-  font-weight: 550;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-  transition: background var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
-}
-@media (hover: hover) {
-  .agent-chip:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); color: var(--text); }
-}
-.agent-chip:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
-.agent-chip .agent-chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.agent-chip .agent-chip-chevron { flex: none; color: var(--faint); }
-.agent-chip .agent-chip-chevron:dir(rtl) { transform: scaleX(-1); }
 .agents-page .agent-feed-empty .agent-mark { --mark: 36px; justify-self: center; margin-block-end: var(--space-1); }
 .agents-page .agents-home-glyph .agent-mark { --mark: var(--icon-lg); }

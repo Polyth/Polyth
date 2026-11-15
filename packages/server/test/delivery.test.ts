@@ -246,6 +246,45 @@ test("hidden repeated prompt stays hidden through durable queue dispatch", async
   await store.close();
 });
 
+test("display text reaches the chat row and survives the durable queue; the model gets the full text", async () => {
+  const fake = fakeRuntime();
+  const { sessions, store } = makeService(fake);
+  const { id } = await sessions.create({ projectId: "p1", title: "Agent wake" });
+
+  await sessions.send(id, { text: "charter + wake", displayText: "" });
+  await flush();
+  const queued = await sessions.send(id, { text: "charter + input: hi", displayText: "hi", delivery: "queue" });
+  assert.equal(queued.queued, true);
+  assert.equal((await store.queueList(id))[0]?.displayText, "hi");
+  const enqueued = (await store.events(id)).find((event) => event.type === "queue/enqueued");
+  assert.equal((enqueued?.data as { displayText?: string }).displayText, "hi");
+
+  fake.emit(id, { type: "turn/stopped", reason: "completed" });
+  await flush();
+
+  assert.deepEqual(fake.startedTexts, ["charter + wake", "charter + input: hi"]);
+  const users = (await store.events(id)).filter((event) => event.type === "user/message");
+  assert.equal(users.length, 2);
+  assert.equal((users[0]!.data as { displayText?: string }).displayText, "");
+  assert.equal((users[1]!.data as { displayText?: string }).displayText, "hi");
+  // Still conversation, unlike a hidden retry.
+  assert.equal((users[0]!.data as { hiddenUserMessage?: boolean }).hiddenUserMessage, undefined);
+  await store.close();
+});
+
+test("editing a queued prompt drops its display text: the edit is the whole prompt", async () => {
+  const fake = fakeRuntime();
+  const { sessions, store } = makeService(fake);
+  const { id } = await sessions.create({ projectId: "p1", title: "Agent wake edit" });
+  await sessions.send(id, { text: "first" });
+  await flush();
+  const queued = await sessions.send(id, { text: "charter + input: hi", displayText: "hi", delivery: "queue" });
+  const edited = await store.queueEdit(id, queued.queueId!, "hello there");
+  assert.equal(edited?.text, "hello there");
+  assert.equal(edited?.displayText, undefined);
+  await store.close();
+});
+
 test("aborted idle turn admits the next queued message without an abort flag reset", { timeout: 5000 }, async () => {
   const fake = fakeRuntime();
   const { sessions, store } = makeService(fake);

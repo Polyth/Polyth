@@ -642,8 +642,6 @@ export const en = {
   "agents.liveWriting": "Writing",
   "agents.stepsValue": "Steps: {count}",
   "agents.watchInSession": "Watch in the session",
-  "agents.sessionOfValue": "Conversation of {name}",
-  "agents.backToAgent": "Open the agent",
 } as const;
 
 export type AgentsMessageKey = keyof typeof en;

@@ -1158,9 +1158,12 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       const target = sessionId;
       // The session validates the files again and hands them to the model.
       const attachments = wake.attachments?.length ? { attachments: wake.attachments } : {};
+      // The composed wake (charter, notebook, journal, events) is the agent's
+      // machinery: the chat shows only what the person wrote, or nothing.
+      const displayText = wake.input?.trim() ?? "";
       const delivered = await withRouteFailover(routes, route, async (execution) => {
         await assertRouteSignedIn(task, execution);
-        return sender.send(target, { text, ...attachments, ...execution, ...profileOf(task) }, scheduleTurnAdmission(task));
+        return sender.send(target, { text, displayText, ...attachments, ...execution, ...profileOf(task) }, scheduleTurnAdmission(task));
       });
       route = delivered.route;
       const sent = delivered.value;

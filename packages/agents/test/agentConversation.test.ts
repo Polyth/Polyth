@@ -533,17 +533,25 @@ test("while the agent works, its step shows at the end of its conversation, a me
   await view.unmount();
 });
 
-test("an agent's session opened in Chat names its agent in the header; an ordinary chat shows nothing", async () => {
+test("an agent's session opened in Chat leads its header with Back to the agent; an ordinary chat shows nothing", async () => {
   resetRegistry();
   fakeServer([answered()]);
   const { host, opened } = fakeHost({ "s-b": { id: "s-b", purpose: "agent" }, "chat-1": { id: "chat-1" } });
   const agentSession = await mounted(createElement(AgentSessionChip, { host, sessionId: "s-b" }));
   await act(async () => { await delay(30); });
-  const chip = agentSession.container.querySelector<HTMLButtonElement>(".agent-chip")!;
-  assert.match(chip.textContent ?? "", /Watcher/);
-  await act(async () => { chip.click(); await delay(10); });
+  const back = agentSession.container.querySelector<HTMLButtonElement>(".session-back.agent-chip")!;
+  assert.ok(back, "the host's Back control, not a package look-alike");
+  assert.match(back.textContent ?? "", /Watcher/);
+  assert.equal(back.getAttribute("aria-label"), "Back to Watcher");
+  assert.ok(back.querySelector(".agent-mark"), "the agent's mark rides in the Back");
+  await act(async () => { back.click(); await delay(10); });
   assert.deepEqual(opened.at(-1), { pageId: "agents", resource: "agent-w" }, "the way back to the agent");
   await agentSession.unmount();
+  const phone = await mounted(createElement(AgentSessionChip, { host, sessionId: "s-b", presentation: "island" }));
+  await act(async () => { await delay(30); });
+  const island = phone.container.querySelector<HTMLButtonElement>(".session-back--island")!;
+  assert.equal(island.getAttribute("aria-label"), "Back to Watcher");
+  await phone.unmount();
   const ordinary = await mounted(createElement(AgentSessionChip, { host, sessionId: "chat-1" }));
   await act(async () => { await delay(30); });
   assert.equal(ordinary.container.innerHTML, "");

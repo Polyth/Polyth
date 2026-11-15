@@ -814,7 +814,7 @@ async function host(t: { after(fn: () => void): void }) {
   const project = { id: "prj", path: dir, name: "P", createdAt: 1, spaceId: "spc" };
   const logs = new Map<string, SessionEvent[]>();
   const states = new Map<string, SessionState>();
-  const sent: Array<{ sessionId: string; text: string; attachments?: unknown[] }> = [];
+  const sent: Array<{ sessionId: string; text: string; displayText?: string; attachments?: unknown[] }> = [];
   const replies: string[] = [];
   const purposes = new Map<string, string>();
   const origins = new Map<string, unknown>();
@@ -837,8 +837,13 @@ async function host(t: { after(fn: () => void): void }) {
       return { id };
     },
     async snapshot(id: string) { return { id, projectId: "prj", status: states.get(id)?.status ?? "idle", purpose: purposes.get(id) }; },
-    async send(sessionId: string, input: { text: string; attachments?: unknown[] }) {
-      sent.push({ sessionId, text: input.text, ...(input.attachments ? { attachments: input.attachments } : {}) });
+    async send(sessionId: string, input: { text: string; displayText?: string; attachments?: unknown[] }) {
+      sent.push({
+        sessionId,
+        text: input.text,
+        ...(input.displayText !== undefined ? { displayText: input.displayText } : {}),
+        ...(input.attachments ? { attachments: input.attachments } : {}),
+      });
       const n = sent.length;
       append(sessionId, "turn/started", {});
       append(sessionId, "tool/started", { callId: `call-${n}`, tool: "read", input: { path: "README.md" } });
@@ -957,6 +962,9 @@ test("a fresh agent's report can be answered in its own conversation", async (t)
   assert.match(sent[1]!.text, /Your notebook changed[^\n]*\nPrefers very short reports\./);
   assert.match(sent[1]!.text, /Input from the user:\nWhat about the flaky test\?/);
   assert.match(sent[1]!.text, /Continue following your standing instructions/);
+  // The chat shows the person's words, never the composed wake around them.
+  assert.equal(sent[0]!.displayText, "", "a wake nobody wrote stays out of the chat");
+  assert.equal(sent[1]!.displayText, "What about the flaky test?");
   const reply = agents.runsOf(agent.id)[0]!;
   assert.equal(reply.continued, true);
   assert.equal(reply.key, report.key);

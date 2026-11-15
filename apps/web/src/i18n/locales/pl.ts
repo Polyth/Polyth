@@ -3606,6 +3606,7 @@ export const pl: AppMessages = {
   "sharing.lostAccess": "Ten czat nie jest już dla ciebie dostępny.",
   "sharing.noPeople": "Nikogo jeszcze nie dodano.",
   "sharing.openParent": "Otwórz udostępnianie czatu nadrzędnego",
+  "sessionback.backToValue": "Wróć do {name}",
   "sharing.owner": "Właściciel",
   "sharing.people": "Osoby",
   "sharing.policyAllowSpace": "Udostępnianie w całym Space",

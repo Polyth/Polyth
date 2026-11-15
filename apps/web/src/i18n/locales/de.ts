@@ -3606,6 +3606,7 @@ export const de: AppMessages = {
   "sharing.lostAccess": "Dieser Chat ist für Sie nicht mehr verfügbar.",
   "sharing.noPeople": "Noch niemand hinzugefügt.",
   "sharing.openParent": "Freigabe des übergeordneten Chats öffnen",
+  "sessionback.backToValue": "Zurück zu {name}",
   "sharing.owner": "Eigentümer",
   "sharing.people": "Personen",
   "sharing.policyAllowSpace": "Freigabe für den ganzen Space",
