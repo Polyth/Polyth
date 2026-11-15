@@ -614,6 +614,9 @@ export default function Header() {
     return (
       <>
         {pageOpen ? null : chatSurface ? <MobileSessionHeader /> : <MobileViewHeader />}
+        {/* Tells iOS Safari the top edge has fixed chrome, so it drops its
+            blurred status-bar band from the floating islands (styles.css). */}
+        <div className="phone-top-edge" aria-hidden="true" />
         {/* Swipes from Chat pull the Navigator or the Workspace in. */}
         <PhoneShellSwipes />
         {/* One Workspace layer for the whole phone shell: it must outlive the

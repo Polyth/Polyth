@@ -14933,6 +14933,31 @@ color: var(--muted);
   }
 }
 
+/* iOS 26+ Safari lays its scroll edge effect, a soft blurred band, under the
+   status bar, and the band reaches into the page: it blurred the top half of
+   the floating islands below (the native app turns the band off in
+   SceneDelegate.swift; a page cannot). WebKit drops the band only for a fixed
+   top edge: its hit test at the middle of the top edge, 4px down and ignoring
+   `pointer-events`, has to land in a fixed or sticky box at least 90% of the
+   viewport wide with a backdrop filter or a solid fill
+   (LocalFrameView::fixedContainerEdges); Safari then paints the status bar in
+   the page's colour. The islands start lower and are narrower, and a backdrop
+   filter on their row would bound the islands' own glass to it. The phone
+   header (Header.tsx) renders this strip for that hit test: full width, above
+   the conversation and under the islands, an identity backdrop filter (any
+   value but `none` counts), so it paints nothing and never takes a tap.
+   phoneTopEdge.test.ts replays the hit test. */
+.phone-top-edge {
+  position: fixed;
+  inset-block-start: 0;
+  inset-inline: 0;
+  z-index: calc(var(--z-shell) + 1);
+  block-size: max(var(--space-2), var(--conversation-chrome-inset));
+  pointer-events: none;
+  -webkit-backdrop-filter: opacity(1);
+  backdrop-filter: opacity(1);
+}
+
 /* Phone uses one three-segment shell bar for every workspace surface. The
    bar floats so the chat timeline can keep its own scroll root; the sibling
    clearance rules below keep non-chat surfaces from sitting underneath it. */
