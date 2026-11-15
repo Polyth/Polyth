@@ -54,7 +54,13 @@ test("commits group by conventional type, leading verb and touched paths", () =>
     ["Виправити падіння", ["apps/web/src/a.ts"], "fixes", "Виправити падіння"],
     ["ci: pin node", [".github/workflows/ci.yml"], "maintenance", "Pin node"],
     ["perf(server): batch reads", ["packages/server/src/a.ts"], "improvements", "Batch reads"],
-    ["[Fix] Lock the @polyth/orchestration workspace", ["package-lock.json"], "maintenance", "[Fix] Lock the @polyth/orchestration workspace"],
+    ["[Fix] Lock the @polyth/orchestration workspace", ["package-lock.json"], "maintenance", "Lock the @polyth/orchestration workspace"],
+    ["[Fix] Session action icon positioning", ["apps/web/src/a.tsx"], "fixes", "Session action icon positioning"],
+    ["[Feature] Vibration effects for flight events", ["apps/web/src/a.tsx"], "features", "Vibration effects for flight events"],
+    ["[Improvement] Minimize blocking after session creation", ["packages/server/src/a.ts"], "improvements", "Minimize blocking after session creation"],
+    ["[Performance] Speed up long-period usage display", ["apps/web/src/a.tsx"], "improvements", "Speed up long-period usage display"],
+    ["[Chore] Bump the docker images group", ["package.json"], "maintenance", "Bump the docker images group"],
+    ["[Unmatched] Keep the brackets", ["apps/web/src/a.tsx"], "improvements", "[Unmatched] Keep the brackets"],
     ["Pin the native bridge", ["packages/link/Cargo.lock"], "maintenance", "Pin the native bridge"],
   ];
   for (const [subject, files, section, title] of cases) {
