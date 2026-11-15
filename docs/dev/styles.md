@@ -214,6 +214,7 @@ when the locale switches between LTR and RTL.
 | `--composer-height` | Density-scaled resting conversation composer height. |
 | `--composer-action-size` | Density-scaled visible send/stop action size. The disc reads this size on every pointer; a touch target grows past its edge through `::after`. |
 | `--composer-stack-mark`, `--composer-stack-text`, `--composer-stack-end` | The columns of the pending stack above the composer, measured from the composer card's outer edge: marks are centred on the model logo's column, labels start at the model name, trailing glyphs end where the marks start. Packages that draw a line there (planner, code hosting, git) use them with a fallback. |
+| `--composer-row-mid` | Half the resting composer row: how far the composer card's model line centres below its top edge and its rail above its bottom edge (the composer's icon grid, [ui](ui.md) "The composer's icon grid"). |
 | `--composer-stack-row`, `--composer-stack-control` | One line's height in that stack and the size of a control on it. |
 | `--composer-stack-reach` | How far a line that opens something reaches up into the timeline's bottom space to keep its full touch target while it reads one row tall: 0 on fine pointers. |
 | `--composer-max-input-height` | Font-scaled five-line composer input ceiling. |

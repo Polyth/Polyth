@@ -454,7 +454,6 @@ export default function MobileComposerRail({ storageKey, context, add, primary, 
 
   return <>
     <div ref={rail} className="composer-rail mobile-composer-rail" data-editing={editing || undefined} data-resting={resting || undefined}
-      style={{ "--mobile-rail-lanes": columns - 1 } as CSSProperties}
       onPointerDownCapture={holdStart}
       onPointerMoveCapture={holdMove}
       onPointerUpCapture={cancelHold}

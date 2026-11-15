@@ -3101,7 +3101,24 @@ measured from the card's outer edge: marks are centred on the model logo's colum
 (`--composer-stack-text`), trailing glyphs end where the marks start
 (`--composer-stack-end`). The phone's resting row, which shows no model line,
 stands on the same grid: Add centres on the marks' column and the Stop/Send disc
-ends with the trailing column. In the compact shell's uncapped frame the status line
+ends with the trailing column.
+
+**The composer's icon grid** continues those columns inside the card, on every
+width, pointer, look and state (composerAdaptive.css "Composer icon grid"):
+the model logo and Add centre on `--composer-stack-mark`, the Stop/Send disc ends
+on `--composer-stack-end`, the model line centres `--composer-row-mid` (half the
+resting row) below the card's top edge and the rail the same distance above its
+bottom edge. Every quiet rail control centres one 20px glyph in one square box,
+so neighbouring glyphs are evenly spaced, and the disc stands off by the same
+visible space. The card names that space `--composer-glyph-gap` (24px on a
+phone, 28px on another touch screen, 12px with a mouse) and the model line keeps
+it too: from the model's caret to the context pie and from glyph to glyph after
+it. Every glyph-only item on that line, a package's included, is its glyph plus
+`--composer-line-inset` on each side (peak pricing's dot follows it); chips with
+words keep their own padding. On a phone the engaged card keeps the resting row's geometry, so
+Add, the quick launcher and Send hold still while the card opens and closes.
+`apps/web/test/composerIconGrid.test.ts` measures these rules in the real
+Composer across looks, phone, tablet and desktop. In the compact shell's uncapped frame the status line
 spans the composer's full width. A line reads `--composer-stack-row` tall; on touch, a line
 that opens something keeps its full target by reaching up into the timeline's
 bottom space (`--composer-stack-reach`). Their inks follow the wallpaper wash

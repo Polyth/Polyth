@@ -6,10 +6,13 @@
   gap: 0;
 }
 
+/* The line keeps the shared top inset (composerAdaptive.css): its tap-tall
+   controls centre --composer-row-mid below the card edge, as the rail's
+   centre sits above the bottom one. */
 .composer-mobile.composer-mobile-grid .composer-config-row {
   display: flex;
   order: 0;
-  padding-block: 0;
+  padding-block-end: 0;
   padding-inline-end: var(--space-1);
 }
 
@@ -22,7 +25,9 @@
   height: auto;
   min-height: var(--control-h-sm);
   max-height: min(var(--composer-max-input-height), 18dvh);
-  padding: var(--space-1) var(--space-4) var(--space-2);
+  /* Even air above and below: one line of text stands midway between the
+     model line's centre and the rail's. */
+  padding: calc((var(--space-1) + var(--space-2)) / 2) var(--space-4);
   line-height: var(--font-response-lh);
 }
 
@@ -59,7 +64,18 @@
   align-items: start;
   gap: var(--mobile-rail-gap);
   order: 2;
-  padding: 0 var(--space-4) var(--space-2);
+  /* The resting row's grid, kept while engaged ("Composer icon grid",
+     composerAdaptive.css): Add's tap box centres on the model logo's column,
+     the Stop/Send disc ends on the trailing column, and the row centres
+     --composer-row-mid above the card's bottom edge, so opening the card
+     never moves Add or Send. */
+  padding:
+    0
+    calc(var(--composer-stack-end) - (var(--tap) - var(--composer-action-size)) / 2 - 1px)
+    calc(var(--composer-row-mid) - var(--tap) / 2 - 1px)
+    calc(var(--composer-stack-mark) - var(--tap) / 2 - 1px);
+  /* The tap row sets the height; a taller floor would lift the row's centre. */
+  min-height: 0;
   /* The narrow-composer rule scrolls the desktop rail; here the leading run
      scrolls on its own, and the rail must not clip the Remove badges. */
   overflow: visible;
@@ -150,8 +166,11 @@
   justify-content: center;
 }
 
-/* The disc stands in the middle of its tap box under any pointer. */
+/* The disc stands in the middle of its tap box under any pointer: the box is
+   the primary's own, so the margin that spaces it from its neighbour never
+   eats into the inset the trailing column counts on. */
 .mobile-composer-primary { min-width: var(--tap); display: flex; justify-content: center; }
+.mobile-composer-primary > .composer-primary { min-width: var(--tap); justify-content: center; }
 
 /* Arranging: the leading run wraps instead of scrolling, so every button
    is in reach, while the run beside Send stays on the first row. */

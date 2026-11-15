@@ -150,18 +150,27 @@
 /* Configuration row: the model and its pending effort share one quiet line
    above the editor on both desktop and mobile. Thinking effort sits right
    next to the model picker itself, and the editor below sheds the top padding
-   the row now provides. */
+   the row now provides. The line's controls centre --composer-row-mid below
+   the card's outer top edge, mirroring the rail above the bottom edge
+   ("Composer icon grid" below); `--composer-line-h` is the line's control
+   height (a 30px chip, a tap on touch), so the centre never depends on
+   which package glyphs happen to share the line. */
 .composer-simple .composer-config-row {
+  --composer-line-h: max(30px, var(--hit-min));
   order: 0;
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-1);
+  box-sizing: content-box;
   min-width: 0;
-  padding: var(--space-2) var(--space-4) 0;
+  min-height: var(--composer-line-h);
+  padding: calc(var(--composer-row-mid) - 1px - var(--composer-line-h) / 2) var(--space-4) 0;
 }
 
+/* Past its caret the chip keeps the line's inset, its 1px edge included. */
 .composer-simple .composer-config-row .model-picker-trigger {
   padding-inline-start: 0;
+  padding-inline-end: calc(var(--composer-line-inset) - 1px);
 }
 
 .composer-simple .composer-effort-trigger {
@@ -577,12 +586,6 @@ action off a narrow phone's composer. */
     min-width: 0;
   }
 
-  /* The row otherwise inherits the desktop-shared top padding, which reads as
-     too much air above the model chip on a short phone card. */
-  .composer-mobile .composer-config-row {
-    padding-top: var(--space-1);
-  }
-
   .composer-mobile .composer-config-row .model-picker-trigger {
     width: 100%;
     max-width: none;
@@ -590,9 +593,10 @@ action off a narrow phone's composer. */
   }
 
   /* A touch-height cell, narrower than a full tap square so the model label
-     keeps its room; the glyph grows with the larger phone type. */
+     keeps its room; the glyph grows with the larger phone type and keeps the
+     line's inset on each side. */
   .composer-mobile .composer-config-row .composer-context-pie {
-    width: 36px;
+    width: calc(18px + 2 * var(--composer-line-inset));
     min-height: var(--tap);
   }
 
@@ -769,33 +773,63 @@ action off a narrow phone's composer. */
   }
 }
 
-/* The Add glyph shares the editor's text origin. Keep its hit box generous
-   while placing the visible glyph at the same inline start on every rail. */
-.composer-simple .composer-rail {
-  padding-inline: var(--space-4);
-}
-
-.composer-simple .composer-add-trigger {
-  justify-content: flex-start;
-  padding-inline: 0;
-}
-
-/* Rail rhythm: the visible space between neighbouring glyphs is identical
-   left and right. Every quiet control centres one glyph size in one square
-   box (phones already give each one a full tap box). Desktop Add keeps its
-   glyph on the text origin and drops the half-box in front of it. Filled
-   Send/Stop shows its edge rather than a glyph, so it is inset by the
-   half-box a quiet neighbour would leave (the engaged phone rail solves its
-   own inset below); the resting phone row has no glyph beside Send to
-   match, so Mic stays flush there. */
-.composer-simple .composer-rail {
+/* Composer icon grid: the card's two icon rows stand on the pending stack's
+   columns (tokens.css), on every width, pointer and state.
+   - Leading column: the model logo and the Add glyph centre on
+     --composer-stack-mark from the card's outer inline-start edge.
+   - Trailing column: the Send/Stop disc ends on --composer-stack-end from the
+     outer inline-end edge, the line its stack glyphs end on.
+   - Rows: the model line centres --composer-row-mid below the outer top edge
+     and the rail the same distance above the outer bottom edge, half the
+     resting phone row, so Add and Send hold still while that row opens.
+   - Rhythm: every quiet control centres one glyph in one square box, so the
+     visible space between neighbouring glyphs is the same along the rail; the
+     filled disc shows its edge rather than a glyph, so it stands off by the
+     half-box a quiet neighbour would leave and the space before it matches.
+     The model line keeps that same space (--composer-glyph-gap) from the
+     model's caret to each glyph after it: every glyph there keeps
+     --composer-line-inset on each side, a package's included.
+   Phones lay the same grid out with their own tap cells
+   (MobileComposerRail.css); `apps/web/test/composerIconGrid.test.ts` holds
+   every rule above in the real composer. */
+.composer-simple .composer-card {
   --composer-rail-box: var(--control-h-sm);
   --composer-rail-glyph: 20px;
   --composer-rail-inset: calc((var(--composer-rail-box) - var(--composer-rail-glyph)) / 2);
+  /* The visible space between neighbouring glyphs, on either row: two box
+     insets and the rail's one step between boxes. */
+  --composer-glyph-gap: calc(var(--composer-rail-box) - var(--composer-rail-glyph) + var(--space-1));
+  /* The air a glyph on the model line keeps on each side (the context pie, a
+     package's route glyph, the model chip past its caret): with the line's
+     one step between items, neighbouring glyphs stand one glyph gap apart. */
+  --composer-line-inset: calc((var(--composer-glyph-gap) - var(--space-1)) / 2);
+}
+
+/* Phone launcher tap boxes touch, so the phone gap is the two insets alone. */
+.composer-mobile.composer-mobile-grid .composer-card {
+  --composer-glyph-gap: calc(var(--tap) - var(--composer-rail-glyph));
+}
+
+.composer-simple .composer-rail {
+  padding-block-end: calc(var(--composer-row-mid) - max(var(--composer-action-size), var(--hit-min)) / 2 - 1px);
+  padding-inline:
+    calc(var(--composer-stack-mark) - var(--composer-rail-box) / 2 - 1px)
+    calc(var(--composer-stack-end) - (max(var(--composer-action-size), var(--hit-min)) - var(--composer-action-size)) / 2 - 1px);
 }
 
 @media (pointer: coarse) {
-  .composer-simple .composer-rail { --composer-rail-box: var(--tap); }
+  .composer-simple .composer-card { --composer-rail-box: var(--tap); }
+}
+
+.composer-simple .composer-add-trigger {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+/* One step between boxes in every group, at any width, or the rhythm breaks
+   where the leading run meets the run beside Send. */
+.composer-simple:not(.composer-mobile) .composer-rail :is(.composer-leading-zone, .composer-extensions, .composer-actions) {
+  gap: var(--space-1);
 }
 
 .composer-simple:not(.composer-mobile) .composer-rail .composer-extensions :is(.ui-icon-btn, .header-action, .icon-btn, .mic-btn),
@@ -814,33 +848,28 @@ action off a narrow phone's composer. */
   height: var(--composer-rail-glyph);
 }
 
-/* The leading 1px border keeps the glyph on the text origin; the trailing
-   side carries exactly one inset. */
-.composer-simple:not(.composer-mobile) .composer-rail .composer-add-trigger {
-  width: calc(1px + var(--composer-rail-glyph) + var(--composer-rail-inset));
-  min-width: calc(1px + var(--composer-rail-glyph) + var(--composer-rail-inset));
-  border-inline-end-width: 0;
-  justify-content: flex-start;
-}
-
+/* The disc already sits (touch box − disc)/2 inside its own touch box. */
 .composer-simple:not(.composer-mobile) .composer-rail .composer-primary {
-  margin-inline-start: var(--composer-rail-inset);
+  margin-inline-start: calc(var(--composer-rail-inset) - (max(var(--composer-action-size), var(--hit-min)) - var(--composer-action-size)) / 2);
 }
 
-/* Engaged phone rail: launcher lanes stretch to share the row, so Send's
-   inset follows the lane width L, solved from the rail width W with
-   n·L + (L − glyph)/2 + tap = W. Lanes touch (each is already a full tap
-   target), which keeps six launchers beside Send on a 390px phone. */
+/* Engaged phone rail: launcher tap boxes touch (each is already a full tap
+   target), which keeps six launchers beside Send on a 390px phone. Send's
+   disc sits (tap − disc)/2 inside its own tap box, so the box steps away by
+   the rest of one inset and the glyph beside it is as far from the disc as
+   from its other neighbour. */
 .composer-mobile.composer-mobile-grid:not(.composer-collapsed) .mobile-composer-rail:not([data-editing]) {
   --mobile-rail-gap: 0px;
-  container-type: inline-size;
 }
 
-.composer-mobile.composer-mobile-grid:not(.composer-collapsed) .mobile-composer-rail:not([data-editing]) .composer-primary {
-  margin-inline-start: calc(
-    (100cqw - var(--tap) + var(--composer-rail-glyph) / 2) / (var(--mobile-rail-lanes) + .5) / 2
-    - var(--composer-rail-glyph) / 2
-  );
+.composer-mobile.composer-mobile-grid .mobile-composer-rail:not([data-editing]) .mobile-composer-primary {
+  margin-inline-start: calc(var(--composer-rail-inset) - (var(--tap) - var(--composer-action-size)) / 2 - var(--mobile-rail-gap));
+}
+
+/* Resting, the quick launcher keeps the same distance from Send, so it holds
+   its place while the card opens; the row's own gap is part of it. */
+.composer-mobile.composer-mobile-grid.composer-collapsed .mobile-composer-rail:not([data-editing]) .mobile-composer-primary {
+  margin-inline-start: calc(var(--composer-rail-inset) - (var(--tap) - var(--composer-action-size)) / 2 - var(--space-1));
 }
 
 /* Send is the stable terminal action. Dictation is an input method and never
@@ -866,7 +895,7 @@ action off a narrow phone's composer. */
 .composer-simple .composer-context-pie {
   flex: none;
   justify-content: center;
-  width: 30px;
+  width: calc(16px + 2 * var(--composer-line-inset));
   padding: 0;
 }
 
