@@ -48,6 +48,17 @@ const CONVENTIONAL_SECTIONS = {
   docs: "maintenance", doc: "maintenance", test: "maintenance", tests: "maintenance", ci: "maintenance",
   build: "maintenance", chore: "maintenance", refactor: "maintenance", revert: "maintenance", deps: "maintenance",
 };
+/** The repository's own title style: `[Fix] Subject`, `[Feature] Subject`, `[Improvement] Subject`. */
+const BRACKET = /^\[([^\]]{1,20})\]\s*(.+)$/;
+const BRACKET_SECTIONS = {
+  feature: "features", feat: "features", new: "features", add: "features",
+  fix: "fixes", fixes: "fixes", bugfix: "fixes", hotfix: "fixes", bug: "fixes",
+  improvement: "improvements", improve: "improvements", enhancement: "improvements", polish: "improvements",
+  perf: "improvements", performance: "improvements", ux: "improvements", ui: "improvements", style: "improvements",
+  docs: "maintenance", doc: "maintenance", test: "maintenance", tests: "maintenance", ci: "maintenance",
+  build: "maintenance", chore: "maintenance", refactor: "maintenance", deps: "maintenance",
+  infra: "maintenance", maintenance: "maintenance", release: "maintenance",
+};
 const VERB_SECTIONS = [
   ["features", /^(add|adds|added|introduce|introduces|support|supports|implement|implements|create|creates|enable|enables|offer|offers|ship|ships|launch|new|дода\S*|додай)$/i],
   ["fixes", /^(fix|fixes|fixed|stop|stops|prevent|prevents|repair|restore|restores|resolve|resolves|correct|avoid|recover|unblock|guard|keep|keeps|don't|never|handle|виправ\S*)$/i],
@@ -130,12 +141,19 @@ export function commitSummary(body) {
 export function classifyCommit(commit) {
   let subject = commit.subject.trim();
   let section = null;
+  const bracketed = BRACKET.exec(subject);
+  const bracketSection = bracketed && BRACKET_SECTIONS[bracketed[1].trim().toLowerCase()];
+  if (bracketSection) {
+    section = bracketSection;
+    subject = bracketed[2].trim();
+  }
   const conventional = CONVENTIONAL.exec(subject);
   if (conventional && Object.hasOwn(CONVENTIONAL_SECTIONS, conventional[1].toLowerCase())) {
     section = CONVENTIONAL_SECTIONS[conventional[1].toLowerCase()];
     subject = conventional[4].trim();
   }
   if (!section) {
+    subject = subject.trim();
     const verb = subject.split(/\s+/)[0]?.replace(/[:,]$/, "") ?? "";
     section = VERB_SECTIONS.find(([, pattern]) => pattern.test(verb))?.[0] ?? "improvements";
   }
