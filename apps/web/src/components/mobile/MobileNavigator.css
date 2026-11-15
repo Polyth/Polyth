@@ -1400,7 +1400,10 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
   --swipe-tone: var(--muted);
   flex: 1 1 0;
   min-inline-size: 0;
-  min-block-size: 44px;
+  /* Exactly the row's height: the clip ends there, so a taller minimum (the
+     balanced and compact rows are 34–38px) would hang below it and centre the
+     glyph low. The tile is the whole revealed row, wide enough to tap. */
+  min-block-size: 0;
   padding: 0;
   display: flex;
   align-items: center;
