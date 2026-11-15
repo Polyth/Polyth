@@ -459,6 +459,58 @@ test("a pressed project lights its whole line, not the button's box", { skip: !C
   }
 });
 
+// A project's New chat and ⋯ and the toolbar's tools press as their circle
+// alone, centred on the glyph. Their targets are full 44px boxes with the
+// glyph placed by the cluster's rhythm, not mid-box, so the shared inset
+// press shadow (styles.css button:not(:disabled):active, 0,2,1) drew a
+// square frame off-centre round New chat with the circle flush to its edge.
+for (const dir of ["ltr", "rtl"] as const) {
+  test(`a pressed New chat, ⋯ or tool lights only its circle on the glyph (${dir})`, { skip: !CHROME }, async () => {
+    assert.ok(page);
+    await measure(390, { dir });
+    const targets = ["#busy .mobile-nav-project-actions > :first-child", "#busy .mobile-nav-project-actions > :last-child", "#settings", "#close"];
+    const read = () => page!.evaluate((selectors) => selectors.map((selector) => {
+      const button = document.querySelector(selector)!;
+      const own = getComputedStyle(button);
+      const wash = getComputedStyle(button, "::before");
+      const box = button.getBoundingClientRect();
+      const glyph = button.querySelector("svg")!.getBoundingClientRect();
+      // The circle hangs from the box's inline end by --nav-wash-end.
+      const washEnd = parseFloat(wash.insetInlineEnd);
+      const washCentre = document.documentElement.dir === "rtl"
+        ? box.left + washEnd + parseFloat(wash.width) / 2
+        : box.right - washEnd - parseFloat(wash.width) / 2;
+      return {
+        selector, shadow: own.boxShadow, fill: own.backgroundColor, wash: wash.backgroundColor,
+        washOffset: washCentre - (glyph.left + glyph.width / 2),
+        washSquare: wash.width === wash.height,
+      };
+    }), targets);
+    for (const rest of await read()) {
+      near(rest.washOffset, 0, `${rest.selector}: the circle is centred on the glyph`);
+      assert.equal(rest.washSquare, true, `${rest.selector}: the wash is a circle's box`);
+      assert.equal(rest.wash, "rgba(0, 0, 0, 0)", `${rest.selector}: clear at rest`);
+    }
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("DOM.enable");
+    await cdp.send("CSS.enable");
+    const { root } = await cdp.send("DOM.getDocument", { depth: -1 });
+    const nodeIds = await Promise.all(targets.map(async (selector) =>
+      (await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector })).nodeId));
+    for (const nodeId of nodeIds) await cdp.send("CSS.forcePseudoState", { nodeId, forcedPseudoClasses: ["active"] });
+    try {
+      for (const pressed of await read()) {
+        assert.notEqual(pressed.wash, "rgba(0, 0, 0, 0)", `${pressed.selector}: the circle lights under the finger`);
+        assert.equal(pressed.shadow, "none", `${pressed.selector}: no inset frame on the square target`);
+        assert.equal(pressed.fill, "rgba(0, 0, 0, 0)", `${pressed.selector}: no fill on the square target`);
+      }
+    } finally {
+      for (const nodeId of nodeIds) await cdp.send("CSS.forcePseudoState", { nodeId, forcedPseudoClasses: [] });
+      await cdp.detach();
+    }
+  });
+}
+
 // The current row's fill keeps --nav-pill-air (10px) before the status mark
 // and after the ⋯ glyph, like the desktop pill; with the slot empty
 // (data-lead="empty") the same air before the title. It reaches past the row

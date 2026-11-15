@@ -5062,7 +5062,11 @@ closed search pill and the filter dot follow the lens. Every phone row menu
 is the stroked horizontal ellipsis (`MoreIcon`), the session island's menu
 trigger included; the desktop sidebar keeps `MoreVerticalIcon`, and the
 Agents group draws whichever its host does. Their press wash is a circle
-round the glyph and their targets are the full row height. Search's Back
+round the glyph and their targets are the full row height. The toolbar's
+tools and a project's New chat and ⋯ press as that circle alone: their
+square 44px boxes clear the shared button press shadow, whose glyph-blind
+frame drew off-centre round New chat (`mobileNavigatorLayout.test.ts`
+forces `:active` to hold this). Search's Back
 and a row's ⋯ keep a 44px target that runs out to the edge through a
 transparent `::after`; press rules set `background-color` only.
 Hierarchy is size and weight together: a project name uses the user's

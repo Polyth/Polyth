@@ -569,11 +569,13 @@ button.mobile-nav-place:active:where(:not(:disabled)) {
   background-color: color-mix(in srgb, var(--text) 7%, transparent);
 }
 
-/* The circle is the press. The shared press wash (styles.css: an inset
-   shadow over the button's box) would fill the whole square target round
-   it. */
+/* The circle is the press. The shared press washes (styles.css: inset
+   shadows over the button's box) would frame the whole square target round
+   it, off-centre from a glyph the cluster's rhythm places. The later of them,
+   button:not(:disabled):active, is (0,2,1), so New chat and ⋯ need the
+   navigator's scope to clear it; a tool's child combinator already does. */
 .mobile-nav-tools > .mobile-nav-tool:active:where(:not(:disabled)),
-.mobile-nav-project-action:active:where(:not(:disabled)) {
+.mobile-navigator .mobile-nav-project-action:active:where(:not(:disabled)) {
   box-shadow: none;
 }
 
