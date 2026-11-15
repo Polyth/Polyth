@@ -4416,18 +4416,34 @@ empty or error markup.
   (`components/settings/OtherDevicesSection.tsx`). The device is the shell this
   screen draws (`useSettingsDevice()`: wide → `desktop`, compact → `tablet`,
   phone → `phone`); name in `devices` every shell whose code actually reads
-  the setting. Blocks for this device render in their own place
-  (`blocksOnDevice`); the rest wait in one closed `OtherDevicesSection` at the
-  end of the page, titled for those devices ("For desktop and tablet") with
-  their `labels` as the summary line (it wraps between labels only). Opening it
-  shows a one-line note, then the hidden loose rows straight under the group's
-  heading (so a section title still shown on the page is never repeated), then
-  blocks with `ownSection` as whole sections one heading level down
-  (`SectionHeadingLevel`). It is closed on every visit and opens for
-  a `settingsTarget` among its `items`, so search and deep links still land.
-  Nothing is stored about it. General (gestures) and Appearance (window layout,
-  rails, status bar, tablet toolbar) use it; pinned in
-  `apps/web/test/settingsOtherDevices.test.ts`.
+  the setting. Blocks for this device render open in their own place
+  (`blocksOnDevice`), above everything for other devices. The rest wait at the
+  end of the page in `OtherDevicesSection`: one closed group per other device,
+  largest screen first (desktop, tablet, phone), titled for it ("For desktop")
+  with its blocks' `labels` as the summary line while closed (it wraps between
+  labels only). A closed group reads as a fold one step quieter than a
+  section, like the page's other folds: a 600 `--text-dim` title with its
+  chevron right after it and a `--faint` summary; the whole row is the
+  ≥`--hit-min` button. A block for several hidden devices sits in each of
+  their groups, so every group is that device's whole list. Its rows and
+  `labels` don't repeat the device the heading names ("Session title", not
+  "Mobile session title"); the registry keeps the qualified label, since a
+  search result shows no group. Opening a group
+  hides the summary and shows its loose rows straight under the group's
+  heading (so a section title
+  still shown on the page is never repeated), then blocks with `ownSection` as
+  whole sections one heading level down (`SectionHeadingLevel`). Each group is
+  closed on every visit and opens for a `settingsTarget` among its `items`
+  (the first group when two hold it), so search and deep links still land; a
+  page that points at such a setting again bumps `revision` to reopen it.
+  Nothing is stored about it. General (gestures), Appearance (window layout,
+  rails, status bar, tablet toolbar), Chat (send keys, prompt rail and
+  bookmarks, phone chat title — Chat keeps this screen's ones inside its
+  summary rows, and a preview part whose setting waits opens its group) and
+  Behavior (shared pinned window) use it; pinned in
+  `apps/web/test/settingsOtherDevices.test.ts`. A setting goes into a block
+  only when the code that reads it is limited to some shells; pointer-only
+  behavior (hover reveals) and native-app-only rows are other axes.
 - **Control vocabulary.** Boolean → `Toggle` (never a lone checkbox).
   ≤4 mutually exclusive options → `Seg`. More options → `Select` (from
   `components/ui`). Several independent choices of one kind → `CheckGroup`.

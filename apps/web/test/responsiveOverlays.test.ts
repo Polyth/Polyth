@@ -1355,8 +1355,10 @@ test("switch hover keeps the 44px outer target transparent and the track cue int
   assert.notEqual(onHover.trackBg, "rgba(0, 0, 0, 0)", "the checked accent fill persists on hover");
   assert.equal(onHover.trackBg, onBefore.trackBg, "hover does not replace the checked fill");
   assert.equal(onHover.knobTransform, onBefore.knobTransform, "hover does not move the checked knob");
-  assert.equal(offBefore.trackBg, offHover.trackBg, "the unchecked track keeps its base fill; only the border cue changes");
-  assert.notEqual(offHover.trackBorder, offBefore.trackBorder, "hover adds a visible track-border cue");
+  // The off track is an ink tint, so its cue is a deeper tint: a border cue
+  // vanished in Borderless mode (the default), where hairlines go transparent.
+  assert.notEqual(offBefore.trackBg, "rgba(0, 0, 0, 0)", "the unchecked track has a visible fill of its own");
+  assert.notEqual(offHover.trackBg, offBefore.trackBg, "hover deepens the unchecked track's tint");
   assert.equal(onHover.trackBorder, onBefore.trackBorder, "the checked track keeps its accent border on hover");
 
   const disBefore = await readSwitch("#dis");
@@ -1365,6 +1367,25 @@ test("switch hover keeps the 44px outer target transparent and the track cue int
   assert.equal(disHover.outerBg, "rgba(0, 0, 0, 0)", "a disabled switch hover stays transparent");
   assert.equal(disHover.trackBorder, disBefore.trackBorder, "a disabled switch does not get the hover cue");
   assert.equal(disHover.trackBg, disBefore.trackBg, "a disabled switch keeps its base fill");
+
+  // Borderless keeps the off track: its edge is the fill, not the hairline.
+  await page.mouse.move(380, 700); // off the switches and their 44px hit boxes
+  await page.evaluate(() => { document.body.dataset.hideBorders = "true"; });
+  const offBorderless = await readSwitch("#off");
+  assert.equal(offBorderless.trackBg, offBefore.trackBg, "Borderless leaves the unchecked track's fill alone");
+  assert.notEqual(offBorderless.trackBg, "rgba(0, 0, 0, 0)", "an unchecked switch still shows its track in Borderless");
+  // A surface fill (--raised was the old one) matches the settings pane it
+  // sits on, leaving only the knob visible.
+  const surfaces = await page.evaluate(() => ["--bg", "--panel", "--elevated", "--raised"].map((token) => {
+    const probe = document.createElement("div");
+    probe.style.background = `var(${token})`;
+    document.body.append(probe);
+    const color = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return color;
+  }));
+  assert.ok(!surfaces.includes(offBorderless.trackBg), `the unchecked track is not a surface colour (${offBorderless.trackBg})`);
+  await page.evaluate(() => { delete document.body.dataset.hideBorders; });
   await page.setViewportSize({ width: 390, height: 720 });
 });
 

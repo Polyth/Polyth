@@ -1567,8 +1567,9 @@ function BehaviorInstructionsEditor() {
   );
 }
 
-export function BehaviorPage() {
+export function BehaviorPage({ settingsTarget }: { settingsTarget?: SettingsNavigationTarget } = {}) {
   const ui = useUiSettings();
+  const device = useSettingsDevice();
   const commandsEnabled = useSyncExternalStore(subscribePackages, () => isPackageEnabled("commands"));
   const [favoriteSubagents, setFavoriteSubagents] = useState(true);
   const [savingFavoriteSubagents, setSavingFavoriteSubagents] = useState(false);
@@ -1613,6 +1614,21 @@ export function BehaviorPage() {
       setSavingWorkspaceInstructions(false);
     }
   };
+  // Only a wide window pins a package window: the tablet and phone shells open
+  // them as sheets with no pin (ContextRail.tsx `compact`).
+  const pinnedWindowBlock: DeviceBlock = {
+    devices: ["desktop"],
+    labels: [tr("settings.pages.sharedPinnedWindow")],
+    items: ["behavior.sharedPinnedWindow"],
+    ownSection: true,
+    render: () => (
+      <Section title={tr("settings.pages.sectionPackageWindows")}>
+        <Row label={tr("settings.pages.sharedPinnedWindow")} hint={tr("settings.pages.sharedPinnedWindowHint")} itemId="behavior.sharedPinnedWindow">
+          <Toggle on={ui.sharedPinnedWindow} onChange={(v) => setUiSettings({ sharedPinnedWindow: v })} label={tr("settings.pages.sharedPinnedWindow")} />
+        </Row>
+      </Section>
+    ),
+  };
   return (
     <>
       <PageHead title={tr("settings.pages.behavior")} blurb={tr("settings.pages.workspaceSafetyFlowAndGlobalAgentInstructions")} />
@@ -1656,11 +1672,8 @@ export function BehaviorPage() {
           <Toggle on={ui.editorAutosave} onChange={(v) => setUiSettings({ editorAutosave: v })} label={tr("settings.pages.editorAutosave")} />
         </Row>
       </Section>
-      <Section title={tr("settings.pages.sectionPackageWindows")}>
-        <Row label={tr("settings.pages.sharedPinnedWindow")} hint={tr("settings.pages.sharedPinnedWindowHint")} itemId="behavior.sharedPinnedWindow">
-          <Toggle on={ui.sharedPinnedWindow} onChange={(v) => setUiSettings({ sharedPinnedWindow: v })} label={tr("settings.pages.sharedPinnedWindow")} />
-        </Row>
-      </Section>
+      {blocksOnDevice([pinnedWindowBlock], device)}
+      <OtherDevicesSection device={device} blocks={[pinnedWindowBlock]} target={settingsTarget?.itemId} />
     </>
   );
 }

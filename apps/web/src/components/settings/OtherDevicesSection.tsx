@@ -1,6 +1,7 @@
 // Settings that take effect only on another kind of screen wait behind one
-// closed group at the end of their page, so a phone does not list desktop
-// window options and a desktop does not list phone gestures. They stay one
+// closed group per device at the end of their page, so a phone does not list
+// desktop window options and a desktop does not list phone gestures. This
+// device's settings stay open in their own place above. The others stay one
 // click away: appearance can sync across devices, and a window can be resized
 // into another shell. Contract: docs/dev/ui.md §4.5 "Settings for other devices".
 import { Fragment, useEffect, useId, useState, type ReactNode } from "react";
@@ -15,8 +16,8 @@ import { SectionHeadingLevel } from "./parts.tsx";
 export type SettingsDevice = "desktop" | "tablet" | "phone";
 
 const DEVICE_OF_SHELL: Record<ShellMode, SettingsDevice> = { wide: "desktop", compact: "tablet", phone: "phone" };
-/** Title order: the two devices a page can hide read best desktop/phone first. */
-const DEVICE_ORDER: readonly SettingsDevice[] = ["desktop", "phone", "tablet"];
+/** Group order, largest screen first. */
+const DEVICE_ORDER: readonly SettingsDevice[] = ["desktop", "tablet", "phone"];
 const DEVICE_NAMES = {
   desktop: "settings.devices.desktop",
   tablet: "settings.devices.tablet",
@@ -73,35 +74,65 @@ function groupedForOtherDevices(hidden: readonly DeviceBlock[]): ReactNode {
   );
 }
 
-/** The page's closing group of settings for other devices. Renders nothing
- *  when every block works here. Closed on every visit, unless the page was
- *  opened on one of its settings. */
-export function OtherDevicesSection({ device, blocks, target }: {
+/** The page's closing groups of settings for other devices: one per device,
+ *  largest screen first. A block that works on several hidden devices sits in
+ *  each of their groups, so every group is that device's whole list. Renders
+ *  nothing when every block works here. Each group is closed on every visit,
+ *  unless the page was opened on one of its settings; a setting found in two
+ *  groups opens the first. A page that points at a setting again (a second
+ *  click on the same preview part) bumps `revision` to reopen its group. */
+export function OtherDevicesSection({ device, blocks, target, revision = 0 }: {
   device: SettingsDevice;
   blocks: readonly DeviceBlock[];
   target?: string | undefined;
+  revision?: number;
 }) {
   const hidden = blocks.filter((block) => !onDevice(block, device));
-  const targeted = !!target && hidden.some((block) => block.items.includes(target));
+  const groups = DEVICE_ORDER
+    .filter((other) => other !== device)
+    .map((other) => ({ other, blocks: hidden.filter((block) => onDevice(block, other)) }))
+    .filter((group) => group.blocks.length > 0);
+  const targetGroup = target
+    ? groups.find((group) => group.blocks.some((block) => block.items.includes(target)))?.other
+    : undefined;
+  return (
+    <>
+      {groups.map((group) => (
+        <OtherDeviceGroup
+          key={group.other}
+          device={group.other}
+          blocks={group.blocks}
+          targeted={group.other === targetGroup}
+          target={target}
+          revision={revision}
+        />
+      ))}
+    </>
+  );
+}
+
+/** One other device's closed group: its name, the labels it holds, and on a
+ *  press its settings. */
+function OtherDeviceGroup({ device, blocks, targeted, target, revision }: {
+  device: SettingsDevice;
+  blocks: readonly DeviceBlock[];
+  targeted: boolean;
+  target?: string | undefined;
+  revision: number;
+}) {
   const [open, setOpen] = useState(targeted);
   // Only a press animates: a group opened for a search hit lands settled.
   const [pressed, setPressed] = useState(false);
   useEffect(() => {
     if (targeted) setOpen(true);
-  }, [targeted, target]);
+  }, [targeted, target, revision]);
   const titleId = useId();
   const bodyId = useId();
-  if (hidden.length === 0) return null;
-  const names = DEVICE_ORDER
-    .filter((other) => other !== device && hidden.some((block) => block.devices.includes(other)))
-    .map((other) => tr(DEVICE_NAMES[other]));
-  const devices = names.length > 1
-    ? tr("settings.devices.pair", { first: names[0]!, second: names[1]! })
-    : names[0] ?? "";
   return (
     <section
       className="settings-section settings-other-devices"
       aria-labelledby={titleId}
+      data-device={device}
       data-open={open ? "true" : undefined}
     >
       <h3 className="settings-other-devices-heading">
@@ -112,22 +143,26 @@ export function OtherDevicesSection({ device, blocks, target }: {
           {...(open ? { "aria-controls": bodyId } : {})}
           onClick={() => { setPressed(true); setOpen(!open); }}
         >
-          <span className="settings-section-copy">
-            <span className="settings-section-title" id={titleId}>{tr("settings.devices.title", { devices })}</span>
-            {/* A narrow screen wraps between labels, never inside one. */}
+          {/* The chevron follows the title, as on the page's other folds, so
+              a wide pane does not leave it a window's width away. */}
+          <span className="settings-other-devices-title-line">
+            <span className="settings-section-title" id={titleId}>{tr("settings.devices.title", { devices: tr(DEVICE_NAMES[device]) })}</span>
+            <span className="settings-other-devices-chevron" aria-hidden="true"><Icon icon={ChevronDownIcon} size="sm" /></span>
+          </span>
+          {/* What a closed group holds; open, its settings say it. A narrow
+              screen wraps between labels, never inside one. */}
+          {!open && (
             <span className="settings-section-hint">
-              {hidden.flatMap((block) => block.labels).map((label, index) => (
+              {blocks.flatMap((block) => block.labels).map((label, index) => (
                 <Fragment key={index}>{index > 0 && " · "}<span className="settings-other-devices-label">{label}</span></Fragment>
               ))}
             </span>
-          </span>
-          <span className="settings-other-devices-chevron" aria-hidden="true"><Icon icon={ChevronDownIcon} size="sm" /></span>
+          )}
         </button>
       </h3>
       {open && (
         <div id={bodyId} className="settings-other-devices-body" data-motion={pressed ? "opening" : undefined}>
-          <p className="settings-other-devices-note">{tr("settings.devices.note")}</p>
-          {groupedForOtherDevices(hidden)}
+          {groupedForOtherDevices(blocks)}
         </div>
       )}
     </section>

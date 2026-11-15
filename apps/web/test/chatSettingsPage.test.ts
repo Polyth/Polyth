@@ -187,14 +187,23 @@ test("the header numbers setting is gone, and its row is named for what is left"
   assert.equal(searchSettingsItems("chat metrics", { chat: "Chat" }).some((hit) => hit.item.id === "chat.headerMetrics"), false);
   assert.equal("headerMetrics" in UI_DEFAULTS, false);
   resetPrefs();
+  // This file renders the wide shell: the phone's title waits in the phone's
+  // group, and a link to it opens that group (settingsOtherDevices.test.ts
+  // pins its own row on a phone).
   const { container, unmount } = await mount({ itemId: "chat.mobileSessionTitle" });
   try {
-    assert.match(rowHead(container, "header")?.textContent ?? "", /Mobile session title/);
-    const buttons = [...container.querySelectorAll('[data-settings-item="chat.mobileSessionTitle"] .seg button')];
+    assert.equal(rowHead(container, "header"), null, "no phone title row on a wide window");
+    assert.deepEqual(openRows(container), [], "the link opens no row here");
+    const group = container.querySelector('.settings-other-devices[data-device="phone"]');
+    assert.equal(group?.querySelector(".settings-other-devices-toggle")?.getAttribute("aria-expanded"), "true");
+    const row = group?.querySelector('[data-settings-item="chat.mobileSessionTitle"]');
+    // The group's heading names the phone, so the row doesn't repeat it.
+    assert.match(row?.textContent ?? "", /^Session title/);
+    assert.doesNotMatch(row?.textContent ?? "", /Mobile session title/);
+    const buttons = [...(row?.querySelectorAll(".seg button") ?? [])];
     assert.deepEqual(buttons.map((button) => button.textContent), ["Hidden", "Title", "Glass button"]);
     await click(buttons[2] ?? null);
     assert.equal(getUiSettings().mobileSessionTitle, "button");
-    assert.match(rowHead(container, "header")?.textContent ?? "", /Glass button/, "the summary follows");
   } finally {
     setUiSettings({ mobileSessionTitle: UI_DEFAULTS.mobileSessionTitle });
     await unmount();
@@ -269,11 +278,11 @@ test("rows open in place, one at a time, and a closed row renders no settings", 
 
 test("a routed target opens its row or More options at once, so it can be scrolled to", async () => {
   resetPrefs();
-  const mounted = await mount({ itemId: "chat.pinLatestPrompt" });
+  const mounted = await mount({ itemId: "chat.promptBookmarkDesktop" });
   const { container } = mounted;
   try {
     assert.deepEqual(openRows(container), ["navigation"], "a deep link on first render");
-    assert.equal(hasItem(container, "chat.pinLatestPrompt"), true);
+    assert.equal(hasItem(container, "chat.promptBookmarkDesktop"), true);
     assert.equal(container.querySelector('[data-disclosure-row="navigation"]')?.getAttribute("data-motion"), null,
       "a routed row does not animate, so its setting is at its final place");
     await mounted.rerender({ itemId: "chat.responseActions" });
@@ -283,6 +292,11 @@ test("a routed target opens its row or More options at once, so it can be scroll
     await mounted.rerender({ itemId: "chat.promptHistoryLimit" });
     assert.equal(hasItem(container, "chat.promptHistoryLimit"), true, "More options opens for its settings");
     assert.equal(hasItem(container, "chat.copyFormat"), true);
+    // A setting of narrower screens opens its device's group, not a row.
+    await mounted.rerender({ itemId: "chat.pinLatestPrompt" });
+    const tablet = container.querySelector('.settings-other-devices[data-device="tablet"]');
+    assert.equal(tablet?.querySelector(".settings-other-devices-toggle")?.getAttribute("aria-expanded"), "true");
+    assert.ok(tablet?.querySelector('[data-settings-item="chat.pinLatestPrompt"]'));
   } finally {
     await mounted.unmount();
   }
@@ -344,7 +358,23 @@ test("the preview follows the preferences, dims around an open row and opens a c
     assert.deepEqual(openRows(container), ["send"], "the send button opens its own row, not the composer's");
     assert.equal(part("composer")?.dataset.focused, "true", "the composer stays lit around it");
     assert.match(part("composer")?.textContent ?? "", /Enter/, "the send key shows, having no look of its own");
-    for (const row of Object.values(CHAT_PREVIEW_ROW)) assert.ok(rowHead(container, row), `no row for ${row}`);
+    // Every part has a row here, except the phone's title on a wide window:
+    // a click on it opens the phone's group at the setting instead.
+    for (const row of Object.values(CHAT_PREVIEW_ROW)) {
+      if (row !== "header") assert.ok(rowHead(container, row), `no row for ${row}`);
+    }
+    assert.equal(rowHead(container, "header"), null);
+    const phoneGroup = () => container.querySelector('.settings-other-devices[data-device="phone"]');
+    assert.equal(phoneGroup()?.querySelector(".settings-other-devices-toggle")?.getAttribute("aria-expanded"), "false");
+    await click(part("header"));
+    assert.equal(phoneGroup()?.querySelector(".settings-other-devices-toggle")?.getAttribute("aria-expanded"), "true");
+    assert.ok(phoneGroup()?.querySelector('[data-settings-item="chat.mobileSessionTitle"]'));
+    assert.deepEqual(openRows(container), [], "the open row closes for it");
+    await click(phoneGroup()?.querySelector(".settings-other-devices-toggle") ?? null);
+    assert.equal(phoneGroup()?.querySelector(".settings-other-devices-toggle")?.getAttribute("aria-expanded"), "false");
+    await click(part("header"));
+    assert.equal(phoneGroup()?.querySelector(".settings-other-devices-toggle")?.getAttribute("aria-expanded"), "true",
+      "a second pick reopens the group the person closed");
   } finally {
     resetPrefs();
     await unmount();

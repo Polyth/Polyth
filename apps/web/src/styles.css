@@ -5548,9 +5548,13 @@ body[data-desktop-low-resource="true"] .lock-mark-frame {
   display: inline-flex; align-items: center; justify-content: center;
   background: transparent; border: 0; position: relative;
 }
+/* The off track is an ink tint, not a surface fill with a hairline: on a pane
+   of the same tone, and in the default Borderless mode where hairlines go
+   transparent, a --raised track left only the knob visible. */
 .switch-track {
+  --switch-off-track: color-mix(in srgb, var(--text) 16%, transparent);
   display: block; flex: none; width: 38px; height: 22px; padding: 2px;
-  border-radius: var(--radius-switch); background: var(--raised); border: 1px solid var(--hair);
+  border-radius: var(--radius-switch); background: var(--switch-off-track); border: 1px solid transparent;
   transition: background var(--motion-normal) var(--motion-ease), border-color var(--motion-normal) var(--motion-ease);
 }
 .switch::after {
@@ -5565,11 +5569,11 @@ body[data-desktop-low-resource="true"] .lock-mark-frame {
 /* Keep the enlarged outer hit box transparent on hover: the global
    button:hover:where(:not(:disabled)) fill would otherwise repaint it (including 44px phone/coarse
    targets, and it would also paint a disabled switch). The genuine cue is a
-   border tint on unchecked tracks only, so checked accent and disabled
-   behavior are untouched. */
+   deeper ink tint on unchecked tracks only (it survives Borderless), so
+   checked accent and disabled behavior are untouched. */
 @media (hover: hover) {
   .switch:hover:where(:not(:disabled)) { background: transparent; }
-  .switch:hover:not(:disabled):not([aria-checked="true"]) .switch-track { border-color: var(--border); }
+  .switch:hover:not(:disabled):not([aria-checked="true"]) .switch-track { --switch-off-track: color-mix(in srgb, var(--text) 24%, transparent); }
 }
 .switch i {
   display: block; width: 16px; height: 16px; border-radius: var(--radius-switch); background: var(--muted);
@@ -21096,41 +21100,48 @@ body.desktop-app[data-desktop-platform="win32"][data-desktop-controls-position] 
 .settings-section.is-danger .settings-section-title { color: var(--red); }
 .settings-section.is-danger .settings-section-head { border-bottom-color: color-mix(in srgb, var(--red) 30%, var(--hair)); }
 .settings-reset-link.ui-btn--ghost { color: var(--accent); padding-inline: var(--space-2); }
-/* Settings for other devices (OtherDevicesSection): one closed group at the
-   page end, read as a section head that opens. The hairline sits on the
-   heading so the button's hover wash can reach past the text edge. Inside,
-   the hidden sections keep their own look one heading level down. */
+/* Settings for other devices (OtherDevicesSection): one closed group per
+   device at the page end. Each reads as a fold, one step quieter than the
+   sections above (the page's "More options" / "Customize each size" folds):
+   a 600 dim title with its chevron right after it, and, while closed, the
+   labels it holds on a faint line. The whole row is the button, so the hit
+   area stays full width; the hairline sits on the heading so the hover wash
+   can reach past the text edge. Closed groups stack as one short list; an
+   open one keeps the ordinary section gap before the next. Inside, the
+   hidden sections keep their own look one heading level down. */
+.settings-other-devices:not([data-open]) + .settings-other-devices { margin-top: var(--space-1); }
 .settings-other-devices-heading {
   margin: 0; font: inherit;
   border-bottom: 1px solid var(--hair);
 }
 .settings-other-devices-toggle {
-  display: flex; align-items: center; gap: var(--space-3);
-  width: calc(100% + 2 * var(--space-2)); min-height: max(var(--hit-min), 40px);
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px;
+  width: calc(100% + 2 * var(--space-2)); min-height: max(var(--hit-min), var(--control-h));
   margin: 0 calc(-1 * var(--space-2)) var(--space-1);
   padding: var(--space-1) var(--space-2);
-  border: 0; border-radius: var(--radius-sm); background: transparent; color: inherit;
+  border: 0; border-radius: var(--radius-control); background: transparent; color: inherit;
   font: inherit; text-align: start; cursor: pointer;
   transition: background-color var(--motion-fast) var(--motion-ease);
 }
+.settings-other-devices-title-line { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; }
+.settings-other-devices-toggle .settings-section-title { font-weight: 600; color: var(--text-dim); }
+.settings-other-devices-toggle .settings-section-hint { color: var(--faint); text-wrap: pretty; }
 @media (hover: hover) and (pointer: fine) {
   .settings-other-devices-toggle:hover { background: var(--surface-overlay-hover); }
-  .settings-other-devices-toggle:hover .settings-other-devices-chevron { color: var(--text-dim); }
+  .settings-other-devices-toggle:hover :is(.settings-section-title, .settings-other-devices-chevron) { color: var(--text); }
 }
 .settings-other-devices-toggle:active { background: var(--surface-overlay-hover); }
 .settings-other-devices-toggle:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.settings-other-devices[data-open="true"] .settings-other-devices-toggle .settings-section-title { color: var(--text); }
 .settings-other-devices-label { white-space: nowrap; }
 .settings-other-devices-chevron {
   flex: none; display: grid; place-items: center; color: var(--faint);
   transition: transform var(--motion-normal) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
 }
-.settings-other-devices[data-open="true"] .settings-other-devices-chevron { transform: rotate(180deg); }
-.settings-other-devices-note {
-  margin: var(--space-3) 0 0; max-width: 68ch;
-  color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh);
-}
-.settings-other-devices-rows { margin-top: var(--space-2); }
-.settings-other-devices-body > .settings-section:first-of-type { margin-top: var(--space-4); }
+.settings-other-devices[data-open="true"] .settings-other-devices-chevron { transform: rotate(180deg); color: var(--text-dim); }
+.settings-other-devices-rows { margin-top: var(--space-1); }
+.settings-other-devices-body > .settings-section:first-of-type { margin-top: var(--space-3); }
+.settings-other-devices-rows + .settings-section { margin-top: var(--space-5); }
 .settings-other-devices-body[data-motion="opening"] { animation: settings-other-devices-open var(--motion-normal) var(--motion-ease) both; }
 @keyframes settings-other-devices-open {
   from { opacity: 0; transform: translateY(-4px); }
