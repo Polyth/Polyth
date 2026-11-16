@@ -436,8 +436,12 @@ const readPreviewCatalog = (projectId?: string, harnessId?: string, spaceId?: st
         aliases.add(previewCatalogKey(snapshot.context.projectId, aliasHarnessId, undefined, snapshot.context.cwd));
         aliases.add(previewCatalogKey(snapshot.context.projectId, aliasHarnessId, snapshot.context.spaceId, snapshot.context.cwd));
       }
+      // Seed, never await: an alias can be another scope's read still in
+      // flight (the composer carries Space + cwd, the project preload neither),
+      // and that read aliases this key back. Awaiting it deadlocked both reads
+      // and left the picker on "Loading…" for good. A fresh value is kept.
       for (const alias of aliases) {
-        if (alias !== requestKey) await catalogCache.read(alias, async () => catalog);
+        if (alias !== requestKey && catalogCache.peek(alias) === undefined) catalogCache.write(alias, catalog);
       }
       const persistedAliases = new Set([
         previewPresentationKey(snapshot.context.projectId, resolvedHarnessId, snapshot.context.spaceId, snapshot.context.cwd),
