@@ -1070,6 +1070,7 @@ export const uk: GitMessages = {
   "diffcomment.placeholder": "Коментар для агента…",
   "diffcomment.add": "Додати до повідомлення",
   "diffcomment.added": "Додано до чернетки повідомлення. Нічого не надсилається, доки ви не надішлете.",
+  "diffcomment.goToMessage": "Перейти до повідомлення",
   "diffcomment.extend": "Розширити до",
   "diffcomment.rangeHint": "Shift-клік на іншому рядку охоплює діапазон.",
   "diffcomment.rangeHintTouch": "Торкніться іншого рядка, потім «Розширити», щоб охопити діапазон.",

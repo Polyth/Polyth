@@ -85,7 +85,7 @@ export function CommentableRows({ lines, path, renderRow }: {
   useEffect(() => { coarse.current = coarsePointer(); });
   if (!host) return <>{lines.map((line, index) => <Fragment key={index}>{renderRow(line, index, null)}</Fragment>)}</>;
   const t = translator(host);
-  const { IconButton } = host.ui.components;
+  const { Button, IconButton } = host.ui.components;
   const commentIcon = host.ui.iconSet?.ChatIcon ?? CommentGlyph;
   const commentableRows = lines.flatMap((line, index) => commentable(line) ? [index] : []);
   const tabStop = rover !== null && commentableRows.includes(rover) ? rover : commentableRows[0];
@@ -163,7 +163,16 @@ export function CommentableRows({ lines, path, renderRow }: {
             }}
           />
         )}
-        {sent === index && range === null && <div className="git-diff-comment-sent form-success" role="status">{t("diffcomment.added")}</div>}
+        {sent === index && range === null && (
+          // The message box can be out of sight (a phone layer covers it):
+          // the confirmation offers the way there, the host decides what closes.
+          <div className="git-diff-comment-sent form-success">
+            <span role="status">{t("diffcomment.added")}</span>
+            {host.conversation.revealComposer && (
+              <Button size="sm" variant="ghost" onClick={() => host.conversation.revealComposer?.()}>{t("diffcomment.goToMessage")}</Button>
+            )}
+          </div>
+        )}
       </Fragment>
     );
   })}</>;

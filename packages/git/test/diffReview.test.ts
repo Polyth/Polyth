@@ -219,6 +219,7 @@ test("a comment is inserted as the block, empty is disabled, several append, Esc
   assert.equal(inserted.length, 1);
   assert.equal(inserted[0], "src/a.ts:2\n\n```diff\n+const two = 22;\n```\n\nuse a const name\n\n");
   assert.equal(editor() === null, true, "the editor closes after adding");
+  assert.equal(view.container.querySelector(".git-diff-comment-sent button") === null, true, "no Go to message on a host without revealComposer");
 
   // Range: open on the first add, shift+click the second add.
   await click(buttons()[2]!);
@@ -310,5 +311,21 @@ test("Cmd/Ctrl+F opens the find bar only from inside the view; counts, next/prev
   assert.equal(view.container.querySelector(".git-find-bar") === null, true);
   await act(async () => { await delay(20); });
   assert.equal(document.activeElement === inner, true, "Esc restores focus to where Find was opened");
+  await view.close();
+});
+
+test("after adding a comment, Go to message asks the host to reveal the composer", async () => {
+  let reveals = 0;
+  const base = host as unknown as { conversation: Record<string, unknown>; ui: unknown };
+  const revealing = { ...base, conversation: { ...base.conversation, revealComposer: () => { reveals++; } } } as never;
+  const view = await mount(createElement(DiffCommentsProvider, { value: revealing }, createElement(DiffContent, { diff: DIFF, path: "src/a.ts", split: false, wrap: false })));
+  await click(view.container.querySelectorAll<HTMLButtonElement>(".git-diff-comment-btn")[2]!);
+  await type(view.container.querySelector(".git-diff-comment-editor textarea")!, "check this");
+  await click([...view.container.querySelectorAll<HTMLButtonElement>(".git-diff-comment-editor button")].find((button) => button.textContent === "Add to message")!);
+  const go = [...view.container.querySelectorAll<HTMLButtonElement>(".git-diff-comment-sent button")].find((button) => button.textContent === "Go to message");
+  assert.equal(go !== undefined, true, "the confirmation offers the way to the message");
+  assert.equal(view.container.querySelector(".git-diff-comment-sent [role=status]")?.textContent, "Added to your message draft. Nothing is sent until you send it.");
+  await click(go!);
+  assert.equal(reveals, 1);
   await view.close();
 });

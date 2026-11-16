@@ -2012,6 +2012,10 @@ body[data-desktop-low-resource="true"] .git-page .git-landing {
 }
 .git-page .git-diff-comment-hint { margin: var(--space-1) 0 0; font-size: var(--font-meta); }
 .git-page .git-diff-comment-sent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
   margin: 0 var(--space-2) var(--space-1);
   white-space: normal;
   font-family: var(--ui-font-family, inherit);

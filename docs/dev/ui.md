@@ -5545,6 +5545,11 @@ its revealed chats.
   and returns false when no composer took it. An empty `text` changes nothing;
   only `discard: true` takes the run's words back out (a spoken command), and a
   discarded run is never queued for a later composer.
+- `host.conversation.revealComposer?()` brings the chat composer into view and
+  focuses it: it closes a package window that covers the chat (the phone layer,
+  or a pane promoted to full screen, `.rail-fullscreen`) and a page, and leaves
+  a side window open. It is the "Go to message" after `insert`, which itself
+  never closes a side or phone window (Source control's line comments use it).
 - `host.conversation.submitDraft?({ delivery? })` sends the mounted composer's
   draft exactly as its Send control would (same target, new-session creation,
   model, attachments, follow-up delivery). `delivery` (`queue`, `steer`,

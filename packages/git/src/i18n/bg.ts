@@ -1070,6 +1070,7 @@ export const bg: GitMessages = {
   "diffcomment.placeholder": "Comment for the agent…",
   "diffcomment.add": "Add to message",
   "diffcomment.added": "Added to your message draft. Nothing is sent until you send it.",
+  "diffcomment.goToMessage": "Go to message",
   "diffcomment.extend": "Extend to",
   "diffcomment.rangeHint": "Shift-click another line to cover a range.",
   "diffcomment.rangeHintTouch": "Tap another line, then Extend, to cover a range.",
