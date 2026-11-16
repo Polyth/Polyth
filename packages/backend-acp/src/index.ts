@@ -466,6 +466,18 @@ export function createAcpRuntime(
         permission: string;
         patterns: string[];
     }>();
+    /** Every permission id this runtime has asked. An agent may ask more than
+     * once for one tool call (e.g. a file outside the workspace, then the
+     * write); reusing the tool call id would hit the first request's settled
+     * answer, so the agent would wait forever and every send would conflict. */
+    const askedPermissionIds = new Set<string>();
+    const permissionRequestId = (toolCallId: unknown): string => {
+        if (typeof toolCallId !== "string" || !toolCallId) return randomUUID();
+        let requestId = toolCallId;
+        for (let n = 2; askedPermissionIds.has(requestId); n++) requestId = `${toolCallId}#${n}`;
+        askedPermissionIds.add(requestId);
+        return requestId;
+    };
     const accepted: NonNullable<RuntimeSnapshot["acceptedOperations"]> = [];
     const endpoint = { authorityId: rpc.authorityId, generation: rpc.generation, continuity: "generation-only" as const, url: "stdio:", location: { directory: context.cwd }, control: { kind: "owned" as const, instanceToken: rpc.authorityId }, config: { kind: "read-only" as const }, authentication: { kind: "none" as const } };
     const emit = (event: RuntimeEvent) => { for (const cb of listeners)
@@ -704,7 +716,7 @@ export function createAcpRuntime(
         if (method !== "session/request_permission" || params.sessionId !== nativeId)
             throw new Error("unsupported request");
         markAccepted();
-        const requestId = params.toolCall?.toolCallId ?? randomUUID();
+        const requestId = permissionRequestId(params.toolCall?.toolCallId);
         // Some agents name only the tool call in the request; its kind, title
         // and input were already announced on the `tool_call` update.
         const tracked = typeof params.toolCall?.toolCallId === "string" ? acpToolCalls.get(params.toolCall.toolCallId) : undefined;
@@ -1185,7 +1197,12 @@ export function createAcpRuntime(
             pending.delete(requestId);
             request.resolve(option ? { outcome: { outcome: "selected", optionId: option.optionId } } : { outcome: { outcome: "cancelled" } });
         },
-        replyPermissionOperation: (_sid, requestId, reply, operationId) => mutate(operationId, async () => { await runtime.replyPermission(context.sessionId!, requestId, reply); return {}; }),
+        // `pending` is the agent's own open request; without it nothing waits
+        // for this answer, so say so instead of leaving the request unknown
+        // (an unknown answer is never retried and blocks every later send).
+        replyPermissionOperation: async (_sid, requestId, reply, operationId) => !pending.has(requestId)
+            ? { kind: "rejected", code: "not-found", message: "The agent is no longer waiting for this permission" }
+            : mutate(operationId, async () => { await runtime.replyPermission(context.sessionId!, requestId, reply); return {}; }),
         replyQuestion: async () => { throw Object.assign(new Error("questions unsupported"), { code: "unsupported" }); },
         endpoint: async () => endpoint, protocol: async () => "legacy",
         reconcile: async (binding) => ({ ...endpoint, backendSessionId: binding.backendSessionId!, reconciliationOrdinal: binding.reconciliationOrdinal ?? 0,

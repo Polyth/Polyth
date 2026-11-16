@@ -108,6 +108,33 @@ test("ACP permissions map native option ids; a lost admitted prompt records a te
     assert.equal((await rt.releaseExecution!(binding, "switch")).kind, "confirmed");
 });
 
+test("ACP gives a repeated permission for one tool call its own id; a request nobody waits for is not-found", async () => {
+    const f = fakeRpc();
+    f.handle(async (method) => method === "session/new" ? { sessionId: "native" } : new Promise(() => {}));
+    const rt = createAcpRuntime(context, f.rpc);
+    const events: RuntimeEvent[] = [];
+    rt.onEvent((_sid, e) => events.push(e));
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    const admission = rt.startTurnOperation!({ sessionId: "canonical", text: "task" }, "submit");
+    const options = [{ optionId: "allow", kind: "allow_once" }];
+    const first = f.request("session/request_permission", { sessionId: "native", toolCall: { toolCallId: "patch", kind: "edit", title: "~/.zshrc" }, options });
+    assert.equal((await admission).kind, "confirmed");
+    assert.equal((await rt.replyPermissionOperation!("canonical", "patch", "once", "op-1")).kind, "confirmed");
+    assert.deepEqual(await first, { outcome: { outcome: "selected", optionId: "allow" } });
+    // The same tool call asks again (as Copilot's apply_patch can).
+    const second = f.request("session/request_permission", { sessionId: "native", toolCall: { toolCallId: "patch", kind: "edit", title: "~/.zshrc" }, options });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(events.filter((e) => e.type === "permission/requested").map((e) => e.type === "permission/requested" && e.requestId), ["patch", "patch#2"]);
+    assert.equal((await rt.replyPermissionOperation!("canonical", "patch#2", "once", "op-2")).kind, "confirmed");
+    assert.deepEqual(await second, { outcome: { outcome: "selected", optionId: "allow" } });
+    // Answering a request the agent is no longer waiting on must not stay
+    // unknown: the server expires a not-found request instead of wedging it.
+    assert.deepEqual(await rt.replyPermissionOperation!("canonical", "patch", "reject", "op-3"), {
+        kind: "rejected", code: "not-found", message: "The agent is no longer waiting for this permission",
+    });
+    await rt.dispose();
+});
+
 test("ACP follow-up silence from an unresponsive peer times out with one terminal error and fences late completion", async () => {
     const f = fakeRpc();
     let promptCount = 0;
