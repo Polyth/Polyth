@@ -1130,3 +1130,21 @@ test("Codex turn/plan/updated publishes canonical task snapshots only inside an 
     ]);
     await rt.dispose();
 });
+test("Codex maps command output deltas to a throttled ephemeral tool/progress, only inside a turn", async () => {
+    const f = fakeRpc();
+    f.handle(async () => ({ thread: { id: "native" } }));
+    const rt = await createCodexRuntime(context, f.rpc);
+    const events: RuntimeEvent[] = [];
+    rt.onEvent((_sid, event) => events.push(event));
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    const progress = () => events.filter((event) => event.type === "tool/progress");
+    f.emit("item/commandExecution/outputDelta", { threadId: "native", turnId: "t", itemId: "cmd-1", delta: "early" });
+    assert.equal(progress().length, 0, "no turn admitted: nothing");
+    f.emit("turn/started", { threadId: "native", turn: { id: "turn-1" } });
+    f.emit("item/commandExecution/outputDelta", { threadId: "native", turnId: "turn-1", itemId: "cmd-1", delta: "a" });
+    f.emit("item/commandExecution/outputDelta", { threadId: "native", turnId: "turn-1", itemId: "cmd-1", delta: "b" });
+    f.emit("item/commandExecution/outputDelta", { threadId: "native", turnId: "turn-1", itemId: "cmd-2", delta: "c" });
+    const calls = progress().map((event) => event.type === "tool/progress" ? event.callId : "");
+    assert.deepEqual(calls, ["cmd-1", "cmd-2"], "one per call per window");
+    await rt.dispose();
+});

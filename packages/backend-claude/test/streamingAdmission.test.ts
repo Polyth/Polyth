@@ -397,3 +397,25 @@ test("Claude leaves a notification inside a live turn to that turn", async () =>
     assert.equal(events.some((event) => event.type === "runtime/wake-requested"), false);
     await runtime.dispose();
 });
+
+test("Claude maps SDK tool_progress to a throttled tool/progress inside an admitted turn and drops it outside", async () => {
+    const f = await openClaudeRuntime();
+    try {
+        const progress = () => f.events.filter((event) => event.type === "tool/progress");
+        f.push({ type: "tool_progress", tool_use_id: "early", tool_name: "Bash", parent_tool_use_id: null, elapsed_time_seconds: 5, uuid: "p0", session_id: "n" });
+        await flush();
+        assert.equal(progress().length, 0, "no admitted turn: dropped");
+        const admission = f.runtime.startTurnOperation!({ sessionId: "canonical", text: "run" }, "prog-turn");
+        await f.nextInput();
+        f.push({ type: "system", subtype: "status", status: "requesting", uuid: "status-prog" });
+        assert.equal((await admission).kind, "confirmed");
+        for (const n of [1, 2, 3]) f.push({ type: "tool_progress", tool_use_id: "toolu_1", tool_name: "Bash", parent_tool_use_id: null, elapsed_time_seconds: n, uuid: `p${n}`, session_id: "n" });
+        f.push({ type: "tool_progress", tool_use_id: "toolu_2", tool_name: "Bash", parent_tool_use_id: null, elapsed_time_seconds: 1, uuid: "p9", session_id: "n" });
+        await flush();
+        assert.deepEqual(progress().map((event) => event.type === "tool/progress" ? event.callId : ""), ["toolu_1", "toolu_2"]);
+        f.push({ type: "result", uuid: "result-prog", is_error: false });
+        await flush();
+    } finally {
+        await f.runtime.dispose();
+    }
+});

@@ -24,6 +24,7 @@ import { open, readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { AgentRuntime, HarnessContext, HarnessDescriptor, HarnessProvider, JsonObject, ModelDescriptor, MutationOutcome, RateLimitRetryHint, RuntimeCommandDescriptor, RuntimeErrorCode, RuntimeEvent, RuntimeSnapshot } from "@polyth/contracts";
+import { createToolProgressThrottle } from "@polyth/contracts";
 import {
     acknowledgeCapabilityApplication,
     attachmentModality,
@@ -482,6 +483,7 @@ export function createAcpRuntime(
     const endpoint = { authorityId: rpc.authorityId, generation: rpc.generation, continuity: "generation-only" as const, url: "stdio:", location: { directory: context.cwd }, control: { kind: "owned" as const, instanceToken: rpc.authorityId }, config: { kind: "read-only" as const }, authentication: { kind: "none" as const } };
     const emit = (event: RuntimeEvent) => { for (const cb of listeners)
         cb(sid, event); };
+    const progressThrottle = createToolProgressThrottle();
     const currentMessagePartId = () => {
         if (!messagePartId) {
             messagePartId = messagePartOrdinal === 0 ? turnId : `${turnId}:${messagePartOrdinal}`;
@@ -690,6 +692,17 @@ export function createAcpRuntime(
             if (update.sessionUpdate === "tool_call") finishMessagePart();
             for (const event of eventsFromAcpToolCallUpdate(acpToolCalls, update as Record<string, unknown>, toolCallOptions)) {
                 emit(event);
+            }
+            // An in-progress update (status or streamed content) proves the call
+            // is alive. Ephemeral and throttled; the repeated tool/started above
+            // is unchanged. Nothing for a finished call.
+            if (update.sessionUpdate === "tool_call_update" && typeof update.toolCallId === "string") {
+                const call = acpToolCalls.get(update.toolCallId);
+                const hasContent = Array.isArray(update.content) ? update.content.length > 0 : update.rawOutput !== undefined;
+                if (active && call && !call.finished && (update.status === "in_progress" || (update.status === undefined && hasContent)) && progressThrottle.take(update.toolCallId)) {
+                    const at = Date.now();
+                    emit({ type: "tool/progress", callId: update.toolCallId, at });
+                }
             }
             // An agent whose todo tool is an ordinary call publishes its list
             // only as that call's input; the list is a full replacement.
@@ -1069,6 +1082,7 @@ export function createAcpRuntime(
             }
             active = true;
             turnId = operationId;
+            progressThrottle.clear();
             text = "";
             messagePartId = "";
             messagePartOrdinal = 0;

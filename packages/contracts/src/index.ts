@@ -5407,6 +5407,11 @@ export type RuntimeEvent =
   | { type: "assistant/message"; partId: string; text: string; reasoning?: string; tokens?: TokenUsage; cost?: number }
   | { type: "tool/call"; callId: string; tool: string; input: JsonObject; status: "pending" | "running" }
   | { type: "tool/started"; callId: string; tool: string; input: JsonObject }
+  /** Liveness of one running call (output arrived, the harness reported
+   *  progress). EPHEMERAL: never appended to the session log or event store,
+   *  never model-visible, never replayed. The server only counts it as watchdog
+   *  activity and relays it live. `at` is epoch ms on the adapter's clock. */
+  | { type: "tool/progress"; callId: string; at: number }
   | { type: "tool/result"; callId: string; tool: string; output: string; title?: string; metadata?: JsonObject; input?: JsonObject }
   | { type: "tool/error"; callId: string; tool: string; error: string; input?: JsonObject; mcpServer?: string }
   | { type: "permission/requested"; requestId: string; permission: string; patterns: string[]; metadata?: JsonObject; tool?: string }
@@ -5453,6 +5458,7 @@ export const RUNTIME_TURN_CONTENT_EVENT_TYPES = [
   "assistant/message",
   "tool/call",
   "tool/started",
+  "tool/progress",
   "tool/result",
   "tool/error",
   "usage/recorded",
@@ -5461,6 +5467,34 @@ export const RUNTIME_TURN_CONTENT_EVENT_TYPES = [
 
 const RUNTIME_TURN_CONTENT_EVENT_TYPE_SET: ReadonlySet<string> =
   new Set(RUNTIME_TURN_CONTENT_EVENT_TYPES);
+
+/** Minimum spacing of `tool/progress` per call (adapter side). */
+export const TOOL_PROGRESS_MIN_INTERVAL_MS = 2_000;
+
+/** One shared throttle for `tool/progress`: at most one event per call per
+ *  `TOOL_PROGRESS_MIN_INTERVAL_MS`. `take` returns true when the caller should
+ *  emit; `forget` releases a finished call. Bounded: an unfinished call's slot
+ *  is dropped by `clear()` at turn end. */
+export interface ToolProgressThrottle {
+  take(callId: string, now?: number): boolean;
+  forget(callId: string): void;
+  clear(): void;
+}
+export const createToolProgressThrottle = (
+  minIntervalMs: number = TOOL_PROGRESS_MIN_INTERVAL_MS,
+): ToolProgressThrottle => {
+  const last = new Map<string, number>();
+  return {
+    take(callId, now = Date.now()) {
+      const prev = last.get(callId);
+      if (prev !== undefined && now - prev < minIntervalMs) return false;
+      last.set(callId, now);
+      return true;
+    },
+    forget(callId) { last.delete(callId); },
+    clear() { last.clear(); },
+  };
+};
 
 export const runtimeEventHasTurnContent = (type: string): boolean =>
   RUNTIME_TURN_CONTENT_EVENT_TYPE_SET.has(type);

@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import type { AgentRuntime, HarnessContext, JsonObject, ModelDescriptor, ModelRef, MutationOutcome, RateLimitRetryHint, RuntimeCommandDescriptor, RuntimeEvent, RuntimeObservation, RuntimeSnapshot, TokenUsage, WorkspaceContext } from "@polyth/contracts";
-import { runtimeEventHasTurnContent } from "@polyth/contracts";
+import { createToolProgressThrottle, runtimeEventHasTurnContent } from "@polyth/contracts";
 import { createTodoToolTracker } from "@polyth/todos";
 import { redactSecrets } from "@polyth/plugins";
 import { agentBetaEnabled, attachmentModality, composeTurnPrompt, contextWindowTelemetry, createProcessAuthority, deltaCost, deltaTokenUsage, isPlaceholderTitle, normalizeTokenUsage, resolveModelSelection, unsupportedAttachmentMessage } from "@polyth/harness-runtime";
@@ -443,12 +443,14 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
         items: JsonObject[];
     }>();
     const endpoint = { authorityId: authority.authorityId, generation: authority.generation, continuity: "generation-only" as const, url: "sdk:", location: { directory: context.cwd }, control: { kind: "owned" as const, instanceToken: authority.authorityId }, config: { kind: "read-only" as const }, authentication: { kind: "none" as const } };
+    const progressThrottle = createToolProgressThrottle();
     const emit = (event: RuntimeEvent, key: string) => {
         const revision = digest(event);
         const artifactKind = event.type.startsWith("tool/") ? "tool" : event.type.startsWith("turn/") ? "turn" : event.type === "permission/requested" ? "permission" : event.type === "question/asked" ? "question" : "message";
         // Live and pull must claim one durable entity: the snapshot carries the
         // same artifact kind the observation below publishes.
-        events.push({ entityKey: key, revision, artifactKind, events: [event] });
+        // tool/progress is ephemeral: never part of the replayable snapshot.
+        if (event.type !== "tool/progress") events.push({ entityKey: key, revision, artifactKind, events: [event] });
         if (observations.size && reconciliationOrdinal > 0)
             for (const cb of observations)
                 cb(sid, { channel: "sse", entityKey: key, identity: { ...endpoint, backendSessionId: nativeId, artifactKind, entityId: key, revision }, reconciliationOrdinal, events: [event] });
@@ -890,6 +892,17 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                             emit({ type: "runtime/wake-requested", wakeId: note.uuid, reason: "background-task", text: backgroundTaskWakeText(note) }, `${note.uuid}:wake`);
                         }
                     }
+                    if (message.type === "tool_progress") {
+                        // The SDK's liveness for a running call (elapsed time, or a
+                        // heartbeat). Ephemeral and throttled; admitted turn only.
+                        const callId = typeof message.tool_use_id === "string" ? message.tool_use_id : "";
+                        // Dropped silently outside a turn: a late pulse is stale, not
+                        // evidence of an unowned loop, so it must not arm the loop fence.
+                        if (callId && (active || admission) && progressThrottle.take(callId)) {
+                            const at = Date.now();
+                            emit({ type: "tool/progress", callId, at }, `${callId}:progress:${at}`);
+                        }
+                    }
                     if (message.type === "prompt_suggestion") {
                         // Not dialogue and not turn content: a presentation
                         // hint for the composer, offered after the turn closed.
@@ -1157,6 +1170,7 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                         // terminal event is out, so the fence can tell this
                         // turn's own close apart from an unadmitted loop.
                         active = "";
+                        progressThrottle.clear();
                         if (!turnId) settleUnadmittedLoop();
                     }
                 }

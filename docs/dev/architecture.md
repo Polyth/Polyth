@@ -171,10 +171,23 @@ starts Node or OpenCode. See `docs/mobile/architecture.md`.
   `toolExecutionTimeoutMs` (default ten minutes) is stopped; "activity" is any
   runtime event carrying the call's id after `tool/started` (a repeated
   `tool/started` or `tool/call{running}`, as ACP and OpenCode emit for input and
-  status updates). A call that keeps showing activity still ends at
+  status updates) or a `tool/progress{callId, at}`. `tool/progress` is the
+  per-call liveness signal: Codex `item/commandExecution|fileChange/outputDelta`
+  and `item/mcpToolCall/progress`, the Claude SDK's `tool_progress`, and ACP
+  in-progress `tool_call_update`s map to it, throttled to one per call per 2 s
+  (`createToolProgressThrottle` in `@polyth/contracts`). It is EPHEMERAL: a
+  member of `RUNTIME_TURN_CONTENT_EVENT_TYPES` (so adapters and the legacy
+  ingress drop it outside an admitted turn) but the session service never
+  persists it — no event-store row, not model-visible, not replayed. It only
+  refreshes the watchdog clock and is relayed live through the optional
+  `Broadcaster.toolProgress` to the WS subscribers of that session
+  (`{type:"tool/progress", sessionId, callId, at}`, best effort, skipped for a
+  backed-up reader). Antigravity and Pi are not mapped (no per-call progress notification is
+  consumed or verifiable in this repo), so they are still ten minutes from start.
+  A call that keeps showing activity still ends at
   `toolExecutionHardLimitMs` (default sixty minutes) from its start; a harness
   that never repeats a call event is stopped ten minutes after the start. No
-  adapter streams output deltas as call events yet, so for most harnesses this
+  adapter other than those above streams output as call events, so for such a harness this
   is still ten minutes from start. Human approval waits pause the clock but do
   not extend the ceiling. The error says the call was stopped without output
   and to run long commands in the background; the server-owned global behaviour

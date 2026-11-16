@@ -1012,6 +1012,20 @@ export function createWsGateway(
         if (send(ws, { type: "event", event: ev }) && sub.sessionId) sub.afterSeq = ev.seq;
       }
     },
+    toolProgress(sessionId: string, callId: string, at: number) {
+      if (closed) return;
+      const owner = spaceOf(sessionId);
+      for (const [ws, sub] of clients) {
+        const live = currentPrincipal(ws, sub);
+        if (!allowWsCapability(live, REMOTE_CAPABILITY.coreSessionsRead)) continue;
+        if (!inSpace(sub, owner)) continue;
+        if (!sub.sessionId || sub.sessionId !== sessionId) continue;
+        // Best effort and never buffered: a missed pulse is not state, so a
+        // backed-up reader just skips it (no resync).
+        if ((options?.bufferedAmount?.(ws) ?? ws.bufferedAmount) > (options?.frameHighWater ?? FRAME_HIGH_WATER)) continue;
+        send(ws, { type: "tool/progress", sessionId, callId, at }, true);
+      }
+    },
     projection(p: SessionProjection) {
       if (closed) return;
       const viewFor = readerViews(p);

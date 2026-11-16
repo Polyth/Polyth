@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute, join, resolve } from "node:path";
 import type { AgentRuntime, CanonicalTurnRequest, HarnessCapabilityApplicationReceipt, HarnessContext, JsonObject, ModelDescriptor, ModelRef, MutationOutcome, RateLimitRetryHint, RuntimeErrorCode, RuntimeEvent, RuntimeObservation, RuntimeSnapshot, TokenUsage } from "@polyth/contracts";
+import { createToolProgressThrottle } from "@polyth/contracts";
 import {
     acknowledgeCapabilityApplication,
     agentBetaEnabled,
@@ -620,6 +621,15 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer, 
             for (const cb of listeners)
                 cb(sid, event);
     };
+    // Per-call liveness from Codex's output notifications: ephemeral, throttled,
+    // and only inside a turn Polyth admitted (`activeTurn`).
+    const progressThrottle = createToolProgressThrottle();
+    const emitToolProgress = (callId: unknown) => {
+        if (!activeTurn || typeof callId !== "string" || !callId || !progressThrottle.take(callId))
+            return;
+        const at = Date.now();
+        emit({ type: "tool/progress", callId, at }, `${callId}:progress:${at}`);
+    };
     const readThread = async (threadId: string, includeTurns?: boolean) => (
         await rpc.request<{ thread: Thread }>(
             "thread/read",
@@ -748,6 +758,7 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer, 
         }
         if (method === "turn/completed") {
             activeTurn = "";
+            progressThrottle.clear();
             lastUsageDigest = "";
             lastUsageTurnId = "";
             order++;
@@ -764,6 +775,8 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer, 
             pendingFailure = undefined;
             emit(event, params.turn.id + ":stop");
         }
+        if (method === "item/commandExecution/outputDelta" || method === "item/fileChange/outputDelta" || method === "item/mcpToolCall/progress")
+            emitToolProgress(params.itemId);
         if (method === "item/agentMessage/delta")
             emit({ type: "assistant/chunk", partId: params.itemId, text: params.delta }, params.itemId + ":chunk:" + (++order));
         if (method === "item/reasoning/delta")
@@ -779,6 +792,8 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer, 
                     compaction: { active: false, lastAt: Date.now() },
                 }, `${params.item.id}:context`);
             }
+            if (method === "item/completed" && typeof params.item?.id === "string")
+                progressThrottle.forget(params.item.id);
             const event = eventFor(params.item);
             if (event)
                 emit(event, params.item.id);

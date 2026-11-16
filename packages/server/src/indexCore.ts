@@ -713,6 +713,7 @@ export async function boot(opts: BootOptions = {}) {
     clientSettingsChanged: (userId, settings) => live?.clientSettingsChanged?.(userId, settings),
     projectPresentationChanged: (spaceId, projectId, settings) => live?.projectPresentationChanged?.(spaceId, projectId, settings),
     worktreesChanged: (projectId) => live?.worktreesChanged?.(projectId),
+    toolProgress: (sessionId, callId, at) => live?.toolProgress?.(sessionId, callId, at),
     sessionAccessChanged: (projections, formerReaders) => {
       live?.sessionAccessChanged?.(projections, formerReaders);
       eventWaiters.projection();

@@ -355,6 +355,9 @@ export interface Broadcaster {
    *  fakes stay valid; inbox records never pass through appendAndBroadcast
    *  or any session reducer. */
   notification?(record: NotificationRecord, recipient?: { userId: string; spaceId: string }): void;
+  /** Live-only liveness of one running tool call. Never persisted, replayed or
+   *  model-visible: a client that was not connected simply misses it. */
+  toolProgress?(sessionId: string, callId: string, at: number): void;
   pluginChanged?(packageId: string): void;
   packageChanged?(pkg: PackageDescriptorDto): void;
   /** Server-persisted client preferences changed for one authenticated account. */
@@ -6086,6 +6089,17 @@ export function createSessionService(deps: {
         }
         break;
       }
+      case "tool/progress": {
+        // Ephemeral by contract: no persist(), no log row, no replay. Admitted
+        // turn only (the v2 observation path is not otherwise fenced).
+        const callId = typeof ev.callId === "string" ? ev.callId : "";
+        if (sideEffects && callId
+          && (admitting.has(sessionId) || lastTurnId.has(sessionId) || await runtimeTurnAdmitted(sessionId))) {
+          noteToolActivity(sessionId, callId);
+          broadcast.toolProgress?.(sessionId, callId, Number.isFinite(ev.at) ? ev.at : Date.now());
+        }
+        break;
+      }
       case "runtime/prompt-suggestion": {
         const suggestion = typeof ev.suggestion === "string" ? ev.suggestion.trim().slice(0, PROMPT_SUGGESTION_MAX) : "";
         if (sideEffects && suggestion) {
@@ -6318,7 +6332,7 @@ export function createSessionService(deps: {
         // is not telemetry. Replaying it would relabel an explicit abort as
         // failed when OpenCode later emits session.error.
         const event = observation.events[index]!;
-        if (event.type === "context/updated" || event.type === "runtime/commands-changed" || event.type === "runtime/prompt-suggestion" || event.type === "runtime/wake-requested") {
+        if (event.type === "context/updated" || event.type === "runtime/commands-changed" || event.type === "runtime/prompt-suggestion" || event.type === "runtime/wake-requested" || event.type === "tool/progress") {
           await onRuntimeEvent(sessionId, event, {
             persist: async () => undefined as unknown as SessionEvent,
           });

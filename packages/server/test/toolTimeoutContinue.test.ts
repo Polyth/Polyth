@@ -107,7 +107,8 @@ const harness = (options: {
   const permissions = {
     evaluate: () => "ask", addRule: () => {}, rules: () => [],
   } as unknown as PermissionService;
-  const broadcast: Broadcaster = { event: () => {}, projection: () => {} };
+  const progressed: string[] = [];
+  const broadcast: Broadcaster = { event: () => {}, projection: () => {}, toolProgress: (_sessionId, callId) => { progressed.push(callId); } };
   const sessions = createSessionService({ autoContinueIncomplete: false,
     store,
     projects,
@@ -122,7 +123,7 @@ const harness = (options: {
       ? {}
       : { toolTimeoutContinueLimit: options.continueLimit }),
   });
-  return { sessions, store, emit, startedTexts, aborted, observers, endpoint, dir, runtime };
+  return { sessions, store, emit, startedTexts, aborted, observers, endpoint, dir, runtime, progressed };
 };
 
 const NUDGE_EVENT = "user/message";
@@ -500,4 +501,30 @@ test("a harness that emits nothing after the start is stopped at the silence lim
   await waitFor(() => h.aborted.length === 1);
   assert.ok(Date.now() - startedAt >= 100);
   assert.ok(Date.now() - startedAt < 2_000);
+});
+
+test("tool/progress keeps a call alive past the silence limit, is relayed live, and is never persisted", async (t) => {
+  const h = harness({ continueLimit: 0, toolExecutionTimeoutMs: 200, toolExecutionHardLimitMs: 60_000 });
+  t.after(() => { h.sessions.dispose(); return h.store.close(); });
+  const { id } = await h.sessions.create({ projectId: "p1", title: "Progress" });
+  await h.sessions.send(id, { text: "sleep a while" });
+  h.emit(id, { type: "tool/started", callId: "slow", tool: "shell", input: { command: "sleep 900" } });
+  for (let step = 0; step < 12; step += 1) {
+    await flush(50);
+    h.emit(id, { type: "tool/progress", callId: "slow", at: Date.now() });
+  }
+  assert.deepEqual(h.aborted, [], "progress every 50ms keeps a 200ms-silence call alive for 600ms");
+  assert.ok(h.progressed.length >= 10 && h.progressed.every((callId) => callId === "slow"));
+  assert.equal((await h.store.events(id)).some((event) => event.type === "tool/progress"), false, "never appended to the log");
+  await waitFor(() => h.aborted.length === 1);
+});
+
+test("tool/progress outside an admitted turn is dropped: no relay, no watchdog activity, no log row", async (t) => {
+  const h = harness({ continueLimit: 0, toolExecutionTimeoutMs: 200, toolExecutionHardLimitMs: 60_000 });
+  t.after(() => { h.sessions.dispose(); return h.store.close(); });
+  const { id } = await h.sessions.create({ projectId: "p1", title: "Unadmitted progress" });
+  h.emit(id, { type: "tool/progress", callId: "ghost", at: Date.now() });
+  await flush(60);
+  assert.deepEqual(h.progressed, []);
+  assert.equal((await h.store.events(id)).some((event) => event.type === "tool/progress"), false);
 });
