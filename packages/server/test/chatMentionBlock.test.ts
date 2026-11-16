@@ -176,3 +176,10 @@ test("a retried operation keeps the recorded block even after the chat is rename
   assert.match((records[0]!.data as { modelVisibleText: string }).modelVisibleText, /First name/);
   assert.ok(f.requests.every((request) => !request.text.includes("Second name")));
 });
+
+test("a chat reference with nobody to vouch for it is never mentionable", async () => {
+  const { isMentionableChat } = await import("../src/sessionSharing.ts");
+  const current = { id: "s-current", projectId: "p1" };
+  const target = { id: "s-other", projectId: "p1", spaceId: "space-1", status: "idle" } as const;
+  assert.equal(isMentionableChat("space-1", current, target as never, []), false);
+});

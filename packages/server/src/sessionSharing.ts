@@ -329,6 +329,9 @@ export function isMentionableChat(
   if (!target || target.id === current.id || target.status === "archived") return false;
   if (target.projectId !== current.projectId) return false;
   if (target.spaceId && target.spaceId !== spaceId) return false;
+  // Nobody to vouch for the reference (no author, no audience) must not mean
+  // "everyone may see it": `every` over an empty list would allow any chat.
+  if (readers.length === 0) return false;
   return readers.every((userId) => sessionAccess(userId, spaceId, target.id) !== undefined);
 }
 
