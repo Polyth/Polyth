@@ -27,6 +27,8 @@ export default function TurnIncompleteNotice({ notice, onContinue, entering = fa
   leaving?: boolean;
 }) {
   const length = notice.incompleteKind === "length";
+  // The action names what it does ("Ask it to continue" sends a visible
+  // message), so nobody mistakes it for expanding a truncated text.
   // A footnote of the agent's turn in its own column, like the model line:
   // no icon and no disc, so it never reads as a message from Polyth.
   return (

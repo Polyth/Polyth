@@ -129,21 +129,23 @@ test("the running row says only what it saw", () => {
     const line = renderToStaticMarkup(createElement(ToolPulseLine, quiet));
     assert.match(line, /tool-pulse--stopping/);
     assert.match(line, /No output for 8m 25s/);
-    assert.match(line, /stops in 1m 35s/);
+    // Who stops it and on what condition, in place (not only in the tooltip).
+    assert.match(line, /Polyth stops it in 1m 35s unless it prints something/);
     assert.match(line, /title="Polyth stops a command after 10 minutes with no output\."/);
     assert.doesNotMatch(line, /tool-pulse-dot|[Qq]uiet/, "no dot, and no second word for silence");
     const inlineQuiet = renderToStaticMarkup(createElement(ToolPulseInline, quiet));
     assert.match(inlineQuiet, />8m 50s</);
-    assert.match(inlineQuiet, />stops in 1m 35s</);
+    // "auto-stop", never a bare "stops in" that reads as "finishes in".
+    assert.match(inlineQuiet, />auto-stop in 1m 35s</);
 
     // Near the watchdog without frames: silence is never claimed, only the countdown.
     progress.clearToolProgress();
     const silent = { ...props, callId: "c2", startedAt: now - 530_000 };
     const silentLine = renderToStaticMarkup(createElement(ToolPulseLine, silent));
-    assert.match(silentLine, />Stops automatically in 1m 10s</);
+    assert.match(silentLine, />Polyth stops it in 1m 10s unless it finishes</);
     assert.doesNotMatch(silentLine, />[^<]*(No output|Last output)[^<]*</, "no claim about output");
     const silentInline = renderToStaticMarkup(createElement(ToolPulseInline, silent));
-    assert.match(silentInline, />8m 50s<.*>stops in 1m 10s</);
+    assert.match(silentInline, />8m 50s<.*>auto-stop in 1m 10s</);
     assert.doesNotMatch(silentInline, />[^<]*(output|quiet)[^<]*</i);
   });
   progress.clearToolProgress();
@@ -180,7 +182,8 @@ test("notice variants: auto-continued says so; otherwise a quiet Continue sends 
   const empty = { ...base, incompleteKind: "empty" as const, autoContinued: false };
   const offered = renderToStaticMarkup(createElement(TurnIncompleteNotice, { notice: empty, onContinue: () => {} }));
   assert.match(offered, /The agent stopped without answering/);
-  assert.match(offered, /<button[^>]*turn-incomplete-continue[^>]*>.*Continue/);
+  // The action says it asks the agent (a sent message), not "show more".
+  assert.match(offered, /<button[^>]*turn-incomplete-continue[^>]*>Ask it to continue</);
   // Not the newest row any more: no Continue.
   assert.doesNotMatch(renderToStaticMarkup(createElement(TurnIncompleteNotice, { notice: empty })), /<button/);
 

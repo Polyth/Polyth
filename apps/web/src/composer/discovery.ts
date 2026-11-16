@@ -464,7 +464,11 @@ export function addMenuRows(input: {
     attach("upload", tr("composer.files"), tr("composer.discovery.uploadFiles")),
     { id: "group-context", kind: "group", label: tr("composer.discovery.addContext") },
     {
-      id: "mention", kind: "item", label: tr("composer.discovery.mentionProjectFile"), action: "mention", hint: "@",
+      // In a chat, @ also lists the project's other chats: say so where a
+      // person looks for it (a new chat has no chats to offer yet).
+      id: "mention", kind: "item",
+      label: tr(input.hasSession ? "composer.discovery.mentionFileOrChat" : "composer.discovery.mentionProjectFile"),
+      action: "mention", hint: "@",
       ...(needsProject ? { disabledReason: needsProject } : {}),
     },
   ];

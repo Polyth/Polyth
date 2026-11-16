@@ -172,7 +172,8 @@ import ComposerFocusDialog from "./ComposerFocusDialog.tsx";
 import ContextLiquid, { contextLiquidLabel, useActiveContextGauge } from "./ContextLiquid.tsx";
 import ContextPie, { contextPieVisible } from "./ContextPie.tsx";
 import ChatMemoryReminder from "./ChatMemoryReminder.tsx";
-import { chatMemoryState } from "../chatMemory.ts";
+import { chatMemoryState, modelSwitchOverflow } from "../chatMemory.ts";
+import { resolveModelContextLimit } from "@polyth/contracts/model-context";
 import QueuedMessageList, { latestSteerableQueuedItem, queueItemText } from "./QueuedMessageList.tsx";
 import {
   composerContributionsVersion,
@@ -4513,6 +4514,15 @@ function ComposerBody({
   const chatMemory = session
     ? chatMemoryState(session, compactionDefault, runtimeFeatures?.capabilities.autoCompactionSwitch === true)
     : null;
+  // Picking a model whose window this chat no longer fits: say what the next
+  // send will do before the person sends (docs/dev/ui.md "Chat memory").
+  const switchOverflow = session && chatMemory && selectedModel
+    ? modelSwitchOverflow(chatMemory, {
+        usedTokens: session.contextWindow?.usedTokens,
+        currentTokens: session.contextWindow?.limitTokens ?? (contextGauge.known ? contextGauge.contextTokens : undefined),
+        nextTokens: resolveModelContextLimit(selectedModel, chatModels, selectedModel.harnessId ?? session.resolvedHarnessId),
+      })
+    : undefined;
   const contextPie = session && contextPieVisible(contextGauge)
     ? <ContextPie
         key={session.id}
@@ -5009,6 +5019,7 @@ function ComposerBody({
           idle={session.status === "idle"}
           full={model.turn?.contextFull === true}
           compact={{ pending: compactionRunning, run: () => { startCompact(session.id); } }}
+          {...(switchOverflow && selectedModel ? { switching: { model: selectedModel.name, outcome: switchOverflow } } : {})}
         />
       )}
       {/* Widget-areas (WA4): the uncommitted-changes bar area, above the box. */}
@@ -5202,7 +5213,10 @@ function ComposerBody({
               ? tr(shellLayout === "phone" ? "composer.people.placeholderShort" : "composer.people.placeholder")
               : shellLayout === "phone"
                 ? tr("composer.messagePolythShort")
-                : tr("composer.messageTheAgentTagFilesOrUse")}
+                : session
+                  // In a chat, @ also mentions other chats; a new chat has none to offer.
+                  ? tr("composer.messageTheAgentMentionChats")
+                  : tr("composer.messageTheAgentTagFilesOrUse")}
           {...(acView ? {
             role: "combobox",
             ariaAutocomplete: "list" as const,

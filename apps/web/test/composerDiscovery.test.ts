@@ -123,7 +123,7 @@ test("add menu: exact rows, contributed items in order, sigil hints, and no Skil
     tr("composer.discovery.photos"),
     tr("composer.files"),
     tr("composer.discovery.addContext"),
-    tr("composer.discovery.mentionProjectFile"),
+    tr("composer.discovery.mentionFileOrChat"),
     "Link GitHub issue or pull request…",
     "Attach goal",
     tr("composer.discovery.compose"),
@@ -165,6 +165,8 @@ test("add menu: visible disabled reasons for a missing project and a drafted she
   for (const id of ["photos", "upload", "mention", "commands", "snippets", "history", "shell"]) {
     assert.equal(noProject.find((r) => r.id === id)?.disabledReason, OPEN_PROJECT_FIRST, id);
   }
+  // A new chat has no other chats to offer, so its mention row names files only.
+  assert.equal(noProject.find((r) => r.id === "mention")?.label, tr("composer.discovery.mentionProjectFile"));
   // No registry contribution supplies these rows; the host never invents them.
   assert.equal(noProject.find((r) => r.id === "contribution:github.link"), undefined);
 

@@ -66,9 +66,11 @@ export function ToolPulseLine({ sessionId, callId, startedAt }: { sessionId: str
   if (!pulse.nearStop) {
     return <div className="tool-pulse"><span className="tool-pulse-text">{lastOutputLine(pulse.lastOutputAgoMs!)}</span></div>;
   }
+  // The line says who stops it and why, in place: a bare "stops in 1m" read
+  // as "finishes in 1m", and the policy was only in a hover tooltip.
   const stop = pulse.lastOutputAgoMs === undefined
     ? tr("execution.pulseStopsInLine", { duration: stopsIn(pulse) })
-    : tr("execution.pulseStopsIn", { duration: stopsIn(pulse) });
+    : tr("execution.pulseStopsInQuiet", { duration: stopsIn(pulse) });
   return (
     <div className="tool-pulse tool-pulse--stopping" title={tr("execution.pulseStopHint")}>
       <span className="tool-pulse-text">

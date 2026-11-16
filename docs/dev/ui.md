@@ -759,7 +759,11 @@ Contract and server rules: [Spaces §14.8](../architecture/spaces-and-tenancy.md
   (`GET …/sharing/outsiders`) is read when a mention starts, not when the chat
   opens. A new chat, with no session yet, asks `GET /api/sharing/new-chat`
   instead and works the same way.
-- **Mentioning a chat**: the same `@` list shows a "Chats" group between People
+- **Mentioning a chat**: in an open chat the desktop placeholder says so
+  ("Message the agent. Type @ for files and other chats, / for commands and
+  skills") and the Add menu row reads "Mention a file or chat…"; a new chat,
+  which has no other chats to offer, keeps "Mention project file…". The same
+  `@` list shows a "Chats" group between People
   and Files: chats of the same project, newest first, matched by title, never
   this chat or an archived one (`GET /api/sessions/:id/chat-mention-candidates`,
   read when a mention starts; `chatMentionOptions` in `composer/discovery.ts`).
@@ -956,9 +960,13 @@ Host-owned (`apps/web`), not a package seam.
   since "quiet" would only restate the elapsed time. In the last two minutes
   before the server's silence watchdog (`TOOL_SILENCE_HINT_MS` 8 min,
   `TOOL_SILENCE_STOP_MS` 10 min), the line becomes the countdown. That is
-  "No output for 8m 25s · stops in 1m 35s" once frames exist, or "Stops
-  automatically in 1m 10s" without them. The collapsed tail reads `· 8m 50s ·
-  stops in 1m 10s`. The policy sentence ("Polyth stops a command after 10
+  "No output for 8m 25s · Polyth stops it in 1m 35s unless it prints
+  something" once frames exist, or "Polyth stops it in 1m 10s unless it
+  finishes" without them (the watchdog counts from the start there). The line
+  names who stops it and on what condition in place, because a bare "stops in
+  1m" read as "finishes in 1m" and a tooltip reaches neither touch nor a
+  screen reader. The collapsed tail reads `· 8m 50s · auto-stop in 1m 10s`.
+  The policy sentence ("Polyth stops a command after 10
   minutes with no output.") is the tooltip. The countdown uses the strong ink
   at weight 500, with no colour signal. The pulse uses the summary row's text
   column and is words only: no dot, border or spinner of its own, and no
@@ -978,7 +986,8 @@ Host-owned (`apps/web`), not a package seam.
   "The agent stopped without answering". With `autoContinued` it adds the
   muted "Polyth asked it to continue." (that hidden continuation stays
   hidden). Otherwise, while the notice is the chat's newest row and no turn or
-  send is in progress, an accent text action **Continue** follows the fact and
+  send is in progress, an accent text action **Ask it to continue** (it sends
+  a message, so it never reads as "show the rest") follows the fact and
   wraps with it. It sends the ordinary visible message `Continue` through
   `sendMessage` (never `hiddenUserMessage`). Its hit area reaches `--hit-min`
   on coarse pointers without moving the line. Unknown fields are ignored and
@@ -2644,7 +2653,14 @@ session's cache warmth, the re-write a cooled cache costs and **Keep warm** for
 `ChatMemoryReminder` row above the composer (Compact now, Continue in a new chat),
 never a toast. A turn stopped with code `context-full` opens the same row in any mode
 with its own sentence, and suppresses the generic failure notice, whose Retry could
-not help. Focus returns to the pie on close only when the pie
+not help. Picking a model whose window the chat no longer fits (the last measured
+usage at or past the new window less its compaction reserve, and that window
+smaller than the current one; `modelSwitchOverflow` in `chatMemory.ts`, the
+client twin of the server's `compactionDueForNextModel`) opens the same row
+before anything is sent: "This chat is too long for {model}. Polyth will compact
+it before your next message." with no buttons, or, for a manual chat, "…Compact
+it, or continue in a new chat, before you send." with both actions. Unknown
+usage or an unknown window says nothing. Focus returns to the pie on close only when the pie
 held focus, so a tap while the phone editor is focused keeps the keyboard and
 the engaged composer. The resting phone row keeps the pie right after Add
 (the model line dissolves with `display: contents` and only the pie stays).
