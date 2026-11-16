@@ -569,6 +569,7 @@ export const ar: GitMessages = {
   "landing.integrateAndPush": "تكامل في {branch} ثم ادفع",
   "landing.integrate": "تكامل",
   "landing.waitWorking": "بانتظار أن ينهي الوكيل دوره.",
+  "landing.waitDelegated": "بانتظار أن ينهي الوكلاء المفوَّضون عملهم.",
   "landing.noConflicts": "لا توجد تعارضات",
   "landing.oneConflictFile": "ملف واحد يتعارض مع {branch}",
   "landing.conflictFiles": "ملفات تتعارض مع {branch}: {count}",

@@ -457,9 +457,14 @@ A live isolation whose `originPath` is a checkout is a dependent of that
 checkout. Its merge, discard and session deletion refuse while one remains
 (`reason: "delegated-pending"`, mutation rejected), cleanup keeps it, and its
 status lists the children as `delegated` with merge and discard disabled. While
-the delegator rests, its isolation card says why it cannot integrate and links
-each child; a nested child's card names the "parent workspace" instead of the
-managed branch. A nested child publishes only while its target isolation is
+the delegator or any of those children still runs (`delegatedChildRunning`, the
+same rule that holds back the agent's merge reminder; a child's live status is
+read from the client store), the chat shows only the subagent list and the
+Changes landing line only waits ("Waits for the delegated agents to finish");
+the delegator merges them when woken. Once all of them rest with work still
+unmerged, its isolation card says why it cannot integrate and links each child;
+a nested child's card names the "parent workspace" instead of the managed
+branch. A nested child publishes only while its target isolation is
 still open.
 `mergeDelegated` releases a child without unique changes and refuses
 overlapping uncommitted destination work (`reason: "target-overlap"`) instead

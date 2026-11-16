@@ -1,7 +1,7 @@
 import { handoffReviewScope } from "./reviewScopeHandoff.ts";
 import { cloneElement, useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState, type CSSProperties, type ReactElement, type ReactNode, type RefObject } from "react";
 import type { IsolationStatusDto, IsolationTargetDto, SessionIsolation, SessionProjection } from "@polyth/contracts";
-import { isManagedIsolationBranch, isolationActions, isolationBlocksUserMutation, isolationNeedsRecovery, isolationRuntimeUnsettled } from "@polyth/contracts";
+import { delegatedChildRunning, isManagedIsolationBranch, isolationActions, isolationBlocksUserMutation, isolationNeedsRecovery, isolationRuntimeUnsettled } from "@polyth/contracts";
 import { api } from "@polyth/session/web-api";
 import { reportGitError } from "./gitRefusal.ts";
 import { activateSession, clearRuntimeFeatures, getState, openChanges, setSessions, upsertSession, useStore, workspacePresentationKey, type AppState } from "../../../apps/web/src/store.ts";
@@ -441,6 +441,11 @@ function useIsolationCardView(cardRef: RefObject<HTMLElement | null>): CardView 
     && candidate.isolation?.kind === "git-worktree"
     && candidate.isolation.originPath === worktreePath));
   const status = currentStatus(held, sessionId, statusKey, cacheKey, isolation, sessionWorking || hostsDelegated);
+  // A delegated agent still at work belongs to the subagent list under the
+  // chat, and its parent merges it once woken. Its live status comes from the
+  // store, since the status answer is re-read only when this session changes.
+  const delegatedRunning = useStore((state) => (status?.delegated ?? []).some((child) =>
+    delegatedChildRunning(state.sessions.find((candidate) => candidate.id === child.sessionId)?.status ?? child.status)));
   // Requests in flight belong to the session they were made for. The card is
   // one component across session switches, so a merge still running for one
   // session must never dress another session's card as integrating.
@@ -509,8 +514,9 @@ function useIsolationCardView(cardRef: RefObject<HTMLElement | null>): CardView 
       }
     }
     // While the agent works the answer is fixed ("working"); projection churn
-    // from the turn must not re-ask the server on every update.
-  }, [sessionId, statusKey, cacheKey, sessionWorking ? "working" : session?.updatedAt]);
+    // from the turn must not re-ask the server on every update. A delegated
+    // agent coming to rest does change the answer.
+  }, [sessionId, statusKey, cacheKey, sessionWorking ? "working" : session?.updatedAt, delegatedRunning]);
 
   // A request that finishes after a session switch re-reads the session now
   // shown; the old session's closure would cancel that session's own read.
@@ -640,9 +646,11 @@ function useIsolationCardView(cardRef: RefObject<HTMLElement | null>): CardView 
   const recovering = liveState === "merging" || liveState === "publishing" || liveState === "rebind-pending" || liveState === "cleanup-pending";
   const discarding = recovering && liveState !== "merging" && liveState !== "publishing" && !live.resultCommit;
   const integrating = recovering && !discarding;
-  // While the delegating agent runs, integrating its children is its job;
-  // once it rests, the card explains why this session cannot integrate yet.
-  const delegatedPending = delegated.length > 0 && !working;
+  // While the delegating agent or any of its delegated agents runs,
+  // integrating them is still the agent's job and the subagent list shows the
+  // work. Only once all of them rest does the card explain why this session
+  // cannot integrate yet: the work is then stranded.
+  const delegatedPending = delegated.length > 0 && !working && !delegatedRunning;
   // Retry is for an unfinished phase nobody is driving: never while this
   // card's own request runs, the session works, or a merge is still moving.
   const recoveryNeeded = recovering && busy === null && !working

@@ -569,6 +569,7 @@ export const zhCN: GitMessages = {
   "landing.integrateAndPush": "集成到 {branch} 并推送",
   "landing.integrate": "集成",
   "landing.waitWorking": "等待代理完成本轮。",
+  "landing.waitDelegated": "等待委派的代理完成。",
   "landing.noConflicts": "无冲突",
   "landing.oneConflictFile": "1 个文件与 {branch} 冲突",
   "landing.conflictFiles": "{count} 个文件与 {branch} 冲突",

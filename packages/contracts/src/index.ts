@@ -2019,6 +2019,13 @@ export const isolationBlocksUserMutation = (status: SessionStatus): boolean =>
   || status === "epoch-pending"
   || status === "archived";
 
+/** A delegated child still at work: its isolated checkout keeps changing, and
+ *  its parent waits for it (the agent through its completion wake, the person
+ *  through the subagent list) before anyone is asked to merge or discard it.
+ *  An archived child is at rest: its unmerged work is stranded. */
+export const delegatedChildRunning = (status: SessionStatus): boolean =>
+  isolationBlocksUserMutation(status) && status !== "archived";
+
 /** Blocking statuses where no agent turn runs but Polyth has not yet proven
  *  the runtime settled (recovery, reconciliation, an unconfirmed outcome).
  *  Unlike a working turn, these can last, so the isolation card says why. */

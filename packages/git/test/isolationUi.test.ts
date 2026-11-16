@@ -517,6 +517,42 @@ test("a running delegator keeps integrating its children without a pending-work 
   }
 });
 
+test("a resting delegator waiting on running delegated agents shows no card until they rest", async () => {
+  const originalStatus = api.isolationStatus;
+  const isolation: SessionIsolation = { ...base, state: "active" };
+  const childIsolation: SessionIsolation = { ...base, state: "active", worktreePath: "/repo-running", worktreeBranch: "polyth/isolate/running", targetBranch: base.worktreeBranch };
+  let reads = 0;
+  api.isolationStatus = async () => {
+    reads += 1;
+    return {
+      isolation, effectiveState: isolation.state,
+      suggestion: { eligible: false, hasChanges: false, targetBranch: "main", targetDirty: false, revision: "rev" },
+      delegated: [{
+        sessionId: "running-child", title: "Scrub the env", status: "working", state: "active", hasChanges: false,
+        revision: "", worktreePath: "/repo-running", worktreeBranch: "polyth/isolate/running", targetBranch: base.worktreeBranch,
+      }],
+      actions: { canReview: true, canMerge: false, canKeep: true, canResolve: false, canDiscard: false, canRecover: false, canAbandon: false },
+    };
+  };
+  seedSessionCache(projection("running-child", childIsolation, { parentId: "waiting-delegator-ui", status: "working" }));
+  const mounted = await mount(projection("waiting-delegator-ui", isolation));
+  try {
+    const text = mounted.container.textContent ?? "";
+    assert.equal(text.includes(tr("isolation.delegatedPending")), false, "the subagent list alone shows running delegated work");
+    assert.equal(buttons(mounted.container).some((b) => b.textContent === tr("isolation.commitAndPush")), false);
+    assert.equal(named(mounted.container, "Scrub the env"), undefined);
+    const before = reads;
+    // The child rests without its parent waking to merge it: the work is stranded.
+    await act(async () => { upsertSession(projection("running-child", childIsolation, { parentId: "waiting-delegator-ui", status: "idle", updatedAt: 2 })); await wait(); });
+    assert.ok(reads > before, "a delegated agent coming to rest re-reads the status");
+    assert.ok((mounted.container.textContent ?? "").includes(tr("isolation.delegatedPending")));
+    assert.ok(named(mounted.container, "Scrub the env"));
+  } finally {
+    await mounted.close();
+    api.isolationStatus = originalStatus;
+  }
+});
+
 test("a delegated child's card names its parent workspace instead of the managed branch", async () => {
   const originalStatus = api.isolationStatus;
   const isolation: SessionIsolation = { ...base, state: "merge-ready", targetBranch: "polyth/isolate/parent123456", originPath: "/repo-parent" };
