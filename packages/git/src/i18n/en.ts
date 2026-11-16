@@ -571,6 +571,7 @@ export const en = {
   "landing.integrateAndPush": "Integrate into {branch} and push",
   "landing.integrate": "Integrate",
   "landing.waitWorking": "Waits for the agent to finish its turn.",
+  "landing.waitDelegated": "Waits for the delegated agents to finish.",
   "landing.noConflicts": "No conflicts",
   "landing.oneConflictFile": "1 file conflicts with {branch}",
   "landing.conflictFiles": "{count} files conflict with {branch}",

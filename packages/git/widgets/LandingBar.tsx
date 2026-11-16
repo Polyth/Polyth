@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { IsolationStatusDto, IsolationTargetDto, IsolationTargetPushDto, SessionIsolation } from "@polyth/contracts";
-import { isManagedIsolationBranch, isolationBlocksUserMutation, isolationNeedsRecovery } from "@polyth/contracts";
+import { delegatedChildRunning, isManagedIsolationBranch, isolationBlocksUserMutation, isolationNeedsRecovery } from "@polyth/contracts";
 import { api } from "@polyth/session/web-api";
 import type { WebPackageHost } from "@polyth/web-sdk";
 import { setUiError, upsertSession, useStore } from "../../../apps/web/src/store.ts";
@@ -157,6 +157,10 @@ export function useLanding({ host, projectId, sessionId, repositoryId, uncommitt
   const push = prefs.pushAfterIntegrate;
   const [held, setHeld] = useState<{ sessionId: string; value: IsolationStatusDto } | null>(null);
   const status = held?.sessionId === sessionId ? held.value : null;
+  // Delegated agents still at work: their live status comes from the store,
+  // since the status answer is re-read only when this session changes.
+  const delegatedRunning = useStore((state) => (status?.delegated ?? []).some((child) =>
+    delegatedChildRunning(state.sessions.find((candidate) => candidate.id === child.sessionId)?.status ?? child.status)));
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState<"merge" | "retarget" | null>(null);
   const [choosing, setChoosing] = useState(false);
@@ -175,7 +179,8 @@ export function useLanding({ host, projectId, sessionId, repositoryId, uncommitt
       // The card reports a failed read; this bar keeps what it showed.
     }
     // While the agent works the answer is fixed; turn churn must not re-ask.
-  }, [identity, sessionId, working ? "working" : session?.updatedAt, uncommitted]);
+    // A delegated agent coming to rest does change it.
+  }, [identity, sessionId, working ? "working" : session?.updatedAt, uncommitted, delegatedRunning]);
   useEffect(() => {
     void refresh();
     return () => { request.current += 1; };
@@ -226,6 +231,9 @@ export function useLanding({ host, projectId, sessionId, repositoryId, uncommitt
   const check = ((): Check => {
     if (working) return { tone: "neutral", text: tr("landing.waitWorking") };
     if (suggestion?.reason === "runtime-recovering") return { tone: "neutral", text: tr("isolation.runtimeRecovering") };
+    // Running delegated agents are merged by this session's agent when they
+    // finish, so the bar only waits; work they left at rest is stranded.
+    if (delegatedRunning) return { tone: "neutral", text: tr("landing.waitDelegated") };
     if (delegatedPending) return { tone: "warn", text: tr("isolation.delegatedPending") };
     if (conflict) {
       const count = live.conflict?.files.length ?? 0;

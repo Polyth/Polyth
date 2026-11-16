@@ -5782,6 +5782,13 @@ click everywhere else.
   writer's single newlines (`white-space: pre-line`); file preview keeps
   CommonMark soft breaks. A quote renders `blockquote.md-quote` and a rule
   `hr.md-hr` on every surface (styles in `styles.css`, not per package).
+- **Code frame.** A fenced block with a language shows its header band
+  (`md-code-block-header`) with the language and the copy control. A fence
+  without a language has nothing to label, so it draws no header — the copy
+  control floats in the frame's top-right corner (`.md-code-block-float`) and
+  the code starts at the body's own padding, instead of under an empty 29px
+  band. The floating control reserves the first line's end (`pre`
+  `padding-inline-end`), so a long line scrolls rather than passing beneath it.
 - **Provider bodies.** Change-request and issue descriptions and comments
   (GitHub, GitLab) render through `HostingBody`
   (`packages/code-hosting/widgets/HostingBody.tsx`), which splits the text and

@@ -13,6 +13,7 @@ import {
   setNativePushForeground,
   type NativePushStatus,
 } from "@polyth/mobile/native";
+import { landedNativePushOpen, openNativePushTarget, withoutNativePushOpen } from "./nativePushOpen.ts";
 
 const json = (method: string, body?: Record<string, unknown>): RequestInit => ({
   method,
@@ -111,51 +112,60 @@ export async function reconcileNativePushForeground(active: boolean): Promise<vo
   if (!nativePushAvailable()) return;
   const current = activeBrowserAccountId();
   await controller().setForeground({ accountId: current }, active);
-  // Status must be refreshed after the native foreground mapping changes;
+  // Leaving the foreground does not end the registration: the server keeps
+  // pushing to this phone. The native side answers "disabled" for a page that
+  // is not its foreground account, so reading the status here switched the
+  // page's own local notifications back on, and a task that ended before iOS
+  // suspended the page was announced twice (the push and a local copy).
+  if (!active) return;
+  // Status must be refreshed after the native foreground mapping is set;
   // after a process restart the initial status is deliberately disabled.
   await authoritativeStatus();
 }
 
-const NATIVE_NOTIFICATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+// Read while this module loads, before boot restoration rewrites the address
+// (see `landedNativePushOpen`).
+let landedOpen = typeof location === "undefined" ? undefined : landedNativePushOpen(location.search);
 
 function clearNativePushOpen(): void {
-  const clean = new URL(location.href);
-  clean.searchParams.delete("nativePushOpen");
-  history.replaceState(null, "", `${clean.pathname}${clean.search}${clean.hash}`);
+  const clean = withoutNativePushOpen(location.href);
+  if (clean !== undefined) history.replaceState(history.state, "", clean);
 }
 
 /** Run after authenticated project/session restoration. The provider UUID
  * selects only an account-scoped canonical record, never a session directly. */
 export async function openPendingNativePushAfterHydration(): Promise<void> {
-  if (!nativePushAvailable()) return;
-  const notificationId = new URLSearchParams(location.search).get("nativePushOpen");
-  if (!notificationId) return;
-  if (!NATIVE_NOTIFICATION_ID.test(notificationId)) { clearNativePushOpen(); return; }
-  const status = await authoritativeStatus();
-  if (status.state === "failed") return; // keep the bounded intent for a retry/reload
-  if (status.state !== "enabled" || !nativePushLocalProjectionEnabled()) { clearNativePushOpen(); return; }
-
-  let response: Response;
-  try {
-    response = await fetch(`/api/notifications/${encodeURIComponent(notificationId)}`, json("GET"));
-  } catch {
-    return; // transient connectivity: retain the URL intent, create no trust
-  }
-  if (!response.ok) {
-    if (response.status >= 400 && response.status < 500) clearNativePushOpen();
-    return;
-  }
-  const record = await response.json().catch(() => undefined) as Partial<{ id: string; sessionId: string; projectId: string }> | undefined;
-  if (!record || typeof record.id !== "string" || record.id.toLowerCase() !== notificationId.toLowerCase()
-    || typeof record.sessionId !== "string" || typeof record.projectId !== "string") {
-    clearNativePushOpen();
-    return;
-  }
-  clearNativePushOpen();
-  try {
-    await openSession(record.sessionId);
-    await request("/api/notifications/read", json("POST", { ids: [notificationId] }));
-  } catch {
-    // Deleted/archived/inaccessible targets fall back to the hydrated home.
-  }
+  const notificationId = landedOpen;
+  landedOpen = undefined;
+  if (typeof location !== "undefined") clearNativePushOpen();
+  if (!notificationId || !nativePushAvailable()) return;
+  await openNativePushTarget(notificationId, {
+    registered: async () => {
+      let state = (await authoritativeStatus()).state;
+      // The native side answers "disabled" until this page is its foreground
+      // account; boot sets that, and a failure there would drop the tap.
+      if (state === "disabled") {
+        await reconcileNativePushForeground(true).catch(() => undefined);
+        state = (await authoritativeStatus()).state;
+      }
+      return state === "enabled" && nativePushLocalProjectionEnabled();
+    },
+    record: async (id) => {
+      let response: Response;
+      try {
+        response = await fetch(`/api/notifications/${encodeURIComponent(id)}`, json("GET"));
+      } catch {
+        return "unreachable"; // transient connectivity: create no trust
+      }
+      if (!response.ok) return response.status >= 400 && response.status < 500 ? "gone" : "unreachable";
+      const record = await response.json().catch(() => undefined) as Partial<{ id: string; sessionId: string; projectId: string }> | undefined;
+      return record && typeof record.id === "string" && record.id.toLowerCase() === id
+        && typeof record.sessionId === "string" && typeof record.projectId === "string"
+        ? { sessionId: record.sessionId }
+        : "gone";
+    },
+    open: (sessionId) => openSession(sessionId),
+    markRead: async (id) => { await request("/api/notifications/read", json("POST", { ids: [id] })); },
+    wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  });
 }

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { DelegatedIsolationDto, Disposable, JsonObject } from "@polyth/contracts";
-import { isolationBlocksUserMutation } from "@polyth/contracts";
+import { delegatedChildRunning } from "@polyth/contracts";
 import {
   SERVER_SESSION_ISOLATION,
   SERVER_TURN_STOPPED_BUS,
@@ -9,7 +9,7 @@ import {
 
 /** A running child's isolated checkout is still changing. */
 export const delegationRunning = (child: DelegatedIsolationDto): boolean =>
-  isolationBlocksUserMutation(child.status) && child.status !== "archived";
+  delegatedChildRunning(child.status);
 
 /** What the delegating agent has to do next about one isolated child. */
 export function delegationNextStep(child: DelegatedIsolationDto): string {

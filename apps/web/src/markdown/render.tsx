@@ -214,6 +214,11 @@ function MdCodeFrame({
   }, [text]);
 
   const displayLang = lang ? lang.trim().toLowerCase() : "";
+  // A fence without a language has nothing to put in a header band. Keeping
+  // one left an empty 29px row (plus the body's padding) above the first line,
+  // so a bare ``` block read as pushed-down code. It floats the copy control
+  // in the corner instead and starts the code at the frame's normal padding.
+  const showHeader = Boolean(displayLang) || Boolean(headerAction);
 
   return (
     <div
@@ -225,13 +230,19 @@ function MdCodeFrame({
         collapsible && expanded ? "is-expanded" : "",
       ].filter(Boolean).join(" ")}
     >
-      <div className="md-code-block-header">
-        <span className="md-code-block-lang">{displayLang}</span>
-        <div className="md-code-block-actions">
-          {headerAction}
+      {showHeader ? (
+        <div className="md-code-block-header">
+          <span className="md-code-block-lang">{displayLang}</span>
+          <div className="md-code-block-actions">
+            {headerAction}
+            <CopyButton text={text} />
+          </div>
+        </div>
+      ) : (
+        <div className="md-code-block-float">
           <CopyButton text={text} />
         </div>
-      </div>
+      )}
       <div className="md-code-block-body" ref={bodyRef}>{children}</div>
       {collapsible && (
         <button

@@ -569,6 +569,7 @@ export const uk: GitMessages = {
   "landing.integrateAndPush": "Інтегрувати в {branch} і надіслати",
   "landing.integrate": "Інтеграція",
   "landing.waitWorking": "Чекає, поки агент завершить хід.",
+  "landing.waitDelegated": "Чекає, поки делеговані агенти завершать роботу.",
   "landing.noConflicts": "Без конфліктів",
   "landing.oneConflictFile": "1 файл конфліктує з {branch}",
   "landing.conflictFiles": "Файлів у конфлікті з {branch}: {count}",

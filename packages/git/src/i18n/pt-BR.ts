@@ -569,6 +569,7 @@ export const ptBR: GitMessages = {
   "landing.integrateAndPush": "Integrar em {branch} e fazer push",
   "landing.integrate": "Integrar",
   "landing.waitWorking": "Aguarda o agente terminar o turno.",
+  "landing.waitDelegated": "Aguarda os agentes delegados terminarem.",
   "landing.noConflicts": "Sem conflitos",
   "landing.oneConflictFile": "1 arquivo em conflito com {branch}",
   "landing.conflictFiles": "{count} arquivos em conflito com {branch}",

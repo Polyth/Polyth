@@ -156,6 +156,30 @@ test("with no default target the one action is choosing a branch", async () => {
   } finally { await view.close(); }
 });
 
+test("running delegated agents make the landing wait; once they rest their unmerged work is a warning", async () => {
+  const child = (sessionStatus: SessionProjection["status"], updatedAt: number): SessionProjection => ({
+    id: "landing-child", projectId: "landing", title: "Scrub the env", status: sessionStatus, createdAt: 1, updatedAt, parentId: "landing-delegator",
+  });
+  const waiting = status("devel", {
+    actions: { canReview: true, canMerge: false, canKeep: true, canResolve: false, canDiscard: false, canRecover: false, canAbandon: false, canChooseTarget: true },
+    delegated: [{
+      sessionId: "landing-child", title: "Scrub the env", status: "working", state: "active", hasChanges: false,
+      revision: "", worktreePath: "/wt-child", worktreeBranch: "polyth/isolate/child", targetBranch: "polyth/isolate/landing",
+    }],
+  });
+  seedSessionCache(child("working", 1));
+  const view = await mount(session("landing-delegator", "devel"), () => waiting);
+  try {
+    const text = () => view.container.querySelector(".git-landing")?.textContent ?? "";
+    assert.ok(text().includes(tr("landing.waitDelegated")));
+    assert.equal(text().includes(tr("isolation.delegatedPending")), false);
+    assert.notEqual(view.primary()?.disabled, false, "integrating still waits for the delegated agents");
+    await act(async () => { seedSessionCache(child("idle", 2)); await wait(); await wait(); });
+    assert.ok(text().includes(tr("isolation.delegatedPending")));
+    assert.equal(text().includes(tr("landing.waitDelegated")), false);
+  } finally { await view.close(); }
+});
+
 test("the landing stays away without work to integrate", async () => {
   const empty = status("devel", { suggestion: { eligible: false, hasChanges: false, targetBranch: "devel", targetDirty: false, revision: "rev", reason: "no-changes" } });
   const view = await mount(session("landing-empty", "devel"), () => empty);

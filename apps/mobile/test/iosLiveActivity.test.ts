@@ -238,6 +238,17 @@ test("a pushed update carries no words: the widget draws them from the App's sha
   assert.match(widget, /PolythLiveActivityStore\.read\(PolythLiveActivityStore\.Snapshot\.self/);
   // The question or task line belongs to the state it was written for.
   assert.match(widget, /detail: same \? last\?\.detail \?\? "" : ""/);
+  // When the App's copy cannot be read the widget draws from its own: it
+  // saves every full update, and a status glyph always has a word beside it.
+  assert.match(widget, /if let title = content\.title \{[\s\S]*?keep\(full\)\n\s+return full/);
+  assert.match(widget, /\.read\(PolythLiveActivityStore\.Snapshot\.self, account: "snapshot"\)\n\s+\?\? PolythLiveActivityStore\.readOwn\(PolythLiveActivityStore\.Snapshot\.self, key: "snapshot"\)/);
+  assert.match(widget, /label: texts\?\.labels\[content\.state\] \?\? ownLabel\(content\.state\)/);
+  for (const state of ["needs-approval", "needs-reply", "working", "failed", "done"]) {
+    assert.match(widget, new RegExp(`func ownLabel[\\s\\S]*?case "${state}": return "[A-Z][a-z ]+"`), state);
+  }
+  // The widget's copy lives in its own container, not in the shared group.
+  assert.match(attributes, /static func keepOwn<T: Codable & Equatable>[\s\S]*?UserDefaults\.standard\.set\(data, forKey: ownPrefix \+ key\)/);
+  assert.doesNotMatch(attributes, /func keepOwn[\s\S]*?SecItem[\s\S]*?static func readOwn/);
   const plugin = await readFile(join(iosApp, "App/PolythLiveActivityPlugin.swift"), "utf8");
   assert.match(plugin, /pushType: \.token/);
   assert.match(plugin, /self\.remember\(state\)/);

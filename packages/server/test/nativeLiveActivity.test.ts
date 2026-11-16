@@ -68,7 +68,7 @@ test("the island state mirrors the navigator's: approval, reply, working, then f
   assert.equal(liveActivityState(undefined), "done");
 });
 
-test("a tracked island is pushed its state changes, heartbeats while live, and ends when nothing is live", async () => {
+test("a tracked island is kept current while its chat works and ends the moment that chat needs a person or stops", async () => {
   const views = new Map<string, LiveActivityView>();
   const t = setup(views);
   const start = t.at() - 30_000;
@@ -83,14 +83,18 @@ test("a tracked island is pushed its state changes, heartbeats while live, and e
   await t.service.flushActivities();
   assert.equal(t.pushed().length, 0);
 
-  // A question arrives while the phone sleeps.
-  views.set("chat-a", { ...working(start), attention: { questions: 1, permissions: 0 } });
+  // The other chat asks a question while the phone sleeps: the island's own
+  // chat still works, so only its line of counts changes.
+  views.set("chat-b", { ...working(start), attention: { questions: 1, permissions: 0 } });
   await t.service.flushActivities();
   assert.deepEqual(t.apns.activity[0]!.destination, {
     subscriptionId: "live-activity", version: 1, platform: "ios", environment: "production", channel: "liveactivity", providerToken: activityToken,
   });
   // No words ever reach APNs.
-  assert.deepEqual(t.pushed()[0], { event: "update", state: "needs-reply", waiting: 0, working: 1, staleAt: Math.floor(t.at() / 1000) + 600, urgent: true });
+  assert.deepEqual(t.pushed()[0], {
+    event: "update", state: "working", startedAt: Math.floor(start / 1000), waiting: 1, working: 0,
+    staleAt: Math.floor(t.at() / 1000) + 600, urgent: true,
+  });
 
   // Unchanged: only a low-priority heartbeat once it is due.
   t.tick(LIVE_ACTIVITY_HEARTBEAT_MS - 1_000);
@@ -99,29 +103,38 @@ test("a tracked island is pushed its state changes, heartbeats while live, and e
   t.tick(2_000);
   await t.service.flushActivities();
   assert.equal(t.pushed()[1]?.urgent, false);
-  assert.equal(t.pushed()[1]?.state, "needs-reply");
+  assert.equal(t.pushed()[1]?.state, "working");
 
-  // Answered from the PC: working again, with the timer start in seconds.
-  views.set("chat-a", working(start));
+  // The island's chat asks a question. Its alert says so with the words; the
+  // island leaves at once instead of repeating it, though another chat is
+  // still waiting.
+  views.set("chat-a", { ...working(start), attention: { questions: 1, permissions: 0 } });
   await t.service.flushActivities();
-  assert.equal(t.pushed()[2]?.state, "working");
-  assert.equal(t.pushed()[2]?.startedAt, Math.floor(start / 1000));
-
-  // The focus finishes while another chat still works: an update, not an end.
-  views.set("chat-a", { status: "idle", updatedAt: t.at() });
-  await t.service.flushActivities();
-  assert.equal(t.pushed()[3]?.event, "update");
-  assert.equal(t.pushed()[3]?.state, "done");
-  // Then the other one: the activity ends and stays briefly.
-  views.set("chat-b", { status: "idle", updatedAt: t.at() });
-  await t.service.flushActivities();
-  assert.equal(t.pushed()[4]?.event, "end");
-  assert.equal(t.pushed()[4]?.dismissAt, Math.floor(t.at() / 1000) + 600);
+  assert.equal(t.pushed()[2]?.event, "end");
+  assert.equal(t.pushed()[2]?.state, "needs-reply");
+  assert.equal(t.pushed()[2]?.dismissAt, Math.floor(t.at() / 1000), "nothing stays on the Lock Screen");
   // Nothing tracked any more.
   t.tick(LIVE_ACTIVITY_HEARTBEAT_MS * 2);
   await t.service.flushActivities();
-  assert.equal(t.pushed().length, 5);
+  assert.equal(t.pushed().length, 3);
   t.service.close();
+});
+
+test("a chat that finishes, fails or asks for approval ends its island at once, with no card left behind", async () => {
+  for (const [view, state] of [
+    [{ status: "idle", updatedAt: 1 }, "done"],
+    [{ status: "failed", updatedAt: 1 }, "failed"],
+    [{ ...working(1_800_000_000_000), attention: { questions: 0, permissions: 1 } }, "needs-approval"],
+  ] as Array<[LiveActivityView, string]>) {
+    const views = new Map<string, LiveActivityView>([["chat-a", working(1_800_000_000_000)], ["chat-b", working(1_800_000_000_000)]]);
+    const t = setup(views);
+    await register(t);
+    await t.service.trackActivity({ ...alice, track: { sessionId: "chat-a", others: ["chat-b"], shown: { state: "working", startedAt: 1_800_000_000_000, waiting: 0, working: 1 } } });
+    views.set("chat-a", view);
+    await t.service.flushActivities();
+    assert.deepEqual(t.pushed().map((input) => [input.event, input.state, input.dismissAt]), [["end", state, Math.floor(t.at() / 1000)]], state);
+    t.service.close();
+  }
 });
 
 test("only a readable chat is tracked, a chat that becomes unreadable ends at once, and a dead token is dropped", async () => {

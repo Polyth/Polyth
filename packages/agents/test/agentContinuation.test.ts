@@ -736,7 +736,7 @@ test("an event run's script note is not the person's words, also in records save
   const agent = svc.create({ projectId: "p", prompt: "x", kind: "every", everyMinutes: 60, manualOnly: true });
   svc.markSeen(agent.id, 1);
   const doc = JSON.parse(readFileSync(file, "utf8"));
-  assert.equal(doc.v, 5);
+  assert.equal(doc.v, 6);
   doc.v = 4;
   doc.tasks[0].history = [
     { runId: "e", startedAt: 1, status: "ok", trigger: "event", input: "Look at the deploy" },
@@ -746,7 +746,7 @@ test("an event run's script note is not the person's words, also in records save
   const migrated = createScheduleService({ file, runner: heldRunner().runner }).runsOf(agent.id);
   assert.deepEqual(migrated.map((run) => [run.input, run.note]), [[undefined, "Look at the deploy"], ["Hello", undefined]]);
   const rewritten = JSON.parse(readFileSync(file, "utf8"));
-  assert.equal(rewritten.v, 5, "migrated once, then saved under the new schema");
+  assert.equal(rewritten.v, 6, "migrated once, then saved under the new schema");
   assert.equal(rewritten.tasks[0].history[0].note, "Look at the deploy");
 
   // Written by this schema: an event run's input is the person's words and stays.

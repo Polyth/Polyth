@@ -94,3 +94,13 @@ test("a subagent's header goes Back to its parent chat; others offer the package
   await agent.unmount();
   dispose();
 });
+
+test("bare shell layout keeps the back control interactive", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const css = await readFile(new URL("../src/shellLayout.css", import.meta.url), "utf8");
+  assert.match(
+    css,
+    /body\[data-shell-layout="bare"\]\s+\.app\s*>\s*\.header\s+:is\([^)]*\.session-back[^)]*\)\s*\{\s*pointer-events:\s*auto;/s,
+    "bare header enables pointer-events for the session-back control",
+  );
+});

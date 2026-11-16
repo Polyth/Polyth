@@ -23,14 +23,14 @@
 .assist-recap-tail {
   white-space: nowrap;
 }
-/* Centred on its line without making the line taller. */
+/* The primitive's own sm box (its grid centres the glyph in the hover wash;
+   its ::after grows the touch target), centred on its line without making the
+   line taller. Do not override its display or size: an inline-flex box pinned
+   the glyph to the wash's start edge. */
 .assist-recap .assist-dismiss {
-  display: inline-flex;
   vertical-align: middle;
   color: var(--faint);
-  inline-size: max(var(--control-h-sm), var(--hit-min));
-  block-size: max(var(--control-h-sm), var(--hit-min));
-  margin-block: calc((var(--font-meta) * var(--font-meta-lh) - max(var(--control-h-sm), var(--hit-min))) / 2);
+  margin-block: calc((var(--font-meta) * var(--font-meta-lh) - 24px) / 2);
   margin-inline-start: var(--space-1);
 }
 /* A pointer reveals the dismiss on approach; touch keeps it visible. */

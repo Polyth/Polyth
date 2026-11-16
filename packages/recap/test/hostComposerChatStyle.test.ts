@@ -19,7 +19,12 @@ test("idle recap is package-owned and mounts at the transcript tail", () => {
   assert.match(strip, /assistFreshnessSeq/);
   assert.match(strip, /freshnessSeq > assist\.atSeq/);
   assert.equal(css.match(/\.assist-strip\s*\{/g)?.length, 1);
-  assert.match(css, /\.assist-dismiss\s*\{[^}]*inline-size:\s*max\(var\(--control-h-sm\), var\(--hit-min\)\);/s);
+  // The dismiss keeps the IconButton's own centring grid and sm box (its ::after
+  // carries the touch target): an inline-flex or resized box pinned the glyph
+  // to the hover wash's start edge.
+  const dismiss = css.match(/\.assist-recap \.assist-dismiss\s*\{([^}]*)\}/)?.[1] ?? "";
+  assert.match(dismiss, /margin-block:\s*calc\(\(var\(--font-meta\) \* var\(--font-meta-lh\) - 24px\) \/ 2\);/);
+  assert.doesNotMatch(dismiss, /\bdisplay:|inline-size:|block-size:|\bwidth:|\bheight:/);
   // One suggestion surface: the recap's next prompt rides on the composer chip.
   assert.doesNotMatch(strip, /assist\.suggestion|conversation\.insert/);
   assert.doesNotMatch(css, /\.assist-chip/);
