@@ -1973,26 +1973,29 @@ body[data-desktop-low-resource="true"] .git-page .git-landing {
   padding-inline: var(--space-1);
   user-select: none;
 }
-.git-page .git-diff-comment-btn {
-  display: inline-grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  margin-block: -2px;
+/* The host IconButton (it skips the legacy 44px tap floor of narrow panels,
+   which made every diff row 40px tall), trimmed to the code line: a 24px
+   target whose negative block margin keeps the row at its line height. */
+.git-page .git-diff-comment-btn.ui-icon-btn {
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  min-height: 24px;
+  margin-block: -3px;
   padding: 0;
-  border: 0;
-  border-radius: var(--radius-control, 6px);
-  background: transparent;
   color: var(--muted);
-  cursor: pointer;
   opacity: 0;
   transition: opacity var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
 }
-.git-page .git-diff-line:hover .git-diff-comment-btn,
-.git-page .git-diff-comment-btn:focus-visible,
-.git-page .git-diff-line:focus-within .git-diff-comment-btn { opacity: 1; }
-.git-page .git-diff-comment-btn:hover { background: var(--hover-wash, color-mix(in srgb, currentColor 10%, transparent)); color: var(--text); }
-.git-page .git-diff-comment-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.git-page .git-diff-line:hover .git-diff-comment-btn.ui-icon-btn,
+.git-page .git-diff-comment-btn.ui-icon-btn:focus-visible,
+.git-page .git-diff-line:focus-within .git-diff-comment-btn.ui-icon-btn { opacity: 1; }
+/* Shown, it sits on the panel surface so an overflowing code line does not
+   print through the glyph. */
+.git-page .git-diff-line:hover .git-diff-comment-btn.ui-icon-btn,
+.git-page .git-diff-line:focus-within .git-diff-comment-btn.ui-icon-btn { background: var(--sc-diff-bg, var(--surface)); }
+.git-page .git-diff-comment-btn.ui-icon-btn:hover { background: color-mix(in srgb, var(--text) 10%, var(--sc-diff-bg, var(--surface))); color: var(--text); }
+.git-page .git-diff-comment-btn.ui-icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .git-page .git-diff-line--commented { box-shadow: inset 2px 0 0 var(--accent); }
 .git-page .git-diff-comment-editor {
   border-color: transparent;
@@ -2002,15 +2005,15 @@ body[data-desktop-low-resource="true"] .git-page .git-landing {
   max-width: min(100%, 72ch);
   margin: var(--space-1) var(--space-2) var(--space-2);
   white-space: normal;
-  font-family: var(--font-ui, inherit);
-  font-size: var(--font-size-base, 13px);
+  font-family: var(--ui-font-family, inherit);
+  font-size: var(--font-body);
 }
 .git-page .git-diff-comment-sent {
   margin: 0 var(--space-2) var(--space-1);
   color: var(--muted);
   white-space: normal;
-  font-family: var(--font-ui, inherit);
-  font-size: var(--font-size-sm, 12px);
+  font-family: var(--ui-font-family, inherit);
+  font-size: var(--font-meta);
 }
 .git-page .git-diff-comment-strip { display: none; }
 @media (pointer: coarse), (hover: none) {
@@ -2022,7 +2025,7 @@ body[data-desktop-low-resource="true"] .git-page .git-landing {
     background: var(--sc-diff-bg);
     box-shadow: inset 0 1px 0 var(--borderless-edge, var(--hair));
     white-space: normal;
-    font-family: var(--font-ui, inherit);
+    font-family: var(--ui-font-family, inherit);
   }
   .git-page .git-diff-comment-tap {
     flex: 1;
@@ -2049,6 +2052,12 @@ body[data-desktop-low-resource="true"] .git-page .git-landing {
   box-shadow: 0 1px 0 var(--borderless-edge, var(--hair));
 }
 .git-page .git-find-input { flex: 1 1 12ch; min-width: 0; }
+/* Match case reads as on: the accent wash a pressed toggle carries. */
+.git-page .git-find-case[aria-pressed="true"] {
+  background: var(--accent-wash);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
 .git-page .git-find-count { flex: none; min-width: 7ch; text-align: end; font-variant-numeric: tabular-nums; }
 .git-page ::highlight(git-find) { background: color-mix(in srgb, var(--amber, #d9a400) 35%, transparent); color: inherit; }
 .git-page ::highlight(git-find-current) { background: color-mix(in srgb, var(--accent) 55%, transparent); color: inherit; }

@@ -27,6 +27,19 @@
   gap: var(--space-1);
   padding: var(--space-5) var(--screen-gutter) var(--space-3);
 }
+/* The title shares its row with Find in changes (a 44px target on touch). */
+.git-phone-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  justify-self: stretch;
+  min-width: 0;
+}
+.git-phone-title-row .git-phone-title { flex: 1 1 auto; min-width: 0; }
+.git-phone-title-row .git-phone-find-open { flex: none; min-width: var(--tap); min-height: var(--tap); margin-inline-end: calc(var(--space-2) * -1); }
+/* In the file layer the bar sits under the layer head, above the code. */
+.git-phone-find { position: sticky; top: 0; z-index: 3; }
+.git-phone-find .git-find-bar { padding-inline: var(--screen-gutter); }
 .git-phone-title {
   margin: 0;
   color: var(--text);

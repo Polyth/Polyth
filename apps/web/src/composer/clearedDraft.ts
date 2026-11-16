@@ -44,3 +44,8 @@ export function isRestoreUndoKey(input: {
   return input.key.toLowerCase() === "z" && Boolean(input.ctrlKey || input.metaKey)
     && !input.shiftKey && !input.altKey;
 }
+
+/** The restore shortcut as this keyboard names it. */
+export function restoreDraftKeyLabel(platform: string = typeof navigator === "undefined" ? "" : navigator.platform): string {
+  return /Mac|iPhone|iPad/i.test(platform) ? "\u2318Z" : "Ctrl Z";
+}

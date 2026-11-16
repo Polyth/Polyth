@@ -765,11 +765,19 @@ Contract and server rules: [Spaces §14.8](../architecture/spaces-and-tenancy.md
   read when a mention starts; `chatMentionOptions` in `composer/discovery.ts`).
   In a chat other people can read, only chats every reader can already open are
   offered, so a private or personal chat never appears; in a private chat, any
-  chat the author can read. Picking one inserts the plain-text token
-  `[@Title](polyth://session/<id>)`, so it travels through the queue, steering
-  and retries as ordinary message text. The timeline renders it as a chip
+  chat the author can read. Picking one inserts `@Title` in the composer and
+  remembers `{ label, sessionId }` in the draft record next to the text
+  (`chatMentions`, `drafts.ts`; `composer/chatMentionDraft.ts`), so a reload
+  keeps it. The send rewrites the first unused `@label` of each entry into the
+  plain-text token `[@Title](polyth://session/<id>)`, which travels through the
+  queue, steering and retries as ordinary message text; a label edited away is
+  dropped and sends as plain text. A recalled prompt (Up arrow or Previous
+  prompts) turns its tokens back into `@Title` plus entries. The list is local:
+  the server draft sync carries the text only, so another device sees plain
+  `@Title`. The timeline renders it as a chip
   (`SessionChatChip`, `markdown/render.tsx`) with the LIVE title when the
-  reader's own chat list contains the chat (click opens it); anyone else sees a
+  reader's own chat list contains the chat (click opens it; a chat glyph tells
+  it from a person's name and the tooltip says "Open <title>"); anyone else sees a
   plain "a chat", no title, no link. Accepted trade-off: the label inside the
   token and the raw text still contain the title the author saw at send time.
 - **Mentioning someone outside the chat**: one plateless line of the pending
@@ -3265,7 +3273,9 @@ ends with the trailing column.
 composer (free: plain Up/Down still step through history and ignore Ctrl/Cmd;
 no host shortcut uses it) opens `PromptHistoryPalette`: a `ResponsiveOverlay`
 (dialog on desktop, sheet with its own search on a phone) listing this project's
-prompts newest first, filtered by every typed word. Enter or a click recalls the
+prompts newest first, filtered by every typed word. A chat mention token shows
+and is searched as `@Title` (`promptDisplayText`, `composer/history.ts`; the
+prompt-jump names use it too); recall still inserts the stored token. Enter or a click recalls the
 prompt through `usePromptHistory().recall` (text plus `attachmentsForRecall`,
 the same browse state as Up-arrow, so Esc in the composer returns to the draft)
 and never sends; Esc clears the query, then closes and the composer takes focus
@@ -3275,8 +3285,9 @@ filters by the session's person, never a client value; prompts recorded before
 authorship stay visible). When unsent text of at least 20 characters empties by
 the person's own edit (`onTextChange(..., "user")`: delete, cut, select-all),
 the pending stack shows one `composer-suggestion composer-restore` line, "Draft
-cleared. Restore it?", for 10 s; the line or `Cmd/Ctrl+Z` on the empty field
-restores it. Sending, 20 new characters, another chat or the 10 s end dismiss
+cleared. Restore it?", for 10 s, and announces the same words with the
+shortcut through the shared polite live region; the line or `Cmd/Ctrl+Z` on the
+empty field restores it. Sending, 20 new characters, another chat or the 10 s end dismiss
 it; a programmatic clear (a send, a recalled prompt) never offers it
 (`composer/clearedDraft.ts`).
 

@@ -12,6 +12,19 @@ import { hydratePendingAttachments, seedAttachments } from "./attachments.ts";
 import { shouldApplySeed, type SeedRecord } from "./messageActions.ts";
 import { loadScopedDraftRecord, updateScopedDraftRecord } from "./draftRecord.ts";
 import { stripRecoveryContextBlocks } from "./recoveryDisplay.ts";
+import type { ChatMentionRef } from "./composer/chatMentionDraft.ts";
+
+/** The chats a draft names as `@label`, kept next to its text so a reload
+ *  still sends the links. A record written before this field reads as none. */
+export function loadChatMentions(sessionId: string | null): ChatMentionRef[] {
+  return loadScopedDraftRecord(sessionId).chatMentions ?? [];
+}
+
+export function saveChatMentions(sessionId: string | null, refs: readonly ChatMentionRef[]): void {
+  const current = loadScopedDraftRecord(sessionId).chatMentions ?? [];
+  if (current.length === refs.length && current.every((ref, i) => ref.label === refs[i]!.label && ref.sessionId === refs[i]!.sessionId)) return;
+  updateScopedDraftRecord(sessionId, { chatMentions: refs.length ? refs.slice() : undefined });
+}
 
 // Marker provenance belongs to the same trusted namespace as the draft text.
 export function loadSeedRecord(sessionId: string): SeedRecord | null {

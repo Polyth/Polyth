@@ -17,6 +17,7 @@ import ImageLightbox, { type MarkdownImage } from "./ImageLightbox.tsx";
 import { tr } from "../i18n/index.ts";
 import {
   Button,
+  ChatIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronUpIcon,
@@ -393,7 +394,10 @@ export function SessionChatChip({ sessionId }: { sessionId: string }) {
   const row = useStore((state) => state.sessions.find((session) => session.id === sessionId));
   if (!row) return <span className="chat-mention chat-mention-plain">{tr("timeline.chatMention.unavailable")}</span>;
   return (
-    <button type="button" className="chat-mention" onClick={() => activateSession(sessionId)}>
+    // The glyph tells a chat link from a person's name (same pill family);
+    // the tooltip says what a click does.
+    <button type="button" className="chat-mention" title={tr("notify.people.open", { chat: row.title || tr("composer.chats.untitled") })} onClick={() => activateSession(sessionId)}>
+      <Icon icon={ChatIcon} size="sm" className="chat-mention-icon" />
       {row.title || tr("composer.chats.untitled")}
     </button>
   );

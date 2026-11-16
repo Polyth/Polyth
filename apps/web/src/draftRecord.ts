@@ -2,6 +2,7 @@
 // attachment metadata are updated through this module so they cannot drift
 // into competing local stores.
 import type { AttachmentRef } from "@polyth/contracts";
+import { MAX_DRAFT_CHAT_MENTIONS, isChatMentionRef, type ChatMentionRef } from "./composer/chatMentionDraft.ts";
 import { hydrateClientRecord, readClientRecord, removeClientRecord, writeClientRecord, type PersistenceScope } from "./clientPersistence.ts";
 import { clientPersistenceScope } from "./reliabilityContext.ts";
 import { activeDraftLanePurpose, newSessionLaneDraftId } from "./workbench/lanes.ts";
@@ -19,6 +20,9 @@ export interface ScopedDraftRecord {
   conflict?: { text: string; serverUpdatedAt?: number };
   seed?: { key: string; seedText: string };
   attachments: AttachmentRef[];
+  /** Chats the text names as `@label` (composer/chatMentionDraft.ts); the
+   *  send rewrites each into its link token. Drafts without it still work. */
+  chatMentions?: ChatMentionRef[];
   /** Native-owned staged files are metadata only. Their paths never become
    * AttachmentRefs or server payloads; upload admission owns that boundary. */
   nativeStaged?: NativeStagedAttachment[];
@@ -118,6 +122,9 @@ function parseRecord(raw: string | null): ScopedDraftRecord {
     return {
       v: 1, text: value.text, attachments: value.attachments as AttachmentRef[],
       revision: value.revision as number, updatedAt: value.updatedAt,
+      ...(Array.isArray(value.chatMentions)
+        ? { chatMentions: value.chatMentions.filter(isChatMentionRef).slice(-MAX_DRAFT_CHAT_MENTIONS) }
+        : {}),
       ...(value.seed && typeof value.seed.key === "string" && typeof value.seed.seedText === "string" ? { seed: value.seed } : {}),
       ...(Array.isArray(value.nativeStaged)
         ? { nativeStaged: value.nativeStaged.filter(validNativeStaged).slice(-MAX_NATIVE_STAGED) }
@@ -184,7 +191,7 @@ const persistScopedDraftRecord = (
 
 export function updateScopedDraftRecord(
   sessionId: string | null | undefined,
-  patch: Partial<Pick<ScopedDraftRecord, "text" | "seed" | "attachments" | "nativeStaged" | "previousNewSessionDrafts" | "dirty" | "serverUpdatedAt" | "conflict">>,
+  patch: Partial<Pick<ScopedDraftRecord, "text" | "seed" | "attachments" | "chatMentions" | "nativeStaged" | "previousNewSessionDrafts" | "dirty" | "serverUpdatedAt" | "conflict">>,
   capturedScope?: PersistenceScope,
 ): ScopedDraftRecord {
   const targetScope = scope(sessionId, capturedScope);

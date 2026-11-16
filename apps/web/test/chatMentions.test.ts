@@ -32,11 +32,12 @@ const { setSessions } = await import("../src/store.ts");
 const { SessionChatChip, renderMarkdown } = await import("../src/markdown/render.tsx");
 const { tr } = await import("../src/i18n/index.ts");
 
-test("the picker lists chats newest first, matched by title, as the exact message token", () => {
+test("the picker lists chats newest first, matched by title, inserting @Title (the send writes the token)", () => {
   assert.deepEqual(chatMentionOptions(chats, "").map((o) => o.chat?.sessionId), ["s-other", "s-new", "s-old"]);
   const hits = chatMentionOptions(chats, "BILLING");
   assert.deepEqual(hits.map((o) => o.chat?.sessionId), ["s-new", "s-old"]);
-  assert.equal(hits[0]!.value, "[@Billing export](polyth://session/s-new) ");
+  assert.equal(hits[0]!.value, "@Billing export ");
+  assert.deepEqual(hits[0]!.chat, { sessionId: "s-new", title: "Billing export" });
   assert.equal(hits[0]!.presentation?.groupId, "chats");
 });
 

@@ -6,7 +6,9 @@ import type { AttachmentRef, PromptHistoryEntryDto } from "@polyth/contracts";
 import {
   attachmentsForRecall,
   emptyPromptHistoryCursor,
+  filterPromptHistory,
   isBlockedAttachment,
+  promptDisplayText,
   restorePromptHistoryDraft,
   shouldHandlePromptHistoryKey,
   stepPromptHistory,
@@ -549,4 +551,13 @@ test("takeDisplayedForSend returns recalled attachments and ends browse without 
   await act(async () => { root.unmount(); });
   container.remove();
   restore();
+});
+
+test("a chat mention reads as @Title in previews and search, never as its link and id", () => {
+  const raw = "Follow up on [@Tax rounding bug](polyth://session/4e5ec855-28a1-4e3f-b3a3-28b86aa486e8) today";
+  assert.equal(promptDisplayText(raw), "Follow up on @Tax rounding bug today");
+  assert.equal(promptDisplayText("[docs](https://example.com) stay"), "[docs](https://example.com) stay");
+  const entries = [entry({ id: "a", text: raw }), entry({ id: "b", text: "plain" })];
+  assert.deepEqual(filterPromptHistory(entries, "polyth").map((e) => e.id), [], "the hidden link is not searchable");
+  assert.deepEqual(filterPromptHistory(entries, "@tax").map((e) => e.id), ["a"]);
 });

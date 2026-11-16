@@ -161,7 +161,7 @@ import {
 import { isPromptHistoryPaletteKey, shouldHandlePromptHistoryKey } from "../composer/history.ts";
 import {
   CLEARED_DRAFT_WINDOW_MS, captureClearedDraft, clearedDraftLive, isRestoreUndoKey,
-  typingDismissesClearedDraft, type ClearedDraft,
+  restoreDraftKeyLabel, typingDismissesClearedDraft, type ClearedDraft,
 } from "../composer/clearedDraft.ts";
 import PromptHistoryPalette from "./PromptHistoryPalette.tsx";
 import { usePromptHistory } from "../composer/usePromptHistory.ts";
@@ -274,7 +274,8 @@ import { clientPersistenceScope, persistenceScopeIsCurrent } from "../reliabilit
 import { activeLanePurpose } from "../workbench/profileNavigation.ts";
 import { newSessionLaneDraftId } from "../workbench/lanes.ts";
 import { stripRecoveryContextBlocks } from "../recoveryDisplay.ts";
-import { forgetComposerSelection, rememberComposerSelection, takeComposerSelection, visibleComposerDraft } from "../drafts.ts";
+import { forgetComposerSelection, loadChatMentions, rememberComposerSelection, saveChatMentions, takeComposerSelection, visibleComposerDraft } from "../drafts.ts";
+import { collapseChatMentions, expandChatMentions, liveChatMentions, mergeChatMentions, type ChatMentionRef } from "../composer/chatMentionDraft.ts";
 import { holdLaunchReveal } from "../launchReveal.ts";
 import {
   beginConversationSelection, endConversationSelection, openConversationStart, useConversationSelection,
@@ -1467,6 +1468,23 @@ function ComposerBody({
   });
   const promptHistoryNavRef = useRef(promptHistoryNav);
   promptHistoryNavRef.current = promptHistoryNav;
+  // Chat mentions show as `@Title`; this draft-owned list (drafts.ts) lets the
+  // send write their link tokens, and survives a reload with the draft.
+  const chatMentionsRef = useRef<ChatMentionRef[]>([]);
+  const chatMentionScope = session?.id ?? null;
+  useEffect(() => { chatMentionsRef.current = loadChatMentions(chatMentionScope); }, [chatMentionScope, activeProjectId]);
+  const setDraftChatMentions = useCallback((refs: ChatMentionRef[]) => {
+    chatMentionsRef.current = refs;
+    saveChatMentions(sessionIdRef.current ?? null, refs);
+  }, []);
+  // A recalled prompt (history or palette) arrives with tokens: show `@Title`
+  // and remember the links, so sending it again writes the same tokens.
+  const applyHistoryDraft = useCallback((draft: { text: string }) => {
+    const shown = collapseChatMentions(draft.text);
+    if (shown.refs.length) setDraftChatMentions(mergeChatMentions(chatMentionsRef.current, shown.refs));
+    setText(shown.text);
+    inputRef.current?.replaceText(shown.text, { anchor: shown.text.length }, { silent: true });
+  }, [setDraftChatMentions]);
   const [historyOpen, setHistoryOpen] = useState(false);
   // A draft that vanished without a send waits here for 10 s (clearedDraft.ts).
   const [clearedDraft, setClearedDraftState] = useState<ClearedDraft | null>(null);
@@ -1759,10 +1777,7 @@ function ComposerBody({
   // Settings / project change is not a session switch: restore the snapshot
   // into the textarea, then end browse. Never flush the live historical text.
   useEffect(() => {
-    promptHistoryNavRef.current.cancelToDraft((draft) => {
-      setText(draft.text);
-      inputRef.current?.replaceText(draft.text, { anchor: draft.text.length }, { silent: true });
-    });
+    promptHistoryNavRef.current.cancelToDraft(applyHistoryDraft);
   }, [uiPrefs.promptHistoryScope, uiPrefs.promptHistoryLimit, activeProjectId]);
 
   // Disengage after an outside click has reached its target. Collapsing on
@@ -2708,7 +2723,7 @@ function ComposerBody({
     // People mode never queues behind or steers the agent turn: it records a
     // person message and stops there, even while the agent is working.
     if (peopleModeRef.current && !queueEdit && sessionIdRef.current) {
-      sendPeopleMessage((override ?? inputRef.current?.getText() ?? "").trim());
+      sendPeopleMessage(expandChatMentions((override ?? inputRef.current?.getText() ?? "").trim(), chatMentionsRef.current));
       return;
     }
     // The latch is the synchronous witness, not this render's values: a
@@ -2721,7 +2736,8 @@ function ComposerBody({
     const firstPeopleMessage = peopleModeRef.current && !queueEdit && !parkAsDraft;
     if (firstPeopleMessage && (peopleSendingRef.current || peopleSendAwaitsAnswer())) return;
     const noTurn = parkAsDraft || firstPeopleMessage;
-    const t = (override ?? inputRef.current?.getText() ?? text).trim();
+    // `@Title` chat mentions leave as their link tokens (chatMentionDraft.ts).
+    const t = expandChatMentions((override ?? inputRef.current?.getText() ?? text).trim(), chatMentionsRef.current);
     const target = sessionIdRef.current;
     // Sending ends any offer to restore a cleared draft; never restore after a send.
     if (!parkAsDraft && clearedDraftRef.current) setClearedDraft(null);
@@ -3701,12 +3717,13 @@ function ComposerBody({
     const cur = h.getText();
     const r = completeToken(cur, token, item.value);
     if (item.person) addPersonMention(item.person);
+    if (item.chat) setDraftChatMentions(mergeChatMentions(chatMentionsRef.current, [{ label: item.value.trim().slice(1), sessionId: item.chat.sessionId }]));
     selectedCommandRef.current = token.kind === "command" ? item.command : undefined;
     // replaceText fires onTextChange, which re-derives the token/popup state.
     h.replaceText(r.text, { anchor: r.caret });
     h.focus();
     return true;
-  }, [addPersonMention]);
+  }, [addPersonMention, setDraftChatMentions]);
 
   // ---- derived popup view (honest four-state projection) ----------------------
   const acView: AutocompleteViewState | null = (() => {
@@ -3854,10 +3871,7 @@ function ComposerBody({
       text: inputRef.current?.getText() ?? text,
       attachments: pendingAttachments(sessionIdRef.current),
     };
-    promptHistoryNav.recall(entry, current, (draft) => {
-      setText(draft.text);
-      inputRef.current?.replaceText(draft.text, { anchor: draft.text.length }, { silent: true });
-    });
+    promptHistoryNav.recall(entry, current, applyHistoryDraft);
     inputRef.current?.focus();
   };
   const onKeyIntercept = (e: KeyboardEvent<HTMLTextAreaElement>, composing: boolean): boolean => {
@@ -3931,10 +3945,7 @@ function ComposerBody({
       }
     }
     if (e.key === "Escape") {
-      const restored = promptHistoryNav.cancelToDraft((draft) => {
-        setText(draft.text);
-        inputRef.current?.replaceText(draft.text, { anchor: draft.text.length }, { silent: true });
-      });
+      const restored = promptHistoryNav.cancelToDraft(applyHistoryDraft);
       if (restored) return true;
     }
     if (e.key === "Enter") {
@@ -3965,10 +3976,7 @@ function ComposerBody({
       text: inputRef.current?.getText() ?? text,
       attachments: pendingAttachments(sessionIdRef.current),
     };
-    promptHistoryNav.step(current, key === "ArrowUp" ? "up" : "down", (draft) => {
-      setText(draft.text);
-      inputRef.current?.replaceText(draft.text, { anchor: draft.text.length }, { silent: true });
-    });
+    promptHistoryNav.step(current, key === "ArrowUp" ? "up" : "down", applyHistoryDraft);
   };
 
   // Token-based autocomplete on committed text changes. File searches keep the
@@ -3982,8 +3990,14 @@ function ComposerBody({
       lastTextRef.current = val;
       if (source === "user" && !restoringDraftRef.current) {
         const lost = captureClearedDraft({ prev: before, next: val, lastSent: null, now: Date.now() });
-        if (lost) setClearedDraft(lost);
-        else if (clearedDraftRef.current && typingDismissesClearedDraft(val)) setClearedDraft(null);
+        if (lost) {
+          setClearedDraft(lost);
+          // The line appears for 10 s only: say so where a screen reader hears it.
+          announce(`${tr("composer.restoreDraft.text")} ${restoreDraftKeyLabel()}`);
+        } else if (clearedDraftRef.current && typingDismissesClearedDraft(val)) setClearedDraft(null);
+        // A label edited away drops its link: that text sends plain.
+        const live = liveChatMentions(val, chatMentionsRef.current);
+        if (live.length !== chatMentionsRef.current.length) setDraftChatMentions(live);
       }
       // A mode's trigger typed at the start of the draft ("/btw ") enters the
       // mode and leaves only the words after it. A restored draft never does.
@@ -4934,13 +4948,12 @@ function ComposerBody({
       <button
         type="button"
         className="composer-suggestion-use"
-        aria-label={tr("composer.restoreDraft.action")}
         onMouseDown={(event) => event.preventDefault()}
         onClick={restoreClearedDraft}
       >
         <UiIcon icon={UndoIcon} size="sm" className="composer-suggestion-icon" />
         <span className="composer-suggestion-text">{tr("composer.restoreDraft.text")}</span>
-        <kbd className="composer-suggestion-key" aria-hidden="true">{/Mac|iPhone|iPad/i.test(typeof navigator === "undefined" ? "" : navigator.platform) ? "\u2318Z" : "Ctrl Z"}</kbd>
+        <kbd className="composer-suggestion-key" aria-hidden="true">{restoreDraftKeyLabel()}</kbd>
       </button>
       <IconButton
         className="composer-suggestion-dismiss"

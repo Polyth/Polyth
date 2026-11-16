@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import type { PromptHistoryEntryDto } from "@polyth/contracts";
 import { PROMPT_HISTORY_MAX_LIMIT } from "@polyth/contracts";
 import { api } from "@polyth/session/web-api";
-import { filterPromptHistory, paletteEntries } from "../composer/history.ts";
+import { filterPromptHistory, paletteEntries, promptDisplayText } from "../composer/history.ts";
 import { tr } from "../i18n/index.ts";
 import { useShellMode } from "../responsiveShell.ts";
 import { Icon, IconButton, ResponsiveOverlay, SearchIcon, CloseIcon, Spinner, TextInput } from "./ui/index.ts";
@@ -157,7 +157,7 @@ export default function PromptHistoryPalette({ projectId, onPick, onClose }: {
             onClick={() => choose(entry)}
           >
             <span className="palette-col">
-              <span className="palette-label prompt-history-text">{entry.text || tr("composer.historyPalette.attachmentsOnly")}</span>
+              <span className="palette-label prompt-history-text">{promptDisplayText(entry.text) || tr("composer.historyPalette.attachmentsOnly")}</span>
             </span>
             {entry.attachments.length > 0 && (
               <span className="palette-meta">{tr("composer.historyPalette.attached", { count: entry.attachments.length })}</span>

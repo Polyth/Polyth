@@ -183,9 +183,17 @@ test("each diff line has a keyboard-reachable Comment button named with path and
   assert.equal(buttons.length, 5, "two context rows, a delete and two adds");
   assert.equal(buttons[2]!.getAttribute("aria-label"), "Comment on src/a.ts line 2");
   assert.equal(buttons[0]!.tagName, "BUTTON");
-  assert.ok(buttons.every((button) => button.tabIndex >= 0 && button.type === "button"), "real buttons stay in the tab order");
-  buttons[2]!.focus();
-  assert.equal(document.activeElement === buttons[2], true);
+  assert.ok(buttons.every((button) => button.type === "button"), "real buttons");
+  // One tab stop for the whole diff (a long diff would otherwise be hundreds
+  // of Tab presses); arrows move between rows and the stop follows focus.
+  assert.deepEqual(buttons.map((button) => button.tabIndex), [0, -1, -1, -1, -1]);
+  await act(async () => { buttons[0]!.focus(); await delay(5); });
+  await key(buttons[0]!, { key: "ArrowDown" });
+  assert.equal(document.activeElement === buttons[1], true, "ArrowDown focuses the next row's button");
+  await key(buttons[1]!, { key: "End" });
+  assert.equal(document.activeElement === buttons[4], true, "End focuses the last row's button");
+  const after = [...view.container.querySelectorAll<HTMLButtonElement>(".git-diff-comment-btn")];
+  assert.deepEqual(after.map((button) => button.tabIndex), [-1, -1, -1, -1, 0], "the tab stop follows focus");
   await view.close();
 });
 
@@ -290,6 +298,10 @@ test("Cmd/Ctrl+F opens the find bar only from inside the view; counts, next/prev
   await act(async () => { await delay(80); });
   assert.equal(count(), "1 of 2", "case-insensitive by default");
   const toggle = [...bar.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.getAttribute("aria-pressed") !== null)!;
+  assert.equal(toggle.getAttribute("aria-label"), "Match case", "the Aa toggle is named for what it does");
+  const onToggle = await key(toggle, { key: "Enter" });
+  assert.equal(onToggle.defaultPrevented, false, "Enter on a button presses that button, not Next match");
+  assert.equal(count(), "1 of 2");
   await click(toggle);
   await act(async () => { await delay(80); });
   assert.equal(count(), "No matches", "match case finds only the exact casing");

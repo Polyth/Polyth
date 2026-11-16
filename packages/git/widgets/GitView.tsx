@@ -2165,7 +2165,9 @@ export default function GitView({
         closeFile={() => setMobileDetail(false)}
         commitTitle={phonePage?.kind === "history" && mobileDetail && commitSel ? selectedCommit?.shortSha ?? commitSel.slice(0, 7) : null}
         closeCommit={() => { setMobileDetail(false); setCommitSel(null); }}
-        renderFileDiff={renderFileDiff}
+        // The phone diff sits in its own layer: Find paints inside it.
+        renderFileDiff={() => <div ref={findRoot} className="git-phone-find-root">{renderFileDiff()}</div>}
+        find={{ bar: find.bar, isOpen: find.open, open: find.openFind }}
         renderLog={renderLog}
         renderBranches={renderBranches}
         renderStashes={renderStashes}

@@ -2,7 +2,7 @@
 // the row (shift+click a second row to cover a range) and "Add to message",
 // which hands a `path:line` + diff snippet + comment block to the composer
 // through `host.conversation.insert`. The hunk note editor is the same editor.
-import { Fragment, createContext, useContext, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Fragment, createContext, useContext, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import type { WebPackageHost } from "@polyth/web-sdk";
 import { commentLineNumber, commentable, commentTarget, lineCommentMarkdown } from "./diffComment.ts";
 import type { DiffLine } from "./diffLines.ts";
@@ -47,6 +47,11 @@ export function LineCommentEditor({ host, label, placeholder, submitLabel, onSub
   );
 }
 
+/** Fallback when a host has no icon set: the speech bubble at icon size. */
+const CommentGlyph = ({ className }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M3 3.5h10a1 1 0 0 1 1 1V10a1 1 0 0 1-1 1H8l-3 2.5V11H3a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" /></svg>
+);
+
 const coarsePointer = (): boolean => {
   try { return typeof window !== "undefined" && Boolean(window.matchMedia?.("(pointer: coarse)").matches); } catch { return false; }
 };
@@ -70,10 +75,29 @@ export function CommentableRows({ lines, path, renderRow }: {
   const [armed, setArmed] = useState<number | null>(null);
   const [sent, setSent] = useState<number | null>(null);
   const buttons = useRef(new Map<number, HTMLElement>());
+  // One tab stop for the whole diff: the last comment button used (else the
+  // first). Up/Down/Home/End move between rows' buttons from there.
+  const [rover, setRover] = useState<number | null>(null);
   const coarse = useRef(false);
   useEffect(() => { coarse.current = coarsePointer(); });
   if (!host) return <>{lines.map((line, index) => <Fragment key={index}>{renderRow(line, index, null)}</Fragment>)}</>;
   const t = translator(host);
+  const { IconButton } = host.ui.components;
+  const commentIcon = host.ui.iconSet?.ChatIcon ?? CommentGlyph;
+  const commentableRows = lines.flatMap((line, index) => commentable(line) ? [index] : []);
+  const tabStop = rover !== null && commentableRows.includes(rover) ? rover : commentableRows[0];
+  const moveFocus = (from: number, key: string): boolean => {
+    const at = commentableRows.indexOf(from);
+    const to = key === "ArrowDown" ? commentableRows[at + 1]
+      : key === "ArrowUp" ? commentableRows[at - 1]
+      : key === "Home" ? commentableRows[0]
+      : key === "End" ? commentableRows[commentableRows.length - 1]
+      : undefined;
+    if (to === undefined || to === from) return key === "ArrowDown" || key === "ArrowUp" || key === "Home" || key === "End";
+    setRover(to);
+    buttons.current.get(to)?.focus();
+    return true;
+  };
 
   const open = (index: number, extend: boolean) => {
     setSent(null);
@@ -90,16 +114,20 @@ export function CommentableRows({ lines, path, renderRow }: {
     const number = commentLineNumber(line);
     const slot = can ? (
       <span className="git-diff-comment-slot">
-        <button
+        <IconButton
           type="button"
           className="git-diff-comment-btn"
-          ref={(node) => { if (node) buttons.current.set(index, node); else buttons.current.delete(index); }}
-          aria-label={t("diffcomment.buttonLabel", { path, line: number ?? "" })}
+          icon={commentIcon}
+          size="sm"
+          variant="ghost"
+          tabIndex={index === tabStop ? 0 : -1}
+          ref={(node: HTMLButtonElement | null) => { if (node) buttons.current.set(index, node); else buttons.current.delete(index); }}
+          label={t("diffcomment.buttonLabel", { path, line: number ?? "" })}
           title={t("diffcomment.buttonHint")}
-          onClick={(event) => { event.stopPropagation(); open(index, event.shiftKey && range !== null); }}
-        >
-          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M3 3.5h10a1 1 0 0 1 1 1V10a1 1 0 0 1-1 1H8l-3 2.5V11H3a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" /></svg>
-        </button>
+          onFocus={() => setRover(index)}
+          onKeyDown={(event: KeyboardEvent<HTMLButtonElement>) => { if (moveFocus(index, event.key)) event.preventDefault(); }}
+          onClick={(event: MouseEvent<HTMLButtonElement>) => { event.stopPropagation(); open(index, event.shiftKey && range !== null); }}
+        />
       </span>
     ) : null;
     const inRange = range !== null && index >= firstRow && index <= lastRow;

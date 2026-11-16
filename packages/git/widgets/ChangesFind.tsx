@@ -205,6 +205,16 @@ export function useChangesFind({ host, files, loadDiff, reveal, root, signature 
     }
   };
 
+  /** Opens the bar without a shortcut (the phone's search button). */
+  const openFind = () => {
+    if (!open) restore.current = (document.activeElement as HTMLElement | null) ?? null;
+    setOpen(true);
+    // The bar may mount with a layer that opens in the same tap.
+    const focus = () => { input.current?.focus(); input.current?.select(); };
+    setTimeout(focus, 0);
+    setTimeout(focus, 200);
+  };
+
   const bar = open && host ? (
     <FindBar
       host={host}
@@ -221,7 +231,7 @@ export function useChangesFind({ host, files, loadDiff, reveal, root, signature 
       onClose={close}
     />
   ) : null;
-  return { open, bar, onKeyDown, total, position: index + 1 };
+  return { open, bar, onKeyDown, openFind, total, position: index + 1 };
 }
 
 export function FindBar({ host, inputRef, query, onQuery, matchCase, onMatchCase, total, position, searching, onNext, onPrevious, onClose }: {
@@ -249,11 +259,14 @@ export function FindBar({ host, inputRef, query, onQuery, matchCase, onMatchCase
     <div className="git-find-bar" role="search" aria-label={t("diffFind.label")}
       onKeyDown={(event) => {
         if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); }
-        else if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); if (event.shiftKey) onPrevious(); else onNext(); }
+        // Enter steps through matches from the field only: on a button it
+        // must keep pressing that button (Aa, previous, next, close).
+        else if (event.key === "Enter" && event.target === inputRef.current && !event.nativeEvent.isComposing) { event.preventDefault(); if (event.shiftKey) onPrevious(); else onNext(); }
       }}>
       <TextInput ref={inputRef} uiSize="sm" className="git-find-input" value={query} placeholder={t("diffFind.placeholder")} aria-label={t("diffFind.label")} onChange={(event) => onQuery(event.target.value)} />
       <span className="git-find-count muted" role="status" aria-live="polite">{status}</span>
-      <Button size="sm" variant="ghost" aria-pressed={matchCase} title={t("diffFind.matchCase")} onClick={onMatchCase}>Aa</Button>
+      {/* "Aa" alone is no name for a screen reader; the label says what it toggles. */}
+      <Button size="sm" variant="ghost" className="git-find-case" aria-pressed={matchCase} aria-label={t("diffFind.matchCase")} title={t("diffFind.matchCase")} onClick={onMatchCase}>Aa</Button>
       <IconButton icon={ChevronUpIcon} size="sm" variant="ghost" label={t("diffFind.previous")} disabled={total === 0} onClick={onPrevious} />
       <IconButton icon={ChevronDownIcon} size="sm" variant="ghost" label={t("diffFind.next")} disabled={total === 0} onClick={onNext} />
       <IconButton icon={CloseIcon} size="sm" variant="ghost" label={t("diffFind.close")} onClick={onClose} />

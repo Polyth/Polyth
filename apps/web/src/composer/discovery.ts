@@ -12,7 +12,7 @@ import type {
   SessionMentionCandidateDto,
   ChatMentionCandidateDto,
 } from "@polyth/contracts";
-import { sessionMentionToken } from "@polyth/contracts";
+import { chatMentionInsert } from "./chatMentionDraft.ts";
 import {
   commandPrecedence,
   extensionCommandBinding,
@@ -933,7 +933,9 @@ export function chatMentionOptions(
       id: autocompleteOptionId("chat", chat.sessionId),
       label: chat.title || tr("composer.chats.untitled"),
       detail: "",
-      value: `${sessionMentionToken(chat.sessionId, chat.title)} `,
+      // The composer shows `@Title`; the send writes the link token
+      // (composer/chatMentionDraft.ts).
+      value: chatMentionInsert(chat.sessionId, chat.title).text,
       presentation,
       chat: { sessionId: chat.sessionId, title: chat.title },
     }));

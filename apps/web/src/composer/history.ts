@@ -1,4 +1,5 @@
 import type { AttachmentRef, PromptHistoryEntryDto } from "@polyth/contracts";
+import { collapseChatMentions } from "./chatMentionDraft.ts";
 
 export interface PromptHistoryDraft {
   text: string;
@@ -161,8 +162,14 @@ export function paletteEntries(
   return out;
 }
 
-/** Every typed word must appear somewhere in the prompt (case-insensitive,
- *  any order). An empty query keeps the newest-first order unchanged. */
+/** A prompt as a person reads it: a chat mention token shows as `@Title`, not
+ *  its link markup and session id. */
+export function promptDisplayText(text: string): string {
+  return collapseChatMentions(text).text;
+}
+
+/** Every typed word must appear somewhere in the prompt as it is shown
+ *  (case-insensitive, any order). An empty query keeps the newest-first order. */
 export function filterPromptHistory(
   entries: readonly PromptHistoryEntryDto[],
   query: string,
@@ -170,7 +177,7 @@ export function filterPromptHistory(
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (words.length === 0) return entries.slice();
   return entries.filter((entry) => {
-    const hay = entry.text.toLowerCase();
+    const hay = promptDisplayText(entry.text).toLowerCase();
     return words.every((word) => hay.includes(word));
   });
 }
