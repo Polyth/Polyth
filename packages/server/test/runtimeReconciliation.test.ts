@@ -1804,7 +1804,7 @@ test("tool watchdog aborts a stuck execution and records the failure for the age
   assert.equal(aborts, 1);
   assert.match(
     String((events.find((event) => event.type === "tool/error")?.data as { error?: unknown })?.error),
-    /stopped after exceeding the 25ms execution safety limit/,
+    /stopped after 25ms without output/,
   );
   assert.equal(events.at(-1)?.type, "turn/stopped");
   assert.equal((await store.projection("session-stuck-tool"))?.status, "idle");

@@ -2055,6 +2055,46 @@ export interface BackgroundWorkState {
   };
 }
 
+/** Background work a session still has live: what a parent needs to know when
+ *  an otherwise finished child goes idle. */
+export interface SessionLiveBackgroundWork {
+  count: number;
+  /** At most three short names. */
+  names: string[];
+}
+
+/** Live background work of a session, or undefined when it has none.
+ *  Native harness tasks count unless the process that ran them was lost. */
+export const liveBackgroundWork = (
+  projection: Pick<SessionProjection, "backgroundWork"> & { nativeBackgroundTasks?: unknown },
+): SessionLiveBackgroundWork | undefined => {
+  const names: string[] = [];
+  let count = 0;
+  const native = projection.nativeBackgroundTasks as
+    | { tasks?: Array<{ id?: string; description?: string; kind?: string }>; lost?: unknown }
+    | undefined;
+  if (native && !native.lost && Array.isArray(native.tasks)) {
+    for (const task of native.tasks) {
+      count += 1;
+      const label = (task.description ?? task.kind ?? task.id ?? "task").replace(/\s+/g, " ").trim();
+      names.push(label.length > 40 ? `${label.slice(0, 39)}…` : label);
+    }
+  }
+  const work = projection.backgroundWork;
+  for (const kind of ["multirun", "fusion", "workflow"] as const) {
+    const n = work?.[kind] ?? 0;
+    if (n > 0) {
+      count += n;
+      names.push(n > 1 ? `${kind} ×${n}` : kind);
+    }
+  }
+  return count > 0 ? { count, names: names.slice(0, 3) } : undefined;
+};
+
+/** "idle, but 2 background tasks still running: a, b" */
+export const liveBackgroundWorkNote = (work: SessionLiveBackgroundWork): string =>
+  `idle, but ${work.count} background ${work.count === 1 ? "task" : "tasks"} still running: ${work.names.join(", ")}${work.count > work.names.length ? ", …" : ""}`;
+
 export type WorktreeState = "ready" | "bootstrapping" | "busy" | "missing";
 
 /** Isolation lifecycle is independent of agent runtime status (`idle`/`working`). */

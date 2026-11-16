@@ -167,8 +167,18 @@ starts Node or OpenCode. See `docs/mobile/architecture.md`.
   recovery legitimately re-derives a turn Polyth had lost — fencing it would
   drop recovered work. Closing that gap needs a recovery-aware admission rule,
   not a blanket refusal.
-  Tool watchdog: one tool execution over `toolExecutionTimeoutMs` (default ten
-  minutes) is hard-stopped — a hung tool is never left running, and its abort is
+  Tool watchdog: one tool call with no observed activity for
+  `toolExecutionTimeoutMs` (default ten minutes) is stopped; "activity" is any
+  runtime event carrying the call's id after `tool/started` (a repeated
+  `tool/started` or `tool/call{running}`, as ACP and OpenCode emit for input and
+  status updates). A call that keeps showing activity still ends at
+  `toolExecutionHardLimitMs` (default sixty minutes) from its start; a harness
+  that never repeats a call event is stopped ten minutes after the start. No
+  adapter streams output deltas as call events yet, so for most harnesses this
+  is still ten minutes from start. Human approval waits pause the clock but do
+  not extend the ceiling. The error says the call was stopped without output
+  and to run long commands in the background; the server-owned global behaviour
+  (`longRunningWorkBehaviorSection`) tells every harness the same. A hung tool is never left running, and its abort is
   journaled as `turn-abort` with `turn/abort-requested{reason:"tool-timeout",
   source:"tool-watchdog"}` plus a model-visible `tool/error`. Other tools
   canceled with that turn receive a separate cancellation error; only the

@@ -23,6 +23,8 @@ Decide per child with `agent.spawn` `isolation`:
 - `shared` (default): the child runs in the delegator's checkout, sees its uncommitted files and writes straight into them. Use it for read-only exploration and review, small sequential edits, and work that needs uncommitted context.
 - `isolated`: Polyth gives the child its own managed Git worktree (`polyth/isolate/<id>`) branched from the delegator's last commit, with merge-back pointed at the delegator's checkout. Use it for parallel implementers whose write sets could collide, risky or experimental changes, and work that may be thrown away. When the delegator itself runs in an isolated checkout (or shares one as a child), the new child nests inside it: its merge lands on that isolate branch and reaches the project branch only through the owner's own merge.
 
+A completion wake whose child still has live background work (native harness background tasks that were not lost, or multirun/fusion/workflow counts) adds `Background work: idle, but N background tasks still running: <names>`. The note is frozen into the child's `turn/stopped` event (`background`) when it is written, so a retried wake replays identical text; `session.get` shows the live `backgroundWork` note while the child is idle. Watch firing is unchanged.
+
 An isolated spawn returns the worktree, branch and merge target, reports how many uncommitted delegator files the child cannot see, and arms a one-shot completion wake unless `watchCaller=false`.
 
 A person may pause a child from the subagent list. The delegator is woken with `paused` (the watch stays armed), sees `paused: true` in `session.get`, and must not message, replace or restart that child: only the person continues or stops it ([watch semantics](architecture.md)).

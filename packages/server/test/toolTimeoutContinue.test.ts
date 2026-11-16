@@ -30,7 +30,10 @@ const waitFor = async (
   throw new Error("condition was not reached");
 };
 
-const harness = (options: { continueLimit?: number; dir?: string; reconcileRetryDelaysMs?: number[] } = {}) => {
+const harness = (options: {
+  continueLimit?: number; dir?: string; reconcileRetryDelaysMs?: number[];
+  toolExecutionTimeoutMs?: number; toolExecutionHardLimitMs?: number;
+} = {}) => {
   const listeners = new Set<(sessionId: string, event: RuntimeEvent) => void>();
   const observers = new Set<(sessionId: string, observation: RuntimeObservation) => void>();
   const startedTexts: string[] = [];
@@ -112,7 +115,8 @@ const harness = (options: { continueLimit?: number; dir?: string; reconcileRetry
     broadcast,
     queue: store,
     runtimes: { forProject: async () => runtime },
-    toolExecutionTimeoutMs: 30,
+    toolExecutionTimeoutMs: options.toolExecutionTimeoutMs ?? 30,
+    ...(options.toolExecutionHardLimitMs === undefined ? {} : { toolExecutionHardLimitMs: options.toolExecutionHardLimitMs }),
     ...(options.reconcileRetryDelaysMs ? { reconcileRetryDelaysMs: options.reconcileRetryDelaysMs } : {}),
     ...(options.continueLimit === undefined
       ? {}
@@ -239,7 +243,7 @@ test("a pending package approval does not shield an unrelated runaway tool", asy
   h.emit(id, { type: "tool/started", callId: "runaway", tool: "shell", input: {} });
   await waitFor(() => h.aborted.length === 1);
   const failure = (await h.store.events(id)).find(event => event.type === "tool/error" && event.data.callId === "runaway");
-  assert.match(String(failure?.data.error), /stopped after exceeding/);
+  assert.match(String(failure?.data.error), /stopped after .* without output/);
   controller.abort();
   assert.equal(await decision, "deny");
 });
@@ -274,7 +278,7 @@ test("a stuck tool is stopped and the cut turn is continued with a hidden nudge"
   assert.ok(toolError, "the runaway tool is still recorded as a model-visible failure");
   assert.match(
     String((toolError!.data as { error?: unknown }).error),
-    /stopped after exceeding the .* execution safety limit/,
+    /stopped after .* without output/,
   );
   assert.deepEqual(h.aborted, [id], "the runaway execution is hard-stopped, not merely nudged");
 
@@ -308,7 +312,7 @@ test("the watchdog identifies the timed-out call among concurrent tools", async 
     const data = event.data as { callId?: string; error?: string };
     return [data.callId, data.error];
   }));
-  assert.match(byCall.stuck ?? "", /stopped after exceeding/);
+  assert.match(byCall.stuck ?? "", /stopped after .* without output/);
   assert.equal(byCall.neighbor, "Canceled because another tool exceeded its execution safety limit.");
   assert.equal((await h.store.projection(id))?.status, "idle");
   await h.store.close();
@@ -442,4 +446,58 @@ test("the status re-probe is bounded when the runtime never answers", async (t) 
   const blocked = (await h.store.events(id)).filter((event) => event.type === "reconciliation/blocked").length;
   assert.equal(blocked, 3, "the first settle plus exactly two re-probes");
   assert.equal((await nudges(h.store, id)).length, 0);
+});
+
+const toolErrors = async (store: ReturnType<typeof createStore>, sessionId: string, callId: string) =>
+  (await store.events(sessionId)).filter((event) => event.type === "tool/error" && event.data.callId === callId);
+
+test("a call that keeps showing activity survives past the silence limit, then is stopped once it goes quiet", async (t) => {
+  const h = harness({ continueLimit: 0, toolExecutionTimeoutMs: 200, toolExecutionHardLimitMs: 60_000 });
+  t.after(() => { h.sessions.dispose(); return h.store.close(); });
+  const { id } = await h.sessions.create({ projectId: "p1", title: "Chatty tool" });
+  await h.sessions.send(id, { text: "long read loop" });
+  const input = { command: "for f in *; do cat $f; done" };
+  h.emit(id, { type: "tool/started", callId: "loop", tool: "shell", input });
+  // Well past the 200ms silence limit in total, never silent for 200ms.
+  for (let step = 0; step < 12; step += 1) {
+    await flush(50);
+    h.emit(id, { type: "tool/call", callId: "loop", tool: "shell", input, status: "running" });
+  }
+  assert.deepEqual(h.aborted, [], "activity every 50ms keeps a 200ms-silence call alive for 600ms");
+  const quietSince = Date.now();
+  await waitFor(() => h.aborted.length === 1);
+  assert.ok(Date.now() - quietSince >= 150, "the limit counts from the last activity");
+  const [failure] = await toolErrors(h.store, id, "loop");
+  assert.match(String(failure?.data.error), /stopped after 200ms without output.*background/s);
+});
+
+test("a call with activity is still stopped at the hard ceiling", async (t) => {
+  const h = harness({ continueLimit: 0, toolExecutionTimeoutMs: 200, toolExecutionHardLimitMs: 500 });
+  t.after(() => { h.sessions.dispose(); return h.store.close(); });
+  const { id } = await h.sessions.create({ projectId: "p1", title: "Endless chatty tool" });
+  await h.sessions.send(id, { text: "never ends" });
+  const input = { command: "tail -f log" };
+  const startedAt = Date.now();
+  h.emit(id, { type: "tool/started", callId: "forever", tool: "shell", input });
+  while (h.aborted.length === 0 && Date.now() - startedAt < 3_000) {
+    await flush(40);
+    h.emit(id, { type: "tool/started", callId: "forever", tool: "shell", input });
+  }
+  assert.equal(h.aborted.length, 1);
+  assert.ok(Date.now() - startedAt >= 450, "not stopped by the silence limit while active");
+  await waitFor(async () => (await toolErrors(h.store, id, "forever")).length === 1);
+  const [failure] = await toolErrors(h.store, id, "forever");
+  assert.match(String(failure?.data.error), /hard execution limit/);
+});
+
+test("a harness that emits nothing after the start is stopped at the silence limit from the start", async (t) => {
+  const h = harness({ continueLimit: 0, toolExecutionTimeoutMs: 120, toolExecutionHardLimitMs: 60_000 });
+  t.after(() => { h.sessions.dispose(); return h.store.close(); });
+  const { id } = await h.sessions.create({ projectId: "p1", title: "Silent tool" });
+  await h.sessions.send(id, { text: "silent" });
+  const startedAt = Date.now();
+  h.emit(id, { type: "tool/started", callId: "mute", tool: "shell", input: {} });
+  await waitFor(() => h.aborted.length === 1);
+  assert.ok(Date.now() - startedAt >= 100);
+  assert.ok(Date.now() - startedAt < 2_000);
 });

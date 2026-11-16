@@ -74,6 +74,7 @@ import { redactSecrets } from "@polyth/plugins";
 import type { SessionStartStep, WorkspaceCheckpointService, WorkspaceCheckpointTurn, WorkspaceRestoreInput } from "@polyth/plugins";
 import type { RewindFilesOutcome, RewindFilesPreview, RewindFilesUnavailableReason, RewindRestorePreview, WorkspaceCheckpointData } from "@polyth/contracts";
 import { cwdInsideRoot, rewindCheckpointTurns, WORKSPACE_CHECKPOINT_EVENT } from "./rewindFiles.ts";
+import { liveBackgroundWork } from "@polyth/contracts";
 import { isolationBlocksUserMutation, isolationNeedsRecovery, isManagedIsolationBranch, normalizeIsolation, publishedIsolationMerge } from "@polyth/contracts";
 import {
   projectRepositories,
@@ -245,14 +246,17 @@ const fingerprintClientAdmission = ({ author: _author, ...input }: UserTurnInput
 export const toolTimeoutContinuePrompt = (
   active: { tool: string; input: JsonObject },
   limit: string,
+  cause: "silence" | "hard-limit" = "silence",
 ): string => {
   const command = typeof active.input.command === "string" ? active.input.command : undefined;
   const stopped = command
     ? `\nThe stopped call was: ${command.replace(/\s+/g, " ").trim().slice(0, 300)}`
     : "";
   return [
-    `[polyth] Tool watchdog: your \`${active.tool}\` call was stopped after exceeding the ${limit} execution safety limit, so that run is incomplete and its output was discarded.${stopped}`,
-    "Everything you already did — your reasoning, earlier tool results, and the files you read — is intact, and this turn continues from exactly there. Do not repeat that call. Continue with bounded work instead: read one file at a time, cap piped output, and pass an explicit timeout to any long command. If the deliverable is already complete, write it and finish.",
+    cause === "silence"
+      ? `[polyth] Tool watchdog: your \`${active.tool}\` call was stopped after ${limit} without output, so that run is incomplete and its output was discarded.${stopped}`
+      : `[polyth] Tool watchdog: your \`${active.tool}\` call was stopped at the ${limit} hard execution limit, so that run is incomplete and its output was discarded.${stopped}`,
+    "Everything you already did — your reasoning, earlier tool results, and the files you read — is intact, and this turn continues from exactly there. Do not repeat that call. Run long commands in the background (the harness's background option, or `nohup … > file 2>&1 &`) and check on them, or continue with bounded work: read one file at a time and cap piped output. If the deliverable is already complete, write it and finish.",
   ].join("\n\n");
 };
 
@@ -1038,9 +1042,13 @@ export function createSessionService(deps: {
       accessRequest?: PersonAccessRequest;
     }): void;
   };
-  /** Hard ceiling for one runtime tool execution. A hung tool is aborted and
-   * recorded as a model-visible tool/error. Defaults to ten minutes. */
+  /** Silence limit for one runtime tool execution: a call with no observed
+   * activity for this long is aborted and recorded as a model-visible
+   * tool/error. Defaults to ten minutes. */
   toolExecutionTimeoutMs?: number;
+  /** Absolute ceiling for one tool call even while it keeps showing activity.
+   *  Defaults to sixty minutes. `toolExecutionTimeoutMs` is the silence limit. */
+  toolExecutionHardLimitMs?: number;
   /** Consecutive tool-watchdog aborts that may auto-continue the turn with a
    *  hidden continuation prompt. 0 disables the nudge. Defaults to 1. */
   toolTimeoutContinueLimit?: number;
@@ -1455,6 +1463,10 @@ export function createSessionService(deps: {
   // so reconciliation can take over instead of leaving the control disabled.
   const ABORT_AWAIT_MS = 8_000;
   const TOOL_EXECUTION_TIMEOUT_MS = deps.toolExecutionTimeoutMs ?? 10 * 60_000;
+  const TOOL_EXECUTION_HARD_LIMIT_MS = Math.max(
+    TOOL_EXECUTION_TIMEOUT_MS,
+    deps.toolExecutionHardLimitMs ?? 60 * 60_000,
+  );
   // A tool that never returns must still be stopped, but a forced abort is not
   // a reason to throw away the turn's work: the agent is nudged forward with a
   // hidden continuation prompt instead (bounded, never a replay of the whole
@@ -1476,6 +1488,9 @@ export function createSessionService(deps: {
   const unadmittedContentFences = new Map<string, number>();
   const toolWatchdogs = new Map<string, NodeJS.Timeout>();
   const pausedToolWatchdogs = new Set<string>();
+  // Per-call clock: when it started and when a runtime event last carried its
+  // id. Survives a request pause so the hard ceiling is not reset by waiting.
+  const toolWatchdogClocks = new Map<string, { startedAt: number; lastActivityAt: number }>();
   const toolWatchdogKey = (sessionId: string, callId: string): string => `${sessionId}\0${callId}`;
   const clearToolWatchdog = (sessionId: string, callId: string): void => {
     const key = toolWatchdogKey(sessionId, callId);
@@ -1483,6 +1498,7 @@ export function createSessionService(deps: {
     if (timer) clearTimeout(timer);
     toolWatchdogs.delete(key);
     pausedToolWatchdogs.delete(key);
+    toolWatchdogClocks.delete(key);
   };
   const clearSessionToolWatchdogs = (sessionId: string): void => {
     for (const [key, timer] of toolWatchdogs) {
@@ -1492,6 +1508,9 @@ export function createSessionService(deps: {
     }
     for (const key of pausedToolWatchdogs) {
       if (key.startsWith(`${sessionId}\0`)) pausedToolWatchdogs.delete(key);
+    }
+    for (const key of toolWatchdogClocks.keys()) {
+      if (key.startsWith(`${sessionId}\0`)) toolWatchdogClocks.delete(key);
     }
   };
   type ActiveTool = { tool: string; input: JsonObject; startedAt: number };
@@ -1517,22 +1536,60 @@ export function createSessionService(deps: {
     for (const event of events) foldActiveTool(active, event);
     return active;
   };
+  /** Arm (or re-arm) the silence watchdog for one call. The call is stopped
+   *  after TOOL_EXECUTION_TIMEOUT_MS without activity, or at the hard ceiling
+   *  from its start, whichever comes first. A harness that never repeats a
+   *  call-bearing event is therefore stopped ten minutes after it started. */
   function armToolWatchdog(
     sessionId: string,
     callId: string,
     startedAt = Date.now(),
+    lastActivityAt = startedAt,
   ): void {
     if (serviceDisposed || TOOL_EXECUTION_TIMEOUT_MS <= 0) return;
-    clearToolWatchdog(sessionId, callId);
-    const timer = setTimeout(() => {
-      toolWatchdogs.delete(toolWatchdogKey(sessionId, callId));
-      void stopTimedOutTool(sessionId, callId).catch((error) => {
-        console.error(`[polyth] failed to stop timed-out tool ${callId} in ${sessionId}`, error);
-      });
-    }, Math.max(0, TOOL_EXECUTION_TIMEOUT_MS - (Date.now() - startedAt)));
-    timer.unref?.();
-    toolWatchdogs.set(toolWatchdogKey(sessionId, callId), timer);
+    const key = toolWatchdogKey(sessionId, callId);
+    const pending = toolWatchdogs.get(key);
+    if (pending) clearTimeout(pending);
+    toolWatchdogs.delete(key);
+    pausedToolWatchdogs.delete(key);
+    toolWatchdogClocks.set(key, { startedAt, lastActivityAt });
+    const schedule = (): void => {
+      const clock = toolWatchdogClocks.get(key);
+      if (!clock) return;
+      const deadline = Math.min(
+        clock.lastActivityAt + TOOL_EXECUTION_TIMEOUT_MS,
+        clock.startedAt + TOOL_EXECUTION_HARD_LIMIT_MS,
+      );
+      const timer = setTimeout(() => {
+        toolWatchdogs.delete(key);
+        const current = toolWatchdogClocks.get(key);
+        if (!current) return;
+        const now = Date.now();
+        const silent = now - current.lastActivityAt >= TOOL_EXECUTION_TIMEOUT_MS;
+        const capped = now - current.startedAt >= TOOL_EXECUTION_HARD_LIMIT_MS;
+        // Timers can fire a hair early; activity may also have landed meanwhile.
+        if (!silent && !capped) {
+          schedule();
+          return;
+        }
+        void stopTimedOutTool(sessionId, callId, silent ? "silence" : "hard-limit").catch((error) => {
+          console.error(`[polyth] failed to stop timed-out tool ${callId} in ${sessionId}`, error);
+        });
+      }, Math.max(0, deadline - Date.now()));
+      timer.unref?.();
+      toolWatchdogs.set(key, timer);
+    };
+    schedule();
   }
+  /** A runtime event carrying this call's id proves it is alive. The timer is
+   *  left alone: it re-checks the clock when it fires, so a chatty call costs
+   *  one map write per event rather than a timer reset. */
+  const noteToolActivity = (sessionId: string, callId: string): boolean => {
+    const clock = toolWatchdogClocks.get(toolWatchdogKey(sessionId, callId));
+    if (!clock) return false;
+    clock.lastActivityAt = Date.now();
+    return true;
+  };
   const toolAwaitingRequest = (sessionId: string, callId: string, tool: string, facts: LogFacts): boolean =>
     [facts.openPermissions, facts.openQuestions, facts.openSecrets].some((requests) =>
       [...requests].some(([requestId, request]) =>
@@ -1565,17 +1622,23 @@ export function createSessionService(deps: {
         toolWatchdogs.delete(key);
         pausedToolWatchdogs.add(key);
       } else if (pausedToolWatchdogs.delete(key)) {
-        armToolWatchdog(sessionId, callId);
+        // Human latency is not tool silence, but it does not extend the ceiling.
+        armToolWatchdog(sessionId, callId, toolWatchdogClocks.get(key)?.startedAt ?? Date.now(), Date.now());
       }
     }
   };
 
   async function updateToolWatchdog(sessionId: string, event: RuntimeEvent): Promise<void> {
     if (event.type === "tool/started" || (event.type === "tool/call" && event.status === "running")) {
-      armToolWatchdog(sessionId, event.callId);
+      // A repeat of an armed call (input refinement, status update) is activity,
+      // not a new call: it must not restart the hard-ceiling clock.
+      if (!pausedToolWatchdogs.has(toolWatchdogKey(sessionId, event.callId)) && noteToolActivity(sessionId, event.callId)) return;
+      armToolWatchdog(sessionId, event.callId, toolWatchdogClocks.get(toolWatchdogKey(sessionId, event.callId))?.startedAt);
       await syncToolWatchdogsForRequests(sessionId);
     } else if (event.type === "tool/result" || event.type === "tool/error") {
       clearToolWatchdog(sessionId, event.callId);
+    } else if (event.type === "tool/call") {
+      noteToolActivity(sessionId, event.callId);
     } else if (event.type === "turn/stopped") {
       clearSessionToolWatchdogs(sessionId);
     } else if (event.type === "permission/requested" || event.type === "question/asked" || event.type === "secret/requested") {
@@ -5651,6 +5714,12 @@ export function createSessionService(deps: {
         // Whichever leg reports the stop (the runtime, Stop's local fallback,
         // reconciliation), Pause's abort request makes it a paused one.
         const pausing = effectiveReason === "aborted" && pauseRequested(await store.events(sessionId));
+        // Background work the child still has when its turn completes, frozen
+        // into the terminal fact: a parent's wake text is derived from it and
+        // must replay identically on retry, whatever the child does later.
+        const liveBackground = effectiveReason === "completed"
+          ? liveBackgroundWork((await store.projection(sessionId)) ?? {})
+          : undefined;
         const stopped = await persist(sessionId, "turn/stopped", {
           turnId: ev.turnId ?? lastTurnId.get(sessionId) ?? ev.type,
           reason: effectiveReason,
@@ -5658,6 +5727,7 @@ export function createSessionService(deps: {
           ...(ev.code ? { code: ev.code } : {}),
           ...(retry ? { retry: retry as unknown as JsonObject } : {}),
           ...(pausing ? { paused: true } : {}),
+          ...(liveBackground ? { background: liveBackground as unknown as JsonObject } : {}),
         }, { ignorable: true });
         // Replay hands back the persisted row: its flag is the fact.
         const paused = stopped !== undefined && (stopped.data as { paused?: unknown }).paused === true;
@@ -9992,6 +10062,7 @@ export function createSessionService(deps: {
   async function stopTimedOutTool(
     sessionId: string,
     callId: string,
+    cause: "silence" | "hard-limit" = "silence",
   ): Promise<void> {
     const continuation = await withSessionLock(sessionId, async () => {
       if (serviceDisposed) return undefined;
@@ -10004,16 +10075,19 @@ export function createSessionService(deps: {
         await syncToolWatchdogsForRequests(sessionId);
         return undefined;
       }
-      const duration = TOOL_EXECUTION_TIMEOUT_MS >= 60_000
-        ? `${Math.round(TOOL_EXECUTION_TIMEOUT_MS / 60_000)} minutes`
-        : `${TOOL_EXECUTION_TIMEOUT_MS}ms`;
+      const limitMs = cause === "silence" ? TOOL_EXECUTION_TIMEOUT_MS : TOOL_EXECUTION_HARD_LIMIT_MS;
+      const duration = limitMs >= 60_000
+        ? `${Math.round(limitMs / 60_000)} minutes`
+        : `${limitMs}ms`;
       const allowed = (toolTimeoutContinues.get(sessionId) ?? 0) < TOOL_TIMEOUT_CONTINUE_LIMIT;
-      const text = allowed ? toolTimeoutContinuePrompt(active, duration) : undefined;
+      const text = allowed ? toolTimeoutContinuePrompt(active, duration, cause) : undefined;
       if (text) toolTimeoutContinues.set(sessionId, (toolTimeoutContinues.get(sessionId) ?? 0) + 1);
       const kind = await abortTurnUnderLock(
         sessionId,
         "tool-timeout",
-        `${active.tool} was stopped after exceeding the ${duration} execution safety limit. Retry with a shorter command or an explicit timeout.`,
+        cause === "silence"
+          ? `${active.tool} was stopped after ${duration} without output. Run long commands in the background (the harness's background option, or \`nohup … > file 2>&1 &\`) and check on them instead of waiting.`
+          : `${active.tool} was stopped at the ${duration} hard execution limit. Run long commands in the background and check on them instead of waiting.`,
         text ? "tool-watchdog" : undefined,
         callId,
       );

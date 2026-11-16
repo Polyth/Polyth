@@ -3,10 +3,11 @@ import type {
   JsonObject,
   SessionEvent,
   SessionProjection,
+  SessionLiveBackgroundWork,
   SessionService,
   SpaceContext,
 } from "@polyth/contracts";
-import { SESSION_PAUSE_ENDED_EVENT, SESSION_START_FAILED_EVENT } from "@polyth/contracts";
+import { liveBackgroundWorkNote, SESSION_PAUSE_ENDED_EVENT, SESSION_START_FAILED_EVENT } from "@polyth/contracts";
 import type {
   DurableSessionWatch,
   DurableSessionWatchStop,
@@ -80,6 +81,14 @@ const canonicalEvents = (events: ServerSessionWatchReason[] | undefined): Server
   return REASONS.filter((reason) => selected.has(reason));
 };
 
+/** The note was frozen into the terminal event when it was written; read it
+ *  back verbatim so a retried delivery replays identical text. */
+const storedBackground = (data: JsonObject): SessionLiveBackgroundWork | undefined => {
+  const value = data.background as { count?: unknown; names?: unknown } | undefined;
+  if (!value || typeof value.count !== "number" || value.count <= 0 || !Array.isArray(value.names)) return undefined;
+  return { count: value.count, names: value.names.filter((name): name is string => typeof name === "string") };
+};
+
 const dto = (watch: DurableSessionWatch): ServerSessionWatchDto => ({
   id: watch.id,
   sourceSessionId: watch.sourceSessionId,
@@ -97,6 +106,7 @@ const messageFor = (
   reason: ServerSessionWatchReason,
   stopSeq: number,
   targetSessionId: string,
+  background?: SessionLiveBackgroundWork,
 ): string => {
   if (reason === "paused") {
     return [
@@ -115,6 +125,9 @@ const messageFor = (
     `Session: ${source.id}`,
     `Project: ${source.projectId}`,
     `Result: ${status}`,
+    ...(reason === "completed" && background
+      ? [`Background work: ${liveBackgroundWorkNote(background)}. It is not finished: wait for it or check on it before treating the child's result as final.`]
+      : []),
     `Terminal event seq: ${stopSeq}`,
     "",
     "Inspect that session with the Polyth session tools if its result matters, then continue your orchestration task.",
@@ -180,6 +193,7 @@ export function createSessionWatchCoordinator(deps: {
     source: SessionProjection,
     reason: ServerSessionWatchReason,
     stopSeq: number,
+    background?: SessionLiveBackgroundWork,
   ): Promise<void> => {
     let operationId = watch.pendingSeq === stopSeq ? watch.pendingOperationId : undefined;
     if (!operationId) {
@@ -192,7 +206,7 @@ export function createSessionWatchCoordinator(deps: {
       if (!updated) return fail("not-found", "session watch disappeared before delivery");
     }
     await deps.sessions().send(watch.targetSessionId, {
-      text: messageFor(source, reason, stopSeq, watch.targetSessionId),
+      text: messageFor(source, reason, stopSeq, watch.targetSessionId, background),
       delivery: "normal",
       hiddenUserMessage: true,
       clientOperationId: operationId,
@@ -256,7 +270,7 @@ export function createSessionWatchCoordinator(deps: {
         if (current.delivery === "observe") {
           await appendObservation(current, source, reason, stop.seq);
         } else {
-          await wake(current, source, reason, stop.seq);
+          await wake(current, source, reason, stop.seq, storedBackground(stop.data));
         }
         // A pause is not the end: even a one-shot watch stays armed for it.
         if (reason === "paused") {

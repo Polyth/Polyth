@@ -10,7 +10,7 @@ import type {
   SpaceContext,
   ToolExecutionContext,
 } from "@polyth/contracts";
-import { isolationBlocksUserMutation } from "@polyth/contracts";
+import { isolationBlocksUserMutation, liveBackgroundWork, liveBackgroundWorkNote } from "@polyth/contracts";
 import {
   SERVER_DELEGATION_POLICY,
   SERVER_MODEL_ROUTING,
@@ -314,6 +314,11 @@ const publicProject = (project: Project): JsonObject => ({
   remote: Boolean(project.remote),
 });
 
+const backgroundNoteFields = (session: SessionProjection): JsonObject => {
+  const work = liveBackgroundWork(session);
+  return work ? { backgroundWork: liveBackgroundWorkNote(work) } : {};
+};
+
 const publicSession = (session: SessionProjection): JsonObject => ({
   id: session.id,
   projectId: session.projectId,
@@ -328,6 +333,8 @@ const publicSession = (session: SessionProjection): JsonObject => ({
   updatedAt: session.updatedAt,
   // A person paused it: idle, but its work is not over.
   ...(session.paused ? { paused: true } : {}),
+  // Idle, but background work it started is still running.
+  ...(session.status === "idle" ? backgroundNoteFields(session) : {}),
 });
 
 const diagnosticEvent = (type: string): boolean =>

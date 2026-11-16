@@ -181,7 +181,7 @@ test("the watchdog still stops a runaway tool once earlier calls finished", asyn
   await waitFor(() => h.aborted.length === 1);
   const errors = (await h.store.events(id)).filter((event) => event.type === "tool/error");
   assert.deepEqual(errors.map((event) => event.data.callId), ["runaway"], "only the still-running call is stopped");
-  assert.match(String(errors[0]?.data.error), /stopped after exceeding/);
+  assert.match(String(errors[0]?.data.error), /stopped after 80ms without output/);
 });
 
 test("a restart re-arms only the current turn's running tool", async (t) => {
@@ -208,7 +208,7 @@ test("a restart re-arms only the current turn's running tool", async (t) => {
   assert.deepEqual(errors.map((event) => event.data.callId), ["running"]);
   // A timer re-armed for the earlier turn's call would fire first and report
   // the running tool as "canceled because another tool exceeded" instead.
-  assert.match(String(errors[0]?.data.error), /stopped after exceeding/, "only the current turn's tool is re-armed");
+  assert.match(String(errors[0]?.data.error), /stopped after 80ms without output/, "only the current turn's tool is re-armed");
 });
 
 test("a streaming turn's quiet check reads cached facts and still reconciles once the stream goes silent", async (t) => {
