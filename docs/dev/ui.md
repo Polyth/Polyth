@@ -5789,6 +5789,10 @@ click everywhere else.
   the code starts at the body's own padding, instead of under an empty 29px
   band. The floating control reserves the first line's end (`pre`
   `padding-inline-end`), so a long line scrolls rather than passing beneath it.
+  While a message streams, a still-open fence is not re-tokenized per delta: it
+  renders the last highlighted snapshot plus the escaped new tail in the same
+  `<pre><code>` (snapshot refreshed at most every 300 ms, trailing), so the box
+  never shifts; closed fences and finished or historical messages highlight at once.
 - **Provider bodies.** Change-request and issue descriptions and comments
   (GitHub, GitLab) render through `HostingBody`
   (`packages/code-hosting/widgets/HostingBody.tsx`), which splits the text and
