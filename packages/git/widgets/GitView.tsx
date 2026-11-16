@@ -2407,6 +2407,11 @@ export default function GitView({
               )}
             </div>
             <span className="header-spacer" />
+            {reviewView === "working" && all.length > 0 && host && (
+              <Button size="sm" variant="ghost" iconStart={SearchIcon} aria-expanded={find.open} aria-keyshortcuts="Control+F Meta+F"
+                title={tr("diffFind.openHint", { shortcut: /Mac|iPhone|iPad/.test(globalThis.navigator?.platform ?? "") ? "⌘F" : "Ctrl+F" })}
+                onClick={find.openFind}>{tr("diffFind.open")}</Button>
+            )}
             {reviewView === "working" && <ViewOptionsMenu prefs={prefs} />}
           </div>
 

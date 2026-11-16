@@ -16,9 +16,11 @@ type Translate = (key: string, values?: Record<string, string | number>) => stri
 const translator = (host: WebPackageHost): Translate => (key, values) => host.ui.locale.translate(key, values);
 
 /** The one comment editor: line comments and hunk notes both use it. */
-export function LineCommentEditor({ host, label, placeholder, submitLabel, onSubmit, onCancel, restoreFocus }: {
+export function LineCommentEditor({ host, label, placeholder, hint, submitLabel, onSubmit, onCancel, restoreFocus }: {
   host: WebPackageHost;
   label: string;
+  /** One quiet line under the field (how to widen the range). */
+  hint?: string;
   placeholder?: string;
   submitLabel: string;
   onSubmit: (text: string) => void;
@@ -39,6 +41,7 @@ export function LineCommentEditor({ host, label, placeholder, submitLabel, onSub
   return (
     <div className="review-draft git-diff-comment-editor" role="group" aria-label={label} onKeyDown={onKeyDown}>
       <Textarea autoFocus rows={3} aria-label={label} {...(placeholder ? { placeholder } : {})} value={text} onChange={(event) => setText(event.target.value)} />
+      {hint && <p className="git-diff-comment-hint muted">{hint}</p>}
       <div className="commit-row">
         <Button size="sm" variant="ghost" onClick={cancel}>{t("common.cancel")}</Button>
         <Button size="sm" variant="primary" disabled={empty} onClick={submit}>{submitLabel}</Button>
@@ -135,10 +138,11 @@ export function CommentableRows({ lines, path, renderRow }: {
     return (
       <Fragment key={index}>
         {renderRow(line, index, extras)}
-        {can && armed === index && range === null && (
+        {can && armed === index && !(range !== null && index >= firstRow && index <= lastRow) && (
           <div className="git-diff-comment-strip">
-            <button type="button" className="git-diff-comment-tap" onClick={() => { setArmed(null); open(index, false); }}>
-              {t("diffcomment.button")} <span className="mono">{commentTarget(path, [line])}</span>
+            {/* With a comment already open, a tap widens it instead of starting another. */}
+            <button type="button" className="git-diff-comment-tap" onClick={() => { setArmed(null); open(index, range !== null); }}>
+              {t(range !== null ? "diffcomment.extend" : "diffcomment.button")} <span className="mono">{commentTarget(path, [line])}</span>
             </button>
           </div>
         )}
@@ -148,6 +152,7 @@ export function CommentableRows({ lines, path, renderRow }: {
             host={host}
             label={t("diffcomment.editorLabel", { target: commentTarget(path, covered) })}
             placeholder={t("diffcomment.placeholder")}
+            hint={t(coarse.current ? "diffcomment.rangeHintTouch" : "diffcomment.rangeHint")}
             submitLabel={t("diffcomment.add")}
             restoreFocus={focusButton(index)}
             onCancel={close}
@@ -158,7 +163,7 @@ export function CommentableRows({ lines, path, renderRow }: {
             }}
           />
         )}
-        {sent === index && range === null && <div className="git-diff-comment-sent" role="status">{t("diffcomment.added")}</div>}
+        {sent === index && range === null && <div className="git-diff-comment-sent form-success" role="status">{t("diffcomment.added")}</div>}
       </Fragment>
     );
   })}</>;

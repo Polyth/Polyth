@@ -1696,6 +1696,17 @@ agent draft actions. The failure reason and remote stay together; conflict
 counts remain visible alongside the recovery hint. Without a remote failure,
 the conflict recovery region appears only on Changes.
 
+Line comments and Find in changes (`DiffComments.tsx`, `ChangesFind.tsx`) must be
+discoverable without the docs. Rows show a faint comment glyph while the diff is
+hovered (full on the row); the open editor says how to cover a range (Shift-click
+a row; on touch tap a row, then *Extend to*). *Add to message* confirms in place
+that the text is in the draft and not sent. The desktop Changes bar has a visible
+*Find* button whose tooltip names the shortcut (Ctrl/⌘+F); the phone has the
+search button in the Changes header. On touch or narrow widths the find field
+takes its own row with the count and buttons beneath. Known gap: no seam moves
+focus to the composer from a package (see the usability notes in the change that
+added this paragraph).
+
 On a phone (`useShellMode() === "phone"`) `GitView` presents through
 `GitPhoneView`, which owns placement only: every request and mutation stays in
 `GitView`, and `phoneOverview.ts` decides the state without touching the DOM.

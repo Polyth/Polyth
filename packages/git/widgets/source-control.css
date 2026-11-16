@@ -1987,6 +1987,8 @@ body[data-desktop-low-resource="true"] .git-page .git-landing {
   opacity: 0;
   transition: opacity var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
 }
+.git-page .git-diff:hover .git-diff-comment-btn.ui-icon-btn,
+.git-page .split-diff:hover .git-diff-comment-btn.ui-icon-btn { opacity: .45; }
 .git-page .git-diff-line:hover .git-diff-comment-btn.ui-icon-btn,
 .git-page .git-diff-comment-btn.ui-icon-btn:focus-visible,
 .git-page .git-diff-line:focus-within .git-diff-comment-btn.ui-icon-btn { opacity: 1; }
@@ -2008,9 +2010,9 @@ body[data-desktop-low-resource="true"] .git-page .git-landing {
   font-family: var(--ui-font-family, inherit);
   font-size: var(--font-body);
 }
+.git-page .git-diff-comment-hint { margin: var(--space-1) 0 0; font-size: var(--font-meta); }
 .git-page .git-diff-comment-sent {
   margin: 0 var(--space-2) var(--space-1);
-  color: var(--muted);
   white-space: normal;
   font-family: var(--ui-font-family, inherit);
   font-size: var(--font-meta);
@@ -2052,6 +2054,13 @@ body[data-desktop-low-resource="true"] .git-page .git-landing {
   box-shadow: 0 1px 0 var(--borderless-edge, var(--hair));
 }
 .git-page .git-find-input { flex: 1 1 12ch; min-width: 0; }
+/* Narrow or touch: the field takes a full row, the count and four 44px
+   buttons sit under it (a 120px field beside them was unusable). */
+@media (pointer: coarse), (max-width: 520px) {
+  .git-page .git-find-bar { flex-wrap: wrap; }
+  .git-page .git-find-input { flex: 1 0 100%; }
+  .git-page .git-find-count { flex: 1 1 auto; text-align: start; }
+}
 /* Match case reads as on: the accent wash a pressed toggle carries. */
 .git-page .git-find-case[aria-pressed="true"] {
   background: var(--accent-wash);
