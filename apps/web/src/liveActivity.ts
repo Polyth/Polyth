@@ -1,20 +1,24 @@
-// Projects Polyth's attention and work onto the iOS Live Activity (Dynamic
-// Island / Lock Screen). One activity for the whole app: the chat that most
-// needs a person (approval, then question), otherwise the one working. The
-// snapshot is a presentation of canonical projections only; nothing here
-// enters history. Updates are local and stop when iOS suspends the page (the
-// socket closes the moment the page hides), so every update carries a stale
-// date anchored to when the server last confirmed the store current: the
-// activity turns stale shortly after that instead of pretending to be live.
+// Projects Polyth's running work onto the iOS Live Activity (Dynamic Island /
+// Lock Screen). One activity for the whole app, and only for a chat that is
+// working: its elapsed time and current task. What needs a person, finishes
+// or fails reaches the phone as a notification, with the words and a row in
+// Notification Centre, so the activity leaves at that moment instead of
+// repeating it beside the notification. The snapshot is a presentation of
+// canonical projections only; nothing here enters history. Updates are local
+// and stop when iOS suspends the page (the socket closes the moment the page
+// hides), so every update carries a stale date anchored to when the server
+// last confirmed the store current: the activity turns stale shortly after
+// that instead of pretending to be live.
 // With push (the server confirmed this device's relay registration) the
 // page also tells the server which chat the island shows; the server then
-// pushes that chat's state changes, without words, while iOS suspends the
-// page, and the trust window grows to the server's heartbeat.
+// pushes that chat's changes, without words, while iOS suspends the page
+// (it ends the activity once the chat stops working), and the trust window
+// grows to the server's heartbeat.
 // DOM-free apart from the injected bridge and timers, so node:test covers it.
 import type { SessionEvent, SessionProjection } from "@polyth/contracts";
 import { LIVE_ACTIVITY_COUNTS, type LiveActivitySnapshot, type LiveActivityState, type LiveActivityTexts } from "@polyth/mobile/native";
 import { tr } from "./i18n/index.ts";
-import { lastTask, questionLabel, requestLabel, sessionTitleOf, tasksForIsland } from "./mobileIsland.ts";
+import { lastTask, sessionTitleOf, tasksForIsland } from "./mobileIsland.ts";
 import type { RenderModel } from "./reduce.ts";
 import { resolveSessionStatus, type SessionStatusKind } from "./sessionStatus.ts";
 
@@ -36,13 +40,12 @@ type LiveKind = Extract<SessionStatusKind, "needs-approval" | "needs-reply" | "w
 const RANK: Record<LiveKind, number> = { "needs-approval": 0, "needs-reply": 1, working: 2 };
 const isLive = (kind: SessionStatusKind): kind is LiveKind => kind in RANK;
 
-export type LiveActivityModel = Pick<RenderModel, "permissions" | "questions" | "tasks" | "messages">;
+export type LiveActivityModel = Pick<RenderModel, "tasks" | "messages">;
 
 export interface LiveActivityInput {
   sessions: readonly SessionProjection[];
   activeSessionId: string | null;
-  /** The active chat's render model, already filtered by its auto-accept
-   *  policy, so only requests that need a person are named. */
+  /** The active chat's render model, for its task list. */
   activeModel: LiveActivityModel | null;
   events: Record<string, readonly SessionEvent[] | undefined>;
   now?: number;
@@ -89,13 +92,22 @@ function liveRows(input: LiveActivityInput, now: number) {
     });
 }
 
+/** The island's chat and the other live chats its line counts. Only a chat
+ *  that is working takes the island (the open one first, then the most
+ *  recent); chats that wait for a person are counted in its line and never
+ *  shown themselves, since a notification already says what they ask. */
+function islandRows(input: LiveActivityInput, now: number) {
+  const rows = liveRows(input, now);
+  const focus = rows.find((row) => row.status.kind === "working");
+  return focus ? { focus, others: rows.filter((row) => row !== focus) } : null;
+}
+
 export function liveActivityTrack(input: LiveActivityInput): LiveActivityTrack | null {
-  const rows = liveRows(input, input.now ?? Date.now());
-  const focus = rows[0];
-  if (!focus) return null;
-  const others = rows.slice(1);
+  const island = islandRows(input, input.now ?? Date.now());
+  if (!island) return null;
+  const { focus, others } = island;
   const working = others.filter((row) => row.status.kind === "working").length;
-  const startedAt = focus.status.kind === "working" ? workStartedAt(focus.session) : undefined;
+  const startedAt = workStartedAt(focus.session);
   return {
     sessionId: focus.session.id,
     others: others.slice(0, TRACKED_OTHERS).map((row) => row.session.id),
@@ -126,11 +138,10 @@ export function liveActivityTexts(): LiveActivityTexts {
 
 export function liveActivitySnapshot(input: LiveActivityInput): LiveActivitySnapshot | null {
   const now = input.now ?? Date.now();
-  const rows = liveRows(input, now);
-  const focus = rows[0];
-  if (!focus) return null;
+  const island = islandRows(input, now);
+  if (!island) return null;
+  const { focus, others } = island;
 
-  const others = rows.slice(1);
   const working = others.filter((row) => row.status.kind === "working").length;
   const waiting = others.length - working;
   const summary = [
@@ -138,27 +149,19 @@ export function liveActivitySnapshot(input: LiveActivityInput): LiveActivitySnap
     working > 0 ? tr("liveActivity.othersWorking", { count: working }) : "",
   ].filter(Boolean).join(" · ");
 
-  const kind = focus.status.kind;
   let detail = "";
   let done = 0;
   let total = 0;
   const model = focus.session.id === input.activeSessionId ? input.activeModel : null;
   if (model) {
-    if (kind === "needs-approval") {
-      const permission = model.permissions.find((item) => item.status === "pending");
-      detail = permission ? requestLabel(permission) : "";
-    } else if (kind === "needs-reply") {
-      const question = model.questions.find((item) => item.status === "pending");
-      detail = question ? questionLabel(question) : "";
-    }
     const tasks = tasksForIsland(model.tasks, model.messages);
     total = tasks.length;
     done = tasks.filter((task) => task.status === "done").length;
-    if (kind === "working") detail = lastTask(tasks)?.text ?? "";
+    detail = lastTask(tasks)?.text ?? "";
   }
 
   const snapshot: LiveActivitySnapshot = {
-    state: kind,
+    state: "working",
     sessionId: focus.session.id,
     title: sessionTitleOf(focus.session, input.events),
     detail,
@@ -168,39 +171,17 @@ export function liveActivitySnapshot(input: LiveActivityInput): LiveActivitySnap
     done,
     total,
   };
-  if (kind === "working") {
-    const startedAt = workStartedAt(focus.session);
-    if (startedAt !== undefined) snapshot.startedAt = startedAt;
-  }
+  const startedAt = workStartedAt(focus.session);
+  if (startedAt !== undefined) snapshot.startedAt = startedAt;
   return snapshot;
-}
-
-/** What the activity says once nothing is live any more: the last chat it
- *  showed finished or failed. A chat that vanished ends it without a word. */
-export function liveActivityFinal(
-  previous: LiveActivitySnapshot,
-  sessions: readonly SessionProjection[],
-  now = Date.now(),
-): LiveActivitySnapshot | undefined {
-  const session = sessions.find((candidate) => candidate.id === previous.sessionId);
-  if (!session || session.status === "archived") return undefined;
-  const status = resolveSessionStatus(session, now);
-  const state: LiveActivityState = status.kind === "failed" ? "failed" : "done";
-  const { startedAt: _startedAt, ...rest } = previous;
-  return {
-    ...rest,
-    state,
-    label: state === "failed" ? status.label : tr("liveActivity.done"),
-    detail: state === "failed" ? previous.detail : "",
-    summary: "",
-  };
 }
 
 export interface LiveActivityBridge {
   /** `staleAt` (epoch ms) is when iOS should mark the snapshot stale; 0 means
    *  it is not confirmed at all and is stale at once. */
   update(snapshot: LiveActivitySnapshot, staleAt: number): Promise<boolean>;
-  end(final?: LiveActivitySnapshot): Promise<void>;
+  /** The activity leaves at once: nothing stays on the Lock Screen. */
+  end(): Promise<void>;
 }
 
 export interface LiveActivityTimers {
@@ -230,7 +211,6 @@ export class LiveActivityPublisher {
   private readonly bridge: LiveActivityBridge;
   private readonly evaluate: () => {
     snapshot: LiveActivitySnapshot | null;
-    final: (previous: LiveActivitySnapshot) => LiveActivitySnapshot | undefined;
     track?: LiveActivityTrack | null;
   };
   private readonly tracker: LiveActivityTracker | undefined;
@@ -287,7 +267,7 @@ export class LiveActivityPublisher {
     if (this.disposed) return this.chain;
     const now = this.now();
     this.lastRun = now;
-    const { snapshot, final, track } = this.evaluate();
+    const { snapshot, track } = this.evaluate();
     const key = snapshot ? JSON.stringify(snapshot) : "";
     const trackKey = snapshot && track ? JSON.stringify(track) : "";
     if (this.tracker && trackKey !== this.trackedKey) {
@@ -304,13 +284,12 @@ export class LiveActivityPublisher {
     this.armHeartbeat(snapshot !== null && current);
     const moved = Math.abs(staleAt - this.publishedStaleAt) >= this.heartbeatMs;
     if (key === this.publishedKey && (!snapshot || !moved)) return this.chain;
-    const previous = this.published;
     this.published = snapshot;
     this.publishedKey = key;
     this.publishedStaleAt = snapshot ? staleAt : 0;
     this.chain = this.chain.then(async () => {
       if (snapshot) await this.bridge.update(snapshot, staleAt);
-      else await this.bridge.end(previous ? final(previous) : undefined);
+      else await this.bridge.end();
     }).catch(() => undefined);
     return this.chain;
   }

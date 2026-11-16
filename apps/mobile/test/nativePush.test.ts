@@ -34,6 +34,10 @@ test("local notification suppression requires matching authoritative server stat
   assert.doesNotMatch(native, /nativeProjectionEnabled = status\.state === "enabled"/);
   assert.match(web, /setNativePushAuthoritativeProjection\(status\.state === "enabled"\)/);
   assert.match(coordinator, /server\.subscriptionId === local\.subscriptionId/);
+  // A backgrounded page keeps its registration: re-reading the status there
+  // (native answers "disabled" off the foreground) brought the local copies
+  // back beside the server's pushes.
+  assert.match(web, /export async function reconcileNativePushForeground[\s\S]*?if \(!active\) return;\n[\s\S]*?await authoritativeStatus\(\);\n\}/);
 });
 
 test("native push pending opens accept only a known mapping and canonical notification UUID", () => {
@@ -171,8 +175,8 @@ test("a foreign-server foreground notification retains the intent for the bundle
   assert.match(screen, /const pending = launch\.pendingPushOpen;[\s\S]*next\.connectionId === pending\.connectionId[\s\S]*nativePushOpen=\$\{encodeURIComponent\(pending\.notificationId\)\}/);
   assert.match(screen, /bootstrapUrlWithNext\(next\.bootstrapUrl, nextPath\)/);
   assert.doesNotMatch(web, /consumeNativePushOpen/);
-  assert.match(web, /fetch\(`\/api\/notifications\/\$\{encodeURIComponent\(notificationId\)\}`/);
-  assert.match(web, /await openSession\(record\.sessionId\)[\s\S]*\/api\/notifications\/read/);
+  assert.match(web, /fetch\(`\/api\/notifications\/\$\{encodeURIComponent\(id\)\}`/);
+  assert.match(web, /open: \(sessionId\) => openSession\(sessionId\)[\s\S]*\/api\/notifications\/read/);
   assert.match(activity, /recordTap[\s\S]*https:\/\/localhost/);
   assert.match(swift, /recordTapped[\s\S]*returnToConnectionHub/);
   assert.match(android, /consumePendingOpen\(PluginCall call\) \{[\s\S]*?requireBundled\(call\)/);
@@ -187,8 +191,13 @@ test("pending push intent survives proxy bootstrap and waits for authenticated h
   ]);
   assert.match(screen, /\/?\?nativePushOpen=/);
   assert.doesNotMatch(screen, /bootstrapUrlWithNext\([^\n]+\)[\s\S]{0,120}searchParams\.set\("nativePushOpen"/);
-  assert.match(bootstrap, /init\(\)\.then\(openPendingNativePushAfterHydration\)/);
+  assert.match(bootstrap, /const hydrated = init\(\);[\s\S]*hydrated\.then\(openPendingNativePushAfterHydration\)/);
   assert.match(init, /export function init\(\): Promise<void>[\s\S]*return initialHydration/);
+  // Boot restoration rewrites the address before hydration ends, so the id
+  // is read while the module loads (apps/web/test/nativePushOpen.test.ts).
+  const web = await readFile(new URL("../../web/src/nativePush.ts", import.meta.url), "utf8");
+  assert.match(web, /\nlet landedOpen = typeof location === "undefined" \? undefined : landedNativePushOpen\(location\.search\);/);
+  assert.doesNotMatch(web, /async function openPendingNativePushAfterHydration[\s\S]*location\.search/);
 });
 
 test("loopback semantic push access is pinned to the exact active Link proxy", async () => {

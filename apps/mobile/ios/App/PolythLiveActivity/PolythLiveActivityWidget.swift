@@ -34,13 +34,16 @@ private struct State {
 
 private func shown(_ content: PolythActivityAttributes.ContentState) -> State {
     if let title = content.title {
-        return State(
+        let full = State(
             state: content.state, sessionId: content.sessionId ?? "", title: title, detail: content.detail ?? "",
             label: content.label ?? "", summary: content.summary ?? "", staleHint: content.staleHint ?? "",
             startedAt: content.startedAt, done: content.done ?? 0, total: content.total ?? 0
         )
+        keep(full)
+        return full
     }
     let last = PolythLiveActivityStore.read(PolythLiveActivityStore.Snapshot.self, account: "snapshot")
+        ?? PolythLiveActivityStore.readOwn(PolythLiveActivityStore.Snapshot.self, key: "snapshot")
     let texts = PolythLiveActivityStore.read(PolythLiveActivityStore.Texts.self, account: "texts")
     let same = last?.state == content.state
     // "n waiting · n working", as the page joins it.
@@ -56,13 +59,44 @@ private func shown(_ content: PolythActivityAttributes.ContentState) -> State {
         sessionId: last?.sessionId ?? "",
         title: last?.title ?? "Polyth",
         detail: same ? last?.detail ?? "" : "",
-        label: texts?.labels[content.state] ?? "",
+        label: texts?.labels[content.state] ?? ownLabel(content.state),
         summary: summary,
         staleHint: last?.staleHint ?? "",
         startedAt: content.startedAt,
         done: same ? last?.done ?? 0 : 0,
         total: same ? last?.total ?? 0 : 0
     )
+}
+
+/// Saves what a full update said, for a push that follows it (`keepOwn`).
+private func keep(_ state: State) {
+    PolythLiveActivityStore.keepOwn(
+        PolythLiveActivityStore.Snapshot(
+            state: state.state, sessionId: state.sessionId, title: state.title, detail: state.detail,
+            staleHint: state.staleHint, done: state.done, total: state.total
+        ),
+        key: "snapshot"
+    )
+    guard !state.label.isEmpty else { return }
+    var labels = PolythLiveActivityStore.readOwn([String: String].self, key: "labels") ?? [:]
+    guard labels[state.state] != state.label else { return }
+    labels[state.state] = state.label
+    PolythLiveActivityStore.keepOwn(labels, key: "labels")
+}
+
+/// The status word of a pushed state when the App's copy has none: the word
+/// the page last used for that state, else a plain English one. The card
+/// never shows a glyph with no word beside it.
+private func ownLabel(_ state: String) -> String {
+    if let label = PolythLiveActivityStore.readOwn([String: String].self, key: "labels")?[state] { return label }
+    switch state {
+    case "needs-approval": return "Approval required"
+    case "needs-reply": return "Reply needed"
+    case "working": return "Working"
+    case "failed": return "Failed"
+    case "done": return "Done"
+    default: return ""
+    }
 }
 
 /// The tap opens the chat only in the page that published it; other pages

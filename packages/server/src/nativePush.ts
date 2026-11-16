@@ -141,8 +141,6 @@ export const LIVE_ACTIVITY_PUSH_TRUST_MS = 10 * 60_000;
 export const LIVE_ACTIVITY_HEARTBEAT_MS = 4 * 60_000;
 /** iOS ends a Live Activity after 8 hours; tracking ends with it. */
 const LIVE_ACTIVITY_MAX_MS = 8 * 3600_000;
-/** How long a finished chat's final state stays on the Lock Screen. */
-const LIVE_ACTIVITY_DISMISS_MS = 10 * 60_000;
 /** Coalesces a burst of events of one chat into one evaluation. */
 const LIVE_ACTIVITY_SETTLE_MS = 1_500;
 const MAX_OTHERS = 20;
@@ -150,9 +148,10 @@ const MAX_OTHERS = 20;
 const backgroundRuns = (view: LiveActivityView): number =>
   (view.backgroundWork?.multirun ?? 0) + (view.backgroundWork?.fusion ?? 0) + (view.backgroundWork?.workflow ?? 0);
 
-/** Mirrors `resolveSessionStatus` and `liveActivityFinal` (apps/web/src/
- *  sessionStatus.ts, liveActivity.ts) for the five states the island draws:
- *  not live means failed or done; a missing or unreadable chat is done. */
+/** Mirrors `resolveSessionStatus` (apps/web/src/sessionStatus.ts) for the
+ *  states a chat can be in: not live means failed or done; a missing or
+ *  unreadable chat is done. The island shows a chat only while it is
+ *  `working`; the other states end it and are counted in another's line. */
 export function liveActivityState(view: LiveActivityView | undefined): LiveActivityState {
   if (!view || view.status === "archived") return "done";
   if ((view.attention?.permissions ?? 0) > 0) return "needs-approval";
@@ -695,7 +694,10 @@ export function createNativePushService(opts: {
     const content = liveActivityContent(focus, track.others.map((id) => views.get(id)));
     // The person works on another device: the island leaves this phone at once.
     const away = elsewhere(entry);
-    const ended = away || (!LIVE_STATES.has(content.state) && content.waiting + content.working === 0);
+    // The island is for a chat that is working, nothing else. Once it needs a
+    // person, finishes or fails, the alert for that (`send`) says so with its
+    // words, and an island repeating it would be a second card for one event.
+    const ended = away || content.state !== "working";
     const changed = !sameContent(content, track.sent);
     if (!changed && !ended && at - track.pushedAt < LIVE_ACTIVITY_HEARTBEAT_MS) return;
     const seconds = Math.floor(at / 1_000);
@@ -710,9 +712,8 @@ export function createNativePushService(opts: {
         waiting: content.waiting,
         working: content.working,
         staleAt: seconds + LIVE_ACTIVITY_PUSH_TRUST_MS / 1_000,
-        // A chat that is gone (or no longer readable) leaves at once, and so
-        // does an island on a phone not in use; a finished one stays briefly.
-        ...(ended ? { dismissAt: focus && !away ? seconds + LIVE_ACTIVITY_DISMISS_MS / 1_000 : seconds } : {}),
+        // An ended island leaves the Lock Screen at once.
+        ...(ended ? { dismissAt: seconds } : {}),
         urgent: changed || ended,
       },
     ).catch((): SendResult => "transient");

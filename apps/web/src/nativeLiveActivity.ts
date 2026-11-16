@@ -17,7 +17,6 @@ import { activeElsewhere, subscribeActiveElsewhere } from "./devicePresence.ts";
 import { getSyncFreshness, openNativeAppPath, subscribeSyncFreshness } from "./init.ts";
 import {
   LiveActivityPublisher,
-  liveActivityFinal,
   liveActivitySnapshot,
   liveActivityTexts,
   liveActivityTrack,
@@ -25,7 +24,7 @@ import {
   type LiveActivityTrack,
   type LiveActivityTracker,
 } from "./liveActivity.ts";
-import { getState, modelForAutoAccept, overlaySessionProjection, reduceSessionModel, subscribeStore } from "./store.ts";
+import { getState, overlaySessionProjection, reduceSessionModel, subscribeStore } from "./store.ts";
 
 let teardown: (() => void) | null = null;
 let installing = false;
@@ -41,21 +40,16 @@ function presentedSessions(): SessionProjection[] {
 
 function evaluate() {
   // The person works on another device: the island leaves this phone at once
-  // (no final card) and the server stops pushing to it.
-  if (activeElsewhere()) return { snapshot: null, final: () => undefined };
+  // and the server stops pushing to it.
+  if (activeElsewhere()) return { snapshot: null };
   const state = getState();
   const activeId = state.activeSessionId;
   const sessions = presentedSessions();
-  const active = activeId ? sessions.find((session) => session.id === activeId) : undefined;
-  const activeModel = activeId && active
-    ? modelForAutoAccept(reduceSessionModel(activeId, state.events[activeId] ?? NO_EVENTS), active)
+  const activeModel = activeId && sessions.some((session) => session.id === activeId)
+    ? reduceSessionModel(activeId, state.events[activeId] ?? NO_EVENTS)
     : null;
   const input = { sessions, activeSessionId: activeId, activeModel, events: state.events };
-  return {
-    snapshot: liveActivitySnapshot(input),
-    track: liveActivityTrack(input),
-    final: (previous: Parameters<typeof liveActivityFinal>[0]) => liveActivityFinal(previous, presentedSessions()),
-  };
+  return { snapshot: liveActivitySnapshot(input), track: liveActivityTrack(input) };
 }
 
 const PUSH_PATH = "/api/native-push/live-activity";
@@ -139,7 +133,7 @@ export async function installLiveActivity(): Promise<void> {
   // Called only after a server reply, long after the publisher exists.
   const tracker = pushTracker(() => publisher.schedule());
   const publisher = new LiveActivityPublisher({
-    bridge: { update: updateNativeLiveActivity, end: endNativeLiveActivity },
+    bridge: { update: updateNativeLiveActivity, end: () => endNativeLiveActivity() },
     evaluate,
     freshness,
     tracker,
