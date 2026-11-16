@@ -19,6 +19,7 @@ import {
 } from "@polyth/commands/catalog";
 import { filterSnippets, type AutocompleteItem } from "../utils.ts";
 import { tr } from "../i18n/index.ts";
+import { promptHistoryShortcutLabel } from "./history.ts";
 import { accessLabel } from "../sessionSharing.ts";
 import { mentionTokenFor } from "../sessionPeople.ts";
 
@@ -387,7 +388,7 @@ export function planShellEntry(text: string): ShellEntryPlan {
 
 export type AddMenuAction =
   | "camera" | "photos" | "upload" | "mention"
-  | "commands" | "snippets" | "shell";
+  | "commands" | "snippets" | "history" | "shell";
 
 export interface AddMenuRow {
   id: string;
@@ -484,6 +485,12 @@ export function addMenuRows(input: {
     {
       id: "snippets", kind: "item", label: tr("composer.discovery.snippets"), action: "snippets", hint: "#",
       detail: catalogDetail("snippets", input.snippets),
+      ...(needsProject ? { disabledReason: needsProject } : {}),
+    },
+    {
+      id: "history", kind: "item", label: tr("composer.historyPalette.title"), action: "history",
+      hint: promptHistoryShortcutLabel(),
+      description: tr("composer.historyPalette.description"),
       ...(needsProject ? { disabledReason: needsProject } : {}),
     },
   );

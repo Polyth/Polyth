@@ -124,3 +124,58 @@ export function shouldHandlePromptHistoryKey(input: {
   if (input.altKey || input.ctrlKey || input.metaKey || input.shiftKey) return false;
   return input.key === "ArrowUp" || input.key === "ArrowDown";
 }
+
+/** Ctrl+Up / Cmd+Up opens the previous-prompts palette. Plain Up/Down keep
+ *  stepping through history; Alt/Shift variants stay free for the editor. */
+export function isPromptHistoryPaletteKey(input: {
+  key: string;
+  composing: boolean;
+  altKey?: boolean;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+  shiftKey?: boolean;
+}): boolean {
+  if (input.composing) return false;
+  if (input.altKey || input.shiftKey) return false;
+  return input.key === "ArrowUp" && Boolean(input.ctrlKey || input.metaKey);
+}
+
+/** Entries of one project for the palette, newest first. The store lists a
+ *  scope oldest first; the palette reads the other way round. */
+export function paletteEntries(
+  items: readonly PromptHistoryEntryDto[],
+  projectId: string | null,
+): PromptHistoryEntryDto[] {
+  const seen = new Set<string>();
+  const out: PromptHistoryEntryDto[] = [];
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i]!;
+    if (projectId && item.projectId !== projectId) continue;
+    // The same words sent twice are one row: the newest copy wins.
+    const key = item.text.trim();
+    if (!key && item.attachments.length === 0) continue;
+    if (key && seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
+}
+
+/** Every typed word must appear somewhere in the prompt (case-insensitive,
+ *  any order). An empty query keeps the newest-first order unchanged. */
+export function filterPromptHistory(
+  entries: readonly PromptHistoryEntryDto[],
+  query: string,
+): PromptHistoryEntryDto[] {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return entries.slice();
+  return entries.filter((entry) => {
+    const hay = entry.text.toLowerCase();
+    return words.every((word) => hay.includes(word));
+  });
+}
+
+/** The shortcut as the person's keyboard names it. */
+export function promptHistoryShortcutLabel(platform: string = typeof navigator === "undefined" ? "" : navigator.platform): string {
+  return /Mac|iPhone|iPad/i.test(platform) ? "\u2318\u2191" : "Ctrl \u2191";
+}

@@ -157,7 +157,12 @@ import {
   withDraftHarnessForNextTurn, withHarnessForNextTurn,
   type ComposerConfig,
 } from "../composerConfig.ts";
-import { shouldHandlePromptHistoryKey } from "../composer/history.ts";
+import { isPromptHistoryPaletteKey, shouldHandlePromptHistoryKey } from "../composer/history.ts";
+import {
+  CLEARED_DRAFT_WINDOW_MS, captureClearedDraft, clearedDraftLive, isRestoreUndoKey,
+  typingDismissesClearedDraft, type ClearedDraft,
+} from "../composer/clearedDraft.ts";
+import PromptHistoryPalette from "./PromptHistoryPalette.tsx";
 import { usePromptHistory } from "../composer/usePromptHistory.ts";
 import { executionSelectionChanged, immediateFollowUpDelivery } from "../followUpDelivery.ts";
 import AdaptiveTextInput, { type TextInputHandle } from "./input/AdaptiveTextInput.tsx";
@@ -206,6 +211,7 @@ import ImageSizePrompt, { useImageSizeChoice } from "./ImageSizePrompt.tsx";
 import { migrateFavoritesOnce, profilesLoaded, useProfiles } from "../profiles.ts";
 import { useSpaces } from "../spaces.ts";
 import { useProjectInterfaceMode } from "../projectInterfaceScope.ts";
+import type { PromptHistoryEntryDto } from "@polyth/contracts";
 import { isManagedIsolationBranch, projectIsolatesByDefault, projectIsolationLevel } from "@polyth/contracts";
 import type {
   AttachmentRef,
@@ -256,7 +262,7 @@ import { openProjectSettings } from "../projectSettings.ts";
 import { soloPersonalProject } from "../personalProject.ts";
 import { chatAmongOthers, rootProjects } from "../privateRoom.ts";
 import { ChatAudienceChip } from "./ChatAudience.tsx";
-import { AssistIcon, BotIcon, Button, CheckIcon, ChevronDownIcon, CloseIcon, CommandIcon, FileIcon, GlassDock, Icon as UiIcon, IconButton, Menu, Notice, QueueSendIcon, SendIcon, SettingsIcon, ShowIcon, StopIcon, Switch, UploadIcon, type MenuEntry } from "./ui/index.ts";
+import { AssistIcon, BotIcon, Button, CheckIcon, ChevronDownIcon, CloseIcon, CommandIcon, FileIcon, GlassDock, Icon as UiIcon, IconButton, Menu, Notice, QueueSendIcon, SendIcon, SettingsIcon, ShowIcon, StopIcon, Switch, UndoIcon, UploadIcon, type MenuEntry } from "./ui/index.ts";
 import { canCollaborateSession, ownerName } from "../sessionSharing.ts";
 import { getSendFailure, subscribeSendFailures } from "../sendFailure.ts";
 import { isNativeMobile } from "@polyth/mobile/runtime";
@@ -1460,6 +1466,24 @@ function ComposerBody({
   });
   const promptHistoryNavRef = useRef(promptHistoryNav);
   promptHistoryNavRef.current = promptHistoryNav;
+  const [historyOpen, setHistoryOpen] = useState(false);
+  // A draft that vanished without a send waits here for 10 s (clearedDraft.ts).
+  const [clearedDraft, setClearedDraftState] = useState<ClearedDraft | null>(null);
+  const clearedDraftRef = useRef<ClearedDraft | null>(null);
+  const setClearedDraft = useCallback((next: ClearedDraft | null) => {
+    clearedDraftRef.current = next;
+    setClearedDraftState(next);
+  }, []);
+  const lastTextRef = useRef(text);
+  useEffect(() => { lastTextRef.current = text; }, [text]);
+  useEffect(() => {
+    if (!clearedDraft) return;
+    const left = Math.max(CLEARED_DRAFT_WINDOW_MS - (Date.now() - clearedDraft.at), 0);
+    const timer = setTimeout(() => setClearedDraft(null), left);
+    return () => clearTimeout(timer);
+  }, [clearedDraft, setClearedDraft]);
+  // Another chat is another draft: the offer never follows the person across.
+  useEffect(() => { setClearedDraft(null); setHistoryOpen(false); }, [session?.id, setClearedDraft]);
   const promoteHistoryDraft = () => {
     const nav = promptHistoryNavRef.current;
     if (!nav.isBrowsing()) return;
@@ -2692,6 +2716,8 @@ function ComposerBody({
     const noTurn = parkAsDraft || firstPeopleMessage;
     const t = (override ?? inputRef.current?.getText() ?? text).trim();
     const target = sessionIdRef.current;
+    // Sending ends any offer to restore a cleared draft; never restore after a send.
+    if (!parkAsDraft && clearedDraftRef.current) setClearedDraft(null);
     if (parkAsDraft && queueEdit) return;
     if (parkAsDraft && target) {
       // An open chat already owns its composer text as its draft: save it to
@@ -3806,12 +3832,45 @@ function ComposerBody({
     input.focus();
   };
 
+  const restoreClearedDraft = () => {
+    const lost = clearedDraftRef.current;
+    if (!lost) return;
+    setClearedDraft(null);
+    setText(lost.text);
+    inputRef.current?.replaceText(lost.text, { anchor: lost.text.length });
+    inputRef.current?.focus();
+  };
+  const pickPromptHistory = (entry: PromptHistoryEntryDto) => {
+    setHistoryOpen(false);
+    const current = {
+      text: inputRef.current?.getText() ?? text,
+      attachments: pendingAttachments(sessionIdRef.current),
+    };
+    promptHistoryNav.recall(entry, current, (draft) => {
+      setText(draft.text);
+      inputRef.current?.replaceText(draft.text, { anchor: draft.text.length }, { silent: true });
+    });
+    inputRef.current?.focus();
+  };
   const onKeyIntercept = (e: KeyboardEvent<HTMLTextAreaElement>, composing: boolean): boolean => {
     // IME composition: never send, never navigate autocomplete, never hotkey.
     if (composing) return false;
     if (e.key === "Escape" && cancelQueuedEdit()) return true;
     if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "Enter") {
       setFocusMode(true);
+      return true;
+    }
+    // Ctrl/Cmd+Up: search the prompts this person sent before.
+    if (!acView && !queueEdit && !shellMode && isPromptHistoryPaletteKey({
+      key: e.key, composing, altKey: e.altKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, shiftKey: e.shiftKey,
+    })) {
+      setHistoryOpen(true);
+      return true;
+    }
+    // Cmd/Ctrl+Z right after a clear brings the draft back.
+    if (isRestoreUndoKey(e) && (inputRef.current?.getText() ?? text) === ""
+      && clearedDraftLive(clearedDraftRef.current, Date.now())) {
+      restoreClearedDraft();
       return true;
     }
     if (acView) {
@@ -3908,7 +3967,16 @@ function ComposerBody({
   // sequence guard: a project, session, token, or query change invalidates the
   // in-flight request, so a stale response never reopens or replaces results.
   const onTextChange = useCallback(
-    (val: string) => {
+    (val: string, source: "user" | "program" = "program") => {
+      // Only the person's own edit can lose a draft; a send clearing the field
+      // or a recalled prompt is programmatic and never offers a restore.
+      const before = lastTextRef.current;
+      lastTextRef.current = val;
+      if (source === "user" && !restoringDraftRef.current) {
+        const lost = captureClearedDraft({ prev: before, next: val, lastSent: null, now: Date.now() });
+        if (lost) setClearedDraft(lost);
+        else if (clearedDraftRef.current && typingDismissesClearedDraft(val)) setClearedDraft(null);
+      }
       // A mode's trigger typed at the start of the draft ("/btw ") enters the
       // mode and leaves only the words after it. A restored draft never does.
       if (!activeModeIdRef.current && !restoringDraftRef.current && !queueEditRef.current) {
@@ -3958,7 +4026,7 @@ function ComposerBody({
         setFileSearch({ query: q, phase: "done", hits: hits.map((h) => ({ path: h.path, kind: h.kind })) });
       });
     },
-    [activeProjectId],
+    [activeProjectId, setClearedDraft],
   );
 
   // ---- Add menu insertions (through the IME-safe handle only) ----------------
@@ -4561,6 +4629,7 @@ function ComposerBody({
       onInsertMention={menuMention}
       onInsertCommand={menuCommand}
       onInsertSnippet={menuSnippet}
+      onOpenHistory={() => setHistoryOpen(true)}
       onEnterShell={menuShell}
       shellHidden={!shellAllowed}
       contributions={composerContributions}
@@ -4850,6 +4919,32 @@ function ComposerBody({
       />
     </div>
   ) : null;
+  // Draft cleared without a send: one quiet line of the pending stack for 10 s,
+  // on the suggestion line's grid and look.
+  const restoreLine = clearedDraft ? (
+    <div className="composer-suggestion composer-restore" role="group" aria-label={tr("composer.restoreDraft.label")}>
+      <button
+        type="button"
+        className="composer-suggestion-use"
+        aria-label={tr("composer.restoreDraft.action")}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={restoreClearedDraft}
+      >
+        <UiIcon icon={UndoIcon} size="sm" className="composer-suggestion-icon" />
+        <span className="composer-suggestion-text">{tr("composer.restoreDraft.text")}</span>
+        <kbd className="composer-suggestion-key" aria-hidden="true">{/Mac|iPhone|iPad/i.test(typeof navigator === "undefined" ? "" : navigator.platform) ? "\u2318Z" : "Ctrl Z"}</kbd>
+      </button>
+      <IconButton
+        className="composer-suggestion-dismiss"
+        icon={CloseIcon}
+        label={tr("composer.restoreDraft.dismiss")}
+        size="sm"
+        variant="ghost"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => setClearedDraft(null)}
+      />
+    </div>
+  ) : null;
   return (
     <div
       ref={rootRef}
@@ -4910,6 +5005,7 @@ function ComposerBody({
           suggestions off. They draw nothing and offer through composerDraft. */}
       {session && !peopleOnly && <SlotHost slot="composer.suggestion" context={slotContext} />}
       {suggestionChip}
+      {restoreLine}
       {mentionAccess && mentionOutsiders && (
         <MentionAccessLine
           line={mentionAccess}
@@ -5202,6 +5298,13 @@ function ComposerBody({
           }}
           onClose={() => setFocusMode(false)}
           onSend={(t) => send(t)}
+        />
+      )}
+      {historyOpen && (
+        <PromptHistoryPalette
+          projectId={activeProjectId}
+          onPick={pickPromptHistory}
+          onClose={() => { setHistoryOpen(false); inputRef.current?.focus(); }}
         />
       )}
       {contributedDialogs.map((dialog) => (

@@ -3248,6 +3248,25 @@ measured from the card's outer edge: marks are centred on the model logo's colum
 stands on the same grid: Add centres on the marks' column and the Stop/Send disc
 ends with the trailing column.
 
+**Previous prompts and the cleared-draft line.** `Ctrl+Up` / `Cmd+Up` in the
+composer (free: plain Up/Down still step through history and ignore Ctrl/Cmd;
+no host shortcut uses it) opens `PromptHistoryPalette`: a `ResponsiveOverlay`
+(dialog on desktop, sheet with its own search on a phone) listing this project's
+prompts newest first, filtered by every typed word. Enter or a click recalls the
+prompt through `usePromptHistory().recall` (text plus `attachmentsForRecall`,
+the same browse state as Up-arrow, so Esc in the composer returns to the draft)
+and never sends; Esc clears the query, then closes and the composer takes focus
+back. A phone has no such key: the Add menu's "Previous prompts" row opens it.
+The list is the signed-in person's own prompts only (`/api/prompt-history`
+filters by the session's person, never a client value; prompts recorded before
+authorship stay visible). When unsent text of at least 20 characters empties by
+the person's own edit (`onTextChange(..., "user")`: delete, cut, select-all),
+the pending stack shows one `composer-suggestion composer-restore` line, "Draft
+cleared. Restore it?", for 10 s; the line or `Cmd/Ctrl+Z` on the empty field
+restores it. Sending, 20 new characters, another chat or the 10 s end dismiss
+it; a programmatic clear (a send, a recalled prompt) never offers it
+(`composer/clearedDraft.ts`).
+
 **The composer's icon grid** continues those columns inside the card, on every
 width, pointer, look and state (composerAdaptive.css "Composer icon grid"):
 the model logo and Add centre on `--composer-stack-mark`, the Stop/Send disc ends

@@ -129,6 +129,7 @@ test("add menu: exact rows, contributed items in order, sigil hints, and no Skil
     tr("composer.discovery.compose"),
     tr("composer.discovery.commands"),
     tr("composer.discovery.snippets"),
+    tr("composer.historyPalette.title"),
     tr("composer.discovery.shellCommand"),
   ]);
   const byId = new Map(rows.map((r) => [r.id, r]));
@@ -161,7 +162,7 @@ test("add menu: visible disabled reasons for a missing project and a drafted she
     hasProject: false, hasSession: false, draftText: "",
     commands: { state: "loading" }, snippets: { state: "loading" },
   });
-  for (const id of ["photos", "upload", "mention", "commands", "snippets", "shell"]) {
+  for (const id of ["photos", "upload", "mention", "commands", "snippets", "history", "shell"]) {
     assert.equal(noProject.find((r) => r.id === id)?.disabledReason, OPEN_PROJECT_FIRST, id);
   }
   // No registry contribution supplies these rows; the host never invents them.
