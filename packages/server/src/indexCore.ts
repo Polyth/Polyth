@@ -225,6 +225,9 @@ export interface BootOptions {
   /** Operator-declared canonical identity origin from the trusted bootstrap.
    *  Hosts must not derive it from request input. */
   canonicalOrigin?: string;
+  /** Refuse every provider turn (agent-beta test servers without
+   *  POLYTH_AGENT_BETA_MODEL_TURNS=1). */
+  modelTurnsDisabled?: boolean;
   /** Static SPA directory override for packaged hosts. */
   webDist?: string;
   opencode?: Partial<OpenCodeAdapterOptions>;
@@ -2908,6 +2911,7 @@ export async function boot(opts: BootOptions = {}) {
 
   const sessions = createSessionService({
     store,
+    ...(opts.modelTurnsDisabled ? { modelTurnsDisabled: true } : {}),
     redactToolInput: (toolName, input) => {
       const descriptor = capabilityContributions.list().map((item) => item.descriptor).find((item) =>
         item.kind === "tool" && (item.name === toolName || toolName.endsWith(`__${item.name}`) || toolName.endsWith(`_${item.name}`)));

@@ -33,6 +33,14 @@ for (let i = 0; i < args.length; i++) {
     const value = args[++i];
     if (!value) invalid("--project requires a path");
     options.project = resolve(value);
+  } else if (arg === "--help" || arg === "-h") {
+    console.log([
+      "Usage: node --experimental-strip-types scripts/agent-beta.ts [--port N] [--project PATH] [--no-build]",
+      "Starts an isolated read-only agent-beta server.",
+      "Model turns are OFF: every provider turn (sends, queue drains, continuations, wakes) is refused.",
+      "Set POLYTH_AGENT_BETA_MODEL_TURNS=1 in the environment to allow paid model turns.",
+    ].join("\n"));
+    process.exit(0);
   } else if (arg === "--no-build") {
     options.build = false;
   } else {
@@ -185,12 +193,17 @@ const main = async (): Promise<void> => {
     console.error("[agent-beta] server error", error);
   });
 
+  const modelTurns = process.env.POLYTH_AGENT_BETA_MODEL_TURNS === "1";
+  console.log(modelTurns
+    ? "[agent-beta] model turns are ON (POLYTH_AGENT_BETA_MODEL_TURNS=1): real provider turns may run"
+    : "[agent-beta] model turns are OFF; set POLYTH_AGENT_BETA_MODEL_TURNS=1 to allow them");
   await waitForHealth(origin, server);
   await registerProject(origin, projectPath);
   console.log(`POLYTH_AGENT_BETA_READY ${JSON.stringify({
     url: origin,
     project: projectPath,
     dataDir,
+    modelTurns,
     pid: server.pid ?? null,
   })}`);
 

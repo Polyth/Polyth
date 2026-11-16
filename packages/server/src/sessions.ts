@@ -159,6 +159,9 @@ import {
 /** Bounds one move's transaction; a chat with more delegated work stays put. */
 const SESSION_MOVE_FAMILY_LIMIT = 200;
 
+export const MODEL_TURNS_DISABLED_MESSAGE =
+  "Model turns are off on this test server. Set POLYTH_AGENT_BETA_MODEL_TURNS=1 to allow them.";
+
 const QUIET_DISPATCH_ERRORS = new Set([
   "shutting_down",
   "restart-deferred",
@@ -1058,6 +1061,10 @@ export function createSessionService(deps: {
   /** Absolute ceiling for one tool call even while it keeps showing activity.
    *  Defaults to sixty minutes. `toolExecutionTimeoutMs` is the silence limit. */
   toolExecutionHardLimitMs?: number;
+  /** Refuse every provider turn at admission (agent-beta without opt-in). */
+  modelTurnsDisabled?: boolean;
+  /** Test seam: grace after a restart before a rehydrated call's hard ceiling may fire (default 60 s). */
+  toolRehydrateGraceMs?: number;
   /** Consecutive tool-watchdog aborts that may auto-continue the turn with a
    *  hidden continuation prompt. 0 disables the nudge. Defaults to 1. */
   toolTimeoutContinueLimit?: number;
@@ -1499,7 +1506,10 @@ export function createSessionService(deps: {
   const pausedToolWatchdogs = new Set<string>();
   // Per-call clock: when it started and when a runtime event last carried its
   // id. Survives a request pause so the hard ceiling is not reset by waiting.
-  const toolWatchdogClocks = new Map<string, { startedAt: number; lastActivityAt: number }>();
+  const toolWatchdogClocks = new Map<string, { startedAt: number; lastActivityAt: number; ceilingNotBefore: number }>();
+  /** After a server restart the hard ceiling never fires sooner than this long
+   *  after start, so reconciliation and epoch recovery settle first. */
+  const TOOL_REHYDRATE_GRACE_MS = Math.max(0, deps.toolRehydrateGraceMs ?? 60_000);
   const toolWatchdogKey = (sessionId: string, callId: string): string => `${sessionId}\0${callId}`;
   const clearToolWatchdog = (sessionId: string, callId: string): void => {
     const key = toolWatchdogKey(sessionId, callId);
@@ -1554,20 +1564,22 @@ export function createSessionService(deps: {
     callId: string,
     startedAt = Date.now(),
     lastActivityAt = startedAt,
+    ceilingNotBefore?: number,
   ): void {
     if (serviceDisposed || TOOL_EXECUTION_TIMEOUT_MS <= 0) return;
     const key = toolWatchdogKey(sessionId, callId);
+    ceilingNotBefore ??= toolWatchdogClocks.get(key)?.ceilingNotBefore ?? 0;
     const pending = toolWatchdogs.get(key);
     if (pending) clearTimeout(pending);
     toolWatchdogs.delete(key);
     pausedToolWatchdogs.delete(key);
-    toolWatchdogClocks.set(key, { startedAt, lastActivityAt });
+    toolWatchdogClocks.set(key, { startedAt, lastActivityAt, ceilingNotBefore });
     const schedule = (): void => {
       const clock = toolWatchdogClocks.get(key);
       if (!clock) return;
       const deadline = Math.min(
         clock.lastActivityAt + TOOL_EXECUTION_TIMEOUT_MS,
-        clock.startedAt + TOOL_EXECUTION_HARD_LIMIT_MS,
+        Math.max(clock.startedAt + TOOL_EXECUTION_HARD_LIMIT_MS, clock.ceilingNotBefore),
       );
       const timer = setTimeout(() => {
         toolWatchdogs.delete(key);
@@ -1575,7 +1587,7 @@ export function createSessionService(deps: {
         if (!current) return;
         const now = Date.now();
         const silent = now - current.lastActivityAt >= TOOL_EXECUTION_TIMEOUT_MS;
-        const capped = now - current.startedAt >= TOOL_EXECUTION_HARD_LIMIT_MS;
+        const capped = now - current.startedAt >= TOOL_EXECUTION_HARD_LIMIT_MS && now >= current.ceilingNotBefore;
         // Timers can fire a hair early; activity may also have landed meanwhile.
         if (!silent && !capped) {
           schedule();
@@ -8395,6 +8407,18 @@ export function createSessionService(deps: {
     clientRequestFingerprint: string | undefined,
     turn: TurnLatch,
   ): Promise<SendResult> => {
+    // The one gate every provider turn passes (person send, queue drain,
+    // watchdog/incomplete/epoch continuations, wakes). Runs before anything is
+    // persisted or any runtime is touched; a reserved queue row goes back.
+    if (deps.modelTurnsDisabled) {
+      if (reserved) {
+        await broadcastTail(sessionId, () => deps.queue!.releaseQueueReservation(
+          reserved.operation.operationId,
+          { kind: "rejected", code: "model-turns-disabled", message: MODEL_TURNS_DISABLED_MESSAGE },
+        ));
+      }
+      throw Object.assign(new Error(MODEL_TURNS_DISABLED_MESSAGE), { code: "forbidden" });
+    }
     if ((await store.projection(sessionId))?.harnessTransition) {
       throw Object.assign(new Error("harness switch is pending"), { code: "conflict" });
     }
@@ -8872,9 +8896,10 @@ export function createSessionService(deps: {
     // before delivery; a retry sends the exact recorded block, so a changed
     // audience never rewrites what an operation already told the model.
     if (operation && !contextFree && input.keepAlive !== true) {
-      const recorded = existingEvents.find((event) =>
-        event.type === "context/people-prepared"
-        && (event.data as { operationId?: unknown }).operationId === operation!.operationId,
+      // `existingEvents` does not load this type: read it explicitly so a replay
+      // finds the recorded block instead of assembling it again.
+      const recorded = (await eventsOfTypeList(sessionId, ["context/people-prepared"])).find((event) =>
+        (event.data as { operationId?: unknown }).operationId === operation!.operationId,
       );
       let peopleText = typeof (recorded?.data as { modelVisibleText?: unknown } | undefined)?.modelVisibleText === "string"
         ? (recorded!.data as { modelVisibleText: string }).modelVisibleText
@@ -16492,7 +16517,10 @@ export function createSessionService(deps: {
     for (const row of await store.projections()) {
       if (row.status === "archived" || row.status === "idle") continue;
       for (const [callId, active] of await currentTurnActiveTools(row.id)) {
-        armToolWatchdog(row.id, callId, active.startedAt);
+        // Activity is not persisted and the runtime may have outlived the
+        // restart: the silence window restarts now, the ceiling gets a grace.
+        const now = Date.now();
+        armToolWatchdog(row.id, callId, active.startedAt, now, now + TOOL_REHYDRATE_GRACE_MS);
       }
       await syncToolWatchdogsForRequests(row.id);
     }

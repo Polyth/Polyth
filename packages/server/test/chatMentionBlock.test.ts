@@ -36,13 +36,17 @@ function fixture(t: test.TestContext) {
   t.after(() => { binding.dispose(); security.close(); rmSync(root, { recursive: true, force: true }); });
   const store = createStore(":memory:");
   const requests: CanonicalTurnRequest[] = [];
+  const failNext = { value: false };
   const runtime = {
     harnessId: "fake",
     capabilities: async () => ({ steering: false, streaming: true, permissions: false, questions: false, compaction: false, subagents: false }) as RuntimeCapabilities,
     commands: async () => [], models: async () => [], agents: async () => [],
     ensureSession: async ({ sessionId }: { sessionId: string }) => `native-${sessionId}`,
     sessions: async () => [], history: async () => [],
-    async startTurn(request: CanonicalTurnRequest) { requests.push(request); },
+    async startTurn(request: CanonicalTurnRequest) {
+      if (failNext.value) { failNext.value = false; throw new Error("delivery failed"); }
+      requests.push(request);
+    },
     abort: async () => {}, replyPermission: async () => {}, replyQuestion: async () => {},
     onEvent: () => ({ dispose: () => {} }), dispose: async () => {},
   } as unknown as AgentRuntime;
@@ -65,7 +69,7 @@ function fixture(t: test.TestContext) {
     return id;
   };
   const prepared = async (id: string) => (await store.events(id)).filter((event) => event.type === "context/turn-prepared");
-  return { sessions, store, requests, chat, prepared };
+  return { sessions, store, requests, chat, prepared, failNext };
 }
 
 const OLIA = { userId: "usr_olia", name: "Olia" };
@@ -182,4 +186,16 @@ test("a chat reference with nobody to vouch for it is never mentionable", async 
   const current = { id: "s-current", projectId: "p1" };
   const target = { id: "s-other", projectId: "p1", spaceId: "space-1", status: "idle" } as const;
   assert.equal(isMentionableChat("space-1", current, target as never, []), false);
+});
+
+test("a replayed operation finds its recorded people block instead of assembling it again", async (t) => {
+  const f = await fixture(t);
+  const from = await f.chat("Here", "inherit");
+  const input = { text: "hello there", clientOperationId: "op-people" };
+  f.failNext.value = true;
+  await f.sessions.send(from, input, { author: OLIA }).catch(() => undefined);
+  const people = async () => (await f.store.events(from)).filter((event) => event.type === "context/people-prepared");
+  assert.equal((await people()).length, 1, "the first send records the block");
+  await f.sessions.send(from, input, { author: OLIA }).catch(() => undefined);
+  assert.equal((await people()).length, 1, "a replay of the same operation records no second block");
 });

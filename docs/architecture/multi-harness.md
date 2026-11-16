@@ -92,7 +92,10 @@ an associated pending permission, question or secret request. Native permissions
 correlate by call ID; package-tool approvals correlate by tool name. Closing the
 associated requests gives that still-active tool a fresh execution limit.
 Unrelated tools and mirrored child requests retain their execution limits. On
-restart, durable open requests restore the pause. Codex rejects a permission
+restart, durable open requests restore the pause, and every other open call
+of a non-idle session restarts its silence window at service start (activity is
+not persisted and the runtime may have outlived the server); the hard ceiling
+still counts from the call's start but never fires sooner than 60 s after start. Codex rejects a permission
 response whose local native request is already absent before delivery, allowing
 the canonical request to expire without an unknown mutation blocking subsequent
 turns. Transport failures and lost mutation acknowledgements remain uncertain
