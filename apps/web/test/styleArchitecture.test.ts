@@ -137,7 +137,22 @@ test("runtime CSS does not introduce unscaled radius literals", async () => {
   }
 });
 
-test("Corner rounding reaches every pill, and the last notch is one geometry on every platform style", async () => {
+test("Corner rounding notches are even steps: square at 0, native at 9, one more step at 10", async () => {
+  const { cornerRadiusScale, CORNER_ROUNDING_STEP } = await import("../src/uiPrefs.ts");
+  assert.equal(cornerRadiusScale(0), 0);
+  assert.equal(cornerRadiusScale(9), 1.8, "the default draws every style's native radii");
+  assert.equal(cornerRadiusScale(10), 2.25, "the last notch is 1.25× native, not a doubled shape");
+  // Every notch past square is the same ratio, so the top notches change as
+  // visibly as the low ones and the last one is no jump.
+  for (let r = 2; r <= 10; r += 1) {
+    const ratio = cornerRadiusScale(r) / cornerRadiusScale(r - 1);
+    assert.ok(Math.abs(ratio - CORNER_ROUNDING_STEP) < 0.01, `notch ${r - 1} → ${r} is ×${ratio.toFixed(3)}`);
+  }
+  assert.equal(cornerRadiusScale(42), cornerRadiusScale(10));
+  assert.equal(cornerRadiusScale(-3), 0);
+});
+
+test("Corner rounding reaches every pill and scales every platform style's radii with no last-notch floor", async () => {
   const [tokens, fluent, macos, glass, styles, composer] = await Promise.all([
     read("../src/tokens.css"),
     read("../src/fluentTheme.css"),
@@ -147,19 +162,19 @@ test("Corner rounding reaches every pill, and the last notch is one geometry on 
     read("../src/composerAdaptive.css"),
   ]);
   // A pill squares with the setting; only --radius-circle keeps its shape.
-  assert.match(tokens, /--radius-round:\s*max\(calc\(14px \* var\(--corner-radius-scale\)\), var\(--radius-max-pill\)\)/);
+  assert.match(tokens, /--radius-round:\s*calc\(14px \* var\(--corner-radius-scale\)\);/);
   assert.match(tokens, /--radius-circle:\s*999px/);
-  // A switch is a full pill at the default rounding and joins the shared
-  // last-notch geometry; only --radius-circle keeps its shape at every notch.
-  assert.match(tokens, /--radius-switch:\s*max\(calc\(6\.25px \* var\(--corner-radius-scale\)\), var\(--radius-max-pill\)\)/);
+  // A switch is a full pill from the default rounding up and squares with the
+  // rest; only --radius-circle keeps its shape at every notch.
+  assert.match(tokens, /--radius-switch:\s*calc\(6\.25px \* var\(--corner-radius-scale\)\);/);
+  // The last notch once swapped native radii for 22–32px floors and 999px
+  // pills, doubling cards and menus in one step. It is the curve's next step now.
+  for (const css of [tokens, fluent, macos, glass]) assert.doesNotMatch(css, /--radius-max-|--corner-max/);
   assert.match(glass, /html\[data-theme-style="liquid-glass"\] \.switch \{\s*width:\s*40px;\s*\}/,
     "the liquid-glass switch button shares its 40px track box, so the focus ring follows the capsule");
   for (const [css, round] of [[fluent, "--fluent-round"], [macos, "--macos-round"], [glass, "--lg-round"]] as const) {
-    for (const [role, max] of [
-      ["control", "control"], ["card", "card"], ["surface", "surface"], ["sheet", "sheet"],
-      ["island", "float"], ["dock", "float"], ["composer", "float"], ["round", "pill"],
-    ]) {
-      assert.match(css, new RegExp(`--radius-${role}:\\s*max\\(calc\\(\\d+px \\* var\\(${round}\\)\\), var\\(--radius-max-${max}\\)\\)`), `${round} ${role}`);
+    for (const role of ["control", "card", "surface", "sheet", "island", "dock", "composer", "round"]) {
+      assert.match(css, new RegExp(`--radius-${role}:\\s*calc\\(\\d+px \\* var\\(${round}\\)\\);`), `${round} ${role}`);
     }
   }
   // The project and branch chips sit on one baseline: the shared .chip hover

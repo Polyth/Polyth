@@ -640,17 +640,22 @@ export function applyUiSettings(s: UiSettings = settings): void {
   // a scale set on <body> would never reach them. Do not publish a second
   // runtime radius vocabulary here.
   document.documentElement.style?.setProperty("--corner-radius-scale", String(cornerRadiusScale(s.rounding)));
-  document.documentElement.style?.setProperty("--corner-max", s.rounding >= 10 ? "1" : "0");
 }
 
-/** The radius multiplier a rounding setting publishes. 0..9 is linear
- *  (rounding / 5), so the default 9 (scale 1.8) draws every platform style's
- *  native radii — they divide the scale by 1.8, as the interface styles do.
- *  The last notch is a visible step past native, 1.5× the default, instead of
- *  the +11% a linear scale leaves there (under a millimetre on a 4–8px control). */
+/** Each Corner rounding notch past square multiplies every radius by the same
+ *  ratio. */
+export const CORNER_ROUNDING_STEP = 1.25;
+
+/** The radius multiplier a rounding setting publishes. The default 9 is scale
+ *  1.8, which draws every platform style's native radii: they divide the scale
+ *  by 1.8, as the interface styles do. 0 is square. From 1 to 10 every notch is
+ *  one even ×1.25 step, because a corner is read against its own size: a
+ *  linear scale left the top notches about 1px apart and made any visible last
+ *  notch a jump. So 10 is 1.25× native, not a doubled shape. */
 export function cornerRadiusScale(rounding: number): number {
-  const r = Math.min(10, Math.max(0, rounding));
-  return r <= 9 ? r / 5 : Math.round((1.8 + (r - 9) * 0.9) * 100) / 100;
+  const r = Math.min(10, Math.max(0, Math.round(rounding)));
+  if (r === 0) return 0;
+  return Math.round(1.8 * CORNER_ROUNDING_STEP ** (r - 9) * 1000) / 1000;
 }
 
 export function getUiSettings(): UiSettings {

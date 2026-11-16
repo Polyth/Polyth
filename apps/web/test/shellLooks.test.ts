@@ -354,7 +354,7 @@ test("every look radius follows Corner rounding: no literal corner but pills and
   }
   assert.deepEqual(literal, []);
   // --look-round is the platform styles' divisor, so rounding 9 draws these
-  // radii and the last notch reaches 1.5× (scale 2.7), matching the platform
+  // radii and the last notch reaches 1.25× (scale 2.25), matching the platform
   // styles' growth instead of tripling an already large look radius.
   assert.match(css, /--look-round: calc\(var\(--corner-radius-scale\) \/ 1\.8\);/);
   // A look's pill squares with the setting rather than staying a frozen 999px.

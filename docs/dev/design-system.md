@@ -103,8 +103,8 @@ scale — see "Type surfaces" in `docs/dev/styles.md`.
   substantial panels 12px (`--radius-surface`), sheets/dialogs/composer 16px
   (`--radius-sheet`/`--radius-composer`). Pills are `--radius-round` and square
   with the setting; `--radius-circle`/`50%` only for true circles (spinners,
-  avatars, radios, status dots). The last rounding notch is one shared rounded
-  geometry on every platform style (`--corner-max`, [styles](styles.md#radius)).
+  avatars, radios, status dots). Rounding notches are even ×1.25 steps, native
+  at the default 9 and 1.25× native at 10 ([styles](styles.md#radius)).
 - **Shadows** climb with detachment: `--shadow-sm` cards, `--shadow-md`
   (= `--overlay-shadow`) popovers/menus, `--shadow-lg` modals/sheets. Never
   hand-rolled `box-shadow` colors.

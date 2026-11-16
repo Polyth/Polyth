@@ -51,7 +51,7 @@ interface Shape {
   mirror?: boolean;
   /** The desktop app, with its window controls on this side. */
   desktop?: "left" | "right";
-  /** --corner-radius-scale: 1.8 is the default Corner rounding, 2.7 the most. */
+  /** --corner-radius-scale: 1.8 is the default Corner rounding, 2.25 the most. */
   scale?: number;
 }
 
@@ -280,7 +280,7 @@ test("the column's corners never round past half its width, so squaring two leav
   const sprung: string[] = [];
   for (const shape of SHAPES) {
     if (shape.desktop || shape.borderless === false) continue;
-    for (const scale of [1.8, 2.7]) {
+    for (const scale of [1.8, 2.25]) {
       const at = { ...shape, scale };
       const idle = await load(at, "idle");
       const open = await load(at, "floating");

@@ -9178,7 +9178,7 @@ button.theme-style-card[aria-pressed="true"] { border-color: var(--accent); box-
   --spec-segment-shadow: 0 0 0 1px var(--hair-strong);
   --spec-knob: 7px;
   --spec-knob-w: 7px;
-  --spec-round-cap: 2.7;
+  --spec-round-cap: 2.25;
   height: 64px;
   display: flex;
   overflow: hidden;

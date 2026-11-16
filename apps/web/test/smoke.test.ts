@@ -935,8 +935,8 @@ test("setUiSettings persists and applies visual data attributes", () => {
     topRailSurface: UI_DEFAULTS.topRailSurface,
   });
   assert.deepEqual(parseUiSettings(values.get(UI_SETTINGS_KEY) ?? null), getUiSettings());
-  assert.equal(styles.get("--corner-radius-scale"), "2.7");
-  assert.equal(styles.get("--corner-max"), "1", "the last notch opens the shared rounded geometry");
+  assert.equal(styles.get("--corner-radius-scale"), "2.25", "the last notch is one even step past the default");
+  assert.equal(styles.has("--corner-max"), false, "no separate last-notch geometry jumps past the curve");
   assert.equal(styles.has("--radius-control"), false, "semantic radii derive from the shared scale");
 
   setUiSettings({ actionGrouping: "ungrouped", thinkingDisplayMode: "activity" });
@@ -945,7 +945,6 @@ test("setUiSettings persists and applies visual data attributes", () => {
 
   setUiSettings({ rounding: 0 });
   assert.equal(styles.get("--corner-radius-scale"), "0");
-  assert.equal(styles.get("--corner-max"), "0");
   assert.equal(styles.has("--radius-control"), false);
 
   Object.defineProperty(globalThis, "document", { configurable: true, value: undefined });
