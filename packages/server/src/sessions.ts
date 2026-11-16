@@ -866,6 +866,8 @@ export function createSessionService(deps: {
   spawnTelemetry?: SpawnTelemetry;
   /** Package start steps (`SESSION_START_STEPS`), read per start. */
   startSteps?: { get(id: string): SessionStartStep | undefined };
+  /** Package per-turn context blocks (`TURN_CONTEXT`), collected per admitted turn. */
+  turnContext?: { collect(input: { spaceId: string; sessionId: string; projectId: string; userId: string | undefined; worktreePath: string | undefined }): Promise<string> };
   /** Backoff ladder (ms) for retrying a transient runtime-acquire failure on a
    *  new session's first acquire. Tests shorten it; omitted uses the default. */
   runtimeAcquireRetryMs?: readonly number[];
@@ -8624,6 +8626,36 @@ export function createSessionService(deps: {
         }
       }
       if (peopleText) projectedSections.push(peopleText);
+
+      // Package-owned blocks (e.g. running project actions). Same rule: recorded
+      // once per operation, a retry resends the exact recorded text.
+      if (deps.turnContext) {
+        const recordedContext = existingEvents.find((event) =>
+          event.type === "context/turn-prepared"
+          && (event.data as { operationId?: unknown }).operationId === operation!.operationId,
+        );
+        let contextText = typeof (recordedContext?.data as { modelVisibleText?: unknown } | undefined)?.modelVisibleText === "string"
+          ? (recordedContext!.data as { modelVisibleText: string }).modelVisibleText
+          : undefined;
+        if (!recordedContext) {
+          const spaceId = proj.spaceId ?? (await projects.get(proj.projectId))?.spaceId;
+          let worktreePath: string | undefined;
+          if (!turnProject.remote) {
+            try { worktreePath = workspaceExecutionPath(turnProject, proj); } catch { worktreePath = undefined; }
+          }
+          const collected = spaceId
+            ? await deps.turnContext.collect({ spaceId, sessionId, projectId: proj.projectId, userId: turnAuthor?.userId, worktreePath }).catch(() => "")
+            : "";
+          if (collected) {
+            await appendAndBroadcast(sessionId, "context/turn-prepared", {
+              operationId: operation.operationId,
+              modelVisibleText: collected,
+            }, { ignorable: true });
+            contextText = collected;
+          }
+        }
+        if (contextText) projectedSections.push(contextText);
+      }
     }
 
     // Memory is prepared after the durable operation has an operationId, but

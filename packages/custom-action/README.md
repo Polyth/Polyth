@@ -158,6 +158,21 @@ command); creating, editing, reordering and deleting a command need
 `core.sessions.message` in the handler. The list response tells the UI what
 the caller may do (`canManage`, `canRun`, `canChat`, `blocked`).
 
+## Running-actions hint for agents
+
+On enable the package registers a `TURN_CONTEXT` contributor
+(`src/turnContext.ts`, see [multi-harness](../../docs/architecture/multi-harness.md)).
+Each admitted message of a chat gets a `<polyth-running-actions>` block listing
+the runs **of the person whose message it is** (runs are private per person;
+no author, e.g. a system or agent-originated send, means no block) in the
+**same Space and same project** that are running now (at most
+8, newest first): `name — running Nm — URL`, then *Reuse these instead of
+starting another copy; ask before stopping one.* The URL is the last
+`http(s)://localhost|127.0.0.1|0.0.0.0[:port]` URL the run's output printed
+(`0.0.0.0` is shown as `localhost`); actions have no declared-URL field yet.
+The block never contains the command, output, env or secrets, and is empty when
+nothing runs. The run manager's `running(spaceId, projectId, userId)` is the only reader.
+
 ## Verification
 
 ```sh

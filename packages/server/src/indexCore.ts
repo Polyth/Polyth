@@ -76,6 +76,7 @@ import {
   SESSION_PURPOSES,
   SESSION_START_STEPS,
   SERVER_BEHAVIOR_SECTIONS,
+  TURN_CONTEXT,
   serverServiceKey,
   type HttpServerContext,
   type PluginRegistry,
@@ -140,6 +141,7 @@ import { registerDiscoveredPackages, registerServerPackage } from "./packageDisc
 import { queueRoutes } from "./routes/queue.ts";
 import { createBehaviorSectionRegistry, createBehaviorService } from "./behavior.ts";
 import { createSessionStartStepRegistry } from "./sessionStartSteps.ts";
+import { createTurnContextRegistry } from "./turnContext.ts";
 import { createClientSettings, modelFavoriteKeys } from "./clientSettings.ts";
 import { parseCompactionPreference } from "@polyth/contracts/compaction-policy";
 import { createFailedStartupCleanupPolicy, type SessionAccountDeps } from "./failedStartupCleanup.ts";
@@ -2084,6 +2086,10 @@ export async function boot(opts: BootOptions = {}) {
   // Package-owned steps of a chat's start (`SessionStartRequest.extensions`).
   const sessionStartSteps = createSessionStartStepRegistry();
   services.provide(SESSION_START_STEPS, sessionStartSteps);
+  // Package-owned per-turn context blocks (`TURN_CONTEXT`); the Space is
+  // resolved server-side, never from the message.
+  const turnContext = createTurnContextRegistry({ space: (spaceId) => spaceGateway.resolveInternal(spaceId) });
+  services.provide(TURN_CONTEXT, turnContext);
   const behavior = createBehaviorService({
     file: `${dataDir}/behavior.md`,
     policyFile: `${dataDir}/behavior-policy.json`,
@@ -2907,6 +2913,7 @@ export async function boot(opts: BootOptions = {}) {
     },
     projects, runtimes, broadcast, queue: store, org: store, profiles: store, behavior, secureSafe,
     startSteps: sessionStartSteps,
+    turnContext,
     harnesses: {
       staticFeatures: (harnessId) =>
         harnesses.providers().find((provider) => provider.descriptor.id === harnessId)?.staticFeatures,

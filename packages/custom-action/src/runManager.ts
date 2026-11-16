@@ -13,6 +13,7 @@ import {
   type CustomActionDto,
 } from "./actionModel.ts";
 import { composeChatPrompt } from "./chatPrompt.ts";
+import { terminalPlainText } from "./terminalText.ts";
 
 /** The slice of the terminal package's service a run needs. */
 export interface RunTerminals {
@@ -68,12 +69,31 @@ export interface StartRunInput {
   cwd: string;
 }
 
+export interface RunningRunSummary {
+  name: string;
+  startedAt: number;
+  /** Last localhost URL the run's output printed. */
+  url: string | null;
+}
+
+/** Last http(s) URL on this machine in a run's output (small owned parser). */
+const LOCAL_URL = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d{1,5})?(?:\/[A-Za-z0-9\-._~!$&()*+,;=:@%/]*)?/g;
+export function localUrlFromOutput(raw: string): string | null {
+  const plain = terminalPlainText(raw);
+  let last: string | null = null;
+  for (const match of plain.matchAll(LOCAL_URL)) last = match[0];
+  return last ? last.replace(/^(https?:\/\/)0\.0\.0\.0/, "$1localhost").replace(/[.,;:]+$/, "") : null;
+}
+
 export interface RunManager {
   /** Start (or join the already running instance of) an action. */
   start(input: StartRunInput): Promise<{ run: ActionRunDto; joined: boolean }>;
   list(space: SpaceContext): ActionRunDto[];
   output(space: SpaceContext, runId: string, from: number): ActionRunOutputDto;
   stop(space: SpaceContext, runId: string): Promise<ActionRunDto>;
+  /** Commands one person has running in one Space's project, newest
+   *  first. No output or command text: only name, start and a local URL. */
+  running(spaceId: string, projectId: string, userId: string): RunningRunSummary[];
   /** Stop every running process; used when the package is disabled. */
   dispose(): Promise<void>;
 }
@@ -246,6 +266,13 @@ export function createRunManager(deps: RunManagerDeps): RunManager {
   };
 
   return {
+    running(spaceId, projectId, userId) {
+      return [...runs.values()]
+        .filter((run) => run.owner === ownerKey({ spaceId, userId } as SpaceContext) && run.dto.projectId === projectId
+          && run.dto.status === "running" && run.dto.phase === "command")
+        .sort((a, b) => b.dto.startedAt - a.dto.startedAt)
+        .map((run) => ({ name: run.dto.name, startedAt: run.dto.startedAt, url: localUrlFromOutput(run.output) }));
+    },
     async start(input) {
       const owner = ownerKey(input.space);
       const mode = input.action.mode;
