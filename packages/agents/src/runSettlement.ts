@@ -472,3 +472,77 @@ export async function settleScheduledRun(
     await sleep(Math.min(poll, Math.max(1, until - now())), opts.signal);
   }
 }
+
+/** What a settled run's session says about its report later on. */
+export interface LateReportScan {
+  /** The run's own report, written in a turn its background work woke after
+   *  the run was settled without one, with the usage of every turn the run
+   *  owned up to it. */
+  report?: { text: string; tokens?: TokenUsage; cost?: number };
+  /** Nothing later can be the run's: it reported (or failed) in its own
+   *  turns, or a person or another run took the session. */
+  closed: boolean;
+}
+
+/** Reads a settled run's session again for a report it wrote too late.
+ *  `events`: the session's events after the run's `schedule/run-started`
+ *  marker, oldest first. The run owns its first turn and every turn its own
+ *  background work wakes (a hidden message); its report is the final message
+ *  of the first of those turns that carries a Report line. `queueId`: the
+ *  run's prompt was queued, so turns before its dispatch are someone else's.
+ *  Pure: it decides nothing about the record and replays nothing. */
+export function scanLateReport(events: readonly SessionEvent[], queueId?: string): LateReportScan {
+  // (queued → dispatched) → before → (turn/started) → turn → (turn/stopped
+  // completed) → between → (hidden wake) → woken → (turn/started) → turn → …
+  let phase: "queued" | "before" | "turn" | "between" | "woken" = queueId ? "queued" : "before";
+  let turnText = "";
+  let tokens: TokenUsage | undefined;
+  let cost: number | undefined;
+  for (const event of events) {
+    const data = event.data as JsonObject | undefined;
+    if (event.type === "schedule/run-started") return { closed: true };
+    if (phase === "queued") {
+      if (event.type === "queue/dispatched" && str(event, "queueId") === queueId) phase = "before";
+      else if (event.type === "queue/removed" && str(event, "queueId") === queueId) return { closed: true };
+      continue;
+    }
+    if (phase === "between" || phase === "woken") {
+      if (event.type === "user/message") {
+        if (data?.hiddenUserMessage !== true) return { closed: true };
+        phase = "woken";
+        continue;
+      }
+      if (event.type === "person/message") return { closed: true };
+      if (event.type !== "turn/started") continue;
+      if (phase === "between") return { closed: true };
+    }
+    if (event.type === "turn/started") {
+      phase = "turn";
+      turnText = "";
+      continue;
+    }
+    if (phase !== "turn") continue;
+    if (event.type === "assistant/message") {
+      const text = str(event, "text")?.trim();
+      if (text) turnText = text;
+      continue;
+    }
+    if (event.type === "usage/recorded") {
+      const sample = data?.tokens as Partial<TokenUsage> | undefined;
+      if (sample && typeof sample === "object") tokens = addUsage(tokens, sample);
+      if (typeof data?.cost === "number" && Number.isFinite(data.cost)) cost = (cost ?? 0) + data.cost;
+      continue;
+    }
+    if (event.type !== "turn/stopped") continue;
+    // A turn that failed or was stopped ends the run with what it said.
+    if (str(event, "reason") !== "completed") return { closed: true };
+    if (parseAgentReport(turnText).signal) {
+      return {
+        closed: true,
+        report: { text: turnText, ...(tokens ? { tokens } : {}), ...(cost !== undefined ? { cost } : {}) },
+      };
+    }
+    phase = "between";
+  }
+  return { closed: false };
+}

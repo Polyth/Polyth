@@ -68,8 +68,9 @@ export type { AgentSpend, AgentTrigger, AgentWake } from "./agentPrompt.ts";
 export { describeCron, nextRun, nextRuns, validateCron } from "./cron.ts";
 export { parseLoopFile, scanLoopsDir } from "./loops.ts";
 export type { LoopFileResult, LoopSpec } from "./loops.ts";
-export { settleScheduledRun } from "./runSettlement.ts";
-export type { RunSettlementOptions } from "./runSettlement.ts";
+export { scanLateReport, settleScheduledRun } from "./runSettlement.ts";
+export type { LateReportScan, RunSettlementOptions } from "./runSettlement.ts";
+import type { LateReportScan } from "./runSettlement.ts";
 
 export type ScheduleKind = "at" | "every" | "cron";
 
@@ -198,6 +199,12 @@ export interface ScheduleRunRecord {
   /** Once finished: how the run went, in the agent's own passing words and
    *  its waits, oldest first and bounded. Its final message is the report. */
   timeline?: AgentRunMoment[];
+  /** It finished without a Report line, so its report may still come: the
+   *  agent ended its turn to wait for background work, and that work woke
+   *  it after the run stopped waiting. `watch`: settled so; `backfill`: a
+   *  record from before schema 6, read once. Cleared once its session
+   *  says. */
+  lateReport?: "watch" | "backfill";
   /** Once finished: what the report says only the person can do. */
   needs?: AgentNeed[];
 }
@@ -766,6 +773,10 @@ export interface ScheduleRunner {
     /** The person asked to stop the run. */
     stopRequested?: () => boolean,
   ): Promise<ScheduleRunSettlement>;
+  /** The run's session read again after it settled without a report: the
+   *  report it wrote later, if any (`scanLateReport`). Without it, a run's
+   *  report is only what its settlement saw. */
+  lateReport?(task: ScheduleTask, run: ScheduleRunRecord): Promise<LateReportScan>;
   /** Where a message from the person would go at `at` (the decision the
    *  owner's `followUp` preview shows). Fixes a waiting message's
    *  conversation when it queues; without it the run decides when it starts. */
@@ -911,6 +922,12 @@ export interface ScheduleService {
 }
 
 const HISTORY_LIMIT = 50;
+/** How long after a run settled without a report its session is still read
+ *  for one, and how often. */
+const LATE_REPORT_MS = 24 * 60 * 60_000;
+const LATE_CHECK_MS = 60_000;
+/** Records from before schema 6 read once for a late report: each agent's newest. */
+const LATE_BACKFILL_RUNS = 10;
 /** Journal note bound; the full answer stays in the session. */
 const SUMMARY_LIMIT = 2_000;
 const DEFAULT_MAX_CONCURRENT_RUNS = 4;
@@ -1549,6 +1566,23 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
     rec.remembered = added;
   };
 
+  /** A run's final message, as its record keeps it. The report line and
+   *  notes are protocol, not prose: they are kept apart. */
+  const applyReport = (task: ScheduleTask, rec: ScheduleRunRecord, text: string, ok: boolean): void => {
+    const report = parseAgentReport(text);
+    if (report.body) rec.summary = report.body.slice(0, SUMMARY_LIMIT);
+    else delete rec.summary;
+    const signal = report.signal ?? (ok ? "update" : undefined);
+    if (signal) rec.signal = signal;
+    else delete rec.signal;
+    const headline = report.headline ?? (signal && signal !== "quiet" ? headlineFrom(report.body) : undefined);
+    if (headline) rec.headline = headline;
+    else delete rec.headline;
+    if (report.needs.length) rec.needs = report.needs;
+    else delete rec.needs;
+    if (ok) remember(task, rec, report.remember);
+  };
+
   /** `task` owns canonical history/clock state; `executableTask` may be an
    * exact one-shot repository snapshot which must never replace canonical
    * approved prompt/cadence fields. */
@@ -1558,19 +1592,16 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
     if (result.error) rec.error = result.error;
     else delete rec.error;
     if (result.summary !== undefined) {
-      // The report line and notes are protocol, not prose: keep them apart.
-      const report = parseAgentReport(result.summary);
-      if (report.body) rec.summary = report.body.slice(0, SUMMARY_LIMIT);
-      else delete rec.summary;
-      const signal = report.signal ?? (result.status === "ok" ? "update" : undefined);
-      if (signal) rec.signal = signal;
-      const headline = report.headline ?? (signal && signal !== "quiet" ? headlineFrom(report.body) : undefined);
-      if (headline) rec.headline = headline;
-      if (report.needs.length) rec.needs = report.needs;
-      if (result.status === "ok") remember(task, rec, report.remember);
+      applyReport(task, rec, result.summary, result.status === "ok");
     } else if (result.status === "ok") {
       rec.signal = "update";
     }
+    // Ended without a Report line: background work may still wake the agent
+    // to write it (a wait longer than the run's), so its session is read again.
+    if (result.status === "ok" && opts.runner.lateReport && rec.sessionId && rec.markerSeq !== undefined
+      && !parseAgentReport(result.summary).signal) {
+      rec.lateReport = "watch";
+    } else delete rec.lateReport;
     if (result.tokens) rec.tokens = result.tokens;
     if (result.cost !== undefined) rec.cost = result.cost;
     if (result.backup) rec.backup = result.backup;
@@ -1601,6 +1632,61 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
       if (tripped && (task.notify ?? "alerts") !== "off") opts.notify?.(task, rec, "tripped");
       else if (reportNotifies(task.notify, rec)) opts.notify?.(task, rec, "report");
     } catch { /* delivery never changes the run's record */ }
+  };
+
+  let lateChecking = false;
+  let lateCheckedAt = Number.NEGATIVE_INFINITY;
+  /** Runs that settled without a report: their sessions are read again for
+   *  the report their background work woke the agent to write after the run
+   *  stopped waiting. One pass at a time; a record drops out once its
+   *  session says, or after LATE_REPORT_MS. */
+  const checkLateReports = async (): Promise<void> => {
+    const reader = opts.runner.lateReport;
+    if (!reader || lateChecking) return;
+    lateChecking = true;
+    lateCheckedAt = now();
+    try {
+      for (const task of [...tasks]) {
+        for (const rec of [...(task.history ?? [])]) {
+          if (!rec.lateReport) continue;
+          if (rec.status !== "ok" || !rec.sessionId || rec.markerSeq === undefined) {
+            delete rec.lateReport;
+            save();
+            continue;
+          }
+          let scan: LateReportScan;
+          try {
+            scan = await reader(task, { ...rec });
+          } catch {
+            continue;
+          }
+          if (paused()) return;
+          // The record may have moved on while its session was read.
+          const kind = rec.lateReport;
+          if (!kind || rec.status !== "ok" || !tasks.includes(task)) continue;
+          const expired = now() - (rec.finishedAt ?? rec.startedAt) >= LATE_REPORT_MS;
+          if (!scan.report && !scan.closed && !expired) continue;
+          delete rec.lateReport;
+          const late = scan.report;
+          const adopted = !!late && parseAgentReport(late.text).body.slice(0, SUMMARY_LIMIT) !== (rec.summary ?? "");
+          if (adopted) {
+            applyReport(task, rec, late.text, true);
+            if (late.tokens) rec.tokens = late.tokens;
+            if (late.cost !== undefined) rec.cost = late.cost;
+          }
+          save();
+          // The person hears of the real report as of any other; an old
+          // record put right once is not news.
+          if (adopted && kind === "watch") {
+            try {
+              if (reportNotifies(task.notify, rec)) opts.notify?.(task, rec, "report");
+            } catch { /* delivery never changes the run's record */ }
+          }
+        }
+      }
+    } finally {
+      lateChecking = false;
+    }
   };
 
   /** Follow an admitted run to its real end. A stop() detaches the observer
@@ -2486,6 +2572,7 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
       // Stopped: due runs fire after start(); their clocks did not move.
       if (paused()) return 0;
       const t0 = now();
+      if (t0 - lateCheckedAt >= LATE_CHECK_MS) void checkLateReports().catch(() => {});
       // A budget trip lifts by itself once the 24-hour window has room again.
       for (const t of tasks) {
         if (t.tripped?.reason !== "budget" || budgetExceeded(t, t0)) continue;
@@ -2876,8 +2963,9 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
 }
 
 /** Schema of the saved documents. 5: an event run's script note is its
- *  `note`, no longer its `input`. */
-const SCHEMA_VERSION = 5;
+ *  `note`, no longer its `input`. 6: a run that settled before its late
+ *  report came is read again (`lateReport`). */
+const SCHEMA_VERSION = 6;
 
 /** Before schema 5 an event run kept its script's note in `input`. Moves it
  *  to `note`; returns how many records moved. */
@@ -2894,6 +2982,24 @@ function moveScriptNotes(tasks: readonly ScheduleTask[]): number {
   return moved;
 }
 
+/** Before schema 6 a run settled on the turn that ended to wait for its
+ *  background work, so the report written after the wake never reached its
+ *  record. Marks each agent's newest finished runs to be read again once;
+ *  returns how many. */
+function markLateReports(tasks: readonly ScheduleTask[]): number {
+  let marked = 0;
+  for (const t of tasks) {
+    let seen = 0;
+    for (const run of t.history ?? []) {
+      if (run.status !== "ok" || !run.sessionId || run.markerSeq === undefined || run.lateReport) continue;
+      if (seen++ >= LATE_BACKFILL_RUNS) break;
+      run.lateReport = "backfill";
+      marked += 1;
+    }
+  }
+  return marked;
+}
+
 /** A saved document. `migrated`: it predates the current schema and loading
  *  changed it, so it should be saved again (once). */
 function load(file: string): { tasks: ScheduleTask[]; loopErrors: Record<string, ScheduleLoopError[]>; migrated: boolean } {
@@ -2905,10 +3011,13 @@ function load(file: string): { tasks: ScheduleTask[]; loopErrors: Record<string,
     };
     const tasks = Array.isArray(parsed.tasks) ? parsed.tasks : [];
     const current = typeof parsed.v === "number" && parsed.v >= SCHEMA_VERSION;
+    // Both run: neither may be skipped because the other changed something.
+    const moved = current ? 0 : moveScriptNotes(tasks);
+    const marked = current ? 0 : markLateReports(tasks);
     return {
       tasks,
       loopErrors: parsed.loopErrors && typeof parsed.loopErrors === "object" ? parsed.loopErrors : {},
-      migrated: !current && moveScriptNotes(tasks) > 0,
+      migrated: moved + marked > 0,
     };
   } catch {
     return { tasks: [], loopErrors: {}, migrated: false };

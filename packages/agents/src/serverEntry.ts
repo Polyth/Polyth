@@ -56,6 +56,7 @@ import {
   isRouteFailure,
   scheduleExecutionRoutes,
   scheduleExecutionSelection,
+  scanLateReport,
   scheduleTurnAdmission,
   settleScheduledRun,
   type AgentBudget,
@@ -1181,6 +1182,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         ...(sent?.turnId ? { turnId: sent.turnId } : {}),
       };
     },
+    lateReport: async (_task, run) => scanLateReport(await host.store.events(run.sessionId!, run.markerSeq), run.queueId),
     settle: (task, run, signal, onWaiting, onActivity, onBackground, stopRequested) => settleScheduledRun(run, {
       signal,
       events: (sessionId, afterSeq) => host.store.events(sessionId, afterSeq),
