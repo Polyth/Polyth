@@ -16550,7 +16550,8 @@ export function createSessionService(deps: {
       if (row.status === "archived" || row.status === "idle") continue;
       const activeTools = await currentTurnActiveTools(row.id);
       if (activeTools.size > 0) {
-        for (const event of await store.events(row.id)) {
+        // Typed read: boot must not replay a whole long log per working chat.
+        for (const event of await eventsOfTypeList(row.id, [TOOL_KEEP_RUNNING_EVENT])) {
           const kept = event.type === TOOL_KEEP_RUNNING_EVENT ? (event.data as { callId?: unknown }).callId : undefined;
           if (typeof kept === "string" && activeTools.has(kept)) keptToolCalls.add(toolWatchdogKey(row.id, kept));
         }
