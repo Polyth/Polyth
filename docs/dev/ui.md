@@ -2289,6 +2289,19 @@ overwrite the next prompt. Rejected sends restore the submitted text only when
 no newer input edit has taken its place; when the sending composer is gone, the
 one now showing that chat takes the text back into its empty input.
 
+**Echo handover:** the optimistic echo renders after every timeline row, so one
+that never retires sits below the turn its prompt started. Each echo records
+the newest seq the client had cached when it was sent (`afterSeq`). Each
+canonical admission newer than that (`user/message`, or `queue/enqueued`
+except interrupt parking) retires one echo, oldest first
+(`retiredPendingSends` in `apps/web/src/store.ts`). A first send's echo binds
+to its new chat at `afterSeq` 0, because the whole chat history follows the
+send. Binding also retires the echo against that chat's cached events at once,
+since the live socket can deliver the admission before the create reply. An
+echo anchored before the first cached event retires on that load. A cold open
+reads only the newest window, so its admission is already in the history
+above. Gates: the echo tests in `apps/web/test/eventIngestion.test.ts`.
+
 **First send is one request:** Send on a fresh chat makes one keyed create
 that carries the first turn (`SessionStartRequest`: `firstTurn`, the
 agent profile, the approval setting unless it inherits, and start steps —

@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { JsonObject, SessionEvent } from "@polyth/contracts";
 import { buildModel, cloneModel, createModelCache, reduceEvent } from "../src/reduce.ts";
-import { activateSession, applyEvent, applyEvents, beginPendingSend, bindPendingSend, endPendingSend, getState, hasInFlightPrompt, lastSeq, overlaySessionProjection, pendingSendsForSurface, seedSessionCache, subscribeSessionEvents, subscribeStore, upsertSession, upsertSessions } from "../src/store.ts";
+import { activateSession, applyEvent, applyEvents, beginPendingSend, bindPendingSend, endPendingSend, getState, hasInFlightPrompt, lastSeq, overlaySessionProjection, pendingSendsForSurface, retiredPendingSends, seedSessionCache, subscribeSessionEvents, subscribeStore, upsertSession, upsertSessions } from "../src/store.ts";
 import { visibleComposerDraft } from "../src/drafts.ts";
 import { titleFromPrompt } from "../src/format.ts";
 import { resolveSessionStatus } from "../src/sessionStatus.ts";
@@ -430,15 +430,71 @@ test("a rejected send drops its echo without waiting for an event", () => {
   assert.equal(getState().pendingSends.some((p) => p.id === echo), false);
 });
 
-test("first-send creation binds its echo to the new session's real tail", () => {
+test("first-send creation binds its echo to the whole history of the chat it created", () => {
   seedSession("bound-s");
-  applyEvents([mk("bound-s", 7, "user/message", { text: "pre-existing" })]);
   const echo = beginPendingSend({ sessionId: null, text: "first prompt", attachments: [] });
+  // The created chat has no events yet: binding keeps the echo standing.
   bindPendingSend(echo, "bound-s");
-  // Binding re-anchors to seq 7: the already-stored message must not retire it.
-  applyEvents([mk("bound-s", 7, "user/message", { text: "pre-existing" })]);
   assert.equal(getState().pendingSends.some((p) => p.id === echo), true);
-  applyEvents([mk("bound-s", 8, "user/message", { text: "first prompt" })]);
+  applyEvents([mk("bound-s", 1, "session/created", {})]);
+  assert.equal(getState().pendingSends.some((p) => p.id === echo), true);
+  applyEvents([mk("bound-s", 2, "queue/enqueued", { queueId: "q-first", text: "first prompt" })]);
+  assert.equal(getState().pendingSends.some((p) => p.id === echo), false);
+});
+
+// Phone over Link, 2026-11-16: the live socket delivered the new chat's queued
+// first prompt and its user message before the create reply. Binding then
+// anchored the echo past them, and it stood below the turn's work for good.
+test("first-send creation retires its echo when the socket delivered the admission before the create reply", () => {
+  seedSession("raced-s");
+  const echo = beginPendingSend({ sessionId: null, text: "first prompt", attachments: [] });
+  applyEvents([
+    mk("raced-s", 1, "session/created", {}),
+    mk("raced-s", 4, "queue/enqueued", { queueId: "q-first", text: "first prompt" }),
+    mk("raced-s", 11, "user/message", { text: "first prompt" }),
+    mk("raced-s", 12, "turn/started", { turnId: "t1" }),
+  ]);
+  // Unbound, the echo belongs to the spawn surface; nothing retires it yet.
+  assert.equal(getState().pendingSends.some((p) => p.id === echo), true);
+  bindPendingSend(echo, "raced-s");
+  assert.equal(getState().pendingSends.some((p) => p.id === echo), false);
+});
+
+// A cold open loads only the newest window. A prompt admitted before that
+// window can never be counted, so the echo retires instead of standing below
+// the turn it started.
+test("an echo whose admission lies above the loaded window retires on that load", () => {
+  seedSession("window-s");
+  const echo = beginPendingSend({ sessionId: null, text: "first prompt", attachments: [] });
+  bindPendingSend(echo, "window-s");
+  assert.equal(getState().pendingSends.some((p) => p.id === echo), true);
+  applyEvents([
+    mk("window-s", 421, "assistant/reasoning-chunk", { text: "…" }),
+    mk("window-s", 422, "tool/call", { callId: "c1", tool: "read" }),
+    mk("window-s", 423, "tool/result", { callId: "c1" }),
+  ]);
+  assert.equal(getState().pendingSends.some((p) => p.id === echo), false);
+});
+
+test("an echo anchored inside the loaded window still waits for its own admission", () => {
+  seedSession("anchored-s");
+  applyEvents([
+    mk("anchored-s", 421, "user/message", { text: "older prompt" }),
+    mk("anchored-s", 422, "turn/stopped", { turnId: "t0" }),
+  ]);
+  const hidden = { id: "pending-send-hidden", sessionId: "anchored-s", text: "lost", attachments: [], afterSeq: 3 };
+  const waiting = { id: "pending-send-waiting", sessionId: "anchored-s", text: "next", attachments: [], afterSeq: 422 };
+  const merged = getState().events["anchored-s"]!;
+  // The hidden echo retires; the anchored one waits for an admission past 422.
+  assert.deepEqual(retiredPendingSends([hidden, waiting], merged).map((p) => p.id), [hidden.id]);
+  assert.deepEqual(
+    retiredPendingSends([hidden, waiting], [...merged, mk("anchored-s", 423, "user/message", { text: "next" })]).map((p) => p.id),
+    [hidden.id, waiting.id],
+  );
+  const echo = beginPendingSend({ sessionId: "anchored-s", text: "next", attachments: [] });
+  applyEvents([mk("anchored-s", 423, "turn/started", { turnId: "t1" })]);
+  assert.equal(getState().pendingSends.some((p) => p.id === echo), true);
+  applyEvents([mk("anchored-s", 424, "user/message", { text: "next" })]);
   assert.equal(getState().pendingSends.some((p) => p.id === echo), false);
 });
 
