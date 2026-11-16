@@ -239,7 +239,7 @@ const reliabilityHarness = async (
       for (const listener of projectionListeners) listener(projection);
     },
   };
-  const sessions = createSessionService({
+  const sessions = createSessionService({ autoContinueIncomplete: false,
     store,
     projects: projectServices(project),
     permissions: permissionService,
@@ -1159,7 +1159,7 @@ test("fresh session-service consumer sees running pending state from durable tru
       event.type === "permission/requested"
       && (event.data as { requestId?: string }).requestId === "per_fresh");
 
-    const secondConsumer = createSessionService({
+    const secondConsumer = createSessionService({ autoContinueIncomplete: false,
       store: harness.store,
       projects: projectServices(harness.project),
       permissions: permissionService,
@@ -1344,7 +1344,7 @@ test("worktree runtimes keep messages, attachments, attention, forks, and querie
   };
   const durableEvents: SessionEvent[] = [];
   const listeners = new Set<(event: SessionEvent) => void>();
-  const sessions = createSessionService({
+  const sessions = createSessionService({ autoContinueIncomplete: false,
     store,
     projects: projectServices(project),
     permissions: permissionService,

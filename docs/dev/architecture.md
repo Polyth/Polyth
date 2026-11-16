@@ -222,6 +222,22 @@ starts Node or OpenCode. See `docs/mobile/architecture.md`.
   with `continued`/`source:"turn"`, so the log and projection agree. A pause
   survives a server restart: it is durable projection state, cleared only by
   those paths (`packages/server/test/sessionPause.test.ts`).
+  Incomplete completed turns: a `turn/stopped` with reason `completed` can
+  still be an unfinished answer. The server records the ignorable fact
+  `turn/incomplete {turnId, kind, autoContinued}` (`empty`: after the admitted
+  prompt there is no assistant text and no tool call, reasoning-only counts as
+  empty; `length`: the adapter set the optional `outputLimit` on that stop,
+  from Claude `stop_reason: max_tokens`, Pi `stopReason: length`, ACP
+  `stopReason: max_tokens` and OpenCode message `finish: length`; Codex and
+  Antigravity report no such signal and only get `empty`). Aborted, paused,
+  error, rate-limit, keep-alive, native-command turns and compactions are never
+  incomplete. The fact is durable before the one hidden continuation (the
+  clientOperationId is `sha256(sessionId + turnId + "incomplete-continue")`
+  shaped as a UUID) is sent; the continuation is cancelled by a Pause, Stop,
+  newer turn or queued user work. A continuation turn that ends incomplete
+  records `autoContinued:false` and sends nothing. The service dep
+  `autoContinueIncomplete: false` keeps the fact and disables the send
+  (`packages/server/test/incompleteTurn.test.ts`).
   F18: per-session auto-accept policy (`on`/`off`/`inherit`, nearest-parent
   resolution from `@polyth/permissions`, explicit settings on the canonical
   session projection; legacy JSON settings are imported) — policy-approved

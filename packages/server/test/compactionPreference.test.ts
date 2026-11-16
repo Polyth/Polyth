@@ -56,7 +56,7 @@ function fixture(options: { personDefault?: CompactionPreference; models?: Model
     get: async (id: string) => id === "p" ? { id: "p", name: "p", path: "/tmp", spaceId: "space", createdAt: 0 } : undefined,
     list: async () => [],
   } as unknown as ProjectService;
-  const sessions = createSessionService({
+  const sessions = createSessionService({ autoContinueIncomplete: false,
     store,
     projects,
     runtimes: { forProject: async () => runtime },

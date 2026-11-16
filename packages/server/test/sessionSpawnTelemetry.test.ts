@@ -88,7 +88,7 @@ const harness = (options: Options = {}) => {
   const permissions = { evaluate: () => "ask", addRule: () => {}, rules: () => [] } as unknown as PermissionService;
   const broadcast: Broadcaster = { event: () => {}, projection: () => {} };
   const telemetry = createSpawnTelemetry({ now: () => clock.t, wallNow: () => WALL });
-  const sessions = createSessionService({
+  const sessions = createSessionService({ autoContinueIncomplete: false,
     store, projects, permissions, broadcast, queue: store,
     spawnTelemetry: telemetry,
     // Deterministic single-shot stage measurement: no readiness retry.

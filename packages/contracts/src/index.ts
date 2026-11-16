@@ -760,6 +760,21 @@ export interface TurnStoppedData {
    *  "aborted" for old readers), but the work is not over. Continue or Stop
    *  ends the pause with `session/pause-ended`. */
   paused?: true;
+  /** A completed turn whose output stopped at the model's output-token limit
+   *  (the adapter's own signal). Absent where a harness reports none. */
+  outputLimit?: true;
+}
+
+/** `turn/incomplete`: a turn ended `completed` but the answer is not whole
+ *  (`empty`: no assistant text and no tool call; `length`: the model hit its
+ *  output-token limit). A fact, recorded before any automatic continuation is
+ *  delivered. Old reducers ignore the unknown type. */
+export const TURN_INCOMPLETE_EVENT = "turn/incomplete" as const;
+export interface TurnIncompleteData {
+  turnId: string;
+  kind: "empty" | "length";
+  /** Polyth sent its one hidden continuation for this turn. */
+  autoContinued: boolean;
 }
 
 /** `session/pause-ended`: a paused session was continued (its next turn was
@@ -5413,7 +5428,7 @@ export type RuntimeEvent =
    * admits a turn for it itself: Polyth turns `text` into one hidden, idempotent
    * send keyed by `wakeId`. Not dialogue and never a canonical row. */
   | { type: "runtime/wake-requested"; wakeId: string; reason: "background-task"; text: string }
-  | { type: "turn/stopped"; turnId?: string; reason: "completed" | "aborted" | "error"; error?: string; code?: RuntimeErrorCode; retry?: RateLimitRetryHint }
+  | { type: "turn/stopped"; turnId?: string; reason: "completed" | "aborted" | "error"; error?: string; code?: RuntimeErrorCode; retry?: RateLimitRetryHint; outputLimit?: true }
   | ({ type: "usage/recorded" } & UsageRecordedData)
   // Full revisioned snapshots: replay-deterministic task/subagent state.
   | { type: "task/snapshot"; listId: string; revision: number; items: Array<{ id: string; text: string; status: TaskItemStatus }> }

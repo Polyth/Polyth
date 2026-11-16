@@ -1134,7 +1134,7 @@ export function createAcpRuntime(
                             ...(failed.code ? { code: failed.code } : {}),
                             ...(failed.retry ? { retry: failed.retry } : {}),
                         }
-                        : { type: "turn/stopped", turnId, reason: result.stopReason === "cancelled" ? "aborted" : "completed" });
+                        : { type: "turn/stopped", turnId, reason: result.stopReason === "cancelled" ? "aborted" : "completed", ...(result.stopReason === "max_tokens" ? { outputLimit: true as const } : {}) });
                     for (const cb of lifecycle)
                         cb({ type: "stream-connected", authorityId: rpc.authorityId, generation: rpc.generation });
                 }, async (error) => {

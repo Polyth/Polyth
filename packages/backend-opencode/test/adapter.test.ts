@@ -1309,3 +1309,31 @@ test("real opencode provider list", { skip: process.env.POLYTH_REAL_OPENCODE !==
     await runtime.dispose();
   }
 });
+
+test("a completed assistant message that finished on length marks the stop with outputLimit", async () => {
+  const fake = await startFake();
+  const runtime = await createTestRuntime(fake.baseUrl);
+  const events: RuntimeEvent[] = [];
+  runtime.onEvent((_sessionId, event) => events.push(event));
+  try {
+    await runtime.ensureSession({ sessionId: "output-limit", projectId: "p", cwd: "/tmp", title: "t" });
+    await waitUntil(() => fake.sseClients.length >= 1);
+    await runtime.startTurn({ sessionId: "output-limit", text: "write a lot" });
+    fake.replay({
+      id: "evt_length_message",
+      type: "message.updated",
+      properties: {
+        sessionID: "ses_fake_1",
+        info: { id: "msg_len", role: "assistant", sessionID: "ses_fake_1", finish: "length", time: { created: 1, completed: 2 } },
+      },
+    });
+    fake.replay({ id: "evt_length_idle", type: "session.idle", properties: { sessionID: "ses_fake_1" } });
+    await waitUntil(() => events.some((event) => event.type === "turn/stopped"));
+    const stopped = events.find((event) => event.type === "turn/stopped");
+    assert.equal(stopped?.type === "turn/stopped" && stopped.reason, "completed");
+    assert.equal(stopped?.type === "turn/stopped" && stopped.outputLimit, true);
+  } finally {
+    await runtime.dispose();
+    fake.server.close();
+  }
+});

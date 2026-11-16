@@ -347,3 +347,23 @@ test("Claude publishes its AI title mid-turn and never a prompt-derived summary"
         await f.runtime.dispose();
     }
 });
+
+test("a result that stopped at max_tokens marks the completed stop with outputLimit", async () => {
+    const f = await openRuntime();
+    try {
+        await f.begin("turn-1");
+        f.push({ type: "result", uuid: "result-1", is_error: false, subtype: "success", stop_reason: "max_tokens" });
+        await flush();
+        const stopped = f.events.find((event) => event.type === "turn/stopped");
+        assert.equal(stopped?.type === "turn/stopped" && stopped.reason, "completed");
+        assert.equal(stopped?.type === "turn/stopped" && stopped.outputLimit, true);
+        await f.begin("turn-2");
+        f.push({ type: "result", uuid: "result-2", is_error: false, subtype: "success", stop_reason: "end_turn" });
+        await flush();
+        const stops = f.events.filter((event) => event.type === "turn/stopped");
+        assert.equal(stops.length, 2);
+        assert.equal(stops[1]?.type === "turn/stopped" && stops[1].outputLimit, undefined);
+    } finally {
+        await f.runtime.dispose();
+    }
+});

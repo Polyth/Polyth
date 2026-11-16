@@ -1147,6 +1147,7 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                             turnId,
                             reason: message.is_error ? "error" : "completed",
                             ...(retry ? { retry } : {}),
+                            ...(!message.is_error && (message as { stop_reason?: unknown }).stop_reason === "max_tokens" ? { outputLimit: true as const } : {}),
                             ...(message.is_error ? {
                                 error: errorText ?? limitNotice ?? (contextFull ? contextFullText : undefined),
                                 code: contextFull ? "context-full" : authFailed ? "auth-expired" : oauthRefreshLock || transportFailure ? "unknown" : retry ? "rate-limited" : /rate.?limit|overloaded/i.test(errorText ?? "") ? "rate-limited" : "unknown",

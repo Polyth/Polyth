@@ -885,3 +885,27 @@ test("Pi classifies a refused provider request as a bounded auto-retry", async (
     await runtime.dispose();
   }
 });
+
+test("Pi marks a completed stop whose last message ended on the length stop reason", async () => {
+  const fake = fakePi();
+  const runtime = createPiRuntime(context, fake.rpc);
+  const events: RuntimeEvent[] = [];
+  runtime.onEvent((_, event) => events.push(event));
+  await runtime.createSessionOperation!(
+    { projectId: "project", sessionId: "canonical", title: "Pi", cwd: "/tmp" },
+    "create-op",
+  );
+  const admitted = await runtime.startTurnOperation!({ sessionId: "canonical", text: "hello" }, "turn-op");
+  assert.equal(admitted.kind, "confirmed");
+  fake.emit({ type: "message_start", message: { role: "assistant", content: [] } });
+  fake.emit({
+    type: "message_end",
+    message: { role: "assistant", content: [{ type: "text", text: "cut off" }], stopReason: "length" },
+  });
+  fake.emit({ type: "agent_settled" });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const stopped = events.find((event) => event.type === "turn/stopped");
+  assert.equal(stopped?.type === "turn/stopped" && stopped.reason, "completed");
+  assert.equal(stopped?.type === "turn/stopped" && stopped.outputLimit, true);
+  await runtime.dispose();
+});

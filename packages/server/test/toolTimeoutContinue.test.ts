@@ -108,7 +108,7 @@ const harness = (options: {
     evaluate: () => "ask", addRule: () => {}, rules: () => [],
   } as unknown as PermissionService;
   const broadcast: Broadcaster = { event: () => {}, projection: () => {} };
-  const sessions = createSessionService({
+  const sessions = createSessionService({ autoContinueIncomplete: false,
     store,
     projects,
     permissions,

@@ -60,6 +60,7 @@ import {
   SESSION_PURPOSE_CONVERSATION,
   CONVERSATION_SESSION_STARTED_EVENT,
   SESSION_PAUSE_ENDED_EVENT,
+  TURN_INCOMPLETE_EVENT,
   SESSION_PROJECT_MOVED_EVENT,
   SESSION_START_FAILED_EVENT,
   SESSION_STARTING_QUEUE_REASON,
@@ -1042,6 +1043,10 @@ export function createSessionService(deps: {
       accessRequest?: PersonAccessRequest;
     }): void;
   };
+  /** A `completed` turn whose answer is incomplete (`turn/incomplete`) is
+   *  continued once with a hidden send. false keeps the fact and sends nothing.
+   *  Defaults to true. */
+  autoContinueIncomplete?: boolean;
   /** Silence limit for one runtime tool execution: a call with no observed
    * activity for this long is aborted and recorded as a model-visible
    * tool/error. Defaults to ten minutes. */
@@ -3864,6 +3869,74 @@ export function createSessionService(deps: {
     deferredRuntimeWakes.delete(sessionId);
     for (const wake of held) requestRuntimeWake(sessionId, wake.wakeId, wake.text);
   };
+  /** The one hidden continuation of a turn that ended `completed` but not
+   *  whole. Same family as the runtime wake: a hidden, idempotent send. */
+  const INCOMPLETE_CONTINUE_PROMPT = "Your previous answer ended before it was complete. Continue from where you stopped without repeating what you already wrote.";
+  const incompleteContinueOperationId = (sessionId: string, turnId: string): string => {
+    const hex = createHash("sha256").update(sessionId + turnId + "incomplete-continue").digest("hex");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-${(8 | (parseInt(hex[16]!, 16) & 3)).toString(16)}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+  };
+  const recordIncompleteTurn = async (
+    sessionId: string,
+    stopped: SessionEvent,
+    events: readonly SessionEvent[],
+  ): Promise<void> => {
+    const turnId = (stopped.data as { turnId?: unknown }).turnId;
+    if (typeof turnId !== "string" || !turnId) return;
+    // The agent is waiting on background work: a quiet turn is expected.
+    if ((stopped.data as { background?: unknown }).background) return;
+    const end = events.findIndex((event) => event.seq === stopped.seq);
+    if (end < 0) return;
+    let hasText = false;
+    let hasTool = false;
+    let message: SessionEvent | undefined;
+    for (let index = end - 1; index >= 0; index -= 1) {
+      const event = events[index]!;
+      if (event.type === "turn/stopped") break;
+      if (event.type === "user/message") { message = event; break; }
+      if (event.type === "assistant/message" && typeof (event.data as { text?: unknown }).text === "string"
+        && ((event.data as { text: string }).text).trim()) hasText = true;
+      else if (event.type === "tool/call" || event.type === "tool/started" || event.type === "tool/result" || event.type === "tool/error") hasTool = true;
+    }
+    // No admitted prompt (a compaction), a keep-alive or a native command turn
+    // is not a person's answer.
+    if (!message) return;
+    const sent = message.data as { keepAlive?: unknown; command?: unknown; hiddenUserMessage?: unknown; text?: unknown };
+    if (sent.keepAlive === true || sent.command) return;
+    const outputLimit = (stopped.data as { outputLimit?: unknown }).outputLimit === true;
+    const kind = outputLimit ? "length" : (!hasText && !hasTool ? "empty" : undefined);
+    if (!kind) return;
+    if (events.some((event) => event.type === TURN_INCOMPLETE_EVENT && (event.data as { turnId?: unknown }).turnId === turnId)) return;
+    const isContinuation = sent.hiddenUserMessage === true && sent.text === INCOMPLETE_CONTINUE_PROMPT;
+    const autoContinued = !isContinuation && deps.autoContinueIncomplete !== false;
+    // The fact is durable before any continuation can be delivered.
+    await appendAndBroadcast(sessionId, TURN_INCOMPLETE_EVENT, { turnId, kind, autoContinued }, { ignorable: true });
+    if (!autoContinued) return;
+    const stoppedSeq = stopped.seq;
+    void Promise.resolve()
+      .then(async () => {
+        if (deps.isShuttingDown?.()) return;
+        const proceed = await withSessionLock(sessionId, async () => {
+          const proj = await store.projection(sessionId);
+          // A Pause, a Stop, a model switch or anything newer cancels it.
+          if (!proj || proj.status !== "idle" || proj.paused || proj.harnessTransition) return false;
+          if ((await store.events(sessionId)).some((event) => event.seq > stoppedSeq
+            && (event.type === "turn/started" || event.type === "user/message" || event.type === "turn/abort-requested"))) return false;
+          if (deps.queue && (await deps.queue.queueList(sessionId)).some((item) => !item.heldForReview)) return false;
+          return true;
+        });
+        if (!proceed) return;
+        await service.send(sessionId, {
+          text: INCOMPLETE_CONTINUE_PROMPT,
+          delivery: "normal",
+          hiddenUserMessage: true,
+          clientOperationId: incompleteContinueOperationId(sessionId, turnId),
+        });
+      })
+      .catch((error: unknown) => {
+        console.warn(`[polyth] incomplete-turn continuation for ${sessionId} was not admitted: ${error instanceof Error ? error.message : String(error)}`);
+      });
+  };
   const clearPromptSuggestion = (sessionId: string): void => {
     promptSuggestions.delete(sessionId);
   };
@@ -5728,6 +5801,7 @@ export function createSessionService(deps: {
           ...(retry ? { retry: retry as unknown as JsonObject } : {}),
           ...(pausing ? { paused: true } : {}),
           ...(liveBackground ? { background: liveBackground as unknown as JsonObject } : {}),
+          ...(ev.outputLimit === true && effectiveReason === "completed" ? { outputLimit: true } : {}),
         }, { ignorable: true });
         // Replay hands back the persisted row: its flag is the fact.
         const paused = stopped !== undefined && (stopped.data as { paused?: unknown }).paused === true;
@@ -5783,6 +5857,9 @@ export function createSessionService(deps: {
               reason: effectiveReason,
               requestsOpen,
             });
+          }
+          if (applied && stopped && effectiveReason === "completed" && !paused && !requestsOpen && !retry) {
+            await recordIncompleteTurn(sessionId, stopped, stopEvents);
           }
           // Background work held back by the limit wait reaches the agent now.
           if (!retry) releaseDeferredRuntimeWakes(sessionId);

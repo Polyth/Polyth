@@ -1015,3 +1015,29 @@ test("stdio MCP servers given at launch are left out of session/new; a permissio
     assert.equal(events.filter((event) => event.type === "permission/requested").at(-1)?.permission, "execute");
     await rt.dispose();
 });
+
+test("ACP marks a completed stop whose prompt ended on max_tokens", async () => {
+    const f = fakeRpc();
+    let finish!: (value: unknown) => void;
+    f.handle(async (method) => {
+        if (method === "session/new") return { sessionId: "native" };
+        if (method === "session/prompt") return new Promise((resolve) => { finish = resolve; });
+        return {};
+    });
+    const rt = createAcpRuntime(context, f.rpc, "cursor");
+    const events: RuntimeEvent[] = [];
+    rt.onEvent((_sid, event) => events.push(event));
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    const admission = rt.startTurnOperation!({ sessionId: "canonical", text: "task" }, "submit");
+    f.emit("session/update", {
+        sessionId: "native",
+        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "cut" } },
+    });
+    assert.equal((await admission).kind, "confirmed");
+    finish({ stopReason: "max_tokens" });
+    await new Promise((resolve) => setImmediate(resolve));
+    const stopped = events.find((event) => event.type === "turn/stopped");
+    assert.equal(stopped?.type === "turn/stopped" && stopped.reason, "completed");
+    assert.equal(stopped?.type === "turn/stopped" && stopped.outputLimit, true);
+    await rt.dispose();
+});

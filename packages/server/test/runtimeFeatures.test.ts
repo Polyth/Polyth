@@ -86,7 +86,7 @@ function fixture(capabilities?: Partial<RuntimeCapabilities>) {
       : undefined,
     list: async () => [],
   } as unknown as ProjectService;
-  const sessions = createSessionService({
+  const sessions = createSessionService({ autoContinueIncomplete: false,
     store,
     projects,
     runtimes: { forProject: async () => runtime },
