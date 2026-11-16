@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { lstat, opendir, realpath } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { resolveGitBinary } from "@polyth/git";
+import { resolveGitBinary, scrubInheritedEnv } from "@polyth/git";
 import { isBlockedHostPath, resolveHostPath } from "./browse.ts";
 
 export interface RepositoryDiscovery {
@@ -28,7 +28,7 @@ export async function discoverRepositories(rawPath: string): Promise<RepositoryD
       const actual = await new Promise<string | null>((done) => {
         execFile(resolveGitBinary(), ["-C", canonical, "rev-parse", "--show-toplevel"], {
           timeout: Math.max(1, deadline - Date.now()), maxBuffer: 16 * 1024, encoding: "utf8",
-          env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0" },
+          env: { ...scrubInheritedEnv(), GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0" },
         }, (error, stdout) => done(error ? null : stdout.trim()));
       });
       if (actual && await realpath(actual) === canonical) found.set(canonical, {

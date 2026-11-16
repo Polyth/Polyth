@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { scrubInheritedEnv } from "@polyth/kernel/inherited-env";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import {
@@ -86,7 +87,7 @@ function execGit(
         signal: opts.signal,
         encoding: "buffer",
         env: {
-          ...process.env,
+          ...scrubInheritedEnv(),
           GIT_TERMINAL_PROMPT: "0",
           GIT_OPTIONAL_LOCKS: "0",
           ...(opts.env ?? {}),

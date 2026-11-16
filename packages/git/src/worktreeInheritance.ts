@@ -12,6 +12,7 @@
 //   link can never show up as a change, be snapshotted or be merged back.
 // - Existing paths are never replaced.
 import { execFile } from "node:child_process";
+import { scrubInheritedEnv } from "@polyth/kernel/inherited-env";
 import { lstat, mkdir, readdir, readFile, readlink, realpath, symlink } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { resolveGitBinary } from "./gitBinary.ts";
@@ -37,7 +38,7 @@ const gitLines = (cwd: string, args: string[], input?: string): Promise<string[]
       timeout: 30_000,
       maxBuffer: 16 * 1024 * 1024,
       windowsHide: true,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0" },
+      env: { ...scrubInheritedEnv(), GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0" },
     }, (error, stdout) => {
       // `check-ignore` exits 1 when nothing matched; every other failure
       // just means there is nothing to inherit.

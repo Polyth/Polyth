@@ -1,5 +1,6 @@
 import type { GitService } from "@polyth/git";
 import { execFile } from "node:child_process";
+import { scrubInheritedEnv } from "@polyth/kernel/inherited-env";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -23,7 +24,7 @@ import { createPersonHostingAccounts, type PersonHostingAccounts } from "@polyth
 
 const fail = (code: string, message: string): never => { throw Object.assign(new Error(message), { code }); };
 const gitExec: GitExec = (bin, args, opts) => new Promise((resolve, reject) => {
-  execFile(resolveExecutable(bin, bin === "git" ? { overrideEnv: GIT_BINARY_ENV } : {}), args, { cwd: opts.cwd, timeout: 10_000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => error
+  execFile(resolveExecutable(bin, bin === "git" ? { overrideEnv: GIT_BINARY_ENV } : {}), args, { cwd: opts.cwd, timeout: 10_000, maxBuffer: 1024 * 1024, ...(bin === "git" ? { env: scrubInheritedEnv() } : {}) }, (error, stdout, stderr) => error
     ? reject(Object.assign(new Error("Local Git inspection failed."), { code: "git-unavailable" })) : resolve({ stdout, stderr }));
 });
 function load<T>(path: string, validate: (value: unknown) => value is T, fallback: T): T {

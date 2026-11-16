@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { scrubInheritedEnv } from "@polyth/kernel/inherited-env";
 import {
   parseSourceControlRemoteUrl,
   type SourceControlRemote,
@@ -27,7 +28,7 @@ const systemGitExec: GitRemoteExec = (cwd, args) =>
     execFile(
       resolveGitBinary(),
       args,
-      { cwd, encoding: "utf8", timeout: 30_000, maxBuffer: 1_000_000, windowsHide: true },
+      { cwd, encoding: "utf8", timeout: 30_000, maxBuffer: 1_000_000, windowsHide: true, env: scrubInheritedEnv() },
       (error, stdout, stderr) => {
         if (error) {
           reject(Object.assign(new Error(String(stderr || error.message).trim()), { cause: error }));

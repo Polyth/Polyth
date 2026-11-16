@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { scrubInheritedEnv } from "@polyth/kernel/inherited-env";
 import { createHash } from "node:crypto";
 import { hunkDigest, splitHunks } from "./hunks.ts";
 import { resolveGitBinary } from "./gitBinary.ts";
@@ -80,7 +81,7 @@ export function createHunkPatchRunner(
           args,
           {
             cwd: root,
-            env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+            env: { ...scrubInheritedEnv(), GIT_TERMINAL_PROMPT: "0" },
             maxBuffer: 8 * 1024 * 1024,
             windowsHide: true,
           },

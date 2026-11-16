@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { scrubInheritedEnv } from "@polyth/kernel/inherited-env";
 import type { ContinuityWorkspace } from "@polyth/session";
 import { GIT_BINARY_ENV, resolveExecutable } from "@polyth/kernel/executable";
 const exec = promisify(execFile);
@@ -11,8 +12,8 @@ export async function continuityWorkspace(cwd: string, remote = false): Promise<
   try {
     const bin = gitBinary();
     const [head, status] = await Promise.all([
-      exec(bin, ["rev-parse", "HEAD"], { cwd, timeout: 1500, maxBuffer: 8192, windowsHide: true }),
-      exec(bin, ["status", "--porcelain=v1", "--branch"], { cwd, timeout: 1500, maxBuffer: 64 * 1024, windowsHide: true }),
+      exec(bin, ["rev-parse", "HEAD"], { cwd, timeout: 1500, maxBuffer: 8192, windowsHide: true, env: scrubInheritedEnv() }),
+      exec(bin, ["status", "--porcelain=v1", "--branch"], { cwd, timeout: 1500, maxBuffer: 64 * 1024, windowsHide: true, env: scrubInheritedEnv() }),
     ]);
     const [branch, ...files] = status.stdout.trimEnd().split("\n");
     return { cwd, head: head.stdout.trim(), branch: branch?.slice(3).split("...")[0], dirty: files.length > 0, files: files.slice(0, 30).map((line) => line.slice(3, 203)) };
