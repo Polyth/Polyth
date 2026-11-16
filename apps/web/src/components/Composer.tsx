@@ -1880,6 +1880,7 @@ function ComposerBody({
       pendingLocalTextRef.current = null;
     }
     const reconciled = adoptServerDraft(session.id, serverDraft ?? "", session.draftUpdatedAt);
+    chatMentionsRef.current = reconciled.chatMentions ?? [];
     if (reconciled.conflict) return;
     if (reconciled.text !== text) {
       setText(reconciled.text);
@@ -2724,7 +2725,7 @@ function ComposerBody({
     // People mode never queues behind or steers the agent turn: it records a
     // person message and stops there, even while the agent is working.
     if (peopleModeRef.current && !queueEdit && sessionIdRef.current) {
-      sendPeopleMessage(expandChatMentions((override ?? inputRef.current?.getText() ?? "").trim(), chatMentionsRef.current));
+      sendPeopleMessage(expandChatMentions((override ?? inputRef.current?.getText() ?? "").trim(), loadChatMentions(sessionIdRef.current ?? null)));
       return;
     }
     // The latch is the synchronous witness, not this render's values: a
@@ -2738,7 +2739,7 @@ function ComposerBody({
     if (firstPeopleMessage && (peopleSendingRef.current || peopleSendAwaitsAnswer())) return;
     const noTurn = parkAsDraft || firstPeopleMessage;
     // `@Title` chat mentions leave as their link tokens (chatMentionDraft.ts).
-    const t = expandChatMentions((override ?? inputRef.current?.getText() ?? text).trim(), chatMentionsRef.current);
+    const t = expandChatMentions((override ?? inputRef.current?.getText() ?? text).trim(), loadChatMentions(sessionIdRef.current ?? null));
     const target = sessionIdRef.current;
     // Sending ends any offer to restore a cleared draft; never restore after a send.
     if (!parkAsDraft && clearedDraftRef.current) setClearedDraft(null);

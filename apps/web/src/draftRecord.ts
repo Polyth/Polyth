@@ -2,7 +2,7 @@
 // attachment metadata are updated through this module so they cannot drift
 // into competing local stores.
 import type { AttachmentRef } from "@polyth/contracts";
-import { MAX_DRAFT_CHAT_MENTIONS, isChatMentionRef, type ChatMentionRef } from "./composer/chatMentionDraft.ts";
+import { MAX_DRAFT_CHAT_MENTIONS, collapseChatMentions, expandChatMentions, isChatMentionRef, liveChatMentions, type ChatMentionRef } from "./composer/chatMentionDraft.ts";
 import { hydrateClientRecord, readClientRecord, removeClientRecord, writeClientRecord, type PersistenceScope } from "./clientPersistence.ts";
 import { clientPersistenceScope } from "./reliabilityContext.ts";
 import { activeDraftLanePurpose, newSessionLaneDraftId } from "./workbench/lanes.ts";
@@ -17,7 +17,7 @@ export interface ScopedDraftRecord {
   /** Authoritative projection timestamp last incorporated locally. */
   serverUpdatedAt?: number;
   /** A newer or unordered server value is retained alongside a dirty draft. */
-  conflict?: { text: string; serverUpdatedAt?: number };
+  conflict?: { text: string; serverUpdatedAt?: number; chatMentions?: ChatMentionRef[] };
   seed?: { key: string; seedText: string };
   attachments: AttachmentRef[];
   /** Chats the text names as `@label` (composer/chatMentionDraft.ts); the
@@ -153,6 +153,9 @@ function parseRecord(raw: string | null): ScopedDraftRecord {
             && typeof (value.conflict as { serverUpdatedAt?: unknown }).serverUpdatedAt === "number"
             ? { serverUpdatedAt: (value.conflict as { serverUpdatedAt: number }).serverUpdatedAt }
             : {}),
+          ...(Array.isArray((value.conflict as { chatMentions?: unknown }).chatMentions)
+            ? { chatMentions: (value.conflict as { chatMentions: unknown[] }).chatMentions.filter(isChatMentionRef).slice(-MAX_DRAFT_CHAT_MENTIONS) }
+            : {}),
         } }
         : {}),
     };
@@ -258,10 +261,25 @@ export function recordLocalDraftEdit(sessionId: string, text: string, capturedSc
  * payload for the composer to resolve; there is no implicit last-writer win. */
 export function adoptServerDraft(
   sessionId: string,
-  text: string,
+  wireText: string,
   serverUpdatedAt?: number,
 ): ScopedDraftRecord {
   const current = loadScopedDraftRecord(sessionId);
+  // The server holds the wire form (`[@Title](polyth://session/<id>)`); the
+  // record holds `@Title` plus refs. Every comparison below uses the wire form
+  // of the local draft, so an unedited round trip is never a difference.
+  const currentWire = expandChatMentions(current.text, current.chatMentions ?? []);
+  const shown = collapseChatMentions(wireText);
+  const text = shown.text;
+  const refsFor = () => {
+    const merged = liveChatMentions(text, [...shown.refs, ...(current.chatMentions ?? [])]);
+    return { chatMentions: merged.length ? merged.slice(-MAX_DRAFT_CHAT_MENTIONS) : undefined };
+  };
+  const conflictOf = (stamp?: number) => ({
+    text,
+    ...(stamp !== undefined ? { serverUpdatedAt: stamp } : {}),
+    ...(shown.refs.length ? { chatMentions: shown.refs.slice(-MAX_DRAFT_CHAT_MENTIONS) } : {}),
+  });
   if (current.dirty) {
     // Session projections are broadcast for many unrelated mutations. When
     // the draft CAS witness has not advanced, a differing server value is the
@@ -270,21 +288,21 @@ export function adoptServerDraft(
     // newer local base.
     if (serverUpdatedAt !== undefined && current.serverUpdatedAt !== undefined) {
       if (serverUpdatedAt < current.serverUpdatedAt) return current;
-      if (serverUpdatedAt === current.serverUpdatedAt && text !== current.text) return current;
+      if (serverUpdatedAt === current.serverUpdatedAt && wireText !== currentWire) return current;
     }
-    if (serverUpdatedAt !== undefined && consumeOutboundDraftEcho(sessionId, text)) {
+    if (serverUpdatedAt !== undefined && consumeOutboundDraftEcho(sessionId, wireText)) {
       return updateScopedDraftRecord(sessionId, {
-        dirty: text !== current.text,
+        dirty: wireText !== currentWire,
         serverUpdatedAt,
         conflict: undefined,
       });
     }
-    if (text !== current.text) {
+    if (wireText !== currentWire) {
       return updateScopedDraftRecord(sessionId, {
         // Keep the newer server value as the CAS base for an explicit local
         // continuation without overwriting the preserved local text.
         ...(serverUpdatedAt !== undefined ? { serverUpdatedAt } : {}),
-        conflict: { text, ...(serverUpdatedAt !== undefined ? { serverUpdatedAt } : {}) },
+        conflict: conflictOf(serverUpdatedAt),
       });
     }
     // An exact canonical projection is an acknowledgement of these bytes,
@@ -301,22 +319,21 @@ export function adoptServerDraft(
   if (serverUpdatedAt !== undefined && current.serverUpdatedAt !== undefined && serverUpdatedAt < current.serverUpdatedAt) {
     return current;
   }
-  if (text !== current.text && current.updatedAt > 0 && serverUpdatedAt === undefined) {
-    return updateScopedDraftRecord(sessionId, { conflict: { text } });
+  if (wireText !== currentWire && current.updatedAt > 0 && serverUpdatedAt === undefined) {
+    return updateScopedDraftRecord(sessionId, { conflict: conflictOf() });
   }
-  if (text !== current.text && serverUpdatedAt !== undefined && current.serverUpdatedAt === serverUpdatedAt) {
-    return updateScopedDraftRecord(sessionId, { conflict: { text, serverUpdatedAt } });
+  if (wireText !== currentWire && serverUpdatedAt !== undefined && current.serverUpdatedAt === serverUpdatedAt) {
+    return updateScopedDraftRecord(sessionId, { conflict: conflictOf(serverUpdatedAt) });
   }
-  if (text !== current.text && current.updatedAt > 0 && (
+  if (wireText !== currentWire && current.updatedAt > 0 && (
     serverUpdatedAt === undefined
     || (current.serverUpdatedAt !== undefined && serverUpdatedAt === current.serverUpdatedAt)
   )) {
-    return updateScopedDraftRecord(sessionId, {
-      conflict: { text, ...(serverUpdatedAt !== undefined ? { serverUpdatedAt } : {}) },
-    });
+    return updateScopedDraftRecord(sessionId, { conflict: conflictOf(serverUpdatedAt) });
   }
   return updateScopedDraftRecord(sessionId, {
-    text,
+    // An identical wire form keeps the local text (and its refs) untouched.
+    ...(wireText === currentWire ? {} : { text, ...refsFor() }),
     dirty: false,
     ...(serverUpdatedAt !== undefined ? { serverUpdatedAt } : {}),
     conflict: undefined,
