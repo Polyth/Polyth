@@ -177,11 +177,11 @@ body[data-shell-layout="columns"][data-shell-bar="island"] .app > .header {
 .shell-island .desktop-session-status-trigger { width: auto; max-width: 100%; height: var(--control-h-sm); }
 
 /* Bare: a transparent line whose only controls are the title (sized to its
-   text, centred over the chat) and the Space switcher. */
+   text, centred over the chat), the Back control and the Space switcher. */
 body[data-shell-layout="bare"] .app > .header {
   pointer-events: none;
 }
-body[data-shell-layout="bare"] .app > .header :is(.header-left-cluster, .desktop-session-status-trigger, .session-header-status) {
+body[data-shell-layout="bare"] .app > .header :is(.header-left-cluster, .desktop-session-status-trigger, .session-back, .session-header-status) {
   pointer-events: auto;
 }
 body[data-shell-layout="bare"] .app > .header[data-shell-bar="title"] .desktop-session-status-row {
