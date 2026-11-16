@@ -1,7 +1,7 @@
 // Unified/split diff rendering for Source Control. Line numbers come from the
 // hunk headers, the +/− marker gets its own column so syntax highlighting sees
 // the code without it, and multi-file patches render one section per file.
-import { useState, type DragEvent, type ReactNode } from "react";
+import { useMemo, useState, type DragEvent, type ReactNode } from "react";
 import { highlight, langOf } from "../../../apps/web/src/highlight.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import CopyButton from "../../../apps/web/src/components/CopyButton.tsx";
@@ -16,52 +16,14 @@ import {
   StageIcon,
   UndoIcon,
 } from "../../../apps/web/src/components/ui/index.ts";
+import { CommentableRows, type CommentRowExtras } from "./DiffComments.tsx";
 import { splitPrDiff } from "./prDiff.ts";
 import { summarizeUnifiedDiff } from "./PendingChangesBar.tsx";
 import type { GitHunkOperation } from "./hunkActions.ts";
 import { LineStats, StatusChip, fileIdentity } from "./sourceControlParts.tsx";
 
-export type DiffLineKind = "add" | "del" | "ctx" | "hunk" | "meta";
-
-export interface DiffLine {
-  kind: DiffLineKind;
-  text: string;
-  oldLine?: number;
-  newLine?: number;
-}
-
-const HUNK_HEADER = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
-// File-level headers already have a home in the section title; repeating them
-// as diff rows only pushes the code down.
-const FILE_HEADER = /^(diff --git |index |--- |\+\+\+ |new file mode |deleted file mode |old mode |new mode |similarity index |rename from |rename to |copy from |copy to )/;
-
-export function parseDiffLines(diff: string): DiffLine[] {
-  const lines: DiffLine[] = [];
-  let oldLine = 0;
-  let newLine = 0;
-  let inHunk = false;
-  const raw = diff.endsWith("\n") ? diff.slice(0, -1).split("\n") : diff.split("\n");
-  for (const text of raw) {
-    const header = HUNK_HEADER.exec(text);
-    if (header) {
-      oldLine = Number(header[1]);
-      newLine = Number(header[2]);
-      inHunk = true;
-      lines.push({ kind: "hunk", text });
-      continue;
-    }
-    if (!inHunk || FILE_HEADER.test(text)) {
-      if (FILE_HEADER.test(text)) { inHunk = false; continue; }
-      lines.push({ kind: "meta", text });
-      continue;
-    }
-    if (text.startsWith("+")) lines.push({ kind: "add", text: text.slice(1), newLine: newLine++ });
-    else if (text.startsWith("-")) lines.push({ kind: "del", text: text.slice(1), oldLine: oldLine++ });
-    else if (text.startsWith("\\")) lines.push({ kind: "meta", text });
-    else lines.push({ kind: "ctx", text: text.startsWith(" ") ? text.slice(1) : text, oldLine: oldLine++, newLine: newLine++ });
-  }
-  return lines;
-}
+import { parseDiffLines, type DiffLine, type DiffLineKind } from "./diffLines.ts";
+export { parseDiffLines, type DiffLine, type DiffLineKind };
 
 export function DiffCode({ line, path }: { line: string; path?: string }) {
   if (!path) return <span className="git-diff-code">{line}</span>;
@@ -73,7 +35,7 @@ const ROW_CLASS: Record<DiffLineKind, string> = { add: "diff-add", del: "diff-de
 
 /** One rendered row. The marker is a real `+`/`-` in the text stream (so a
  *  copied selection is still a patch) but sits in its own non-highlighted cell. */
-function UnifiedRow({ line, path, children }: { line: DiffLine; path?: string; children?: ReactNode }) {
+function UnifiedRow({ line, path, children, extras }: { line: DiffLine; path?: string; children?: ReactNode; extras?: CommentRowExtras | null }) {
   if (line.kind === "hunk" || line.kind === "meta") {
     return (
       <div className={`git-diff-line ${ROW_CLASS[line.kind]}`}>
@@ -84,17 +46,19 @@ function UnifiedRow({ line, path, children }: { line: DiffLine; path?: string; c
     );
   }
   return (
-    <div className={`git-diff-line ${ROW_CLASS[line.kind]}`}>
+    <div className={`git-diff-line ${ROW_CLASS[line.kind]}${extras?.inRange ? " git-diff-line--commented" : ""}`} {...(extras ? { onClick: extras.onTap } : {})}>
       <span className="git-diff-ln" aria-hidden="true">{line.oldLine ?? ""}</span>
       <span className="git-diff-ln" aria-hidden="true">{line.newLine ?? ""}</span>
       <span className="git-diff-marker">{MARKER[line.kind]}</span>
       <DiffCode line={line.text} {...(path ? { path } : {})} />
+      {extras?.slot}
     </div>
   );
 }
 
 function UnifiedBody({ diff, path }: { diff: string; path?: string }) {
-  return <>{parseDiffLines(diff).map((line, index) => <UnifiedRow key={index} line={line} {...(path ? { path } : {})} />)}</>;
+  const lines = useMemo(() => parseDiffLines(diff), [diff]);
+  return <CommentableRows lines={lines} path={path ?? ""} renderRow={(line, _index, extras) => <UnifiedRow line={line} extras={path ? extras : null} {...(path ? { path } : {})} />} />;
 }
 
 interface SplitRow {
@@ -304,7 +268,7 @@ export function HunkBlock({ hunk, path, staged, busy, canMutate, onDragStart, on
           {onComment && <IconButton icon={AddIcon} size="sm" variant="ghost" className="hunk-comment-btn hunk-action-btn" title={tr("gitview.addReviewNoteForThisHunk")} label={tr("gitview.addReviewNote")} onClick={onComment} />}
         </span>
       </div>
-      {body.map((line, index) => <UnifiedRow key={index} line={line} path={path} />)}
+      <CommentableRows lines={body} path={path} renderRow={(line, _index, extras) => <UnifiedRow line={line} path={path} extras={extras} />} />
     </div>
   );
 }
