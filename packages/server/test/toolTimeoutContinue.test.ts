@@ -571,3 +571,70 @@ test("a rehydrated call past its hard ceiling fires only after the grace", async
   await waitFor(() => restored.aborted.length === 1);
   assert.ok(Date.now() - bootedAt >= 590);
 });
+
+const keepEvents = async (store: ReturnType<typeof createStore>, id: string) =>
+  (await store.events(id)).filter((event) => event.type === "tool/keep-running");
+
+test("keep-running turns off the silence stop for that call, records one event, is idempotent", async (t) => {
+  const h = harness({ continueLimit: 0, toolExecutionTimeoutMs: 120, toolExecutionHardLimitMs: 60_000 });
+  t.after(() => { h.sessions.dispose(); return h.store.close(); });
+  const { id } = await h.sessions.create({ projectId: "p1", title: "Slow silent" });
+  await h.sessions.send(id, { text: "slow" });
+  h.emit(id, { type: "tool/started", callId: "slow", tool: "shell", input: {} });
+  await waitFor(async () => (await h.store.events(id)).some((e) => e.type === "tool/started"));
+  await h.sessions.keepToolRunning!(id, "slow", { userId: "usr_max" });
+  await h.sessions.keepToolRunning!(id, "slow", { userId: "usr_max" });
+  const events = await keepEvents(h.store, id);
+  assert.equal(events.length, 1, "a second press appends nothing");
+  assert.deepEqual(events[0]!.data, { callId: "slow", byUserId: "usr_max" });
+  await flush(400);
+  assert.deepEqual(h.aborted, [], "3x the silence limit passed without a stop");
+  assert.deepEqual((await toolErrors(h.store, id, "slow")), [], "the kept call is not stopped for silence");
+});
+
+test("a kept call is still stopped at the hard ceiling", async (t) => {
+  const h = harness({ continueLimit: 0, toolExecutionTimeoutMs: 100, toolExecutionHardLimitMs: 500 });
+  t.after(() => { h.sessions.dispose(); return h.store.close(); });
+  const { id } = await h.sessions.create({ projectId: "p1", title: "Kept ceiling" });
+  await h.sessions.send(id, { text: "slow" });
+  const startedAt = Date.now();
+  h.emit(id, { type: "tool/started", callId: "slow", tool: "shell", input: {} });
+  await waitFor(async () => (await h.store.events(id)).some((e) => e.type === "tool/started"));
+  await h.sessions.keepToolRunning!(id, "slow");
+  assert.equal((await keepEvents(h.store, id))[0]!.data.byUserId, undefined);
+  await flush(250);
+  assert.deepEqual(h.aborted, [], "silence limit passed without a stop");
+  await waitFor(() => h.aborted.length === 1);
+  assert.ok(Date.now() - startedAt >= 450);
+  await waitFor(async () => (await toolErrors(h.store, id, "slow")).length === 1);
+  assert.match(String((await toolErrors(h.store, id, "slow"))[0]!.data.error), /hard execution limit/);
+});
+
+test("keep-running is refused for an unknown or finished call and an unknown session", async (t) => {
+  const h = harness({ continueLimit: 0, toolExecutionTimeoutMs: 600_000 });
+  t.after(() => { h.sessions.dispose(); return h.store.close(); });
+  const { id } = await h.sessions.create({ projectId: "p1", title: "Refusals" });
+  await h.sessions.send(id, { text: "x" });
+  h.emit(id, { type: "tool/started", callId: "done", tool: "shell", input: {} });
+  h.emit(id, { type: "tool/result", callId: "done", tool: "shell", output: "ok" } as RuntimeEvent);
+  await waitFor(async () => (await h.store.events(id)).some((e) => e.type === "tool/result"));
+  await assert.rejects(() => h.sessions.keepToolRunning!(id, "done"), { code: "conflict" });
+  await assert.rejects(() => h.sessions.keepToolRunning!(id, "never"), { code: "conflict" });
+  await assert.rejects(() => h.sessions.keepToolRunning!("sess_missing", "x"), { code: "not-found" });
+  assert.equal((await keepEvents(h.store, id)).length, 0);
+});
+
+test("a kept call survives a restart: rehydration arms it without the silence stop", async (t) => {
+  const first = harness({ continueLimit: 0, toolExecutionTimeoutMs: 600_000 });
+  const { id } = await first.sessions.create({ projectId: "p1", title: "Kept restart" });
+  await first.sessions.send(id, { text: "inspect" });
+  first.emit(id, { type: "tool/started", callId: "slow", tool: "shell", input: {} });
+  await waitFor(async () => (await first.store.events(id)).some((e) => e.type === "tool/started"));
+  await first.sessions.keepToolRunning!(id, "slow");
+  const restored = await restartedRunning(first, { continueLimit: 0, toolExecutionTimeoutMs: 150, toolExecutionHardLimitMs: 60_000 });
+  t.after(() => { restored.sessions.dispose(); return restored.store.close(); });
+  await flush(500);
+  assert.deepEqual(restored.aborted, [], "a kept call is not stopped for silence after boot");
+  await restored.sessions.keepToolRunning!(id, "slow");
+  assert.equal((await keepEvents(restored.store, id)).length, 1, "still idempotent after restart");
+});

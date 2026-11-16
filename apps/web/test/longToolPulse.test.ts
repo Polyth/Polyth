@@ -203,3 +203,48 @@ test("the agent's status line names a running call exactly as its timeline row d
   assert.equal(liveActionOf(model), `${words.title} · ${words.preview}`);
   assert.doesNotMatch(liveActionOf(model), /Bash/, "never the raw tool name beside the row's kind label");
 });
+
+test("Keep running: the button shows only in the silence countdown, a kept call reads its own line, the ceiling has no button", () => {
+  progress.clearToolProgress();
+  const now = 10_000_000;
+  withNow(now, () => {
+    const base = { sessionId: "s1", callId: "c1" };
+    // Before the countdown: no button.
+    progress.noteToolProgress("s1", "c1", now - 6_000);
+    assert.doesNotMatch(renderToStaticMarkup(createElement(ToolPulseLine, { ...base, startedAt: now - 192_000 })), /tool-pulse-keep/);
+    // Countdown: ghost button with an accessible name, after the text.
+    const countdown = { ...base, startedAt: now - 530_000 };
+    progress.noteToolProgress("s1", "c1", now - 505_000);
+    const line = renderToStaticMarkup(createElement(ToolPulseLine, countdown));
+    assert.match(line, /Polyth stops it in 1m 35s unless it prints something.*<button[^>]*tool-pulse-keep[^>]*aria-label="Keep running: [^"]*"[^>]*>.*Keep running/s);
+    // Kept: no countdown, no button, the kept line.
+    const kept = renderToStaticMarkup(createElement(ToolPulseLine, { ...countdown, kept: true }));
+    assert.match(kept, />No output for 8m 25s · kept running</);
+    assert.doesNotMatch(kept, /tool-pulse-keep|Polyth stops it|<button/);
+    assert.match(renderToStaticMarkup(createElement(ToolPulseInline, { ...countdown, kept: true })), />kept running</);
+    // Ceiling (from 50 minutes): every call, kept or not, no button.
+    const late = { ...base, startedAt: now - 55 * 60_000 };
+    for (const keptFlag of [false, true]) {
+      const ceiling = renderToStaticMarkup(createElement(ToolPulseLine, { ...late, kept: keptFlag }));
+      assert.match(ceiling, />Polyth stops it in 5m: commands run at most 60 minutes</);
+      assert.doesNotMatch(ceiling, /<button|tool-pulse-keep/);
+    }
+    assert.match(renderToStaticMarkup(createElement(ToolPulseInline, { ...late })), />auto-stop in 5m</);
+  });
+  progress.clearToolProgress();
+});
+
+test("tool/keep-running marks the running call; old or unknown calls are ignored", () => {
+  const model = buildModel([
+    ev(1, "user/message", { text: "go" }),
+    ev(2, "tool/started", { callId: "c1", tool: "bash", input: {} }),
+    ev(3, "tool/keep-running", { callId: "c1", byUserId: "u1" }),
+    ev(4, "tool/keep-running", { callId: "ghost" }),
+    ev(5, "tool/keep-running", {}),
+  ]);
+  const tools = model.messages.filter((m) => m.kind === "tool");
+  assert.equal(tools.length, 1);
+  assert.equal((tools[0] as { keptRunning?: boolean }).keptRunning, true);
+  const before = buildModel([ev(1, "user/message", { text: "go" }), ev(2, "tool/started", { callId: "c1", tool: "bash", input: {} })]);
+  assert.equal((before.messages.find((m) => m.kind === "tool") as { keptRunning?: boolean }).keptRunning, undefined);
+});

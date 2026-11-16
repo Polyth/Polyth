@@ -11,7 +11,7 @@ const PROJECT_METHODS = new Set<PropertyKey>([
   "sync", "backendSessions", "importBackendSessions", "markWorktreeMissing",
 ]);
 const SESSION_METHODS = new Set<PropertyKey>([
-  "snapshot", "events", "send", "clientMutationStatus", "abort", "fork", "archive", "restore", "delete",
+  "snapshot", "events", "send", "clientMutationStatus", "abort", "keepToolRunning", "fork", "archive", "restore", "delete",
   "replyPermission", "replyQuestion", "cancelResume", "setResumeCompact", "resumeNow", "rewind", "clearRewind",
   "previewRewindFiles", "previewRewindRestore",
   "runShell", "compact", "replySecret", "rename", "requestAutomaticTitle", "organize", "queueList", "queueEditStart",

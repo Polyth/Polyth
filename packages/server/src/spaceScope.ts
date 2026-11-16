@@ -301,6 +301,7 @@ function scopeSessions(
 
   assign("pause", bySession(base.pause));
   assign("continuePaused", bySession(base.continuePaused));
+  assign("keepToolRunning", bySession(base.keepToolRunning));
   assign("cancelResume", bySession(base.cancelResume));
   assign("setResumeCompact", bySession(base.setResumeCompact));
   assign("resumeNow", bySession(base.resumeNow));

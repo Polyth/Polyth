@@ -788,6 +788,16 @@ export interface SessionPauseEndedData {
   source?: string;
 }
 
+/** `tool/keep-running`: a person told Polyth that one open call is just slow
+ *  and silent, so its silence stop is off (the hard execution ceiling stays).
+ *  Polyth-originated: not runtime turn content, not model-visible. Old
+ *  reducers ignore the unknown type. */
+export const TOOL_KEEP_RUNNING_EVENT = "tool/keep-running" as const;
+export interface ToolKeepRunningData {
+  callId: string;
+  byUserId?: string;
+}
+
 export interface TurnResumeCancelledData {
   turnId?: string;
   /** "user" cancelled the wait, "model-switch" continued on another model,
@@ -3137,6 +3147,10 @@ export interface SessionService {
   /** Continue a paused session: a hidden turn on the same history asks the
    *  agent to carry on from where it was interrupted. Rejects `not-paused`. */
   continuePaused?(sessionId: string, options?: { source?: string }): Promise<SendResult>;
+  /** Turn off the silence stop for one open call of the current turn (the
+   *  hard ceiling stays); records `tool/keep-running`. Idempotent. Rejects
+   *  `conflict` when the call is not open in the current turn. */
+  keepToolRunning?(sessionId: string, callId: string, options?: { userId?: string }): Promise<void>;
   /** Compact the conversation context: the runtime's native compaction when
    * it has one, otherwise Polyth's own (summary + fresh native leg); a native
    * compaction the harness refuses or fails falls back to Polyth's. Resolves

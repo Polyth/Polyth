@@ -28,7 +28,7 @@ const METHOD_ACCESS: Readonly<Record<string, SessionAccessLevel>> = {
   decidePersonAccess: "manage",
   startSessionFromConversation: "collaborate",
 
-  send: "collaborate", abort: "collaborate", pause: "collaborate", continuePaused: "collaborate", replyPermission: "collaborate", replyQuestion: "collaborate",
+  send: "collaborate", abort: "collaborate", pause: "collaborate", continuePaused: "collaborate", keepToolRunning: "collaborate", replyPermission: "collaborate", replyQuestion: "collaborate",
   replySecret: "collaborate", delegatePermission: "collaborate", cancelResume: "collaborate",
   setResumeCompact: "collaborate", setCompactionPreference: "collaborate", resumeNow: "collaborate", rewind: "collaborate", clearRewind: "collaborate",
   // Previews name the chat's changed files and snapshot the checkout: only

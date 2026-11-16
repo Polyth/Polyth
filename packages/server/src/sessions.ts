@@ -61,6 +61,7 @@ import {
   SESSION_PURPOSE_CONVERSATION,
   CONVERSATION_SESSION_STARTED_EVENT,
   SESSION_PAUSE_ENDED_EVENT,
+  TOOL_KEEP_RUNNING_EVENT,
   TURN_INCOMPLETE_EVENT,
   SESSION_PROJECT_MOVED_EVENT,
   SESSION_START_FAILED_EVENT,
@@ -1504,6 +1505,8 @@ export function createSessionService(deps: {
   const unadmittedContentFences = new Map<string, number>();
   const toolWatchdogs = new Map<string, NodeJS.Timeout>();
   const pausedToolWatchdogs = new Set<string>();
+  /** Calls a person marked `tool/keep-running`: no silence stop, ceiling only. */
+  const keptToolCalls = new Set<string>();
   // Per-call clock: when it started and when a runtime event last carried its
   // id. Survives a request pause so the hard ceiling is not reset by waiting.
   const toolWatchdogClocks = new Map<string, { startedAt: number; lastActivityAt: number; ceilingNotBefore: number }>();
@@ -1517,6 +1520,7 @@ export function createSessionService(deps: {
     if (timer) clearTimeout(timer);
     toolWatchdogs.delete(key);
     pausedToolWatchdogs.delete(key);
+    keptToolCalls.delete(key);
     toolWatchdogClocks.delete(key);
   };
   const clearSessionToolWatchdogs = (sessionId: string): void => {
@@ -1530,6 +1534,9 @@ export function createSessionService(deps: {
     }
     for (const key of toolWatchdogClocks.keys()) {
       if (key.startsWith(`${sessionId}\0`)) toolWatchdogClocks.delete(key);
+    }
+    for (const key of keptToolCalls) {
+      if (key.startsWith(`${sessionId}\0`)) keptToolCalls.delete(key);
     }
   };
   type ActiveTool = { tool: string; input: JsonObject; startedAt: number };
@@ -1577,16 +1584,16 @@ export function createSessionService(deps: {
     const schedule = (): void => {
       const clock = toolWatchdogClocks.get(key);
       if (!clock) return;
-      const deadline = Math.min(
-        clock.lastActivityAt + TOOL_EXECUTION_TIMEOUT_MS,
-        Math.max(clock.startedAt + TOOL_EXECUTION_HARD_LIMIT_MS, clock.ceilingNotBefore),
-      );
+      const ceiling = Math.max(clock.startedAt + TOOL_EXECUTION_HARD_LIMIT_MS, clock.ceilingNotBefore);
+      // A kept call has no silence stop: only the hard ceiling remains.
+      const kept = keptToolCalls.has(key);
+      const deadline = kept ? ceiling : Math.min(clock.lastActivityAt + TOOL_EXECUTION_TIMEOUT_MS, ceiling);
       const timer = setTimeout(() => {
         toolWatchdogs.delete(key);
         const current = toolWatchdogClocks.get(key);
         if (!current) return;
         const now = Date.now();
-        const silent = now - current.lastActivityAt >= TOOL_EXECUTION_TIMEOUT_MS;
+        const silent = !keptToolCalls.has(key) && now - current.lastActivityAt >= TOOL_EXECUTION_TIMEOUT_MS;
         const capped = now - current.startedAt >= TOOL_EXECUTION_HARD_LIMIT_MS && now >= current.ceilingNotBefore;
         // Timers can fire a hair early; activity may also have landed meanwhile.
         if (!silent && !capped) {
@@ -14281,6 +14288,31 @@ export function createSessionService(deps: {
       if (endedPause) void dispatchQueue(sessionId);
     },
 
+    async keepToolRunning(sessionId, callId, options) {
+      const userId = typeof options?.userId === "string" && options.userId && !options.userId.startsWith("system:")
+        ? options.userId
+        : undefined;
+      await withSessionLock(sessionId, async () => {
+        if (!(await store.projection(sessionId))) {
+          throw Object.assign(new Error("session not found"), { code: "not-found" });
+        }
+        if (!(await currentTurnActiveTools(sessionId)).has(callId)) {
+          throw Object.assign(new Error("that call is not running in the current turn"), { code: "conflict" });
+        }
+        const key = toolWatchdogKey(sessionId, callId);
+        if (keptToolCalls.has(key)) return;
+        await appendAndBroadcast(sessionId, TOOL_KEEP_RUNNING_EVENT, {
+          callId,
+          ...(userId ? { byUserId: userId } : {}),
+        }, { ignorable: true });
+        keptToolCalls.add(key);
+        // A waiting timer carries the old silence deadline; re-arm it against
+        // the ceiling. A paused call re-arms itself on resume.
+        const clock = toolWatchdogClocks.get(key);
+        if (clock && toolWatchdogs.has(key)) armToolWatchdog(sessionId, callId, clock.startedAt, clock.lastActivityAt);
+      });
+    },
+
     async pause(sessionId, options) {
       const source = typeof options?.source === "string" && options.source.trim()
         ? options.source.trim().slice(0, 64)
@@ -16516,7 +16548,14 @@ export function createSessionService(deps: {
   const rehydrateToolWatchdogs = async (): Promise<void> => {
     for (const row of await store.projections()) {
       if (row.status === "archived" || row.status === "idle") continue;
-      for (const [callId, active] of await currentTurnActiveTools(row.id)) {
+      const activeTools = await currentTurnActiveTools(row.id);
+      if (activeTools.size > 0) {
+        for (const event of await store.events(row.id)) {
+          const kept = event.type === TOOL_KEEP_RUNNING_EVENT ? (event.data as { callId?: unknown }).callId : undefined;
+          if (typeof kept === "string" && activeTools.has(kept)) keptToolCalls.add(toolWatchdogKey(row.id, kept));
+        }
+      }
+      for (const [callId, active] of activeTools) {
         // Activity is not persisted and the runtime may have outlived the
         // restart: the silence window restarts now, the ceiling gets a grace.
         const now = Date.now();

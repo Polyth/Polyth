@@ -95,7 +95,15 @@ Unrelated tools and mirrored child requests retain their execution limits. On
 restart, durable open requests restore the pause, and every other open call
 of a non-idle session restarts its silence window at service start (activity is
 not persisted and the runtime may have outlived the server); the hard ceiling
-still counts from the call's start but never fires sooner than 60 s after start. Codex rejects a permission
+still counts from the call's start but never fires sooner than 60 s after start.
+A person can press **Keep running** on a call that is slow but silent:
+`POST /api/sessions/:id/tools/:callId/keep-running` (same guard as `abort`:
+`coreSessionsControl`, collaborate access, gateway-scoped session) appends
+`tool/keep-running` `{ callId, byUserId? }` once (idempotent; 409 unless the
+call is open in the current turn). That call's silence stop is off and only
+the 60-minute hard ceiling remains; rehydration reads the event and arms the
+call the same way. The event is Polyth-originated: not runtime turn content,
+not model-visible, ignored by old reducers. Codex rejects a permission
 response whose local native request is already absent before delivery, allowing
 the canonical request to expire without an unknown mutation blocking subsequent
 turns. Transport failures and lost mutation acknowledgements remain uncertain

@@ -1179,6 +1179,14 @@ async function dispatchHttp(
         }
         return json(res, 200, { ok: true });
       }
+      m = path.match(/^\/api\/sessions\/([^/]+)\/tools\/([^/]+)\/keep-running$/);
+      if (m && method === "POST") {
+        const keep = space().sessions.keepToolRunning;
+        if (!keep) throw Object.assign(new Error("keep running unavailable"), { code: "unsupported" });
+        const userId = space().ctx.userId;
+        await keep(m[1]!, decodeURIComponent(m[2]!), { userId });
+        return json(res, 200, { ok: true });
+      }
       m = path.match(/^\/api\/sessions\/([^/]+)\/(pause|continue)$/);
       if (m && method === "POST") {
         const b = await loadBody();

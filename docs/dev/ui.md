@@ -969,6 +969,16 @@ Host-owned (`apps/web`), not a package seam.
   names who stops it and on what condition in place, because a bare "stops in
   1m" read as "finishes in 1m" and a tooltip reaches neither touch nor a
   screen reader. The collapsed tail reads `· 8m 50s · auto-stop in 1m 10s`.
+  While the countdown shows and the call is not kept, a small ghost
+  **Keep running** button follows the text (host `Button`, 44px hit area on
+  touch via negative block margin). It calls `api.keepToolRunning`; the
+  countdown goes away when `tool/keep-running` arrives (the reducer sets
+  `ToolMsg.keptRunning`), focus moves to the replacing line, and a failure
+  shows a short inline alert. A kept call reads "No output for 8m 25s · kept
+  running" (collapsed tail: `kept running`) with no countdown. From 50 minutes
+  after the start (`TOOL_HARD_HINT_MS`) every call, kept or not, reads "Polyth
+  stops it in 5m: commands run at most 60 minutes" with no button, because the
+  server's hard ceiling (`TOOL_HARD_STOP_MS`) applies regardless.
   The policy sentence ("Polyth stops a command after 10
   minutes with no output.") is the tooltip. The countdown uses the strong ink
   at weight 500, with no colour signal. The pulse uses the summary row's text
