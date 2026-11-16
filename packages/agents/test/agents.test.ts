@@ -116,7 +116,11 @@ test("consecutive failures trip the agent until the user resumes it", async (t) 
   assert.equal(svc.get(agent.id)!.tripped?.reason, "failures");
   assert.equal(svc.get(agent.id)!.nextRunAt, null);
 
-  svc.setEnabled(agent.id, true);
+  // An edit that does not resume keeps the breaker; an explicit resume
+  // through update (the agent tool's path) clears it like setEnabled.
+  svc.update(agent.id, { description: "still tripped" });
+  assert.equal(svc.get(agent.id)!.tripped?.reason, "failures");
+  svc.update(agent.id, { enabled: true });
   assert.equal(svc.get(agent.id)!.tripped, undefined);
   assert.notEqual(svc.get(agent.id)!.nextRunAt, null);
 });

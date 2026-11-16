@@ -53,6 +53,10 @@ export interface RunSettlementOptions {
  *  enough that work lost with its process does not keep it "working". */
 const DEFAULT_BACKGROUND_WAIT_MS = 60 * 60_000;
 const WAITING_POLL_MS = 5_000;
+/** How long a turn the tool watchdog cut may take to be continued. The
+ *  server continues at once after a proven abort; an unproven one waits for
+ *  reconciliation first. */
+const WATCHDOG_RESUME_MS = 15 * 60_000;
 const MOMENTS_KEPT = 20;
 const MOMENT_CHARS = 160;
 const WAIT_TASKS = 3;
@@ -205,7 +209,12 @@ export async function settleScheduledRun(
   }
   // queued → (dispatched) → admitted → (turn/started) → turn → (turn/stopped)
   // → waiting (background work runs) → (its wake) → admitted → …
-  let phase: "queued" | "admitted" | "turn" | "waiting" = run.queueId ? "queued" : "admitted";
+  // → resuming (the tool watchdog cut the turn and promised to continue it)
+  // → (its hidden continuation) → admitted → …
+  let phase: "queued" | "admitted" | "turn" | "waiting" | "resuming" = run.queueId ? "queued" : "admitted";
+  // The current turn's abort came from the tool watchdog, which continues it.
+  let watchdogCut = false;
+  let resumeSince = 0;
   const waitMs = opts.backgroundWaitMs ?? DEFAULT_BACKGROUND_WAIT_MS;
   // Background work the run started (call id → description), and the wakes
   // it has had so far.
@@ -339,6 +348,19 @@ export async function settleScheduledRun(
         }
         continue;
       }
+      if (phase === "resuming") {
+        const data = event.data as JsonObject | undefined;
+        if (event.type === "user/message" && data?.hiddenUserMessage === true && data.autoResume === true) {
+          // The watchdog's continuation: the run goes on in the next turn.
+          phase = "admitted";
+          continue;
+        }
+        if (event.type === "user/message" || event.type === "turn/started" || event.type === "schedule/run-started") {
+          // Someone else took the session first; the cut turn was the run's end.
+          return result({ status: "failed", error: "Stopped before it finished." });
+        }
+        continue;
+      }
       if (phase === "queued") {
         if (event.type === "queue/dispatched" && str(event, "queueId") === run.queueId) phase = "admitted";
         else if (event.type === "queue/removed" && str(event, "queueId") === run.queueId) {
@@ -349,6 +371,12 @@ export async function settleScheduledRun(
       if (event.type === "turn/started") {
         phase = "turn";
         turnText = "";
+        watchdogCut = false;
+        continue;
+      }
+      if (phase === "turn" && event.type === "turn/abort-requested") {
+        // Only a watchdog abort that plans a continuation carries this source.
+        watchdogCut = str(event, "source") === "tool-watchdog";
         continue;
       }
       if (phase === "turn" && opts.onActivity) noteActivity(event);
@@ -402,6 +430,12 @@ export async function settleScheduledRun(
         continue;
       }
       if (reason === "error") return result({ status: "failed", error: str(event, "error") ?? "The run's turn failed." });
+      if (reason === "aborted" && watchdogCut && phase === "turn") {
+        // One overlong tool call, not a stop: the server continues the turn.
+        phase = "resuming";
+        resumeSince = eventTime(event);
+        continue;
+      }
       if (reason === "aborted") return result({ status: "failed", error: "Stopped before it finished." });
       return result({ status: "unknown", error: `The run's turn stopped without a confirmed result (${reason ?? "no reason"}).` });
     }
@@ -418,6 +452,13 @@ export async function settleScheduledRun(
       // what its last turn said.
       // Only once caught up: a later page may hold the wake.
       if (!events.length && now() - waitSince >= waitMs) return result({ status: "ok" });
+    }
+    if (phase === "resuming") {
+      if (opts.stopRequested?.()) return result({ status: "failed", error: "Stopped before it finished." });
+      // The continuation never came (budget spent, session busy, send failed).
+      if (!events.length && now() - resumeSince >= WATCHDOG_RESUME_MS) {
+        return result({ status: "failed", error: "Stopped before it finished." });
+      }
     }
     // A person's decision should reach the agent's page soon after the click;
     // a stop of a waiting run, too.

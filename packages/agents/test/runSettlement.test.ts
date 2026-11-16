@@ -66,6 +66,53 @@ test("a provider-limit stop with a resume plan keeps waiting for the resumed tur
   assert.deepEqual(await settleScheduledRun(run, opts(source.events)), { status: "ok" });
 });
 
+test("a turn the tool watchdog cut and continued is still the run, not a stop", async () => {
+  const continued = feed([[
+    ev(11, "turn/started"),
+    ev(12, "turn/abort-requested", { reason: "tool-timeout", source: "tool-watchdog" }),
+    ev(13, "turn/stopped", { reason: "aborted" }),
+  ], [], [
+    ev(14, "user/message", { hiddenUserMessage: true, autoResume: true }),
+    ev(15, "turn/started"),
+    ev(16, "assistant/message", { text: "Shipped.\n\nReport: update — done" }),
+    ev(17, "turn/stopped", { reason: "completed" }),
+  ]]);
+  const settled = await settleScheduledRun(run, opts(continued.events, { now: () => 20 }));
+  assert.equal(settled.status, "ok");
+  assert.match(settled.summary ?? "", /Shipped/);
+
+  // The person's own message instead of the continuation ends the run as stopped.
+  const overtaken = feed([[
+    ev(11, "turn/started"),
+    ev(12, "turn/abort-requested", { reason: "tool-timeout", source: "tool-watchdog" }),
+    ev(13, "turn/stopped", { reason: "aborted" }),
+    ev(14, "user/message", { text: "stop that" }),
+  ]]);
+  assert.equal((await settleScheduledRun(run, opts(overtaken.events))).status, "failed");
+
+  // A watchdog abort with no continuation planned (no source) is a plain stop.
+  const spent = feed([[
+    ev(11, "turn/started"),
+    ev(12, "turn/abort-requested", { reason: "tool-timeout" }),
+    ev(13, "turn/stopped", { reason: "aborted" }),
+  ]]);
+  assert.equal((await settleScheduledRun(run, opts(spent.events))).status, "failed");
+
+  // A continuation that never comes gives up after its bound.
+  let clock = 0;
+  const lost = feed([[
+    ev(11, "turn/started"),
+    ev(12, "turn/abort-requested", { reason: "tool-timeout", source: "tool-watchdog" }),
+    { ...ev(13, "turn/stopped", { reason: "aborted" }), time: 0 } as SessionEvent,
+  ]]);
+  const gaveUp = await settleScheduledRun({ ...run, startedAt: 0 }, opts(lost.events, {
+    now: () => clock,
+    sleep: async (ms: number) => { clock += ms; },
+  }));
+  assert.deepEqual(gaveUp, { status: "failed", error: "Stopped before it finished." });
+  assert.ok(clock >= 15 * 60_000 && clock < 60 * 60_000, `gave up after ${clock} ms`);
+});
+
 test("abort, queue removal, a lost session and the observation limit never read as success", async () => {
   const aborted = feed([[ev(11, "turn/started"), ev(12, "turn/stopped", { reason: "aborted" })]]);
   assert.equal((await settleScheduledRun(run, opts(aborted.events))).status, "failed");

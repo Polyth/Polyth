@@ -2425,6 +2425,8 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
       const issued = applyAgentFields(t, patch);
       if (Object.keys(issued).length) issuedTokens.set(t.id, issued);
       t.enabled = merged.enabled ?? true;
+      // An explicit resume clears the breaker, as setEnabled does.
+      if (patch.enabled === true) delete t.tripped;
       if (cadence.kind === "at" && (patch.kind !== undefined || patch.at !== undefined || patch.cadence !== undefined)) {
         t.runs = 0; // re-arm one-shots on reschedule
       }
