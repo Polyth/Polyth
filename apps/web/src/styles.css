@@ -7068,7 +7068,8 @@ li > .md-quote { margin-block: calc(var(--prose-gap) * 0.6); }
   gap: var(--space-1);
   margin-left: auto;
 }
-.md-code-block-header .copy-btn {
+.md-code-block-header .copy-btn,
+.md-code-block-float .copy-btn {
   width: 24px;
   height: 24px;
   padding: 0;
@@ -7079,11 +7080,32 @@ li > .md-quote { margin-block: calc(var(--prose-gap) * 0.6); }
   color: var(--muted);
 }
 @media (hover: hover) {
-  .md-code-block-header .copy-btn:hover:not(:disabled) {
+  .md-code-block-header .copy-btn:hover:not(:disabled),
+  .md-code-block-float .copy-btn:hover:not(:disabled) {
     background: var(--surface-overlay-hover);
     border-color: transparent;
     color: var(--text);
   }
+}
+/* A fence with no language keeps no header row: the copy control floats in the
+   frame's top-right corner over the block's own fill, so the first line starts
+   at the normal padding instead of under an empty band. The fill behind it is
+   the frame's, so a long first line scrolling beneath the control stays
+   readable. */
+.md-code-block-float {
+  position: absolute;
+  z-index: 1;
+  inset-block-start: var(--space-1);
+  inset-inline-end: var(--space-1);
+  display: inline-flex;
+  border-radius: calc(var(--radius-control) - 2px);
+  background: color-mix(in srgb, var(--sunken) 92%, transparent);
+}
+/* The floating control sits in the first line's row, so the code's content box
+   ends before it: a long line is scrolled rather than hidden behind the
+   button. */
+.md-code-block:has(> .md-code-block-float) pre {
+  padding-inline-end: calc(var(--space-3) + var(--space-6));
 }
 .md-code-block-header .json-toggle-btn {
   height: 24px;
