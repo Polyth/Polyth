@@ -240,7 +240,9 @@ export function modelToMarkdown(model: RenderModel): string {
       lines.push(`### Fixing merge conflicts for pull request #${m.prNumber}`);
       lines.push(`\n${m.title}\n\n\`${m.baseRefName} ← ${m.headRefName}\`\n\n${m.url}`);
     } else if (m.kind === "notice") {
-      lines.push(m.topic === "project-moved"
+      lines.push(m.topic === "turn-incomplete"
+        ? `${m.incompleteKind === "length" ? "The answer hit the model’s output limit" : "The agent stopped without replying"}${m.autoContinued ? ". Polyth asked it to continue." : ""}`
+        : m.topic === "project-moved"
         ? `Moved from ${m.fromProject ?? "another project"} to ${m.toProject ?? "another project"}`
         : m.topic === "isolation-merged"
           ? `Merged into ${m.branch ?? ""} · ${m.commit ?? ""}`

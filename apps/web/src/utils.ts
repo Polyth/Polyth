@@ -263,12 +263,19 @@ export function mergeThinking(messages: RenderMessage[]): RenderMessage[] {
   return out;
 }
 
+/** The sentence a turn-incomplete notice reads (also its copied text). */
+export function turnIncompleteLabel(m: { incompleteKind?: "empty" | "length"; autoContinued?: boolean }): string {
+  const fact = tr(m.incompleteKind === "length" ? "timeline.incompleteLength" : "timeline.incompleteEmpty");
+  return m.autoContinued ? `${fact} · ${tr("timeline.incompleteAutoContinued")}` : fact;
+}
+
 /** Message as Markdown for the copy action. */
 export function messageMarkdown(m: RenderMessage): string {
   if (m.kind === "github-conflict") {
     return `### Fixing merge conflicts for pull request #${m.prNumber}\n\n${m.title}\n\n\`${m.baseRefName} ← ${m.headRefName}\`\n\n${m.url}`;
   }
   if (m.kind === "notice") {
+    if (m.topic === "turn-incomplete") return turnIncompleteLabel(m);
     if (m.topic === "project-moved") {
       return m.fromProject && m.toProject
         ? tr("timeline.movedBetweenProjects", { from: m.fromProject, to: m.toProject })

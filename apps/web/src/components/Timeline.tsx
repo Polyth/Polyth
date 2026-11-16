@@ -137,6 +137,8 @@ import { hiddenModelMatcher } from "@polyth/models";
 import { lastChosenHarnessModel } from "../composer/discovery.ts";
 import { getLocale, tr } from "../i18n/index.ts";
 import { normalizeQuestions, questionAnswerDraft, type AnswerMap } from "../questionSerializers.ts";
+import { ToolPulseInline } from "./ToolPulse.tsx";
+import TurnIncompleteNotice, { continueIncompleteTurn } from "./TurnIncompleteNotice.tsx";
 import ExecutionRow, { ComposerShellRow, ExecutionIcon, useCollapsePresence, useExecutionStop, useExecutionSummary, type ExecutionSummary } from "./ExecutionRow.tsx";
 import ActivityTicker, { useTickerKey } from "./ActivityTicker.tsx";
 import { useSettledFlag } from "../activityTicker.ts";
@@ -716,11 +718,12 @@ function stepLine(item: ActivityItem, summary: ExecutionSummary | null): { glyph
   return { preview: item.kind === "task" ? item.text : "", command: false };
 }
 
-function StepLineView({ line }: { line: ReturnType<typeof stepLine> }) {
+function StepLineView({ line, tail }: { line: ReturnType<typeof stepLine>; tail?: ReactNode }) {
   return <span className="activity-ticker-step live">
     {line.glyph && <span className="activity-ticker-glyph" aria-hidden="true"><ExecutionIcon kind={line.glyph.kind} image={line.glyph.image} mcp={line.glyph.mcp} /></span>}
     {line.label && <strong>{line.label}</strong>}
     {line.preview && <span className={`activity-ticker-preview${line.command ? " command" : ""}`}>{line.preview}</span>}
+    {tail}
   </span>;
 }
 
@@ -801,7 +804,11 @@ export function ActivityGroupView({
   const shownSummary = useExecutionSummary(shownTool, sessionId);
   const shownLine = shownStep ? stepLine(shownStep, shownSummary) : null;
   const renderLine = (key: string): ReactNode => {
-    if (key === ticker.shown && shownLine) return <StepLineView line={shownLine} />;
+    if (key === ticker.shown && shownLine) {
+      return shownTool?.status === "running"
+        ? <StepLineView line={shownLine} tail={<ToolPulseInline sessionId={sessionId} callId={shownTool.callId} startedAt={shownTool.time} />} />
+        : <StepLineView line={shownLine} />;
+    }
     const item = key === "summary" ? undefined : g.items.find((candidate) => candidate.id === key);
     if (!item) return <><strong>{title}</strong><small>{metaNode}</small></>;
     if (item.kind === "tool") return <ToolStepLine tool={item} sessionId={sessionId} />;
@@ -1157,8 +1164,10 @@ function PendingPrompt({ send }: { send: PendingSend }) {
   );
 }
 
-function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, settled, dormant, progress, segmentStartedAt, live, entering, leaving = false, answerLeaving = false, onRevert, onFork, revert, fork, sessionId, resourceContext }: {
+function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, settled, dormant, progress, segmentStartedAt, live, entering, leaving = false, answerLeaving = false, onRevert, onFork, revert, fork, sessionId, resourceContext, canContinue = false }: {
   m: RenderMessage;
+  /** A turn-incomplete notice that is the chat's newest row of an idle turn. */
+  canContinue?: boolean;
   announce?: Announce;
   plan?: NonNullable<RenderModel["tasks"]>;
   regeneratePrompt?: { eventSeq: number; text: string; attachments?: UserMsg["attachments"] };
@@ -1251,6 +1260,14 @@ function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, sett
   // `session.timeline.event`. The model keeps this row as a hidden prompt
   // boundary (grouping, regenerate, search and export), so render nothing.
   if (m.kind === "github-conflict") return null;
+  if (m.kind === "notice" && m.topic === "turn-incomplete") {
+    return <TurnIncompleteNotice
+      notice={m}
+      entering={entering}
+      leaving={leaving}
+      onContinue={canContinue && sessionId ? () => { void continueIncompleteTurn(sendMessage, sessionId); } : undefined}
+    />;
+  }
   if (m.kind === "notice") return <IsolationNotice notice={m} entering={entering} leaving={leaving} />;
   if (m.kind === "task") return <TaskActivityRow activity={m} entering={entering} leaving={leaving} />;
   if (m.composerShell) return <ComposerShellRow message={m} entering={entering} leaving={leaving} />;
@@ -1300,6 +1317,7 @@ function sameMessage(a: RenderMessage, b: RenderMessage): boolean {
   }
   if (a.kind === "notice" && b.kind === "notice") {
     return a.topic === b.topic && a.branch === b.branch && a.commit === b.commit
+      && a.incompleteKind === b.incompleteKind && a.autoContinued === b.autoContinued
       && a.fromProject === b.fromProject && a.toProject === b.toProject;
   }
   if (a.kind === "person-message" && b.kind === "person-message") {
@@ -1342,6 +1360,7 @@ const MessageRow = memo(function MessageRow(props: Parameters<typeof MessageView
   && prev.onRevert === next.onRevert
   && prev.onFork === next.onFork
   && prev.sessionId === next.sessionId
+  && prev.canContinue === next.canContinue
   && prev.resourceContext?.projectId === next.resourceContext?.projectId
   && prev.resourceContext?.sessionId === next.resourceContext?.sessionId
   && availabilityEqual(prev.revert, next.revert)
@@ -4803,6 +4822,8 @@ export default function Timeline({
                  segmentStartedAt={r.kind === "assistant" ? terminalAnswers.terminal.get(r.eventSeq) : undefined}
                  announce={announce}
                  onRevert={revert}
+                canContinue={r.kind === "notice" && r.topic === "turn-incomplete" && r.id === latestRowId
+                  && !turnInProgress && pendingSends.length === 0}
 
                 onFork={fork}
                 revert={revertOk}

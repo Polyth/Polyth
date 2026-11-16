@@ -2,6 +2,7 @@
 // keeping only the contiguous cursor makes replay memory proportional to active
 // sessions, rather than to the lifetime of the browser tab.
 import type { ClientSettingsDto, NotificationKind, NotificationRecord, PackageDescriptorDto, ProjectPresentationSettingsDto, SessionEvent, SessionProjection } from "@polyth/contracts";
+import { clearToolProgress, clearToolProgressCall, clearToolProgressSession, noteToolProgress } from "./toolProgress.ts";
 
 export type SyncInbound =
   | { type: "event"; event: SessionEvent }
@@ -20,6 +21,27 @@ export type SyncInbound =
   /** Answer to this page's `presence`: is its person working on another device? */
   | { type: "presence/state"; activeElsewhere: boolean }
   | { type: "error"; code: string; message: string };
+
+/** Live-only liveness of one running tool call. Never in history; handled
+ *  here as ephemeral client state (toolProgress.ts) and not passed to
+ *  listeners. `at` is the adapter's clock and is not used for display. */
+interface ToolProgressFrame { type: "tool/progress"; sessionId: string; callId: string; at: number }
+
+function isToolProgressFrame(raw: unknown): raw is ToolProgressFrame {
+  const m = raw as Record<string, unknown> | null;
+  return typeof m === "object" && m !== null && m.type === "tool/progress"
+    && typeof m.sessionId === "string" && m.sessionId.length > 0
+    && typeof m.callId === "string" && m.callId.length > 0
+    && typeof m.at === "number";
+}
+
+/** Events that end a call's (or every call's) liveness on this client. */
+function settleToolProgress(event: SessionEvent): void {
+  const data = event.data as Record<string, unknown> | null | undefined;
+  if (event.type === "tool/result" || event.type === "tool/error") {
+    if (typeof data?.callId === "string") clearToolProgressCall(event.sessionId, data.callId);
+  } else if (event.type === "turn/stopped") clearToolProgressSession(event.sessionId);
+}
 
 export type SyncListener = (msg: SyncInbound) => void;
 /** `offline` is only a local transport hint, never an authentication verdict. */
@@ -377,6 +399,7 @@ export class SyncClient {
       sessions: this.freshness.sessions && previous !== null && (previous.projectId ?? undefined) === projectId,
     });
     if (this.ws && this.ws.readyState === WS_OPEN) this.armReceiptFallback(this.ws, this.socketGeneration);
+    if (previous?.sessionId && previous.sessionId !== sessionId) clearToolProgressSession(previous.sessionId);
     this.sub = { sessionId, afterSeq, ...(projectId ? { projectId } : {}) };
     if (sessionId) {
       this.recoveringAt.delete(sessionId);
@@ -429,6 +452,7 @@ export class SyncClient {
     this.appliedSeq.clear();
     this.recoveringAt.clear();
     this.sub = null;
+    clearToolProgress();
   }
 
   private canRetry(): boolean { return !this.closed && this.onlineHint && this.foregroundHint; }
@@ -742,6 +766,12 @@ export class SyncClient {
         : { session: true, sessions: this.freshness.sessions });
       return;
     }
+    if (isToolProgressFrame(parsed)) {
+      if (this.isCurrent(ws, generation) && this.acceptsSession(parsed.sessionId)) {
+        noteToolProgress(parsed.sessionId, parsed.callId);
+      }
+      return;
+    }
     if (!isSyncInbound(parsed) || !this.isCurrent(ws, generation)) return;
     if (parsed.type === "event") {
       if (!this.acceptsSession(parsed.event.sessionId)) {
@@ -749,6 +779,7 @@ export class SyncClient {
         return;
       }
       if (!this.accept(parsed.event, ws, generation)) return;
+      settleToolProgress(parsed.event);
     } else if (parsed.type === "events") {
       if (parsed.events.some((event) => !this.acceptsSession(event.sessionId))) {
         this.reassertSubscription(ws, generation);
@@ -764,7 +795,10 @@ export class SyncClient {
           this.recover(event.sessionId, ws, generation);
           break;
         }
-        if (this.accept(event, ws, generation)) accepted.push(event);
+        if (this.accept(event, ws, generation)) {
+          accepted.push(event);
+          settleToolProgress(event);
+        }
       }
       if (accepted.length === 0) return;
       parsed = { type: "events", events: accepted, ...(parsed.live === true ? { live: true } : {}) } satisfies SyncInbound;

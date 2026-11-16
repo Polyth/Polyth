@@ -143,7 +143,11 @@ export interface NoticeMsg {
   kind: "notice";
   id: string;
   eventSeq: number;
-  topic: "isolation-merged" | "isolation-discarded" | "isolation-started" | "project-moved";
+  topic: "isolation-merged" | "isolation-discarded" | "isolation-started" | "project-moved" | "turn-incomplete";
+  /** Turn incomplete: no reply (`empty`) or the output limit (`length`). */
+  incompleteKind?: "empty" | "length";
+  /** Turn incomplete: Polyth already sent its one hidden continuation. */
+  autoContinued?: boolean;
   /** Project moved: names at the time of the move; the log outlives them. */
   fromProject?: string;
   toProject?: string;
@@ -1001,6 +1005,22 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         topic: "project-moved",
         ...(str(d, "fromProjectName") ? { fromProject: str(d, "fromProjectName") } : {}),
         ...(str(d, "toProjectName") ? { toProject: str(d, "toProjectName") } : {}),
+        time: ev.time,
+      });
+      break;
+    }
+    case "turn/incomplete": {
+      // Ignorable and maybe from a newer server: only a known kind renders,
+      // and fields this client does not know are left alone.
+      const kind = str(d, "kind");
+      if (kind !== "empty" && kind !== "length") break;
+      model.messages.push({
+        kind: "notice",
+        id: ev.id,
+        eventSeq: ev.seq,
+        topic: "turn-incomplete",
+        incompleteKind: kind,
+        autoContinued: d.autoContinued === true,
         time: ev.time,
       });
       break;

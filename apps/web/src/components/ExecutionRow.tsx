@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import type { JsonObject, SessionProjection } from "@polyth/contracts";
 import { resolveModelPresentation } from "@polyth/contracts/model-presentation";
 import { api, errorCodeOf, httpStatusOf } from "@polyth/session/web-api";
-import { fmtMs } from "../format.ts";
+import { fmtDuration, fmtMs } from "../format.ts";
 import {
   executionPresentation,
   executionPathParts,
@@ -26,6 +26,7 @@ import AttachmentPreview from "./AttachmentPreview.tsx";
 import CopyButton from "./CopyButton.tsx";
 import { McpCallDetail, TodoChecklist } from "./ToolCallDetail.tsx";
 import { ExecutionIcon } from "./ExecutionIcon.tsx";
+import { ToolPulseLine } from "./ToolPulse.tsx";
 
 export { ExecutionIcon };
 import ResourceLink from "./ResourceLink.tsx";
@@ -143,7 +144,9 @@ function StatusMark({ message, childStatus }: { message: ToolMsg; childStatus?: 
     const timer = window.setInterval(() => setNow(Date.now()), 500);
     return () => window.clearInterval(timer);
   }, [status]);
-  const elapsed = fmtMs(Math.max(0, (message.finishTime ?? now) - message.time));
+  const elapsedMs = Math.max(0, (message.finishTime ?? now) - message.time);
+  // A long call reads in minutes ("8m 50s"), not "530.0s".
+  const elapsed = elapsedMs >= 60_000 ? fmtDuration(elapsedMs) : fmtMs(elapsedMs);
   const label = tr(STATUS_LABEL[status]);
   return (
     <span className={`execution-status ${status}`} aria-label={tr("execution.statusIn", { status: label, elapsed })}>
@@ -1198,6 +1201,9 @@ export function ExecutionRow({
             </Button>
           )}
         </div>
+        {status === "running" && presentation.kind !== "subagent" && !message.composerShell
+          ? <ToolPulseLine sessionId={sessionIdProp ?? activeSessionId} callId={message.callId} startedAt={message.time} />
+          : null}
         <div className="execution-expand-shell" aria-hidden={!open}>
           <div className="execution-collapse-content">
           {detailsPresent && (

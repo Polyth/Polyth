@@ -1,0 +1,66 @@
+/* Incomplete answer: a footnote in the agent's column, not an alert. One
+   small mark, the fact, an optional muted note and a quiet Continue. No
+   outline, so Hide interface borders changes nothing. */
+.turn-incomplete {
+  --turn-incomplete-tone: var(--muted);
+  --turn-incomplete-wash: var(--surface-overlay);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  margin: var(--space-1) 0 var(--space-2);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+.turn-incomplete--length {
+  --turn-incomplete-tone: var(--amber);
+  --turn-incomplete-wash: var(--amber-wash);
+}
+
+.turn-incomplete-mark {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-circle);
+  background: var(--turn-incomplete-wash);
+  color: var(--turn-incomplete-tone);
+}
+
+.turn-incomplete-text {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--space-2);
+}
+
+.turn-incomplete-fact {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.turn-incomplete-note {
+  color: var(--muted);
+}
+
+.turn-incomplete-continue {
+  flex: none;
+  position: relative;
+}
+
+/* Coarse pointers: the button meets the touch floor without growing. */
+@media (pointer: coarse) {
+  .turn-incomplete-continue::after {
+    content: "";
+    position: absolute;
+    inset: 50% auto auto 50%;
+    width: max(100%, var(--hit-min));
+    height: var(--hit-min);
+    transform: translate(-50%, -50%);
+  }
+}

@@ -912,6 +912,41 @@ Contract and server rules: [Spaces §14.8](../architecture/spaces-and-tenancy.md
   default unless picked) and a one-time editable copy of the participants;
   with nobody left the new chat stays private.
 
+### Long tool calls and incomplete answers in the timeline
+
+Host-owned (`apps/web`), not a package seam.
+
+- **Running tool pulse.** The server's live-only `tool/progress` frame
+  (`{ sessionId, callId, at }`, Codex/Claude/ACP, at most every 2 s per call,
+  never in history) is handled in `sync.ts` and kept in `toolProgress.ts` as
+  ephemeral client state: only the time *this client* received the newest
+  frame. The frame's `at` (adapter clock) is never displayed. Frames for
+  another session are dropped and none reach sync listeners. An entry is
+  cleared by the call's `tool/result`/`tool/error`, by `turn/stopped`, by a
+  subscription to another session and by `close()`.
+- A running call shows its elapsed time from the call's start event (the
+  status mark switches to minutes from 60 s: `8m 50s`, not `530.0s`). Once a
+  frame for that call has arrived, the expanded row adds "Last output 6s ago"
+  under it, and the collapsed activity line appends `· 4m 14s · last output 6s
+  ago` after the step (`ToolPulse.tsx`). Without frames nothing about output is
+  claimed. After 8 minutes of quiet (since the newest frame, or since the start
+  when none arrived) both turn amber: "Quiet for 8m 25s" plus "Polyth stops a
+  tool call after 10 min without output." (the server's silence watchdog;
+  `TOOL_SILENCE_STOP_MS`/`TOOL_SILENCE_HINT_MS` mirror it). The pulse uses the
+  summary row's own columns (dot under the tool icon), has no border or
+  spinner, and its only motion, a slow breathing dot, stops under
+  reduced-motion, *Reduce animations* and low-resource mode.
+- **Incomplete answer.** `turn/incomplete { turnId, kind, autoContinued }`
+  reduces to a `notice` row with topic `turn-incomplete`
+  (`TurnIncompleteNotice.tsx`): `length` reads "The answer hit the model’s
+  output limit" (amber mark), `empty` reads "The agent stopped without
+  replying". With `autoContinued` it adds "Polyth asked it to continue." (that
+  hidden continuation stays hidden). Otherwise, while the notice is the chat's
+  newest row and no turn or send is in progress, a quiet ghost **Continue**
+  sends the ordinary visible message `Continue` through `sendMessage` (never
+  `hiddenUserMessage`); its touch target is widened to `--hit-min` on coarse
+  pointers. Unknown fields are ignored and an unknown `kind` renders nothing.
+
 ### 3.1 Host catalog pickers
 
 The Canvas add-widget menu uses the host-owned compact catalog treatment in
