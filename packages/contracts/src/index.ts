@@ -1833,7 +1833,7 @@ export interface ChatMentionCandidateDto {
 export const SESSION_MENTION_SCHEME = "polyth://session/" as const;
 /** Most chats one message may reference; the rest are ignored. */
 export const MAX_SESSION_MENTIONS = 5;
-const SESSION_MENTION_TOKEN = /\[@[^\]\n]*\]\(polyth:\/\/session\/([A-Za-z0-9_-]{1,80})\)/g;
+const SESSION_MENTION_TOKEN = /\[@[^\]\n]{0,80}\]\(polyth:\/\/session\/([A-Za-z0-9_-]{1,80})\)/g;
 
 /** The token for one chat; the label cannot close or nest the link. */
 export function sessionMentionToken(sessionId: string, title: string): string {

@@ -167,6 +167,15 @@ test("the token is parsed from text only: unknown shapes pass through untouched"
   assert.equal(sessionMentionToken("s1", "A](x) <b> [y]"), "[@A x b y](polyth://session/s1)");
 });
 
+test("parsing is linear on unterminated openers (CodeQL js/polynomial-redos #154)", () => {
+  const started = performance.now();
+  assert.deepEqual(sessionMentionIds("[@".repeat(50_000)), []);
+  assert.deepEqual(sessionMentionIds("[@](polyth://session/".repeat(10_000)), []);
+  assert.ok(performance.now() - started < 1_000);
+  const longest = sessionMentionToken("s1", "x".repeat(200));
+  assert.deepEqual(sessionMentionIds(longest), ["s1"], "the longest label a token can carry still parses");
+});
+
 test("a retried operation keeps the recorded block even after the chat is renamed", async (t) => {
   const f = await fixture(t);
   const from = await f.chat("Here", "inherit");

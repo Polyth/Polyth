@@ -11,7 +11,7 @@ export interface ChatMentionRef {
 
 export const MAX_DRAFT_CHAT_MENTIONS = 32;
 
-const TOKEN = /\[@([^\]\n]*)\]\(polyth:\/\/session\/([^)\s]+)\)/g;
+const TOKEN = /\[@([^\]\n]{0,80})\]\(polyth:\/\/session\/([^)\s]{1,128})\)/g;
 const LABEL_IN_TOKEN = /^\[@([^\]\n]*)\]\(/;
 
 /** The label a token will carry for this title (the token's own sanitizing). */

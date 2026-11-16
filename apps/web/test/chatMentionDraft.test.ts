@@ -77,3 +77,12 @@ test("recall round-trips: token → @Title + ref → the same token", () => {
   assert.deepEqual(shown.refs, [{ label: "Tax rounding bug", sessionId: ID }]);
   assert.equal(expandChatMentions(shown.text, shown.refs), sent);
 });
+
+test("collapse is linear on unterminated openers (CodeQL js/polynomial-redos #155)", () => {
+  const started = performance.now();
+  assert.equal(collapseChatMentions("[@\\".repeat(50_000)).refs.length, 0);
+  assert.equal(collapseChatMentions("[@](polyth://session/!".repeat(10_000)).refs.length, 0);
+  assert.ok(performance.now() - started < 1_000);
+  const longest = expandChatMentions("@" + "x".repeat(80), [{ label: "x".repeat(80), sessionId: "id-1" }]);
+  assert.deepEqual(collapseChatMentions(longest).refs, [{ label: "x".repeat(80), sessionId: "id-1" }]);
+});
