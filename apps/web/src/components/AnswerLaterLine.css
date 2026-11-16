@@ -1,0 +1,37 @@
+/* "Answer later" waiting line: one plateless line of the pending stack above
+   the composer (docs/dev/ui.md "Answer later"), on the stack's grid: the mark on
+   --composer-stack-mark, the words from --composer-stack-text. The whole line is
+   the target (44px on touch); only hover/press paints, like the suggestion. */
+.answer-later {
+  min-inline-size: 0; box-sizing: border-box;
+  /* The composer card's column, so the grid is measured from its edge. */
+  inline-size: min(var(--chat-measure), calc(100% - 2 * var(--gutter)));
+  margin: 0 auto var(--space-1);
+  padding-inline-end: calc(var(--composer-stack-end) - (max(var(--composer-stack-control), var(--hit-min)) - var(--icon-sm)) / 2);
+}
+.answer-later-open {
+  display: flex; align-items: center;
+  inline-size: 100%; min-inline-size: 0; box-sizing: border-box;
+  gap: calc(var(--composer-stack-text) - var(--composer-stack-mark) - var(--icon-sm) / 2);
+  min-block-size: max(var(--composer-stack-row), var(--hit-min));
+  margin: 0; padding: var(--space-1);
+  padding-inline-start: calc(var(--composer-stack-mark) - var(--icon-sm) / 2);
+  border: 0; border-radius: var(--radius-control);
+  background: none; color: var(--chat-ink-dim); text-align: start;
+  font: inherit; font-size: var(--font-composer-stack); line-height: 1.35;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) {
+  .answer-later-open:hover { background: var(--surface-overlay-hover); }
+}
+.answer-later-open:active { background: var(--surface-overlay-hover); }
+.answer-later-open:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.answer-later-mark { flex: none; color: var(--chat-ink-accent); }
+.answer-later-text { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.answer-later-sep { color: var(--chat-ink-dim); }
+.answer-later-action { color: var(--chat-ink-accent); font-weight: 600; }
+@media (prefers-reduced-motion: no-preference) {
+  .answer-later { animation: composer-suggestion-in var(--motion-normal) var(--motion-ease) both; }
+}

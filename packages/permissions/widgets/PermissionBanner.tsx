@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type ComponentType } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
 import type { UiSlot } from "@polyth/contracts";
 import { api } from "@polyth/session/web-api";
 import type { PendingPermission } from "../../../apps/web/src/reduce.ts";
@@ -9,6 +9,9 @@ import { tr, type TranslationKey } from "../../../apps/web/src/i18n/index.ts";
 import { guardedAutoApproveAllowed, guardedMayAllow, useGuardrails } from "../../../apps/web/src/guardrails.ts";
 import { openSession } from "../../../apps/web/src/init.ts";
 import { useStore } from "../../../apps/web/src/store.ts";
+import {
+  admitAnswerLater, answerLaterKey, deferAnswerLater, isDeferred, takeAnswerLaterFocus, useAnswerLaterVersion,
+} from "@polyth/web-sdk/answer-later";
 import { groupPermissions } from "./groupPermissions.ts";
 import { confirmFullAccess } from "./fullAccess.ts";
 import { outsideTaskLabel, permissionBlastRadius, riskReasonLabels, sessionWorkspaceRoots, type Translate } from "./blastRadius.ts";
@@ -422,8 +425,24 @@ export interface PermissionPolicyEffect {
   apply(level: PermissionPolicyLevel): void;
 }
 
-function PermissionRow({ requests, Slot }: { requests: PendingPermission[]; Slot?: PermissionNotesSlot }) {
+const laterKeys = (requests: readonly PendingPermission[]) =>
+  requests.map((request) => answerLaterKey("approval", request.sessionId, request.requestId));
+
+function PermissionRow({ requests, Slot, onLater }: {
+  requests: PendingPermission[];
+  Slot?: PermissionNotesSlot;
+  /** Answer later is on: a row opened from the waiting line takes the focus. */
+  onLater?: boolean;
+}) {
   const bodyRef = useScrollEdges();
+  const rowRef = useRef<HTMLDivElement>(null);
+  const keysSignature = laterKeys(requests).join("\n");
+  // Opened from the waiting line: the first decision takes the focus.
+  useEffect(() => {
+    if (!onLater || !takeAnswerLaterFocus(keysSignature.split("\n"))) return;
+    rowRef.current?.querySelector<HTMLElement>(".perm-actions button:not([disabled])")?.focus({ preventScroll: true });
+    rowRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [keysSignature, onLater]);
   const [busy, setBusy] = useState<PermissionAction | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Protected mode mirror; the server refuses these replies regardless.
@@ -548,7 +567,7 @@ function PermissionRow({ requests, Slot }: { requests: PendingPermission[]; Slot
   const mcpDetails = isMcp ? parseMcpDetails(p, lines) : null;
 
   return (
-    <div className="perm-row permission-request">
+    <div ref={rowRef} className="perm-row permission-request">
       {/* Everything that explains the request scrolls; the decision row
           below it stays in view however long the explanation gets. */}
       <div className="permission-request-body" ref={bodyRef}>
@@ -701,19 +720,65 @@ function PermissionRow({ requests, Slot }: { requests: PendingPermission[]; Slot
   );
 }
 
-export default function PermissionBanner({ permissions, Slot }: { permissions: PendingPermission[]; Slot?: PermissionNotesSlot }) {
-  const groups = groupPermissions(permissions);
+export default function PermissionBanner({ permissions, Slot, deferrable = false }: {
+  permissions: PendingPermission[];
+  Slot?: PermissionNotesSlot;
+  /** The chat's own placement may fold rows for later; the session-row popover
+   *  and other "answer from anywhere" placements always show every request. */
+  deferrable?: boolean;
+}) {
+  useAnswerLaterVersion();
+  const all = groupPermissions(permissions);
+  const groups = deferrable
+    ? all.filter((group) => {
+      const keys = laterKeys(group.requests);
+      admitAnswerLater(keys, group.requests[0]?.sessionId ?? null);
+      return !keys.every(isDeferred);
+    })
+    : all;
   if (groups.length === 0) return null;
+  // Answer later folds every request on screen into the waiting line above
+  // the composer; the keyboard follows to its Answer when it was in here.
+  const later = (banner: HTMLElement | null) => {
+    const hadFocus = banner?.contains(document.activeElement) ?? false;
+    const requests = groups.flatMap((group) => group.requests);
+    deferAnswerLater(laterKeys(requests), requests[0]?.sessionId ?? null);
+    if (hadFocus) requestAnimationFrame(() => document.querySelector<HTMLElement>(".answer-later-open")?.focus());
+  };
   return (
-    <GlassDock className="perm-banner permission-toast" role="alert" aria-live="assertive" aria-relevant="additions text">
+    <GlassDock
+      className="perm-banner permission-toast"
+      role="alert"
+      aria-live="assertive"
+      aria-relevant="additions text"
+      {...(deferrable ? {
+        onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => {
+          if (event.key !== "Escape" || event.defaultPrevented || event.nativeEvent.isComposing) return;
+          event.preventDefault();
+          later(event.currentTarget);
+        },
+      } : {})}
+    >
       <div className="perm-title">
         <span className="permission-mode-icon" aria-hidden="true"><Icon.shield /></span>
         {tr("permissionbanner.permissionRequested")}
+        {deferrable && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="permission-later"
+            title={tr("answerlater.laterTitle")}
+            aria-keyshortcuts="Escape"
+            onClick={(event) => later(event.currentTarget.closest(".perm-banner"))}
+          >
+            {tr("answerlater.later")}
+          </Button>
+        )}
       </div>
       {groups.map((group, index) => (
         <Fragment key={group.key}>
           {index > 0 && <Separator decorative />}
-          <PermissionRow requests={group.requests} Slot={Slot} />
+          <PermissionRow requests={group.requests} Slot={Slot} onLater={deferrable} />
         </Fragment>
       ))}
     </GlassDock>

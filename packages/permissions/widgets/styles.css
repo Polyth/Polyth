@@ -58,6 +58,25 @@
 .perm-banner > .perm-title,
 .perm-banner > .ui-separator { flex: none; }
 
+/* Answer later: a quiet word at the title's end, never a decision. It keeps the
+   title's height with a mouse and a full 44px target on touch by reaching out
+   of the line rather than growing it. */
+.perm-banner .perm-title .permission-later {
+  margin-inline-start: auto;
+  margin-block: calc(-1 * var(--space-1));
+  color: var(--muted);
+  font-weight: 500;
+}
+@media (hover: hover) {
+  .perm-banner .perm-title .permission-later:hover:not(:disabled) { color: var(--text); }
+}
+@media (pointer: coarse) {
+  .perm-banner .perm-title .permission-later {
+    min-block-size: var(--hit-min);
+    margin-block: calc((1lh - var(--hit-min)) / 2);
+  }
+}
+
 .perm-banner .permission-request {
   display: flex;
   min-width: 0;

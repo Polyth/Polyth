@@ -4111,6 +4111,11 @@ body[data-desktop-low-resource="true"] .timeline > .rewind-leaving { animation: 
   background: var(--material-glass);
 }
 .question-actions .question-reject { color: var(--muted); }
+/* Answer later: as quiet as Reject, but on the forward side, next to Submit. */
+.question-actions .question-later { color: var(--muted); }
+@media (hover: hover) {
+  .question-actions .question-later:hover:not(:disabled) { color: var(--text); }
+}
 @media (hover: hover) {
   .question-actions .question-reject:hover:not(:disabled) { color: var(--danger); }
 }

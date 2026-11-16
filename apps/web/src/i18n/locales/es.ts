@@ -1,6 +1,15 @@
 import type { AppMessages } from "./en.ts";
 
 export const es: AppMessages = {
+  "answerlater.later": "Más tarde",
+  "answerlater.laterTitle": "Responder más tarde (Esc)",
+  "answerlater.answer": "Responder",
+  "answerlater.waiting": "En espera: {items}",
+  "answerlater.and": "{first} y {second}",
+  "answerlater.questionOne": "1 pregunta",
+  "answerlater.questionMany": "{count} preguntas",
+  "answerlater.approvalOne": "1 aprobación",
+  "answerlater.approvalMany": "{count} aprobaciones",
   "api.httpErrorValueValueValue": "HTTP {status} {statusText} — {body}",
   "api.httpStatusValue": "HTTP {status}",
   "api.ttsFailedHttpValue": "Error de texto a voz: HTTP {status}",

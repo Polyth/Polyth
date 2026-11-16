@@ -23,7 +23,7 @@ import { guardedAutoApproveAllowed, useGuardrails } from "../../../apps/web/src/
 function PendingPermissionsWidget({ Slot }: { Slot?: PermissionNotesSlot }) {
   const model = useActiveModel();
   const pending = model.permissions.filter((request) => request.status === "pending");
-  return createElement(PermissionBanner, { permissions: pending, Slot });
+  return createElement(PermissionBanner, { permissions: pending, Slot, deferrable: true });
 }
 
 type ApprovalSetting = "off" | "on" | "all" | "inherit";

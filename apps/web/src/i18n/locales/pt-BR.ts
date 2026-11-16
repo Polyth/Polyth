@@ -1,6 +1,15 @@
 import type { AppMessages } from "./en.ts";
 
 export const ptBR: AppMessages = {
+  "answerlater.later": "Depois",
+  "answerlater.laterTitle": "Responder depois (Esc)",
+  "answerlater.answer": "Responder",
+  "answerlater.waiting": "Aguardando: {items}",
+  "answerlater.and": "{first} e {second}",
+  "answerlater.questionOne": "1 pergunta",
+  "answerlater.questionMany": "{count} perguntas",
+  "answerlater.approvalOne": "1 aprovação",
+  "answerlater.approvalMany": "{count} aprovações",
   "api.httpErrorValueValueValue": "HTTP {status} {statusText} — {body}",
   "api.httpStatusValue": "HTTP {status}",
   "api.ttsFailedHttpValue": "Falha de conversão de texto em fala: HTTP {status}",

@@ -1,6 +1,15 @@
 import type { AppMessages } from "./en.ts";
 
 export const zhCN: AppMessages = {
+  "answerlater.later": "稍后",
+  "answerlater.laterTitle": "稍后回答 (Esc)",
+  "answerlater.answer": "回答",
+  "answerlater.waiting": "等待中：{items}",
+  "answerlater.and": "{first}、{second}",
+  "answerlater.questionOne": "1 个问题",
+  "answerlater.questionMany": "{count} 个问题",
+  "answerlater.approvalOne": "1 个批准",
+  "answerlater.approvalMany": "{count} 个批准",
   "api.httpErrorValueValueValue": "HTTP {status} {statusText} — {body}",
   "api.httpStatusValue": "HTTP {status}",
   "api.ttsFailedHttpValue": "文本转语音失败：HTTP {status}",

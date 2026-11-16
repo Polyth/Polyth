@@ -1,6 +1,15 @@
 import type { AppMessages } from "./en.ts";
 
 export const uk: AppMessages = {
+  "answerlater.later": "Пізніше",
+  "answerlater.laterTitle": "Відповісти пізніше (Esc)",
+  "answerlater.answer": "Відповісти",
+  "answerlater.waiting": "Чекають відповіді: {items}",
+  "answerlater.and": "{first}, {second}",
+  "answerlater.questionOne": "запитання (1)",
+  "answerlater.questionMany": "запитання ({count})",
+  "answerlater.approvalOne": "дозвіл (1)",
+  "answerlater.approvalMany": "дозволи ({count})",
   "api.httpErrorValueValueValue": "HTTP {status} {statusText} — {body}",
   "api.httpStatusValue": "HTTP {status}",
   "api.ttsFailedHttpValue": "Помилка перетворення тексту в мовлення: HTTP {status}",

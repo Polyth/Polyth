@@ -1,6 +1,15 @@
 import type { AppMessages } from "./en.ts";
 
 export const ar: AppMessages = {
+  "answerlater.later": "لاحقًا",
+  "answerlater.laterTitle": "الرد لاحقًا (Esc)",
+  "answerlater.answer": "رد",
+  "answerlater.waiting": "بانتظار الرد: {items}",
+  "answerlater.and": "{first} و{second}",
+  "answerlater.questionOne": "سؤال (1)",
+  "answerlater.questionMany": "أسئلة ({count})",
+  "answerlater.approvalOne": "موافقة (1)",
+  "answerlater.approvalMany": "موافقات ({count})",
   "api.httpErrorValueValueValue": "HTTP {status} {statusText} — {body}",
   "api.httpStatusValue": "HTTP {status}",
   "api.ttsFailedHttpValue": "فشل تحويل النص إلى كلام: HTTP {status}",

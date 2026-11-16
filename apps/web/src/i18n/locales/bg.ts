@@ -1,6 +1,15 @@
 import type { AppMessages } from "./en.ts";
 
 export const bg: AppMessages = {
+  "answerlater.later": "По-късно",
+  "answerlater.laterTitle": "Отговор по-късно (Esc)",
+  "answerlater.answer": "Отговор",
+  "answerlater.waiting": "Чакат: {items}",
+  "answerlater.and": "{first} и {second}",
+  "answerlater.questionOne": "1 въпрос",
+  "answerlater.questionMany": "{count} въпроса",
+  "answerlater.approvalOne": "1 одобрение",
+  "answerlater.approvalMany": "{count} одобрения",
   "api.httpErrorValueValueValue": "HTTP {status} {statusText} — {body}",
   "api.httpStatusValue": "HTTP {status}",
   "api.ttsFailedHttpValue": "Неуспешно преобразуване на текст в говор: HTTP {status}",

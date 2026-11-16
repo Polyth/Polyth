@@ -2986,6 +2986,29 @@ pressed button and a failed send stays in the card as an inline error;
 Cmd/Ctrl+Enter moves to the next step or submits. Choosing "Other" reveals its
 text field; a ticked-but-empty Other is neither a valid answer nor sent.
 
+**Answer later:** background work never moves what a person is typing. An
+open question's footer offers a quiet **Later** next to Submit, and the
+chat's approval banner offers one at the end of its title. Esc while focus is
+inside the card or banner does the same. A folded item leaves the timeline, and
+every waiting item of the chat shares one plateless line at the top of the
+pending stack (`AnswerLaterLine`): help mark · "1 question and 2 approvals
+waiting" · **Answer**. The whole line is the target (44 px on touch). It opens
+every waiting item, and the first one takes the focus on its first control (a
+question's first choice or field, an approval's first decision). When Later or
+Esc folds a card that held the focus, the keyboard moves to Answer. Neither
+card takes the focus on mount. An item that first appears while the composer of
+its chat holds unsent text (words or attachments) arrives already folded. It
+never paints under the caret and the focus stays put. Sending or clearing that
+draft opens these items again; items folded by hand stay folded until the person
+opens them. A new item that joins a card already on screen never folds. The
+state is client-only (`@polyth/web-sdk/answer-later`): per tab, keyed by the
+session holding the request and its request id. It survives chat switches and
+never enters session history. Attention (the session row's "?", unread and
+approval badges, the phone) still counts folded items. Only the chat's own
+banner placement folds (`deferrable`); the session row's popover and other
+placements always show the request. Pinned in `apps/web/test/answerLater.test.ts`
+and `packages/permissions/test/answerLater.test.ts`.
+
 **Answered questions:** the open stepper owns a pending question only. Once
 answered, declined or expired, the same row hands over to the record: the
 question stays in the conversation where it was asked (`QuestionRecord.tsx`): a quiet
@@ -3162,7 +3185,8 @@ restyles every block already in the transcript without a re-render.
 
 **The pending stack above the composer:** everything that waits on the composer
 is lines of text, not cards, with the composer card as the one surface. Top to
-bottom: the agent's status or the edited files, any subagents hanging from them,
+bottom: the questions and approvals waiting for later (see "Answer later"), the
+agent's status or the edited files, any subagents hanging from them,
 the queued prompts and the suggested next prompt. No line paints a plate, border,
 shadow or glass in any platform style or look. Everything sits on one grid
 measured from the card's outer edge: marks are centred on the model logo's column

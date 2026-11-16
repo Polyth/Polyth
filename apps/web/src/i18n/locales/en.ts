@@ -4,6 +4,15 @@
  * against this object in tests so a missing translation can never ship.
  */
 export const en = {
+  "answerlater.later": "Later",
+  "answerlater.laterTitle": "Answer later (Esc)",
+  "answerlater.answer": "Answer",
+  "answerlater.waiting": "{items} waiting",
+  "answerlater.and": "{first} and {second}",
+  "answerlater.questionOne": "1 question",
+  "answerlater.questionMany": "{count} questions",
+  "answerlater.approvalOne": "1 approval",
+  "answerlater.approvalMany": "{count} approvals",
   "api.httpErrorValueValueValue": "HTTP {status} {statusText} — {body}",
   "api.httpStatusValue": "HTTP {status}",
   "api.ttsFailedHttpValue": "Text-to-speech failed: HTTP {status}",

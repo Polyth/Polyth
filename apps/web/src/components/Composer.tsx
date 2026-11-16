@@ -2,6 +2,7 @@ import {
   Fragment, memo, useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, useSyncExternalStore,
   type ClipboardEvent, type CSSProperties, type Ref, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode,
 } from "react";
+import { reportComposerDraft } from "@polyth/web-sdk/answer-later";
 import {
   activateProject,
   moveNewSessionDraftToProject,
@@ -4509,6 +4510,13 @@ function ComposerBody({
     || (queueEdit ? !liveText.trim() : (!liveText.trim() && attachments.length === 0))
     || (!queueEdit && !shellMode && (modelAbsenceBlocksSend || profileMissing) && !hostOnlyCommandReady);
   const hasDraft = liveText.trim() !== "" || attachments.length > 0 || imageChoice.pending.length > 0;
+  // Answer later: a question or approval that arrives while this draft is
+  // unsent folds into the waiting line; sending or clearing opens it again.
+  const answerLaterSessionId = session?.id ?? null;
+  useEffect(() => {
+    reportComposerDraft(answerLaterSessionId, hasDraft);
+  }, [answerLaterSessionId, hasDraft]);
+  useEffect(() => () => reportComposerDraft(answerLaterSessionId, false), [answerLaterSessionId]);
   const peopleSendDisabled = peopleSending || (liveText.trim() === "" && attachments.length === 0);
   const runningHasSend = !sendDisabled;
   const runningPrimaryLabel = queueEdit
