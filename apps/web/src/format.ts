@@ -14,16 +14,18 @@ export function fmtMs(ms: number): string {
 export function fmtDuration(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
   if (s < 60) return tr("format.durationSeconds", { value: formatNumber(s) });
+  // Zero parts are dropped: "1m", not "1m 0s"; "2h", not "2h 0m".
   if (s < 3600) {
-    return tr("format.durationMinutes", {
-      minutes: formatNumber(Math.floor(s / 60)),
-      seconds: formatNumber(s % 60),
-    });
+    const minutes = formatNumber(Math.floor(s / 60));
+    return s % 60 === 0
+      ? tr("format.durationMinutesOnly", { minutes })
+      : tr("format.durationMinutes", { minutes, seconds: formatNumber(s % 60) });
   }
-  return tr("format.durationHours", {
-    hours: formatNumber(Math.floor(s / 3600)),
-    minutes: formatNumber(Math.floor((s % 3600) / 60)),
-  });
+  const hours = formatNumber(Math.floor(s / 3600));
+  const minutes = Math.floor((s % 3600) / 60);
+  return minutes === 0
+    ? tr("format.durationHoursOnly", { hours })
+    : tr("format.durationHours", { hours, minutes: formatNumber(minutes) });
 }
 
 /** Compact navigator clock: mm:ss under an hour, then h:mm without seconds. */

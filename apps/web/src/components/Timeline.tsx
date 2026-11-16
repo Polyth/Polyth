@@ -662,11 +662,12 @@ function activityItemNode(
   entering: boolean,
   sessionId: string | null,
   resourceContext?: TimelineResourceContext,
+  headless = false,
 ): ReactNode {
   // A step shows what it is, not its whole output. Assistant text is the same
   // reading surface as the timeline answer — never secondary thinking type.
   if (item.kind === "tool") {
-    return <ExecutionRow key={item.id} message={item} subagent={childForTool(item, subagents)} entering={entering} sessionId={sessionId} />;
+    return <ExecutionRow key={item.id} message={item} subagent={childForTool(item, subagents)} entering={entering} sessionId={sessionId} headless={headless} />;
   }
   if (item.kind === "assistant") {
     const thought = item.reasoning.trim() !== ""
@@ -803,9 +804,16 @@ export function ActivityGroupView({
   const shownTool = shownStep?.kind === "tool" ? shownStep : undefined;
   const shownSummary = useExecutionSummary(shownTool, sessionId);
   const shownLine = shownStep ? stepLine(shownStep, shownSummary) : null;
+  // A block that holds one call names it once: open, the block's header stays
+  // the only line (and the only toggle) and the call shows its details without
+  // repeating its own summary row ("Test Run tests" over "Test Run tests").
+  // The header then keeps the time and the Stop the row would have carried.
+  const soleTool = g.items.length === 1 && g.items[0]!.kind === "tool"
+    && executionPresentation(g.items[0]!).kind !== "subagent" ? g.items[0] : undefined;
   const renderLine = (key: string): ReactNode => {
     if (key === ticker.shown && shownLine) {
-      return shownTool?.status === "running"
+      // Open, the running row below shows the time itself: no second copy.
+      return shownTool?.status === "running" && (!open || soleTool !== undefined)
         ? <StepLineView line={shownLine} tail={<ToolPulseInline sessionId={sessionId} callId={shownTool.callId} startedAt={shownTool.time} />} />
         : <StepLineView line={shownLine} />;
     }
@@ -817,7 +825,7 @@ export function ActivityGroupView({
   // A command the line names while it runs gets a Stop beside the line, once
   // it has run for a beat. An open block shows the step's own Stop instead,
   // and a delegated agent is stopped from its own session.
-  const stopCandidate = shownTool && shownTool.status === "running" && !open
+  const stopCandidate = shownTool && shownTool.status === "running" && (!open || soleTool !== undefined)
     && shownSummary !== null && shownSummary.kind !== "subagent" ? shownTool : undefined;
   const stopper = useExecutionStop(stopCandidate, sessionId, stopCandidate !== undefined);
   const showStop = useSettledFlag(stopper.canStop, LIVE_STOP_DELAY_MS);
@@ -872,7 +880,7 @@ export function ActivityGroupView({
           {itemsPresent && (
             <div className="activity-group-items">
               {g.items.map((item, index) =>
-                activityItemNode(item, subagents, ticking && index === g.items.length - 1, entering && active && index === g.items.length - 1, sessionId, resourceContext))}
+                activityItemNode(item, subagents, ticking && index === g.items.length - 1, entering && active && index === g.items.length - 1, sessionId, resourceContext, item === soleTool))}
             </div>
           )}
         </div>

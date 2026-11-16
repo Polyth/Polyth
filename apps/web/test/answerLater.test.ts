@@ -81,6 +81,8 @@ test("Later folds the question into one waiting line; Answer restores it with fo
     assert.ok(view.q(".question-open"), "the question shows");
     assert.equal(view.q(".answer-later"), null, "no waiting line while nothing waits");
     assert.equal(view.q(".question-later")?.textContent, "Later");
+    assert.ok(view.q(".question-head .question-later"), "Later sits at the title's end, as on the approval card");
+    assert.equal(view.q(".question-actions .question-later"), null, "never beside Submit");
 
     await act(async () => view.q(".question-later")!.click());
     assert.equal(view.q(".question-open"), null, "the card folds");

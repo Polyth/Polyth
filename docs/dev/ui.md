@@ -925,27 +925,42 @@ Host-owned (`apps/web`), not a package seam.
   cleared by the call's `tool/result`/`tool/error`, by `turn/stopped`, by a
   subscription to another session and by `close()`.
 - A running call shows its elapsed time from the call's start event (the
-  status mark switches to minutes from 60 s: `8m 50s`, not `530.0s`). Once a
-  frame for that call has arrived, the expanded row adds "Last output 6s ago"
-  under it, and the collapsed activity line appends `· 4m 14s · last output 6s
-  ago` after the step (`ToolPulse.tsx`). Without frames nothing about output is
-  claimed. After 8 minutes of quiet (since the newest frame, or since the start
-  when none arrived) both turn amber: "Quiet for 8m 25s" plus "Polyth stops a
-  tool call after 10 min without output." (the server's silence watchdog;
-  `TOOL_SILENCE_STOP_MS`/`TOOL_SILENCE_HINT_MS` mirror it). The pulse uses the
-  summary row's own columns (dot under the tool icon), has no border or
-  spinner, and its only motion, a slow breathing dot, stops under
-  reduced-motion, *Reduce animations* and low-resource mode.
+  status mark switches to minutes from 60 s: `8m 50s`, not `530.0s`). Each fact
+  appears once (`ToolPulse.tsx`). The collapsed activity line appends
+  `· 4m 14s · last output 6s ago` after the step. While the block is open, that
+  tail is hidden, because the row's status mark carries the time. Once a frame
+  for that call has arrived, the expanded row adds one line under it: "Last
+  output 6s ago". Without frames nothing about output or silence is claimed,
+  since "quiet" would only restate the elapsed time. In the last two minutes
+  before the server's silence watchdog (`TOOL_SILENCE_HINT_MS` 8 min,
+  `TOOL_SILENCE_STOP_MS` 10 min), the line becomes the countdown. That is
+  "No output for 8m 25s · stops in 1m 35s" once frames exist, or "Stops
+  automatically in 1m 10s" without them. The collapsed tail reads `· 8m 50s ·
+  stops in 1m 10s`. The policy sentence ("Polyth stops a command after 10
+  minutes with no output.") is the tooltip. The countdown uses the strong ink
+  at weight 500, with no colour signal. The pulse uses the summary row's text
+  column and is words only: no dot, border or spinner of its own, and no
+  motion. A test step's glyph is a flask: a check mark next to a running
+  spinner would read as "passed". A block holding one call names it once: when open, the block header
+  stays the only toggle and keeps the tail and Stop, and the call shows only its
+  details (`ExecutionRow` `headless`). The agent's status line above the
+  composer names the running call with the row's own words through
+  `executionSummaryWords` (`execution.ts`), e.g. "Test · Run tests".
+  `fmtDuration` drops zero parts ("1m", "2h 5m").
 - **Incomplete answer.** `turn/incomplete { turnId, kind, autoContinued }`
   reduces to a `notice` row with topic `turn-incomplete`
-  (`TurnIncompleteNotice.tsx`): `length` reads "The answer hit the model’s
-  output limit" (amber mark), `empty` reads "The agent stopped without
-  replying". With `autoContinued` it adds "Polyth asked it to continue." (that
-  hidden continuation stays hidden). Otherwise, while the notice is the chat's
-  newest row and no turn or send is in progress, a quiet ghost **Continue**
-  sends the ordinary visible message `Continue` through `sendMessage` (never
-  `hiddenUserMessage`); its touch target is widened to `--hit-min` on coarse
-  pointers. Unknown fields are ignored and an unknown `kind` renders nothing.
+  (`TurnIncompleteNotice.tsx`). It is a footnote of the agent's turn in the
+  agent's column, set like the model line (meta size, no icon, disc or
+  outline), so it never reads as a message from Polyth. `length` reads "The
+  answer was cut off: it reached the reply length limit", and `empty` reads
+  "The agent stopped without answering". With `autoContinued` it adds the
+  muted "Polyth asked it to continue." (that hidden continuation stays
+  hidden). Otherwise, while the notice is the chat's newest row and no turn or
+  send is in progress, an accent text action **Continue** follows the fact and
+  wraps with it. It sends the ordinary visible message `Continue` through
+  `sendMessage` (never `hiddenUserMessage`). Its hit area reaches `--hit-min`
+  on coarse pointers without moving the line. Unknown fields are ignored and
+  an unknown `kind` renders nothing.
 
 ### 3.1 Host catalog pickers
 
@@ -3022,12 +3037,14 @@ Cmd/Ctrl+Enter moves to the next step or submits. Choosing "Other" reveals its
 text field; a ticked-but-empty Other is neither a valid answer nor sent.
 
 **Answer later:** background work never moves what a person is typing. An
-open question's footer offers a quiet **Later** next to Submit, and the
-chat's approval banner offers one at the end of its title. Esc while focus is
-inside the card or banner does the same. A folded item leaves the timeline, and
-every waiting item of the chat shares one plateless line at the top of the
-pending stack (`AnswerLaterLine`): help mark · "1 question and 2 approvals
-waiting" · **Answer**. The whole line is the target (44 px on touch). It opens
+open question and the chat's approval banner both offer a quiet **Later**
+at the end of their title (never beside Submit, where it would read as a
+decision). Esc while focus is inside the card or banner does the same. A folded
+item leaves the timeline, and every waiting item of the chat shares one pill at
+the top of the pending stack (`AnswerLaterLine`): help mark, "1 question and 2
+approvals waiting", then **Answer ›** in accent ink. The pill starts at the
+composer card's edge, hugs its words and sits on an accent wash (13 %, 20 % on
+hover, 27 % pressed). The whole pill is the target (44 px on touch). It opens
 every waiting item, and the first one takes the focus on its first control (a
 question's first choice or field, an approval's first decision). When Later or
 Esc folds a card that held the focus, the keyboard moves to Answer. Neither

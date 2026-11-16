@@ -1,12 +1,13 @@
 // "Answer later": the questions and approvals a person folded (or that folded
-// themselves while they typed) wait as one plateless line of the pending stack
-// above the composer: "1 question waiting · Answer". The whole line is the
-// target; it opens every waiting item and the first one takes the focus.
+// themselves while they typed) wait as one accent pill at the top of the
+// pending stack above the composer: "? 1 question waiting  Answer ›". The
+// whole pill is the target; it opens every waiting item and the first one
+// takes the focus.
 // State lives in @polyth/web-sdk/answer-later; docs/dev/ui.md "Answer later".
 import type { RenderModel } from "../reduce.ts";
 import { answerLaterKey, isDeferred, openAnswerLater, useAnswerLaterVersion } from "@polyth/web-sdk/answer-later";
 import { tr } from "../i18n/index.ts";
-import { HelpIcon, Icon } from "./ui/index.ts";
+import { ChevronRightIcon, HelpIcon, Icon } from "./ui/index.ts";
 import "./AnswerLaterLine.css";
 
 /** The waiting items of one chat, oldest first, questions before approvals. */
@@ -52,10 +53,10 @@ export default function AnswerLaterLine({ sessionId, model }: {
         onClick={() => openAnswerLater([...questions, ...approvals])}
       >
         <Icon icon={HelpIcon} size="sm" className="answer-later-mark" />
-        <span className="answer-later-text">
-          <span className="answer-later-count">{label}</span>
-          <span className="answer-later-sep" aria-hidden="true"> · </span>
-          <span className="answer-later-action">{tr("answerlater.answer")}</span>
+        <span className="answer-later-count">{label}</span>
+        <span className="answer-later-action">
+          {tr("answerlater.answer")}
+          <Icon icon={ChevronRightIcon} size="sm" className="answer-later-chevron" />
         </span>
       </button>
     </div>

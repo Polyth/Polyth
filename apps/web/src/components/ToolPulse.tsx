@@ -8,7 +8,7 @@ import "./ToolPulse.css";
  *  activity (packages/server/src/sessions.ts); on harnesses without progress
  *  signals that is counted from the call's start. */
 export const TOOL_SILENCE_STOP_MS = 10 * 60_000;
-/** From here on, a quiet call says when Polyth will stop it. */
+/** From here on (the last two minutes), a call says when Polyth will stop it. */
 export const TOOL_SILENCE_HINT_MS = 8 * 60_000;
 
 export interface ToolPulseState {
@@ -53,43 +53,50 @@ export function useToolPulse(sessionId: string | null | undefined, callId: strin
 
 const lastOutputText = (ms: number) => tr("execution.pulseLastOutput", { ago: fmtDuration(ms) });
 const lastOutputLine = (ms: number) => tr("execution.pulseLastOutputLine", { ago: fmtDuration(ms) });
+/** Whole seconds left before the watchdog stops the call. */
+const stopsIn = (pulse: ToolPulseState) => fmtDuration(Math.max(0, TOOL_SILENCE_STOP_MS - pulse.quietMs));
 
-/** Under an expanded running tool row: when output was last seen and, after a
- *  long quiet, when Polyth will stop the call. Elapsed time is in the row's
- *  status mark already. */
+/** Under an expanded running tool row, one line: when output was last seen,
+ *  and in the last two minutes before the watchdog, when the call stops. It
+ *  claims silence only after a progress frame proved the harness reports
+ *  output; elapsed time is in the row's status mark already. */
 export function ToolPulseLine({ sessionId, callId, startedAt }: { sessionId: string | null | undefined; callId: string; startedAt: number }) {
   const pulse = useToolPulse(sessionId, callId, startedAt, true);
   if (!pulse || (pulse.lastOutputAgoMs === undefined && !pulse.nearStop)) return null;
+  if (!pulse.nearStop) {
+    return <div className="tool-pulse"><span className="tool-pulse-text">{lastOutputLine(pulse.lastOutputAgoMs!)}</span></div>;
+  }
+  const stop = pulse.lastOutputAgoMs === undefined
+    ? tr("execution.pulseStopsInLine", { duration: stopsIn(pulse) })
+    : tr("execution.pulseStopsIn", { duration: stopsIn(pulse) });
   return (
-    <div className={`tool-pulse${pulse.nearStop ? " tool-pulse--quiet" : ""}`}>
-      {pulse.nearStop
-        ? <>
-          <span className="tool-pulse-dot" aria-hidden="true" />
-          <span className="tool-pulse-text">{tr("execution.pulseQuietFor", { duration: fmtDuration(pulse.quietMs) })}</span>
-          <span className="tool-pulse-hint">{tr("execution.pulseStopHint")}</span>
-        </>
-        : <>
-          <span className="tool-pulse-dot tool-pulse-dot--live" aria-hidden="true" />
-          <span className="tool-pulse-text">{lastOutputLine(pulse.lastOutputAgoMs!)}</span>
-        </>}
+    <div className="tool-pulse tool-pulse--stopping" title={tr("execution.pulseStopHint")}>
+      <span className="tool-pulse-text">
+        {pulse.lastOutputAgoMs !== undefined
+          ? <>{tr("execution.pulseNoOutput", { duration: fmtDuration(pulse.lastOutputAgoMs) })}<span aria-hidden="true"> · </span></>
+          : null}
+        <span className="tool-pulse-stop">{stop}</span>
+      </span>
     </div>
   );
 }
 
 /** The same facts, compact, after the step a collapsed activity block names:
- *  "· 3m 12s · last output 6s ago". */
+ *  "· 3m 12s · last output 6s ago", or near the watchdog "· 8m 50s · stops in 1m 10s". */
 export function ToolPulseInline({ sessionId, callId, startedAt }: { sessionId: string | null | undefined; callId: string; startedAt: number }) {
   const pulse = useToolPulse(sessionId, callId, startedAt, true);
   if (!pulse) return null;
-  const parts = [fmtDuration(pulse.elapsedMs)];
-  if (pulse.nearStop) parts.push(tr("execution.pulseQuietShort", { duration: fmtDuration(pulse.quietMs) }));
-  else if (pulse.lastOutputAgoMs !== undefined) parts.push(lastOutputText(pulse.lastOutputAgoMs));
   return (
     <span
-      className={`tool-pulse-inline${pulse.nearStop ? " tool-pulse--quiet" : ""}`}
+      className={`tool-pulse-inline${pulse.nearStop ? " tool-pulse--stopping" : ""}`}
       title={pulse.nearStop ? tr("execution.pulseStopHint") : undefined}
     >
-      {parts.map((part, index) => <span key={index} className="tool-pulse-part">{part}</span>)}
+      <span className="tool-pulse-part">{fmtDuration(pulse.elapsedMs)}</span>
+      {pulse.nearStop
+        ? <span className="tool-pulse-part tool-pulse-stop">{tr("execution.pulseStopsIn", { duration: stopsIn(pulse) })}</span>
+        : pulse.lastOutputAgoMs !== undefined
+          ? <span className="tool-pulse-part">{lastOutputText(pulse.lastOutputAgoMs)}</span>
+          : null}
     </span>
   );
 }

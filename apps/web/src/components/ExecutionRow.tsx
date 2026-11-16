@@ -7,6 +7,7 @@ import { fmtDuration, fmtMs } from "../format.ts";
 import {
   executionPresentation,
   executionPathParts,
+  executionSummaryWords,
   isImagePath,
   normalizedInputEntries,
   outputLineCount,
@@ -953,17 +954,17 @@ export function useExecutionSummary(message: ToolMsg | undefined, sessionIdProp?
   const presentation = useMemo(() => message ? executionPresentation(message, {
     sessionTitle: (id) => sessions.find((session) => session.id === id || session.backendSessionId === id)?.title,
   }) : null, [message, message?.rev, sessions]);
-  const pathParts = useMemo(
-    () => presentation?.path ? executionPathParts(presentation.path, projectRoot) : undefined,
-    [presentation?.path, projectRoot],
+  const words = useMemo(
+    () => presentation ? executionSummaryWords(presentation, projectRoot) : null,
+    [presentation, projectRoot],
   );
-  if (!presentation) return null;
+  if (!presentation || !words) return null;
   return {
     kind: presentation.kind,
     image: isImagePath(presentation.path) && !presentation.files?.length,
     ...(presentation.mcp?.icon ? { mcp: presentation.mcp.icon } : {}),
-    title: pathParts?.filename ?? presentation.label,
-    preview: pathParts ? [presentation.label, pathParts.directory].filter(Boolean).join(" · ") : presentation.preview,
+    title: words.title,
+    preview: words.preview,
     ...(presentation.path ? { path: presentation.path } : {}),
   };
 }
@@ -1009,6 +1010,7 @@ export function ExecutionRow({
   subagent,
   entering = false,
   leaving = false,
+  headless = false,
   sessionId: sessionIdProp,
 }: {
   message: ToolMsg;
@@ -1017,6 +1019,9 @@ export function ExecutionRow({
   entering?: boolean;
   /** Model-driven rewind exit; keeps the row mounted until the cut settles. */
   leaving?: boolean;
+  /** The only call of an activity block whose header already names it: no
+   *  summary line of its own, details always shown, the header toggles. */
+  headless?: boolean;
   /** Owning timeline session; required when a retained row outlives navigation. */
   sessionId?: string | null;
 }) {
@@ -1041,7 +1046,8 @@ export function ExecutionRow({
   const projectRoot = useStore((state) => {
     return projectId ? state.projectRegistry.projects.find((project) => project.id === projectId)?.path ?? null : null;
   });
-  const [open, setOpen] = useState(false);
+  const [openState, setOpen] = useState(false);
+  const open = headless || openState;
   const [revertedPaths, setRevertedPaths] = useState<ReadonlySet<string>>(() => new Set());
   const detailsPresent = useCollapsePresence(open);
   const rowRef = useRef<HTMLDivElement>(null);
@@ -1151,7 +1157,7 @@ export function ExecutionRow({
 
   return (
     <>
-      <div className={`tool-card execution-row${entering ? " timeline-row-enter" : ""}${leaving ? " rewind-leaving" : ""}${open ? " open" : ""}${status === "pending" || status === "running" ? " current" : ""}${status === "error" ? " error" : ""}${presentation.kind === "subagent" ? " execution-subagent" : ""}`}
+      <div className={`tool-card execution-row${entering ? " timeline-row-enter" : ""}${leaving ? " rewind-leaving" : ""}${open ? " open" : ""}${status === "pending" || status === "running" ? " current" : ""}${status === "error" ? " error" : ""}${presentation.kind === "subagent" ? " execution-subagent" : ""}${headless ? " execution-row--headless" : ""}`}
         ref={rowRef}
         data-execution-kind={presentation.kind}
         onPointerDownCapture={() => {
@@ -1201,7 +1207,8 @@ export function ExecutionRow({
             </Button>
           )}
         </div>
-        {status === "running" && presentation.kind !== "subagent" && !message.composerShell
+        {/* Headless, the block header's tail already carries the time and countdown. */}
+        {status === "running" && !headless && presentation.kind !== "subagent" && !message.composerShell
           ? <ToolPulseLine sessionId={sessionIdProp ?? activeSessionId} callId={message.callId} startedAt={message.time} />
           : null}
         <div className="execution-expand-shell" aria-hidden={!open}>

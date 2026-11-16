@@ -4111,10 +4111,25 @@ body[data-desktop-low-resource="true"] .timeline > .rewind-leaving { animation: 
   background: var(--material-glass);
 }
 .question-actions .question-reject { color: var(--muted); }
-/* Answer later: as quiet as Reject, but on the forward side, next to Submit. */
-.question-actions .question-later { color: var(--muted); }
+/* Answer later: a quiet word at the title's end, before the copy tools, the
+   same place and weight as on the approval card. It reaches out of the head
+   for a full 44px touch target instead of growing it. */
+.question-head .question-later {
+  flex: none;
+  margin-inline-start: auto;
+  margin-block: calc(-1 * var(--space-1));
+  color: var(--muted);
+  font-weight: 500;
+}
+.question-head .question-later + .question-copy { margin-inline-start: 0; }
 @media (hover: hover) {
-  .question-actions .question-later:hover:not(:disabled) { color: var(--text); }
+  .question-head .question-later:hover:not(:disabled) { color: var(--text); }
+}
+@media (pointer: coarse) {
+  .question-head .question-later {
+    min-block-size: var(--hit-min);
+    margin-block: calc((1lh - var(--hit-min)) / 2);
+  }
 }
 @media (hover: hover) {
   .question-actions .question-reject:hover:not(:disabled) { color: var(--danger); }
@@ -19454,6 +19469,9 @@ html:not(.light)[data-background]:not([data-background="none"]):not([data-backgr
 .activity-group.current .activity-group-items::before {
   background: linear-gradient(to bottom, var(--activity-thread), var(--activity-thread-live));
 }
+/* One call in a block: the block's header names it, so the open row shows
+   its details without its own summary line (ExecutionRow `headless`). */
+.execution-row--headless > .execution-summary-line { display: none; }
 
 /* The live line -------------------------------------------------------------
  * While its block is the live tail of a working turn, the summary line names

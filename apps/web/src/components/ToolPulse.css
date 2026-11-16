@@ -1,59 +1,29 @@
-/* Running tool pulse: a quiet meta line under an expanded running tool row
-   and a compact tail on the collapsed activity line. Text only, one small
-   dot; no spinner, no border (lines survive Hide interface borders because
-   there are none). */
+/* Running tool pulse: one quiet meta line under an expanded running tool row
+   and a compact tail on the collapsed activity line. Words only: the row's
+   spinner already says the call is alive, so there is no dot, no colour
+   signal and no border (Hide interface borders changes nothing). Urgency is
+   the stop countdown itself, in the strong ink. */
 .tool-pulse {
-  /* Same columns as the summary row above: the dot sits under the tool's
-     icon, the words under its name. */
+  /* Same columns as the summary row above: the words under the tool's name. */
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
-  align-items: baseline;
   column-gap: 6px;
-  row-gap: 1px;
   min-width: 0;
   padding: 0 0 var(--space-1);
-  color: var(--muted);
+  color: var(--text-dim);
   font-size: var(--font-meta);
   line-height: var(--font-meta-lh);
-}
-
-.tool-pulse-dot {
-  justify-self: center;
-  align-self: center;
-  width: 6px;
-  height: 6px;
-  border-radius: var(--radius-circle);
-  background: color-mix(in srgb, var(--muted) 70%, transparent);
-}
-
-/* Output was seen: the dot breathes slowly. Motion settings stop it. */
-.tool-pulse-dot--live {
-  background: var(--accent);
-  animation: tool-pulse-breathe 2.4s var(--motion-ease) infinite;
-}
-
-@keyframes tool-pulse-breathe {
-  0%, 100% { opacity: .9; }
-  50% { opacity: .35; }
-}
-
-.tool-pulse-text {
-  color: var(--text-dim);
   font-variant-numeric: tabular-nums;
 }
 
-.tool-pulse-hint {
+.tool-pulse-text {
   grid-column: 2;
   min-width: 0;
-  color: var(--muted);
 }
 
-.tool-pulse--quiet .tool-pulse-dot {
-  background: var(--amber);
-}
-
-.tool-pulse--quiet .tool-pulse-text {
-  color: var(--amber-on-wash, var(--text-dim));
+.tool-pulse-stop {
+  color: var(--text);
+  font-weight: 500;
 }
 
 /* Collapsed line: "· 3m 12s · last output 6s ago" after the step. It gives
@@ -62,7 +32,7 @@
   flex: 0 100 auto;
   min-width: 0;
   overflow: hidden;
-  color: var(--muted);
+  color: var(--text-dim);
   font-size: var(--font-meta);
   line-height: var(--font-meta-lh);
   font-variant-numeric: tabular-nums;
@@ -73,21 +43,9 @@
 .tool-pulse-part::before {
   content: "·";
   margin-inline-end: .35em;
+  color: var(--muted);
 }
 
 .tool-pulse-part + .tool-pulse-part {
   margin-inline-start: .35em;
-}
-
-.tool-pulse-inline.tool-pulse--quiet .tool-pulse-part:last-child {
-  color: var(--amber-on-wash, var(--amber));
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .tool-pulse-dot--live { animation: none; }
-}
-
-html[data-reduce-animations="true"] .tool-pulse-dot--live,
-body[data-desktop-low-resource="true"] .tool-pulse-dot--live {
-  animation: none;
 }

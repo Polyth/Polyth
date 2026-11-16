@@ -276,6 +276,18 @@ export default function QuestionPrompt({ m, sessionId, entering = false, leaving
               </span>
             )}
           </span>
+          {/* Answer later sits at the title's end, as on the approval card:
+              never beside Submit, where it would read as a decision. */}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="question-later"
+            title={tr("answerlater.laterTitle")}
+            aria-keyshortcuts="Escape"
+            onClick={later}
+          >
+            {tr("answerlater.later")}
+          </Button>
           <span className="question-copy">
             <IconButton
               icon={MarkdownIcon}
@@ -374,16 +386,6 @@ export default function QuestionPrompt({ m, sessionId, entering = false, leaving
             {tr("questioncards.reject")}
           </Button>
           <span className="question-actions-end">
-            <Button
-              size="sm"
-              variant="ghost"
-              className="question-later"
-              title={tr("answerlater.laterTitle")}
-              aria-keyshortcuts="Escape"
-              onClick={later}
-            >
-              {tr("answerlater.later")}
-            </Button>
             {multiStep && step > 0 && (
               <Button size="sm" variant="ghost" onClick={() => setStep(Math.max(0, step - 1))}>
                 {tr("common.back")}

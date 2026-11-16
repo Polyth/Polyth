@@ -115,6 +115,8 @@ test("visual-fix localization keys exist in every app and harness locale", () =>
     "format.durationSeconds",
     "format.durationMinutes",
     "format.durationHours",
+    "format.durationMinutesOnly",
+    "format.durationHoursOnly",
     "sessionStatus.approvalRequired",
     "sessionStatus.replyNeeded",
     "sessionStatus.working",

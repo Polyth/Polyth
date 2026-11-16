@@ -123,13 +123,28 @@ test("the running row says only what it saw", () => {
     assert.match(renderToStaticMarkup(createElement(ToolPulseLine, props)), />Last output 6s ago</);
     assert.match(renderToStaticMarkup(createElement(ToolPulseInline, props)), />last output 6s ago</);
 
+    // Near the watchdog with frames: one line, the silence since the newest frame and the countdown.
     const quiet = { ...props, startedAt: now - 530_000 };
     progress.noteToolProgress("s1", "c1", now - 505_000);
     const line = renderToStaticMarkup(createElement(ToolPulseLine, quiet));
-    assert.match(line, /tool-pulse--quiet/);
-    assert.match(line, /Quiet for 8m 25s/);
-    assert.match(line, /Polyth stops a tool call after 10 min without output\./);
-    assert.match(renderToStaticMarkup(createElement(ToolPulseInline, quiet)), /quiet 8m 25s/);
+    assert.match(line, /tool-pulse--stopping/);
+    assert.match(line, /No output for 8m 25s/);
+    assert.match(line, /stops in 1m 35s/);
+    assert.match(line, /title="Polyth stops a command after 10 minutes with no output\."/);
+    assert.doesNotMatch(line, /tool-pulse-dot|[Qq]uiet/, "no dot, and no second word for silence");
+    const inlineQuiet = renderToStaticMarkup(createElement(ToolPulseInline, quiet));
+    assert.match(inlineQuiet, />8m 50s</);
+    assert.match(inlineQuiet, />stops in 1m 35s</);
+
+    // Near the watchdog without frames: silence is never claimed, only the countdown.
+    progress.clearToolProgress();
+    const silent = { ...props, callId: "c2", startedAt: now - 530_000 };
+    const silentLine = renderToStaticMarkup(createElement(ToolPulseLine, silent));
+    assert.match(silentLine, />Stops automatically in 1m 10s</);
+    assert.doesNotMatch(silentLine, />[^<]*(No output|Last output)[^<]*</, "no claim about output");
+    const silentInline = renderToStaticMarkup(createElement(ToolPulseInline, silent));
+    assert.match(silentInline, />8m 50s<.*>stops in 1m 10s</);
+    assert.doesNotMatch(silentInline, />[^<]*(output|quiet)[^<]*</i);
   });
   progress.clearToolProgress();
 });
@@ -148,7 +163,7 @@ test("turn/incomplete becomes a notice; unknown fields are tolerated and unknown
     ["turn-incomplete", "length", true],
     ["turn-incomplete", "empty", false],
   ]);
-  assert.equal(messageMarkdown(notices[0]!), "The answer hit the model’s output limit · Polyth asked it to continue.");
+  assert.equal(messageMarkdown(notices[0]!), "The answer was cut off: it reached the reply length limit · Polyth asked it to continue.");
 });
 
 test("notice variants: auto-continued says so; otherwise a quiet Continue sends a visible message", async () => {
@@ -157,13 +172,14 @@ test("notice variants: auto-continued says so; otherwise a quiet Continue sends 
     notice: { ...base, incompleteKind: "length", autoContinued: true },
     onContinue: () => {},
   }));
-  assert.match(auto, /The answer hit the model’s output limit/);
+  assert.match(auto, /The answer was cut off: it reached the reply length limit/);
+  assert.doesNotMatch(auto, /<svg/, "a footnote: no icon or disc");
   assert.match(auto, /Polyth asked it to continue\./);
   assert.doesNotMatch(auto, /<button/);
 
   const empty = { ...base, incompleteKind: "empty" as const, autoContinued: false };
   const offered = renderToStaticMarkup(createElement(TurnIncompleteNotice, { notice: empty, onContinue: () => {} }));
-  assert.match(offered, /The agent stopped without replying/);
+  assert.match(offered, /The agent stopped without answering/);
   assert.match(offered, /<button[^>]*turn-incomplete-continue[^>]*>.*Continue/);
   // Not the newest row any more: no Continue.
   assert.doesNotMatch(renderToStaticMarkup(createElement(TurnIncompleteNotice, { notice: empty })), /<button/);
@@ -173,4 +189,14 @@ test("notice variants: auto-continued says so; otherwise a quiet Continue sends 
   assert.equal(CONTINUE_PROMPT, "Continue");
   assert.deepEqual(calls, [["Continue", undefined, undefined, { targetSessionId: "s1" }]]);
   assert.equal((calls[0]![3] as Record<string, unknown>).hiddenUserMessage, undefined);
+});
+
+test("the agent's status line names a running call exactly as its timeline row does", async () => {
+  const { liveActionOf } = await import("../src/liveAction.ts");
+  const { executionPresentation, executionSummaryWords } = await import("../src/execution.ts");
+  const call = { kind: "tool" as const, id: "c1", callId: "c1", eventSeq: 3, tool: "bash", input: { command: "npm test -- --runInBand", description: "Run the full test suite" }, status: "running" as const, time: 0 };
+  const words = executionSummaryWords(executionPresentation(call));
+  const model = { messages: [call], tasks: null, subagents: null } as unknown as Parameters<typeof liveActionOf>[0];
+  assert.equal(liveActionOf(model), `${words.title} · ${words.preview}`);
+  assert.doesNotMatch(liveActionOf(model), /Bash/, "never the raw tool name beside the row's kind label");
 });
