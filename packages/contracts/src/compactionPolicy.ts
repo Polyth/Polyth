@@ -85,6 +85,23 @@ export function compactionDue(
   return typeof fraction === "number" && Number.isFinite(fraction) && fraction >= percent / 100;
 }
 
+/** Whether the conversation no longer fits the model that will run the next
+ *  turn. A model or harness switch keeps the measured usage (the history is
+ *  the same) but changes the window, and the harness's own threshold belongs
+ *  to the model that just ran, so `auto` must compact first too. `manual`
+ *  never compacts on its own. An unknown window or usage is not due: nothing
+ *  says the new model would be overflowed. */
+export function compactionDueForNextModel(
+  preference: CompactionPreference,
+  window: { usedTokens?: number | undefined; limitTokens?: number | undefined },
+): boolean {
+  if (preference.mode === "manual") return false;
+  const { usedTokens, limitTokens } = window;
+  if (usedTokens === undefined || !Number.isFinite(usedTokens)) return false;
+  const latest = limitTokens === undefined ? undefined : compactionLatestTokens(limitTokens);
+  return latest !== undefined && usedTokens >= latest;
+}
+
 /** Whichever choice applies: the chat's own, else the person's default. */
 export function effectiveCompactionPreference(
   chat: CompactionPreference | undefined,

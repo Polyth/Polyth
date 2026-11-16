@@ -68,7 +68,7 @@ import {
 import { sessionMentionCandidates, sessionAudience, sessionOutsiders, sessionShareApprover, sharingRootId, steerPeopleLine, turnPeopleBlock } from "./sessionSharing.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
 import type { ProjectService } from "@polyth/contracts";
-import { compactionDue, effectiveCompactionPreference, parseCompactionPreference, type CompactionPreference } from "@polyth/contracts/compaction-policy";
+import { compactionDue, compactionDueForNextModel, effectiveCompactionPreference, parseCompactionPreference, type CompactionPreference } from "@polyth/contracts/compaction-policy";
 import { extractSecureSafeEnvRefs } from "@polyth/credential-vault";
 import { redactSecrets } from "@polyth/plugins";
 import type { SessionStartStep, WorkspaceCheckpointService, WorkspaceCheckpointTurn, WorkspaceRestoreInput } from "@polyth/plugins";
@@ -286,6 +286,12 @@ const isModelRef = (value: ResumeTurnOptions | ModelRef): value is ModelRef =>
   && typeof value.providerID === "string"
   && "modelID" in value
   && typeof value.modelID === "string";
+
+/** The identity a measured context window belongs to: one conversation can
+ *  keep its used-token count across a model or harness change, but the limit
+ *  it was measured against belongs to that exact model. */
+const modelRouteKey = (model: ModelRef | undefined): string | undefined =>
+  model ? `${model.providerID}\u0000${model.modelID}` : undefined;
 
 const normalizeResumeOptions = (
   input?: ResumeTurnOptions | ModelRef,
@@ -1071,6 +1077,10 @@ export function createSessionService(deps: {
      *  when that model has just run out of quota. */
     smallModelFirst?: boolean;
   }) => Promise<string>;
+  /** The context window the shared model catalog knows for a model on a
+   *  harness, or undefined when nothing authoritative says. Read only when the
+   *  next turn's route differs from the one the occupancy was measured on. */
+  modelContextLimit?(model: ModelRef, harnessId: string | undefined): Promise<number | undefined>;
   /** The selected model turned out not to exist (or not be usable) on its
    * harness: the shared model catalog that offered it is stale. */
   modelCatalogStale?(signal: {
@@ -1366,6 +1376,8 @@ export function createSessionService(deps: {
     generation: number;
     commands?: RuntimeCommandDescriptor[];
     contextWindow?: ContextWindowState;
+    /** The model the window was measured on, so a switch cannot borrow its limit. */
+    contextWindowModel?: ModelRef;
     nativeCommandsRevision: number;
   };
   const runtimeFeatureState = new Map<string, RuntimeFeatureState>();
@@ -3746,6 +3758,7 @@ export function createSessionService(deps: {
   const clearRuntimeFeatureState = (sessionId: string): void => {
     runtimeFeatureState.delete(sessionId);
     compactionAttempts.delete(sessionId);
+    queuedTurnModels.delete(sessionId);
     clearAutomaticTitleTracking(sessionId);
   };
 
@@ -3816,6 +3829,9 @@ export function createSessionService(deps: {
       ...(patch.contextWindow !== undefined
         ? { contextWindow: patch.contextWindow }
         : sameGeneration && prev.contextWindow ? { contextWindow: prev.contextWindow } : {}),
+      ...(patch.contextWindowModel !== undefined
+        ? { contextWindowModel: patch.contextWindowModel }
+        : sameGeneration && prev.contextWindowModel ? { contextWindowModel: prev.contextWindowModel } : {}),
     };
     runtimeFeatureState.set(sessionId, next);
     return next;
@@ -4855,33 +4871,106 @@ export function createSessionService(deps: {
   const COMPACTION_RETRY_MS = 10 * 60_000;
   const COMPACTION_RETRY_GROWTH = 0.05;
   const compactionAttempts = new Map<string, { at: number; fraction: number }>();
+  /** The model a message waiting behind a compaction was chosen for. A queued
+   *  item carries no model of its own, so the send records it here and the
+   *  dispatcher applies it to that exact message. */
+  const queuedTurnModels = new Map<string, { queueId: string; model: ModelRef }>();
 
-  /** The person asked to compact before this conversation grows further. Done
-   *  before a message rather than after an answer, so an abandoned chat costs
-   *  nothing. Only a quiet, measured session qualifies. */
-  const compactionDueBeforeTurn = (sessionId: string, proj: SessionProjection): boolean => {
-    if (!deps.queue || proj.status !== "idle" || proj.paused || proj.harnessTransition || !proj.backendSessionId) return false;
-    if (turnActive(sessionId) || compactions.has(sessionId)) return false;
-    const window = projectionContextWindow(sessionId, proj);
-    if (!window || window.source === "unknown" || window.compaction?.active) return false;
-    if (!compactionDue(compactionPreferenceOf(proj), window)) return false;
+  /** The occupancy the next turn will be measured against. A model or harness
+   *  change keeps the conversation's used tokens — the history is the same —
+   *  but the measured limit belongs to the model that produced it, so the new
+   *  route's catalog window replaces it. Nothing is invented when no catalog
+   *  knows the new route. */
+  const nextTurnContextWindow = async (
+    sessionId: string,
+    proj: SessionProjection,
+    next?: { harnessId?: string | undefined; model?: ModelRef | undefined },
+  ): Promise<{ window: ContextWindowState; retargeted: boolean; measuredModel?: ModelRef } | undefined> => {
+    const current = projectionContextWindow(sessionId, proj);
+    const state = runtimeFeatureState.get(sessionId);
+    const measuredModel = state?.contextWindowModel;
+    if (!next) return current ? { window: current, retargeted: false, ...(measuredModel ? { measuredModel } : {}) } : undefined;
+    const nextModel = next.model ?? proj.model;
+    if (current && modelRouteKey(measuredModel) === modelRouteKey(nextModel)) {
+      return { window: current, retargeted: false, ...(measuredModel ? { measuredModel } : {}) };
+    }
+    const base = current ?? state?.contextWindow;
+    if (!base || base.usedTokens === undefined) return undefined;
+    const limitTokens = nextModel && deps.modelContextLimit
+      ? await deps.modelContextLimit(nextModel, next.harnessId ?? proj.resolvedHarnessId).catch(() => undefined)
+      : undefined;
+    if (limitTokens === undefined || !(limitTokens > 0)) {
+      return current ? { window: current, retargeted: false, ...(measuredModel ? { measuredModel } : {}) } : undefined;
+    }
+    return {
+      window: {
+        ...base,
+        limitTokens,
+        remainingTokens: Math.max(0, limitTokens - base.usedTokens),
+        fraction: base.usedTokens / limitTokens,
+      },
+      retargeted: true,
+      ...(measuredModel ? { measuredModel } : {}),
+    };
+  };
+
+  /** The person asked to compact before this conversation grows further, or a
+   *  switch to a smaller model would overflow it. Done before a message rather
+   *  than after an answer, so an abandoned chat costs nothing. Only a quiet,
+   *  measured session qualifies. */
+  const compactionDueBeforeTurn = async (
+    sessionId: string,
+    proj: SessionProjection,
+    next?: { harnessId?: string | undefined; model?: ModelRef | undefined },
+  ): Promise<{ fraction: number; model?: ModelRef } | undefined> => {
+    if (!deps.queue || proj.status !== "idle" || proj.paused || proj.harnessTransition || !proj.backendSessionId) return undefined;
+    if (turnActive(sessionId) || compactions.has(sessionId)) return undefined;
+    const measured = await nextTurnContextWindow(sessionId, proj, next);
+    if (!measured || measured.window.source === "unknown" || measured.window.compaction?.active) return undefined;
+    const { window, retargeted } = measured;
+    const preference = compactionPreferenceOf(proj);
+    if (!compactionDue(preference, window)
+      && !(retargeted && compactionDueForNextModel(preference, window))) return undefined;
     const last = compactionAttempts.get(sessionId);
-    return !last
-      || Date.now() - last.at >= COMPACTION_RETRY_MS
-      || (window.fraction ?? 0) >= last.fraction + COMPACTION_RETRY_GROWTH;
+    if (last
+      && Date.now() - last.at < COMPACTION_RETRY_MS
+      && (window.fraction ?? 0) < last.fraction + COMPACTION_RETRY_GROWTH) return undefined;
+    // The catalog lookup above awaits: a turn or another dispatch may have
+    // started meanwhile, and two compactions must never race.
+    const current = (await store.projection(sessionId)) ?? proj;
+    if (turnActive(sessionId) || compactions.has(sessionId)) return undefined;
+    if (current.status !== "idle" || current.paused || current.harnessTransition) return undefined;
+    return {
+      fraction: window.fraction ?? 0,
+      ...(measured.measuredModel ? { model: measured.measuredModel } : {}),
+    };
   };
 
   /** Starts it and returns at once: a summary can outlast a proxy's read
    *  timeout, and the message that triggered it waits in the queue like any
    *  other sent during a compaction. Compaction only saves tokens, so a failure
    *  is recorded and the queue still runs. */
-  const startCompactionBeforeTurn = (sessionId: string, proj: SessionProjection): void => {
+  const startCompactionBeforeTurn = (
+    sessionId: string,
+    proj: SessionProjection,
+    fraction?: number,
+    model?: ModelRef,
+  ): boolean => {
+    // The due check awaits before the caller starts it; a turn or another
+    // compaction may have begun in between.
+    if (turnActive(sessionId) || compactions.has(sessionId)) return false;
     compactionAttempts.set(sessionId, {
       at: Date.now(),
-      fraction: projectionContextWindow(sessionId, proj)?.fraction ?? 0,
+      fraction: fraction ?? projectionContextWindow(sessionId, proj)?.fraction ?? 0,
     });
     beginCompaction(sessionId);
-    void withSessionLock(sessionId, () => compactLocked(sessionId, { background: true, beforeQueuedTurn: true })).then(
+    void withSessionLock(sessionId, () => compactLocked(sessionId, {
+      background: true,
+      beforeQueuedTurn: true,
+      // Summarize on the model the occupancy was measured on, never on the
+      // smaller one this message was switched to.
+      ...(model ? { model } : {}),
+    })).then(
       (strategy) => {
         // A Polyth summary ends itself; so does a native one the runtime
         // finishes in the background, which leaves its backstop timer here.
@@ -4894,6 +4983,7 @@ export function createSessionService(deps: {
         endCompaction(sessionId);
       },
     );
+    return true;
   };
 
   /** Boot: re-arm timers for sessions that stopped rate-limited before a
@@ -5843,6 +5933,7 @@ export function createSessionService(deps: {
             harnessId,
             generation,
             contextWindow: state,
+            contextWindowModel: proj?.model,
           });
           if (proj) publishProjection(proj);
         }
@@ -7992,14 +8083,28 @@ export function createSessionService(deps: {
         // so does a Continue that had to wait the same way.
         if (proj.paused && queued[0].hiddenUserMessage && queued[0].text !== PAUSE_CONTINUE_PROMPT) return;
         if (queued[0] && queueEditHeld(sessionId, queued[0].id)) return;
+        // A message that waited behind a compaction for a model switch runs on
+        // the model this queue head was chosen for; any later head drops it.
+        const pendingModel = queuedTurnModels.get(sessionId);
+        if (pendingModel) {
+          queuedTurnModels.delete(sessionId);
+          if (pendingModel.queueId === queued[0].id
+            && modelRouteKey(proj.model) !== modelRouteKey(pendingModel.model)) {
+            await updateProjection(sessionId, { model: pendingModel.model });
+            proj = (await store.projection(sessionId)) ?? proj;
+          }
+        }
         assertIsolationExecutable(proj);
         const reconciliation = await durable.reconciliation(sessionId);
         if (reconciliation?.state === "reconciling"
           || reconciliation?.state === "blocked"
           || reconciliation?.state === "unknown") return;
         // Ending the compaction runs this dispatcher again.
-        if (!queued[0].command && compactionDueBeforeTurn(sessionId, proj)) {
-          startCompactionBeforeTurn(sessionId, proj);
+        const toCompact = !queued[0].command
+          ? await compactionDueBeforeTurn(sessionId, proj, { harnessId: proj.resolvedHarnessId, model: proj.model })
+          : undefined;
+        if (toCompact) {
+          startCompactionBeforeTurn(sessionId, proj, toCompact.fraction, toCompact.model);
           return;
         }
         // A replacement submitted while the old turn was running is queued
@@ -13096,13 +13201,30 @@ export function createSessionService(deps: {
         await compactionSettled(sessionId);
         proj = (await store.projection(sessionId)) ?? proj;
       }
-      if (input.keepAlive !== true && input.autoResume !== true && !input.command && compactionDueBeforeTurn(sessionId, proj)) {
-        startCompactionBeforeTurn(sessionId, proj);
+      // The next turn may run on another model or harness than the one the
+      // occupancy was measured on (a picker change before sending), so the
+      // check reads that route's window instead of the previous leg's.
+      const nextTurnRoute = {
+        harnessId: input.harness?.mode === "pinned" ? input.harness.harnessId : proj.resolvedHarnessId,
+        model: input.model ?? proj.model,
+      };
+      let pendingQueuedModel: ModelRef | undefined;
+      if (input.keepAlive !== true && input.autoResume !== true && !input.command) {
+        const toCompact = await compactionDueBeforeTurn(sessionId, proj, nextTurnRoute);
+        // The compaction itself runs on the measured model (`toCompact.model`);
+        // `proj.model` is left alone so it summarizes the history on a window
+        // that can still hold it. The chosen model travels with the queued
+        // message instead.
+        if (toCompact && startCompactionBeforeTurn(sessionId, proj, toCompact.fraction, toCompact.model)) {
+          if (nextTurnRoute.model && modelRouteKey(nextTurnRoute.model) !== modelRouteKey(proj.model)) {
+            pendingQueuedModel = nextTurnRoute.model;
+          }
+        }
       }
       // A compaction is replacing the context: the message waits for the
       // compacted context, then dispatches from the queue.
       if (compactions.has(sessionId) && deps.queue) {
-        return enqueueMessage(
+        const queuedResult = await enqueueMessage(
           sessionId,
           input.text,
           "queue",
@@ -13117,6 +13239,10 @@ export function createSessionService(deps: {
           input.author,
           input.displayText,
         );
+        if (pendingQueuedModel && queuedResult.queueId) {
+          queuedTurnModels.set(sessionId, { queueId: queuedResult.queueId, model: pendingQueuedModel });
+        }
+        return queuedResult;
       }
       if (input.harness) {
         const selection = input.harness;

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   compactionDue,
+  compactionDueForNextModel,
   compactionLatestTokens,
   compactionMarkPercent,
   compactionReserveTokens,
@@ -39,6 +40,25 @@ test("Polyth compacts only for a chosen target and only on a measured window", (
   assert.equal(compactionDue({ mode: "custom", percent: 75 }, window), false);
   assert.equal(compactionDue({ mode: "earlier" }, {}), false);
   assert.equal(compactionDue({ mode: "earlier" }, { fraction: 0.7 }), true);
+});
+
+test("a switch to a smaller model compacts before the next message", () => {
+  // 400k used on a 1M window still fits there, but not in a 200k model's 180k.
+  assert.equal(compactionDueForNextModel({ mode: "auto" }, { usedTokens: 400_000, limitTokens: 200_000 }), true);
+  assert.equal(compactionDueForNextModel({ mode: "earlier" }, { usedTokens: 400_000, limitTokens: 200_000 }), true);
+  assert.equal(compactionDueForNextModel({ mode: "custom", percent: 70 }, { usedTokens: 400_000, limitTokens: 200_000 }), true);
+  assert.equal(compactionDueForNextModel({ mode: "auto" }, { usedTokens: 400_000, limitTokens: 1_000_000 }), false, "it still fits a 1M window");
+  assert.equal(compactionDueForNextModel({ mode: "auto" }, { usedTokens: 120_000, limitTokens: 200_000 }), false, "auto stays out of the way when it fits");
+  assert.equal(compactionDueForNextModel({ mode: "auto" }, { usedTokens: 180_000, limitTokens: 200_000 }), true, "the reserve is the last point that leaves the summary room");
+});
+
+test("manual never compacts on a model switch, and an unknown window or usage is not due", () => {
+  assert.equal(compactionDueForNextModel({ mode: "manual" }, { usedTokens: 900_000, limitTokens: 200_000 }), false);
+  assert.equal(compactionDueForNextModel({ mode: "auto" }, {}), false);
+  assert.equal(compactionDueForNextModel({ mode: "auto" }, { usedTokens: 400_000 }), false);
+  assert.equal(compactionDueForNextModel({ mode: "auto" }, { limitTokens: 200_000 }), false);
+  assert.equal(compactionDueForNextModel({ mode: "auto" }, { usedTokens: Number.NaN, limitTokens: 200_000 }), false);
+  assert.equal(compactionDueForNextModel({ mode: "auto" }, { usedTokens: 400_000, limitTokens: 4_000 }), false, "a window no larger than the reserve has no point to compact at");
 });
 
 test("the reserve caps a custom target on a small window", () => {

@@ -144,6 +144,7 @@ import { createSessionStartStepRegistry } from "./sessionStartSteps.ts";
 import { createTurnContextRegistry } from "./turnContext.ts";
 import { createClientSettings, modelFavoriteKeys } from "./clientSettings.ts";
 import { parseCompactionPreference } from "@polyth/contracts/compaction-policy";
+import { resolveModelContextLimit } from "@polyth/contracts/model-context";
 import { createFailedStartupCleanupPolicy, type SessionAccountDeps } from "./failedStartupCleanup.ts";
 import { createExpiredSessionPolicy, sessionsKeptByPeople, startExpiredSessionCleanup } from "./expiredSessionCleanup.ts";
 import { createMcpConfigService, mcpEntriesFromBackendConfig, PERSONAL_MCP_PACKAGE } from "./mcp.ts";
@@ -2925,6 +2926,11 @@ export async function boot(opts: BootOptions = {}) {
     failedStartupCleanupAllowed,
     outputCache,
     modelCatalogStale: (signal) => { runtimeCatalog.modelsStale(signal); },
+    // A model or harness switch keeps the conversation's used tokens but not
+    // the window they were measured against: the shared catalog knows the new
+    // route's capacity. Unknown stays unknown, never guessed from the old leg.
+    modelContextLimit: async (model, harnessId) =>
+      resolveModelContextLimit(model, await runtimeCatalog.models(), harnessId),
     // Polyth-owned compaction summarizes with the session's own model, as a
     // harness compaction would; the owning account's small model (else
     // POLYTH_SMALL_MODEL) is the fallback. The small model goes first when

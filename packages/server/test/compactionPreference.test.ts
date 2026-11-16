@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { AgentRuntime, CanonicalTurnRequest, ProjectService, RuntimeEvent } from "@polyth/contracts";
+import type { AgentRuntime, CanonicalTurnRequest, ModelDescriptor, ModelRef, ProjectService, RuntimeEvent } from "@polyth/contracts";
 import type { CompactionPreference } from "@polyth/contracts/compaction-policy";
+import { resolveModelContextLimit } from "@polyth/contracts/model-context";
 import type { PermissionService } from "@polyth/permissions";
 import { createStore } from "@polyth/session";
 import { createSessionService } from "../src/sessions.ts";
@@ -15,18 +16,19 @@ const waitUntil = async (predicate: () => boolean): Promise<void> => {
   throw new Error("condition was not met");
 };
 
-function fixture(options: { personDefault?: CompactionPreference } = {}) {
+function fixture(options: { personDefault?: CompactionPreference; models?: ModelDescriptor[] } = {}) {
   const store = createStore(":memory:");
   const listeners = new Set<(sessionId: string, event: RuntimeEvent) => void>();
   const requests: CanonicalTurnRequest[] = [];
   const switches: boolean[] = [];
+  const compactModels: Array<ModelRef | undefined> = [];
   let compactCalls = 0;
   let compactResult: Awaited<ReturnType<NonNullable<AgentRuntime["compactOperation"]>>> = { kind: "confirmed", value: { completion: "pending" } };
   const runtime: AgentRuntime = {
     harnessId: "fake",
     capabilities: async () => ({ streaming: true, permissions: false, questions: false, compaction: true, subagents: false, autoCompactionSwitch: true }),
     commands: async () => [],
-    models: async () => [],
+    models: async () => options.models ?? [],
     agents: async () => [],
     ensureSession: async ({ sessionId }) => `native-${sessionId}`,
     sessions: async () => [],
@@ -37,7 +39,11 @@ function fixture(options: { personDefault?: CompactionPreference } = {}) {
     },
     abort: async () => {},
     setAutoCompaction: async (_sessionId, enabled) => { switches.push(enabled); },
-    compactOperation: async () => { compactCalls += 1; return compactResult; },
+    compactOperation: async (_sessionId, _operationId, model) => {
+      compactCalls += 1;
+      compactModels.push(model);
+      return compactResult;
+    },
     replyPermission: async () => {},
     replyQuestion: async () => {},
     onEvent(listener) {
@@ -57,6 +63,10 @@ function fixture(options: { personDefault?: CompactionPreference } = {}) {
     permissions: { evaluate: () => "allow" } as unknown as PermissionService,
     broadcast: { event() {}, projection() {} },
     queue: store,
+    ...(options.models ? {
+      modelContextLimit: async (model: Parameters<typeof resolveModelContextLimit>[0], harnessId?: string) =>
+        resolveModelContextLimit(model, options.models!, harnessId),
+    } : {}),
     ...(options.personDefault ? { compactionDefault: (userId: string | undefined) => userId === "u1" ? options.personDefault : undefined } : {}),
   });
   const emit = (sessionId: string, event: RuntimeEvent) => {
@@ -77,6 +87,7 @@ function fixture(options: { personDefault?: CompactionPreference } = {}) {
     switches,
     finishedTurn,
     compactCalls: () => compactCalls,
+    compactModels,
     resolveCompactWith(result: typeof compactResult) { compactResult = result; },
   };
 }
@@ -108,6 +119,31 @@ test("auto never spends a summary request, however full the window is", async ()
   assert.notEqual(sent.queued, true);
   assert.equal(f.compactCalls(), 0);
   assert.equal(f.requests.length, 2);
+  await f.store.close();
+});
+
+test("a switch to a smaller model compacts before the next message, even on auto", async () => {
+  const big: ModelDescriptor = { providerID: "fake", modelID: "big", name: "Big", context: 1_000_000 };
+  const small: ModelDescriptor = { providerID: "fake", modelID: "small", name: "Small", context: 200_000 };
+  const f = fixture({ models: [big, small] });
+  const { id } = await f.sessions.create({ projectId: "p", title: "T" });
+  await f.sessions.send(id, { text: "fill the window", model: { providerID: "fake", modelID: "big" } });
+  // 400k fits the 1M model the occupancy was measured on, but not a 200k one.
+  f.emit(id, { type: "context/updated", source: "native", updatedAt: Date.now(), usedTokens: 400_000, limitTokens: 1_000_000, fraction: 0.4 });
+  f.emit(id, { type: "turn/stopped", reason: "completed" });
+  await flush();
+
+  const sent = await f.sessions.send(id, { text: "next", model: { providerID: "fake", modelID: "small" } });
+  assert.equal(sent.queued, true, "the message waits for the compaction");
+  await waitUntil(() => f.compactCalls() === 1);
+  assert.equal(f.requests.length, 1, "nothing reaches the smaller model while it compacts");
+  assert.equal(f.compactModels[0]?.modelID, "big", "the summary runs on the model the occupancy was measured on");
+  assert.equal((await f.store.projection(id))?.model?.modelID, "big", "the compaction does not switch the model it summarizes on");
+
+  f.emit(id, { type: "session/compacted" });
+  await waitUntil(() => f.requests.length === 2);
+  assert.equal(f.requests[1]?.text.endsWith("next"), true);
+  assert.equal(f.requests[1]?.model?.modelID, "small", "the turn runs on the model it was chosen for");
   await f.store.close();
 });
 

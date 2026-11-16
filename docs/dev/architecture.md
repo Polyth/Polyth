@@ -774,7 +774,20 @@ does not act inside one long turn, and a failure is recorded and never blocks th
 message. It has no Polyth fallback (`compact`'s, above): a native refusal or failure
 stands, because an automatic compaction only saves tokens and must not spend a second
 request after the harness declined. An attempt is not repeated for 10 minutes unless the window grew 5 points
-(process memory). `manual` needs `RuntimeCapabilities.autoCompactionSwitch`
+(process memory).
+A model or harness switch keeps the conversation but not the window it was measured
+against: the used tokens survive (the history is the same), while the limit belongs to
+the model that produced the occupancy. Before a send whose route differs — a picker
+model change under `auto`, `earlier` or `custom`, or a pinned harness switch — Polyth
+reads the new route's capacity from the shared model catalog (`resolveModelContextLimit`)
+and compacts when the last known usage no longer fits that window less the same reserve
+(`compactionDueForNextModel`); `auto` is included because the harness's own threshold
+belongs to the old model, `manual` never does this, and an unknown new window or
+unknown usage leaves the message alone. The summary itself runs on the model the
+occupancy was measured on, never on the smaller one just picked; a queued message
+carries no model, so that send remembers the chosen model and the dispatcher applies it
+to that exact message after the compaction.
+`manual` needs `RuntimeCapabilities.autoCompactionSwitch`
 (`AgentRuntime.setAutoCompaction`, called before every turn and on a change; only
 Claude Code today, through `autoCompactEnabled`). Elsewhere the web card refuses it
 and the harness keeps compacting; the composer reminds a manual chat from 75%.
