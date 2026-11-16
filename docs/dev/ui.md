@@ -771,7 +771,8 @@ Contract and server rules: [Spaces §14.8](../architecture/spaces-and-tenancy.md
   keeps it. The send rewrites the first unused `@label` of each entry into the
   plain-text token `[@Title](polyth://session/<id>)`, which travels through the
   queue, steering and retries as ordinary message text; a label edited away is
-  dropped and sends as plain text. A recalled prompt (Up arrow or Previous
+  dropped and sends as plain text (not while "Draft cleared. Restore it?" is
+  offered, so a restored draft keeps its links). A recalled prompt (Up arrow or Previous
   prompts) turns its tokens back into `@Title` plus entries. The list is local:
   the server draft sync carries the text only, so another device sees plain
   `@Title`. The timeline renders it as a chip

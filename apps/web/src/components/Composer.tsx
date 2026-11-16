@@ -3995,9 +3995,12 @@ function ComposerBody({
           // The line appears for 10 s only: say so where a screen reader hears it.
           announce(`${tr("composer.restoreDraft.text")} ${restoreDraftKeyLabel()}`);
         } else if (clearedDraftRef.current && typingDismissesClearedDraft(val)) setClearedDraft(null);
-        // A label edited away drops its link: that text sends plain.
-        const live = liveChatMentions(val, chatMentionsRef.current);
-        if (live.length !== chatMentionsRef.current.length) setDraftChatMentions(live);
+        // A label edited away drops its link: that text sends plain. While a
+        // cleared draft can still be restored, keep its links for the restore.
+        if (!clearedDraftRef.current) {
+          const live = liveChatMentions(val, chatMentionsRef.current);
+          if (live.length !== chatMentionsRef.current.length) setDraftChatMentions(live);
+        }
       }
       // A mode's trigger typed at the start of the draft ("/btw ") enters the
       // mode and leaves only the words after it. A restored draft never does.
