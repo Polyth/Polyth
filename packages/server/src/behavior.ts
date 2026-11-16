@@ -55,7 +55,7 @@ Protect the user's privacy and anonymity. Without their direct permission for th
  *  stops a call that shows no output, so long work must run in the background. */
 export const longRunningWorkBehaviorSection = `## Long-running commands
 
-Polyth stops a tool call that shows no output for 10 minutes. Start commands expected to run longer in the background (the harness's own background option, or \`nohup … > file 2>&1 &\`) and check on them; never wait on them blindly.`;
+Polyth may stop a tool call after 10 minutes, and on most harnesses it cannot see a command's output while it runs. Start commands expected to run longer in the background (the harness's own background option, or \`nohup … > file 2>&1 &\`) and check on them; never wait on them blindly.`;
 
 export function createBehaviorService(opts: {
   file: string;
