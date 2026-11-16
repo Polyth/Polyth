@@ -10,6 +10,7 @@ import type {
   NewChatPeopleDto,
   SessionMentionCandidateDto,
   SessionMentionOutsidersDto,
+  ChatMentionCandidateDto,
 } from "@polyth/contracts";
 import { useEffect, useMemo, useState } from "react";
 import { sessionFetch } from "@polyth/session/web-api";
@@ -20,6 +21,8 @@ const personMessagesPath = (sessionId: string) =>
   `/api/sessions/${encodeURIComponent(sessionId)}/person-messages`;
 const mentionCandidatesPath = (sessionId: string) =>
   `/api/sessions/${encodeURIComponent(sessionId)}/mention-candidates`;
+const chatMentionsPath = (sessionId: string) =>
+  `/api/sessions/${encodeURIComponent(sessionId)}/chat-mention-candidates`;
 const mutePath = (sessionId: string) => `/api/sessions/${encodeURIComponent(sessionId)}/mute`;
 const outsidersPath = (sessionId: string) => `/api/sessions/${encodeURIComponent(sessionId)}/sharing/outsiders`;
 const personAccessPath = (sessionId: string, messageSeq: number) =>
@@ -248,4 +251,18 @@ export function useSessionPeople(sessionId: string | null): SessionMentionCandid
 export function useSessionPeopleNames(sessionId: string | null): string[] {
   const people = useSessionPeople(sessionId);
   return useMemo(() => people.map(candidateName), [people]);
+}
+
+/** Chats this chat may reference with `@`, per session. Read when a mention
+ *  starts; the server re-checks access on every send, so a stale list can only
+ *  offer a chat the send then drops. */
+export async function loadChatMentionCandidates(sessionId: string): Promise<ChatMentionCandidateDto[]> {
+  const result = await sessionFetch<{ items?: unknown }>(chatMentionsPath(sessionId));
+  return Array.isArray(result?.items)
+    ? result.items.filter((row): row is ChatMentionCandidateDto => {
+        const item = row as Partial<ChatMentionCandidateDto> | null;
+        return !!item && typeof item.sessionId === "string" && item.sessionId.length > 0
+          && typeof item.title === "string" && typeof item.updatedAt === "number";
+      })
+    : [];
 }

@@ -7,7 +7,7 @@ import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef,
 import { parseMarkdown, collectImages, holdBackStreamingTail, splitFrontmatter, type Block, type Inline, type TableAlign } from "./parse.ts";
 import { sanitizeLinkHref, sanitizeImageSrc, isVideoSource } from "./sanitize.ts";
 import { findFileRefs } from "./fileReference.ts";
-import { getState, useStore } from "../store.ts";
+import { activateSession, getState, useStore } from "../store.ts";
 import { getUiSettings } from "../uiPrefs.ts";
 import CopyButton from "../components/CopyButton.tsx";
 import Mermaid from "./Mermaid.tsx";
@@ -124,6 +124,12 @@ export function renderInline(nodes: Inline[], keyBase: string, linkify = true): 
         out.push(<del key={k}>{renderInline(n.children, k, linkify)}</del>);
         break;
       case "link": {
+        const chatId = SESSION_LINK_RE.exec(n.href.trim())?.[1];
+        if (chatId) {
+          // A chat reference: the label in the text is never shown or trusted.
+          out.push(<SessionChatChip key={k} sessionId={chatId} />);
+          break;
+        }
         const href = sanitizeLinkHref(n.href);
         if (href === null) out.push(<span key={k}>{renderInline(n.children, k, false)}</span>);
         else out.push(<a key={k} href={href} target="_blank" rel="noopener noreferrer">{renderInline(n.children, k, false)}</a>);
@@ -377,6 +383,22 @@ function bareVideoAutolink(inline: Inline[]): string | null {
 }
 
 /** A bare video URL paragraph: the player plus its small caption link. */
+const SESSION_LINK_RE = /^polyth:\/\/session\/([A-Za-z0-9_-]{1,80})$/;
+
+/** `[@Title](polyth://session/<id>)` as a chip. The reader's own chat list is
+ *  already filtered to the chats they may open, so a chat found there shows its
+ *  live title and opens; any other reader sees a plain "a chat", no title and
+ *  no link, whatever label the text carries. */
+export function SessionChatChip({ sessionId }: { sessionId: string }) {
+  const row = useStore((state) => state.sessions.find((session) => session.id === sessionId));
+  if (!row) return <span className="chat-mention chat-mention-plain">{tr("timeline.chatMention.unavailable")}</span>;
+  return (
+    <button type="button" className="chat-mention" onClick={() => activateSession(sessionId)}>
+      {row.title || tr("composer.chats.untitled")}
+    </button>
+  );
+}
+
 function VideoAutolink({ href }: { href: string }) {
   const ctx = useContext(DocContext);
   const resolved = sanitizeImageSrc(href, {

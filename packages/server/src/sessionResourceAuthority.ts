@@ -725,7 +725,7 @@ export function canonicalSessionService(
     "saveDraft", "markRead", "postPersonMessage", "decidePersonAccess", "setPersonMute", "runtimeFeatures", "renameWorktreeBranch", "patchIsolation", "rebindWorkspace",
     "switchHarness", "cancelHarnessSwitch", "restartRuntime", "updateWorkspace", "patchWorkspace", "withWorkspaceMutation",
   ]);
-  const readableMethodNames = new Set<PropertyKey>(["debug", "clientMutationStatus", "mentionCandidates"]);
+  const readableMethodNames = new Set<PropertyKey>(["debug", "clientMutationStatus", "mentionCandidates", "chatMentionCandidates"]);
 
   const reconciledList = async (projectId?: string): Promise<SessionProjection[]> => {
     await reconcileMissingDeletes();

@@ -17,7 +17,7 @@ const SESSION_METHODS = new Set<PropertyKey>([
   "runShell", "compact", "replySecret", "rename", "requestAutomaticTitle", "organize", "queueList", "queueEditStart",
   "queueEdit", "queueSendNow", "queueEditCancel", "queueReorder", "queueRemove", "pinContext",
   "unpinContext", "autoAcceptGet", "autoAcceptSet", "confirmBorrowedRuntimeEpoch", "saveDraft",
-  "markRead", "postPersonMessage", "decidePersonAccess", "mentionCandidates", "setPersonMute",
+  "markRead", "postPersonMessage", "decidePersonAccess", "mentionCandidates", "chatMentionCandidates", "setPersonMute",
   "runtimeFeatures", "renameWorktreeBranch", "patchIsolation", "rebindWorkspace",
   "switchHarness", "cancelHarnessSwitch", "restartRuntime", "debug",
 ]);

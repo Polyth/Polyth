@@ -66,6 +66,7 @@ import {
   type NewChatPeopleDto,
   type SessionAccessLevel,
   type SessionMentionCandidateDto,
+  type ChatMentionCandidateDto,
   type SessionMentionOutsidersDto,
 } from "@polyth/contracts";
 import type { ComposerAddMenuItem, ComposerContributionContext, ComposerDraftContext, ComposerMode, ComposerSuggestionOffer } from "@polyth/web-sdk";
@@ -279,7 +280,7 @@ import {
   beginConversationSelection, endConversationSelection, openConversationStart, useConversationSelection,
 } from "../conversationSelection.ts";
 import {
-  cachedMentionOutsiders, forgetPersonMessageOperation, loadMentionCandidates, loadMentionOutsiders, loadNewChatPeople, personInitials, personMessageOperationId,
+  cachedMentionOutsiders, forgetPersonMessageOperation, loadChatMentionCandidates, loadMentionCandidates, loadMentionOutsiders, loadNewChatPeople, personInitials, personMessageOperationId,
   postPersonMessage, useSessionPeople,
 } from "../sessionPeople.ts";
 import {
@@ -2359,10 +2360,16 @@ function ComposerBody({
   const [acIndex, setAcIndex] = useState(0);
   const acTokenRef = useRef<PromptToken | null>(null);
   const startedMention = acToken?.kind === "file";
+  const [chatMentions, setChatMentions] = useState<ChatMentionCandidateDto[]>([]);
+  useEffect(() => { setChatMentions([]); }, [sessionIdForPeople]);
   useEffect(() => {
     if (!startedMention) return;
     if (sessionIdForPeople) {
       refreshMentionPeople(sessionIdForPeople);
+      const forSession = sessionIdForPeople;
+      void loadChatMentionCandidates(forSession)
+        .then((items) => { if (sessionIdRef.current === forSession) setChatMentions(items); })
+        .catch(() => { /* without it the picker offers no chats */ });
     } else if (activeProjectId) {
       const scopeKey = scopedDraftCacheKey(null);
       void loadNewChatPeople(activeProjectId)
@@ -3714,6 +3721,7 @@ function ComposerBody({
       fresh ? fileSearch.phase : "pending",
       fresh && fileSearch.phase === "done" ? fileSearch.hits : [],
       mentionOutsiders?.people ?? [],
+      chatMentions,
     );
   })();
   const acOptions = acView?.options ?? [];
@@ -5200,7 +5208,7 @@ function ComposerBody({
           <div className="ac-popup" data-kind={acView.kind}>
             {/* With people listed the groups name themselves; a "Files" title
                 above the People group would mislabel it. */}
-            {!acGroups.some((group) => group.id === "people" || group.id === "people-outside") && <div className="ac-header">
+            {!acGroups.some((group) => group.id === "people" || group.id === "people-outside" || group.id === "chats") && <div className="ac-header">
               <span className="ac-header-title">{acView.kind === "cmd" ? tr("composer.discovery.actions") : acView.kind === "snip" ? tr("composer.snippets") : tr("composer.files")}</span>
               {acView.kind === "cmd" && acView.resultCount !== undefined && (
                 <span className="ac-count" aria-label={tr("composer.discovery.valueAvailable", { value: acView.resultCount })}>{acView.resultCount}</span>

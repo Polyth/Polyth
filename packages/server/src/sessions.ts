@@ -40,7 +40,7 @@ import type {
   Project, SessionMoveBlock, SessionMoveInput, SessionProjectMove, SessionProjectMovedData, SessionReleasedExecution,
   SessionPerson, SessionPersonScope, TurnAdmission,
   PersonAccessDecisionResult, PersonAccessOutcome, PersonAccessRequest, PersonAccessResolvedData,
-  PersonMessageInput, PersonMessageResult, SessionMentionCandidateDto,
+  PersonMessageInput, PersonMessageResult, SessionMentionCandidateDto, ChatMentionCandidateDto,
   CreateConversationInput, StartSessionFromConversationInput, StartSessionFromConversationResult,
   SessionStartFailedData, SessionStartRequest, StartSessionInput, StartSessionResult,
   RuntimeCapabilities,
@@ -50,6 +50,7 @@ import type {
 import {
   isSessionAccessLevel,
   normalizeSessionPerson,
+  sessionMentionIds,
   readErrorDiagnostics,
   runtimeBatchAdmitsTurnContent,
   runtimeEventHasTurnContent,
@@ -66,7 +67,7 @@ import {
   SESSION_STARTING_QUEUE_REASON,
   normalizeSessionOrigin,
 } from "@polyth/contracts";
-import { sessionMentionCandidates, sessionAudience, sessionOutsiders, sessionShareApprover, sharingRootId, steerPeopleLine, turnPeopleBlock } from "./sessionSharing.ts";
+import { chatMentionCandidates, mentionedChatsBlock, sessionMentionCandidates, sessionAudience, sessionOutsiders, sessionShareApprover, sharingRootId, steerPeopleLine, turnPeopleBlock } from "./sessionSharing.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
 import type { ProjectService } from "@polyth/contracts";
 import { compactionDue, compactionDueForNextModel, effectiveCompactionPreference, parseCompactionPreference, type CompactionPreference } from "@polyth/contracts/compaction-policy";
@@ -8895,10 +8896,13 @@ export function createSessionService(deps: {
 
       // Package-owned blocks (e.g. running project actions). Same rule: recorded
       // once per operation, a retry resends the exact recorded text.
-      if (deps.turnContext) {
-        const recordedContext = existingEvents.find((event) =>
-          event.type === "context/turn-prepared"
-          && (event.data as { operationId?: unknown }).operationId === operation!.operationId,
+      // Chats the message references with `[@Title](polyth://session/<id>)` join
+      // the same record: re-checked here, on the admitted message only.
+      const mentionIds = sessionMentionIds(typeof (message?.data as { text?: unknown } | undefined)?.text === "string"
+        ? (message!.data as { text: string }).text : "");
+      if (deps.turnContext || mentionIds.length > 0) {
+        const recordedContext = (await eventsOfTypeList(sessionId, ["context/turn-prepared"])).find((event) =>
+          (event.data as { operationId?: unknown }).operationId === operation!.operationId,
         );
         let contextText = typeof (recordedContext?.data as { modelVisibleText?: unknown } | undefined)?.modelVisibleText === "string"
           ? (recordedContext!.data as { modelVisibleText: string }).modelVisibleText
@@ -8909,15 +8913,22 @@ export function createSessionService(deps: {
           if (!turnProject.remote) {
             try { worktreePath = workspaceExecutionPath(turnProject, proj); } catch { worktreePath = undefined; }
           }
-          const collected = spaceId
+          const collected = spaceId && deps.turnContext
             ? await deps.turnContext.collect({ spaceId, sessionId, projectId: proj.projectId, userId: turnAuthor?.userId, worktreePath }).catch(() => "")
             : "";
-          if (collected) {
+          const mentioned = spaceId && mentionIds.length > 0
+            ? await mentionedChatsBlock({
+                spaceId, current: proj, ids: mentionIds, authorId: turnAuthor?.userId,
+                lookup: (id) => store.projection(id),
+              }).catch(() => undefined)
+            : undefined;
+          const combined = [collected, mentioned].filter((part): part is string => Boolean(part)).join("\n\n");
+          if (combined) {
             await appendAndBroadcast(sessionId, "context/turn-prepared", {
               operationId: operation.operationId,
-              modelVisibleText: collected,
+              modelVisibleText: combined,
             }, { ignorable: true });
-            contextText = collected;
+            contextText = combined;
           }
         }
         if (contextText) projectedSections.push(contextText);
@@ -15895,6 +15906,15 @@ export function createSessionService(deps: {
       if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
       if (!proj.spaceId) return [];
       return sessionMentionCandidates(proj.spaceId, sessionId, person?.userId);
+    },
+
+    async chatMentionCandidates(sessionId, person?: SessionPersonScope): Promise<ChatMentionCandidateDto[]> {
+      const proj = await store.projection(sessionId);
+      if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      const spaceId = proj.spaceId ?? (await projects.get(proj.projectId))?.spaceId;
+      if (!spaceId) return [];
+      const rows = (await store.projections(proj.projectId)).filter((row): row is SessionProjection => Boolean(row));
+      return chatMentionCandidates(spaceId, proj, rows, person?.userId);
     },
 
     async setPersonMute(sessionId, muted, person?: SessionPersonScope): Promise<void> {

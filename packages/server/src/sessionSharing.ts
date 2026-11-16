@@ -13,6 +13,8 @@ import {
   sessionAccessAtLeast,
   type SessionAccessLevel,
   type SessionMentionCandidateDto,
+  type ChatMentionCandidateDto,
+  MAX_SESSION_MENTIONS,
   type NewChatPeopleDto,
   type SessionMentionOutsidersDto,
   type PersonMessageShare,
@@ -303,6 +305,89 @@ export function sessionMentionCandidates(
   return sessionAudience(spaceId, sessionId)
     .filter((member) => member.userId !== excludeUserId)
     .map(({ userId, name, access }) => ({ userId, ...(name ? { name } : {}), access }));
+}
+
+/** The people who must all be able to open a chat before it may be referenced
+ *  from `current`: the author plus everyone who can open `current`. A private
+ *  or personal chat is therefore never offered in a chat others can read.
+ *  Empty without canonical identity (one person, nothing to decide). */
+export function chatMentionReaders(spaceId: string, currentId: string, authorId?: string): string[] {
+  if (!canonicalSecurity()) return [];
+  const ids = new Set<string>(sessionAudience(spaceId, currentId).map((member) => member.userId));
+  if (authorId && !authorId.startsWith("system:")) ids.add(authorId);
+  return [...ids];
+}
+
+/** One chat may be referenced from another: same Space and project, not the
+ *  chat itself, not archived, and every required reader can open it. */
+export function isMentionableChat(
+  spaceId: string,
+  current: Pick<SessionProjection, "id" | "projectId">,
+  target: Pick<SessionProjection, "id" | "projectId" | "spaceId" | "status"> | undefined,
+  readers: readonly string[],
+): boolean {
+  if (!target || target.id === current.id || target.status === "archived") return false;
+  if (target.projectId !== current.projectId) return false;
+  if (target.spaceId && target.spaceId !== spaceId) return false;
+  return readers.every((userId) => sessionAccess(userId, spaceId, target.id) !== undefined);
+}
+
+/** Chats the reader may reference from `current`, newest first. `rows` are the
+ *  project's sessions; the filter is `isMentionableChat`. */
+export function chatMentionCandidates(
+  spaceId: string,
+  current: Pick<SessionProjection, "id" | "projectId">,
+  rows: readonly SessionProjection[],
+  readerId: string | undefined,
+): ChatMentionCandidateDto[] {
+  const readers = chatMentionReaders(spaceId, current.id, readerId);
+  return rows
+    .filter((row) => isMentionableChat(spaceId, current, row, readers))
+    .map((row) => ({ sessionId: row.id, title: row.title, updatedAt: row.lastTurnAt ?? row.updatedAt }))
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+const AGE_UNITS: ReadonlyArray<readonly [number, string]> = [
+  [86_400_000, "day"], [3_600_000, "hour"], [60_000, "minute"],
+];
+const relativeAge = (ms: number, now: number): string => {
+  const diff = Math.max(0, now - ms);
+  for (const [size, unit] of AGE_UNITS) {
+    if (diff >= size) {
+      const count = Math.floor(diff / size);
+      return `${count} ${unit}${count === 1 ? "" : "s"} ago`;
+    }
+  }
+  return "just now";
+};
+
+/** A title as data for the model: no markup, quotes or control characters. */
+const chatTitleForModel = (title: string): string =>
+  JSON.stringify(Array.from(title.replace(/[<>"`\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim()).slice(0, 120).join("").trim() || "Untitled");
+
+/** `<polyth-mentioned-chats>` for the tokens in an admitted message: only chats
+ *  that pass `isMentionableChat` (everything else is dropped without a trace).
+ *  Titles are the live ones; no chat content is inlined. Undefined when none
+ *  remain. */
+export async function mentionedChatsBlock(input: {
+  spaceId: string;
+  current: Pick<SessionProjection, "id" | "projectId">;
+  authorId?: string;
+  ids: readonly string[];
+  lookup: (sessionId: string) => Promise<SessionProjection | undefined>;
+  now?: number;
+}): Promise<string | undefined> {
+  const readers = chatMentionReaders(input.spaceId, input.current.id, input.authorId);
+  const now = input.now ?? Date.now();
+  const lines: string[] = [];
+  for (const id of input.ids.slice(0, MAX_SESSION_MENTIONS)) {
+    let target: SessionProjection | undefined;
+    try { target = await input.lookup(id); } catch { target = undefined; }
+    if (!isMentionableChat(input.spaceId, input.current, target, readers)) continue;
+    lines.push(`${chatTitleForModel(target!.title)} \u2014 session ${target!.id} \u2014 last active ${relativeAge(target!.lastTurnAt ?? target!.updatedAt, now)}`);
+  }
+  if (lines.length === 0) return undefined;
+  return ["<polyth-mentioned-chats>", ...lines, "Read one with the polyth tool (session.messages) if you need its content.", "</polyth-mentioned-chats>"].join("\n");
 }
 
 /** Active Space members who cannot open a chat, the reader excluded. */

@@ -439,6 +439,10 @@ function scopeSessions(
     const mentionCandidates = base.mentionCandidates.bind(base);
     scoped.mentionCandidates = (sessionId) => guarded(() => mentionCandidates(g(sessionId), personScope));
   }
+  if (base.chatMentionCandidates) {
+    const chatMentionCandidates = base.chatMentionCandidates.bind(base);
+    scoped.chatMentionCandidates = (sessionId) => guarded(() => chatMentionCandidates(g(sessionId), personScope));
+  }
   if (base.setPersonMute) {
     const setPersonMute = base.setPersonMute.bind(base);
     scoped.setPersonMute = (sessionId, muted) => guarded(() => setPersonMute(g(sessionId), muted, personScope));

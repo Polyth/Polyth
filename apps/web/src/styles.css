@@ -22376,6 +22376,21 @@ body.desktop-app .lock-screen {
   background: color-mix(in srgb, var(--person-tone) 16%, transparent);
   color: var(--person-tone);
 }
+/* A chat referenced from a message: a quiet inline pill that opens it; a chat
+   the reader cannot open is the same pill without the link affordance. */
+.chat-mention {
+  display: inline;
+  margin: 0;
+  padding: 0 .3em;
+  border: 0;
+  border-radius: calc(4px * var(--corner-radius-scale));
+  background: var(--accent-wash);
+  color: var(--accent);
+  font: inherit;
+  font-weight: 550;
+  cursor: pointer;
+}
+.chat-mention-plain { background: var(--surface-sunken, transparent); color: var(--muted); cursor: default; }
 /* The reader's own name carries the room's one emphasis. */
 .person-mention.is-self { background: var(--accent); color: var(--accent-ink); }
 /* On one's own accent bubble a mention is a lighter pill of the same ink. */

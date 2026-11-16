@@ -759,6 +759,19 @@ Contract and server rules: [Spaces §14.8](../architecture/spaces-and-tenancy.md
   (`GET …/sharing/outsiders`) is read when a mention starts, not when the chat
   opens. A new chat, with no session yet, asks `GET /api/sharing/new-chat`
   instead and works the same way.
+- **Mentioning a chat**: the same `@` list shows a "Chats" group between People
+  and Files: chats of the same project, newest first, matched by title, never
+  this chat or an archived one (`GET /api/sessions/:id/chat-mention-candidates`,
+  read when a mention starts; `chatMentionOptions` in `composer/discovery.ts`).
+  In a chat other people can read, only chats every reader can already open are
+  offered, so a private or personal chat never appears; in a private chat, any
+  chat the author can read. Picking one inserts the plain-text token
+  `[@Title](polyth://session/<id>)`, so it travels through the queue, steering
+  and retries as ordinary message text. The timeline renders it as a chip
+  (`SessionChatChip`, `markdown/render.tsx`) with the LIVE title when the
+  reader's own chat list contains the chat (click opens it); anyone else sees a
+  plain "a chat", no title, no link. Accepted trade-off: the label inside the
+  token and the raw text still contain the title the author saw at send time.
 - **Mentioning someone outside the chat**: one plateless line of the pending
   stack above the composer (`MentionAccessLine.tsx`, decisions in
   `composer/people.ts`) asks once, with a wrapping sentence, a primary action
