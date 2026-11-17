@@ -788,14 +788,27 @@ export interface SessionPauseEndedData {
   source?: string;
 }
 
-/** `tool/keep-running`: a person told Polyth that one open call is just slow
- *  and silent, so its silence stop is off (the hard execution ceiling stays).
+/** `tool/keep-running`: a person (or, when nobody answered, an enabled
+ *  Judgment use) told Polyth that one open call is just slow and silent, so
+ *  its silence stop is off (the hard execution ceiling stays).
  *  Polyth-originated: not runtime turn content, not model-visible. Old
  *  reducers ignore the unknown type. */
 export const TOOL_KEEP_RUNNING_EVENT = "tool/keep-running" as const;
 export interface ToolKeepRunningData {
   callId: string;
   byUserId?: string;
+  /** Set when a judge kept it, never by a person's click. */
+  via?: "judge";
+  /** The Judgment use that decided (with `via: "judge"`). */
+  useId?: string;
+}
+/** Who may keep a call running, as `keepToolRunning` options: a person's id,
+ *  or a server-side judge (`via: "judge"` with its use id). The HTTP route
+ *  only ever passes the signed-in person's id. */
+export interface KeepToolRunningOptions {
+  userId?: string;
+  via?: "judge";
+  useId?: string;
 }
 
 export interface TurnResumeCancelledData {
@@ -3170,7 +3183,7 @@ export interface SessionService {
   /** Turn off the silence stop for one open call of the current turn (the
    *  hard ceiling stays); records `tool/keep-running`. Idempotent. Rejects
    *  `conflict` when the call is not open in the current turn. */
-  keepToolRunning?(sessionId: string, callId: string, options?: { userId?: string }): Promise<void>;
+  keepToolRunning?(sessionId: string, callId: string, options?: KeepToolRunningOptions): Promise<void>;
   /** Compact the conversation context: the runtime's native compaction when
    * it has one, otherwise Polyth's own (summary + fresh native leg); a native
    * compaction the harness refuses or fails falls back to Polyth's. Resolves

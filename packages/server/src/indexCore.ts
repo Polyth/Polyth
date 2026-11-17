@@ -70,6 +70,7 @@ import {
   SERVER_TURN_COMPLETION_BUS,
   SERVER_TURN_STOPPED_BUS,
   SERVER_PERMISSION_WAITING_BUS,
+  SERVER_TOOL_QUIET_BUS,
   SERVER_ACCOUNT_REMOVAL_BUS,
   SERVER_PERSON_DATA_VOLUME,
   SESSION_ATTENTION_SERVICE,
@@ -86,6 +87,7 @@ import {
 import { createProjectService } from "./projects.ts";
 import { bindGitDiscoveryToDataDir } from "./gitDiscoveryBoundary.ts";
 import { createPermissionWaitingBus } from "./permissionWaiting.ts";
+import { createToolQuietBus } from "./toolQuiet.ts";
 import { defaultStallReport, watchEventLoopStalls, type EventLoopStall } from "./eventLoopStall.ts";
 import {
   createSpaceGateway,
@@ -2692,6 +2694,10 @@ export async function boot(opts: BootOptions = {}) {
     guardedSpace: spaceHasGuardedMember,
   });
   services.provide(SERVER_PERMISSION_WAITING_BUS, permissionWaiting.service);
+  // A call went quiet and nobody kept it: a package (a judge) may keep it
+  // before the silence stop.
+  const toolQuiet = createToolQuietBus({ projection: (sessionId) => store.projection(sessionId) });
+  services.provide(SERVER_TOOL_QUIET_BUS, toolQuiet.service);
   const accountRemovedListeners = new Set<(event: { userId: string }) => void | Promise<void>>();
   services.provide(SERVER_ACCOUNT_REMOVAL_BUS, {
     subscribe(listener) {
@@ -3093,6 +3099,7 @@ export async function boot(opts: BootOptions = {}) {
         });
       },
       permissionWaiting: (sessionId, requestId) => permissionWaiting.publish(sessionId, requestId),
+      toolQuiet: (notice) => toolQuiet.publish(notice),
       turnStopped(sessionId, reason) {
         pushNotifier.turnStopped(sessionId, reason);
         publishTurnStopped(sessionId, reason);

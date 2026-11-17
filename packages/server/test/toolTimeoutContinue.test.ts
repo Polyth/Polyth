@@ -33,6 +33,7 @@ const waitFor = async (
 const harness = (options: {
   continueLimit?: number; dir?: string; reconcileRetryDelaysMs?: number[];
   toolExecutionTimeoutMs?: number; toolExecutionHardLimitMs?: number; toolRehydrateGraceMs?: number;
+  toolQuietNoticeMs?: number;
 } = {}) => {
   const listeners = new Set<(sessionId: string, event: RuntimeEvent) => void>();
   const observers = new Set<(sessionId: string, observation: RuntimeObservation) => void>();
@@ -108,6 +109,7 @@ const harness = (options: {
     evaluate: () => "ask", addRule: () => {}, rules: () => [],
   } as unknown as PermissionService;
   const progressed: string[] = [];
+  const quiet: Array<{ sessionId: string; callId: string; tool: string; startedAt: number; quietSince: number; stopsAt: number; at: number }> = [];
   const broadcast: Broadcaster = { event: () => {}, projection: () => {}, toolProgress: (_sessionId, callId) => { progressed.push(callId); } };
   const sessions = createSessionService({ autoContinueIncomplete: false,
     store,
@@ -119,12 +121,16 @@ const harness = (options: {
     toolExecutionTimeoutMs: options.toolExecutionTimeoutMs ?? 30,
     ...(options.toolExecutionHardLimitMs === undefined ? {} : { toolExecutionHardLimitMs: options.toolExecutionHardLimitMs }),
     ...(options.toolRehydrateGraceMs === undefined ? {} : { toolRehydrateGraceMs: options.toolRehydrateGraceMs }),
+    ...(options.toolQuietNoticeMs === undefined ? {} : {
+      toolQuietNoticeMs: options.toolQuietNoticeMs,
+      notify: { attention: () => {}, turnStopped: () => {}, toolQuiet: (event) => { quiet.push({ ...event, at: Date.now() }); } },
+    }),
     ...(options.reconcileRetryDelaysMs ? { reconcileRetryDelaysMs: options.reconcileRetryDelaysMs } : {}),
     ...(options.continueLimit === undefined
       ? {}
       : { toolTimeoutContinueLimit: options.continueLimit }),
   });
-  return { sessions, store, emit, startedTexts, aborted, observers, endpoint, dir, runtime, progressed };
+  return { sessions, store, emit, startedTexts, aborted, observers, endpoint, dir, runtime, progressed, quiet };
 };
 
 const NUDGE_EVENT = "user/message";
@@ -637,4 +643,49 @@ test("a kept call survives a restart: rehydration arms it without the silence st
   assert.deepEqual(restored.aborted, [], "a kept call is not stopped for silence after boot");
   await restored.sessions.keepToolRunning!(id, "slow");
   assert.equal((await keepEvents(restored.store, id)).length, 1, "still idempotent after restart");
+});
+
+test("a quiet call is announced once before its silence stop; activity starts a new quiet stretch", async (t) => {
+  const h = harness({ continueLimit: 0, toolExecutionTimeoutMs: 300, toolExecutionHardLimitMs: 60_000, toolQuietNoticeMs: 150 });
+  t.after(() => { h.sessions.dispose(); return h.store.close(); });
+  const { id } = await h.sessions.create({ projectId: "p1", title: "Quiet" });
+  await h.sessions.send(id, { text: "build" });
+  h.emit(id, { type: "tool/started", callId: "slow", tool: "shell", input: { command: "make all" } });
+  await waitFor(() => h.quiet.length === 1);
+  const first = h.quiet[0]!;
+  assert.equal(first.sessionId, id);
+  assert.equal(first.callId, "slow");
+  assert.equal(first.tool, "shell");
+  assert.equal(first.stopsAt - first.quietSince, 300);
+  assert.ok(first.at - first.quietSince >= 140, "announced after the notice delay, not at the start");
+  assert.deepEqual(h.aborted, [], "the notice comes before the stop");
+  // Activity before the stop: a new quiet stretch, announced again.
+  h.emit(id, { type: "tool/progress", callId: "slow", at: Date.now() });
+  await waitFor(() => h.quiet.length === 2);
+  assert.ok(h.quiet[1]!.quietSince > first.quietSince);
+  await waitFor(() => h.aborted.length === 1);
+  assert.equal(h.quiet.length, 2, "one notice per quiet stretch");
+});
+
+test("a judge keeps a quiet call: no stop, the event says judge, and a kept call is never announced", async (t) => {
+  const h = harness({ continueLimit: 0, toolExecutionTimeoutMs: 300, toolExecutionHardLimitMs: 60_000, toolQuietNoticeMs: 150 });
+  t.after(() => { h.sessions.dispose(); return h.store.close(); });
+  const { id } = await h.sessions.create({ projectId: "p1", title: "Judge keeps" });
+  await h.sessions.send(id, { text: "test" });
+  h.emit(id, { type: "tool/started", callId: "slow", tool: "shell", input: { command: "npm test" } });
+  await waitFor(() => h.quiet.length === 1);
+  await h.sessions.keepToolRunning!(id, "slow", { via: "judge", useId: "judges.quiet-command", userId: "system:judge" });
+  await flush(450);
+  assert.deepEqual(h.aborted, [], "kept by the judge: no silence stop");
+  const kept = (await h.store.events(id)).filter((event) => event.type === "tool/keep-running");
+  assert.equal(kept.length, 1);
+  assert.deepEqual(kept[0]!.data, { callId: "slow", via: "judge", useId: "judges.quiet-command" }, "system ids are never recorded as a person");
+
+  // Kept by a person before the notice: never announced.
+  h.emit(id, { type: "tool/started", callId: "other", tool: "shell", input: { command: "sleep 900" } });
+  await h.sessions.keepToolRunning!(id, "other", { userId: "usr_max" });
+  await flush(400);
+  assert.equal(h.quiet.filter((event) => event.callId === "other").length, 0);
+  const person = (await h.store.events(id)).filter((event) => event.type === "tool/keep-running").at(-1)!;
+  assert.deepEqual(person.data, { callId: "other", byUserId: "usr_max" });
 });

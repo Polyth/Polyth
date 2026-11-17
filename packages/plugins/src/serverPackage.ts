@@ -270,6 +270,34 @@ export interface ServerPermissionWaitingBus {
 export const SERVER_PERMISSION_WAITING_BUS =
   serverServiceKey<ServerPermissionWaitingBus>("session.permission-waiting");
 
+/** An open tool call has been quiet for a while (one minute before Polyth's
+ *  silence stop by default) and nobody kept it running. Published once per
+ *  quiet stretch, never for a kept call. Observation only: keeping it goes
+ *  through an authorized facade's `keepToolRunning` (a judge passes
+ *  `via: "judge"`); doing nothing lets the silence stop run at `stopsAt`.
+ *  Read the call itself through that facade; this event names it only. */
+export interface ServerToolQuietEvent {
+  sessionId: string;
+  callId: string;
+  /** The call's tool name as the harness reported it. */
+  tool: string;
+  startedAt: number;
+  /** When the call last showed activity (its start without progress frames). */
+  quietSince: number;
+  /** When the silence stop runs if nothing changes. */
+  stopsAt: number;
+  /** The session's Space (from its projection) when known. */
+  spaceId?: string;
+  projectId?: string;
+}
+
+export interface ServerToolQuietBus {
+  subscribe(listener: (event: ServerToolQuietEvent) => void | Promise<void>): Disposable;
+}
+
+export const SERVER_TOOL_QUIET_BUS =
+  serverServiceKey<ServerToolQuietBus>("session.tool-quiet");
+
 /** A server account the owner is removing. Listeners run, and are awaited,
  *  before its credential goes, so access a package granted to the account
  *  (a paired phone, a token) ends with it. A failing listener is logged and

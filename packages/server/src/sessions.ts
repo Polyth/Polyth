@@ -1037,6 +1037,10 @@ export function createSessionService(deps: {
      *  Not called when a decided answer failed to deliver, nor for requests
      *  re-published after a reconnect. */
     permissionWaiting?(sessionId: string, requestId: string): void;
+    /** An open call has been quiet for `toolQuietNoticeMs` and nobody kept it
+     *  (SERVER_TOOL_QUIET_BUS): its silence stop is due at `stopsAt` unless it
+     *  shows activity or someone keeps it. Once per quiet stretch. */
+    toolQuiet?(event: { sessionId: string; callId: string; tool: string; startedAt: number; quietSince: number; stopsAt: number }): void;
     /** A `person/message` was appended. `mentions` are the kept mentioned
      *  people (kind `mention`); `audience`, only for a conversation, is every
      *  other person who can open it and has not muted it (kind `message`).
@@ -1063,6 +1067,9 @@ export function createSessionService(deps: {
   /** Absolute ceiling for one tool call even while it keeps showing activity.
    *  Defaults to sixty minutes. `toolExecutionTimeoutMs` is the silence limit. */
   toolExecutionHardLimitMs?: number;
+  /** How long a call is quiet before `notify.toolQuiet` hears it, once per
+   *  quiet stretch. Defaults to one minute before the silence stop. */
+  toolQuietNoticeMs?: number;
   /** Refuse every provider turn at admission (agent-beta without opt-in). */
   modelTurnsDisabled?: boolean;
   /** Test seam: grace after a restart before a rehydrated call's hard ceiling may fire (default 60 s). */
@@ -1508,6 +1515,10 @@ export function createSessionService(deps: {
   const pausedToolWatchdogs = new Set<string>();
   /** Calls a person marked `tool/keep-running`: no silence stop, ceiling only. */
   const keptToolCalls = new Set<string>();
+  /** The quiet notice comes this long into a silence; 0 or past the stop: never. */
+  const TOOL_QUIET_NOTICE_MS = Math.floor(deps.toolQuietNoticeMs ?? Math.max(0, TOOL_EXECUTION_TIMEOUT_MS - 60_000));
+  /** Per call, the `lastActivityAt` whose quiet stretch was already announced. */
+  const toolQuietNoticed = new Map<string, number>();
   // Per-call clock: when it started and when a runtime event last carried its
   // id. Survives a request pause so the hard ceiling is not reset by waiting.
   const toolWatchdogClocks = new Map<string, { startedAt: number; lastActivityAt: number; ceilingNotBefore: number }>();
@@ -1523,6 +1534,7 @@ export function createSessionService(deps: {
     pausedToolWatchdogs.delete(key);
     keptToolCalls.delete(key);
     toolWatchdogClocks.delete(key);
+    toolQuietNoticed.delete(key);
   };
   const clearSessionToolWatchdogs = (sessionId: string): void => {
     for (const [key, timer] of toolWatchdogs) {
@@ -1538,6 +1550,9 @@ export function createSessionService(deps: {
     }
     for (const key of keptToolCalls) {
       if (key.startsWith(`${sessionId}\0`)) keptToolCalls.delete(key);
+    }
+    for (const key of toolQuietNoticed.keys()) {
+      if (key.startsWith(`${sessionId}\0`)) toolQuietNoticed.delete(key);
     }
   };
   type ActiveTool = { tool: string; input: JsonObject; startedAt: number };
@@ -1588,14 +1603,29 @@ export function createSessionService(deps: {
       const ceiling = Math.max(clock.startedAt + TOOL_EXECUTION_HARD_LIMIT_MS, clock.ceilingNotBefore);
       // A kept call has no silence stop: only the hard ceiling remains.
       const kept = keptToolCalls.has(key);
-      const deadline = kept ? ceiling : Math.min(clock.lastActivityAt + TOOL_EXECUTION_TIMEOUT_MS, ceiling);
+      const silenceStop = clock.lastActivityAt + TOOL_EXECUTION_TIMEOUT_MS;
+      const deadline = kept ? ceiling : Math.min(silenceStop, ceiling);
+      // The same timer wakes once earlier for the quiet notice, so every path
+      // that clears the watchdog clears the notice too.
+      const noticeAt = !kept && deps.notify?.toolQuiet && TOOL_QUIET_NOTICE_MS > 0
+        && TOOL_QUIET_NOTICE_MS < TOOL_EXECUTION_TIMEOUT_MS && silenceStop <= ceiling
+        && toolQuietNoticed.get(key) !== clock.lastActivityAt
+        ? clock.lastActivityAt + TOOL_QUIET_NOTICE_MS
+        : Number.POSITIVE_INFINITY;
       const timer = setTimeout(() => {
         toolWatchdogs.delete(key);
         const current = toolWatchdogClocks.get(key);
         if (!current) return;
         const now = Date.now();
-        const silent = !keptToolCalls.has(key) && now - current.lastActivityAt >= TOOL_EXECUTION_TIMEOUT_MS;
+        const quietFor = now - current.lastActivityAt;
+        const silent = !keptToolCalls.has(key) && quietFor >= TOOL_EXECUTION_TIMEOUT_MS;
         const capped = now - current.startedAt >= TOOL_EXECUTION_HARD_LIMIT_MS && now >= current.ceilingNotBefore;
+        if (!silent && !capped && !keptToolCalls.has(key) && deps.notify?.toolQuiet
+          && TOOL_QUIET_NOTICE_MS > 0 && quietFor >= TOOL_QUIET_NOTICE_MS
+          && toolQuietNoticed.get(key) !== current.lastActivityAt) {
+          toolQuietNoticed.set(key, current.lastActivityAt);
+          void announceToolQuiet(sessionId, callId, { startedAt: current.startedAt, lastActivityAt: current.lastActivityAt });
+        }
         // Timers can fire a hair early; activity may also have landed meanwhile.
         if (!silent && !capped) {
           schedule();
@@ -1604,11 +1634,35 @@ export function createSessionService(deps: {
         void stopTimedOutTool(sessionId, callId, silent ? "silence" : "hard-limit").catch((error) => {
           console.error(`[polyth] failed to stop timed-out tool ${callId} in ${sessionId}`, error);
         });
-      }, Math.max(0, deadline - Date.now()));
+      }, Math.max(0, Math.min(deadline, noticeAt) - Date.now()));
       timer.unref?.();
       toolWatchdogs.set(key, timer);
     };
     schedule();
+  }
+  /** Tell listeners an open call went quiet (see `notify.toolQuiet`). The
+   *  call's name comes from the current turn; a call that already ended,
+   *  or was kept meanwhile, is not announced. */
+  async function announceToolQuiet(
+    sessionId: string,
+    callId: string,
+    clock: { startedAt: number; lastActivityAt: number },
+  ): Promise<void> {
+    try {
+      const call = (await currentTurnActiveTools(sessionId)).get(callId);
+      const key = toolWatchdogKey(sessionId, callId);
+      if (!call || keptToolCalls.has(key) || !toolWatchdogClocks.has(key)) return;
+      deps.notify?.toolQuiet?.({
+        sessionId,
+        callId,
+        tool: call.tool,
+        startedAt: clock.startedAt,
+        quietSince: clock.lastActivityAt,
+        stopsAt: clock.lastActivityAt + TOOL_EXECUTION_TIMEOUT_MS,
+      });
+    } catch (error) {
+      console.error(`[polyth] tool quiet notice failed for ${callId} in ${sessionId}`, error);
+    }
   }
   /** A runtime event carrying this call's id proves it is alive. The timer is
    *  left alone: it re-checks the clock when it fires, so a chatty call costs
@@ -14382,6 +14436,12 @@ export function createSessionService(deps: {
       const userId = typeof options?.userId === "string" && options.userId && !options.userId.startsWith("system:")
         ? options.userId
         : undefined;
+      // A judge keeps a call only when nobody answered; the event says so, so
+      // a reader never mistakes it for a person's click.
+      const judge = options?.via === "judge";
+      const useId = judge && typeof options?.useId === "string" && options.useId.trim()
+        ? options.useId.trim().slice(0, 96)
+        : undefined;
       await withSessionLock(sessionId, async () => {
         if (!(await store.projection(sessionId))) {
           throw Object.assign(new Error("session not found"), { code: "not-found" });
@@ -14394,6 +14454,7 @@ export function createSessionService(deps: {
         await appendAndBroadcast(sessionId, TOOL_KEEP_RUNNING_EVENT, {
           callId,
           ...(userId ? { byUserId: userId } : {}),
+          ...(judge ? { via: "judge", ...(useId ? { useId } : {}) } : {}),
         }, { ignorable: true });
         keptToolCalls.add(key);
         // A waiting timer carries the old silence deadline; re-arm it against
