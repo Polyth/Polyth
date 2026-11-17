@@ -187,8 +187,9 @@ try {
   if (!npmMode) {
     // `polyth update` against a local mirror holding a newer release (this
     // archive under the next patch version), then `--rollback`.
-    const [major, minor, patch] = version.split(/[.-]/).map(Number) as [number, number, number];
-    const next = `${major}.${minor}.${patch + 1}`;
+    // Same channel as this archive: a `-nightly` install only takes nightlies.
+    const [, major, minor, patch, suffix = ""] = /^(\d+)\.(\d+)\.(\d+)(-.+)?$/.exec(version) ?? [];
+    const next = `${major}.${minor}.${Number(patch) + 1}${suffix}`;
     const nextSource = join(work, "next");
     await mkdir(nextSource);
     check(spawnSync("tar", ["-xzf", source, "-C", nextSource]).status === 0, `update: a ${next} archive is prepared`);
@@ -203,7 +204,7 @@ try {
       const origin = `http://127.0.0.1:${(mirror.address() as AddressInfo).port}`;
       if (request.url?.startsWith("/releases")) {
         response.setHeader("content-type", "application/json");
-        response.end(JSON.stringify([{ tag_name: `v${next}`, prerelease: false, draft: false, assets: [
+        response.end(JSON.stringify([{ tag_name: `v${next}`, prerelease: suffix !== "", draft: false, assets: [
           { name: nextName, browser_download_url: `${origin}/assets/${nextName}` },
           { name: "SHA256SUMS-server.txt", browser_download_url: `${origin}/assets/SHA256SUMS-server.txt` },
         ] }]));
