@@ -1,7 +1,8 @@
 export { discoverRepositories } from "./repositoryDiscovery.ts";
 // Project-scoped filesystem. Every path is relative to a project root;
 // escapes (`..`, absolute, symlink-out) are rejected.
-import { mkdir, open, readFile, readdir, lstat, realpath, rename as move, rm, writeFile } from "node:fs/promises";
+import { copyFile, link, mkdir, open, readFile, readdir, lstat, realpath, rename as move, rm, stat as statPath, writeFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
 import { spawn } from "node:child_process";
 import { scrubInheritedEnv } from "@polyth/git";
 import path from "node:path";
@@ -16,8 +17,29 @@ const MAX_EDIT = 8 * 1024 * 1024;
 const BINARY_SCAN = 8 * 1024;
 const MAX_RAW = 20 * 1024 * 1024;
 
-/** Shared binary cap: raw serving, uploads, and message attachments. */
+/** Most bytes read into memory at once: raw serving, single-request uploads
+ *  and attachment content sent inside a message. Bigger files still upload
+ *  (in pieces) and still attach; the agent gets them by path. */
 export const MAX_RAW_BYTES = MAX_RAW;
+
+/** One piece of an upload sent in several requests (`writeBytesPart`). */
+export interface UploadPart {
+  /** Bytes already sent before this piece; 0 starts the upload over. */
+  offset: number;
+  /** Size of the whole file. */
+  total: number;
+  data: Uint8Array;
+}
+
+/** Where pieces gather until the last one arrives: a hidden sibling, so the
+ *  file appears at its own name only when it is whole. */
+export const uploadStagingPath = (rel: string): string => {
+  const slash = rel.lastIndexOf("/");
+  return `${rel.slice(0, slash + 1)}.${rel.slice(slash + 1)}.polyth-upload`;
+};
+
+const uploadConflict = (rel: string, size: number): Error =>
+  Object.assign(new Error(`upload of ${rel} is out of step (server has ${size} bytes)`), { code: "conflict", size });
 /** Preview cap: how much text a browse/hover/inline read serves by default.
  *  Shared with the remote implementation (see remote.ts). This is a transfer
  *  cost decision, not a data boundary — a caller that is going to EDIT asks
@@ -160,6 +182,26 @@ export interface FileService {
   readRaw(root: string, rel: string): Promise<FileRawResult>;
   write(root: string, rel: string, content: string, opts?: WriteOptions): Promise<{ revision: string }>;
   writeBytes(root: string, rel: string, data: Uint8Array): Promise<void>;
+  /** Store one piece of a file sent in several requests. Pieces gather in
+   *  `uploadStagingPath(rel)`; `offset` must equal what is already there (0
+   *  starts over), and the piece that completes `total` moves the file into
+   *  place. Sending a stored piece again (its reply was lost) is accepted. A
+   *  piece out of step fails with code `conflict`. */
+  writeBytesPart(root: string, rel: string, part: UploadPart): Promise<{ size: number; done: boolean }>;
+  /** Copy `fromRel` under `fromRoot` to `toRel` under `toRoot` on the same
+   *  machine, with no size cap and without reading it into memory. */
+  copy(fromRoot: string, fromRel: string, toRoot: string, toRel: string): Promise<void>;
+  /** Put a file that already sits on the server's own disk at `rel` without
+   *  sending its bytes: a copy-on-write clone, else a hard link, else a plain
+   *  disk copy. `source` is absolute; it must be a regular file outside the
+   *  server's sealed data and still match `expect`. `rel` must not exist yet.
+   *  Absent where the project's files are on another computer. */
+  placeLocalFile?(
+    root: string,
+    rel: string,
+    source: string,
+    expect: { size: number; mtimeMs?: number },
+  ): Promise<{ size: number }>;
   mkdir(root: string, rel: string): Promise<void>;
   remove(root: string, rel: string): Promise<void>;
   rename(root: string, from: string, to: string): Promise<void>;
@@ -451,6 +493,109 @@ export function createFileService(options: FileServiceOptions = {}): FileService
       await mkdir(path.dirname(abs), { recursive: true });
       await writeFile(abs, data);
       await reach(root, rel);
+    },
+
+    async writeBytesPart(root, rel, { offset, total, data }) {
+      assertBetaWritable();
+      const abs = await reach(root, rel, { forWrite: true });
+      const staging = await reach(root, uploadStagingPath(rel), { forWrite: true });
+      await mkdir(path.dirname(abs), { recursive: true });
+      const end = offset + data.length;
+      const sizeOf = async (file: string): Promise<number | undefined> => {
+        try {
+          const st = await lstat(file);
+          return st.isFile() ? st.size : -1;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+          throw error;
+        }
+      };
+      /** Whether `file` already holds exactly `data` at `offset`. */
+      const holds = async (file: string): Promise<boolean> => {
+        const handle = await open(file, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+        try {
+          const seen = Buffer.alloc(data.length);
+          const { bytesRead } = await handle.read(seen, 0, data.length, offset);
+          return bytesRead === data.length && seen.equals(data);
+        } finally {
+          await handle.close();
+        }
+      };
+      const staged = await sizeOf(staging);
+      if (staged === -1) throw uploadConflict(rel, 0);
+      if (offset > 0 && staged === undefined) {
+        // The last piece's reply was lost after it moved the file into place.
+        if (end === total && await sizeOf(abs) === total && await holds(abs)) return { size: total, done: true };
+        throw uploadConflict(rel, 0);
+      }
+      let size = staged ?? 0;
+      if (offset === 0 || size === offset) {
+        // O_NOFOLLOW: a link planted at the staging name must not redirect
+        // the write out of the project.
+        const flags = fsConstants.O_WRONLY | fsConstants.O_NOFOLLOW | fsConstants.O_CREAT
+          | (offset === 0 ? fsConstants.O_TRUNC : fsConstants.O_APPEND);
+        const handle = await open(staging, flags, 0o666);
+        try {
+          await handle.writeFile(data);
+        } finally {
+          await handle.close();
+        }
+        size = end;
+      } else if (!(size === end && await holds(staging))) {
+        throw uploadConflict(rel, size);
+      }
+      if (size !== total) return { size, done: false };
+      await move(staging, abs);
+      await reach(root, rel);
+      return { size, done: true };
+    },
+
+    async copy(fromRoot, fromRel, toRoot, toRel) {
+      assertBetaWritable();
+      const from = await reach(fromRoot, fromRel);
+      const to = await reach(toRoot, toRel, { forWrite: true });
+      await mkdir(path.dirname(to), { recursive: true });
+      // A copy-on-write clone where the disk supports it, a plain copy elsewhere.
+      await copyFile(from, to, fsConstants.COPYFILE_FICLONE);
+      await reach(toRoot, toRel);
+    },
+
+    async placeLocalFile(root, rel, source, expect) {
+      assertBetaWritable();
+      if (typeof source !== "string" || !path.isAbsolute(source) || source.includes("\0")) {
+        throw Object.assign(new Error("source must be an absolute path"), { code: "invalid-input" });
+      }
+      const missing = () => Object.assign(new Error("source file not found"), { code: "not-found" });
+      const real = await realpath(source).catch(() => { throw missing(); });
+      // The server's own data (everyone's private chats) never leaves through here.
+      const sealed = await Promise.all((options.sealedRoots?.() ?? [])
+        .map((folder) => realpath(folder).catch(() => path.resolve(folder))));
+      if (sealed.some((folder) => within(folder, real))) throw missing();
+      const st = await statPath(real);
+      if (!st.isFile()) throw Object.assign(new Error("source is not a file"), { code: "invalid-input" });
+      if (st.size !== expect.size || (expect.mtimeMs !== undefined && Math.abs(st.mtimeMs - expect.mtimeMs) > 2000)) {
+        throw Object.assign(new Error("source file does not match"), { code: "conflict" });
+      }
+      const abs = await reach(root, rel, { forWrite: true });
+      await mkdir(path.dirname(abs), { recursive: true });
+      try {
+        await copyFile(real, abs, fsConstants.COPYFILE_EXCL | fsConstants.COPYFILE_FICLONE_FORCE);
+      } catch (cloneError) {
+        if ((cloneError as NodeJS.ErrnoException).code === "EEXIST") {
+          throw Object.assign(new Error(`${rel} already exists`), { code: "conflict" });
+        }
+        // COPYFILE_EXCL proved the name was free, so whatever a failed clone
+        // left there is ours to clear.
+        await rm(abs, { force: true });
+        try {
+          await link(real, abs);
+        } catch {
+          await rm(abs, { force: true });
+          await copyFile(real, abs, fsConstants.COPYFILE_EXCL);
+        }
+      }
+      await reach(root, rel);
+      return { size: (await lstat(abs)).size };
     },
 
     async mkdir(root, rel) {

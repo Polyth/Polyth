@@ -542,6 +542,37 @@ A message carries at most 50 attachments (`MAX_TURN_ATTACHMENTS`, the
 composer's `MAX_PENDING_ATTACHMENTS`); the composer uploads at most four at
 once and refuses past the limit before the bytes leave the device.
 
+An attachment has no size limit. Polyth reads content into a message only up
+to 20 MiB (`MAX_RAW_BYTES`, the seam's `attachments.maxBytes`, passed to the
+planner as `inlineMaxBytes`): a bigger file that would otherwise go `native`,
+`harness-emulated` or `text-projection` becomes a `file-reference` with
+`tooLarge` (a line range names its lines in the reason), and is refused only
+where the agent cannot reach uploads. Staged `_inbox/*` files reach a linked
+worktree or remote host with `FileService.copy`, disk to disk (a
+copy-on-write clone where the disk allows).
+
+How the bytes get there (`api.filesUpload`, `packages/session/src/webApi.ts`):
+up to 8 MiB (`UPLOAD_PART_BYTES`) in one `POST /api/files/upload`; a bigger
+file in 8 MiB pieces read one at a time from the `Blob` through
+`POST /api/files/upload-part` (`{offset, total, base64}`), each a bounded JSON
+body, so paired devices may use it (`files.write`). Pieces gather in the
+hidden sibling `uploadStagingPath(rel)` (`.<name>.polyth-upload`, opened with
+`O_NOFOLLOW`) and the piece that completes `total` moves the file into place;
+a repeated piece (lost reply) is accepted, an out-of-step one is `conflict`,
+and the client retries a piece only after a network error, 408, 429 or 5xx.
+
+The desktop app showing its own server attaches a file over 8 MiB where it
+sits. The preload's `pathForFile` (`webUtils.getPathForFile`, `""` on any other
+server's window) gives the path, and `POST /api/files/upload-local`
+(`FileService.placeLocalFile`) puts it in `_inbox/` as a copy-on-write clone,
+else a hard link (the agent then edits the person's original), else a disk
+copy. It is allowed only for the instance owner, only over direct loopback
+(not Link, not a trusted proxy), only into `_inbox/`, only from a regular file
+outside the server's sealed data that still has the declared size and
+modification time; it has no paired-device rule. Any refusal falls back to the
+pieces. Not covered yet: the native mobile picker still stops at 8 MB (its
+bridge reads a whole file), and the composer shows no upload progress.
+
 PDFs work on every harness. When the harness or the model cannot take one
 natively (including a harness that declares `pdf: "unsupported"`), the PDF
 reads as `emulated` and Polyth projects its text layer
@@ -1517,7 +1548,8 @@ local client; closing it closes the remote CLI's stdin, which ends the stdio
 harness. Pi runs plain `pi --mode rpc` there (its local tool-bridge worker is
 not projected). Its project images, staged `_inbox/*` uploads included, are on
 the host, so the adapter reads them there with `readRemoteFileBytes` (raw
-stdout bytes over the same connection, capped at the 20 MiB upload limit) and
+stdout bytes over the same connection, capped at the 20 MiB inline limit;
+a bigger image goes by path) and
 sends them as RPC image blocks; browser captures stay Polyth artifacts on this
 machine and are read locally. Command Code uploads its content-addressed worker and bridge
 Mod (0600) under `~/.local/share/polyth/runtimes/commandcode/` on the host and

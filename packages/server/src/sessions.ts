@@ -982,8 +982,9 @@ export function createSessionService(deps: {
    *  project file against the session's execution root; `materialize`
    *  guarantees a staged `_inbox/*` upload exists at the execution root,
    *  copying from the project root when the session runs in a linked worktree
-   *  or on a remote host. Both must reject paths escaping the root; `maxBytes`
-   *  reuses the upload cap. */
+   *  or on a remote host. Both must reject paths escaping the root.
+   *  `maxBytes` is the most Polyth reads to send inside a message; a bigger
+   *  attachment is still accepted and is handed to the agent by path. */
   attachments?: {
     maxBytes: number;
     stat(root: string, rel: string, projectId?: string): Promise<{ kind: "file" | "dir"; size: number }>;
@@ -4379,6 +4380,10 @@ export function createSessionService(deps: {
     };
   };
 
+  /** Largest attachment whose content goes inside a message; a bigger one
+   *  reaches the agent by path. Attachments themselves have no size limit. */
+  const attachmentInlineMaxBytes = (): number => deps.attachments?.maxBytes ?? 20 * 1024 * 1024;
+
   /**
    * The delivery inputs for a turn, resolved without waking a runtime. Static
    * harness capabilities plus the project's remote/materialize policy — the
@@ -4435,6 +4440,7 @@ export function createSessionService(deps: {
         supportDeclared,
         projected,
         referenceable: !inputs.remote || inputs.materializeAvailable,
+        inlineMaxBytes: attachmentInlineMaxBytes(),
       });
       if (plan.kind === "unsupported") {
         throw Object.assign(new Error(plan.reason), { code: plan.code });
@@ -7909,10 +7915,9 @@ export function createSessionService(deps: {
   const prepareAttachments = async (
     proj: SessionProjection, raw: unknown, sessionId: string,
   ): Promise<AttachmentRef[] | undefined> => {
-    const maxBytes = deps.attachments?.maxBytes ?? 20 * 1024 * 1024;
     return prepareShapedAttachments(
       proj,
-      sanitizeAttachments(raw, { maxBytes, projectId: proj.projectId, sessionId }),
+      sanitizeAttachments(raw, { projectId: proj.projectId, sessionId }),
       sessionId,
     );
   };
@@ -8008,9 +8013,7 @@ export function createSessionService(deps: {
       if (stat.kind !== "file") {
         throw Object.assign(new Error(`attachment could not be prepared: ${ref.name}`), { code: "invalid-input" });
       }
-      if (stat.size > deps.attachments.maxBytes) {
-        throw Object.assign(new Error(`attachment is too large: ${ref.name}`), { code: "invalid-input" });
-      }
+      // No size limit: a file too big to send inside a message goes by path.
       ref.size = stat.size; // trust disk, not the client
     }
     return refs;
@@ -8526,7 +8529,6 @@ export function createSessionService(deps: {
         );
       }
       const shaped = sanitizeAttachments(merged, {
-        maxBytes: deps.attachments?.maxBytes ?? 20 * 1024 * 1024,
         projectId: proj.projectId,
         sessionId,
       });
@@ -8573,7 +8575,9 @@ export function createSessionService(deps: {
           continue;
         }
         const referenceable = !project?.remote || Boolean(deps.attachments?.materialize);
-        const plan = planAttachmentDelivery({ ref, support, harnessName, supportDeclared, projected, referenceable });
+        const plan = planAttachmentDelivery({
+          ref, support, harnessName, supportDeclared, projected, referenceable, inlineMaxBytes: attachmentInlineMaxBytes(),
+        });
         if (plan.kind === "unsupported") {
           throw Object.assign(new Error(plan.reason), { code: plan.code });
         }
@@ -8583,7 +8587,10 @@ export function createSessionService(deps: {
           path: ref.path!, ...(ref.mime ? { mime: ref.mime } : {}), size: ref.size, reason,
         });
         if (plan.kind === "file-reference") {
-          sections.push(reference(`${harnessName} cannot take this kind of file as message content`));
+          sections.push(reference(plan.tooLarge
+            ? "it is too large to send inside a message"
+              + (ref.kind === "range" && ref.range ? `; the part meant is lines ${ref.range[0]}–${ref.range[1]}` : "")
+            : `${harnessName} cannot take this kind of file as message content`));
           continue;
         }
         if (plan.kind !== "text-projection") { forwarded.push(ref); continue; }
@@ -13038,7 +13045,6 @@ export function createSessionService(deps: {
       for (const { step, payload } of steps) await step.validate?.(payload, stepContext);
       if (firstTurn?.attachments?.length) {
         sanitizeAttachments(firstTurn.attachments, {
-          maxBytes: deps.attachments?.maxBytes ?? 20 * 1024 * 1024,
           projectId: input.projectId,
           sessionId,
         });
@@ -13363,7 +13369,6 @@ export function createSessionService(deps: {
         // refused here, before any `_inbox/*` bytes are copied into the
         // execution root and before the turn can be queued.
         const shaped = sanitizeAttachments(input.attachments, {
-          maxBytes: deps.attachments?.maxBytes ?? 20 * 1024 * 1024,
           projectId: proj.projectId,
           sessionId,
         });

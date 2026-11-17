@@ -69,7 +69,7 @@ function isSafeRelPath(rel: unknown): rel is string {
  */
 export function sanitizeAttachments(
   input: unknown,
-  opts: { maxBytes: number; projectId: string; sessionId?: string },
+  opts: { projectId: string; sessionId?: string },
 ): AttachmentRef[] {
   if (input === undefined || input === null) return [];
   if (!Array.isArray(input)) throw invalid("attachments must be an array");
@@ -88,7 +88,7 @@ export function sanitizeAttachments(
     if (!mime) throw invalid(`attachment mime invalid: ${name}`);
     const size = Number(a.size);
     if (!Number.isSafeInteger(size) || size < 0) throw invalid(`attachment size invalid: ${name}`);
-    if (size > opts.maxBytes) throw invalid(`attachment too large (max ${opts.maxBytes} bytes): ${name}`);
+    // No size limit: content too big for a message reaches the agent by path.
     const kind = a.kind === undefined ? "file" : a.kind;
     if (kind !== "file" && kind !== "image" && kind !== "range" && kind !== "url" && kind !== "browser-context") {
       throw invalid(`attachment kind invalid: ${name}`);

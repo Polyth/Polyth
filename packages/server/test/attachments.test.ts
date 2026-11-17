@@ -15,7 +15,7 @@ import type { PermissionService } from "@polyth/permissions";
 import { createSessionService, type Broadcaster } from "../src/sessions.ts";
 import { attachmentDeliveryKey, mergeAttachmentInputs, sanitizeAttachments } from "../src/attachments.ts";
 
-const OPTS = { maxBytes: 1024 * 1024, projectId: "p1" };
+const OPTS = { projectId: "p1" };
 
 test("sanitizeAttachments: valid refs pass and the file url is recomputed", () => {
   const out = sanitizeAttachments([
@@ -133,7 +133,6 @@ test("sanitizeAttachments: typed rejections", () => {
   bad([{ id: "x", name: "a", mime: "text/plain", size: 1, path: "/etc/passwd" }], /path invalid/);
   bad([{ id: "x", name: "a", mime: "text/plain", size: 1, kind: "url", url: "ftp://files.example/x" }], /http/);
   bad([{ id: "x", name: "a", mime: "text/plain", size: 1, kind: "url", url: "javascript:alert(1)" }], /http/);
-  bad([{ id: "x", name: "a", mime: "text/plain", size: OPTS.maxBytes + 1, path: "big.bin" }], /too large/);
   bad([{ id: "x", name: "a", mime: "not a mime", size: 1, path: "f.txt" }], /mime/);
   bad([{ id: "x", name: "a", mime: "text/plain", size: 1, kind: "blob", path: "f.txt" }], /kind/);
   bad([{ id: "x", name: "a", mime: "text/plain", size: 1, kind: "range", path: "f.txt", range: [0, 4] }], /range/);
@@ -438,7 +437,8 @@ test("remote/SSH linked worktree routes inbox materialization and text projectio
   await flush();
 
   assert.equal(fake.started.length, 1);
-  assert.ok(calls.includes("readRaw") && calls.includes("writeBytes"), "copy went through the remote FileService");
+  assert.ok(calls.includes("copy"), "the copy went through the remote FileService");
+  assert.ok(calls.includes("readRaw"), "the text projection read went through the remote FileService");
   assert.ok(projectIds.length > 0 && projectIds.every((projectId) => projectId === "p1"), "the local store was never selected");
   assert.match(fake.started[0]!.text, /remote staged bytes/);
   assert.deepEqual(fake.started[0]!.attachments ?? [], []);

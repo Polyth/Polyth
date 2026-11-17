@@ -77,6 +77,29 @@ test("an upload the engine cannot take becomes a file reference where the agent 
   }
 });
 
+test("a file bigger than Polyth sends inside a message goes by path, whatever its kind", () => {
+  const cap = 20 * 1024 * 1024;
+  const support = { image: "native", pdf: "native", file: "emulated" } as const;
+  for (const [kind, mime, modality] of [
+    ["image", "image/png", "image"],
+    ["file", "application/pdf", "pdf"],
+    ["file", "text/plain", "file"],
+    ["range", "text/plain", "file"],
+  ] as const) {
+    const big = ref({ kind, mime, path: "_inbox/big", size: cap + 1, ...(kind === "range" ? { range: [1, 2] } : {}) });
+    const input = { ref: big, support, harnessName: "Claude Code", inlineMaxBytes: cap };
+    assert.deepEqual(planAttachmentDelivery({ ...input, referenceable: true }), { kind: "file-reference", modality, tooLarge: true });
+    const refused = planAttachmentDelivery({ ...input, referenceable: false });
+    assert.equal(refused.kind === "unsupported" && refused.code, "invalid-attachment");
+    assert.match(refused.kind === "unsupported" ? refused.reason : "", /larger than 20 MB/);
+    // At the cap, content is still sent.
+    assert.notEqual(planAttachmentDelivery({ ...input, ref: { ...big, size: cap }, referenceable: true }).kind, "file-reference");
+  }
+  // A link has no file behind it: its size says nothing.
+  const link = ref({ kind: "url", mime: "text/uri-list", url: "https://example.com/", size: cap + 1 });
+  assert.equal(planAttachmentDelivery({ ref: link, support: { url: "native" }, harnessName: "Pi", inlineMaxBytes: cap }).kind, "native");
+});
+
 test("a link or an unreachable remote file is still refused, never referenced", () => {
   const link = planAttachmentDelivery({
     ref: ref({ kind: "url", mime: "text/uri-list", url: "https://example.com/" }),

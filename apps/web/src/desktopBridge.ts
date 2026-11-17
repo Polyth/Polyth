@@ -206,6 +206,9 @@ export interface PolythDesktopApi {
   syncCaptionControls?(band: number): Promise<DesktopCaptionGeometry | null>;
   revealPath(path: string): Promise<void>;
   openPath(path: string): Promise<void>;
+  /** Where a dropped or picked file sits on this computer; "" for one made in
+   *  the page (a paste) and on another server's window. Absent from older shells. */
+  pathForFile?(file: File): string;
   openDataFolder(): Promise<void>;
   quit(): Promise<void>;
   /** Absent from shells older than the main-window update notice. */

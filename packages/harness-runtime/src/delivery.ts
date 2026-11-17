@@ -24,7 +24,13 @@ export type AttachmentDeliveryPlan =
    *  agent's workspace: Polyth names its path in the prompt so the agent can
    *  open it with its own tools, or tell the person it cannot. The ref must
    *  NOT be forwarded to the adapter. */
-  | { kind: "file-reference"; modality: AttachmentModality }
+  | {
+      kind: "file-reference";
+      modality: AttachmentModality;
+      /** The engine could take this kind of content, but the file is bigger
+       *  than Polyth sends inside a message. */
+      tooLarge?: true;
+    }
   | { kind: "unsupported"; modality?: AttachmentModality; code: TurnRejectionCode; reason: string };
 
 const MODALITY_NOUN: Record<AttachmentModality, string> = {
@@ -59,6 +65,10 @@ export interface AttachmentDeliveryInput {
    *  or a remote one Polyth materializes into). Then a modality the engine
    *  cannot take is handed over as a path instead of being refused. */
   referenceable?: boolean;
+  /** Largest file whose content Polyth reads and sends inside a message.
+   *  A bigger file is handed over by path (when `referenceable`); there is
+   *  no limit on the size of an attachment itself. */
+  inlineMaxBytes?: number;
 }
 
 /** Whether a ref names an uploaded or project file the agent could open. */
@@ -66,6 +76,22 @@ const isFileRef = (ref: AttachmentRef): boolean =>
   Boolean(ref.path) && ref.kind !== "url" && ref.kind !== "browser-context";
 
 export function planAttachmentDelivery(input: AttachmentDeliveryInput): AttachmentDeliveryPlan {
+  const plan = planByModality(input);
+  const { ref, inlineMaxBytes } = input;
+  if (inlineMaxBytes === undefined || !isFileRef(ref) || !(ref.size > inlineMaxBytes)) return plan;
+  if (plan.kind !== "native" && plan.kind !== "harness-emulated" && plan.kind !== "text-projection") return plan;
+  const modality = attachmentModality(ref) ?? "file";
+  if (input.referenceable) return { kind: "file-reference", modality, tooLarge: true };
+  return {
+    kind: "unsupported",
+    modality,
+    code: "invalid-attachment",
+    reason: `${ref.name} is larger than ${formatBytes(inlineMaxBytes)}, the most Polyth sends inside a message, `
+      + "and the agent here cannot open uploaded files.",
+  };
+}
+
+function planByModality(input: AttachmentDeliveryInput): AttachmentDeliveryPlan {
   const { ref, support, harnessName } = input;
   if (ref.kind === "browser-context") {
     const shot = ref.browserContext?.crop ?? ref.browserContext?.screenshot;

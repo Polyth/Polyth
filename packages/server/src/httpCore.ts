@@ -339,9 +339,9 @@ const sendShellWithStatus = async (
   res.end(body);
 };
 
-// Buffered-body ceiling: headroom over the 20MB MAX_RAW_BYTES attachment cap
-// (@polyth/files) so a maximal upload survives its JSON envelope while a
-// runaway client can no longer grow the heap without bound.
+// Buffered-body ceiling for one request, so a runaway client cannot grow the
+// heap without bound. It does not limit file size: a file upload bigger than
+// one 8 MiB piece goes through /api/files/upload-part, piece by piece.
 export const MAX_BODY_BYTES = 25 * 1024 * 1024;
 
 export function contentLengthOf(req: IncomingMessage): number | undefined {

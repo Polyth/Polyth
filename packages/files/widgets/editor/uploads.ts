@@ -61,7 +61,7 @@ export async function uploadIntoFolder(request: UploadRequest, files: FilesApi =
     } else {
       const path = joinPath(request.dir, file.name);
       try {
-        await files.filesUpload(request.projectId, path, new Uint8Array(await file.arrayBuffer()), sessionId, request.repositoryId);
+        await files.filesUpload(request.projectId, path, file, sessionId, request.repositoryId);
         outcome.uploaded.push(path);
       } catch (error) {
         outcome.failed.push({ name: file.name, reason: error instanceof Error ? error.message : String(error) });

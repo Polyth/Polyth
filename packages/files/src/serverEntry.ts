@@ -65,6 +65,19 @@ export async function ignoreExistingInboxes(
   }
 }
 
+/** Pieces of one upload are stored one after another: a retry that overlaps
+ *  the piece it repeats must not append twice. */
+const uploadsInFlight = new Map<string, Promise<unknown>>();
+const oneUploadAtATime = <T>(key: string, run: () => Promise<T>): Promise<T> => {
+  const next = (uploadsInFlight.get(key) ?? Promise.resolve()).then(run, run);
+  const settled = next.then(() => undefined, () => undefined);
+  uploadsInFlight.set(key, settled);
+  void settled.then(() => {
+    if (uploadsInFlight.get(key) === settled) uploadsInFlight.delete(key);
+  });
+  return next;
+};
+
 /** Attachment preparation seam consumed by the session service.
  *  Published so the composition root never imports this package. */
 export interface AttachmentSourceService {
@@ -220,13 +233,14 @@ export function createAttachmentSourceService(
         }
         return { kind: "file", size: st.size };
       }
-      // Linked worktree or remote host: copy the staged bytes into the
+      // Linked worktree or remote host: copy the staged file into the
       // execution root so downstream worktree-relative resolution just works.
-      // `readRaw` enforces MAX_RAW_BYTES.
-      const raw = await fs.readRaw(projectRoot, rel);
-      const dir = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
-      if (dir) await fs.mkdir(execRoot, dir);
-      await fs.writeBytes(execRoot, rel, raw.data);
+      // Disk to disk, any size: nothing passes through memory.
+      const source = await fs.stat(projectRoot, rel);
+      if (source.kind !== "file") {
+        throw Object.assign(new Error("staged attachment is not a file"), { code: "invalid-input" });
+      }
+      await fs.copy(projectRoot, rel, execRoot, rel);
       const st = await fs.stat(execRoot, rel);
       return { kind: "file", size: st.size };
     },
@@ -379,7 +393,8 @@ export function workspaceRoutes(deps: {
     return repositoryId === primaryId ? project.path : selectedRoot;
   };
 
-  return async ({ path, method, url, body, json, req, res }) => {
+  return async (request) => {
+    const { path, method, url, body, json, req, res } = request;
     if (!path.startsWith("/api/files")) return false;
     const query = (key: string) => url.searchParams.get(key);
     // A private chat's attachments live here too: they open by name from their
@@ -568,6 +583,54 @@ export function workspaceRoutes(deps: {
       json(200, { ok: true });
       return true;
     }
+    if (path === "/api/files/upload-part" && method === "POST") {
+      // A file of any size, in pieces: each request stays a bounded JSON body
+      // (a paired phone's body is parsed before any route runs).
+      const input = await body();
+      const offset = Number(input.offset);
+      const total = Number(input.total);
+      if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(total) || offset < 0 || offset > total) {
+        throw Object.assign(new Error("upload offset and total must be whole byte counts"), { code: "invalid-input" });
+      }
+      const data = Buffer.from(String(input.base64 ?? ""), "base64");
+      if (offset + data.length > total || (data.length === 0 && offset !== total)) {
+        throw Object.assign(new Error("upload piece does not fit the declared size"), { code: "invalid-input" });
+      }
+      const fs = await filesFor(String(input.projectId ?? ""));
+      const root = await rootForBody(input);
+      const rel = String(input.path ?? "");
+      json(200, { ok: true, ...await oneUploadAtATime(`${root}\0${rel}`, () => fs.writeBytesPart(root, rel, { offset, total, data })) });
+      return true;
+    }
+    if (path === "/api/files/upload-local" && method === "POST") {
+      // The desktop app on the server's own computer attaches a file by its
+      // path: nothing is sent. Only the server owner, only straight from this
+      // computer (not through Link or a proxy), and only into `_inbox/`.
+      const ingress = request.ingress;
+      if (ingress.kind !== "public-http" || !ingress.loopback || ingress.proxied || !hasInstanceOwnerAuthority(request)) {
+        throw Object.assign(new Error("only the server owner on this computer can attach a file by its path"), { code: "forbidden" });
+      }
+      const input = await body();
+      const rel = String(input.path ?? "");
+      if (!rel.startsWith(INBOX_PREFIX)) {
+        throw Object.assign(new Error("a file is attached by path only into _inbox/"), { code: "invalid-input" });
+      }
+      const size = Number(input.size);
+      const mtimeMs = input.lastModified === undefined ? undefined : Number(input.lastModified);
+      if (!Number.isSafeInteger(size) || size < 0 || (mtimeMs !== undefined && !Number.isFinite(mtimeMs))) {
+        throw Object.assign(new Error("size and lastModified must be numbers"), { code: "invalid-input" });
+      }
+      const fs = await filesFor(String(input.projectId ?? ""));
+      if (!fs.placeLocalFile) {
+        throw Object.assign(new Error("this project's files are on another computer"), { code: "unsupported" });
+      }
+      const placed = await fs.placeLocalFile(await rootForBody(input), rel, String(input.source ?? ""), {
+        size,
+        ...(mtimeMs !== undefined ? { mtimeMs } : {}),
+      });
+      json(200, { ok: true, size: placed.size });
+      return true;
+    }
     if (path === "/api/files/mkdir" && method === "POST") {
       const input = await body();
       const fs = await filesFor(String(input.projectId ?? ""));
@@ -643,6 +706,9 @@ export const FILES_REMOTE_ACCESS: RemoteAccessPolicy = {
     { methods: ["GET"], path: SESSION_EDITS_PATH, capability: REMOTE_CAPABILITY.coreSessionsRead, mutation: false },
     { methods: ["POST"], path: "/api/files/write", capability: REMOTE_CAPABILITY.filesWrite, mutation: true },
     { methods: ["POST"], path: "/api/files/upload", capability: REMOTE_CAPABILITY.filesWrite, mutation: true },
+    // No rule for /api/files/upload-local: a paired device never names a
+    // path on the server's disk.
+    { methods: ["POST"], path: "/api/files/upload-part", capability: REMOTE_CAPABILITY.filesWrite, mutation: true },
     { methods: ["POST"], path: "/api/files/mkdir", capability: REMOTE_CAPABILITY.filesWrite, mutation: true },
     { methods: ["POST"], path: "/api/files/delete", capability: REMOTE_CAPABILITY.filesWrite, mutation: true },
     { methods: ["POST"], path: "/api/files/rename", capability: REMOTE_CAPABILITY.filesWrite, mutation: true },
