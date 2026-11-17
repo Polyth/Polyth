@@ -39,7 +39,7 @@ on:
         type: choice
         required: true
         default: all
-        options: [all, android-apk, ios-app, mac-dmg, mac-dmg-legacy, mac-dmg-workstation, windows-exe, windows-exe-workstation, linux-appimage, linux-appimage-workstation, npm-packages]
+        options: [all, android-apk, ios-app, mac-dmg, mac-dmg-legacy, mac-dmg-workstation, windows-exe, windows-exe-workstation, linux-appimage, linux-appimage-workstation, npm-packages, server]
 
 permissions:
   contents: read
