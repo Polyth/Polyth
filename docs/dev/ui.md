@@ -3218,6 +3218,15 @@ would change no file — nothing changed, not a repository, a remote project,
 no snapshot — stays the instant, dialog-free action. Groups are told apart by
 a fill, not a border, and red counts use `--red-on-wash`.
 
+**Regenerate with files:** Regenerate on an answer is a rewind to its source
+prompt plus a resend, and it always discards the files the replaced answer
+changed (`files: "restore"`). When the same preview lists any file, it first
+asks in `RewindFilesDialog` with `purpose="regenerate"`: "Regenerate and lose
+file changes?", the list headed "Changes will be lost · N", and two buttons —
+Cancel (initial focus) and a danger "Regenerate". There is no "conversation
+only" choice. A running turn is stopped first, as above. Nothing to change
+on disk keeps Regenerate instant and dialog-free (`ChatResponseFooter.tsx`).
+
 **Rewind cut and replacement:** an active Revert & edit is represented by one
 quiet cut marker at the end of the retained prefix. It does not count or narrate
 the hidden branch; when the rollback restored or left files it carries one

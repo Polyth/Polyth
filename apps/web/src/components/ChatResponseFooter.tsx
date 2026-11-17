@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AttachmentRef } from "@polyth/contracts";
+import type { AttachmentRef, RewindFilesPreview } from "@polyth/contracts";
 import { resolveModelPresentation } from "@polyth/contracts/model-presentation";
 import { api } from "@polyth/session/web-api";
 import { fmtCost, fmtTokens } from "../format.ts";
@@ -27,6 +27,7 @@ import { MESSAGE_ACTION_ICONS, messageActionName } from "./messageActionCatalog.
 import { startSessionFromText } from "./chatActionHandoffs.ts";
 import { useMessagePin } from "./messagePin.ts";
 import { Popover } from "./ui/index.ts";
+import RewindFilesDialog, { type RewindFilesPhase } from "./RewindFilesDialog.tsx";
 
 function downloadAnswerImage(text: string, title: string): boolean {
   const canvas = document.createElement("canvas");
@@ -142,44 +143,117 @@ export default function ChatResponseFooter({
 
   const actionAnchor = { role: "assistant" as const, eventSeq: m.eventSeq };
   const responseActionsId = `chat-response-actions-${m.eventSeq}`;
-  const regenerate = (anchor: HTMLElement | null) => {
-    if (!session || !regeneratePrompt || regenerateBusy) return;
-    setRegenerateBusy(true);
-    // Regeneration is a real history replacement, not a hidden
-    // follow-up. Rewind to the source prompt first; the replacement
-    // send then branches the runtime from that exact prefix. The
-    // answer starts leaving now; the prompt itself never moves: its
-    // in-flight echo takes over the same pixels until the canonical
-    // prompt lands (rewindMotion.ts).
-    const sessionId = session;
-    beginRegenerateMotion(sessionId, regeneratePrompt.eventSeq, anchor?.closest<HTMLElement>(".timeline") ?? null);
+  type RegenerateSource = NonNullable<typeof regeneratePrompt>;
+  // Regeneration is a real history replacement, not a hidden follow-up.
+  // Rewind to the source prompt first; the replacement send then branches
+  // the runtime from that exact prefix. The answer starts leaving now; the
+  // prompt itself never moves: its in-flight echo takes over the same
+  // pixels until the canonical prompt lands (rewindMotion.ts). Rejects only
+  // when the rewind itself was refused (nothing changed); a refused send
+  // leaves the rewind marker to restore.
+  const replaceAnswer = (
+    sessionId: string,
+    source: RegenerateSource,
+    timeline: HTMLElement | null,
+    files?: "restore",
+    motion = true,
+  ): Promise<void> => {
+    if (motion) beginRegenerateMotion(sessionId, source.eventSeq, timeline);
     let echo: string | null = null;
-    void api.rewind(sessionId, regeneratePrompt.eventSeq)
+    return api.rewind(sessionId, source.eventSeq, files ? { files } : undefined)
+      .catch((error: unknown) => {
+        if (motion) cancelRewindMotion(sessionId, source.eventSeq);
+        throw error;
+      })
       .then((marker) => {
         // The durable marker and its replacement echo publish in one
-        // store snapshot: no frame can contain both old rows or
-        // neither the cut nor the prompt.
+        // store snapshot: no frame can contain both old rows or neither
+        // the cut nor the prompt.
         echo = applyEventWithPendingSend(marker, {
           sessionId,
-          text: regeneratePrompt.text,
-          attachments: regeneratePrompt.attachments ?? [],
+          text: source.text,
+          attachments: source.attachments ?? [],
         });
-        return sendMessage(regeneratePrompt.text, undefined, undefined, {
+        return sendMessage(source.text, undefined, undefined, {
           targetSessionId: sessionId,
-          ...(regeneratePrompt.attachments?.length ? { attachments: regeneratePrompt.attachments } : {}),
+          ...(source.attachments?.length ? { attachments: source.attachments } : {}),
+        }).then((ok) => {
+          if (!ok) { if (echo) endPendingSend(echo); return; }
+          showConfirmation("regenerate");
+        }, (error: unknown) => {
+          if (motion) cancelRewindMotion(sessionId, source.eventSeq);
+          if (echo) endPendingSend(echo);
+          setUiError(error instanceof Error ? error.message : String(error));
         });
-      })
-      .then((ok) => {
-        // A refused replacement leaves the rewind marker to restore.
-        if (!ok) { if (echo) endPendingSend(echo); return; }
-        showConfirmation("regenerate");
-      })
-      .catch((error) => {
-        cancelRewindMotion(sessionId, regeneratePrompt.eventSeq);
-        if (echo) endPendingSend(echo);
-        setUiError(error instanceof Error ? error.message : String(error));
-      })
-      .finally(() => setRegenerateBusy(false));
+      });
+  };
+  // Regenerating discards the files the replaced answer changed. When any
+  // file would change, ask first and list them (RewindFilesDialog's
+  // regenerate purpose); otherwise it stays the instant action it was.
+  const [filesConfirm, setFilesConfirm] = useState<{
+    sessionId: string;
+    source: RegenerateSource;
+    preview: RewindFilesPreview;
+    phase: RewindFilesPhase;
+    error: string | null;
+  } | null>(null);
+  // Mounted from the first confirmation on, so its exit can play; a footer
+  // that never asked renders no dialog at all.
+  const [filesConfirmMounted, setFilesConfirmMounted] = useState(false);
+  const regenerateInvokerRef = useRef<HTMLElement | null>(null);
+  const regenerateTimelineRef = useRef<HTMLElement | null>(null);
+  const regenerate = (anchor: HTMLElement | null) => {
+    if (!session || !regeneratePrompt || regenerateBusy || filesConfirm) return;
+    setRegenerateBusy(true);
+    const sessionId = session;
+    const source = regeneratePrompt;
+    const timeline = anchor?.closest<HTMLElement>(".timeline") ?? null;
+    regenerateInvokerRef.current = anchor;
+    regenerateTimelineRef.current = timeline;
+    // An older server (or a failed preview) keeps the files-untouched
+    // regeneration it always had.
+    const previewing: Promise<RewindFilesPreview | null> = typeof api.previewRewindFiles === "function"
+      ? api.previewRewindFiles(sessionId, source.eventSeq).catch(() => null)
+      : Promise.resolve(null);
+    void previewing.then((preview) => {
+      if (preview?.available && preview.restore.length > 0) {
+        setFilesConfirmMounted(true);
+        setFilesConfirm({ sessionId, source, preview, phase: "idle", error: null });
+        return;
+      }
+      // Nothing on disk would change. A regeneration that leaves changed
+      // files behind still records why on its marker.
+      const recordWhy = preview !== null && !preview.turnRunning
+        && (preview.keep.length > 0 || preview.reason === "branch-changed");
+      return replaceAnswer(sessionId, source, timeline, recordWhy ? "restore" : undefined)
+        .catch((error: unknown) => setUiError(error instanceof Error ? error.message : String(error)));
+    }).finally(() => setRegenerateBusy(false));
+  };
+  const runConfirmedRegenerate = (dialog: NonNullable<typeof filesConfirm>, attempts: number) => {
+    // While a stopped turn settles, the dialog keeps saying so; the retried
+    // rewinds play no exit motion, so a refused attempt cannot flicker.
+    const running = dialog.preview.turnRunning;
+    setFilesConfirm({ ...dialog, phase: running && attempts > 0 ? "stopping" : "applying", error: null });
+    void replaceAnswer(dialog.sessionId, dialog.source, regenerateTimelineRef.current, "restore", !running)
+      .then(() => setFilesConfirm(null))
+      .catch((error: unknown) => {
+        // The stop the person asked for may still be settling on the server.
+        if (attempts > 0 && (error as { code?: unknown } | null)?.code === "conflict" && running) {
+          window.setTimeout(() => runConfirmedRegenerate(dialog, attempts - 1), 500);
+          return;
+        }
+        setFilesConfirm((current) => current && { ...current, phase: "idle", error: tr("timeline.regenerateFiles.error") });
+      });
+  };
+  const confirmRegenerate = () => {
+    const dialog = filesConfirm;
+    if (!dialog || dialog.phase !== "idle") return;
+    if (!dialog.preview.turnRunning) { runConfirmedRegenerate(dialog, 0); return; }
+    // Files are written only after the turn has really stopped: stop it,
+    // then retry the rewind while the server still reports it running.
+    setFilesConfirm({ ...dialog, phase: "stopping", error: null });
+    void api.abort(dialog.sessionId, "timeline").catch(() => undefined)
+      .then(() => runConfirmedRegenerate(dialog, 60));
   };
 
   const action = (
@@ -241,6 +315,7 @@ export default function ChatResponseFooter({
   if (!identity && !prefs.showAnswerQuickActions) return null;
 
   return (
+    <>
     <footer
       className="chat-response-footer"
       data-dormant={dormant || undefined}
@@ -305,5 +380,17 @@ export default function ChatResponseFooter({
         </dl>
       </Popover>
     </footer>
+    {filesConfirmMounted && (
+      <RewindFilesDialog
+        purpose="regenerate"
+        preview={filesConfirm?.preview ?? null}
+        phase={filesConfirm?.phase ?? "idle"}
+        error={filesConfirm?.error ?? null}
+        onRestore={confirmRegenerate}
+        onClose={() => setFilesConfirm(null)}
+        restoreFocusRef={regenerateInvokerRef}
+      />
+    )}
+    </>
   );
 }

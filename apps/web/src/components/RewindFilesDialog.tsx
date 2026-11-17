@@ -3,6 +3,10 @@
 // only. It opens only when at least one file will change; every other
 // rollback stays the instant, dialog-free action it always was. The list is
 // the preview — there is no second "are you sure".
+//
+// `purpose="regenerate"` is the same preview as Regenerate's confirmation:
+// the answer's file changes are always discarded with it, so the choice is
+// Regenerate (files restored) or Cancel — never "conversation only".
 import { useId, useState, type RefObject } from "react";
 import type { RewindFileChange, RewindFileKept, RewindFileKeepReason, RewindFilesPreview } from "@polyth/contracts";
 import { tr, type TranslationKey } from "../i18n/index.ts";
@@ -87,15 +91,18 @@ export default function RewindFilesDialog({
   onConversationOnly,
   onClose,
   restoreFocusRef,
+  purpose = "rollback",
 }: {
   /** Open while non-null. */
   preview: RewindFilesPreview | null;
   phase: RewindFilesPhase;
   error: string | null;
   onRestore: () => void;
-  onConversationOnly: () => void;
+  /** Rollback only: Regenerate offers Cancel instead. */
+  onConversationOnly?: () => void;
   onClose: () => void;
   restoreFocusRef?: RefObject<HTMLElement | null>;
+  purpose?: "rollback" | "regenerate";
 }) {
   const [keepOpen, setKeepOpen] = useState(false);
   const describedBy = useId();
@@ -104,6 +111,8 @@ export default function RewindFilesDialog({
   const running = preview?.turnRunning === true;
   const restore = preview?.restore ?? [];
   const keep = preview?.keep ?? [];
+  const regenerating = purpose === "regenerate";
+  const restoreGroup = tr(regenerating ? "timeline.regenerateFiles.restoreGroup" : "timeline.rewindFiles.restoreGroup", { count: restore.length });
 
   const footer = (
     <div className="rewind-files-actions">
@@ -111,21 +120,23 @@ export default function RewindFilesDialog({
         variant="quiet"
         className="rewind-files-secondary"
         disabled={busy}
-        onClick={onConversationOnly}
-      >{tr("timeline.rewindFiles.conversationOnly")}</Button>
+        onClick={regenerating ? onClose : onConversationOnly}
+      >{tr(regenerating ? "common.cancel" : "timeline.rewindFiles.conversationOnly")}</Button>
       <Button
-        variant="primary"
+        variant={regenerating ? "danger" : "primary"}
         className="rewind-files-primary"
         busy={busy}
         onClick={onRestore}
       >
         {phase === "applying"
-          ? tr("timeline.rewindFiles.applying")
+          ? tr(regenerating ? "timeline.regenerateFiles.applying" : "timeline.rewindFiles.applying")
           : phase === "stopping"
             ? tr("timeline.rewindFiles.stopping")
-            : running
-              ? tr("timeline.rewindFiles.stopAndRollBack")
-              : tr("timeline.rewindFiles.confirm")}
+            : regenerating
+              ? tr("timeline.regenerateFiles.confirm")
+              : running
+                ? tr("timeline.rewindFiles.stopAndRollBack")
+                : tr("timeline.rewindFiles.confirm")}
       </Button>
     </div>
   );
@@ -136,24 +147,25 @@ export default function RewindFilesDialog({
       // The rollback is in flight: the dialog closes only once the server
       // has confirmed (or refused) it.
       onClose={() => { if (!busy) onClose(); }}
-      title={tr("timeline.rewindFiles.title")}
+      title={tr(regenerating ? "timeline.regenerateFiles.title" : "timeline.rewindFiles.title")}
       desktop="dialog"
       phone="sheet"
       dialogSize="md"
       className="rewind-files"
-      initialFocus=".rewind-files-primary"
+      // A destructive confirmation starts on the safe choice.
+      initialFocus={regenerating ? ".rewind-files-secondary" : ".rewind-files-primary"}
       dialogDescribedBy={describedBy}
       dialogFooter={footer}
       sheetFooter={footer}
       {...(restoreFocusRef ? { restoreFocusRef } : {})}
     >
       <div className="rewind-files-body">
-        <p className="rewind-files-subtitle" id={describedBy}>{tr("timeline.rewindFiles.subtitle")}</p>
-        {running && <Notice tone="info">{tr("timeline.rewindFiles.running")}</Notice>}
+        <p className="rewind-files-subtitle" id={describedBy}>{tr(regenerating ? "timeline.regenerateFiles.subtitle" : "timeline.rewindFiles.subtitle")}</p>
+        {running && <Notice tone="info">{tr(regenerating ? "timeline.regenerateFiles.running" : "timeline.rewindFiles.running")}</Notice>}
         {error && <Notice tone="error" role="alert">{error}</Notice>}
         <section className="rewind-files-group">
-          <h3 className="rewind-files-group-label">{tr("timeline.rewindFiles.restoreGroup", { count: restore.length })}</h3>
-          <ul className="rewind-files-list" aria-label={tr("timeline.rewindFiles.restoreGroup", { count: restore.length })}>
+          <h3 className="rewind-files-group-label">{restoreGroup}</h3>
+          <ul className="rewind-files-list" aria-label={restoreGroup}>
             {restore.map((change) => <ChangeRow key={change.path} change={change} />)}
           </ul>
         </section>
