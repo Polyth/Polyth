@@ -64,7 +64,10 @@ request
 4. **Global caches and pools.** The runtime pool is keyed by `projectId` +
    resolved `cwd`; the model/agent catalog aggregated across *all* projects.
 5. **Host filesystem browsing.** `/api/browse` lists arbitrary server
-   directories for the folder picker.
+   directories for the folder picker; `/api/browse/stat` tells the composer
+   whether a pasted absolute path names a file or folder (kind, name, size;
+   never contents), with the server's data folder and pseudo-filesystems
+   reading as absent.
 6. **Package state is deployment state.** Every package writes to the one
    `storageDir`; a tenant-installed package would run in-process with full
    control-plane privileges.
@@ -198,7 +201,7 @@ migrated; new tenant state goes through `spaceStorage`. See §6.
 | Feature-package state (`ssh.json`, `mcp.json`, `secure-safe`, `schedule.json`, `workflows.json`, `permissions.json`) | **Open** — these stores remain deployment-wide (ssh and schedule now under their `<data>/packages/<id>` directory); browser shots are per-Space `packages/browser/browser-shots`. Knowledge and Memory now resolve through `spaceStorage(space).packageDir("knowledge")`; the remaining listed integrations still cross Space boundaries. |
 | Execution | **Open** — everything runs on the host as the server user. |
 | Tenant packages | **Open** — a package's server entry runs in the control plane. Gated by `allowsTenantPackagesInControlPlane`, which is only true for `local-trusted`. |
-| Host filesystem browsing | **Closed for hosted** — `/api/browse` refuses under `multi-tenant-sandboxed`. |
+| Host filesystem browsing | **Closed for hosted** — `/api/browse` (and its `/api/browse/stat` path lookup) refuses under `multi-tenant-sandboxed`, and stays local-only for paired devices. |
 | Runtime pool / model catalog | **Partly closed** — the catalog now aggregates only the caller's Space; the pool is keyed by project + resolved cwd, and project ids are Space-owned, so pool keys cannot collide across Spaces. Warm processes are still shared per project, which is correct (one project belongs to exactly one Space). |
 | Restart recovery | **Partly closed** — recovery runs before the gateway serves and re-derives ownership from the adopted projections, but there is no tenant assertion inside the recovery path itself. See §7. |
 | People within one Space | **Partly closed** — messages record their author, tools see the acting person, drafts, read cursors and pins are per person, and a person's new chats are private until shared with named people or the whole Space at view/collaborate/manage access (§14 stages 1–2). Personal connected accounts, administration and the remaining stores are §14 stages 3–5. |

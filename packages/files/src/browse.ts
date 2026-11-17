@@ -119,6 +119,51 @@ export async function browseHost(rawPath?: string | null, opts: BrowseOptions = 
   };
 }
 
+export interface HostPathStat {
+  /** The absolute path as asked (`~` expanded), not its symlink target. */
+  path: string;
+  name: string;
+  kind: "file" | "dir";
+  /** Bytes for a file; 0 for a folder. */
+  size: number;
+}
+
+/** Whether an absolute host path names a file or folder, for the composer's
+ *  pasted-path card. Anything the picker would refuse — pseudo-filesystems,
+ *  the server's own data, sockets and devices — reads as absent (null), so
+ *  the answer never tells those apart from a missing path. */
+export async function statHost(rawPath: string, opts: Pick<BrowseOptions, "sealedRoots"> = {}): Promise<HostPathStat | null> {
+  // `resolveHostPath` reads an empty path as home; a lookup must not.
+  if (!rawPath.trim()) return null;
+  let abs: string;
+  try {
+    abs = resolveHostPath(rawPath);
+  } catch {
+    return null;
+  }
+  if (isBlockedHostPath(abs) || isSealedHostPath(abs, opts.sealedRoots)) return null;
+  let real: string;
+  try {
+    real = await realpath(abs);
+  } catch {
+    return null;
+  }
+  if (isBlockedHostPath(real) || isSealedHostPath(real, opts.sealedRoots)) return null;
+  let st: Awaited<ReturnType<typeof stat>>;
+  try {
+    st = await stat(real);
+  } catch {
+    return null;
+  }
+  if (!st.isFile() && !st.isDirectory()) return null;
+  return {
+    path: abs,
+    name: path.basename(abs) || abs,
+    kind: st.isDirectory() ? "dir" : "file",
+    size: st.isFile() ? st.size : 0,
+  };
+}
+
 /** Create a directory (recursively) on the host, for "create folder if missing". */
 export async function mkdirHost(rawPath: string, opts: Pick<BrowseOptions, "sealedRoots"> = {}): Promise<{ path: string }> {
   const abs = resolveHostPath(rawPath);

@@ -314,6 +314,8 @@ export const fr: AppMessages = {
   "composer.discovery.mentionFileOrChat": "Mentionner un fichier ou un chat…",
   "composer.discovery.noCommandsAvailable": "Aucune commande disponible.",
   "composer.discovery.noCommandsMatch": "Aucune commande ne correspond à « {query} ».",
+  "composer.hostPath.file": "Fichier",
+  "composer.hostPath.folder": "Dossier",
   "composer.discovery.noProjectFilesMatch": "Aucun fichier de projet ne correspond à « {query} ».",
   "composer.discovery.noSnippetsMatch": "Aucun extrait ne correspond à « {query} ».",
   "composer.discovery.noSnippetsYet": "Pas encore d'extraits.",

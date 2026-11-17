@@ -241,6 +241,12 @@ export interface BrowseResultDto {
   home: string;
   entries: BrowseEntryDto[];
 }
+export interface HostPathStatDto {
+  path: string;
+  name: string;
+  kind: "file" | "dir";
+  size: number;
+}
 
 // ---- provider/model visibility (Providers & Models settings) ----------------
 export interface ProviderCatalogModelDto {
@@ -1502,6 +1508,10 @@ export const api = {
     jfetch<{ repositories: Array<{ name: string; path: string; linked: boolean }>; truncated: boolean }>(`/api/browse?${new URLSearchParams({ path, repositories: "true" })}`),
   browseMkdir: (path: string) =>
     jfetch<{ path: string }>(`/api/browse/mkdir`, json("POST", { path })),
+  /** Whether an absolute (or `~/`) path names a file or folder on the server
+   *  host; null when absent or refused. */
+  browseStat: (path: string) =>
+    jfetch<HostPathStatDto | null>(`/api/browse/stat?${new URLSearchParams({ path })}`),
 
   // ---- git (§12) -----------------------------------------------------------
   gitStatus: (projectId: string, sessionId?: string, repositoryId?: string) =>

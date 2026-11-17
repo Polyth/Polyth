@@ -317,6 +317,8 @@ export const en = {
   "composer.discovery.mentionFileOrChat": "Mention a file or chat…",
   "composer.discovery.noCommandsAvailable": "No commands available.",
   "composer.discovery.noCommandsMatch": "No commands match “{query}”.",
+  "composer.hostPath.file": "File",
+  "composer.hostPath.folder": "Folder",
   "composer.discovery.noProjectFilesMatch": "No project files match “{query}”.",
   "composer.discovery.noSnippetsMatch": "No snippets match “{query}”.",
   "composer.discovery.noSnippetsYet": "No snippets yet.",

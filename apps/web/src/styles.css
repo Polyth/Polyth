@@ -8711,6 +8711,23 @@ color: var(--text-dim);
 .ac-status + .ac-list { border-top: 1px solid var(--border-soft); }
 .ac-status + .ac-status { padding-top: 0; }
 .ac-create-snippet { flex: none; }
+/* A typed or pasted host path the server found. A fact, not a choice: no
+   hover, no selection, and Enter still sends the message. */
+.ac-host-path {
+  display: grid;
+  grid-template-columns: var(--icon-sm) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+  padding: var(--space-2) var(--space-3);
+}
+.ac-host-path .ac-label { max-width: 60%; }
+.ac-host-path .ac-detail {
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .ac-footer {
   min-height: var(--control-h-sm);
   display: flex;

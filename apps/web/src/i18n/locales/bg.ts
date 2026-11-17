@@ -314,6 +314,8 @@ export const bg: AppMessages = {
   "composer.discovery.mentionFileOrChat": "Споменаване на файл или чат…",
   "composer.discovery.noCommandsAvailable": "Няма налични команди.",
   "composer.discovery.noCommandsMatch": "Няма съответстващи команди „{query}“.",
+  "composer.hostPath.file": "Файл",
+  "composer.hostPath.folder": "Папка",
   "composer.discovery.noProjectFilesMatch": "Няма файлове на проекта, които да съответстват на „{query}“.",
   "composer.discovery.noSnippetsMatch": "Няма фрагменти, съответстващи на „{query}“.",
   "composer.discovery.noSnippetsYet": "Все още няма фрагменти.",

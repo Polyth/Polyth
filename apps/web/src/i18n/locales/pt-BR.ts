@@ -314,6 +314,8 @@ export const ptBR: AppMessages = {
   "composer.discovery.mentionFileOrChat": "Mencionar um arquivo ou chat…",
   "composer.discovery.noCommandsAvailable": "Comandos Disponíveis:",
   "composer.discovery.noCommandsMatch": "Nenhum comando corresponde a “{query}”.",
+  "composer.hostPath.file": "Arquivo",
+  "composer.hostPath.folder": "Pasta",
   "composer.discovery.noProjectFilesMatch": "Nenhum arquivo de projeto corresponde a \"{query}\".",
   "composer.discovery.noSnippetsMatch": "Nenhum trecho corresponde a \"{query}\".",
   "composer.discovery.noSnippetsYet": "Ainda não há trechos.",

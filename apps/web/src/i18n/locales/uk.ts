@@ -314,6 +314,8 @@ export const uk: AppMessages = {
   "composer.discovery.mentionFileOrChat": "Згадати файл або чат…",
   "composer.discovery.noCommandsAvailable": "Немає доступних команд.",
   "composer.discovery.noCommandsMatch": "Немає команд, що відповідають запиту «{query}».",
+  "composer.hostPath.file": "Файл",
+  "composer.hostPath.folder": "Папка",
   "composer.discovery.noProjectFilesMatch": "Немає файлів проєкту, що відповідають запиту «{query}».",
   "composer.discovery.noSnippetsMatch": "Немає фрагментів, що відповідають запиту «{query}».",
   "composer.discovery.noSnippetsYet": "Поки що немає фрагментів.",

@@ -3,7 +3,7 @@
 // safe token-insertion decisions for the Add menu, stable autocomplete option
 // ids plus honest status copy, and contract-bounded model detail formatting.
 // No DOM, no fetch, no send path — components project this module's decisions.
-import type { SnippetDef, StrictListResult } from "@polyth/session/web-api";
+import type { HostPathStatDto, SnippetDef, StrictListResult } from "@polyth/session/web-api";
 import type {
   HarnessTransition,
   ModelDescriptor,
@@ -558,6 +558,42 @@ export interface AutocompleteViewState {
   resultCount?: number;
   /** Instructional / loading / empty / error body. May accompany recovery destinations. */
   status: { text: string; createSnippet?: boolean } | null;
+  /** A typed or pasted host path the server confirmed. Shown, never picked:
+   *  Enter still sends and arrows still move the caret. */
+  hostPath?: HostPathStatDto;
+}
+
+/** A host path shows only once the server says it is there; while the lookup
+ *  runs, or when nothing is there, the composer shows nothing at all. */
+export function hostPathAutocomplete(found: HostPathStatDto | null | undefined): AutocompleteViewState | null {
+  return found ? { kind: "file", options: [], status: null, hostPath: found } : null;
+}
+
+export function hostPathKindLabel(found: HostPathStatDto): string {
+  return found.kind === "dir" ? tr("composer.hostPath.folder") : tr("composer.hostPath.file");
+}
+
+const BYTE_UNITS = ["byte", "kilobyte", "megabyte", "gigabyte", "terabyte"] as const;
+
+/** `4.3 MB · /Users/me/Downloads` for a file, the containing folder alone for
+ *  a folder. */
+export function hostPathDetail(found: HostPathStatDto, locale: string): string {
+  const cut = Math.max(found.path.lastIndexOf("/"), found.path.lastIndexOf("\\"));
+  const parent = cut > 0 ? found.path.slice(0, cut) : found.path.slice(0, 1);
+  if (found.kind === "dir") return parent;
+  let value = found.size;
+  let unit = 0;
+  while (value >= 1000 && unit < BYTE_UNITS.length - 1) {
+    value /= 1000;
+    unit += 1;
+  }
+  const size = new Intl.NumberFormat(locale, {
+    style: "unit",
+    unit: BYTE_UNITS[unit],
+    unitDisplay: unit === 0 ? "long" : "short",
+    maximumFractionDigits: unit === 0 ? 0 : 1,
+  }).format(value);
+  return `${size} · ${parent}`;
 }
 
 const SLASH_INPUT_NAME = /^[A-Za-z0-9_-]+$/;

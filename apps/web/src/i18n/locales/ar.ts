@@ -314,6 +314,8 @@ export const ar: AppMessages = {
   "composer.discovery.mentionFileOrChat": "اذكر ملفًا أو محادثة…",
   "composer.discovery.noCommandsAvailable": "لا توجد أوامر متاحة.",
   "composer.discovery.noCommandsMatch": "لا توجد أوامر مطابقة \\\"{query}\\\".",
+  "composer.hostPath.file": "ملف",
+  "composer.hostPath.folder": "مجلد",
   "composer.discovery.noProjectFilesMatch": "لا توجد ملفات مشروع تطابق \"{query}\".",
   "composer.discovery.noSnippetsMatch": "لا توجد مقتطفات تطابق \"{query}\".",
   "composer.discovery.noSnippetsYet": "لا توجد مقتطفات حتى الآن.",

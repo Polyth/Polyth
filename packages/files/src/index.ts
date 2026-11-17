@@ -9,7 +9,7 @@ import path from "node:path";
 import { DEFAULT_EXTERNAL_READ_POLICY, resolveExternalRead, type ExternalReadPolicy } from "./externalReads.ts";
 import { withIgnoredInbox } from "./inboxIgnore.ts";
 
-export { browseHost, mkdirHost, resolveHostPath, isBlockedHostPath } from "./browse.ts";
+export { browseHost, mkdirHost, resolveHostPath, isBlockedHostPath, statHost, type HostPathStat } from "./browse.ts";
 export type { BrowseEntry, BrowseOptions, BrowseResult } from "./browse.ts";
 
 const MAX_READ = 512 * 1024;

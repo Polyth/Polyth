@@ -6,7 +6,7 @@
 // exactly what a hosted, multi-tenant deployment must not offer, so the
 // deployment profile — not a per-request flag — decides whether it exists.
 import { allowsHostFilesystemBrowsing } from "@polyth/contracts";
-import { browseHost, discoverRepositories, mkdirHost } from "@polyth/files";
+import { browseHost, discoverRepositories, mkdirHost, statHost } from "@polyth/files";
 import { AGENT_BETA_READ_ONLY_MESSAGE, agentBetaEnabled } from "@polyth/harness-runtime";
 import type { RouteHandler } from "../http.ts";
 
@@ -16,7 +16,7 @@ export function browseRoutes(dataDir: string): RouteHandler {
   const sealedRoots = [dataDir];
   return async (rc) => {
     const { path, method } = rc;
-    if (path !== "/api/browse" && path !== "/api/browse/mkdir") return false;
+    if (path !== "/api/browse" && path !== "/api/browse/mkdir" && path !== "/api/browse/stat") return false;
 
     if (!allowsHostFilesystemBrowsing(rc.space.deployment)) {
       throw Object.assign(
@@ -37,6 +37,14 @@ export function browseRoutes(dataDir: string): RouteHandler {
         rc.url.searchParams.get("path"),
         { hidden: rc.url.searchParams.get("hidden") === "true", sealedRoots },
       ));
+      return true;
+    }
+
+    // The composer asks whether a path typed or pasted into a message names a
+    // file here, so it can show a file instead of command suggestions. Absence
+    // is an answer (null), not an error, and so is everything the picker refuses.
+    if (path === "/api/browse/stat" && method === "GET") {
+      rc.json(200, await statHost(rc.url.searchParams.get("path") ?? "", { sealedRoots }));
       return true;
     }
 

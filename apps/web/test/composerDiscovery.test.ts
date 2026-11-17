@@ -17,7 +17,8 @@ const mem = new Map<string, string>();
 const {
   ATTACHMENT_COMPAT_NOTE, CATALOG_LOADING, OPEN_PROJECT_FIRST,
   SHELL_DRAFT_BLOCK, addMenuRows, autocompleteOptionId, catalogFromResult,
-  commandAutocomplete, commandPrecedence, contextTokensLabel, fileAutocomplete, groupAutocompleteOptions, mergeCommandCatalog, modelDetail,
+  commandAutocomplete, commandPrecedence, contextTokensLabel, fileAutocomplete, groupAutocompleteOptions, hostPathAutocomplete,
+  hostPathDetail, hostPathKindLabel, mergeCommandCatalog, modelDetail,
   modelDisplayName, modelSupportsTextWorkflow, planCommandInsert, planShellEntry,
   nativeCommandInput, planSigilInsert, snippetAutocomplete,
 } = await import("../src/composer/discovery.ts");
@@ -222,6 +223,26 @@ test("command autocomplete states carry the exact honest copy", () => {
   const hit = commandAutocomplete(avail, "pl");
   assert.equal(hit.status, null);
   assert.equal(hit.options[0]?.label, "/plan");
+});
+
+test("a pasted host path shows as a file only once the host has it, never as unknown commands", () => {
+  const pasted = "/Users/me/Downloads/e2e-03static_w_path.zip";
+  // The grammar no longer hands a path to the command picker at all.
+  assert.equal(activeToken(pasted, pasted.length)?.kind, "path");
+  // Pending or absent: no popup.
+  assert.equal(hostPathAutocomplete(undefined), null);
+  assert.equal(hostPathAutocomplete(null), null);
+  const file = { path: pasted, name: "e2e-03static_w_path.zip", kind: "file" as const, size: 4_250_000 };
+  const view = hostPathAutocomplete(file);
+  // Shown, never offered: no options, so Enter sends rather than inserting.
+  assert.deepEqual(view, { kind: "file", options: [], status: null, hostPath: file });
+  assert.equal(hostPathKindLabel(file), tr("composer.hostPath.file"));
+  assert.equal(hostPathDetail(file, "en"), "4.3 MB · /Users/me/Downloads");
+  assert.equal(hostPathDetail({ ...file, size: 5 }, "en"), "5 bytes · /Users/me/Downloads");
+  const folder = { path: "/Users/me/Downloads", name: "Downloads", kind: "dir" as const, size: 0 };
+  assert.equal(hostPathKindLabel(folder), tr("composer.hostPath.folder"));
+  assert.equal(hostPathDetail(folder, "en"), "/Users/me");
+  assert.equal(hostPathDetail({ path: "/srv", name: "srv", kind: "dir", size: 0 }, "en"), "/");
 });
 
 test("command autocomplete separates kind, provenance, and Settings destinations", () => {
