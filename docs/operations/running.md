@@ -74,7 +74,17 @@ Restart=on-failure
 
 To update, unpack the new archive beside the old tree, stop the service, archive the
 data directory, swap the directories (or a `current` symlink) and start; the old tree
-is the rollback. `polyth server restart` is the checkout's rebuild-and-restart and is
+is the rollback.
+
+Every server, however it was installed, copies a canonical database before it
+migrates its schema: the control plane (`control-plane/control.sqlite`) and the
+session history (`sessions.db`) go to
+`<data>/pre-migration/<name>-before-<version>-<time>.sqlite`, the three newest per
+database are kept, and a copy that would leave less than 512 MB free is skipped with
+a log line. Schema changes are forward-only and an older server refuses a control
+plane migrated past it, so going back to an older version after a migration means
+restoring these copies: stop the server, copy each snapshot over its database,
+delete that database's `-wal` and `-shm` files, start the older version. `polyth server restart` is the checkout's rebuild-and-restart and is
 refused here: restart through the service manager. Release publication of these
 archives, the `polyth` npm package and a `polyth update` command are not built yet.
 

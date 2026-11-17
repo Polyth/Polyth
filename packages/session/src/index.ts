@@ -740,6 +740,27 @@ export async function executeDurableRuntimeMutation<T>(
   }
 }
 
+/** How many forward-only migrations createStore applies (its MIGRATIONS list). */
+export const SESSION_SCHEMA_VERSION = 24;
+
+/** Migrations createStore would apply to an existing sessions database, read
+ *  without changing it; 0 for a current or empty one. A host snapshots the
+ *  file first, since only that copy can take an update back. */
+export function pendingSessionMigrations(dbPath: string): number {
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  try {
+    const tables = new Set((db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>)
+      .map((row) => row.name));
+    if (!tables.has("events")) return 0;
+    const row = tables.has("schema_meta")
+      ? db.prepare("SELECT value FROM schema_meta WHERE key = 'version'").get() as { value: string } | undefined
+      : undefined;
+    return Math.max(0, SESSION_SCHEMA_VERSION - (row ? Number(row.value) : 0));
+  } finally {
+    db.close();
+  }
+}
+
 export function createStore(dbPath: string): Store {
   const raw = new DatabaseSync(dbPath);
   // Closed-store fence: teardown may begin while a service operation is still
@@ -1394,6 +1415,9 @@ export function createStore(dbPath: string): Store {
       }
     },
   ];
+  if (MIGRATIONS.length !== SESSION_SCHEMA_VERSION) {
+    throw new Error(`session store has ${MIGRATIONS.length} migrations but SESSION_SCHEMA_VERSION is ${SESSION_SCHEMA_VERSION}`);
+  }
   for (let v = getVersion(); v < MIGRATIONS.length; v++) {
     transaction(() => {
       MIGRATIONS[v]!();

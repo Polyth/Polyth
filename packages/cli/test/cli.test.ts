@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -9,8 +9,9 @@ import { parseArgs, seconds, UsageError } from "../src/args.ts";
 import { openRequests, operationIdFor, type SessionEvent } from "../src/api.ts";
 import { exitCodeFor, PolythError } from "../src/client.ts";
 import { diffSession } from "../src/follow.ts";
-import { completionScript, main } from "../src/main.ts";
+import { cliVersion, completionScript, main, VERSION } from "../src/main.ts";
 import {
+  bundleBuild,
   controlSocketPath,
   desktopDataDir,
   normalizeUrl,
@@ -102,6 +103,17 @@ test("a packaged server has its own data directory, found before it first runs",
     /No Polyth found/,
     "without a packaged install there is still nothing to fall back to",
   );
+});
+
+test("a packaged server's CLI reports that server's release", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-cli-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(join(dir, "BUILD.json"), JSON.stringify({ version: "1.2.356", commit: "abc", target: "linux-x64" }));
+  assert.equal(cliVersion({ POLYTH_SERVER_BUNDLE: dir }), "1.2.356");
+  assert.deepEqual(bundleBuild({ POLYTH_SERVER_BUNDLE: dir }), { version: "1.2.356", commit: "abc", target: "linux-x64" });
+  assert.equal(cliVersion({}), VERSION, "outside a packaged install it is the CLI's own version");
+  writeFileSync(join(dir, "BUILD.json"), "{not json");
+  assert.equal(cliVersion({ POLYTH_SERVER_BUNDLE: dir }), VERSION);
 });
 
 test("target resolution: flag > env > saved default > discovery; tokens stay in a 0600 file", (t) => {

@@ -64,6 +64,30 @@ export function serverBundleRoot(env: NodeJS.ProcessEnv = process.env): string |
   return root ? resolve(root) : undefined;
 }
 
+/** What a packaged server's BUILD.json records (layout: apps/server/src/layout.ts). */
+export interface BundleBuild {
+  version: string;
+  commit: string;
+  target: string;
+}
+
+export function bundleBuild(env: NodeJS.ProcessEnv = process.env): BundleBuild | undefined {
+  const root = serverBundleRoot(env);
+  if (!root) return undefined;
+  try {
+    const build = JSON.parse(readFileSync(join(root, "BUILD.json"), "utf8")) as Partial<BundleBuild>;
+    return typeof build.version === "string" && typeof build.commit === "string" && typeof build.target === "string"
+      ? { version: build.version, commit: build.commit, target: build.target }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function bundleVersion(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return bundleBuild(env)?.version;
+}
+
 export function configPath(env: NodeJS.ProcessEnv = process.env, os: NodeJS.Platform = platform()): string {
   if (env.POLYTH_CLI_CONFIG) return resolve(env.POLYTH_CLI_CONFIG);
   if (os === "win32") return join(env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "Polyth", "cli.json");

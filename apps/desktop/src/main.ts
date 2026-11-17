@@ -1865,6 +1865,7 @@ const startServer = async (preferredPort?: number): Promise<void> => {
   desktopSetupClaims.reset();
   serverLifecycle = await boot({
     port, hostname: "127.0.0.1", dataDir, webDist, webPackagesDir: webPackagesPath(), serverPackages: desktopServerPackages,
+    version: app.getVersion(),
     desktopOwnerChannel: true,
     onEventLoopStall: (stall) => {
       log(`Event loop blocked for ${(stall.blockedMs / 1000).toFixed(1)}s (rss ${Math.round(process.memoryUsage().rss / 1_048_576)} MB)`);

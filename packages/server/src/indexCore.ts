@@ -167,6 +167,8 @@ import { projectVisibleToUser, setPrivateRoomParentLookup } from "./accountLimit
 import { createPersonalMcpReprovisioner, type PersonalMcpReprovisioner } from "./personalMcpReprovision.ts";
 import { assertRemoteOpenCodeUsable, type RemoteOpenCodeAccessDeps } from "./remoteOpenCodeAccess.ts";
 import { canonicalSecurity, isSourceEntrypoint } from "./runtimeSecurity.ts";
+import { serverVersion } from "./version.ts";
+import { snapshotBeforeMigrations } from "./preMigrationSnapshot.ts";
 import { oneShot } from "./oneshot.ts";
 import {
   createSmallModelService,
@@ -230,6 +232,9 @@ export interface BootOptions {
   modelTurnsDisabled?: boolean;
   /** Static SPA directory override for packaged hosts. */
   webDist?: string;
+  /** The Polyth version a packaged host ships (its release version). A
+   *  checkout reports its root package.json (version.ts). */
+  version?: string;
   opencode?: Partial<OpenCodeAdapterOptions>;
   /** Workspace packages/ directory scanned for polyth.serverEntry markers. */
   packagesDir?: string;
@@ -658,6 +663,7 @@ type DictationForWs = NonNullable<Parameters<typeof createWsGateway>[2]>;
 
 export async function boot(opts: BootOptions = {}) {
   const port = opts.port ?? Number(process.env.PORT ?? 4400);
+  const version = serverVersion(opts.version);
   opts.hostname ??= process.env.HOST;
   const localhostAuthOptional = process.env.POLYTH_UI_PASSWORD_LOCALHOST === "optional";
   let publicServerForSurface: import("node:http").Server | null = null;
@@ -667,6 +673,9 @@ export async function boot(opts: BootOptions = {}) {
   const dataDir = writerLease.canonicalDataDir;
   bindGitDiscoveryToDataDir(dataDir);
   try {
+  // Under the writer lease, before any database is opened for writing: a copy
+  // of each one this version is about to migrate (an update's way back).
+  snapshotBeforeMigrations(dataDir, { version });
   // Warm the engine identity cache while the rest of boot (sweep, packages,
   // HTTP) runs so the first owned spawn does not wait on `--version`/`db path`
   // / hashing the OpenCode binary.
@@ -3398,7 +3407,7 @@ export async function boot(opts: BootOptions = {}) {
       return saved;
     },
     systemInfo: (local) => ({
-      version: "0.1.0",
+      version,
       applicationUrl: `http://${opts.hostname ?? "127.0.0.1"}:${port}`,
       tunnelUrl: process.env.POLYTH_TUNNEL_URL ?? null,
       dataDirLabel: local ? dataDir : "Polyth data directory",
@@ -3584,7 +3593,7 @@ export async function boot(opts: BootOptions = {}) {
       store,
       capabilities: () => allCapabilities(),
       goals: () => svc<AgentGoalService>("goals"),
-      version: "0.1.0",
+      version,
       onSessionCreated: async (sessionId, space, parentSessionId) => {
         if (parentSessionId) await notifications.inheritSessionRecipient(parentSessionId, sessionId, space);
         else await notifications.registerSessionRecipient(sessionId, space);
@@ -3624,7 +3633,7 @@ export async function boot(opts: BootOptions = {}) {
     capabilities: allCapabilities,
     webDist: resolve(opts.webDist ?? resolve(__dirname, "../../../apps/web/dist")),
     packagesDir: resolve(opts.webPackagesDir ?? packagesDir),
-    version: "0.1.0",
+    version,
     remotePolicies: () => routeRegistry.policies(),
     listenerId: "public",
     admission: httpAdmission,

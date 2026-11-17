@@ -8,8 +8,15 @@ import { api, models, open, projects, server, status } from "./commands/admin.ts
 import { events, on, requests } from "./commands/automation.ts";
 import { chat } from "./commands/chat.ts";
 import { archive, fork, log, newSession, queue, remove, restore, send, sessions, show, stop, wait } from "./commands/sessions.ts";
+import { bundleVersion } from "./target.ts";
 
 export const VERSION = "0.1.0";
+
+/** What `polyth --version` prints: a packaged server's CLI is that server's
+ *  release (read when asked, after its launcher marked the install). */
+export function cliVersion(env: NodeJS.ProcessEnv = process.env): string {
+  return bundleVersion(env) ?? VERSION;
+}
 
 export const GLOBAL_FLAGS: FlagSpec[] = [
   { name: "json", description: "Machine-readable JSON output" },
@@ -183,7 +190,7 @@ export async function main(argv: string[]): Promise<number> {
   try {
     const { globals, rest } = splitGlobals(argv);
     o = createOutput({ json: globals.json === true, ...(globals["no-color"] === true ? { color: false } : {}) });
-    if (globals.version === true) { o.out(VERSION); return 0; }
+    if (globals.version === true) { o.out(cliVersion()); return 0; }
     const [name, ...commandArgs] = rest;
     if (!name || name === "--") { o.out(overview(o)); return name ? 2 : 0; }
     const command = find(name);
