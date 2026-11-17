@@ -1,7 +1,7 @@
 import { handoffReviewScope } from "./reviewScopeHandoff.ts";
 import { cloneElement, useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState, type CSSProperties, type ReactElement, type ReactNode, type RefObject } from "react";
 import type { IsolationStatusDto, IsolationTargetDto, SessionIsolation, SessionProjection } from "@polyth/contracts";
-import { delegatedChildRunning, isManagedIsolationBranch, isolationActions, isolationBlocksUserMutation, isolationNeedsRecovery, isolationRuntimeUnsettled } from "@polyth/contracts";
+import { delegatedChildRunning, isManagedIsolationBranch, isolationActions, isolationBlocksUserMutation, isolationNeedsRecovery, isolationRuntimeUnsettled, runningSubagents } from "@polyth/contracts";
 import { api } from "@polyth/session/web-api";
 import { reportGitError } from "./gitRefusal.ts";
 import { activateSession, clearRuntimeFeatures, getState, openChanges, setSessions, upsertSession, useStore, workspacePresentationKey, type AppState } from "../../../apps/web/src/store.ts";
@@ -421,7 +421,11 @@ function useIsolationCardView(cardRef: RefObject<HTMLElement | null>): CardView 
     state.sessions.find((candidate) => candidate.id === state.activeSessionId) ?? null,
   );
   const isolation = isolationOf(session);
-  const sessionWorking = session ? isolationBlocksUserMutation(session.status) : false;
+  // Subagents still at work (the "Waiting for subagents" line) are the
+  // agent's task in progress: the card reads them as the session working, so
+  // it never offers to integrate half-done work.
+  const subagentsRunning = useStore((state) => sessionId !== null && runningSubagents(state.sessions, sessionId).length > 0);
+  const sessionWorking = session ? isolationBlocksUserMutation(session.status) || subagentsRunning : false;
   const promptPending = useStore((state) => sessionId !== null && promptOwnsNextTurn(state, sessionId));
   // What a status answer describes: read while the agent worked, for an
   // earlier isolation state or for a target since changed, it says nothing
@@ -614,7 +618,7 @@ function useIsolationCardView(cardRef: RefObject<HTMLElement | null>): CardView 
     };
   }
 
-  const working = isolationBlocksUserMutation(session.status) || promptPending;
+  const working = sessionWorking || promptPending;
   // A new prompt hands the work back to the agent, and the server answers
   // "working" for a running turn. Until the session status and a fresh read
   // say so, an answer read while it rested must not keep offering Integrate:

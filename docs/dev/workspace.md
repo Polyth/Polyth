@@ -476,6 +476,15 @@ unmerged, its isolation card says why it cannot integrate and links each child;
 a nested child's card names the "parent workspace" instead of the managed
 branch. A nested child publishes only while its target isolation is
 still open.
+
+Any subagent still running under a session — every descendant by `parentId`,
+shared-workspace children included (`runningSubagents` in `@polyth/contracts`)
+— holds that session's isolated work back like its own turn: the status
+reports merge, discard, resolve and choose-target as unavailable, merge and
+discard refuse (`reason: "subagents-running"`, mutation rejected), the
+isolation card offers nothing to integrate and the landing line waits. The
+client applies the same rule from its store, so an older server's "ready"
+answer is not shown while the subagent list says it is waiting.
 `mergeDelegated` releases a child without unique changes and refuses
 overlapping uncommitted destination work (`reason: "target-overlap"`) instead
 of recording an AI repair receipt. A merged child is rebound to the

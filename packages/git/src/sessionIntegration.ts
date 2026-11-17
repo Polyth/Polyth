@@ -51,6 +51,7 @@ import {
   isolationRuntimeUnsettled,
   isolationNeedsRecovery,
   normalizeIsolation as normalizeIsolationContract,
+  runningSubagents,
   SESSION_PURPOSE_CONVERSATION,
   transitionIsolation as transitionIsolationContract,
 } from "@polyth/contracts";
@@ -1147,7 +1148,23 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
     session: SessionProjection,
     isolation: SessionIsolation,
   ): Promise<void> => {
-    const pending = nestedIsolationsAt(await deps.sessions.list(session.projectId), session.id, isolation.worktreePath);
+    const candidates = await deps.sessions.list(session.projectId);
+    // A subagent still at work has not finished its part: integrating or
+    // dropping the workspace now would ship or lose half of it.
+    const running = runningSubagents(candidates, session.id);
+    if (running.length > 0) {
+      const names = running.slice(0, 5).map((candidate) => `“${candidate.title}”`).join(", ");
+      throw Object.assign(
+        err("conflict", `Subagents are still working on this task: ${names}${running.length > 5 ? ", …" : ""}. Wait for them to finish first.`),
+        {
+          reason: "subagents-running",
+          sessionIds: running.map((candidate) => candidate.id),
+          mutationOutcome: "rejected",
+          retryability: "safe",
+        },
+      );
+    }
+    const pending = nestedIsolationsAt(candidates, session.id, isolation.worktreePath);
     if (pending.length === 0) return;
     const names = pending.slice(0, 5).map((candidate) => `“${candidate.title}”`).join(", ");
     throw Object.assign(
@@ -3104,7 +3121,10 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
       const destinationRead = destinationFor(session, isolation).then(() => true, () => false);
       const delegatedRead = deps.sessions.list(session.projectId).then(async (candidates) => {
         const pending = nestedIsolationsAt(candidates, session.id, isolation.worktreePath);
-        return pending.length ? Promise.all(pending.map(delegatedSummary)) : undefined;
+        return {
+          delegated: pending.length ? await Promise.all(pending.map(delegatedSummary)) : undefined,
+          subagentsRunning: runningSubagents(candidates, session.id).length > 0,
+        };
       });
       delegatedRead.catch(() => undefined);
       const durableEvents = events ?? await readTurnFacts(sessionId, isolation);
@@ -3131,13 +3151,15 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
       if (!destinationReady && suggestion?.eligible) {
         suggestion = { ...suggestion, eligible: false, reason: "destination-unavailable" };
       }
-      const blocked = isolationBlocksUserMutation(session.status);
+      const { delegated, subagentsRunning } = await delegatedRead;
+      // Running subagents are the agent's work still in progress, like its
+      // own turn: nothing may integrate or drop the workspace under them.
+      const blocked = isolationBlocksUserMutation(session.status) || subagentsRunning;
       const sourceReady = effectiveState !== "missing" && effectiveState !== "unowned" && effectiveState !== "corrupt";
       const hasChanges = suggestion?.hasChanges === true;
       // A conflict a later completed turn settled merges again (merge-back
       // accepts the conflict state); an open one only offers resolution.
       const conflict = isolation.state === "conflict" && suggestion?.eligible !== true;
-      const delegated = await delegatedRead;
       // Another target is a way out of a vanished destination or a conflict
       // too, so it does not wait on either; it waits on the work being at rest.
       const choosable = !blocked && sourceReady && hasChanges && !delegated

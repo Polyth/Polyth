@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { IsolationStatusDto, IsolationTargetDto, IsolationTargetPushDto, SessionIsolation } from "@polyth/contracts";
-import { delegatedChildRunning, isManagedIsolationBranch, isolationBlocksUserMutation, isolationNeedsRecovery } from "@polyth/contracts";
+import { delegatedChildRunning, isManagedIsolationBranch, isolationBlocksUserMutation, isolationNeedsRecovery, runningSubagents } from "@polyth/contracts";
 import { api } from "@polyth/session/web-api";
 import type { WebPackageHost } from "@polyth/web-sdk";
 import { setUiError, upsertSession, useStore } from "../../../apps/web/src/store.ts";
@@ -152,6 +152,9 @@ export interface LandingModel {
 export function useLanding({ host, projectId, sessionId, repositoryId, uncommitted }: LandingInput): LandingModel | null {
   const session = useStore((state) => state.sessions.find((candidate) => candidate.id === sessionId) ?? null);
   const isolation: SessionIsolation | null = session?.isolation?.kind === "git-worktree" ? session.isolation : null;
+  // Any subagent still at work (shared-workspace ones included) holds the
+  // landing back like the agent's own turn; the status is re-read when they rest.
+  const subagentsRunning = useStore((state) => runningSubagents(state.sessions, sessionId).length > 0);
   const working = session ? isolationBlocksUserMutation(session.status) : false;
   const prefs = useGitPrefs(projectId);
   const push = prefs.pushAfterIntegrate;
@@ -180,7 +183,7 @@ export function useLanding({ host, projectId, sessionId, repositoryId, uncommitt
     }
     // While the agent works the answer is fixed; turn churn must not re-ask.
     // A delegated agent coming to rest does change it.
-  }, [identity, sessionId, working ? "working" : session?.updatedAt, uncommitted, delegatedRunning]);
+  }, [identity, sessionId, working ? "working" : session?.updatedAt, uncommitted, delegatedRunning, subagentsRunning]);
   useEffect(() => {
     void refresh();
     return () => { request.current += 1; };
@@ -197,7 +200,7 @@ export function useLanding({ host, projectId, sessionId, repositoryId, uncommitt
   const proposed = originSwitched ?? (unavailable ? null : recorded);
   const stranded = unavailable && !originSwitched;
   const conflict = live?.state === "conflict" && suggestion?.eligible !== true;
-  const ready = status?.actions?.canMerge === true || originSwitched !== undefined;
+  const ready = !subagentsRunning && (status?.actions?.canMerge === true || originSwitched !== undefined);
   const delegatedPending = (status?.delegated?.length ?? 0) > 0;
 
   // Conflicts and commit count are read for the recorded target only, and
@@ -225,7 +228,7 @@ export function useLanding({ host, projectId, sessionId, repositoryId, uncommitt
 
   const shown = proposed ?? recorded;
   const shownBranch = shown.branch;
-  const canChoose = status.actions?.canChooseTarget === true && !working && busy === null;
+  const canChoose = status.actions?.canChooseTarget === true && !working && !subagentsRunning && busy === null;
   const known = preview?.key === previewKey ? preview : null;
 
   const check = ((): Check => {
@@ -233,7 +236,7 @@ export function useLanding({ host, projectId, sessionId, repositoryId, uncommitt
     if (suggestion?.reason === "runtime-recovering") return { tone: "neutral", text: tr("isolation.runtimeRecovering") };
     // Running delegated agents are merged by this session's agent when they
     // finish, so the bar only waits; work they left at rest is stranded.
-    if (delegatedRunning) return { tone: "neutral", text: tr("landing.waitDelegated") };
+    if (delegatedRunning || subagentsRunning) return { tone: "neutral", text: tr("landing.waitDelegated") };
     if (delegatedPending) return { tone: "warn", text: tr("isolation.delegatedPending") };
     if (conflict) {
       const count = live.conflict?.files.length ?? 0;
@@ -338,7 +341,7 @@ export function useLanding({ host, projectId, sessionId, repositoryId, uncommitt
     busy,
     canChoose,
     canIntegrate: ready && !working && busy === null && !delegatedPending && suggestion?.reason !== "target-overlap",
-    canResolve: conflict && status.actions?.canResolve === true && !working && busy === null,
+    canResolve: conflict && status.actions?.canResolve === true && !working && !subagentsRunning && busy === null,
     integrate,
     integrateLabel: push ? tr("landing.integrateAndPush", { branch: shownBranch }) : tr("isolation.integrateInto", { branch: shownBranch }),
   };

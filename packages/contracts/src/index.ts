@@ -2087,6 +2087,26 @@ export const isolationBlocksUserMutation = (status: SessionStatus): boolean =>
 export const delegatedChildRunning = (status: SessionStatus): boolean =>
   isolationBlocksUserMutation(status) && status !== "archived";
 
+/** The subagents of `sessionId` (children, grandchildren…, by `parentId`)
+ *  that still run. Their work is unfinished — shared-workspace children write
+ *  straight into the parent's checkout — so the parent's isolated work is not
+ *  ready to integrate, discard or publish while any is listed. */
+export function runningSubagents<T extends Pick<SessionProjection, "id" | "parentId" | "status">>(
+  sessions: readonly T[],
+  sessionId: string,
+): T[] {
+  const byId = new Map(sessions.map((candidate) => [candidate.id, candidate]));
+  const descends = (candidate: T): boolean => {
+    const seen = new Set<string>();
+    for (let parentId = candidate.parentId; parentId && !seen.has(parentId); parentId = byId.get(parentId)?.parentId) {
+      if (parentId === sessionId) return true;
+      seen.add(parentId);
+    }
+    return false;
+  };
+  return sessions.filter((candidate) => candidate.id !== sessionId && delegatedChildRunning(candidate.status) && descends(candidate));
+}
+
 /** Blocking statuses where no agent turn runs but Polyth has not yet proven
  *  the runtime settled (recovery, reconciliation, an unconfirmed outcome).
  *  Unlike a working turn, these can last, so the isolation card says why. */

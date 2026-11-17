@@ -553,6 +553,29 @@ test("a resting delegator waiting on running delegated agents shows no card unti
   }
 });
 
+test("a resting agent whose subagent still works is not offered Integrate, even by a server that would allow it", async () => {
+  const originalStatus = api.isolationStatus;
+  const isolation: SessionIsolation = { ...base, state: "merge-ready" };
+  // An older server answers "ready" without knowing about the running subagent.
+  api.isolationStatus = async () => ({
+    isolation, effectiveState: isolation.state, suggestion: readySuggestion,
+    actions: { canReview: true, canMerge: true, canKeep: true, canResolve: false, canDiscard: true, canRecover: false, canAbandon: false },
+  });
+  const integrateLabel = tr("isolation.integrateInto", { branch: base.targetBranch });
+  // A shared-workspace subagent: no isolation of its own, so it is not in `delegated`.
+  seedSessionCache({ id: "screenshot-child", projectId: "ui-test", title: "Screenshots", status: "working", createdAt: 1, updatedAt: 1, parentId: "waiting-on-shared-child", worktreePath: base.worktreePath });
+  const mounted = await mount(projection("waiting-on-shared-child", isolation));
+  try {
+    assert.equal(buttons(mounted.container).some((b) => b.textContent === integrateLabel), false);
+    assert.equal(buttons(mounted.container).some((b) => b.textContent === tr("isolation.commitAndPush")), false);
+    await act(async () => { upsertSession({ id: "screenshot-child", projectId: "ui-test", title: "Screenshots", status: "idle", createdAt: 1, updatedAt: 2, parentId: "waiting-on-shared-child", worktreePath: base.worktreePath }); await wait(); });
+    assert.ok(buttons(mounted.container).some((b) => b.textContent === integrateLabel), "the card returns once every subagent rests");
+  } finally {
+    await mounted.close();
+    api.isolationStatus = originalStatus;
+  }
+});
+
 test("a delegated child's card names its parent workspace instead of the managed branch", async () => {
   const originalStatus = api.isolationStatus;
   const isolation: SessionIsolation = { ...base, state: "merge-ready", targetBranch: "polyth/isolate/parent123456", originPath: "/repo-parent" };
