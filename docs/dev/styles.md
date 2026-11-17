@@ -605,8 +605,8 @@ paints `--look-overlay-solid` (the look's overlay material, opaque; default
 | `paper` | One flat sheet with no panels. The composer is a ruled line and the prompt a quoted passage. |
 | `line` | A hairline grid: columns and the composer form are drawn by lines, with 6px corners and mono figures. |
 | `air` | Soft islands with diffuse shadows and pill shapes, and no lines. |
-| `monolith` | Chrome on a deep backdrop; the conversation is one raised sheet with a short, light shadow. |
-| `monolith-reverse` | A lit chrome plane with the conversation recessed into it. Raised pieces (composer, prompt, cards) are made of the plane; navigator selection is carved down to the well. |
+| `monolith` | Chrome on a deep backdrop; the conversation is one raised sheet with a short, light shadow. Over a wallpaper the backdrop is the tinted image and the sheet frosts as a canvas does (`--look-veil`). |
+| `monolith-reverse` | A lit chrome plane with the conversation recessed into it. Raised pieces (composer, prompt, cards) are made of the plane; navigator selection is carved down to the well. Fields and control strips are a shallower cut (`--look-cut`: halfway to the well in dark, the well's gray in light). In dark mode the plane is `--bg` lit by a tenth of white, so quiet ink keeps 4.5:1 on it. Over a wallpaper the plane and its raised pieces are lit glass on `--look-veil-soft`, and the well and every cut and selection veil as the well does (`--look-veil`), so nothing on the glass is an opaque slot. |
 | `obsidian` | Rimmed glass with gradient edges, an aurora backdrop and a glowing composer. In light mode it reads as pearl. |
 | `editorial` | Source Serif 4 titles and prompts, a small-caps index navigator and a letter-field composer on warm paper. |
 
@@ -744,6 +744,20 @@ at ≥ 6.6:1.
   veil. A look that writes the conversation straight on its canvas (Paper,
   Line, Air, Obsidian, Editorial) veils that canvas with `--look-veil`, never
   `--look-veil-soft`.
+- The Monoliths' work plane is a window in the chrome, not a layer on it. On
+  the desktop (≥ 961px) `.app` is bare, and the chrome (`--look-chrome`:
+  Monolith's backdrop, Reverse's lit plane, both on `--look-veil-soft`; light
+  Monolith's on `--look-veil`) is the work plane's outer spread
+  (`0 0 0 100vmax`). It fills the window around the sheet or well, follows its
+  corners, and lets the plane's own veil (`--look-veil`) lie straight on the
+  image. Painted on `.app`, the chrome lay under the plane too and the two
+  veils stacked, so Reverse's well let only a few percent of the image
+  through. The navigator and the top rail come before the plane in the tree,
+  so they take `z-index: 1` (the launcher column already sits above). Tablets
+  and phones keep the chrome on `.app`. A docked window's plane still lies on
+  the spread, so over a wallpaper it shows a little less of the image than the
+  conversation does. Guards: `shellLooks.test.ts`,
+  `railLauncherStability.test.ts`.
 - A look layers over every **Style** (`html[data-theme-style]`): the macOS 27,
   Big Sur and Polyth recipes re-bind the same elements with `!important` at
   class strength (for example the borderless composer ring of

@@ -339,7 +339,13 @@ test("in the Monoliths a docked window lies on a plane like the conversation's, 
     const docked = await load(shape, "docked");
     const pane = docked.pane!;
     if (docked.paneFill !== docked.workspaceFill || /rgba\(0, 0, 0, 0\)/.test(docked.paneFill)) off.push(`${name(shape)}: the window's fill ${docked.paneFill}, the conversation's ${docked.workspaceFill}`);
-    if (docked.paneShadow !== docked.workspaceShadow) off.push(`${name(shape)}: the window's edge ${docked.paneShadow}, the conversation's ${docked.workspaceShadow}`);
+    // On the desktop the conversation's shadow ends in the chrome itself, a
+    // solid spread around the plane (shellLooks.css, "a window in the
+    // chrome"); its edge is everything before that.
+    const chrome = docked.workspaceShadow.match(/, ((?:color|rgba?)\([^)]*\)) 0px 0px 0px (\d+)px$/);
+    assert.ok(chrome && Number(chrome[2]) >= 900, `${name(shape)}: the conversation carries no chrome spread: ${docked.workspaceShadow}`);
+    const workspaceEdge = docked.workspaceShadow.slice(0, chrome!.index);
+    if (docked.paneShadow !== workspaceEdge) off.push(`${name(shape)}: the window's edge ${docked.paneShadow}, the conversation's ${workspaceEdge}`);
     // One foot line, and the sheet's gap to the strip, which stays chrome.
     if (!near(pane.bottom, docked.workspace.bottom)) off.push(`${name(shape)}: the window ends at ${pane.bottom}, the conversation at ${docked.workspace.bottom}`);
     const gap = shape.mirror ? pane.left - docked.strip.right : docked.strip.left - pane.right;
