@@ -285,6 +285,12 @@ function restingRect(element: Element): DOMRect {
 function measureZone(entry: ZoneEntry, draggedId: string): ZoneGeometry | null {
   const element = entry.element;
   if (!element) return null;
+  // A rail hidden while empty (shellLayout.css collapses an empty docked
+  // group) has no layout to measure: report none rather than a zero rect at
+  // the window's origin, so the rail is measured again once a drag brings it
+  // back instead of being targeted somewhere it is not.
+  const box = element.getBoundingClientRect();
+  if (box.width === 0 && box.height === 0) return null;
   const { axis, ids } = entry.spec;
   const centers: number[] = [];
   let itemSize = 0;
@@ -718,6 +724,11 @@ function finish(drop: boolean): void {
 
 function lift(source: HTMLElement, zoneId: RailZoneId, id: string, pointerId: number, x: number, y: number, touch: boolean): void {
   const origin = source.getBoundingClientRect();
+  // The drag flag first: a rail hidden while empty (shellLayout.css) comes
+  // back for the drag, and every zone must be measured with that layout, or a
+  // source rail the restored bar sits above keeps stale along-axis centres.
+  document.body.dataset.railDragging = "true";
+  document.body.dataset.railDragOver = zoneId;
   for (const entry of zones.values()) entry.geometry = measureZone(entry, id);
   const from = zones.get(zoneId)?.geometry;
   // Only an icon its rail can lose gets the pill that says so.
@@ -761,8 +772,6 @@ function lift(source: HTMLElement, zoneId: RailZoneId, id: string, pointerId: nu
       window.removeEventListener("blur", onBlur);
     },
   };
-  document.body.dataset.railDragging = "true";
-  document.body.dataset.railDragOver = zoneId;
   if (touch) tapFeedback();
   const index = from ? insertionIndex(from.centers, zones.get(zoneId)!.spec.axis === "x" ? x : y) : 0;
   emit({ id, from: zoneId, over: zoneId, index, phase: "dragging" });

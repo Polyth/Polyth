@@ -5535,7 +5535,16 @@ rendered once through `ShellDock` in `Sidebar` and
 vertical group reorders on the `y` axis and carries
 `data-orientation="vertical"`. "Start"/"end" are logical: a mirrored shell or
 an RTL locale swaps which screen edge they name, and the settings labels
-follow. Styling contract: [styles.md → Window layout](styles.md#window-layout).
+follow. A docked group with nothing on it is not a bar: an empty Tools row
+leaves no blank strip above the navigator, and an emptied actions rail no
+seam in the launcher strip. The group stays mounted, because a rail drag
+finds it by zone (`railDrag.ts`, and a rail with no box is measured again
+once it has one). The tools rail renders itself as soon as a drag offers it
+an icon, which un-empties its dock and brings the row back; the actions rail
+knows nothing of a drag, so its dock and its navigator row come back for any
+drag in the air (`body[data-rail-dragging]`) as the landing strip. Edit mode
+keeps the rows and the actions dock for their pencil. Styling contract:
+[styles.md → Window layout](styles.md#window-layout).
 
 **Optional and home-surface profiles** (`workbench/profileNavigation.ts`,
 `workbench/profileOffers.ts`). Two more presentation hints, again without the

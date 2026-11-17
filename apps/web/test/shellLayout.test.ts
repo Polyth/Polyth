@@ -152,3 +152,46 @@ test("the bar between full-height columns stops a column gap before the strip an
   // A pinned window takes its own lane and a closed one has no box.
   assert.deepEqual(shellBarReserves(lane, [{ left: 1440, right: 1880 }, { left: 0, right: 0 }], 8), { left: 0, right: 0 });
 });
+
+test("a docked group with nothing on it is not a bar, but is one while a launcher is dragged", async () => {
+  const css = await read("../src/shellLayout.css");
+  const scope = '[data-shell-layout="columns"], [data-shell-layout="bare"]';
+  const docked = {
+    // The tools rail renders itself in edit mode, so it needs no exception;
+    // the actions rail's pencil must survive, so it has one.
+    tools: { selector: `.shell-dock:empty`, editMode: true, duringDrag: false },
+    actions: { selector: `.shell-dock--actions:not(:has([data-rail-item], [data-rail-slot]))`, editMode: false, duringDrag: true },
+    head: { selector: `.shell-column-head:not(:has(.view-switcher, [data-rail-item], [data-rail-slot]))`, editMode: false, duringDrag: false },
+    foot: { selector: `.shell-column-foot:not(:has([data-rail-item], [data-rail-slot], .shell-column-account))`, editMode: false, duringDrag: true },
+  };
+  // Read the declarations of the rule a selector belongs to (its selector
+  // list ends at the rule's opening brace).
+  const block = (selector: string) => {
+    const at = css.indexOf(selector);
+    assert.ok(at >= 0, `missing rule ${selector}`);
+    const open = css.indexOf("{", at);
+    const close = css.indexOf("}", open);
+    assert.ok(open >= 0 && close > open, `unterminated rule ${selector}`);
+    return css.slice(open, close);
+  };
+  for (const [name, { selector, editMode, duringDrag }] of Object.entries(docked)) {
+    // An empty group reserves no space in a window layout...
+    const hidden = `${editMode ? "body:is" : "body:not([data-ui-editing]):is"}(${scope}) ${selector}`;
+    assert.ok(block(hidden).includes("display: none"), `${name} is hidden while empty`);
+    // ...but the actions bar and its row come back as the landing strip while
+    // a drag is in the air, so the first launcher dropped there has somewhere
+    // to land. The tools bar needs no rule: its rail renders itself while a
+    // drag offers it an icon (`receiving`), which un-empties the dock.
+    const restoreSelector = `body[data-rail-dragging]:is(${scope}) ${selector}`;
+    if (duringDrag) assert.ok(block(restoreSelector).includes("display: flex"), `${name} returns for a drag`);
+    else assert.ok(!css.includes(restoreSelector), `${name} stays hidden for a drag, keeping unrelated drags still`);
+  }
+  // Edit mode keeps the rows and the actions dock: the pencil in a group
+  // emptied of its last item is the way to add one back.
+  assert.ok(!css.includes(`body:is(${scope}) .shell-column-head`), "the head is not collapsed for edit mode");
+  assert.ok(!css.includes(`body:is(${scope}) .shell-dock--actions`), "the actions dock is not collapsed for edit mode");
+  // The rows are hidden, never unmounted: rail drag reaches them by zone, and
+  // railDrag.ts measures a rail again once it has layout.
+  const drag = await read("../src/railDrag.ts");
+  assert.match(drag, /if \(box\.width === 0 && box\.height === 0\) return null;/);
+});

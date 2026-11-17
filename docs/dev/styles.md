@@ -939,6 +939,20 @@ and the absence of colour literals.
   `bare` does the same; its bar is only a quiet chat title line (and the Space
   switcher with several Spaces), and without either the workspace reaches the
   top.
+- A docked group with nothing on it draws no bar, padding or seam, and the
+  navigator row that carries it goes with it (`shellLayout.css`: an empty
+  `.shell-dock`, a `.shell-dock--actions` without a launcher, an empty
+  `.shell-column-head`/`-foot`). It is hidden with `display: none`, never
+  unmounted, because rail drag targets a rail by zone. The tools rail renders
+  itself while a drag offers it an icon, which un-empties its dock; the
+  actions rail cannot know that, so its dock and navigator row come back for
+  any drag in the air (`body[data-rail-dragging]`) and the new test asserts
+  unrelated drags leave the tools row untouched. Edit mode keeps the rows and
+  the actions dock for their pencil. `railDrag.ts` sets that flag before it
+  measures any zone (so a restored bar is laid out first) and measures a rail
+  with no box as no geometry, so a group that reappears mid-drag is measured
+  where it now is rather than at the window origin. Pinned by
+  `shellLayout.test.ts` and `railDragHiddenZone.test.ts`.
 - Up to `1400px` (the tablet band of the wide shell) the idle launcher keeps
   its floating cluster; full-height strip insets apply from `1401px`.
 - Desktop app: `.app::before` is the window drag band (the title bar or the

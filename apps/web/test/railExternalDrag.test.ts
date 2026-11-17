@@ -48,11 +48,19 @@ function Rail({ ids, accepts, onCommit }: { ids: string[]; accepts: (id: string)
   );
 }
 
-/** Lay the items out along the rail axis so insertion indices are real. */
+/** Lay the items out along the rail axis so insertion indices are real, and
+ *  give the rail itself a box: a rail with no layout (hidden while empty) is
+ *  not a drop target (railDrag.ts measureZone), which happy-dom cannot tell
+ *  apart from a rendered one without this. */
 function stack(top: number, height: number) {
-  for (const [index, item] of [...document.querySelectorAll<HTMLElement>("[data-rail-item]")].entries()) {
+  const items = [...document.querySelectorAll<HTMLElement>("[data-rail-item]")];
+  for (const [index, item] of items.entries()) {
     const rect = { left: 0, top: top + index * height, width: 32, height, right: 32, bottom: top + (index + 1) * height, x: 0, y: top + index * height };
     item.getBoundingClientRect = () => rect as DOMRect;
+  }
+  for (const rail of document.querySelectorAll<HTMLElement>(".rail")) {
+    const rect = { left: 0, top, width: 32, height: Math.max(height, items.length * height), right: 32, bottom: top + items.length * height, x: 0, y: top };
+    rail.getBoundingClientRect = () => rect as DOMRect;
   }
 }
 
