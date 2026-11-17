@@ -38,7 +38,11 @@ everything in `POLYTH_DATA_DIR`.
 
 `npm run build:server` builds one archive for the machine it runs on:
 `apps/server/release/polyth-server-<version>-<platform>-<arch>.tar.gz` and its
-`.sha256`. Inside is the server with every server package compiled in, the web app,
+`.sha256`, plus the same tree split for npm in `apps/server/release/npm/`: `polyth`
+(the code and the `polyth` command, identical on every platform) and
+`@polyth/server-<platform>-<arch>` (`resources/` for one platform, installed by npm
+only there through `os`/`cpu`). The server takes `resources/` beside itself, else
+from that package, and refuses one of another version. Inside is the server with every server package compiled in, the web app,
 `polyth-link-host`, the runtime supervisor (Linux) and the four runtime dependencies
 that cannot be bundled (`node-pty`, `playwright-core`, `esbuild`, `typescript`). The
 machine that runs it needs Node.js 22.16 or newer and the agent CLIs, nothing else:

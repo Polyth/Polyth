@@ -1,9 +1,11 @@
-// Smoke test of a packaged server archive, as a user gets it: unpack it, start
-// it on a free loopback port with an empty data directory, complete first-run
-// setup through the same HTTP API the setup page uses, restart into the full
-// server (every package), sign in and make an authenticated request.
+// Smoke test of a packaged server, as a user gets it: unpack the archive (or
+// install the npm packages), start it on a free loopback port with an empty
+// data directory, complete first-run setup through the same HTTP API the setup
+// page uses, restart into the full server (every package), sign in and make an
+// authenticated request.
 //   node --experimental-strip-types apps/server/smoke.ts [archive.tar.gz]
-// Without an argument it takes the archive in apps/server/release.
+//   node --experimental-strip-types apps/server/smoke.ts --npm [dir with the .tgz files]
+// Without a path it takes the build's output in apps/server/release.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { accessSync, constants, existsSync, readdirSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -12,9 +14,13 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const releaseDir = join(import.meta.dirname, "release");
-const archive = resolve(process.argv[2]
-  ?? join(releaseDir, (existsSync(releaseDir) ? readdirSync(releaseDir) : []).find((file) => file.endsWith(".tar.gz")) ?? "missing.tar.gz"));
-if (!existsSync(archive)) throw new Error(`no server archive at ${archive}`);
+const npmMode = process.argv[2] === "--npm";
+const given = npmMode ? process.argv[3] : process.argv[2];
+const source = resolve(given ?? (npmMode
+  ? join(releaseDir, "npm")
+  : join(releaseDir, (existsSync(releaseDir) ? readdirSync(releaseDir) : []).find((file) => file.endsWith(".tar.gz")) ?? "missing.tar.gz")));
+if (!existsSync(source)) throw new Error(`nothing to test at ${source}`);
+const target = `${process.platform}-${process.arch}`;
 
 const freePort = () => new Promise<number>((resolvePort, reject) => {
   const probe = createServer();
@@ -59,23 +65,44 @@ function browser(origin: string) {
 const work = await mkdtemp(join(tmpdir(), "polyth-server-smoke-"));
 const running = new Set<ChildProcess>();
 try {
-  const unpacked = spawnSync("tar", ["-xzf", archive, "-C", work], { stdio: "inherit" });
-  check(unpacked.status === 0, "archive unpacks");
-  const root = join(work, "polyth");
-  const build = JSON.parse(await readFile(join(root, "BUILD.json"), "utf8")) as { version: string; target: string };
-  check(build.target === `${process.platform}-${process.arch}`, `built for this machine (${build.target})`);
+  let root: string;
+  let resources: string;
+  if (npmMode) {
+    const packages = readdirSync(source).filter((file) => file.endsWith(".tgz"));
+    const main = packages.find((file) => /^polyth-\d/.test(file));
+    const platform = packages.find((file) => file.startsWith(`polyth-server-${target}-`));
+    check(main && platform, `npm packages for ${target} are present`);
+    const prefix = join(work, "install");
+    // Scripts stay off: node-pty may not build here, and the server must run without it.
+    const installed = spawnSync("npm", [
+      "install", "--prefix", prefix, "--ignore-scripts", "--no-audit", "--no-fund", "--prefer-offline",
+      join(source, main!), join(source, platform!),
+    ], { stdio: "inherit", shell: process.platform === "win32" });
+    check(installed.status === 0, "npm installs polyth with this platform's package");
+    root = join(prefix, "node_modules", "polyth");
+    resources = join(prefix, "node_modules", "@polyth", `server-${target}`, "resources");
+    check(!existsSync(join(root, "resources")) && !existsSync(join(root, "node_modules", "polyth-link")), "the main package carries no platform files");
+  } else {
+    const unpacked = spawnSync("tar", ["-xzf", source, "-C", work], { stdio: "inherit" });
+    check(unpacked.status === 0, "archive unpacks");
+    root = join(work, "polyth");
+    resources = join(root, "resources");
+    const build = JSON.parse(await readFile(join(root, "BUILD.json"), "utf8")) as { version: string; target: string };
+    check(build.target === target, `built for this machine (${build.target})`);
+  }
   const exe = process.platform === "win32" ? ".exe" : "";
-  const linkHost = join(root, "resources", "polyth-link", `polyth-link-host${exe}`);
+  const linkHost = join(resources, "polyth-link", `polyth-link-host${exe}`);
   check(existsSync(linkHost), "carries polyth-link-host");
   if (process.platform !== "win32") accessSync(linkHost, constants.X_OK);
   if (process.platform === "linux") {
-    const supervisor = join(root, "resources", "runtime-supervisor", build.target, "polyth-supervisor");
+    const supervisor = join(resources, "runtime-supervisor", target, "polyth-supervisor");
     check(existsSync(supervisor), "carries the runtime supervisor");
     accessSync(supervisor, constants.X_OK);
   }
   const polyth = join(root, "bin", "polyth.mjs");
+  const { version } = JSON.parse(await readFile(join(root, "BUILD.json"), "utf8")) as { version: string };
   const cli = spawnSync(process.execPath, [polyth, "--version"], { encoding: "utf8" });
-  check(cli.status === 0 && cli.stdout.trim().length > 0, `the polyth command runs (${cli.stdout.trim()})`);
+  check(cli.status === 0 && cli.stdout.trim() === version, `polyth --version prints the release (${cli.stdout.trim()})`);
 
   const port = await freePort();
   const base = `http://127.0.0.1:${port}`;
@@ -139,12 +166,13 @@ try {
     ["polyth.sessions", "polyth.terminal", "polyth.git"].every((id) => capabilities.includes(id)),
     `full server: bundled packages are loaded (${capabilities.length} capabilities)`,
   );
+  check(full.health?.version === version, `full server: reports version ${String(full.health?.version)}`);
   const signedIn = browser(base);
   await signedIn("/api/auth/status");
   check((await signedIn("/api/auth/login", { login: "owner", password: "smoke test passphrase" })).status === 200, "full server: the owner signs in");
   check((await signedIn("/api/projects")).status === 200, "full server: an authenticated API request succeeds");
   await full.stop();
-  console.log(`smoke passed: ${archive}`);
+  console.log(`smoke passed: ${source}`);
 } finally {
   for (const child of running) child.kill("SIGKILL");
   await rm(work, { recursive: true, force: true });

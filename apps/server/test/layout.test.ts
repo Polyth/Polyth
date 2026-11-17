@@ -6,9 +6,14 @@ import {
   bundleLayout,
   bundleTarget,
   LAUNCHER,
+  NPM_README,
+  npmMainPackageJson,
   PACKAGE_NAME,
+  platformPackageJson,
+  platformPackageName,
   releaseName,
   RUNTIME_EXTERNALS,
+  SERVER_TARGETS,
   stagePackageJson,
 } from "../src/layout.ts";
 
@@ -51,6 +56,34 @@ test("the package root installs the polyth command and pins its runtime external
   assert.equal("private" in manifest, false, "publishable");
   assert.match(LAUNCHER, /^#!\/usr\/bin\/env node\n/);
   assert.match(LAUNCHER, /import "\.\.\/dist\/cli\.mjs";/);
+});
+
+test("npm splits the tree: the code once, the resources per platform", () => {
+  const main = npmMainPackageJson({
+    version: "1.2.356",
+    dependencies: { typescript: "5.9.3", esbuild: "0.28.2", "playwright-core": "1.65.0" },
+    optionalDependencies: { "node-pty": "1.1.0" },
+    nodeEngine: ">=22.16.0",
+  });
+  assert.equal(main.name, "polyth");
+  assert.deepEqual(main.bin, { polyth: "bin/polyth.mjs" });
+  assert.equal("private" in main, false);
+  assert.deepEqual(Object.keys(main.dependencies), ["esbuild", "playwright-core", "typescript"]);
+  assert.deepEqual(main.optionalDependencies, {
+    "@polyth/server-darwin-arm64": "1.2.356",
+    "@polyth/server-darwin-x64": "1.2.356",
+    "@polyth/server-linux-arm64": "1.2.356",
+    "@polyth/server-linux-x64": "1.2.356",
+    "node-pty": "1.1.0",
+  }, "every platform package at exactly this version; node-pty may fail to build");
+  for (const target of SERVER_TARGETS) assert.equal(bundleTarget(...target.split("-") as [NodeJS.Platform, string]), target);
+
+  const platform = platformPackageJson("linux-arm64", "1.2.356");
+  assert.equal(platform.name, platformPackageName("linux-arm64"));
+  assert.equal(platform.name, "@polyth/server-linux-arm64");
+  assert.deepEqual([platform.os, platform.cpu], [["linux"], ["arm64"]], "npm installs it only on its platform");
+  assert.equal(platform.version, "1.2.356");
+  assert.match(NPM_README, /npm install --global polyth/);
 });
 
 test("the server keeps outside its bundle what Desktop keeps outside its own", () => {

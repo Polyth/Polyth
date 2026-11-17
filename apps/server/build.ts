@@ -1,6 +1,8 @@
 // Builds the packaged Polyth server for this machine's platform:
 //   apps/server/dist/polyth/                                  the install tree (src/layout.ts)
 //   apps/server/release/polyth-server-<version>-<target>.tar.gz (+ .sha256)
+//   apps/server/release/npm/polyth-<version>.tgz               npm: the code
+//   apps/server/release/npm/polyth-server-<target>-<version>.tgz npm: this platform's resources
 // Needs the web build first (`npm run build:server` runs both). POLYTH_VERSION
 // sets the version (release builds); POLYTH_LINK_BIN_DIR takes an already
 // built polyth-link-host instead of running cargo.
@@ -9,13 +11,16 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { chmod, copyFile, cp, mkdir, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { writeThirdPartyNotices } from "../../scripts/third-party-notices.mjs";
 import { serverPackagesPlugin } from "../../scripts/server-packages-bundle.ts";
 import {
   bundleLayout,
   bundleTarget,
   LAUNCHER,
+  NPM_README,
+  npmMainPackageJson,
+  platformPackageJson,
   releaseName,
   RUNTIME_EXTERNALS,
   stagePackageJson,
@@ -258,3 +263,47 @@ if (packed.status !== 0) throw new Error(`failed to write ${archive}`);
 const digest = createHash("sha256").update(await readFile(archive)).digest("hex");
 await writeFile(`${archive}.sha256`, `${digest}  ${name}.tar.gz\n`);
 console.log(`Polyth server ${version} (${target}): ${archive}`);
+
+// ---- npm packages ---------------------------------------------------------
+// The same tree split for npm (src/layout.ts): `polyth` with the code, the
+// same on every platform (release CI publishes the linux-x64 runner's), and
+// `@polyth/server-<target>` with this platform's resources.
+
+const npmStage = join(distRoot, "npm");
+const mainTree = join(npmStage, "polyth");
+const platformTree = join(npmStage, `server-${target}`);
+const inside = (path: string, dir: string) => path === dir || path.startsWith(`${dir}${sep}`);
+await cp(layout.root, mainTree, {
+  recursive: true,
+  filter: (source) => {
+    const rel = relative(layout.root, source);
+    return !inside(rel, "node_modules") && !inside(rel, "resources");
+  },
+});
+await copyFile(join(layout.resources, "THIRD_PARTY_NOTICES.txt"), join(mainTree, "THIRD_PARTY_NOTICES.txt"));
+await writeFile(join(mainTree, "README.md"), NPM_README);
+// The main package is not built for one platform.
+await writeFile(join(mainTree, "BUILD.json"), `${JSON.stringify({ version, commit, target: "npm" }, null, 2)}\n`);
+await writeFile(join(mainTree, "package.json"), `${JSON.stringify(npmMainPackageJson({
+  version,
+  dependencies: Object.fromEntries(RUNTIME_EXTERNALS.filter((external) => external !== "node-pty")
+    .map((external) => [external, byName.get(external)!])),
+  optionalDependencies: { "node-pty": byName.get("node-pty")! },
+  nodeEngine: rootManifest.engines.node,
+}), null, 2)}\n`);
+
+await cp(layout.resources, join(platformTree, "resources"), { recursive: true });
+await copyFile(join(repoRoot, "LICENSE"), join(platformTree, "LICENSE"));
+await writeFile(join(platformTree, "package.json"), `${JSON.stringify(platformPackageJson(target, version), null, 2)}\n`);
+
+const npmOut = join(releaseDir, "npm");
+await mkdir(npmOut, { recursive: true });
+for (const tree of [mainTree, platformTree]) {
+  const packed = spawnSync("npm", ["pack", tree, "--pack-destination", npmOut, "--json"], {
+    encoding: "utf8",
+    shell: process.platform === "win32",
+  });
+  if (packed.status !== 0) throw new Error(`npm pack ${tree} failed: ${packed.stderr}`);
+  const [file] = JSON.parse(packed.stdout) as Array<{ filename: string; size: number; unpackedSize: number }>;
+  console.log(`npm package: ${join(npmOut, file!.filename)} (${Math.round(file!.size / 1_048_576)} MB, ${Math.round(file!.unpackedSize / 1_048_576)} MB unpacked)`);
+}
