@@ -198,7 +198,7 @@ test("a signed-in row names the app shell from its token, never the browser it e
     mobile: ["settings.accesspage.polythMobile", "Polyth Mobile"],
   } as const;
   for (const [kind, [key, label]] of Object.entries(shells)) {
-    assert.match(own, new RegExp(`(?:^|\\s)"?${kind}"?: "${key.replace(/\./g, "\\.")}"`), kind);
+    assert.match(own, new RegExp(`(?:^|\\s)"?${kind}"?: "${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`), kind);
     assert.equal(en[key as keyof typeof en], label);
   }
 });
