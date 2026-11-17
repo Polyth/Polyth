@@ -635,6 +635,15 @@ tinted lines, the removed text in place as a red block, a gutter bar per change
 with the exact-snapshot hunk API (refused while the buffer has unsaved edits);
 Keep only hides that hunk on this device until Git shows a different one there.
 A floating review bar steps through changes and through the chat's edited files.
+Work a chat already committed or staged still shows: for a file with chat
+edits, Files also fetches `GET /api/git/diff?since=<first edit, epoch ms>`,
+the working tree against the newest first-parent commit no later than that
+moment (HEAD when none is that old; the response names it as `base`).
+`historyHunks` keeps only the lines the working-tree diff does not cover (kept
+hunks included) and attributes them without the single-chat fallback, because
+other people's commits share that diff. Those hunks are `inert`: a gutter bar
+in the chat's colour with no tint, no Undo/Keep chips and no inspector, labelled
+"Committed or staged"; Keep all hides them like any other hunk.
 
 **Editing.** CodeMirror draws its caret as a border, so the editor keeps the
 caret, drop cursor and the border-only states (matching bracket, search match,

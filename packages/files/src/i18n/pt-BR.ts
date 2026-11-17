@@ -123,6 +123,7 @@ export const ptBR: FilesMessages = {
   "files.changes.legend": "Chats com alterações",
   "files.changes.notFromChat": "Não alterado por um chat",
   "files.changes.other": "Outras alterações",
+  "files.changes.committed": "Confirmado ou preparado",
   "files.changes.undo": "Desfazer",
   "files.changes.keep": "Manter",
   "files.changes.inspect": "Mostrar alteração",

@@ -123,6 +123,7 @@ export const es: FilesMessages = {
   "files.changes.legend": "Chats con cambios",
   "files.changes.notFromChat": "No modificado por un chat",
   "files.changes.other": "Otros cambios",
+  "files.changes.committed": "Confirmado o preparado",
   "files.changes.undo": "Deshacer",
   "files.changes.keep": "Conservar",
   "files.changes.inspect": "Mostrar cambio",

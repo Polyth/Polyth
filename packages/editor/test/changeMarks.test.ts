@@ -95,6 +95,23 @@ test("marks: tinted changed lines, an in-place removed block and one gutter bar 
   assert.equal(actionWidgets, 0);
 });
 
+test("an inert (committed) hunk draws its bar as plain text, never a button", () => {
+  const doc = Text.of(["a", "B", "c", ""]);
+  const set = changeSet(doc.toString());
+  const live = buildChangeMarks(doc, set);
+  const inert = buildChangeMarks(doc, { ...set, hunks: set.hunks.map((hunk) => ({ ...hunk, plain: true, inert: true })) });
+  const tags = (marks: ReturnType<typeof buildChangeMarks>) => {
+    const found: string[] = [];
+    marks.bars.between(0, doc.length, (_from, _to, marker) => {
+      const node = marker.toDOM!(undefined as never) as HTMLElement;
+      found.push(`${node.tagName.toLowerCase()}:${node.title}`);
+    });
+    return found;
+  };
+  assert.deepEqual(tags(live), ["button:Changed by This chat · Show change"]);
+  assert.deepEqual(tags(inert), ["span:Changed by This chat"]);
+});
+
 test("marks follow typing and clear on a null set", () => {
   const doc = "a\nB\nc\n";
   let state = EditorState.create({ doc, extensions: [changeMarksExtension] });

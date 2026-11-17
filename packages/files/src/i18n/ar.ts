@@ -123,6 +123,7 @@ export const ar: FilesMessages = {
   "files.changes.legend": "محادثات بها تغييرات",
   "files.changes.notFromChat": "تغيير لم تُجرِه محادثة",
   "files.changes.other": "تغييرات أخرى",
+  "files.changes.committed": "تم الإيداع أو التجهيز",
   "files.changes.undo": "تراجع",
   "files.changes.keep": "إبقاء",
   "files.changes.inspect": "عرض التغيير",

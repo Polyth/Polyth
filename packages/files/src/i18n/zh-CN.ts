@@ -123,6 +123,7 @@ export const zhCN: FilesMessages = {
   "files.changes.legend": "有更改的聊天",
   "files.changes.notFromChat": "不是聊天所做的更改",
   "files.changes.other": "其他更改",
+  "files.changes.committed": "已提交或已暂存",
   "files.changes.undo": "撤销",
   "files.changes.keep": "保留",
   "files.changes.inspect": "显示更改",

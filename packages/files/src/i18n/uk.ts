@@ -123,6 +123,7 @@ export const uk: FilesMessages = {
   "files.changes.legend": "Чати зі змінами",
   "files.changes.notFromChat": "Змінено не чатом",
   "files.changes.other": "Інші зміни",
+  "files.changes.committed": "Закомічено або в індексі",
   "files.changes.undo": "Скасувати",
   "files.changes.keep": "Залишити",
   "files.changes.inspect": "Показати зміну",

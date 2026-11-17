@@ -101,6 +101,9 @@ export interface EditorChangeHunk {
   label: string;
   /** Nobody the owner tracks made this change: draw it without inline actions. */
   plain?: boolean;
+  /** Shown for context only (already committed): no inline actions, and its
+   *  gutter bar is not a button. */
+  inert?: boolean;
 }
 
 /** Change highlighting a resource owner (Files) supplies. The editor only

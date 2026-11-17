@@ -16,6 +16,7 @@ const loaders: Record<string, () => Promise<Extension>> = {
   json: () => import("@codemirror/lang-json").then((m) => m.json()),
   yaml: () => import("@codemirror/lang-yaml").then((m) => m.yaml()),
   markdown: () => import("@codemirror/lang-markdown").then((m) => m.markdown()),
+  python: () => import("./python.ts").then((m) => m.python()),
 };
 
 const cache = new Map<string, Promise<Extension>>();
@@ -47,6 +48,7 @@ const LANGUAGES: Record<string, Omit<EditorLanguage, "load"> & { loaderId: strin
   json: { id: "json", label: "JSON", loaderId: "json" },
   yaml: { id: "yaml", label: "YAML", loaderId: "yaml" },
   markdown: { id: "markdown", label: "Markdown", loaderId: "markdown" },
+  python: { id: "python", label: "Python", loaderId: "python" },
 };
 
 const BY_EXTENSION: Record<string, string> = {
@@ -57,6 +59,7 @@ const BY_EXTENSION: Record<string, string> = {
   json: "json",
   yaml: "yaml", yml: "yaml",
   md: "markdown", markdown: "markdown",
+  py: "python", pyi: "python", pyw: "python",
 };
 
 export const PLAIN_TEXT_LABEL = "Plain text";

@@ -218,7 +218,11 @@ export interface GitService {
    *  could call it a work tree. Costs a few `stat`s, not a process. */
   mayBeWorkTree?(root: string): Promise<boolean>;
   status(root: string): Promise<GitStatus>;
-  diff(root: string, opts?: { path?: string; staged?: boolean; ignoreWhitespace?: boolean }): Promise<{ path: string | null; diff: string }>;
+  /** Working tree against the index; `staged` diffs the index against HEAD.
+   *  `since` (epoch ms) diffs the working tree against the commit HEAD's
+   *  first-parent line had reached by then, so committed, staged and unstaged
+   *  changes since that moment all show; `base` names that commit. */
+  diff(root: string, opts?: { path?: string; staged?: boolean; ignoreWhitespace?: boolean; since?: number }): Promise<{ path: string | null; diff: string; base?: string }>;
   show(root: string, sha: string, opts?: { ignoreWhitespace?: boolean }): Promise<{ sha: string; diff: string }>;
   /** All uncommitted changes (staged + unstaged) against HEAD; plain `git diff` on a fresh repo. */
   diffHead(root: string): Promise<string>;
@@ -1429,16 +1433,30 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
       const path = o.path ?? null;
       const args = ["diff", "--no-color"];
       if (o.ignoreWhitespace) args.push("--ignore-all-space");
-      if (o.staged) args.push("--cached");
+      let base: string | null = null;
+      if (o.since !== undefined) {
+        if (o.staged) throw Object.assign(new Error("since and staged cannot be combined"), { code: "invalid-input" });
+        if (!Number.isSafeInteger(o.since) || o.since <= 0) throw Object.assign(new Error("since must be a positive epoch time in ms"), { code: "invalid-input" });
+        // The first-parent ancestor committed no later than `since`: commits
+        // made after it (by the chat or anyone) fall inside the diff. No commit
+        // that old: HEAD, so staged and unstaged changes still show.
+        const before = await readGit(root, ["rev-list", "-1", "--first-parent", `--before=@${Math.floor(o.since / 1000)}`, "HEAD"], true);
+        const sha = before.stdout.trim();
+        base = before.code === 0 && COMMIT_ID.test(sha) ? sha.toLowerCase() : await commitOf(root, "HEAD");
+        if (base) args.push(base);
+      } else if (o.staged) {
+        args.push("--cached");
+      }
       if (path) args.push("--", path);
       const r = await run(root, args, true);
-      if (r.stdout.trim() || !path) return { path, diff: r.stdout };
+      const withBase = (diff: string) => ({ path, diff, ...(base ? { base } : {}) });
+      if (r.stdout.trim() || !path) return withBase(r.stdout);
       // Only an *untracked* file needs a synthesised diff; an empty diff for a
       // tracked file genuinely means "no changes in this view".
       const tracked = (await run(root, ["ls-files", "--error-unmatch", "--", path], true)).code === 0;
-      if (tracked) return { path, diff: "" };
+      if (tracked) return withBase("");
       const untracked = await run(root, ["diff", "--no-color", "--no-index", "--", "/dev/null", path], true);
-      return { path, diff: untracked.stdout };
+      return withBase(untracked.stdout);
     },
 
     async show(root, sha, o = {}) {

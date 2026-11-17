@@ -843,6 +843,7 @@ export function gitRoutes(deps: {
         ...(query("path") ? { path: assertGitRelativePath(query("path")!) } : {}),
         staged: query("staged") === "true",
         ignoreWhitespace: query("ignoreWhitespace") === "true",
+        ...(query("since") ? { since: Number(query("since")) } : {}),
       }));
       return true;
     }

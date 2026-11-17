@@ -53,7 +53,7 @@ import {
   TreeViewIcon,
   type MenuEntry,
 } from "../../../../apps/web/src/components/ui/index.ts";
-import { attributeChanges, type AttributedHunk } from "./changeAttribution.ts";
+import { attributeChanges, historyHunks, type AttributedHunk } from "./changeAttribution.ts";
 import ImageViewer from "./ImageViewer.tsx";
 import CsvPreview from "./CsvPreview.tsx";
 import SymbolsPanel from "./SymbolsPanel.tsx";
@@ -132,9 +132,17 @@ const FILES_GROUP_ID = "files";
 
 interface GitFileDiff { diff: string; snapshotDigest: string }
 
-/** The file's working-tree diff against the index (what Undo discards). */
-async function fetchFileDiff(projectId: string, sessionId: string | null, repositoryId: string | undefined, path: string): Promise<GitFileDiff | null> {
-  const query = new URLSearchParams({ projectId, path, ...(sessionId ? { sessionId } : {}), ...(repositoryId ? { repositoryId } : {}) });
+/** The file's working-tree diff against the index (what Undo discards), or
+ *  with `since` against the commit HEAD had reached then (what was committed
+ *  or staged since shows too). */
+async function fetchFileDiff(projectId: string, sessionId: string | null, repositoryId: string | undefined, path: string, since?: number): Promise<GitFileDiff | null> {
+  const query = new URLSearchParams({
+    projectId,
+    path,
+    ...(sessionId ? { sessionId } : {}),
+    ...(repositoryId ? { repositoryId } : {}),
+    ...(since !== undefined ? { since: String(since) } : {}),
+  });
   const response = await fetch(`/api/git/diff?${query}`);
   if (!response.ok) return null;
   const body = await response.json() as { diff?: unknown; snapshotDigest?: unknown };
@@ -143,8 +151,12 @@ async function fetchFileDiff(projectId: string, sessionId: string | null, reposi
     : null;
 }
 
+/** A hunk's id in the editor's change set; history ids never match a pending one. */
+const hunkIdOf = (hunk: AttributedHunk): string => `${hunk.history ? "h" : ""}${hunk.index}:${hunk.digest}`;
+
 interface ChangeReview {
   set: EditorChangeSet;
+  /** Pending hunks (Undo/Keep) and committed history, in line order. */
   hunks: readonly AttributedHunk[];
   /** Chats that own at least one shown change, in colour order. */
   owners: readonly CheckoutSession[];
@@ -164,15 +176,20 @@ function changeReview(
   const toneIndex = new Map<string, number>();
   const owners = new Map<string, CheckoutSession>();
   let unattributed = false;
-  const toneOf = (owner: string | null): number => {
+  // Committed history keeps its chat's colour but only as a gutter bar: the
+  // tint and the Undo/Keep chips mark what is still pending.
+  const toneOf = (owner: string | null, history: boolean): number => {
     const session = owner ? byId.get(owner) : undefined;
-    const key = session?.sessionId ?? "";
+    const key = `${history ? "h" : ""}${session?.sessionId ?? ""}`;
     const known = toneIndex.get(key);
     if (known !== undefined) return known;
     toneIndex.set(key, tones.length);
-    tones.push(session
-      ? { color: sessionToneColor(session.tone), label: changedByLabel([session]), attributed: true }
-      : { color: sessionToneColor(-1), label: tr("files.changes.notFromChat"), attributed: false });
+    const label = session ? changedByLabel([session]) : tr("files.changes.notFromChat");
+    tones.push({
+      color: sessionToneColor(session ? session.tone : -1),
+      label: history ? `${tr("files.changes.committed")} · ${label}` : label,
+      attributed: Boolean(session) && !history,
+    });
     return tones.length - 1;
   };
   const note = (owner: string | null) => {
@@ -181,32 +198,35 @@ function changeReview(
     else unattributed = true;
   };
   const editorHunks = hunks.map((hunk) => {
+    const history = hunk.history === true;
     const hunkOwners = new Map<string, CheckoutSession>();
     let plain = false;
     const lines = hunk.lines.map((entry) => {
       note(entry.owner);
       const session = entry.owner ? byId.get(entry.owner) : undefined;
       if (session) hunkOwners.set(session.sessionId, session); else plain = true;
-      return { line: entry.line, tone: toneOf(entry.owner) };
+      return { line: entry.line, tone: toneOf(entry.owner, history) };
     });
     const removed = hunk.removed.map((block) => {
       note(block.owner);
       const session = block.owner ? byId.get(block.owner) : undefined;
       if (session) hunkOwners.set(session.sessionId, session); else plain = true;
-      return { line: block.line, text: block.text, tone: toneOf(block.owner) };
+      return { line: block.line, text: block.text, tone: toneOf(block.owner, history) };
     });
     const labels = [
+      ...(history ? [tr("files.changes.committed")] : []),
       ...(hunkOwners.size > 0 ? [changedByLabel([...hunkOwners.values()].sort((left, right) => left.tone - right.tone))] : []),
       ...(plain ? [tr("files.changes.notFromChat")] : []),
     ];
     return {
-      id: `${hunk.index}:${hunk.digest}`,
+      id: hunkIdOf(hunk),
       lines,
       removed,
       anchorLine: hunk.anchorLine,
       label: labels.join(" · "),
       // A change no chat made keeps the plain Git gutter: no Undo/Keep chips.
-      ...(hunkOwners.size === 0 ? { plain: true } : {}),
+      // A committed one has nothing left to undo or inspect in the worktree.
+      ...(history ? { plain: true, inert: true } : hunkOwners.size === 0 ? { plain: true } : {}),
     };
   });
   const signature = editorHunks.map((hunk) =>
@@ -332,9 +352,18 @@ export default function FilePane({ projectId, sessionId, repositoryId, resource:
   const checkout = useCheckoutFile(checkoutKey, path);
   const editsVersion = useSyncExternalStore(subscribeCheckoutEdits, checkoutEditsVersion);
   const [gitDiff, setGitDiff] = useState<(GitFileDiff & { scope: string }) | null>(null);
+  // Since the first chat edit of this file: what the chats' work looks like
+  // after a commit or `git add` took it out of the working-tree diff.
+  const [historyDiff, setHistoryDiff] = useState<(GitFileDiff & { scope: string }) | null>(null);
   const [diffToken, setDiffToken] = useState(0);
   const [hunkCursor, setHunkCursor] = useState(-1);
+  // A live edit can still lack its time (0): it says nothing about the start.
+  const firstEdit = (checkout.file?.edits ?? []).reduce<number | undefined>(
+    (first, edit) => edit.time > 0 && (first === undefined || edit.time < first) ? edit.time : first,
+    undefined,
+  );
   const diffScope = `${checkoutKey}\0${path}`;
+  const historyScope = `${diffScope}\0${firstEdit ?? ""}`;
   const wantsDiff = visible && editing && snap.status === "ready" && !readOnly && !snap.binary && !snap.truncated;
   useEffect(() => {
     if (!wantsDiff) return;
@@ -342,9 +371,15 @@ export default function FilePane({ projectId, sessionId, repositoryId, resource:
     void fetchFileDiff(projectId, sessionId, repositoryId, path)
       .then((result) => { if (!cancelled) setGitDiff(result ? { ...result, scope: diffScope } : null); })
       .catch(() => { if (!cancelled) setGitDiff(null); });
+    if (firstEdit === undefined) setHistoryDiff(null);
+    else {
+      void fetchFileDiff(projectId, sessionId, repositoryId, path, Math.floor(firstEdit))
+        .then((result) => { if (!cancelled) setHistoryDiff(result ? { ...result, scope: historyScope } : null); })
+        .catch(() => { if (!cancelled) setHistoryDiff(null); });
+    }
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wantsDiff, diffScope, snap.authoritativeGeneration, snap.saveCount, checkout.file?.seq, checkout.file?.edits.length, diffToken]);
+  }, [wantsDiff, diffScope, historyScope, snap.authoritativeGeneration, snap.saveCount, checkout.file?.seq, checkout.file?.edits.length, diffToken]);
   // A chat (or a person elsewhere) wrote this file: look again now instead of
   // waiting for the poll.
   useEffect(() => {
@@ -390,16 +425,25 @@ export default function FilePane({ projectId, sessionId, repositoryId, resource:
   const lastReview = useRef<ChangeReview | null>(null);
   const review = useMemo<ChangeReview | null>(() => {
     if (!gitDiff || gitDiff.scope !== diffScope || snap.status !== "ready") return null;
-    const hunks = attributeChanges({ text: snap.saved, diff: gitDiff.diff, edits: checkout.file?.edits ?? [], accepted: kept });
+    const edits = checkout.file?.edits ?? [];
+    const pending = attributeChanges({ text: snap.saved, diff: gitDiff.diff, edits, accepted: kept });
+    const history = historyDiff && historyDiff.scope === historyScope
+      ? historyHunks({ text: snap.saved, history: historyDiff.diff, worktree: gitDiff.diff, edits, accepted: kept })
+      : [];
     // The disk moved ahead of the loaded text (a reload is on its way): the
     // marks drawn for the loaded text are still the truth for what is shown.
-    if (hunks === null) {
+    if (pending === null || history === null) {
       const previous = lastReview.current;
-      return previous && previous.set.baseText === snap.saved ? previous : null;
+      if (previous && previous.set.baseText === snap.saved) return previous;
+      // Only the history is behind: the pending changes still show.
+      if (pending === null) return null;
     }
+    const committed = history ?? [];
+    const hunks = [...pending, ...committed].sort((left, right) => left.anchorLine - right.anchorLine);
     if (hunks.length === 0) return null;
-    return changeReview(hunks, checkout.sessions, snap.saved, gitDiff.snapshotDigest, onChangeAction);
-  }, [gitDiff, diffScope, snap.status, snap.saved, checkout.file, checkout.sessions, kept, onChangeAction]);
+    const digest = historyDiff && committed.length > 0 ? `${gitDiff.snapshotDigest}+${historyDiff.snapshotDigest}` : gitDiff.snapshotDigest;
+    return changeReview(hunks, checkout.sessions, snap.saved, digest, onChangeAction);
+  }, [gitDiff, historyDiff, diffScope, historyScope, snap.status, snap.saved, checkout.file, checkout.sessions, kept, onChangeAction]);
   useEffect(() => { lastReview.current = review; }, [review]);
   useEffect(() => { setHunkCursor(-1); }, [diffScope]);
 
@@ -795,8 +839,9 @@ export default function FilePane({ projectId, sessionId, repositoryId, resource:
 
   // Inline Undo/Keep and the gutter bars act on the hunk they belong to.
   changeActionRef.current = (hunkId, action) => {
-    const hunk = review?.hunks.find((entry) => `${entry.index}:${entry.digest}` === hunkId);
-    if (!hunk || !gitDiff) return;
+    const hunk = review?.hunks.find((entry) => hunkIdOf(entry) === hunkId);
+    // Committed history is inert: the hunk APIs act on the working-tree diff.
+    if (!hunk || hunk.history || !gitDiff) return;
     if (action === "keep") {
       keepHunks(projectId, sessionId, repositoryId, path, [hunk.digest]);
       return;

@@ -177,13 +177,13 @@ export function buildChangeMarks(doc: Text, set: EditorChangeSet): ChangeMarks {
   const bars: Range<GutterMarker>[] = [];
   const toneOf = (index: number): EditorChangeTone => set.tones[index] ?? NEUTRAL;
   const moreLabel = set.labels?.moreRemoved ?? "+{count}";
-  const onAction = set.onAction ?? null;
   for (const hunk of set.hunks) {
+    const onAction = hunk.inert ? null : set.onAction ?? null;
     const owners = new Set([...hunk.lines.map((entry) => entry.tone), ...hunk.removed.map((block) => block.tone)]);
     const actions: ActionSpec | null = set.actions && onAction && !hunk.plain
       ? { hunkId: hunk.id, labels: set.actions, onAction, label: hunk.label, mixed: owners.size > 1 }
       : null;
-    const inspectLabel = set.actions ? `${hunk.label} · ${set.actions.inspect}` : hunk.label;
+    const inspectLabel = set.actions && onAction ? `${hunk.label} · ${set.actions.inspect}` : hunk.label;
     const changed = hunk.lines.filter((entry) => entry.line >= 1 && entry.line <= doc.lines);
     for (const [index, entry] of changed.entries()) {
       const tone = toneOf(entry.tone);

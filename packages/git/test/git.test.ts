@@ -200,6 +200,36 @@ test("diff returns unstaged, staged and untracked content", async () => {
   assert.ok((await git.diff(dir)).diff.length >= 0); // whole-repo diff must not throw
 });
 
+test("diff since a moment shows what was committed and staged after it", async () => {
+  const dir = repo(false);
+  const commitAt = (seconds: number, message: string) => execFileSync("git", ["commit", "-qam", message], {
+    cwd: dir,
+    stdio: "pipe",
+    env: { ...process.env, GIT_AUTHOR_DATE: `@${seconds} +0000`, GIT_COMMITTER_DATE: `@${seconds} +0000` },
+  });
+  writeFileSync(join(dir, "a.py"), "one\n");
+  execFileSync("git", ["add", "a.py"], { cwd: dir });
+  commitAt(1_700_000_000, "start");
+  const start = execFileSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).trim();
+  // A chat edits at +100 s, commits at +200 s, then stages one more line.
+  writeFileSync(join(dir, "a.py"), "one\ntwo\n");
+  commitAt(1_700_000_200, "chat work");
+  writeFileSync(join(dir, "a.py"), "one\ntwo\nthree\n");
+  await git.stage(dir, ["a.py"]);
+
+  assert.equal((await git.diff(dir, { path: "a.py" })).diff, "", "nothing left in the working-tree diff");
+  const since = await git.diff(dir, { path: "a.py", since: 1_700_000_100_000 });
+  assert.equal(since.base, start);
+  assert.match(since.diff, /\+two\n\+three/);
+  // Nothing as old as `since`: HEAD, so the staged change still shows.
+  const early = await git.diff(dir, { path: "a.py", since: 1_000 });
+  assert.equal(early.base, execFileSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).trim());
+  assert.match(early.diff, /\+three/);
+  assert.doesNotMatch(early.diff, /\+two/);
+  await assert.rejects(git.diff(dir, { path: "a.py", since: Number.NaN }), { code: "invalid-input" });
+  await assert.rejects(git.diff(dir, { path: "a.py", since: 1, staged: true }), { code: "invalid-input" });
+});
+
 test("commit returns a sha and log lists it", async () => {
   const dir = repo();
   writeFileSync(join(dir, "f.txt"), "x\n");
