@@ -4264,6 +4264,8 @@ export const uk: AppMessages = {
   "execution.pulseKept": "Немає виводу вже {duration} · триває далі",
   "execution.pulseCeiling": "Polyth зупинить її через {duration}: команди працюють не довше 60 хвилин",
   "execution.pulseKeptInline": "триває далі",
+  "execution.pulseKeptByJudge": "Немає виводу вже {duration} · суддя залишив її працювати",
+  "execution.pulseKeptByJudgeInline": "залишив суддя",
   "execution.keepRunning": "Не зупиняти",
   "execution.keepRunningHint": "Не зупиняти: не припиняти цю команду через відсутність виводу. Ліміт у 60 хвилин лишається.",
   "execution.keepRunningFailed": "Не вдалося залишити її запущеною. Спробуйте ще раз.",

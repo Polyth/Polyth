@@ -4264,6 +4264,8 @@ export const pl: AppMessages = {
   "execution.pulseKept": "Brak wyjścia od {duration} · działa dalej",
   "execution.pulseCeiling": "Polyth zatrzyma je za {duration}: polecenia działają maksymalnie 60 minut",
   "execution.pulseKeptInline": "działa dalej",
+  "execution.pulseKeptByJudge": "Brak wyjścia od {duration} · sędzia pozwolił działać dalej",
+  "execution.pulseKeptByJudgeInline": "zostawione przez sędziego",
   "execution.keepRunning": "Pozwól działać",
   "execution.keepRunningHint": "Pozwól działać: nie zatrzymuj tego polecenia z powodu braku wyjścia. Limit 60 minut nadal obowiązuje.",
   "execution.keepRunningFailed": "Nie udało się pozostawić go uruchomionym. Spróbuj ponownie.",

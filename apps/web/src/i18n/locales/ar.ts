@@ -4264,6 +4264,8 @@ export const ar: AppMessages = {
   "execution.pulseKept": "لا مخرجات منذ {duration} · يستمر في العمل",
   "execution.pulseCeiling": "سيوقفه Polyth خلال {duration}: تعمل الأوامر 60 دقيقة كحد أقصى",
   "execution.pulseKeptInline": "يستمر في العمل",
+  "execution.pulseKeptByJudge": "لا مخرجات منذ {duration} · أبقاه حَكَم قيد العمل",
+  "execution.pulseKeptByJudgeInline": "أبقاه حَكَم",
   "execution.keepRunning": "أبقِه قيد التشغيل",
   "execution.keepRunningHint": "أبقِه قيد التشغيل: لا توقف هذا الأمر لعدم وجود مخرجات. يظل حد الـ60 دقيقة ساريًا.",
   "execution.keepRunningFailed": "تعذّر إبقاؤه قيد التشغيل. حاول مرة أخرى.",

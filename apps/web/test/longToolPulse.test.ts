@@ -222,6 +222,9 @@ test("Keep running: the button shows only in the silence countdown, a kept call 
     assert.match(kept, />No output for 8m 25s · kept running</);
     assert.doesNotMatch(kept, /tool-pulse-keep|Polyth stops it|<button/);
     assert.match(renderToStaticMarkup(createElement(ToolPulseInline, { ...countdown, kept: true })), />kept running</);
+    // A judge kept it: the same line says so, so nobody thinks they pressed it.
+    assert.match(renderToStaticMarkup(createElement(ToolPulseLine, { ...countdown, kept: true, keptBy: "judge" })), />No output for 8m 25s · a judge kept it running</);
+    assert.match(renderToStaticMarkup(createElement(ToolPulseInline, { ...countdown, kept: true, keptBy: "judge" })), />kept by a judge</);
     // Ceiling (from 50 minutes): every call, kept or not, no button.
     const late = { ...base, startedAt: now - 55 * 60_000 };
     for (const keptFlag of [false, true]) {
@@ -268,6 +271,16 @@ test("tool/keep-running marks the running call; old or unknown calls are ignored
   const tools = model.messages.filter((m) => m.kind === "tool");
   assert.equal(tools.length, 1);
   assert.equal((tools[0] as { keptRunning?: boolean }).keptRunning, true);
+  assert.equal((tools[0] as { keptBy?: string }).keptBy, undefined, "a person's keep names no judge");
+  const judged = buildModel([
+    ev(1, "user/message", { text: "go" }),
+    ev(2, "tool/started", { callId: "c1", tool: "bash", input: {} }),
+    ev(3, "tool/keep-running", { callId: "c1", via: "judge", useId: "judges.quiet-command" }),
+    ev(4, "tool/keep-running", { callId: "c1", byUserId: "u1" }),
+  ]);
+  const judgedTool = judged.messages.find((m) => m.kind === "tool") as { keptRunning?: boolean; keptBy?: string };
+  assert.equal(judgedTool.keptRunning, true);
+  assert.equal(judgedTool.keptBy, "judge", "the first keep wins; a later person keep is a no-op on the server too");
   const before = buildModel([ev(1, "user/message", { text: "go" }), ev(2, "tool/started", { callId: "c1", tool: "bash", input: {} })]);
   assert.equal((before.messages.find((m) => m.kind === "tool") as { keptRunning?: boolean }).keptRunning, undefined);
 });

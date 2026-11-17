@@ -4264,6 +4264,8 @@ export const zhCN: AppMessages = {
   "execution.pulseKept": "已 {duration} 无输出 · 保持运行",
   "execution.pulseCeiling": "Polyth 将在 {duration} 后停止它：命令最多运行 60 分钟",
   "execution.pulseKeptInline": "保持运行",
+  "execution.pulseKeptByJudge": "已 {duration} 无输出 · 评审让它继续运行",
+  "execution.pulseKeptByJudgeInline": "评审保持运行",
   "execution.keepRunning": "保持运行",
   "execution.keepRunningHint": "保持运行：不要因为没有输出而停止此命令。60 分钟的上限仍然有效。",
   "execution.keepRunningFailed": "无法保持运行。请重试。",

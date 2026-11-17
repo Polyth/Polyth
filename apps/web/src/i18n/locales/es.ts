@@ -4264,6 +4264,8 @@ export const es: AppMessages = {
   "execution.pulseKept": "Sin salida desde hace {duration} · se mantiene en marcha",
   "execution.pulseCeiling": "Polyth lo detendrá en {duration}: los comandos duran como máximo 60 minutos",
   "execution.pulseKeptInline": "se mantiene en marcha",
+  "execution.pulseKeptByJudge": "Sin salida desde hace {duration} · un juez la mantuvo en marcha",
+  "execution.pulseKeptByJudgeInline": "mantenido por un juez",
   "execution.keepRunning": "Mantener en marcha",
   "execution.keepRunningHint": "Mantener en marcha: no detener este comando por no mostrar salida. El límite de 60 minutos sigue vigente.",
   "execution.keepRunningFailed": "No se pudo mantener en marcha. Inténtalo de nuevo.",

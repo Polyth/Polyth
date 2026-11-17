@@ -4264,6 +4264,8 @@ export const de: AppMessages = {
   "execution.pulseKept": "Seit {duration} keine Ausgabe · läuft weiter",
   "execution.pulseCeiling": "Polyth stoppt ihn in {duration}: Befehle laufen höchstens 60 Minuten",
   "execution.pulseKeptInline": "läuft weiter",
+  "execution.pulseKeptByJudge": "Seit {duration} keine Ausgabe · vom Evaluator-Modell weiterlaufen gelassen",
+  "execution.pulseKeptByJudgeInline": "vom Evaluator-Modell gehalten",
   "execution.keepRunning": "Weiterlaufen lassen",
   "execution.keepRunningHint": "Weiterlaufen lassen: diesen Befehl nicht wegen fehlender Ausgabe stoppen. Das 60-Minuten-Limit gilt weiter.",
   "execution.keepRunningFailed": "Konnte nicht weiterlaufen gelassen werden. Versuche es erneut.",

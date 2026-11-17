@@ -103,7 +103,17 @@ A person can press **Keep running** on a call that is slow but silent:
 call is open in the current turn). That call's silence stop is off and only
 the 60-minute hard ceiling remains; rehydration reads the event and arms the
 call the same way. The event is Polyth-originated: not runtime turn content,
-not model-visible, ignored by old reducers. Codex rejects a permission
+not model-visible, ignored by old reducers. When nobody is at the screen, a
+package can decide instead: about a minute before the silence stop
+(`toolQuietNoticeMs`, default 9 min of silence) the session service announces
+the call once per quiet stretch on `SERVER_TOOL_QUIET_BUS`
+(`packages/server/src/toolQuiet.ts`; `{ sessionId, callId, tool, startedAt,
+quietSince, stopsAt, spaceId?, projectId? }`, never for a kept call). The
+opt-in judge use `judges.quiet-command` listens and, when the judge says the
+call is still working, keeps it through the owner's Space-scoped facade
+(`keepToolRunning(…, { via: "judge", useId })`); the event then carries
+`via: "judge"` and `useId` instead of `byUserId`, and the client says "a judge
+kept it running". Doing nothing lets the stop run at `stopsAt`. Codex rejects a permission
 response whose local native request is already absent before delivery, allowing
 the canonical request to expire without an unknown mutation blocking subsequent
 turns. Transport failures and lost mutation acknowledgements remain uncertain

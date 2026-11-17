@@ -103,7 +103,7 @@ function useKeepRunning(sessionId: string | null | undefined, callId: string, ke
  *  and in the last two minutes before the watchdog, when the call stops. It
  *  claims silence only after a progress frame proved the harness reports
  *  output; elapsed time is in the row's status mark already. */
-export function ToolPulseLine({ sessionId, callId, startedAt, kept = false }: { sessionId: string | null | undefined; callId: string; startedAt: number; kept?: boolean }) {
+export function ToolPulseLine({ sessionId, callId, startedAt, kept = false, keptBy }: { sessionId: string | null | undefined; callId: string; startedAt: number; kept?: boolean; keptBy?: "judge" }) {
   const pulse = useToolPulse(sessionId, callId, startedAt, true, kept);
   const lineRef = useRef<HTMLDivElement>(null);
   const { keep, busy, failed } = useKeepRunning(sessionId, callId, kept, () => lineRef.current?.focus());
@@ -118,7 +118,7 @@ export function ToolPulseLine({ sessionId, callId, startedAt, kept = false }: { 
   if (pulse.kept) {
     return (
       <div className="tool-pulse" ref={lineRef} tabIndex={-1}>
-        <span className="tool-pulse-text" role="status">{tr("execution.pulseKept", { duration: fmtDuration(pulse.quietMs) })}</span>
+        <span className="tool-pulse-text" role="status">{tr(keptBy === "judge" ? "execution.pulseKeptByJudge" : "execution.pulseKept", { duration: fmtDuration(pulse.quietMs) })}</span>
       </div>
     );
   }
@@ -181,7 +181,7 @@ export function ToolKeepRunning({ sessionId, callId, startedAt, kept = false, on
 
 /** The same facts, compact, after the step a collapsed activity block names:
  *  "· 3m 12s · last output 6s ago", or near the watchdog "· 8m 50s · stops in 1m 10s". */
-export function ToolPulseInline({ sessionId, callId, startedAt, kept = false }: { sessionId: string | null | undefined; callId: string; startedAt: number; kept?: boolean }) {
+export function ToolPulseInline({ sessionId, callId, startedAt, kept = false, keptBy }: { sessionId: string | null | undefined; callId: string; startedAt: number; kept?: boolean; keptBy?: "judge" }) {
   const pulse = useToolPulse(sessionId, callId, startedAt, true, kept);
   if (!pulse) return null;
   return (
@@ -193,7 +193,7 @@ export function ToolPulseInline({ sessionId, callId, startedAt, kept = false }: 
       {pulse.nearCeiling
         ? <span className="tool-pulse-part tool-pulse-stop">{tr("execution.pulseStopsIn", { duration: ceilingIn(pulse) })}</span>
         : pulse.kept
-        ? <span className="tool-pulse-part">{tr("execution.pulseKeptInline")}</span>
+        ? <span className="tool-pulse-part">{tr(keptBy === "judge" ? "execution.pulseKeptByJudgeInline" : "execution.pulseKeptInline")}</span>
         : pulse.nearStop
         ? <span className="tool-pulse-part tool-pulse-stop">{tr("execution.pulseStopsIn", { duration: stopsIn(pulse) })}</span>
         : pulse.lastOutputAgoMs !== undefined

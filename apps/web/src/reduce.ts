@@ -113,6 +113,8 @@ export interface ToolMsg {
   /** A person pressed Keep running (`tool/keep-running`): the server's silence
    *  stop is off for this call; only the hard ceiling remains. */
   keptRunning?: true;
+  /** A judge, not a person, kept it (`tool/keep-running` with `via: "judge"`). */
+  keptBy?: "judge";
   /** See UserMsg.rev. */
   rev?: number;
 }
@@ -1395,6 +1397,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       const t = findTool(model, str(d, "callId") ?? "");
       if (t && !t.keptRunning) {
         t.keptRunning = true;
+        if (d.via === "judge") t.keptBy = "judge";
         touch(t);
       }
       break;

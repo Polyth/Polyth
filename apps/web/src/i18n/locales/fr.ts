@@ -4264,6 +4264,8 @@ export const fr: AppMessages = {
   "execution.pulseKept": "Aucune sortie depuis {duration} · maintenu",
   "execution.pulseCeiling": "Polyth l’arrête dans {duration} : les commandes durent 60 minutes au plus",
   "execution.pulseKeptInline": "maintenu",
+  "execution.pulseKeptByJudge": "Aucune sortie depuis {duration} · maintenu par un juge",
+  "execution.pulseKeptByJudgeInline": "maintenu par un juge",
   "execution.keepRunning": "Laisser tourner",
   "execution.keepRunningHint": "Laisser tourner : ne pas arrêter cette commande faute de sortie. La limite de 60 minutes s’applique toujours.",
   "execution.keepRunningFailed": "Impossible de la laisser tourner. Réessayez.",

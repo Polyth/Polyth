@@ -4264,6 +4264,8 @@ export const bg: AppMessages = {
   "execution.pulseKept": "Няма изход от {duration} · продължава",
   "execution.pulseCeiling": "Polyth ще я спре след {duration}: командите работят най-много 60 минути",
   "execution.pulseKeptInline": "продължава",
+  "execution.pulseKeptByJudge": "Няма изход от {duration} · съдия я остави да продължи",
+  "execution.pulseKeptByJudgeInline": "оставена от съдия",
   "execution.keepRunning": "Продължи",
   "execution.keepRunningHint": "Продължи: не спирай тази команда заради липса на изход. Лимитът от 60 минути остава.",
   "execution.keepRunningFailed": "Не успя да я задържи. Опитай отново.",

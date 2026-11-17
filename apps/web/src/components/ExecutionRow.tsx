@@ -1222,7 +1222,7 @@ export function ExecutionRow({
         </div>
         {/* Headless, the block header's tail already carries the time and countdown. */}
         {status === "running" && !headless && presentation.kind !== "subagent" && !message.composerShell
-          ? <ToolPulseLine sessionId={sessionIdProp ?? activeSessionId} callId={message.callId} startedAt={message.time} kept={message.keptRunning === true} />
+          ? <ToolPulseLine sessionId={sessionIdProp ?? activeSessionId} callId={message.callId} startedAt={message.time} kept={message.keptRunning === true} keptBy={message.keptBy} />
           : null}
         <div className="execution-expand-shell" aria-hidden={!open}>
           <div className="execution-collapse-content">

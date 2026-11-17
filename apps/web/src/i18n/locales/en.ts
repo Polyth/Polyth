@@ -4267,6 +4267,8 @@ export const en = {
   "execution.pulseKept": "No output for {duration} · kept running",
   "execution.pulseCeiling": "Polyth stops it in {duration}: commands run at most 60 minutes",
   "execution.pulseKeptInline": "kept running",
+  "execution.pulseKeptByJudge": "No output for {duration} · a judge kept it running",
+  "execution.pulseKeptByJudgeInline": "kept by a judge",
   "execution.keepRunning": "Keep running",
   "execution.keepRunningHint": "Keep running: don't stop this command for having no output. The 60-minute limit still applies.",
   "execution.keepRunningFailed": "Couldn't keep it running. Try again.",

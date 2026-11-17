@@ -4264,6 +4264,8 @@ export const it: AppMessages = {
   "execution.pulseKept": "Nessun output da {duration} · lasciato in esecuzione",
   "execution.pulseCeiling": "Polyth lo ferma tra {duration}: i comandi durano al massimo 60 minuti",
   "execution.pulseKeptInline": "lasciato in esecuzione",
+  "execution.pulseKeptByJudge": "Nessun output da {duration} · un giudice l'ha lasciato in esecuzione",
+  "execution.pulseKeptByJudgeInline": "lasciato da un giudice",
   "execution.keepRunning": "Lascia in esecuzione",
   "execution.keepRunningHint": "Lascia in esecuzione: non fermare questo comando per mancanza di output. Il limite di 60 minuti resta valido.",
   "execution.keepRunningFailed": "Impossibile lasciarlo in esecuzione. Riprova.",

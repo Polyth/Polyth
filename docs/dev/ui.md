@@ -1014,7 +1014,10 @@ Host-owned (`apps/web`), not a package seam.
   **Keep running** into the block's live-Stop slot, before Stop so Stop never
   moves; on success focus returns to the block's line. Without it the countdown
   had no action in the most common view. A kept call reads "No output for 8m 25s · kept
-  running" (collapsed tail: `kept running`) with no countdown. From 50 minutes
+  running" (collapsed tail: `kept running`) with no countdown; when a judge
+  kept it (`tool/keep-running` with `via: "judge"`, `ToolMsg.keptBy`), "No
+  output for 8m 25s · a judge kept it running" (tail: `kept by a judge`), so
+  nobody thinks they pressed it. From 50 minutes
   after the start (`TOOL_HARD_HINT_MS`) every call, kept or not, reads "Polyth
   stops it in 5m: commands run at most 60 minutes" with no button, because the
   server's hard ceiling (`TOOL_HARD_STOP_MS`) applies regardless.

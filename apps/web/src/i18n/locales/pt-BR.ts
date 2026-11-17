@@ -4264,6 +4264,8 @@ export const ptBR: AppMessages = {
   "execution.pulseKept": "Sem saída há {duration} · mantido em execução",
   "execution.pulseCeiling": "O Polyth vai pará-lo em {duration}: comandos duram no máximo 60 minutos",
   "execution.pulseKeptInline": "mantido em execução",
+  "execution.pulseKeptByJudge": "Sem saída há {duration} · um juiz manteve em execução",
+  "execution.pulseKeptByJudgeInline": "mantido por um juiz",
   "execution.keepRunning": "Manter em execução",
   "execution.keepRunningHint": "Manter em execução: não pare este comando por falta de saída. O limite de 60 minutos continua valendo.",
   "execution.keepRunningFailed": "Não foi possível mantê-lo em execução. Tente de novo.",
