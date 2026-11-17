@@ -330,32 +330,14 @@ test("assistant identity panel renders once per turn, after the turn completes",
   const footer = read("../src/components/ChatResponseFooter.tsx");
   const chrome = read("../src/components/ChatChrome.css");
   const css = read("../src/styles.css");
-  // While a turn is in progress (working, waiting on a request, or a sent
-  // prompt not yet admitted) no answer shows its metadata. The terminal answer
-  // of the live turn mounts its panel only after the turn completes; answers
-  // already closed by a later prompt keep their panel in place, so the
-  // transcript above the live turn never reflows.
+  // Only a turn's last answer carries its footer (identity and quick
+  // actions), also while its turn works; interim answers show none.
   assert.match(timeline, /const sessionActive = sessionStatus === "working" \|\| sessionStatus === "waiting" \|\| pendingSends\.length > 0;/);
-  assert.match(timeline, /terminal=\{r\.kind === "assistant" && terminalAnswers\.terminal\.has\(r\.eventSeq\)\s*&& \(!turnInProgress \|\| pendingSends\.length > 0 \|\| r\.eventSeq !== terminalAnswers\.trailing\)\}/);
-  // Only the working turn's own answers are dormant: a closed turn's footer
-  // (its quick actions) stays visible while the next turn works; invisible, it
-  // was a blank band above the block under it.
-  assert.match(timeline, /dormant=\{turnInProgress && pendingSends\.length === 0 && r\.eventSeq > terminalAnswers\.openSeq\}/);
-  assert.match(timeline, /\{m\.finalized && hasAnswer && \(terminal \|\| settled\) && \(/);
+  assert.match(timeline, /\{m\.finalized && hasAnswer && terminal && \(\s*<ChatResponseFooter/);
   assert.match(timeline, /if \(lastAssistant !== null\) terminal\.set\(lastAssistant\.eventSeq, openAt\);/);
-  // Interim answers keep quick actions (no identity panel). In a live turn an
-  // interim answer takes its dormant footer's box as soon as a row lands under
-  // it, so the turn's end only reveals footers and moves no row below them.
-  assert.match(timeline, /settled=\{r\.kind === "assistant"\s*&& \(!turnInProgress \|\| pendingSends\.length > 0 \|\| r\.eventSeq < terminalAnswers\.openSeq\s*\|\| r\.id !== latestRowId\)\}/);
-  assert.match(footer, /data-actions-only=\{identity \? undefined : "true"\}/);
-  assert.match(footer, /data-dormant=\{dormant \|\| undefined\}/);
-  assert.match(chrome, /\.chat-response-footer\[data-dormant\] \{ visibility: hidden; \}/);
+  assert.doesNotMatch(footer, /data-dormant|data-actions-only/);
+  assert.doesNotMatch(chrome, /data-dormant|data-actions-only/);
   assert.match(css, /\.timeline\s*>\s*\.msg\.assistant\s*\+\s*\.activity-group/);
-  // No pointer shows an actions-only footer: its reserved row set the
-  // activity rows apart from the prose (36px over, 28px under them). Only the
-  // final answer keeps its footer.
-  assert.match(chrome, /\n\.chat-response-footer\[data-actions-only\] \{ display: none; \}/);
-  assert.doesNotMatch(chrome, /\.chat-response-footer\[data-actions-only\][^{]*\{[^}]*height/);
   // Next to prose the gap counts a row's empty band, so a row's title stands
   // the group gap from the text's ink; looks that draw the summary zero it.
   assert.match(css, /\.timeline > \.msg\.assistant \+ \.activity-group \{\s*margin-block-start: calc\(var\(--conversation-group-gap\) - var\(--timeline-gap\) - var\(--activity-row-trim\) - var\(--activity-row-band\)\);/);

@@ -3723,20 +3723,13 @@ and `online`; a 4xx is final. On the server the read uses the indexed newest
 `turn/stopped` fact instead of loading the session's whole log, and runs its
 independent Git reads together; the latency contract is
 `packages/git/test/isolationCardLatency.test.ts`. An idle read keeps only the
-held tail position described above. While a turn is in progress, answers
-already closed by a later prompt keep their response footer in place and
-visible (identity and quick actions); removing those footers reflowed the
-whole transcript at every send and again at turn end, and hiding them
-(`data-dormant`, now only the working turn's own answers) left a blank band
-above the block under the answer. The identity panel is one per
-turn (its terminal answer). An interim answer that tools, an answered question
-or more prose of the same turn follow still renders an actions-only footer
-(`data-actions-only`), but no pointer shows it (`display: none` in
-`ChatChrome.css`): its reserved quick-action row set the activity rows apart
-from the prose (36px of ink gap over a row, 28px under it, against a 12px
-paragraph gap), and a collapsed hover bar revealed into the block under it,
-which painted over the icons and took their clicks. Only the turn's final
-answer carries its footer. Next to prose an activity block's gap counts the
+held tail position described above. Only a turn's last answer
+carries the response footer (model identity and quick actions), also while the
+turn still works: hiding it until the turn ended made the model line and actions
+vanish during every run. An interim answer that tools, a question or more prose
+of the same turn follow shows none; a row per interim answer was noise and set
+the activity rows apart from the prose. The streaming answer has none yet.
+Next to prose an activity block's gap counts the
 empty band around a 36px row's title (`--activity-row-band`, `--space-2`), so
 the title stands the group gap from the text's ink on both sides (measured
 20px with a mouse, 16px on a phone). On phones prose, thoughts and blocks share one

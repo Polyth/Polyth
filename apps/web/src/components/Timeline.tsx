@@ -496,12 +496,10 @@ function AssistantView({
   regeneratePrompt,
   turn,
   terminal = false,
-  settled = false,
   segmentStartedAt,
   live = false,
   entering = false,
   leaving = false,
-  dormant = false,
   progress = false,
   resourceContext,
 }: {
@@ -510,20 +508,14 @@ function AssistantView({
   plan?: NonNullable<RenderModel["tasks"]>;
   regeneratePrompt?: { eventSeq: number; text: string; attachments?: UserMsg["attachments"] };
   turn?: RenderModel["turn"];
-  /** Terminal answer of a completed turn: the only row that carries the
-   *  identity panel (one per turn, rendered after the turn completes). */
+  /** The last answer of its turn so far: the only one with a footer. */
   terminal?: boolean;
-  /** The answer's turn is closed or idle: an interim answer may show its
-   *  quick actions without moving rows of a live turn. */
-  settled?: boolean;
   segmentStartedAt?: number;
   /** True while this row is the latest assistant row of a working turn: its
    *  thinking block reflects incoming reasoning chunks immediately. */
   live?: boolean;
   entering?: boolean;
   leaving?: boolean;
-  /** A turn is working: a completed footer keeps its box but shows nothing. */
-  dormant?: boolean;
   /** An activity block follows this answer: it is a progress update, read in
    *  a quieter ink (a class, not a sibling :has(), which re-matched on every
    *  row insertion and reflowed stale on older touch WebKit). */
@@ -552,18 +544,16 @@ function AssistantView({
           {!m.finalized && <span className="caret" />}
         </div>
       )}
-      {/* Every finished answer of a settled turn keeps its quick actions, also
-          when tools, a question or more text of the same turn follow it; only
-          the terminal answer carries the identity panel. */}
-      {m.finalized && hasAnswer && (terminal || settled) && (
+      {/* Only a turn's last answer carries the footer (model identity and
+          quick actions), also while the turn still works; an answer that more
+          of its turn follows shows none. */}
+      {m.finalized && hasAnswer && terminal && (
         <ChatResponseFooter
           m={m}
           announce={announce}
           turn={turn}
           segmentStartedAt={segmentStartedAt}
           regeneratePrompt={regeneratePrompt}
-          dormant={dormant}
-          identity={terminal}
         />
       )}
       {plan && plan.items.length > 0 && <TaskList plan={plan} />}
@@ -1183,7 +1173,7 @@ function PendingPrompt({ send }: { send: PendingSend }) {
   );
 }
 
-function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, settled, dormant, progress, segmentStartedAt, live, entering, leaving = false, answerLeaving = false, onRevert, onFork, revert, fork, sessionId, resourceContext, canContinue = false }: {
+function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, progress, segmentStartedAt, live, entering, leaving = false, answerLeaving = false, onRevert, onFork, revert, fork, sessionId, resourceContext, canContinue = false }: {
   m: RenderMessage;
   /** A turn-incomplete notice that is the chat's newest row of an idle turn. */
   canContinue?: boolean;
@@ -1192,8 +1182,6 @@ function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, sett
   regeneratePrompt?: { eventSeq: number; text: string; attachments?: UserMsg["attachments"] };
   turn?: RenderModel["turn"];
   terminal?: boolean;
-  settled?: boolean;
-  dormant?: boolean;
   progress?: boolean;
   segmentStartedAt?: number;
   live?: boolean;
@@ -1264,8 +1252,6 @@ function MessageView({ m, announce, plan, regeneratePrompt, turn, terminal, sett
         regeneratePrompt={regeneratePrompt}
         turn={turn}
         terminal={terminal}
-        settled={settled}
-        dormant={dormant}
         progress={progress}
         segmentStartedAt={segmentStartedAt}
          live={live}
@@ -1366,8 +1352,6 @@ const MessageRow = memo(function MessageRow(props: Parameters<typeof MessageView
   // model.turn mutates in place: any row holding it must always re-render
   && prev.turn === undefined && next.turn === undefined
   && prev.terminal === next.terminal
-  && prev.settled === next.settled
-  && prev.dormant === next.dormant
   && prev.progress === next.progress
   && prev.live === next.live
   && prev.entering === next.entering
@@ -3779,28 +3763,18 @@ export default function Timeline({
   // activity dock above the composer keeps showing that work with its Stop,
   // so the transcript itself stays calm while the prompt is being edited.
   const rewindRunning = model.rewind !== null && turnWorking;
-  // One identity panel per completed turn, on the turn's terminal answer only.
-  // The terminal answer is the last assistant message before the next prompt
-  // (or the log tail); the map also records the opening prompt time so the
-  // panel's duration stays truthful when the turn state is no longer in the
-  // store. While the session is actively working no answer shows any metadata
-  // row; panels appear once the turn completes.
-  // Answers closed by a later prompt keep their footer, visible, through the
-  // next turn: removing every completed footer while a turn ran reflowed the
-  // whole transcript at each send and again at each turn end, and an invisible
-  // one left a blank band above the block under it. Only the working turn's
-  // answers wait (dormant), unless a sent prompt already closes the turn.
+  // Each answer's turn-opening time, keyed by the turn's terminal answer (the
+  // last assistant message before the next prompt or the log tail), so its
+  // footer's duration covers the whole turn.
   const terminalAnswers = useMemo(() => {
     const terminal = new Map<number, number>();
     let openAt = 0;
-    let openSeq = -1;
     let lastAssistant: AssistantMsg | null = null;
     for (const message of renderedMessages) {
       if (message.kind === "user" || message.kind === "github-conflict" || message.kind === "notice") {
         if (lastAssistant !== null) terminal.set(lastAssistant.eventSeq, openAt);
         lastAssistant = null;
         openAt = message.time;
-        openSeq = message.eventSeq;
       } else if (message.kind === "assistant") {
         // A prompt the chat does not draw (an agent's wake) opened a new turn.
         if (message.hiddenPromptAt !== undefined && message.hiddenPromptAt > openAt) {
@@ -3811,8 +3785,7 @@ export default function Timeline({
       }
     }
     if (lastAssistant !== null) terminal.set(lastAssistant.eventSeq, openAt);
-    // Rows after `openSeq` belong to the newest (possibly still live) turn.
-    return { terminal, trailing: lastAssistant?.eventSeq, openSeq };
+    return terminal;
   }, [derived.epoch, leavingAtSeq, rewoundMessages.length, visibleMessages.length]);
   const prompts = useMemo(() => promptIndex(visibleMessages), [derived.epoch]);
   const latestPending = pendingSends[pendingSends.length - 1];
@@ -4825,20 +4798,9 @@ export default function Timeline({
                 // thinking state; every row displays the received text directly.
                 live={r.kind === "assistant" && turnWorking && r.id === latestAssistantId}
                 entering={r.id === latestRowId}
-                terminal={r.kind === "assistant" && terminalAnswers.terminal.has(r.eventSeq)
-                  && (!turnInProgress || pendingSends.length > 0 || r.eventSeq !== terminalAnswers.trailing)}
-                // Only the working turn's own answers wait: an answer a later
-                // prompt closed keeps its footer (actions, identity) in view.
-                dormant={turnInProgress && pendingSends.length === 0 && r.eventSeq > terminalAnswers.openSeq}
+                terminal={r.kind === "assistant" && terminalAnswers.has(r.eventSeq)}
                 progress={r.kind === "assistant" && nextRowIsActivity(chronologicalRows, index)}
-                // An interim answer of a live turn takes its (still invisible)
-                // footer's box the moment a row lands under it, while it is
-                // the tail's neighbour: added at turn end instead, every
-                // footer in view pushed the rows below it down at once.
-                settled={r.kind === "assistant"
-                  && (!turnInProgress || pendingSends.length > 0 || r.eventSeq < terminalAnswers.openSeq
-                    || r.id !== latestRowId)}
-                 segmentStartedAt={r.kind === "assistant" ? terminalAnswers.terminal.get(r.eventSeq) : undefined}
+                 segmentStartedAt={r.kind === "assistant" ? terminalAnswers.get(r.eventSeq) : undefined}
                  announce={announce}
                  onRevert={revert}
                 canContinue={r.kind === "notice" && r.topic === "turn-incomplete" && r.id === latestRowId

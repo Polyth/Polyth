@@ -76,19 +76,12 @@ export default function ChatResponseFooter({
   turn,
   segmentStartedAt,
   regeneratePrompt,
-  dormant = false,
-  identity = true,
 }: {
   m: AssistantMsg;
   announce?: (text: string, anchor?: ActionAnnounceAnchor) => void;
   turn?: RenderModel["turn"];
   segmentStartedAt?: number;
   regeneratePrompt?: { eventSeq: number; text: string; attachments?: AttachmentRef[] };
-  /** A later turn is working: keep the footer's box, show nothing. */
-  dormant?: boolean;
-  /** False on an answer a later row of the same turn follows: only the
-   *  quick actions show; the identity panel stays one per turn. */
-  identity?: boolean;
 }) {
   // Only the fields the footer reads: every footer of the transcript would
   // otherwise re-render on each session update of a live turn (status,
@@ -333,17 +326,10 @@ export default function ChatResponseFooter({
     }));
   }
 
-  // An actions-only footer with its actions turned off would be an empty row.
-  if (!identity && !prefs.showAnswerQuickActions) return null;
-
   return (
     <>
-    <footer
-      className="chat-response-footer"
-      data-dormant={dormant || undefined}
-      data-actions-only={identity ? undefined : "true"}
-    >
-      {identity && <div className="chat-response-identity">
+    <footer className="chat-response-footer">
+      <div className="chat-response-identity">
         <ProviderLogo
           providerID={descriptor?.providerID ?? modelRef?.providerID}
           providerName={descriptor?.providerName}
@@ -353,7 +339,7 @@ export default function ChatResponseFooter({
         />
         <span className="chat-response-model" title={modelName}>{modelName}</span>
         {duration && <span className="chat-response-duration">{duration}</span>}
-      </div>}
+      </div>
 
       <div className="chat-response-action-area">
         <MessageActionBar

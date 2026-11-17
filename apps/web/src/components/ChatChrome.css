@@ -154,18 +154,6 @@
   line-height: var(--font-response-meta-lh);
 }
 
-/* While a turn works its own answers show no metadata yet, but keep the
-   footer's box: adding it at turn end would push the rows below down.
-   Answers of closed turns are never dormant. */
-.chat-response-footer[data-dormant] { visibility: hidden; }
-
-/* An answer followed by more of its turn shows no footer: its quick actions
-   reserved a row under every interim answer, and that blank band set the
-   activity rows below it apart from the prose (36px over a row, 28px under
-   it, against a 12px paragraph gap). Only the turn's final answer carries
-   its footer, on every pointer. */
-.chat-response-footer[data-actions-only] { display: none; }
-
 .chat-response-identity {
   display: flex;
   align-items: center;
