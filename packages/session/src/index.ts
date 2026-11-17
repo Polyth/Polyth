@@ -314,6 +314,8 @@ export {
 } from "./packageContext.ts";
 export { latestCompletedExchange, type CompletedExchange } from "./nextAction.ts";
 
+export { stripDenseContent } from "./denseContent.ts";
+
 export {
   COMPACTION_SUMMARY_MAX_CHARS,
   COMPACTION_SUMMARY_MAX_OUTPUT_TOKENS,

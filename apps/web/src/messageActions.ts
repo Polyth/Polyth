@@ -6,6 +6,7 @@ import type { AttachmentRef } from "@polyth/contracts";
 import type { AssistantMsg, RenderModel, TurnState, UserMsg } from "./reduce.ts";
 import { fmtCost, fmtTokens } from "./format.ts";
 import { dateTimeFormatter, getLocale, tr } from "./i18n/index.ts";
+import { promptDisplayText } from "./composer/history.ts";
 
 // ---- semantic times ----------------------------------------------------------
 
@@ -65,7 +66,7 @@ export const PROMPT_NAV_NAME = tr("messageActions.promptNavigation");
 /** Bounded single-line prompt preview for accessible names and the in-flow
  *  preview head. An empty prompt is named as empty, never a blank control. */
 export function boundedPromptPreview(text: string, max = 80): string {
-  const first = text.split("\n").find((line) => line.trim())?.trim() ?? "";
+  const first = promptDisplayText(text).split("\n").find((line) => line.trim())?.trim() ?? "";
   if (first === "") return tr("messageActions.emptyPrompt");
   return first.length > max ? `${first.slice(0, Math.max(1, max - 1))}…` : first;
 }

@@ -17,7 +17,7 @@ for (const [name, value] of Object.entries({
 
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
-const { chatMemoryOverrideFor, chatMemoryReminderDue, chatMemoryState } = await import("../src/chatMemory.ts");
+const { chatMemoryOverrideFor, chatMemoryReminderDue, chatMemoryState, modelSwitchOverflow } = await import("../src/chatMemory.ts");
 const { default: ChatMemoryCard } = await import("../src/components/ChatMemoryCard.tsx");
 const { default: ChatMemoryReminder } = await import("../src/components/ChatMemoryReminder.tsx");
 const { default: ChatMemorySection } = await import("../src/components/settings/ChatMemorySection.tsx");
@@ -190,6 +190,40 @@ test("a chat refused for being full says why and how to go on, in any mode", asy
   const working = await mount(createElement(ChatMemoryReminder, { ...props, idle: false }));
   assert.equal(working.button(tr("chatmemory.compactNow")), undefined);
   await working.unmount();
+});
+
+test("picking a smaller model says what the next send will do before it happens", async () => {
+  const auto = chatMemoryState({}, { mode: "auto" }, true);
+  const manual = chatMemoryState({}, { mode: "manual" }, true);
+  // 150k used of a 200k window, a 128k model picked: no longer fits (128k less its reserve).
+  assert.equal(modelSwitchOverflow(auto, { usedTokens: 150_000, currentTokens: 200_000, nextTokens: 128_000 }), "compact");
+  assert.equal(modelSwitchOverflow(chatMemoryState({}, { mode: "earlier" }, true), { usedTokens: 150_000, currentTokens: 200_000, nextTokens: 128_000 }), "compact");
+  assert.equal(modelSwitchOverflow(manual, { usedTokens: 150_000, currentTokens: 200_000, nextTokens: 128_000 }), "manual");
+  // Still fits, a window that is not smaller, or anything unknown: nothing to say.
+  assert.equal(modelSwitchOverflow(auto, { usedTokens: 60_000, currentTokens: 200_000, nextTokens: 128_000 }), undefined);
+  assert.equal(modelSwitchOverflow(auto, { usedTokens: 190_000, currentTokens: 200_000, nextTokens: 200_000 }), undefined);
+  assert.equal(modelSwitchOverflow(auto, { currentTokens: 200_000, nextTokens: 128_000 }), undefined);
+  assert.equal(modelSwitchOverflow(auto, { usedTokens: 150_000, currentTokens: 200_000 }), undefined);
+
+  const props = {
+    sessionId: "s1", projectId: "p1", title: "Reports", gauge,
+    idle: true, full: false, compact: { pending: false, run: () => {} },
+  };
+  const told = await mount(createElement(ChatMemoryReminder, { ...props, state: auto, switching: { model: "Mini", outcome: "compact" as const } }));
+  assert.ok(told.text().includes(tr("chatmemory.switchCompact", { model: "Mini" })));
+  assert.equal(told.host.querySelectorAll("button").length, 0, "Polyth compacts on its own: nothing to decide");
+  assert.equal(told.host.querySelector(".chat-memory-reminder")?.getAttribute("role"), "status");
+  await told.unmount();
+  const asked = await mount(createElement(ChatMemoryReminder, { ...props, state: manual, switching: { model: "Mini", outcome: "manual" as const } }));
+  assert.ok(asked.text().includes(tr("chatmemory.switchManual", { model: "Mini" })));
+  assert.ok(asked.button(tr("chatmemory.compactNow")) !== undefined);
+  assert.ok(asked.button(tr("chatmemory.newChat")) !== undefined);
+  await asked.unmount();
+  const compacting = await mount(createElement(ChatMemoryReminder, {
+    ...props, state: auto, compact: { pending: true, run: () => {} }, switching: { model: "Mini", outcome: "compact" as const },
+  }));
+  assert.equal(compacting.text().includes(tr("chatmemory.switchCompact", { model: "Mini" })), false);
+  await compacting.unmount();
 });
 
 test("a refusal holds until a compaction or a new turn answers it", () => {

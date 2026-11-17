@@ -788,6 +788,16 @@ export interface SessionPauseEndedData {
   source?: string;
 }
 
+/** `tool/keep-running`: a person told Polyth that one open call is just slow
+ *  and silent, so its silence stop is off (the hard execution ceiling stays).
+ *  Polyth-originated: not runtime turn content, not model-visible. Old
+ *  reducers ignore the unknown type. */
+export const TOOL_KEEP_RUNNING_EVENT = "tool/keep-running" as const;
+export interface ToolKeepRunningData {
+  callId: string;
+  byUserId?: string;
+}
+
 export interface TurnResumeCancelledData {
   turnId?: string;
   /** "user" cancelled the wait, "model-switch" continued on another model,
@@ -1806,6 +1816,42 @@ export interface SessionMentionCandidateDto {
   userId: string;
   name?: string;
   access: SessionAccessLevel;
+}
+
+/** A chat the reader may reference from the composer with `@`. */
+export interface ChatMentionCandidateDto {
+  sessionId: string;
+  title: string;
+  /** Last activity (ms): `lastTurnAt` when there is one, else `updatedAt`. */
+  updatedAt: number;
+}
+
+/** A chat reference lives in the message text as `[@Title](polyth://session/<id>)`
+ *  so it travels through the queue, steering and retries untouched. The label
+ *  is presentation only: the server and the timeline use the live title and
+ *  re-check access, never the label. */
+export const SESSION_MENTION_SCHEME = "polyth://session/" as const;
+/** Most chats one message may reference; the rest are ignored. */
+export const MAX_SESSION_MENTIONS = 5;
+const SESSION_MENTION_TOKEN = /\[@[^\]\n]{0,80}\]\(polyth:\/\/session\/([A-Za-z0-9_-]{1,80})\)/g;
+
+/** The token for one chat; the label cannot close or nest the link. */
+export function sessionMentionToken(sessionId: string, title: string): string {
+  const label = title.replace(/[\][()<>\\\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
+  return `[@${label || "chat"}](${SESSION_MENTION_SCHEME}${sessionId})`;
+}
+
+/** Chat ids named by well-formed tokens in a text: first-seen order, no
+ *  duplicates, at most `limit`. Malformed tokens are ignored. */
+export function sessionMentionIds(text: string, limit: number = MAX_SESSION_MENTIONS): string[] {
+  const ids: string[] = [];
+  for (const match of text.matchAll(SESSION_MENTION_TOKEN)) {
+    const id = match[1]!;
+    if (ids.includes(id)) continue;
+    ids.push(id);
+    if (ids.length >= limit) break;
+  }
+  return ids;
 }
 
 /** `GET /api/sessions/:id/sharing/outsiders`: the Space members who cannot open
@@ -3101,6 +3147,10 @@ export interface SessionService {
   /** Continue a paused session: a hidden turn on the same history asks the
    *  agent to carry on from where it was interrupted. Rejects `not-paused`. */
   continuePaused?(sessionId: string, options?: { source?: string }): Promise<SendResult>;
+  /** Turn off the silence stop for one open call of the current turn (the
+   *  hard ceiling stays); records `tool/keep-running`. Idempotent. Rejects
+   *  `conflict` when the call is not open in the current turn. */
+  keepToolRunning?(sessionId: string, callId: string, options?: { userId?: string }): Promise<void>;
   /** Compact the conversation context: the runtime's native compaction when
    * it has one, otherwise Polyth's own (summary + fresh native leg); a native
    * compaction the harness refuses or fails falls back to Polyth's. Resolves
@@ -3288,6 +3338,9 @@ export interface SessionService {
   decidePersonAccess?(sessionId: string, messageSeq: number, input: PersonAccessDecisionInput, admission?: PersonMessageAdmission): Promise<PersonAccessDecisionResult>;
   /** People the reader may mention here: those who can open the session. */
   mentionCandidates?(sessionId: string, person?: SessionPersonScope): Promise<SessionMentionCandidateDto[]>;
+  /** Chats the reader may reference with `@` from this chat: same project,
+   *  readable by the reader and by everyone who can open this chat. */
+  chatMentionCandidates?(sessionId: string, person?: SessionPersonScope): Promise<ChatMentionCandidateDto[]>;
   /** Mute/unmute one conversation for one person: only mentions notify. */
   setPersonMute?(sessionId: string, muted: boolean, person?: SessionPersonScope): Promise<void>;
   /** Create a runtime-less `conversation` session shared with participants. */

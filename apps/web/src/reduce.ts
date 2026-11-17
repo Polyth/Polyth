@@ -105,6 +105,9 @@ export interface ToolMsg {
   /** A command the person ran from the composer with `!`: its own timeline
    *  row, never part of an agent's activity block. */
   composerShell?: boolean;
+  /** A person pressed Keep running (`tool/keep-running`): the server's silence
+   *  stop is off for this call; only the hard ceiling remains. */
+  keptRunning?: true;
   /** See UserMsg.rev. */
   rev?: number;
 }
@@ -1354,6 +1357,15 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           model.changedFiles = [...new Set([...model.changedFiles, ...changedFiles])];
         }
         t.finishTime = ev.time;
+        touch(t);
+      }
+      break;
+    }
+    case "tool/keep-running": {
+      // Polyth-originated, not model-visible; an unknown call is ignored.
+      const t = findTool(model, str(d, "callId") ?? "");
+      if (t && !t.keptRunning) {
+        t.keptRunning = true;
         touch(t);
       }
       break;

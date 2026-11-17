@@ -160,6 +160,7 @@ function fixture(t: test.TestContext) {
     },
     async withWorkspaceMutation() { throw new Error("mutation callback reached domain"); },
     async abort() {},
+    async keepToolRunning() {},
     async replyPermission() {},
     async replyQuestion() {},
   } as unknown as SessionService;
@@ -408,6 +409,7 @@ test("viewer can read admitted sessions but cannot create or mutate them", async
   assert.equal((await viewer.snapshot(ref.id)).id, ref.id);
   await assert.rejects(viewer.create({ projectId: "prj_one" }), { code: "forbidden" });
   await assert.rejects(viewer.archive(ref.id), { code: "forbidden" });
+  await assert.rejects(() => viewer.keepToolRunning!(ref.id, "c1"), { code: "forbidden" });
   await assert.rejects(viewer.send(ref.id, { text: "no", delivery: "enqueue" } as never), { code: "forbidden" });
 });
 

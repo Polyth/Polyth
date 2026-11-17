@@ -718,14 +718,14 @@ export function canonicalSessionService(
     : undefined;
 
   const activeMethodNames = new Set<PropertyKey>([
-    "send", "abort", "pause", "continuePaused", "replyPermission", "delegatePermission", "replyDelegatedPermission", "replyQuestion", "cancelResume", "setResumeCompact", "resumeNow",
+    "send", "abort", "pause", "continuePaused", "keepToolRunning", "replyPermission", "delegatePermission", "replyDelegatedPermission", "replyQuestion", "cancelResume", "setResumeCompact", "resumeNow",
     "rewind", "clearRewind", "previewRewindFiles", "previewRewindRestore", "runShell", "compact", "replySecret", "rename", "requestAutomaticTitle", "organize",
     "queueList", "queueEditStart", "queueEdit", "queueSendNow", "queueEditCancel", "queueReorder", "queueRemove",
     "pinContext", "unpinContext", "autoAcceptGet", "autoAcceptSet", "confirmBorrowedRuntimeEpoch",
     "saveDraft", "markRead", "postPersonMessage", "decidePersonAccess", "setPersonMute", "runtimeFeatures", "renameWorktreeBranch", "patchIsolation", "rebindWorkspace",
     "switchHarness", "cancelHarnessSwitch", "restartRuntime", "updateWorkspace", "patchWorkspace", "withWorkspaceMutation",
   ]);
-  const readableMethodNames = new Set<PropertyKey>(["debug", "clientMutationStatus", "mentionCandidates"]);
+  const readableMethodNames = new Set<PropertyKey>(["debug", "clientMutationStatus", "mentionCandidates", "chatMentionCandidates"]);
 
   const reconciledList = async (projectId?: string): Promise<SessionProjection[]> => {
     await reconcileMissingDeletes();

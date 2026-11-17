@@ -3,11 +3,11 @@ import ResourceLink from "../components/ResourceLink.tsx";
 // Shared sanitized Markdown renderer. One code path for chat bubbles,
 // multirun/fusion output and file preview: parse (pure AST) → sanitize URLs →
 // render. Rich leaves (mermaid/math/json tree/galleries) mount lazily.
-import { createContext, useContext, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { parseMarkdown, collectImages, holdBackStreamingTail, splitFrontmatter, type Block, type Inline, type TableAlign } from "./parse.ts";
 import { sanitizeLinkHref, sanitizeImageSrc, isVideoSource } from "./sanitize.ts";
 import { findFileRefs } from "./fileReference.ts";
-import { getState, useStore } from "../store.ts";
+import { activateSession, getState, useStore } from "../store.ts";
 import { getUiSettings } from "../uiPrefs.ts";
 import CopyButton from "../components/CopyButton.tsx";
 import Mermaid from "./Mermaid.tsx";
@@ -17,18 +17,21 @@ import ImageLightbox, { type MarkdownImage } from "./ImageLightbox.tsx";
 import { tr } from "../i18n/index.ts";
 import {
   Button,
+  ChatIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronUpIcon,
   Icon,
   ImageIcon,
 } from "../components/ui/index.ts";
-import { highlight } from "../highlight.ts";
+import { highlight, escapeCodeHtml } from "../highlight.ts";
 import { codeBlockOverflow } from "./codeBlock.ts";
 import { renderFence, useMarkdownFenceRenderer } from "./fenceRenderers.ts";
 import { useConversationReply } from "./conversationReplies.ts";
 
 interface DocContextValue {
+  /** The document is a live prefix: an unclosed code fence is still growing. */
+  streaming?: boolean;
   images: MarkdownImage[];
   openGallery(src: string): void;
   projectId: string | undefined;
@@ -122,6 +125,12 @@ export function renderInline(nodes: Inline[], keyBase: string, linkify = true): 
         out.push(<del key={k}>{renderInline(n.children, k, linkify)}</del>);
         break;
       case "link": {
+        const chatId = SESSION_LINK_RE.exec(n.href.trim())?.[1];
+        if (chatId) {
+          // A chat reference: the label in the text is never shown or trusted.
+          out.push(<SessionChatChip key={k} sessionId={chatId} />);
+          break;
+        }
         const href = sanitizeLinkHref(n.href);
         if (href === null) out.push(<span key={k}>{renderInline(n.children, k, false)}</span>);
         else out.push(<a key={k} href={href} target="_blank" rel="noopener noreferrer">{renderInline(n.children, k, false)}</a>);
@@ -157,8 +166,41 @@ function readViewportHeight(): number {
   return window.innerHeight > 0 ? window.innerHeight : 0;
 }
 
-function HighlightedPre({ lang, text }: { lang: string; text: string }) {
-  const html = useMemo(() => highlight(text, lang), [lang, text]);
+/** Streaming re-highlight cadence for a growing code fence (trailing). */
+export const STREAMING_HIGHLIGHT_MS = 300;
+
+function HighlightedPre({ lang, text, live = false }: { lang: string; text: string; live?: boolean }) {
+  // A fence still growing in a live message is not re-tokenized per delta
+  // (quadratic). It shows the last highlighted snapshot plus the escaped new
+  // tail in the same <pre><code>, and the snapshot advances at most every
+  // STREAMING_HIGHLIGHT_MS; a closed fence or a finished message highlights
+  // at once. Same box and text throughout, so nothing shifts when colour lands.
+  const [snap, setSnap] = useState<string | null>(null);
+  const latest = useRef(text);
+  latest.current = text;
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Trailing throttle: schedule only when none is pending, so deltas faster
+  // than the interval cannot starve (or endlessly postpone) the snapshot.
+  useEffect(() => {
+    if (!live || text === snap || timer.current !== null) return;
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      setSnap(latest.current);
+    }, STREAMING_HIGHLIGHT_MS);
+  }, [live, text, snap]);
+  useEffect(() => {
+    if (live) return;
+    if (timer.current !== null) clearTimeout(timer.current);
+    timer.current = null;
+  }, [live]);
+  useEffect(() => () => {
+    if (timer.current !== null) clearTimeout(timer.current);
+    timer.current = null;
+  }, []);
+  const base = live && snap !== null && text.startsWith(snap) ? snap : "";
+  const baseHtml = useMemo(() => (live && base ? highlight(base, lang) : ""), [live, base, lang]);
+  const finalHtml = useMemo(() => (live ? "" : highlight(text, lang)), [live, lang, text]);
+  const html = live ? baseHtml + escapeCodeHtml(text.slice(base.length)) : finalHtml;
   return (
     <pre>
       <code
@@ -271,7 +313,7 @@ function CodeBlock({ lang, text, info = "", closed = true, blockKey = "" }: { la
     // first line. A language without a renderer keeps the host's plain frame
     // and drops them (CommonMark ignores the rest of the info string).
     const body = info ? (text ? `${info}\n${text}` : info) : text;
-    const source = <PlainCodeBlock lang={lang} text={body} />;
+    const source = <PlainCodeBlock lang={lang} text={body} closed={closed} />;
     return renderFence(fence, {
       lang: lang.trim().toLowerCase(),
       text: body,
@@ -287,10 +329,11 @@ function CodeBlock({ lang, text, info = "", closed = true, blockKey = "" }: { la
       },
     });
   }
-  return <PlainCodeBlock lang={lang} text={text} />;
+  return <PlainCodeBlock lang={lang} text={text} closed={closed} />;
 }
 
-function PlainCodeBlock({ lang, text }: { lang: string; text: string }) {
+function PlainCodeBlock({ lang, text, closed = true }: { lang: string; text: string; closed?: boolean }) {
+  const live = Boolean(useContext(DocContext).streaming) && !closed;
   const prefs = getUiSettings();
   const [asTree, setAsTree] = useState(prefs.jsonTreeDefault !== "raw");
   if (lang === "mermaid") return <Mermaid code={text} />;
@@ -315,13 +358,13 @@ function PlainCodeBlock({ lang, text }: { lang: string; text: string }) {
       >
         {asTree
           ? <JsonTree value={parsed} defaultDepth={prefs.jsonTreeDepth ?? 2} />
-          : <HighlightedPre lang="json" text={text} />}
+          : <HighlightedPre lang="json" text={text} live={live} />}
       </MdCodeFrame>
     );
   }
   return (
     <MdCodeFrame lang={lang} text={text}>
-      <HighlightedPre lang={lang} text={text} />
+      <HighlightedPre lang={lang} text={text} live={live} />
     </MdCodeFrame>
   );
 }
@@ -341,6 +384,25 @@ function bareVideoAutolink(inline: Inline[]): string | null {
 }
 
 /** A bare video URL paragraph: the player plus its small caption link. */
+const SESSION_LINK_RE = /^polyth:\/\/session\/([A-Za-z0-9_-]{1,80})$/;
+
+/** `[@Title](polyth://session/<id>)` as a chip. The reader's own chat list is
+ *  already filtered to the chats they may open, so a chat found there shows its
+ *  live title and opens; any other reader sees a plain "a chat", no title and
+ *  no link, whatever label the text carries. */
+export function SessionChatChip({ sessionId }: { sessionId: string }) {
+  const row = useStore((state) => state.sessions.find((session) => session.id === sessionId));
+  if (!row) return <span className="chat-mention chat-mention-plain">{tr("timeline.chatMention.unavailable")}</span>;
+  return (
+    // The glyph tells a chat link from a person's name (same pill family);
+    // the tooltip says what a click does.
+    <button type="button" className="chat-mention" title={tr("notify.people.open", { chat: row.title || tr("composer.chats.untitled") })} onClick={() => activateSession(sessionId)}>
+      <Icon icon={ChatIcon} size="sm" className="chat-mention-icon" />
+      {row.title || tr("composer.chats.untitled")}
+    </button>
+  );
+}
+
 function VideoAutolink({ href }: { href: string }) {
   const ctx = useContext(DocContext);
   const resolved = sanitizeImageSrc(href, {
@@ -478,6 +540,7 @@ export function MarkdownDoc({ text, keyBase = "md", showGalleryShortcut = false,
   const [galleryAt, setGalleryAt] = useState<number | null>(null);
 
   const ctx = useMemo<DocContextValue>(() => ({
+    ...(streaming ? { streaming: true } : {}),
     images,
     projectId,
     sessionId,
@@ -488,7 +551,7 @@ export function MarkdownDoc({ text, keyBase = "md", showGalleryShortcut = false,
       const at = images.findIndex((im) => im.src === src);
       setGalleryAt(at >= 0 ? at : 0);
     },
-  }), [images, projectId, sessionId, repositoryId, conversation, keyBase]);
+  }), [images, projectId, sessionId, repositoryId, conversation, keyBase, streaming]);
 
   return (
     <DocContext.Provider value={ctx}>

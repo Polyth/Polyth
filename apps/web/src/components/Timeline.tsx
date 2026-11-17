@@ -814,7 +814,7 @@ export function ActivityGroupView({
     if (key === ticker.shown && shownLine) {
       // Open, the running row below shows the time itself: no second copy.
       return shownTool?.status === "running" && (!open || soleTool !== undefined)
-        ? <StepLineView line={shownLine} tail={<ToolPulseInline sessionId={sessionId} callId={shownTool.callId} startedAt={shownTool.time} />} />
+        ? <StepLineView line={shownLine} tail={<ToolPulseInline sessionId={sessionId} callId={shownTool.callId} startedAt={shownTool.time} kept={shownTool.keptRunning === true} />} />
         : <StepLineView line={shownLine} />;
     }
     const item = key === "summary" ? undefined : g.items.find((candidate) => candidate.id === key);

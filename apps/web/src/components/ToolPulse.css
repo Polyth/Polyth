@@ -49,3 +49,26 @@
 .tool-pulse-part + .tool-pulse-part {
   margin-inline-start: .35em;
 }
+
+/* Keep running: a quiet ghost button after the countdown. On touch the hit
+   area grows to 44px without growing the line (negative block margin). */
+.tool-pulse-keep {
+  margin-inline-start: var(--space-2);
+  vertical-align: baseline;
+}
+
+@media (pointer: coarse) {
+  .tool-pulse-keep {
+    min-width: 44px;
+    min-height: 44px;
+    margin-block: -14px;
+  }
+}
+
+.tool-pulse-error {
+  color: var(--danger);
+}
+
+.tool-pulse:focus-visible {
+  outline: none;
+}

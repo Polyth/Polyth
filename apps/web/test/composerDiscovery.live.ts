@@ -278,7 +278,7 @@ test("add menu: truthful rows, four-state details, ARIA, and no invented capabil
     .locator(".add-menu-group, .add-menu-label")
     .allTextContents();
   assert.deepEqual(labels, [
-    "Add context", "Mention project file…",
+    "Add context", "Mention a file or chat…",
     "Link GitHub issue or pull request…", "Attach goal…",
     "Compose", "Commands", "Snippets", "Shell command",
   ]);
@@ -295,7 +295,7 @@ test("add menu: truthful rows, four-state details, ARIA, and no invented capabil
 
   // Sigil hints are secondary expert columns on the right rows.
   for (const [label, hint] of [
-    ["Mention project file…", "@"], ["Commands", "/"], ["Snippets", "#"], ["Shell command", "!"],
+    ["Mention a file or chat…", "@"], ["Commands", "/"], ["Snippets", "#"], ["Shell command", "!"],
   ] as const) {
     assert.equal(await menuItem(page, label).locator(".add-menu-hint").innerText(), hint, label);
   }
@@ -349,7 +349,7 @@ test("menu insertion equals typed sigils; the popup is an honest combobox", asyn
 
   // Mention → "@" at the caret with the instruction state (not a fake list).
   await openAddMenu(page);
-  await menuItem(page, "Mention project file…").click();
+  await menuItem(page, "Mention a file or chat…").click();
   await page.waitForSelector(".ac-popup", { state: "visible" });
   assert.equal(await input.inputValue(), "@");
   assert.equal(await input.getAttribute("role"), "combobox");

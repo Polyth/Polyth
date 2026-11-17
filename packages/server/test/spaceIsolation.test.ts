@@ -178,6 +178,7 @@ test("mutations across Spaces are refused, including deletes that would silently
   for (const attempt of [
     () => homeServices.sessions.archive(inWork.sessionId),
     () => homeServices.sessions.abort(inWork.sessionId),
+    () => homeServices.sessions.keepToolRunning!(inWork.sessionId, "c1"),
     () => homeServices.sessions.rename!(inWork.sessionId, "stolen"),
     () => homeServices.sessions.send(inWork.sessionId, { text: "hi" }),
     () => homeServices.sessions.delete!(inWork.sessionId),

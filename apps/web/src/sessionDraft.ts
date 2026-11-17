@@ -4,6 +4,7 @@
 // a chat with history shows the same mark while its draft waits unsent.
 import type { SessionProjection } from "@polyth/contracts";
 import { sessionDraftPreview } from "@polyth/contracts";
+import { collapseChatMentions } from "./composer/chatMentionDraft.ts";
 
 type DraftFields = Pick<SessionProjection, "summary" | "draft" | "draftPreview" | "lastTurnAt">;
 
@@ -11,8 +12,9 @@ type DraftFields = Pick<SessionProjection, "summary" | "draft" | "draftPreview" 
  *  preview (any `draft` on it is stale cached detail); a full projection
  *  carries the text itself. */
 export function sessionDraftLine(session: DraftFields): string | undefined {
-  if (session.summary) return session.draftPreview || undefined;
-  return session.draftPreview || sessionDraftPreview(session.draft);
+  // The server holds link tokens; the navigator shows `@Title`.
+  const line = session.summary ? session.draftPreview : session.draftPreview || sessionDraftPreview(session.draft);
+  return line ? collapseChatMentions(line).text || undefined : undefined;
 }
 
 /** Navigator mark. The open chat already shows its draft in the composer, so

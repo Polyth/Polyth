@@ -1595,6 +1595,10 @@ export interface WebPackageHost {
    * shell store or composer event bus directly. */
   conversation: {
     insert(text: string): void;
+    /** Bring the chat composer into view and focus it: closes a package layer
+     * that covers the chat (a phone or full-screen window) and leaves a side
+     * window open. For "Go to message" after an insert. Optional for older hosts. */
+    revealComposer?(): void;
     startNewSession(projectId: string, seed?: ConversationSeed): void;
     openSession(sessionId: string): Promise<void>;
     /** Reveal a visible canonical message, paging older history if needed.

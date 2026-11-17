@@ -46,8 +46,10 @@ import { friendlyError } from "../settings.ts";
 import { registerUiPreference } from "../settingsSync.ts";
 import { registerPackageOnboarding } from "./onboarding/registry.ts";
 import {
+  closePackageWindow,
   closePage,
   closeWorkspacePane,
+  focusComposer,
   getState,
   openPage,
   openSettingsPage,
@@ -287,6 +289,13 @@ export const webPackageHost: WebPackageHost = {
       requestComposerInsert(text);
       closePage();
       setActiveView("session");
+    },
+    revealComposer: () => {
+      // Only a window that covers the chat closes (phone, or a pane promoted to
+      // full screen); a side window stays beside the composer.
+      if (typeof document !== "undefined" && document.querySelector(".rail-fullscreen")) closePackageWindow();
+      closePage();
+      focusComposer();
     },
     startNewSession: (projectId, seed) => {
       startNewSession(projectId, seed);

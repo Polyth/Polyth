@@ -123,12 +123,13 @@ test("add menu: exact rows, contributed items in order, sigil hints, and no Skil
     tr("composer.discovery.photos"),
     tr("composer.files"),
     tr("composer.discovery.addContext"),
-    tr("composer.discovery.mentionProjectFile"),
+    tr("composer.discovery.mentionFileOrChat"),
     "Link GitHub issue or pull request…",
     "Attach goal",
     tr("composer.discovery.compose"),
     tr("composer.discovery.commands"),
     tr("composer.discovery.snippets"),
+    tr("composer.historyPalette.title"),
     tr("composer.discovery.shellCommand"),
   ]);
   const byId = new Map(rows.map((r) => [r.id, r]));
@@ -161,9 +162,11 @@ test("add menu: visible disabled reasons for a missing project and a drafted she
     hasProject: false, hasSession: false, draftText: "",
     commands: { state: "loading" }, snippets: { state: "loading" },
   });
-  for (const id of ["photos", "upload", "mention", "commands", "snippets", "shell"]) {
+  for (const id of ["photos", "upload", "mention", "commands", "snippets", "history", "shell"]) {
     assert.equal(noProject.find((r) => r.id === id)?.disabledReason, OPEN_PROJECT_FIRST, id);
   }
+  // A new chat has no other chats to offer, so its mention row names files only.
+  assert.equal(noProject.find((r) => r.id === "mention")?.label, tr("composer.discovery.mentionProjectFile"));
   // No registry contribution supplies these rows; the host never invents them.
   assert.equal(noProject.find((r) => r.id === "contribution:github.link"), undefined);
 

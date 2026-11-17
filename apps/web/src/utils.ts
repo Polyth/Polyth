@@ -5,6 +5,7 @@ import type { AssistantMsg, RenderMessage, TaskActivityMsg, ToolMsg, UserMsg } f
 import { tr } from "./i18n/index.ts";
 import { isNativeMobile } from "@polyth/mobile/runtime";
 import { writeNativeClipboard } from "@polyth/mobile/native";
+import { expandChatMentions } from "./composer/chatMentionDraft.ts";
 import { acknowledgeDraftRevision, loadScopedDraftRecord, recordLocalDraftEdit, scopedDraftCacheKey, trackOutboundDraftWrite } from "./draftRecord.ts";
 import { clientPersistenceScope } from "./reliabilityContext.ts";
 import type { PersistenceScope } from "./clientPersistence.ts";
@@ -689,11 +690,13 @@ async function sendDraftRevision(
   const record = loadScopedDraftRecord(sessionId, capturedScope);
   // A newer edit replaced this timer's payload before it ran.
   if (record.text !== text || !record.dirty) return "skipped";
-  const settleOutbound = trackOutboundDraftWrite(sessionId, text, capturedScope);
+  // The server holds the link tokens; the record keeps `@Title` plus refs.
+  const wire = expandChatMentions(record.text, record.chatMentions ?? []);
+  const settleOutbound = trackOutboundDraftWrite(sessionId, wire, capturedScope);
   let definitive = false;
   try {
     const { api } = await import("@polyth/session/web-api");
-    const result = await api.saveDraft(sessionId, text, record.serverUpdatedAt ?? null);
+    const result = await api.saveDraft(sessionId, wire, record.serverUpdatedAt ?? null);
     acknowledgeDraftRevision(sessionId, record.revision, result.draftUpdatedAt, capturedScope);
     definitive = true;
     return "sent";

@@ -751,7 +751,11 @@ Polyth compacts itself
 `compaction.active`; the session's own model (the owning account's small
 model, else `POLYTH_SMALL_MODEL`, as fallback, through `SmallModelService`; `summarizeSessionFirst` in
 `packages/server/src/smallModel.ts`) summarizes the confirmed canonical
-history since the last summary-bearing compaction. The summary runs first on
+history since the last summary-bearing compaction; before it does, dense
+message text (data URIs, long base64 runs, fences over 4 KB and long log/JSON
+runs) is replaced in the summarizer's transcript only by a size marker
+(`stripDenseContent`, `packages/session/src/denseContent.ts`), so canonical
+history is never changed. The summary runs first on
 the session's own wired runtime through its direct completion only, because a
 session-bound harness (Antigravity) cannot lend a project-scoped runtime; a
 project runtime is used only when that runtime has no direct completion or

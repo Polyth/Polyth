@@ -759,6 +759,35 @@ Contract and server rules: [Spaces §14.8](../architecture/spaces-and-tenancy.md
   (`GET …/sharing/outsiders`) is read when a mention starts, not when the chat
   opens. A new chat, with no session yet, asks `GET /api/sharing/new-chat`
   instead and works the same way.
+- **Mentioning a chat**: in an open chat the desktop placeholder says so
+  ("Message the agent. Type @ for files and other chats, / for commands and
+  skills") and the Add menu row reads "Mention a file or chat…"; a new chat,
+  which has no other chats to offer, keeps "Mention project file…". The same
+  `@` list shows a "Chats" group between People
+  and Files: chats of the same project, newest first, matched by title, never
+  this chat or an archived one (`GET /api/sessions/:id/chat-mention-candidates`,
+  read when a mention starts; `chatMentionOptions` in `composer/discovery.ts`).
+  In a chat other people can read, only chats every reader can already open are
+  offered, so a private or personal chat never appears; in a private chat, any
+  chat the author can read. Picking one inserts `@Title` in the composer and
+  remembers `{ label, sessionId }` in the draft record next to the text
+  (`chatMentions`, `drafts.ts`; `composer/chatMentionDraft.ts`), so a reload
+  keeps it. The send rewrites the first unused `@label` of each entry into the
+  plain-text token `[@Title](polyth://session/<id>)`, which travels through the
+  queue, steering and retries as ordinary message text; a label edited away is
+  dropped and sends as plain text (not while "Draft cleared. Restore it?" is
+  offered, so a restored draft keeps its links). A recalled prompt (Up arrow or Previous
+  prompts) turns its tokens back into `@Title` plus entries. The server draft
+  carries the token form (`expandChatMentions` of the record at save), and a
+  device applying a server draft collapses it back to `@Title` plus refs
+  (`adoptServerDraft`); local and server text are compared in the token form,
+  so an unedited round trip is neither a conflict nor dirty. The send reads the
+  refs from the draft record. An older client shows the raw tokens. The timeline renders it as a chip
+  (`SessionChatChip`, `markdown/render.tsx`) with the LIVE title when the
+  reader's own chat list contains the chat (click opens it; a chat glyph tells
+  it from a person's name and the tooltip says "Open <title>"); anyone else sees a
+  plain "a chat", no title, no link. Accepted trade-off: the label inside the
+  token and the raw text still contain the title the author saw at send time.
 - **Mentioning someone outside the chat**: one plateless line of the pending
   stack above the composer (`MentionAccessLine.tsx`, decisions in
   `composer/people.ts`) asks once, with a wrapping sentence, a primary action
@@ -934,9 +963,23 @@ Host-owned (`apps/web`), not a package seam.
   since "quiet" would only restate the elapsed time. In the last two minutes
   before the server's silence watchdog (`TOOL_SILENCE_HINT_MS` 8 min,
   `TOOL_SILENCE_STOP_MS` 10 min), the line becomes the countdown. That is
-  "No output for 8m 25s · stops in 1m 35s" once frames exist, or "Stops
-  automatically in 1m 10s" without them. The collapsed tail reads `· 8m 50s ·
-  stops in 1m 10s`. The policy sentence ("Polyth stops a command after 10
+  "No output for 8m 25s · Polyth stops it in 1m 35s unless it prints
+  something" once frames exist, or "Polyth stops it in 1m 10s unless it
+  finishes" without them (the watchdog counts from the start there). The line
+  names who stops it and on what condition in place, because a bare "stops in
+  1m" read as "finishes in 1m" and a tooltip reaches neither touch nor a
+  screen reader. The collapsed tail reads `· 8m 50s · auto-stop in 1m 10s`.
+  While the countdown shows and the call is not kept, a small ghost
+  **Keep running** button follows the text (host `Button`, 44px hit area on
+  touch via negative block margin). It calls `api.keepToolRunning`; the
+  countdown goes away when `tool/keep-running` arrives (the reducer sets
+  `ToolMsg.keptRunning`), focus moves to the replacing line, and a failure
+  shows a short inline alert. A kept call reads "No output for 8m 25s · kept
+  running" (collapsed tail: `kept running`) with no countdown. From 50 minutes
+  after the start (`TOOL_HARD_HINT_MS`) every call, kept or not, reads "Polyth
+  stops it in 5m: commands run at most 60 minutes" with no button, because the
+  server's hard ceiling (`TOOL_HARD_STOP_MS`) applies regardless.
+  The policy sentence ("Polyth stops a command after 10
   minutes with no output.") is the tooltip. The countdown uses the strong ink
   at weight 500, with no colour signal. The pulse uses the summary row's text
   column and is words only: no dot, border or spinner of its own, and no
@@ -956,7 +999,8 @@ Host-owned (`apps/web`), not a package seam.
   "The agent stopped without answering". With `autoContinued` it adds the
   muted "Polyth asked it to continue." (that hidden continuation stays
   hidden). Otherwise, while the notice is the chat's newest row and no turn or
-  send is in progress, an accent text action **Continue** follows the fact and
+  send is in progress, an accent text action **Ask it to continue** (it sends
+  a message, so it never reads as "show the rest") follows the fact and
   wraps with it. It sends the ordinary visible message `Continue` through
   `sendMessage` (never `hiddenUserMessage`). Its hit area reaches `--hit-min`
   on coarse pointers without moving the line. Unknown fields are ignored and
@@ -1664,6 +1708,17 @@ working-tree conflicts in one recovery region above its tabs, with one set of
 agent draft actions. The failure reason and remote stay together; conflict
 counts remain visible alongside the recovery hint. Without a remote failure,
 the conflict recovery region appears only on Changes.
+
+Line comments and Find in changes (`DiffComments.tsx`, `ChangesFind.tsx`) must be
+discoverable without the docs. Rows show a faint comment glyph while the diff is
+hovered (full on the row); the open editor says how to cover a range (Shift-click
+a row; on touch tap a row, then *Extend to*). *Add to message* confirms in place
+that the text is in the draft and not sent. The desktop Changes bar has a visible
+*Find* button whose tooltip names the shortcut (Ctrl/⌘+F); the phone has the
+search button in the Changes header. On touch or narrow widths the find field
+takes its own row with the count and buttons beneath. Known gap: no seam moves
+focus to the composer from a package (see the usability notes in the change that
+added this paragraph).
 
 On a phone (`useShellMode() === "phone"`) `GitView` presents through
 `GitPhoneView`, which owns placement only: every request and mutation stays in
@@ -2635,7 +2690,14 @@ session's cache warmth, the re-write a cooled cache costs and **Keep warm** for
 `ChatMemoryReminder` row above the composer (Compact now, Continue in a new chat),
 never a toast. A turn stopped with code `context-full` opens the same row in any mode
 with its own sentence, and suppresses the generic failure notice, whose Retry could
-not help. Focus returns to the pie on close only when the pie
+not help. Picking a model whose window the chat no longer fits (the last measured
+usage at or past the new window less its compaction reserve, and that window
+smaller than the current one; `modelSwitchOverflow` in `chatMemory.ts`, the
+client twin of the server's `compactionDueForNextModel`) opens the same row
+before anything is sent: "This chat is too long for {model}. Polyth will compact
+it before your next message." with no buttons, or, for a manual chat, "…Compact
+it, or continue in a new chat, before you send." with both actions. Unknown
+usage or an unknown window says nothing. Focus returns to the pie on close only when the pie
 held focus, so a tap while the phone editor is focused keeps the keyboard and
 the engaged composer. The resting phone row keeps the pie right after Add
 (the model line dissolves with `display: contents` and only the pie stays).
@@ -3260,6 +3322,28 @@ measured from the card's outer edge: marks are centred on the model logo's colum
 (`--composer-stack-end`). The phone's resting row, which shows no model line,
 stands on the same grid: Add centres on the marks' column and the Stop/Send disc
 ends with the trailing column.
+
+**Previous prompts and the cleared-draft line.** `Ctrl+Up` / `Cmd+Up` in the
+composer (free: plain Up/Down still step through history and ignore Ctrl/Cmd;
+no host shortcut uses it) opens `PromptHistoryPalette`: a `ResponsiveOverlay`
+(dialog on desktop, sheet with its own search on a phone) listing this project's
+prompts newest first, filtered by every typed word. A chat mention token shows
+and is searched as `@Title` (`promptDisplayText`, `composer/history.ts`; the
+prompt-jump names use it too); recall still inserts the stored token. Enter or a click recalls the
+prompt through `usePromptHistory().recall` (text plus `attachmentsForRecall`,
+the same browse state as Up-arrow, so Esc in the composer returns to the draft)
+and never sends; Esc clears the query, then closes and the composer takes focus
+back. A phone has no such key: the Add menu's "Previous prompts" row opens it.
+The list is the signed-in person's own prompts only (`/api/prompt-history`
+filters by the session's person, never a client value; prompts recorded before
+authorship stay visible). When unsent text of at least 20 characters empties by
+the person's own edit (`onTextChange(..., "user")`: delete, cut, select-all),
+the pending stack shows one `composer-suggestion composer-restore` line, "Draft
+cleared. Restore it?", for 10 s, and announces the same words with the
+shortcut through the shared polite live region; the line or `Cmd/Ctrl+Z` on the
+empty field restores it. Sending, 20 new characters, another chat or the 10 s end dismiss
+it; a programmatic clear (a send, a recalled prompt) never offers it
+(`composer/clearedDraft.ts`).
 
 **The composer's icon grid** continues those columns inside the card, on every
 width, pointer, look and state (composerAdaptive.css "Composer icon grid"):
@@ -5484,6 +5568,11 @@ its revealed chats.
   and returns false when no composer took it. An empty `text` changes nothing;
   only `discard: true` takes the run's words back out (a spoken command), and a
   discarded run is never queued for a later composer.
+- `host.conversation.revealComposer?()` brings the chat composer into view and
+  focuses it: it closes a package window that covers the chat (the phone layer,
+  or a pane promoted to full screen, `.rail-fullscreen`) and a page, and leaves
+  a side window open. It is the "Go to message" after `insert`, which itself
+  never closes a side or phone window (Source control's line comments use it).
 - `host.conversation.submitDraft?({ delivery? })` sends the mounted composer's
   draft exactly as its Send control would (same target, new-session creation,
   model, attachments, follow-up delivery). `delivery` (`queue`, `steer`,
@@ -5802,6 +5891,10 @@ click everywhere else.
   the code starts at the body's own padding, instead of under an empty 29px
   band. The floating control reserves the first line's end (`pre`
   `padding-inline-end`), so a long line scrolls rather than passing beneath it.
+  While a message streams, a still-open fence is not re-tokenized per delta: it
+  renders the last highlighted snapshot plus the escaped new tail in the same
+  `<pre><code>` (snapshot refreshed at most every 300 ms, trailing), so the box
+  never shifts; closed fences and finished or historical messages highlight at once.
 - **Provider bodies.** Change-request and issue descriptions and comments
   (GitHub, GitLab) render through `HostingBody`
   (`packages/code-hosting/widgets/HostingBody.tsx`), which splits the text and

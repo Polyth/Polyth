@@ -47,6 +47,8 @@ import type { CommitPicks } from "./phoneOverview.ts";
 import { gitRefusalOf, openGitRefusal, reportGitError, type GitRefusal } from "./gitRefusal.ts";
 import { ChangeSection, fileStatKey, type ChangeGroup } from "./ChangeList.tsx";
 import { CommitFiles, DiffContent, DiffSkeleton, HunkBlock, parseCommitPrelude } from "./DiffViewer.tsx";
+import { DiffCommentsProvider, LineCommentEditor } from "./DiffComments.tsx";
+import { useChangesFind, type FindFile } from "./ChangesFind.tsx";
 import { AuthorAvatar, CountBadge, LineStats, StatusChip, When, fileIdentity, refKind, statusLabel } from "./sourceControlParts.tsx";
 import {
   AddIcon,
@@ -451,7 +453,25 @@ export function BranchReviewPanel({ target, host, prefs, prefsScope, workspace, 
   const compare = () => { setBase(baseDraft.trim()); retry((n) => n + 1); };
   const diffWrap = phone ? prefs.phoneWrap : prefs.wrap;
   const pathIndex = list && path ? list.files.findIndex((file) => file.path === path) : -1;
-  return <section className="git-branch-review" aria-label={tr("gitview.branchVsBase")}>
+  const findRoot = useRef<HTMLElement | null>(null);
+  const findFiles = useMemo<FindFile[]>(() => (list?.files ?? []).map((file) => ({ key: file.path, path: file.path })), [list]);
+  const find = useChangesFind({
+    host,
+    files: findFiles,
+    signature: JSON.stringify([request, list?.head, list?.mergeBase]),
+    root: findRoot,
+    loadDiff: async (file) => {
+      if (!list) return null;
+      try {
+        const value = await branchReviewClient.file(request, file.path);
+        return value.head !== list.head || value.mergeBase !== list.mergeBase || value.binary ? null : value.diff;
+      } catch { return null; }
+    },
+    reveal: (file) => { if (file.path !== path) selectPath(file.path); },
+  });
+  const commentHost = host && canInsert ? host : null;
+  return <section className="git-branch-review" aria-label={tr("gitview.branchVsBase")} ref={findRoot} tabIndex={-1} onKeyDown={(event) => { find.onKeyDown(event); }}>
+    {find.bar}
     {phone && !path && <>
       <button type="button" className="git-phone-row git-phone-base" onClick={() => setBasePicking(true)}>
         <UiIcon icon={CompareIcon} size="md" />
@@ -507,22 +527,30 @@ export function BranchReviewPanel({ target, host, prefs, prefsScope, workspace, 
             <LineStats stats={file} mode={prefs.lineStats === "hidden" ? "numbers" : prefs.lineStats} />
           </button>;
         })}</nav>}
-        {(!phone || path) && <div className="git-branch-review-detail">
+        {(!phone || path) && <DiffCommentsProvider value={commentHost}><div className="git-branch-review-detail">
           {fileLoading ? <div role="status" aria-busy="true" className="git-branch-review-loading"><span>{tr("gitview.reviewLoading")}</span></div> : patch ? <>
             {patch.binary ? <p className="source-inline-status">{tr("gitview.reviewBinary")}</p> : <DiffContent diff={patch.diff} path={patch.path} split={!phone && prefs.layout === "split"} wrap={diffWrap} />}
             {patch.truncated && <p className="source-inline-status" role="status">{tr("gitview.reviewTruncated")}</p>}
             {!patch.binary && <div className="git-branch-review-hunks" aria-label={tr("gitview.addReviewNote")}>
               {splitHunks(patch.diff).map((hunk, index) => <Button key={hunkDigest(hunk)} size="sm" variant="ghost" iconStart={AddIcon} aria-pressed={draftHunk ? hunkDigest(draftHunk) === hunkDigest(hunk) : false} onClick={() => { setDraftHunk(hunk); setText(""); }}>{tr("gitview.reviewNoteNearLineValue", { line: hunk.startNew })} · {index + 1}</Button>)}
             </div>}
-            {draftHunk && <div className="review-draft"><Textarea aria-label={tr("gitview.addReviewNote")} rows={3} value={text} onChange={(event) => setText(event.target.value)} />
+            {draftHunk && (host
+              ? <LineCommentEditor
+                  host={host}
+                  label={tr("gitview.addReviewNote")}
+                  submitLabel={tr("gitview.addNote")}
+                  onCancel={() => setDraftHunk(null)}
+                  onSubmit={(noteText) => { persist([...notes, { id: globalThis.crypto.randomUUID(), path: patch.path, line: draftHunk.startNew, mergeBase: patch.mergeBase, head: patch.head, createdAt: Date.now(), text: noteText, digest: hunkDigest(draftHunk), excerpt: capReviewExcerpt(draftHunk.body.join("\n")) }]); setDraftHunk(null); }}
+                />
+              : <div className="review-draft"><Textarea aria-label={tr("gitview.addReviewNote")} rows={3} value={text} onChange={(event) => setText(event.target.value)} />
               <div className="commit-row">
                 <Button size="sm" variant="ghost" onClick={() => setDraftHunk(null)}>{tr("common.cancel")}</Button>
                 <Button size="sm" variant="primary" disabled={!text.trim()} onClick={() => { persist([...notes, { id: globalThis.crypto.randomUUID(), path: patch.path, line: draftHunk.startNew, mergeBase: patch.mergeBase, head: patch.head, createdAt: Date.now(), text: text.trim(), digest: hunkDigest(draftHunk), excerpt: capReviewExcerpt(draftHunk.body.join("\n")) }]); setDraftHunk(null); }}>{tr("gitview.addNote")}</Button>
               </div>
-            </div>}
+            </div>)}
           </> : <EmptyState title={tr("gitview.selectAFileToReview")} description={tr("gitview.chooseAFileFromTheChangeList")} />}
           {phone && path && <PhoneFileFoot index={pathIndex} total={list.files.length} onStep={(delta) => { const next = list.files[pathIndex + delta]; if (next) selectPath(next.path); }} />}
-        </div>}
+        </div></DiffCommentsProvider>}
       </div>}
       {notes.length > 0 && <div className="review-list">
         <div className="stat-label">{tr("gitview.reviewNotesValue", { count: notes.length })}</div>
@@ -1291,6 +1319,24 @@ export default function GitView({
 
   const all = status ? [...status.conflicted, ...status.staged, ...status.unstaged, ...status.untracked] : [];
   const hunks = useMemo(() => splitHunks(diff), [diff]);
+  const findRoot = useRef<HTMLDivElement | null>(null);
+  const findFiles = useMemo<FindFile[]>(() => all.map((file) => ({ key: `${file.staged ? "s" : "u"}:${file.path}`, path: file.path })), [all.map(fileStatKey).join("\0")]);
+  const find = useChangesFind({
+    host,
+    files: findFiles,
+    signature: `${projectId}|${sessionId ?? ""}|${repositoryId ?? ""}|${prefs.ignoreWhitespace}|${changeKey}`,
+    root: findRoot,
+    loadDiff: async (file) => {
+      if (!projectId) return null;
+      const staged = file.key.startsWith("s:");
+      try { return (await api.gitDiff(projectId, file.path, staged, prefs.ignoreWhitespace, sessionId ?? undefined, repositoryId)).diff; } catch { return null; }
+    },
+    reveal: (file) => {
+      const entry = all.find((item) => item.path === file.path && item.staged === file.key.startsWith("s:"));
+      if (entry && !(selected?.path === entry.path && selected.staged === entry.staged)) openFile(entry);
+    },
+  });
+  const commentHost = host && sessionId ? host : null;
   const graphRows = useMemo(() => layoutGraph(graph), [graph]);
   const ResourceLink = host?.ui.components.ResourceLink;
   const resourceFor = useCallback((file: GitFileEntry): ResourceRef | undefined => {
@@ -1580,7 +1626,7 @@ export default function GitView({
   );
 
   const renderFileDiff = () => selected && (
-    <>
+    <DiffCommentsProvider value={commentHost}>
                     {diffLoading ? <DiffSkeleton /> : diffError ? (
                       <div className="source-inline-status error" role="alert">
                         <span>{diffError}</span>
@@ -1612,25 +1658,28 @@ export default function GitView({
                         <CopyButton text={diff} />
                       </div>
                     )}
-                    {draft && (
-                      <div className="review-draft">
+                    {draft && (host
+                      ? <LineCommentEditor
+                          host={host}
+                          label={tr("gitview.addReviewNote")}
+                          placeholder={tr("gitview.reviewNoteNearLineValue", { line: draft.line })}
+                          submitLabel={tr("gitview.addNote")}
+                          onCancel={() => setDraft(null)}
+                          onSubmit={(text) => {
+                            persistComments([...comments, { id: `rc_${Date.now().toString(36)}`, path: selected.path, digest: draft.digest, line: draft.line, text, createdAt: Date.now() }]);
+                            setDraft(null);
+                          }}
+                        />
+                      : <div className="review-draft">
                         <Textarea autoFocus rows={3} placeholder={tr("gitview.reviewNoteNearLineValue", { line: draft.line })} value={draftText} onChange={(event) => setDraftText(event.target.value)} />
                         <div className="commit-row">
                           <Button size="sm" variant="ghost" onClick={() => setDraft(null)}>{tr("common.cancel")}</Button>
                           <Button size="sm" variant="primary" disabled={!draftText.trim()} onClick={() => {
-                            persistComments([...comments, {
-                              id: `rc_${Date.now().toString(36)}`,
-                              path: selected.path,
-                              digest: draft.digest,
-                              line: draft.line,
-                              text: draftText.trim(),
-                              createdAt: Date.now(),
-                            }]);
+                            persistComments([...comments, { id: `rc_${Date.now().toString(36)}`, path: selected.path, digest: draft.digest, line: draft.line, text: draftText.trim(), createdAt: Date.now() }]);
                             setDraft(null);
                           }}>{tr("gitview.addNote")}</Button>
                         </div>
-                      </div>
-                    )}
+                      </div>)}
                     {fileComments.length > 0 && (
                       <div className="review-list">
                         <div className="stat-label">{tr("gitview.reviewNotesValue", { count: fileComments.length })}</div>
@@ -1650,7 +1699,7 @@ export default function GitView({
                         })}
                       </div>
                     )}
-    </>
+    </DiffCommentsProvider>
   );
 
   const renderLog = () => (
@@ -2116,7 +2165,9 @@ export default function GitView({
         closeFile={() => setMobileDetail(false)}
         commitTitle={phonePage?.kind === "history" && mobileDetail && commitSel ? selectedCommit?.shortSha ?? commitSel.slice(0, 7) : null}
         closeCommit={() => { setMobileDetail(false); setCommitSel(null); }}
-        renderFileDiff={renderFileDiff}
+        // The phone diff sits in its own layer: Find paints inside it.
+        renderFileDiff={() => <div ref={findRoot} className="git-phone-find-root">{renderFileDiff()}</div>}
+        find={{ bar: find.bar, isOpen: find.open, open: find.openFind }}
         renderLog={renderLog}
         renderBranches={renderBranches}
         renderStashes={renderStashes}
@@ -2342,7 +2393,7 @@ export default function GitView({
       />
 
       {tab === "changes" && (
-        <div className="git-changes-layout">
+        <div className="git-changes-layout" ref={findRoot} tabIndex={-1} onKeyDown={reviewView === "working" ? find.onKeyDown : undefined}>
           <div className="source-subbar">
             <div className="git-review-scope source-segmented" role="group" aria-label={tr("gitview.reviewScope")}>
               {(["working", "branch"] as const).map((scope) => <Button key={scope} size="sm" variant="ghost" aria-pressed={reviewView === scope} onClick={() => {
@@ -2356,6 +2407,11 @@ export default function GitView({
               )}
             </div>
             <span className="header-spacer" />
+            {reviewView === "working" && all.length > 0 && host && (
+              <Button size="sm" variant="ghost" iconStart={SearchIcon} aria-expanded={find.open} aria-keyshortcuts="Control+F Meta+F"
+                title={tr("diffFind.openHint", { shortcut: /Mac|iPhone|iPad/.test(globalThis.navigator?.platform ?? "") ? "⌘F" : "Ctrl+F" })}
+                onClick={find.openFind}>{tr("diffFind.open")}</Button>
+            )}
             {reviewView === "working" && <ViewOptionsMenu prefs={prefs} />}
           </div>
 
@@ -2368,6 +2424,8 @@ export default function GitView({
               prefsScope={gitViewScope} workspace={selectedRepository?.path ?? session?.worktreePath ?? project?.path ?? ""}
               branches={branches.branches} missing={workspaceInvalid || selectedRepository?.state === "missing" || session?.worktreeState === "missing"} />
           )}
+
+          {reviewView === "working" && find.bar}
 
           {reviewView === "working" && (
             <div className={`git-master-detail ${mobileDetail ? "detail-open" : ""}${all.length === 0 ? " is-clean" : ""}`}>

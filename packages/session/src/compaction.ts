@@ -5,6 +5,8 @@
 // the same `session/compacted` marker a harness compaction leaves.
 import type { ModelMessage, SessionEvent } from "@polyth/contracts";
 
+import { stripDenseContent } from "./denseContent.ts";
+
 /** `session/compacted.source` for a compaction Polyth performed itself. */
 export const POLYTH_COMPACTION_SOURCE = "polyth";
 
@@ -42,11 +44,12 @@ const clip = (text: string, max: number): string => {
 const oneLine = (text: string): string => text.replace(/\s+/g, " ").trim();
 
 /** One message as transcript text. Reasoning is private to its turn and is
- *  left out; tool traffic is clipped to what explains the work. */
+ *  left out; tool traffic is clipped to what explains the work, and dense
+ *  message text is reduced to a size marker before it reaches the summarizer. */
 export function compactionTranscriptLine(message: ModelMessage): string {
   const chunks: string[] = [];
   for (const part of message.parts) {
-    if (part.type === "text" && part.text.trim()) chunks.push(part.text.trim());
+    if (part.type === "text" && part.text.trim()) chunks.push(stripDenseContent(part.text.trim()));
     else if (part.type === "file") chunks.push(`[attached ${part.name}]`);
     else if (part.type === "tool-call") {
       chunks.push(`[tool ${part.tool}] ${clip(oneLine(JSON.stringify(part.input)), TOOL_INPUT_CHARS)}`);

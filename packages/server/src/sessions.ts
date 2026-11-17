@@ -40,7 +40,7 @@ import type {
   Project, SessionMoveBlock, SessionMoveInput, SessionProjectMove, SessionProjectMovedData, SessionReleasedExecution,
   SessionPerson, SessionPersonScope, TurnAdmission,
   PersonAccessDecisionResult, PersonAccessOutcome, PersonAccessRequest, PersonAccessResolvedData,
-  PersonMessageInput, PersonMessageResult, SessionMentionCandidateDto,
+  PersonMessageInput, PersonMessageResult, SessionMentionCandidateDto, ChatMentionCandidateDto,
   CreateConversationInput, StartSessionFromConversationInput, StartSessionFromConversationResult,
   SessionStartFailedData, SessionStartRequest, StartSessionInput, StartSessionResult,
   RuntimeCapabilities,
@@ -50,6 +50,7 @@ import type {
 import {
   isSessionAccessLevel,
   normalizeSessionPerson,
+  sessionMentionIds,
   readErrorDiagnostics,
   runtimeBatchAdmitsTurnContent,
   runtimeEventHasTurnContent,
@@ -60,13 +61,14 @@ import {
   SESSION_PURPOSE_CONVERSATION,
   CONVERSATION_SESSION_STARTED_EVENT,
   SESSION_PAUSE_ENDED_EVENT,
+  TOOL_KEEP_RUNNING_EVENT,
   TURN_INCOMPLETE_EVENT,
   SESSION_PROJECT_MOVED_EVENT,
   SESSION_START_FAILED_EVENT,
   SESSION_STARTING_QUEUE_REASON,
   normalizeSessionOrigin,
 } from "@polyth/contracts";
-import { sessionMentionCandidates, sessionAudience, sessionOutsiders, sessionShareApprover, sharingRootId, steerPeopleLine, turnPeopleBlock } from "./sessionSharing.ts";
+import { chatMentionCandidates, mentionedChatsBlock, sessionMentionCandidates, sessionAudience, sessionOutsiders, sessionShareApprover, sharingRootId, steerPeopleLine, turnPeopleBlock } from "./sessionSharing.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
 import type { ProjectService } from "@polyth/contracts";
 import { compactionDue, compactionDueForNextModel, effectiveCompactionPreference, parseCompactionPreference, type CompactionPreference } from "@polyth/contracts/compaction-policy";
@@ -157,6 +159,9 @@ import {
 } from "./sessionWorkspace.ts";
 /** Bounds one move's transaction; a chat with more delegated work stays put. */
 const SESSION_MOVE_FAMILY_LIMIT = 200;
+
+export const MODEL_TURNS_DISABLED_MESSAGE =
+  "Model turns are off on this test server. Set POLYTH_AGENT_BETA_MODEL_TURNS=1 to allow them.";
 
 const QUIET_DISPATCH_ERRORS = new Set([
   "shutting_down",
@@ -1057,6 +1062,10 @@ export function createSessionService(deps: {
   /** Absolute ceiling for one tool call even while it keeps showing activity.
    *  Defaults to sixty minutes. `toolExecutionTimeoutMs` is the silence limit. */
   toolExecutionHardLimitMs?: number;
+  /** Refuse every provider turn at admission (agent-beta without opt-in). */
+  modelTurnsDisabled?: boolean;
+  /** Test seam: grace after a restart before a rehydrated call's hard ceiling may fire (default 60 s). */
+  toolRehydrateGraceMs?: number;
   /** Consecutive tool-watchdog aborts that may auto-continue the turn with a
    *  hidden continuation prompt. 0 disables the nudge. Defaults to 1. */
   toolTimeoutContinueLimit?: number;
@@ -1496,9 +1505,14 @@ export function createSessionService(deps: {
   const unadmittedContentFences = new Map<string, number>();
   const toolWatchdogs = new Map<string, NodeJS.Timeout>();
   const pausedToolWatchdogs = new Set<string>();
+  /** Calls a person marked `tool/keep-running`: no silence stop, ceiling only. */
+  const keptToolCalls = new Set<string>();
   // Per-call clock: when it started and when a runtime event last carried its
   // id. Survives a request pause so the hard ceiling is not reset by waiting.
-  const toolWatchdogClocks = new Map<string, { startedAt: number; lastActivityAt: number }>();
+  const toolWatchdogClocks = new Map<string, { startedAt: number; lastActivityAt: number; ceilingNotBefore: number }>();
+  /** After a server restart the hard ceiling never fires sooner than this long
+   *  after start, so reconciliation and epoch recovery settle first. */
+  const TOOL_REHYDRATE_GRACE_MS = Math.max(0, deps.toolRehydrateGraceMs ?? 60_000);
   const toolWatchdogKey = (sessionId: string, callId: string): string => `${sessionId}\0${callId}`;
   const clearToolWatchdog = (sessionId: string, callId: string): void => {
     const key = toolWatchdogKey(sessionId, callId);
@@ -1506,6 +1520,7 @@ export function createSessionService(deps: {
     if (timer) clearTimeout(timer);
     toolWatchdogs.delete(key);
     pausedToolWatchdogs.delete(key);
+    keptToolCalls.delete(key);
     toolWatchdogClocks.delete(key);
   };
   const clearSessionToolWatchdogs = (sessionId: string): void => {
@@ -1519,6 +1534,9 @@ export function createSessionService(deps: {
     }
     for (const key of toolWatchdogClocks.keys()) {
       if (key.startsWith(`${sessionId}\0`)) toolWatchdogClocks.delete(key);
+    }
+    for (const key of keptToolCalls) {
+      if (key.startsWith(`${sessionId}\0`)) keptToolCalls.delete(key);
     }
   };
   type ActiveTool = { tool: string; input: JsonObject; startedAt: number };
@@ -1553,28 +1571,30 @@ export function createSessionService(deps: {
     callId: string,
     startedAt = Date.now(),
     lastActivityAt = startedAt,
+    ceilingNotBefore?: number,
   ): void {
     if (serviceDisposed || TOOL_EXECUTION_TIMEOUT_MS <= 0) return;
     const key = toolWatchdogKey(sessionId, callId);
+    ceilingNotBefore ??= toolWatchdogClocks.get(key)?.ceilingNotBefore ?? 0;
     const pending = toolWatchdogs.get(key);
     if (pending) clearTimeout(pending);
     toolWatchdogs.delete(key);
     pausedToolWatchdogs.delete(key);
-    toolWatchdogClocks.set(key, { startedAt, lastActivityAt });
+    toolWatchdogClocks.set(key, { startedAt, lastActivityAt, ceilingNotBefore });
     const schedule = (): void => {
       const clock = toolWatchdogClocks.get(key);
       if (!clock) return;
-      const deadline = Math.min(
-        clock.lastActivityAt + TOOL_EXECUTION_TIMEOUT_MS,
-        clock.startedAt + TOOL_EXECUTION_HARD_LIMIT_MS,
-      );
+      const ceiling = Math.max(clock.startedAt + TOOL_EXECUTION_HARD_LIMIT_MS, clock.ceilingNotBefore);
+      // A kept call has no silence stop: only the hard ceiling remains.
+      const kept = keptToolCalls.has(key);
+      const deadline = kept ? ceiling : Math.min(clock.lastActivityAt + TOOL_EXECUTION_TIMEOUT_MS, ceiling);
       const timer = setTimeout(() => {
         toolWatchdogs.delete(key);
         const current = toolWatchdogClocks.get(key);
         if (!current) return;
         const now = Date.now();
-        const silent = now - current.lastActivityAt >= TOOL_EXECUTION_TIMEOUT_MS;
-        const capped = now - current.startedAt >= TOOL_EXECUTION_HARD_LIMIT_MS;
+        const silent = !keptToolCalls.has(key) && now - current.lastActivityAt >= TOOL_EXECUTION_TIMEOUT_MS;
+        const capped = now - current.startedAt >= TOOL_EXECUTION_HARD_LIMIT_MS && now >= current.ceilingNotBefore;
         // Timers can fire a hair early; activity may also have landed meanwhile.
         if (!silent && !capped) {
           schedule();
@@ -8394,6 +8414,18 @@ export function createSessionService(deps: {
     clientRequestFingerprint: string | undefined,
     turn: TurnLatch,
   ): Promise<SendResult> => {
+    // The one gate every provider turn passes (person send, queue drain,
+    // watchdog/incomplete/epoch continuations, wakes). Runs before anything is
+    // persisted or any runtime is touched; a reserved queue row goes back.
+    if (deps.modelTurnsDisabled) {
+      if (reserved) {
+        await broadcastTail(sessionId, () => deps.queue!.releaseQueueReservation(
+          reserved.operation.operationId,
+          { kind: "rejected", code: "model-turns-disabled", message: MODEL_TURNS_DISABLED_MESSAGE },
+        ));
+      }
+      throw Object.assign(new Error(MODEL_TURNS_DISABLED_MESSAGE), { code: "forbidden" });
+    }
     if ((await store.projection(sessionId))?.harnessTransition) {
       throw Object.assign(new Error("harness switch is pending"), { code: "conflict" });
     }
@@ -8871,9 +8903,10 @@ export function createSessionService(deps: {
     // before delivery; a retry sends the exact recorded block, so a changed
     // audience never rewrites what an operation already told the model.
     if (operation && !contextFree && input.keepAlive !== true) {
-      const recorded = existingEvents.find((event) =>
-        event.type === "context/people-prepared"
-        && (event.data as { operationId?: unknown }).operationId === operation!.operationId,
+      // `existingEvents` does not load this type: read it explicitly so a replay
+      // finds the recorded block instead of assembling it again.
+      const recorded = (await eventsOfTypeList(sessionId, ["context/people-prepared"])).find((event) =>
+        (event.data as { operationId?: unknown }).operationId === operation!.operationId,
       );
       let peopleText = typeof (recorded?.data as { modelVisibleText?: unknown } | undefined)?.modelVisibleText === "string"
         ? (recorded!.data as { modelVisibleText: string }).modelVisibleText
@@ -8895,10 +8928,13 @@ export function createSessionService(deps: {
 
       // Package-owned blocks (e.g. running project actions). Same rule: recorded
       // once per operation, a retry resends the exact recorded text.
-      if (deps.turnContext) {
-        const recordedContext = existingEvents.find((event) =>
-          event.type === "context/turn-prepared"
-          && (event.data as { operationId?: unknown }).operationId === operation!.operationId,
+      // Chats the message references with `[@Title](polyth://session/<id>)` join
+      // the same record: re-checked here, on the admitted message only.
+      const mentionIds = sessionMentionIds(typeof (message?.data as { text?: unknown } | undefined)?.text === "string"
+        ? (message!.data as { text: string }).text : "");
+      if (deps.turnContext || mentionIds.length > 0) {
+        const recordedContext = (await eventsOfTypeList(sessionId, ["context/turn-prepared"])).find((event) =>
+          (event.data as { operationId?: unknown }).operationId === operation!.operationId,
         );
         let contextText = typeof (recordedContext?.data as { modelVisibleText?: unknown } | undefined)?.modelVisibleText === "string"
           ? (recordedContext!.data as { modelVisibleText: string }).modelVisibleText
@@ -8909,15 +8945,22 @@ export function createSessionService(deps: {
           if (!turnProject.remote) {
             try { worktreePath = workspaceExecutionPath(turnProject, proj); } catch { worktreePath = undefined; }
           }
-          const collected = spaceId
+          const collected = spaceId && deps.turnContext
             ? await deps.turnContext.collect({ spaceId, sessionId, projectId: proj.projectId, userId: turnAuthor?.userId, worktreePath }).catch(() => "")
             : "";
-          if (collected) {
+          const mentioned = spaceId && mentionIds.length > 0
+            ? await mentionedChatsBlock({
+                spaceId, current: proj, ids: mentionIds, authorId: turnAuthor?.userId,
+                lookup: (id) => store.projection(id),
+              }).catch(() => undefined)
+            : undefined;
+          const combined = [collected, mentioned].filter((part): part is string => Boolean(part)).join("\n\n");
+          if (combined) {
             await appendAndBroadcast(sessionId, "context/turn-prepared", {
               operationId: operation.operationId,
-              modelVisibleText: collected,
+              modelVisibleText: combined,
             }, { ignorable: true });
-            contextText = collected;
+            contextText = combined;
           }
         }
         if (contextText) projectedSections.push(contextText);
@@ -14245,6 +14288,31 @@ export function createSessionService(deps: {
       if (endedPause) void dispatchQueue(sessionId);
     },
 
+    async keepToolRunning(sessionId, callId, options) {
+      const userId = typeof options?.userId === "string" && options.userId && !options.userId.startsWith("system:")
+        ? options.userId
+        : undefined;
+      await withSessionLock(sessionId, async () => {
+        if (!(await store.projection(sessionId))) {
+          throw Object.assign(new Error("session not found"), { code: "not-found" });
+        }
+        if (!(await currentTurnActiveTools(sessionId)).has(callId)) {
+          throw Object.assign(new Error("that call is not running in the current turn"), { code: "conflict" });
+        }
+        const key = toolWatchdogKey(sessionId, callId);
+        if (keptToolCalls.has(key)) return;
+        await appendAndBroadcast(sessionId, TOOL_KEEP_RUNNING_EVENT, {
+          callId,
+          ...(userId ? { byUserId: userId } : {}),
+        }, { ignorable: true });
+        keptToolCalls.add(key);
+        // A waiting timer carries the old silence deadline; re-arm it against
+        // the ceiling. A paused call re-arms itself on resume.
+        const clock = toolWatchdogClocks.get(key);
+        if (clock && toolWatchdogs.has(key)) armToolWatchdog(sessionId, callId, clock.startedAt, clock.lastActivityAt);
+      });
+    },
+
     async pause(sessionId, options) {
       const source = typeof options?.source === "string" && options.source.trim()
         ? options.source.trim().slice(0, 64)
@@ -15897,6 +15965,15 @@ export function createSessionService(deps: {
       return sessionMentionCandidates(proj.spaceId, sessionId, person?.userId);
     },
 
+    async chatMentionCandidates(sessionId, person?: SessionPersonScope): Promise<ChatMentionCandidateDto[]> {
+      const proj = await store.projection(sessionId);
+      if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      const spaceId = proj.spaceId ?? (await projects.get(proj.projectId))?.spaceId;
+      if (!spaceId) return [];
+      const rows = (await store.projections(proj.projectId)).filter((row): row is SessionProjection => Boolean(row));
+      return chatMentionCandidates(spaceId, proj, rows, person?.userId);
+    },
+
     async setPersonMute(sessionId, muted, person?: SessionPersonScope): Promise<void> {
       if (!person?.userId) {
         throw Object.assign(new Error("mute needs a person"), { code: "invalid-input" });
@@ -16471,8 +16548,19 @@ export function createSessionService(deps: {
   const rehydrateToolWatchdogs = async (): Promise<void> => {
     for (const row of await store.projections()) {
       if (row.status === "archived" || row.status === "idle") continue;
-      for (const [callId, active] of await currentTurnActiveTools(row.id)) {
-        armToolWatchdog(row.id, callId, active.startedAt);
+      const activeTools = await currentTurnActiveTools(row.id);
+      if (activeTools.size > 0) {
+        // Typed read: boot must not replay a whole long log per working chat.
+        for (const event of await eventsOfTypeList(row.id, [TOOL_KEEP_RUNNING_EVENT])) {
+          const kept = event.type === TOOL_KEEP_RUNNING_EVENT ? (event.data as { callId?: unknown }).callId : undefined;
+          if (typeof kept === "string" && activeTools.has(kept)) keptToolCalls.add(toolWatchdogKey(row.id, kept));
+        }
+      }
+      for (const [callId, active] of activeTools) {
+        // Activity is not persisted and the runtime may have outlived the
+        // restart: the silence window restarts now, the ceiling gets a grace.
+        const now = Date.now();
+        armToolWatchdog(row.id, callId, active.startedAt, now, now + TOOL_REHYDRATE_GRACE_MS);
       }
       await syncToolWatchdogsForRequests(row.id);
     }
