@@ -3724,28 +3724,24 @@ visible (identity and quick actions); removing those footers reflowed the
 whole transcript at every send and again at turn end, and hiding them
 (`data-dormant`, now only the working turn's own answers) left a blank band
 above the block under the answer. The identity panel is one per
-turn (its terminal answer), but every finished answer keeps its quick actions:
-an interim answer that tools, an answered question or more prose of the same
-turn follow gets an actions-only footer (`data-actions-only`). In the live turn
-an interim answer takes that footer's (dormant) box the moment a row lands
-under it, while it is the tail's neighbour; added at turn end instead, every
-footer in view pushed the rows below it down at once. On touch
-(`(hover: none), (pointer: coarse)`) actions-only footers are not shown: a
-row of quick actions under every interim answer doubled the activity gaps;
-the turn's final answer keeps its footer. With a mouse, over a block that
-footer *is* the group gap (no top margin, a negative bottom margin of
-`--conversation-group-gap`), in every reveal mode: elsewhere a hover-revealed
-actions-only footer collapses to no height and its bar shows in the message
-gap below, but the group gap is narrower than the icon track, and the block
-(its own stacking context) painted over the revealed icons and took their
-clicks. On phones prose, thoughts and blocks share one
+turn (its terminal answer). An interim answer that tools, an answered question
+or more prose of the same turn follow still renders an actions-only footer
+(`data-actions-only`), but no pointer shows it (`display: none` in
+`ChatChrome.css`): its reserved quick-action row set the activity rows apart
+from the prose (36px of ink gap over a row, 28px under it, against a 12px
+paragraph gap), and a collapsed hover bar revealed into the block under it,
+which painted over the icons and took their clicks. Only the turn's final
+answer carries its footer. Next to prose an activity block's gap counts the
+empty band around a 36px row's title (`--activity-row-band`, `--space-2`), so
+the title stands the group gap from the text's ink on both sides (measured
+20px with a mouse, 16px on a phone). On phones prose, thoughts and blocks share one
 gap (`--conversation-group-gap` = `--timeline-gap`, 12px); touch block rows
 keep a 44px hit box but lay out as 36px (`--activity-row-trim` pulls the
 block into the gaps around it), and consecutive blocks' hit boxes meet
 (`--space-1` apart with a mouse). The trim only reaches into a row's empty
 padding, so a look that draws the summary's box (the Chip outline, Air's pill
-and open island, Line's rule) sets it to 0 on the block and keeps the full
-gap; trimmed, a prompt under Air's pill sat 8px from it. A thought row keeps prose's ink gap (group
+and open island, Line's rule) sets it (and `--activity-row-band`, on the
+timeline) to 0 and keeps the full gap; trimmed, a prompt under Air's pill sat 8px from it. A thought row keeps prose's ink gap (group
 gap less its header pad). A progress update (an
 interim answer followed by a block) only quiets its ink; new type metrics would
 reflow the lines right above the block that just arrived. The overflowing think

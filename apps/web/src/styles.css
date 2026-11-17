@@ -2858,17 +2858,25 @@ body[data-desktop-low-resource="true"] .timeline > .rewind-leaving { animation: 
    out as 36px ones. The block reaches into the gaps around it by the trim,
    which only its rows' empty block padding fills. A look that draws the
    summary's box (a pill, an outline, a rule) has no such padding and sets
-   the trim to 0 on the block, or the drawn edge eats the gap. */
+   the trim to 0 on the block, or the drawn edge eats the gap.
+   --activity-row-band: a 36px row's title sits in an empty band about 10px
+   tall above and below it. Next to prose the gap counts that band, so the
+   title stands the group gap from the text's ink rather than the gap plus
+   the band (it read 28-36px against a 12px paragraph gap). A look that
+   draws the summary's box sets it to 0 on the timeline: its edge is ink. */
 .timeline {
   --activity-row-trim: max(0px, calc((var(--hit-min) - 36px) / 2));
+  --activity-row-band: var(--space-2);
 }
 .timeline > .msg.activity-group { margin-block-end: calc(-1 * var(--activity-row-trim)); }
-.timeline > .msg.user + .activity-group,
-.timeline > .msg.assistant + .activity-group {
+.timeline > .msg.user + .activity-group {
   margin-block-start: calc(var(--conversation-group-gap) - var(--timeline-gap) - var(--activity-row-trim));
 }
+.timeline > .msg.assistant + .activity-group {
+  margin-block-start: calc(var(--conversation-group-gap) - var(--timeline-gap) - var(--activity-row-trim) - var(--activity-row-band));
+}
 .timeline > .activity-group + .msg.assistant:where(:not(.activity-group)) {
-  margin-block-start: calc(var(--conversation-group-gap) - var(--timeline-gap));
+  margin-block-start: calc(var(--conversation-group-gap) - var(--timeline-gap) - var(--activity-row-band));
 }
 /* Consecutive folded blocks read as one list of steps, not separate groups;
    on touch their hit boxes meet and never overlap. */
@@ -19811,6 +19819,7 @@ body[data-activity-style="ledger"] .activity-group-items > * + * { box-shadow: i
 /* The outline is drawn on the row's whole touch box, so the block has no
    empty padding for the touch trim to reach into: it keeps the full gaps. */
 body[data-activity-style="chip"] .activity-group { --activity-step-inset: var(--space-3); --activity-row-trim: 0px; }
+body[data-activity-style="chip"] .timeline { --activity-row-band: 0px; }
 body[data-activity-style="chip"] .activity-group > .ui-run-summary {
   width: fit-content;
   max-width: calc(100% - 2 * var(--activity-bleed));

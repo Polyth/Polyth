@@ -1509,6 +1509,7 @@ body[data-shell-look="line"]:not(#\#) .md-code-block {
 
 /* The rule sits on the touch box's bottom edge: no touch trim under it. */
 body[data-shell-look="line"]:not(#\#) .activity-group { --activity-row-trim: 0px; }
+body[data-shell-look="line"]:not(#\#) .timeline { --activity-row-band: 0px; }
 
 /* The rule runs from frame edge to frame edge: this block does not bleed. */
 body[data-shell-look="line"]:not(#\#) .activity-group {
@@ -1783,6 +1784,7 @@ body[data-shell-look="air"]:not(#\#) .md-code-block {
 /* The pill (and the open block's island) fill the row's whole touch box:
    no touch trim, so they keep the full gap to the rows around them. */
 body[data-shell-look="air"]:not(#\#) .activity-group { --activity-row-trim: 0px; }
+body[data-shell-look="air"]:not(#\#) .timeline { --activity-row-band: 0px; }
 
 /* The pill's edge stands on the frame; the thread and the steps follow the
    mark and the title inside it. */

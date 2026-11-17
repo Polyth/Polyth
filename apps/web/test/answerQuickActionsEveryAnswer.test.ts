@@ -1,6 +1,8 @@
-// Mounted check: every finished answer keeps its quick actions, also when
-// tools, an answered question or more text of the same turn follow it. Only the
-// terminal answer of a turn carries the identity panel.
+// Mounted check: every finished answer renders its footer, also when tools, an
+// answered question or more text of the same turn follow it. Only the terminal
+// answer of a turn carries the identity panel; an interim answer's actions-only
+// footer stays in the DOM but CSS hides it (ChatChrome.css) to keep the
+// prose/activity rhythm.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
