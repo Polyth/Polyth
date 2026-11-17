@@ -746,7 +746,6 @@ jobs:
       VERSION: ${{ needs.prepare.outputs.version }}
       TAG: ${{ needs.prepare.outputs.tag }}
       RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
-      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -789,27 +788,18 @@ jobs:
           set -euo pipefail
           gh release upload "$TAG" release-assets/* --clobber --repo "$GITHUB_REPOSITORY"
 
+      # Trusted publishing (this job's id-token, trusted publisher `release.yml`)
+      # needs npm >= 11.5.1; Node 22 ships npm 10. NPM_TOKEN is only a fallback:
+      # npm is retiring tokens that publish without 2FA.
+      - name: npm for trusted publishing
+        if: inputs.publish_npm
+        run: npm install --global npm@11.21.2
+
       - name: Publish public npm SDK packages
         if: inputs.publish_npm
-        run: |
-          set -euo pipefail
-          test -n "$NODE_AUTH_TOKEN" || { echo "NPM_TOKEN is required when publish_npm=true" >&2; exit 1; }
-
-          publish_if_missing() {
-            PACKAGE="$1"
-            FILE="$2"
-            if npm view "$PACKAGE@$VERSION" version >/dev/null 2>&1; then
-              echo "$PACKAGE@$VERSION is already published; keeping release reruns idempotent."
-            else
-              npm publish "$FILE" --access public --provenance
-            fi
-          }
-
-          CONTRACTS="$(find release-assets -maxdepth 1 -name 'polyth-contracts-*.tgz' -print -quit)"
-          SDK="$(find release-assets -maxdepth 1 -name 'polyth-package-sdk-*.tgz' -print -quit)"
-          test -n "$CONTRACTS" && test -n "$SDK"
-          publish_if_missing "@polyth/contracts" "$CONTRACTS"
-          publish_if_missing "@polyth/package-sdk" "$SDK"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: node scripts/ci/publish-sdk-npm.mjs release-assets "$VERSION"
 
       - name: Publish GitHub Release
         if: inputs.draft == false

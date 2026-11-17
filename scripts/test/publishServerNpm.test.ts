@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { channelPublishes, npmAuthMode, npmSupportsOidc, serverDistTag, serverNpmPlan } from "../ci/publish-server-npm.mjs";
+import { sdkNpmPlan } from "../ci/publish-sdk-npm.mjs";
 
 test("the server reaches npm under its channel's dist-tag; stable is what installs by default", () => {
   assert.equal(serverDistTag("1.2.357"), "latest");
@@ -37,6 +38,24 @@ test("only a complete set is published, platform packages before polyth", () => 
     ]);
     assert.match(plan.packages.at(-1)!.file, /products-server-linux-x64[\\/]polyth-1\.2\.357\.tgz$/, "one runner's copy of the main package");
     assert.deepEqual(serverNpmPlan(root, "1.2.358").missing.length, 5, "another version's files do not count");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the SDK publishes this release's npm pack tarballs, contracts before package-sdk", () => {
+  const root = mkdtempSync(join(tmpdir(), "sdk-npm-"));
+  try {
+    writeFileSync(join(root, "polyth-contracts-1.2.357.tgz"), "x");
+    writeFileSync(join(root, "polyth-package-sdk-1.2.356.tgz"), "x");
+    assert.deepEqual(sdkNpmPlan(root, "1.2.357").missing, ["@polyth/package-sdk"], "another version's tarball does not count");
+
+    writeFileSync(join(root, "polyth-package-sdk-1.2.357.tgz"), "x");
+    const plan = sdkNpmPlan(root, "1.2.357");
+    assert.deepEqual(plan.missing, []);
+    assert.equal(plan.tag, "latest");
+    assert.deepEqual(plan.packages.map((pkg) => pkg.name), ["@polyth/contracts", "@polyth/package-sdk"]);
+    assert.match(plan.packages[1]!.file, /polyth-package-sdk-1\.2\.357\.tgz$/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
