@@ -4872,6 +4872,20 @@ open that view directly (`OWN_ACCOUNT_TARGET`). Polyth Link's *This computer*
 card shows the host status, the address this browser uses and whether
 sign-in is required, above the paired phones.
 
+A signed-in row is labelled from the sign-in request's user agent
+(`clientUserAgent.ts` reads it; the server stores it, up to 200 characters):
+a browser name and system, or the shell token an app appends to the same
+agent — `PolythDesktop/<version>`, `PolythDesktop-Workstation/<version>`
+(desktop app, `userAgent.ts`) or `PolythMobile` (phone app, Capacitor
+`appendUserAgent`). That token is the only such signal: a phone app and phone
+Safari ship the same WebKit agent, and an Electron window otherwise reports a
+plain Chrome agent, which is why the app would read as "Chrome on macOS". The
+longer label bound exists for the same reason — a phone's agent alone already
+passes 120 characters, so a tighter cut would drop the token. Both tokens are
+client claims: render them, never authorize on them. A row that arrived before
+this logged-in shell keeps its browser-or-system label, and a browser stays
+version-less because the agent is its own.
+
 Harness-specific sections contribute to `settings.harness.detail` with
 `harnessId`, `sectionId`, and `label` metadata. Their `order` controls navigation;
 `handlesPendingChanges: true` identifies the section that reviews and applies

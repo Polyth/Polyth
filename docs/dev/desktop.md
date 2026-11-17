@@ -118,6 +118,13 @@ work in progress. If first-run setup never finished and the person goes to anoth
 server, the setup server stops and the app counts as connect-only, since it held
 nothing. Choosing This computer starts it again.
 
+The main window's user agent is the Chromium default plus `userAgent.ts`'s token
+(`PolythDesktop/<version>`, or `PolythDesktop-Workstation/<version>` in the
+workstation edition), set before the first page loads. It is how the account's
+signed-in device list shows Polyth Desktop instead of "Chrome on macOS"; the
+server keeps the agent only as a display label (docs/dev/ui.md § Users and
+account settings), so this changes nothing about authorization.
+
 ### What another server's page may do
 
 `windowSurface()` sorts the sender's own frame URL into `local`, `hub`, `remote` or

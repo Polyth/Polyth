@@ -604,7 +604,9 @@ export function createAuthService(opts: AuthServiceOptions): AuthService {
         tokenHash: sha256(token),
         createdAt: t,
         lastSeenAt: t,
-        label: (userAgent ?? "").slice(0, 120),
+        // Same bound as the identity store's label: long enough to keep the
+        // shell token a phone or desktop app appends to its user agent.
+        label: (userAgent ?? "").slice(0, 200),
       });
       save();
       return { ok: true, token };

@@ -32,6 +32,7 @@ import { desktopServerPackages } from "./serverPackages.ts";
 import { createDesktopSetupClaimBroker } from "./setupClaim.ts";
 import { hubResponse } from "./hubProtocol.ts";
 import { osDisplayName } from "./osDisplayName.ts";
+import { desktopUserAgent } from "./userAgent.ts";
 import { createPolythLinkClient, type PolythLinkClient } from "./polythLinkClient.ts";
 import { withoutForeignSessionCookies } from "./sessionCookieGuard.ts";
 import { readSavedServerPort, reserveServerPort, saveServerPort } from "./serverPort.ts";
@@ -1334,6 +1335,13 @@ const createWindow = async (startUrl = firstWindowUrl()): Promise<void> => {
       backgroundThrottling: true,
     },
   });
+  // The account's device list is built from the sign-in request's user agent,
+  // and an Electron window otherwise reports a plain Chrome UA: our own app
+  // would sign in as "Chrome on macOS", exactly like a browser tab.
+  window.webContents.setUserAgent(desktopUserAgent(window.webContents.getUserAgent(), {
+    version: app.getVersion(),
+    workstation,
+  }));
   mainWindow = window;
   void refreshSystemControls();
   pendingMaximize = saved.maximized === true;

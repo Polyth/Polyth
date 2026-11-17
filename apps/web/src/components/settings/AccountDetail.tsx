@@ -20,7 +20,8 @@ import {
 } from "../../passkeys.ts";
 import type { CurrentSpaceAccess } from "../../spaceAccess.ts";
 import { confirmAlert } from "../../alerts.ts";
-import { getLocale, tr } from "../../i18n/index.ts";
+import { getLocale, tr, type TranslationKey } from "../../i18n/index.ts";
+import { browserOf, isPhoneAgent, osOf, shellOf, type BrowserName, type OsName, type ShellKind } from "../../clientUserAgent.ts";
 import CopyButton from "../CopyButton.tsx";
 import { Badge, Button, Dialog, Icon, Notice, TextInput } from "../ui/index.ts";
 import { BackIcon, KeyIcon, MonitorIcon, SignOutIcon, SmartphoneIcon } from "../ui/icons.ts";
@@ -38,20 +39,41 @@ const ACTIVE_NOW_MS = 5 * 60_000;
 const when = (ts: number): string =>
   new Intl.DateTimeFormat(getLocale(), { dateStyle: "medium", timeStyle: "short" }).format(ts);
 
-const deviceLabel = (ua: string): string => {
-  if (!ua) return tr("settings.accesspage.unknownDevice");
-  const browser =
-    /Edg\//.test(ua) ? tr("settings.accesspage.edge") : /Firefox\//.test(ua) ? tr("settings.accesspage.firefox")
-    : /Chrome\//.test(ua) ? tr("settings.accesspage.chrome") : /Safari\//.test(ua) ? tr("settings.accesspage.safari") : null;
-  const os =
-    /Windows/.test(ua) ? tr("settings.accesspage.windows") : /Mac OS X|Macintosh/.test(ua) && !/iPhone|iPad/.test(ua) ? tr("settings.accesspage.macos")
-    : /Android/.test(ua) ? tr("settings.accesspage.android") : /iPhone|iPad/.test(ua) ? tr("settings.accesspage.ios")
-    : /Linux/.test(ua) ? tr("settings.accesspage.linux") : null;
-  if (browser && os) return tr("settings.accesspage.valueOnValue", { browser, os });
-  return browser ?? os ?? ua.slice(0, 40);
+const BROWSER_KEYS: Record<BrowserName, TranslationKey> = {
+  edge: "settings.accesspage.edge",
+  firefox: "settings.accesspage.firefox",
+  chrome: "settings.accesspage.chrome",
+  safari: "settings.accesspage.safari",
 };
 
-const isPhone = (ua: string): boolean => /iPhone|Android.+Mobile|Mobile Safari/.test(ua);
+const OS_KEYS: Record<OsName, TranslationKey> = {
+  windows: "settings.accesspage.windows",
+  macos: "settings.accesspage.macos",
+  android: "settings.accesspage.android",
+  ios: "settings.accesspage.ios",
+  linux: "settings.accesspage.linux",
+};
+
+/** An app names itself and its version; a browser is only its name (its user
+ *  agent is the browser's own, so there is no version of ours to show). */
+const SHELL_KEYS: Record<ShellKind, TranslationKey> = {
+  desktop: "settings.accesspage.polythDesktop",
+  "desktop-workstation": "settings.accesspage.polythDesktopWorkstation",
+  mobile: "settings.accesspage.polythMobile",
+};
+
+const deviceLabel = (ua: string): string => {
+  if (!ua) return tr("settings.accesspage.unknownDevice");
+  const shell = shellOf(ua);
+  const browserName = shell ? null : browserOf(ua);
+  const browser = shell
+    ? [tr(SHELL_KEYS[shell.kind]), shell.version].filter(Boolean).join(" ")
+    : browserName ? tr(BROWSER_KEYS[browserName]) : null;
+  const os = osOf(ua);
+  const osName = os ? tr(OS_KEYS[os]) : null;
+  if (browser && osName) return tr("settings.accesspage.valueOnValue", { browser, os: osName });
+  return browser ?? osName ?? ua.slice(0, 40);
+};
 
 async function browserSessions(): Promise<BrowserSession[]> {
   const response = await fetch("/api/auth/sessions", { cache: "no-store" });
@@ -335,7 +357,7 @@ export default function AccountDetail({ account, name, spaceAccess, withReauth, 
               return (
                 <ItemRow
                   key={session.id}
-                  icon={<Icon icon={isPhone(session.label) ? SmartphoneIcon : MonitorIcon} size="sm" />}
+                  icon={<Icon icon={isPhoneAgent(session.label) ? SmartphoneIcon : MonitorIcon} size="sm" />}
                   title={deviceLabel(session.label)}
                   {...(session.current ? { meta: <Badge tone="success" dot>{tr("settings.account.thisDevice")}</Badge> } : {})}
                   description={session.current || recent ? tr("settings.account.activeNow") : tr("settings.account.lastActive", { date: when(session.lastSeenAt) })}

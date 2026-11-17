@@ -182,3 +182,23 @@ test("the Access page is gone and its settings live in Users and Polyth Link", a
   assert.match(link, /className="pkg-tunnel-hero"/);
   assert.match(link, /\/api\/auth\/status/);
 });
+
+test("a signed-in row names the app shell from its token, never the browser it embeds", async () => {
+  const own = await source("../src/components/settings/AccountDetail.tsx");
+  // A phone app and phone Safari share one agent, and an Electron window
+  // reports plain Chrome, so the appended token is the only shell signal.
+  assert.match(own, /import \{ browserOf, isPhoneAgent, osOf, shellOf,/);
+  assert.match(own, /const shell = shellOf\(ua\);/);
+  // A shell's own agent never also reads as the browser it embeds.
+  assert.match(own, /const browserName = shell \? null : browserOf\(ua\);/);
+  assert.match(own, /isPhoneAgent\(session\.label\)/);
+  const shells = {
+    desktop: ["settings.accesspage.polythDesktop", "Polyth Desktop"],
+    "desktop-workstation": ["settings.accesspage.polythDesktopWorkstation", "Polyth Desktop Workstation"],
+    mobile: ["settings.accesspage.polythMobile", "Polyth Mobile"],
+  } as const;
+  for (const [kind, [key, label]] of Object.entries(shells)) {
+    assert.match(own, new RegExp(`(?:^|\\s)"?${kind}"?: "${key.replace(/\./g, "\\.")}"`), kind);
+    assert.equal(en[key as keyof typeof en], label);
+  }
+});

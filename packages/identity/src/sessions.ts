@@ -5,6 +5,13 @@ import type { IdentitySession, SessionSummary } from './types.ts';
 
 export interface IssuedSession { token: string; session: IdentitySession }
 interface SessionRow extends IdentitySession { lastSeenAt: number }
+
+/** A sign-in label holds the request's user agent. A phone WebView's agent is
+ *  already over 120 characters, so a tighter cut would drop the shell token
+ *  the apps append (`PolythMobile`, `PolythDesktop/<version>`) — the only
+ *  signal that tells the app from a browser on the same device. */
+const MAX_LABEL_LENGTH = 200;
+
 export interface SessionService {
   resolve(token: string | null | undefined): IdentitySession | null;
   /** Revalidate an already-bound channel without possessing its cookie token.
@@ -86,7 +93,7 @@ export function createSessions(control: ControlPlane, opts: { now: () => number;
       if (!user || control.installation().state !== 'ready') throw controlError('unauthorized', 'Authentication required');
       const token = newToken(), id = opaqueId('ses'), time = now();
       const session: IdentitySession = { id, userId, displayName: user.display_name, userRevision: user.revision, createdAt: time, expiresAt: time + absoluteMs, elevatedAt: time };
-      control.run('INSERT INTO auth_sessions(id,user_id,token_hash,created_at_ms,last_seen_at_ms,expires_at_ms,label,auth_epoch,elevated_at_ms) VALUES(?,?,?,?,?,?,?,?,?)', id, userId, tokenHash('session', token), time, time, session.expiresAt, label.replace(/[\x00-\x1f\x7f]/g, '').slice(0, 120), user.auth_epoch, time);
+      control.run('INSERT INTO auth_sessions(id,user_id,token_hash,created_at_ms,last_seen_at_ms,expires_at_ms,label,auth_epoch,elevated_at_ms) VALUES(?,?,?,?,?,?,?,?,?)', id, userId, tokenHash('session', token), time, time, session.expiresAt, label.replace(/[\x00-\x1f\x7f]/g, '').slice(0, MAX_LABEL_LENGTH), user.auth_epoch, time);
       control.audit(userId, 'auth.session-created', id);
       return { token, session };
     },
