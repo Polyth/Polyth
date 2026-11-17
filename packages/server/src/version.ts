@@ -24,3 +24,13 @@ export function serverVersion(hostVersion?: string): string {
   const named = hostVersion?.trim();
   return named ? named : checkoutVersion();
 }
+
+/** The command that updates this install: the host's, else a container's or a
+ *  checkout's. */
+export function updateCommand(hostCommand?: string, inContainer: boolean = existsSync("/.dockerenv")): string {
+  const named = hostCommand?.trim();
+  if (named) return named;
+  return inContainer
+    ? "docker compose pull && docker compose up -d"
+    : "git pull && npm ci && npm run build && npm run polyth:restart";
+}

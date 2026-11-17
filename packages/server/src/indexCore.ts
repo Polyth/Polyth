@@ -167,7 +167,7 @@ import { projectVisibleToUser, setPrivateRoomParentLookup } from "./accountLimit
 import { createPersonalMcpReprovisioner, type PersonalMcpReprovisioner } from "./personalMcpReprovision.ts";
 import { assertRemoteOpenCodeUsable, type RemoteOpenCodeAccessDeps } from "./remoteOpenCodeAccess.ts";
 import { canonicalSecurity, isSourceEntrypoint } from "./runtimeSecurity.ts";
-import { serverVersion } from "./version.ts";
+import { serverVersion, updateCommand } from "./version.ts";
 import { snapshotBeforeMigrations } from "./preMigrationSnapshot.ts";
 import { oneShot } from "./oneshot.ts";
 import {
@@ -235,6 +235,10 @@ export interface BootOptions {
   /** The Polyth version a packaged host ships (its release version). A
    *  checkout reports its root package.json (version.ts). */
   version?: string;
+  /** How this install updates, shown with a newer release (Settings → About):
+   *  the packaged server passes `polyth update` or Homebrew's command; without
+   *  it a container or a checkout is assumed (version.ts). */
+  updateCommand?: string;
   opencode?: Partial<OpenCodeAdapterOptions>;
   /** Workspace packages/ directory scanned for polyth.serverEntry markers. */
   packagesDir?: string;
@@ -3617,7 +3621,7 @@ export async function boot(opts: BootOptions = {}) {
     notificationRoutes(notifications, async (space) => new Set((await spaceServices(space).projects.list()).map((p) => p.id))),
     browseRoutes(dataDir),
     iconifyRoutes(),
-    releasesRoutes(),
+    releasesRoutes({ serverVersion: version, updateCommand: updateCommand(opts.updateCommand) }),
     async (request) => {
       if (request.path.startsWith("/api/mcp/") || request.path.startsWith("/api/plugins")) return false;
       return settingsRoute(request);

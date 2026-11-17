@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { boot } from "@polyth/server";
 import { serverDataDir } from "@polyth/cli/target";
+import { installKind } from "@polyth/cli/update";
 import { bundleLayout, bundleTarget, platformPackageName } from "./layout.ts";
 import { serverAppPackages } from "./serverPackages.ts";
 
@@ -42,8 +43,15 @@ const resources = resourcesRoot();
 // (packages/harness-runtime) and packages with packaged assets.
 process.env.POLYTH_RESOURCES_DIR ??= resources;
 
+// Shown with a newer release in Settings → About.
+const kind = installKind({ bundle: layout.root, docker: existsSync("/.dockerenv") });
+const updateCommand = kind.kind === "homebrew"
+  ? "brew upgrade polyth && brew services restart polyth"
+  : kind.kind === "docker" ? undefined : "polyth update";
+
 await boot({
   version: build.version,
+  ...(updateCommand ? { updateCommand } : {}),
   dataDir: resolve(process.env.POLYTH_DATA_DIR?.trim() || serverDataDir()),
   webDist: join(resources, "web"),
   webPackagesDir: join(resources, "packages"),

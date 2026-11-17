@@ -2,8 +2,9 @@
 // The browser cannot call api.github.com anonymously (no CORS headers, and a
 // 60 req/h/IP limit), so the server proxies one cached /releases/latest read —
 // the same reason and shape as routes/iconify.ts.
-import { principalHasFullAccess, type ReleaseDownloadDto, type ReleaseDownloadsDto } from "@polyth/contracts";
+import { compareReleaseVersions, principalHasFullAccess, type ReleaseDownloadDto, type ReleaseDownloadsDto } from "@polyth/contracts";
 import type { RouteHandler } from "../http.ts";
+import { UNKNOWN_VERSION } from "../version.ts";
 
 export type ReleasesFetch = typeof fetch;
 
@@ -116,6 +117,10 @@ export interface ReleasesRouteDeps {
   /** `owner/repo` value, or a getter read per request (default: the env var). */
   repository?: string | null | (() => string | null | undefined);
   now?: () => number;
+  /** This server's version; with `updateCommand`, a newer release is offered. */
+  serverVersion?: string;
+  /** How this install updates (BootOptions.updateCommand or the default). */
+  updateCommand?: string;
 }
 
 /** `GET /api/system/releases` — authenticated, cached GitHub lookup. */
@@ -189,7 +194,20 @@ export function releasesRoutes(deps: ReleasesRouteDeps = {}): RouteHandler {
       rc.json(200, { enabled: false, release: null, error: null } satisfies ReleaseDownloadsDto);
       return true;
     }
-    rc.json(200, await load(coordinates.owner, coordinates.repo));
+    const body = await load(coordinates.owner, coordinates.repo);
+    rc.json(200, { ...body, update: serverUpdate(body.release?.version, deps) } satisfies ReleaseDownloadsDto);
     return true;
   };
+}
+
+/** The newer release and this install's command for it, when there is one. */
+export function serverUpdate(
+  latest: string | undefined,
+  deps: Pick<ReleasesRouteDeps, "serverVersion" | "updateCommand">,
+): ReleaseDownloadsDto["update"] {
+  // A server that cannot name its own version is not offered anything.
+  if (!latest || !deps.serverVersion || deps.serverVersion === UNKNOWN_VERSION || !deps.updateCommand) return null;
+  return (compareReleaseVersions(latest, deps.serverVersion) ?? 0) > 0
+    ? { version: latest, command: deps.updateCommand }
+    : null;
 }

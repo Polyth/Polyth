@@ -106,6 +106,11 @@ runs the old release until it is restarted; the running server keeps its files, 
 the web assets it serves already belong to the new release. One update runs at a
 time (`.polyth-update.lock` beside the install).
 
+With `POLYTH_UPDATE_REPOSITORY` set, Settings → About offers a newer stable release
+with the command for this install: `polyth update`, Homebrew's
+`brew upgrade polyth && brew services restart polyth`, `docker compose pull` in a
+container, or the checkout's `git pull` sequence.
+
 Every server, however it was installed, copies a canonical database before it
 migrates its schema: the control plane (`control-plane/control.sqlite`) and the
 session history (`sessions.db`) go to

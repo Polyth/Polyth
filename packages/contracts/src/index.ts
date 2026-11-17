@@ -6994,6 +6994,29 @@ export interface ReleaseDownloadsDto {
     downloads: ReleaseDownloadDto[];
   } | null;
   error: string | null;
+  /** Set when that release is newer than this server: the command that updates
+   *  it, for how it was installed (`polyth update`, Homebrew, Docker, a
+   *  checkout). Absent from older servers. */
+  update?: { version: string; command: string } | null;
+}
+
+const RELEASE_VERSION = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;
+
+/** Polyth release order: numbers first, then a stable release above its own
+ *  prerelease (`1.2.357` > `1.2.357-nightly` > `1.2.356`). Null when either is
+ *  not a release version. */
+export function compareReleaseVersions(a: string, b: string): number | null {
+  const left = RELEASE_VERSION.exec(a);
+  const right = RELEASE_VERSION.exec(b);
+  if (!left || !right) return null;
+  for (let i = 1; i <= 3; i += 1) {
+    const diff = Number(left[i]) - Number(right[i]);
+    if (diff !== 0) return Math.sign(diff);
+  }
+  if (left[4] === right[4]) return 0;
+  if (!left[4]) return 1;
+  if (!right[4]) return -1;
+  return left[4] < right[4] ? -1 : 1;
 }
 
 /** Server-persisted client preferences (Appearance, chat, notifications, and

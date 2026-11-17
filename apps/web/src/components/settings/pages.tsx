@@ -2358,7 +2358,16 @@ export function AboutPage() {
     <>
       <PageHead title={tr("settings.pages.about")} blurb={tr("settings.pages.connectionDetailsForThisPolythServer")} />
       <div data-settings-item="about.info">
-        <Row label={tr("settings.pages.version")}><span className="mono">{info.version}</span></Row>
+        <Row
+          label={tr("settings.pages.version")}
+          hint={release?.update ? tr("settings.pages.updateAvailable", { version: release.update.version }) : undefined}
+        ><span className="mono">{info.version}</span></Row>
+        {release?.update && (
+          <Row label={tr("settings.pages.updateServer")} hint={tr("settings.pages.updateServerHint")}>
+            <span className="mono">{release.update.command}</span>
+            {copyButton("update", release.update.command)}
+          </Row>
+        )}
         {release?.release && release.release.downloads.length > 0 && (
           <Row
             label={tr("settings.pages.downloadApp")}
