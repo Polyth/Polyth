@@ -314,6 +314,8 @@ export const pt: AppMessages = {
   "composer.discovery.mentionFileOrChat": "Mencionar um ficheiro ou chat…",
   "composer.discovery.noCommandsAvailable": "Sem comandos disponíveis.",
   "composer.discovery.noCommandsMatch": "Nenhum comando corresponde a “{query}”.",
+  "composer.hostPath.file": "Ficheiro",
+  "composer.hostPath.folder": "Pasta",
   "composer.discovery.noProjectFilesMatch": "Nenhum ficheiro de projeto corresponde a \"{query}\".",
   "composer.discovery.noSnippetsMatch": "Nenhum excerto corresponde a “{query}”.",
   "composer.discovery.noSnippetsYet": "Ainda não existem excertos.",

@@ -369,7 +369,7 @@ test("Git context drops attach a repository-scoped hunk and reject stale snapsho
     assert.equal(repositoryId, "api");
     return { path: _path, diff: patch, snapshotDigest: digest };
   };
-  api.filesUpload = async (_pid, _path, bytes) => { uploaded = new TextDecoder().decode(bytes); return { ok: true }; };
+  api.filesUpload = async (_pid, _path, data) => { uploaded = data instanceof Uint8Array ? new TextDecoder().decode(data) : await data.text(); return { ok: true }; };
   api.filesStat = async (_pid, path) => ({ path, kind: "file", size: uploaded.length, mime: "text/plain" });
   const ref = { scheme: "file", projectId: project.id, sessionId: null, repositoryId: "api", locator: "src/file.ts" };
   const errors: string[] = [];
@@ -401,7 +401,7 @@ test("directory drops attach a scoped reference without reading directory conten
   const oldStat = api.filesStat;
   let uploaded = "";
   const calls: string[] = [];
-  api.filesUpload = async (_pid, _path, bytes) => { uploaded = new TextDecoder().decode(bytes); return { ok: true }; };
+  api.filesUpload = async (_pid, _path, data) => { uploaded = data instanceof Uint8Array ? new TextDecoder().decode(data) : await data.text(); return { ok: true }; };
   api.filesStat = async (_pid, path, _sid, repositoryId) => {
     calls.push(path);
     if (path === "src") { assert.equal(repositoryId, "api"); return { path, kind: "dir", size: 0 }; }

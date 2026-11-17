@@ -3,8 +3,13 @@ import assert from "node:assert/strict";
 import {
   ancestorPaths,
   beginTreeRequest,
+  foldersToRefresh,
   isCurrentTreeRequest,
   readTreePrefs,
+  TREE_BUSY_REFRESH_MS,
+  TREE_BUSY_WINDOW_MS,
+  TREE_IDLE_REFRESH_MS,
+  treePollDelay,
   treeScopeKey,
   writeTreePrefs,
 } from "../widgets/editor/treeState.ts";
@@ -58,4 +63,22 @@ test("tree request tokens reject responses from an earlier scope generation", ()
   assert.equal(isCurrentTreeRequest(token, first, 3), true);
   assert.equal(isCurrentTreeRequest(token, second, 3), false);
   assert.equal(isCurrentTreeRequest(token, first, 4), false);
+});
+
+test("a change re-lists the deepest shown folder holding it, never the changed path itself", () => {
+  const shown = new Set(["", "src", "src/components", "docs"]);
+  assert.deepEqual(foldersToRefresh(["src/components/Button.tsx", "src/components/Menu.tsx"], shown), ["src/components"]);
+  // A new folder appears in its shown parent; a removed shown folder leaves it.
+  assert.deepEqual(foldersToRefresh(["src/fresh/deep/new.ts"], shown), ["src"]);
+  assert.deepEqual(foldersToRefresh(["src/components"], shown), ["src"]);
+  assert.deepEqual(foldersToRefresh(["README.md", "hidden/inner/file.ts"], shown), [""]);
+  assert.deepEqual(foldersToRefresh([], shown), []);
+});
+
+test("the poll runs at the busy pace for a while after files change, then slows down", () => {
+  const now = 1_000_000;
+  assert.equal(treePollDelay(now, now), TREE_BUSY_REFRESH_MS);
+  assert.equal(treePollDelay(now - TREE_BUSY_WINDOW_MS + 1, now), TREE_BUSY_REFRESH_MS);
+  assert.equal(treePollDelay(now - TREE_BUSY_WINDOW_MS, now), TREE_IDLE_REFRESH_MS);
+  assert.ok(TREE_IDLE_REFRESH_MS > TREE_BUSY_REFRESH_MS);
 });

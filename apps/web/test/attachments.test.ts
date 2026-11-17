@@ -13,8 +13,9 @@ const mem = new Map<string, string>();
 
 const {
   addAttachment, attachBrowserContext, attachNativeStagedUpload, attachText, clearAttachments, detachAttachment, insertAttachment, isLargeTextPaste, MAX_PENDING_ATTACHMENTS, newAttachmentId, pendingAttachments,
-  removeAttachment, seedAttachments, takeAttachments,
+  removeAttachment, seedAttachments, takeAttachments, uploadInboxFile,
 } = await import("../src/attachments.ts");
+const { UPLOAD_PART_BYTES } = await import("@polyth/session/web-api");
 const { buildModel } = await import("../src/reduce.ts");
 const { nativeStagedAttachments, removeNativeStagedAttachment } = await import("../src/draftRecord.ts");
 const { setClientReliabilityContext, setClientReliabilityProject } = await import("../src/reliabilityContext.ts");
@@ -406,4 +407,73 @@ test("reducer surfaces attachments on user messages; junk rows are dropped", () 
   const atts = (user as { attachments?: AttachmentRef[] }).attachments;
   assert.equal(atts?.length, 1);
   assert.equal(atts?.[0]?.name, "a.txt");
+});
+
+test("a file of any size uploads in pieces, and the desktop app on its own server attaches it in place", async () => {
+  setClientReliabilityContext({ connectionScope: "connection-big", spaceId: "default" });
+  setClientReliabilityProject("project-big");
+  const previousFetch = globalThis.fetch;
+  const host = globalThis as { window?: unknown };
+  const previousWindow = host.window;
+  const size = 2 * UPLOAD_PART_BYTES + 5;
+  const big = new File([new Uint8Array(size).fill(7)], "dump.zip", { type: "application/zip", lastModified: 1234 });
+  let calls: Array<{ path: string; body: Record<string, unknown> }> = [];
+  let failNextPiece = false;
+  let localStatus = 200;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), "http://localhost");
+    const body = typeof init?.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : {};
+    calls.push({ path: url.pathname, body });
+    if (url.pathname === "/api/files/upload-part" && failNextPiece && body.offset === UPLOAD_PART_BYTES) {
+      failNextPiece = false;
+      return new Response(JSON.stringify({ error: "unavailable", message: "busy" }), { status: 503 });
+    }
+    if (url.pathname === "/api/files/upload-local" && localStatus !== 200) {
+      return new Response(JSON.stringify({ error: "forbidden", message: "not here" }), { status: localStatus });
+    }
+    if (url.pathname === "/api/files/stat") {
+      return new Response(JSON.stringify({ path: url.searchParams.get("path"), kind: "file", size, mime: "application/zip" }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    // A browser: pieces, one transient failure retried, never one huge body.
+    failNextPiece = true;
+    const sent = await uploadInboxFile("project-big", "session-big", big);
+    assert.equal(sent.ok, true);
+    assert.equal(sent.ok && sent.ref.size, size);
+    const pieces = calls.filter((call) => call.path === "/api/files/upload-part");
+    assert.deepEqual(pieces.map((call) => call.body.offset), [0, UPLOAD_PART_BYTES, UPLOAD_PART_BYTES, 2 * UPLOAD_PART_BYTES]);
+    assert.ok(pieces.every((call) => call.body.total === size && call.body.path === pieces[0]!.body.path));
+    assert.equal(Buffer.from(String(pieces.at(-1)!.body.base64), "base64").length, 5);
+    assert.ok(!calls.some((call) => call.path === "/api/files/upload" || call.path === "/api/files/upload-local"));
+
+    // The desktop app showing its own server: the file is attached where it sits.
+    host.window = { polythDesktop: { surface: "local", pathForFile: () => "/home/person/Downloads/dump.zip" } };
+    calls = [];
+    const placed = await uploadInboxFile("project-big", "session-big", big);
+    assert.equal(placed.ok, true);
+    const local = calls.filter((call) => call.path === "/api/files/upload-local");
+    assert.equal(local.length, 1);
+    assert.deepEqual(
+      (({ source, size: declared, lastModified }) => ({ source, size: declared, lastModified }))(local[0]!.body),
+      { source: "/home/person/Downloads/dump.zip", size, lastModified: 1234 },
+    );
+    assert.ok(!calls.some((call) => call.path === "/api/files/upload-part"));
+
+    // Refused (not the owner, or not this computer): the bytes are sent instead.
+    localStatus = 403;
+    calls = [];
+    assert.equal((await uploadInboxFile("project-big", "session-big", big)).ok, true);
+    assert.equal(calls.filter((call) => call.path === "/api/files/upload-part").length, 3);
+
+    // Another server's window never learns where the file sits.
+    host.window = { polythDesktop: { surface: "remote", pathForFile: () => "/home/person/Downloads/dump.zip" } };
+    calls = [];
+    assert.equal((await uploadInboxFile("project-big", "session-big", big)).ok, true);
+    assert.ok(!calls.some((call) => call.path === "/api/files/upload-local"));
+  } finally {
+    globalThis.fetch = previousFetch;
+    host.window = previousWindow;
+  }
 });

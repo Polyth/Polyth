@@ -194,7 +194,7 @@ export async function uploadFiles(
   const paths: string[] = [];
   for (const f of files) {
     const rel = dir ? `${dir}/${f.name}` : f.name;
-    await api.filesUpload(projectId, rel, new Uint8Array(await f.arrayBuffer()), sessionId, repositoryId);
+    await api.filesUpload(projectId, rel, f, sessionId, repositoryId);
     paths.push(rel);
   }
   return paths;

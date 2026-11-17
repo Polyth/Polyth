@@ -1,10 +1,15 @@
 // Pure prompt-token grammar: /commands, #snippets and @file mentions
 // highlight and complete at any caret position, not only when the whole input
 // is one token. Fenced code spans are opaque.
+//
+// A host path (`/Users/me/a.zip`, `~/notes`) is never a command: command names
+// cannot hold a slash, so a slash token with a second slash is a `path` token,
+// and so is `~/…`, at a line start or anywhere after whitespace.
 export type PromptToken =
   | { kind: "command"; from: number; to: number; value: string }
   | { kind: "snippet"; from: number; to: number; value: string }
-  | { kind: "file"; from: number; to: number; path: string };
+  | { kind: "file"; from: number; to: number; path: string }
+  | { kind: "path"; from: number; to: number; path: string };
 
 interface Span { from: number; to: number }
 
@@ -39,12 +44,16 @@ export function fencedSpans(text: string): Span[] {
 
 const inSpan = (spans: Span[], i: number): boolean => spans.some((s) => i >= s.from && i < s.to);
 
-/** Parse all prompt tokens. `/name` is recognized at a line start; `#alias`
- *  and `@path` anywhere after whitespace or start-of-text. */
+/** `/a/…` or `~/a…`: the first segment names something (`//` and a bare `~/`
+ *  do not). */
+const HOST_PATH_RE = /^(?:\/[^/\s]+\/|~\/[^/\s])/;
+
+/** Parse all prompt tokens. `/name` is recognized at a line start; `#alias`,
+ *  `@path` and host paths anywhere after whitespace or start-of-text. */
 export function parsePromptTokens(text: string): PromptToken[] {
   const fences = fencedSpans(text);
   const out: PromptToken[] = [];
-  const re = /(^|[\s(])([/#@])([^\s]*)/gm;
+  const re = /(^|[\s(])([/#@~])([^\s]*)/gm;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
     const lead = m[1]!;
@@ -53,7 +62,11 @@ export function parsePromptTokens(text: string): PromptToken[] {
     const from = m.index + lead.length;
     if (inSpan(fences, from)) continue;
     const to = from + 1 + body.length;
-    if (sigil === "/") {
+    if (HOST_PATH_RE.test(sigil + body)) {
+      out.push({ kind: "path", from, to, path: sigil + body });
+    } else if (sigil === "~") {
+      continue;
+    } else if (sigil === "/") {
       // command semantics: only at the start of a line
       const lineStart = from === 0 || text[from - 1] === "\n";
       if (!lineStart) continue;
@@ -65,6 +78,13 @@ export function parsePromptTokens(text: string): PromptToken[] {
     }
   }
   return out;
+}
+
+/** The path a `path` token asks the host about: a sentence's closing
+ *  punctuation is prose, not part of the name. */
+export function hostPathQuery(path: string): string | null {
+  const trimmed = path.replace(/[.,;:!?)\]}>"']+$/, "");
+  return trimmed.length <= 4096 && HOST_PATH_RE.test(trimmed.endsWith("/") ? trimmed : `${trimmed}/`) ? trimmed : null;
 }
 
 /** Token whose range contains the caret (caret at token end counts). */

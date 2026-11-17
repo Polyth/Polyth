@@ -14,7 +14,7 @@ import {
   isSendKey,
   replaceAll,
 } from "../src/components/input/editorCore.ts";
-import { activeToken, completeToken, composerMode, fencedSpans, parsePromptTokens, shellCommand } from "../src/composer/language.ts";
+import { activeToken, completeToken, composerMode, fencedSpans, hostPathQuery, parsePromptTokens, shellCommand } from "../src/composer/language.ts";
 import { isActivateKey, moveRoving } from "../src/components/a11y/roving.ts";
 
 test("commands apply immediately when no composition is active", () => {
@@ -97,6 +97,32 @@ test("slash is a command only at line start", () => {
   assert.deepEqual(tokens.map((t) => t.kind), []);
   const t2 = parsePromptTokens("/cmd arg");
   assert.equal(t2[0]?.kind, "command");
+});
+
+test("a pasted host path is a path, never a command", () => {
+  const pasted = "/Users/me/Downloads/e2e-03static_w_path.zip";
+  assert.deepEqual(activeToken(pasted, pasted.length), { kind: "path", from: 0, to: pasted.length, path: pasted });
+  // Anywhere after whitespace, and from home.
+  assert.deepEqual(
+    parsePromptTokens("unzip /tmp/a.zip into ~/work please").map((t) => [t.kind, "path" in t ? t.path : t.value]),
+    [["path", "/tmp/a.zip"], ["path", "~/work"]],
+  );
+  // One segment is still a command being typed; `//` and a bare `~/` are neither.
+  assert.equal(parsePromptTokens("/review")[0]?.kind, "command");
+  assert.equal(parsePromptTokens("/Users")[0]?.kind, "command");
+  assert.deepEqual(parsePromptTokens("a // note ~/ ~user").map((t) => t.kind), []);
+  // The other sigils keep their meaning.
+  assert.deepEqual(parsePromptTokens("@/abs/x #/a/b").map((t) => t.kind), ["file", "snippet"]);
+  assert.deepEqual(parsePromptTokens("```\n/Users/me/a.zip\n```").map((t) => t.kind), []);
+});
+
+test("a host path asks without the sentence's closing punctuation", () => {
+  assert.equal(hostPathQuery("/Users/me/a.zip"), "/Users/me/a.zip");
+  assert.equal(hostPathQuery("/Users/me/a.zip."), "/Users/me/a.zip");
+  assert.equal(hostPathQuery("/Users/me/Downloads/),"), "/Users/me/Downloads/");
+  assert.equal(hostPathQuery("~/notes.md?"), "~/notes.md");
+  assert.equal(hostPathQuery("~/."), null);
+  assert.equal(hostPathQuery(`/a/${"x".repeat(5000)}`), null);
 });
 
 test("tokens inside fenced code are opaque", () => {

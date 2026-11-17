@@ -47,12 +47,13 @@ const CONVENTIONAL_SECTIONS = {
   perf: "improvements", i18n: "improvements", ux: "improvements", ui: "improvements", style: "improvements",
   docs: "maintenance", doc: "maintenance", test: "maintenance", tests: "maintenance", ci: "maintenance",
   build: "maintenance", chore: "maintenance", refactor: "maintenance", revert: "maintenance", deps: "maintenance",
+  security: "fixes",
 };
 /** The repository's own title style: `[Fix] Subject`, `[Feature] Subject`, `[Improvement] Subject`. */
 const BRACKET = /^\[([^\]]{1,20})\]\s*(.+)$/;
 const BRACKET_SECTIONS = {
   feature: "features", feat: "features", new: "features", add: "features",
-  fix: "fixes", fixes: "fixes", bugfix: "fixes", hotfix: "fixes", bug: "fixes",
+  fix: "fixes", fixes: "fixes", bugfix: "fixes", hotfix: "fixes", bug: "fixes", security: "fixes", vuln: "fixes",
   improvement: "improvements", improve: "improvements", enhancement: "improvements", polish: "improvements",
   perf: "improvements", performance: "improvements", ux: "improvements", ui: "improvements", style: "improvements",
   docs: "maintenance", doc: "maintenance", test: "maintenance", tests: "maintenance", ci: "maintenance",

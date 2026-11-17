@@ -241,6 +241,12 @@ export interface BrowseResultDto {
   home: string;
   entries: BrowseEntryDto[];
 }
+export interface HostPathStatDto {
+  path: string;
+  name: string;
+  kind: "file" | "dir";
+  size: number;
+}
 
 // ---- provider/model visibility (Providers & Models settings) ----------------
 export interface ProviderCatalogModelDto {
@@ -353,6 +359,19 @@ export async function sessionFetch<T>(path: string, init?: RequestInit): Promise
 }
 
 const jfetch = sessionFetch;
+
+/** Raw bytes per upload request. As base64 inside JSON a piece stays well
+ *  under the server's 25 MiB request cap, which also bounds a paired phone. */
+export const UPLOAD_PART_BYTES = 8 * 1024 * 1024;
+const UPLOAD_PART_ATTEMPTS = 3;
+
+const base64Of = (bytes: Uint8Array): string => {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(bin);
+};
 
 export const httpStatusOf = (err: unknown): number =>
   typeof (err as { status?: unknown })?.status === "number" ? (err as { status: number }).status : 0;
@@ -1489,6 +1508,10 @@ export const api = {
     jfetch<{ repositories: Array<{ name: string; path: string; linked: boolean }>; truncated: boolean }>(`/api/browse?${new URLSearchParams({ path, repositories: "true" })}`),
   browseMkdir: (path: string) =>
     jfetch<{ path: string }>(`/api/browse/mkdir`, json("POST", { path })),
+  /** Whether an absolute (or `~/`) path names a file or folder on the server
+   *  host; null when absent or refused. */
+  browseStat: (path: string) =>
+    jfetch<HostPathStatDto | null>(`/api/browse/stat?${new URLSearchParams({ path })}`),
 
   // ---- git (§12) -----------------------------------------------------------
   gitStatus: (projectId: string, sessionId?: string, repositoryId?: string) =>
@@ -1665,13 +1688,63 @@ export const api = {
     jfetch<{ ok: true }>(`/api/files/delete`, json("POST", { projectId, path: relPath, ...(sessionId ? { sessionId } : {}), ...(repositoryId ? { repositoryId } : {}) })),
   filesRename: (projectId: string, from: string, to: string, sessionId?: string, repositoryId?: string) =>
     jfetch<{ ok: true }>(`/api/files/rename`, json("POST", { projectId, from, to, ...(sessionId ? { sessionId } : {}), ...(repositoryId ? { repositoryId } : {}) })),
-  filesUpload: (projectId: string, relPath: string, bytes: Uint8Array, sessionId?: string, repositoryId?: string) => {
-    let bin = "";
-    for (let i = 0; i < bytes.length; i += 0x8000) {
-      bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  /** Store a file of any size at `relPath`. Up to UPLOAD_PART_BYTES goes in
+   *  one request; a bigger file goes in pieces of that size, read one at a
+   *  time from the Blob, so neither side holds the whole file in memory. */
+  filesUpload: async (
+    projectId: string,
+    relPath: string,
+    data: Uint8Array | Blob,
+    sessionId?: string,
+    repositoryId?: string,
+    onProgress?: (sent: number, total: number) => void,
+  ): Promise<{ ok: true }> => {
+    const scope = { projectId, path: relPath, ...(sessionId ? { sessionId } : {}), ...(repositoryId ? { repositoryId } : {}) };
+    const total = data instanceof Uint8Array ? data.length : data.size;
+    const piece = async (start: number, end: number): Promise<string> =>
+      base64Of(data instanceof Uint8Array ? data.subarray(start, end) : new Uint8Array(await data.slice(start, end).arrayBuffer()));
+    if (total <= UPLOAD_PART_BYTES) {
+      const result = await jfetch<{ ok: true }>(`/api/files/upload`, json("POST", { ...scope, base64: await piece(0, total) }));
+      onProgress?.(total, total);
+      return result;
     }
-    return jfetch<{ ok: true }>(`/api/files/upload`, json("POST", { projectId, path: relPath, base64: btoa(bin), ...(sessionId ? { sessionId } : {}), ...(repositoryId ? { repositoryId } : {}) }));
+    for (let offset = 0; offset < total;) {
+      const end = Math.min(total, offset + UPLOAD_PART_BYTES);
+      const body = json("POST", { ...scope, offset, total, base64: await piece(offset, end) });
+      for (let attempt = 1; ; attempt += 1) {
+        try {
+          await jfetch<{ ok: true; size: number; done: boolean }>(`/api/files/upload-part`, body);
+          break;
+        } catch (error) {
+          // A lost reply may hide a stored piece; the server accepts it again.
+          const status = httpStatusOf(error);
+          const transient = status === 0 || status === 408 || status === 429 || status >= 500;
+          if (!transient || attempt >= UPLOAD_PART_ATTEMPTS) throw error;
+          await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+        }
+      }
+      offset = end;
+      onProgress?.(offset, total);
+    }
+    return { ok: true };
   },
+  /** The desktop app on the server's own computer: put the file at `source`
+   *  into `_inbox/` without sending it. Only the server owner, straight from
+   *  this computer, may; anyone else gets `forbidden` and uploads instead. */
+  filesUploadLocal: (
+    projectId: string,
+    relPath: string,
+    source: { path: string; size: number; lastModified?: number },
+    sessionId?: string,
+  ) =>
+    jfetch<{ ok: true; size: number }>(`/api/files/upload-local`, json("POST", {
+      projectId,
+      path: relPath,
+      source: source.path,
+      size: source.size,
+      ...(source.lastModified !== undefined ? { lastModified: source.lastModified } : {}),
+      ...(sessionId ? { sessionId } : {}),
+    })),
   filesStat: (projectId: string, relPath: string, sessionId?: string, repositoryId?: string) =>
     jfetch<{ path: string; kind: "file" | "dir"; size: number; mime?: string; revision?: string }>(
       `/api/files/stat?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(relPath)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}${repositoryId ? `&repositoryId=${encodeURIComponent(repositoryId)}` : ""}`,

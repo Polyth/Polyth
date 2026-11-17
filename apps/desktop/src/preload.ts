@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
   DesktopCommand,
   DesktopInfo,
@@ -72,6 +72,14 @@ const api: PolythDesktopApi = {
     ipcRenderer.invoke("desktop:window:caption", band) as Promise<DesktopCaptionGeometry | null>,
   revealPath: (path) => ipcRenderer.invoke("desktop:path:reveal", path) as Promise<void>,
   openPath: (path) => ipcRenderer.invoke("desktop:path:open", path) as Promise<void>,
+  pathForFile: (file) => {
+    if (place.surface !== "local") return "";
+    try {
+      return webUtils.getPathForFile(file);
+    } catch {
+      return "";
+    }
+  },
   openDataFolder: () => ipcRenderer.invoke("desktop:data:open") as Promise<void>,
   quit: () => ipcRenderer.invoke("desktop:quit") as Promise<void>,
   getUpdateState: () =>

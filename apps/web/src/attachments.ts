@@ -4,7 +4,8 @@
 import { useCallback, useSyncExternalStore } from "react";
 import type { AttachmentRef, BrowserContext } from "@polyth/contracts";
 import { browserContextMime } from "@polyth/contracts";
-import { api, errorCodeOf } from "@polyth/session/web-api";
+import { api, errorCodeOf, UPLOAD_PART_BYTES } from "@polyth/session/web-api";
+import { localDesktopBridge } from "./desktopBridge.ts";
 import { tr } from "./i18n/index.ts";
 import { flushClientPersistence } from "./clientPersistence.ts";
 import {
@@ -301,8 +302,21 @@ async function storeInboxFile(
   const safeName = (file.name || "pasted").replace(/[^\w.-]+/g, "_").replace(/^\.+/, "").slice(0, 80) || "pasted";
   const id = newAttachmentId();
   const rel = `_inbox/${id}-${safeName}`;
+  const describe = () => describeProjectFile(projectId, sessionId, rel, undefined, id, displayName ?? safeName);
+  // The desktop app showing its own server: a big file is attached where it
+  // sits instead of being sent. Any refusal (not the owner, not this
+  // computer, a remote project) falls through to an ordinary upload.
+  const source = file.size > UPLOAD_PART_BYTES ? localDesktopBridge()?.pathForFile?.(file) : undefined;
+  if (source) {
+    try {
+      await api.filesUploadLocal(projectId, rel, { path: source, size: file.size, lastModified: file.lastModified }, sessionId ?? undefined);
+      return await describe();
+    } catch {
+      // Send the bytes instead.
+    }
+  }
   try {
-    await api.filesUpload(projectId, rel, new Uint8Array(await file.arrayBuffer()), sessionId ?? undefined);
+    await api.filesUpload(projectId, rel, file, sessionId ?? undefined);
   } catch (err) {
     // A lost upload response is not permission to choose a new destination.
     // A read-only stat can prove the stable destination already arrived.
@@ -315,7 +329,7 @@ async function storeInboxFile(
       return { ok: false, reason: err instanceof Error ? err.message : String(err) };
     }
   }
-  return describeProjectFile(projectId, sessionId, rel, undefined, id, displayName ?? safeName);
+  return describe();
 }
 
 /** Upload a desktop/pasted file into _inbox/, then attach the stored copy. */
@@ -405,7 +419,7 @@ export async function attachNativeStagedUpload(
     return { ok: false, reason: error instanceof Error ? error.message : String(error) };
   }
   try {
-    await api.filesUpload(projectId, staged.destination, new Uint8Array(await file.arrayBuffer()), sessionId ?? undefined);
+    await api.filesUpload(projectId, staged.destination, file, sessionId ?? undefined);
   } catch (uploadError) {
     // Response loss is resolved only by authoritative stat. If absent or the
     // server is unreachable, retain the same metadata/path for restart retry.

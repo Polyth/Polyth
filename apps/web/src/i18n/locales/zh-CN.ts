@@ -314,6 +314,8 @@ export const zhCN: AppMessages = {
   "composer.discovery.mentionFileOrChat": "提及文件或聊天…",
   "composer.discovery.noCommandsAvailable": "无可用命令。",
   "composer.discovery.noCommandsMatch": "没有与“{query}”匹配的命令。",
+  "composer.hostPath.file": "文件",
+  "composer.hostPath.folder": "文件夹",
   "composer.discovery.noProjectFilesMatch": "没有与“{query}”匹配的项目文件。",
   "composer.discovery.noSnippetsMatch": "没有与“{query}”匹配的代码片段。",
   "composer.discovery.noSnippetsYet": "还没有代码片段。",

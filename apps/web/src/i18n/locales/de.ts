@@ -314,6 +314,8 @@ export const de: AppMessages = {
   "composer.discovery.mentionFileOrChat": "Datei oder Chat erwähnen…",
   "composer.discovery.noCommandsAvailable": "Keine Befehle verfügbar.",
   "composer.discovery.noCommandsMatch": "Keine Befehle stimmen mit „{query}“ überein.",
+  "composer.hostPath.file": "Datei",
+  "composer.hostPath.folder": "Ordner",
   "composer.discovery.noProjectFilesMatch": "Keine Projektdateien stimmen mit „{query}“ überein.",
   "composer.discovery.noSnippetsMatch": "Keine Snippets stimmen mit „{query}“ überein.",
   "composer.discovery.noSnippetsYet": "Noch keine Snippets.",

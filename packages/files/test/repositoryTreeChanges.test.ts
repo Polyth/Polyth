@@ -33,15 +33,16 @@ const { default: RepositoryTree } = await import("../widgets/editor/RepositoryTr
 type SessionChange = import("../widgets/editor/sessionChanges.ts").SessionChange;
 
 const FS: Record<string, string[]> = {
-  "": ["docs/", "src/", "README.md"],
+  "": [".github/", ".gitignore", "docs/", "src/", "README.md"],
   docs: ["guide.md"],
   src: ["components/", "main.ts"],
   "src/components": ["Button.tsx", "Menu.tsx"],
 };
 const loaded: string[] = [];
-api.filesTree = async (_projectId, path) => {
+// Like the server, dotfiles are listed only when asked for.
+api.filesTree = async (_projectId, path, hidden) => {
   loaded.push(path ?? "");
-  return (FS[path ?? ""] ?? []).map((name) => {
+  return (FS[path ?? ""] ?? []).filter((name) => hidden || !name.startsWith(".")).map((name) => {
     const dir = name.endsWith("/");
     const base = dir ? name.slice(0, -1) : name;
     return { name: base, path: path ? `${path}/${base}` : base, dir };
@@ -186,6 +187,70 @@ test("keyboard: Home/End, ArrowRight enters an open folder, levels and expansion
   assert.equal(tree.active(), "docs");
   await tree.key("ArrowLeft");
   assert.equal(tree.row("docs")!.getAttribute("aria-expanded"), "false");
+  await tree.unmount();
+});
+
+test("Show hidden files survives the background refresh", async () => {
+  const tree = await mount({});
+  assert.ok(!tree.row(".github"), "dotfiles stay out while the option is off");
+  await tree.render({ showHidden: true, refreshToken: 1 });
+  await settle();
+  assert.ok(tree.row(".github"), "turning the option on lists dotfiles");
+  // The poll, window focus and files-changed events share one refresh path.
+  await act(async () => { window.dispatchEvent(new dom.Event("focus") as unknown as Event); });
+  await settle();
+  assert.ok(tree.row(".github"), "a refresh keeps listing dotfiles while the option is on");
+  assert.ok(tree.row(".gitignore"));
+  await tree.render({ showHidden: false, refreshToken: 2 });
+  await settle();
+  assert.ok(!tree.row(".github"), "turning the option off hides dotfiles again");
+  await tree.unmount();
+});
+
+const announce = (path?: string) => window.dispatchEvent(new dom.CustomEvent("polyth:files-changed", {
+  detail: { projectId: "p", sessionId: "s", repositoryId: "r", ...(path ? { path } : {}), source: "activity" },
+}) as unknown as Event);
+const batchWindow = async () => {
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 350)); });
+  await settle();
+};
+
+test("announced changes are batched and re-list only the shown folder holding each one", async () => {
+  const tree = await mount({});
+  await tree.click("src");
+  await tree.click("docs");
+  loaded.length = 0;
+  // One tool that wrote three files under src, one of them in a new folder.
+  await act(async () => { announce("src/main.ts"); announce("src/extra.ts"); announce("src/fresh/new.ts"); });
+  assert.deepEqual(loaded, [], "nothing is listed before the batch closes");
+  await batchWindow();
+  assert.deepEqual(loaded, ["src"]);
+  loaded.length = 0;
+  await act(async () => { announce("README.md"); });
+  await batchWindow();
+  assert.deepEqual(loaded, [""]);
+  loaded.length = 0;
+  // A change with no path could be anywhere: every shown folder is re-listed.
+  await act(async () => { announce(); });
+  await batchWindow();
+  assert.deepEqual(loaded.sort(), ["", "docs", "src"]);
+  await tree.unmount();
+});
+
+test("refreshes skip folders under a collapsed parent and re-list them when they show again", async () => {
+  const tree = await mount({});
+  await tree.click("src");
+  await tree.click("components");
+  await tree.click("src");
+  assert.ok(!tree.row("components"), "src is collapsed again");
+  loaded.length = 0;
+  await act(async () => { window.dispatchEvent(new dom.Event("focus") as unknown as Event); });
+  await settle();
+  assert.deepEqual(loaded, [""], "src/components stays open but hidden, so it is not polled");
+  loaded.length = 0;
+  await tree.click("src");
+  assert.deepEqual(loaded.sort(), ["src", "src/components"], "cached rows are re-listed once they show");
+  assert.ok(tree.row("Button.tsx"));
   await tree.unmount();
 });
 

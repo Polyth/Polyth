@@ -222,6 +222,10 @@ export interface PolythDesktopApi {
   syncCaptionControls(band: number): Promise<DesktopCaptionGeometry | null>;
   revealPath(path: string): Promise<void>;
   openPath(path: string): Promise<void>;
+  /** Where a dropped or picked file sits on this computer; "" for a file made
+   *  in the page, and always "" on another server's window (a path names the
+   *  person, and that server could not open it anyway). */
+  pathForFile(file: File): string;
   openDataFolder(): Promise<void>;
   quit(): Promise<void>;
   getUpdateState(): Promise<DesktopUpdateState>;

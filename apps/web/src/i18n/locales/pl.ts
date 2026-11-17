@@ -314,6 +314,8 @@ export const pl: AppMessages = {
   "composer.discovery.mentionFileOrChat": "Wspomnij plik lub czat…",
   "composer.discovery.noCommandsAvailable": "Brak dostępnych poleceń.",
   "composer.discovery.noCommandsMatch": "Żadne polecenia nie pasują do „{query}”.",
+  "composer.hostPath.file": "Plik",
+  "composer.hostPath.folder": "Folder",
   "composer.discovery.noProjectFilesMatch": "Żaden plik projektu nie pasuje do „{query}”.",
   "composer.discovery.noSnippetsMatch": "Żaden fragment kodu nie pasuje do „{query}”.",
   "composer.discovery.noSnippetsYet": "Nie ma jeszcze fragmentów.",

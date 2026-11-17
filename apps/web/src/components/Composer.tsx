@@ -54,8 +54,10 @@ import {
 import {
   api,
   errorCodeOf,
+  httpStatusOf,
   type ComposerCatalogResult,
   type GitBranches,
+  type HostPathStatDto,
   type SlashCommand,
   type SnippetDef,
   type Worktree,
@@ -102,7 +104,7 @@ import {
   beginTranscriptSpan,
   type TranscriptSpan,
 } from "../composer/transcriptSpan.ts";
-import { activeToken, completeToken, shellCommand, type PromptToken } from "../composer/language.ts";
+import { activeToken, completeToken, hostPathQuery, shellCommand, type PromptToken } from "../composer/language.ts";
 import { isTransportFailure } from "../errorPresentation.ts";
 import { copyErrorAction, errorReportText } from "../errorReport.ts";
 
@@ -141,6 +143,9 @@ import {
   sendableRouteModel,
   visibleFallbackModel,
   emptyModelCatalogReason,
+  hostPathAutocomplete,
+  hostPathDetail,
+  hostPathKindLabel,
   snippetAutocomplete,
   type AutocompleteViewState,
   type AutocompleteOption,
@@ -251,7 +256,7 @@ import {
   writeDraftExecutionConfig,
 } from "../executionDraft.ts";
 import { useViewportMetrics } from "../mobileViewport.ts";
-import { tr } from "../i18n/index.ts";
+import { getLocale, tr } from "../i18n/index.ts";
 import SessionContextBar, {
   type ContextChoice,
   type ProjectContextChoice,
@@ -264,7 +269,7 @@ import { openProjectSettings } from "../projectSettings.ts";
 import { soloPersonalProject } from "../personalProject.ts";
 import { chatAmongOthers, rootProjects } from "../privateRoom.ts";
 import { ChatAudienceChip } from "./ChatAudience.tsx";
-import { AssistIcon, BotIcon, Button, CheckIcon, ChevronDownIcon, CloseIcon, CommandIcon, FileIcon, GlassDock, Icon as UiIcon, IconButton, Menu, Notice, QueueSendIcon, SendIcon, SettingsIcon, ShowIcon, StopIcon, Switch, UndoIcon, UploadIcon, type MenuEntry } from "./ui/index.ts";
+import { AssistIcon, BotIcon, Button, CheckIcon, ChevronDownIcon, CloseIcon, CommandIcon, FileIcon, FolderIcon, GlassDock, Icon as UiIcon, IconButton, Menu, Notice, QueueSendIcon, SendIcon, SettingsIcon, ShowIcon, StopIcon, Switch, UndoIcon, UploadIcon, type MenuEntry } from "./ui/index.ts";
 import { canCollaborateSession, ownerName } from "../sessionSharing.ts";
 import { getSendFailure, subscribeSendFailures } from "../sendFailure.ts";
 import { isNativeMobile } from "@polyth/mobile/runtime";
@@ -314,6 +319,8 @@ const PROFILE_MISSING_NOTE = tr("composer.profileUnavailableChooseAnother");
 const MODEL_WARNING_DELAY_MS = 8_000;
 /** How long Send shows its "kept as a draft" check after a hold. */
 const SEND_PARKED_MS = 1_400;
+/** How long a typed host path must hold still before the server is asked. */
+const HOST_PATH_LOOKUP_DELAY_MS = 150;
 
 const isComposerInputFocused = (): boolean =>
   typeof document !== "undefined" && document.activeElement instanceof Element
@@ -2400,6 +2407,39 @@ function ComposerBody({
   const [fileSearch, setFileSearch] = useState<{ query: string; phase: "pending" | "done"; hits: Array<{ path: string; kind: "file" | "dir" }> }>(
     { query: "", phase: "done", hits: [] },
   );
+  // A typed or pasted host path (`/Users/me/a.zip`): the server says whether
+  // it names a file or folder. Nothing shows until it answers, and a path that
+  // isn't there shows nothing, so a path never reads as an unknown command.
+  const [hostPathFound, setHostPathFound] = useState<{ query: string; found: HostPathStatDto | null }>(
+    { query: "", found: null },
+  );
+  const hostPathSeq = useRef(0);
+  const hostPathTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // A hosted deployment (`unsupported`) or a paired device (`forbidden`)
+  // refuses every lookup; after the first refusal, stop asking.
+  const hostPathUnsupported = useRef(false);
+  useEffect(() => () => {
+    if (hostPathTimer.current) clearTimeout(hostPathTimer.current);
+  }, []);
+  const lookUpHostPath = useCallback((token: PromptToken | null) => {
+    if (hostPathTimer.current) clearTimeout(hostPathTimer.current);
+    hostPathTimer.current = null;
+    const seq = ++hostPathSeq.current;
+    const query = token?.kind === "path" ? hostPathQuery(token.path) : null;
+    if (!query || hostPathUnsupported.current) return;
+    // Typing a path one key at a time asks once, when the typing settles.
+    hostPathTimer.current = setTimeout(() => {
+      hostPathTimer.current = null;
+      void api.browseStat(query)
+        .catch((cause: unknown) => {
+          if (errorCodeOf(cause) === "unsupported" || httpStatusOf(cause) === 403) hostPathUnsupported.current = true;
+          return null;
+        })
+        .then((found) => {
+          if (seq === hostPathSeq.current) setHostPathFound({ query, found });
+        });
+    }, HOST_PATH_LOOKUP_DELAY_MS);
+  }, []);
 
   // One-time favorites → profiles migration once models are known.
   useEffect(() => {
@@ -3732,6 +3772,10 @@ function ComposerBody({
     if (!acToken) return null;
     if (acToken.kind === "command") return commandAutocomplete(commandCatalog, acToken.value);
     if (acToken.kind === "snippet") return snippetAutocomplete(snippetCatalog, acToken.value);
+    if (acToken.kind === "path") {
+      const query = hostPathQuery(acToken.path);
+      return hostPathAutocomplete(query !== null && hostPathFound.query === query ? hostPathFound.found : null);
+    }
     if (!activeProjectId) return null;
     const fresh = fileSearch.query === acToken.path;
     return mentionAndFileAutocomplete(
@@ -3744,6 +3788,9 @@ function ComposerBody({
     );
   })();
   const acOptions = acView?.options ?? [];
+  // A host-path card only shows what is there: the keyboard, Enter included,
+  // keeps working on the draft as if no popup were open.
+  const acPicking = Boolean(acView) && !acView?.hostPath;
   const acSel = acOptions.length > 0 ? Math.min(acIndex, acOptions.length - 1) : -1;
   const acGroups = acView?.kind === "cmd" || acView?.kind === "file"
     ? groupAutocompleteOptions(acOptions)
@@ -3814,7 +3861,8 @@ function ComposerBody({
   // One polite announcement per status transition — never per render and never
   // duplicating the active option name (aria-activedescendant covers that).
   const lastAnnounced = useRef<string | null>(null);
-  const statusText = acView?.status?.text ?? null;
+  const statusText = acView?.status?.text
+    ?? (acView?.hostPath ? `${hostPathKindLabel(acView.hostPath)}: ${acView.hostPath.name}` : null);
   useEffect(() => {
     if (statusText !== lastAnnounced.current) announce(statusText);
     lastAnnounced.current = statusText;
@@ -3885,7 +3933,7 @@ function ComposerBody({
       return true;
     }
     // Ctrl/Cmd+Up: search the prompts this person sent before.
-    if (!acView && !queueEdit && !shellMode && isPromptHistoryPaletteKey({
+    if (!acPicking && !queueEdit && !shellMode && isPromptHistoryPaletteKey({
       key: e.key, composing, altKey: e.altKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, shiftKey: e.shiftKey,
     })) {
       setHistoryOpen(true);
@@ -3897,7 +3945,11 @@ function ComposerBody({
       restoreClearedDraft();
       return true;
     }
-    if (acView) {
+    if (acView?.hostPath && e.key === "Escape") {
+      setAcToken(null);
+      return true;
+    }
+    if (acPicking) {
       // Arrows move the active descendant; Enter/Tab insert only when a
       // selectable option exists (Tab otherwise follows normal focus order).
       // Consume arrows even while loading or empty so history cannot steal them.
@@ -3967,7 +4019,7 @@ function ComposerBody({
     if (!shouldHandlePromptHistoryKey({
       key,
       composing: false,
-      autocompleteActive: Boolean(acView),
+      autocompleteActive: acPicking,
       queueEditActive: Boolean(queueEdit),
     })) return;
     if ((promptHistoryNav?.items?.length ?? 0) === 0) {
@@ -4037,6 +4089,7 @@ function ComposerBody({
       acTokenRef.current = token;
       setAcToken(token);
       setAcIndex(0);
+      lookUpHostPath(token);
       if (!token || token.kind !== "file") {
         fileSearchSeq.current++;
         return;
@@ -4053,7 +4106,7 @@ function ComposerBody({
         setFileSearch({ query: q, phase: "done", hits: hits.map((h) => ({ path: h.path, kind: h.kind })) });
       });
     },
-    [activeProjectId, setClearedDraft],
+    [activeProjectId, lookUpHostPath, setClearedDraft],
   );
 
   // ---- Add menu insertions (through the IME-safe handle only) ----------------
@@ -5218,7 +5271,7 @@ function ComposerBody({
                   // In a chat, @ also mentions other chats; a new chat has none to offer.
                   ? tr("composer.messageTheAgentMentionChats")
                   : tr("composer.messageTheAgentTagFilesOrUse")}
-          {...(acView ? {
+          {...(acPicking ? {
             role: "combobox",
             ariaAutocomplete: "list" as const,
             ariaExpanded: true,
@@ -5240,7 +5293,7 @@ function ComposerBody({
             {/* With people listed the groups name themselves; a "Files" title
                 above the People group would mislabel it. */}
             {!acGroups.some((group) => group.id === "people" || group.id === "people-outside" || group.id === "chats") && <div className="ac-header">
-              <span className="ac-header-title">{acView.kind === "cmd" ? tr("composer.discovery.actions") : acView.kind === "snip" ? tr("composer.snippets") : tr("composer.files")}</span>
+              <span className="ac-header-title">{acView.hostPath ? hostPathKindLabel(acView.hostPath) : acView.kind === "cmd" ? tr("composer.discovery.actions") : acView.kind === "snip" ? tr("composer.snippets") : tr("composer.files")}</span>
               {acView.kind === "cmd" && acView.resultCount !== undefined && (
                 <span className="ac-count" aria-label={tr("composer.discovery.valueAvailable", { value: acView.resultCount })}>{acView.resultCount}</span>
               )}
@@ -5256,6 +5309,19 @@ function ComposerBody({
                   >
                     {tr("composer.createASnippet")}</Button>
                 )}
+              </div>
+            )}
+            {acView.hostPath && (
+              <div className="ac-host-path" data-kind={acView.hostPath.kind}>
+                <span className="ac-icon" aria-hidden="true">
+                  {acView.hostPath.kind === "dir"
+                    ? <FolderIcon size={16} strokeWidth={1.75} />
+                    : <FileIcon size={16} strokeWidth={1.75} />}
+                </span>
+                <span className="ac-copy">
+                  <span className="ac-label">{acView.hostPath.name}</span>
+                  <span className="ac-detail" title={acView.hostPath.path}>{hostPathDetail(acView.hostPath, getLocale())}</span>
+                </span>
               </div>
             )}
             {acOptions.length > 0 && (

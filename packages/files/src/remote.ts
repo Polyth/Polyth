@@ -7,6 +7,7 @@
 import { posix } from "node:path";
 import type { RemoteHost } from "@polyth/contracts";
 import { assertExternalReadPath, DEFAULT_EXTERNAL_READ_POLICY, type ExternalReadPolicy } from "./externalReads.ts";
+import { withIgnoredInbox } from "./inboxIgnore.ts";
 import {
   assertRelative,
   BINARY_SCAN_BYTES,
@@ -17,6 +18,7 @@ import {
   MAX_RAW_BYTES,
   rawMimeOf,
   scorePath,
+  uploadStagingPath,
   type ContentSearchOptions,
   type FileContentSearchResult,
   type FileEntry,
@@ -127,7 +129,8 @@ export function createRemoteFileService(
     return out;
   };
 
-  return {
+  // Every write into `_inbox/` gives the folder its `.gitignore` first.
+  return withIgnoredInbox({
     async tree(root, opts = {}) {
       const rel = opts.path ?? "";
       const result = await run(root, rel, `ls -1Ap -- ${shq(rel || ".")}`);
@@ -285,6 +288,77 @@ export function createRemoteFileService(
       }
     },
 
+    async writeBytesPart(root, rel, { offset, total, data }) {
+      assertBetaWritable();
+      assertRelative(rel);
+      const staging = uploadStagingPath(rel);
+      const end = offset + data.length;
+      const outOfStep = (size: number) =>
+        Object.assign(fail("conflict", `upload of ${rel} is out of step (server has ${size} bytes)`), { size });
+      /** Size of a plain file, -1 for anything else, undefined when absent. */
+      const sizeOf = async (file: string): Promise<number | undefined> => {
+        const q = shq(file);
+        const result = await run(root, file, `if [ -L ${q} ]; then echo L; elif [ -f ${q} ]; then wc -c < ${q}; elif [ -e ${q} ]; then echo L; else echo -; fi`);
+        const out = result.stdout.trim();
+        if (result.code !== 0) throw new Error(`cannot stat ${file}: ${result.stderr.trim() || `exit ${result.code}`}`);
+        if (out === "-") return undefined;
+        return /^\d+$/.test(out) ? Number(out) : -1;
+      };
+      const staged = await sizeOf(staging);
+      if (staged === -1) throw outOfStep(0);
+      if (offset > 0 && staged === undefined) {
+        // The last piece's reply was lost after it moved the file into place.
+        if (end === total && await sizeOf(rel) === total) return { size: total, done: true };
+        throw outOfStep(0);
+      }
+      let size = staged ?? 0;
+      if (offset === 0 || size === offset) {
+        // Same bounded `printf | base64 -d` round trips as writeBytes, appended
+        // straight onto the staging file.
+        const b64 = Buffer.from(data).toString("base64");
+        const step = Math.ceil(WRITE_CHUNK_BYTES / 3) * 4;
+        let i = 0;
+        do {
+          const start = i === 0 ? `mkdir -p -- ${shq(posix.dirname(rel))} && ` : "";
+          const redirect = i === 0 && offset === 0 ? ">" : ">>";
+          const result = await run(
+            root,
+            rel,
+            `${start}printf '%s' ${shq(b64.slice(i, i + step))} | base64 -d ${redirect} ${shq(staging)}`,
+            { timeoutMs: 60_000 },
+          );
+          if (result.code !== 0) {
+            throw new Error(`cannot write ${rel}: ${result.stderr.trim() || `exit ${result.code}`}`);
+          }
+          i += step;
+        } while (i < b64.length);
+        size = end;
+      } else if (size !== end) {
+        throw outOfStep(size);
+      }
+      if (size !== total) return { size, done: false };
+      const moved = await run(root, rel, `mv -- ${shq(staging)} ${shq(rel)}`, { timeoutMs: 60_000 });
+      if (moved.code !== 0) {
+        throw new Error(`cannot write ${rel}: ${moved.stderr.trim() || `exit ${moved.code}`}`);
+      }
+      return { size, done: true };
+    },
+
+    async copy(fromRoot, fromRel, toRoot, toRel) {
+      assertBetaWritable();
+      assertRelative(fromRel);
+      const from = posix.join(fromRoot, fromRel);
+      const result = await run(
+        toRoot,
+        toRel,
+        `mkdir -p -- ${shq(posix.dirname(toRel))} && cp -- ${shq(from)} ${shq(toRel)}`,
+        { timeoutMs: 30 * 60_000 },
+      );
+      if (result.code !== 0) {
+        throw new Error(`cannot copy ${fromRel}: ${result.stderr.trim() || `exit ${result.code}`}`);
+      }
+    },
+
     async mkdir(root, rel) {
       assertBetaWritable();
       const result = await run(root, rel, `mkdir -p -- ${shq(rel)}`);
@@ -369,5 +443,5 @@ export function createRemoteFileService(
       // corrupt paths/content containing colons or newlines.
       throw Object.assign(new Error("remote content search is unavailable"), { code: "unavailable" });
     },
-  };
+  });
 }

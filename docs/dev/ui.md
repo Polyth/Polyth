@@ -788,6 +788,20 @@ Contract and server rules: [Spaces §14.8](../architecture/spaces-and-tenancy.md
   it from a person's name and the tooltip says "Open <title>"); anyone else sees a
   plain "a chat", no title, no link. Accepted trade-off: the label inside the
   token and the raw text still contain the title the author saw at send time.
+- **A typed or pasted path is a path, not a command**: command names cannot
+  hold a slash, so a `/` token with a second slash (`/Users/me/a.zip`), and a
+  `~/…` token, is a `path` token anywhere in the draft (`parsePromptTokens`,
+  `composer/language.ts`) and never opens Actions. While the caret is in it,
+  the composer asks `GET /api/browse/stat` (150 ms after typing settles; a
+  sentence's closing punctuation is left out, `hostPathQuery`). Only when the
+  server host has a file or folder there does the popup show one read-only
+  card: "File"/"Folder", the name, the size and the containing folder
+  (`hostPathAutocomplete`/`hostPathDetail` in `composer/discovery.ts`). A path
+  that isn't there, a lookup still running, a hosted deployment and a paired
+  device all show nothing. The card is a fact, not a choice: it is not a
+  listbox, so Enter still sends, arrows and prompt history behave as with no
+  popup, and Esc hides it. A one-segment `/Users` is still a command being
+  typed. The message text is sent unchanged.
 - **Mentioning someone outside the chat**: one plateless line of the pending
   stack above the composer (`MentionAccessLine.tsx`, decisions in
   `composer/people.ts`) asks once, with a wrapping sentence, a primary action
