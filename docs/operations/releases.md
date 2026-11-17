@@ -210,9 +210,8 @@ When `npm_packages` is enabled, Release packs:
 
 The tarballs are also attached to the GitHub Release. `publish_npm=true` publishes those exact tarballs to npm with provenance after checking whether the same version already exists, making a release-job retry safe.
 
-npm publication requires `NPM_TOKEN`. npm is retiring tokens that publish without 2FA; these
-packages need the same move to [trusted publishing](#npm-trusted-publishing) (trusted publisher
-file `release.yml`) before then.
+npm publication uses [trusted publishing](#npm-trusted-publishing) (trusted publisher file
+`release.yml`); no secret is needed, and both packages refuse tokens.
 
 Internal first-party workspaces are deliberately **not** bulk-published just because they lack `private: true`; the public npm release allowlist is explicit.
 
@@ -330,55 +329,59 @@ own runners; no deploy key or second repository is involved.
   incomplete archive set. To rotate it, add a new write deploy key to the tap, set the secret to
   its private key and delete the old key.
   The formula installs the archive into `libexec`, runs it with Homebrew's `node` and gives
-  `brew services` a service; `homebrew/core` would want a source build instead, so the tap is
+  `brew services` a service. That `node` is the newest major (26.13.1 on 2026-11-17, where the
+  archive passed `apps/server/smoke.ts`); the archive's only native module, `node-pty`, uses
+  N-API, so a new major does not need a rebuild; `homebrew/core` would want a source build instead, so the tap is
   the channel. The packaged server itself is described in
   [Ways to run Polyth](running.md#packaged-server).
 
 ### npm trusted publishing
 
 npm is retiring tokens that publish without a 2FA challenge (management actions since August
-2026, direct publishing around January 2027), so the server packages publish from `nightly.yml`'s
-`publish` job by OIDC: the job has `id-token: write`, installs npm 11.21.2 (trusted publishing
-needs 11.5.1 or newer; Node 22 ships npm 10) and `publish-server-npm.mjs` uses the job's identity
-before any `NPM_TOKEN`. Provenance comes with it.
+2026, direct publishing around January 2027), so both npm sets publish by OIDC from the job
+that builds them:
 
-Trusted publishing cannot create a package. While any of the five packages (`polyth`,
-`@polyth/server-linux-x64`, `-linux-arm64`, `-darwin-arm64`, `-darwin-x64`) is not on npm, the
-step publishes nothing and says so in a warning; the release, the archives and the Homebrew tap
-are not affected.
+| Packages | Workflow → job | Script |
+| --- | --- | --- |
+| `polyth`, `@polyth/server-linux-x64`, `-linux-arm64`, `-darwin-arm64`, `-darwin-x64` | `nightly.yml` → `publish`, channels in `POLYTH_SERVER_NPM_CHANNELS` | `publish-server-npm.mjs` |
+| `@polyth/contracts`, `@polyth/package-sdk` | `release.yml` → `publish`, with `publish_npm=true` | `publish-sdk-npm.mjs` |
 
-All five were bootstrapped on 2026-11-17: a `0.0.0` placeholder each (`latest` until the first
-real release; deprecate it then) and a trusted publisher for `Polyth/Polyth` → `nightly.yml`
-(`npm trust list <pkg>`). Repeat the steps below only for a new package, such as a new platform,
-as a maintainer with 2FA in the `polyth` npm organization:
+Both jobs have `id-token: write` and install npm 11.21.2 (trusted publishing needs 11.5.1 or
+newer; Node 22 ships npm 10). `scripts/ci/npm-publish.mjs` uses the job's identity before any
+`NPM_TOKEN`, publishes in order with provenance and skips versions already on npm, so a rerun is
+safe. npm checks provenance against a package's `repository` field: every published
+`package.json` must name `github.com/Polyth/Polyth`, or npm rejects the publish.
 
-1. Publish the package once by hand (`npm publish <tgz> --access public`, 2FA prompt), for
-   example the tarballs of a release run (`gh run download <run> --pattern 'products-*'`)
-   or a `0.0.0` placeholder. Give a directory as `./dir`: npm reads `pkgs/polyth` as the
-   GitHub shorthand `user/repo`. The registry answers `202` and shows a new package a few
-   minutes later.
-2. Add the trusted publisher of each package (npm 11.15.0 or newer, 2FA; one configuration per
-   package):
+Trusted publishing cannot create a package. While a package of the set is not on npm, the server
+step publishes nothing and says so in a warning (the release, the archives and the Homebrew tap
+are not affected); the SDK step fails, because someone asked for that publication.
+
+Since 2026-11-17 all seven packages have a deprecated `0.0.0` placeholder (`latest` until their
+first real release), a trusted publisher for `Polyth/Polyth` and their workflow file
+(`npm trust list <pkg>`), and *Require two-factor authentication and disallow tokens*
+(`npm access set mfa=publish`): no token can publish them, `NPM_TOKEN` included. For a new
+package, such as a new platform, a maintainer with 2FA in the `polyth` npm organization:
+
+1. Publishes it once by hand (`npm publish <tgz> --access public`, 2FA prompt), for example the
+   tarballs of a release run (`gh run download <run> --pattern 'products-*'`) or a `0.0.0`
+   placeholder. A directory is given as `./dir`: npm reads `pkgs/polyth` as the GitHub
+   shorthand `user/repo`. The registry answers `202` and shows a new package a few minutes later.
+2. Adds its trusted publisher (npm 11.15.0 or newer; one configuration per package; the
+   workflow from the table):
 
    ```bash
-   for p in polyth @polyth/server-linux-x64 @polyth/server-linux-arm64 \
-            @polyth/server-darwin-arm64 @polyth/server-darwin-x64; do
-     npm trust github "$p" --repo Polyth/Polyth --file nightly.yml --allow-publish --yes
-     sleep 2
-   done
+   npm trust github "$p" --repo Polyth/Polyth --file nightly.yml --allow-publish --yes
    ```
 
-   Put global flags such as `--registry` after `trust github`: npm 11.21 takes the first
-   arguments after `npm` as the command path, so a flag in front makes it fail with
-   *Unknown positional argument: github*. The web 2FA prompt (`--auth-type=web`, also for
-   `npm publish`) appears only when stdin and stdout are a terminal; without one npm fails
-   with `EOTP`. In a script, run npm under `script -qfec`.
+3. Deprecates a placeholder (`npm deprecate "$p@0.0.0" "<message>"`) and disallows tokens
+   (`npm access set mfa=publish "$p"`).
 
-3. Optionally set each package to *Require two-factor authentication and disallow tokens*
-   (package settings → Publishing access); trusted publishing is not affected.
-
-The next release of a channel listed in `POLYTH_SERVER_NPM_CHANNELS` then publishes all five
-(versions already on npm are skipped).
+Each `deprecate` and `access` call asks for its own web 2FA confirmation; the "skip for five
+minutes" choice covers publishes only. Put global flags such as `--registry` after the
+subcommand: npm 11.21 takes the first arguments after `npm` as the command path, so a flag in
+front makes `npm trust github` fail with *Unknown positional argument: github*. The web 2FA
+prompt (`--auth-type=web`) appears only when stdin and stdout are a terminal; without one npm
+fails with `EOTP`. In a script, run npm under `script -qfec`.
 
 ## External builder feed
 
