@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import { scrubInheritedEnv } from "@polyth/git";
 import path from "node:path";
 import { DEFAULT_EXTERNAL_READ_POLICY, resolveExternalRead, type ExternalReadPolicy } from "./externalReads.ts";
+import { withIgnoredInbox } from "./inboxIgnore.ts";
 
 export { browseHost, mkdirHost, resolveHostPath, isBlockedHostPath } from "./browse.ts";
 export type { BrowseEntry, BrowseOptions, BrowseResult } from "./browse.ts";
@@ -231,7 +232,8 @@ export function createFileService(options: FileServiceOptions = {}): FileService
     if (!sealed) return async () => false;
     return async (abs) => sealed(await realpath(abs).catch(() => abs));
   };
-  return {
+  // Every write into `_inbox/` gives the folder its `.gitignore` first.
+  return withIgnoredInbox({
     async tree(root, opts = {}) {
       const rel = opts.path ?? "";
       let abs: string;
@@ -625,7 +627,7 @@ export function createFileService(options: FileServiceOptions = {}): FileService
       if (Date.now() > deadline) truncated = true;
       return { hits, truncated };
     },
-  };
+  });
 }
 
 /** Attachments of every chat in the project, including private ones: readable

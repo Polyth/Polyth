@@ -206,6 +206,16 @@ agent) stages them the same way through `files.attachments` `stage`, which
 writes a fresh `_inbox/<uuid>-<name>` at the project root; the session's
 ordinary attachment preparation then materializes it into the execution root.
 
+`_inbox/` is never source-controlled. Every write into it through a
+`FileService` (local or SSH; uploads, `stage`, materialization into a worktree
+or remote host, moved-chat media) first gives the folder a `.gitignore` of `*`
+when it has none (`packages/files/src/inboxIgnore.ts`), so Git leaves every file
+there out of status, `git add -A` and commits without Polyth editing the
+project's own ignore rules; a `.gitignore` already in the folder is kept. On
+enable the files package also adds it to existing `_inbox/` folders of local
+projects. It ignores, it does not untrack: an attachment someone already
+committed stays tracked until it is removed from the index.
+
 Releasing an isolation record (merge, discard, abandon, repository discard or
 session deletion) leaves nothing Polyth-owned behind. Process closure covers
 terminals and the project-scoped utility runtimes (titles, commit messages,

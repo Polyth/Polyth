@@ -30,6 +30,7 @@ import {
 } from "./externalReads.ts";
 import { createReadFileAgentTool, FILES_PACKAGE_ID } from "./readFileTool.ts";
 import { createRemoteFileService } from "./remote.ts";
+import { ensureInboxIgnored, INBOX_DIR, isInboxPath } from "./inboxIgnore.ts";
 import { registerFilesHandoffSources } from "./handoffSources.ts";
 import { inlineAiRoutes } from "./inlineAiRoutes.ts";
 import { SESSION_EDITS_PATH, sessionEditsRoute } from "./sessionEdits.ts";
@@ -48,13 +49,21 @@ import {
 
 /** `_inbox/` is an explicit project-root staging area for freshly attached
  *  files: uploads land here before any session/worktree owns the message. */
-export const INBOX_PREFIX = "_inbox/";
-/** Whether a requested folder is the attachment inbox or inside it, however the
- *  path is spelled. */
-const isInboxFolder = (requested: string): boolean => {
-  const clean = path.posix.normalize(requested.replaceAll("\\", "/")).replace(/^(\.?\/)+/, "");
-  return clean === INBOX_PREFIX.slice(0, -1) || clean === INBOX_PREFIX || clean.startsWith(INBOX_PREFIX);
-};
+export const INBOX_PREFIX = `${INBOX_DIR}/`;
+
+/** An `_inbox/` written before every inbox write carried its `.gitignore`
+ *  (`inboxIgnore.ts`) gets one now. Local projects whose folder already exists
+ *  only: none is created, and an SSH host gets its file with its next upload. */
+export async function ignoreExistingInboxes(
+  projects: readonly { path: string; remote?: unknown }[],
+  files: FileService,
+): Promise<void> {
+  for (const project of projects) {
+    if (project.remote) continue;
+    const isFolder = await files.stat(project.path, INBOX_DIR).then((st) => st.kind === "dir", () => false);
+    if (isFolder) await ensureInboxIgnored(files, project.path);
+  }
+}
 
 /** Attachment preparation seam consumed by the session service.
  *  Published so the composition root never imports this package. */
@@ -375,7 +384,7 @@ export function workspaceRoutes(deps: {
     const query = (key: string) => url.searchParams.get(key);
     // A private chat's attachments live here too: they open by name from their
     // chat and are never listed for whoever else can open the project.
-    if ((path === "/api/files/tree" || path === "/api/files/list" || path === "/api/files/archive") && isInboxFolder(query("path") ?? "")) {
+    if ((path === "/api/files/tree" || path === "/api/files/list" || path === "/api/files/archive") && isInboxPath(query("path") ?? "")) {
       json(404, { error: "not-found", message: "path not found" });
       return true;
     }
@@ -678,6 +687,9 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
       if (registrations) return;
+      void host.projects.list()
+        .then((projects) => ignoreExistingInboxes(projects, files))
+        .catch((error: unknown) => console.warn("[polyth] existing _inbox folders were not checked", error));
       const handoffRegistry = host.services.get(serverServiceKey<import("@polyth/handoff").ContextSourceRegistry>("handoff.sources"));
       if (handoffRegistry) {
         registerFilesHandoffSources({ registry: handoffRegistry, files, projects: host.projects });

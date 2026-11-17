@@ -7,6 +7,7 @@
 import { posix } from "node:path";
 import type { RemoteHost } from "@polyth/contracts";
 import { assertExternalReadPath, DEFAULT_EXTERNAL_READ_POLICY, type ExternalReadPolicy } from "./externalReads.ts";
+import { withIgnoredInbox } from "./inboxIgnore.ts";
 import {
   assertRelative,
   BINARY_SCAN_BYTES,
@@ -127,7 +128,8 @@ export function createRemoteFileService(
     return out;
   };
 
-  return {
+  // Every write into `_inbox/` gives the folder its `.gitignore` first.
+  return withIgnoredInbox({
     async tree(root, opts = {}) {
       const rel = opts.path ?? "";
       const result = await run(root, rel, `ls -1Ap -- ${shq(rel || ".")}`);
@@ -369,5 +371,5 @@ export function createRemoteFileService(
       // corrupt paths/content containing colons or newlines.
       throw Object.assign(new Error("remote content search is unavailable"), { code: "unavailable" });
     },
-  };
+  });
 }
