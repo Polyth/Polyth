@@ -9641,10 +9641,6 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 .turn-rate-limit.ui-glass-dock {
   width: min(calc(100% - (2 * var(--conversation-chrome-inset))), var(--chat-measure));
   margin-inline: auto;
-  /* Like the isolation card: room and a capped shadow so the scroller's
-     bottom edge does not cut the shadow off. */
-  margin-block-end: var(--space-3);
-  --material-glass-shadow: var(--shadow-md);
   /* The glyph sits on the title's first line, as on the card. */
   align-items: flex-start;
   gap: var(--space-2);
@@ -19959,19 +19955,53 @@ body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="s
    reserved outside the scrollport; keep a full reading gap below the last
    surface so activity text cannot crowd the above-composer status dock. */
 .focus-conversation:has(> .conversation-composer-dock) .timeline {
-  --timeline-pad-bottom: calc(var(--conversation-message-gap) + var(--conversation-group-gap) + var(--timeline-turn-sheet-space, 0px));
-  scroll-padding-bottom: calc(var(--conversation-message-gap) + var(--conversation-group-gap));
+  --timeline-pad-bottom: calc(var(--conversation-message-gap) + var(--conversation-group-gap) + var(--timeline-dock-overlap, 0px) + var(--timeline-turn-sheet-space, 0px));
+  scroll-padding-bottom: calc(var(--conversation-message-gap) + var(--conversation-group-gap) + var(--timeline-dock-overlap, 0px));
+}
+/* A scroller clips everything at its edge, shadows included, so a glass card
+   at the tail ended its shadow on a hard line above the composer. Instead the
+   transcript's box reaches under the composer dock (which paints above it)
+   by the composer's height, and the runway and scroll padding above grow by
+   the same amount: rows rest exactly where they did, and at the tail a
+   shadow lies under the dock instead of being cut.
+   Scrolled away from the tail, history would slide under the dock's
+   plateless lines, so a scroll-driven mask hides the overlap everywhere but
+   the last few pixels of the range (and a transcript that does not scroll has
+   no timeline, so no mask). Masking only while scrolled keeps the tail glass
+   blurring the wallpaper: a masked ancestor is its backdrop root. Without
+   scroll timelines there is no overlap at all. */
+@supports (animation-timeline: scroll()) {
+  .focus-conversation:has(> .conversation-composer-dock) {
+    --timeline-dock-overlap: var(--composer-height);
+  }
+  .focus-conversation:has(> .conversation-composer-dock) > .timeline-wrap {
+    margin-block-end: calc(-1 * var(--timeline-dock-overlap));
+  }
+  .focus-conversation:has(> .conversation-composer-dock) .timeline {
+    animation: timeline-dock-overlap-hidden linear none;
+    animation-timeline: scroll(self);
+    animation-range: 0 calc(100% - 4px);
+  }
+}
+@keyframes timeline-dock-overlap-hidden {
+  from, to {
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - var(--timeline-dock-overlap, 0px)), transparent 0);
+    mask-image: linear-gradient(to bottom, #000 calc(100% - var(--timeline-dock-overlap, 0px)), transparent 0);
+  }
 }
 /* ...but the phone authored its own smaller tail clearance (24px in the
    UX-MOBILE-01 section) and the rule above would re-derive it from the shared
    message/group gaps, leaving ~40px of over-reserved runway. This rule sits
    after both, so the phone value is the last word on a phone; the reading gap
    above still applies to the wider shells that authored no phone override.
-   The JS fresh-turn runway (--timeline-turn-sheet-space) still adds on top. */
+   The JS fresh-turn runway (--timeline-turn-sheet-space) still adds on top.
+   The phone needs no overlap: its own bottom mask dissolves the edge. */
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+  .focus-conversation:has(> .conversation-composer-dock) { --timeline-dock-overlap: 0px; }
   .focus-conversation:has(> .conversation-composer-dock) .timeline {
     --timeline-pad-bottom: calc(24px + var(--timeline-turn-sheet-space, 0px));
     scroll-padding-bottom: 24px;
+    animation: none;
   }
 }
 

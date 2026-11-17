@@ -358,13 +358,7 @@
   gap: var(--space-2);
   min-width: 0;
   width: min(calc(100% - (2 * var(--conversation-chrome-inset))), var(--chat-measure));
-  /* The card ends the transcript's scroller, which clips whatever paints past
-     its bottom edge, and the tail runway (30px at compact density) is shorter
-     than a glass shadow. The bottom margin plus the capped shadow keep the
-     whole shadow inside the scrollport (shadow-md reaches ≤40px in every
-     theme) instead of ending on a hard line above the composer. */
-  margin: var(--space-2) auto var(--space-3);
-  --material-glass-shadow: var(--shadow-md);
+  margin: var(--space-2) auto 0;
   padding: var(--space-3) var(--space-4) var(--space-3) var(--space-3);
   border-radius: var(--radius-card);
   color: var(--text);
