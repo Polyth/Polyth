@@ -7078,7 +7078,11 @@ export function createSessionService(deps: {
         materializationFailures.delete(sessionId);
       }
       let attachedProjection = proj;
-      if (!proj.backendSessionId && (await store.events(sessionId)).some((event) => event.type === "session/snapshot-imported")) {
+      // A Snapshot import and a fork that branched nothing natively (a
+      // continuity fork, or Fork and edit on the first prompt) publish no
+      // native session: their own runtime creates it on first use.
+      if (!proj.backendSessionId && (await store.events(sessionId)).some((event) =>
+        event.type === "session/snapshot-imported" || event.type === "session/forked")) {
         let operation = (await durable.operations(sessionId)).find((op) => op.mutationKind === "session-create");
         if (!operation) operation = (await broadcastTail(sessionId, () => durable.prepareOperation({
           sessionId, mutationKind: "session-create",
@@ -10856,37 +10860,54 @@ export function createSessionService(deps: {
     return (await store.projection(sessionId)) ?? current;
   }
 
-  /** Fork for a runtime without exact native branching. The child gets the
-   *  exact canonical prefix and no native session yet: like a Snapshot import
-   *  (`session/snapshot-imported`, `mode: "fork"`), its native session is
-   *  created on first use and that leg's first prompt carries the prefix as
-   *  canonical continuity. Nothing is mutated on the source or its runtime,
-   *  so there is no outcome to reconcile, and the source may be mid-turn or
-   *  recovering: whatever the prefix leaves open is closed in the child. The
-   *  caller holds the source lock. */
+  /** The source projection without what a fork never inherits. The source's
+   *  draft, pin, acting person and automation origin are someone else's, and
+   *  everything tied to the source's running work stays with the source: a
+   *  scheduled resend, a retry chain, a pause, a harness move, background
+   *  work, a released execution or a suggested next prompt. A child that
+   *  inherited them would look busy, show a countdown or resend on its own
+   *  the moment it opened. */
+  function forkableProjection(proj: SessionProjection) {
+    const {
+      draft: _draft, draftUpdatedAt: _draftUpdatedAt, pinned: _pinned, actor: _actor, origin: _origin,
+      harnessTransition: _harnessTransition, runtimeControl: _runtimeControl,
+      resume: _resume, releasedExecution: _releasedExecution, paused: _paused,
+      autoRetry: _autoRetry, backgroundWork: _backgroundWork, promptSuggestion: _promptSuggestion,
+      ...forkable
+    } = proj;
+    return forkable;
+  }
+
+  /** Fork that leaves every runtime alone. The child gets the exact canonical
+   *  prefix and no native session yet; its own runtime creates one on first
+   *  use. A prefix with dialogue is published like a Snapshot import
+   *  (`session/snapshot-imported`, `mode: "fork"`), so that leg's first prompt
+   *  carries the prefix as canonical continuity; an empty one has nothing to
+   *  carry and starts like a new chat. Nothing is mutated on the source or its
+   *  runtime, so there is no outcome to reconcile, and the source may be
+   *  mid-turn or recovering: whatever the prefix leaves open is closed in the
+   *  child. The caller holds the source lock. */
   async function publishContinuityFork(input: {
     sessionId: string;
     proj: SessionProjection;
     forkId: string;
     title: string;
     prefix: readonly SessionEvent[];
+    /** Model-visible dialogue in `prefix`; none means no continuity marker. */
+    carriesDialogue: boolean;
     copiedThroughSeq: number;
     draft: ForkDraft | undefined;
     atSeq: number | undefined;
   }): Promise<ForkResult> {
-    const { sessionId, proj, forkId, title, prefix, copiedThroughSeq, draft, atSeq } = input;
+    const { sessionId, proj, forkId, title, prefix, carriesDialogue, copiedThroughSeq, draft, atSeq } = input;
     const now = Date.now();
-    // Same ownership rules as a native fork. Everything bound to the source's
-    // native leg or its running work stays behind: the child has none yet.
+    // The child has no native leg yet, so nothing bound to the source's leg
+    // comes along either.
     const {
-      draft: _draft, draftUpdatedAt: _draftUpdatedAt, pinned: _pinned, actor: _actor, origin: _origin,
       backendSessionId: _backendSessionId, runtimeBinding: _runtimeBinding, runtimeLeg: _runtimeLeg,
-      harnessTransition: _harnessTransition, runtimeControl: _runtimeControl,
       runtimeObservationSeq: _runtimeObservationSeq, contextWindow: _contextWindow,
-      resume: _resume, releasedExecution: _releasedExecution, paused: _paused,
-      autoRetry: _autoRetry, backgroundWork: _backgroundWork, promptSuggestion: _promptSuggestion,
       ...forkable
-    } = proj;
+    } = forkableProjection(proj);
     const projection: SessionProjection = {
       ...forkable, id: forkId, parentId: sessionId, title,
       status: "idle",
@@ -10894,11 +10915,13 @@ export function createSessionService(deps: {
       updatedAt: now,
     };
     const closing = forkClosingEvents(prefix);
-    const continuity = {
-      type: "session/snapshot-imported",
-      data: { mode: "fork", fromSessionId: sessionId, copiedThroughSeq } as JsonObject,
-      ignorable: true as const,
-    };
+    const continuity = carriesDialogue
+      ? [{
+          type: "session/snapshot-imported",
+          data: { mode: "fork", fromSessionId: sessionId, copiedThroughSeq } as JsonObject,
+          ignorable: true as const,
+        }]
+      : [];
     const markerData: SessionForkedData = {
       fromSessionId: sessionId,
       ...(atSeq !== undefined ? { sourceAtSeq: atSeq } : {}),
@@ -10918,7 +10941,7 @@ export function createSessionService(deps: {
             sourceSeq: ev.seq,
           })),
           ...closing.map((event) => ({ time: now, ...event })),
-          { time: now, ...continuity },
+          ...continuity.map((event) => ({ time: now, ...event })),
         ],
         projection,
         marker: { type: "session/forked", data: markerData as unknown as JsonObject, ignorable: true },
@@ -10935,7 +10958,9 @@ export function createSessionService(deps: {
       for (const event of closing) {
         copied.push(await store.append(forkId, event.type, event.data, { ignorable: true }));
       }
-      copied.push(await store.append(forkId, continuity.type, continuity.data, { ignorable: true }));
+      for (const event of continuity) {
+        copied.push(await store.append(forkId, event.type, event.data, { ignorable: true }));
+      }
       await store.upsertProjection(projection);
       const marker = await store.append(
         forkId, "session/forked", markerData as unknown as JsonObject, { ignorable: true },
@@ -14519,8 +14544,10 @@ export function createSessionService(deps: {
         // resolve the SOURCE session's backend id to fork from it.
         // A busy or recovering source is never wired or branched: its
         // runtime is in use or unproven. A runtime that cannot be reached at
-        // all is no reason to refuse either; the child starts its own.
-        const rt = settled
+        // all is no reason to refuse either; the child starts its own. An
+        // empty prefix has nothing to branch, so the source's runtime is not
+        // even started for it.
+        const rt = settled && history.length > 0
           ? await ensureWired(sessionId, proj).catch((error: unknown) => {
               console.warn(`[polyth] fork of ${sessionId} continues without its runtime: ${materializationLogText(error instanceof Error ? error.message : error)}`);
               return undefined;
@@ -14533,21 +14560,28 @@ export function createSessionService(deps: {
           ...(proj.model ? { model: proj.model } : {}),
           ...(proj.agent ? { agent: proj.agent } : {}),
         };
-        // An empty prefix needs no branch — a fresh backend session already
-        // represents the same (empty) history. A runtime that can branch
-        // natively gets an exact native copy. Every other runtime (Claude
-        // Code, Codex, Pi, ACP…) — and a native branch that refuses because
-        // its history no longer matches Polyth's — gets a continuity fork:
-        // the canonical prefix is published exactly, and the child's first
-        // prompt hands it to a fresh native session, as a Snapshot import or
-        // harness switch does. The native session is never told it holds
-        // history it does not. The same fork serves a source that is busy,
-        // recovering or without a reachable runtime.
+        // A runtime that can branch natively gets an exact native copy. Every
+        // other runtime (Claude Code, Pi, ACP…) — and a native branch that
+        // refuses because its history no longer matches Polyth's — gets a
+        // continuity fork: the canonical prefix is published exactly, and the
+        // child's first prompt hands it to a fresh native session, as a
+        // Snapshot import or harness switch does. The native session is never
+        // told it holds history it does not. The same fork serves a source
+        // that is busy, recovering or without a reachable runtime.
+        //
+        // An empty prefix (Fork and edit on the first prompt) asks no runtime
+        // for anything: the child is a new chat whose own runtime creates its
+        // native session on first send. Creating it here would run on the
+        // SOURCE's runtime, and a runtime that holds one native session per
+        // chat (every ACP harness) would then point the source's next prompt
+        // at the child's conversation and share one agent between both chats.
         const nativeBranch = rt !== undefined && history.length > 0
           && Boolean(rt.branchSession || rt.branchSessionOperation)
           && (await Promise.resolve(rt.capabilities?.()).catch(() => undefined))?.fork !== false;
-        if (!rt || (history.length > 0 && !nativeBranch)) {
-          return publishContinuityFork({ sessionId, proj, forkId, title, prefix, copiedThroughSeq, draft, atSeq });
+        if (!rt || !nativeBranch) {
+          return publishContinuityFork({
+            sessionId, proj, forkId, title, prefix, carriesDialogue: history.length > 0, copiedThroughSeq, draft, atSeq,
+          });
         }
         const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
           sessionId,
@@ -14564,21 +14598,17 @@ export function createSessionService(deps: {
         }));
         const outcome = await runPreparedOperation<{ backendSessionId: string }, string>(
           prepared.operation,
-          (operationId) => history.length === 0
-            ? (rt.createSessionOperation
-                ? rt.createSessionOperation(target, operationId)
-                : rt.ensureSession(target))
-            : (rt.branchSessionOperation
-                ? rt.branchSessionOperation({
-                    sourceSessionId: sessionId,
-                    target,
-                    history,
-                  }, operationId)
-                : rt.branchSession!({
-                    sourceSessionId: sessionId,
-                    target,
-                    history,
-                  })),
+          (operationId) => rt.branchSessionOperation
+            ? rt.branchSessionOperation({
+                sourceSessionId: sessionId,
+                target,
+                history,
+              }, operationId)
+            : rt.branchSession!({
+                sourceSessionId: sessionId,
+                target,
+                history,
+              }),
           (backendSessionId) => ({ backendSessionId }),
         );
         // A definitive refusal made no branch, so the continuity fork is
@@ -14586,10 +14616,11 @@ export function createSessionService(deps: {
         // and never triggers a second mutation.
         if (
           outcome.kind === "rejected"
-          && history.length > 0
           && (outcome.code === "history-mismatch" || outcome.code === "unsupported" || outcome.code === "capability-unsupported")
         ) {
-          return publishContinuityFork({ sessionId, proj, forkId, title, prefix, copiedThroughSeq, draft, atSeq });
+          return publishContinuityFork({
+            sessionId, proj, forkId, title, prefix, carriesDialogue: true, copiedThroughSeq, draft, atSeq,
+          });
         }
         if (outcome.kind !== "confirmed") {
           if (outcome.kind === "unknown") {
@@ -14601,12 +14632,10 @@ export function createSessionService(deps: {
         const backendSessionId = outcome.value.backendSessionId;
 
         const now = Date.now();
-        // A fork belongs to whoever forked it: the source's draft, pin and
-        // acting person are someone else's and never carry over, and no
-        // automation started it.
-        const { draft: _draft, draftUpdatedAt: _draftUpdatedAt, pinned: _pinned, actor: _actor, origin: _origin, ...forkable } = proj;
+        // A fork belongs to whoever forked it, and the source's running work
+        // stays with the source (`forkableProjection`).
         const projection: SessionProjection = {
-          ...forkable, id: forkId, parentId: sessionId, title,
+          ...forkableProjection(proj), id: forkId, parentId: sessionId, title,
           status: "reconciling",
           createdAt: now,
           updatedAt: now,

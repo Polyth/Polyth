@@ -1450,6 +1450,11 @@ test("worktree runtimes keep messages, attachments, attention, forks, and querie
     .find((event) => event.type === "user/message")!;
   const fork = await sessions.fork(rootSession.id, firstRootPrompt.seq);
   assert.equal((await store.projection(fork.id))?.worktreePath, undefined);
+  // Fork and edit on the first prompt creates nothing at fork time; the
+  // child's own (root) runtime creates its native session when it is used.
+  assert.equal(rootFake.requestCount("POST", "/session"), 1);
+  assert.equal(worktreeFake.requestCount("POST", "/session"), 1);
+  await sessions.activate!(fork.id);
   assert.equal(rootFake.requestCount("POST", "/session"), 2);
   assert.equal(worktreeFake.requestCount("POST", "/session"), 1);
 
