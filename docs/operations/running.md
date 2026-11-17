@@ -7,6 +7,7 @@ the [quick start](../../README.md#quick-start) covers the first one.
 | Setup | Server runs | Reach it from | Start here |
 |---|---|---|---|
 | [Local from source](#local-from-source) | your machine, `npm start` | this machine's browser | `npm start` |
+| [Packaged server](#packaged-server) | any machine with Node.js, no checkout or build tools | this machine's browser, or via a proxy | `npm run build:server` |
 | [Development supervisor](#development-supervisor) | your machine, auto-rebuild and restart | this machine's browser | `npm run watch` |
 | [Docker, this machine](#docker) | container on Linux, host network | this machine's browser | `deploy/docker/compose.yml` |
 | [Docker behind HTTPS](#docker) | container and Caddy TLS proxy | any browser, `https://your.domain` | `deploy/docker/compose.proxy.yml` |
@@ -32,6 +33,60 @@ everything in `POLYTH_DATA_DIR`.
 | `POLYTH_CHROMIUM_PATH` | auto | Chromium executable for the built-in browser |
 | `POLYTH_LINK_HOST` | auto | `polyth-link-host` executable (otherwise `target/release` after `npm run build:link`) |
 | `POLYTH_DEBUG_AGENT_ACCESS` | none | `1` allows loopback API access without sign-in, see [debug modes](#debug-and-disposable-modes) |
+
+## Packaged server
+
+`npm run build:server` builds one archive for the machine it runs on:
+`apps/server/release/polyth-server-<version>-<platform>-<arch>.tar.gz` and its
+`.sha256`. Inside is the server with every server package compiled in, the web app,
+`polyth-link-host`, the runtime supervisor (Linux) and the four runtime dependencies
+that cannot be bundled (`node-pty`, `playwright-core`, `esbuild`, `typescript`). The
+machine that runs it needs Node.js 22.16 or newer and the agent CLIs, nothing else:
+no checkout, no compilers, no development dependencies. The layout is described in
+`apps/server/src/layout.ts`; `resources/` has the same shape as Desktop's resources
+directory and is the server's `POLYTH_RESOURCES_DIR`.
+
+```bash
+tar -xzf polyth-server-<version>-linux-x64.tar.gz -C /opt   # unpacks /opt/polyth
+node /opt/polyth/bin/polyth.mjs server setup-claim           # first run only, server stopped
+node /opt/polyth/bin/polyth.mjs server start                 # foreground
+```
+
+`bin/polyth.mjs` is the ordinary [`polyth` CLI](../../packages/cli); in a packaged
+install `polyth server start`, `setup-claim` and `break-glass` run the bundled entries
+instead of a checkout's npm scripts, and `start` turns the CLI process into the
+server, so a service manager's stop signal reaches the server itself. Without
+`POLYTH_DATA_DIR` the data lives in `~/.local/share/polyth-server/data` (Linux,
+`XDG_DATA_HOME`), `~/Library/Application Support/Polyth Server/data` (macOS) or
+`%LOCALAPPDATA%\Polyth Server\data` (Windows), apart from Desktop's, so both can run on
+one machine. Every variable of [Local from source](#local-from-source) applies.
+
+A systemd unit:
+
+```ini
+[Service]
+User=polyth
+EnvironmentFile=/etc/polyth/polyth.env
+ExecStart=/usr/bin/node /opt/polyth/bin/polyth.mjs server start
+KillMode=mixed
+Restart=on-failure
+```
+
+To update, unpack the new archive beside the old tree, stop the service, archive the
+data directory, swap the directories (or a `current` symlink) and start; the old tree
+is the rollback. `polyth server restart` is the checkout's rebuild-and-restart and is
+refused here: restart through the service manager. Release publication of these
+archives, the `polyth` npm package and a `polyth update` command are not built yet.
+
+Building needs the web build (`build:server` runs it first), `cargo` for
+`polyth-link-host` unless `POLYTH_LINK_BIN_DIR` names a directory that already has it,
+and a C compiler on Linux for the supervisor. `POLYTH_VERSION` sets the version (the
+root `package.json` version otherwise). The build copies the runtime dependencies from
+`node_modules` and refuses, under `CI`, versions that differ from `package-lock.json`;
+locally it warns. `npm run smoke --workspace @polyth/server-app [archive]` unpacks an
+archive into a temporary directory, completes first-run setup through the HTTP API the
+setup page uses, restarts into the full server, signs in, makes an authenticated
+request and stops it.
 
 ## Development supervisor
 

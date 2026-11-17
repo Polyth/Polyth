@@ -9,6 +9,7 @@ import {
   bindCanonicalSecurity,
   bindCanonicalSecurityFactory,
   canonicalSecurity,
+  isSourceEntrypoint,
 } from "./runtimeSecurity.ts";
 import { createSetupServer } from "./setupServer.ts";
 import { createProxyTrust } from "./trustedProxy.ts";
@@ -298,6 +299,6 @@ export async function boot(opts: BootOptions = {}) {
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+if (isSourceEntrypoint(import.meta.url, "index.ts")) {
   void boot();
 }

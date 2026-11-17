@@ -1,13 +1,14 @@
 import { spawn } from "node:child_process";
 import { createReadStream, existsSync, readFileSync, statSync, watch } from "node:fs";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { bool, int, str, UsageError } from "../args.ts";
 import { listProjects, resolveProject, session, summaries, type WhoAmI } from "../api.ts";
 import { PolythError } from "../client.ts";
 import type { Command, Context } from "../context.ts";
 import { oneLine, style, table } from "../output.ts";
 import { openExternal, readStdin } from "../system.ts";
-import { describeTarget, desktopDataDir, repoRoot, type Target } from "../target.ts";
+import { describeTarget, desktopDataDir, repoRoot, serverBundleRoot, type Target } from "../target.ts";
 
 export const status: Command = {
   name: "status",
@@ -170,15 +171,23 @@ export const open: Command = {
 
 // ---- local server administration (control-socket targets only) -----------
 
-function localServer(ctx: Context): { dataDir: string; root: string | undefined } {
+function localServer(ctx: Context): { dataDir: string; root: string | undefined; bundle: string | undefined } {
   const target = ctx.target();
   if (target.kind !== "socket") throw new UsageError("`polyth server` manages a Polyth on this machine; it does not work with a URL target");
   if (isDesktop(target)) throw new UsageError("Polyth Desktop manages its own server; use the app (tray → Restart) instead");
-  return { dataDir: target.dataDir, root: repoRoot() };
+  return { dataDir: target.dataDir, root: repoRoot(), bundle: serverBundleRoot() };
 }
 
-const runIn = (cwd: string, command: string, args: string[]) => new Promise<number>((resolveExit) => {
-  const child = spawn(command, args, { cwd, stdio: "inherit", shell: process.platform === "win32" });
+/** The marker names the CLI's own install; the server and the agents it runs
+ *  have no use for it. */
+function withoutBundleMarker(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const { POLYTH_SERVER_BUNDLE: _marker, ...rest } = env;
+  return rest;
+}
+
+const runIn = (cwd: string, command: string, args: string[], env?: NodeJS.ProcessEnv) => new Promise<number>((resolveExit) => {
+  // npm needs a shell on Windows; a direct executable such as Node does not.
+  const child = spawn(command, args, { cwd, stdio: "inherit", shell: process.platform === "win32" && command === "npm", ...(env ? { env } : {}) });
   child.on("error", (error) => { process.stderr.write(`${error.message}\n`); resolveExit(127); });
   child.on("exit", (code, signal) => resolveExit(code ?? (signal ? 128 : 1)));
 });
@@ -211,7 +220,7 @@ export const server: Command = {
   usage: [
     "polyth server status",
     "polyth server logs [-f] [-n LINES]",
-    "polyth server start                 # foreground, from a server checkout",
+    "polyth server start                 # foreground, from a server checkout or install",
     "polyth server restart               # drain-aware: waits for running turns",
     "polyth server setup-claim           # one-time claim for first-run setup",
     "polyth server break-glass           # reset an owner password (interactive)",
@@ -222,12 +231,18 @@ export const server: Command = {
   ],
   async run(ctx, args) {
     const [action = "status"] = args.positionals;
-    const { dataDir, root } = localServer(ctx);
+    const { dataDir, root, bundle } = localServer(ctx);
     const o = ctx.o;
     const needRoot = () => {
       if (!root) throw new UsageError("run this from a Polyth server checkout (the CLI inside packages/cli)");
       return root;
     };
+    // A packaged server (npm, release tarball, Homebrew) runs its own bundled
+    // entries with this Node; it has no npm scripts.
+    const runBundled = (bundleRoot: string, entry: string) => runIn(process.cwd(), process.execPath, [join(bundleRoot, "dist", entry)], {
+      ...withoutBundleMarker(process.env),
+      POLYTH_DATA_DIR: dataDir,
+    });
     switch (action) {
       case "status": {
         const target = ctx.target();
@@ -243,6 +258,7 @@ export const server: Command = {
         o.out(`${style.bold(o.color, "Data")}      ${dataDir}`);
         if (target.kind === "socket") o.out(`${style.bold(o.color, "Socket")}    ${target.socketPath}`);
         if (root) o.out(`${style.bold(o.color, "Checkout")}  ${root}`);
+        else if (bundle) o.out(`${style.bold(o.color, "Install")}   ${bundle}`);
         return 0;
       }
       case "logs": {
@@ -253,10 +269,21 @@ export const server: Command = {
         await tailFile(file, int(args, "lines", 100, 1, 100_000), bool(args, "follow"), controller.signal);
         return 0;
       }
-      case "start": return runIn(needRoot(), "npm", ["start"]);
-      case "restart": return runIn(needRoot(), "npm", ["run", "polyth:restart"]);
-      case "setup-claim": return runIn(needRoot(), "npm", ["run", "setup:claim"]);
-      case "break-glass": return runIn(needRoot(), "npm", ["run", "auth:break-glass"]);
+      case "start":
+        if (!root && bundle) {
+          // This process becomes the server, so a service manager's signals
+          // (systemd, launchd, `brew services`) reach it directly.
+          delete process.env.POLYTH_SERVER_BUNDLE;
+          process.env.POLYTH_DATA_DIR = dataDir;
+          await import(pathToFileURL(join(bundle, "dist", "server.mjs")).href);
+          return 0;
+        }
+        return runIn(needRoot(), "npm", ["start"]);
+      case "restart":
+        if (!root && bundle) throw new UsageError("restart this server with the service manager that runs it (for example `systemctl restart polyth`)");
+        return runIn(needRoot(), "npm", ["run", "polyth:restart"]);
+      case "setup-claim": return !root && bundle ? runBundled(bundle, "setup-claim.mjs") : runIn(needRoot(), "npm", ["run", "setup:claim"]);
+      case "break-glass": return !root && bundle ? runBundled(bundle, "break-glass.mjs") : runIn(needRoot(), "npm", ["run", "auth:break-glass"]);
       default: throw new UsageError(`unknown action "${action}"`);
     }
   },

@@ -220,7 +220,10 @@ function report(o: Output, error: unknown): number {
 const invokedDirectly = (() => {
   try {
     const self = new URL(import.meta.url).pathname;
-    return process.argv[1] !== undefined && (process.argv[1] === self || process.argv[1].endsWith("/packages/cli/src/main.ts"));
+    // Only this source file: inside a bundle (the packaged server's dist/cli.mjs)
+    // import.meta.url is the bundle, whose own entry runs main().
+    return process.argv[1] !== undefined
+      && ((process.argv[1] === self && self.endsWith("/main.ts")) || process.argv[1].endsWith("/packages/cli/src/main.ts"));
   } catch {
     return false;
   }

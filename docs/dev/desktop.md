@@ -19,7 +19,9 @@ random port on every launch; deleting the file makes the next launch take, and k
 a new one.
 
 Server features are selected from `polyth.serverEntry` manifests by
-`apps/desktop/serverPackageInventory.ts`. The main-process esbuild plugin generates
+`apps/desktop/serverPackageInventory.ts`, a thin wrapper over the inventory it shares
+with the [packaged server](../operations/running.md#packaged-server)
+(`scripts/server-packages-bundle.ts`). The main-process esbuild plugin generates
 static imports; installed applications do not scan repository directories. Source
 execution/tests load the same discovered inventory. The desktop-specific Chat
 Workspace factory is the only platform override. New features do not require a

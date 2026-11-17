@@ -1,0 +1,10 @@
+{
+  "name": "@polyth/server-app",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "node --experimental-strip-types build.ts",
+    "smoke": "node --experimental-strip-types smoke.ts"
+  }
+}

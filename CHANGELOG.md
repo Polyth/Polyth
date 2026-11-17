@@ -7,6 +7,17 @@ milestones are named after what shipped.
 
 ---
 
+## Unreleased — packaged server archive
+
+### Added
+
+- `npm run build:server` builds the Polyth server as one archive for a platform
+  (`polyth-server-<version>-<platform>-<arch>.tar.gz`). A server machine needs only
+  Node.js and the agent CLIs: no checkout, Rust, compiler or development
+  dependencies. `polyth server start`, `setup-claim` and `break-glass` work from the
+  unpacked archive, and a smoke test checks an archive from first run to a signed-in
+  request. See [Packaged server](docs/operations/running.md#packaged-server).
+
 ## Unreleased — GitHub Copilot as a harness
 
 ### Added

@@ -499,7 +499,9 @@
         "Cargo.toml",
         "Dockerfile",
         ".dockerignore",
-        "deploy/docker/**"
+        "deploy/docker/**",
+        "apps/server/**",
+        "scripts/server-packages-bundle.ts"
       ],
       "entrypoints": [
         "package.json",
@@ -515,15 +517,18 @@
         "scripts/release-version.mjs",
         "scripts/bump-version.mjs",
         "Cargo.toml",
-        "Dockerfile"
+        "Dockerfile",
+        "apps/server/build.ts"
       ],
       "references": [
         "docs/agents/commands.md",
         "docs/agents/verification.md",
         "docs/operations/releases.md",
-        "docs/operations/docker.md"
+        "docs/operations/docker.md",
+        "docs/operations/running.md"
       ],
       "testHints": [
+        "apps/server/test/layout.test.ts",
         "scripts/test/release-version.test.ts",
         "scripts/test/release-notes.test.ts",
         "scripts/test/checkCoAuthors.test.ts",

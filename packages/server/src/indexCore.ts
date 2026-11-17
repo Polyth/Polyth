@@ -166,7 +166,7 @@ import { erasePrivateChats, privateDataBytes, privateDataRoutes } from "./routes
 import { projectVisibleToUser, setPrivateRoomParentLookup } from "./accountLimits.ts";
 import { createPersonalMcpReprovisioner, type PersonalMcpReprovisioner } from "./personalMcpReprovision.ts";
 import { assertRemoteOpenCodeUsable, type RemoteOpenCodeAccessDeps } from "./remoteOpenCodeAccess.ts";
-import { canonicalSecurity } from "./runtimeSecurity.ts";
+import { canonicalSecurity, isSourceEntrypoint } from "./runtimeSecurity.ts";
 import { oneShot } from "./oneshot.ts";
 import {
   createSmallModelService,
@@ -3809,6 +3809,6 @@ export async function boot(opts: BootOptions = {}) {
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+if (isSourceEntrypoint(import.meta.url, "indexCore.ts")) {
   void boot();
 }

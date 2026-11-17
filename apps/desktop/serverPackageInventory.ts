@@ -1,64 +1,30 @@
-import { resolve, sep } from "node:path";
-import { pathToFileURL } from "node:url";
-import { readFile, realpath, stat } from "node:fs/promises";
+import { resolve } from "node:path";
 import type { Plugin } from "esbuild";
-import { discoverServerPackages, type ServerPackageFactory } from "@polyth/plugins";
 import type { ServerPackageRegistration } from "@polyth/server";
-import type { PackageDescriptorDto } from "@polyth/contracts";
-import { packageInEdition, type PolythEdition } from "@polyth/contracts/edition";
+import type { PolythEdition } from "@polyth/contracts/edition";
+import {
+  editionServerPackages,
+  loadServerPackages,
+  serverPackagesPlugin,
+} from "../../scripts/server-packages-bundle.ts";
 
-/** The server packages an edition bundles: every one for standard, only those
- *  whose manifest lists the edition for the workstation build. */
-export async function editionServerPackages(root: string, edition: PolythEdition) {
-  const packages = await discoverServerPackages(resolve(root, "packages"));
-  return packages.filter((pkg) => packageInEdition(pkg.editions, edition));
-}
-
-async function inventory(root: string, edition: PolythEdition) {
-  const packages = await editionServerPackages(root, edition);
-  return Promise.all(packages.map(async (pkg) => {
-    const manifest = JSON.parse(await readFile(resolve(pkg.dir, "package.json"), "utf8")) as {
-      polyth: { descriptor: Omit<PackageDescriptorDto, "id"> };
-    };
-    const packageRoot = await realpath(pkg.dir);
-    // Every package, desktop included, loads its own manifest entry.
-    const modulePath = await realpath(resolve(pkg.dir, pkg.entryPath));
-    if (!modulePath.startsWith(packageRoot + sep) || !(await stat(modulePath)).isFile()) {
-      throw new Error(`Desktop server entry escapes its package or is not a file: ${pkg.id}`);
-    }
-    return { ...pkg,
-      // Keep the package's declared presentation order; discovery has already validated the descriptor.
-      descriptor: { ...pkg.descriptor, ...manifest.polyth.descriptor, id: pkg.id },
-      modulePath,
-    };
-  }));
-}
+// The inventory itself is shared with the packaged server (apps/server):
+// scripts/server-packages-bundle.ts. Desktop keeps its own names for it.
+export { editionServerPackages };
 
 /** Unbundled development/test path. Packaged builds substitute static imports below. */
-export async function loadDesktopServerPackages(root: string, edition: PolythEdition = "standard"): Promise<ServerPackageRegistration[]> {
-  const packages = await inventory(root, edition);
-  return Promise.all(packages.map(async (pkg) => {
-    const loaded = await import(pathToFileURL(pkg.modulePath).href) as { default?: ServerPackageFactory };
-    if (typeof loaded.default !== "function") throw new Error(`Invalid desktop server factory: ${pkg.id}`);
-    return { id: pkg.id, descriptor: pkg.descriptor, factory: loaded.default, ...(pkg.formerIds?.length ? { formerIds: pkg.formerIds } : {}) };
-  }));
+export function loadDesktopServerPackages(root: string, edition: PolythEdition = "standard"): Promise<ServerPackageRegistration[]> {
+  return loadServerPackages(root, edition);
 }
 
 /** Every feature of the edition is included by esbuild; no runtime filesystem
  *  scan in an installed app. Packages outside the edition are never imported,
  *  so none of their code reaches the bundle. */
 export function desktopServerPackagesPlugin(root: string, edition: PolythEdition = "standard"): Plugin {
-  const modulePath = resolve(root, "apps/desktop/src/serverPackages.ts");
-  return { name: "polyth-desktop-server-packages", setup(build) {
-    build.onLoad({ filter: /[/\\]src[/\\]serverPackages\.ts$/ }, async (args) => {
-      if (args.path !== modulePath) return;
-      const packages = await inventory(root, edition);
-      return { loader: "js", resolveDir: root, contents: [
-        ...packages.map((pkg, i) => `import factory${i} from ${JSON.stringify(pkg.modulePath)};`),
-        "export const desktopServerPackages = [",
-        ...packages.map((pkg, i) => `{id:${JSON.stringify(pkg.id)},descriptor:${JSON.stringify(pkg.descriptor)},factory:factory${i}${pkg.formerIds?.length ? `,formerIds:${JSON.stringify(pkg.formerIds)}` : ""}},`),
-        "];",
-      ].join("\n") };
-    });
-  } };
+  return serverPackagesPlugin({
+    root,
+    edition,
+    modulePath: resolve(root, "apps/desktop/src/serverPackages.ts"),
+    exportName: "desktopServerPackages",
+  });
 }
