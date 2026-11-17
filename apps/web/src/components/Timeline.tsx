@@ -137,7 +137,7 @@ import { hiddenModelMatcher } from "@polyth/models";
 import { lastChosenHarnessModel } from "../composer/discovery.ts";
 import { getLocale, tr } from "../i18n/index.ts";
 import { normalizeQuestions, questionAnswerDraft, type AnswerMap } from "../questionSerializers.ts";
-import { ToolPulseInline } from "./ToolPulse.tsx";
+import { ToolKeepRunning, ToolPulseInline } from "./ToolPulse.tsx";
 import TurnIncompleteNotice, { continueIncompleteTurn } from "./TurnIncompleteNotice.tsx";
 import ExecutionRow, { ComposerShellRow, ExecutionIcon, useCollapsePresence, useExecutionStop, useExecutionSummary, type ExecutionSummary } from "./ExecutionRow.tsx";
 import ActivityTicker, { useTickerKey } from "./ActivityTicker.tsx";
@@ -862,6 +862,17 @@ export function ActivityGroupView({
           onFocus={() => { stopFocused.current = true; }}
           onBlur={() => { stopFocused.current = false; }}
         >
+          {/* In the last two minutes before the silence stop, Keep running
+              comes in before Stop, so Stop never moves. */}
+          {stopCandidate && (
+            <ToolKeepRunning
+              sessionId={sessionId}
+              callId={stopCandidate.callId}
+              startedAt={stopCandidate.time}
+              kept={stopCandidate.keptRunning === true}
+              onKept={() => sectionRef.current?.querySelector<HTMLElement>(":scope > .ui-run-summary")?.focus()}
+            />
+          )}
           <Button
             className="execution-stop"
             variant="danger"
