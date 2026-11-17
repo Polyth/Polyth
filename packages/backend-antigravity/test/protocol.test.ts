@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ANTIGRAVITY_CAPABILITIES, agyLaunchArgs, agyUsage, createAgyDecoder, createAgyTurn, parseAgyModels, sameAgyModel } from "../src/protocol.ts";
+import { AGY_PLANNER_THINKING_STEP, ANTIGRAVITY_CAPABILITIES, agyLaunchArgs, agyUsage, createAgyDecoder, createAgyTurn, parseAgyModels, sameAgyModel } from "../src/protocol.ts";
 
 const model = { providerID: "antigravity", modelID: "fixture-gemini", variant: "high" };
 test("native NDJSON preserves fragmented Unicode, blank lines and final non-LF frames", () => {
@@ -438,4 +438,23 @@ test("a native question Polyth answered settles as its answer, not as a failed t
   assert.deepEqual(stop, { type: "turn/stopped", turnId: "t", reason: "completed" });
   assert.equal(createAgyTurn("u", model).step({ step_index: 1, state: "ERROR", step_type: "tool", tool_name: "run_command",
     error: "Answered by the user in Polyth" })[1]?.type, "tool/error", "only ask_question settles as an answer");
+});
+
+test("transcript planner thinking is reasoning that never settles or blocks its planner step", () => {
+  const turn = createAgyTurn("t", model);
+  const thought = { step_index: 4, state: "DONE", step_type: AGY_PLANNER_THINKING_STEP, thinking: "  Listing first.  " };
+  assert.deepEqual(turn.step(thought), [
+    { type: "assistant/message", partId: "t:step:4:thinking", text: "", reasoning: "Listing first." },
+  ]);
+  assert.deepEqual(turn.step(thought), []);
+  assert.deepEqual(turn.step({ step_index: 5, state: "DONE", step_type: AGY_PLANNER_THINKING_STEP, thinking: " " }), []);
+  // The same planner step's own stream frames still arrive after its thinking.
+  assert.deepEqual(turn.step({ step_index: 4, state: "ACTIVE", step_type: "agent_response", text_delta: "Hi" }), [
+    { type: "assistant/chunk", partId: "t:step:4", text: "Hi" },
+  ]);
+  assert.deepEqual(turn.step({ step_index: 4, state: "DONE", step_type: "agent_response" }), [
+    { type: "assistant/message", partId: "t:step:4", text: "Hi" },
+  ]);
+  // A thought read after its planner step settled is still shown.
+  assert.deepEqual(turn.step({ ...thought, step_index: 2, thinking: "late" }).length, 1);
 });
