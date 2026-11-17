@@ -417,6 +417,40 @@ jobs:
           POLYTH_SERVER_NPM_CHANNELS: ${{ vars.POLYTH_SERVER_NPM_CHANNELS || 'stable' }}
         run: node scripts/ci/publish-server-npm.mjs "$RUNNER_TEMP/products" "$VERSION"
 
+      # Stable releases rewrite Formula/polyth.rb in the Homebrew tap from the
+      # release's server checksums (scripts/ci/homebrew-formula.mjs).
+      - name: Update the Homebrew tap
+        if: env.POLYTH_RELEASE_CHANNEL == 'stable'
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAP_REPOSITORY: ${{ vars.POLYTH_HOMEBREW_TAP || 'Polyth/homebrew-tap' }}
+          VERSION: ${{ steps.feed.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "::notice::HOMEBREW_TAP_TOKEN is not set; the Homebrew tap is not updated"
+            exit 0
+          fi
+          sums="$RUNNER_TEMP/feed/SHA256SUMS-server.txt"
+          if ! node scripts/ci/homebrew-formula.mjs "$VERSION" "$sums" "$GITHUB_REPOSITORY" > "$RUNNER_TEMP/polyth.rb"; then
+            echo "::warning::Release $VERSION has no complete server archive set; the Homebrew tap is not updated"
+            exit 0
+          fi
+          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/${TAP_REPOSITORY}.git" "$RUNNER_TEMP/tap"
+          mkdir -p "$RUNNER_TEMP/tap/Formula"
+          cp "$RUNNER_TEMP/polyth.rb" "$RUNNER_TEMP/tap/Formula/polyth.rb"
+          cd "$RUNNER_TEMP/tap"
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "Formula/polyth.rb already describes $VERSION"
+            exit 0
+          fi
+          git config user.name "Max"
+          git config user.email "max@polyth.app"
+          git add Formula/polyth.rb
+          git commit --message "polyth $VERSION"
+          git push origin HEAD
+
       # Temporary: a nightly build's workstation edition replaces the edition assets
       # on the newest stable release, so the edition tracks devel while the app keeps
       # its stable-only feed (updater channel `workstation`). Remove this pair of

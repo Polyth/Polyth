@@ -319,7 +319,13 @@ own runners; no deploy key or second repository is involved.
   packages (`@polyth/server-<target>` first, then `polyth`) only as a complete set, with provenance,
   under the channel's dist-tag (`latest` for stable). It needs the `NPM_TOKEN` secret and publishes
   the channels in the `POLYTH_SERVER_NPM_CHANNELS` variable (default `stable`; add `nightly` to put
-  nightlies under `polyth@nightly`). The packaged server itself is described in
+  nightlies under `polyth@nightly`). A stable release then rewrites `Formula/polyth.rb` in the
+  Homebrew tap (`POLYTH_HOMEBREW_TAP`, default `Polyth/homebrew-tap`) from
+  `SHA256SUMS-server.txt` with `scripts/ci/homebrew-formula.mjs`; it needs the
+  `HOMEBREW_TAP_TOKEN` secret (contents write on the tap) and skips an incomplete archive set.
+  The formula installs the archive into `libexec`, runs it with Homebrew's `node` and gives
+  `brew services` a service; `homebrew/core` would want a source build instead, so the tap is
+  the channel. The packaged server itself is described in
   [Ways to run Polyth](running.md#packaged-server).
 
 ## External builder feed
