@@ -242,6 +242,7 @@ import { newChatPersonDefault, newChatRouteChosen, usePersonHarnessDefault } fro
 import { contextTokensUsed } from "../reduce.ts";
 import { effectiveAttachmentSupport, attachmentModality } from "@polyth/contracts";
 import { primaryPointerIsFine, useShellMode } from "../responsiveShell.ts";
+import { focusOnChatOpen } from "./composerOpenFocus.ts";
 import {
   getGuardrails, guardedModelSwitcherVisible, guardedShellAllowed, useGuardrails,
 } from "../guardrails.ts";
@@ -1841,6 +1842,15 @@ function ComposerBody({
   useLayoutEffect(() => {
     if (composerFocusCarry !== null && composerFocusCarry === (sessionIdRef.current ?? unboundSpawnKey())) inputRef.current?.focus();
   }, []);
+  // Opening a chat, an existing one or a new one, leaves a mouse or trackpad
+  // screen ready to type; touch keeps its keyboard down until the field is
+  // tapped. A chat that is starting is the one already being typed in: the
+  // carry above keeps its focus, and a click elsewhere meanwhile is not undone.
+  const openedChat = session?.id ?? newSessionChat;
+  useEffect(() => {
+    if (widgetMode || !primaryPointerIsFine() || isActiveSessionSpawning(getState())) return;
+    return focusOnChatOpen(() => rootRef.current, () => inputRef.current?.focus());
+  }, [openedChat, widgetMode]);
 
   // Debounced local persistence while typing (refresh-safe). Server sync runs
   // only after idle time, or immediately on session/page lifecycle changes.

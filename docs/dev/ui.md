@@ -355,6 +355,18 @@ any `input` event (dictation and some phone keyboards have) is committed at the
 field's next caret move, key release or focus, so Send's enabled state cannot
 stay behind a draft the field visibly holds.
 
+**Focus when a chat opens.** On a mouse or trackpad screen
+(`primaryPointerIsFine`), opening a chat — an existing one from any path, or a
+new one — puts the caret in its composer, so typing can start at once. The chat
+composer (not a widget composer) runs this whenever the chat it shows changes
+(`session.id`, or the new chat's `newSessionOrigin`) and on mount
+(`focusOnChatOpen`, `apps/web/src/components/composerOpenFocus.ts`). It waits a
+few frames for a closing menu or palette and never takes focus from a text
+field, dialog, menu, listbox or popover (`openFocusIsFree`). A chat that is
+starting is skipped: the start's focus carry already keeps the writer in the
+field. Touch screens are left alone, because a focused field raises the
+keyboard there.
+
 Both navigators and the new chat's recent list show drafts among all chats
 with an accent **Draft** `Badge` (`apps/web/src/sessionDraft.ts`). A chat that
 never ran a turn is named by the first line of its draft (navigator, title
