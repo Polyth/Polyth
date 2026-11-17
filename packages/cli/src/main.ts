@@ -5,6 +5,7 @@ import { createContext, type Command } from "./context.ts";
 import { createOutput, style, type Output } from "./output.ts";
 import { login, logout, target, whoami } from "./commands/auth.ts";
 import { api, models, open, projects, server, status } from "./commands/admin.ts";
+import { update } from "./commands/update.ts";
 import { events, on, requests } from "./commands/automation.ts";
 import { chat } from "./commands/chat.ts";
 import { archive, fork, log, newSession, queue, remove, restore, send, sessions, show, stop, wait } from "./commands/sessions.ts";
@@ -34,7 +35,7 @@ const GROUPS: Array<[string, Command[]]> = [
   ["Automation", [events, on, requests]],
   ["Polyth", [status, projects, models, open, api]],
   ["Connection", [login, logout, whoami, target]],
-  ["This machine", [server]],
+  ["This machine", [server, update]],
 ];
 
 const completion: Command = {

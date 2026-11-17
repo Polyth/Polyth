@@ -76,9 +76,35 @@ KillMode=mixed
 Restart=on-failure
 ```
 
-To update, unpack the new archive beside the old tree, stop the service, archive the
-data directory, swap the directories (or a `current` symlink) and start; the old tree
-is the rollback.
+### Updating a packaged server
+
+```bash
+polyth update --check              # installed and newest release of this install's channel
+polyth update                      # install it, restart, confirm
+polyth update --channel nightly    # or --version 1.2.357; --no-restart installs only
+polyth update --rollback           # back to the release the last update replaced (archive)
+```
+
+`polyth update` works out what installed it. An npm install is updated with
+`npm install polyth@<version>` (global or in its prefix). A release archive downloads
+`polyth-server-<version>-<platform>-<arch>.tar.gz` from the release, checks it against
+the release's `SHA256SUMS-server.txt`, unpacks it into `<install>/.update-<version>/`
+and swaps it in place: the current entries move to `<install>/.previous/`, so the
+paths a service names never change and the server's own user, which owns the install,
+can update it. Homebrew, Docker and checkout installs are told the command their
+manager uses instead. Releases come from `POLYTH_UPDATE_REPOSITORY` (default
+`Polyth/Polyth`); `POLYTH_UPDATE_RELEASES_URL` may name a mirror that answers in the
+shape of GitHub's releases API, for hosts without GitHub access.
+
+When a systemd or launchd service from `polyth service install` runs this install
+(its command names this install's `bin/polyth.mjs`; a `polyth.service` that runs
+another install is left alone), the update restarts it and waits up to ten minutes
+for the server to answer with the new version. The server drains the turns running
+at SIGTERM before it exits. If it does not come back, the previous release is put
+back and restarted. Without such a service the update says that the server still
+runs the old release until it is restarted; the running server keeps its files, but
+the web assets it serves already belong to the new release. One update runs at a
+time (`.polyth-update.lock` beside the install).
 
 Every server, however it was installed, copies a canonical database before it
 migrates its schema: the control plane (`control-plane/control.sqlite`) and the
@@ -88,9 +114,12 @@ database are kept, and a copy that would leave less than 512 MB free is skipped 
 a log line. Schema changes are forward-only and an older server refuses a control
 plane migrated past it, so going back to an older version after a migration means
 restoring these copies: stop the server, copy each snapshot over its database,
-delete that database's `-wal` and `-shm` files, start the older version. `polyth server restart` is the checkout's rebuild-and-restart and is
-refused here: restart through the service manager. Release publication of these
-archives, the `polyth` npm package and a `polyth update` command are not built yet.
+delete that database's `-wal` and `-shm` files, start the older version. `polyth
+update` prints these steps when the previous release does not start either.
+
+`polyth server restart` is the checkout's rebuild-and-restart and is refused in a
+packaged install: restart through the service manager. Releases publish these archives
+and the npm packages ([Nightly builds from devel](releases.md#nightly-builds-from-devel)).
 
 Building needs the web build (`build:server` runs it first), `cargo` for
 `polyth-link-host` unless `POLYTH_LINK_BIN_DIR` names a directory that already has it,

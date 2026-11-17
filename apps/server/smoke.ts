@@ -7,9 +7,11 @@
 //   node --experimental-strip-types apps/server/smoke.ts --npm [dir with the .tgz files]
 // Without a path it takes the build's output in apps/server/release.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import { accessSync, constants, existsSync, readdirSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { createServer } from "node:net";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer as createHttpServer } from "node:http";
+import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -29,6 +31,16 @@ const freePort = () => new Promise<number>((resolvePort, reject) => {
     const address = probe.address();
     probe.close(() => typeof address === "object" && address ? resolvePort(address.port) : reject(new Error("no port")));
   });
+});
+
+/** The CLI run asynchronously: a mirror served by this process must keep answering. */
+const runCli = (args: string[], env: NodeJS.ProcessEnv) => new Promise<{ status: number | null; stdout: string; stderr: string }>((done) => {
+  const child = spawn(process.execPath, args, { env, stdio: ["ignore", "pipe", "pipe"] });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+  child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+  child.once("exit", (status) => done({ status, stdout, stderr }));
 });
 
 const check = (ok: unknown, what: string): void => {
@@ -171,7 +183,60 @@ try {
   await signedIn("/api/auth/status");
   check((await signedIn("/api/auth/login", { login: "owner", password: "smoke test passphrase" })).status === 200, "full server: the owner signs in");
   check((await signedIn("/api/projects")).status === 200, "full server: an authenticated API request succeeds");
-  await full.stop();
+
+  if (!npmMode) {
+    // `polyth update` against a local mirror holding a newer release (this
+    // archive under the next patch version), then `--rollback`.
+    const [major, minor, patch] = version.split(/[.-]/).map(Number) as [number, number, number];
+    const next = `${major}.${minor}.${patch + 1}`;
+    const nextSource = join(work, "next");
+    await mkdir(nextSource);
+    check(spawnSync("tar", ["-xzf", source, "-C", nextSource]).status === 0, `update: a ${next} archive is prepared`);
+    const buildFile = join(nextSource, "polyth", "BUILD.json");
+    await writeFile(buildFile, JSON.stringify({ ...JSON.parse(await readFile(buildFile, "utf8")), version: next }));
+    const nextName = `polyth-server-${next}-${target}.tar.gz`;
+    const nextArchive = join(work, nextName);
+    check(spawnSync("tar", ["-czf", nextArchive, "-C", nextSource, "polyth"]).status === 0, "update: the archive packs");
+    const bytes = await readFile(nextArchive);
+    const sums = `${createHash("sha256").update(bytes).digest("hex")}  ${nextName}\n`;
+    const mirror = createHttpServer((request, response) => {
+      const origin = `http://127.0.0.1:${(mirror.address() as AddressInfo).port}`;
+      if (request.url?.startsWith("/releases")) {
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify([{ tag_name: `v${next}`, prerelease: false, draft: false, assets: [
+          { name: nextName, browser_download_url: `${origin}/assets/${nextName}` },
+          { name: "SHA256SUMS-server.txt", browser_download_url: `${origin}/assets/SHA256SUMS-server.txt` },
+        ] }]));
+      } else if (request.url === `/assets/${nextName}`) response.end(bytes);
+      else if (request.url === "/assets/SHA256SUMS-server.txt") response.end(sums);
+      else { response.statusCode = 404; response.end(); }
+    });
+    await new Promise<void>((listening) => mirror.listen(0, "127.0.0.1", listening));
+    try {
+      const updateEnv = { ...env, POLYTH_UPDATE_RELEASES_URL: `http://127.0.0.1:${(mirror.address() as AddressInfo).port}/releases` };
+      const checked = await runCli([polyth, "update", "--check", "--json"], updateEnv);
+      if (checked.status !== 0) process.stderr.write(checked.stderr + checked.stdout);
+      const plan = JSON.parse(checked.stdout || "{}") as { install?: string; available?: string; update?: boolean };
+      check(checked.status === 0 && plan.install === "archive" && plan.available === next && plan.update === true, `update --check sees ${next} for this archive install`);
+      const updated = await runCli([polyth, "update"], updateEnv);
+      if (updated.status !== 0) process.stderr.write(updated.stderr);
+      check(updated.status === 0 && /still runs/.test(updated.stdout), `polyth update installs ${next} beside the running server (${updated.stdout.trim().split("\n").at(-1)})`);
+      check(JSON.parse(await readFile(join(root, "BUILD.json"), "utf8")).version === next, "update: the install now holds the new release");
+      await full.stop();
+      const upgraded = await start("updated server");
+      check(upgraded.health?.version === next, `updated server: reports ${String(upgraded.health?.version)}`);
+      const back = await runCli([polyth, "update", "--rollback"], updateEnv);
+      check(back.status === 0, `polyth update --rollback puts ${version} back`);
+      await upgraded.stop();
+      const restored = await start("rolled-back server");
+      check(restored.health?.version === version, `rolled-back server: reports ${String(restored.health?.version)}`);
+      await restored.stop();
+    } finally {
+      mirror.close();
+    }
+  } else {
+    await full.stop();
+  }
   console.log(`smoke passed: ${source}`);
 } finally {
   for (const child of running) child.kill("SIGKILL");
