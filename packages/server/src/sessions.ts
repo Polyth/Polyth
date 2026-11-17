@@ -3112,6 +3112,18 @@ export function createSessionService(deps: {
     const queued = deps.queue ? await deps.queue.queueList(sessionId) : [];
     return queued.some((item) => !item.heldForReview);
   };
+  /** Boot check for a turn left open in the log by the previous process.
+   *  Only uncertain statuses are read, by the store's indexed lookup. */
+  const turnCutByRestart = async (projection: SessionProjection): Promise<boolean> => {
+    if (
+      projection.status !== "unknown"
+      && projection.status !== "working"
+      && projection.status !== "reconciling"
+      && projection.status !== "epoch-pending"
+    ) return false;
+    if (store.lastTurnEventType) return (await store.lastTurnEventType(projection.id)) === "started";
+    return Boolean(openTurnFromEvents(await store.events(projection.id)));
+  };
   const recoverOwnedEpochIfWorkPending = async (sessionId: string): Promise<void> => {
     try {
       if (!await ownedEpochHasPendingWork(sessionId)) return;
@@ -9975,6 +9987,12 @@ export function createSessionService(deps: {
     // Terminalize the cut turn before the epoch marker so admission after
     // rehydration does not see a still-open turn in the durable log.
     if (interrupted) {
+      // Says why the turn stops: whoever waits on it (a scheduled agent run)
+      // keeps waiting for the continuation sent after the new epoch.
+      await appendAndBroadcast(sessionId, "turn/abort-requested", {
+        reason: "runtime-replaced",
+        source: "runtime-epoch",
+      }, { ignorable: true });
       await stopLocally(
         sessionId,
         "Runtime authority was replaced before the turn finished.",
@@ -10150,7 +10168,8 @@ export function createSessionService(deps: {
     source?: string,
     timedOutCallId?: string,
     pause = false,
-  ): Promise<MutationOutcome<Record<string, never>>["kind"]> {
+    epochHandoff = false,
+  ): Promise<MutationOutcome<Record<string, never>>["kind"] | "epoch-recovery"> {
     const projection = await store.projection(sessionId);
     if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
     // Stop is an unconditional intent. Whatever the session state — idle,
@@ -10162,6 +10181,16 @@ export function createSessionService(deps: {
       try {
         runtime = await ensureWired(sessionId, projection);
       } catch (error) {
+        // The runtime that ran this turn is gone (a Polyth restart replaced
+        // it), so nothing is left to kill. When the caller only wanted the
+        // turn unstuck, the owned-epoch recovery already queued by wiring
+        // closes the cut turn and continues it on a fresh runtime; closing it
+        // here first would leave that recovery nothing to continue.
+        if (
+          epochHandoff
+          && (error as { code?: unknown } | null)?.code === "epoch-pending"
+          && recoverableOwnedEpochs.has(sessionId)
+        ) return "epoch-recovery";
         console.error(`[polyth] abort could not wire a runtime for ${sessionId}`, error);
       }
     }
@@ -10208,8 +10237,11 @@ export function createSessionService(deps: {
     sessionId: string,
     callId: string,
     cause: "silence" | "hard-limit" = "silence",
+    epochHandoff = true,
   ): Promise<void> {
-    const continuation = await withSessionLock(sessionId, async () => {
+    const continuation = await withSessionLock(sessionId, async (): Promise<
+      { text: string } | { epoch: true } | undefined
+    > => {
       if (serviceDisposed) return undefined;
       const active = (await currentTurnActiveTools(sessionId)).get(callId);
       if (!active) return undefined;
@@ -10235,7 +10267,14 @@ export function createSessionService(deps: {
           : `${active.tool} was stopped at the ${duration} hard execution limit. Run long commands in the background and check on them instead of waiting.`,
         text ? "tool-watchdog" : undefined,
         callId,
+        false,
+        epochHandoff,
       );
+      if (kind === "epoch-recovery") {
+        // Nothing was stopped, so no watchdog nudge was spent.
+        if (text) toolTimeoutContinues.set(sessionId, Math.max(0, (toolTimeoutContinues.get(sessionId) ?? 1) - 1));
+        return { epoch: true };
+      }
       // An unproven abort must not be followed by more work: reconciliation
       // owns that session until the release is settled, and only a later
       // ready + idle settle runs the deferred nudge.
@@ -10248,6 +10287,17 @@ export function createSessionService(deps: {
       return { text };
     });
     if (!continuation) return;
+    if ("epoch" in continuation) {
+      // Runs outside the lock: recovery takes it itself. When it could not
+      // replace the runtime the turn is still open, and the plain local stop
+      // runs after all so the session never stays stuck behind it.
+      await recoverOwnedEpochIfPending(sessionId);
+      if (serviceDisposed || deps.isShuttingDown?.()) return;
+      if ((await currentTurnActiveTools(sessionId)).has(callId)) {
+        await stopTimedOutTool(sessionId, callId, cause, false);
+      }
+      return;
+    }
     await runToolTimeoutContinue(sessionId, continuation);
   }
 
@@ -12581,9 +12631,19 @@ export function createSessionService(deps: {
             )).catch((cause: unknown) => console.error(`[polyth] start failure for ${projection.id} was not recorded`, cause));
             continue;
           }
-          if (!needsDelegatedSettlement(projection) && !queued.length && !await historyImportPending(projection)) continue;
+          // A turn Polyth's restart cut off waits for nobody: wiring finds its
+          // owned runtime gone, and the owned-epoch recovery that queues closes
+          // the turn and continues it on a fresh runtime (or, when the runtime
+          // outlived the restart, reattaches and reconciles it). Without this
+          // it sat until the tool watchdog closed it as a plain stop.
+          const cutTurn = await turnCutByRestart(projection);
+          if (!cutTurn && !needsDelegatedSettlement(projection) && !queued.length && !await historyImportPending(projection)) continue;
           try { await sessionJobs.enqueue(projection.id); }
           catch { /* durable queue/import state is retained for explicit recovery */ }
+          // One recovery at a time at boot: each may start a native process.
+          if (cutTurn && recoverableOwnedEpochs.has(projection.id)) {
+            await recoverOwnedEpochIfWorkPending(projection.id);
+          }
         }
       })().finally(() => { recoveryWork = undefined; });
     },

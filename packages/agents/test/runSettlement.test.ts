@@ -113,6 +113,34 @@ test("a turn the tool watchdog cut and continued is still the run, not a stop", 
   assert.ok(clock >= 15 * 60_000 && clock < 60 * 60_000, `gave up after ${clock} ms`);
 });
 
+test("a turn a Polyth restart cut and the server replayed on a fresh runtime is still the run", async () => {
+  const continued = feed([[
+    ev(11, "turn/started"),
+    ev(12, "tool/started", { callId: "c1", tool: "bash" }),
+    ev(13, "turn/abort-requested", { reason: "runtime-replaced", source: "runtime-epoch" }),
+    ev(14, "tool/error", { callId: "c1", tool: "bash" }),
+    ev(15, "turn/stopped", { reason: "aborted" }),
+    ev(16, "runtime/epoch-replaced", { new: { epoch: 2 } }),
+  ], [], [
+    // The run's prompt replayed as the hidden epoch continuation.
+    ev(17, "user/message", { text: "charter", hiddenUserMessage: true, autoResume: true, runtimeEpochRecovery: { epoch: 2, markerSeq: 16 } }),
+    ev(18, "turn/started"),
+    ev(19, "assistant/message", { text: "Finished after the restart." }),
+    ev(20, "turn/stopped", { reason: "completed" }),
+  ]]);
+  const settled = await settleScheduledRun(run, opts(continued.events, { now: () => 25 }));
+  assert.equal(settled.status, "ok");
+
+  // A person's own message instead of the continuation ends the run as stopped.
+  const other = feed([[
+    ev(11, "turn/started"),
+    ev(12, "turn/abort-requested", { reason: "runtime-replaced", source: "runtime-epoch" }),
+    ev(13, "turn/stopped", { reason: "aborted" }),
+    ev(14, "user/message", { text: "stop that" }),
+  ]]);
+  assert.equal((await settleScheduledRun(run, opts(other.events))).status, "failed");
+});
+
 test("abort, queue removal, a lost session and the observation limit never read as success", async () => {
   const aborted = feed([[ev(11, "turn/started"), ev(12, "turn/stopped", { reason: "aborted" })]]);
   assert.equal((await settleScheduledRun(run, opts(aborted.events))).status, "failed");

@@ -29,7 +29,14 @@ FIFO, held-for-review and durable mutation reconciliation.
 Activating a session that was dormant across a restart is recover-on-use. When
 its owned runtime authority no longer exists, wiring marks the epoch pending.
 Only a session with work to resume (a cut turn or a queued message) is
-recovered without being opened; `activate` starts or joins the recovery — also
+recovered without being opened. Startup recovery (`recoverPendingWork`) wires,
+one at a time, every session whose log still has the turn the restart cut
+open, so its owned-epoch recovery closes that turn (`turn/abort-requested`
+`{reason:"runtime-replaced", source:"runtime-epoch"}`, then `turn/stopped`)
+and continues it at once on a fresh runtime instead of leaving it for the tool
+watchdog. A watchdog that still fires on such a turn hands it to the same
+recovery rather than stopping it as a plain abort; it stops it locally only
+when that recovery cannot replace the runtime. `activate` starts or joins the recovery — also
 for a session that was still wired when its runtime identity broke — and
 finishes the lifecycle pass on the replacement epoch, so a normal open never
 reports the transient state as a conflict. It still answers `epoch-pending`
