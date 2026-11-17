@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { channelPublishes, serverDistTag, serverNpmPlan } from "../ci/publish-server-npm.mjs";
+import { channelPublishes, npmAuthMode, npmSupportsOidc, serverDistTag, serverNpmPlan } from "../ci/publish-server-npm.mjs";
 
 test("the server reaches npm under its channel's dist-tag; stable is what installs by default", () => {
   assert.equal(serverDistTag("1.2.357"), "latest");
@@ -40,4 +40,22 @@ test("only a complete set is published, platform packages before polyth", () => 
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("trusted publishing first, a token only as the fallback, setup-node's stand-in is no token", () => {
+  const oidc = { ACTIONS_ID_TOKEN_REQUEST_URL: "https://token.example", ACTIONS_ID_TOKEN_REQUEST_TOKEN: "t" };
+  assert.equal(npmAuthMode(oidc), "oidc");
+  assert.equal(npmAuthMode({ ...oidc, NODE_AUTH_TOKEN: "npm_x" }), "oidc");
+  assert.equal(npmAuthMode({ NODE_AUTH_TOKEN: "npm_x" }), "token");
+  assert.equal(npmAuthMode({ NODE_AUTH_TOKEN: "XXXXX-XXXXX-XXXXX-XXXXX" }), null);
+  assert.equal(npmAuthMode({ NODE_AUTH_TOKEN: "" }), null);
+  assert.equal(npmAuthMode({}), null);
+});
+
+test("trusted publishing needs npm 11.5.1 or newer", () => {
+  assert.equal(npmSupportsOidc("10.9.2"), false);
+  assert.equal(npmSupportsOidc("11.5.0"), false);
+  assert.equal(npmSupportsOidc("11.5.1"), true);
+  assert.equal(npmSupportsOidc("11.21.2\n"), true);
+  assert.equal(npmSupportsOidc("12.0.0"), true);
 });

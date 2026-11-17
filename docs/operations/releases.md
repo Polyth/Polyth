@@ -210,7 +210,9 @@ When `npm_packages` is enabled, Release packs:
 
 The tarballs are also attached to the GitHub Release. `publish_npm=true` publishes those exact tarballs to npm with provenance after checking whether the same version already exists, making a release-job retry safe.
 
-npm publication requires `NPM_TOKEN`.
+npm publication requires `NPM_TOKEN`. npm is retiring tokens that publish without 2FA; these
+packages need the same move to [trusted publishing](#npm-trusted-publishing) (trusted publisher
+file `release.yml`) before then.
 
 Internal first-party workspaces are deliberately **not** bulk-published just because they lack `private: true`; the public npm release allowlist is explicit.
 
@@ -317,9 +319,10 @@ own runners; no deploy key or second repository is involved.
   `SHA256SUMS-server.txt` to the release; like the APK they never block it, and a missing platform
   is a warning. After the release is public, `scripts/ci/publish-server-npm.mjs` publishes the npm
   packages (`@polyth/server-<target>` first, then `polyth`) only as a complete set, with provenance,
-  under the channel's dist-tag (`latest` for stable). It needs the `NPM_TOKEN` secret and publishes
-  the channels in the `POLYTH_SERVER_NPM_CHANNELS` variable (default `stable`; add `nightly` to put
-  nightlies under `polyth@nightly`). A stable release then rewrites `Formula/polyth.rb` in the
+  under the channel's dist-tag (`latest` for stable), through
+  [npm trusted publishing](#npm-trusted-publishing) (no secret; `NPM_TOKEN` is only a fallback), and
+  publishes the channels in the `POLYTH_SERVER_NPM_CHANNELS` variable (default `stable`; add
+  `nightly` to put nightlies under `polyth@nightly`). A stable release then rewrites `Formula/polyth.rb` in the
   Homebrew tap (`POLYTH_HOMEBREW_TAP`, default `Polyth/homebrew-tap`) from
   `SHA256SUMS-server.txt` with `scripts/ci/homebrew-formula.mjs`; it needs the
   `HOMEBREW_TAP_TOKEN` secret (contents write on the tap) and skips an incomplete archive set.
@@ -327,6 +330,39 @@ own runners; no deploy key or second repository is involved.
   `brew services` a service; `homebrew/core` would want a source build instead, so the tap is
   the channel. The packaged server itself is described in
   [Ways to run Polyth](running.md#packaged-server).
+
+### npm trusted publishing
+
+npm is retiring tokens that publish without a 2FA challenge (management actions since August
+2026, direct publishing around January 2027), so the server packages publish from `nightly.yml`'s
+`publish` job by OIDC: the job has `id-token: write`, installs npm 11.21.2 (trusted publishing
+needs 11.5.1 or newer; Node 22 ships npm 10) and `publish-server-npm.mjs` uses the job's identity
+before any `NPM_TOKEN`. Provenance comes with it.
+
+Trusted publishing cannot create a package. While any of the five packages (`polyth`,
+`@polyth/server-linux-x64`, `-linux-arm64`, `-darwin-arm64`, `-darwin-x64`) is not on npm, the
+step publishes nothing and says so in a warning; the release, the archives and the Homebrew tap
+are not affected. Once, by a maintainer with 2FA in the `polyth` npm organization:
+
+1. Publish each package once by hand (`npm publish <tgz> --access public`, 2FA prompt), for
+   example the tarballs of a release run (`gh run download <run> --pattern 'products-*'`)
+   or a `0.0.0` placeholder that is deprecated after the first real release.
+2. Add the trusted publisher of each package (npm 11.15.0 or newer, 2FA; one configuration per
+   package):
+
+   ```bash
+   for p in polyth @polyth/server-linux-x64 @polyth/server-linux-arm64 \
+            @polyth/server-darwin-arm64 @polyth/server-darwin-x64; do
+     npm trust github "$p" --repo Polyth/Polyth --file nightly.yml --allow-publish --yes
+     sleep 2
+   done
+   ```
+
+3. Optionally set each package to *Require two-factor authentication and disallow tokens*
+   (package settings → Publishing access); trusted publishing is not affected.
+
+The next release of a channel listed in `POLYTH_SERVER_NPM_CHANNELS` then publishes all five
+(versions already on npm are skipped).
 
 ## External builder feed
 

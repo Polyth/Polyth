@@ -331,7 +331,7 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: write
-      # npm provenance for the server packages.
+      # npm trusted publishing (and provenance) for the server packages.
       id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -410,6 +410,11 @@ jobs:
 
       # After the release that carries the server archives: the npm packages of
       # the same build, only as a complete set (scripts/ci/publish-server-npm.mjs).
+      # Trusted publishing (this job's id-token) needs npm >= 11.5.1; Node 22
+      # ships npm 10. NPM_TOKEN is only a fallback: npm is retiring tokens
+      # that publish without 2FA.
+      - name: npm for trusted publishing
+        run: npm install --global npm@11.21.2
       - name: Publish the server to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

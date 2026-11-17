@@ -7,11 +7,17 @@
 //
 //   node scripts/ci/publish-server-npm.mjs <productsDir> <version>
 //
-// NODE_AUTH_TOKEN unset: nothing is published (a notice, not a failure).
+// Authentication: npm trusted publishing (OIDC) when the job may mint an
+// id-token (`permissions: id-token: write`), which needs npm >= 11.5.1 and a
+// trusted publisher configured on every package; otherwise NODE_AUTH_TOKEN.
+// Neither: nothing is published (a notice, not a failure). Trusted publishing
+// cannot create a package, so while any package of the set is not on npm yet
+// nothing is published (docs/operations/releases.md#npm-trusted-publishing).
 // POLYTH_SERVER_NPM_CHANNELS: comma-separated release channels to publish
 // (default `stable`); the version's channel must be listed.
 import { spawnSync } from "node:child_process";
-import { readdirSync, statSync } from "node:fs";
+import { mkdtempSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { channelOfVersion, SERVER_TARGETS } from "./update-feed.mjs";
@@ -58,8 +64,36 @@ export function channelPublishes(version, channels = "stable") {
   return listed.includes(channelOfVersion(version));
 }
 
-function npm(args) {
-  return spawnSync("npm", args, { encoding: "utf8", shell: process.platform === "win32" });
+/** setup-node's stand-in when no token is given. */
+const SETUP_NODE_PLACEHOLDER = "XXXXX-XXXXX-XXXXX-XXXXX";
+
+/** How this job authenticates to npm: "oidc", "token" or null. */
+export function npmAuthMode(env = process.env) {
+  if (env.ACTIONS_ID_TOKEN_REQUEST_URL && env.ACTIONS_ID_TOKEN_REQUEST_TOKEN) return "oidc";
+  const token = env.NODE_AUTH_TOKEN?.trim();
+  return token && token !== SETUP_NODE_PLACEHOLDER ? "token" : null;
+}
+
+/** Trusted publishing needs npm 11.5.1 or newer. */
+export function npmSupportsOidc(version) {
+  const [major = 0, minor = 0, patch = 0] = String(version).trim().split(/[.-]/).map(Number);
+  return major > 11 || (major === 11 && (minor > 5 || (minor === 5 && patch >= 1)));
+}
+
+function npm(args, env = process.env) {
+  return spawnSync("npm", args, { encoding: "utf8", shell: process.platform === "win32", env });
+}
+
+let anonymousEnv;
+/** Registry reads without credentials: a public package needs none, and
+ *  setup-node's stand-in token must not turn a read into a 401. */
+function npmView(args) {
+  if (!anonymousEnv) {
+    const config = join(mkdtempSync(join(tmpdir(), "npm-anonymous-")), ".npmrc");
+    writeFileSync(config, "registry=https://registry.npmjs.org/\n");
+    anonymousEnv = { ...process.env, NPM_CONFIG_USERCONFIG: config, NODE_AUTH_TOKEN: "" };
+  }
+  return npm(["view", ...args], anonymousEnv);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -72,8 +106,14 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     console.log(`publish-server-npm: ${version} is a ${channelOfVersion(version)} release, not published to npm (POLYTH_SERVER_NPM_CHANNELS)`);
     process.exit(0);
   }
-  if (!process.env.NODE_AUTH_TOKEN) {
-    console.log("::notice::publish-server-npm: NPM_TOKEN is not set; the server is not published to npm");
+  const auth = npmAuthMode();
+  if (!auth) {
+    console.log("::notice::publish-server-npm: no id-token permission and no NPM_TOKEN; the server is not published to npm");
+    process.exit(0);
+  }
+  const npmVersion = npm(["--version"]).stdout.trim();
+  if (auth === "oidc" && !npmSupportsOidc(npmVersion)) {
+    console.log(`::warning::publish-server-npm: npm ${npmVersion} cannot use trusted publishing (needs 11.5.1 or newer); nothing is published to npm`);
     process.exit(0);
   }
   const { packages, missing, tag } = serverNpmPlan(productsDir, version);
@@ -81,8 +121,15 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     console.log(`::warning::publish-server-npm: ${missing.join(", ")} missing from this build; nothing is published to npm`);
     process.exit(0);
   }
+  if (auth === "oidc") {
+    const absent = packages.filter(({ name }) => npmView([name, "name"]).status !== 0).map(({ name }) => name);
+    if (absent.length > 0) {
+      console.log(`::warning::publish-server-npm: ${absent.join(", ")} not on npm yet; trusted publishing cannot create a package, so publish it once by hand and add its trusted publisher (docs/operations/releases.md#npm-trusted-publishing); nothing is published to npm`);
+      process.exit(0);
+    }
+  }
   for (const { name, file } of packages) {
-    if (npm(["view", `${name}@${version}`, "version"]).status === 0) {
+    if (npmView([`${name}@${version}`, "version"]).status === 0) {
       console.log(`publish-server-npm: ${name}@${version} is already published`);
       continue;
     }
@@ -93,6 +140,6 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       console.error(`publish-server-npm: ${name}@${version} failed`);
       process.exit(1);
     }
-    console.log(`publish-server-npm: ${name}@${version} published (${tag})`);
+    console.log(`publish-server-npm: ${name}@${version} published (${tag}, ${auth === "oidc" ? "trusted publishing" : "token"})`);
   }
 }
