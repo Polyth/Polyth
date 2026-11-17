@@ -345,11 +345,18 @@ before any `NPM_TOKEN`. Provenance comes with it.
 Trusted publishing cannot create a package. While any of the five packages (`polyth`,
 `@polyth/server-linux-x64`, `-linux-arm64`, `-darwin-arm64`, `-darwin-x64`) is not on npm, the
 step publishes nothing and says so in a warning; the release, the archives and the Homebrew tap
-are not affected. Once, by a maintainer with 2FA in the `polyth` npm organization:
+are not affected.
 
-1. Publish each package once by hand (`npm publish <tgz> --access public`, 2FA prompt), for
+All five were bootstrapped on 2026-11-17: a `0.0.0` placeholder each (`latest` until the first
+real release; deprecate it then) and a trusted publisher for `Polyth/Polyth` → `nightly.yml`
+(`npm trust list <pkg>`). Repeat the steps below only for a new package, such as a new platform,
+as a maintainer with 2FA in the `polyth` npm organization:
+
+1. Publish the package once by hand (`npm publish <tgz> --access public`, 2FA prompt), for
    example the tarballs of a release run (`gh run download <run> --pattern 'products-*'`)
-   or a `0.0.0` placeholder that is deprecated after the first real release.
+   or a `0.0.0` placeholder. Give a directory as `./dir`: npm reads `pkgs/polyth` as the
+   GitHub shorthand `user/repo`. The registry answers `202` and shows a new package a few
+   minutes later.
 2. Add the trusted publisher of each package (npm 11.15.0 or newer, 2FA; one configuration per
    package):
 
@@ -360,6 +367,12 @@ are not affected. Once, by a maintainer with 2FA in the `polyth` npm organizatio
      sleep 2
    done
    ```
+
+   Put global flags such as `--registry` after `trust github`: npm 11.21 takes the first
+   arguments after `npm` as the command path, so a flag in front makes it fail with
+   *Unknown positional argument: github*. The web 2FA prompt (`--auth-type=web`, also for
+   `npm publish`) appears only when stdin and stdout are a terminal; without one npm fails
+   with `EOTP`. In a script, run npm under `script -qfec`.
 
 3. Optionally set each package to *Require two-factor authentication and disallow tokens*
    (package settings → Publishing access); trusted publishing is not affected.
