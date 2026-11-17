@@ -2750,7 +2750,10 @@ client twin of the server's `compactionDueForNextModel`) opens the same row
 before anything is sent: "This chat is too long for {model}. Polyth will compact
 it before your next message." with no buttons, or, for a manual chat, "…Compact
 it, or continue in a new chat, before you send." with both actions. Unknown
-usage or an unknown window says nothing. Focus returns to the pie on close only when the pie
+usage or an unknown window says nothing. The model picker says it before the
+pick: with `usage` passed, every unselected row that the same rule flags
+carries an amber "Chat won't fit" tag beside its name, styled like "Not connected" (`chatOverflowsModel` in
+`packages/models/widgets/chatFit.ts`); the row stays selectable. Focus returns to the pie on close only when the pie
 held focus, so a tap while the phone editor is focused keeps the keyboard and
 the engaged composer. The resting phone row keeps the pie right after Add
 (the model line dissolves with `display: contents` and only the pie stays).

@@ -25,6 +25,8 @@ export const zhCN: ModelsMessages = {
   "modelpicker.noModelsFound": "未找到模型",
   "modelpicker.noModelsMatch": "没有与“",
   "modelpicker.notConnected": "未连接",
+  "modelpicker.chatWontFit": "Chat won't fit",
+  "modelpicker.chatWontFitTitle": "This chat no longer fits this model's context window",
   "modelpicker.notReported": "未提供",
   "modelpicker.output": "输出",
   "modelpicker.pdf": "PDF",

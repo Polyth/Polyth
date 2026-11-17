@@ -25,6 +25,8 @@ export const bg: ModelsMessages = {
   "modelpicker.noModelsFound": "Не са намерени модели",
   "modelpicker.noModelsMatch": "Няма модели, отговарящи на „",
   "modelpicker.notConnected": "Не е свързан",
+  "modelpicker.chatWontFit": "Chat won't fit",
+  "modelpicker.chatWontFitTitle": "This chat no longer fits this model's context window",
   "modelpicker.notReported": "Не е посочено",
   "modelpicker.output": "Изходни данни",
   "modelpicker.pdf": "PDF",

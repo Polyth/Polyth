@@ -25,6 +25,8 @@ export const ptBR: ModelsMessages = {
   "modelpicker.noModelsFound": "Nenhum modelo encontrado",
   "modelpicker.noModelsMatch": "Nenhum modelo corresponde a “",
   "modelpicker.notConnected": "Não conectado",
+  "modelpicker.chatWontFit": "Chat won't fit",
+  "modelpicker.chatWontFitTitle": "This chat no longer fits this model's context window",
   "modelpicker.notReported": "Não informado",
   "modelpicker.output": "Saída",
   "modelpicker.pdf": "PDF",
