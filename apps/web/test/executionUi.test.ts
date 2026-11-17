@@ -3440,3 +3440,47 @@ test("with motion off the live line still keeps its dwell; it only changes in pl
     viewport.remove();
   }
 });
+
+test("a tool row announces its changed files once, when it finishes, never from history", async () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const announced: string[] = [];
+  const listen = (event: Event) => { announced.push((event as CustomEvent<{ path?: string }>).detail?.path ?? ""); };
+  const edit = (patch: Partial<ToolMsg>) => tool({
+    id: "edit-1", callId: "edit-1", tool: "write", input: { file_path: "src/a.ts" }, output: "", changedFiles: ["src/a.ts"], ...patch,
+  });
+  const render = (key: string, message: ToolMsg) => act(async () => root.render(createElement(ExecutionRow, { key, message })));
+  window.addEventListener("polyth:files-changed", listen);
+  try {
+    await act(async () => {
+      activateProject("files-announce-test");
+      setSessions("files-announce-test", [{
+        id: "files-announce", projectId: "files-announce-test", title: "Files", status: "idle", createdAt: 1, updatedAt: 1,
+      }]);
+      activateSession("files-announce");
+    });
+    await render("history", edit({ status: "done", finishTime: Date.now() - 60 * 60_000 }));
+    assert.equal(announced.length, 0, "an opened chat's finished rows do not announce");
+
+    await render("live", edit({ status: "running", finishTime: undefined }));
+    assert.equal(announced.length, 0);
+    await render("live", edit({ status: "done", finishTime: Date.now() }));
+    assert.ok(announced.includes("src/a.ts"), `the finish announces the file: ${announced.join(",")}`);
+    const once = announced.length;
+    await render("live", edit({ status: "done", finishTime: Date.now(), rev: 2 }));
+    assert.equal(announced.length, once, "later updates of a finished row do not announce again");
+
+    // Start and finish delivered together: the row first renders done.
+    await render("fast", edit({ status: "done", finishTime: Date.now() }));
+    assert.equal(announced.length, once * 2);
+  } finally {
+    window.removeEventListener("polyth:files-changed", listen);
+    await act(async () => root.unmount());
+    container.remove();
+    await act(async () => {
+      activateSession(null);
+      setSessions("files-announce-test", []);
+    });
+  }
+});

@@ -83,6 +83,34 @@ export function ancestorPaths(path: string): string[] {
   return result;
 }
 
+/** Folders to re-list after `paths` changed: for each, the deepest shown folder
+ *  that holds it. A new subfolder appears in that folder and a removed one
+ *  leaves it, so the changed path itself is never listed (it may be gone). */
+export function foldersToRefresh(paths: Iterable<string>, shown: ReadonlySet<string>): string[] {
+  const result = new Set<string>();
+  for (const path of paths) {
+    const holders = ancestorPaths(path);
+    for (let index = holders.length - 1; index >= 0; index--) {
+      if (!shown.has(holders[index]!)) continue;
+      result.add(holders[index]!);
+      break;
+    }
+  }
+  return [...result];
+}
+
+/** How long the tree keeps polling at the busy pace after files last changed. */
+export const TREE_BUSY_WINDOW_MS = 120_000;
+export const TREE_BUSY_REFRESH_MS = 8_000;
+/** Changes Polyth announces arrive as events; when nothing has changed for a
+ *  while the poll only catches edits it was not told about (a terminal,
+ *  another editor, git), so it can be slow. */
+export const TREE_IDLE_REFRESH_MS = 30_000;
+
+export function treePollDelay(lastChangeAt: number, now: number): number {
+  return now - lastChangeAt < TREE_BUSY_WINDOW_MS ? TREE_BUSY_REFRESH_MS : TREE_IDLE_REFRESH_MS;
+}
+
 export function beginTreeRequest(scope: TreeScope, generation: number): TreeRequestToken {
   return { scopeKey: treeScopeKey(scope), generation };
 }

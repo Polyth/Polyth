@@ -110,6 +110,14 @@ const SETTLED_REASON_KEYS: Readonly<Record<string, TranslationKey>> = {
   "Turn ended before tool completed": "execution.settledTurnEnded",
 };
 
+/** A tool row may first render already done when the start and finish arrive
+ *  together. A finish this recent still counts as live. `finishTime` is server
+ *  time, so a skewed clock only costs one extra or one missed announcement. */
+const LIVE_FINISH_MS = 15_000;
+function finishedJustNow(message: ToolMsg): boolean {
+  return typeof message.finishTime === "number" && Math.abs(Date.now() - message.finishTime) < LIVE_FINISH_MS;
+}
+
 function displayError(error: string | undefined): string | undefined {
   if (error === undefined) return undefined;
   const key = SETTLED_REASON_KEYS[error];
@@ -1075,14 +1083,19 @@ export function ExecutionRow({
       resolve: canonicalRepositoryId === undefined,
     }
     : undefined;
+  // Files views re-list the folders a finished tool touched. Announce once, at
+  // the finish: a row that mounts long done (an opened chat's history) or
+  // re-renders must not make them re-list again.
+  const filesAnnouncedRef = useRef(message.status === "done" && !finishedJustNow(message));
   useEffect(() => {
-    if (message.status !== "done" || !projectId || !currentSession || typeof window === "undefined") return;
+    if (message.status !== "done" || filesAnnouncedRef.current || !projectId || !currentSession || typeof window === "undefined") return;
     const paths = new Set<string>([
       ...(message.changedFiles ?? []),
       ...(presentation.files?.map((file) => file.path) ?? []),
       ...(presentation.path ? [presentation.path] : []),
     ].filter((path): path is string => safeRelativeFilePath(path)));
     if (paths.size === 0) return;
+    filesAnnouncedRef.current = true;
     for (const path of paths) {
       window.dispatchEvent(new CustomEvent("polyth:files-changed", {
         detail: {

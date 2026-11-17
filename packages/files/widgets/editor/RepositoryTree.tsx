@@ -14,8 +14,10 @@ import {
   ancestorPaths,
   beginTreeRequest,
   canMoveInto,
+  foldersToRefresh,
   isCurrentTreeRequest,
   readTreePrefs,
+  treePollDelay,
   treeScopeKey,
   writeTreePrefs,
 } from "./treeState.ts";
@@ -76,7 +78,8 @@ const baseOf = (path: string) => path.split("/").pop() ?? path;
 const treeItemId = (repositoryId: string, path: string) =>
   `ft-item-${encodeURIComponent(repositoryId)}-${encodeURIComponent(path)}`;
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
-const TREE_REFRESH_MS = 8_000;
+/** A tool that changed several files announces each one: one re-list for all. */
+const CHANGE_BATCH_MS = 300;
 const NO_CHANGES: ReadonlyMap<string, SessionChange & { sessions?: readonly string[] }> = new Map();
 const MAX_OWNER_DOTS = 3;
 interface ChangeMark { kind: SessionChange["kind"]; latestTurn: boolean; count?: number; owners?: readonly CheckoutSession[] }
@@ -195,8 +198,23 @@ export default function RepositoryTree({
   const loadingDirsRef = useRef(new Map<string, Promise<void>>());
   const longPressRef = useRef<{ timer: ReturnType<typeof setTimeout> | null; entry: FileEntry | null }>({ timer: null, entry: null });
   const activityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** Loaded folders currently shown expanded (incl. changed-only auto-opens). */
+  /** Folders currently shown expanded (incl. changed-only auto-opens), root
+   *  first. Refreshes re-list only these; a folder hidden under a collapsed
+   *  parent is re-listed when it shows again. */
   const visibleDirsRef = useRef<string[]>([]);
+  /** When files here last changed; the poll stays at the busy pace for a while after. */
+  const lastChangeAtRef = useRef(Date.now());
+  /** Hands changed paths (null: unknown) to the live refresh loop, if one runs. */
+  const queueChangesRef = useRef<((paths: readonly string[] | null) => void) | null>(null);
+  /** The scope the refresh loop last ran for: a restart for it means cached rows. */
+  const loopScopeRef = useRef("");
+  /** Kind per changed path at the last look; null until the first one. */
+  const seenChangesRef = useRef<ReadonlyMap<string, SessionChange["kind"]> | null>(null);
+  /** The server lists dotfiles only when asked. Read at request time: the poll,
+   *  focus and files-changed listeners outlive the render that bound them, and
+   *  a captured `showHidden` re-listed folders without the files just shown. */
+  const showHiddenRef = useRef(showHidden);
+  showHiddenRef.current = showHidden;
 
   useEffect(() => () => {
     if (longPressRef.current.timer) clearTimeout(longPressRef.current.timer);
@@ -222,25 +240,28 @@ export default function RepositoryTree({
 
   const loadDir = async (path: string): Promise<void> => {
     if (!visible || !sectionOpen) return;
-    const requestKey = `${scopeKey}:${path}`;
+    const hidden = showHiddenRef.current;
+    const requestKey = `${scopeKey}:${hidden ? "all" : "plain"}:${path}`;
     const existing = loadingDirsRef.current.get(requestKey);
     if (existing) return existing;
     const generation = generationRef.current;
     const token = beginTreeRequest(scope, generation);
+    // A listing asked for before the option changed is stale on arrival.
+    const isCurrent = () => isCurrentTreeRequest(token, scope, generationRef.current) && hidden === showHiddenRef.current;
     const request = (async () => {
       try {
         const entries = await api.filesTree(
           projectId,
           path || undefined,
-          showHidden,
+          hidden,
           sessionId ?? undefined,
           repository.repositoryId,
         );
-        if (!isCurrentTreeRequest(token, scope, generationRef.current)) return;
+        if (!isCurrent()) return;
         setKids((current) => ({ ...current, [path]: entries }));
         setError("");
       } catch (cause) {
-        if (!isCurrentTreeRequest(token, scope, generationRef.current)) return;
+        if (!isCurrent()) return;
         setError(messageOf(cause));
       }
     })();
@@ -309,14 +330,46 @@ export default function RepositoryTree({
     tree.scrollTop = scrollTop;
   }, [sectionOpen, scopeKey, scrollTop, visible]);
 
+  // The refresh loop of a shown tree. It polls the shown folders, fast while
+  // files are changing and slowly once they stop, and re-lists them right away
+  // when the window returns. Announced file changes are batched and re-list
+  // only the folders holding them.
   useEffect(() => {
     if (repository.state !== "ready" || !visible || !sectionOpen) return;
-    const refresh = () => {
+    let poll: ReturnType<typeof setTimeout> | null = null;
+    let batch: ReturnType<typeof setTimeout> | null = null;
+    let changed = new Set<string>();
+    let unknownChange = false;
+    const load = (paths: Iterable<string>) => {
       if (document.visibilityState === "hidden") return;
-      for (const path of new Set(["", ...open, ...visibleDirsRef.current])) void loadDir(path);
+      for (const path of paths) void loadDir(path);
     };
-    const onFocus = () => refresh();
-    const onVisibility = () => { if (document.visibilityState === "visible") refresh(); };
+    const schedulePoll = () => {
+      if (poll) clearTimeout(poll);
+      poll = setTimeout(() => refreshShown(), treePollDelay(lastChangeAtRef.current, Date.now()));
+    };
+    const refreshShown = () => {
+      schedulePoll();
+      load(visibleDirsRef.current);
+    };
+    const flush = () => {
+      batch = null;
+      const paths = changed;
+      const everything = unknownChange;
+      changed = new Set();
+      unknownChange = false;
+      if (everything) return refreshShown();
+      schedulePoll();
+      load(foldersToRefresh(paths, new Set(visibleDirsRef.current)));
+    };
+    queueChangesRef.current = (paths) => {
+      lastChangeAtRef.current = Date.now();
+      if (paths === null) unknownChange = true;
+      else for (const path of paths) changed.add(path);
+      if (!batch) batch = setTimeout(flush, CHANGE_BATCH_MS);
+    };
+    const onFocus = () => refreshShown();
+    const onVisibility = () => { if (document.visibilityState === "visible") refreshShown(); };
     const onFilesChanged = (event: Event) => {
       const detail = (event as CustomEvent<{ projectId?: string; sessionId?: string | null; repositoryId?: string; path?: string; source?: string }>).detail;
       if (detail?.projectId && detail.projectId !== projectId) return;
@@ -327,20 +380,26 @@ export default function RepositoryTree({
         if (activityTimerRef.current) clearTimeout(activityTimerRef.current);
         activityTimerRef.current = setTimeout(() => setActivityPath(null), 1600);
       }
-      refresh();
+      queueChangesRef.current?.(detail?.path ? [detail.path] : null);
     };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("polyth:files-changed", onFilesChanged);
-    const timer = setInterval(refresh, TREE_REFRESH_MS);
+    // Shown again with this scope's rows still cached (they were not polled
+    // while hidden): re-list now. A new scope is listed by restore() instead.
+    if (loopScopeRef.current === scopeKey) refreshShown();
+    else schedulePoll();
+    loopScopeRef.current = scopeKey;
     return () => {
+      queueChangesRef.current = null;
+      if (poll) clearTimeout(poll);
+      if (batch) clearTimeout(batch);
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("polyth:files-changed", onFilesChanged);
-      clearInterval(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, repository.state, sectionOpen, visible, scopeKey]);
+  }, [repository.state, sectionOpen, visible, scopeKey]);
 
   const reveal = async (path: string): Promise<void> => {
     pendingRevealRef.current = path;
@@ -378,14 +437,20 @@ export default function RepositoryTree({
 
   useEffect(() => {
     if (refreshToken === 0 || !visible || repository.state !== "ready" || !sectionOpen) return;
-    for (const path of new Set(["", ...open, ...visibleDirsRef.current])) void loadDir(path);
+    for (const path of visibleDirsRef.current) void loadDir(path);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshToken]);
 
-  // A tool just wrote a file: pull the directories we show now instead of waiting for the poll.
+  // A chat's edit reached the change map (this chat or another one in the
+  // checkout): re-list the folders holding the paths that changed. The first
+  // map is what restore() lists anyway.
   useEffect(() => {
-    if (!changedKey || !visible || repository.state !== "ready" || !sectionOpen) return;
-    for (const path of new Set(["", ...open, ...visibleDirsRef.current])) void loadDir(path);
+    const before = seenChangesRef.current;
+    seenChangesRef.current = new Map([...changes].map(([path, change]) => [path, change.kind]));
+    if (!before) return;
+    const touched = [...changes].filter(([path, change]) => before.get(path) !== change.kind).map(([path]) => path);
+    for (const path of before.keys()) if (!changes.has(path)) touched.push(path);
+    if (touched.length > 0) queueChangesRef.current?.(touched);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [changedKey]);
 
@@ -460,6 +525,17 @@ export default function RepositoryTree({
     for (const path of unloaded) void loadDir(path);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [unloadedKey, visible, repository.state, sectionOpen]);
+  // A folder that shows again (it or a collapsed parent re-expanded) was not
+  // polled while hidden: re-list the rows it still has cached.
+  const shownKey = visibleDirsRef.current.join("\0");
+  const shownBeforeRef = useRef<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    const before = shownBeforeRef.current;
+    shownBeforeRef.current = new Set(visibleDirsRef.current);
+    if (!visible || repository.state !== "ready" || !sectionOpen) return;
+    for (const path of visibleDirsRef.current) if (!before.has(path) && kids[path]) void loadDir(path);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shownKey]);
   const markOf = (entry: FileEntry): ChangeMark | null => {
     if (entry.dir) {
       const folder = folderChanges.get(entry.path);
