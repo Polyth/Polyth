@@ -133,6 +133,7 @@ is always present.
 - models
 - multirun
 - opencode
+- orchestration
 - peak-pricing
 - permissions
 - plugins
