@@ -14,10 +14,15 @@ import {
   resolveBuildVersion,
   resolveFeedRepository,
   resolveReleaseChannel,
+  SERVER_SUMS_NAME,
+  SERVER_TARGETS,
+  serverArchiveName,
 } from "../ci/update-feed.mjs";
 import { MAC_LEGACY_ELECTRON_VERSION, macLegacyBuilderArgs } from "../ci/mac-legacy.mjs";
+import { SERVER_TARGETS as BUNDLE_TARGETS } from "../../apps/server/src/layout.ts";
 
 const WORKSTATION_MISSING = "The workstation edition is missing; this release has no workstation feed";
+const SERVER_MISSING = "The server archives are missing; this release has no packaged server";
 
 const mac = (arch: string) => [
   "version: 0.1.86",
@@ -127,6 +132,7 @@ test("assembling the feed requires every platform's metadata and files", () => {
     assert.deepEqual(result.warnings, [
       "The macOS 12 build is missing; this release has no legacy-mac.yml",
       WORKSTATION_MISSING,
+      SERVER_MISSING,
     ]);
     assert.ok(result.files.includes("latest-mac.yml"));
     assert.deepEqual(result.files, [
@@ -175,6 +181,53 @@ test("assembling the feed requires every platform's metadata and files", () => {
   }
 });
 
+test("server archives ride along as checksummed extras and never block a desktop release", () => {
+  const root = mkdtempSync(join(tmpdir(), "update-feed-"));
+  try {
+    const products = join(root, "products");
+    const put = (dir: string, name: string, content = "x") => {
+      mkdirSync(join(products, dir), { recursive: true });
+      writeFileSync(join(products, dir, name), content);
+    };
+    for (const arch of ["x64", "arm64"]) {
+      put(`products-mac-dmg-${arch}`, `latest-mac.${arch}.partial.yml`, mac(arch));
+      for (const ext of ["zip", "dmg"]) put(`products-mac-dmg-${arch}`, `Polyth-0.1.86-mac-${arch}.${ext}`);
+    }
+    put("products-windows-exe", "latest.yml", "version: 0.1.86\nfiles:\n  - url: Polyth-0.1.86-win-x64.exe\n    sha512: a\n    size: 1\npath: Polyth-0.1.86-win-x64.exe\n");
+    put("products-windows-exe", "Polyth-0.1.86-win-x64.exe");
+    put("products-linux-appimage", "latest-linux.yml", "version: 0.1.86\nfiles:\n  - url: Polyth-0.1.86-linux-x86_64.AppImage\n    sha512: a\n    size: 1\npath: Polyth-0.1.86-linux-x86_64.AppImage\n");
+    put("products-linux-appimage", "Polyth-0.1.86-linux-x86_64.AppImage");
+    for (const target of ["linux-x64", "linux-arm64", "darwin-arm64"]) {
+      put(`products-server-${target}`, serverArchiveName("0.1.86", target), `archive ${target}`);
+      put(`products-server-${target}`, `${serverArchiveName("0.1.86", target)}.sha256`, "sum");
+      // npm tarballs go to the registry, not into the release.
+      put(`products-server-${target}`, `polyth-server-${target}-0.1.86.tgz`);
+    }
+    const feed = join(root, "feed");
+    const result = assembleFeed(products, feed);
+    const server = result.files.filter((file) => /server/i.test(file));
+    assert.deepEqual(server, [
+      SERVER_SUMS_NAME,
+      "polyth-server-0.1.86-darwin-arm64.tar.gz",
+      "polyth-server-0.1.86-linux-arm64.tar.gz",
+      "polyth-server-0.1.86-linux-x64.tar.gz",
+    ]);
+    assert.ok(result.warnings.includes("The darwin-x64 server archive is missing"), result.warnings.join("; "));
+    const sums = readFileSync(join(feed, SERVER_SUMS_NAME), "utf8").trim().split("\n");
+    assert.equal(sums.length, 3);
+    assert.match(sums[0]!, /^[0-9a-f]{64} {2}polyth-server-0\.1\.86-darwin-arm64\.tar\.gz$/);
+
+    put("products-server-darwin-x64", serverArchiveName("0.1.85", "darwin-x64"));
+    assert.throws(() => assembleFeed(products, feed), /polyth-server-0\.1\.85-darwin-x64\.tar\.gz does not belong to release 0\.1\.86/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the release pipeline and the server build name the same platforms", () => {
+  assert.deepEqual([...SERVER_TARGETS].sort(), [...BUNDLE_TARGETS].sort());
+});
+
 const legacyMac = (version: string) => [
   `version: ${version}`,
   "files:",
@@ -219,7 +272,7 @@ test("the macOS 12 feed ships as legacy-mac.yml alone, beside the regular metada
     const feed = join(root, "feed");
 
     const result = assembleFeed(products, feed);
-    assert.deepEqual(result.warnings, [WORKSTATION_MISSING]);
+    assert.deepEqual(result.warnings, [WORKSTATION_MISSING, SERVER_MISSING]);
     assert.ok(result.files.includes("legacy-mac.yml"));
     // No channel copies: the macOS 12 build reads only legacy-mac.yml on stable releases.
     assert.ok(!result.files.some((file) => /^(beta|nightly)-legacy|legacy-mac\.(beta|nightly)/.test(file)));

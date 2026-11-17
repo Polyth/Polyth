@@ -35,6 +35,12 @@ import {
   WORKSTATION_ASSET_INFIX, WORKSTATION_METADATA, WORKSTATION_SUMS_NAME, sha256Sums, workstationMacPartialName,
 } from "./workstation.mjs";
 
+/** Platforms the packaged server is built for (apps/server/src/layout.ts SERVER_TARGETS). */
+export const SERVER_TARGETS = ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"];
+/** Checksums of the release's server archives; `polyth update` verifies downloads with it. */
+export const SERVER_SUMS_NAME = "SHA256SUMS-server.txt";
+export const serverArchiveName = (version, target) => `polyth-server-${version}-${target}.tar.gz`;
+
 const REPOSITORY = /^([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))\/([A-Za-z0-9._-]{1,100})$/;
 const STABLE_VERSION = /^(\d+)\.(\d+)\.(\d+)$/;
 /** Each macOS architecture is built and signed on its own native runner; x64 first. */
@@ -392,7 +398,32 @@ export function assembleFeed(productsDir, feedDir, channel = "stable") {
   const apks = [...byName.values()].filter((file) => file.endsWith(".apk"));
   if (apks.length > 1) throw new Error(`Builder products hold more than one APK: ${apks.map((file) => basename(file)).join(", ")}`);
   if (apks.length === 1) cpSync(apks[0], join(out, `Polyth-${version}-android.apk`));
+  const servers = serverArchives(byName, version, warnings);
+  for (const file of servers) cpSync(file, join(out, basename(file)));
+  if (servers.length > 0) writeFileSync(join(out, SERVER_SUMS_NAME), sha256Sums(servers.map((file) => join(out, basename(file)))));
   return { version, channel: releaseChannel, prerelease: releaseChannel !== "stable", files: readdirSync(out).sort(), warnings };
+}
+
+/**
+ * The packaged server's archives (apps/server), download-only extras like the
+ * APK: a missing platform is a warning, never a blocked desktop release. An
+ * archive of another version is an error.
+ */
+function serverArchives(byName, version, warnings) {
+  const found = [...byName.keys()].filter((name) => /^polyth-server-.+\.tar\.gz$/.test(name));
+  for (const name of found) {
+    if (!SERVER_TARGETS.some((target) => name === serverArchiveName(version, target))) {
+      throw new Error(`Server archive ${name} does not belong to release ${version}`);
+    }
+  }
+  if (found.length === 0) {
+    warnings.push("The server archives are missing; this release has no packaged server");
+    return [];
+  }
+  for (const target of SERVER_TARGETS) {
+    if (!byName.has(serverArchiveName(version, target))) warnings.push(`The ${target} server archive is missing`);
+  }
+  return found.sort().map((name) => byName.get(name));
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

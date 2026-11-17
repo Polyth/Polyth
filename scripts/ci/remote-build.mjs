@@ -301,6 +301,10 @@ function validateOutputFormats(target, outputs) {
     case "npm-packages":
       requireFiles(outputs, ".tgz", "npm package", isGzip);
       break;
+    case "server":
+      requireFiles(outputs, ".tar.gz", "server archive", isGzip);
+      requireFiles(outputs, ".tgz", "server npm package", isGzip);
+      break;
     case "testflight":
       requireFiles(outputs, "testflight.json", "TestFlight distribution summary");
       break;
@@ -790,6 +794,21 @@ function buildNpmPackages() {
   copyFiles(walk(releaseDir).filter((p) => p.endsWith(".tgz")));
 }
 
+/** The packaged server for this runner's platform (apps/server): its release
+ *  archive and npm packages, each smoke-tested from first run to a signed-in
+ *  request before it leaves the runner. */
+function buildServer() {
+  npmCi();
+  run(npm, ["run", "build:server"], { env: { POLYTH_VERSION: feedVersion() } });
+  run(process.execPath, ["--experimental-strip-types", "apps/server/smoke.ts"]);
+  run(process.execPath, ["--experimental-strip-types", "apps/server/smoke.ts", "--npm"]);
+  const release = join(ROOT, "apps/server/release");
+  copyFiles([
+    ...directFiles(release).filter((p) => p.endsWith(".tar.gz") || p.endsWith(".tar.gz.sha256")),
+    ...directFiles(join(release, "npm")).filter((p) => p.endsWith(".tgz")),
+  ]);
+}
+
 const handlers = {
   "android-apk": buildAndroid,
   "ios-app": buildIos,
@@ -801,6 +820,7 @@ const handlers = {
   "linux-appimage": () => buildLinux(),
   "linux-appimage-workstation": () => buildLinux({ workstation: true }),
   "npm-packages": buildNpmPackages,
+  server: buildServer,
   testflight: distributeTestFlight,
 };
 

@@ -310,6 +310,17 @@ own runners; no deploy key or second repository is involved.
   `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`) and iOS/TestFlight (the five App
   Store Connect secrets under [iOS / TestFlight](#ios--testflight)); without them the builds are
   ad-hoc signed and the iOS job produces a simulator archive.
+- **Packaged server.** Target `server` (remote-build.mjs) runs on `linux-x64`, `linux-arm64`,
+  `darwin-arm64` and `darwin-x64` runners: `npm run build:server` with the release version, then
+  `apps/server/smoke.ts` on the archive and on the npm packages (first run, setup, full server,
+  sign-in). `update-feed.mjs` adds the archives `polyth-server-<version>-<target>.tar.gz` and
+  `SHA256SUMS-server.txt` to the release; like the APK they never block it, and a missing platform
+  is a warning. After the release is public, `scripts/ci/publish-server-npm.mjs` publishes the npm
+  packages (`@polyth/server-<target>` first, then `polyth`) only as a complete set, with provenance,
+  under the channel's dist-tag (`latest` for stable). It needs the `NPM_TOKEN` secret and publishes
+  the channels in the `POLYTH_SERVER_NPM_CHANNELS` variable (default `stable`; add `nightly` to put
+  nightlies under `polyth@nightly`). The packaged server itself is described in
+  [Ways to run Polyth](running.md#packaged-server).
 
 ## External builder feed
 
