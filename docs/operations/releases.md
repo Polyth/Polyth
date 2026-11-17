@@ -324,8 +324,11 @@ own runners; no deploy key or second repository is involved.
   publishes the channels in the `POLYTH_SERVER_NPM_CHANNELS` variable (default `stable`; add
   `nightly` to put nightlies under `polyth@nightly`). A stable release then rewrites `Formula/polyth.rb` in the
   Homebrew tap (`POLYTH_HOMEBREW_TAP`, default `Polyth/homebrew-tap`) from
-  `SHA256SUMS-server.txt` with `scripts/ci/homebrew-formula.mjs`; it needs the
-  `HOMEBREW_TAP_TOKEN` secret (contents write on the tap) and skips an incomplete archive set.
+  `SHA256SUMS-server.txt` with `scripts/ci/homebrew-formula.mjs`; it pushes over SSH with the
+  `HOMEBREW_TAP_DEPLOY_KEY` secret, the private half of a write deploy key of the tap (no access to
+  any other repository; GitHub's host keys come from `api.github.com/meta`), and skips an
+  incomplete archive set. To rotate it, add a new write deploy key to the tap, set the secret to
+  its private key and delete the old key.
   The formula installs the archive into `libexec`, runs it with Homebrew's `node` and gives
   `brew services` a service; `homebrew/core` would want a source build instead, so the tap is
   the channel. The packaged server itself is described in
