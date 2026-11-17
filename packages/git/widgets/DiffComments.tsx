@@ -169,7 +169,8 @@ export function CommentableRows({ lines, path, renderRow }: {
           <div className="git-diff-comment-sent form-success">
             <span role="status">{t("diffcomment.added")}</span>
             {host.conversation.revealComposer && (
-              <Button size="sm" variant="ghost" onClick={() => host.conversation.revealComposer?.()}>{t("diffcomment.goToMessage")}</Button>
+              // Bordered with the chat glyph: as bare ghost text it read as part of the sentence.
+              <Button size="sm" iconStart={host.ui.iconSet?.ChatIcon} onClick={() => host.conversation.revealComposer?.()}>{t("diffcomment.goToMessage")}</Button>
             )}
           </div>
         )}
