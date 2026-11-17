@@ -40,6 +40,7 @@ import {
   type SettingsLook,
 } from "./settingsSnapshot.ts";
 import { getState, subscribeStore, updateSettings } from "./store.ts";
+import { onServerHostSurface } from "./desktopBridge.ts";
 import { getUiSettings, parseUiSettings, setUiSettings, subscribeUiSettings, type UiSettings } from "./uiPrefs.ts";
 import {
   getSessionDefaults,
@@ -151,6 +152,11 @@ const appearanceSyncListeners = new Set<() => void>();
 let appearanceSyncEnabled = readAppearanceSyncFlag();
 
 function readAppearanceSyncFlag(): boolean {
+  // This window's own server has no second side to sync with, and its row is
+  // not rendered (pages.tsx). A "0" stored before that row was hidden would
+  // otherwise freeze this window for good with no control left to undo it, so
+  // the flag counts as ON there and its value is left untouched.
+  if (onServerHostSurface()) return true;
   try { return localStorage.getItem(APPEARANCE_SYNC_KEY) !== "0"; } catch { return true; }
 }
 

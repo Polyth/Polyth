@@ -247,3 +247,11 @@ export const localDesktopBridge = (): PolythDesktopApi | undefined => {
 
 /** The window shows another Polyth, through Link or by address. */
 export const onRemoteDesktopSurface = (): boolean => desktopBridge()?.surface === "remote";
+
+/** The window runs this computer's own server: the server and the client are
+ *  one app, so settings described as "this device vs. the server" have no
+ *  second side here. Shells older than client mode (no `surface` field) are
+ *  always this computer's server; an unknown surface (`null`, main.ts's "not
+ *  the main window or an address it cannot place") is a client we cannot
+ *  classify, so it keeps everything a client gets. */
+export const onServerHostSurface = (): boolean => localDesktopBridge() !== undefined;

@@ -243,6 +243,14 @@ server's look (not the frozen local one) with no flicker and no push of the
 frozen look. While OFF, the pushed blob carries the server's appearance — never
 the local one — so a server that ignores the flag neither loses its account
 appearance nor receives this device's. The flag itself never reaches the blob.
+The toggle only exists where this window is a client of another Polyth
+(`onServerHostSurface` is false in `desktopBridge.ts`): a browser, native mobile,
+or a desktop window showing a remote or Link server. The desktop shell that runs
+this computer's own server is that server's own client — one app, not two sides
+— so the row and its search hit are not rendered there, and the stored flag
+counts as ON so an "off" saved before the row was hidden cannot freeze that
+window with no switch left. An unplaceable surface (`null`: a dropped Link
+address, a redirect, an IPC failure) is treated as a client and keeps the row.
 
 When two mechanisms look plausible, prefer the one with the smallest blast
 radius: slot contribution over surface, surface over workspace surface,
