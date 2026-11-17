@@ -1,6 +1,6 @@
 import {
-  useEffect, useLayoutEffect, useMemo, useRef, useState,
-  type DragEvent, type FormEvent,
+  useEffect, useId, useLayoutEffect, useMemo, useRef, useState,
+  type DragEvent, type FormEvent, type MouseEvent,
 } from "react";
 import type { AttachmentRef } from "@polyth/contracts";
 import { api, type AgentRunAttachmentDto, type ScheduleRunDto, type ScheduleTaskDto } from "@polyth/session/web-api";
@@ -17,10 +17,12 @@ import AttachmentPills from "../../../apps/web/src/components/AttachmentPills.ts
 import { ExecutionIcon } from "../../../apps/web/src/components/ExecutionIcon.tsx";
 import {
   Button, GlassDock, Icon,
-  ExternalLinkIcon, ClockIcon, SessionIcon, ShieldAlertIcon, TextInput, ThumbsDownIcon, ThumbsUpIcon,
+  ChevronRightIcon, ExternalLinkIcon, ClockIcon, SessionIcon, ShieldAlertIcon, TextInput, ThumbsDownIcon, ThumbsUpIcon,
 } from "../../../apps/web/src/components/ui/index.ts";
 import { AgentMark } from "./AgentGlyph.tsx";
-import { tokenTotal } from "../src/agentPrompt.ts";
+import { budgetWords, tokenTotal } from "../src/agentPrompt.ts";
+import { withoutOpenFence } from "../src/agentReport.ts";
+import { useFold } from "./useFold.ts";
 import { newestReportAt, shortDuration, type AgentLive } from "./agentLive.ts";
 import { agentName } from "./agentActions.ts";
 import { useNow } from "./agentClock.ts";
@@ -28,8 +30,23 @@ import { optimistic } from "./agentsStore.ts";
 import AgentComposer, { type AgentMessage, type DroppedFiles } from "./AgentComposer.tsx";
 import {
   bareDay, carries, conversationDays, dayItems, queues,
-  type ConversationThread, type PendingMessage, type ThreadOpening,
+  type ConversationDay, type ConversationItem, type ConversationThread, type PendingMessage, type ThreadOpening,
 } from "./agentThreads.ts";
+
+/** A one-line row of the ledger: a read report or quiet checks. */
+const isRow = (item: ConversationItem | undefined): boolean =>
+  item?.kind === "quiet" || (item?.kind === "report" && !!item.compact);
+const entries = (day: ConversationDay): ConversationItem[] =>
+  day.threads.flatMap((thread) => thread.items).filter((item) => item.kind !== "new");
+
+/** How a day without a divider meets the day above it. Its rows say their
+ *  day, so it adds no air of its own: after a row its first row stacks under
+ *  it ("row"), after anything else it keeps an entry's gap ("entry"). A day
+ *  that begins with a report keeps the air of a new day (undefined). */
+function dayJoin(day: ConversationDay, above: ConversationDay | undefined, bare: boolean): "row" | "entry" | undefined {
+  if (!bare || !above || !isRow(entries(day)[0])) return undefined;
+  return isRow(entries(above).at(-1)) ? "row" : "entry";
+}
 
 export { conversationDays } from "./agentThreads.ts";
 export type { ConversationDay, ConversationItem, ConversationThread } from "./agentThreads.ts";
@@ -310,14 +327,37 @@ function Timeline({ moments }: { moments: NonNullable<ScheduleRunDto["timeline"]
   );
 }
 
+/** A plain click on a report's words: not the end of a selection, not on a
+ *  link, a control or a code block, and no modifier held. Only then may the
+ *  words act. */
+function plainClick(event: MouseEvent<HTMLElement>): boolean {
+  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return false;
+  const selection = typeof window.getSelection === "function" ? window.getSelection() : null;
+  if (selection && !selection.isCollapsed && selection.toString().trim()) return false;
+  const target = event.target as Element | null;
+  return !target?.closest?.("a, button, input, textarea, select, summary, pre, [role='button'], [contenteditable='true']");
+}
+
+/** What a report says, as the page shows it. A report kept before reports were
+ *  cut whole may end inside a code block: it ends where its last whole part
+ *  does, and "…" says there was more. */
+function shownSummary(summary: string | undefined): string {
+  const text = summary?.trim() ?? "";
+  const whole = withoutOpenFence(text);
+  if (whole === text) return text;
+  return whole ? `${whole}\n\n…` : "";
+}
+
 /** What a run said, as a ledger entry. Its first line says when it ran and
  *  how long (and, when one is due, a status word); the headline follows, then
  *  its opening paragraph. The rest of the report (how the run went, the notes
- *  it kept) opens from one quiet link; what only the person can do closes the
- *  entry. A report read before, with newer ones after it, is one row until
- *  opened: its mark, its day, its headline, its length. `dated`: no divider
- *  above says the day, so the entry does. */
-function Report({ task, run, compact, latest, dated, onFeedback }: {
+ *  it kept) opens in place from one quiet link, and its session from another;
+ *  what only the person can do closes the entry. A report read before, with
+ *  newer ones after it, is one row until opened: its mark, its day, its
+ *  headline, its length. It opens under that row, which stays where it is
+ *  and closes it again. `dated`: no divider above says the day, so the entry
+ *  does. */
+function Report({ task, run, compact, latest, dated, onFeedback, onOpenSession }: {
   task: ScheduleTaskDto;
   run: ScheduleRunDto;
   compact?: boolean;
@@ -325,14 +365,17 @@ function Report({ task, run, compact, latest, dated, onFeedback }: {
   latest?: boolean;
   dated?: boolean;
   onFeedback: OnFeedback;
+  onOpenSession?: (sessionId: string) => void;
 }) {
-  const [open, setOpen] = useState(!compact);
-  const [full, setFull] = useState(false);
+  const card = useFold(!compact);
+  const more = useFold(false);
+  const moreLink = useRef<HTMLButtonElement>(null);
+  const id = useId();
   const feedback = useFeedback(run, onFeedback);
   const signal = signalOf(run);
   const tone = toneOf(run);
   const headline = headlineOf(run);
-  const body = run.summary?.trim() ?? "";
+  const body = shownSummary(run.summary);
   // A headline taken from the body's first line is never said twice.
   const firstLine = body.split("\n")[0] ?? "";
   const said = plainWords(headline).replace(/…$/, "");
@@ -345,8 +388,8 @@ function Report({ task, run, compact, latest, dated, onFeedback }: {
   const wake = wakeLabel(run);
   const duration = durationOf(run);
   const at = new Date(run.startedAt).toISOString();
-  const markdown = (text: string, part: string) => (
-    <div className={`msg assistant agent-report-body agent-report-${part}`}>
+  const markdown = (text: string, part: string, onClick?: (event: MouseEvent<HTMLElement>) => void) => (
+    <div className={`msg assistant agent-report-body agent-report-${part}`} {...(onClick ? { "data-action": "more", onClick } : {})}>
       <div className="bubble">
         <MarkdownDoc
           text={text}
@@ -357,27 +400,7 @@ function Report({ task, run, compact, latest, dated, onFeedback }: {
     </div>
   );
 
-  if (!open) {
-    // Alerts and failures say so in words too, for a reader who cannot see the mark.
-    const word = signal === "alert" ? tr("agents.signalAlert") : signal === "failed" ? tr("agents.runFailed") : null;
-    return (
-      <li className="agent-turn agent-report" data-signal={signal} data-compact="line">
-        <button type="button" className="agent-report-line" aria-expanded={false} onClick={() => setOpen(true)}>
-          <ToneMark tone={tone} />
-          <time className="agent-row-when" dateTime={at}>{dated ? whenOf(run.startedAt) : timeOf(run.startedAt)}</time>
-          <span className="agent-report-line-title">
-            {word && <span className="agent-sr">{word}: </span>}
-            {headline}
-          </span>
-          {duration && <span className="agent-row-length">{duration}</span>}
-        </button>
-      </li>
-    );
-  }
-
-  // When, for how long, and the news only when it is news.
-  const midnight = new Date(run.startedAt).setHours(0, 0, 0, 0);
-  const when = [dated ? dayLabel(midnight) : null, spanOf(run), duration].filter(Boolean).join(" · ");
+  // The news only when it is news.
   const status = [
     signal === "alert" ? <span key="signal" className="agent-report-signal" data-signal="alert">{tr("agents.signalAlert")}</span> : null,
     signal === "failed" && run.headline ? <span key="signal" className="agent-report-signal" data-signal="failed">{tr("agents.runFailed")}</span> : null,
@@ -386,29 +409,26 @@ function Report({ task, run, compact, latest, dated, onFeedback }: {
     run.backup ? <span key="backup" className="agent-report-wake">{tr("agents.ranOnBackupValue", { count: run.backup })}</span> : null,
   ].filter(Boolean);
   // One link: the rest of the report (how it went, its notes last), or the notes alone.
-  const more = !!rest || moments.length > 1 || notes.length > 0;
-  const moreLabel = full ? tr("agents.showLess")
+  const hasMore = !!rest || moments.length > 1 || notes.length > 0;
+  const moreLabel = more.open ? tr("agents.showLess")
     : rest || moments.length > 1 ? tr("agents.readFullReport")
       : tr(notes.length === 1 ? "agents.notesOneValue" : "agents.notesValue", { count: notes.length });
-  const tools = run.status === "ok" || facts;
+  // The whole run (every step, the whole message) is in its session.
+  const session = run.sessionId && onOpenSession ? run.sessionId : undefined;
+  const tools = run.status === "ok" || !!facts;
   const needs = run.status === "ok" ? run.needs ?? [] : [];
-  return (
-    <li
-      className="agent-turn agent-report"
-      data-signal={signal}
-      data-compact={compact ? "open" : undefined}
-      data-latest={latest || undefined}
-    >
-      <p className="agent-report-meta">
-        <ToneMark tone={tone} />
-        {compact ? (
-          <button type="button" className="agent-report-fold agent-report-when" aria-expanded aria-label={`${when} · ${tr("agents.showLess")}`} onClick={() => setOpen(false)}>
-            <time dateTime={at}>{when}</time>
-          </button>
-        ) : <time className="agent-report-when" dateTime={at}>{when}</time>}
-        {status}
-      </p>
-      <h3 className="agent-report-headline">{headline}</h3>
+  const restId = `${id}-rest`;
+  // The words are a pointer's shortcut to the foot's links (which keyboards
+  // and screen readers use): the opening paragraph reads on into the full
+  // report, the headline opens the run's session.
+  const readOn = hasMore && !more.open
+    ? (event: MouseEvent<HTMLElement>) => { if (plainClick(event)) more.toggle(true); }
+    : undefined;
+  const openRun = session
+    ? (event: MouseEvent<HTMLElement>) => { if (plainClick(event)) onOpenSession!(session); }
+    : undefined;
+  const details = (
+    <>
       {run.note || run.events?.length ? (
         <ul className="agent-report-events">
           {/* The wake script's words, which may quote event data: what woke
@@ -418,21 +438,39 @@ function Report({ task, run, compact, latest, dated, onFeedback }: {
           {(run.events?.length ?? 0) > 3 && <li>{tr("agents.moreEventsValue", { count: run.events!.length - 3 })}</li>}
         </ul>
       ) : null}
-      {lead && markdown(lead, "lead")}
-      {rest && full && markdown(rest, "full")}
-      {full && moments.length > 1 && <Timeline moments={moments} />}
-      {full && notes.length > 0 && (
-        <section className="agent-report-notes" aria-label={tr("agents.remembered")}>
-          <h4 className="agent-report-notes-label">{tr("agents.remembered")}</h4>
-          <ul>{notes.map((note) => <li key={note}>{note}</li>)}</ul>
-        </section>
+      {lead && markdown(lead, "lead", readOn)}
+      {hasMore && more.present && (
+        <div ref={more.region} id={restId} className="agent-fold agent-report-rest">
+          {rest && markdown(rest, "full")}
+          {moments.length > 1 && <Timeline moments={moments} />}
+          {notes.length > 0 && (
+            <section className="agent-report-notes" aria-label={tr("agents.remembered")}>
+              <h4 className="agent-report-notes-label">{tr("agents.remembered")}</h4>
+              <ul>{notes.map((note) => <li key={note}>{note}</li>)}</ul>
+            </section>
+          )}
+        </div>
       )}
       {run.error && signal !== "stopped" && <p className="agent-report-error">{run.error}</p>}
-      {(more || tools) && (
-        <footer className="agent-report-foot" data-link={more || undefined}>
-          {more && (
-            <button type="button" className="agent-report-more" aria-expanded={full} onClick={() => setFull(!full)}>
+      {(hasMore || session || tools) && (
+        <footer className="agent-report-foot" data-link={hasMore || !!session || undefined}>
+          {hasMore && (
+            <button
+              ref={moreLink}
+              type="button"
+              className="agent-report-more"
+              aria-expanded={more.open}
+              {...(more.present ? { "aria-controls": restId } : {})}
+              // Closing keeps this link where it is on screen: the reader stays at the report.
+              onClick={() => more.toggle(!more.open, more.open ? moreLink.current : null)}
+            >
               {moreLabel}
+            </button>
+          )}
+          {session && (
+            <button type="button" className="agent-report-more agent-report-session" onClick={() => onOpenSession!(session)}>
+              {tr("agents.openSession")}
+              <Icon icon={ChevronRightIcon} size="sm" className="agent-report-session-arrow" />
             </button>
           )}
           {tools && (
@@ -445,6 +483,59 @@ function Report({ task, run, compact, latest, dated, onFeedback }: {
       )}
       {feedback.noteOpen && <FeedbackNote feedback={feedback} />}
       {needs.length > 0 && <Needs needs={needs} />}
+    </>
+  );
+
+  if (compact) {
+    // Alerts and failures say so in words too, for a reader who cannot see the mark.
+    const word = signal === "alert" ? tr("agents.signalAlert") : signal === "failed" ? tr("agents.runFailed") : null;
+    const cardId = `${id}-card`;
+    return (
+      <li
+        className="agent-turn agent-report"
+        data-signal={signal}
+        data-compact={card.present ? "open" : "line"}
+        data-latest={latest || undefined}
+      >
+        <button
+          type="button"
+          className="agent-report-line"
+          aria-expanded={card.open}
+          {...(card.present ? { "aria-controls": cardId } : {})}
+          onClick={() => card.toggle(!card.open)}
+        >
+          <ToneMark tone={tone} />
+          <time className="agent-row-when" dateTime={at}>{dated ? whenOf(run.startedAt) : timeOf(run.startedAt)}</time>
+          <span className="agent-report-line-title">
+            {word && <span className="agent-sr">{word}: </span>}
+            {headline}
+          </span>
+          {duration && <span className="agent-row-length">{duration}</span>}
+        </button>
+        {card.present && (
+          <div ref={card.region} id={cardId} className="agent-fold agent-report-card">
+            <p className="agent-report-meta">
+              <time className="agent-report-when" dateTime={at}>{spanOf(run)}</time>
+              {status}
+            </p>
+            {details}
+          </div>
+        )}
+      </li>
+    );
+  }
+
+  const midnight = new Date(run.startedAt).setHours(0, 0, 0, 0);
+  const when = [dated ? dayLabel(midnight) : null, spanOf(run), duration].filter(Boolean).join(" · ");
+  return (
+    <li className="agent-turn agent-report" data-signal={signal} data-latest={latest || undefined}>
+      <p className="agent-report-meta">
+        <ToneMark tone={tone} />
+        <time className="agent-report-when" dateTime={at}>{when}</time>
+        {status}
+      </p>
+      <h3 className="agent-report-headline" {...(openRun ? { "data-action": "session", onClick: openRun } : {})}>{headline}</h3>
+      {details}
     </li>
   );
 }
@@ -475,22 +566,25 @@ function YouBubble({ id, text, at, pending, attachments, attachmentCount }: {
 
 /** Quiet checks and skipped wakes: one row in the quietest ink. A lone check
  *  reads as its own headline and length; several fold into a count and the
- *  hours they span, and open into their list. */
+ *  hours they span, and open into their list under the row. A skipped wake
+ *  took no time worth a figure. */
 function QuietFold({ runs, dated }: { runs: ScheduleRunDto[]; dated?: boolean }) {
-  const [open, setOpen] = useState(false);
+  const fold = useFold(false);
+  const listId = `${useId()}-list`;
   const first = runs[0]!;
   const last = runs.at(-1)!;
   const skipped = runs.filter((run) => run.status === "skipped").length;
   const checks = runs.length - skipped;
   const lone = runs.length === 1;
   const words = (run: ScheduleRunDto) => run.status === "skipped"
-    ? run.error ?? tr("agents.runSkipped")
+    ? (run.error ? budgetWords(run.error) : tr("agents.runSkipped"))
     : run.headline || run.summary?.split("\n").find((line) => line.trim())?.replace(/^#+\s*/, "").trim() || tr("agents.signalQuiet");
   const label = lone ? words(first) : [
     checks ? tr("agents.quietChecksValue", { count: checks }) : "",
     skipped ? tr("agents.skippedCountValue", { count: skipped }) : "",
   ].filter(Boolean).join(" · ");
-  const end = lone ? durationOf(first) : `${timeOf(first.startedAt)}–${timeOf(last.startedAt)}`;
+  const end = !lone ? `${timeOf(first.startedAt)}–${timeOf(last.startedAt)}`
+    : first.status === "skipped" ? null : durationOf(first);
   const at = new Date(first.startedAt).toISOString();
   const row = (
     <>
@@ -503,17 +597,27 @@ function QuietFold({ runs, dated }: { runs: ScheduleRunDto[]; dated?: boolean })
   // A lone check has nothing more to open.
   if (lone) return <li className="agent-turn agent-quiet"><div className="agent-quiet-toggle" data-static="">{row}</div></li>;
   return (
-    <li className="agent-turn agent-quiet" data-open={open || undefined}>
-      <button type="button" className="agent-quiet-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>{row}</button>
-      {open && (
-        <ol className="agent-quiet-list">
-          {runs.map((run) => (
-            <li key={run.runId}>
-              <span>{words(run)}</span>
-              <time dateTime={new Date(run.startedAt).toISOString()}>{timeOf(run.startedAt)}</time>
-            </li>
-          ))}
-        </ol>
+    <li className="agent-turn agent-quiet" data-open={fold.present || undefined}>
+      <button
+        type="button"
+        className="agent-quiet-toggle"
+        aria-expanded={fold.open}
+        {...(fold.present ? { "aria-controls": listId } : {})}
+        onClick={() => fold.toggle(!fold.open)}
+      >
+        {row}
+      </button>
+      {fold.present && (
+        <div ref={fold.region} id={listId} className="agent-fold">
+          <ol className="agent-quiet-list">
+            {runs.map((run) => (
+              <li key={run.runId}>
+                <span>{words(run)}</span>
+                <time dateTime={new Date(run.startedAt).toISOString()}>{timeOf(run.startedAt)}</time>
+              </li>
+            ))}
+          </ol>
+        </div>
       )}
     </li>
   );
@@ -831,6 +935,7 @@ function Thread({ agent, thread, headless, dated, latest, onOpenSession, onFeedb
               compact={!!item.compact}
               latest={item.key === latest}
               {...(dated ? { dated } : {})}
+              {...(onOpenSession ? { onOpenSession } : {})}
               onFeedback={onFeedback}
             />
           );
@@ -1011,7 +1116,7 @@ export default function AgentConversation({ host, agent, live, onReview, onRun, 
               <p>{tr("agents.feedEmptyBody")}</p>
             </div>
           )}
-          {days.map((day) => {
+          {days.map((day, index) => {
             // A conversation that opens the day is said on the day's line.
             const first = day.threads[0];
             const joined = first?.opening && first.opening.kind !== "upcoming" ? first : undefined;
@@ -1019,7 +1124,13 @@ export default function AgentConversation({ host, agent, live, onReview, onRun, 
             // person speaking, needs no divider: each row says its day.
             const bare = bareDay(day);
             return (
-              <section className="agent-day" key={day.key} aria-label={dayLabel(day.at)} data-bare={bare || undefined}>
+              <section
+                className="agent-day"
+                key={day.key}
+                aria-label={dayLabel(day.at)}
+                data-bare={bare || undefined}
+                data-join={dayJoin(day, days[index - 1], bare)}
+              >
                 {!bare && (
                   <Divider
                     heading

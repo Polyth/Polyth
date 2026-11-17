@@ -308,6 +308,7 @@ function fakeServer(tasks: ScheduleTaskDto[]) {
 
 function fakeHost(projections: Record<string, Partial<SessionProjection>> = {}) {
   const opened: Array<{ pageId: string; resource: string | null }> = [];
+  const sessions: string[] = [];
   const host = {
     ui: { Slot: () => null },
     store: { subscribe: () => () => {}, getSnapshot: () => ({ activePage: null }) },
@@ -315,13 +316,13 @@ function fakeHost(projections: Record<string, Partial<SessionProjection>> = {}) 
       openPage: (pageId: string, resource?: string | null) => { opened.push({ pageId, resource: resource ?? null }); return true; },
       closePage: () => {},
     },
-    conversation: { openSession: async () => {} },
+    conversation: { openSession: async (id: string) => { sessions.push(id); } },
     sessions: {
       get: (id: string) => projections[id] as SessionProjection | undefined,
       subscribe: () => () => {},
     },
   } as unknown as WebPackageHost;
-  return { host, opened };
+  return { host, opened, sessions };
 }
 
 const answered = () => watcher({
@@ -564,11 +565,13 @@ test("nights read as one row each; the newest report says when and how long, and
     ],
   });
   fakeServer([task]);
-  const { host } = fakeHost();
+  const { host, sessions } = fakeHost();
   const view = await mounted(createElement(AgentsPage, { host, resource: "agent-w" }));
   await act(async () => { await delay(30); });
   const feed = view.container.querySelector(".agent-feed")!;
   assert.equal(feed.querySelectorAll(".agent-divider").length, 0, "days of the agent's own rows need no divider");
+  assert.deepEqual([...feed.querySelectorAll(".agent-day")].map((day) => day.getAttribute("data-join")), [null, "row", null],
+    "a night's row stacks under the night before, with no air of a new day; the day that opens a report keeps it");
 
   const quiet = feed.querySelector(".agent-quiet")!;
   assert.ok(quiet.querySelector('.agent-tone[data-tone="quiet"]'), "a quiet night has a ring");
@@ -591,6 +594,17 @@ test("nights read as one row each; the newest report says when and how long, and
   assert.equal(links[0]!.getAttribute("href"), "https://github.com/acme/app/pull/32");
   assert.equal(links[0]!.getAttribute("rel"), "noopener noreferrer");
 
+  // The words act like the foot's links for a pointer: the headline opens the
+  // run's session, the opening paragraph reads on into the full report.
+  await act(async () => { latest.querySelector<HTMLElement>(".agent-report-headline")!.click(); });
+  assert.deepEqual(sessions, ["s-3"], "the headline opens the run's session");
+  const lead = latest.querySelector<HTMLElement>(".agent-report-lead[data-action]")!;
+  await act(async () => { (lead.querySelector("p") ?? lead).click(); });
+  assert.equal(buttonNamed(latest, "Show less")?.getAttribute("aria-expanded"), "true", "a click on the words opens the full report");
+  assert.equal(latest.querySelector(".agent-report-lead[data-action]"), null, "an open report's words are only words");
+  await act(async () => { lead.click(); });
+  assert.ok(buttonNamed(latest, "Show less"), "a click on them never closes it again");
+  await act(async () => { buttonNamed(latest, "Show less")!.click(); await delay(500); });
   await act(async () => { buttonNamed(latest, "Full report")!.click(); });
   const steps = latest.querySelector(".agent-steps")!;
   assert.match(steps.textContent ?? "", /CI on devel is red\./);

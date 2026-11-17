@@ -123,6 +123,9 @@ const GENERIC_SHELL_IMPORTS = new Set([
   "markdown/ImageLightbox.tsx",
   "markdown.tsx",
   "mobileViewport.ts",
+  // The host's motion settings (reduced motion, low-resource mode) and its
+  // duration tokens, for a package's scripted motion (an agent's report folds).
+  "motionPresence.ts",
   "pendingChanges.ts",
   // These four modules are generic host responsibilities: project presentation
   // persistence, canonical resource navigation, session activity resolution,

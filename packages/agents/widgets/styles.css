@@ -1675,16 +1675,47 @@
   transition: color var(--motion-fast) var(--motion-ease);
 }
 /* On touch the link keeps its size; its target reaches the tap height. */
-.agents-page :is(.agent-report-more, .agent-report-fold)::after {
+.agents-page .agent-report-more::after {
   content: "";
   position: absolute;
   inset: min(0px, calc((24px - var(--hit-min)) / 2)) calc(var(--space-1) * -1);
 }
 .agents-page .agent-report-more[aria-expanded="true"] { color: var(--text-dim); }
+/* "Open session": the whole run, every step and the whole message. */
+.agents-page .agent-report-session { display: inline-flex; align-items: center; gap: 2px; }
+.agents-page .agent-report-session-arrow {
+  width: 14px;
+  height: 14px;
+  margin-inline-end: -2px;
+  transition: translate var(--motion-fast) var(--motion-ease);
+}
+.agents-page .agent-report-session-arrow:dir(rtl) { scale: -1 1; }
+@media (hover: hover) {
+  .agents-page .agent-report-session:hover .agent-report-session-arrow { translate: 2px 0; }
+  .agents-page .agent-report-session:dir(rtl):hover .agent-report-session-arrow { translate: -2px 0; }
+}
 @media (hover: hover) {
   .agents-page .agent-report-more:hover:where(:not(:disabled)) { color: var(--text); }
 }
-.agents-page :is(.agent-report-more, .agent-report-fold, .agent-report-line, .agent-quiet-toggle):focus-visible {
+/* The words stand for the foot's links (`readOn`, `openRun` in
+   AgentConversation.tsx): the opening paragraph reads on into the full
+   report, the headline opens the run's session. A pointer over one lights
+   the link it stands for, so a click never surprises; code keeps its own. */
+.agents-page :is(.agent-report-headline, .agent-report-lead)[data-action] { cursor: pointer; }
+.agents-page .agent-report-lead[data-action] pre { cursor: auto; }
+@media (hover: hover) {
+  .agents-page .agent-report-headline[data-action]:hover {
+    text-decoration-line: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 0.18em;
+    text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  }
+  .agents-page .agent-report:has(> .agent-report-headline[data-action]:hover) .agent-report-session,
+  .agents-page .agent-report:has(.agent-report-lead[data-action]:hover) .agent-report-more:not(.agent-report-session) { color: var(--text); }
+  .agents-page .agent-report:has(> .agent-report-headline[data-action]:hover) .agent-report-session-arrow { translate: 2px 0; }
+  .agents-page .agent-report:has(> .agent-report-headline[data-action]:hover) .agent-report-session:dir(rtl) .agent-report-session-arrow { translate: -2px 0; }
+}
+.agents-page :is(.agent-report-more, .agent-report-line, .agent-quiet-toggle):focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
   border-radius: var(--radius-control);
@@ -1781,27 +1812,48 @@
 }
 .agents-page .agent-quiet-label { color: var(--muted); }
 .agents-page .agent-report[data-signal="failed"] .agent-report-line-title { color: color-mix(in srgb, var(--red) 70%, var(--text)); }
-.agents-page .agent-report-fold {
-  position: relative;
-  flex: none;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
 @media (hover: hover) {
   .agents-page .agent-report-line:hover:where(:not(:disabled)) .agent-report-line-title { color: var(--text); }
-  .agents-page .agent-report-fold:hover:where(:not(:disabled)) time { color: var(--text); }
 }
-.agents-page :is(.agent-report[data-compact="line"], .agent-quiet) + :is(.agent-report[data-compact="line"], .agent-quiet) {
+/* Rows sit together, open or not: an opened row's air travels inside its
+   fold, so opening one never moves the rows around it by a margin. */
+.agents-page :is(.agent-report[data-compact], .agent-quiet) + :is(.agent-report[data-compact], .agent-quiet) {
   margin-block-start: calc(var(--conversation-message-gap) * -1);
 }
-/* A day of rows alone (no divider) goes on the list above it; a day that
-   opens a report keeps the air of a new day. */
-.agents-page .agent-day + .agent-day[data-bare]:not(:has(.agent-report:not([data-compact="line"]), .agent-live)) {
-  margin-block-start: calc(var(--conversation-message-gap) * -1);
+/* A day without a divider adds no air of its own: its rows say their day.
+   Its first row goes on the list above when that list ends in a row
+   (data-join="row"), and keeps an entry's gap after anything else; a day
+   that begins with a report keeps the air of a new day (no data-join). */
+.agents-page .agent-day + .agent-day[data-join="entry"] { margin-block-start: 0; }
+.agents-page .agent-day + .agent-day[data-join="row"] { margin-block-start: calc(var(--conversation-message-gap) * -1); }
+
+/* A fold: the part of an entry that opens in place under what opened it
+   (useFold.ts glides its height and keeps the reader's place). Its air rides
+   inside it, so a fold at nothing adds none. */
+.agents-page .agent-fold {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  margin-block-start: calc(var(--space-1) * -1);
+  padding-block-start: var(--space-1);
+}
+/* An entry's fold ends in the air before what follows: content, not padding,
+   so it is clipped and glides with the fold (padding would stand at full size
+   while the fold is at nothing). Before another row, in its day or the next,
+   that air is the gap rows otherwise do without. */
+.agents-page :is(.agent-report-card, .agent-quiet > .agent-fold)::after { content: ""; flex: none; block-size: var(--fold-air, 0px); }
+.agents-page :is(
+  :is(.agent-report[data-compact], .agent-quiet):has(+ :is(.agent-report[data-compact], .agent-quiet)),
+  .agent-day:has(+ .agent-day[data-join="row"]) > .agent-thread:last-child > .agent-thread-items > :is(.agent-report[data-compact], .agent-quiet):last-child
+) > .agent-fold { --fold-air: var(--conversation-message-gap); }
+/* A read report opened under its row. The row stays its header and closes
+   it again; its headline reads whole, in the headline's ink. */
+.agents-page .agent-report-line[aria-expanded="true"] .agent-report-line-title { -webkit-line-clamp: none; }
+.agents-page .agent-report:not([data-signal="failed"]) > .agent-report-line[aria-expanded="true"] .agent-report-line-title { color: var(--text); }
+/* On a wide column the words start under the row's headline. */
+@container agents-page (min-width: 521px) {
+  .agents-page .agent-report-card { padding-inline-start: calc(8px + var(--font-meta) * 5.2 + var(--space-3) * 2); }
 }
 
 /* The mark: what kind of news a run brought. A dot for news (the accent for
@@ -1902,7 +1954,7 @@
 .agents-page .agent-quiet-list {
   display: grid;
   gap: var(--space-1);
-  margin: 0 0 var(--space-1);
+  margin: 0;
   /* Under the row's words, past its mark and day. */
   padding: 0;
   padding-inline-start: calc(8px + var(--font-meta) * 5.2 + var(--space-3) * 2);

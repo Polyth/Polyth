@@ -25,6 +25,7 @@ import { budgetExceeded, failureStreakReached, pendingFeedback, type AgentTrigge
 import { computeNextBeat, validateHeartbeat, type AgentHeartbeat } from "./agentHeartbeat.ts";
 import {
   appendToNotebook,
+  clipReport,
   headlineFrom,
   NOTEBOOK_LIMIT,
   parseAgentReport,
@@ -1570,7 +1571,7 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
    *  notes are protocol, not prose: they are kept apart. */
   const applyReport = (task: ScheduleTask, rec: ScheduleRunRecord, text: string, ok: boolean): void => {
     const report = parseAgentReport(text);
-    if (report.body) rec.summary = report.body.slice(0, SUMMARY_LIMIT);
+    if (report.body) rec.summary = clipReport(report.body, SUMMARY_LIMIT);
     else delete rec.summary;
     const signal = report.signal ?? (ok ? "update" : undefined);
     if (signal) rec.signal = signal;
@@ -1668,7 +1669,7 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
           if (!scan.report && !scan.closed && !expired) continue;
           delete rec.lateReport;
           const late = scan.report;
-          const adopted = !!late && parseAgentReport(late.text).body.slice(0, SUMMARY_LIMIT) !== (rec.summary ?? "");
+          const adopted = !!late && clipReport(parseAgentReport(late.text).body, SUMMARY_LIMIT) !== (rec.summary ?? "");
           if (adopted) {
             applyReport(task, rec, late.text, true);
             if (late.tokens) rec.tokens = late.tokens;

@@ -9,7 +9,7 @@ import {
   BotIcon, Button, CloseIcon, Icon, IconButton, Notice, PlusIcon, ShieldAlertIcon,
 } from "../../../apps/web/src/components/ui/index.ts";
 import { AGENT_ICONS, AgentMark } from "./AgentGlyph.tsx";
-import type { AgentIconId } from "../src/agentPrompt.ts";
+import { budgetWords, type AgentIconId } from "../src/agentPrompt.ts";
 import { TemplateGrid } from "./AgentTemplates.tsx";
 import { agentLive, isScheduledMessage, type AgentLive } from "./agentLive.ts";
 import { statusLine } from "./agentText.ts";
@@ -23,7 +23,9 @@ const glyphOf = (agent: ScheduleTaskDto) => AGENT_ICONS[agent.icon as AgentIconI
 function Row({ host, agent, live }: { host?: WebPackageHost; agent: ScheduleTaskDto; live: AgentLive }) {
   const now = useNow(live.phase === "working");
   const report = live.lastReport;
-  const line = report ? (report.headline ?? report.error ?? report.summary?.split("\n")[0]) : agent.description;
+  const line = report
+    ? (report.headline ?? (report.error ? budgetWords(report.error) : report.summary?.split("\n")[0]))
+    : agent.description;
   return (
     <li className="agents-home-row" data-phase={live.phase} data-unread={live.unread > 0 || undefined}>
       <button type="button" className="agents-home-row-main" onClick={() => host && openAgent(host, agent)}>
