@@ -2,8 +2,11 @@
 // whether their person is using them (visible and touched lately); the device
 // touched most recently wins. While a person works on one device, alerts and
 // the phone's Live Activity go only there (docs/mobile/platform-behavior.md
-// "Only the device in use"). The registry is memory only: a restart forgets
-// it, and with nobody active every device is alerted as before.
+// "Only the device in use"). A page left for another tab or window still
+// counts for a while, as a guess (`hidden`): what its person does not read
+// there is sent on to their other devices (deferredAlerts.ts). The registry
+// is memory only: a restart forgets it, and with nobody active every device
+// is alerted as before.
 import type { AuthPrincipal } from "@polyth/contracts";
 import type { NotificationAccount } from "./notifications.ts";
 
@@ -29,14 +32,27 @@ export function presenceDeviceKey(principal: AuthPrincipal | null | undefined, c
   return undefined;
 }
 
+/** The device a person is using. `hidden`: its page is not on screen, so the
+ *  claim rests on the last touch before the person left it. */
+export interface DeviceUse {
+  device: string;
+  hidden: boolean;
+  /** Server time of the person's last touch there (for a hidden page: when
+   *  they left it). */
+  touchedAt: number;
+}
+
 export interface DevicePresence {
   /** One connection's report. `idleMs` is how long ago its person last
-   *  touched it, measured on that device (a duration, so no clock skew). */
-  report(connection: object, account: NotificationAccount, device: string, active: boolean, idleMs: number): void;
+   *  touched it, measured on that device (a duration, so no clock skew).
+   *  `hidden`: the page is behind another tab or window. */
+  report(connection: object, account: NotificationAccount, device: string, active: boolean, idleMs: number, hidden?: boolean): void;
   /** The connection closed. */
   drop(connection: object): void;
   /** The device this person is using in that Space now, if any. */
   activeDevice(account: NotificationAccount): string | undefined;
+  /** The same, with how sure the claim is. */
+  activeUse(account: NotificationAccount): DeviceUse | undefined;
   /** Told once per change of an account's active device. */
   subscribe(listener: (account: NotificationAccount) => void): () => void;
   close(): void;
@@ -46,6 +62,7 @@ interface Report {
   account: NotificationAccount;
   device: string;
   active: boolean;
+  hidden: boolean;
   /** Server time of the person's last touch. */
   touchedAt: number;
   /** Server time of the report. */
@@ -64,7 +81,7 @@ export function createDevicePresence(opts: { now?: () => number; leaseMs?: numbe
   let timer: ReturnType<typeof setTimeout> | undefined;
   let closed = false;
 
-  const activeDevice = (account: NotificationAccount): string | undefined => {
+  const activeUse = (account: NotificationAccount): DeviceUse | undefined => {
     const key = accountKey(account);
     const at = now();
     let best: Report | undefined;
@@ -72,8 +89,16 @@ export function createDevicePresence(opts: { now?: () => number; leaseMs?: numbe
       if (!report.active || at - report.at > lease || accountKey(report.account) !== key) continue;
       if (!best || report.touchedAt > best.touchedAt || (report.touchedAt === best.touchedAt && report.at > best.at)) best = report;
     }
-    return best?.device;
+    if (!best) return undefined;
+    // One page of the device on screen makes the whole device's claim sure.
+    let hidden = best.hidden;
+    for (const report of reports.values()) {
+      if (!hidden) break;
+      if (report.active && !report.hidden && at - report.at <= lease && report.device === best.device && accountKey(report.account) === key) hidden = false;
+    }
+    return { device: best.device, hidden, touchedAt: best.touchedAt };
   };
+  const activeDevice = (account: NotificationAccount): string | undefined => activeUse(account)?.device;
   const settle = (account: NotificationAccount) => {
     const key = accountKey(account);
     const device = activeDevice(account);
@@ -109,12 +134,12 @@ export function createDevicePresence(opts: { now?: () => number; leaseMs?: numbe
   };
 
   return {
-    report(connection, account, device, active, idleMs) {
+    report(connection, account, device, active, idleMs, hidden = false) {
       if (closed) return;
       const at = now();
       const idle = Number.isFinite(idleMs) ? Math.min(Math.max(0, idleMs), MAX_IDLE_MS) : MAX_IDLE_MS;
       const previous = reports.get(connection);
-      reports.set(connection, { account: { userId: account.userId, spaceId: account.spaceId }, device, active, touchedAt: at - idle, at });
+      reports.set(connection, { account: { userId: account.userId, spaceId: account.spaceId }, device, active, hidden, touchedAt: at - idle, at });
       // A connection that moved to another Space (or device) leaves the old one.
       if (previous && accountKey(previous.account) !== accountKey(account)) settle(previous.account);
       settle(account);
@@ -128,6 +153,7 @@ export function createDevicePresence(opts: { now?: () => number; leaseMs?: numbe
       schedule();
     },
     activeDevice,
+    activeUse,
     subscribe(listener) {
       listeners.add(listener);
       return () => { listeners.delete(listener); };

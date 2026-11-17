@@ -401,7 +401,9 @@ export interface NativePushService {
   unregister(input: { userId: string; spaceId: string; deviceId: string; deviceEndpointId: string }): Promise<boolean>;
   /** Internal account-deletion hook: its devices stop receiving at once. */
   removeAccount(userId: string): Promise<number>;
-  send(input: { userId: string; spaceId: string; notificationId: string; kind: NotificationKind; transitionKey: string; title?: string; body?: string }): Promise<{ sent: number }>;
+  /** `exceptDevice` (a devicePresence.ts device key): that device already has
+   *  the alert (deferredAlerts.ts); the person's other phones get it now. */
+  send(input: { userId: string; spaceId: string; notificationId: string; kind: NotificationKind; transitionKey: string; title?: string; body?: string; exceptDevice?: string }): Promise<{ sent: number }>;
   /** Live Activity push (docs/mobile/platform-behavior.md): the activity's
    *  push token, the chat it shows, and pushes of state changes while the app
    *  is suspended. */
@@ -825,7 +827,8 @@ export function createNativePushService(opts: {
       const firstAt = now();
       // While the person works on one device, only that one is told; the
       // inbox row reaches every device either way.
-      const devices = state.subscriptions.filter((row) => row.userId === input.userId && row.spaceId === input.spaceId && !elsewhere(row));
+      const devices = state.subscriptions.filter((row) => row.userId === input.userId && row.spaceId === input.spaceId && !elsewhere(row)
+        && (input.exceptDevice === undefined || pairedDeviceKey(row.deviceEndpointId) !== input.exceptDevice));
       await Promise.all(devices.map(async (entry) => {
         let sealed: string | undefined;
         if (entry.contentKey && typeof input.title === "string" && typeof input.body === "string") {

@@ -446,11 +446,19 @@ the repository tests do not make provider calls.
 
 While a person works on one of their devices, only that device alerts them.
 Every open page tells the server over `/ws` whether its person is using it
-(`presence {clientId, active, idleMs}`, `apps/web/src/devicePresence.ts`):
-in use means the page is visible and was touched (pointer, key, wheel, touch)
-in the last 5 minutes. Opening or showing the page counts as a touch. The
-page reports when that changes, at most every 15 s while it is touched, and
-every minute while in use; hiding it reports at once.
+(`presence {clientId, active, idleMs, hidden}`, `apps/web/src/devicePresence.ts`):
+
+- **On screen:** in use while it was touched (pointer, key, wheel, touch) in
+  the last 5 minutes. Opening or showing the page counts as a touch.
+- **Behind another tab or window** (`hidden: true`): still in use for 15
+  minutes after its person left it, if it was in use at that moment. Leaving
+  counts as the last touch: the person is most likely at the same device. A
+  page that had already gone idle gains nothing by being hidden (a screen
+  that locks by itself), and a hidden page sees no touches, so the server
+  treats this as a guess (see "Sent on" below).
+
+The page reports when that changes, at most every 15 s while it is touched,
+and every minute while in use.
 
 The server (`packages/server/src/devicePresence.ts`, memory only) keeps each
 report for 150 s and names, per person and Space, the device touched most
@@ -472,10 +480,25 @@ While a device is in use:
   task outcomes and messages (`presence/state {activeElsewhere: true}`); the
   inbox row, the bell and in-page cards still reach every device.
 
-With no device in use (all hidden or idle, or no page open) every device is
-alerted, as before. A restart forgets presence. The phone counts as in use
-only while the app is open, so a locked phone always defers to a device in
-use and gets the alerts once that one goes idle.
+**Sent on.** An alert only the device in use received is kept for up to 15
+minutes (`packages/server/src/deferredAlerts.ts`, memory only, the newest 20
+per person and Space) and goes to the person's other devices, never twice to
+the first one, when its inbox row is still unread and either:
+
+- nobody has been in use for 20 s (the device went idle, was closed, or its
+  report ran out; a page reload or a reconnecting socket is back sooner), or
+- the device in use is only a hidden page, and 2 minutes have passed since
+  both the alert and the person leaving that page.
+
+A row that was read is not sent on. Neither is one whose person moved to
+another device: that device is open and shows the inbox. A device that stays
+on screen and in use keeps its alerts to itself until it goes quiet.
+
+With no device in use (all idle, or no page open) every device is alerted at
+once, as before. A restart forgets presence and what was kept for sending
+on; the inbox rows stay. A phone whose app went to the background counts
+like any hidden page, for as long as its last report lasts (150 s), and a
+device touched later takes over at once.
 
 ### Polyth's push service
 

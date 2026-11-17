@@ -2,11 +2,18 @@
 // learns whether they are working on another device right now. While they
 // are, this device keeps quiet: no sound, no OS notification, no Live Activity
 // (the server likewise skips its push). With nobody active every device is
-// alerted as before. Contract: docs/mobile/platform-behavior.md
+// alerted as before. A page its person left for another tab or window still
+// counts for a while: they are most likely at the same device, and what they
+// do not read there is sent on to their other devices. Contract:
+// docs/mobile/platform-behavior.md
 // "Only the device in use"; server half: packages/server/src/devicePresence.ts.
 
 /** No touch for this long and the page no longer counts as in use. */
 export const PRESENCE_IDLE_MS = 5 * 60_000;
+/** A hidden page (another tab or window in front) counts as in use this long
+ *  after its person left it. It cannot see touches, so the server treats the
+ *  claim as a guess and sends an unread alert on to the other devices. */
+export const PRESENCE_HIDDEN_MS = 15 * 60_000;
 /** While in use, the page re-reports this often (the server's lease is 150 s). */
 export const PRESENCE_HEARTBEAT_MS = 60_000;
 /** Touches re-report at most this often, so the newest device wins quickly. */
@@ -14,7 +21,13 @@ const PRESENCE_TOUCH_GAP_MS = 15_000;
 const CLIENT_ID_KEY = "polyth.presence.client-id";
 const CLIENT_ID = /^[A-Za-z0-9_-]{16,64}$/;
 
-export interface PresenceReport { clientId: string; active: boolean; idleMs: number }
+export interface PresenceReport {
+  clientId: string;
+  active: boolean;
+  idleMs: number;
+  /** The page is not on screen: `active` rests on its last touch alone. */
+  hidden: boolean;
+}
 
 /** The part of SyncClient presence needs. */
 export interface PresenceTransport {
@@ -104,19 +117,34 @@ export function installDevicePresence(
   let touchedAt = env.now();
   let sentActive: boolean | undefined;
   let sentAt = Number.NEGATIVE_INFINITY;
-  const inUse = () => env.visible() && env.now() - touchedAt < PRESENCE_IDLE_MS;
+  let shown = env.visible();
+  // Whether the page was in use when its person left it: only then does it
+  // keep counting while hidden. One that had gone idle first stays idle.
+  let leftInUse = true;
+  const inUse = () => env.visible()
+    ? env.now() - touchedAt < PRESENCE_IDLE_MS
+    : leftInUse && env.now() - touchedAt < PRESENCE_HIDDEN_MS;
   const report = (force: boolean) => {
     const active = inUse();
     const now = env.now();
     if (!force && active === sentActive && (!active || now - sentAt < PRESENCE_TOUCH_GAP_MS)) return;
-    if (!transport.sendPresence({ clientId, active, idleMs: Math.max(0, now - touchedAt) })) return;
+    if (!transport.sendPresence({ clientId, active, idleMs: Math.max(0, now - touchedAt), hidden: !env.visible() })) return;
     sentActive = active;
     sentAt = now;
   };
   const stopListening = env.listen(
     () => { touchedAt = env.now(); report(false); },
     () => {
-      if (env.visible()) touchedAt = env.now();
+      const visible = env.visible();
+      // Showing the page is a touch. So is leaving a page that was in use:
+      // its person just switched away from it. A page that had already gone
+      // idle (a screen locking by itself) gains nothing by being hidden.
+      if (visible) touchedAt = env.now();
+      else if (shown) {
+        leftInUse = env.now() - touchedAt < PRESENCE_IDLE_MS;
+        if (leftInUse) touchedAt = env.now();
+      }
+      shown = visible;
       report(true);
     },
   );

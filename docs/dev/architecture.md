@@ -575,8 +575,8 @@ answers 401 `unauthorized` without a valid session cookie, and `/ws` +
 ## WS protocol (`/ws`)
 
 Client → server: `subscribe {sessionId, afterSeq}`, `browser/subscribe
-{browserSessionId, afterRevision}`, `presence {clientId, active, idleMs}` (whether
-the person is using this page; see [Only the device in use](../mobile/platform-behavior.md#only-the-device-in-use)),
+{browserSessionId, afterRevision}`, `presence {clientId, active, idleMs, hidden}` (whether
+the person is using this page, and whether it is behind another tab or window; see [Only the device in use](../mobile/platform-behavior.md#only-the-device-in-use)),
 `dictation/start {dictationId}`, and live dictation
 audio as binary frames (`packages/dictation/src/wire.ts`; JSON/base64 audio is refused on
 the socket). A finished recording is uploaded over HTTP instead (`POST

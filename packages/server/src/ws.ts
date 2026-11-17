@@ -595,7 +595,7 @@ export function createWsGateway(
         browserSessionId?: string; afterRevision?: number;
         tabId?: string; visible?: boolean; quality?: number;
         dictationId?: string;
-        clientId?: unknown; active?: unknown; idleMs?: unknown;
+        clientId?: unknown; active?: unknown; idleMs?: unknown; hidden?: unknown;
       } = {};
 
       try {
@@ -700,7 +700,7 @@ export function createWsGateway(
         if (!device) return;
         if (sub.presenceDevice !== device) sub.presenceElsewhere = undefined;
         sub.presenceDevice = device;
-        presence.report(ws, account, device, msg.active === true, typeof msg.idleMs === "number" ? msg.idleMs : 0);
+        presence.report(ws, account, device, msg.active === true, typeof msg.idleMs === "number" ? msg.idleMs : 0, msg.hidden === true);
         sendPresenceState(ws, sub);
         return;
       }

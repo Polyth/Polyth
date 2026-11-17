@@ -390,7 +390,9 @@ export interface PushService {
   removeAccount(userId: string): number;
   /** Encrypt + POST to every subscription; dead endpoints (404/410) drop.
    *  `failed` counts other rejections and network errors (kept, logged). */
-  send(account: NotificationAccount, payload: PushPayload): Promise<PushSendResult>;
+  /** `exceptDevice`: this device already has the alert (deferredAlerts.ts);
+   *  every other subscription of the person gets it now. */
+  send(account: NotificationAccount, payload: PushPayload, opts?: { exceptDevice?: string }): Promise<PushSendResult>;
   send(payload: PushPayload): Promise<PushSendResult>;
 }
 
@@ -568,7 +570,7 @@ export function createPushService(opts: {
       return before - s.subs.length;
     },
 
-    async send(first: NotificationAccount | PushPayload, second?: PushPayload) {
+    async send(first: NotificationAccount | PushPayload, second?: PushPayload, sendOpts?: { exceptDevice?: string }) {
       const account = second === undefined ? LEGACY_TEST_ACCOUNT : first as NotificationAccount;
       const payload = second === undefined ? first as PushPayload : second;
       if (!validAccount(account) || !hasAccess(account)) return { sent: 0, dropped: 0, failed: 0, droppedEndpoints: [] };
@@ -577,7 +579,11 @@ export function createPushService(opts: {
       // (an unnamed older subscription counts as another device). A test push
       // the person asked for goes everywhere.
       const active = payload.test === true ? undefined : opts.activeDevice?.(account);
-      const owned = s.subs.filter((sub) => sameAccount(sub.recipient, account) && (active === undefined || sub.device === active));
+      // An alert sent on from the device that had it first goes to the others.
+      const except = sendOpts?.exceptDevice;
+      const owned = s.subs.filter((sub) => sameAccount(sub.recipient, account)
+        && (active === undefined || sub.device === active)
+        && (except === undefined || sub.device !== except));
       if (owned.length === 0) return { sent: 0, dropped: 0, failed: 0, droppedEndpoints: [] };
       const plaintext = Buffer.from(JSON.stringify(payload));
       // A person's message is worth delivering after a phone wakes from doze

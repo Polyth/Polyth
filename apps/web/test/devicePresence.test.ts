@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   activeElsewhere, installDevicePresence, presenceClientId, subscribeActiveElsewhere,
-  PRESENCE_HEARTBEAT_MS, PRESENCE_IDLE_MS, type PresenceEnvironment, type PresenceReport,
+  PRESENCE_HEARTBEAT_MS, PRESENCE_HIDDEN_MS, PRESENCE_IDLE_MS, type PresenceEnvironment, type PresenceReport,
 } from "../src/devicePresence.ts";
 
 const ID = "abcdefghijklmnop0123";
@@ -41,22 +41,44 @@ function rig(open = true) {
 test("installing reports active once the socket is open; touches are throttled to 15 s", () => {
   const r = rig();
   const stop = installDevicePresence(r.transport, r.env, ID);
-  assert.deepEqual(r.reports, [{ clientId: ID, active: true, idleMs: 0 }]);
+  assert.deepEqual(r.reports, [{ clientId: ID, active: true, idleMs: 0, hidden: false }]);
   r.advance(5_000); r.touch();
   assert.equal(r.reports.length, 1, "a touch within 15 s does not re-report");
   r.advance(11_000); r.touch();
   assert.equal(r.reports.length, 2, "after 15 s it does");
-  assert.deepEqual(r.reports[1], { clientId: ID, active: true, idleMs: 0 });
+  assert.deepEqual(r.reports[1], { clientId: ID, active: true, idleMs: 0, hidden: false });
   stop();
 });
 
-test("hiding reports inactive at once; showing again reports active", () => {
+test("leaving a page in use keeps it counting, marked hidden, until the hidden window runs out", () => {
   const r = rig();
   const stop = installDevicePresence(r.transport, r.env, ID);
+  r.advance(60_000);
   r.setVisible(false); r.visibility();
-  assert.equal(r.reports.at(-1)!.active, false);
-  r.setVisible(true); r.visibility();
+  assert.deepEqual(r.reports.at(-1), { clientId: ID, active: true, idleMs: 0, hidden: true }, "leaving is the last touch");
+  r.advance(PRESENCE_HIDDEN_MS - PRESENCE_HEARTBEAT_MS); r.beat();
   assert.equal(r.reports.at(-1)!.active, true);
+  assert.equal(r.reports.at(-1)!.hidden, true);
+  r.advance(PRESENCE_HEARTBEAT_MS); r.beat();
+  assert.equal(r.reports.at(-1)!.active, false, "the hidden window ended");
+  const count = r.reports.length;
+  r.advance(PRESENCE_HEARTBEAT_MS); r.beat();
+  assert.equal(r.reports.length, count, "an idle hidden page stops reporting");
+  r.setVisible(true); r.visibility();
+  assert.deepEqual(r.reports.at(-1), { clientId: ID, active: true, idleMs: 0, hidden: false }, "showing it is a touch");
+  stop();
+});
+
+test("a page that was already idle gains nothing by being hidden", () => {
+  const r = rig();
+  const stop = installDevicePresence(r.transport, r.env, ID);
+  r.advance(PRESENCE_IDLE_MS); r.beat();
+  assert.equal(r.reports.at(-1)!.active, false);
+  r.setVisible(false); r.visibility();
+  assert.equal(r.reports.at(-1)!.active, false, "hiding is no touch for an idle page");
+  assert.equal(r.reports.at(-1)!.hidden, true);
+  r.advance(PRESENCE_HEARTBEAT_MS); r.beat();
+  assert.equal(r.reports.at(-1)!.active, false);
   stop();
 });
 

@@ -397,6 +397,12 @@ test("with an active device only that phone is alerted; a non-phone device alert
     active = "client:abcdefghijklmnop";
     assert.deepEqual(await service.send({ ...to, notificationId: "n-3", transitionKey: "k3" }), { sent: 0 });
     assert.equal(relay.alerts.length, 0);
+    // An alert sent on from the device that had it skips only that device.
+    active = undefined;
+    assert.deepEqual(await service.send({ ...to, notificationId: "n-4", transitionKey: "k4", exceptDevice: "device:end_a" }), { sent: 1 });
+    assert.deepEqual(tokens(), [tokB]);
+    relay.alerts.length = 0;
+    assert.deepEqual(await service.send({ ...to, notificationId: "n-5", transitionKey: "k5", exceptDevice: "browser:remembered" }), { sent: 2 });
   } finally { service.close(); }
 });
 

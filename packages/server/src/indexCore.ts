@@ -181,6 +181,7 @@ import {
 } from "./smallModel.ts";
 import { createWsGateway, type WsGateway } from "./ws.ts";
 import { createDevicePresence } from "./devicePresence.ts";
+import { createDeferredAlerts } from "./deferredAlerts.ts";
 import { createRouteRegistry } from "./routeRegistry.ts";
 import { createPackageLifecycle } from "./packageLifecycle.ts";
 import {
@@ -2403,6 +2404,23 @@ export async function boot(opts: BootOptions = {}) {
   });
   liveActivityTouched = nativePush.sessionTouched;
   devicePresence.subscribe(nativePush.presenceChanged);
+  // What only the device in use was told is sent on to the person's other
+  // devices if it stays unread there (deferredAlerts.ts).
+  const deferredAlerts = createDeferredAlerts<{ payload: PushPayload; record: NotificationRecord }>({
+    activeUse: devicePresence.activeUse,
+    unread: async (account, id) => (await notifications.list(account)).items.some((item) => item.id === id && !item.read),
+    deliver: async (account, { payload, record }, exceptDevice) => {
+      await Promise.allSettled([
+        push.send(account, payload, { exceptDevice }),
+        nativePush.send({
+          userId: account.userId, spaceId: account.spaceId,
+          notificationId: record.id, kind: record.kind, transitionKey: record.key,
+          title: record.title, body: record.body, exceptDevice,
+        }),
+      ]);
+    },
+  });
+  devicePresence.subscribe(deferredAlerts.presenceChanged);
   // One recipient's delivery leg: durable inbox row -> recipient-filtered WS
   // broadcast -> independent Web/native push. Shared by the turn notifier and
   // by person-message notifications so neither duplicates the ordering.
@@ -2422,6 +2440,9 @@ export async function boot(opts: BootOptions = {}) {
     });
     if (!record) return;
     broadcast.notification?.(record, recipient);
+    // Held before the sends, so a device going quiet meanwhile is not missed.
+    const inUse = devicePresence.activeUse(recipient);
+    if (inUse) deferredAlerts.hold(recipient, record.id, { payload, record }, inUse.device);
     // Delivery transports are independent best-effort legs after the durable
     // row + WS fan-out. A failed or stalled leg cannot suppress the other.
     await Promise.allSettled([
@@ -3761,6 +3782,7 @@ export async function boot(opts: BootOptions = {}) {
       live?.close();
       liveActivityTouched = null;
       nativePush.close();
+      deferredAlerts.close();
       devicePresence.close();
       await runtimeStorageMaintenance.dispose();
       await packageLifecycle.stopIngress();
