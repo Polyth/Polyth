@@ -65,16 +65,28 @@ server, so a service manager's stop signal reaches the server itself. Without
 `%LOCALAPPDATA%\Polyth Server\data` (Windows), apart from Desktop's, so both can run on
 one machine. Every variable of [Local from source](#local-from-source) applies.
 
-A systemd unit:
+Run it under the machine's service manager with one command:
 
-```ini
-[Service]
-User=polyth
-EnvironmentFile=/etc/polyth/polyth.env
-ExecStart=/usr/bin/node /opt/polyth/bin/polyth.mjs server start
-KillMode=mixed
-Restart=on-failure
+```bash
+polyth service install                      # systemd --user unit, or a macOS LaunchAgent
+sudo polyth service install --system --run-as polyth --env-file /etc/polyth/polyth.env
+polyth service status
+polyth service uninstall
 ```
+
+`install` writes `polyth.service` (Linux: `~/.config/systemd/user/`, or
+`/etc/systemd/system/` with `--system`) or `app.polyth.server.plist` (macOS:
+`~/Library/LaunchAgents/`, or `/Library/LaunchDaemons/`), then enables and starts it.
+It records `POLYTH_DATA_DIR` (`--data-dir` or `POLYTH_DATA_DIR`, else the default above
+for the account the service runs as, which is where `polyth update` run by that account
+looks; with another directory, pass it to `polyth update` too) and, when given,
+`--host` and `--port`; it never writes tokens or secrets, so put those in the
+`--env-file` (systemd). A user service needs `loginctl enable-linger $USER` to run
+without a login session; a system service never runs as root unless you name it.
+`--dry-run` prints the file and commands, `--no-start` only writes, `--force` replaces
+an existing file and restarts the service with it. A hand-written unit
+(`ExecStart=/usr/bin/node /opt/polyth/bin/polyth.mjs server start`, `KillMode=mixed`,
+`Restart=on-failure`) still works.
 
 ### Updating a packaged server
 

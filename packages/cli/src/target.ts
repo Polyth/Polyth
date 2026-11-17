@@ -50,11 +50,12 @@ export function desktopDataDir(env: NodeJS.ProcessEnv = process.env, os: NodeJS.
 
 /** Default data directory of a packaged server install (the `polyth` npm
  *  package, a release tarball, Homebrew). It is not Desktop's, so the app and
- *  a server can run on one machine; `POLYTH_DATA_DIR` overrides it. */
-export function serverDataDir(env: NodeJS.ProcessEnv = process.env, os: NodeJS.Platform = platform()): string {
-  if (os === "win32") return join(env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "Polyth Server", "data");
-  if (os === "darwin") return join(homedir(), "Library", "Application Support", "Polyth Server", "data");
-  return join(env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "polyth-server", "data");
+ *  a server can run on one machine; `POLYTH_DATA_DIR` overrides it. `home`
+ *  names another account's home (`polyth service install --system`). */
+export function serverDataDir(env: NodeJS.ProcessEnv = process.env, os: NodeJS.Platform = platform(), home: string = homedir()): string {
+  if (os === "win32") return join(env.LOCALAPPDATA ?? join(home, "AppData", "Local"), "Polyth Server", "data");
+  if (os === "darwin") return join(home, "Library", "Application Support", "Polyth Server", "data");
+  return join(env.XDG_DATA_HOME ?? join(home, ".local", "share"), "polyth-server", "data");
 }
 
 /** Root of the packaged server this CLI ships in. Only that package's
