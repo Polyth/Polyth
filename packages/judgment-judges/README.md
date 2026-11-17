@@ -42,7 +42,7 @@ trimmed, and known credential shapes (API keys, tokens, bearer headers,
 
 ## Built-in uses
 
-All three are registered through `JUDGMENT_SERVICE.registerUse`, are off by default,
+All four are registered through `JUDGMENT_SERVICE.registerUse`, are off by default,
 and are switched on and tuned in **Settings → Judgment → Uses**. Use state is
 resolved before every evaluation. Registration follows the live Judgment
 service, so either package may enable first.
@@ -52,6 +52,7 @@ service, so either package may enable first.
 | `judges.completion-check` | `judges.completion-check.v1` | long: request ≤1,500 chars, answer tail ≤3,000, commands, changed files, open todos | choice `verified` / `claimed_only` / `cannot_tell` | top answer is `claimed_only`, P ≥ `threshold` (0.7) and lead over the next ≥ `margin` (0.2) |
 | `judges.needs-you` | `judges.needs-you.v1` | short: last 400 chars of the final answer | noul “Is the assistant waiting for the person to answer or decide?” | P ≥ `threshold` (0.7) |
 | `judges.keep-warm` | `judges.keep-warm.v1` | short: request head ≤200 chars, answer tail ≤400, open-todo count | choice `unfinished` / `finished` / `cannot_tell` | top answer is `unfinished`, P ≥ `threshold` (0.8) and lead ≥ `margin` (0.3); arms keep-alives, records nothing |
+| `judges.quiet-command` | `judges.quiet-command.v1` | short: tool name, input ≤600 chars, minutes running/quiet, ever showed activity, agent's last text before the call ≤600 | choice `working` / `stuck` / `cannot_tell` | top answer is `working` and P ≥ `threshold` (0.75); presses Keep running |
 
 `judges.completion-check` also has `suggestFollowUp` (boolean, default off).
 When it is on, the marker carries a fixed “please verify” text, shown as an
@@ -65,6 +66,21 @@ notification as a *question* ("is waiting for your answer") with the same key,
 so the OS notification is replaced; the notification centre keeps both rows.
 A session that is working, waiting on a request, or delegated is not notified
 again. The user's notification kinds still apply (the question kind).
+
+## Quiet commands
+
+`judges.quiet-command` (`src/quietCommand.ts`) listens on `SERVER_TOOL_QUIET_BUS`,
+which Polyth publishes once per quiet stretch, about a minute before the silence
+stop (9 minutes of silence by default; never for a call already kept). Skipped
+when the use is off for the event's Space, the event has no `spaceId`, or less
+than 10 s remain. The call's input and the agent's last text come from the
+event's own Space through its Space facade (`host.forSpace`), redacted and
+clipped. One `working` / `stuck` / `cannot_tell` question, timeout
+`min(45 s, stopsAt − now − 5 s)`. Only a `working` answer at or above
+`threshold` calls `keepToolRunning(sessionId, callId, { via: "judge", useId })`
+(the call then runs to the 60-minute limit) and records a marker. Stuck,
+unsure, low chance, timeout, error and a `conflict` (the call already ended)
+all do nothing: the stop runs.
 
 ## Keep warm
 

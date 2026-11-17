@@ -2,13 +2,14 @@ import { join } from "node:path";
 import type { JsonObject, SessionEvent, SessionProjection, SessionService, SpaceContext } from "@polyth/contracts";
 import {
   localOnlyRemoteAccess, SERVER_MODEL_ROUTING, SERVER_PERMISSION_WAITING_BUS, SERVER_SESSION_ISOLATION, SERVER_TURN_COMPLETION_BUS,
-  SERVER_TURN_STOPPED_BUS, SESSION_ATTENTION_SERVICE, systemSessionsForSession, type ServerPackage, type ServerPackageHost,
+  SERVER_TOOL_QUIET_BUS, SERVER_TURN_STOPPED_BUS, SESSION_ATTENTION_SERVICE, systemSessionsForSession, type ServerPackage, type ServerPackageHost,
 } from "@polyth/plugins";
 import { sessionCacheFacts } from "@polyth/usage/session-cache";
 import { JUDGMENT_SERVICE, type JudgmentService } from "@polyth/judgment/server";
 import type { JudgmentQuestion, JudgmentResult } from "@polyth/judgment";
 import { BUILTIN_USES, runCompletionCheck, runNeedsYou } from "./builtins.ts";
 import { cacheIneligible, createKeepWarm, judgeContinuation, KEEP_ALIVE_PROMPT, KEEP_WARM, keepAliveBudget, keepWarmParams } from "./keepWarm.ts";
+import { QUIET_COMMAND, runQuietCommand, type QuietEvent } from "./quietCommand.ts";
 import { askJudge, assessmentFor, customScope, judgeTarget, requestVerdict, type CustomOutcome } from "./custom.ts";
 import { ACTS_FOR_NO_ONE, runAction, sendBlocked, sendMessage, SPACE_NEVER_APPROVES, type ActionTarget } from "./actions.ts";
 import { currentRoute, routeAsk, routeDecision, routeOptions } from "./routes.ts";
@@ -54,7 +55,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     if (registered && registered.service !== service) { registered.off.forEach((off) => off()); registered = undefined; }
     if (service && !registered) {
       const off: Array<() => void> = [];
-      for (const use of [...BUILTIN_USES, KEEP_WARM]) {
+      for (const use of [...BUILTIN_USES, KEEP_WARM, QUIET_COMMAND]) {
         try { off.push(service.registerUse(use)); }
         catch (error) { console.warn(`[polyth] judges: Judgment use ${use.id} registration failed`, error); }
       }
@@ -210,6 +211,16 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         if (outcome.wouldFire && live()) await fire(judge, outcome, sessionId, access, { turnSeq: turn.turnSeq }, live);
       } catch (error) { console.warn("[polyth] judges: custom judge failed", error); }
     }
+  };
+
+  /** A call silent for most of its window: a judge may keep it running before the silence stop. */
+  const evaluateQuiet = async (event: QuietEvent, admitted: number) => {
+    const service = judgment();
+    // The tenant boundary: only the event's own Space, through its own facade.
+    if (!service || admitted !== generation || !event.spaceId) return;
+    const space = host.systemSpaceContext(event.spaceId);
+    const outcome = await runQuietCommand({ judgment: service, space, sessions: host.forSpace(space).sessions, signal: lifetime.signal }, event);
+    if (outcome.kept && enabled && admitted === generation) await record(event.sessionId, outcome.assessment);
   };
 
   /** A permission request waiting for a person: permission judges may answer it or change Auto-Approve. */
@@ -494,6 +505,10 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         }),
         host.services.get(SERVER_TURN_STOPPED_BUS)?.subscribe(({ sessionId, reason }) => {
           if (reason === "error") enqueue(`limit:${sessionId}`, () => evaluateLimit(sessionId, admitted));
+        }),
+        host.services.get(SERVER_TOOL_QUIET_BUS)?.subscribe((event) => {
+          if (!event.spaceId) return;
+          enqueue(`quiet:${event.sessionId}:${event.callId}`, () => evaluateQuiet(event, admitted));
         }),
       ].filter((subscription): subscription is { dispose(): void } => !!subscription);
       keepWarmTimer ??= setInterval(() => { void keepWarm.tick(); }, KEEP_WARM_TICK_MS);

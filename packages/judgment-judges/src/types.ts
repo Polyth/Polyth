@@ -225,7 +225,7 @@ export interface AssessmentAction {
 export interface AssessmentData {
   useId: string;
   scope: string;
-  kind: "completion-check" | "needs-you" | "custom";
+  kind: "completion-check" | "needs-you" | "quiet-command" | "custom";
   /** Short human title of the judge that fired. */
   title: string;
   label: string;
