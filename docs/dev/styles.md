@@ -437,6 +437,18 @@ keeps the answer size for both its header and its cells. Code *blocks* stay
 the one intentionally distinct step, because they are framed surfaces rather
 than prose words.
 
+A Markdown link is `.md-link` wherever Markdown renders (answers, the user's
+own prompt, quotes, previews), never the browser's blue or visited purple. Its
+ink is `--link`, falling back to `--chat-ink-accent`/`--accent-text`: a style
+with its own link colour sets `--link` on `html` (macOS styles use `--blue`),
+and the accent-tinted user message sets it to `--accent-on-wash` (macOS styles:
+`--blue` leaned toward the ink). Visited links keep that ink; the underline is a
+40% hairline at `0.22em` offset that firms to the full colour with a faint wash
+under the pointer, and keyboard focus gets the `--focus-ring` outline. A bare
+URL (`.md-link-url`) breaks anywhere instead of widening the bubble, and its
+`https://` / `www.` (`.md-link-scheme`) steps back in ink while staying in the
+copied text.
+
 A Markdown table is a grid, not a paragraph that happens to have rules. It
 must read correctly at any width and with any cell text, so the renderer wraps
 it in `.md-table-scroll` and the CSS gives the table `width: max-content;

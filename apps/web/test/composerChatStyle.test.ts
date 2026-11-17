@@ -251,7 +251,11 @@ test("conversation code surfaces follow the configured glass material", () => {
   );
   assert.match(css, /\.msg \.bubble pre code,\s*\.msg \.bubble \.md-code-block pre\s*\{[^}]*background:\s*transparent/s);
   assert.match(css, /\.msg \.bubble pre,\s*\.msg \.bubble pre code\s*\{[^}]*font-size:\s*var\(--font-code\)/s);
-  assert.match(css, /\.msg\.assistant > \.bubble a\s*\{[^}]*color:\s*var\(--accent\)/s);
+  // Markdown links take the theme's link ink everywhere (never browser
+  // blue/purple), visited included, and the accent-tinted prompt its on-wash ink.
+  assert.match(css, /\.md-link \{[^}]*--md-link-ink:\s*var\(--link, var\(--chat-ink-accent, var\(--accent-text\)\)\);[^}]*color:\s*var\(--md-link-ink\)/s);
+  assert.match(css, /\.md-link:visited \{ color: var\(--md-link-ink\); \}/);
+  assert.match(css, /\.msg\.user \.bubble \{ --link: var\(--accent-on-wash\); \}/);
 });
 
 test("composer command suggestions stay compact and readable with backdrop blur", () => {

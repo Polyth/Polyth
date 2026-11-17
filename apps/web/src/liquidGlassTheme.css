@@ -507,13 +507,8 @@ html[data-theme-style="liquid-glass"] .msg.user .bubble { box-shadow: none; }
 /* Links take `blue`, separate from the accent as in AppKit. In the user's own
    accent-tinted message (which otherwise keeps the browser's link blue) it
    leans toward the label ink to hold 4.5:1 on the tint. */
-html[data-theme-style="liquid-glass"] .msg { --lg-link: var(--blue); }
-html[data-theme-style="liquid-glass"] .msg.user .bubble { --lg-link: color-mix(in srgb, var(--blue) 82%, var(--text)); }
-html[data-theme-style="liquid-glass"] :is(.msg.assistant > .bubble, .msg.user .bubble) a {
-  color: var(--lg-link);
-  text-decoration-color: color-mix(in srgb, var(--lg-link) 40%, transparent);
-}
-html[data-theme-style="liquid-glass"] :is(.msg.assistant > .bubble, .msg.user .bubble) a:hover { color: var(--lg-link); text-decoration-color: currentColor; }
+html[data-theme-style="liquid-glass"] { --link: var(--blue); }
+html[data-theme-style="liquid-glass"] .msg.user .bubble { --link: color-mix(in srgb, var(--blue) 82%, var(--text)); }
 
 /* ---- progress, spinner, scrollbars, selection, focus ------------------------ */
 /* A flat accent bar in a rounded track. */

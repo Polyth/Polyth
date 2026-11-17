@@ -6986,16 +6986,38 @@ li > .md-quote { margin-block: calc(var(--prose-gap) * 0.6); }
 .md-table :is(th, td) code {
   white-space: nowrap;
 }
-/* Links in answers use the active theme accent instead of browser blue. */
-.msg.assistant > .bubble a {
-  color: var(--accent);
+/* Markdown links, everywhere markdown renders (answers, the reader's own
+   prompt, quotes, previews). One look for every theme, tuned by `--link`:
+   the text-safe accent by default (washed toward the ink over a wallpaper),
+   a theme's own link colour where it has one (macOS-style `--blue`), and
+   the on-wash accent inside the accent-tinted user message. Visited links
+   keep the same colour: a conversation is not a browsing history, and the
+   browser's purple clashes with every palette. The underline is a quiet
+   40% hairline that firms to the full colour under the pointer or focus. */
+.md-link {
+  --md-link-ink: var(--link, var(--chat-ink-accent, var(--accent-text)));
+  color: var(--md-link-ink);
+  text-decoration-line: underline;
+  text-decoration-color: color-mix(in srgb, var(--md-link-ink) 40%, transparent);
+  text-decoration-thickness: max(1px, 0.07em);
+  text-underline-offset: 0.22em;
+  text-decoration-skip-ink: auto;
   border-radius: min(var(--radius-control), 0.25em);
-  text-decoration-color: var(--accent-line);
-  text-decoration-thickness: 1px;
-  text-underline-offset: 0.18em;
-  transition: color var(--motion-fast) var(--motion-ease), text-decoration-color var(--motion-fast) var(--motion-ease);
+  transition: color var(--motion-fast) var(--motion-ease), text-decoration-color var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease);
 }
-.msg.assistant > .bubble a:hover { color: var(--accent-hi); text-decoration-color: currentColor; }
+.md-link:visited { color: var(--md-link-ink); }
+@media (hover: hover) {
+  .md-link:hover { text-decoration-color: currentColor; background-color: color-mix(in srgb, var(--md-link-ink) 8%, transparent); }
+}
+.md-link:active { text-decoration-color: currentColor; background-color: color-mix(in srgb, var(--md-link-ink) 12%, transparent); }
+.md-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; text-decoration-color: currentColor; }
+/* A bare address breaks anywhere instead of pushing the bubble wider, and
+   reads by its host: the scheme stays in the copied text, one step quieter. */
+.md-link-url { overflow-wrap: anywhere; word-break: normal; }
+.md-link-scheme { opacity: 0.62; }
+/* The reader's own message is accent-tinted: its links take the accent that
+   holds 4.5:1 on its own wash. */
+.msg.user .bubble { --link: var(--accent-on-wash); }
 .md-blocked { opacity: 0.7; text-decoration: line-through; }
 .md-img-btn { background: none; border: 0; padding: 0; cursor: zoom-in; display: inline-block; max-width: 100%; }
 .md-img { max-width: min(420px, 100%); max-height: 280px; border-radius: var(--radius-control); border: 1px solid var(--border-soft); display: block; }

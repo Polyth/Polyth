@@ -104,6 +104,23 @@ function InlineImage({ src, alt }: { src: string; alt: string }) {
   );
 }
 
+/** The visible text of a link whose label is its own address (a bare URL),
+ *  or null for a labelled link. */
+function bareUrlText(n: Extract<Inline, { kind: "link" }>): string | null {
+  const only = n.children.length === 1 ? n.children[0] : undefined;
+  return only?.kind === "text" && only.text === n.href ? only.text : null;
+}
+
+const URL_LEAD_RE = /^(https?:\/\/(?:www\.)?)(.+)$/i;
+
+/** A bare URL reads by its host: the scheme (and `www.`) stays in the text,
+ *  so copying keeps the whole address, but steps back in ink. */
+function renderBareUrl(text: string): ReactNode {
+  const m = URL_LEAD_RE.exec(text);
+  if (!m) return text;
+  return <><span className="md-link-scheme">{m[1]}</span>{m[2]}</>;
+}
+
 export function renderInline(nodes: Inline[], keyBase: string, linkify = true): ReactNode[] {
   const out: ReactNode[] = [];
   nodes.forEach((n, i) => {
@@ -133,7 +150,14 @@ export function renderInline(nodes: Inline[], keyBase: string, linkify = true): 
         }
         const href = sanitizeLinkHref(n.href);
         if (href === null) out.push(<span key={k}>{renderInline(n.children, k, false)}</span>);
-        else out.push(<a key={k} href={href} target="_blank" rel="noopener noreferrer">{renderInline(n.children, k, false)}</a>);
+        else {
+          const bare = bareUrlText(n);
+          out.push(
+            <a key={k} className={bare ? "md-link md-link-url" : "md-link"} href={href} target="_blank" rel="noopener noreferrer">
+              {bare ? renderBareUrl(bare) : renderInline(n.children, k, false)}
+            </a>,
+          );
+        }
         break;
       }
       case "image":
