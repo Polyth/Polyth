@@ -19,6 +19,13 @@ export const ANTIGRAVITY_PROVIDER_ID = "antigravity";
 export const ANTIGRAVITY_PROVIDER_NAME = "Antigravity";
 
 const GOOGLE_PRIMARY = "https://cloudcode-pa.googleapis.com";
+/** The host `agy` itself talks to (every `v1internal` call in its log, quota
+ *  included). The production host still answers `retrieveUserQuotaSummary`
+ *  with 200, but with a placeholder — every bucket full and a reset that slides
+ *  to now + window — so it only stands in when this host cannot answer.
+ *  Verified 2026-11-17 against agy 1.5.10. */
+const ANTIGRAVITY_API = "https://daily-cloudcode-pa.googleapis.com";
+const QUOTA_HOSTS = [ANTIGRAVITY_API, GOOGLE_PRIMARY] as const;
 const DEFAULT_PROJECT = "rising-fact-p41fc";
 const DEFAULT_COOLDOWN_MS = 5 * 60_000;
 const MAX_COOLDOWN_MS = 60 * 60_000;
@@ -143,6 +150,29 @@ const safeJson = async (
 
 const SIGN_IN_AGAIN = "Antigravity session expired — please sign in again with agy";
 
+/** Posts to the first quota host that answers. A rejected login (401) and a
+ *  rate limit (429) stop at once: the next host would only serve its placeholder
+ *  over the real reading. A 403 is final only on the last host. */
+const postQuota = async (
+  runtime: QuotaRuntime,
+  method: string,
+  init: RequestInit,
+  authMessage: string,
+): Promise<Record<string, unknown>> => {
+  let lastError: unknown = null;
+  for (const [index, host] of QUOTA_HOSTS.entries()) {
+    try {
+      return await safeJson(runtime, `${host}/v1internal:${method}`, init, authMessage);
+    } catch (err: unknown) {
+      const status = (err as { status?: number })?.status;
+      if (status === 401 || status === 429) throw err;
+      if (status === 403 && index === QUOTA_HOSTS.length - 1) throw err;
+      lastError = err;
+    }
+  }
+  throw lastError;
+};
+
 /** An OpenCode plugin login, refreshed with the plugin's own installed client. */
 async function refreshPluginToken(
   runtime: QuotaRuntime,
@@ -197,9 +227,9 @@ async function fetchAntigravityUsage(
 
   // 0. retrieveUserQuotaSummary: provides official 5-hour and weekly limits for Google and third-party groups
   try {
-    const summary = await safeJson(
+    const summary = await postQuota(
       runtime,
-      `${GOOGLE_PRIMARY}/v1internal:retrieveUserQuotaSummary`,
+      "retrieveUserQuotaSummary",
       {
         method: "POST",
         headers,
@@ -266,9 +296,9 @@ async function fetchAntigravityUsage(
   // 1. retrieveUserQuota: model-level quota buckets with reset times and remaining fractions
   if (rawModels.size === 0) {
     try {
-      const quotas = await safeJson(
+      const quotas = await postQuota(
         runtime,
-        `${GOOGLE_PRIMARY}/v1internal:retrieveUserQuota`,
+        "retrieveUserQuota",
         {
           method: "POST",
           headers,
@@ -296,6 +326,7 @@ async function fetchAntigravityUsage(
 
   // 2. fetchAvailableModels fallback / augmentation
   const endpoints = [
+    ANTIGRAVITY_API,
     "https://daily-cloudcode-pa.sandbox.googleapis.com",
     "https://autopush-cloudcode-pa.sandbox.googleapis.com",
     GOOGLE_PRIMARY,

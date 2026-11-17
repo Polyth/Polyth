@@ -1097,6 +1097,93 @@ test("Antigravity maps 5-hour and weekly limits from retrieveUserQuotaSummary", 
   ]);
 });
 
+// Shapes recorded 2026-11-17 from the same login: agy's own host carried the
+// real reading, the production host a full placeholder whose reset slides to
+// now + window.
+const AGY_QUOTA_HOST = "https://daily-cloudcode-pa.googleapis.com/";
+const PRODUCTION_QUOTA_HOST = "https://cloudcode-pa.googleapis.com/";
+const quotaSummary = (gemini: [number, number], thirdParty: [number, number], now: number) => {
+  const bucket = (bucketId: string, window: string, remainingFraction: number, ms: number) =>
+    ({ bucketId, window, remainingFraction, resetTime: new Date(now + ms).toISOString() });
+  return {
+    groups: [
+      {
+        displayName: "Gemini Models",
+        buckets: [
+          bucket("gemini-weekly", "weekly", gemini[0], 4 * 86_400_000),
+          bucket("gemini-5h", "5h", gemini[1], 4 * 3_600_000),
+        ],
+      },
+      {
+        displayName: "Claude and GPT models",
+        buckets: [
+          bucket("3p-weekly", "weekly", thirdParty[0], 7 * 86_400_000),
+          bucket("3p-5h", "5h", thirdParty[1], 5 * 3_600_000),
+        ],
+      },
+    ],
+  };
+};
+const antigravityOver = (now: number, route: (url: string) => Response) => {
+  const calls: string[] = [];
+  const agy = provider(discoverQuotaProviders({
+    readAuth: () => ({ antigravity: { access: "valid-token" } }),
+    env: { PATH: "" },
+    homedir: "/unused",
+    now: () => now,
+    readFile: () => { throw Object.assign(new Error("missing"), { code: "ENOENT" }); },
+    fetchImpl: (async (input: string | URL | Request) => {
+      const url = String(input);
+      calls.push(url);
+      return route(url);
+    }) as typeof fetch,
+  }), "antigravity");
+  return { agy, calls };
+};
+const usedByWindow = (snapshot: { windows: { id: string; used: number }[] }) =>
+  Object.fromEntries(snapshot.windows.map((w) => [w.id, w.used]));
+
+test("Antigravity reads its quota summary from agy's own host, not the production placeholder", async () => {
+  const now = 1_800_000_000_000;
+  const { agy, calls } = antigravityOver(now, (url) => {
+    if (!url.endsWith("/v1internal:retrieveUserQuotaSummary")) throw new Error(`unexpected url ${url}`);
+    if (url.startsWith(AGY_QUOTA_HOST)) return jsonResponse(quotaSummary([0.6958984, 0.90502274], [1, 1], now));
+    return jsonResponse(quotaSummary([1, 1], [1, 1], now));
+  });
+  const snapshot = await agy.fetch(new AbortController().signal);
+  assert.deepEqual(usedByWindow(snapshot), {
+    "google-weekly": 30,
+    "google-5h": 9,
+    "third-party-weekly": 0,
+    "third-party-5h": 0,
+  });
+  assert.deepEqual(calls, [`${AGY_QUOTA_HOST}v1internal:retrieveUserQuotaSummary`]);
+});
+
+test("Antigravity falls back to the production quota host only when agy's host cannot answer", async () => {
+  const now = 1_800_000_000_000;
+  const { agy, calls } = antigravityOver(now, (url) => {
+    if (url.startsWith(AGY_QUOTA_HOST)) return new Response("unavailable", { status: 503 });
+    return jsonResponse(quotaSummary([0.5, 0.75], [1, 1], now));
+  });
+  const snapshot = await agy.fetch(new AbortController().signal);
+  assert.equal(usedByWindow(snapshot)["google-weekly"], 50);
+  assert.deepEqual(calls, [
+    `${AGY_QUOTA_HOST}v1internal:retrieveUserQuotaSummary`,
+    `${PRODUCTION_QUOTA_HOST}v1internal:retrieveUserQuotaSummary`,
+  ]);
+});
+
+test("Antigravity rate limits on agy's host never fall through to the production placeholder", async () => {
+  const now = 1_800_000_000_000;
+  const { agy, calls } = antigravityOver(now, (url) => {
+    if (url.startsWith(AGY_QUOTA_HOST)) return new Response("", { status: 429, headers: { "retry-after": "60" } });
+    return jsonResponse(quotaSummary([1, 1], [1, 1], now));
+  });
+  await assert.rejects(() => agy.fetch(new AbortController().signal), /Rate limited/);
+  assert.ok(calls.every((url) => url.startsWith(AGY_QUOTA_HOST)), calls.join("\n"));
+});
+
 test("Codex gracefully handles plans without 5-hour limit and exposes plan name", async () => {
   const codex = provider(discoverQuotaProviders({
     readAuth: () => ({ openai: { access: "codex-secret" } }),
