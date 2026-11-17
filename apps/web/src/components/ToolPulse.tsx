@@ -73,6 +73,32 @@ const stopsIn = (pulse: ToolPulseState) => fmtDuration(Math.max(0, TOOL_SILENCE_
 /** Whole seconds left before the hard ceiling stops the call. */
 const ceilingIn = (pulse: ToolPulseState) => fmtDuration(Math.max(0, TOOL_HARD_STOP_MS - pulse.elapsedMs));
 
+/** The Keep running request. Its button vanishes once `tool/keep-running`
+ *  arrives, so `onKept` hands focus on (only after this client pressed it). */
+function useKeepRunning(sessionId: string | null | undefined, callId: string, kept: boolean, onKept: () => void) {
+  const pressed = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const onKeptRef = useRef(onKept);
+  onKeptRef.current = onKept;
+  useEffect(() => {
+    if (kept && pressed.current) {
+      pressed.current = false;
+      onKeptRef.current();
+    }
+  }, [kept]);
+  const keep = () => {
+    if (!sessionId || busy) return;
+    setBusy(true);
+    setFailed(false);
+    pressed.current = true;
+    api.keepToolRunning(sessionId, callId)
+      .catch(() => { pressed.current = false; setFailed(true); })
+      .finally(() => setBusy(false));
+  };
+  return { keep, busy, failed };
+}
+
 /** Under an expanded running tool row, one line: when output was last seen,
  *  and in the last two minutes before the watchdog, when the call stops. It
  *  claims silence only after a progress frame proved the harness reports
@@ -80,17 +106,7 @@ const ceilingIn = (pulse: ToolPulseState) => fmtDuration(Math.max(0, TOOL_HARD_S
 export function ToolPulseLine({ sessionId, callId, startedAt, kept = false }: { sessionId: string | null | undefined; callId: string; startedAt: number; kept?: boolean }) {
   const pulse = useToolPulse(sessionId, callId, startedAt, true, kept);
   const lineRef = useRef<HTMLDivElement>(null);
-  const pressed = useRef(false);
-  const [busy, setBusy] = useState(false);
-  const [failed, setFailed] = useState(false);
-  // The button vanishes once the event arrives: focus moves to the line that
-  // replaces it instead of dropping to the page.
-  useEffect(() => {
-    if (kept && pressed.current) {
-      pressed.current = false;
-      lineRef.current?.focus();
-    }
-  }, [kept]);
+  const { keep, busy, failed } = useKeepRunning(sessionId, callId, kept, () => lineRef.current?.focus());
   if (!pulse || (pulse.lastOutputAgoMs === undefined && !pulse.nearStop && !pulse.kept && !pulse.nearCeiling)) return null;
   if (pulse.nearCeiling) {
     return (
@@ -114,15 +130,6 @@ export function ToolPulseLine({ sessionId, callId, startedAt, kept = false }: { 
   const stop = pulse.lastOutputAgoMs === undefined
     ? tr("execution.pulseStopsInLine", { duration: stopsIn(pulse) })
     : tr("execution.pulseStopsInQuiet", { duration: stopsIn(pulse) });
-  const keep = () => {
-    if (!sessionId || busy) return;
-    setBusy(true);
-    setFailed(false);
-    pressed.current = true;
-    api.keepToolRunning(sessionId, callId)
-      .catch(() => { pressed.current = false; setFailed(true); })
-      .finally(() => setBusy(false));
-  };
   return (
     <div className="tool-pulse tool-pulse--stopping" ref={lineRef} tabIndex={-1} title={tr("execution.pulseStopHint")}>
       <span className="tool-pulse-text">
@@ -145,6 +152,30 @@ export function ToolPulseLine({ sessionId, callId, startedAt, kept = false }: { 
         {failed ? <span className="tool-pulse-error" role="alert"> {tr("execution.keepRunningFailed")}</span> : null}
       </span>
     </div>
+  );
+}
+
+/** Keep running beside a block's live Stop. A collapsed block, or one that
+ *  holds a single call, names the call on its line with `ToolPulseInline`
+ *  (a span inside the line's toggle, so no button there) and draws no
+ *  `ToolPulseLine`: without this the countdown had no action at all. */
+export function ToolKeepRunning({ sessionId, callId, startedAt, kept = false, onKept }: { sessionId: string | null | undefined; callId: string; startedAt: number; kept?: boolean; onKept: () => void }) {
+  const pulse = useToolPulse(sessionId, callId, startedAt, true, kept);
+  const { keep, busy, failed } = useKeepRunning(sessionId, callId, kept, onKept);
+  if (!sessionId || !pulse || !pulse.nearStop || pulse.nearCeiling) return null;
+  return (
+    <>
+      {failed ? <span className="tool-pulse-error activity-keep-running-error" role="alert">{tr("execution.keepRunningFailed")}</span> : null}
+      <Button
+        className="activity-keep-running"
+        size="sm"
+        busy={busy}
+        aria-label={tr("execution.keepRunningHint")}
+        onClick={keep}
+      >
+        {tr("execution.keepRunning")}
+      </Button>
+    </>
   );
 }
 
