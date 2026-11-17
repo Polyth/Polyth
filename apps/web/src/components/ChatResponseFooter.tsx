@@ -5,11 +5,14 @@ import { api } from "@polyth/session/web-api";
 import { fmtCost, fmtTokens } from "../format.ts";
 import { sendMessage } from "../init.ts";
 import { selectionFeedback } from "../haptics.ts";
+import { thinkingVariantLabel } from "@polyth/models/model-presentation";
 import {
   assistantTime,
+  dateTimeMedium,
+  latencyLabel,
   normalizedDuration,
+  responseTiming,
   timeIso,
-  timeShort,
   turnDurationMs,
   type ActionAnnounceAnchor,
 } from "../messageActions.ts";
@@ -20,7 +23,7 @@ import { useTimelineProjectId, useTimelineSessionId } from "../timelineSession.t
 import { beginRegenerateMotion, cancelRewindMotion } from "../rewindMotion.ts";
 import { useUiSettings } from "../uiPrefs.ts";
 import { copyText } from "../utils.ts";
-import { tr } from "../i18n/index.ts";
+import { getLocale, tr } from "../i18n/index.ts";
 import ProviderLogo from "../../../../packages/models/widgets/ProviderLogo.tsx";
 import MessageActionBar, { useActionConfirmation, type MessageActionDef } from "./MessageActionBar.tsx";
 import { MESSAGE_ACTION_ICONS, messageActionName } from "./messageActionCatalog.ts";
@@ -140,6 +143,25 @@ export default function ChatResponseFooter({
   const usage = turn?.usage?.tokens ?? m.tokens;
   const cost = turn?.usage?.cost ?? m.cost;
   const hasUsage = usage !== undefined && (usage.input > 0 || usage.output > 0);
+  const effort = modelRef?.variant ? thinkingVariantLabel(modelRef.variant) : null;
+  const completedAt = assistantTime(m);
+  // Turn usage spans the whole turn, so its speed does too; an answer's own
+  // tokens are measured over that answer's own stream.
+  const timing = responseTiming({
+    startedAt: m.turnStartedAt ?? turn?.startedAt,
+    firstOutputAt: m.turnFirstOutputAt ?? turn?.firstOutputAt,
+    endedAt: turn?.usage ? turn.stoppedAt : m.completedAt,
+    outputTokens: usage?.output,
+  });
+  const ownSpeed = !turn?.usage && m.tokens && m.completedAt !== undefined
+    ? responseTiming({ firstOutputAt: m.time, endedAt: m.completedAt, outputTokens: m.tokens.output }).tokensPerSecond
+    : null;
+  const tokensPerSecond = turn?.usage ? timing.tokensPerSecond : ownSpeed;
+  const speed = tokensPerSecond !== null
+    ? tr("timeline.metaSpeedValue", {
+        value: new Intl.NumberFormat(getLocale(), { maximumFractionDigits: tokensPerSecond < 10 ? 1 : 0 }).format(tokensPerSecond),
+      })
+    : null;
 
   const actionAnchor = { role: "assistant" as const, eventSeq: m.eventSeq };
   const responseActionsId = `chat-response-actions-${m.eventSeq}`;
@@ -368,15 +390,17 @@ export default function ChatResponseFooter({
         restoreFocus={false}
       >
         <dl>
+          <dt>{tr("timeline.metaModel")}</dt><dd>{modelName}</dd>
+          {effort && <><dt>{tr("timeline.metaEffort")}</dt><dd>{effort}</dd></>}
           {harnessId && <><dt>{tr("timeline.metaHarness")}</dt><dd>{harnessId}</dd></>}
           {(m.profileId ?? turn?.profileId) && <><dt>{tr("timeline.metaProfile")}</dt><dd><code>{m.profileId ?? turn?.profileId}</code></dd></>}
-          {(m.runtimeLegId ?? turn?.runtimeLegId) && <><dt>{tr("timeline.metaRuntimeLeg")}</dt><dd><code>{m.runtimeLegId ?? turn?.runtimeLegId}</code></dd></>}
           <dt>{tr("timeline.agent")}</dt><dd>{agentName}</dd>
-          <dt>{tr("timeline.completed")}</dt><dd><time dateTime={timeIso(assistantTime(m))}>{timeShort(assistantTime(m))}</time></dd>
+          <dt>{tr("timeline.completed")}</dt><dd><time dateTime={timeIso(completedAt)}>{dateTimeMedium(completedAt)}</time></dd>
+          {timing.ttftMs !== null && <><dt><abbr title={tr("timeline.metaTtftFull")}>{tr("timeline.metaTtft")}</abbr></dt><dd>{latencyLabel(timing.ttftMs)}</dd></>}
+          {speed && <><dt>{tr("timeline.metaSpeed")}</dt><dd>{speed}</dd></>}
           {hasUsage && <><dt>{tr("timeline.input")}</dt><dd>{fmtTokens(usage.input)}</dd><dt>{tr("timeline.output")}</dt><dd>{fmtTokens(usage.output)}</dd></>}
           {usage?.cacheRead ? <><dt>{tr("timeline.cached")}</dt><dd>{fmtTokens(usage.cacheRead)}</dd></> : null}
           {cost ? <><dt>{tr("timeline.cost")}</dt><dd>{fmtCost(cost)}</dd></> : null}
-          {turn?.turnId ? <><dt>{tr("timeline.metaRun")}</dt><dd><code>{turn.turnId}</code></dd></> : null}
         </dl>
       </Popover>
     </footer>

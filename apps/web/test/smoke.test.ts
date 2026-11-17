@@ -83,6 +83,7 @@ import {
   timeIso,
   timeFull,
   timeShort,
+  responseTiming,
   turnDurationMs,
   turnFooterLine,
   userArticleName,
@@ -1811,6 +1812,40 @@ test("turn footer uses one terminal turn's own start/stop and usage with normali
   assert.ok(line);
   assert.match(line!, /worked 5m 0s/);
   assert.match(line!, /1\.2k in · 300 out/);
+});
+
+test("response details time the first output and the turn's output speed", () => {
+  const events = [
+    ev("user/message", { text: "go" }),
+    ev("turn/started", { turnId: "t1" }),
+    ev("tool/call", { callId: "c1", tool: "read", input: {} }),
+    ev("assistant/chunk", { partId: "p1", text: "do" }),
+    ev("assistant/message", { partId: "p1", text: "done" }),
+    ev("usage/recorded", { tokens: { input: 1200, output: 300 } }),
+    ev("turn/stopped", { turnId: "t1", reason: "completed" }),
+  ];
+  events[1]!.time = 1_000_000;
+  events[2]!.time = 1_001_500; // first output: a tool call
+  events[3]!.time = 1_005_000;
+  events[4]!.time = 1_007_000;
+  events[6]!.time = 1_011_500;
+  const m = buildModel(events);
+  assert.equal(m.turn?.firstOutputAt, 1_001_500);
+  const answer = m.messages.find((row) => row.kind === "assistant");
+  assert.ok(answer?.kind === "assistant");
+  // An older answer keeps the timing after the turn state moves on.
+  assert.equal(answer.turnStartedAt, 1_000_000);
+  assert.equal(answer.turnFirstOutputAt, 1_001_500);
+  const timing = responseTiming({
+    startedAt: answer.turnStartedAt,
+    firstOutputAt: answer.turnFirstOutputAt,
+    endedAt: m.turn?.stoppedAt,
+    outputTokens: m.turn?.usage?.tokens.output,
+  });
+  assert.equal(timing.ttftMs, 1500);
+  assert.equal(timing.tokensPerSecond, 30);
+  // Too short a span gives no speed rather than a wild number.
+  assert.equal(responseTiming({ firstOutputAt: 0, endedAt: 400, outputTokens: 50 }).tokensPerSecond, null);
 });
 
 test("an unmatched copied stop yields no duration and inherited totals never leak into the footer turn", () => {
