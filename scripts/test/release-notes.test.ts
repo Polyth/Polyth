@@ -60,6 +60,7 @@ test("commits group by conventional type, leading verb and touched paths", () =>
     ["[Improvement] Minimize blocking after session creation", ["packages/server/src/a.ts"], "improvements", "Minimize blocking after session creation"],
     ["[Performance] Speed up long-period usage display", ["apps/web/src/a.tsx"], "improvements", "Speed up long-period usage display"],
     ["[Chore] Bump the docker images group", ["package.json"], "maintenance", "Bump the docker images group"],
+    ["[Security] Bound chat-mention token regexes (CodeQL #154, #155)", ["packages/server/src/a.ts"], "fixes", "Bound chat-mention token regexes (CodeQL #154, #155)"],
     ["[Unmatched] Keep the brackets", ["apps/web/src/a.tsx"], "improvements", "[Unmatched] Keep the brackets"],
     ["Pin the native bridge", ["packages/link/Cargo.lock"], "maintenance", "Pin the native bridge"],
   ];
