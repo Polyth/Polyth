@@ -63,6 +63,14 @@ test("a starting chat's queued first prompt is its one prompt row, also after a 
   ], "s1"), []);
 });
 
+test("a fork cut before the started prompt's admission does not inherit its start", () => {
+  // Fork and edit on the first prompt: the copy ends before its user/message
+  // and queue/dispatched, then the child's marker.
+  const forked = [...starting(), ev("session/forked", { fromSessionId: "src", sourceAtSeq: 4, copiedThroughSeq: 3 })];
+  assert.deepEqual(startingQueuePrompts(forked, "s1"), [], "no stuck prompt row under the history");
+  assert.equal(sessionStartingFromServer("idle", forked), false, "no endless Spawning agent…");
+});
+
 test("the submit-frame echo hands over to the queued prompt, and a failed start retires it", () => {
   const echo = { id: "echo", sessionId: "s1", text: "build the thing", attachments: [], afterSeq: 0 };
   // The start's queue/enqueued retires the echo; the starting row takes over.

@@ -15018,21 +15018,35 @@ color: var(--muted);
    `pointer-events`, has to land in a fixed or sticky box at least 90% of the
    viewport wide with a backdrop filter or a solid fill
    (LocalFrameView::fixedContainerEdges); Safari then paints the status bar in
-   the page's colour. The islands start lower and are narrower, and a backdrop
-   filter on their row would bound the islands' own glass to it. The phone
-   header (Header.tsx) renders this strip for that hit test: full width, above
-   the conversation and under the islands, an identity backdrop filter (any
-   value but `none` counts), so it paints nothing and never takes a tap.
+   the page's colour. Only a fill gives Safari that colour: a backdrop filter
+   makes the edge "multiple colours", `_sampledTopFixedPositionContentColor`
+   is nil and Safari keeps the band (an identity-filter strip shipped first
+   and changed nothing on an iPhone). The islands start lower and are
+   narrower. The phone header (Header.tsx) renders this strip: full width,
+   from the top down to the islands, above the conversation and under the
+   islands, filled with the canvas colour (the html rule for wallpapers), and
+   never taking a tap. Boxes 10px tall or less have no fill for WebKit, hence
+   the 11px floor. Only iOS WebKit (-webkit-touch-callout) has the band; the
+   native app hides it itself and the home-screen app was never reported, so
+   other engines and those two shells keep their top as it was.
    phoneTopEdge.test.ts replays the hit test. */
-.phone-top-edge {
-  position: fixed;
-  inset-block-start: 0;
-  inset-inline: 0;
-  z-index: calc(var(--z-shell) + 1);
-  block-size: max(var(--space-2), var(--conversation-chrome-inset));
-  pointer-events: none;
-  -webkit-backdrop-filter: opacity(1);
-  backdrop-filter: opacity(1);
+.phone-top-edge { display: none; }
+@supports (-webkit-touch-callout: none) {
+  @media not all and (display-mode: standalone) {
+    body:not([data-native-platform]) .phone-top-edge {
+      display: block;
+      position: fixed;
+      inset-block-start: 0;
+      inset-inline: 0;
+      z-index: calc(var(--z-shell) + 1);
+      block-size: max(11px, calc(var(--safe-top) + var(--conversation-chrome-inset)));
+      pointer-events: none;
+      background-color: var(--bg);
+    }
+    html[data-background]:not([data-background="none"]) body:not([data-native-platform]) .phone-top-edge {
+      background-color: var(--app-system-bar-color, var(--bg));
+    }
+  }
 }
 
 /* Phone uses one three-segment shell bar for every workspace surface. The

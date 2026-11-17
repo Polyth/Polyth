@@ -114,10 +114,18 @@ export function departedQueueIds(events: readonly Pick<SessionEvent, "type" | "d
 
 /** Queue ids of first prompts that wait for their chat to start
  *  (`SESSION_STARTING_QUEUE_REASON`). The timeline shows each as the prompt,
- *  so this list must not show it as a chip too. */
+ *  so this list must not show it as a chip too.
+ *
+ *  A fork copies its source's log up to the fork point and ends the copy with
+ *  `session/forked`. Fork and edit on a started chat's first prompt cuts the
+ *  copy between that prompt's queue row and its admission, so the copy holds
+ *  a start that never finishes in the child: "Spawning agent…" for good and
+ *  the prompt stuck under the history. Rows before the marker are the
+ *  source's; the child's queue starts empty. */
 export function startingQueueIds(events: readonly Pick<SessionEvent, "type" | "data">[]): Set<string> {
   const ids = new Set<string>();
   for (const event of events) {
+    if (event.type === "session/forked") ids.clear();
     if (event.type !== "delivery/fallback-queued") continue;
     const data = event.data as { queueId?: unknown; reason?: unknown } | null | undefined;
     if (data?.reason === SESSION_STARTING_QUEUE_REASON && typeof data.queueId === "string") ids.add(data.queueId);

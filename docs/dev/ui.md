@@ -2438,6 +2438,10 @@ While the chat starts, its first prompt waits on the server queue with the
 row as the prompt (the submit-frame echo hands over to it), the queue list
 never shows it as a chip and never calls it stalled, and the "Spawning agent…"
 dock shows while such a row waits — also after a reload or on another device.
+A fork's copied log ends with `session/forked`, and a `session-starting` row
+before that marker is the source's, never the child's: Fork and edit on a
+started chat's first prompt copies the row but not its admission, which left
+the child on "Spawning agent…" with the prompt stuck under its history.
 The projection status is no guide while it does (`reconciling`, then `idle`
 until the prompt is admitted), so `sessionStartingFromServer` reads the row and
 only excludes `failed` and `archived`; tying it to `reconciling` flashed the
