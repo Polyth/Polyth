@@ -49,6 +49,11 @@ export function langOf(path: string): string {
   return ALIAS[ext] ?? ext;
 }
 
+/** HTML-escape code text exactly as highlight() escapes untokenized runs. */
+export function escapeCodeHtml(code: string): string {
+  return esc(code);
+}
+
 /** Render code to escaped HTML with <span class="tok-*"> wrappers. */
 export function highlight(code: string, lang: string): string {
   const fam = ALIAS[lang] ?? lang;

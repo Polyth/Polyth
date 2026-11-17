@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { scrubInheritedEnv } from "@polyth/kernel/inherited-env";
 import { readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, sep } from "node:path";
@@ -129,7 +130,7 @@ export function createSourceControlProfilesStore(storageFor: (space: SpaceContex
 
 const SSH_COMMAND = /^ssh -i ([\w@%+=:,./~-]+) -o IdentitiesOnly=yes$/;
 const git = (root: string, args: string[]) => new Promise<{ code: number; stdout: string }>((done) =>
-  execFile(resolveGitBinary(), ["-C", root, ...args], { timeout: 10_000, windowsHide: true }, (err, stdout) => done({ code: err ? Number((err as { code?: number }).code ?? 1) : 0, stdout: String(stdout) })));
+  execFile(resolveGitBinary(), ["-C", root, ...args], { timeout: 10_000, windowsHide: true, env: scrubInheritedEnv() }, (err, stdout) => done({ code: err ? Number((err as { code?: number }).code ?? 1) : 0, stdout: String(stdout) })));
 
 export async function getSshKey(root: string): Promise<string | null> {
   const r = await git(root, ["config", "--local", "--get", "core.sshCommand"]);

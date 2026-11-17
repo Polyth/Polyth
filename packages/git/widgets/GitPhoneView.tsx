@@ -33,6 +33,7 @@ import {
   PullIcon,
   PushIcon,
   RefreshIcon,
+  SearchIcon,
   Sheet,
   SheetRow,
   StashIcon,
@@ -139,6 +140,8 @@ export interface GitPhoneViewProps {
   commitTitle: string | null;
   closeCommit: () => void;
   renderFileDiff: () => ReactNode;
+  /** Find in changes: a phone has no Cmd/Ctrl+F, so the header offers it. */
+  find?: { bar: ReactNode; isOpen: boolean; open: () => void };
   renderLog: () => ReactNode;
   renderBranches: () => ReactNode;
   renderStashes: () => ReactNode;
@@ -298,7 +301,7 @@ export default function GitPhoneView(props: GitPhoneViewProps) {
     isolated, isolationTarget, isolationState, landingActive, conflictFiles, headRevision,
     repository, identity, remote, branchCount, stashCount,
     page, setPage, file, openFile, closeFile, commitTitle, closeCommit,
-    renderFileDiff, renderLog, renderBranches, renderStashes, renderConflicts, renderCompare,
+    renderFileDiff, find, renderLog, renderBranches, renderStashes, renderConflicts, renderCompare,
     branchActions, logActions, openConflict, stageFile, discardFile, stash, revertAll, abortMerge,
     resolveWithAgent, resolveIsolation, conflictAgentTarget, conflictAgentBusy,
     commitMessage, setCommitMessage, generating, generateMessage, commit,
@@ -570,6 +573,7 @@ export default function GitPhoneView(props: GitPhoneViewProps) {
         {fileChange?.stats && <LineStats stats={fileChange.stats} mode="numbers" />}
         {fileChange && isPartlyStaged(fileChange) && <span>{file.staged ? tr("gitphone.showStaged") : tr("gitphone.showNotStaged")}</span>}
       </p>
+      {find?.isOpen && <div className="git-phone-find">{find.bar}</div>}
       {renderFileDiff()}
     </PhoneLayer>
   );
@@ -671,7 +675,21 @@ export default function GitPhoneView(props: GitPhoneViewProps) {
     <div className="git-page git-phone" data-density={prefs.density} data-state={state.kind} data-commit-open={commitOpen ? "true" : undefined}>
       <div className="git-phone-scroll">
         <header className="git-phone-summary">
-          <h2 className="git-phone-title" aria-live="polite">{summary.title}</h2>
+          <div className="git-phone-title-row">
+            <h2 className="git-phone-title" aria-live="polite">{summary.title}</h2>
+            {find && state.kind === "changes" && changes.length > 0 && (
+              <IconButton
+                className="git-phone-find-open"
+                icon={SearchIcon}
+                variant="ghost"
+                label={tr("diffFind.label")}
+                onClick={() => {
+                  if (!file) openFile(phoneChangeEntry(changes[0]!));
+                  find.open();
+                }}
+              />
+            )}
+          </div>
           {summary.meta && <p className="git-phone-meta">{summary.meta}</p>}
           {landing && state.kind !== "changes" && state.kind !== "conflict" && landing.check.tone !== "ok" && landing.check.text && (
             <p className="git-phone-check" data-tone={landing.check.tone} role="status">

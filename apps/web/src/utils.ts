@@ -5,6 +5,7 @@ import type { AssistantMsg, RenderMessage, TaskActivityMsg, ToolMsg, UserMsg } f
 import { tr } from "./i18n/index.ts";
 import { isNativeMobile } from "@polyth/mobile/runtime";
 import { writeNativeClipboard } from "@polyth/mobile/native";
+import { expandChatMentions } from "./composer/chatMentionDraft.ts";
 import { acknowledgeDraftRevision, loadScopedDraftRecord, recordLocalDraftEdit, scopedDraftCacheKey, trackOutboundDraftWrite } from "./draftRecord.ts";
 import { clientPersistenceScope } from "./reliabilityContext.ts";
 import type { PersistenceScope } from "./clientPersistence.ts";
@@ -263,12 +264,19 @@ export function mergeThinking(messages: RenderMessage[]): RenderMessage[] {
   return out;
 }
 
+/** The sentence a turn-incomplete notice reads (also its copied text). */
+export function turnIncompleteLabel(m: { incompleteKind?: "empty" | "length"; autoContinued?: boolean }): string {
+  const fact = tr(m.incompleteKind === "length" ? "timeline.incompleteLength" : "timeline.incompleteEmpty");
+  return m.autoContinued ? `${fact} · ${tr("timeline.incompleteAutoContinued")}` : fact;
+}
+
 /** Message as Markdown for the copy action. */
 export function messageMarkdown(m: RenderMessage): string {
   if (m.kind === "github-conflict") {
     return `### Fixing merge conflicts for pull request #${m.prNumber}\n\n${m.title}\n\n\`${m.baseRefName} ← ${m.headRefName}\`\n\n${m.url}`;
   }
   if (m.kind === "notice") {
+    if (m.topic === "turn-incomplete") return turnIncompleteLabel(m);
     if (m.topic === "project-moved") {
       return m.fromProject && m.toProject
         ? tr("timeline.movedBetweenProjects", { from: m.fromProject, to: m.toProject })
@@ -682,11 +690,13 @@ async function sendDraftRevision(
   const record = loadScopedDraftRecord(sessionId, capturedScope);
   // A newer edit replaced this timer's payload before it ran.
   if (record.text !== text || !record.dirty) return "skipped";
-  const settleOutbound = trackOutboundDraftWrite(sessionId, text, capturedScope);
+  // The server holds the link tokens; the record keeps `@Title` plus refs.
+  const wire = expandChatMentions(record.text, record.chatMentions ?? []);
+  const settleOutbound = trackOutboundDraftWrite(sessionId, wire, capturedScope);
   let definitive = false;
   try {
     const { api } = await import("@polyth/session/web-api");
-    const result = await api.saveDraft(sessionId, text, record.serverUpdatedAt ?? null);
+    const result = await api.saveDraft(sessionId, wire, record.serverUpdatedAt ?? null);
     acknowledgeDraftRevision(sessionId, record.revision, result.draftUpdatedAt, capturedScope);
     definitive = true;
     return "sent";

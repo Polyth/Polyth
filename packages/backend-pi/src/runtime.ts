@@ -354,7 +354,7 @@ export function createPiRuntime(context: HarnessContext, rpc: PiRpc, options: Pi
         ...classifyPiFailure(error, provider),
       });
     } else {
-      emit({ type: "turn/stopped", turnId, reason: "completed" });
+      emit({ type: "turn/stopped", turnId, reason: "completed", ...(lastStopReason === "length" ? { outputLimit: true as const } : {}) });
     }
     abortRequested = false;
     lastStopReason = "";

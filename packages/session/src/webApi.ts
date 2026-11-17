@@ -1127,6 +1127,12 @@ export const api = {
     `/api/sessions/${id}/abort`,
     json("POST", source ? { source } : { source: "http" }),
   ),
+  /** Tell Polyth one open call is slow but fine: its silence stop is off (the
+   *  60-minute ceiling stays). 409 when the call is not open; idempotent. */
+  keepToolRunning: (id: string, callId: string) => jfetch<{ ok: true }>(
+    `/api/sessions/${encodeURIComponent(id)}/tools/${encodeURIComponent(callId)}/keep-running`,
+    json("POST", {}),
+  ),
   /** Pause the running turn: interrupted like Stop, but recorded as paused
    *  (projection.paused) until Continue or Stop ends it. */
   pause: (id: string, source?: string) => jfetch<{ ok: true }>(

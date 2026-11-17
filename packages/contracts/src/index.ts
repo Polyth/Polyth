@@ -760,6 +760,21 @@ export interface TurnStoppedData {
    *  "aborted" for old readers), but the work is not over. Continue or Stop
    *  ends the pause with `session/pause-ended`. */
   paused?: true;
+  /** A completed turn whose output stopped at the model's output-token limit
+   *  (the adapter's own signal). Absent where a harness reports none. */
+  outputLimit?: true;
+}
+
+/** `turn/incomplete`: a turn ended `completed` but the answer is not whole
+ *  (`empty`: no assistant text and no tool call; `length`: the model hit its
+ *  output-token limit). A fact, recorded before any automatic continuation is
+ *  delivered. Old reducers ignore the unknown type. */
+export const TURN_INCOMPLETE_EVENT = "turn/incomplete" as const;
+export interface TurnIncompleteData {
+  turnId: string;
+  kind: "empty" | "length";
+  /** Polyth sent its one hidden continuation for this turn. */
+  autoContinued: boolean;
 }
 
 /** `session/pause-ended`: a paused session was continued (its next turn was
@@ -771,6 +786,16 @@ export interface SessionPauseEndedData {
   /** seq of the paused `turn/stopped` this ends. */
   stopSeq?: number;
   source?: string;
+}
+
+/** `tool/keep-running`: a person told Polyth that one open call is just slow
+ *  and silent, so its silence stop is off (the hard execution ceiling stays).
+ *  Polyth-originated: not runtime turn content, not model-visible. Old
+ *  reducers ignore the unknown type. */
+export const TOOL_KEEP_RUNNING_EVENT = "tool/keep-running" as const;
+export interface ToolKeepRunningData {
+  callId: string;
+  byUserId?: string;
 }
 
 export interface TurnResumeCancelledData {
@@ -1793,6 +1818,42 @@ export interface SessionMentionCandidateDto {
   access: SessionAccessLevel;
 }
 
+/** A chat the reader may reference from the composer with `@`. */
+export interface ChatMentionCandidateDto {
+  sessionId: string;
+  title: string;
+  /** Last activity (ms): `lastTurnAt` when there is one, else `updatedAt`. */
+  updatedAt: number;
+}
+
+/** A chat reference lives in the message text as `[@Title](polyth://session/<id>)`
+ *  so it travels through the queue, steering and retries untouched. The label
+ *  is presentation only: the server and the timeline use the live title and
+ *  re-check access, never the label. */
+export const SESSION_MENTION_SCHEME = "polyth://session/" as const;
+/** Most chats one message may reference; the rest are ignored. */
+export const MAX_SESSION_MENTIONS = 5;
+const SESSION_MENTION_TOKEN = /\[@[^\]\n]{0,80}\]\(polyth:\/\/session\/([A-Za-z0-9_-]{1,80})\)/g;
+
+/** The token for one chat; the label cannot close or nest the link. */
+export function sessionMentionToken(sessionId: string, title: string): string {
+  const label = title.replace(/[\][()<>\\\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
+  return `[@${label || "chat"}](${SESSION_MENTION_SCHEME}${sessionId})`;
+}
+
+/** Chat ids named by well-formed tokens in a text: first-seen order, no
+ *  duplicates, at most `limit`. Malformed tokens are ignored. */
+export function sessionMentionIds(text: string, limit: number = MAX_SESSION_MENTIONS): string[] {
+  const ids: string[] = [];
+  for (const match of text.matchAll(SESSION_MENTION_TOKEN)) {
+    const id = match[1]!;
+    if (ids.includes(id)) continue;
+    ids.push(id);
+    if (ids.length >= limit) break;
+  }
+  return ids;
+}
+
 /** `GET /api/sessions/:id/sharing/outsiders`: the Space members who cannot open
  *  the chat, and what the reader can do about that. Any reader of the chat may
  *  ask; the names are the ones `GET …/sharing` already gives them. */
@@ -2019,6 +2080,13 @@ export const isolationBlocksUserMutation = (status: SessionStatus): boolean =>
   || status === "epoch-pending"
   || status === "archived";
 
+/** A delegated child still at work: its isolated checkout keeps changing, and
+ *  its parent waits for it (the agent through its completion wake, the person
+ *  through the subagent list) before anyone is asked to merge or discard it.
+ *  An archived child is at rest: its unmerged work is stranded. */
+export const delegatedChildRunning = (status: SessionStatus): boolean =>
+  isolationBlocksUserMutation(status) && status !== "archived";
+
 /** Blocking statuses where no agent turn runs but Polyth has not yet proven
  *  the runtime settled (recovery, reconciliation, an unconfirmed outcome).
  *  Unlike a working turn, these can last, so the isolation card says why. */
@@ -2054,6 +2122,46 @@ export interface BackgroundWorkState {
     at: number;
   };
 }
+
+/** Background work a session still has live: what a parent needs to know when
+ *  an otherwise finished child goes idle. */
+export interface SessionLiveBackgroundWork {
+  count: number;
+  /** At most three short names. */
+  names: string[];
+}
+
+/** Live background work of a session, or undefined when it has none.
+ *  Native harness tasks count unless the process that ran them was lost. */
+export const liveBackgroundWork = (
+  projection: Pick<SessionProjection, "backgroundWork"> & { nativeBackgroundTasks?: unknown },
+): SessionLiveBackgroundWork | undefined => {
+  const names: string[] = [];
+  let count = 0;
+  const native = projection.nativeBackgroundTasks as
+    | { tasks?: Array<{ id?: string; description?: string; kind?: string }>; lost?: unknown }
+    | undefined;
+  if (native && !native.lost && Array.isArray(native.tasks)) {
+    for (const task of native.tasks) {
+      count += 1;
+      const label = (task.description ?? task.kind ?? task.id ?? "task").replace(/\s+/g, " ").trim();
+      names.push(label.length > 40 ? `${label.slice(0, 39)}…` : label);
+    }
+  }
+  const work = projection.backgroundWork;
+  for (const kind of ["multirun", "fusion", "workflow"] as const) {
+    const n = work?.[kind] ?? 0;
+    if (n > 0) {
+      count += n;
+      names.push(n > 1 ? `${kind} ×${n}` : kind);
+    }
+  }
+  return count > 0 ? { count, names: names.slice(0, 3) } : undefined;
+};
+
+/** "idle, but 2 background tasks still running: a, b" */
+export const liveBackgroundWorkNote = (work: SessionLiveBackgroundWork): string =>
+  `idle, but ${work.count} background ${work.count === 1 ? "task" : "tasks"} still running: ${work.names.join(", ")}${work.count > work.names.length ? ", …" : ""}`;
 
 export type WorktreeState = "ready" | "bootstrapping" | "busy" | "missing";
 
@@ -3039,6 +3147,10 @@ export interface SessionService {
   /** Continue a paused session: a hidden turn on the same history asks the
    *  agent to carry on from where it was interrupted. Rejects `not-paused`. */
   continuePaused?(sessionId: string, options?: { source?: string }): Promise<SendResult>;
+  /** Turn off the silence stop for one open call of the current turn (the
+   *  hard ceiling stays); records `tool/keep-running`. Idempotent. Rejects
+   *  `conflict` when the call is not open in the current turn. */
+  keepToolRunning?(sessionId: string, callId: string, options?: { userId?: string }): Promise<void>;
   /** Compact the conversation context: the runtime's native compaction when
    * it has one, otherwise Polyth's own (summary + fresh native leg); a native
    * compaction the harness refuses or fails falls back to Polyth's. Resolves
@@ -3226,6 +3338,9 @@ export interface SessionService {
   decidePersonAccess?(sessionId: string, messageSeq: number, input: PersonAccessDecisionInput, admission?: PersonMessageAdmission): Promise<PersonAccessDecisionResult>;
   /** People the reader may mention here: those who can open the session. */
   mentionCandidates?(sessionId: string, person?: SessionPersonScope): Promise<SessionMentionCandidateDto[]>;
+  /** Chats the reader may reference with `@` from this chat: same project,
+   *  readable by the reader and by everyone who can open this chat. */
+  chatMentionCandidates?(sessionId: string, person?: SessionPersonScope): Promise<ChatMentionCandidateDto[]>;
   /** Mute/unmute one conversation for one person: only mentions notify. */
   setPersonMute?(sessionId: string, muted: boolean, person?: SessionPersonScope): Promise<void>;
   /** Create a runtime-less `conversation` session shared with participants. */
@@ -5352,6 +5467,11 @@ export type RuntimeEvent =
   | { type: "assistant/message"; partId: string; text: string; reasoning?: string; tokens?: TokenUsage; cost?: number }
   | { type: "tool/call"; callId: string; tool: string; input: JsonObject; status: "pending" | "running" }
   | { type: "tool/started"; callId: string; tool: string; input: JsonObject }
+  /** Liveness of one running call (output arrived, the harness reported
+   *  progress). EPHEMERAL: never appended to the session log or event store,
+   *  never model-visible, never replayed. The server only counts it as watchdog
+   *  activity and relays it live. `at` is epoch ms on the adapter's clock. */
+  | { type: "tool/progress"; callId: string; at: number }
   | { type: "tool/result"; callId: string; tool: string; output: string; title?: string; metadata?: JsonObject; input?: JsonObject }
   | { type: "tool/error"; callId: string; tool: string; error: string; input?: JsonObject; mcpServer?: string }
   | { type: "permission/requested"; requestId: string; permission: string; patterns: string[]; metadata?: JsonObject; tool?: string }
@@ -5373,7 +5493,7 @@ export type RuntimeEvent =
    * admits a turn for it itself: Polyth turns `text` into one hidden, idempotent
    * send keyed by `wakeId`. Not dialogue and never a canonical row. */
   | { type: "runtime/wake-requested"; wakeId: string; reason: "background-task"; text: string }
-  | { type: "turn/stopped"; turnId?: string; reason: "completed" | "aborted" | "error"; error?: string; code?: RuntimeErrorCode; retry?: RateLimitRetryHint }
+  | { type: "turn/stopped"; turnId?: string; reason: "completed" | "aborted" | "error"; error?: string; code?: RuntimeErrorCode; retry?: RateLimitRetryHint; outputLimit?: true }
   | ({ type: "usage/recorded" } & UsageRecordedData)
   // Full revisioned snapshots: replay-deterministic task/subagent state.
   | { type: "task/snapshot"; listId: string; revision: number; items: Array<{ id: string; text: string; status: TaskItemStatus }> }
@@ -5398,6 +5518,7 @@ export const RUNTIME_TURN_CONTENT_EVENT_TYPES = [
   "assistant/message",
   "tool/call",
   "tool/started",
+  "tool/progress",
   "tool/result",
   "tool/error",
   "usage/recorded",
@@ -5406,6 +5527,34 @@ export const RUNTIME_TURN_CONTENT_EVENT_TYPES = [
 
 const RUNTIME_TURN_CONTENT_EVENT_TYPE_SET: ReadonlySet<string> =
   new Set(RUNTIME_TURN_CONTENT_EVENT_TYPES);
+
+/** Minimum spacing of `tool/progress` per call (adapter side). */
+export const TOOL_PROGRESS_MIN_INTERVAL_MS = 2_000;
+
+/** One shared throttle for `tool/progress`: at most one event per call per
+ *  `TOOL_PROGRESS_MIN_INTERVAL_MS`. `take` returns true when the caller should
+ *  emit; `forget` releases a finished call. Bounded: an unfinished call's slot
+ *  is dropped by `clear()` at turn end. */
+export interface ToolProgressThrottle {
+  take(callId: string, now?: number): boolean;
+  forget(callId: string): void;
+  clear(): void;
+}
+export const createToolProgressThrottle = (
+  minIntervalMs: number = TOOL_PROGRESS_MIN_INTERVAL_MS,
+): ToolProgressThrottle => {
+  const last = new Map<string, number>();
+  return {
+    take(callId, now = Date.now()) {
+      const prev = last.get(callId);
+      if (prev !== undefined && now - prev < minIntervalMs) return false;
+      last.set(callId, now);
+      return true;
+    },
+    forget(callId) { last.delete(callId); },
+    clear() { last.clear(); },
+  };
+};
 
 export const runtimeEventHasTurnContent = (type: string): boolean =>
   RUNTIME_TURN_CONTENT_EVENT_TYPE_SET.has(type);

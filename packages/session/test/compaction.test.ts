@@ -38,7 +38,7 @@ const text = (role: ModelMessage["role"], value: string): ModelMessage => ({ rol
 test("transcript keeps the first request and the newest messages and counts the gap", () => {
   const messages: ModelMessage[] = [
     text("user", "GOAL: build the importer"),
-    ...Array.from({ length: 30 }, (_, i) => text(i % 2 ? "user" : "assistant", `middle-${i} ${"x".repeat(200)}`)),
+    ...Array.from({ length: 30 }, (_, i) => text(i % 2 ? "user" : "assistant", `middle-${i} ${"·".repeat(200)}`)),
     text("assistant", "LATEST reply"),
   ];
   const transcript = compactionTranscript(messages, { maxChars: 2_000 });
@@ -63,6 +63,16 @@ test("transcript leads with an earlier summary and clips tool traffic", () => {
   assert.match(transcript, /\[tool error bash\] y+…/);
   assert.doesNotMatch(transcript, /PRIVATE THOUGHT/);
   assert.ok(transcript.length < 2_000);
+});
+
+test("dense user and assistant text reaches the summarizer as a size marker", () => {
+  const transcript = compactionTranscript([
+    text("user", `see data:image/png;base64,${"A".repeat(400)}`),
+    text("assistant", `blob ${"B".repeat(300)} end`),
+  ], { maxChars: 20_000 });
+  assert.match(transcript, /\[base64 data, 1 KB omitted\]/);
+  assert.doesNotMatch(transcript, /A{200}|B{200}/);
+  assert.match(transcript, /end$/);
 });
 
 test("the prompt cannot be closed early by transcript text", () => {

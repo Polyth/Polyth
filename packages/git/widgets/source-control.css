@@ -1960,3 +1960,123 @@ body[data-desktop-low-resource="true"] .git-page .git-landing {
   .git-page .git-detail-pane { animation: none; }
   .git-page .diff-skeleton span { animation: none; }
 }
+
+/* Line comments: a quiet gutter button per diff row (revealed on hover and
+   focus), the shared editor under the row, and a 44px tap strip on touch. */
+.git-page .git-diff-comment-slot {
+  position: sticky;
+  inset-inline-end: 0;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  margin-inline-start: auto;
+  padding-inline: var(--space-1);
+  user-select: none;
+}
+/* The host IconButton (it skips the legacy 44px tap floor of narrow panels,
+   which made every diff row 40px tall), trimmed to the code line: a 24px
+   target whose negative block margin keeps the row at its line height. */
+.git-page .git-diff-comment-btn.ui-icon-btn {
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  min-height: 24px;
+  margin-block: -3px;
+  padding: 0;
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
+}
+.git-page .git-diff:hover .git-diff-comment-btn.ui-icon-btn,
+.git-page .split-diff:hover .git-diff-comment-btn.ui-icon-btn { opacity: .45; }
+.git-page .git-diff-line:hover .git-diff-comment-btn.ui-icon-btn,
+.git-page .git-diff-comment-btn.ui-icon-btn:focus-visible,
+.git-page .git-diff-line:focus-within .git-diff-comment-btn.ui-icon-btn { opacity: 1; }
+/* Shown, it sits on the panel surface so an overflowing code line does not
+   print through the glyph. */
+.git-page .git-diff-line:hover .git-diff-comment-btn.ui-icon-btn,
+.git-page .git-diff-line:focus-within .git-diff-comment-btn.ui-icon-btn { background: var(--sc-diff-bg, var(--surface)); }
+.git-page .git-diff-comment-btn.ui-icon-btn:hover { background: color-mix(in srgb, var(--text) 10%, var(--sc-diff-bg, var(--surface))); color: var(--text); }
+.git-page .git-diff-comment-btn.ui-icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.git-page .git-diff-line--commented { box-shadow: inset 2px 0 0 var(--accent); }
+.git-page .git-diff-comment-editor {
+  border-color: transparent;
+  box-shadow: 0 0 0 1px var(--borderless-edge, var(--accent-line));
+  position: sticky;
+  inset-inline-start: 0;
+  max-width: min(100%, 72ch);
+  margin: var(--space-1) var(--space-2) var(--space-2);
+  white-space: normal;
+  font-family: var(--ui-font-family, inherit);
+  font-size: var(--font-body);
+}
+.git-page .git-diff-comment-hint { margin: var(--space-1) 0 0; font-size: var(--font-meta); }
+.git-page .git-diff-comment-sent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  margin: 0 var(--space-2) var(--space-1);
+  white-space: normal;
+  font-family: var(--ui-font-family, inherit);
+  font-size: var(--font-meta);
+}
+.git-page .git-diff-comment-strip { display: none; }
+@media (pointer: coarse), (hover: none) {
+  .git-page .git-diff-comment-slot { display: none; }
+  .git-page .git-diff-comment-strip {
+    display: flex;
+    position: sticky;
+    inset-inline-start: 0;
+    background: var(--sc-diff-bg);
+    box-shadow: inset 0 1px 0 var(--borderless-edge, var(--hair));
+    white-space: normal;
+    font-family: var(--ui-font-family, inherit);
+  }
+  .git-page .git-diff-comment-tap {
+    flex: 1;
+    min-height: 44px;
+    padding-inline: var(--space-3);
+    border: 0;
+    background: transparent;
+    color: var(--accent);
+    text-align: start;
+    cursor: pointer;
+  }
+}
+
+/* Find in changes. */
+.git-page .git-find-bar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  background: var(--surface, var(--sc-diff-bg));
+  box-shadow: 0 1px 0 var(--borderless-edge, var(--hair));
+}
+.git-page .git-find-input { flex: 1 1 12ch; min-width: 0; }
+/* Narrow or touch: the field takes a full row, the count and four 44px
+   buttons sit under it (a 120px field beside them was unusable). */
+@media (pointer: coarse), (max-width: 520px) {
+  .git-page .git-find-bar { flex-wrap: wrap; }
+  .git-page .git-find-input { flex: 1 0 100%; }
+  .git-page .git-find-count { flex: 1 1 auto; text-align: start; }
+}
+/* Match case reads as on: the accent wash a pressed toggle carries. */
+.git-page .git-find-case[aria-pressed="true"] {
+  background: var(--accent-wash);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+.git-page .git-find-count { flex: none; min-width: 7ch; text-align: end; font-variant-numeric: tabular-nums; }
+.git-page ::highlight(git-find) { background: color-mix(in srgb, var(--amber, #d9a400) 35%, transparent); color: inherit; }
+.git-page ::highlight(git-find-current) { background: color-mix(in srgb, var(--accent) 55%, transparent); color: inherit; }
+.git-page [data-find-current] { box-shadow: inset 2px 0 0 var(--accent); }
+.git-page .git-changes-layout:focus { outline: none; }
+.git-page .git-branch-review:focus { outline: none; }
+@media (pointer: coarse) {
+  .git-page .git-find-bar .ui-btn, .git-page .git-find-bar .ui-icon-btn { min-width: 44px; min-height: 44px; }
+}

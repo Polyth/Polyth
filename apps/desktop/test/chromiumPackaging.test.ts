@@ -14,7 +14,7 @@ test("desktop stages an exact installed Playwright Chromium and packages it as a
   };
   const script = await readFile(join(desktopDir, "stage-chromium.mjs"), "utf8");
   const main = await readFile(join(desktopDir, "src", "main.ts"), "utf8");
-  assert.equal(pkg.dependencies["playwright-core"], "1.62.1");
+  assert.equal(pkg.dependencies["playwright-core"], "1.65.0");
   assert.match(pkg.scripts["stage:chromium"] ?? "", /stage-chromium\.mjs/);
   assert.match(pkg.scripts.dist ?? "", /stage:chromium/);
   assert.deepEqual(

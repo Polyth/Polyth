@@ -79,7 +79,7 @@ test("next admitted turn restores active goal and pins once per compaction", asy
     rules: () => [],
   } as unknown as PermissionService;
   const broadcast: Broadcaster = { event: () => {}, projection: () => {} };
-  const sessions = createSessionService({
+  const sessions = createSessionService({ autoContinueIncomplete: false,
     store,
     projects,
     permissions,
@@ -169,7 +169,7 @@ test("context pressure suggests delegation once per level and again after compac
   } as unknown as ProjectService;
   const permissions = { evaluate: () => "allow", addRule: () => {}, rules: () => [] } as unknown as PermissionService;
   let enabled = true;
-  const sessions = createSessionService({
+  const sessions = createSessionService({ autoContinueIncomplete: false,
     store,
     projects,
     permissions,
@@ -316,7 +316,7 @@ test("first turn in a fresh runtime epoch restores active goal and pins", async 
     dispose: async () => undefined,
   };
   const project: Project = { id: "p-epoch", name: "Epoch", path: dir, createdAt: 1 };
-  const sessions = createSessionService({
+  const sessions = createSessionService({ autoContinueIncomplete: false,
     store,
     projects: {
       list: async () => [project],
@@ -497,7 +497,7 @@ test("a second runtime epoch never rehydrates an older fenced turn tail", async 
     path: dir,
     createdAt: 1,
   };
-  const sessions = createSessionService({
+  const sessions = createSessionService({ autoContinueIncomplete: false,
     store,
     projects: {
       list: async () => [project],
@@ -710,7 +710,7 @@ test("epoch recovery respects rewind-effective history and rides user/message.re
   const store = createStore(join(dir, "sessions.db"));
   const harness = epochHarness(dir);
   const project: Project = { id: "p-rewind", name: "Rewind", path: dir, createdAt: 1 };
-  const sessions = createSessionService({
+  const sessions = createSessionService({ autoContinueIncomplete: false,
     store,
     projects: {
       list: async () => [project],
@@ -784,7 +784,7 @@ test("epoch recovery keeps pins and recent tail inside the 16k cap with an omiss
   const store = createStore(join(dir, "sessions.db"));
   const harness = epochHarness(dir);
   const project: Project = { id: "p-budget", name: "Budget", path: dir, createdAt: 1 };
-  const sessions = createSessionService({
+  const sessions = createSessionService({ autoContinueIncomplete: false,
     store,
     projects: {
       list: async () => [project],

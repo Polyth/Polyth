@@ -75,8 +75,10 @@ export interface AdaptiveTextInputProps {
   ariaExpanded?: boolean;
   ariaControls?: string;
   ariaActiveDescendant?: string;
-  /** Fires on committed edits only — never mid-composition. */
-  onTextChange?: (text: string) => void;
+  /** Fires on committed edits only — never mid-composition. `source` is
+   *  "program" for a replaceText/insertText call (a send clearing the field, a
+   *  recalled prompt) and "user" for typing, cut, delete and paste. */
+  onTextChange?: (text: string, source?: "user" | "program") => void;
   /** Live text while an IME composition is open, then `null` once it ends.
    *  Phone keyboards compose whole words, so the committed text can be empty
    *  while the field visibly holds one; use this for display state such as
@@ -130,7 +132,7 @@ const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(fu
       el.setSelectionRange(r.caret, r.caret);
     }
     committed.current = el.value;
-    if (cmd.kind !== "replace" || !cmd.silent) onTextChange?.(el.value);
+    if (cmd.kind !== "replace" || !cmd.silent) onTextChange?.(el.value, "program");
   };
 
   const runOrDefer = (cmd: EditorCommand) => {
@@ -150,7 +152,7 @@ const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(fu
     latest.current.onComposingText?.(null);
     if (el) {
       committed.current = el.value;
-      latest.current.onTextChange?.(el.value);
+      latest.current.onTextChange?.(el.value, "user");
     }
     for (const cmd of deferred) applyCommand(cmd);
   };
@@ -239,7 +241,7 @@ const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(fu
     if (!el || gate.current.composing || el.value === committed.current) return;
     commitEdit(gate.current);
     committed.current = el.value;
-    latest.current.onTextChange?.(el.value);
+    latest.current.onTextChange?.(el.value, "user");
   };
   useEffect(() => {
     const doc = taRef.current?.ownerDocument;
@@ -269,7 +271,7 @@ const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(fu
     }
     commitEdit(gate.current);
     committed.current = el.value;
-    onTextChange?.(el.value);
+    onTextChange?.(el.value, "user");
   };
 
   const onCompositionStart = (_e: CompositionEvent<HTMLTextAreaElement>) => {

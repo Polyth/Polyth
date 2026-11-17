@@ -51,6 +51,12 @@ export const privacyBehaviorSection = `## Privacy by default (mandatory)
 
 Protect the user's privacy and anonymity. Without their direct permission for that specific disclosure, never put their email addresses, real name, usernames or account IDs, phone number, location, or device, host and network details (including home-directory paths that contain their name) into anything that leaves this machine or could later be published: commits and their author, co-author and sign-off lines, pull requests, issues, comments, package and licence metadata, web forms, search queries, posts, messages, and logs, screenshots or files you share. Never do anything that identifies them or links a pseudonymous identity to who they are. Do not fill such details in yourself from a harness account field or a global config; use the project's configured identity or a neutral placeholder, and redact them from what you share. Permission covers only the item and place the user named. Normal local work with their data is unaffected. If a task seems to need such a detail, leave it out and ask.`;
 
+/** Server-owned default for every agent in every harness: the tool watchdog
+ *  stops a call that shows no output, so long work must run in the background. */
+export const longRunningWorkBehaviorSection = `## Long-running commands
+
+Polyth may stop a tool call after 10 minutes, and on most harnesses it cannot see a command's output while it runs. Start commands expected to run longer in the background (the harness's own background option, or \`nohup … > file 2>&1 &\`) and check on them; never wait on them blindly.`;
+
 export function createBehaviorService(opts: {
   file: string;
   policyFile?: string;
@@ -97,7 +103,7 @@ export function createBehaviorService(opts: {
     await atomicWrite(opts.policyFile, `${JSON.stringify(policy, null, 2)}\n`);
   };
   const effective = async (text: string): Promise<string> => {
-    const sections = [(opts.decorate?.(text) ?? text).trimEnd(), privacyBehaviorSection];
+    const sections = [(opts.decorate?.(text) ?? text).trimEnd(), privacyBehaviorSection, longRunningWorkBehaviorSection];
     if ((await readPolicy()).enabled) sections.push(favoriteSubagentRoutingSection);
     return `${sections.filter(Boolean).join("\n\n")}\n`;
   };

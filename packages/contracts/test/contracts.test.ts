@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { cap, errorBodyText, isolationBlocksUserMutation, isUiSlot, MODEL_VISIBLE_TYPES, RUNTIME_TURN_CONTENT_EVENT_TYPES, runtimeBatchAdmitsTurnContent, runtimeEventHasTurnContent, UI_SLOTS } from "@polyth/contracts";
+import { createToolProgressThrottle, cap, errorBodyText, isolationBlocksUserMutation, isUiSlot, MODEL_VISIBLE_TYPES, RUNTIME_TURN_CONTENT_EVENT_TYPES, runtimeBatchAdmitsTurnContent, runtimeEventHasTurnContent, UI_SLOTS } from "@polyth/contracts";
 import type {
   BrowserAction,
   DeliveryMode,
@@ -184,6 +184,7 @@ test("turn content and runtime batch admission", () => {
     "assistant/message",
     "tool/call",
     "tool/started",
+    "tool/progress",
     "tool/result",
     "tool/error",
     "usage/recorded",
@@ -207,4 +208,15 @@ test("turn content and runtime batch admission", () => {
   // Bookkeeping no turn owns is never gated by turn admission.
   assert.equal(runtimeEventHasTurnContent("runtime/commands-changed"), false);
   assert.equal(runtimeBatchAdmitsTurnContent([{ type: "runtime/commands-changed" }], false), false);
+});
+
+test("tool/progress throttle admits one event per call per window and is a turn-content type", () => {
+  const throttle = createToolProgressThrottle(2_000);
+  assert.equal(throttle.take("a", 0), true);
+  assert.equal(throttle.take("a", 1_999), false);
+  assert.equal(throttle.take("b", 1_000), true);
+  assert.equal(throttle.take("a", 2_000), true);
+  throttle.forget("b");
+  assert.equal(throttle.take("b", 2_001), true);
+  assert.equal(runtimeEventHasTurnContent("tool/progress"), true);
 });

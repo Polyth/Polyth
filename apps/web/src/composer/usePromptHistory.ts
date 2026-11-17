@@ -29,6 +29,12 @@ export function usePromptHistory(opts: {
     direction: "up" | "down",
     apply: (draft: PromptHistoryDraft) => void,
   ) => boolean;
+  /** Put one chosen entry into the composer as a browsed prompt (Esc returns to the draft). */
+  recall: (
+    entry: PromptHistoryEntryDto,
+    current: PromptHistoryDraft,
+    apply: (draft: PromptHistoryDraft) => void,
+  ) => void;
   takeDisplayedForSend: () => AttachmentRef[] | null;
   reload: () => void;
 } {
@@ -108,6 +114,22 @@ export function usePromptHistory(opts: {
     return true;
   }, [applyStep, items]);
 
+  const recall = useCallback((
+    entry: PromptHistoryEntryDto,
+    current: PromptHistoryDraft,
+    apply: (draft: PromptHistoryDraft) => void,
+  ) => {
+    const draft = cursor.current.entryId
+      ? cursor.current.draft
+      : { text: current.text, attachments: current.attachments.slice() };
+    applyStep({
+      entry,
+      text: entry.text,
+      attachments: entry.attachments,
+      cursor: { entryId: entry.id, draft },
+    }, apply);
+  }, [applyStep]);
+
   const cancelToDraft = useCallback((apply: (draft: PromptHistoryDraft) => void): boolean => {
     const next = restorePromptHistoryDraft(cursor.current);
     if (!next) return false;
@@ -134,6 +156,7 @@ export function usePromptHistory(opts: {
     reset,
     cancelToDraft,
     step,
+    recall,
     takeDisplayedForSend,
     reload,
   };

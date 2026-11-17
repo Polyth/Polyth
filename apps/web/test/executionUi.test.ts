@@ -2169,6 +2169,31 @@ test("a lone running action names itself, then settles into the summary in place
   }
 });
 
+test("a block with one call names it once: open, its row drops its own summary line and the header stays the toggle", async () => {
+  const { viewport } = activityTimelineHost();
+  const root = createRoot(viewport.querySelector(".timeline")!.firstElementChild!);
+  const running = tool({ status: "running", output: undefined, finishTime: undefined, time: Date.now() });
+  try {
+    await act(async () => root.render(createElement(ActivityGroupView, { g: activityGroup("activity-1", [running]), subagents: null, ticking: true })));
+    const summary = viewport.querySelector<HTMLButtonElement>(".ui-run-summary")!;
+    await act(async () => summary.click());
+    assert.equal(summary.getAttribute("aria-expanded"), "true");
+    const row = viewport.querySelector(".execution-row")!;
+    assert.ok(row.classList.contains("execution-row--headless"), "the only call is headless");
+    assert.ok(row.classList.contains("open"), "its details show without a second toggle");
+    assert.equal(row.querySelector(".tool-pulse"), null, "the header's tail is the only copy of the time");
+    await act(async () => summary.click());
+    assert.equal(summary.getAttribute("aria-expanded"), "false", "the header still folds it");
+    // Two calls: every row keeps its own summary line.
+    await act(async () => root.render(createElement(ActivityGroupView, { g: activityGroup("activity-1", [running, tool({ id: "t2", callId: "t2" })]), subagents: null, ticking: true })));
+    await act(async () => summary.click());
+    assert.equal(viewport.querySelectorAll(".execution-row--headless").length, 0);
+  } finally {
+    await act(async () => root.unmount());
+    viewport.remove();
+  }
+});
+
 test("the live line shares one grid cell, so a step never changes the block's height", async () => {
   const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
   const rule = (selector: string) => new RegExp(`(?:^|\\n)${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`).exec(css)?.[1] ?? "";

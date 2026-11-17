@@ -29,6 +29,7 @@ import {
   CodeIcon,
   CommandIcon,
   FileIcon,
+  HistoryIcon,
   ImageIcon,
   PlusIcon,
   SettingsIcon,
@@ -53,6 +54,8 @@ export interface ComposerAddMenuProps {
   onInsertMention: () => void;
   onInsertCommand: () => void;
   onInsertSnippet: () => void;
+  /** Opens the previous-prompts palette (the phone has no Ctrl+Up). */
+  onOpenHistory: () => void;
   onEnterShell: () => void;
   /** Protected mode: omit the `!` shell row. */
   shellHidden?: boolean;
@@ -77,6 +80,7 @@ const actionIcons: Record<AddMenuAction, LucideIcon> = {
   mention: FileIcon,
   commands: CommandIcon,
   snippets: CodeIcon,
+  history: HistoryIcon,
   shell: TerminalIcon,
 };
 
@@ -179,6 +183,7 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
       case "mention": props.onInsertMention(); break;
       case "commands": props.onInsertCommand(); break;
       case "snippets": props.onInsertSnippet(); break;
+      case "history": props.onOpenHistory(); break;
       case "shell": props.onEnterShell(); break;
     }
   };

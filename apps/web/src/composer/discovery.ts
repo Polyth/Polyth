@@ -10,7 +10,9 @@ import type {
   ModelDiscoveryState,
   ModelRef,
   SessionMentionCandidateDto,
+  ChatMentionCandidateDto,
 } from "@polyth/contracts";
+import { chatMentionInsert } from "./chatMentionDraft.ts";
 import {
   commandPrecedence,
   extensionCommandBinding,
@@ -19,6 +21,7 @@ import {
 } from "@polyth/commands/catalog";
 import { filterSnippets, type AutocompleteItem } from "../utils.ts";
 import { tr } from "../i18n/index.ts";
+import { promptHistoryShortcutLabel } from "./history.ts";
 import { accessLabel } from "../sessionSharing.ts";
 import { mentionTokenFor } from "../sessionPeople.ts";
 
@@ -387,7 +390,7 @@ export function planShellEntry(text: string): ShellEntryPlan {
 
 export type AddMenuAction =
   | "camera" | "photos" | "upload" | "mention"
-  | "commands" | "snippets" | "shell";
+  | "commands" | "snippets" | "history" | "shell";
 
 export interface AddMenuRow {
   id: string;
@@ -461,7 +464,11 @@ export function addMenuRows(input: {
     attach("upload", tr("composer.files"), tr("composer.discovery.uploadFiles")),
     { id: "group-context", kind: "group", label: tr("composer.discovery.addContext") },
     {
-      id: "mention", kind: "item", label: tr("composer.discovery.mentionProjectFile"), action: "mention", hint: "@",
+      // In a chat, @ also lists the project's other chats: say so where a
+      // person looks for it (a new chat has no chats to offer yet).
+      id: "mention", kind: "item",
+      label: tr(input.hasSession ? "composer.discovery.mentionFileOrChat" : "composer.discovery.mentionProjectFile"),
+      action: "mention", hint: "@",
       ...(needsProject ? { disabledReason: needsProject } : {}),
     },
   ];
@@ -486,6 +493,12 @@ export function addMenuRows(input: {
       detail: catalogDetail("snippets", input.snippets),
       ...(needsProject ? { disabledReason: needsProject } : {}),
     },
+    {
+      id: "history", kind: "item", label: tr("composer.historyPalette.title"), action: "history",
+      hint: promptHistoryShortcutLabel(),
+      description: tr("composer.historyPalette.description"),
+      ...(needsProject ? { disabledReason: needsProject } : {}),
+    },
   );
   if (!input.shellHidden) {
     rows.push({
@@ -501,19 +514,19 @@ export function addMenuRows(input: {
 
 /** Stable DOM-safe option id derived from token kind + item identity (never
  *  the array index). */
-export function autocompleteOptionId(kind: "cmd" | "snip" | "file" | "person", identity: string): string {
+export function autocompleteOptionId(kind: "cmd" | "snip" | "file" | "person" | "chat", identity: string): string {
   const safe = identity.replace(/[^A-Za-z0-9_-]/g, (c) => `_${c.codePointAt(0)!.toString(16)}`);
   return `composer-ac-${kind}-${safe}`;
 }
 
 export type ComposerCommand = CatalogCommand;
 
-export type AutocompletePresentationKind = "command" | "skill" | "settings" | "person" | "file";
+export type AutocompletePresentationKind = "command" | "skill" | "settings" | "person" | "chat" | "file";
 
 export interface AutocompletePresentation {
   kind: AutocompletePresentationKind;
   kindLabel: string;
-  groupId: "people" | "people-outside" | "project" | "space" | "personal" | "builtin" | "plugins" | "agent" | "customize" | "files";
+  groupId: "people" | "people-outside" | "chats" | "project" | "space" | "personal" | "builtin" | "plugins" | "agent" | "customize" | "files";
   groupLabel: string;
   /** More specific provenance inside the group, such as OpenCode or a package id. */
   sourceLabel?: string;
@@ -528,6 +541,8 @@ export interface AutocompleteOption extends AutocompleteItem {
   /** A person picked from a people group; the composer records the id.
    *  `outside`: they cannot open the chat yet, so the composer asks. */
   person?: { userId: string; name: string; token: string; outside?: boolean };
+  /** A chat picked from the chats group; its `value` is the message token. */
+  chat?: { sessionId: string; title: string };
 }
 
 export interface AutocompleteGroup {
@@ -558,6 +573,7 @@ export function commandInputName(command: ComposerCommand): string {
 const COMMAND_GROUP_ORDER: Record<AutocompletePresentation["groupId"], number> = {
   people: -2,
   "people-outside": -1,
+  chats: -0.5,
   project: 0,
   space: 1,
   personal: 2,
@@ -587,6 +603,7 @@ const sourceName = (value: string): string => {
 const groupLabel = (groupId: AutocompletePresentation["groupId"]): string => {
   if (groupId === "people") return tr("composer.people.group");
   if (groupId === "people-outside") return tr("composer.people.outsideGroup");
+  if (groupId === "chats") return tr("composer.chats.group");
   if (groupId === "files") return tr("composer.files");
   if (groupId === "project") return tr("mobile.sessioncontextbar.project");
   if (groupId === "space") return tr("spaces.title");
@@ -897,6 +914,37 @@ export function peopleAutocomplete(
   ];
 }
 
+/** Chats the server says this chat may reference (same project, readable by
+ *  everyone who reads here, never this chat or an archived one), matched by
+ *  title and kept newest first. Picking one inserts the message token. */
+export function chatMentionOptions(
+  chats: readonly ChatMentionCandidateDto[],
+  query: string,
+  limit = 8,
+): AutocompleteOption[] {
+  const normalized = query.trim().toLocaleLowerCase();
+  const presentation: AutocompletePresentation = {
+    kind: "chat",
+    kindLabel: tr("composer.chats.group"),
+    groupId: "chats",
+    groupLabel: tr("composer.chats.group"),
+  };
+  return [...chats]
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .filter((chat) => !normalized || chat.title.toLocaleLowerCase().includes(normalized))
+    .slice(0, limit)
+    .map((chat): AutocompleteOption => ({
+      id: autocompleteOptionId("chat", chat.sessionId),
+      label: chat.title || tr("composer.chats.untitled"),
+      detail: "",
+      // The composer shows `@Title`; the send writes the link token
+      // (composer/chatMentionDraft.ts).
+      value: chatMentionInsert(chat.sessionId, chat.title).text,
+      presentation,
+      chat: { sessionId: chat.sessionId, title: chat.title },
+    }));
+}
+
 /** One @ picker: the people who can open the chat, then the rest of the Space,
  *  then project files. A list the route could not answer leaves the file
  *  results untouched. */
@@ -906,9 +954,10 @@ export function mentionAndFileAutocomplete(
   phase: "idle" | "pending" | "done",
   hits: Array<{ path: string; kind: "file" | "dir" }>,
   outsiders: readonly MentionOutsider[] = [],
+  chats: readonly ChatMentionCandidateDto[] = [],
 ): AutocompleteViewState {
   const fileView = fileAutocomplete(query, phase, hits);
-  const peopleOptions = peopleAutocomplete(people, query, outsiders);
+  const peopleOptions = [...peopleAutocomplete(people, query, outsiders), ...chatMentionOptions(chats, query)];
   if (peopleOptions.length === 0) return fileView;
   return {
     ...fileView,

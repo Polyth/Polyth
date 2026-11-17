@@ -69,7 +69,7 @@ function makeService(fake: ReturnType<typeof fakeRuntime>) {
     rules: () => [],
   } as unknown as PermissionService;
   const broadcast: Broadcaster = { event: () => {}, projection: () => {} };
-  const sessions = createSessionService({
+  const sessions = createSessionService({ autoContinueIncomplete: false,
     store, projects, permissions, broadcast, queue: store,
     runtimes: { forProject: async () => fake.rt },
     profiles: { profileGet: async (id) => (id === PROFILE.id ? PROFILE : undefined) },
@@ -215,7 +215,7 @@ test("a stored profile deleted later degrades without failing or substituting", 
   const store = createStore(join(dir, "s.db"));
   const project: Project = { id: "p1", path: dir, name: "p", createdAt: 1 };
   let deleted = false;
-  const sessions = createSessionService({
+  const sessions = createSessionService({ autoContinueIncomplete: false,
     store,
     projects: {
       list: async () => [project], get: async () => project,

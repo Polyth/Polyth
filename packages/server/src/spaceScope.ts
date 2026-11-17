@@ -301,6 +301,7 @@ function scopeSessions(
 
   assign("pause", bySession(base.pause));
   assign("continuePaused", bySession(base.continuePaused));
+  assign("keepToolRunning", bySession(base.keepToolRunning));
   assign("cancelResume", bySession(base.cancelResume));
   assign("setResumeCompact", bySession(base.setResumeCompact));
   assign("resumeNow", bySession(base.resumeNow));
@@ -438,6 +439,10 @@ function scopeSessions(
   if (base.mentionCandidates) {
     const mentionCandidates = base.mentionCandidates.bind(base);
     scoped.mentionCandidates = (sessionId) => guarded(() => mentionCandidates(g(sessionId), personScope));
+  }
+  if (base.chatMentionCandidates) {
+    const chatMentionCandidates = base.chatMentionCandidates.bind(base);
+    scoped.chatMentionCandidates = (sessionId) => guarded(() => chatMentionCandidates(g(sessionId), personScope));
   }
   if (base.setPersonMute) {
     const setPersonMute = base.setPersonMute.bind(base);

@@ -935,8 +935,8 @@ test("setUiSettings persists and applies visual data attributes", () => {
     topRailSurface: UI_DEFAULTS.topRailSurface,
   });
   assert.deepEqual(parseUiSettings(values.get(UI_SETTINGS_KEY) ?? null), getUiSettings());
-  assert.equal(styles.get("--corner-radius-scale"), "2.7");
-  assert.equal(styles.get("--corner-max"), "1", "the last notch opens the shared rounded geometry");
+  assert.equal(styles.get("--corner-radius-scale"), "2.25", "the last notch is one even step past the default");
+  assert.equal(styles.has("--corner-max"), false, "no separate last-notch geometry jumps past the curve");
   assert.equal(styles.has("--radius-control"), false, "semantic radii derive from the shared scale");
 
   setUiSettings({ actionGrouping: "ungrouped", thinkingDisplayMode: "activity" });
@@ -945,7 +945,6 @@ test("setUiSettings persists and applies visual data attributes", () => {
 
   setUiSettings({ rounding: 0 });
   assert.equal(styles.get("--corner-radius-scale"), "0");
-  assert.equal(styles.get("--corner-max"), "0");
   assert.equal(styles.has("--radius-control"), false);
 
   Object.defineProperty(globalThis, "document", { configurable: true, value: undefined });
@@ -1439,12 +1438,18 @@ test("fmtDuration formats elapsed wall-clock spans", () => {
   assert.equal(fmtDuration(45_600), "46s");
   assert.equal(fmtDuration(181_000), "3m 1s");
   assert.equal(fmtDuration(3_840_000), "1h 4m");
+  // Zero parts are dropped.
+  assert.equal(fmtDuration(60_000), "1m");
+  assert.equal(fmtDuration(7_200_000), "2h");
+  assert.equal(fmtDuration(7_500_000), "2h 5m");
+  assert.equal(fmtDuration(3_600_400), "1h");
 });
 
 test("fmtDuration uses the active locale's duration units", async () => {
   await setLocale("uk");
   try {
     assert.equal(fmtDuration(3_840_000), "1 год 4 хв");
+    assert.equal(fmtDuration(120_000), "2 хв");
   } finally {
     await setLocale("en");
   }

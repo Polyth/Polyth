@@ -3,6 +3,7 @@
 // with defaults on load — boot with an empty in-memory registry and leave the
 // file untouched until a deliberate user write succeeds.
 import { execFile } from "node:child_process";
+import { scrubInheritedEnv } from "@polyth/kernel/inherited-env";
 import { readFileSync, mkdirSync, existsSync, renameSync, realpathSync, statSync } from "node:fs";
 import { atomicWriteSync } from "@polyth/plugins/atomic-write";
 import { GIT_BINARY_ENV, resolveExecutable } from "@polyth/kernel/executable";
@@ -203,7 +204,7 @@ function gitRepositoryRoot(path: string): Promise<string> {
       timeout: 30_000,
       maxBuffer: 1024 * 1024,
       windowsHide: true,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0" },
+      env: { ...scrubInheritedEnv(), GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0" },
     }, (error, stdout) => {
       if (error || !String(stdout).trim()) {
         reject(invalidRepository("repository path must be a local Git repository"));
@@ -223,7 +224,7 @@ function gitRepositoryRoot(path: string): Promise<string> {
 async function repositoryIdentity(root: string): Promise<string[]> {
   const run = (args: string[]) => new Promise<string>((done) => {
     execFile(resolveExecutable("git", { overrideEnv: GIT_BINARY_ENV }), ["-C", root, ...args], { encoding: "utf8", timeout: 10_000, maxBuffer: 128 * 1024, windowsHide: true,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0" } },
+      env: { ...scrubInheritedEnv(), GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0" } },
     (error, stdout) => done(error ? "" : String(stdout)));
   });
   const [roots, remotes] = await Promise.all([

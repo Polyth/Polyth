@@ -46,6 +46,8 @@ export const Icon = {
   fork: () => <svg {...s}><circle cx="6" cy="4" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="20" r="2"/><path d="M6 6v12M8 12h4a6 6 0 0 0 6-4"/></svg>,
   rewind: () => <svg {...s}><path d="M3 7v5h5"/><path d="M5.1 17a8 8 0 1 0 .5-10.5L3 9"/></svg>,
   check: () => <svg {...s}><path d="m5 12 4 4L19 6"/></svg>,
+  // A test step: never a check mark, which would read as "passed" while it runs.
+  flask: () => <svg {...s}><path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2"/><path d="M6.453 15h11.094"/><path d="M8.5 2h7"/></svg>,
   select: () => <svg {...s}><rect x="3" y="4" width="6" height="6" rx="1"/><path d="m4.5 7 1.3 1.3L8 6"/><rect x="3" y="14" width="6" height="6" rx="1"/><path d="M13 7h8M13 17h8"/></svg>,
   list: () => <svg {...s}><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg>,
   hierarchy: () => <svg {...s}><path d="M6 3v12M6 7h8M6 15h8"/><rect x="14" y="4.5" width="7" height="5" rx="1"/><rect x="14" y="12.5" width="7" height="5" rx="1"/></svg>,

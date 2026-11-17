@@ -19,7 +19,7 @@ export function ExecutionIcon({ kind, image = false, mcp }: { kind: ExecutionKin
                 : kind === "web" || kind === "browser" ? Icon.globe
                   : kind === "mcp" ? Icon.plug
                     : kind === "subagent" ? Icon.hierarchy
-                      : kind === "test" ? Icon.check
+                      : kind === "test" ? Icon.flask
                         : kind === "git" ? Icon.branch
                           : Icon.events;
   return <Glyph />;

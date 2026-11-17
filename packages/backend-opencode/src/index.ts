@@ -647,6 +647,7 @@ export const createOpenCodeRuntimeFacade = (
     const turn = activeTurn.get(sessionId);
     if (!terminal || !turn) return [];
     const assistant = terminal.state === "idle" ? flushAssistantOnIdle(state) : [];
+    const outputLimit = state.outputLimit === true;
     clearRateLimitStall(sessionId);
     activeTurn.delete(sessionId);
     finishTranslateTurn(state, turn.turnId);
@@ -656,6 +657,7 @@ export const createOpenCodeRuntimeFacade = (
         {
           type: "turn/stopped",
           reason: turn.aborting ? "aborted" : "completed",
+          ...(outputLimit && !turn.aborting ? { outputLimit: true as const } : {}),
         },
       ];
     }

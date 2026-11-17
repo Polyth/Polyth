@@ -208,5 +208,5 @@ test("legacy managed tasks migrate fail-closed instead of inheriting implicit tr
   assert.equal(migrated.enabled, false);
   assert.equal(migrated.nextRunAt, null);
   const persisted = JSON.parse(readFileSync(storage, "utf8")) as { v?: number };
-  assert.equal(persisted.v, 5);
+  assert.equal(persisted.v, 6);
 });

@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./executable": "./src/executable.ts"
+    "./executable": "./src/executable.ts",
+    "./inherited-env": "./src/inheritedEnv.ts"
   }
 }

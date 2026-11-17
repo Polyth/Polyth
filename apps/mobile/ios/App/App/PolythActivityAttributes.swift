@@ -80,7 +80,25 @@ enum PolythLiveActivityStore {
         return try? JSONDecoder().decode(type, from: data)
     }
 
-    /// App only: the widget never writes. Nil group (the build did not
+    /// The widget's own copy of the same words, in its own container, so it
+    /// needs no shared Keychain group. The widget saves what every update
+    /// from the page said (those arrive in full) and draws a later push from
+    /// it when the App's copy cannot be read; without it such a push showed a
+    /// bare glyph over the word "Polyth".
+    private static let ownPrefix = "polyth-live-activity.widget."
+
+    static func keepOwn<T: Codable & Equatable>(_ value: T, key: String) {
+        if readOwn(T.self, key: key) == value { return }
+        guard let data = try? JSONEncoder().encode(value) else { return }
+        UserDefaults.standard.set(data, forKey: ownPrefix + key)
+    }
+
+    static func readOwn<T: Decodable>(_ type: T.Type, key: String) -> T? {
+        guard let data = UserDefaults.standard.data(forKey: ownPrefix + key) else { return nil }
+        return try? JSONDecoder().decode(type, from: data)
+    }
+
+    /// App only: the widget never writes here. Nil group (the build did not
     /// substitute the prefix) leaves pushes drawing generic words.
     static func write<T: Encodable>(_ value: T, account: String) {
         guard let prefix = Bundle.main.object(forInfoDictionaryKey: "AppIdentifierPrefix") as? String,

@@ -45,6 +45,7 @@ import { useSessionSummaryPages } from "../../useSessionSummaryPages.ts";
 import { ago, displaySessionTitle, isPlaceholderTitle } from "../../format.ts";
 import { conversationUnread, unreadBadgeText } from "../../sessionPeople.ts";
 import AgentLiveStatusDock from "../AgentLiveStatusDock.tsx";
+import AnswerLaterLine from "../AnswerLaterLine.tsx";
 import SubagentActivityDock, { SubagentBranchIsland, SubagentBranchScope } from "../SubagentActivityDock.tsx";
 import CustomizeZoneButton from "../CustomizeZoneButton.tsx";
 import { useWidgetCatalog } from "../../widgets/catalog.ts";
@@ -820,6 +821,8 @@ function ChatSessionSurface() {
         : <div className="conversation-composer-dock">
             {/* Above the package rows: the jump button floats up from here and must not lie on them. */}
             <div ref={setLatestRevealAnchor} className="timeline-latest-reveal-anchor" />
+            {/* Questions and approvals folded for later wait here as one line. */}
+            <AnswerLaterLine sessionId={sessionId} model={model} />
             <SlotHost slot="session.composer.before" context={composerBeforeContext} customizable />
             {/* The area renders nothing while empty, so its pencil lives in a
                 zero-height zone that only takes space in edit mode. */}

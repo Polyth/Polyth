@@ -3,6 +3,7 @@
 // Pure host logic: no HTTP, no session knowledge — the server maps projectId to
 // a repo root and calls these.
 import { execFile } from "node:child_process";
+import { scrubInheritedEnv } from "@polyth/kernel/inherited-env";
 import { createHash } from "node:crypto";
 import { constants as FS_CONSTANTS, existsSync, rmSync, statSync } from "node:fs";
 import { copyFile, lstat, mkdir, mkdtemp, open, readlink, realpath, rm, rmdir, writeFile, type FileHandle } from "node:fs/promises";
@@ -13,6 +14,7 @@ import { currentGitCommitIdentity, gitTransportInvocation } from "./sourceContro
 import { resolveGitBinary } from "./gitBinary.ts";
 
 export { resolveGitBinary, type GitBinaryOptions } from "./gitBinary.ts";
+export { scrubInheritedEnv } from "@polyth/kernel/inherited-env";
 
 export type GitFileStatus =
   | "added" | "modified" | "deleted" | "renamed" | "copied" | "typechange" | "untracked" | "conflicted";
@@ -524,7 +526,7 @@ export async function cloneRepository(
       timeout: timeoutMs,
       maxBuffer: 32 * 1024 * 1024,
       windowsHide: true,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...transport.env },
+      env: { ...scrubInheritedEnv(), GIT_TERMINAL_PROMPT: "0", ...transport.env },
     }, (error, stdout, stderr) => {
       if (!error) { resolvePromise(); return; }
       rmSync(target, { recursive: true, force: true });
@@ -989,7 +991,7 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
         timeout: opts.timeoutMs ?? timeout,
         maxBuffer: 32 * 1024 * 1024,
         windowsHide: true,
-        env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0", ...(opts.env ?? {}), ...transport.env },
+        env: { ...scrubInheritedEnv(), GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0", ...(opts.env ?? {}), ...transport.env },
       }, (err, stdout, stderr) => {
         const execErr = err as (Error & {
           code?: number | string;
@@ -1386,7 +1388,6 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
 
   const service: GitService = {
     async mayBeWorkTree(root) {
-      if (process.env.GIT_DIR) return true;
       let directory = resolve(root);
       while (true) {
         try {

@@ -58,7 +58,7 @@ test("package context appended between turns reaches the next prompt once", asyn
   };
   const permissions = { evaluate: () => "allow", addRule: () => {}, rules: () => [] } as unknown as PermissionService;
   const broadcast: Broadcaster = { event: () => {}, projection: () => {} };
-  const sessions = createSessionService({
+  const sessions = createSessionService({ autoContinueIncomplete: false,
     store, projects, permissions, broadcast,
     runtimes: { forProject: async () => fake.runtime },
   });

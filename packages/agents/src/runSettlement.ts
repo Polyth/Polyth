@@ -53,6 +53,10 @@ export interface RunSettlementOptions {
  *  enough that work lost with its process does not keep it "working". */
 const DEFAULT_BACKGROUND_WAIT_MS = 60 * 60_000;
 const WAITING_POLL_MS = 5_000;
+/** How long a turn the tool watchdog cut may take to be continued. The
+ *  server continues at once after a proven abort; an unproven one waits for
+ *  reconciliation first. */
+const WATCHDOG_RESUME_MS = 15 * 60_000;
 const MOMENTS_KEPT = 20;
 const MOMENT_CHARS = 160;
 const WAIT_TASKS = 3;
@@ -205,7 +209,12 @@ export async function settleScheduledRun(
   }
   // queued → (dispatched) → admitted → (turn/started) → turn → (turn/stopped)
   // → waiting (background work runs) → (its wake) → admitted → …
-  let phase: "queued" | "admitted" | "turn" | "waiting" = run.queueId ? "queued" : "admitted";
+  // → resuming (the tool watchdog cut the turn and promised to continue it)
+  // → (its hidden continuation) → admitted → …
+  let phase: "queued" | "admitted" | "turn" | "waiting" | "resuming" = run.queueId ? "queued" : "admitted";
+  // The current turn's abort came from the tool watchdog, which continues it.
+  let watchdogCut = false;
+  let resumeSince = 0;
   const waitMs = opts.backgroundWaitMs ?? DEFAULT_BACKGROUND_WAIT_MS;
   // Background work the run started (call id → description), and the wakes
   // it has had so far.
@@ -339,6 +348,19 @@ export async function settleScheduledRun(
         }
         continue;
       }
+      if (phase === "resuming") {
+        const data = event.data as JsonObject | undefined;
+        if (event.type === "user/message" && data?.hiddenUserMessage === true && data.autoResume === true) {
+          // The watchdog's continuation: the run goes on in the next turn.
+          phase = "admitted";
+          continue;
+        }
+        if (event.type === "user/message" || event.type === "turn/started" || event.type === "schedule/run-started") {
+          // Someone else took the session first; the cut turn was the run's end.
+          return result({ status: "failed", error: "Stopped before it finished." });
+        }
+        continue;
+      }
       if (phase === "queued") {
         if (event.type === "queue/dispatched" && str(event, "queueId") === run.queueId) phase = "admitted";
         else if (event.type === "queue/removed" && str(event, "queueId") === run.queueId) {
@@ -349,6 +371,12 @@ export async function settleScheduledRun(
       if (event.type === "turn/started") {
         phase = "turn";
         turnText = "";
+        watchdogCut = false;
+        continue;
+      }
+      if (phase === "turn" && event.type === "turn/abort-requested") {
+        // Only a watchdog abort that plans a continuation carries this source.
+        watchdogCut = str(event, "source") === "tool-watchdog";
         continue;
       }
       if (phase === "turn" && opts.onActivity) noteActivity(event);
@@ -402,6 +430,12 @@ export async function settleScheduledRun(
         continue;
       }
       if (reason === "error") return result({ status: "failed", error: str(event, "error") ?? "The run's turn failed." });
+      if (reason === "aborted" && watchdogCut && phase === "turn") {
+        // One overlong tool call, not a stop: the server continues the turn.
+        phase = "resuming";
+        resumeSince = eventTime(event);
+        continue;
+      }
       if (reason === "aborted") return result({ status: "failed", error: "Stopped before it finished." });
       return result({ status: "unknown", error: `The run's turn stopped without a confirmed result (${reason ?? "no reason"}).` });
     }
@@ -419,6 +453,13 @@ export async function settleScheduledRun(
       // Only once caught up: a later page may hold the wake.
       if (!events.length && now() - waitSince >= waitMs) return result({ status: "ok" });
     }
+    if (phase === "resuming") {
+      if (opts.stopRequested?.()) return result({ status: "failed", error: "Stopped before it finished." });
+      // The continuation never came (budget spent, session busy, send failed).
+      if (!events.length && now() - resumeSince >= WATCHDOG_RESUME_MS) {
+        return result({ status: "failed", error: "Stopped before it finished." });
+      }
+    }
     // A person's decision should reach the agent's page soon after the click;
     // a stop of a waiting run, too.
     const pollLimit = open.size ? Math.min(maxPoll, OPEN_REQUEST_POLL_MS)
@@ -430,4 +471,78 @@ export async function settleScheduledRun(
     const until = phase === "waiting" ? Math.min(deadline, waitSince + waitMs) : deadline;
     await sleep(Math.min(poll, Math.max(1, until - now())), opts.signal);
   }
+}
+
+/** What a settled run's session says about its report later on. */
+export interface LateReportScan {
+  /** The run's own report, written in a turn its background work woke after
+   *  the run was settled without one, with the usage of every turn the run
+   *  owned up to it. */
+  report?: { text: string; tokens?: TokenUsage; cost?: number };
+  /** Nothing later can be the run's: it reported (or failed) in its own
+   *  turns, or a person or another run took the session. */
+  closed: boolean;
+}
+
+/** Reads a settled run's session again for a report it wrote too late.
+ *  `events`: the session's events after the run's `schedule/run-started`
+ *  marker, oldest first. The run owns its first turn and every turn its own
+ *  background work wakes (a hidden message); its report is the final message
+ *  of the first of those turns that carries a Report line. `queueId`: the
+ *  run's prompt was queued, so turns before its dispatch are someone else's.
+ *  Pure: it decides nothing about the record and replays nothing. */
+export function scanLateReport(events: readonly SessionEvent[], queueId?: string): LateReportScan {
+  // (queued → dispatched) → before → (turn/started) → turn → (turn/stopped
+  // completed) → between → (hidden wake) → woken → (turn/started) → turn → …
+  let phase: "queued" | "before" | "turn" | "between" | "woken" = queueId ? "queued" : "before";
+  let turnText = "";
+  let tokens: TokenUsage | undefined;
+  let cost: number | undefined;
+  for (const event of events) {
+    const data = event.data as JsonObject | undefined;
+    if (event.type === "schedule/run-started") return { closed: true };
+    if (phase === "queued") {
+      if (event.type === "queue/dispatched" && str(event, "queueId") === queueId) phase = "before";
+      else if (event.type === "queue/removed" && str(event, "queueId") === queueId) return { closed: true };
+      continue;
+    }
+    if (phase === "between" || phase === "woken") {
+      if (event.type === "user/message") {
+        if (data?.hiddenUserMessage !== true) return { closed: true };
+        phase = "woken";
+        continue;
+      }
+      if (event.type === "person/message") return { closed: true };
+      if (event.type !== "turn/started") continue;
+      if (phase === "between") return { closed: true };
+    }
+    if (event.type === "turn/started") {
+      phase = "turn";
+      turnText = "";
+      continue;
+    }
+    if (phase !== "turn") continue;
+    if (event.type === "assistant/message") {
+      const text = str(event, "text")?.trim();
+      if (text) turnText = text;
+      continue;
+    }
+    if (event.type === "usage/recorded") {
+      const sample = data?.tokens as Partial<TokenUsage> | undefined;
+      if (sample && typeof sample === "object") tokens = addUsage(tokens, sample);
+      if (typeof data?.cost === "number" && Number.isFinite(data.cost)) cost = (cost ?? 0) + data.cost;
+      continue;
+    }
+    if (event.type !== "turn/stopped") continue;
+    // A turn that failed or was stopped ends the run with what it said.
+    if (str(event, "reason") !== "completed") return { closed: true };
+    if (parseAgentReport(turnText).signal) {
+      return {
+        closed: true,
+        report: { text: turnText, ...(tokens ? { tokens } : {}), ...(cost !== undefined ? { cost } : {}) },
+      };
+    }
+    phase = "between";
+  }
+  return { closed: false };
 }

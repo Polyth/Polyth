@@ -2,25 +2,18 @@
 // active task, a native subagent's task, the running tool with its target,
 // thinking, or the activity fallback. The parent's live status line and the
 // subagent branch under it read the same words from the same model.
+import { executionPresentation, executionSummaryWords } from "./execution.ts";
 import { tr } from "./i18n/index.ts";
 import type { RenderModel } from "./reduce.ts";
 
-const TOOL_DETAIL_KEYS = ["description", "command", "filePath", "path", "query", "pattern", "url"] as const;
-
-/** The running tool's own words: its title (or a readable tool name) and the
- *  last path segment or first meaningful input. */
+/** The running tool in the timeline row's own words ("Test · Run tests"):
+ *  the same presentation and naming helper, never a second naming path. */
 function toolAction(model: RenderModel): string | undefined {
   const activeTool = [...model.messages].reverse().find((message) =>
     message.kind === "tool" && (message.status === "pending" || message.status === "running"));
   if (activeTool?.kind !== "tool") return undefined;
-  const toolDetail = TOOL_DETAIL_KEYS
-    .map((key) => activeTool.input[key])
-    .find((value): value is string => typeof value === "string" && value.trim() !== "");
-  const conciseToolDetail = toolDetail && /[\\/]/.test(toolDetail)
-    ? toolDetail.replaceAll("\\", "/").split("/").filter(Boolean).at(-1)
-    : toolDetail;
-  const toolName = activeTool.title ?? activeTool.tool.replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-  return `${toolName}${conciseToolDetail ? ` · ${conciseToolDetail}` : ""}`;
+  const { title, preview } = executionSummaryWords(executionPresentation(activeTool));
+  return [title, preview].filter((part) => part.trim() !== "").join(" · ");
 }
 
 /** The agent's own current action, when its log names one: a task, a native

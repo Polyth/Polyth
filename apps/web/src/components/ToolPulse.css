@@ -1,0 +1,74 @@
+/* Running tool pulse: one quiet meta line under an expanded running tool row
+   and a compact tail on the collapsed activity line. Words only: the row's
+   spinner already says the call is alive, so there is no dot, no colour
+   signal and no border (Hide interface borders changes nothing). Urgency is
+   the stop countdown itself, in the strong ink. */
+.tool-pulse {
+  /* Same columns as the summary row above: the words under the tool's name. */
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  column-gap: 6px;
+  min-width: 0;
+  padding: 0 0 var(--space-1);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  font-variant-numeric: tabular-nums;
+}
+
+.tool-pulse-text {
+  grid-column: 2;
+  min-width: 0;
+}
+
+.tool-pulse-stop {
+  color: var(--text);
+  font-weight: 500;
+}
+
+/* Collapsed line: "· 3m 12s · last output 6s ago" after the step. It gives
+   way before the step's name, after the preview. */
+.tool-pulse-inline {
+  flex: 0 100 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-pulse-part::before {
+  content: "·";
+  margin-inline-end: .35em;
+  color: var(--muted);
+}
+
+.tool-pulse-part + .tool-pulse-part {
+  margin-inline-start: .35em;
+}
+
+/* Keep running: a quiet ghost button after the countdown. On touch the hit
+   area grows to 44px without growing the line (negative block margin). */
+.tool-pulse-keep {
+  margin-inline-start: var(--space-2);
+  vertical-align: baseline;
+}
+
+@media (pointer: coarse) {
+  .tool-pulse-keep {
+    min-width: 44px;
+    min-height: 44px;
+    margin-block: -14px;
+  }
+}
+
+.tool-pulse-error {
+  color: var(--danger);
+}
+
+.tool-pulse:focus-visible {
+  outline: none;
+}

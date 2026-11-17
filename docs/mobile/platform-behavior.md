@@ -415,10 +415,25 @@ session/project. Exact foreground mapping suppresses the OS alert so canonical
 WebSocket/in-app delivery wins; a different trusted server/account retains its
 OS notification.
 
+The hub hands the id to the workspace in its landing address
+(`/?nativePushOpen=<id>`). The page reads it while it loads
+(`landedNativePushOpen`, `apps/web/src/nativePushOpen.ts`): boot restoration
+rewrites the address to the chat it restored before hydration ends, so a later
+read finds nothing and the tap would open whatever the app showed last. After
+hydration the page asks its server for that inbox row and opens the row's
+chat. The app has only just reconnected at that point, so a registration check
+or inbox read that fails is tried again (after 1, 3 and 6 s) before the tap is
+given up; a row the server refuses ends it at once.
+
 The app uses `polyth_activity` for completed/subagent activity and
 `polyth_attention` for failed/question/permission events. Existing local and
 browser notifications remain the fallback when native push is unavailable or
-not successfully claimed. Inside the native app, Settings shows only the Mobile
+not successfully claimed. A confirmed registration keeps the page's local
+notifications off while the app is in the background too: the page does not
+re-read the native status when it leaves the foreground (the native side
+reports a page that is not its foreground account as disabled), or a task
+ending before the OS suspends the page would be announced by the push and by
+a local copy. Inside the native app, Settings shows only the Mobile
 push row: browser Web Push can never subscribe from the WebView, so its row is
 hidden there. An iOS build without `POLYTH_PUSH_ENVIRONMENT`, an Android build
 without `google-services.json`, or a server with neither the push service nor
@@ -530,19 +545,23 @@ is logged without its contents. The push service reads the same two files.
 ## Live Activity (Dynamic Island)
 
 On iOS 16.2+ the app shows one Live Activity — in the Dynamic Island and on the
-Lock Screen — for the chat that most needs a person (an approval, then a
-question) or, failing that, the chat that is working. Child (subagent/workflow)
-chats never compete with their parent. The pure projection lives in
+Lock Screen — for a chat that is working: the open one first, then the most
+recent. It shows nothing else. A question, an approval, a finished or a failed
+turn reaches the phone as a [notification](#notifications), which carries the
+words and stays in Notification Centre; the activity ends at that moment, with
+no card left behind, so one event is never shown twice on the Lock Screen (it
+used to be: the notification and a "Reply needed" or "Done" card). Child
+(subagent/workflow) chats never compete with their parent. The pure projection lives in
 `apps/web/src/liveActivity.ts`, the host wiring in
 `apps/web/src/nativeLiveActivity.ts` (installed after hydration), the bridge in
 `apps/mobile/src/nativeLiveActivity.ts`, and the native side in
 `App/PolythLiveActivityPlugin.swift` + the `PolythLiveActivity` widget
 extension (shared `PolythActivityAttributes.swift`).
 
-- **Content.** Localized status word, chat title, the pending question /
-  approval / current task text (only for the active chat, whose events the page
-  actually streams), task progress, and a line counting the other waiting and
-  working chats. Working shows a system-drawn elapsed timer from the
+- **Content.** Localized status word, chat title, the current task and task
+  progress (only for the active chat, whose events the page actually streams),
+  and a line counting the other waiting and working chats: a chat that waits
+  for a person is a number there, never the card itself. Working shows a system-drawn elapsed timer from the
   projection's turn start, so time passing never crosses the bridge. Chat text
   is `privacySensitive`, so iOS may redact it on a locked device.
 - **Look.** iOS adds no app icon to a Live Activity, so the widget draws
@@ -571,14 +590,12 @@ extension (shared `PolythActivityAttributes.swift`).
   reconnect the socket re-reads every row the client still shows as working or
   waiting (`refreshSessionIds`, see the [architecture](../dev/architecture.md)
   subscribe contract), so a chat that ended in another project while the phone
-  slept no longer keeps the activity on "Working" or "Reply needed".
-  When nothing is live any more the activity ends with a final Done/Failed
-  snapshot that stays ten minutes; a chat that vanished ends it at once. A
-  finished activity stays listed and on the Lock Screen until that date and
-  cannot run again, so the next one requested replaces it, and only one card
-  ever takes the final snapshot: the Lock Screen never shows two. The
-  first evaluation after a page load always reaches native, so an activity left
-  by a previous process or server is replaced or ended.
+  slept no longer keeps the activity on "Working".
+  When no chat is working any more the page ends the activity without a final
+  snapshot, so native dismisses it at once. The first evaluation after a page
+  load always reaches native, so an activity left by a previous process or
+  server is replaced or ended. (Native still accepts a final snapshot and
+  keeps one card for it; no current page sends one.)
 - **Push while suspended.** The server keeps the activity current while the
   app is suspended, over the same path as alerts: the phone talks only to its
   own server over Polyth Link, and the server sends through
@@ -591,7 +608,13 @@ extension (shared `PolythActivityAttributes.swift`).
   snapshot the page showed, plus the page's status word per state and count
   lines pre-rendered for 1–99 (plural forms stay the page's job). The question
   or task line and progress are drawn only while the pushed state equals the
-  one they were written for. The flow:
+  one they were written for. When that copy cannot be read the widget uses
+  its own (`keepOwn`/`readOwn`, in the widget's container): it saves the
+  title, lines and status word of every full update the page sent, and a
+  state whose word it has never seen gets a plain English one. Before this a
+  push on such a phone drew only the state glyph over the word "Polyth"
+  (reported on a device 2026-11-16; why the shared copy was unreadable there
+  is not established). The flow:
   1. `setContext` (before the first update) gives native the account and the
      texts; the activity is then requested with `pushType: .token`. An
      activity another connection/account started is ended first, so a server
@@ -610,15 +633,17 @@ extension (shared `PolythActivityAttributes.swift`).
      Unchanged live content is re-sent every 4 minutes at priority 5, so an
      accepted track earns the page a 10-minute stale date
      (`LIVE_ACTIVITY_PUSH_TRUST_MS`) instead of two. When the shown chat is no
-     longer live and no counted chat is, the server sends `end`: a finished or
-     failed chat stays ten minutes, a vanished or unreadable one leaves at
-     once, and so does every island while the person uses another device
+     longer working (it asks, finished, failed, vanished or became
+     unreadable) the server sends `end` with immediate dismissal, whatever
+     the counted chats do, and so it does for every island while the person
+     uses another device
      ([Only the device in use](#only-the-device-in-use); re-evaluated as soon
      as that changes). Tracking survives a server restart and lapses after 8
      hours (iOS ends the activity then); a token APNs retires is dropped.
-  A push cannot switch the island to another chat (that needs its title); a
-  question from another chat moves only the count, and an alert still
-  announces it.
+  A push cannot switch the island to another chat (that needs its title), so
+  after the shown chat stops there is no island until the app is opened, even
+  while another chat works; a question from another chat moves only the count,
+  and an alert announces it.
 - **Trust.** Only the bundled shell or the page on the current Link proxy may
   drive the plugin (same gate as the push semantic reader). Native re-validates
   state, session id and bounds every string.

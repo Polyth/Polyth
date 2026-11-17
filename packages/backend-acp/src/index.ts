@@ -24,6 +24,7 @@ import { open, readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { AgentRuntime, HarnessContext, HarnessDescriptor, HarnessProvider, JsonObject, ModelDescriptor, MutationOutcome, RateLimitRetryHint, RuntimeCommandDescriptor, RuntimeErrorCode, RuntimeEvent, RuntimeSnapshot } from "@polyth/contracts";
+import { createToolProgressThrottle } from "@polyth/contracts";
 import {
     acknowledgeCapabilityApplication,
     attachmentModality,
@@ -466,10 +467,23 @@ export function createAcpRuntime(
         permission: string;
         patterns: string[];
     }>();
+    /** Every permission id this runtime has asked. An agent may ask more than
+     * once for one tool call (e.g. a file outside the workspace, then the
+     * write); reusing the tool call id would hit the first request's settled
+     * answer, so the agent would wait forever and every send would conflict. */
+    const askedPermissionIds = new Set<string>();
+    const permissionRequestId = (toolCallId: unknown): string => {
+        if (typeof toolCallId !== "string" || !toolCallId) return randomUUID();
+        let requestId = toolCallId;
+        for (let n = 2; askedPermissionIds.has(requestId); n++) requestId = `${toolCallId}#${n}`;
+        askedPermissionIds.add(requestId);
+        return requestId;
+    };
     const accepted: NonNullable<RuntimeSnapshot["acceptedOperations"]> = [];
     const endpoint = { authorityId: rpc.authorityId, generation: rpc.generation, continuity: "generation-only" as const, url: "stdio:", location: { directory: context.cwd }, control: { kind: "owned" as const, instanceToken: rpc.authorityId }, config: { kind: "read-only" as const }, authentication: { kind: "none" as const } };
     const emit = (event: RuntimeEvent) => { for (const cb of listeners)
         cb(sid, event); };
+    const progressThrottle = createToolProgressThrottle();
     const currentMessagePartId = () => {
         if (!messagePartId) {
             messagePartId = messagePartOrdinal === 0 ? turnId : `${turnId}:${messagePartOrdinal}`;
@@ -679,6 +693,17 @@ export function createAcpRuntime(
             for (const event of eventsFromAcpToolCallUpdate(acpToolCalls, update as Record<string, unknown>, toolCallOptions)) {
                 emit(event);
             }
+            // An in-progress update (status or streamed content) proves the call
+            // is alive. Ephemeral and throttled; the repeated tool/started above
+            // is unchanged. Nothing for a finished call.
+            if (update.sessionUpdate === "tool_call_update" && typeof update.toolCallId === "string") {
+                const call = acpToolCalls.get(update.toolCallId);
+                const hasContent = Array.isArray(update.content) ? update.content.length > 0 : update.rawOutput !== undefined;
+                if (active && call && !call.finished && (update.status === "in_progress" || (update.status === undefined && hasContent)) && progressThrottle.take(update.toolCallId)) {
+                    const at = Date.now();
+                    emit({ type: "tool/progress", callId: update.toolCallId, at });
+                }
+            }
             // An agent whose todo tool is an ordinary call publishes its list
             // only as that call's input; the list is a full replacement.
             const state = options.toolNameFromTitle && typeof update.toolCallId === "string"
@@ -704,7 +729,7 @@ export function createAcpRuntime(
         if (method !== "session/request_permission" || params.sessionId !== nativeId)
             throw new Error("unsupported request");
         markAccepted();
-        const requestId = params.toolCall?.toolCallId ?? randomUUID();
+        const requestId = permissionRequestId(params.toolCall?.toolCallId);
         // Some agents name only the tool call in the request; its kind, title
         // and input were already announced on the `tool_call` update.
         const tracked = typeof params.toolCall?.toolCallId === "string" ? acpToolCalls.get(params.toolCall.toolCallId) : undefined;
@@ -1057,6 +1082,7 @@ export function createAcpRuntime(
             }
             active = true;
             turnId = operationId;
+            progressThrottle.clear();
             text = "";
             messagePartId = "";
             messagePartOrdinal = 0;
@@ -1122,7 +1148,7 @@ export function createAcpRuntime(
                             ...(failed.code ? { code: failed.code } : {}),
                             ...(failed.retry ? { retry: failed.retry } : {}),
                         }
-                        : { type: "turn/stopped", turnId, reason: result.stopReason === "cancelled" ? "aborted" : "completed" });
+                        : { type: "turn/stopped", turnId, reason: result.stopReason === "cancelled" ? "aborted" : "completed", ...(result.stopReason === "max_tokens" ? { outputLimit: true as const } : {}) });
                     for (const cb of lifecycle)
                         cb({ type: "stream-connected", authorityId: rpc.authorityId, generation: rpc.generation });
                 }, async (error) => {
@@ -1185,7 +1211,12 @@ export function createAcpRuntime(
             pending.delete(requestId);
             request.resolve(option ? { outcome: { outcome: "selected", optionId: option.optionId } } : { outcome: { outcome: "cancelled" } });
         },
-        replyPermissionOperation: (_sid, requestId, reply, operationId) => mutate(operationId, async () => { await runtime.replyPermission(context.sessionId!, requestId, reply); return {}; }),
+        // `pending` is the agent's own open request; without it nothing waits
+        // for this answer, so say so instead of leaving the request unknown
+        // (an unknown answer is never retried and blocks every later send).
+        replyPermissionOperation: async (_sid, requestId, reply, operationId) => !pending.has(requestId)
+            ? { kind: "rejected", code: "not-found", message: "The agent is no longer waiting for this permission" }
+            : mutate(operationId, async () => { await runtime.replyPermission(context.sessionId!, requestId, reply); return {}; }),
         replyQuestion: async () => { throw Object.assign(new Error("questions unsupported"), { code: "unsupported" }); },
         endpoint: async () => endpoint, protocol: async () => "legacy",
         reconcile: async (binding) => ({ ...endpoint, backendSessionId: binding.backendSessionId!, reconciliationOrdinal: binding.reconciliationOrdinal ?? 0,

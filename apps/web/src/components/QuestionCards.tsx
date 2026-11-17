@@ -16,6 +16,9 @@ import {
 import QuestionRecord from "./QuestionRecord.tsx";
 import AdaptiveTextInput, { type TextInputHandle } from "./input/AdaptiveTextInput.tsx";
 import { announce } from "./a11y/live.tsx";
+import {
+  admitAnswerLater, answerLaterKey, deferAnswerLater, isDeferred, takeAnswerLaterFocus, useAnswerLaterVersion,
+} from "@polyth/web-sdk/answer-later";
 import { tr } from "../i18n/index.ts";
 import { friendlyError } from "../settings.ts";
 import { copyText } from "../utils.ts";
@@ -163,8 +166,27 @@ export default function QuestionPrompt({ m, sessionId, entering = false, leaving
   const [sent, setSent] = useState<Pick<QuestionMsg, "status" | "answers" | "answeredAt"> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const item = items[Math.min(step, items.length - 1)];
+  // Answer later: folded, the question waits as one line above the composer.
+  useAnswerLaterVersion();
+  const laterKey = answerLaterKey("question", sessionId, m.requestId);
+  if (!sent) admitAnswerLater([laterKey], sessionId);
+  const folded = !sent && isDeferred(laterKey);
+  useEffect(() => {
+    if (folded || !takeAnswerLaterFocus([laterKey])) return;
+    const first = cardRef.current?.querySelector<HTMLElement>(
+      ".question-body input:not([disabled]), .question-body textarea, .question-tab[aria-selected='true']",
+    );
+    (first ?? panelRef.current)?.focus({ preventScroll: true });
+    cardRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [folded, laterKey]);
   if (sent) return <QuestionRecord m={{ ...m, ...sent }} leaving={leaving} />;
-  if (!item) return null;
+  if (folded || !item) return null;
+  const later = () => {
+    // Keep the keyboard nearby: the waiting line's Answer takes the focus.
+    const hadFocus = cardRef.current?.contains(document.activeElement) ?? false;
+    deferAnswerLater([laterKey], sessionId);
+    if (hadFocus) requestAnimationFrame(() => document.querySelector<HTMLElement>(".answer-later-open")?.focus());
+  };
 
   const setAnswer = (key: string, a: string | string[]) => {
     setError(null);
@@ -221,6 +243,12 @@ export default function QuestionPrompt({ m, sessionId, entering = false, leaving
   };
   // Cmd/Ctrl+Enter moves on from anywhere in the card, text fields included.
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    // Esc folds the question for later, unless something inside used it.
+    if (event.key === "Escape" && !event.defaultPrevented && !event.nativeEvent.isComposing) {
+      event.preventDefault();
+      later();
+      return;
+    }
     if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey) || event.nativeEvent.isComposing) return;
     event.preventDefault();
     if (last ? canSubmit : stepValid) advance();
@@ -248,6 +276,18 @@ export default function QuestionPrompt({ m, sessionId, entering = false, leaving
               </span>
             )}
           </span>
+          {/* Answer later sits at the title's end, as on the approval card:
+              never beside Submit, where it would read as a decision. */}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="question-later"
+            title={tr("answerlater.laterTitle")}
+            aria-keyshortcuts="Escape"
+            onClick={later}
+          >
+            {tr("answerlater.later")}
+          </Button>
           <span className="question-copy">
             <IconButton
               icon={MarkdownIcon}

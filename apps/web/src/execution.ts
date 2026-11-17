@@ -506,6 +506,18 @@ function shellCommandPreview(kind: ExecutionKind, command: string): string {
   return executable ? `Run ${executable}` : "Run command";
 }
 
+/** The words a step is named by everywhere: the timeline row, the activity
+ *  line and the agent's status line above the composer ("Test · Run tests").
+ *  The title is the file name for a path step, else the kind label; the rest
+ *  is the label and folder, or the preview. One naming path for all of them. */
+export function executionSummaryWords(presentation: ExecutionPresentation, projectRoot?: string | null): { title: string; preview: string } {
+  const pathParts = presentation.path ? executionPathParts(presentation.path, projectRoot) : undefined;
+  return {
+    title: pathParts?.filename ?? presentation.label,
+    preview: pathParts ? [presentation.label, pathParts.directory].filter(Boolean).join(" · ") : presentation.preview,
+  };
+}
+
 export function executionPresentation(
   message: Pick<ToolMsg, "tool" | "input" | "output" | "title">,
   context: McpDescribeContext = {},

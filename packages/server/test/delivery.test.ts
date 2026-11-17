@@ -168,7 +168,7 @@ function makeService(fake: ReturnType<typeof fakeRuntime>, opts: {
     rules: () => [],
   } as unknown as PermissionService;
   const broadcast: Broadcaster = { event: () => {}, projection: () => {} };
-  const sessions = createSessionService({
+  const sessions = createSessionService({ autoContinueIncomplete: false,
     store, projects, permissions, broadcast, queue: store,
     runtimes: {
       forProject: async () => fake.rt,
@@ -1107,7 +1107,7 @@ test("queue order survives service restart and dispatches after reopen", async (
   let sessionId = "";
   {
     const store = createStore(dbPath);
-    const sessions = createSessionService({
+    const sessions = createSessionService({ autoContinueIncomplete: false,
       store, projects, permissions, broadcast, queue: store,
       runtimes: { forProject: async () => fake.rt },
     });
@@ -1122,7 +1122,7 @@ test("queue order survives service restart and dispatches after reopen", async (
   // restart: new store + service over the same DB; opening the session drains FIFO
   const fake2 = fakeRuntime();
   const store2 = createStore(dbPath);
-  const sessions2 = createSessionService({
+  const sessions2 = createSessionService({ autoContinueIncomplete: false,
     store: store2, projects, permissions, broadcast, queue: store2,
     runtimes: { forProject: async () => fake2.rt },
   });
@@ -1149,7 +1149,7 @@ test("prepared queue reservation resumes once after service restart", async (t) 
   const broadcast: Broadcaster = { event: () => {}, projection: () => {} };
   const store = createStore(dbPath);
   const first = fakeRuntime();
-  const sessions = createSessionService({
+  const sessions = createSessionService({ autoContinueIncomplete: false,
     store, projects, permissions, broadcast, queue: store,
     runtimes: { forProject: async () => first.rt },
   });
@@ -1169,7 +1169,7 @@ test("prepared queue reservation resumes once after service restart", async (t) 
 
   const reopened = createStore(dbPath);
   const second = fakeRuntime();
-  const resumed = createSessionService({
+  const resumed = createSessionService({ autoContinueIncomplete: false,
     store: reopened, projects, permissions, broadcast, queue: reopened,
     runtimes: { forProject: async () => second.rt },
   });
@@ -1275,7 +1275,7 @@ for (const scenario of [
       };
     };
   }
-  resumed = createSessionService({
+  resumed = createSessionService({ autoContinueIncomplete: false,
     store, projects, queue: store,
     permissions: { evaluate: () => "ask", addRule: () => {}, rules: () => [] } as unknown as PermissionService,
     broadcast: { event: () => {}, projection: () => {} },

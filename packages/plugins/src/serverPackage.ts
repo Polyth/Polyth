@@ -710,6 +710,34 @@ export interface ServerBehaviorSectionRegistry {
 export const SERVER_BEHAVIOR_SECTIONS =
   serverServiceKey<ServerBehaviorSectionRegistry>("behavior.sections");
 
+/** What a turn-context contributor is told about the admitted turn. `space` is
+ *  the server-resolved Space scope (never client-supplied); `worktreePath` is
+ *  the turn's checkout for local projects, else undefined. */
+export interface TurnContextInput {
+  readonly space: SpaceContext;
+  readonly sessionId: string;
+  readonly projectId: string;
+  /** The admitted message's author (the people block's "Speaking now");
+   *  undefined for a system/agent-originated send. Per-person data must be
+   *  filtered to this person, and omitted when it is undefined. */
+  readonly userId: string | undefined;
+  readonly worktreePath: string | undefined;
+}
+
+/** Returns one complete `<polyth-…>…</polyth-…>` block, or "" for nothing. */
+export type TurnContextContributor = (input: TurnContextInput) => string | Promise<string>;
+
+/** Package-owned, model-visible per-turn blocks, collected when Polyth admits a
+ *  user message and persisted with it before runtime delivery (like the people
+ *  and memory blocks). Slow or failing contributors are skipped; the total
+ *  budget is 150 ms and the combined text is capped at 2 KB. Register in
+ *  `onEnable` (resolve the service lazily), dispose in `onDisable`. */
+export interface TurnContextRegistry {
+  register(contributor: TurnContextContributor): Disposable;
+}
+
+export const TURN_CONTEXT = serverServiceKey<TurnContextRegistry>("turn.context");
+
 /** Server-owned application surface exposed to controlled browser packages.
  *
  * The returned origins are network reachability exceptions only: the

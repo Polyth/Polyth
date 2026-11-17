@@ -5,7 +5,6 @@ import type { LiveActivitySnapshot } from "@polyth/mobile/native";
 import {
   LIVE_ACTIVITY_PUSH_TRUST_MS,
   LiveActivityPublisher,
-  liveActivityFinal,
   liveActivitySnapshot,
   liveActivityTexts,
   liveActivityTrack,
@@ -26,8 +25,6 @@ const session = (over: Partial<SessionProjection>): SessionProjection => ({
 });
 
 const emptyModel = (over: Partial<LiveActivityModel> = {}): LiveActivityModel => ({
-  permissions: [],
-  questions: [],
   tasks: null,
   messages: [],
   ...over,
@@ -40,22 +37,33 @@ test("nothing live means no activity", () => {
   assert.equal(snapshot([session({ id: "a" }), session({ id: "b", status: "archived" })]), null);
 });
 
-test("a person-needed chat outranks work, approval outranks a question", () => {
+test("only a chat that is working takes the activity; chats that need a person are counted, never shown", () => {
   const sessions = [
     session({ id: "work", title: "Refactor", status: "working", lastTurnAt: NOW - 30_000 }),
     session({ id: "ask", title: "Docs", status: "working", attention: { questions: 1, permissions: 0, unread: 0 } }),
     session({ id: "approve", title: "Deploy", status: "working", attention: { questions: 0, permissions: 1, unread: 0 } }),
   ];
   const result = snapshot(sessions)!;
-  assert.equal(result.state, "needs-approval");
-  assert.equal(result.sessionId, "approve");
-  assert.equal(result.title, "Deploy");
-  assert.match(result.summary, /1/);
-  assert.equal(result.startedAt, undefined);
+  assert.equal(result.state, "working");
+  assert.equal(result.sessionId, "work");
+  assert.equal(result.title, "Refactor");
+  assert.match(result.summary, /2/, "the two waiting chats are a count in its line");
+  assert.equal(result.startedAt, NOW - 30_000);
 
-  const withoutApproval = snapshot(sessions.filter((item) => item.id !== "approve"))!;
-  assert.equal(withoutApproval.state, "needs-reply");
-  assert.equal(withoutApproval.sessionId, "ask");
+  // A question, an approval, a finished or a failed chat: the notification
+  // says it, so nothing is shown beside it.
+  assert.equal(snapshot(sessions.filter((item) => item.id !== "work")), null);
+  assert.equal(snapshot([session({ id: "ask", status: "waiting", attention: { questions: 1, permissions: 0, unread: 0 } })]), null);
+  assert.equal(snapshot([session({ id: "failed", status: "failed" })]), null);
+});
+
+test("the open chat takes the activity before a more recent one", () => {
+  const sessions = [
+    session({ id: "recent", status: "working", lastTurnAt: NOW - 1_000 }),
+    session({ id: "open", status: "working", lastTurnAt: NOW - 60_000 }),
+  ];
+  assert.equal(snapshot(sessions)!.sessionId, "recent");
+  assert.equal(snapshot(sessions, "open")!.sessionId, "open");
 });
 
 test("subagent children never compete with their parent", () => {
@@ -67,33 +75,25 @@ test("subagent children never compete with their parent", () => {
   assert.equal(result.summary, "");
 });
 
-test("the active chat names its pending question and task progress", () => {
+test("the open chat shows its task progress; a background chat never borrows it", () => {
   const model = emptyModel({
-    questions: [{ sessionId: "a", requestId: "q1", status: "pending", time: NOW, questions: [{ question: "Which branch should I merge?" }] }],
     tasks: { listId: "l", revision: 1, items: [
       { id: "1", text: "Plan", status: "done" },
       { id: "2", text: "Build", status: "active" },
       { id: "3", text: "Ship", status: "pending" },
     ] },
   });
-  const result = snapshot([
-    session({ id: "a", title: "Merge", status: "waiting", attention: { questions: 1, permissions: 0, unread: 0 } }),
-  ], "a", model)!;
-  assert.equal(result.state, "needs-reply");
-  assert.equal(result.detail, "Which branch should I merge?");
-  assert.deepEqual([result.done, result.total], [1, 3]);
-});
+  const open = snapshot([session({ id: "a", title: "Merge", status: "working", lastTurnAt: NOW - 1_000 })], "a", model)!;
+  assert.equal(open.detail, "Build");
+  assert.deepEqual([open.done, open.total], [1, 3]);
 
-test("a background chat never borrows the active chat's question text", () => {
-  const model = emptyModel({
-    questions: [{ sessionId: "active", requestId: "q1", status: "pending", time: NOW, questions: [{ question: "Secret plan?" }] }],
-  });
-  const result = snapshot([
+  const background = snapshot([
     session({ id: "active", status: "idle" }),
-    session({ id: "bg", status: "waiting", attention: { questions: 1, permissions: 0, unread: 0 } }),
+    session({ id: "bg", status: "working", lastTurnAt: NOW - 1_000 }),
   ], "active", model)!;
-  assert.equal(result.sessionId, "bg");
-  assert.equal(result.detail, "");
+  assert.equal(background.sessionId, "bg");
+  assert.equal(background.detail, "");
+  assert.deepEqual([background.done, background.total], [0, 0]);
 });
 
 test("working shows the current task and a stable start for the system timer", () => {
@@ -107,19 +107,7 @@ test("working shows the current task and a stable start for the system timer", (
   assert.deepEqual(later, first, "time passing alone must not cross the bridge");
 });
 
-test("the final snapshot says done or failed, and ends silently for a vanished chat", () => {
-  const previous = snapshot([session({ id: "a", title: "Build", status: "working", lastTurnAt: NOW - 1_000 })])!;
-  const done = liveActivityFinal(previous, [session({ id: "a", title: "Build", status: "idle" })], NOW)!;
-  assert.equal(done.state, "done");
-  assert.equal(done.startedAt, undefined);
-  assert.equal(done.summary, "");
-  const failed = liveActivityFinal(previous, [session({ id: "a", status: "failed" })], NOW)!;
-  assert.equal(failed.state, "failed");
-  assert.equal(liveActivityFinal(previous, [], NOW), undefined);
-  assert.equal(liveActivityFinal(previous, [session({ id: "a", status: "archived" })], NOW), undefined);
-});
-
-test("the publisher throttles, dedupes, orders calls and ends with a final snapshot", async () => {
+test("the publisher throttles, dedupes, orders calls and ends without leaving a card", async () => {
   const calls: string[] = [];
   let current: LiveActivitySnapshot | null = null;
   const timers: Array<{ callback: () => void; ms: number }> = [];
@@ -127,9 +115,9 @@ test("the publisher throttles, dedupes, orders calls and ends with a final snaps
   const publisher = new LiveActivityPublisher({
     bridge: {
       update: async (value) => { calls.push(`update:${value.state}`); return true; },
-      end: async (final) => { calls.push(`end:${final?.state ?? "none"}`); },
+      end: async (...final: unknown[]) => { calls.push(`end:${final.length}`); },
     },
-    evaluate: () => ({ snapshot: current, final: (previous) => ({ ...previous, state: "done" }) }),
+    evaluate: () => ({ snapshot: current }),
     timers: { set: (callback, ms) => { timers.push({ callback, ms }); return timers.length; }, clear: () => {} },
     throttleMs: 1_000,
     now: () => clock,
@@ -137,7 +125,7 @@ test("the publisher throttles, dedupes, orders calls and ends with a final snaps
 
   // First evaluation always reaches native, even when nothing is live.
   await publisher.flush();
-  assert.deepEqual(calls, ["end:none"]);
+  assert.deepEqual(calls, ["end:0"]);
 
   current = snapshot([session({ id: "a", status: "working", lastTurnAt: NOW })]);
   publisher.schedule();
@@ -147,12 +135,12 @@ test("the publisher throttles, dedupes, orders calls and ends with a final snaps
   clock = 1_000;
   timers[0]!.callback();
   await publisher.flush(); // unchanged → no second update
-  assert.deepEqual(calls, ["end:none", "update:working"]);
+  assert.deepEqual(calls, ["end:0", "update:working"]);
   assert.equal(publisher.currentSessionId(), "a");
 
   current = null;
   await publisher.flush();
-  assert.deepEqual(calls, ["end:none", "update:working", "end:done"]);
+  assert.deepEqual(calls, ["end:0", "update:working", "end:0"], "the work is over: no final snapshot is handed to native");
   publisher.dispose();
   const armed = timers.length;
   publisher.schedule();
@@ -172,9 +160,9 @@ function harness(initial: LiveActivitySnapshot | null) {
   const publisher = new LiveActivityPublisher({
     bridge: {
       update: async (value, staleAt) => { updates.push({ state: value.state, staleAt, at: world.clock }); return true; },
-      end: async (final) => { ends.push(final?.state ?? "none"); },
+      end: async () => { ends.push("end"); },
     },
-    evaluate: () => ({ snapshot: world.current, final: (previous) => ({ ...previous, state: "done" }) }),
+    evaluate: () => ({ snapshot: world.current }),
     freshness: () => world.freshness.current
       ? { current: true, confirmedAt: world.clock }
       : { current: false, confirmedAt: world.freshness.confirmedAt },
@@ -242,11 +230,11 @@ test("once the link stops confirming, the stale date stays where the confirmatio
 });
 
 test("a snapshot never confirmed by the server is stale at once", async () => {
-  const waiting = snapshot([session({ id: "a", status: "waiting", attention: { questions: 1, permissions: 0, unread: 0 } })])!;
-  const { publisher, updates, world } = harness(waiting);
+  const working = snapshot([session({ id: "a", status: "working", lastTurnAt: NOW })])!;
+  const { publisher, updates, world } = harness(working);
   world.freshness = { current: false, confirmedAt: null };
   await publisher.flush();
-  assert.deepEqual(updates.map((u) => [u.state, u.staleAt]), [["needs-reply", 0]]);
+  assert.deepEqual(updates.map((u) => [u.state, u.staleAt]), [["working", 0]]);
   world.clock += 60_000;
   await publisher.flush();
   assert.equal(updates.length, 1);
@@ -260,11 +248,12 @@ test("the track names the island's chat, the chats its line counts and what it s
     session({ id: "idle", status: "idle" }),
   ];
   const track = liveActivityTrack({ sessions, activeSessionId: null, activeModel: null, events: {}, now: NOW });
-  assert.deepEqual(track, { sessionId: "ask", others: ["work"], shown: { state: "needs-reply", waiting: 0, working: 1 } });
+  assert.deepEqual(track, { sessionId: "work", others: ["ask"], shown: { state: "working", startedAt: NOW - 30_000, waiting: 1, working: 0 } });
   assert.doesNotMatch(JSON.stringify(track), /Refactor|Docs/);
   const working = liveActivityTrack({ sessions: [sessions[0]!], activeSessionId: null, activeModel: null, events: {}, now: NOW });
   assert.equal(working?.shown.startedAt, NOW - 30_000);
   assert.equal(liveActivityTrack({ sessions: [sessions[2]!], activeSessionId: null, activeModel: null, events: {}, now: NOW }), null);
+  assert.equal(liveActivityTrack({ sessions: [sessions[1]!], activeSessionId: null, activeModel: null, events: {}, now: NOW }), null, "a chat that only waits has no island to track");
 });
 
 test("the widget's push texts cover every state and the line for 1 to 99 other chats", () => {
@@ -286,7 +275,7 @@ test("with push the server is told each new island chat once, its end, and an ac
   let track: LiveActivityTrack | null = liveActivityTrack({ sessions: [work], activeSessionId: null, activeModel: null, events: {}, now: NOW });
   const publisher = new LiveActivityPublisher({
     bridge: { update: async (_value, staleAt) => { updates.push(staleAt - clock); return true; }, end: async () => {} },
-    evaluate: () => ({ snapshot: current, track, final: () => undefined }),
+    evaluate: () => ({ snapshot: current, track }),
     tracker: { track: (value) => tracks.push(value), untrack: () => tracks.push(null), trusted: () => accepted },
     timers: { set: () => 0, clear: () => {} },
     trustMs: 120_000,

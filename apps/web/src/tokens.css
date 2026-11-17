@@ -217,17 +217,6 @@
 
   /* One scalable radius vocabulary: controls → cards → surfaces → sheets. */
   --corner-radius-scale: 1;
-  /* 1 only at the last Corner rounding notch (uiPrefs.ts). There every platform
-     style leaves its native radii for one shared, fully rounded geometry, so
-     "maximum" looks the same size of round on Fluent, Big Sur and macOS 27. */
-  --corner-max: 0;
-  --radius-max-control: calc(22px * var(--corner-max));
-  --radius-max-card: calc(22px * var(--corner-max));
-  --radius-max-surface: calc(26px * var(--corner-max));
-  --radius-max-sheet: calc(32px * var(--corner-max));
-  --radius-max-float: calc(28px * var(--corner-max));
-  --radius-max-menu: calc(20px * var(--corner-max));
-  --radius-max-pill: calc(999px * var(--corner-max));
   --radius-control: calc(8px * var(--corner-radius-scale));
   --radius-card: calc(10px * var(--corner-radius-scale));
   --radius-surface: calc(12px * var(--corner-radius-scale));
@@ -242,14 +231,13 @@
      platform style sets how far its own pills go (a Fluent chip is not a
      capsule). --radius-circle is a shape that carries meaning and stays round
      at every setting: spinners, avatars, radios, status dots. */
-  --radius-round: max(calc(14px * var(--corner-radius-scale)), var(--radius-max-pill));
+  --radius-round: calc(14px * var(--corner-radius-scale));
   --radius-circle: 999px;
-  /* A switch track and its thumb: full at the default rounding and at the
-     last notch, and they square together as Rounding drops. 6.25px only
-     becomes the track half-height at the default 1.8 scale; the max floor
-     keeps the switch in the shared last-notch geometry instead of freezing at
-     its own smaller radius. */
-  --radius-switch: max(calc(6.25px * var(--corner-radius-scale)), var(--radius-max-pill));
+  /* A switch track and its thumb: full from the default rounding up, and they
+     square together as Rounding drops. 6.25px only becomes the track
+     half-height at the default 1.8 scale; the last notch's 1.25× stays a full
+     pill. */
+  --radius-switch: calc(6.25px * var(--corner-radius-scale));
 
   /* Deprecated radius aliases. Do not use in new CSS. */
   --radius: var(--radius-control);

@@ -43,6 +43,10 @@ substitute. Preserve the wrapper's unique unit name so complete failure output
 can be read with `journalctl --user -u <unit>.service`; the displayed journal tail
 may omit an early failure.
 
+## Agent-beta rigs run no model turns
+
+A server started with `POLYTH_AGENT_BETA=1` (`scripts/agent-beta.ts`) refuses every provider turn unless `POLYTH_AGENT_BETA_MODEL_TURNS=1` is set. The refusal is the single admission gate in `sessions.ts` (`admitTurnCoreUnfenced`), which every person send, queue drain, watchdog/incomplete/epoch continuation and wake passes through: a person's send fails with "Model turns are off on this test server…", an automatic continuation is refused and logged, and nothing is persisted or left working. Start rigs that need a real turn with the opt-in, and only when paid turns are authorized. Small-model one-shots (titles, commit messages) are not routed through this gate.
+
 ## Temporary files
 
 Tests remove the `mkdtemp` fixtures they create (`t.after`/`after` with `rmSync(dir, { recursive: true, force: true })`). `scripts/test/tempHygiene.test.ts` fails for a new test file that calls `mkdtemp` without removing anything; the files that already leaked are listed per test directory in `test/temp-leaks.allowlist.json` (so a removable package carries its own list), and the lists only shrink. Both test wrappers run with a private `TMPDIR` and remove it afterwards; a killed wrapper's directory (`polyth-test-run-*`, owner pid recorded inside) is swept by the next run once its owner has exited and the directory has been untouched for 35 minutes.

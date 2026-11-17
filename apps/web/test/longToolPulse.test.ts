@@ -1,0 +1,250 @@
+// Long tool calls and incomplete answers in the timeline: the live-only
+// `tool/progress` frame is ephemeral client state keyed by receipt time, the
+// running row says only what it saw, and `turn/incomplete` becomes a notice
+// whose Continue is a normal visible message.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { register } from "node:module";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import type { SessionEvent } from "@polyth/contracts";
+
+register("./tsxHooks.mjs", import.meta.url);
+
+const { SyncClient } = await import("../src/sync.ts");
+const progress = await import("../src/toolProgress.ts");
+const { toolPulseState, ToolPulseLine, ToolPulseInline, TOOL_SILENCE_HINT_MS } = await import("../src/components/ToolPulse.tsx");
+const { default: TurnIncompleteNotice, continueIncompleteTurn, CONTINUE_PROMPT } = await import("../src/components/TurnIncompleteNotice.tsx");
+const { buildModel } = await import("../src/reduce.ts");
+const { messageMarkdown } = await import("../src/utils.ts");
+
+class FakeSocket {
+  readyState = 0;
+  onopen: ((event: Event) => void) | null = null;
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
+  onclose: ((event: CloseEvent) => void) | null = null;
+  sent: string[] = [];
+  send(data: string): void { this.sent.push(data); }
+  close(): void { this.readyState = 3; }
+  open(): void { this.readyState = 1; this.onopen?.({} as Event); }
+  message(value: unknown): void { this.onmessage?.({ data: JSON.stringify(value) } as MessageEvent); }
+}
+
+const ev = (seq: number, type: string, data: Record<string, unknown>, sessionId = "s1", time = seq): SessionEvent =>
+  ({ id: `${sessionId}-${seq}`, sessionId, seq, time, type, data, v: 1 }) as SessionEvent;
+
+function connected() {
+  const socket = new FakeSocket();
+  const client = new SyncClient({ webSocket: () => socket });
+  client.connect("ws://test/ws");
+  socket.open();
+  client.setSubscription("s1", 0);
+  return { socket, client };
+}
+
+function withNow<T>(now: number, run: () => T): T {
+  const real = Date.now;
+  Date.now = () => now;
+  try { return run(); } finally { Date.now = real; }
+}
+
+test("a tool/progress frame records this client's receipt time, never the frame's clock, and is not passed on", () => {
+  progress.clearToolProgress();
+  const { socket, client } = connected();
+  const seen: string[] = [];
+  client.onEvent((message) => seen.push(message.type));
+  withNow(5_000_000, () => socket.message({ type: "tool/progress", sessionId: "s1", callId: "c1", at: 42 }));
+  assert.equal(progress.toolLastOutputAt("s1", "c1"), 5_000_000);
+  assert.deepEqual(seen, []);
+  // Another session's frame (stale subscription) is dropped.
+  socket.message({ type: "tool/progress", sessionId: "s2", callId: "c9", at: 1 });
+  assert.equal(progress.toolLastOutputAt("s2", "c9"), undefined);
+  // Malformed frames are ignored.
+  socket.message({ type: "tool/progress", sessionId: "s1", callId: "", at: 1 });
+  socket.message({ type: "tool/progress", sessionId: "s1", callId: "c2" });
+  assert.equal(progress.toolLastOutputAt("s1", "c2"), undefined);
+  client.close();
+});
+
+test("progress state clears when the call finishes, its turn stops, or the session changes", () => {
+  progress.clearToolProgress();
+  const { socket, client } = connected();
+  socket.message({ type: "tool/progress", sessionId: "s1", callId: "c1", at: 1 });
+  socket.message({ type: "tool/progress", sessionId: "s1", callId: "c2", at: 1 });
+  socket.message({ type: "event", event: ev(1, "tool/result", { callId: "c1", tool: "bash", output: "ok" }) });
+  assert.equal(progress.toolLastOutputAt("s1", "c1"), undefined);
+  assert.notEqual(progress.toolLastOutputAt("s1", "c2"), undefined);
+  socket.message({ type: "events", events: [ev(2, "turn/stopped", { turnId: "t1", reason: "completed" })] });
+  assert.equal(progress.toolLastOutputAt("s1", "c2"), undefined);
+
+  socket.message({ type: "tool/progress", sessionId: "s1", callId: "c3", at: 1 });
+  client.setSubscription("s2", 0);
+  assert.equal(progress.toolLastOutputAt("s1", "c3"), undefined);
+  socket.message({ type: "tool/progress", sessionId: "s2", callId: "c4", at: 1 });
+  socket.message({ type: "event", event: ev(1, "tool/error", { callId: "c4", tool: "bash", error: "x" }, "s2") });
+  assert.equal(progress.toolLastOutputAt("s2", "c4"), undefined);
+  client.close();
+});
+
+test("pulse state: elapsed only without frames, last output after one, the stop hint from 8 minutes of quiet", () => {
+  const start = 1_000_000;
+  const none = toolPulseState(start + 192_000, start);
+  assert.equal(none.elapsedMs, 192_000);
+  assert.equal(none.lastOutputAgoMs, undefined);
+  assert.equal(none.nearStop, false);
+
+  const seen = toolPulseState(start + 254_000, start, start + 248_000);
+  assert.equal(seen.lastOutputAgoMs, 6_000);
+  assert.equal(seen.nearStop, false);
+
+  // Without frames the server counts quiet from the start.
+  assert.equal(toolPulseState(start + TOOL_SILENCE_HINT_MS - 1, start).nearStop, false);
+  assert.equal(toolPulseState(start + TOOL_SILENCE_HINT_MS, start).nearStop, true);
+  // With frames, from the newest receipt.
+  const quiet = toolPulseState(start + 530_000, start, start + 25_000);
+  assert.equal(quiet.quietMs, 505_000);
+  assert.equal(quiet.nearStop, true);
+});
+
+test("the running row says only what it saw", () => {
+  progress.clearToolProgress();
+  const now = 10_000_000;
+  withNow(now, () => {
+    const start = now - 192_000;
+    const props = { sessionId: "s1", callId: "c1", startedAt: start };
+    // No frame: the row adds nothing (elapsed is in its status mark); the line names the elapsed time only.
+    assert.equal(renderToStaticMarkup(createElement(ToolPulseLine, props)), "");
+    const inline = renderToStaticMarkup(createElement(ToolPulseInline, props));
+    assert.match(inline, /3m 12s/);
+    assert.doesNotMatch(inline, /output/i);
+
+    progress.noteToolProgress("s1", "c1", now - 6_000);
+    assert.match(renderToStaticMarkup(createElement(ToolPulseLine, props)), />Last output 6s ago</);
+    assert.match(renderToStaticMarkup(createElement(ToolPulseInline, props)), />last output 6s ago</);
+
+    // Near the watchdog with frames: one line, the silence since the newest frame and the countdown.
+    const quiet = { ...props, startedAt: now - 530_000 };
+    progress.noteToolProgress("s1", "c1", now - 505_000);
+    const line = renderToStaticMarkup(createElement(ToolPulseLine, quiet));
+    assert.match(line, /tool-pulse--stopping/);
+    assert.match(line, /No output for 8m 25s/);
+    // Who stops it and on what condition, in place (not only in the tooltip).
+    assert.match(line, /Polyth stops it in 1m 35s unless it prints something/);
+    assert.match(line, /title="Polyth stops a command after 10 minutes with no output\."/);
+    assert.doesNotMatch(line, /tool-pulse-dot|[Qq]uiet/, "no dot, and no second word for silence");
+    const inlineQuiet = renderToStaticMarkup(createElement(ToolPulseInline, quiet));
+    assert.match(inlineQuiet, />8m 50s</);
+    // "auto-stop", never a bare "stops in" that reads as "finishes in".
+    assert.match(inlineQuiet, />auto-stop in 1m 35s</);
+
+    // Near the watchdog without frames: silence is never claimed, only the countdown.
+    progress.clearToolProgress();
+    const silent = { ...props, callId: "c2", startedAt: now - 530_000 };
+    const silentLine = renderToStaticMarkup(createElement(ToolPulseLine, silent));
+    assert.match(silentLine, />Polyth stops it in 1m 10s unless it finishes</);
+    assert.doesNotMatch(silentLine, />[^<]*(No output|Last output)[^<]*</, "no claim about output");
+    const silentInline = renderToStaticMarkup(createElement(ToolPulseInline, silent));
+    assert.match(silentInline, />8m 50s<.*>auto-stop in 1m 10s</);
+    assert.doesNotMatch(silentInline, />[^<]*(output|quiet)[^<]*</i);
+  });
+  progress.clearToolProgress();
+});
+
+test("turn/incomplete becomes a notice; unknown fields are tolerated and unknown kinds skipped", () => {
+  const model = buildModel([
+    ev(1, "user/message", { text: "hi" }),
+    ev(2, "turn/incomplete", { turnId: "t1", kind: "length", autoContinued: true, future: { nested: [1] } }),
+    ev(3, "turn/incomplete", { turnId: "t2", kind: "empty", autoContinued: false }),
+    ev(4, "turn/incomplete", { turnId: "t3", kind: "someday" }),
+    ev(5, "turn/incomplete", { turnId: "t4" }),
+  ]);
+  const notices = model.messages.filter((m) => m.kind === "notice");
+  assert.equal(notices.length, 2);
+  assert.deepEqual(notices.map((n) => n.kind === "notice" && [n.topic, n.incompleteKind, n.autoContinued]), [
+    ["turn-incomplete", "length", true],
+    ["turn-incomplete", "empty", false],
+  ]);
+  assert.equal(messageMarkdown(notices[0]!), "The answer was cut off: it reached the reply length limit · Polyth asked it to continue.");
+});
+
+test("notice variants: auto-continued says so; otherwise a quiet Continue sends a visible message", async () => {
+  const base = { kind: "notice" as const, id: "n1", eventSeq: 2, topic: "turn-incomplete" as const, time: 0 };
+  const auto = renderToStaticMarkup(createElement(TurnIncompleteNotice, {
+    notice: { ...base, incompleteKind: "length", autoContinued: true },
+    onContinue: () => {},
+  }));
+  assert.match(auto, /The answer was cut off: it reached the reply length limit/);
+  assert.doesNotMatch(auto, /<svg/, "a footnote: no icon or disc");
+  assert.match(auto, /Polyth asked it to continue\./);
+  assert.doesNotMatch(auto, /<button/);
+
+  const empty = { ...base, incompleteKind: "empty" as const, autoContinued: false };
+  const offered = renderToStaticMarkup(createElement(TurnIncompleteNotice, { notice: empty, onContinue: () => {} }));
+  assert.match(offered, /The agent stopped without answering/);
+  // The action says it asks the agent (a sent message), not "show more".
+  assert.match(offered, /<button[^>]*turn-incomplete-continue[^>]*>Ask it to continue</);
+  // Not the newest row any more: no Continue.
+  assert.doesNotMatch(renderToStaticMarkup(createElement(TurnIncompleteNotice, { notice: empty })), /<button/);
+
+  const calls: unknown[][] = [];
+  await continueIncompleteTurn(async (...args: unknown[]) => { calls.push(args); return true; }, "s1");
+  assert.equal(CONTINUE_PROMPT, "Continue");
+  assert.deepEqual(calls, [["Continue", undefined, undefined, { targetSessionId: "s1" }]]);
+  assert.equal((calls[0]![3] as Record<string, unknown>).hiddenUserMessage, undefined);
+});
+
+test("the agent's status line names a running call exactly as its timeline row does", async () => {
+  const { liveActionOf } = await import("../src/liveAction.ts");
+  const { executionPresentation, executionSummaryWords } = await import("../src/execution.ts");
+  const call = { kind: "tool" as const, id: "c1", callId: "c1", eventSeq: 3, tool: "bash", input: { command: "npm test -- --runInBand", description: "Run the full test suite" }, status: "running" as const, time: 0 };
+  const words = executionSummaryWords(executionPresentation(call));
+  const model = { messages: [call], tasks: null, subagents: null } as unknown as Parameters<typeof liveActionOf>[0];
+  assert.equal(liveActionOf(model), `${words.title} · ${words.preview}`);
+  assert.doesNotMatch(liveActionOf(model), /Bash/, "never the raw tool name beside the row's kind label");
+});
+
+test("Keep running: the button shows only in the silence countdown, a kept call reads its own line, the ceiling has no button", () => {
+  progress.clearToolProgress();
+  const now = 10_000_000;
+  withNow(now, () => {
+    const base = { sessionId: "s1", callId: "c1" };
+    // Before the countdown: no button.
+    progress.noteToolProgress("s1", "c1", now - 6_000);
+    assert.doesNotMatch(renderToStaticMarkup(createElement(ToolPulseLine, { ...base, startedAt: now - 192_000 })), /tool-pulse-keep/);
+    // Countdown: ghost button with an accessible name, after the text.
+    const countdown = { ...base, startedAt: now - 530_000 };
+    progress.noteToolProgress("s1", "c1", now - 505_000);
+    const line = renderToStaticMarkup(createElement(ToolPulseLine, countdown));
+    assert.match(line, /Polyth stops it in 1m 35s unless it prints something.*<button[^>]*tool-pulse-keep[^>]*aria-label="Keep running: [^"]*"[^>]*>.*Keep running/s);
+    // Kept: no countdown, no button, the kept line.
+    const kept = renderToStaticMarkup(createElement(ToolPulseLine, { ...countdown, kept: true }));
+    assert.match(kept, />No output for 8m 25s · kept running</);
+    assert.doesNotMatch(kept, /tool-pulse-keep|Polyth stops it|<button/);
+    assert.match(renderToStaticMarkup(createElement(ToolPulseInline, { ...countdown, kept: true })), />kept running</);
+    // Ceiling (from 50 minutes): every call, kept or not, no button.
+    const late = { ...base, startedAt: now - 55 * 60_000 };
+    for (const keptFlag of [false, true]) {
+      const ceiling = renderToStaticMarkup(createElement(ToolPulseLine, { ...late, kept: keptFlag }));
+      assert.match(ceiling, />Polyth stops it in 5m: commands run at most 60 minutes</);
+      assert.doesNotMatch(ceiling, /<button|tool-pulse-keep/);
+    }
+    assert.match(renderToStaticMarkup(createElement(ToolPulseInline, { ...late })), />auto-stop in 5m</);
+  });
+  progress.clearToolProgress();
+});
+
+test("tool/keep-running marks the running call; old or unknown calls are ignored", () => {
+  const model = buildModel([
+    ev(1, "user/message", { text: "go" }),
+    ev(2, "tool/started", { callId: "c1", tool: "bash", input: {} }),
+    ev(3, "tool/keep-running", { callId: "c1", byUserId: "u1" }),
+    ev(4, "tool/keep-running", { callId: "ghost" }),
+    ev(5, "tool/keep-running", {}),
+  ]);
+  const tools = model.messages.filter((m) => m.kind === "tool");
+  assert.equal(tools.length, 1);
+  assert.equal((tools[0] as { keptRunning?: boolean }).keptRunning, true);
+  const before = buildModel([ev(1, "user/message", { text: "go" }), ev(2, "tool/started", { callId: "c1", tool: "bash", input: {} })]);
+  assert.equal((before.messages.find((m) => m.kind === "tool") as { keptRunning?: boolean }).keptRunning, undefined);
+});

@@ -91,6 +91,28 @@ test("fenced ts/js emits tokenizer classes and keeps copy inside the frame", asy
   }
 });
 
+test("a fence without a language keeps no header band above the code", async () => {
+  const bare = await mount("1. Step:\n   ```\n   npm run inspect\n   ```");
+  try {
+    const block = bare.container.querySelector(".md-code-block");
+    assert.ok(block, "fenced code uses .md-code-block");
+    assert.equal(block!.querySelector(".md-code-block-header"), null, "nothing to label, so no header row");
+    const copy = block!.querySelector(".md-code-block-float .copy-btn");
+    assert.ok(copy, "the copy control floats in the frame's corner instead");
+  } finally {
+    await bare.unmount();
+  }
+
+  const labelled = await mount("```bash\nnpm run inspect\n```");
+  try {
+    const block = labelled.container.querySelector(".md-code-block")!;
+    assert.ok(block.querySelector(".md-code-block-header"), "a language keeps the header band");
+    assert.equal(block.querySelector(".md-code-block-float"), null, "no floating copy when the header holds one");
+  } finally {
+    await labelled.unmount();
+  }
+});
+
 test("json raw uses the json tokenizer and the same inside-frame copy", async () => {
   const view = await mount("```json\n{\"ok\": true, \"n\": 2}\n```");
   try {
@@ -206,9 +228,10 @@ test("viewer slides between several images with arrows, keys and thumbnails", as
 
 test("markdown code-block CSS is scoped and uses visual viewport plus editor font", async () => {
   const css = await read("../src/styles.css");
-  const copyRule = css.match(/\.md-code-block-header \.copy-btn\s*\{([^}]+)\}/)?.[1] ?? "";
+  const copyRule = css.match(/\.md-code-block-header \.copy-btn,\s*\.md-code-block-float \.copy-btn\s*\{([^}]+)\}/)?.[1] ?? "";
   assert.match(copyRule, /background:\s*transparent/);
   assert.match(copyRule, /box-shadow:\s*none/);
+  assert.match(css, /\.md-code-block-float\s*\{[^}]*position:\s*absolute/s);
   assert.match(css, /\.md-code-block-header\s*\{[^}]*border-bottom:\s*1px solid var\(--border-soft\)/s);
   assert.match(css, /\.md-code-block\s*\{[^}]*border-radius:\s*var\(--radius-control\)/s);
   assert.doesNotMatch(css, /\.md-code-block\s*\{[^}]*isolation:\s*isolate/s);

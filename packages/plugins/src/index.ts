@@ -51,6 +51,7 @@ export {
   SESSION_PURPOSES,
   SESSION_START_STEPS,
   SERVER_BEHAVIOR_SECTIONS,
+  TURN_CONTEXT,
   serverServiceKey,
   type AppendEventOptions,
   type DiscoveredServerPackage,
@@ -102,6 +103,9 @@ export {
   type SessionStartStepContext,
   type SessionStartStepRegistry,
   type ServerBehaviorSectionRegistry,
+  type TurnContextContributor,
+  type TurnContextInput,
+  type TurnContextRegistry,
   type SessionRuntimeBinding,
 } from "./serverPackage.ts";
 export {

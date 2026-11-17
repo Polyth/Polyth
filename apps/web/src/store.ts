@@ -1879,13 +1879,22 @@ export function applyEventWithPendingSend(
   return pending.id;
 }
 
-/** First-send creation resolved its session id; re-anchor the echo's tail. */
+/** First-send creation resolved its session id. The chat did not exist when
+ *  its prompt was sent, so its whole history follows the send: the echo
+ *  anchors at 0, not at whatever is cached by now. The live socket can deliver
+ *  the new chat's admission before the create reply; anchoring past it left
+ *  the echo standing for good, below the turn's work. Retire it against that
+ *  cache at once. */
 export function bindPendingSend(id: string, sessionId: string): void {
   const at = state.pendingSends.findIndex((p) => p.id === id);
   if (at < 0 || state.pendingSends[at]!.sessionId !== null) return;
   const next = state.pendingSends.slice();
-  next[at] = { ...next[at]!, sessionId, afterSeq: lastSeq(sessionId) };
-  set({ pendingSends: next });
+  next[at] = { ...next[at]!, sessionId, afterSeq: 0 };
+  const cached = state.events[sessionId];
+  const retired = cached && cached.length > 0
+    ? new Set(retiredPendingSends(next.filter((p) => p.sessionId === sessionId), cached).map((p) => p.id))
+    : null;
+  set({ pendingSends: retired && retired.size > 0 ? next.filter((p) => !retired.has(p.id)) : next });
 }
 
 /** Drop an echo whose submission failed. A rejected prompt has no canonical
@@ -1901,14 +1910,25 @@ export function endPendingSend(id: string): void {
  *  `user/message`. Interrupt parks the same text on the queue until abort
  *  finishes — that enqueue must not retire the echo or the timeline blanks.
  *  Steer persists a `user/message` before I/O; `delivery/steered` is only
- *  confirmation and must not count as a second admission. */
+ *  confirmation and must not count as a second admission.
+ *
+ *  An echo anchored before the cached history's first event has its
+ *  admission out of sight: a cold open loads only the newest window, so a
+ *  prompt older than that window can never be counted. The window is the
+ *  server's newest tail, and an admission lands within moments of its send,
+ *  so the prompt is already in the history above; it retires. */
 export function retiredPendingSends(
   pending: readonly PendingSend[],
   merged: readonly SessionEvent[],
 ): PendingSend[] {
-  const oldest = pending[0];
-  if (!oldest) return [];
-  let landed = 0;
+  const firstSeq = merged[0]?.seq;
+  let hidden = 0;
+  while (firstSeq !== undefined && hidden < pending.length && pending[hidden]!.afterSeq + 1 < firstSeq) {
+    hidden += 1;
+  }
+  const oldest = pending[hidden];
+  if (!oldest) return pending.slice(0, hidden);
+  let landed = hidden;
   for (let i = merged.length - 1; i >= 0 && merged[i]!.seq > oldest.afterSeq; i -= 1) {
     const type = merged[i]!.type;
     // A failed start takes its first prompt back to the draft: no row comes.

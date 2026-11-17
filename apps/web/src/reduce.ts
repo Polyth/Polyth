@@ -105,6 +105,9 @@ export interface ToolMsg {
   /** A command the person ran from the composer with `!`: its own timeline
    *  row, never part of an agent's activity block. */
   composerShell?: boolean;
+  /** A person pressed Keep running (`tool/keep-running`): the server's silence
+   *  stop is off for this call; only the hard ceiling remains. */
+  keptRunning?: true;
   /** See UserMsg.rev. */
   rev?: number;
 }
@@ -143,7 +146,11 @@ export interface NoticeMsg {
   kind: "notice";
   id: string;
   eventSeq: number;
-  topic: "isolation-merged" | "isolation-discarded" | "isolation-started" | "project-moved";
+  topic: "isolation-merged" | "isolation-discarded" | "isolation-started" | "project-moved" | "turn-incomplete";
+  /** Turn incomplete: no reply (`empty`) or the output limit (`length`). */
+  incompleteKind?: "empty" | "length";
+  /** Turn incomplete: Polyth already sent its one hidden continuation. */
+  autoContinued?: boolean;
   /** Project moved: names at the time of the move; the log outlives them. */
   fromProject?: string;
   toProject?: string;
@@ -1005,6 +1012,22 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       });
       break;
     }
+    case "turn/incomplete": {
+      // Ignorable and maybe from a newer server: only a known kind renders,
+      // and fields this client does not know are left alone.
+      const kind = str(d, "kind");
+      if (kind !== "empty" && kind !== "length") break;
+      model.messages.push({
+        kind: "notice",
+        id: ev.id,
+        eventSeq: ev.seq,
+        topic: "turn-incomplete",
+        incompleteKind: kind,
+        autoContinued: d.autoContinued === true,
+        time: ev.time,
+      });
+      break;
+    }
     case "github/conflict-resolution-started": {
       const prNumber = num(d, "prNumber");
       if (prNumber === undefined || !Number.isSafeInteger(prNumber) || prNumber <= 0) break;
@@ -1334,6 +1357,15 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           model.changedFiles = [...new Set([...model.changedFiles, ...changedFiles])];
         }
         t.finishTime = ev.time;
+        touch(t);
+      }
+      break;
+    }
+    case "tool/keep-running": {
+      // Polyth-originated, not model-visible; an unknown call is ignored.
+      const t = findTool(model, str(d, "callId") ?? "");
+      if (t && !t.keptRunning) {
+        t.keptRunning = true;
         touch(t);
       }
       break;

@@ -10,13 +10,26 @@ width: clamp(100px, 24%, 180px); min-width: 0;
 /* One tree header row: optional repository scope, the search field and the
    tree actions. The surface title already names the pane, so no label. */
 .files-toolbar {
-  display: flex; align-items: center; gap: var(--space-1);
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1);
   min-height: var(--control-h); padding: 0 0 var(--space-1);
   color: var(--text); font: 400 var(--font-label)/1.3 var(--ui-font-family);
+  container: files-toolbar / inline-size;
 }
 .files-toolbar .workspace-surface-header-scope { flex: 0 1 auto; min-width: 0; max-width: 45%; }
-.files-toolbar .workspace-surface-header-context { flex: 1 1 auto; min-width: 0; display: flex; }
+.files-toolbar .workspace-surface-header-context { flex: 1 1 0; min-width: 0; display: flex; }
 .files-toolbar .workspace-surface-header-actions { flex: none; }
+/* The repository chip shrinks to its column and truncates the alias; the
+   host chip otherwise keeps its content width and spills over the search. */
+.files-toolbar .workspace-surface-header-scope .picker { flex: 1 1 auto; max-width: 100%; }
+.files-toolbar .workspace-surface-header-scope .picker-chip { min-width: 0; max-width: 100%; }
+.files-toolbar .workspace-surface-header-scope .chip-k { flex: none; }
+/* The desktop tree is at most ~240px wide: scope, search and two actions do
+   not share one line there, so the repository gets its own full row. */
+@container files-toolbar (max-width: 360px) {
+  .files-toolbar .workspace-surface-header-scope { flex: 1 0 100%; max-width: none; }
+  .files-toolbar .workspace-surface-header-scope .picker-chip { width: 100%; }
+  .files-toolbar .workspace-surface-header-scope .picker-caret { margin-inline-start: auto; }
+}
 .files-toolbar-actions { display: inline-flex; align-items: center; gap: 2px; }
 .files-repository-trees {
   display: flex; flex-direction: column; min-width: 0;

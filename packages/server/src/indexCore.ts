@@ -76,6 +76,7 @@ import {
   SESSION_PURPOSES,
   SESSION_START_STEPS,
   SERVER_BEHAVIOR_SECTIONS,
+  TURN_CONTEXT,
   serverServiceKey,
   type HttpServerContext,
   type PluginRegistry,
@@ -140,8 +141,10 @@ import { registerDiscoveredPackages, registerServerPackage } from "./packageDisc
 import { queueRoutes } from "./routes/queue.ts";
 import { createBehaviorSectionRegistry, createBehaviorService } from "./behavior.ts";
 import { createSessionStartStepRegistry } from "./sessionStartSteps.ts";
+import { createTurnContextRegistry } from "./turnContext.ts";
 import { createClientSettings, modelFavoriteKeys } from "./clientSettings.ts";
 import { parseCompactionPreference } from "@polyth/contracts/compaction-policy";
+import { resolveModelContextLimit } from "@polyth/contracts/model-context";
 import { createFailedStartupCleanupPolicy, type SessionAccountDeps } from "./failedStartupCleanup.ts";
 import { createExpiredSessionPolicy, sessionsKeptByPeople, startExpiredSessionCleanup } from "./expiredSessionCleanup.ts";
 import { createMcpConfigService, mcpEntriesFromBackendConfig, PERSONAL_MCP_PACKAGE } from "./mcp.ts";
@@ -222,6 +225,9 @@ export interface BootOptions {
   /** Operator-declared canonical identity origin from the trusted bootstrap.
    *  Hosts must not derive it from request input. */
   canonicalOrigin?: string;
+  /** Refuse every provider turn (agent-beta test servers without
+   *  POLYTH_AGENT_BETA_MODEL_TURNS=1). */
+  modelTurnsDisabled?: boolean;
   /** Static SPA directory override for packaged hosts. */
   webDist?: string;
   opencode?: Partial<OpenCodeAdapterOptions>;
@@ -710,6 +716,7 @@ export async function boot(opts: BootOptions = {}) {
     clientSettingsChanged: (userId, settings) => live?.clientSettingsChanged?.(userId, settings),
     projectPresentationChanged: (spaceId, projectId, settings) => live?.projectPresentationChanged?.(spaceId, projectId, settings),
     worktreesChanged: (projectId) => live?.worktreesChanged?.(projectId),
+    toolProgress: (sessionId, callId, at) => live?.toolProgress?.(sessionId, callId, at),
     sessionAccessChanged: (projections, formerReaders) => {
       live?.sessionAccessChanged?.(projections, formerReaders);
       eventWaiters.projection();
@@ -2084,6 +2091,10 @@ export async function boot(opts: BootOptions = {}) {
   // Package-owned steps of a chat's start (`SessionStartRequest.extensions`).
   const sessionStartSteps = createSessionStartStepRegistry();
   services.provide(SESSION_START_STEPS, sessionStartSteps);
+  // Package-owned per-turn context blocks (`TURN_CONTEXT`); the Space is
+  // resolved server-side, never from the message.
+  const turnContext = createTurnContextRegistry({ space: (spaceId) => spaceGateway.resolveInternal(spaceId) });
+  services.provide(TURN_CONTEXT, turnContext);
   const behavior = createBehaviorService({
     file: `${dataDir}/behavior.md`,
     policyFile: `${dataDir}/behavior-policy.json`,
@@ -2900,6 +2911,7 @@ export async function boot(opts: BootOptions = {}) {
 
   const sessions = createSessionService({
     store,
+    ...(opts.modelTurnsDisabled ? { modelTurnsDisabled: true } : {}),
     redactToolInput: (toolName, input) => {
       const descriptor = capabilityContributions.list().map((item) => item.descriptor).find((item) =>
         item.kind === "tool" && (item.name === toolName || toolName.endsWith(`__${item.name}`) || toolName.endsWith(`_${item.name}`)));
@@ -2907,6 +2919,7 @@ export async function boot(opts: BootOptions = {}) {
     },
     projects, runtimes, broadcast, queue: store, org: store, profiles: store, behavior, secureSafe,
     startSteps: sessionStartSteps,
+    turnContext,
     harnesses: {
       staticFeatures: (harnessId) =>
         harnesses.providers().find((provider) => provider.descriptor.id === harnessId)?.staticFeatures,
@@ -2918,6 +2931,11 @@ export async function boot(opts: BootOptions = {}) {
     failedStartupCleanupAllowed,
     outputCache,
     modelCatalogStale: (signal) => { runtimeCatalog.modelsStale(signal); },
+    // A model or harness switch keeps the conversation's used tokens but not
+    // the window they were measured against: the shared catalog knows the new
+    // route's capacity. Unknown stays unknown, never guessed from the old leg.
+    modelContextLimit: async (model, harnessId) =>
+      resolveModelContextLimit(model, await runtimeCatalog.models(), harnessId),
     // Polyth-owned compaction summarizes with the session's own model, as a
     // harness compaction would; the owning account's small model (else
     // POLYTH_SMALL_MODEL) is the fallback. The small model goes first when

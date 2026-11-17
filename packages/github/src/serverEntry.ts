@@ -1,5 +1,6 @@
 import type { AgentCapabilityContributionRegistry, Disposable, RouteHandler, RouteRequest } from "@polyth/contracts";
 import { execFile } from "node:child_process";
+import { scrubInheritedEnv } from "@polyth/kernel/inherited-env";
 import { detectGitRemotes } from "@polyth/code-hosting/remotes";
 import { roleAtLeast } from "@polyth/contracts";
 import { describeChangeRequest, hostingRoutes } from "@polyth/code-hosting/routes";
@@ -57,7 +58,7 @@ const verifyWithGithub: GithubTokenVerifier = async (origin, token) => {
 
 /** The remotes of a checkout, read with the local Git binary. */
 const remotesAt = (path: string) => detectGitRemotes(path, (bin, args, opts) => new Promise((resolve, reject) => {
-  execFile(resolveExecutable(bin, bin === "git" ? { overrideEnv: GIT_BINARY_ENV } : {}), args, { cwd: opts.cwd, timeout: 10_000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => error ? reject(new Error("Local Git inspection failed.")) : resolve({ stdout, stderr }));
+  execFile(resolveExecutable(bin, bin === "git" ? { overrideEnv: GIT_BINARY_ENV } : {}), args, { cwd: opts.cwd, timeout: 10_000, maxBuffer: 1024 * 1024, ...(bin === "git" ? { env: scrubInheritedEnv() } : {}) }, (error, stdout, stderr) => error ? reject(new Error("Local Git inspection failed.")) : resolve({ stdout, stderr }));
 }));
 
 const CONNECT_REASON = "Connect your GitHub account in Profile → Accounts and turn it on for this Space.";

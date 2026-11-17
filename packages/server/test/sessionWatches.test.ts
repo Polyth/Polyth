@@ -629,3 +629,92 @@ test("a failed start wakes the watcher as a failure: no turn will ever stop", as
   await h.coordinator.close();
   await h.store.close();
 });
+
+test("a completed child that still has background work says so in the wake, frozen at the terminal event", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-session-watch-bg-"));
+  const dbPath = join(dir, "sessions.db");
+  const store = createStore(dbPath);
+  await seed(store, "busy", "quiet", "target");
+  const sends: Array<{ sessionId: string; input: UserTurnInput }> = [];
+  let loseResponse = true;
+  const sessions = {
+    async send(sessionId: string, input: UserTurnInput) {
+      sends.push({ sessionId, input });
+      if (loseResponse && input.text.includes("Background work")) {
+        loseResponse = false;
+        throw new Error("response lost after admission");
+      }
+      return { turnId: "wake-turn" };
+    },
+  } as unknown as SessionService;
+  const coordinator = createSessionWatchCoordinator({ store, sessions: () => sessions, broadcast: { event() {} } });
+  await coordinator.create(space, { sourceSessionId: "busy", targetSessionId: "target", once: false });
+  await coordinator.create(space, { sourceSessionId: "quiet", targetSessionId: "target", once: false });
+
+  // The producer freezes the note into the terminal fact (see sessions.ts).
+  await store.append("busy", "turn/stopped", {
+    reason: "completed",
+    background: { count: 2, names: ["npm run build", "workflow"] },
+  });
+  await store.append("quiet", "turn/stopped", { reason: "completed" });
+  await coordinator.kick("quiet");
+  assert.doesNotMatch(sends[0]!.input.text, /Background work/);
+  await coordinator.kick("busy");
+  assert.match(sends[1]!.input.text, /Background work: idle, but 2 background tasks still running: npm run build, workflow/);
+
+  // The child's later state must not leak into the retry: the text is replayed.
+  await store.patchProjection?.("busy", (current) => ({ ...current, backgroundWork: { workflow: 5 } }));
+  await coordinator.recover();
+  assert.equal(sends.length, 3);
+  assert.equal(sends[2]!.input.clientOperationId, sends[1]!.input.clientOperationId);
+  assert.equal(sends[2]!.input.text, sends[1]!.input.text);
+
+  await coordinator.close();
+  await store.close();
+});
+
+test("the terminal event freezes live background work and only for a completed turn", async (t) => {
+  const h = harness();
+  const listeners = new Set<(id: string, event: RuntimeEvent) => void>();
+  const emit = (id: string, event: RuntimeEvent) => { for (const listener of listeners) listener(id, event); };
+  const runtime: AgentRuntime = {
+    capabilities: async () => ({ streaming: true, permissions: true, questions: true, compaction: false, subagents: false }),
+    models: async () => [], agents: async () => [],
+    ensureSession: async (input) => `backend-${input.sessionId}`,
+    sessions: async () => [], history: async () => [],
+    startTurn: async (input) => { emit(input.sessionId, { type: "turn/started", turnId: "t" }); },
+    abort: async () => {}, replyPermission: async () => {}, replyQuestion: async () => {},
+    onEvent(listener) { listeners.add(listener); return { dispose: () => listeners.delete(listener) }; },
+    dispose: async () => {},
+  };
+  const project = { id: "project-watch", name: "Watch", path: h.dir, spaceId: space.spaceId, createdAt: 1 };
+  const sessions = createSessionService({
+    store: h.store, queue: h.store,
+    projects: {
+      get: async (id) => id === project.id ? project : undefined,
+      list: async () => [project], add: async () => project,
+      create: async () => project, remove: async () => {},
+    },
+    permissions: { evaluate: () => "allow", addRule() {}, rules: () => [] } as unknown as PermissionService,
+    broadcast: { event() {}, projection() {} },
+    runtimes: { forProject: async () => runtime },
+  });
+  t.after(async () => { sessions.dispose(); await h.coordinator.close(); await h.store.close(); });
+  const child = await sessions.create({ projectId: project.id, title: "child" });
+  await sessions.send(child.id, { text: "work" });
+  await h.store.patchProjection?.(child.id, (current) => ({ ...current, backgroundWork: { workflow: 2 } }));
+  emit(child.id, { type: "turn/stopped", reason: "completed", turnId: "t" });
+  for (let attempt = 0; attempt < 100 && !(await h.store.sessionWatchStopsAfter(child.id, 0)).length; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  const [stop] = await h.store.sessionWatchStopsAfter(child.id, 0);
+  assert.deepEqual(stop?.data.background, { count: 2, names: ["workflow ×2"] });
+
+  await sessions.send(child.id, { text: "again" });
+  emit(child.id, { type: "turn/stopped", reason: "aborted", turnId: "t" });
+  for (let attempt = 0; attempt < 100 && (await h.store.sessionWatchStopsAfter(child.id, 0)).length < 2; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  const stops = await h.store.sessionWatchStopsAfter(child.id, 0);
+  assert.equal(stops[1]?.data.background, undefined);
+});

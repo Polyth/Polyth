@@ -108,6 +108,33 @@ test("ACP permissions map native option ids; a lost admitted prompt records a te
     assert.equal((await rt.releaseExecution!(binding, "switch")).kind, "confirmed");
 });
 
+test("ACP gives a repeated permission for one tool call its own id; a request nobody waits for is not-found", async () => {
+    const f = fakeRpc();
+    f.handle(async (method) => method === "session/new" ? { sessionId: "native" } : new Promise(() => {}));
+    const rt = createAcpRuntime(context, f.rpc);
+    const events: RuntimeEvent[] = [];
+    rt.onEvent((_sid, e) => events.push(e));
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    const admission = rt.startTurnOperation!({ sessionId: "canonical", text: "task" }, "submit");
+    const options = [{ optionId: "allow", kind: "allow_once" }];
+    const first = f.request("session/request_permission", { sessionId: "native", toolCall: { toolCallId: "patch", kind: "edit", title: "~/.zshrc" }, options });
+    assert.equal((await admission).kind, "confirmed");
+    assert.equal((await rt.replyPermissionOperation!("canonical", "patch", "once", "op-1")).kind, "confirmed");
+    assert.deepEqual(await first, { outcome: { outcome: "selected", optionId: "allow" } });
+    // The same tool call asks again (as Copilot's apply_patch can).
+    const second = f.request("session/request_permission", { sessionId: "native", toolCall: { toolCallId: "patch", kind: "edit", title: "~/.zshrc" }, options });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(events.filter((e) => e.type === "permission/requested").map((e) => e.type === "permission/requested" && e.requestId), ["patch", "patch#2"]);
+    assert.equal((await rt.replyPermissionOperation!("canonical", "patch#2", "once", "op-2")).kind, "confirmed");
+    assert.deepEqual(await second, { outcome: { outcome: "selected", optionId: "allow" } });
+    // Answering a request the agent is no longer waiting on must not stay
+    // unknown: the server expires a not-found request instead of wedging it.
+    assert.deepEqual(await rt.replyPermissionOperation!("canonical", "patch", "reject", "op-3"), {
+        kind: "rejected", code: "not-found", message: "The agent is no longer waiting for this permission",
+    });
+    await rt.dispose();
+});
+
 test("ACP follow-up silence from an unresponsive peer times out with one terminal error and fences late completion", async () => {
     const f = fakeRpc();
     let promptCount = 0;
@@ -986,5 +1013,63 @@ test("stdio MCP servers given at launch are left out of session/new; a permissio
     });
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(events.filter((event) => event.type === "permission/requested").at(-1)?.permission, "execute");
+    await rt.dispose();
+});
+
+test("ACP marks a completed stop whose prompt ended on max_tokens", async () => {
+    const f = fakeRpc();
+    let finish!: (value: unknown) => void;
+    f.handle(async (method) => {
+        if (method === "session/new") return { sessionId: "native" };
+        if (method === "session/prompt") return new Promise((resolve) => { finish = resolve; });
+        return {};
+    });
+    const rt = createAcpRuntime(context, f.rpc, "cursor");
+    const events: RuntimeEvent[] = [];
+    rt.onEvent((_sid, event) => events.push(event));
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    const admission = rt.startTurnOperation!({ sessionId: "canonical", text: "task" }, "submit");
+    f.emit("session/update", {
+        sessionId: "native",
+        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "cut" } },
+    });
+    assert.equal((await admission).kind, "confirmed");
+    finish({ stopReason: "max_tokens" });
+    await new Promise((resolve) => setImmediate(resolve));
+    const stopped = events.find((event) => event.type === "turn/stopped");
+    assert.equal(stopped?.type === "turn/stopped" && stopped.reason, "completed");
+    assert.equal(stopped?.type === "turn/stopped" && stopped.outputLimit, true);
+    await rt.dispose();
+});
+
+test("ACP maps in-progress tool_call_update to a throttled ephemeral tool/progress and keeps repeated tool/started", async () => {
+    const f = fakeRpc();
+    let finish!: (value: unknown) => void;
+    f.handle(async (method) => {
+        if (method === "session/new") return { sessionId: "native" };
+        if (method === "session/prompt") return new Promise((resolve) => { finish = resolve; });
+        return {};
+    });
+    const rt = createAcpRuntime(context, f.rpc);
+    const events: RuntimeEvent[] = [];
+    rt.onEvent((_sid, event) => events.push(event));
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    const admission = rt.startTurnOperation!({ sessionId: "canonical", text: "run" }, "progress-turn");
+    f.emit("session/update", { sessionId: "native", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Running." } } });
+    assert.equal((await admission).kind, "confirmed");
+    f.emit("session/update", { sessionId: "native", update: { sessionUpdate: "tool_call", toolCallId: "sh-1", kind: "execute", title: "sleep 900", status: "in_progress" } });
+    const update = (extra: Record<string, unknown>) => f.emit("session/update", { sessionId: "native", update: { sessionUpdate: "tool_call_update", toolCallId: "sh-1", kind: "execute", ...extra } });
+    update({ status: "in_progress" });
+    update({ status: "in_progress", content: [{ type: "content", content: { type: "text", text: "tick" } }] });
+    await new Promise((resolve) => setImmediate(resolve));
+    const progress = events.filter((event) => event.type === "tool/progress");
+    assert.equal(progress.length, 1, "burst of updates inside the 2 s window is throttled to one");
+    assert.equal(progress[0]!.type === "tool/progress" && progress[0]!.callId, "sh-1");
+    assert.ok(events.some((event) => event.type === "tool/started"), "tool/started behaviour is unchanged");
+    update({ status: "completed", rawOutput: { output: "done" } });
+    update({ status: "in_progress" });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(events.filter((event) => event.type === "tool/progress").length, 1, "nothing for a finished call");
+    finish({ stopReason: "end_turn" });
     await rt.dispose();
 });

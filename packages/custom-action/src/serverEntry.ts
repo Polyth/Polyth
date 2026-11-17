@@ -1,11 +1,13 @@
 import {
   serverServiceKey,
+  TURN_CONTEXT,
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
 import type { RouteHandler } from "@polyth/contracts";
 import { createActionStore } from "./actionStore.ts";
 import { createRunManager, type RunManager, type RunTerminals, type StartChatInput } from "./runManager.ts";
+import { runningActionsContributor } from "./turnContext.ts";
 import { CUSTOM_ACTION_REMOTE_ACCESS, customActionRoutes } from "./routes.ts";
 
 /** Create the hand-off chat in the run's project and send its first message.
@@ -38,6 +40,7 @@ async function startChat(host: ServerPackageHost, input: StartChatInput): Promis
 }
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
+  let turnContext: { dispose(): void } | null = null;
   let runtime: { routes: RouteHandler; runs: RunManager } | null = null;
   const log = (message: string) => console.warn(message);
   return {
@@ -59,8 +62,14 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
           forSpace: (space) => host.forSpace(space),
         }),
       };
+      // Resolved lazily: the host provides the seam; absent means no hint.
+      turnContext = host.services.get(TURN_CONTEXT)?.register(
+        runningActionsContributor({ runs: () => runtime?.runs }),
+      ) ?? null;
     },
     async onDisable() {
+      turnContext?.dispose();
+      turnContext = null;
       const current = runtime;
       runtime = null;
       await current?.runs.dispose();

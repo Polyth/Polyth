@@ -106,6 +106,9 @@ export async function boot(opts: BootOptions = {}) {
     : `http://${localOriginHost(hostname)}:${port}`;
   if (agentBeta) {
     console.warn("[polyth] AGENT beta enabled: loopback web UI runs as the active owner with read-only workspace execution");
+    if (process.env.POLYTH_AGENT_BETA_MODEL_TURNS !== "1") {
+      console.warn("[polyth] AGENT beta: model turns are off (set POLYTH_AGENT_BETA_MODEL_TURNS=1 to allow them)");
+    }
   } else if (debugAgentAccess) {
     console.warn("[polyth] DEBUG agent access enabled: direct-loopback HTTP/WS runs as the active owner");
   }
@@ -146,7 +149,10 @@ export async function boot(opts: BootOptions = {}) {
       // indexCore acquires the canonical data-directory writer lease before
       // the first consumer calls canonicalSecurity(), so the lazy factory above
       // cannot open/migrate the control-plane outside the one-writer section.
-      const runtime = await bootCore({ ...opts, port, hostname, dataDir, canonicalOrigin: origin });
+      const runtime = await bootCore({
+        ...opts, port, hostname, dataDir, canonicalOrigin: origin,
+        ...(agentBeta && process.env.POLYTH_AGENT_BETA_MODEL_TURNS !== "1" ? { modelTurnsDisabled: true } : {}),
+      });
       security = security ?? canonicalSecurity();
       if (!security || security.control.installation().state !== "ready") {
         await runtime.shutdown();

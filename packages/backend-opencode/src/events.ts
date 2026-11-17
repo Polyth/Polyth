@@ -376,6 +376,9 @@ export interface TranslateState {
   /** Model the admitted turn was submitted with, when the message never named one. */
   admittedTurnModel?: ModelRef;
   abortingTurnId?: string;
+  /** The admitted turn's latest completed assistant message ended at the
+   *  model's output-token limit (`finish: "length"`). */
+  outputLimit?: boolean;
   latestAssistantCompletion?: {
     messageId: string;
     revision: string;
@@ -424,6 +427,7 @@ export const admitTranslateTurn = (
   state.abortingTurnId = undefined;
   state.pendingTerminal = undefined;
   state.latestAssistantCompletion = undefined;
+  state.outputLimit = undefined;
 };
 
 export const finishTranslateTurn = (
@@ -436,6 +440,7 @@ export const finishTranslateTurn = (
   state.abortingTurnId = undefined;
   state.pendingTerminal = undefined;
   state.latestAssistantCompletion = undefined;
+  state.outputLimit = undefined;
 };
 
 export const markTranslateTurnAborting = (
@@ -555,6 +560,7 @@ export const translateOcEvent = (ev: OcEvent, state: TranslateState): RuntimeEve
       }
       if (typeof info.cost === "number") state.lastCost = info.cost;
       const completed = asRecord(info?.time)?.completed;
+      if (typeof completed === "number" && state.admittedTurnId) state.outputLimit = info.finish === "length" ? true : undefined;
       if (typeof completed === "number" && typeof info.id === "string" && info.id) {
         state.latestAssistantCompletion = {
           messageId: info.id,

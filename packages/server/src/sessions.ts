@@ -40,7 +40,7 @@ import type {
   Project, SessionMoveBlock, SessionMoveInput, SessionProjectMove, SessionProjectMovedData, SessionReleasedExecution,
   SessionPerson, SessionPersonScope, TurnAdmission,
   PersonAccessDecisionResult, PersonAccessOutcome, PersonAccessRequest, PersonAccessResolvedData,
-  PersonMessageInput, PersonMessageResult, SessionMentionCandidateDto,
+  PersonMessageInput, PersonMessageResult, SessionMentionCandidateDto, ChatMentionCandidateDto,
   CreateConversationInput, StartSessionFromConversationInput, StartSessionFromConversationResult,
   SessionStartFailedData, SessionStartRequest, StartSessionInput, StartSessionResult,
   RuntimeCapabilities,
@@ -50,6 +50,7 @@ import type {
 import {
   isSessionAccessLevel,
   normalizeSessionPerson,
+  sessionMentionIds,
   readErrorDiagnostics,
   runtimeBatchAdmitsTurnContent,
   runtimeEventHasTurnContent,
@@ -60,20 +61,23 @@ import {
   SESSION_PURPOSE_CONVERSATION,
   CONVERSATION_SESSION_STARTED_EVENT,
   SESSION_PAUSE_ENDED_EVENT,
+  TOOL_KEEP_RUNNING_EVENT,
+  TURN_INCOMPLETE_EVENT,
   SESSION_PROJECT_MOVED_EVENT,
   SESSION_START_FAILED_EVENT,
   SESSION_STARTING_QUEUE_REASON,
   normalizeSessionOrigin,
 } from "@polyth/contracts";
-import { sessionMentionCandidates, sessionAudience, sessionOutsiders, sessionShareApprover, sharingRootId, steerPeopleLine, turnPeopleBlock } from "./sessionSharing.ts";
+import { chatMentionCandidates, mentionedChatsBlock, sessionMentionCandidates, sessionAudience, sessionOutsiders, sessionShareApprover, sharingRootId, steerPeopleLine, turnPeopleBlock } from "./sessionSharing.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
 import type { ProjectService } from "@polyth/contracts";
-import { compactionDue, effectiveCompactionPreference, parseCompactionPreference, type CompactionPreference } from "@polyth/contracts/compaction-policy";
+import { compactionDue, compactionDueForNextModel, effectiveCompactionPreference, parseCompactionPreference, type CompactionPreference } from "@polyth/contracts/compaction-policy";
 import { extractSecureSafeEnvRefs } from "@polyth/credential-vault";
 import { redactSecrets } from "@polyth/plugins";
 import type { SessionStartStep, WorkspaceCheckpointService, WorkspaceCheckpointTurn, WorkspaceRestoreInput } from "@polyth/plugins";
 import type { RewindFilesOutcome, RewindFilesPreview, RewindFilesUnavailableReason, RewindRestorePreview, WorkspaceCheckpointData } from "@polyth/contracts";
 import { cwdInsideRoot, rewindCheckpointTurns, WORKSPACE_CHECKPOINT_EVENT } from "./rewindFiles.ts";
+import { liveBackgroundWork } from "@polyth/contracts";
 import { isolationBlocksUserMutation, isolationNeedsRecovery, isManagedIsolationBranch, normalizeIsolation, publishedIsolationMerge } from "@polyth/contracts";
 import {
   projectRepositories,
@@ -155,6 +159,9 @@ import {
 } from "./sessionWorkspace.ts";
 /** Bounds one move's transaction; a chat with more delegated work stays put. */
 const SESSION_MOVE_FAMILY_LIMIT = 200;
+
+export const MODEL_TURNS_DISABLED_MESSAGE =
+  "Model turns are off on this test server. Set POLYTH_AGENT_BETA_MODEL_TURNS=1 to allow them.";
 
 const QUIET_DISPATCH_ERRORS = new Set([
   "shutting_down",
@@ -245,14 +252,17 @@ const fingerprintClientAdmission = ({ author: _author, ...input }: UserTurnInput
 export const toolTimeoutContinuePrompt = (
   active: { tool: string; input: JsonObject },
   limit: string,
+  cause: "silence" | "hard-limit" = "silence",
 ): string => {
   const command = typeof active.input.command === "string" ? active.input.command : undefined;
   const stopped = command
     ? `\nThe stopped call was: ${command.replace(/\s+/g, " ").trim().slice(0, 300)}`
     : "";
   return [
-    `[polyth] Tool watchdog: your \`${active.tool}\` call was stopped after exceeding the ${limit} execution safety limit, so that run is incomplete and its output was discarded.${stopped}`,
-    "Everything you already did — your reasoning, earlier tool results, and the files you read — is intact, and this turn continues from exactly there. Do not repeat that call. Continue with bounded work instead: read one file at a time, cap piped output, and pass an explicit timeout to any long command. If the deliverable is already complete, write it and finish.",
+    cause === "silence"
+      ? `[polyth] Tool watchdog: your \`${active.tool}\` call was stopped after ${limit} without output, so that run is incomplete and its output was discarded.${stopped}`
+      : `[polyth] Tool watchdog: your \`${active.tool}\` call was stopped at the ${limit} hard execution limit, so that run is incomplete and its output was discarded.${stopped}`,
+    "Everything you already did — your reasoning, earlier tool results, and the files you read — is intact, and this turn continues from exactly there. Do not repeat that call. Run long commands in the background (the harness's background option, or `nohup … > file 2>&1 &`) and check on them, or continue with bounded work: read one file at a time and cap piped output. If the deliverable is already complete, write it and finish.",
   ].join("\n\n");
 };
 
@@ -286,6 +296,12 @@ const isModelRef = (value: ResumeTurnOptions | ModelRef): value is ModelRef =>
   && typeof value.providerID === "string"
   && "modelID" in value
   && typeof value.modelID === "string";
+
+/** The identity a measured context window belongs to: one conversation can
+ *  keep its used-token count across a model or harness change, but the limit
+ *  it was measured against belongs to that exact model. */
+const modelRouteKey = (model: ModelRef | undefined): string | undefined =>
+  model ? `${model.providerID}\u0000${model.modelID}` : undefined;
 
 const normalizeResumeOptions = (
   input?: ResumeTurnOptions | ModelRef,
@@ -344,6 +360,9 @@ export interface Broadcaster {
    *  fakes stay valid; inbox records never pass through appendAndBroadcast
    *  or any session reducer. */
   notification?(record: NotificationRecord, recipient?: { userId: string; spaceId: string }): void;
+  /** Live-only liveness of one running tool call. Never persisted, replayed or
+   *  model-visible: a client that was not connected simply misses it. */
+  toolProgress?(sessionId: string, callId: string, at: number): void;
   pluginChanged?(packageId: string): void;
   packageChanged?(pkg: PackageDescriptorDto): void;
   /** Server-persisted client preferences changed for one authenticated account. */
@@ -866,6 +885,8 @@ export function createSessionService(deps: {
   spawnTelemetry?: SpawnTelemetry;
   /** Package start steps (`SESSION_START_STEPS`), read per start. */
   startSteps?: { get(id: string): SessionStartStep | undefined };
+  /** Package per-turn context blocks (`TURN_CONTEXT`), collected per admitted turn. */
+  turnContext?: { collect(input: { spaceId: string; sessionId: string; projectId: string; userId: string | undefined; worktreePath: string | undefined }): Promise<string> };
   /** Backoff ladder (ms) for retrying a transient runtime-acquire failure on a
    *  new session's first acquire. Tests shorten it; omitted uses the default. */
   runtimeAcquireRetryMs?: readonly number[];
@@ -1030,9 +1051,21 @@ export function createSessionService(deps: {
       accessRequest?: PersonAccessRequest;
     }): void;
   };
-  /** Hard ceiling for one runtime tool execution. A hung tool is aborted and
-   * recorded as a model-visible tool/error. Defaults to ten minutes. */
+  /** A `completed` turn whose answer is incomplete (`turn/incomplete`) is
+   *  continued once with a hidden send. false keeps the fact and sends nothing.
+   *  Defaults to true. */
+  autoContinueIncomplete?: boolean;
+  /** Silence limit for one runtime tool execution: a call with no observed
+   * activity for this long is aborted and recorded as a model-visible
+   * tool/error. Defaults to ten minutes. */
   toolExecutionTimeoutMs?: number;
+  /** Absolute ceiling for one tool call even while it keeps showing activity.
+   *  Defaults to sixty minutes. `toolExecutionTimeoutMs` is the silence limit. */
+  toolExecutionHardLimitMs?: number;
+  /** Refuse every provider turn at admission (agent-beta without opt-in). */
+  modelTurnsDisabled?: boolean;
+  /** Test seam: grace after a restart before a rehydrated call's hard ceiling may fire (default 60 s). */
+  toolRehydrateGraceMs?: number;
   /** Consecutive tool-watchdog aborts that may auto-continue the turn with a
    *  hidden continuation prompt. 0 disables the nudge. Defaults to 1. */
   toolTimeoutContinueLimit?: number;
@@ -1069,6 +1102,10 @@ export function createSessionService(deps: {
      *  when that model has just run out of quota. */
     smallModelFirst?: boolean;
   }) => Promise<string>;
+  /** The context window the shared model catalog knows for a model on a
+   *  harness, or undefined when nothing authoritative says. Read only when the
+   *  next turn's route differs from the one the occupancy was measured on. */
+  modelContextLimit?(model: ModelRef, harnessId: string | undefined): Promise<number | undefined>;
   /** The selected model turned out not to exist (or not be usable) on its
    * harness: the shared model catalog that offered it is stale. */
   modelCatalogStale?(signal: {
@@ -1364,6 +1401,8 @@ export function createSessionService(deps: {
     generation: number;
     commands?: RuntimeCommandDescriptor[];
     contextWindow?: ContextWindowState;
+    /** The model the window was measured on, so a switch cannot borrow its limit. */
+    contextWindowModel?: ModelRef;
     nativeCommandsRevision: number;
   };
   const runtimeFeatureState = new Map<string, RuntimeFeatureState>();
@@ -1441,6 +1480,10 @@ export function createSessionService(deps: {
   // so reconciliation can take over instead of leaving the control disabled.
   const ABORT_AWAIT_MS = 8_000;
   const TOOL_EXECUTION_TIMEOUT_MS = deps.toolExecutionTimeoutMs ?? 10 * 60_000;
+  const TOOL_EXECUTION_HARD_LIMIT_MS = Math.max(
+    TOOL_EXECUTION_TIMEOUT_MS,
+    deps.toolExecutionHardLimitMs ?? 60 * 60_000,
+  );
   // A tool that never returns must still be stopped, but a forced abort is not
   // a reason to throw away the turn's work: the agent is nudged forward with a
   // hidden continuation prompt instead (bounded, never a replay of the whole
@@ -1462,6 +1505,14 @@ export function createSessionService(deps: {
   const unadmittedContentFences = new Map<string, number>();
   const toolWatchdogs = new Map<string, NodeJS.Timeout>();
   const pausedToolWatchdogs = new Set<string>();
+  /** Calls a person marked `tool/keep-running`: no silence stop, ceiling only. */
+  const keptToolCalls = new Set<string>();
+  // Per-call clock: when it started and when a runtime event last carried its
+  // id. Survives a request pause so the hard ceiling is not reset by waiting.
+  const toolWatchdogClocks = new Map<string, { startedAt: number; lastActivityAt: number; ceilingNotBefore: number }>();
+  /** After a server restart the hard ceiling never fires sooner than this long
+   *  after start, so reconciliation and epoch recovery settle first. */
+  const TOOL_REHYDRATE_GRACE_MS = Math.max(0, deps.toolRehydrateGraceMs ?? 60_000);
   const toolWatchdogKey = (sessionId: string, callId: string): string => `${sessionId}\0${callId}`;
   const clearToolWatchdog = (sessionId: string, callId: string): void => {
     const key = toolWatchdogKey(sessionId, callId);
@@ -1469,6 +1520,8 @@ export function createSessionService(deps: {
     if (timer) clearTimeout(timer);
     toolWatchdogs.delete(key);
     pausedToolWatchdogs.delete(key);
+    keptToolCalls.delete(key);
+    toolWatchdogClocks.delete(key);
   };
   const clearSessionToolWatchdogs = (sessionId: string): void => {
     for (const [key, timer] of toolWatchdogs) {
@@ -1478,6 +1531,12 @@ export function createSessionService(deps: {
     }
     for (const key of pausedToolWatchdogs) {
       if (key.startsWith(`${sessionId}\0`)) pausedToolWatchdogs.delete(key);
+    }
+    for (const key of toolWatchdogClocks.keys()) {
+      if (key.startsWith(`${sessionId}\0`)) toolWatchdogClocks.delete(key);
+    }
+    for (const key of keptToolCalls) {
+      if (key.startsWith(`${sessionId}\0`)) keptToolCalls.delete(key);
     }
   };
   type ActiveTool = { tool: string; input: JsonObject; startedAt: number };
@@ -1503,22 +1562,62 @@ export function createSessionService(deps: {
     for (const event of events) foldActiveTool(active, event);
     return active;
   };
+  /** Arm (or re-arm) the silence watchdog for one call. The call is stopped
+   *  after TOOL_EXECUTION_TIMEOUT_MS without activity, or at the hard ceiling
+   *  from its start, whichever comes first. A harness that never repeats a
+   *  call-bearing event is therefore stopped ten minutes after it started. */
   function armToolWatchdog(
     sessionId: string,
     callId: string,
     startedAt = Date.now(),
+    lastActivityAt = startedAt,
+    ceilingNotBefore?: number,
   ): void {
     if (serviceDisposed || TOOL_EXECUTION_TIMEOUT_MS <= 0) return;
-    clearToolWatchdog(sessionId, callId);
-    const timer = setTimeout(() => {
-      toolWatchdogs.delete(toolWatchdogKey(sessionId, callId));
-      void stopTimedOutTool(sessionId, callId).catch((error) => {
-        console.error(`[polyth] failed to stop timed-out tool ${callId} in ${sessionId}`, error);
-      });
-    }, Math.max(0, TOOL_EXECUTION_TIMEOUT_MS - (Date.now() - startedAt)));
-    timer.unref?.();
-    toolWatchdogs.set(toolWatchdogKey(sessionId, callId), timer);
+    const key = toolWatchdogKey(sessionId, callId);
+    ceilingNotBefore ??= toolWatchdogClocks.get(key)?.ceilingNotBefore ?? 0;
+    const pending = toolWatchdogs.get(key);
+    if (pending) clearTimeout(pending);
+    toolWatchdogs.delete(key);
+    pausedToolWatchdogs.delete(key);
+    toolWatchdogClocks.set(key, { startedAt, lastActivityAt, ceilingNotBefore });
+    const schedule = (): void => {
+      const clock = toolWatchdogClocks.get(key);
+      if (!clock) return;
+      const ceiling = Math.max(clock.startedAt + TOOL_EXECUTION_HARD_LIMIT_MS, clock.ceilingNotBefore);
+      // A kept call has no silence stop: only the hard ceiling remains.
+      const kept = keptToolCalls.has(key);
+      const deadline = kept ? ceiling : Math.min(clock.lastActivityAt + TOOL_EXECUTION_TIMEOUT_MS, ceiling);
+      const timer = setTimeout(() => {
+        toolWatchdogs.delete(key);
+        const current = toolWatchdogClocks.get(key);
+        if (!current) return;
+        const now = Date.now();
+        const silent = !keptToolCalls.has(key) && now - current.lastActivityAt >= TOOL_EXECUTION_TIMEOUT_MS;
+        const capped = now - current.startedAt >= TOOL_EXECUTION_HARD_LIMIT_MS && now >= current.ceilingNotBefore;
+        // Timers can fire a hair early; activity may also have landed meanwhile.
+        if (!silent && !capped) {
+          schedule();
+          return;
+        }
+        void stopTimedOutTool(sessionId, callId, silent ? "silence" : "hard-limit").catch((error) => {
+          console.error(`[polyth] failed to stop timed-out tool ${callId} in ${sessionId}`, error);
+        });
+      }, Math.max(0, deadline - Date.now()));
+      timer.unref?.();
+      toolWatchdogs.set(key, timer);
+    };
+    schedule();
   }
+  /** A runtime event carrying this call's id proves it is alive. The timer is
+   *  left alone: it re-checks the clock when it fires, so a chatty call costs
+   *  one map write per event rather than a timer reset. */
+  const noteToolActivity = (sessionId: string, callId: string): boolean => {
+    const clock = toolWatchdogClocks.get(toolWatchdogKey(sessionId, callId));
+    if (!clock) return false;
+    clock.lastActivityAt = Date.now();
+    return true;
+  };
   const toolAwaitingRequest = (sessionId: string, callId: string, tool: string, facts: LogFacts): boolean =>
     [facts.openPermissions, facts.openQuestions, facts.openSecrets].some((requests) =>
       [...requests].some(([requestId, request]) =>
@@ -1551,17 +1650,23 @@ export function createSessionService(deps: {
         toolWatchdogs.delete(key);
         pausedToolWatchdogs.add(key);
       } else if (pausedToolWatchdogs.delete(key)) {
-        armToolWatchdog(sessionId, callId);
+        // Human latency is not tool silence, but it does not extend the ceiling.
+        armToolWatchdog(sessionId, callId, toolWatchdogClocks.get(key)?.startedAt ?? Date.now(), Date.now());
       }
     }
   };
 
   async function updateToolWatchdog(sessionId: string, event: RuntimeEvent): Promise<void> {
     if (event.type === "tool/started" || (event.type === "tool/call" && event.status === "running")) {
-      armToolWatchdog(sessionId, event.callId);
+      // A repeat of an armed call (input refinement, status update) is activity,
+      // not a new call: it must not restart the hard-ceiling clock.
+      if (!pausedToolWatchdogs.has(toolWatchdogKey(sessionId, event.callId)) && noteToolActivity(sessionId, event.callId)) return;
+      armToolWatchdog(sessionId, event.callId, toolWatchdogClocks.get(toolWatchdogKey(sessionId, event.callId))?.startedAt);
       await syncToolWatchdogsForRequests(sessionId);
     } else if (event.type === "tool/result" || event.type === "tool/error") {
       clearToolWatchdog(sessionId, event.callId);
+    } else if (event.type === "tool/call") {
+      noteToolActivity(sessionId, event.callId);
     } else if (event.type === "turn/stopped") {
       clearSessionToolWatchdogs(sessionId);
     } else if (event.type === "permission/requested" || event.type === "question/asked" || event.type === "secret/requested") {
@@ -3744,6 +3849,7 @@ export function createSessionService(deps: {
   const clearRuntimeFeatureState = (sessionId: string): void => {
     runtimeFeatureState.delete(sessionId);
     compactionAttempts.delete(sessionId);
+    queuedTurnModels.delete(sessionId);
     clearAutomaticTitleTracking(sessionId);
   };
 
@@ -3786,6 +3892,74 @@ export function createSessionService(deps: {
     deferredRuntimeWakes.delete(sessionId);
     for (const wake of held) requestRuntimeWake(sessionId, wake.wakeId, wake.text);
   };
+  /** The one hidden continuation of a turn that ended `completed` but not
+   *  whole. Same family as the runtime wake: a hidden, idempotent send. */
+  const INCOMPLETE_CONTINUE_PROMPT = "Your previous answer ended before it was complete. Continue from where you stopped without repeating what you already wrote.";
+  const incompleteContinueOperationId = (sessionId: string, turnId: string): string => {
+    const hex = createHash("sha256").update(sessionId + turnId + "incomplete-continue").digest("hex");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-${(8 | (parseInt(hex[16]!, 16) & 3)).toString(16)}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+  };
+  const recordIncompleteTurn = async (
+    sessionId: string,
+    stopped: SessionEvent,
+    events: readonly SessionEvent[],
+  ): Promise<void> => {
+    const turnId = (stopped.data as { turnId?: unknown }).turnId;
+    if (typeof turnId !== "string" || !turnId) return;
+    // The agent is waiting on background work: a quiet turn is expected.
+    if ((stopped.data as { background?: unknown }).background) return;
+    const end = events.findIndex((event) => event.seq === stopped.seq);
+    if (end < 0) return;
+    let hasText = false;
+    let hasTool = false;
+    let message: SessionEvent | undefined;
+    for (let index = end - 1; index >= 0; index -= 1) {
+      const event = events[index]!;
+      if (event.type === "turn/stopped") break;
+      if (event.type === "user/message") { message = event; break; }
+      if (event.type === "assistant/message" && typeof (event.data as { text?: unknown }).text === "string"
+        && ((event.data as { text: string }).text).trim()) hasText = true;
+      else if (event.type === "tool/call" || event.type === "tool/started" || event.type === "tool/result" || event.type === "tool/error") hasTool = true;
+    }
+    // No admitted prompt (a compaction), a keep-alive or a native command turn
+    // is not a person's answer.
+    if (!message) return;
+    const sent = message.data as { keepAlive?: unknown; command?: unknown; hiddenUserMessage?: unknown; text?: unknown };
+    if (sent.keepAlive === true || sent.command) return;
+    const outputLimit = (stopped.data as { outputLimit?: unknown }).outputLimit === true;
+    const kind = outputLimit ? "length" : (!hasText && !hasTool ? "empty" : undefined);
+    if (!kind) return;
+    if (events.some((event) => event.type === TURN_INCOMPLETE_EVENT && (event.data as { turnId?: unknown }).turnId === turnId)) return;
+    const isContinuation = sent.hiddenUserMessage === true && sent.text === INCOMPLETE_CONTINUE_PROMPT;
+    const autoContinued = !isContinuation && deps.autoContinueIncomplete !== false;
+    // The fact is durable before any continuation can be delivered.
+    await appendAndBroadcast(sessionId, TURN_INCOMPLETE_EVENT, { turnId, kind, autoContinued }, { ignorable: true });
+    if (!autoContinued) return;
+    const stoppedSeq = stopped.seq;
+    void Promise.resolve()
+      .then(async () => {
+        if (deps.isShuttingDown?.()) return;
+        const proceed = await withSessionLock(sessionId, async () => {
+          const proj = await store.projection(sessionId);
+          // A Pause, a Stop, a model switch or anything newer cancels it.
+          if (!proj || proj.status !== "idle" || proj.paused || proj.harnessTransition) return false;
+          if ((await store.events(sessionId)).some((event) => event.seq > stoppedSeq
+            && (event.type === "turn/started" || event.type === "user/message" || event.type === "turn/abort-requested"))) return false;
+          if (deps.queue && (await deps.queue.queueList(sessionId)).some((item) => !item.heldForReview)) return false;
+          return true;
+        });
+        if (!proceed) return;
+        await service.send(sessionId, {
+          text: INCOMPLETE_CONTINUE_PROMPT,
+          delivery: "normal",
+          hiddenUserMessage: true,
+          clientOperationId: incompleteContinueOperationId(sessionId, turnId),
+        });
+      })
+      .catch((error: unknown) => {
+        console.warn(`[polyth] incomplete-turn continuation for ${sessionId} was not admitted: ${error instanceof Error ? error.message : String(error)}`);
+      });
+  };
   const clearPromptSuggestion = (sessionId: string): void => {
     promptSuggestions.delete(sessionId);
   };
@@ -3814,6 +3988,9 @@ export function createSessionService(deps: {
       ...(patch.contextWindow !== undefined
         ? { contextWindow: patch.contextWindow }
         : sameGeneration && prev.contextWindow ? { contextWindow: prev.contextWindow } : {}),
+      ...(patch.contextWindowModel !== undefined
+        ? { contextWindowModel: patch.contextWindowModel }
+        : sameGeneration && prev.contextWindowModel ? { contextWindowModel: prev.contextWindowModel } : {}),
     };
     runtimeFeatureState.set(sessionId, next);
     return next;
@@ -4853,33 +5030,106 @@ export function createSessionService(deps: {
   const COMPACTION_RETRY_MS = 10 * 60_000;
   const COMPACTION_RETRY_GROWTH = 0.05;
   const compactionAttempts = new Map<string, { at: number; fraction: number }>();
+  /** The model a message waiting behind a compaction was chosen for. A queued
+   *  item carries no model of its own, so the send records it here and the
+   *  dispatcher applies it to that exact message. */
+  const queuedTurnModels = new Map<string, { queueId: string; model: ModelRef }>();
 
-  /** The person asked to compact before this conversation grows further. Done
-   *  before a message rather than after an answer, so an abandoned chat costs
-   *  nothing. Only a quiet, measured session qualifies. */
-  const compactionDueBeforeTurn = (sessionId: string, proj: SessionProjection): boolean => {
-    if (!deps.queue || proj.status !== "idle" || proj.paused || proj.harnessTransition || !proj.backendSessionId) return false;
-    if (turnActive(sessionId) || compactions.has(sessionId)) return false;
-    const window = projectionContextWindow(sessionId, proj);
-    if (!window || window.source === "unknown" || window.compaction?.active) return false;
-    if (!compactionDue(compactionPreferenceOf(proj), window)) return false;
+  /** The occupancy the next turn will be measured against. A model or harness
+   *  change keeps the conversation's used tokens — the history is the same —
+   *  but the measured limit belongs to the model that produced it, so the new
+   *  route's catalog window replaces it. Nothing is invented when no catalog
+   *  knows the new route. */
+  const nextTurnContextWindow = async (
+    sessionId: string,
+    proj: SessionProjection,
+    next?: { harnessId?: string | undefined; model?: ModelRef | undefined },
+  ): Promise<{ window: ContextWindowState; retargeted: boolean; measuredModel?: ModelRef } | undefined> => {
+    const current = projectionContextWindow(sessionId, proj);
+    const state = runtimeFeatureState.get(sessionId);
+    const measuredModel = state?.contextWindowModel;
+    if (!next) return current ? { window: current, retargeted: false, ...(measuredModel ? { measuredModel } : {}) } : undefined;
+    const nextModel = next.model ?? proj.model;
+    if (current && modelRouteKey(measuredModel) === modelRouteKey(nextModel)) {
+      return { window: current, retargeted: false, ...(measuredModel ? { measuredModel } : {}) };
+    }
+    const base = current ?? state?.contextWindow;
+    if (!base || base.usedTokens === undefined) return undefined;
+    const limitTokens = nextModel && deps.modelContextLimit
+      ? await deps.modelContextLimit(nextModel, next.harnessId ?? proj.resolvedHarnessId).catch(() => undefined)
+      : undefined;
+    if (limitTokens === undefined || !(limitTokens > 0)) {
+      return current ? { window: current, retargeted: false, ...(measuredModel ? { measuredModel } : {}) } : undefined;
+    }
+    return {
+      window: {
+        ...base,
+        limitTokens,
+        remainingTokens: Math.max(0, limitTokens - base.usedTokens),
+        fraction: base.usedTokens / limitTokens,
+      },
+      retargeted: true,
+      ...(measuredModel ? { measuredModel } : {}),
+    };
+  };
+
+  /** The person asked to compact before this conversation grows further, or a
+   *  switch to a smaller model would overflow it. Done before a message rather
+   *  than after an answer, so an abandoned chat costs nothing. Only a quiet,
+   *  measured session qualifies. */
+  const compactionDueBeforeTurn = async (
+    sessionId: string,
+    proj: SessionProjection,
+    next?: { harnessId?: string | undefined; model?: ModelRef | undefined },
+  ): Promise<{ fraction: number; model?: ModelRef } | undefined> => {
+    if (!deps.queue || proj.status !== "idle" || proj.paused || proj.harnessTransition || !proj.backendSessionId) return undefined;
+    if (turnActive(sessionId) || compactions.has(sessionId)) return undefined;
+    const measured = await nextTurnContextWindow(sessionId, proj, next);
+    if (!measured || measured.window.source === "unknown" || measured.window.compaction?.active) return undefined;
+    const { window, retargeted } = measured;
+    const preference = compactionPreferenceOf(proj);
+    if (!compactionDue(preference, window)
+      && !(retargeted && compactionDueForNextModel(preference, window))) return undefined;
     const last = compactionAttempts.get(sessionId);
-    return !last
-      || Date.now() - last.at >= COMPACTION_RETRY_MS
-      || (window.fraction ?? 0) >= last.fraction + COMPACTION_RETRY_GROWTH;
+    if (last
+      && Date.now() - last.at < COMPACTION_RETRY_MS
+      && (window.fraction ?? 0) < last.fraction + COMPACTION_RETRY_GROWTH) return undefined;
+    // The catalog lookup above awaits: a turn or another dispatch may have
+    // started meanwhile, and two compactions must never race.
+    const current = (await store.projection(sessionId)) ?? proj;
+    if (turnActive(sessionId) || compactions.has(sessionId)) return undefined;
+    if (current.status !== "idle" || current.paused || current.harnessTransition) return undefined;
+    return {
+      fraction: window.fraction ?? 0,
+      ...(measured.measuredModel ? { model: measured.measuredModel } : {}),
+    };
   };
 
   /** Starts it and returns at once: a summary can outlast a proxy's read
    *  timeout, and the message that triggered it waits in the queue like any
    *  other sent during a compaction. Compaction only saves tokens, so a failure
    *  is recorded and the queue still runs. */
-  const startCompactionBeforeTurn = (sessionId: string, proj: SessionProjection): void => {
+  const startCompactionBeforeTurn = (
+    sessionId: string,
+    proj: SessionProjection,
+    fraction?: number,
+    model?: ModelRef,
+  ): boolean => {
+    // The due check awaits before the caller starts it; a turn or another
+    // compaction may have begun in between.
+    if (turnActive(sessionId) || compactions.has(sessionId)) return false;
     compactionAttempts.set(sessionId, {
       at: Date.now(),
-      fraction: projectionContextWindow(sessionId, proj)?.fraction ?? 0,
+      fraction: fraction ?? projectionContextWindow(sessionId, proj)?.fraction ?? 0,
     });
     beginCompaction(sessionId);
-    void withSessionLock(sessionId, () => compactLocked(sessionId, { background: true, beforeQueuedTurn: true })).then(
+    void withSessionLock(sessionId, () => compactLocked(sessionId, {
+      background: true,
+      beforeQueuedTurn: true,
+      // Summarize on the model the occupancy was measured on, never on the
+      // smaller one this message was switched to.
+      ...(model ? { model } : {}),
+    })).then(
       (strategy) => {
         // A Polyth summary ends itself; so does a native one the runtime
         // finishes in the background, which leaves its backstop timer here.
@@ -4892,6 +5142,7 @@ export function createSessionService(deps: {
         endCompaction(sessionId);
       },
     );
+    return true;
   };
 
   /** Boot: re-arm timers for sessions that stopped rate-limited before a
@@ -5559,6 +5810,12 @@ export function createSessionService(deps: {
         // Whichever leg reports the stop (the runtime, Stop's local fallback,
         // reconciliation), Pause's abort request makes it a paused one.
         const pausing = effectiveReason === "aborted" && pauseRequested(await store.events(sessionId));
+        // Background work the child still has when its turn completes, frozen
+        // into the terminal fact: a parent's wake text is derived from it and
+        // must replay identically on retry, whatever the child does later.
+        const liveBackground = effectiveReason === "completed"
+          ? liveBackgroundWork((await store.projection(sessionId)) ?? {})
+          : undefined;
         const stopped = await persist(sessionId, "turn/stopped", {
           turnId: ev.turnId ?? lastTurnId.get(sessionId) ?? ev.type,
           reason: effectiveReason,
@@ -5566,6 +5823,8 @@ export function createSessionService(deps: {
           ...(ev.code ? { code: ev.code } : {}),
           ...(retry ? { retry: retry as unknown as JsonObject } : {}),
           ...(pausing ? { paused: true } : {}),
+          ...(liveBackground ? { background: liveBackground as unknown as JsonObject } : {}),
+          ...(ev.outputLimit === true && effectiveReason === "completed" ? { outputLimit: true } : {}),
         }, { ignorable: true });
         // Replay hands back the persisted row: its flag is the fact.
         const paused = stopped !== undefined && (stopped.data as { paused?: unknown }).paused === true;
@@ -5621,6 +5880,9 @@ export function createSessionService(deps: {
               reason: effectiveReason,
               requestsOpen,
             });
+          }
+          if (applied && stopped && effectiveReason === "completed" && !paused && !requestsOpen && !retry) {
+            await recordIncompleteTurn(sessionId, stopped, stopEvents);
           }
           // Background work held back by the limit wait reaches the agent now.
           if (!retry) releaseDeferredRuntimeWakes(sessionId);
@@ -5841,8 +6103,20 @@ export function createSessionService(deps: {
             harnessId,
             generation,
             contextWindow: state,
+            contextWindowModel: proj?.model,
           });
           if (proj) publishProjection(proj);
+        }
+        break;
+      }
+      case "tool/progress": {
+        // Ephemeral by contract: no persist(), no log row, no replay. Admitted
+        // turn only (the v2 observation path is not otherwise fenced).
+        const callId = typeof ev.callId === "string" ? ev.callId : "";
+        if (sideEffects && callId
+          && (admitting.has(sessionId) || lastTurnId.has(sessionId) || await runtimeTurnAdmitted(sessionId))) {
+          noteToolActivity(sessionId, callId);
+          broadcast.toolProgress?.(sessionId, callId, Number.isFinite(ev.at) ? ev.at : Date.now());
         }
         break;
       }
@@ -6078,7 +6352,7 @@ export function createSessionService(deps: {
         // is not telemetry. Replaying it would relabel an explicit abort as
         // failed when OpenCode later emits session.error.
         const event = observation.events[index]!;
-        if (event.type === "context/updated" || event.type === "runtime/commands-changed" || event.type === "runtime/prompt-suggestion" || event.type === "runtime/wake-requested") {
+        if (event.type === "context/updated" || event.type === "runtime/commands-changed" || event.type === "runtime/prompt-suggestion" || event.type === "runtime/wake-requested" || event.type === "tool/progress") {
           await onRuntimeEvent(sessionId, event, {
             persist: async () => undefined as unknown as SessionEvent,
           });
@@ -7990,14 +8264,28 @@ export function createSessionService(deps: {
         // so does a Continue that had to wait the same way.
         if (proj.paused && queued[0].hiddenUserMessage && queued[0].text !== PAUSE_CONTINUE_PROMPT) return;
         if (queued[0] && queueEditHeld(sessionId, queued[0].id)) return;
+        // A message that waited behind a compaction for a model switch runs on
+        // the model this queue head was chosen for; any later head drops it.
+        const pendingModel = queuedTurnModels.get(sessionId);
+        if (pendingModel) {
+          queuedTurnModels.delete(sessionId);
+          if (pendingModel.queueId === queued[0].id
+            && modelRouteKey(proj.model) !== modelRouteKey(pendingModel.model)) {
+            await updateProjection(sessionId, { model: pendingModel.model });
+            proj = (await store.projection(sessionId)) ?? proj;
+          }
+        }
         assertIsolationExecutable(proj);
         const reconciliation = await durable.reconciliation(sessionId);
         if (reconciliation?.state === "reconciling"
           || reconciliation?.state === "blocked"
           || reconciliation?.state === "unknown") return;
         // Ending the compaction runs this dispatcher again.
-        if (!queued[0].command && compactionDueBeforeTurn(sessionId, proj)) {
-          startCompactionBeforeTurn(sessionId, proj);
+        const toCompact = !queued[0].command
+          ? await compactionDueBeforeTurn(sessionId, proj, { harnessId: proj.resolvedHarnessId, model: proj.model })
+          : undefined;
+        if (toCompact) {
+          startCompactionBeforeTurn(sessionId, proj, toCompact.fraction, toCompact.model);
           return;
         }
         // A replacement submitted while the old turn was running is queued
@@ -8126,6 +8414,18 @@ export function createSessionService(deps: {
     clientRequestFingerprint: string | undefined,
     turn: TurnLatch,
   ): Promise<SendResult> => {
+    // The one gate every provider turn passes (person send, queue drain,
+    // watchdog/incomplete/epoch continuations, wakes). Runs before anything is
+    // persisted or any runtime is touched; a reserved queue row goes back.
+    if (deps.modelTurnsDisabled) {
+      if (reserved) {
+        await broadcastTail(sessionId, () => deps.queue!.releaseQueueReservation(
+          reserved.operation.operationId,
+          { kind: "rejected", code: "model-turns-disabled", message: MODEL_TURNS_DISABLED_MESSAGE },
+        ));
+      }
+      throw Object.assign(new Error(MODEL_TURNS_DISABLED_MESSAGE), { code: "forbidden" });
+    }
     if ((await store.projection(sessionId))?.harnessTransition) {
       throw Object.assign(new Error("harness switch is pending"), { code: "conflict" });
     }
@@ -8603,9 +8903,10 @@ export function createSessionService(deps: {
     // before delivery; a retry sends the exact recorded block, so a changed
     // audience never rewrites what an operation already told the model.
     if (operation && !contextFree && input.keepAlive !== true) {
-      const recorded = existingEvents.find((event) =>
-        event.type === "context/people-prepared"
-        && (event.data as { operationId?: unknown }).operationId === operation!.operationId,
+      // `existingEvents` does not load this type: read it explicitly so a replay
+      // finds the recorded block instead of assembling it again.
+      const recorded = (await eventsOfTypeList(sessionId, ["context/people-prepared"])).find((event) =>
+        (event.data as { operationId?: unknown }).operationId === operation!.operationId,
       );
       let peopleText = typeof (recorded?.data as { modelVisibleText?: unknown } | undefined)?.modelVisibleText === "string"
         ? (recorded!.data as { modelVisibleText: string }).modelVisibleText
@@ -8624,6 +8925,46 @@ export function createSessionService(deps: {
         }
       }
       if (peopleText) projectedSections.push(peopleText);
+
+      // Package-owned blocks (e.g. running project actions). Same rule: recorded
+      // once per operation, a retry resends the exact recorded text.
+      // Chats the message references with `[@Title](polyth://session/<id>)` join
+      // the same record: re-checked here, on the admitted message only.
+      const mentionIds = sessionMentionIds(typeof (message?.data as { text?: unknown } | undefined)?.text === "string"
+        ? (message!.data as { text: string }).text : "");
+      if (deps.turnContext || mentionIds.length > 0) {
+        const recordedContext = (await eventsOfTypeList(sessionId, ["context/turn-prepared"])).find((event) =>
+          (event.data as { operationId?: unknown }).operationId === operation!.operationId,
+        );
+        let contextText = typeof (recordedContext?.data as { modelVisibleText?: unknown } | undefined)?.modelVisibleText === "string"
+          ? (recordedContext!.data as { modelVisibleText: string }).modelVisibleText
+          : undefined;
+        if (!recordedContext) {
+          const spaceId = proj.spaceId ?? (await projects.get(proj.projectId))?.spaceId;
+          let worktreePath: string | undefined;
+          if (!turnProject.remote) {
+            try { worktreePath = workspaceExecutionPath(turnProject, proj); } catch { worktreePath = undefined; }
+          }
+          const collected = spaceId && deps.turnContext
+            ? await deps.turnContext.collect({ spaceId, sessionId, projectId: proj.projectId, userId: turnAuthor?.userId, worktreePath }).catch(() => "")
+            : "";
+          const mentioned = spaceId && mentionIds.length > 0
+            ? await mentionedChatsBlock({
+                spaceId, current: proj, ids: mentionIds, authorId: turnAuthor?.userId,
+                lookup: (id) => store.projection(id),
+              }).catch(() => undefined)
+            : undefined;
+          const combined = [collected, mentioned].filter((part): part is string => Boolean(part)).join("\n\n");
+          if (combined) {
+            await appendAndBroadcast(sessionId, "context/turn-prepared", {
+              operationId: operation.operationId,
+              modelVisibleText: combined,
+            }, { ignorable: true });
+            contextText = combined;
+          }
+        }
+        if (contextText) projectedSections.push(contextText);
+      }
     }
 
     // Memory is prepared after the durable operation has an operationId, but
@@ -9855,6 +10196,7 @@ export function createSessionService(deps: {
   async function stopTimedOutTool(
     sessionId: string,
     callId: string,
+    cause: "silence" | "hard-limit" = "silence",
   ): Promise<void> {
     const continuation = await withSessionLock(sessionId, async () => {
       if (serviceDisposed) return undefined;
@@ -9867,16 +10209,19 @@ export function createSessionService(deps: {
         await syncToolWatchdogsForRequests(sessionId);
         return undefined;
       }
-      const duration = TOOL_EXECUTION_TIMEOUT_MS >= 60_000
-        ? `${Math.round(TOOL_EXECUTION_TIMEOUT_MS / 60_000)} minutes`
-        : `${TOOL_EXECUTION_TIMEOUT_MS}ms`;
+      const limitMs = cause === "silence" ? TOOL_EXECUTION_TIMEOUT_MS : TOOL_EXECUTION_HARD_LIMIT_MS;
+      const duration = limitMs >= 60_000
+        ? `${Math.round(limitMs / 60_000)} minutes`
+        : `${limitMs}ms`;
       const allowed = (toolTimeoutContinues.get(sessionId) ?? 0) < TOOL_TIMEOUT_CONTINUE_LIMIT;
-      const text = allowed ? toolTimeoutContinuePrompt(active, duration) : undefined;
+      const text = allowed ? toolTimeoutContinuePrompt(active, duration, cause) : undefined;
       if (text) toolTimeoutContinues.set(sessionId, (toolTimeoutContinues.get(sessionId) ?? 0) + 1);
       const kind = await abortTurnUnderLock(
         sessionId,
         "tool-timeout",
-        `${active.tool} was stopped after exceeding the ${duration} execution safety limit. Retry with a shorter command or an explicit timeout.`,
+        cause === "silence"
+          ? `${active.tool} was stopped after ${duration} without output. Run long commands in the background (the harness's background option, or \`nohup … > file 2>&1 &\`) and check on them instead of waiting.`
+          : `${active.tool} was stopped at the ${duration} hard execution limit. Run long commands in the background and check on them instead of waiting.`,
         text ? "tool-watchdog" : undefined,
         callId,
       );
@@ -13064,13 +13409,30 @@ export function createSessionService(deps: {
         await compactionSettled(sessionId);
         proj = (await store.projection(sessionId)) ?? proj;
       }
-      if (input.keepAlive !== true && input.autoResume !== true && !input.command && compactionDueBeforeTurn(sessionId, proj)) {
-        startCompactionBeforeTurn(sessionId, proj);
+      // The next turn may run on another model or harness than the one the
+      // occupancy was measured on (a picker change before sending), so the
+      // check reads that route's window instead of the previous leg's.
+      const nextTurnRoute = {
+        harnessId: input.harness?.mode === "pinned" ? input.harness.harnessId : proj.resolvedHarnessId,
+        model: input.model ?? proj.model,
+      };
+      let pendingQueuedModel: ModelRef | undefined;
+      if (input.keepAlive !== true && input.autoResume !== true && !input.command) {
+        const toCompact = await compactionDueBeforeTurn(sessionId, proj, nextTurnRoute);
+        // The compaction itself runs on the measured model (`toCompact.model`);
+        // `proj.model` is left alone so it summarizes the history on a window
+        // that can still hold it. The chosen model travels with the queued
+        // message instead.
+        if (toCompact && startCompactionBeforeTurn(sessionId, proj, toCompact.fraction, toCompact.model)) {
+          if (nextTurnRoute.model && modelRouteKey(nextTurnRoute.model) !== modelRouteKey(proj.model)) {
+            pendingQueuedModel = nextTurnRoute.model;
+          }
+        }
       }
       // A compaction is replacing the context: the message waits for the
       // compacted context, then dispatches from the queue.
       if (compactions.has(sessionId) && deps.queue) {
-        return enqueueMessage(
+        const queuedResult = await enqueueMessage(
           sessionId,
           input.text,
           "queue",
@@ -13085,6 +13447,10 @@ export function createSessionService(deps: {
           input.author,
           input.displayText,
         );
+        if (pendingQueuedModel && queuedResult.queueId) {
+          queuedTurnModels.set(sessionId, { queueId: queuedResult.queueId, model: pendingQueuedModel });
+        }
+        return queuedResult;
       }
       if (input.harness) {
         const selection = input.harness;
@@ -13920,6 +14286,31 @@ export function createSessionService(deps: {
       // What waited behind the pause is now as after any Stop: follow-ups
       // queued before it stay held; automatic work held by it may run.
       if (endedPause) void dispatchQueue(sessionId);
+    },
+
+    async keepToolRunning(sessionId, callId, options) {
+      const userId = typeof options?.userId === "string" && options.userId && !options.userId.startsWith("system:")
+        ? options.userId
+        : undefined;
+      await withSessionLock(sessionId, async () => {
+        if (!(await store.projection(sessionId))) {
+          throw Object.assign(new Error("session not found"), { code: "not-found" });
+        }
+        if (!(await currentTurnActiveTools(sessionId)).has(callId)) {
+          throw Object.assign(new Error("that call is not running in the current turn"), { code: "conflict" });
+        }
+        const key = toolWatchdogKey(sessionId, callId);
+        if (keptToolCalls.has(key)) return;
+        await appendAndBroadcast(sessionId, TOOL_KEEP_RUNNING_EVENT, {
+          callId,
+          ...(userId ? { byUserId: userId } : {}),
+        }, { ignorable: true });
+        keptToolCalls.add(key);
+        // A waiting timer carries the old silence deadline; re-arm it against
+        // the ceiling. A paused call re-arms itself on resume.
+        const clock = toolWatchdogClocks.get(key);
+        if (clock && toolWatchdogs.has(key)) armToolWatchdog(sessionId, callId, clock.startedAt, clock.lastActivityAt);
+      });
     },
 
     async pause(sessionId, options) {
@@ -15574,6 +15965,15 @@ export function createSessionService(deps: {
       return sessionMentionCandidates(proj.spaceId, sessionId, person?.userId);
     },
 
+    async chatMentionCandidates(sessionId, person?: SessionPersonScope): Promise<ChatMentionCandidateDto[]> {
+      const proj = await store.projection(sessionId);
+      if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      const spaceId = proj.spaceId ?? (await projects.get(proj.projectId))?.spaceId;
+      if (!spaceId) return [];
+      const rows = (await store.projections(proj.projectId)).filter((row): row is SessionProjection => Boolean(row));
+      return chatMentionCandidates(spaceId, proj, rows, person?.userId);
+    },
+
     async setPersonMute(sessionId, muted, person?: SessionPersonScope): Promise<void> {
       if (!person?.userId) {
         throw Object.assign(new Error("mute needs a person"), { code: "invalid-input" });
@@ -16148,8 +16548,19 @@ export function createSessionService(deps: {
   const rehydrateToolWatchdogs = async (): Promise<void> => {
     for (const row of await store.projections()) {
       if (row.status === "archived" || row.status === "idle") continue;
-      for (const [callId, active] of await currentTurnActiveTools(row.id)) {
-        armToolWatchdog(row.id, callId, active.startedAt);
+      const activeTools = await currentTurnActiveTools(row.id);
+      if (activeTools.size > 0) {
+        // Typed read: boot must not replay a whole long log per working chat.
+        for (const event of await eventsOfTypeList(row.id, [TOOL_KEEP_RUNNING_EVENT])) {
+          const kept = event.type === TOOL_KEEP_RUNNING_EVENT ? (event.data as { callId?: unknown }).callId : undefined;
+          if (typeof kept === "string" && activeTools.has(kept)) keptToolCalls.add(toolWatchdogKey(row.id, kept));
+        }
+      }
+      for (const [callId, active] of activeTools) {
+        // Activity is not persisted and the runtime may have outlived the
+        // restart: the silence window restarts now, the ceiling gets a grace.
+        const now = Date.now();
+        armToolWatchdog(row.id, callId, active.startedAt, now, now + TOOL_REHYDRATE_GRACE_MS);
       }
       await syncToolWatchdogsForRequests(row.id);
     }

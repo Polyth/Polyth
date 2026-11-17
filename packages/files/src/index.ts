@@ -3,6 +3,7 @@ export { discoverRepositories } from "./repositoryDiscovery.ts";
 // escapes (`..`, absolute, symlink-out) are rejected.
 import { mkdir, open, readFile, readdir, lstat, realpath, rename as move, rm, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
+import { scrubInheritedEnv } from "@polyth/git";
 import path from "node:path";
 import { DEFAULT_EXTERNAL_READ_POLICY, resolveExternalRead, type ExternalReadPolicy } from "./externalReads.ts";
 
@@ -718,6 +719,7 @@ async function gitIgnoredPaths(
   return await new Promise<Set<string>>((resolve, reject) => {
     const child = spawn(gitBinary, ["check-ignore", "--stdin", "-z", "--no-index"], {
       cwd: root,
+      env: { ...scrubInheritedEnv(), GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0" },
       stdio: ["pipe", "pipe", "pipe"],
     });
     const ignored = new Set<string>();

@@ -222,6 +222,12 @@ export function orgRoutes(deps: {
       json(200, { items: await sessions.mentionCandidates(m[1]!) });
       return true;
     }
+    m = path.match(/^\/api\/sessions\/([^/]+)\/chat-mention-candidates$/);
+    if (m && method === "GET") {
+      if (!sessions.chatMentionCandidates) { json(501, { error: "unsupported" }); return true; }
+      json(200, { items: await sessions.chatMentionCandidates(m[1]!) });
+      return true;
+    }
     m = path.match(/^\/api\/sessions\/([^/]+)\/mute$/);
     if (m && method === "PUT") {
       if (!sessions.setPersonMute) { json(501, { error: "unsupported" }); return true; }

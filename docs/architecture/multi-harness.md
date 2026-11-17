@@ -92,7 +92,18 @@ an associated pending permission, question or secret request. Native permissions
 correlate by call ID; package-tool approvals correlate by tool name. Closing the
 associated requests gives that still-active tool a fresh execution limit.
 Unrelated tools and mirrored child requests retain their execution limits. On
-restart, durable open requests restore the pause. Codex rejects a permission
+restart, durable open requests restore the pause, and every other open call
+of a non-idle session restarts its silence window at service start (activity is
+not persisted and the runtime may have outlived the server); the hard ceiling
+still counts from the call's start but never fires sooner than 60 s after start.
+A person can press **Keep running** on a call that is slow but silent:
+`POST /api/sessions/:id/tools/:callId/keep-running` (same guard as `abort`:
+`coreSessionsControl`, collaborate access, gateway-scoped session) appends
+`tool/keep-running` `{ callId, byUserId? }` once (idempotent; 409 unless the
+call is open in the current turn). That call's silence stop is off and only
+the 60-minute hard ceiling remains; rehydration reads the event and arms the
+call the same way. The event is Polyth-originated: not runtime turn content,
+not model-visible, ignored by old reducers. Codex rejects a permission
 response whose local native request is already absent before delivery, allowing
 the canonical request to expire without an unknown mutation blocking subsequent
 turns. Transport failures and lost mutation acknowledgements remain uncertain
@@ -144,6 +155,8 @@ A synchronized native leg can be reattached where the adapter supports verified 
 5. The reply is `{ id, queueId }` (or `{ id, turnId }` if the runtime was already there). Only then does the provisioning flight start — create's runtime acquisition, its agent-without-model check, native create, binding and reconcile — so its idle dispatch always finds the queued turn. `autoTitle` reaches the dispatched turn from the start marker.
 
 Shipped start steps: `goals.attach` `{ objective }` (Goals) and `handoff.import` `{ provenance, textHash }` (Handoff); each package registers its step on enable, looks `SESSION_START_STEPS` up optionally and disposes it on disable. The git package's isolation and worktree routes pass `start` through (see [workspace](../dev/workspace.md)). `polyth chat` and `polyth new` send their first prompt as `start.firstTurn` and post it separately only to a server that answers without `queueId`/`turnId`.
+
+**Package turn context.** `TURN_CONTEXT` (`turn.context`, `@polyth/plugins`) lets a package add a hidden `<polyth-…>` block to every admitted user message: `register(contributor)` returns a disposable; the contributor receives `{ space, sessionId, projectId, userId, worktreePath }` (Space resolved by the server; `userId` is the message author, undefined for a system/agent-originated send, and per-person data must be filtered to it) and returns a complete block or `""`. `SessionService.send` collects them (`packages/server/src/turnContext.ts`) right after the `<polyth-people>` block, under the same conditions (an admitted turn with an operation, not `contextFree`, not keep-alive), persists the combined text as `context/turn-prepared { operationId, modelVisibleText }` before runtime delivery and resends the recorded text on a retry. Budget 150 ms in total; a slow or throwing contributor is skipped and logged once; the combined text is capped at 2 KB (whole blocks only). Packages resolve the service lazily in `onEnable` and dispose on `onDisable`. A non-admitted turn never calls a contributor. The same record also carries the `<polyth-mentioned-chats>` block (`mentionedChatsBlock`, `sessionSharing.ts`): for each distinct `[@Title](polyth://session/<id>)` token in the admitted message text (at most 5, `MAX_SESSION_MENTIONS`) that passes the server's re-check (same Space and project, not the chat itself, not archived, openable by the author and by every member who can open this chat) one line `"<live title>" — session <id> — last active <relative>`, then `Read one with the polyth tool (session.messages) if you need its content.`; anything that fails the check is dropped silently, and no chat content is inlined. It is built even when no package contributes.
 
 A resend with the same id and key reuses the row: no second row or native create, the first turn dedupes by its key, the same result comes back, and steps run again (they are idempotent). HTTP derives the id from the key exactly as for a keyed create and scopes the turn key as `/message` does; `start` never scopes it again.
 
