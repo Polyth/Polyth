@@ -298,6 +298,7 @@ const GENERIC_PACKAGE_IMPORTERS = new Set([
 const GENERIC_PACKAGE_IMPORTS = new Map<string, ReadonlySet<string>>([
   ["settingsSync.ts", new Set(["@polyth/models", "@polyth/models/web-prefs", "@polyth/models/model-visibility-prefs"])],
   ["init.ts", new Set(["@polyth/models/runtime-catalog"])],
+  ["components/ChatResponseFooter.tsx", new Set(["@polyth/models/model-presentation"])],
   ["packages/registry.ts", new Set(["@polyth/models/runtime-catalog"])],
   ["composer/extensionCommandGate.ts", new Set(["@polyth/commands/catalog"])],
   // The builtin `/compact` resolver applies the command package's own `/name`
@@ -351,6 +352,8 @@ test("generic package integration exceptions require the exact importer and expo
   assert.equal(hasExactGenericPackageImport("components/settings/pages.tsx", "@polyth/models/model-picker"), true);
   assert.equal(hasExactGenericPackageImport("components/settings/pages.tsx", "@polyth/models/model-picker/private"), false);
   assert.equal(hasExactGenericPackageImport("components/settings/UserDetail.tsx", "@polyth/models/model-picker"), true);
+  assert.equal(hasExactGenericPackageImport("components/ChatResponseFooter.tsx", "@polyth/models/model-presentation"), true);
+  assert.equal(hasExactGenericPackageImport("components/ChatResponseFooter.tsx", "@polyth/models/runtime-catalog"), false);
   for (const importer of GENERIC_PACKAGE_IMPORTS.keys()) {
     assert.equal(GENERIC_PACKAGE_IMPORTERS.has(importer), false, `${importer} must not be broadly approved`);
   }
