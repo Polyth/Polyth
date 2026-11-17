@@ -9,7 +9,7 @@ test("GitHub identity explains a disconnected provider from the shared slot cont
   const github = readFileSync(new URL("../widgets/GithubIntegration.tsx", import.meta.url), "utf8");
   const provider = github.slice(
     github.indexOf("export function GithubIdentity"),
-    github.indexOf("function GithubChangeRequestState"),
+    github.indexOf("function GithubProjectSection"),
   );
   assert.match(provider, /if \(!context.user\)[\s\S]*?tr\("gitview.providerNotConnected"\)[\s\S]*?tr\("gitview.providerSignIn"\)/);
 });

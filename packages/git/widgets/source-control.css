@@ -217,7 +217,7 @@
 .git-page .muted { color: var(--muted); }
 .git-page .mono { font-family: var(--mono); }
 
-/* ── Header: branch identity · remote target · sync ──────────────────────── */
+/* ── Header: branch · commit identity · sync ───────────────────────────── */
 
 /* One control height, one radius and one type size for every header item.
    Status (branch, ahead/behind) reads as a flat tinted capsule, choices as
@@ -317,25 +317,6 @@
   gap: var(--space-2);
   min-width: 0;
 }
-.git-page .git-remote-context {
-  display: inline-flex;
-  align-items: center;
-  min-width: 0;
-}
-.git-page .git-remote-name {
-  display: block;
-  max-width: 10rem;
-  padding-inline: var(--space-1);
-  overflow: hidden;
-  color: var(--muted);
-  font-size: var(--font-meta);
-  line-height: var(--sc-head-h);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.git-page .git-remote-name.is-unavailable { color: var(--amber); font-family: inherit; }
-.git-page .git-remote-picker { max-width: 12rem; }
-.git-page .git-remote-picker .picker-chip { max-width: 100%; }
 .git-page .source-remote-buttons { display: flex; align-items: center; gap: var(--space-1); }
 /* Sync is the theme's standard push button at the header's size. */
 .git-page .source-remote-buttons > .source-sync-btn {
@@ -530,7 +511,7 @@
   top: 0;
   z-index: 2;
   /* Never squashed by a long list: the explicit min-height would otherwise
-     let the column flex shrink it below its two-line summary. */
+     let the column flex shrink it below its summary. */
   flex: none;
   display: grid;
   grid-template-columns: minmax(0, 1fr) max-content max-content;
@@ -544,15 +525,16 @@
   background: var(--panel);
   box-shadow: none;
 }
-.git-page .git-pane-summary { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.git-page .git-pane-summary strong,
-.git-page .git-pane-summary .muted {
+.git-page .git-pane-summary { display: flex; min-width: 0; }
+.git-page .git-pane-summary strong {
   overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-label);
+  font-weight: 650;
+  line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.git-page .git-pane-summary strong { color: var(--text); font-size: var(--font-label); font-weight: 650; line-height: 1.25; }
-.git-page .git-pane-summary .muted { color: var(--muted); font-size: var(--font-meta); line-height: 1.25; }
 .git-page .git-pane-actions { display: flex; flex: none; flex-basis: auto; align-items: center; gap: var(--space-1); }
 .git-page .diff-stat { flex: none; font-variant-numeric: tabular-nums; }
 
@@ -1058,7 +1040,7 @@ body[data-desktop-low-resource="true"] .git-page .git-pane-toolbar {
 .git-page .review-note-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .git-page .review-note-text { margin: var(--space-1) 0 0; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
 
-/* Commit composer: message first, then a rail with context and verbs. */
+/* Commit composer: the message, then one rail of verbs. */
 .git-page .git-commit-composer {
   position: relative;
   z-index: 5;
@@ -1122,30 +1104,6 @@ body[data-desktop-low-resource="true"] .git-page .git-commit-composer {
   padding-top: var(--space-2);
   border-top: 1px solid var(--hair);
 }
-.git-page .git-commit-heading { display: flex; flex: 1 1 14rem; align-items: center; gap: var(--space-2); min-width: 0; }
-.git-page .git-commit-heading strong {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text);
-  font-size: var(--font-label);
-  font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.git-page .git-commit-branch {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  min-width: 0;
-  max-width: 45%;
-  min-height: calc(var(--control-h-sm) - 6px);
-  padding: 0 var(--space-2);
-  border: 1px solid var(--hair);
-  border-radius: var(--radius-round);
-  color: var(--muted);
-  font-size: var(--font-meta);
-}
-.git-page .git-commit-branch .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .git-page .git-commit-counter { flex: none; color: var(--faint); font: 500 var(--font-meta) / 1 var(--mono); font-variant-numeric: tabular-nums; }
 .git-page .git-commit-counter[data-over="true"] { color: var(--amber); }
 .git-page .git-commit-actions { display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-end; gap: var(--space-1); margin-inline-start: auto; }
@@ -1759,11 +1717,11 @@ body[data-desktop-low-resource="true"] .git-page .git-landing {
 
 /* Phone rhythm: header wraps by whole unit, toolbars go icon-first. */
 @container git-page (max-width: 519px) {
-  /* Two rows. The branch and its one verb, Sync, on top; the identity (and
-     any provider chips), then the remote with its menu and refresh, below.
-     The wrappers dissolve so their items order into one wrapping set; a
-     zero-height break item ends the first row, so the second row's spacing
-     is its own top margin. Gaps keep neighbouring hit areas apart. */
+  /* Two rows. The branch and its one verb, Sync, on top; the identity, then
+     the remote menu and refresh at the far end, below. The wrappers dissolve
+     so their items order into one wrapping set; a zero-height break item
+     ends the first row, so the second row's spacing is its own top margin.
+     Gaps keep neighbouring hit areas apart. */
   .git-page .source-control-head {
     --sc-col-gap: max(var(--space-2), calc(var(--hit-min) - var(--sc-sub-h)));
     --sc-row-gap: max(var(--space-2), calc(var(--hit-min) - (var(--sc-head-h) + var(--sc-sub-h)) / 2));
@@ -1785,13 +1743,14 @@ body[data-desktop-low-resource="true"] .git-page .git-landing {
   .git-page .source-control-title > .source-branch { order: 1; flex: 1 1 0; max-width: max-content; margin-block-start: 0; }
   .git-page .source-control-title > .git-ahead-behind { order: 2; margin-block-start: 0; margin-inline-start: calc(var(--sc-col-gap) * -1); }
   .git-page .source-remote-buttons > .source-sync-btn { order: 3; margin-inline-start: auto; }
-  .git-page .git-remote-context { order: 6; margin-block-start: var(--sc-row-gap); margin-inline-start: auto; }
   .git-page .source-remote-buttons > :not(.source-sync-btn) { order: 7; }
+  /* The second row's trailing group (Retry when shown, else the menu) starts
+     at the far edge. */
+  .git-page .source-remote-buttons > :first-child:not(.source-sync-btn),
+  .git-page .source-remote-buttons > .source-sync-btn:first-child + * { margin-inline-start: auto; }
   .git-page .source-remote-buttons > .ui-icon-btn { width: var(--sc-sub-h); height: var(--sc-sub-h); }
   .git-page .source-control-identity { flex: 1 1 0; max-width: max-content; min-width: 0; flex-wrap: nowrap; }
   .git-page .source-control-title .source-control-identity-trigger { min-height: var(--sc-sub-h); max-width: 100%; }
-  .git-page .git-remote-name { line-height: var(--sc-sub-h); }
-  .git-page .git-remote-picker { max-width: 9rem; }
   .git-page .git-pane-actions .git-stage-all .ui-btn-label,
   .git-page .git-branch-review-base .ui-btn .ui-btn-label,
   .git-page .git-branch-review-prefs .ui-btn:has(.ui-icon) .ui-btn-label {
@@ -1826,22 +1785,11 @@ body[data-desktop-low-resource="true"] .git-page .git-landing {
   .git-page .split-diff-row { display: block; min-width: 100%; }
   .git-page .split-diff-cell + .split-diff-cell { border-inline-start: 0; }
   .git-page .split-diff-cell--empty { display: none; }
-  /* The card header already counts staged files, so the composer is the
-     message and one row of verbs; the count stays for screen readers and the
-     subject counter leads the row while typing. */
+  /* One row of verbs: the subject counter while typing, Generate as a
+     glyph, and Commit across the rest, where a thumb finds it. */
   .git-page .git-commit-rail { flex-wrap: nowrap; gap: 0; }
-  .git-page .git-commit-heading { flex: none; }
-  .git-page .git-commit-heading strong {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
-  .git-page .git-commit-heading .git-commit-branch { display: none; }
   .git-page .git-commit-counter { margin-inline-end: var(--space-2); }
-  .git-page .git-commit-actions { display: grid; flex: 1 1 0; grid-template-columns: max-content max-content minmax(0, 1fr); gap: var(--space-1); }
+  .git-page .git-commit-actions { display: grid; flex: 1 1 0; grid-template-columns: max-content minmax(0, 1fr); gap: var(--space-1); }
   .git-page .git-commit-actions > * { min-width: 0; }
   /* The landing stacks: where and Push, then the check, then the one action
      across the card, where a thumb finds it. */
@@ -1939,7 +1887,6 @@ body[data-desktop-low-resource="true"] .git-page .git-landing {
     transform: translate(-50%, -50%);
   }
   .git-page .source-remote-buttons { gap: max(var(--space-1), calc(var(--hit-min) - var(--sc-head-h))); }
-  .git-page .git-remote-picker .picker-chip { min-height: var(--tap); }
 
   @container git-page (max-width: 379px) {
     .git-page .git-file-row { grid-template-columns: minmax(0, 1fr) max-content; }

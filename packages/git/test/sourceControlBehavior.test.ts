@@ -329,6 +329,13 @@ test("GitView keeps the commit composer available while a file diff is open", as
     assert.ok(view.container.querySelector(".git-commit-composer"), "composer is available on the change list");
     assert.ok(view.container.querySelector(".git-commit-composer .git-commit-msg, .git-commit-composer textarea"), "composer keeps a message field");
     assert.ok(view.container.querySelector(".git-commit-rail"), "composer uses the action rail");
+    assert.equal(view.container.querySelector(".git-commit-composer strong, .git-commit-composer .mono"), null, "the composer repeats neither the staged count nor the branch");
+    assert.deepEqual(
+      [...view.container.querySelectorAll(".git-commit-actions .ui-btn")].map((button) => button.textContent?.trim()),
+      ["Generate", "Commit"],
+      "the composer's verbs are Generate and Commit; Sync stays in the header",
+    );
+    assert.equal(view.container.querySelector(".git-pane-summary .muted"), null, "the group headers, not the summary, count staged files");
     const disclosure = view.container.querySelector<HTMLButtonElement>(".git-change-group-head");
     assert.ok(disclosure);
     await act(async () => { disclosure.click(); });
@@ -343,7 +350,7 @@ test("GitView keeps the commit composer available while a file diff is open", as
     });
     assert.ok(view.container.querySelector(".git-master-detail.detail-open"), "file tap opens detail mode");
     assert.ok(view.container.querySelector(".git-commit-composer"), "composer stays visible while the diff is open");
-    assert.match(view.container.textContent ?? "", /Commit 1 staged file/);
+    assert.ok(view.container.querySelector(".git-commit-composer .git-commit-submit"), "the commit action stays reachable while the diff is open");
 
     const back = view.container.querySelector<HTMLButtonElement>(".git-mobile-detail-head button");
     assert.ok(back);
@@ -1096,17 +1103,24 @@ test("GitView chooses a named remote for sync actions", async () => {
   const view = await mounted(createElement(GitView));
   try {
     await act(async () => { await delay(40); });
-    const picker = view.container.querySelector<HTMLButtonElement>(".git-remote-picker .picker-chip");
-    assert.ok(picker, "multiple remotes expose the compact remote picker");
-    await act(async () => { picker.click(); await delay(20); });
-    const personal = [...document.querySelectorAll<HTMLElement>(".picker-item")]
+    assert.doesNotMatch(
+      view.container.querySelector(".source-control-head")?.textContent ?? "",
+      /\borigin\b/,
+      "the header does not print the remote's name",
+    );
+    const trigger = view.container.querySelector<HTMLButtonElement>('.source-remote-actions [aria-haspopup="menu"]');
+    assert.ok(trigger);
+    await act(async () => { trigger.click(); await delay(20); });
+    const remote = [...document.querySelectorAll<HTMLElement>('[role^="menuitem"]')]
+      .find((item) => item.textContent?.includes("Remote"));
+    assert.ok(remote, "multiple remotes are chosen inside the remote menu");
+    await act(async () => { remote.click(); await delay(20); });
+    const personal = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')]
       .find((item) => item.textContent?.includes("personal"));
     assert.ok(personal, "the second remote is reachable");
     await act(async () => { personal.click(); await delay(20); });
     assert.equal(view.container.querySelector(".git-ahead-behind"), null, "origin-only status counts are not shown for another selected remote");
 
-    const trigger = view.container.querySelector<HTMLButtonElement>('.source-remote-actions [aria-haspopup="menu"]');
-    assert.ok(trigger);
     await act(async () => { trigger.click(); await delay(20); });
     const push = [...document.querySelectorAll<HTMLElement>('[role^="menuitem"]')]
       .find((item) => /push/i.test(item.textContent ?? ""));

@@ -101,10 +101,14 @@ function CheckoutIdentity({ host, projectId }: { host: WebPackageHost; projectId
   const profile = resolution.profile;
   const label = resolution.ok ? profile?.label ?? tr("gitprojectsource.systemGit") : profile?.label ?? tr("gitreg.profileUnavailable");
   const displayLabel = profile ? `${providerLabel(profile)} · ${label}` : label;
-  const provider = resolution.provider === "github" ? "GitHub" : resolution.provider === "gitlab" ? "GitLab" : "Git";
-  const triggerLabel = !profile && resolution.provider !== "generic"
-    ? tr("gitview.identityAndProvider", { identity: label, provider }) : displayLabel;
   const commitAuthor = resolution.ok ? resolution.commitAuthor : currentIdentity;
+  // The chip names who commits, nothing more: a chosen profile by its own
+  // label, System Git by the person its Git config names. Provider, source
+  // and e-mail wait in the menu it opens.
+  const triggerLabel = profile || !resolution.ok ? label : commitAuthor?.name || label;
+  const triggerTitle = commitAuthor
+    ? `${tr("gitprojectsource.commitAs")} ${commitAuthor.name} · ${commitAuthor.email}`
+    : displayLabel;
   const inherited = !stored.repositoryProfileIds[projectId];
 
   const entries: MenuEntry[] = [
@@ -187,7 +191,8 @@ function CheckoutIdentity({ host, projectId }: { host: WebPackageHost; projectId
             iconEnd={ChevronDownIcon}
             className="source-control-identity-trigger"
             disabled={syncing}
-            title={displayLabel}
+            data-attention={resolution.ok ? undefined : "true"}
+            title={triggerTitle}
             aria-label={tr("gitview.currentCommitIdentity", { identity: triggerLabel })}
           >
             <span className="source-control-identity-value">{triggerLabel}</span>

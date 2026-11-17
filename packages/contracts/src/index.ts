@@ -6600,7 +6600,7 @@ export const UI_SLOTS = [
   // Settings → Source control: the person's own hosting accounts, the Space
   // admin's shared ones, and provider facts about the active project.
   "settings.pages", "settings.footer", "settings.integrations", "settings.integrations.space", "settings.integrations.project", "commandPalette.commands",
-  "git.repository.identity", "git.repository.identity.provider", "git.change-request.create", "git.repository.change-request.provider", "project.repository.options",
+  "git.repository.identity", "git.repository.identity.provider", "git.change-request.create", "project.repository.options",
   // Widget definitions enter through the catalog/settings seams. The six
   // workspace slots are first-class placement targets alongside panel and
   // toolbar slots, rather than a canvas-only parallel vocabulary.

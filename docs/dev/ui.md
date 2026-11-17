@@ -1676,6 +1676,21 @@ GitHub/GitLab account contributions describe the provider API account. A
 identity label must never imply that it changed credentials or selected a
 provider login, and the identity editor never stores or asks for a secret.
 
+The desktop header says each fact once: the branch capsule (with ahead/behind),
+the identity chip, then Sync, the remote menu and Refresh. The chip names who
+commits, nothing more: a chosen profile by its label, System Git by the name
+its Git config gives. Provider, source, e-mail and provider accounts wait in the
+menu it opens. The header prints no remote name and no pull-request chip: Sync's
+tooltip and the menu rows (Fetch, Pull, Push) name the remote, and with more
+than one remote the choice is the menu's *Remote* drill-in, as on the phone. A
+missing or unsafe remote is the notice under the header. The commit composer is
+the message and one rail: the subject counter while typing, *Generate* and
+*Commit*. Each change group's header counts its own files and the header names
+the branch, so neither the composer nor the file card's summary repeats them.
+Sync stays in the header only; it commits a typed message first, which its
+tooltip says while a message is typed. Tabs show a count only when it is not
+zero.
+
 **Git identities** (titled *Repository identities* in Settings) are
 Space-wide `SourceControlProfile`s (name, email, an
 optional SSH **signing key** `~/.ssh/*.pub`, an optional **hosting account**

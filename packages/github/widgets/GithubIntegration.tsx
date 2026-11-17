@@ -8,7 +8,6 @@ import { tr } from "../../../apps/web/src/i18n/index.ts";
 
 const api = createApiTransport();
 interface Context { remotes: GitRemoteLocation[]; user: HostingStatus["user"] }
-interface CurrentChangeRequest { number: number; title: string; url: string; changedFiles: number; additions: number; deletions: number }
 function useContext(host: WebPackageHost, explicitProjectId?: string) {
   const state = useSyncExternalStore(host.store.subscribe, host.store.getSnapshot, host.store.getSnapshot);
   const projectId = explicitProjectId ?? state.activeProjectId;
@@ -32,26 +31,6 @@ export function GithubIdentity({ host, projectId }: { host: WebPackageHost; proj
     </div>;
   }
   return <host.ui.components.Button size="sm" variant="ghost" title={tr("githubview.identityLabel")} onClick={() => host.navigation.openSettingsPage("git", { itemId: "git.personAccounts" })}>{tr("githubview.identityWithStatus", { status: context.user ? `@${context.user.login}` : "gh" })}</host.ui.components.Button>;
-}
-function GithubChangeRequestState({ host, projectId }: { host: WebPackageHost; projectId: string }) {
-  const { context } = useContext(host, projectId);
-  const [pullRequest, setPullRequest] = useState<CurrentChangeRequest | null>(null);
-  const applicable = context?.remotes.some(r => r.hostname === "github.com") === true;
-  useEffect(() => {
-    let stale = false;
-    setPullRequest(null);
-    if (applicable) void api.get<HostingResult<CurrentChangeRequest>>(`/api/github/pr/current?projectId=${encodeURIComponent(projectId)}`)
-      .then(result => { if (!stale && result.ok) setPullRequest(result.data); })
-      .catch(() => {});
-    return () => { stale = true; };
-  }, [applicable, projectId]);
-  if (!pullRequest) return null;
-  return <host.ui.components.Button
-    size="sm"
-    variant="ghost"
-    title={pullRequest.title}
-    onClick={() => host.navigation.openWorkspacePane("github")}
-  >{tr("widgets.githubplugin.pr")}{pullRequest.number}</host.ui.components.Button>;
 }
 /** Settings → Source control → This project → "GitHub": the repository and
  *  the GitHub CLI's sign-in as the server sees them, with a way into the
@@ -95,6 +74,5 @@ export function installGithubIntegration(host: WebPackageHost): Array<() => void
     host.slots.register({ slot: "settings.integrations", id: "github.integration", order: 10, render: () => <GithubAccounts /> }),
     host.slots.register({ slot: "settings.integrations.project", id: "github.project", order: 10, render: props => typeof props.projectId === "string" ? <GithubProjectSection host={host} projectId={props.projectId} /> : null }),
     host.slots.register({ slot: "git.repository.identity.provider", id: "github.identity", order: 10, render: props => typeof props.projectId === "string" ? <GithubIdentity host={host} projectId={props.projectId} /> : null }),
-    host.slots.register({ slot: "git.repository.change-request.provider", id: "github.change-request", order: 10, render: props => typeof props.projectId === "string" ? <GithubChangeRequestState host={host} projectId={props.projectId} /> : null }),
   ];
 }
