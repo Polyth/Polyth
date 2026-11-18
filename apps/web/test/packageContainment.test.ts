@@ -123,6 +123,9 @@ const GENERIC_SHELL_IMPORTS = new Set([
   "markdown/ImageLightbox.tsx",
   "markdown.tsx",
   "mobileViewport.ts",
+  // The host's motion settings (reduced motion, low-resource mode) and its
+  // duration tokens, for a package's scripted motion (an agent's report folds).
+  "motionPresence.ts",
   "pendingChanges.ts",
   // These four modules are generic host responsibilities: project presentation
   // persistence, canonical resource navigation, session activity resolution,
@@ -295,6 +298,7 @@ const GENERIC_PACKAGE_IMPORTERS = new Set([
 const GENERIC_PACKAGE_IMPORTS = new Map<string, ReadonlySet<string>>([
   ["settingsSync.ts", new Set(["@polyth/models", "@polyth/models/web-prefs", "@polyth/models/model-visibility-prefs"])],
   ["init.ts", new Set(["@polyth/models/runtime-catalog"])],
+  ["components/ChatResponseFooter.tsx", new Set(["@polyth/models/model-presentation"])],
   ["packages/registry.ts", new Set(["@polyth/models/runtime-catalog"])],
   ["composer/extensionCommandGate.ts", new Set(["@polyth/commands/catalog"])],
   // The builtin `/compact` resolver applies the command package's own `/name`
@@ -313,6 +317,9 @@ const GENERIC_PACKAGE_IMPORTS = new Map<string, ReadonlySet<string>>([
   // The agent's status line and its subagents' marks tint each harness logo
   // with the profile color from the same roster the composer's model chip reads.
   ["components/AgentLiveStatusDock.tsx", new Set(["@polyth/models/runtime-catalog"])],
+  // The answer's info line names the thinking level with the same label the
+  // composer's model chip shows for it.
+  ["components/ChatResponseFooter.tsx", new Set(["@polyth/models/model-presentation"])],
   ["components/SubagentActivityDock.tsx", new Set(["@polyth/models/runtime-catalog"])],
   // The island's transcript fallback shares the canonical todo normalizer
   // every harness adapter uses, so both read the same native todo shapes.
@@ -348,6 +355,8 @@ test("generic package integration exceptions require the exact importer and expo
   assert.equal(hasExactGenericPackageImport("components/settings/pages.tsx", "@polyth/models/model-picker"), true);
   assert.equal(hasExactGenericPackageImport("components/settings/pages.tsx", "@polyth/models/model-picker/private"), false);
   assert.equal(hasExactGenericPackageImport("components/settings/UserDetail.tsx", "@polyth/models/model-picker"), true);
+  assert.equal(hasExactGenericPackageImport("components/ChatResponseFooter.tsx", "@polyth/models/model-presentation"), true);
+  assert.equal(hasExactGenericPackageImport("components/ChatResponseFooter.tsx", "@polyth/models/runtime-catalog"), false);
   for (const importer of GENERIC_PACKAGE_IMPORTS.keys()) {
     assert.equal(GENERIC_PACKAGE_IMPORTERS.has(importer), false, `${importer} must not be broadly approved`);
   }

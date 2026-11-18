@@ -37,5 +37,5 @@ test("phone conversation rows use the people glyph and no duration", async () =>
   assert.match(source, /session\.purpose === "conversation"/);
   assert.match(source, /sessionLeadMark\(\{ status: rowStatus, opening, conversation, pinned: session\.pinned !== undefined \}\)/);
   assert.match(source, /case "people":\s*return <span className="mobile-nav-session-state is-conversation">/);
-  assert.match(source, /\{!conversation && rowStatus\.kind === "working" && \(/);
+  assert.match(source, /\{!conversation && rowStatus\.kind === "working" && <WorkingClock /);
 });

@@ -12,6 +12,8 @@ const dom = new Window();
 Object.assign(globalThis, {
   window: dom as unknown as typeof globalThis & Window,
   document: dom.document as unknown as Document,
+  // The phone navigator measures its list to reveal the current project.
+  getComputedStyle: dom.getComputedStyle.bind(dom),
 });
 Object.defineProperty(globalThis, "navigator", { value: dom.navigator, configurable: true });
 Object.defineProperty(globalThis, "localStorage", { value: dom.localStorage, configurable: true });

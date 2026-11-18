@@ -11,6 +11,7 @@ import type {
     Disposable,
     HarnessContext,
     HarnessDescriptor,
+    HarnessProvider,
     HarnessProvisioningQuery,
     HarnessRegistry,
     HarnessSelection,
@@ -40,7 +41,8 @@ import { promptPrefixDiagnostics } from "./promptPrefixDiagnostics.ts";
 import { createHarnessInstallJobs, createInstallContainment, installMachineOs, installSources, localInstallLauncher, remoteInstallLauncher, type HarnessInstallJobs, type InstallContainment, type InstallLauncher } from "./installJobs.ts";
 import { forgetRemoteHarnessProbes, resolveRemoteHarnessHost } from "./remoteHost.ts";
 import { browserOnServer, localSetupEnv, openSetupTerminal, previewSetupTerminal, readSetupAction, REMOTE_SETUP_PATH, requireSetupAuthority, setupCommand, setupTarget, type HarnessSetupTerminals } from "./setupTerminal.ts";
-import { createHarnessUpdateChecker, harnessUpdateStatus } from "./updates.ts";
+import { createHarnessUpdateChecker, harnessUpdateStatus, type HarnessUpdateChecker } from "./updates.ts";
+import { createHarnessAutoUpdater, type AutoUpdateRelease, type HarnessAutoUpdater } from "./autoUpdate.ts";
 import { editionUnavailable, workstationEdition } from "./edition.ts";
 import { pruneHarnessVersions, type HarnessVersionPrune } from "./versionStore.ts";
 
@@ -145,6 +147,63 @@ export async function freeHarnessExecutable(
         throw harnessError("conflict", `${descriptor.name} is still working in ${busy === 1 ? "a chat" : `${busy} chats`}. Windows cannot replace a program while it runs; update once they finish.`);
     }
     return { released };
+}
+/** Run one harness's update the way Settings does (`runHarnessUpdate`, npm
+ *  into the prefix an npm-installed CLI lives in), then drop every cached
+ *  answer about the harnesses it changed: registry snapshots, the server model
+ *  catalog and, after a success, the release lookup. */
+async function updateHarnessCli(
+    host: Pick<ServerPackageHost, "services">,
+    provider: Pick<HarnessProvider, "descriptor" | "versionStore">,
+    checker: HarnessUpdateChecker,
+    harnessIds: readonly string[] = [provider.descriptor.id],
+): Promise<HarnessUpdateResult> {
+    const { descriptor } = provider;
+    if (!descriptor.updateCommand?.length)
+        throw harnessError("unsupported", "this harness has no update command");
+    const source = descriptor.releaseSource;
+    const result = await runHarnessUpdate(descriptor.updateCommand, provider.versionStore, source?.kind === "npm" ? { npmPackage: source.package, ...(source.bin ? { npmBin: source.bin } : {}), ...(source.distTag ? { npmDistTag: source.distTag } : {}) } : {});
+    const registry = host.services.get(serverServiceKey<HarnessRegistry>("harnesses"));
+    for (const harnessId of harnessIds) registry?.invalidate({ harnessId });
+    host.services.get(serverServiceKey<{ invalidateModels(): void }>("runtime.catalog"))?.invalidateModels();
+    if (result.ok && source)
+        checker.forget(source);
+    return result;
+}
+/** Where this machine's CLI versions are probed for automatic updates: no
+ *  Space and no project, like a local install's verification. */
+const machineContext = (): HarnessContext => ({ spaceId: "__machine__", projectId: "__default__", cwd: homedir(), remote: false });
+
+/** A Windows `.cmd` launcher over another app's copy, which no updater here can replace. */
+async function withExternalCopy(status: HarnessUpdateStatus, descriptor: HarnessDescriptor): Promise<HarnessUpdateStatus> {
+    const binary = descriptor.updateCommand?.[0];
+    if (status.reason === "remote" || status.reason === "not-installed" || status.reason === "bundled" || !binary || process.platform !== "win32")
+        return status;
+    const { hit } = await discoverHarnessExecutable(binary);
+    const external = hit ? await externalHarnessCopy(hit, descriptor) : undefined;
+    return external ? { ...status, external } : status;
+}
+
+/** The package's automatic updater: machine-wide settings in the package data
+ *  directory, this machine's status as the owner sees it, and the same update
+ *  path as Settings (Windows first frees the CLI of every harness on it). */
+export function harnessAutoUpdater(host: ServerPackageHost, checker: HarnessUpdateChecker): HarnessAutoUpdater {
+    const registry = () => host.services.require(serverServiceKey<HarnessRegistry>("harnesses"));
+    return createHarnessAutoUpdater({
+        file: () => join(packageDataDir(host), "auto-update.json"),
+        harnesses: () => registry().providers(),
+        async status(harness) {
+            const [snapshot] = await registry().snapshots(machineContext(), { harnessId: harness.descriptor.id });
+            const status = await harnessUpdateStatus({ descriptor: harness.descriptor, snapshot, remote: false, owner: true, checker });
+            return withExternalCopy(status, harness.descriptor);
+        },
+        async update(harness, group) {
+            for (const member of group) await freeHarnessExecutable(host, member.descriptor);
+            const provider = registry().get(harness.descriptor.id) ?? harness;
+            return updateHarnessCli(host, provider, checker, group.map((member) => member.descriptor.id));
+        },
+        release: () => host.services.get(serverServiceKey<AutoUpdateRelease>("harness.runtime.releaseIdle")),
+    });
 }
 export type HarnessUpdateResult = { ok: boolean; exitCode: number | null; output: string; versions?: HarnessVersionPrune };
 
@@ -421,10 +480,11 @@ export function personDefaults(host: ServerPackageHost) {
 export function harnessRoutes(
     host: ServerPackageHost,
     installs: HarnessInstallJobs = createHarnessInstallJobs(),
-    options: { installContainment?: InstallContainment } = {},
+    options: { installContainment?: InstallContainment; updateChecker?: HarnessUpdateChecker; autoUpdates?: HarnessAutoUpdater } = {},
 ): RouteHandler {
     const nativePlugins = createNativePluginRoutes();
-    const updateChecker = createHarnessUpdateChecker();
+    const updateChecker = options.updateChecker ?? createHarnessUpdateChecker();
+    const autoUpdates = options.autoUpdates;
     const localLauncher = localInstallLauncher({
         env: () => localSetupEnv(),
         ...(options.installContainment ? { containment: options.installContainment } : {}),
@@ -704,23 +764,21 @@ export function harnessRoutes(
             const force = request.url.searchParams.get("force") === "1";
             const owner = hasInstanceOwnerAuthority(request);
             const snapshots = await registry.snapshots(context, harnessId ? { harnessId } : {});
+            // Automatic updates concern this machine's CLI; the workstation
+            // edition runs no updater at all.
+            const auto = autoUpdates && !context.remote && !workstationEdition() ? autoUpdates : undefined;
             request.json(200, await Promise.all(targets.map(async (provider): Promise<HarnessUpdateStatus> => {
                 const { descriptor } = provider;
                 try {
-                    const status = await harnessUpdateStatus({
+                    const status = await withExternalCopy(await harnessUpdateStatus({
                         descriptor,
                         snapshot: snapshots.find((row) => row.identity.id === descriptor.id),
                         remote: context.remote,
                         owner,
                         checker: updateChecker,
                         force,
-                    });
-                    const binary = descriptor.updateCommand?.[0];
-                    if (context.remote || status.reason === "not-installed" || status.reason === "bundled" || !binary || process.platform !== "win32")
-                        return status;
-                    const { hit } = await discoverHarnessExecutable(binary);
-                    const external = hit ? await externalHarnessCopy(hit, descriptor) : undefined;
-                    return external ? { ...status, external } : status;
+                    }), descriptor);
+                    return auto ? { ...status, autoUpdate: await auto.state(provider, owner) } : status;
                 }
                 catch {
                     return { harnessId: descriptor.id, available: false, reason: "unavailable", canUpdate: false };
@@ -887,6 +945,25 @@ export function harnessRoutes(
             request.json(200, result);
             return true;
         }
+        // Update automatically: machine-wide, so only the instance owner
+        // switches it, for a CLI on this machine that has an updater.
+        const autoUpdate = request.path.match(/^\/api\/harnesses\/([a-z][a-z0-9-]*)\/auto-update$/);
+        if (autoUpdate && request.method === "PUT") {
+            const provider = registry.get(autoUpdate[1]!);
+            if (!provider || !visible(provider.descriptor))
+                throw harnessError("not-found", "harness not found");
+            requireInstanceOwnerAuthority(request, "automatic harness updates require the instance owner");
+            if (workstationEdition())
+                throw editionUnavailable(`Updating ${provider.descriptor.name}`);
+            if (!autoUpdates)
+                throw harnessError("unsupported", "automatic updates are unavailable");
+            const input = await request.body();
+            if (typeof input.enabled !== "boolean")
+                throw harnessError("invalid-input", "enabled must be true or false");
+            await autoUpdates.set(provider, input.enabled);
+            request.json(200, await autoUpdates.state(provider, true));
+            return true;
+        }
         const maintenance = request.path.match(/^\/api\/harnesses\/([a-z][a-z0-9-]*)\/(restart|update|refresh-models)$/);
         if (maintenance && request.method === "POST") {
             const provider = registry.get(maintenance[1]!);
@@ -923,13 +1000,13 @@ export function harnessRoutes(
                 throw editionUnavailable(`Updating ${provider.descriptor.name}`);
             if (!provider.descriptor.updateCommand?.length)
                 throw harnessError("unsupported", "this harness has no update command");
-            await freeHarnessExecutable(host, provider.descriptor);
-            const source = provider.descriptor.releaseSource;
-            const result = await runHarnessUpdate(provider.descriptor.updateCommand, provider.versionStore, source?.kind === "npm" ? { npmPackage: source.package, ...(source.bin ? { npmBin: source.bin } : {}), ...(source.distTag ? { npmDistTag: source.distTag } : {}) } : {});
-            invalidateModels();
-            if (result.ok && provider.descriptor.releaseSource)
-                updateChecker.forget(provider.descriptor.releaseSource);
-            request.json(200, result);
+            const update = async () => {
+                await freeHarnessExecutable(host, provider.descriptor);
+                return updateHarnessCli(host, provider, updateChecker);
+            };
+            // One update of a CLI at a time, whether Settings or the automatic
+            // updater started it.
+            request.json(200, autoUpdates ? await autoUpdates.exclusive(provider.descriptor, update) : await update());
             return true;
         }
         // Plugin scopes are written to disk, so the plugin routes never guess a
@@ -1082,6 +1159,8 @@ export default function registerPackage(host: ServerPackageHost) {
     const installs = createHarnessInstallJobs();
     const installContainment = createInstallContainment(() => join(packageDataDir(host), "install-executions"));
     const defaults = personDefaults(host);
+    const updateChecker = createHarnessUpdateChecker();
+    const autoUpdates = harnessAutoUpdater(host, updateChecker);
     // Answers only while the package is enabled: a disabled package's saved
     // defaults pin nothing.
     let active = false;
@@ -1089,10 +1168,12 @@ export default function registerPackage(host: ServerPackageHost) {
         usableDefault: async (ctx) => active ? defaults.usableDefault(ctx) : undefined,
     });
     return {
-        routes: harnessRoutes(host, installs, { installContainment }),
+        routes: harnessRoutes(host, installs, { installContainment, updateChecker, autoUpdates }),
         remoteAccess: localOnlyRemoteAccess(["harnesses"]),
         onEnable() {
             active = true;
+            // The workstation edition runs no updater, so it schedules none.
+            if (!workstationEdition()) autoUpdates.start();
             // An installer a crashed Polyth left running is released, never adopted.
             void installContainment.recover().catch((error: unknown) => console.warn("[polyth] harness install recovery failed", error));
             if (promptContribution) return;
@@ -1105,6 +1186,7 @@ export default function registerPackage(host: ServerPackageHost) {
         },
         async onDisable() {
             active = false;
+            autoUpdates.stop();
             // No installer outlives the package that started it.
             await installs.interruptAll();
             const contribution = promptContribution;

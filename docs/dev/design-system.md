@@ -159,7 +159,7 @@ caused by the window rather than the person does not animate at all (`ui.md`
   `DeleteIcon`, …). Import from that file only, so one action keeps one glyph
   app-wide.
 - The glyph data is vendored, not installed: `components/ui/iconNodes.ts` holds
-  one `IconNode` per glyph, `components/ui/iconBase.tsx` is the small React
+  one `IconNode` per glyph, `components/ui/iconBase.ts` is the small React
   runtime (identical markup to lucide-react), and `components/ui/LUCIDE-LICENSE`
   carries the ISC licence. Add or refresh a glyph with
   `node scripts/icons/lucide.mjs add <Name>` (pinned Lucide release, sorted

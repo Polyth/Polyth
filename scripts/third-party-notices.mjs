@@ -20,7 +20,7 @@ export const VENDORED = [
     version: "1.61.0",
     license: "ISC",
     repository: "https://github.com/lucide-icons/lucide",
-    sources: ["apps/web/src/components/ui/iconNodes.ts", "apps/web/src/components/ui/iconBase.tsx"],
+    sources: ["apps/web/src/components/ui/iconNodes.ts", "apps/web/src/components/ui/iconBase.ts"],
     licenseFile: "apps/web/src/components/ui/LUCIDE-LICENSE",
   },
   {

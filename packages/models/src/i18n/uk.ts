@@ -25,6 +25,8 @@ export const uk: ModelsMessages = {
   "modelpicker.noModelsFound": "Моделі не знайдено",
   "modelpicker.noModelsMatch": "Немає моделей за запитом «",
   "modelpicker.notConnected": "Не підключено",
+  "modelpicker.chatWontFit": "Чат не вміститься",
+  "modelpicker.chatWontFitTitle": "Цей чат уже не вміщується в контекстне вікно цієї моделі",
   "modelpicker.notReported": "Не вказано",
   "modelpicker.output": "Вихідні",
   "modelpicker.pdf": "PDF",

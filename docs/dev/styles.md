@@ -386,7 +386,7 @@ Polyth bundles curated, high-performance variable `.woff2` fonts served locally 
 - **Serif:** Source Serif 4 (editorial reading typeface).
 - **Programmer Monospace:** JetBrains Mono, Fira Code, Geist Mono, Cascadia Code, and native System Monospace.
 
-All web font files reside in `apps/web/src/assets/fonts/`, are declared in `apps/web/src/fonts.css` with `font-display: swap`, and are copied to `dist/assets/fonts/` during the web build. They are all SIL OFL 1.1 fonts: a new font adds its copyright notice to `OFL.txt` and a row to the [font provenance table](../../apps/web/src/assets/fonts/README.md) in that directory.
+All web font files reside in `apps/web/src/assets/fonts/`, are declared in `apps/web/src/fonts.css` with `font-display: swap`, and are copied to `dist/assets/fonts/` during the web build. They are all SIL OFL 1.1 fonts: a new font adds its copyright notice to `OFL.txt` and a row to the [font provenance table](../../apps/web/src/assets/fonts/README.md) in that directory. The files are Latin-only subsets, except that JetBrains Mono adds its Cyrillic and its box drawing and block elements (U+2500–259F) as separate `unicode-range` files, so Cyrillic text, `tree` output and tmux or prompt frames in terminals and code stay in the same face and cell width; other families still render Cyrillic in a system font.
 
 Meaningful metadata uses `--font-meta`; 10–11px literals are only for
 tertiary decorative labels, never instructions or state. Navigator session
@@ -436,6 +436,18 @@ instead of the opaque global `code` fill. A Markdown table
 keeps the answer size for both its header and its cells. Code *blocks* stay
 the one intentionally distinct step, because they are framed surfaces rather
 than prose words.
+
+A Markdown link is `.md-link` wherever Markdown renders (answers, the user's
+own prompt, quotes, previews), never the browser's blue or visited purple. Its
+ink is `--link`, falling back to `--chat-ink-accent`/`--accent-text`: a style
+with its own link colour sets `--link` on `html` (macOS styles use `--blue`),
+and the accent-tinted user message sets it to `--accent-on-wash` (macOS styles:
+`--blue` leaned toward the ink). Visited links keep that ink; the underline is a
+40% hairline at `0.22em` offset that firms to the full colour with a faint wash
+under the pointer, and keyboard focus gets the `--focus-ring` outline. A bare
+URL (`.md-link-url`) breaks anywhere instead of widening the bubble, and its
+`https://` / `www.` (`.md-link-scheme`) steps back in ink while staying in the
+copied text.
 
 A Markdown table is a grid, not a paragraph that happens to have rules. It
 must read correctly at any width and with any cell text, so the renderer wraps
@@ -605,8 +617,8 @@ paints `--look-overlay-solid` (the look's overlay material, opaque; default
 | `paper` | One flat sheet with no panels. The composer is a ruled line and the prompt a quoted passage. |
 | `line` | A hairline grid: columns and the composer form are drawn by lines, with 6px corners and mono figures. |
 | `air` | Soft islands with diffuse shadows and pill shapes, and no lines. |
-| `monolith` | Chrome on a deep backdrop; the conversation is one raised sheet with a short, light shadow. |
-| `monolith-reverse` | A lit chrome plane with the conversation recessed into it. Raised pieces (composer, prompt, cards) are made of the plane; navigator selection is carved down to the well. |
+| `monolith` | Chrome on a deep backdrop; the conversation is one raised sheet with a short, light shadow. Over a wallpaper the backdrop is the tinted image and the sheet frosts as a canvas does (`--look-veil`). |
+| `monolith-reverse` | A lit chrome plane with the conversation recessed into it. Raised pieces (composer, prompt, cards) are made of the plane; navigator selection is carved down to the well. Fields and control strips are a shallower cut (`--look-cut`: halfway to the well in dark, the well's gray in light). In dark mode the plane is `--bg` lit by a tenth of white, so quiet ink keeps 4.5:1 on it. Over a wallpaper the plane and its raised pieces are lit glass on `--look-veil-soft`, and the well and every cut and selection veil as the well does (`--look-veil`), so nothing on the glass is an opaque slot. |
 | `obsidian` | Rimmed glass with gradient edges, an aurora backdrop and a glowing composer. In light mode it reads as pearl. |
 | `editorial` | Source Serif 4 titles and prompts, a small-caps index navigator and a letter-field composer on warm paper. |
 
@@ -744,6 +756,26 @@ at ≥ 6.6:1.
   veil. A look that writes the conversation straight on its canvas (Paper,
   Line, Air, Obsidian, Editorial) veils that canvas with `--look-veil`, never
   `--look-veil-soft`.
+- The Monoliths' work plane is a window in the chrome, not a layer on it. On
+  the desktop (≥ 961px) `.app` is bare, and the chrome (`--look-chrome`:
+  Monolith's backdrop, Reverse's lit plane, both on `--look-veil-soft`; light
+  Monolith's on `--look-veil`) is the work plane's outer spread
+  (`0 0 0 100vmax`). It fills the window around the sheet or well, follows its
+  corners, and lets the plane's own veil (`--look-veil`) lie straight on the
+  image. Painted on `.app`, the chrome lay under the plane too and the two
+  veils stacked, so Reverse's well let only a few percent of the image
+  through. The navigator and the top rail come before the plane in the tree,
+  so they take `z-index: 1` (the launcher column already sits above).
+  `.app-shell` clips its overflow, so the spread ends at the shell: Columns and
+  Bare lay the top rail over the shell, inside it, but Classic stacks the rail
+  above the shell, so there the rail paints `--look-chrome` itself, square,
+  and casts it `var(--space-2)` down over the desktop `.app` gap under it
+  (without it, the rail row was a band of bare image over the lit navigator,
+  and then a line of it). Tablets
+  and phones keep the chrome on `.app`. A docked window's plane still lies on
+  the spread, so over a wallpaper it shows a little less of the image than the
+  conversation does. Guards: `shellLooks.test.ts`,
+  `railLauncherStability.test.ts`.
 - A look layers over every **Style** (`html[data-theme-style]`): the macOS 27,
   Big Sur and Polyth recipes re-bind the same elements with `!important` at
   class strength (for example the borderless composer ring of
@@ -925,6 +957,20 @@ and the absence of colour literals.
   `bare` does the same; its bar is only a quiet chat title line (and the Space
   switcher with several Spaces), and without either the workspace reaches the
   top.
+- A docked group with nothing on it draws no bar, padding or seam, and the
+  navigator row that carries it goes with it (`shellLayout.css`: an empty
+  `.shell-dock`, a `.shell-dock--actions` without a launcher, an empty
+  `.shell-column-head`/`-foot`). It is hidden with `display: none`, never
+  unmounted, because rail drag targets a rail by zone. The tools rail renders
+  itself while a drag offers it an icon, which un-empties its dock; the
+  actions rail cannot know that, so its dock and navigator row come back for
+  any drag in the air (`body[data-rail-dragging]`) and the new test asserts
+  unrelated drags leave the tools row untouched. Edit mode keeps the rows and
+  the actions dock for their pencil. `railDrag.ts` sets that flag before it
+  measures any zone (so a restored bar is laid out first) and measures a rail
+  with no box as no geometry, so a group that reappears mid-drag is measured
+  where it now is rather than at the window origin. Pinned by
+  `shellLayout.test.ts` and `railDragHiddenZone.test.ts`.
 - Up to `1400px` (the tablet band of the wide shell) the idle launcher keeps
   its floating cluster; full-height strip insets apply from `1401px`.
 - Desktop app: `.app::before` is the window drag band (the title bar or the

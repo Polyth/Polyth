@@ -1,7 +1,8 @@
 /** Pure, browser-safe: which chat wrote each changed line of a file.
  *
  * Git says WHAT changed (the working-tree diff against the index: the same
- * hunks Undo discards). Edit fragments say WHO: each chat's edits are found
+ * hunks Undo discards; `historyHunks` adds what was committed or staged since
+ * the first chat edit). Edit fragments say WHO: each chat's edits are found
  * in the current text, oldest first, and claim the changed lines they wrote,
  * so the newest writer of a line wins. A removal belongs to the chat whose
  * lines replaced it, else to the newest edit that removed that text. With a
@@ -32,6 +33,8 @@ export interface AttributedHunk {
   removed: AttributedRemoval[];
   /** First changed line: where the hunk's actions and navigation land. */
   anchorLine: number;
+  /** Already committed or staged: shown for context, nothing to undo. */
+  history?: true;
 }
 
 export interface AttributionInput {
@@ -42,6 +45,9 @@ export interface AttributionInput {
   edits: readonly FileEditRecord[];
   /** Hunk digests the person kept: hidden until the hunk changes again. */
   accepted?: ReadonlySet<string>;
+  /** With one editing chat, lines no edit explains are still its own (default).
+   *  Off for history, where other people's commits sit in the same diff. */
+  soleOwner?: boolean;
 }
 
 const MAX_OCCURRENCES = 32;
@@ -201,7 +207,7 @@ export function attributeChanges(input: AttributionInput): AttributedHunk[] | nu
     }
   }
   const editors = new Set(edits.map((edit) => edit.sessionId));
-  const sole = editors.size === 1 ? [...editors][0]! : null;
+  const sole = editors.size === 1 && input.soleOwner !== false ? [...editors][0]! : null;
   const result: AttributedHunk[] = [];
   for (const hunk of hunks) {
     if (input.accepted?.has(hunk.digest)) continue;
@@ -225,6 +231,44 @@ export function attributeChanges(input: AttributionInput): AttributedHunk[] | nu
     );
     if (!Number.isFinite(anchorLine)) continue;
     result.push({ index: hunk.index, digest: hunk.digest, lines, removed, anchorLine });
+  }
+  return result;
+}
+
+export interface HistoryInput {
+  text: string;
+  /** `git diff <base> -- <path>`: the working tree against the commit the
+   *  file's first chat edit started from (committed + staged + unstaged). */
+  history: string;
+  /** `git diff -- <path>`: what Undo/Keep act on. Its lines are never repeated. */
+  worktree: string;
+  edits: readonly FileEditRecord[];
+  accepted?: ReadonlySet<string>;
+}
+
+/**
+ * The changes since the first chat edit that are no longer in the working-tree
+ * diff: committed or staged. Lines the working-tree diff covers (kept hunks
+ * included, so Keep hides them here too) stay with that diff; what is left is
+ * attributed the same way. Null when either diff no longer matches `text`.
+ */
+export function historyHunks(input: HistoryInput): AttributedHunk[] | null {
+  const textLines = input.text.split("\n");
+  const pending = parseHunks(input.worktree, textLines);
+  if (!pending) return null;
+  const covered = new Set(pending.flatMap((hunk) => hunk.added));
+  const coveredRemovals = new Set(pending.flatMap((hunk) => hunk.removed.map((block) => block.line)));
+  const hunks = attributeChanges({ text: input.text, diff: input.history, edits: input.edits, accepted: input.accepted, soleOwner: false });
+  if (!hunks) return null;
+  const result: AttributedHunk[] = [];
+  for (const hunk of hunks) {
+    const lines = hunk.lines.filter((entry) => !covered.has(entry.line));
+    // A removal at a line the pending diff rewrites or removes before is part
+    // of that pending change's story; the pending block shows it.
+    const removed = hunk.removed.filter((block) => !covered.has(block.line) && !coveredRemovals.has(block.line));
+    if (lines.length === 0 && removed.length === 0) continue;
+    const anchorLine = Math.min(...lines.map((line) => line.line), ...removed.map((block) => block.line));
+    result.push({ index: hunk.index, digest: hunk.digest, lines, removed, anchorLine, history: true });
   }
   return result;
 }

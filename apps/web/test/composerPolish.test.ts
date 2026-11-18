@@ -147,7 +147,7 @@ test("mobile primary touch activation survives keyboard dismissal without a dupl
   );
   assert.match(
     composer,
-    /activation\.touch = true;[\s\S]*?event\.preventDefault\(\);\n    startHold\(\);/,
+    /activation\.touch = true;[\s\S]*?event\.preventDefault\(\);\n    startHold\(event\);/,
     "touch pointerdown keeps focus on the editor and arms the save-as-draft hold",
   );
   const pointerUp = composer.slice(composer.indexOf("const onPrimaryPointerUp"), composer.indexOf("const onPrimaryPointerCancel"));

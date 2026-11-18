@@ -1503,8 +1503,11 @@ body[data-desktop-low-resource="true"] .mobile-nav-swipe-tray.is-committing > .m
   transition: none;
 }
 
+/* The current chat takes the same mode-aware selection wash as the desktop
+   row: a fixed glass fill sat one OKLab step off the phone layer and
+   disappeared on dark canvases. */
 .mobile-nav-session-row.is-active {
-  --mobile-nav-fill: var(--material-glass);
+  --mobile-nav-fill: var(--surface-overlay-strong);
 }
 
 /* Pinned rows carry no tint: their group's caption already says it, and a

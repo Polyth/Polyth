@@ -669,19 +669,26 @@ test("a warmed chat whose local draft read waits for a socket claims the loading
   const previous = store.getState().activeSessionId;
   assert.notEqual(previous, sessionId);
 
-  let finishRead: (value: string | null) => void = () => {};
+  // Every read waits on one gate, and the test waits for the read itself
+  // rather than for a turn of the timer queue: on a loaded host the open
+  // reached its draft read a turn later, the release went to nobody and the
+  // read that followed was never answered.
+  let finishRead: () => void = () => {};
+  const gate = new Promise<void>((resolve) => { finishRead = resolve; });
+  let readStarted: () => void = () => {};
+  const reading = new Promise<void>((resolve) => { readStarted = resolve; });
   setClientPersistenceBackend({
-    get: () => new Promise<string | null>((resolve) => { finishRead = resolve; }),
+    get: () => { readStarted(); return gate.then(() => null); },
     set: async () => {},
     remove: async () => {},
   });
   try {
     const opening = openSession(sessionId);
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await reading;
     assert.equal(store.getState().activeSessionId, previous, "the read is still on its way");
     assert.equal(store.getState().openingSessionId, sessionId, "the surface can show its loading layer");
 
-    finishRead(null);
+    finishRead();
     await opening;
     assert.equal(store.getState().activeSessionId, sessionId);
     assert.equal(store.getState().openingSessionId, null, "the claim ends with the open");

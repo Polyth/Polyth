@@ -13,8 +13,9 @@ test("phone modules expose Back to Workspace and a separate dismiss control", as
   // Workspace that Back just returned to.
   assert.match(moduleView, /if \(phone && presented\) rememberMobileWorkspacePackage\(id\)/);
   assert.match(moduleView, /presented = true/);
-  // Back names the Workspace as the destination before the package leaves.
-  assert.match(moduleView, /const phoneBack = \(\) => \{\s*showMobileWorkspaceHome\(\);\s*onClose\(\);\s*\};/);
+  // Back names the Workspace as the destination before the package leaves,
+  // unless a page inside the package claimed Back for its own step (7adc53575).
+  assert.match(moduleView, /const phoneBack = \(\) => \{\s*if \(innerBack\.current\) \{\s*innerBack\.current\(\);\s*return;\s*\}\s*showMobileWorkspaceHome\(\);\s*onClose\(\);\s*\};/);
   assert.match(moduleView, /systemAction\(BackIcon, tr\("common\.back"\), phoneBack/);
   assert.match(moduleView, /module-view-close module-view-dismiss/);
   assert.match(moduleView, /!phone && dockActions/);

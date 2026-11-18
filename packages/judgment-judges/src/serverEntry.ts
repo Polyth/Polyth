@@ -2,25 +2,32 @@ import { join } from "node:path";
 import type { JsonObject, SessionEvent, SessionProjection, SessionService, SpaceContext } from "@polyth/contracts";
 import {
   localOnlyRemoteAccess, SERVER_MODEL_ROUTING, SERVER_PERMISSION_WAITING_BUS, SERVER_SESSION_ISOLATION, SERVER_TURN_COMPLETION_BUS,
-  SERVER_TURN_STOPPED_BUS, SESSION_ATTENTION_SERVICE, systemSessionsForSession, type ServerPackage, type ServerPackageHost,
+  SERVER_TOOL_QUIET_BUS, SERVER_TURN_STOPPED_BUS, SESSION_ATTENTION_SERVICE, systemSessionsForSession, type ServerPackage, type ServerPackageHost,
 } from "@polyth/plugins";
 import { sessionCacheFacts } from "@polyth/usage/session-cache";
 import { JUDGMENT_SERVICE, type JudgmentService } from "@polyth/judgment/server";
 import type { JudgmentQuestion, JudgmentResult } from "@polyth/judgment";
 import { BUILTIN_USES, runCompletionCheck, runNeedsYou } from "./builtins.ts";
 import { cacheIneligible, createKeepWarm, judgeContinuation, KEEP_ALIVE_PROMPT, KEEP_WARM, keepAliveBudget, keepWarmParams } from "./keepWarm.ts";
+import { QUIET_COMMAND, runQuietCommand, type QuietEvent } from "./quietCommand.ts";
 import { askJudge, assessmentFor, customScope, judgeTarget, requestVerdict, type CustomOutcome } from "./custom.ts";
 import { ACTS_FOR_NO_ONE, runAction, sendBlocked, sendMessage, SPACE_NEVER_APPROVES, type ActionTarget } from "./actions.ts";
 import { currentRoute, routeAsk, routeDecision, routeOptions } from "./routes.ts";
 import {
   completedTurns, currentTurnEvidence, isKeepAlive, latestTurnEvidence, mirroredRequestOpen, permissionEvidence, type TurnEvidence,
 } from "./evidence.ts";
-import { createJudge, deleteJudge, noteOutcome, readJudges, reserveCall, updateJudge, usageToday } from "./store.ts";
+import { createJudge, deleteJudge, neverSaved, noteOutcome, readJudges, reserveCall, seedStarters, updateJudge, usageToday } from "./store.ts";
+import { STARTERS } from "./starters.ts";
+import { en, type JudgmentJudgesMessageKey } from "./i18n/en.ts";
+import { judgmentJudgesLocales } from "./i18n/index.ts";
 import {
   ASSESSMENT_EVENT, decidesRequests, hasActions, JUDGE_ID, MAX_BACKTEST, PACKAGE_ID, REQUEST_CHECK_EVENT, REQUEST_VERDICT_EVENT, routeKey,
   validateJudgeInput, type AssessmentAction, type AssessmentData, type BacktestRow, type JudgeDefinition, type JudgeRoutesSnapshot, type JudgesSnapshot,
-  type JudgeTrigger, type RequestCheckData, type RequestVerdictData, type RequestVerdictKind,
+  type BuiltinJudgeState, type JudgeTrigger, type RequestCheckData, type RequestVerdictData, type RequestVerdictKind,
 } from "./types.ts";
+
+/** The built-in judges, in the order the Judges page lists them. */
+const BUILTIN_IDS = [...BUILTIN_USES, KEEP_WARM, QUIET_COMMAND].map((use) => use.id);
 
 /** Background evaluations in flight at once; a newer event of the same kind replaces a queued one. */
 const MAX_ACTIVE = 4;
@@ -54,7 +61,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     if (registered && registered.service !== service) { registered.off.forEach((off) => off()); registered = undefined; }
     if (service && !registered) {
       const off: Array<() => void> = [];
-      for (const use of [...BUILTIN_USES, KEEP_WARM]) {
+      for (const use of [...BUILTIN_USES, KEEP_WARM, QUIET_COMMAND]) {
         try { off.push(service.registerUse(use)); }
         catch (error) { console.warn(`[polyth] judges: Judgment use ${use.id} registration failed`, error); }
       }
@@ -212,6 +219,16 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     }
   };
 
+  /** A call silent for most of its window: a judge may keep it running before the silence stop. */
+  const evaluateQuiet = async (event: QuietEvent, admitted: number) => {
+    const service = judgment();
+    // The tenant boundary: only the event's own Space, through its own facade.
+    if (!service || admitted !== generation || !event.spaceId) return;
+    const space = host.systemSpaceContext(event.spaceId);
+    const outcome = await runQuietCommand({ judgment: service, space, sessions: host.forSpace(space).sessions, signal: lifetime.signal }, event);
+    if (outcome.kept && enabled && admitted === generation) await record(event.sessionId, outcome.assessment);
+  };
+
   /** A permission request waiting for a person: permission judges may answer it or change Auto-Approve. */
   const evaluatePermission = async (sessionId: string, requestId: string, automaticAllowed: boolean, admitted: number) => {
     const service = judgment();
@@ -364,10 +381,25 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   const validateProject = async (space: SpaceContext, projectId: string) => {
     if (!projectId || !await host.forSpace(space).projects.get(projectId)) throw Object.assign(new Error("Project not found"), { code: "not-found" });
   };
-  const snapshot = (space: SpaceContext): JudgesSnapshot => {
-    const stored = readJudges(judgesFile(space));
-    return { revision: stored.revision, judges: stored.judges, usage: usageToday(usageFile(space)), judgmentAvailable: !!judgment(),
-      ...(isPerson(space) ? { viewer: space.userId } : {}) };
+  /** Each built-in judge's switch for this project; a use Judgment cannot resolve reads as off. */
+  const builtins = async (service: JudgmentService, space: SpaceContext, projectId: string): Promise<BuiltinJudgeState[]> =>
+    Promise.all(BUILTIN_IDS.map(async (id) => ({ id,
+      enabled: await service.resolveUse({ space, projectId }, id).then((use) => use.enabled, () => false) })));
+  const snapshot = async (space: SpaceContext, projectId: string): Promise<JudgesSnapshot> => {
+    const file = judgesFile(space);
+    const stored = readJudges(file);
+    const service = judgment();
+    return { revision: stored.revision, judges: stored.judges, usage: usageToday(usageFile(space)), judgmentAvailable: !!service,
+      ...(isPerson(space) ? { viewer: space.userId } : {}),
+      ...(neverSaved(file) ? { fresh: true } : {}),
+      ...(service ? { builtins: await builtins(service, space, projectId) } : {}) };
+  };
+  /** The starters in the language the page asked for, English when it names none this package speaks. */
+  const starterJudges = (locale: unknown) => {
+    const bundle = typeof locale === "string" && Object.hasOwn(judgmentJudgesLocales, locale)
+      ? judgmentJudgesLocales[locale as keyof typeof judgmentJudgesLocales] : en;
+    const t = (key: JudgmentJudgesMessageKey) => bundle[key] || en[key];
+    return STARTERS.filter((starter) => starter.seeded).map((starter) => ({ starter: starter.id, input: starter.build(t) }));
   };
   const bodyOf = async (rc: Parameters<NonNullable<ServerPackage["routes"]>>[0]) => {
     const body = await rc.body();
@@ -438,12 +470,18 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       if (rc.path !== "/api/judges" && !rc.path.startsWith("/api/judges/")) return false;
       const space = rc.space, projectId = rc.url.searchParams.get("projectId") ?? "";
       await validateProject(space, projectId);
-      if (rc.path === "/api/judges" && rc.method === "GET") { rc.json(200, snapshot(space)); return true; }
+      if (rc.path === "/api/judges" && rc.method === "GET") { rc.json(200, await snapshot(space, projectId)); return true; }
       if (rc.path === "/api/judges" && rc.method === "POST") {
         const body = await bodyOf(rc);
         await checkJudge(space, body.judge);
         createJudge(judgesFile(space), body.revision, body.judge, Date.now(), owner(space));
-        rc.json(200, snapshot(space)); return true;
+        rc.json(200, await snapshot(space, projectId)); return true;
+      }
+      // A Space that never saved a judge starts with the starters, off and owned by no one; any saved list is left as it is.
+      if (rc.path === "/api/judges/starters" && rc.method === "POST") {
+        const body = await bodyOf(rc);
+        seedStarters(judgesFile(space), starterJudges(body.locale));
+        rc.json(200, await snapshot(space, projectId)); return true;
       }
       if (rc.path === "/api/judges/routes" && rc.method === "GET") { rc.json(200, await routes(space)); return true; }
       const match = rc.path.match(/^\/api\/judges\/([^/]+)(\/backtest)?$/);
@@ -466,12 +504,12 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         const body = await bodyOf(rc);
         await checkJudge(space, body.judge);
         updateJudge(judgesFile(space), body.revision, id, body.judge, Date.now(), owner(space));
-        rc.json(200, snapshot(space)); return true;
+        rc.json(200, await snapshot(space, projectId)); return true;
       }
       if (rc.method === "DELETE") {
         const revision = rc.url.searchParams.get("revision");
         deleteJudge(judgesFile(space), revision === null ? Number.NaN : Number(revision), id);
-        rc.json(200, snapshot(space)); return true;
+        rc.json(200, await snapshot(space, projectId)); return true;
       }
       return false;
     },
@@ -494,6 +532,10 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         }),
         host.services.get(SERVER_TURN_STOPPED_BUS)?.subscribe(({ sessionId, reason }) => {
           if (reason === "error") enqueue(`limit:${sessionId}`, () => evaluateLimit(sessionId, admitted));
+        }),
+        host.services.get(SERVER_TOOL_QUIET_BUS)?.subscribe((event) => {
+          if (!event.spaceId) return;
+          enqueue(`quiet:${event.sessionId}:${event.callId}`, () => evaluateQuiet(event, admitted));
         }),
       ].filter((subscription): subscription is { dispose(): void } => !!subscription);
       keepWarmTimer ??= setInterval(() => { void keepWarm.tick(); }, KEEP_WARM_TICK_MS);

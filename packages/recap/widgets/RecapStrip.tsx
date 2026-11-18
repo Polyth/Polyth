@@ -1,15 +1,30 @@
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
+import type { SessionAssist, SessionEvent, SessionProjection } from "@polyth/contracts";
 import { assistFreshnessSeq } from "@polyth/session/next-action";
 import type { WebPackageHost } from "@polyth/web-sdk";
 import { CloseIcon, IconButton } from "../../../apps/web/src/components/ui/index.ts";
+import { assistSettings, loadAssistSettings, subscribeAssistSettings } from "./assistSettings.ts";
+import { dismissRecap, recapDismissed, subscribeDismissed } from "./calloutDismissals.ts";
 
-const dismissed = new Set<string>();
-
-const snapshotKey = (host: WebPackageHost, sessionId: string): string => {
-  const assist = host.sessions.get(sessionId)?.assist;
-  const freshnessSeq = assistFreshnessSeq(host.sessions.events(sessionId));
-  return `${assist?.generatedAt ?? 0}:${assist?.atSeq ?? 0}:${freshnessSeq}`;
-};
+/** The recap to draw for a session, or null. A recap is shown only while it
+ *  is the latest word on an idle chat:
+ *  - no conversation activity after it (`assistFreshnessSeq`);
+ *  - it belongs to this log: one pinned past the loaded log's last event came
+ *    with a copied projection (an older fork) and describes another chat;
+ *  - no turn is running.
+ *  Exported for tests. */
+export function visibleRecap(
+  session: Pick<SessionProjection, "status" | "assist"> | undefined,
+  events: readonly SessionEvent[],
+): SessionAssist | null {
+  const assist = session?.assist;
+  if (!assist || !assist.recap.trim()) return null;
+  if (session.status === "working" || session.status === "waiting") return null;
+  const lastSeq = events.at(-1)?.seq ?? 0;
+  if (assist.atSeq > lastSeq) return null;
+  if (assistFreshnessSeq(events) > assist.atSeq) return null;
+  return assist;
+}
 
 export default function RecapStrip({
   host,
@@ -18,24 +33,20 @@ export default function RecapStrip({
   host: WebPackageHost;
   sessionId: string;
 }) {
-  useSyncExternalStore(
-    host.sessions.subscribe,
-    () => snapshotKey(host, sessionId),
-    () => snapshotKey(host, sessionId),
-  );
-  const [, bump] = useState(0);
-  const assist = host.sessions.get(sessionId)?.assist;
-  const freshnessSeq = assistFreshnessSeq(host.sessions.events(sessionId));
+  const snapshot = () => {
+    const assist = visibleRecap(host.sessions.get(sessionId), host.sessions.events(sessionId));
+    return assist ? `${assist.generatedAt}:${assist.atSeq}` : "";
+  };
+  const key = useSyncExternalStore(host.sessions.subscribe, snapshot, snapshot);
+  const settings = useSyncExternalStore(subscribeAssistSettings, assistSettings, assistSettings);
+  useSyncExternalStore(subscribeDismissed, () => key && recapDismissed(sessionId, Number(key.split(":")[1])));
+  useEffect(() => {
+    if (!assistSettings()) void loadAssistSettings().catch(() => {});
+  }, []);
   const tr = host.ui.locale.translate;
 
-  if (!assist || freshnessSeq > assist.atSeq) return null;
-  const key = `${sessionId}:${assist.atSeq}`;
-  if (dismissed.has(key)) return null;
-
-  const dismiss = () => {
-    dismissed.add(key);
-    bump((value) => value + 1);
-  };
+  const assist = key ? visibleRecap(host.sessions.get(sessionId), host.sessions.events(sessionId)) : null;
+  if (!assist || settings?.showRecap === false || recapDismissed(sessionId, assist.atSeq)) return null;
 
   // The recap's suggested next prompt is not drawn here: it rides on the
   // composer's one suggestion chip (PromptAssist), where a harness hint wins.
@@ -56,7 +67,7 @@ export default function RecapStrip({
             label={tr("assiststrip.dismissRecap")}
             size="sm"
             variant="ghost"
-            onClick={dismiss}
+            onClick={() => dismissRecap(sessionId, assist.atSeq)}
           />
         </span>
       </p>

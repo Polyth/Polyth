@@ -735,4 +735,8 @@ test("web push goes only to the subscription of the device in use; a test push g
   const again = createPushService({ file, fetchFn, log: () => {}, activeDevice: () => active });
   assert.equal((await again.send(account, payload)).sent, 1);
   assert.deepEqual(sentTo(), ["phone"]);
+  // An alert sent on from the device that had it reaches every other one.
+  active = undefined;
+  assert.equal((await again.send(account, payload, { exceptDevice: "browser:remembered" })).sent, 2);
+  assert.deepEqual(sentTo(), ["old", "phone"]);
 });

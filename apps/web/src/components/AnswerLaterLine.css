@@ -30,9 +30,9 @@
 /* Doubled class: generic button hover fills from the look layers must not
    replace the wash (they painted it white in light, removed it in dark). */
 @media (hover: hover) {
-  .answer-later .answer-later-open:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); }
+  .answer-later .answer-later-open:hover:where(:not(:disabled)) { background: color-mix(in srgb, var(--accent) 20%, transparent); }
 }
-.answer-later .answer-later-open:active { background: color-mix(in srgb, var(--accent) 27%, transparent); }
+.answer-later .answer-later-open:active:where(:not(:disabled)) { background: color-mix(in srgb, var(--accent) 27%, transparent); }
 .answer-later-open:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .answer-later-mark { flex: none; color: var(--chat-ink-accent); }
 .answer-later-count { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

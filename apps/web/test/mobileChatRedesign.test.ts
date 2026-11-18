@@ -429,7 +429,9 @@ test("the composer is adaptive, with one primary action at a time", async () => 
   assert.ok(composer.includes("composer-input-active"), "textarea focus is exposed for keyboard-safe shell CSS");
   assert.ok(composer.includes("composer-has-draft"), "the draft state keeps the composer engaged");
   assert.ok(
-    composer.includes("const layoutState = composerLayoutState({ phoneLayout, inputFocused, shellMode, hasDraft, railEditing: mobileRailEditing })")
+    // The inputs are named once and shared with the attachment tray (36ea1df36).
+    composer.includes("const layoutInput = { phoneLayout, inputFocused, shellMode: shellMode || Boolean(activeMode), hasDraft, railEditing: mobileRailEditing };")
+      && composer.includes("const layoutState = composerLayoutState({ ...layoutInput, hasDraft: hasDraft || trayPresent });")
       && composer.includes('const expanded = layoutState !== "phone-resting"'),
     "focus, shell mode, and an existing draft expand the phone composer; a working turn alone keeps it minified (Stop stays in the collapsed row)",
   );
@@ -437,7 +439,8 @@ test("the composer is adaptive, with one primary action at a time", async () => 
     "text and attachments retain their independent draft state");
   assert.ok(composer.includes("useViewportMetrics().height"), "auto-grow reacts to the visible viewport");
   assert.ok(
-    composer.includes("Math.max(44, Math.min(visible * 0.42, visible - 240))"),
+    // The open attachment tray's own room comes off the ceiling too (1b7910fc0).
+    composer.includes("Math.max(44, Math.min(visible * 0.42, visible - 240 - trayRoom))"),
     "the input never grows past the room its own chrome needs",
   );
   assert.ok(

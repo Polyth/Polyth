@@ -194,6 +194,19 @@ test("sessions survive restart; the file stores hashes, never tokens or password
   assert.equal(a2.revoke("nope"), false);
 });
 
+test("the device label keeps the shell token a phone app appends", () => {
+  const file = join(tmp(), "auth.json");
+  const a = createAuthService({ file, envPassword: "pw" });
+  // A current phone agent alone already passes 120 characters; a tighter cut
+  // would drop the token that tells the app apart from phone Safari.
+  const ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1 PolythMobile";
+  assert.ok(ua.length > 120);
+  const login = a.login("pw", "10.0.0.1", ua);
+  assert.ok(login.ok);
+  const [device] = a.listSessions(login.ok ? login.token : "");
+  assert.equal(device?.label, ua);
+});
+
 test("stored hash in auth.json enables auth without the env password", () => {
   const file = join(tmp(), "auth.json");
   const a1 = createAuthService({ file, envPassword: "boot-pw" });

@@ -29,6 +29,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { ModelDescriptor, ModelRef } from "@polyth/contracts";
+import { resolveModelContextLimit } from "@polyth/contracts/model-context";
+import { chatOverflowsModel } from "./chatFit.ts";
 import { hiddenModelMatcher, isFavorite, modelKey, orderProviders, providerPreferenceKey } from "@polyth/models";
 import {
   reorderModelFavorites,
@@ -311,6 +313,7 @@ export default function ModelPicker({
     pendingModel = undefined;
     thinking = undefined;
   }
+  const currentLimit = resolveModelContextLimit(value, catalogModels, harnessId);
   const prefs = useModelPrefs();
   const catalog = useMemo(() => pickerCatalogModels(catalogModels, harnessId), [catalogModels, harnessId]);
   // Models this account hid in Settings → Harnesses stay out of the list and
@@ -934,6 +937,12 @@ export default function ModelPicker({
     const unavailable = selectionFull && !selected;
     const key = modelKey(model);
     const favoriteDrag = group === "favorites";
+    const rowLimit = model.contextStatus === "conflict" ? undefined : model.context;
+    const overflows = usage !== undefined && !multi && !selected && chatOverflowsModel({
+      usage,
+      modelLimit: rowLimit,
+      currentLimit,
+    });
     return (
       <div
         key={key}
@@ -979,6 +988,9 @@ export default function ModelPicker({
             {model.name}
             {model.connected === false && (
               <em className="model-row-offline">{tr("modelpicker.notConnected")}</em>
+            )}
+            {overflows && (
+              <em className="model-row-fit" title={tr("modelpicker.chatWontFitTitle")}>{tr("modelpicker.chatWontFit")}</em>
             )}
           </strong>
         </span>

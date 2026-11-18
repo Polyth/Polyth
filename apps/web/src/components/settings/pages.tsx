@@ -22,7 +22,7 @@ import {
   describePushTest, disablePush, enablePush, reconcilePushSubscription, pushUnsupportedReason, sendTestPush,
 } from "../../push.ts";
 import { api } from "@polyth/session/web-api";
-import { desktopBridge } from "../../desktopBridge.ts";
+import { desktopBridge, onServerHostSurface } from "../../desktopBridge.ts";
 import { confirmAlert } from "../../alerts.ts";
 import { CheckGroup, EmptyState, ErrorState, PageHead, ResetLink, Row, SaveBar, Section, Seg, SizeStepper, Toggle } from "./parts.tsx";
 import CompactShortcutsEditor, { CompactShortcutsReset } from "./CompactShortcutsEditor.tsx";
@@ -901,6 +901,10 @@ export function AppearancePage({ settingsTarget }: { settingsTarget?: SettingsNa
   const topRailSize = tr("settings.pages.topRailSize");
   const railSpacing = tr("settings.pages.railSpacing");
   const appearanceSyncOn = useSyncExternalStore(subscribeAppearanceSync, isAppearanceSyncEnabled);
+  // The server and this window are one app on this computer's own server, so
+  // "keep this device's look apart from the account's" has no second side to
+  // sync with. Only a client of another Polyth shows the choice.
+  const showAppearanceSync = !onServerHostSurface();
   const statusBar = tr("settings.pages.statusBar");
   // Settings of one kind of screen. The window layout and its mirror apply to
   // the wide shell only (shellLayout.ts, App.tsx); rails and the status bar to
@@ -985,11 +989,13 @@ export function AppearancePage({ settingsTarget }: { settingsTarget?: SettingsNa
   return (
     <>
       <PageHead title={tr("settings.pages.appearance")} blurb={tr("settings.pages.visualPreferencesSavedInThisBrowserAnd")} />
-      <Section title={tr("settings.account.thisDevice")}>
-        <Row label={tr("settings.pages.syncAppearance")} hint={tr("settings.pages.syncAppearanceHint")} itemId="appearance.sync">
-          <Toggle on={appearanceSyncOn} onChange={setAppearanceSyncEnabled} label={tr("settings.pages.syncAppearance")} />
-        </Row>
-      </Section>
+      {showAppearanceSync && (
+        <Section title={tr("settings.account.thisDevice")}>
+          <Row label={tr("settings.pages.syncAppearance")} hint={tr("settings.pages.syncAppearanceHint")} itemId="appearance.sync">
+            <Toggle on={appearanceSyncOn} onChange={setAppearanceSyncEnabled} label={tr("settings.pages.syncAppearance")} />
+          </Row>
+        </Section>
+      )}
       <Section
         title={tr("settings.pages.shellLook")}
         hint={tr("settings.pages.shellLookHint")}
@@ -2352,7 +2358,16 @@ export function AboutPage() {
     <>
       <PageHead title={tr("settings.pages.about")} blurb={tr("settings.pages.connectionDetailsForThisPolythServer")} />
       <div data-settings-item="about.info">
-        <Row label={tr("settings.pages.version")}><span className="mono">{info.version}</span></Row>
+        <Row
+          label={tr("settings.pages.version")}
+          hint={release?.update ? tr("settings.pages.updateAvailable", { version: release.update.version }) : undefined}
+        ><span className="mono">{info.version}</span></Row>
+        {release?.update && (
+          <Row label={tr("settings.pages.updateServer")} hint={tr("settings.pages.updateServerHint")}>
+            <span className="mono">{release.update.command}</span>
+            {copyButton("update", release.update.command)}
+          </Row>
+        )}
         {release?.release && release.release.downloads.length > 0 && (
           <Row
             label={tr("settings.pages.downloadApp")}

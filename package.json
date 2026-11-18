@@ -29,6 +29,7 @@
     "i18n:generate": "node --experimental-strip-types apps/web/generateI18n.ts",
     "build:web": "npm run i18n:generate && node --experimental-strip-types apps/web/buildPackages.ts && node --experimental-strip-types apps/web/build.ts",
     "build:desktop": "npm run build:web && npm --workspace @polyth/desktop run build",
+    "build:server": "npm run build:web && npm --workspace @polyth/server-app run build",
     "desktop:stage-chromium": "npm --workspace @polyth/desktop run stage:chromium",
     "build": "npm run build:web",
     "prestart": "node scripts/check-node.mjs && npm run build:supervisor",

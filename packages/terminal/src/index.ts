@@ -294,6 +294,25 @@ export const resolveLoginShell = (
   return platform === "darwin" ? "/bin/zsh" : "/bin/sh";
 };
 
+/** The locale a local shell gets when the server's own environment names none.
+ *  The terminal decodes and renders UTF-8 only. A macOS app opened from the
+ *  Dock or Finder inherits launchd's environment, which sets no `LANG`/`LC_*`,
+ *  so zsh would start in the C locale: it counts every byte of a multibyte
+ *  prompt glyph (a git branch icon, `❯`) as its own column, misplaces the right
+ *  prompt, redraws over the left one while you type, and sends partial byte
+ *  sequences that arrive as `�`. Terminal.app and iTerm2 set the locale for the
+ *  same reason. A locale the environment already names is kept, even a
+ *  non-UTF-8 one, and other platforms are unchanged (a Linux service normally
+ *  inherits the system locale, and `en_US.UTF-8` is not guaranteed there). */
+export const terminalLocaleEnv = (
+  env: Readonly<Record<string, string | undefined>>,
+  platform: NodeJS.Platform = process.platform,
+): Record<string, string> => {
+  if (platform !== "darwin") return {};
+  if (env.LC_ALL?.trim() || env.LC_CTYPE?.trim() || env.LANG?.trim()) return {};
+  return { LANG: "en_US.UTF-8" };
+};
+
 /** POSIX-family shells known to accept `-i` for an interactive session. Any
  *  other chosen shell starts without flags (a PTY makes it interactive). */
 const INTERACTIVE_FLAG_SHELLS = new Set(["sh", "bash", "zsh", "fish", "dash", "ash", "ksh", "mksh", "csh", "tcsh", "nu", "xonsh", "yash", "oksh"]);
@@ -478,6 +497,8 @@ export function createTerminalService(opts: {
         }
         env[key] = value;
       }
+      // After the caller's own variables, so a locale it passes is kept.
+      Object.assign(env, terminalLocaleEnv(env));
       Object.assign(env, secureEnv);
       env.TERM = "xterm-256color";
       env.COLORTERM = "truecolor";

@@ -218,6 +218,40 @@ test("an isolated parent's child nests into the parent's workspace, and the pare
   assert.equal(relocated.worktreePath, resolve(root), "the finished child follows its parent back to main");
 });
 
+test("an isolated parent cannot integrate or discard while any of its subagents still works", async () => {
+  const root = repo();
+  const { sessions, isolation } = harness(root);
+  const mainBefore = runGit(root, "rev-parse", "main");
+  const parentRef = await isolation.createIsolatedSession({ projectId: "p1", title: "Waiting orchestrator" });
+  const parent = await sessions.snapshot(parentRef.id);
+  const parentWorktree = parent.isolation!.worktreePath;
+  writeFileSync(join(parentWorktree, "done.txt"), "parent part\n");
+  // A shared-workspace subagent writes straight into the parent's checkout,
+  // and its own subagent is still at work under it.
+  const child = await sessions.create({ projectId: "p1", title: "Screenshots", parentId: parent.id, worktreePath: parentWorktree });
+  const grandchild = await sessions.create({ projectId: "p1", title: "Capture", parentId: child.id, worktreePath: parentWorktree });
+  sessions.setStatus(grandchild.id, "working");
+
+  const status = await isolation.getStatus(parent.id);
+  assert.equal(status.suggestion?.hasChanges, true);
+  assert.equal(status.actions?.canMerge, false, "Integrate is not offered while a subagent works");
+  assert.equal(status.actions?.canDiscard, false);
+  await assert.rejects(() => isolation.mergeBack(parent.id), (error: Error & { reason?: string; sessionIds?: string[] }) => {
+    assert.match(error.message, /Subagents are still working/);
+    assert.equal(error.reason, "subagents-running");
+    assert.deepEqual(error.sessionIds, [grandchild.id]);
+    return true;
+  });
+  await assert.rejects(() => isolation.discard(parent.id), /Subagents are still working/);
+  assert.equal(runGit(root, "rev-parse", "main"), mainBefore, "nothing reached main");
+
+  sessions.setStatus(grandchild.id, "idle");
+  assert.equal((await isolation.getStatus(parent.id)).actions?.canMerge, true, "once every subagent rests the work is ready");
+  const published = await isolation.mergeBack(parent.id);
+  assert.equal(published.finalized, true);
+  assert.equal(runGit(root, "show", "main:done.txt"), "parent part");
+});
+
 test("merging a delegated child without changes only releases its checkout", async () => {
   const root = repo();
   const { sessions, isolation } = harness(root);

@@ -98,7 +98,12 @@ test("CI is automatic on devel and master while build and release workflows stay
   assert.match(release, /--publish always/);
   assert.match(release, /gh release edit .*--draft=false/);
   assert.match(release, /latest\.yml latest-arm64\.yml latest-mac\.yml latest-linux\.yml/);
-  assert.match(release, /npm publish/);
+  // The SDK reaches npm by trusted publishing: the job's id-token, npm >= 11.5.1
+  // and the script that publishes the release's tarballs.
+  assert.match(release, /node scripts\/ci\/publish-sdk-npm\.mjs release-assets "\$VERSION"/);
+  assert.match(release, /id-token: write/);
+  assert.match(release, /npm install --global npm@11\.\d+\.\d+/);
+  assert.match(read("scripts/ci/npm-publish.mjs"), /"publish", file, "--access", "public", "--provenance"/);
   assert.match(release, /upload-google-play/);
 
   const appGradle = read("apps/mobile/android/app/build.gradle");

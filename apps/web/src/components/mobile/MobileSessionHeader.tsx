@@ -51,6 +51,7 @@ import { scheduleSurfaceExit } from "../../motionPresence.ts";
 import { Button, ComposeIcon, GlassIsland, IconButton, LayersIcon, Menu, MenuIcon, type MenuEntry } from "../ui/index.ts";
 import { setHeroEditing, useHeroEditing } from "../../heroEditing.ts";
 import SlotHost from "../slots/SlotHost.ts";
+import SessionHeaderStatus from "../SessionHeaderStatus.tsx";
 import Sheet, { SheetRow, SheetSection } from "./Sheet.tsx";
 import { isImeComposing } from "../input/editorCore.ts";
 import { archiveSessionWithPolicy, renameSessionTitle, toggleSessionPin } from "../../sessionActions.ts";
@@ -976,12 +977,7 @@ export default function MobileSessionHeader() {
                   never the part an ellipsis cuts off. */}
               <span className="mobile-island-title-text">
                 {!attentionCue && (
-                  <span className="session-header-status">
-                    <SlotHost
-                      slot="session.header.status"
-                      context={{ projectId: projectId ?? null, sessionId: session?.id ?? null, workspaceMode: "chat" }}
-                    />
-                  </span>
+                  <SessionHeaderStatus context={{ projectId: projectId ?? null, sessionId: session?.id ?? null, workspaceMode: "chat" }} />
                 )}
                 {activeTitleText}
               </span>

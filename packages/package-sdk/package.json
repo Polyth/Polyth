@@ -2,6 +2,11 @@
   "name": "@polyth/package-sdk",
   "version": "1.2.0",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Polyth/Polyth.git",
+    "directory": "packages/package-sdk"
+  },
   "type": "module",
   "exports": {
     ".": {

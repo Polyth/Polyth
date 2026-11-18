@@ -123,6 +123,7 @@ export const bg: FilesMessages = {
   "files.changes.legend": "Чатове с промени",
   "files.changes.notFromChat": "Не е променено от чат",
   "files.changes.other": "Други промени",
+  "files.changes.committed": "Къмитнато или в индекса",
   "files.changes.undo": "Отмяна",
   "files.changes.keep": "Запазване",
   "files.changes.inspect": "Показване на промяната",

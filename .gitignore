@@ -6,6 +6,8 @@ packages/*/dist
 packages/harness-runtime/native/bin
 apps/desktop/dist
 apps/desktop/release
+apps/server/dist
+apps/server/release
 apps/desktop/build-meta
 apps/desktop/resources/opencode/*/opencode
 apps/desktop/resources/opencode/*/opencode.exe

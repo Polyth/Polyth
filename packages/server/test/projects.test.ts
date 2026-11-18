@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -285,7 +285,12 @@ test("project presentation settings persist per project and stay tenant-scoped",
     (error: Error & { code?: string }) => error.code === "conflict",
   );
   assert.equal((await spaceA.getPresentationSettings!(projectA.id)).revision, 1);
-  assert.equal((await spaceA.putPresentationSettings!(projectA.id, saved.settings, 1)).revision, 2);
+  // An unchanged push is a no-op (no revision bump); a real change bumps.
+  assert.equal((await spaceA.putPresentationSettings!(projectA.id, saved.settings, 1)).revision, 1);
+  assert.equal((await spaceA.putPresentationSettings!(projectA.id, {
+    ...saved.settings,
+    widgetLayout: { version: 1, widgets: { "core.chat": { visible: false } } },
+  }, 1)).revision, 2);
   assert.equal((await spaceA.getPresentationSettings!(projectA.id)).settings.workspaceMode, "widgets");
   assert.deepEqual((await spaceA.getPresentationSettings!(projectA.id)).settings.workspaceState, {
     '["pane","s1"]': '{"tabs":[],"activeId":null}',
@@ -390,4 +395,40 @@ test("an opted-in project list carries large uploaded icons by cacheable referen
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+});
+
+test("projects.json is compact and an identical persist does not rewrite the file", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-projects-"));
+  const root = join(dir, "workspace");
+  mkdirSync(root);
+  const file = join(dir, "projects.json");
+  const projects = createProjectService(dir);
+  const project = await projects.add(root, "Same");
+  assert.doesNotMatch(readFileSync(file, "utf8"), /\n/, "the registry is written compact");
+  const ino = () => statSync(file, { bigint: true }).ino;
+  const first = ino();
+  await projects.update!(project.id, { name: "Same" });
+  assert.equal(ino(), first, "an identical persist skips the atomic replace");
+  await projects.update!(project.id, { name: "Changed" });
+  assert.notEqual(ino(), first, "a changed registry is written");
+  assert.match(readFileSync(file, "utf8"), /Changed/);
+});
+
+test("an unchanged presentation PUT keeps the revision and does not touch the file", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-projects-"));
+  const root = join(dir, "workspace");
+  mkdirSync(root);
+  const file = join(dir, "projects.json");
+  const projects = createProjectService(dir);
+  const project = await projects.add(root, "P");
+  const saved = await projects.putPresentationSettings!(project.id, { workspaceMode: "widgets" });
+  assert.equal(saved.revision, 1);
+  const before = statSync(file, { bigint: true });
+  const again = await projects.putPresentationSettings!(project.id, { workspaceMode: "widgets" }, 1);
+  assert.equal(again.revision, 1);
+  assert.equal(again.updatedAt, saved.updatedAt);
+  assert.equal(statSync(file, { bigint: true }).ino, before.ino);
+  const changed = await projects.putPresentationSettings!(project.id, { workspaceMode: "classic" }, 1);
+  assert.equal(changed.revision, 2);
+  assert.notEqual(statSync(file, { bigint: true }).ino, before.ino);
 });

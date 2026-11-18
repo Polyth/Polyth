@@ -29,6 +29,8 @@
         "packages/plugins/src/managedRegistry.ts",
         "packages/plugins/src/trustedServerEntry.ts",
         "packages/plugins/test/installRepository.test.ts",
+        "packages/package-sdk/src/remoteUi.ts",
+        "apps/web/src/packages/sandbox/RemoteUi.tsx",
         "packages/*/src/serverEntry.ts",
         "packages/*/package.json"
       ],
@@ -39,6 +41,8 @@
       ],
       "references": [
         "docs/dev/extensions.md",
+        "docs/dev/package-content.md",
+        "docs/dev/package-ui-kit.md",
         "docs/dev/README.md",
         "docs/agents/security.md"
       ],
@@ -498,7 +502,9 @@
         "Cargo.toml",
         "Dockerfile",
         ".dockerignore",
-        "deploy/docker/**"
+        "deploy/docker/**",
+        "apps/server/**",
+        "scripts/server-packages-bundle.ts"
       ],
       "entrypoints": [
         "package.json",
@@ -514,15 +520,18 @@
         "scripts/release-version.mjs",
         "scripts/bump-version.mjs",
         "Cargo.toml",
-        "Dockerfile"
+        "Dockerfile",
+        "apps/server/build.ts"
       ],
       "references": [
         "docs/agents/commands.md",
         "docs/agents/verification.md",
         "docs/operations/releases.md",
-        "docs/operations/docker.md"
+        "docs/operations/docker.md",
+        "docs/operations/running.md"
       ],
       "testHints": [
+        "apps/server/test/layout.test.ts",
         "scripts/test/release-version.test.ts",
         "scripts/test/release-notes.test.ts",
         "scripts/test/checkCoAuthors.test.ts",

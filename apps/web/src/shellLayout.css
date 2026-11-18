@@ -502,8 +502,8 @@ body[data-shell-floating="true"]:is([data-shell-layout="columns"], [data-shell-l
 .shell-dock--actions[data-orientation="vertical"]::after { content: none; }
 /* The project rail spaces every tile one Icon spacing apart; a docked group
    there needs no seam on top of that. */
-.sidebar-project-rail > .shell-dock[data-orientation="vertical"]::before,
-.sidebar-project-rail > .shell-dock[data-orientation="vertical"]::after { content: none; }
+body:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .sidebar-project-rail > .shell-dock[data-orientation="vertical"]::before,
+body:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .sidebar-project-rail > .shell-dock[data-orientation="vertical"]::after { content: none; }
 /* In the launcher strip, actions settle at its foot. */
 .plugin-strip > .shell-dock--actions { margin-block-start: auto; padding-block-end: var(--space-1); }
 .plugin-strip > .shell-dock--tools { padding-block-start: var(--space-1); }
@@ -531,6 +531,32 @@ body[data-shell-floating="true"]:is([data-shell-layout="columns"], [data-shell-l
 }
 .shell-column-head > .shell-dock,
 .shell-column-foot > .shell-column-account { margin-inline-start: auto; }
+/* A docked group with nothing on it is not a bar: it draws no plate, padding
+   or seam, and the navigator row that would carry it is gone too. An empty
+   Tools row once left a blank strip above the sessions and an empty rail a
+   seam in the launcher strip. `display: none` keeps the group mounted, so a
+   launcher dragged towards its place still lands there: railDrag's
+   `receiving` renders the landing slot as soon as the icon is lifted, which
+   makes the group non-empty and brings the bar back with it (see
+   railDrag.ts). Edit mode keeps every row and the actions dock for its
+   pencil, which is how a group emptied by removing its last item gets
+   another; the tools rail renders itself in edit mode, so it needs no
+   exception. */
+body:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .shell-dock:empty,
+body:not([data-ui-editing]):is([data-shell-layout="columns"], [data-shell-layout="bare"]) .shell-dock--actions:not(:has([data-rail-item], [data-rail-slot])),
+body:not([data-ui-editing]):is([data-shell-layout="columns"], [data-shell-layout="bare"]) .shell-column-head:not(:has(.view-switcher, [data-rail-item], [data-rail-slot])),
+body:not([data-ui-editing]):is([data-shell-layout="columns"], [data-shell-layout="bare"]) .shell-column-foot:not(:has([data-rail-item], [data-rail-slot], .shell-column-account)) {
+  display: none;
+}
+/* While a launcher is in the air the actions bar comes back at its place, so
+   it can be aimed at: `HeaderActionsRail` knows nothing of a drag and opens
+   its landing slot only once it is already targeted. The tools bar needs no
+   rule here: the rail itself renders as soon as the drag offers it an icon
+   (`receiving`), which makes the dock non-empty and takes the row with it. */
+body[data-rail-dragging]:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .shell-dock--actions:not(:has([data-rail-item], [data-rail-slot])),
+body[data-rail-dragging]:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .shell-column-foot:not(:has([data-rail-item], [data-rail-slot], .shell-column-account)) {
+  display: flex;
+}
 /* The collapsed navigator rail ends with the account. */
 .sidebar-collapsed-rail { height: 100%; padding-block-end: var(--space-2); }
 .sidebar-collapsed-rail > .shell-dock--actions { margin-block-start: auto; }

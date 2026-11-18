@@ -68,12 +68,30 @@ export interface ControlPlane {
   close(): void;
 }
 
+/** The control-plane database file inside its directory. */
+export const CONTROL_PLANE_FILE = 'control.sqlite';
+
+/** Migrations openControlPlane would apply to an existing database, read
+ *  without changing it; 0 for a current or new one. An older build refuses a
+ *  database migrated past it (recovery-required), so a host snapshots the file
+ *  first: that copy is what takes an update back. */
+export function pendingControlPlaneMigrations(file: string): number {
+  const db = new DatabaseSync(file, { readOnly: true });
+  try {
+    if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'").get()) return 0;
+    const { applied } = db.prepare('SELECT count(*) AS applied FROM schema_migrations').get() as { applied: number };
+    return applied === 0 ? 0 : Math.max(0, migrations.length - applied);
+  } finally {
+    db.close();
+  }
+}
+
 export function openControlPlane(opts: { directory: string }): ControlPlane {
   const root = join(opts.directory, 'control-plane');
   mkdirSync(root, { recursive: true, mode: 0o700 });
   if (lstatSync(root).isSymbolicLink()) throw recoveryRequired();
   chmodSync(root, 0o700);
-  const file = join(root, 'control.sqlite');
+  const file = join(root, CONTROL_PLANE_FILE);
   const sentinel = join(root, 'installation.json');
   let newInstance = false;
   let id: string;

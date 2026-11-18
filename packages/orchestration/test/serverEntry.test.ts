@@ -172,3 +172,49 @@ test("a disabled package gives agents no brief; an alias of an excluded model is
   await f.pkg.onDisable?.();
   assert.equal(await service.brief(alice), undefined, "disabled again");
 });
+
+test("auto mode: never lists and the person's order shape the list and reach agents without policy lines", async (t) => {
+  const f = fixture(t);
+  const service = f.provided.get(SERVER_DELEGATION_POLICY) as ServerDelegationPolicyService;
+  f.pkg.onEnable?.();
+  const auto = {
+    ...DEFAULT_POLICY,
+    excluded: ["cursor::cursor/grok-4.7"],
+    pinned: ["claude::anthropic/sonnet", "cursor::cursor/grok-4.7"],
+    demoted: ["claude::anthropic/sonnet", "pi::x/m"],
+    harnesses: { pi: "avoid", antigravity: "never", codex: "prefer" },
+  };
+  const put = await f.call(alice, "PUT", "/api/orchestration/policy", { policy: auto, expectedRevision: "default" });
+  assert.equal(put.status, 200);
+  const state = put.body as OrchestrationState;
+  // A key sits in one list only: never beats pinned beats demoted.
+  assert.deepEqual(state.policy.pinned, ["claude::anthropic/sonnet"]);
+  assert.deepEqual(state.policy.demoted, ["pi::x/m"]);
+  const order = { pin: ["claude::anthropic/sonnet"], demote: ["pi::x/m"], harnesses: { pi: "avoid", codex: "prefer" } };
+  assert.deepEqual(f.seen.at(-1), {
+    exclude: ["cursor::cursor/grok-4.7"], excludeHarnesses: ["antigravity"], order, limit: 50, textLimit: 12,
+  });
+  assert.equal(state.agentText, "SHORTLIST", "auto mode prints no policy block");
+  assert.equal(state.shortlist.agentRows, 1);
+  assert.ok(state.harnesses.some((h) => h.id === "antigravity" && !h.available), "a harness the policy names is listed even when not registered");
+  assert.deepEqual(await service.brief(alice), {
+    text: "", exclude: ["cursor::cursor/grok-4.7"], excludeHarnesses: ["antigravity"], order,
+  });
+  // A harness set to never also takes its models out of every role.
+  const preview = await f.call(alice, "POST", "/api/orchestration/preview", {
+    policy: { ...auto, mode: "roles", roles: [{ id: "explore", enabled: true, models: [{ harnessId: "antigravity", providerID: "g", modelID: "m" }] }] },
+  });
+  assert.equal(preview.body.roles[0].choices[0].status, "excluded");
+  assert.match(preview.body.agentText, /Never delegate to any model of: antigravity\./);
+});
+
+test("an untouched auto policy gives agents no brief and an unsaved policy keeps its old revision shape", async (t) => {
+  const f = fixture(t);
+  const service = f.provided.get(SERVER_DELEGATION_POLICY) as ServerDelegationPolicyService;
+  f.pkg.onEnable?.();
+  assert.equal(await service.brief(alice), undefined);
+  const strict = await f.call(alice, "PUT", "/api/orchestration/policy", { policy: { ...DEFAULT_POLICY, harnesses: { "../x": "never" } }, expectedRevision: "default" });
+  assert.equal(strict.status, 400);
+  const rule = await f.call(alice, "PUT", "/api/orchestration/policy", { policy: { ...DEFAULT_POLICY, harnesses: { pi: "sometimes" } }, expectedRevision: "default" });
+  assert.equal(rule.status, 400);
+});

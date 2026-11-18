@@ -21,8 +21,10 @@ export {
   readGeneratedTitle,
   sanitizeGeneratedTitle,
   selectOpenCodeFreeModel,
+  titleConversationInput,
   titlePromptInput,
   type CustomTitleAttempt,
+  type CustomTitleInputKind,
   type GeneratedTitle,
   type TitleRejection,
 } from "./title.ts";

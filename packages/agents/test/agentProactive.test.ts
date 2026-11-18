@@ -24,7 +24,8 @@ import {
   type ScheduleTask,
 } from "../src/index.ts";
 import { parseAgentFile, serializeAgentFile } from "../src/agentFile.ts";
-import { REPORT_INSTRUCTIONS, REPORT_REMINDER } from "../src/agentReport.ts";
+import { clipReport, REPORT_INSTRUCTIONS, REPORT_REMINDER, withoutOpenFence } from "../src/agentReport.ts";
+import { budgetExceeded, budgetWords } from "../src/agentPrompt.ts";
 
 function tempFile(t: { after(fn: () => void): void }): string {
   const dir = mkdtempSync(join(tmpdir(), "polyth-proactive-"));
@@ -105,6 +106,43 @@ test("Needs you lines become the person's to-dos: what, why and a web link, neve
   assert.doesNotMatch(report.body, /Electron 45|Apple agreement|Rotate/);
   assert.match(report.body, /inside a code sample/, "fenced protocol text is content");
   assert.match(REPORT_INSTRUCTIONS, /Needs you: <what>/);
+});
+
+test("a kept report is cut whole: never inside a code block, a word or after an operator", () => {
+  const prose = "The fix keeps the session open while the runtime restarts. ".repeat(20).trim();
+  const cutInCode = `${prose}\n\n\`\`\`ts\nconst x = 1;\nif (session.parentId === undefined) {\n  return;\n}\n\`\`\``;
+  const kept = clipReport(cutInCode, prose.length + 30);
+  assert.equal(kept, `${prose}\n\n…`, "the half of a code block goes; the paragraph before it stays");
+  assert.equal(clipReport("short", 2000), "short", "a report within the limit is kept as written");
+  const words = clipReport(prose, 200);
+  const head = words.replace(/\n\n…$/, "");
+  assert.ok(words.length <= 200 && head !== words);
+  assert.ok(prose.startsWith(head) && prose[head.length] === " ", "cut between words");
+
+  assert.equal(withoutOpenFence("Before.\n\n```ts\nif (session.p"), "Before.");
+  assert.equal(withoutOpenFence("Before.\n\n```ts\nx\n```\nAfter."), "Before.\n\n```ts\nx\n```\nAfter.", "a closed block stays");
+
+  // 152 characters, then "===" where the 160-character headline is cut.
+  const long = `Report: update — ${"word ".repeat(28)}to parentId === undefined and more`;
+  const headline = parseAgentReport(long).headline ?? "";
+  assert.ok(headline.length <= 160);
+  assert.match(headline, /to parentId…$/, "no operator or dash before the ellipsis");
+});
+
+test("an exhausted daily limit says the spend and the limit, never \"4 of 2\"", () => {
+  const now = Date.UTC(2026, 10, 17, 12);
+  const history = Array.from({ length: 4 }, (_, index) => ({
+    runId: `r${index}`, startedAt: now - (index + 1) * 3_600_000, status: "ok" as const, trigger: "manual" as const,
+  }));
+  assert.equal(
+    budgetExceeded({ budget: { runsPerDay: 2 }, history }, now),
+    "Daily run limit reached: 4 runs in the last 24 h, the limit is 2.",
+  );
+  assert.equal(budgetWords("Daily run limit reached (4 of 2 in the last 24 h)."),
+    "Daily run limit reached: 4 runs in the last 24 h, the limit is 2.", "a run recorded before reads the same");
+  assert.equal(budgetWords("Daily spending limit reached ($3.10 of $2.00 in the last 24 h)."),
+    "Daily spending limit reached: $3.10 in the last 24 h, the limit is $2.00.");
+  assert.equal(budgetWords("Another reason."), "Another reason.");
 });
 
 test("the protocol says the headline shows above the message, so the message does not repeat it", () => {

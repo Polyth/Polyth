@@ -65,6 +65,20 @@ export function sessionIdsToRefresh(sessions: readonly SessionProjection[], limi
     .map((row) => row.id);
 }
 
+const backgroundRunCount = (session: SessionProjection): number =>
+  (session.backgroundWork?.multirun ?? 0)
+  + (session.backgroundWork?.fusion ?? 0)
+  + (session.backgroundWork?.workflow ?? 0);
+
+/** When a working row's running clock started. A row that shows the clock
+ *  can tick it by itself from this, so the list around it need not re-render
+ *  every second only to move one label. */
+export function sessionWorkingSince(session: SessionProjection): number {
+  return backgroundRunCount(session) > 0
+    ? session.backgroundWork?.startedAt ?? session.lastTurnAt ?? session.updatedAt
+    : session.lastTurnAt ?? session.updatedAt;
+}
+
 /** One pure priority resolver for sidebar, hero, mobile navigation, and
  * palette rows. Attention that needs a person always outranks activity. */
 export function resolveSessionStatus(
@@ -82,21 +96,10 @@ export function resolveSessionStatus(
   if (session.status === "waiting") {
     return { kind: "needs-reply", glyph: "?", label: tr("sessionStatus.waitingForYou") };
   }
-  const backgroundRuns =
-    (session.backgroundWork?.multirun ?? 0)
-    + (session.backgroundWork?.fusion ?? 0)
-    + (session.backgroundWork?.workflow ?? 0);
-  if (session.status === "working" || backgroundRuns > 0) {
+  if (session.status === "working" || backgroundRunCount(session) > 0) {
     return {
       kind: "working",
-      elapsedMs: Math.max(
-        0,
-        now - (
-          backgroundRuns > 0
-            ? session.backgroundWork?.startedAt ?? session.lastTurnAt ?? session.updatedAt
-            : session.lastTurnAt ?? session.updatedAt
-        ),
-      ),
+      elapsedMs: Math.max(0, now - sessionWorkingSince(session)),
       glyph: "◌",
       label: tr("sessionStatus.working"),
     };

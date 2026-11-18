@@ -6,7 +6,11 @@
  * in the permission bridge.
  */
 export const ANTIGRAVITY_WORKER_SOURCE = String.raw`import { spawn } from "node:child_process";
+import { closeSync, openSync, readSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
+import { StringDecoder } from "node:string_decoder";
 
 let command = "";
 let native;
@@ -88,10 +92,104 @@ const clearStopTimers = () => {
   killTimer = undefined;
 };
 const validArgs = (args) => Array.isArray(args) && args.every((value) => typeof value === "string");
+// stream-json never carries the model's thinking: a PLANNER_RESPONSE frame
+// reports only thinking_tokens. The CLI appends each finished step, thinking
+// included, to the conversation's transcript under the HOME it runs with (the
+// one this worker shares). Read only what the current turn appended and
+// forward each planner step's thinking as its own frame. A thought for step N
+// waits until a stream frame for step N or later (or the result) is about to be
+// forwarded, so a burst of transcript lines never runs ahead of the stream and
+// the canonical order stays thought → its tool.
+const THOUGHT_POLL_MS = 700;
+const THOUGHT_READ_LIMIT = 4 * 1024 * 1024;
+const THOUGHT_MAX_CHARS = 64 * 1024;
+let thoughtPath = "";
+let thoughtOffset = 0;
+let thoughtCarry = "";
+let thoughtFloor = -1;
+let thoughtTimer;
+let thoughtDecoder = new StringDecoder("utf8");
+let thoughtReached = -1;
+const thoughtSteps = new Set();
+const queuedThoughts = new Map();
+const transcriptPath = (id) => /^[A-Za-z0-9-]{1,128}$/.test(id)
+  ? join(homedir(), ".gemini", "antigravity-cli", "brain", id, ".system_generated", "logs", "transcript.jsonl")
+  : "";
+const fileSize = (path) => { try { return statSync(path).size; } catch { return -1; } };
+const stopThoughts = () => {
+  if (thoughtTimer) clearInterval(thoughtTimer);
+  thoughtTimer = undefined;
+};
+const startThoughts = () => {
+  stopThoughts();
+  thoughtPath = transcriptPath(nativeId);
+  thoughtOffset = Math.max(0, thoughtPath ? fileSize(thoughtPath) : 0);
+  thoughtCarry = "";
+  thoughtDecoder = new StringDecoder("utf8");
+  thoughtFloor = -1;
+  thoughtReached = -1;
+  thoughtSteps.clear();
+  queuedThoughts.clear();
+  if (!thoughtPath) return;
+  thoughtTimer = setInterval(() => drainThoughts(thoughtReached), THOUGHT_POLL_MS);
+  thoughtTimer.unref?.();
+};
+const queueThought = (line) => {
+  let step;
+  try { step = JSON.parse(line); } catch { return; }
+  if (step?.type !== "PLANNER_RESPONSE") return;
+  const index = step.step_index;
+  if (!Number.isSafeInteger(index) || index <= thoughtFloor || thoughtSteps.has(index)) return;
+  if (typeof step.thinking !== "string" || !step.thinking.trim()) return;
+  thoughtSteps.add(index);
+  if (queuedThoughts.size >= 256) return;
+  queuedThoughts.set(index, step.thinking.slice(0, THOUGHT_MAX_CHARS));
+};
+const flushThoughts = (reached) => {
+  for (const index of [...queuedThoughts.keys()].sort((a, b) => a - b)) {
+    if (index > reached || index <= thoughtFloor) continue;
+    const thinking = queuedThoughts.get(index);
+    queuedThoughts.delete(index);
+    send({ event: "step_update", step_update: {
+      conversation_id: nativeId, step_index: index, state: "DONE", step_type: "polyth_planner_thinking", thinking,
+    } });
+  }
+};
+function drainThoughts(reached) {
+  readThoughts();
+  flushThoughts(reached);
+}
+function readThoughts() {
+  if (!thoughtPath || suppressNativeOutput || probePending) return;
+  const size = fileSize(thoughtPath);
+  if (size < 0) return;
+  // A rewritten transcript restarts from its beginning; already-forwarded
+  // steps and steps before this turn's prompt are skipped by index.
+  if (size < thoughtOffset) { thoughtOffset = 0; thoughtCarry = ""; thoughtDecoder = new StringDecoder("utf8"); }
+  if (size === thoughtOffset) return;
+  const length = Math.min(size - thoughtOffset, THOUGHT_READ_LIMIT);
+  const chunk = Buffer.alloc(length);
+  let fd;
+  try {
+    fd = openSync(thoughtPath, "r");
+    const read = readSync(fd, chunk, 0, length, thoughtOffset);
+    thoughtOffset += read;
+    thoughtCarry += thoughtDecoder.write(chunk.subarray(0, read));
+  } catch { return; } finally { if (fd !== undefined) try { closeSync(fd); } catch {} }
+  let newline;
+  while ((newline = thoughtCarry.indexOf("\n")) >= 0) {
+    const line = thoughtCarry.slice(0, newline);
+    thoughtCarry = thoughtCarry.slice(newline + 1);
+    if (line.trim()) queueThought(line);
+  }
+  // One oversized step (a huge tool output) is not worth buffering.
+  if (thoughtCarry.length > THOUGHT_READ_LIMIT) thoughtCarry = "";
+}
 const writePendingInput = () => {
   if (!pending || !native?.stdin?.writable) return;
   const input = pending.input;
   pending = undefined;
+  startThoughts();
   native.stdin.write(JSON.stringify(input) + "\n", (error) => {
     if (error) fail("Antigravity input pipe rejected a Polyth turn");
   });
@@ -174,7 +272,16 @@ const forwardLine = (line, reinitializing) => {
     }
     flushProbeInit();
   }
-  if (!suppressNativeOutput) process.stdout.write(line + "\n");
+  if (suppressNativeOutput) return;
+  if (frame?.event === "step_update" || frame?.event === "result") {
+    const step = frame.step_update;
+    const index = Number.isSafeInteger(step?.step_index) ? step.step_index : undefined;
+    if (step?.step_type === "user_input" && index !== undefined) thoughtFloor = Math.max(thoughtFloor, index);
+    if (index !== undefined) thoughtReached = Math.max(thoughtReached, index);
+    drainThoughts(frame.event === "result" ? Number.MAX_SAFE_INTEGER : thoughtReached);
+    if (frame.event === "result") stopThoughts();
+  }
+  process.stdout.write(line + "\n");
 };
 const forwardErrorLine = (line) => {
   if (suppressNativeOutput || !line.startsWith("AGY_ERROR:")) return;
@@ -250,6 +357,7 @@ const spawnNative = (args, nextMode, reinitializing, deliverPending = false) => 
     }
     clearStopTimers();
     cancelProbe();
+    stopThoughts();
     native = undefined;
     initialized = false;
     if (stopping) process.exit(0);
@@ -295,6 +403,7 @@ const stopNative = () => {
   pending = undefined;
   initialized = false;
   cancelProbe();
+  stopThoughts();
   if (!native) {
     send({ event: "polyth_released" });
     return;

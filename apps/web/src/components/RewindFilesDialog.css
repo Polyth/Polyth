@@ -101,7 +101,7 @@
   cursor: pointer;
 }
 @media (hover: hover) {
-  .rewind-files-disclosure:hover { background: var(--surface-overlay-hover); }
+  .rewind-files-disclosure:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
 }
 .rewind-files-disclosure:focus-visible {
   outline: 2px solid var(--focus-ring);

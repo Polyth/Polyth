@@ -18,6 +18,11 @@ export function timeShort(ms: number, locale?: string): string {
   return dateTimeFormatter(locale ?? getLocale(), { timeStyle: "short" }).format(new Date(ms));
 }
 
+/** Local date and time, compact enough for a details row. */
+export function dateTimeMedium(ms: number, locale?: string): string {
+  return dateTimeFormatter(locale ?? getLocale(), { dateStyle: "medium", timeStyle: "short" }).format(new Date(ms));
+}
+
 /** Full local date and time for accessible names. */
 export function timeFull(ms: number, locale?: string): string {
   return dateTimeFormatter(locale ?? getLocale(), { dateStyle: "full", timeStyle: "medium" }).format(new Date(ms));
@@ -175,6 +180,33 @@ export function normalizedDuration(ms: number): string {
   if (h > 0) return `${h}h ${m}m`;
   if (s >= 60) return `${m}m ${sec}s`;
   return `${s}s`;
+}
+
+/** Time to first token: whole seconds above a minute, tenths below. */
+export function latencyLabel(ms: number, locale?: string): string {
+  if (ms >= 60_000) return normalizedDuration(ms);
+  const seconds = new Intl.NumberFormat(locale ?? getLocale(), { maximumFractionDigits: 1, minimumFractionDigits: 1 }).format(ms / 1000);
+  return tr("timeline.metaSeconds", { value: seconds });
+}
+
+/** Response timing for the details popover: time to first token and output
+ *  speed. Speed is the turn's output tokens over the span from its first
+ *  output to its end, so tool time inside the turn lowers it. */
+export function responseTiming(input: {
+  startedAt?: number;
+  firstOutputAt?: number;
+  endedAt?: number;
+  outputTokens?: number;
+}): { ttftMs: number | null; tokensPerSecond: number | null } {
+  const { startedAt, firstOutputAt, endedAt, outputTokens } = input;
+  const ttftMs = startedAt !== undefined && firstOutputAt !== undefined && firstOutputAt >= startedAt
+    ? firstOutputAt - startedAt
+    : null;
+  const span = endedAt !== undefined && firstOutputAt !== undefined ? endedAt - firstOutputAt : 0;
+  const tokensPerSecond = outputTokens && outputTokens > 0 && span >= 1000
+    ? outputTokens / (span / 1000)
+    : null;
+  return { ttftMs, tokensPerSecond };
 }
 
 /** Wall-clock span of one terminal turn; null while working or when a copied

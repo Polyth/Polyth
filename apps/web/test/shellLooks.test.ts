@@ -338,6 +338,55 @@ test("every look names its floating column corner and the Monoliths keep the str
   }
 });
 
+test("over a wallpaper the Monoliths' work plane is a window in the chrome, and Reverse's plane is glass", async () => {
+  const css = stripComments(await read("../src/shellLooks.css"));
+  const block = (selector: RegExp, marker: string) => [...css.matchAll(new RegExp(`(?:^|\\})\\s*${selector.source} \\{([^}]*)\\}`, "g"))]
+    .map((match) => match[1]!).find((body) => body.includes(marker)) ?? "";
+  // Painted on .app, the chrome lay under the sheet and the well too, and the
+  // work plane's veil stacked on the chrome's: Reverse's well let through only
+  // a few percent of the image. On the desktop the chrome is the work plane's
+  // outer spread, the navigator and top rail step above it, and .app is bare.
+  const desktop = css.match(/@media \(min-width: 961px\) \{((?:[^{}]*\{[^}]*\})+)\s*\}/g)?.find((media) => media.includes("--look-chrome")) ?? "";
+  assert.match(desktop, /body:is\(\[data-shell-look="monolith"\], \[data-shell-look="monolith-reverse"\]\):not\(#\\#\):not\(#\\#\) \.app \{\s*background: transparent !important;/);
+  assert.match(desktop, /\.app-shell > \.workspace \{\s*box-shadow: var\(--look-work-shadow\), 0 0 0 100vmax var\(--look-chrome\) !important;/);
+  assert.match(desktop, /:is\(\.app > \.header, \.app-shell > \.sidebar:not\(\.sidebar--rail-collapsed\)\) \{\s*z-index: 1;/);
+  // .app-shell clips the spread, and Classic stacks the top rail above the
+  // shell: there the rail paints the chrome itself, or its row is the bare
+  // image (railLauncherStability.test.ts measures the pixels).
+  assert.match(desktop, /:not\(\[data-shell-layout="columns"\]\):not\(\[data-shell-layout="bare"\]\):not\(#\\#\):not\(#\\#\) \.app > \.header \{\s*background: var\(--look-chrome\) !important;\s*box-shadow: 0 var\(--space-2\) 0 0 var\(--look-chrome\) !important;/);
+  // Monolith: the backdrop veils as before; the sheet frosts as a canvas does.
+  const mono = block(/body\[data-shell-look="monolith"\]:not\(#\\#\)/, "--look-backdrop:");
+  assert.match(mono, /--look-chrome: color-mix\(in srgb, var\(--look-backdrop\) var\(--look-veil-soft\), transparent\);/);
+  assert.match(mono, /--look-sheet: color-mix\(in srgb, var\(--look-sheet-solid\) var\(--look-veil\), transparent\);/);
+  assert.match(block(/html\.light body\[data-shell-look="monolith"\]:not\(#\\#\)/, "--look-chrome"), /--look-chrome: color-mix\(in srgb, var\(--look-backdrop\) var\(--look-veil\), transparent\);/);
+  assert.match(css, /body\[data-shell-look="monolith"\]:not\(#\\#\) \.app \{\s*background: var\(--look-chrome\) !important;/);
+  // Reverse: the lit plane and its raised pieces are one glass on the
+  // backdrop's rung, and nothing on it is an opaque slot.
+  const rev = block(/body\[data-shell-look="monolith-reverse"\]:not\(#\\#\)/, "--look-plane-solid:");
+  assert.match(rev, /--look-plane: color-mix\(in srgb, var\(--look-plane-solid\) var\(--look-veil-soft\), transparent\);/);
+  assert.match(rev, /--look-chrome: var\(--look-plane\);/);
+  assert.match(rev, /--look-well: color-mix\(in srgb, var\(--look-well-solid\) var\(--look-veil\), transparent\);/);
+  assert.match(rev, /--look-cut: color-mix\(in srgb, var\(--look-cut-solid\) var\(--look-veil\), transparent\);/);
+  assert.match(rev, /--look-select: var\(--look-well\);/);
+  assert.match(rev, /--look-segment: var\(--look-plane\);/);
+  assert.match(css, /body\[data-shell-look="monolith-reverse"\]:not\(#\\#\) \.app \{\s*background: var\(--look-chrome\) !important;/);
+});
+
+test("Reverse monolith's dark plane is a quiet step above its content, and its fields are not cut to the well", async () => {
+  const css = stripComments(await read("../src/shellLooks.css"));
+  const block = (selector: RegExp) => [...css.matchAll(new RegExp(`(?:^|\\})\\s*${selector.source} \\{([^}]*)\\}`, "g"))]
+    .map((match) => match[1]!).find((body) => body.includes("--look-plane-solid")) ?? "";
+  const base = block(/body\[data-shell-look="monolith-reverse"\]:not\(#\\#\)/);
+  // A sixth of white made the macOS palettes' plane #424242: a flat gray slab
+  // with quiet ink under 4.5:1 and gray blocks for the composer and prompt.
+  assert.match(base, /--look-plane-solid: color-mix\(in srgb, var\(--bg\) 90%, white\);/);
+  assert.match(base, /--look-field: var\(--look-cut\);/);
+  assert.match(base, /--look-control: var\(--look-cut\);/);
+  assert.match(base, /--look-cut-solid: color-mix\(in srgb, var\(--look-well-solid\) 55%, var\(--look-plane-solid\)\);/);
+  const light = block(/html\.light body\[data-shell-look="monolith-reverse"\]:not\(#\\#\)/);
+  assert.match(light, /--look-cut-solid: var\(--look-well-solid\);/);
+});
+
 test("every look radius follows Corner rounding: no literal corner but pills and square", async () => {
   const css = stripComments(await read("../src/shellLooks.css"));
   const literal: string[] = [];

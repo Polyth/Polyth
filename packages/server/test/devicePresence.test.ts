@@ -93,3 +93,26 @@ test("a report older than the lease stops counting and subscribers are told when
   assert.deepEqual(heard, ["device:one", undefined]);
   presence.close();
 });
+
+test("activeUse tells a page on screen from one its person left, and one visible page settles the device", () => {
+  let clock = 1_000_000;
+  const presence = createDevicePresence({ now: () => clock });
+  const tab = {}; const other = {};
+  assert.equal(presence.activeUse(a), undefined);
+  presence.report(tab, a, "browser:one", true, 0);
+  assert.deepEqual(presence.activeUse(a), { device: "browser:one", hidden: false, touchedAt: clock });
+  clock += 30_000;
+  presence.report(tab, a, "browser:one", true, 0, true);
+  assert.deepEqual(presence.activeUse(a), { device: "browser:one", hidden: true, touchedAt: clock });
+  assert.equal(presence.activeDevice(a), "browser:one", "a left page still names the device in use");
+  // Another tab of the same browser is on screen, touched earlier: the device is in use for sure.
+  presence.report(other, a, "browser:one", true, 10_000);
+  assert.equal(presence.activeUse(a)!.hidden, false);
+  presence.drop(other);
+  assert.equal(presence.activeUse(a)!.hidden, true);
+  // A phone touched later takes over from the left page.
+  clock += 1_000;
+  presence.report(other, a, "device:phone", true, 0);
+  assert.deepEqual(presence.activeUse(a), { device: "device:phone", hidden: false, touchedAt: clock });
+  presence.close();
+});

@@ -157,7 +157,8 @@ test("live activity stays inside its block: no row is added, removed or overlaid
   assert.match(timeline, /copy=\{<ActivityTicker ticker=\{ticker\} render=\{renderLine\} \/>\}/);
   // What describes the line follows the words on screen, not the newest event.
   assert.match(timeline, /const ticker = useTickerKey\(target\?\.id \?\? "summary"\);/);
-  assert.match(timeline, /const stopCandidate = shownTool && shownTool\.status === "running" && !open/);
+  // A block that is open on its only step still shows that step's Stop on the line (81c39b6f8).
+  assert.match(timeline, /const stopCandidate = shownTool && shownTool\.status === "running" && \(!open \|\| soleTool !== undefined\)/);
   assert.match(controller, /TOP_LEVEL_TIMELINE_ROW_SELECTOR = "[^"]*\.activity-group/);
   assert.match(controller, /TOP_LEVEL_TIMELINE_ROW_SELECTOR = "[^"]*\.pkg-harnesses-switch-marker/);
   assert.doesNotMatch(controller, /activity-merge-claimed/);

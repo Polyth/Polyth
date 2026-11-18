@@ -48,6 +48,47 @@ export function desktopDataDir(env: NodeJS.ProcessEnv = process.env, os: NodeJS.
   return join(env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "Polyth", "data");
 }
 
+/** Default data directory of a packaged server install (the `polyth` npm
+ *  package, a release tarball, Homebrew). It is not Desktop's, so the app and
+ *  a server can run on one machine; `POLYTH_DATA_DIR` overrides it. `home`
+ *  names another account's home (`polyth service install --system`). */
+export function serverDataDir(env: NodeJS.ProcessEnv = process.env, os: NodeJS.Platform = platform(), home: string = homedir()): string {
+  if (os === "win32") return join(env.LOCALAPPDATA ?? join(home, "AppData", "Local"), "Polyth Server", "data");
+  if (os === "darwin") return join(home, "Library", "Application Support", "Polyth Server", "data");
+  return join(env.XDG_DATA_HOME ?? join(home, ".local", "share"), "polyth-server", "data");
+}
+
+/** Root of the packaged server this CLI ships in. Only that package's
+ *  launcher (apps/server/src/cli.ts) sets it. */
+export function serverBundleRoot(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const root = env.POLYTH_SERVER_BUNDLE?.trim();
+  return root ? resolve(root) : undefined;
+}
+
+/** What a packaged server's BUILD.json records (layout: apps/server/src/layout.ts). */
+export interface BundleBuild {
+  version: string;
+  commit: string;
+  target: string;
+}
+
+export function bundleBuild(env: NodeJS.ProcessEnv = process.env): BundleBuild | undefined {
+  const root = serverBundleRoot(env);
+  if (!root) return undefined;
+  try {
+    const build = JSON.parse(readFileSync(join(root, "BUILD.json"), "utf8")) as Partial<BundleBuild>;
+    return typeof build.version === "string" && typeof build.commit === "string" && typeof build.target === "string"
+      ? { version: build.version, commit: build.commit, target: build.target }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function bundleVersion(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return bundleBuild(env)?.version;
+}
+
 export function configPath(env: NodeJS.ProcessEnv = process.env, os: NodeJS.Platform = platform()): string {
   if (env.POLYTH_CLI_CONFIG) return resolve(env.POLYTH_CLI_CONFIG);
   if (os === "win32") return join(env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "Polyth", "cli.json");
@@ -138,7 +179,9 @@ export interface ResolveOptions {
 /**
  * Precedence: explicit flags, then environment, then the saved current
  * target, then discovery (a data directory here or in this checkout, then
- * Polyth Desktop). Discovery only picks sockets that exist.
+ * Polyth Desktop, or instead this packaged server's own data directory).
+ * Discovery only picks sockets that exist, except that a packaged server's
+ * data directory is used before its server first runs.
  */
 export function resolveTarget(opts: ResolveOptions = {}): Target {
   const env = opts.env ?? process.env;
@@ -174,11 +217,18 @@ export function resolveTarget(opts: ResolveOptions = {}): Target {
   candidates.push(["local", join(cwd, "data"), "./data"]);
   const root = repoRoot();
   if (root) candidates.push(["local", join(root, "data"), "this checkout"]);
-  candidates.push(["desktop", desktopDataDir(env), "Polyth Desktop"]);
+  const bundle = serverBundleRoot(env);
+  // A packaged server's own CLI means that server; Desktop on the same machine
+  // stays reachable with `--target desktop`.
+  if (bundle) candidates.push(["local", serverDataDir(env), "this server install"]);
+  else candidates.push(["desktop", desktopDataDir(env), "Polyth Desktop"]);
   for (const [name, dir, source] of candidates) {
     const target = socketTarget(name, dir, source);
     if (target.kind === "socket" && !target.socketPath.startsWith("\\\\.\\pipe\\") && socketExists(target.socketPath)) return target;
   }
+  // A packaged server that is not running yet still has its one data directory
+  // (`polyth server start` needs it to start).
+  if (bundle) return socketTarget("local", serverDataDir(env), "this server install");
   // Windows pipes cannot be probed without connecting; prefer Desktop there.
   if (platform() === "win32") return socketTarget("desktop", desktopDataDir(env), "Polyth Desktop");
   throw new Error(

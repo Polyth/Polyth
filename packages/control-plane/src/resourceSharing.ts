@@ -52,6 +52,9 @@ export interface ResourceSharingAuthority {
     patch: Partial<Omit<SpaceSharingPolicyRecord, "revision">>;
   }): SpaceSharingPolicyRecord;
   grants(resourceId: string): ResourceGrant[];
+  /** `grants` of many resources in one read each 500 ids, each list in the
+   *  same order; a resource without a current grant is absent. */
+  grantsByResource(resourceIds: readonly string[]): Map<string, ResourceGrant[]>;
   /**
    * Change who can open a resource in one transaction. Grants name active
    * human members of the resource's Space other than its owner. Making a
@@ -70,6 +73,8 @@ export interface ResourceSharingAuthority {
 
 const IDENTIFIER = /^[A-Za-z0-9_][A-Za-z0-9_.:-]{0,199}$/;
 const MAX_GRANTS = 200;
+/** Resources per batched grant read; one bound JSON array each. */
+const GRANT_BATCH = 500;
 const identifier = (value: unknown, label: string): string => {
   if (typeof value !== "string" || !IDENTIFIER.test(value)) throw controlError("invalid-input", `Invalid ${label}`);
   return value;
@@ -110,20 +115,43 @@ export function createResourceSharingAuthority(
     };
   };
 
-  const grants = (resourceId: string): ResourceGrant[] => control.all<GrantRow>(
-    `SELECT principal_id,access,granted_by,created_at_ms,updated_at_ms,revision
-       FROM resource_grants WHERE resource_id=? AND (expires_at_ms IS NULL OR expires_at_ms>?)
-      ORDER BY created_at_ms,principal_id`,
-    identifier(resourceId, "resource ID"),
-    now(),
-  ).flatMap((row) => isResourceAccessLevel(row.access) ? [{
+  const grantOf = (row: GrantRow): ResourceGrant[] => isResourceAccessLevel(row.access) ? [{
     principalId: row.principal_id,
     access: row.access,
     grantedBy: row.granted_by,
     createdAt: row.created_at_ms,
     updatedAt: row.updated_at_ms,
     revision: row.revision,
-  }] : []);
+  }] : [];
+  const grants = (resourceId: string): ResourceGrant[] => control.all<GrantRow>(
+    `SELECT principal_id,access,granted_by,created_at_ms,updated_at_ms,revision
+       FROM resource_grants WHERE resource_id=? AND (expires_at_ms IS NULL OR expires_at_ms>?)
+      ORDER BY created_at_ms,principal_id`,
+    identifier(resourceId, "resource ID"),
+    now(),
+  ).flatMap(grantOf);
+  const grantsByResource = (resourceIds: readonly string[]): Map<string, ResourceGrant[]> => {
+    const ids = [...new Set(resourceIds.map((resourceId) => identifier(resourceId, "resource ID")))];
+    const out = new Map<string, ResourceGrant[]>();
+    const time = now();
+    for (let start = 0; start < ids.length; start += GRANT_BATCH) {
+      for (const row of control.all<GrantRow & { resource_id: string }>(
+        `SELECT resource_id,principal_id,access,granted_by,created_at_ms,updated_at_ms,revision
+           FROM resource_grants WHERE resource_id IN (SELECT value FROM json_each(?))
+            AND (expires_at_ms IS NULL OR expires_at_ms>?)
+          ORDER BY resource_id,created_at_ms,principal_id`,
+        JSON.stringify(ids.slice(start, start + GRANT_BATCH)),
+        time,
+      )) {
+        const grant = grantOf(row);
+        if (!grant.length) continue;
+        const list = out.get(row.resource_id);
+        if (list) list.push(...grant);
+        else out.set(row.resource_id, grant);
+      }
+    }
+    return out;
+  };
 
   const activeHumanMember = (principalId: string, spaceId: string): boolean => !!control.get(
     `SELECT 1 FROM space_memberships m JOIN principals p ON p.id=m.principal_id
@@ -144,6 +172,7 @@ export function createResourceSharingAuthority(
   return {
     policy,
     grants,
+    grantsByResource,
     reclaimUnreachable() {
       // Before `share` adopted them, narrowing a chat server work owns left it
       // owned by a system principal that no person is: invisible to everyone.

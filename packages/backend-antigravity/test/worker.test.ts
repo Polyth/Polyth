@@ -68,6 +68,34 @@ createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", (line)
 });
 `;
 
+// stream-json reports only thinking_tokens; the CLI appends each finished step,
+// thinking included, to the conversation transcript under HOME.
+const THINKING_AGY = `import { appendFileSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { createInterface } from "node:readline";
+const id = "native-t";
+const logs = join(homedir(), ".gemini", "antigravity-cli", "brain", id, ".system_generated", "logs");
+mkdirSync(logs, { recursive: true });
+const transcript = join(logs, "transcript.jsonl");
+const step = (value) => process.stdout.write(JSON.stringify({ event: "step_update", step_update: { conversation_id: id, ...value } }) + "\\n");
+const record = (value) => appendFileSync(transcript, JSON.stringify(value) + "\\n");
+process.stdout.write(JSON.stringify({ event: "init", conversation_id: id, init: { cwd: process.cwd(), model: "fixture-gemini", permission_mode: "request-review" } }) + "\\n");
+createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", () => {
+  record({ step_index: 3, type: "USER_INPUT", content: "go" });
+  step({ step_index: 3, state: "DONE", step_type: "user_input" });
+  record({ step_index: 4, type: "PLANNER_RESPONSE", thinking: "Перевіряю файли first.", content: "Listing.", tool_calls: [{ name: "run_command", args: {} }] });
+  step({ step_index: 4, state: "DONE", step_type: "agent_response", text_delta: "Listing.", usage: { thinking_tokens: 9 } });
+  step({ step_index: 5, state: "ACTIVE", step_type: "tool", tool_name: "run_command" });
+  record({ step_index: 5, type: "GENERIC", content: "out" });
+  record({ step_index: 6, type: "PLANNER_RESPONSE", thinking: "Reading next.", tool_calls: [{ name: "read_file", args: {} }] });
+  record({ step_index: 6, type: "PLANNER_RESPONSE", thinking: "a repeated index is ignored" });
+  record({ step_index: 7, type: "PLANNER_RESPONSE", thinking: "  ", content: "blank thinking is skipped" });
+  step({ step_index: 5, state: "DONE", step_type: "tool", tool_name: "run_command" });
+  process.stdout.write(JSON.stringify({ event: "result", result: { conversation_id: id, status: "SUCCESS", response: "Listing.", num_turns: 2 } }) + "\\n");
+});
+`;
+
 function frameReader(child: ChildProcess) {
   const queued: Array<Record<string, unknown>> = [];
   const waiters: Array<(value: Record<string, unknown>) => void> = [];
@@ -95,7 +123,7 @@ async function startWorker(t: TestContext, agySource = FAKE_AGY) {
     writeFile(workerFile, ANTIGRAVITY_WORKER_SOURCE),
     writeFile(fakeFile, agySource),
   ]);
-  const env = { ...process.env };
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: join(root, "home") };
   delete env.NODE_TEST_CONTEXT;
   // Keep the deferred-init probe from adding real seconds to the test, but stay
   // above Node's own child-process startup so a spontaneous init can win.
@@ -109,6 +137,7 @@ async function startWorker(t: TestContext, agySource = FAKE_AGY) {
   t.after(() => { if (worker.exitCode === null && worker.signalCode === null) worker.kill("SIGKILL"); });
   return {
     worker,
+    root,
     fakeFile,
     next: frameReader(worker),
     write: (control: Record<string, unknown>) => worker.stdin!.write(JSON.stringify(control) + "\n"),
@@ -253,4 +282,36 @@ test("owned worker survives a stopped or exited native leg and relaunches the re
   const closed = new Promise<number | null>((resolve) => worker.once("close", resolve));
   worker.stdin!.end();
   assert.equal(await closed, 0);
+});
+
+test("planner thinking from the CLI transcript waits for the stream to reach its step", async (t) => {
+  const { root, fakeFile, next, write } = await startWorker(t, THINKING_AGY);
+  // An earlier turn's planner step is already in the transcript and never resent.
+  const logs = join(root, "home", ".gemini", "antigravity-cli", "brain", "native-t", ".system_generated", "logs");
+  await mkdir(logs, { recursive: true });
+  await writeFile(join(logs, "transcript.jsonl"), JSON.stringify({ step_index: 1, type: "PLANNER_RESPONSE", thinking: "old turn" }) + "\n");
+  const args = [fakeFile, "--input-format", "stream-json", "--output-format", "stream-json"];
+  write({ event: "polyth_launch", command: process.execPath, args, mode: "review" });
+  assert.equal((await next()).event, "init");
+  write({ event: "polyth_user", args, mode: "review", input: { event: "user", message: { content: "go" } } });
+  const frames: Array<Record<string, unknown>> = [];
+  for (;;) {
+    const frame = await next();
+    frames.push(frame);
+    if (frame.event === "result") break;
+  }
+  const summary = frames.map((frame) => {
+    const step = frame.step_update as Record<string, unknown> | undefined;
+    return step ? `${step.step_index}:${step.step_type}:${step.state}${step.thinking ? `:${step.thinking}` : ""}` : String(frame.event);
+  });
+  assert.deepEqual(summary, [
+    "3:user_input:DONE",
+    "4:polyth_planner_thinking:DONE:Перевіряю файли first.",
+    "4:agent_response:DONE",
+    "5:tool:ACTIVE",
+    "5:tool:DONE",
+    "6:polyth_planner_thinking:DONE:Reading next.",
+    "result",
+  ]);
+  assert.equal((frames[1]!.step_update as Record<string, unknown>).conversation_id, "native-t");
 });

@@ -19,12 +19,23 @@ export interface RecapSettings {
    *  reply so they are harder to miss. Off by default — enable it if you want
    *  the assistant to surface what needs your attention before you move on. */
   showCallouts: boolean;
+  /** Write and show the one-line idle recap under a quiet chat. Off skips the
+   *  small-model call and hides recaps already written. */
+  showRecap: boolean;
+  /** How much the recap may say. */
+  recapLength: RecapLength;
 }
 
-const DEFAULT_RECAP_SETTINGS: RecapSettings = { idleSeconds: 120, suggestNextPrompt: true, suggestionPriority: "harness", showCallouts: false };
+export type RecapLength = "short" | "medium" | "detailed";
+export const RECAP_LENGTH_WORDS: Readonly<Record<RecapLength, number>> = { short: 12, medium: 20, detailed: 40 };
+
+const DEFAULT_RECAP_SETTINGS: RecapSettings = {
+  idleSeconds: 120, suggestNextPrompt: true, suggestionPriority: "harness", showCallouts: false,
+  showRecap: true, recapLength: "medium",
+};
 const MIN_IDLE_SECONDS = 10;
 const MAX_IDLE_SECONDS = 3600;
-export const RECAP_MAX_WORDS = 20;
+export const RECAP_MAX_WORDS = RECAP_LENGTH_WORDS.medium;
 
 export interface RecapSettingsService {
   get(): RecapSettings;
@@ -65,6 +76,18 @@ export function createRecapSettings(opts: { file: string }): RecapSettingsServic
       }
       next.suggestionPriority = patch.suggestionPriority;
     }
+    if (patch.showRecap !== undefined) {
+      if (typeof patch.showRecap !== "boolean") {
+        throw Object.assign(new Error("showRecap must be a boolean"), { code: "invalid-input" });
+      }
+      next.showRecap = patch.showRecap;
+    }
+    if (patch.recapLength !== undefined) {
+      if (typeof patch.recapLength !== "string" || !Object.hasOwn(RECAP_LENGTH_WORDS, patch.recapLength)) {
+        throw Object.assign(new Error("recapLength must be \"short\", \"medium\" or \"detailed\""), { code: "invalid-input" });
+      }
+      next.recapLength = patch.recapLength as RecapLength;
+    }
     if (patch.showCallouts !== undefined) {
       if (typeof patch.showCallouts !== "boolean") {
         throw Object.assign(new Error("showCallouts must be a boolean"), { code: "invalid-input" });
@@ -90,18 +113,23 @@ export function capWords(text: string, max: number): string {
   return words.length <= max ? words.join(" ") : `${words.slice(0, max).join(" ")}…`;
 }
 
+/** A recap is current while no conversation activity came after it. One
+ *  pinned past the session's own log (`latestSeq`) belongs to another log —
+ *  a forked or imported copy of the projection — and is never current. */
 export function isFresh(
   assist: { atSeq: number } | undefined,
   latestConversationSeq: number,
+  latestSeq?: number,
 ): boolean {
-  return !!assist && assist.atSeq >= latestConversationSeq;
+  if (!assist || assist.atSeq < latestConversationSeq) return false;
+  return latestSeq === undefined || assist.atSeq <= latestSeq;
 }
 
-export function buildRecapPrompt(transcript: string): string {
+export function buildRecapPrompt(transcript: string, maxWords: number = RECAP_MAX_WORDS): string {
   return [
     "You are reviewing a coding-assistant conversation that just went idle.",
     "Output EXACTLY two lines and nothing else:",
-    `Recap: <what happened, at most ${RECAP_MAX_WORDS} words>`,
+    `Recap: <what happened, at most ${maxWords} words>`,
     "Suggestion: <ONE concrete next prompt the user could send, imperative, one sentence — or the single word none>",
     "",
     "Write `Suggestion: none` when the task is finished, the user closed the",
@@ -110,6 +138,8 @@ export function buildRecapPrompt(transcript: string): string {
     "fill the line: no \"add tests\" when the tests already passed, no",
     "\"implement it\" after it was implemented, no new requirements, no",
     "speculative cleanup, and no choice the user already made.",
+    "Write the recap and the suggestion in the language the user writes in;",
+    "keep the labels `Recap:` and `Suggestion:` in English.",
     "Do not use tools. Do not wrap the answer in code fences.",
     "",
     "<conversation>",
@@ -120,7 +150,7 @@ export function buildRecapPrompt(transcript: string): string {
 
 const NO_SUGGESTION = /^(none|no suggestion|n\/a|-{1,2})\.?$/i;
 
-export function parseRecapReply(raw: string): { recap: string; suggestion?: string } | null {
+export function parseRecapReply(raw: string, maxWords: number = RECAP_MAX_WORDS): { recap: string; suggestion?: string } | null {
   const lines = raw
     .replace(/^\`\`\`[a-z]*\n?|\`\`\`$/g, "")
     .split("\n")
@@ -139,7 +169,7 @@ export function parseRecapReply(raw: string): { recap: string; suggestion?: stri
     suggestion = lines[1]!;
   }
   if (!recap) return null;
-  const capped = capWords(recap, RECAP_MAX_WORDS);
+  const capped = capWords(recap, maxWords);
   return NO_SUGGESTION.test(suggestion) || !suggestion
     ? { recap: capped }
     : { recap: capped, suggestion };
@@ -151,7 +181,7 @@ export interface RecapService {
 }
 
 export function createRecapService(deps: {
-  settings: () => Pick<RecapSettings, "idleSeconds">;
+  settings: () => Pick<RecapSettings, "idleSeconds"> & Partial<Pick<RecapSettings, "showRecap" | "recapLength">>;
   latestSeq(sessionId: string): Promise<number>;
   eventsAfter(sessionId: string, afterSeq: number): Promise<SessionEvent[]>;
   transcript(sessionId: string): Promise<string>;
@@ -188,10 +218,13 @@ export function createRecapService(deps: {
     try {
       const atSeq = await stablePassiveTail(sessionId, seqAtSchedule);
       if (atSeq === null || scheduledEpoch !== epoch) return;
+      if (deps.settings().showRecap === false) return;
       const transcript = await deps.transcript(sessionId);
       if (!transcript.trim() || scheduledEpoch !== epoch) return;
+      const maxWords = RECAP_LENGTH_WORDS[deps.settings().recapLength ?? "medium"] ?? RECAP_MAX_WORDS;
       const parsed = parseRecapReply(
-        await deps.complete(sessionId, buildRecapPrompt(transcript), userId),
+        await deps.complete(sessionId, buildRecapPrompt(transcript, maxWords), userId),
+        maxWords,
       );
       if (!parsed || scheduledEpoch !== epoch) return;
       const finalAtSeq = await stablePassiveTail(sessionId, atSeq);
@@ -208,6 +241,8 @@ export function createRecapService(deps: {
     onTurnCompleted(sessionId, userId) {
       const existing = timers.get(sessionId);
       if (existing) clearTimeout(existing);
+      timers.delete(sessionId);
+      if (deps.settings().showRecap === false) return;
       const scheduledEpoch = epoch;
       void deps.latestSeq(sessionId).then((seq) => {
         if (scheduledEpoch !== epoch) return;

@@ -99,3 +99,15 @@ test("the iOS WebView's own background follows the page canvas, not the launch c
   assert.match(scene, /observed\.scrollView\.backgroundColor = canvas/,
     "the scroll view's background is what WKWebView shows beyond the painted page");
 });
+
+test("the app names its shell in sign-in user agents", async () => {
+  const [config, web] = await Promise.all([
+    readFile(new URL("../capacitor.config.ts", import.meta.url), "utf8"),
+    readFile(new URL("../../web/src/clientUserAgent.ts", import.meta.url), "utf8"),
+  ]);
+  // Capacitor appends this to the WebView's own agent on iOS and Android. It is
+  // the only way the account's device list can tell the app from Safari or
+  // Chrome on the same phone, which ship the same WebKit agent.
+  assert.match(config, /^\s{2}appendUserAgent:\s*"PolythMobile",$/m);
+  assert.match(web, /PolythMobile/, "the web bundle parses the token the app appends");
+});

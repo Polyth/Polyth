@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AttachmentRef } from "@polyth/contracts";
+import type { AttachmentRef, RewindFilesPreview } from "@polyth/contracts";
 import { resolveModelPresentation } from "@polyth/contracts/model-presentation";
 import { api } from "@polyth/session/web-api";
 import { fmtCost, fmtTokens } from "../format.ts";
 import { sendMessage } from "../init.ts";
 import { selectionFeedback } from "../haptics.ts";
+import { thinkingVariantLabel } from "@polyth/models/model-presentation";
 import {
   assistantTime,
+  dateTimeMedium,
+  latencyLabel,
   normalizedDuration,
+  responseTiming,
   timeIso,
-  timeShort,
   turnDurationMs,
   type ActionAnnounceAnchor,
 } from "../messageActions.ts";
@@ -20,13 +23,14 @@ import { useTimelineProjectId, useTimelineSessionId } from "../timelineSession.t
 import { beginRegenerateMotion, cancelRewindMotion } from "../rewindMotion.ts";
 import { useUiSettings } from "../uiPrefs.ts";
 import { copyText } from "../utils.ts";
-import { tr } from "../i18n/index.ts";
+import { getLocale, tr } from "../i18n/index.ts";
 import ProviderLogo from "../../../../packages/models/widgets/ProviderLogo.tsx";
 import MessageActionBar, { useActionConfirmation, type MessageActionDef } from "./MessageActionBar.tsx";
 import { MESSAGE_ACTION_ICONS, messageActionName } from "./messageActionCatalog.ts";
 import { startSessionFromText } from "./chatActionHandoffs.ts";
 import { useMessagePin } from "./messagePin.ts";
 import { Popover } from "./ui/index.ts";
+import RewindFilesDialog, { type RewindFilesPhase } from "./RewindFilesDialog.tsx";
 
 function downloadAnswerImage(text: string, title: string): boolean {
   const canvas = document.createElement("canvas");
@@ -72,19 +76,12 @@ export default function ChatResponseFooter({
   turn,
   segmentStartedAt,
   regeneratePrompt,
-  dormant = false,
-  identity = true,
 }: {
   m: AssistantMsg;
   announce?: (text: string, anchor?: ActionAnnounceAnchor) => void;
   turn?: RenderModel["turn"];
   segmentStartedAt?: number;
   regeneratePrompt?: { eventSeq: number; text: string; attachments?: AttachmentRef[] };
-  /** A later turn is working: keep the footer's box, show nothing. */
-  dormant?: boolean;
-  /** False on an answer a later row of the same turn follows: only the
-   *  quick actions show; the identity panel stays one per turn. */
-  identity?: boolean;
 }) {
   // Only the fields the footer reads: every footer of the transcript would
   // otherwise re-render on each session update of a live turn (status,
@@ -139,47 +136,139 @@ export default function ChatResponseFooter({
   const usage = turn?.usage?.tokens ?? m.tokens;
   const cost = turn?.usage?.cost ?? m.cost;
   const hasUsage = usage !== undefined && (usage.input > 0 || usage.output > 0);
+  const effort = modelRef?.variant ? thinkingVariantLabel(modelRef.variant) : null;
+  const completedAt = assistantTime(m);
+  // Turn usage spans the whole turn, so its speed does too; an answer's own
+  // tokens are measured over that answer's own stream.
+  const timing = responseTiming({
+    startedAt: m.turnStartedAt ?? turn?.startedAt,
+    firstOutputAt: m.turnFirstOutputAt ?? turn?.firstOutputAt,
+    endedAt: turn?.usage ? turn.stoppedAt : m.completedAt,
+    outputTokens: usage?.output,
+  });
+  const ownSpeed = !turn?.usage && m.tokens && m.completedAt !== undefined
+    ? responseTiming({ firstOutputAt: m.time, endedAt: m.completedAt, outputTokens: m.tokens.output }).tokensPerSecond
+    : null;
+  const tokensPerSecond = turn?.usage ? timing.tokensPerSecond : ownSpeed;
+  const speed = tokensPerSecond !== null
+    ? tr("timeline.metaSpeedValue", {
+        value: new Intl.NumberFormat(getLocale(), { maximumFractionDigits: tokensPerSecond < 10 ? 1 : 0 }).format(tokensPerSecond),
+      })
+    : null;
 
   const actionAnchor = { role: "assistant" as const, eventSeq: m.eventSeq };
   const responseActionsId = `chat-response-actions-${m.eventSeq}`;
-  const regenerate = (anchor: HTMLElement | null) => {
-    if (!session || !regeneratePrompt || regenerateBusy) return;
-    setRegenerateBusy(true);
-    // Regeneration is a real history replacement, not a hidden
-    // follow-up. Rewind to the source prompt first; the replacement
-    // send then branches the runtime from that exact prefix. The
-    // answer starts leaving now; the prompt itself never moves: its
-    // in-flight echo takes over the same pixels until the canonical
-    // prompt lands (rewindMotion.ts).
-    const sessionId = session;
-    beginRegenerateMotion(sessionId, regeneratePrompt.eventSeq, anchor?.closest<HTMLElement>(".timeline") ?? null);
+  type RegenerateSource = NonNullable<typeof regeneratePrompt>;
+  // Regeneration is a real history replacement, not a hidden follow-up.
+  // Rewind to the source prompt first; the replacement send then branches
+  // the runtime from that exact prefix. The answer starts leaving now; the
+  // prompt itself never moves: its in-flight echo takes over the same
+  // pixels until the canonical prompt lands (rewindMotion.ts). Rejects only
+  // when the rewind itself was refused (nothing changed); a refused send
+  // leaves the rewind marker to restore.
+  const replaceAnswer = (
+    sessionId: string,
+    source: RegenerateSource,
+    timeline: HTMLElement | null,
+    files?: "restore",
+    motion = true,
+  ): Promise<void> => {
+    if (motion) beginRegenerateMotion(sessionId, source.eventSeq, timeline);
     let echo: string | null = null;
-    void api.rewind(sessionId, regeneratePrompt.eventSeq)
+    return api.rewind(sessionId, source.eventSeq, files ? { files } : undefined)
+      .catch((error: unknown) => {
+        if (motion) cancelRewindMotion(sessionId, source.eventSeq);
+        throw error;
+      })
       .then((marker) => {
         // The durable marker and its replacement echo publish in one
-        // store snapshot: no frame can contain both old rows or
-        // neither the cut nor the prompt.
+        // store snapshot: no frame can contain both old rows or neither
+        // the cut nor the prompt.
         echo = applyEventWithPendingSend(marker, {
           sessionId,
-          text: regeneratePrompt.text,
-          attachments: regeneratePrompt.attachments ?? [],
+          text: source.text,
+          attachments: source.attachments ?? [],
         });
-        return sendMessage(regeneratePrompt.text, undefined, undefined, {
+        return sendMessage(source.text, undefined, undefined, {
           targetSessionId: sessionId,
-          ...(regeneratePrompt.attachments?.length ? { attachments: regeneratePrompt.attachments } : {}),
+          ...(source.attachments?.length ? { attachments: source.attachments } : {}),
+        }).then((ok) => {
+          if (!ok) { if (echo) endPendingSend(echo); return; }
+          showConfirmation("regenerate");
+        }, (error: unknown) => {
+          if (motion) cancelRewindMotion(sessionId, source.eventSeq);
+          if (echo) endPendingSend(echo);
+          setUiError(error instanceof Error ? error.message : String(error));
         });
-      })
-      .then((ok) => {
-        // A refused replacement leaves the rewind marker to restore.
-        if (!ok) { if (echo) endPendingSend(echo); return; }
-        showConfirmation("regenerate");
-      })
-      .catch((error) => {
-        cancelRewindMotion(sessionId, regeneratePrompt.eventSeq);
-        if (echo) endPendingSend(echo);
-        setUiError(error instanceof Error ? error.message : String(error));
-      })
-      .finally(() => setRegenerateBusy(false));
+      });
+  };
+  // Regenerating discards the files the replaced answer changed. When any
+  // file would change, ask first and list them (RewindFilesDialog's
+  // regenerate purpose); otherwise it stays the instant action it was.
+  const [filesConfirm, setFilesConfirm] = useState<{
+    sessionId: string;
+    source: RegenerateSource;
+    preview: RewindFilesPreview;
+    phase: RewindFilesPhase;
+    error: string | null;
+  } | null>(null);
+  // Mounted from the first confirmation on, so its exit can play; a footer
+  // that never asked renders no dialog at all.
+  const [filesConfirmMounted, setFilesConfirmMounted] = useState(false);
+  const regenerateInvokerRef = useRef<HTMLElement | null>(null);
+  const regenerateTimelineRef = useRef<HTMLElement | null>(null);
+  const regenerate = (anchor: HTMLElement | null) => {
+    if (!session || !regeneratePrompt || regenerateBusy || filesConfirm) return;
+    setRegenerateBusy(true);
+    const sessionId = session;
+    const source = regeneratePrompt;
+    const timeline = anchor?.closest<HTMLElement>(".timeline") ?? null;
+    regenerateInvokerRef.current = anchor;
+    regenerateTimelineRef.current = timeline;
+    // An older server (or a failed preview) keeps the files-untouched
+    // regeneration it always had.
+    const previewing: Promise<RewindFilesPreview | null> = typeof api.previewRewindFiles === "function"
+      ? api.previewRewindFiles(sessionId, source.eventSeq).catch(() => null)
+      : Promise.resolve(null);
+    void previewing.then((preview) => {
+      if (preview?.available && preview.restore.length > 0) {
+        setFilesConfirmMounted(true);
+        setFilesConfirm({ sessionId, source, preview, phase: "idle", error: null });
+        return;
+      }
+      // Nothing on disk would change. A regeneration that leaves changed
+      // files behind still records why on its marker.
+      const recordWhy = preview !== null && !preview.turnRunning
+        && (preview.keep.length > 0 || preview.reason === "branch-changed");
+      return replaceAnswer(sessionId, source, timeline, recordWhy ? "restore" : undefined)
+        .catch((error: unknown) => setUiError(error instanceof Error ? error.message : String(error)));
+    }).finally(() => setRegenerateBusy(false));
+  };
+  const runConfirmedRegenerate = (dialog: NonNullable<typeof filesConfirm>, attempts: number) => {
+    // While a stopped turn settles, the dialog keeps saying so; the retried
+    // rewinds play no exit motion, so a refused attempt cannot flicker.
+    const running = dialog.preview.turnRunning;
+    setFilesConfirm({ ...dialog, phase: running && attempts > 0 ? "stopping" : "applying", error: null });
+    void replaceAnswer(dialog.sessionId, dialog.source, regenerateTimelineRef.current, "restore", !running)
+      .then(() => setFilesConfirm(null))
+      .catch((error: unknown) => {
+        // The stop the person asked for may still be settling on the server.
+        if (attempts > 0 && (error as { code?: unknown } | null)?.code === "conflict" && running) {
+          window.setTimeout(() => runConfirmedRegenerate(dialog, attempts - 1), 500);
+          return;
+        }
+        setFilesConfirm((current) => current && { ...current, phase: "idle", error: tr("timeline.regenerateFiles.error") });
+      });
+  };
+  const confirmRegenerate = () => {
+    const dialog = filesConfirm;
+    if (!dialog || dialog.phase !== "idle") return;
+    if (!dialog.preview.turnRunning) { runConfirmedRegenerate(dialog, 0); return; }
+    // Files are written only after the turn has really stopped: stop it,
+    // then retry the rewind while the server still reports it running.
+    setFilesConfirm({ ...dialog, phase: "stopping", error: null });
+    void api.abort(dialog.sessionId, "timeline").catch(() => undefined)
+      .then(() => runConfirmedRegenerate(dialog, 60));
   };
 
   const action = (
@@ -237,16 +326,10 @@ export default function ChatResponseFooter({
     }));
   }
 
-  // An actions-only footer with its actions turned off would be an empty row.
-  if (!identity && !prefs.showAnswerQuickActions) return null;
-
   return (
-    <footer
-      className="chat-response-footer"
-      data-dormant={dormant || undefined}
-      data-actions-only={identity ? undefined : "true"}
-    >
-      {identity && <div className="chat-response-identity">
+    <>
+    <footer className="chat-response-footer">
+      <div className="chat-response-identity">
         <ProviderLogo
           providerID={descriptor?.providerID ?? modelRef?.providerID}
           providerName={descriptor?.providerName}
@@ -256,7 +339,7 @@ export default function ChatResponseFooter({
         />
         <span className="chat-response-model" title={modelName}>{modelName}</span>
         {duration && <span className="chat-response-duration">{duration}</span>}
-      </div>}
+      </div>
 
       <div className="chat-response-action-area">
         <MessageActionBar
@@ -293,17 +376,31 @@ export default function ChatResponseFooter({
         restoreFocus={false}
       >
         <dl>
+          <dt>{tr("timeline.metaModel")}</dt><dd>{modelName}</dd>
+          {effort && <><dt>{tr("timeline.metaEffort")}</dt><dd>{effort}</dd></>}
           {harnessId && <><dt>{tr("timeline.metaHarness")}</dt><dd>{harnessId}</dd></>}
           {(m.profileId ?? turn?.profileId) && <><dt>{tr("timeline.metaProfile")}</dt><dd><code>{m.profileId ?? turn?.profileId}</code></dd></>}
-          {(m.runtimeLegId ?? turn?.runtimeLegId) && <><dt>{tr("timeline.metaRuntimeLeg")}</dt><dd><code>{m.runtimeLegId ?? turn?.runtimeLegId}</code></dd></>}
           <dt>{tr("timeline.agent")}</dt><dd>{agentName}</dd>
-          <dt>{tr("timeline.completed")}</dt><dd><time dateTime={timeIso(assistantTime(m))}>{timeShort(assistantTime(m))}</time></dd>
+          <dt>{tr("timeline.completed")}</dt><dd><time dateTime={timeIso(completedAt)}>{dateTimeMedium(completedAt)}</time></dd>
+          {timing.ttftMs !== null && <><dt><abbr title={tr("timeline.metaTtftFull")}>{tr("timeline.metaTtft")}</abbr></dt><dd>{latencyLabel(timing.ttftMs)}</dd></>}
+          {speed && <><dt>{tr("timeline.metaSpeed")}</dt><dd>{speed}</dd></>}
           {hasUsage && <><dt>{tr("timeline.input")}</dt><dd>{fmtTokens(usage.input)}</dd><dt>{tr("timeline.output")}</dt><dd>{fmtTokens(usage.output)}</dd></>}
           {usage?.cacheRead ? <><dt>{tr("timeline.cached")}</dt><dd>{fmtTokens(usage.cacheRead)}</dd></> : null}
           {cost ? <><dt>{tr("timeline.cost")}</dt><dd>{fmtCost(cost)}</dd></> : null}
-          {turn?.turnId ? <><dt>{tr("timeline.metaRun")}</dt><dd><code>{turn.turnId}</code></dd></> : null}
         </dl>
       </Popover>
     </footer>
+    {filesConfirmMounted && (
+      <RewindFilesDialog
+        purpose="regenerate"
+        preview={filesConfirm?.preview ?? null}
+        phase={filesConfirm?.phase ?? "idle"}
+        error={filesConfirm?.error ?? null}
+        onRestore={confirmRegenerate}
+        onClose={() => setFilesConfirm(null)}
+        restoreFocusRef={regenerateInvokerRef}
+      />
+    )}
+    </>
   );
 }

@@ -171,28 +171,166 @@ Direct `context.append` is reserved for explicitly granted context authority. Ap
 
 ## RemoteUI
 
-Sandboxed extensions do not mount React components into the host realm and do not send arbitrary HTML/CSS as their normal UI contract.
+Sandboxed extensions do not mount React components into the host realm and do not send arbitrary HTML/CSS as their normal UI contract. They describe a `RemoteUiNode` tree and Polyth renders it with its own primitives, so an extension inherits the host's theme, typography, density, touch targets, focus handling, reduced-motion preference, mobile sheets and dialogs without matching them itself.
 
-RemoteUI v2 currently supports host-rendered primitives including:
+The author-facing types (`RemoteUiNode`, `RemoteUiType`, `RemoteUiAction`) are exported from `@polyth/package-sdk`. The tree parser and the exported limit constants (`REMOTE_UI_MAX_NODES`, `MAX_DEPTH`, `MAX_STRING`, `MAX_UPDATES_PER_SEC`) live on the host subpath (`@polyth/package-sdk/host`); the option and table bounds are enforced but not re-exported, and an extension does not need any of them.
 
-- stack and inline layout;
-- text and headings;
-- button;
-- text input and textarea;
-- select, checkbox, and radio group;
-- badges and cards;
-- lists and list items;
-- bounded tables;
-- Markdown rendered by the Polyth Markdown renderer;
-- code;
-- progress and spinner;
-- separator and empty state.
+### Rendering
 
-RemoteUI rejects unknown child nodes and enforces limits on node count, depth, string size, options, table dimensions, and update rate. Action/id values use a restricted identifier vocabulary.
+```ts
+import { connectPolyth, type RemoteUiNode } from "@polyth/package-sdk";
 
-There is no raw HTML node, arbitrary CSS, arbitrary script URL, or unrestricted remote-image primitive.
+const polyth = await connectPolyth();
+let note = "";
 
-Full-tree render updates remain the supported protocol. Keyed incremental patches are not exposed because current dynamic examples do not justify a second diff/resynchronization protocol.
+const tree = (): RemoteUiNode => ({
+  type: "stack",
+  gap: "md",
+  children: [
+    { type: "heading", level: 2, text: "Notes" },
+    { type: "textarea", label: "Note", value: note, action: "note.edit" },
+    { type: "button", label: "Save", variant: "primary", action: "note.save" },
+  ],
+});
+
+polyth.ui.onAction("note.edit", (action) => {
+  if (typeof action.value === "string") note = action.value;
+});
+
+await polyth.ui.render(tree()); // requires the ui.render capability
+```
+
+- `ui.render` requires the `ui.render` capability from the manifest and the grant review.
+- Every call replaces the whole tree. There is no patch protocol, no keyed diff and no partial update; render the whole tree again.
+- A rejected or throttled render leaves the last valid tree on screen. The call rejects instead (invalid tree: `INVALID_REQUEST`, over the rate limit: `HOST_REJECTED`).
+- The tree is runtime state, not session history: it lives in memory for the active runtime and is gone when that runtime is disposed, at which point the surface shows the host's waiting state.
+- The payload must be plain JSON (no functions or DOM nodes), and the whole request must stay under 256 KiB.
+- A contribution may return `ui` inside its `ContributionResult`. It is parsed by the same rules and replaces the tree of that contribution's overlay, so a short-lived result does not need a separate `render` call.
+
+### Actions
+
+A node dispatches only when it has an `action`. `host.ui.onAction(id, handler)` registers the handler; it returns an unsubscribe function, and all handlers are dropped with the runtime.
+
+| Node | Emitted action |
+| --- | --- |
+| `button`, `listItem` | `{ id }` |
+| `checkbox` | `{ id, value: boolean }` |
+| `select`, `radioGroup` | `{ id, value: option.value }` |
+| `input`, `textarea` | `{ id, value: string }` |
+
+- Text fields emit 150 ms after the last keystroke and on blur (blur emits the current value even when nothing changed). A single-line `input` also emits immediately on Enter; `textarea` Enter inserts a newline, so it reports on the debounce or on blur. Drop stale values by comparing with your own state, not by assuming one action per edit.
+- Several nodes may share one action id; then there is one handler and the node must be told apart by `action.value` or by separate ids.
+- Action ids and node ids must match `^[A-Za-z0-9._:-]{1,128}$`. An action id that does not match is **silently dropped**: the control renders but never dispatches.
+- Node `id` is not dispatched. It only gives `children` a stable identity (React key) and names the Markdown render instance.
+
+### State is controlled
+
+Polyth renders what the tree says. It never keeps the new value itself, so a control that ignores its action stays visually stuck.
+
+- `checkbox`, `select` and `radioGroup` have no local state: until the extension renders again with the new `checked`/`value`, the control keeps showing the old one.
+- `input` and `textarea` keep the person's keystrokes while the field is focused and accept an external `value` when it is not. A render that omits the change reverts the field, and blur emits the visible text.
+- The usual shape is: handle the action, update package state, `render(tree())` again. Batch a burst of state changes into one render; renders are capped at 10 per second per runtime (shared with `ui.toast`), and the extra call is rejected rather than queued.
+
+### Node reference
+
+| `type` | Rendered as | Fields used |
+| --- | --- | --- |
+| `stack` | vertical group | `children`, `gap` (`sm`/`md`/`lg`, default `md`) |
+| `inline` | horizontal group; wraps, and stacks below a ~36rem container | `children`, `gap` (`sm`/`md`/`lg`, default `sm`) |
+| `text` | paragraph | `text`, `tone` |
+| `heading` | section title: `level` 1 → `h2`, 2 (default) → `h3`, 3 → `h4` | `text`, `level` |
+| `button` | small host button | `label` (falls back to `text`), `variant`, `disabled`, `action` |
+| `input` | single-line host text field | `value`, `label` (aria-label), `placeholder`, `disabled`, `action` |
+| `textarea` | multi-line field, 3–10 rows, auto-growing | same as `input` |
+| `select` | labelled host select | `value`, `options`, `label` or `title`, `placeholder`, `disabled`, `action` |
+| `checkbox` | host checkbox | `checked`, `label` (falls back to `text`), `subtitle` (description), `disabled`, `action` |
+| `radioGroup` | fieldset of radios | `value`, `options` (`label`, optional `detail`), `label` (legend), `disabled`, `action` |
+| `badge` | status pill | `text` (falls back to `label`), `tone` |
+| `card` | bordered block | `title`, `subtitle`, `body`, `children`, `trailing` |
+| `list` | vertical list container | `children` (`listItem`) |
+| `listItem` | row; with `action` the whole row is a full-width button, otherwise a static row | `title` (falls back to `label`), `subtitle`, `trailing`, `disabled`, `action` |
+| `table` | bounded table; with neither `columns` nor `rows` it renders nothing, and `rows` without `columns` rejects the render | `columns` (required once rows exist, 1–12), `rows` (≤100, each row exactly `columns.length` cells) |
+| `markdown` | Polyth's sanitized Markdown renderer | `body` (falls back to `text`), `id` |
+| `code` | preformatted block, no syntax highlighting | `text` (falls back to `body`), `language` (a `data-language` label) |
+| `progress` | host progress bar | `progress` (`0`…`max`, `max` default `1`), `label` |
+| `spinner` | indeterminate busy indicator | `label` |
+| `separator` | rule | — |
+| `empty` | compact empty state | `title`, `body` (falls back to `subtitle`) |
+
+Fields are shared across nodes and ignored where a node does not use them:
+
+- `tone`: `muted`/`faint`/`success`/`warning`/`danger`/`info`. `text` honours all except `info` (which renders as normal text, as do unknown values); `badge` maps `success`, `warning`, `danger` and `info`, everything else is neutral.
+- `variant` is only for `button`: `primary`, `ghost`, or `danger`. Omitted (and `ghost`) renders the quiet default — the renderer has no separate ghost look.
+- `trailing` is only for `card` and `listItem`, and only `{ type: "badge" | "text", text?, label?, tone? }`. It counts as a node.
+- Strings are clipped to 4000 characters per field rather than rejected, except `language` (80) and table column labels (240); an option `value` longer than 240 characters is rejected. Put long content in `markdown`/`code`, not in many small nodes.
+- An unknown field is ignored. An unknown `type`, a non-object child, an invalid table or a broken `options` list rejects the whole render; the previous tree stays.
+
+Table content is plain text only; put a button inside a row by using `list`/`listItem` instead. Treat everything shown from external data as text: `text` and `markdown` are the only safe channels, and the Markdown renderer parses into Polyth's own AST (raw HTML is not passed through) with sanitized link and image URLs.
+
+### Limits
+
+| Bound | Value | Rejected or clipped |
+| --- | --- | --- |
+| nodes per tree | 200 (trailing nodes included) | rejected |
+| nesting depth | 12 (root is 0) | rejected |
+| string length | 4000 characters per field | clipped |
+| `options` | 64, unique `value` (≤240 characters), non-empty `label` | rejected |
+| table | 12 columns × 100 rows, every row the same width | rejected |
+| renders | 10 per second per runtime | rejected, previous tree kept |
+| id/action | 128 characters, `[A-Za-z0-9._:-]` | silently dropped (id/action omitted) |
+
+There is no raw HTML node, arbitrary CSS, arbitrary script URL, remote-image primitive, or incremental patch protocol; those stay deliberately unsupported until a complete contract exists.
+
+### Example
+
+A search field, a bounded list, an empty state and one action per row, all re-rendered from package state. `listItem` emits no row value, so each row carries its own action id:
+
+```ts
+let query = "";
+let opened = "";
+const items = [{ id: "a", title: "Alpha", note: "First" }, { id: "b", title: "Beta", note: "Second" }];
+
+const tree = (): RemoteUiNode => {
+  const visible = items.filter((item) => item.title.toLowerCase().includes(query.toLowerCase()));
+  return {
+    type: "stack",
+    gap: "md",
+    children: [
+      { type: "input", label: "Search", placeholder: "Filter items", value: query, action: "items.search" },
+      ...(opened ? [{ type: "text" as const, tone: "muted" as const, text: `Open: ${opened}` }] : []),
+      visible.length === 0
+        ? { type: "empty", title: "Nothing matches", body: "Try a shorter search." }
+        : {
+            type: "list",
+            children: visible.map((item) => ({
+              type: "listItem",
+              id: `item.${item.id}`,
+              title: item.title,
+              subtitle: item.note,
+              action: `items.open.${item.id}`,
+              trailing: { type: "badge", text: opened === item.id ? "open" : "idle" },
+            })),
+          },
+    ],
+  };
+};
+
+polyth.ui.onAction("items.search", (action) => {
+  query = typeof action.value === "string" ? action.value : query;
+  void polyth.ui.render(tree());
+});
+
+for (const item of items) {
+  polyth.ui.onAction(`items.open.${item.id}`, () => {
+    opened = item.id;
+    void polyth.ui.render(tree());
+  });
+}
+
+void polyth.ui.render(tree());
+```
+
+Handlers are keyed by action id, so a list whose rows change must subscribe for the new ids and call the previous unsubscribers (or use one stable `select`/`radioGroup` whose `options` carry the identity and whose action value names the choice). `trailing` is presentation only; it cannot dispatch.
 
 ## Tool rendering
 

@@ -33,7 +33,8 @@ const notice = renderToStaticMarkup(createElement(Notice, {
   actions: createElement(Fragment, null,
     createElement(Button, { size: "sm" }, "Sign in"),
     createElement(Button, { size: "sm", variant: "ghost" }, "I’ve signed in")),
-}, "Your conversation is safe. Sign in again, then Polyth will verify this harness and continue the recovery flow."));
+  children: "Your conversation is safe. Sign in again, then Polyth will verify this harness and continue the recovery flow.",
+}));
 
 interface Geometry {
   copyWidth: number; copyBottom: number;

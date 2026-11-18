@@ -1,6 +1,6 @@
-// Mounted check: every finished answer keeps its quick actions, also when
-// tools, an answered question or more text of the same turn follow it. Only the
-// terminal answer of a turn carries the identity panel.
+// Mounted check: only a turn's last answer renders its footer (model identity
+// and quick actions), also while its turn still works; an answer that tools,
+// an answered question or more text of the same turn follow shows none.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
@@ -44,7 +44,7 @@ const event = (type: string, data: JsonObject): SessionEvent => {
 };
 const idle = () => setSessions("p", [{ id: sessionId, projectId: "p", title: "Chat", status: "idle", createdAt: 1, updatedAt: 1 }]);
 
-test("answers followed by more of their turn keep quick actions", async () => {
+test("only the last answer of a turn has a footer", async () => {
   const timeline = document.createElement("div");
   timeline.className = "timeline";
   const host = document.createElement("div");
@@ -80,26 +80,17 @@ test("answers followed by more of their turn keep quick actions", async () => {
       .map((row) => [row.querySelector(".bubble")?.textContent ?? "", row] as const)
       .filter(([text]) => text !== ""));
     const footer = (text: string) => answers.get(text)?.querySelector<HTMLElement>(".chat-response-footer") ?? null;
-    for (const text of ["Answer one.", "Before the tool.", "Before the question.", "Final."]) {
+    for (const text of ["Answer one.", "Final."]) {
       const row = footer(text);
       assert.ok(row, `${text} has a footer`);
       assert.ok(row.querySelector(".chat-response-actions"), `${text} has quick actions`);
-      assert.equal(row.hasAttribute("data-dormant"), false, `${text} is not dormant`);
+      assert.ok(row.querySelector(".chat-response-identity"), `${text} names its model`);
     }
     for (const text of ["Before the tool.", "Before the question."]) {
-      assert.equal(footer(text)!.getAttribute("data-actions-only"), "true");
-      assert.equal(footer(text)!.querySelector(".chat-response-identity"), null);
-    }
-    for (const text of ["Answer one.", "Final."]) {
-      assert.equal(footer(text)!.hasAttribute("data-actions-only"), false);
-      assert.ok(footer(text)!.querySelector(".chat-response-identity"));
+      assert.equal(footer(text) === null, true, `${text} has no footer`);
     }
 
-    // A live turn: an interim answer that a row already follows takes its
-    // footer's box at once, dormant (invisible), so the turn's end only reveals
-    // it and moves no row below it. Answers of closed turns keep their footers
-    // in place and visible: invisible, a footer was a blank band above the
-    // block under it while the next turn worked.
+    // A live turn: its latest answer has the footer, also with tools under it.
     await act(async () => {
       for (const ev of [
         event("user/message", { text: "Third." }),
@@ -113,19 +104,9 @@ test("answers followed by more of their turn keep quick actions", async () => {
     const live = [...host.querySelectorAll<HTMLElement>(".msg.assistant")]
       .find((row) => row.querySelector(".bubble")?.textContent === "Live interim.");
     assert.ok(live);
-    assert.equal(live.querySelector(".chat-response-footer")?.hasAttribute("data-dormant"), true,
-      "the followed interim answer reserves its footer's box, invisibly");
-    assert.equal(live.querySelector(".chat-response-footer")?.getAttribute("data-actions-only"), "true");
-    const closed = [...host.querySelectorAll<HTMLElement>(".msg.assistant")]
-      .find((row) => row.querySelector(".bubble")?.textContent === "Before the tool.");
-    assert.equal(closed?.querySelector(".chat-response-footer")?.hasAttribute("data-dormant"), false,
-      "a closed turn's quick actions stay visible while the next turn works");
-    const closedFinal = [...host.querySelectorAll<HTMLElement>(".msg.assistant")]
-      .find((row) => row.querySelector(".bubble")?.textContent === "Final.");
-    assert.equal(closedFinal?.querySelector(".chat-response-footer")?.hasAttribute("data-dormant"), false);
-    assert.ok(closedFinal?.querySelector(".chat-response-footer .chat-response-identity"));
+    assert.ok(live.querySelector(".chat-response-footer .chat-response-identity"), "the latest answer keeps its footer while tools run");
 
-    // The live tail's own answer gets nothing yet: no row follows it.
+    // The live tail's finished answer has its footer too.
     await act(async () => {
       for (const ev of [
         event("tool/result", { callId: "c2", tool: "read", output: "y" }),
@@ -136,7 +117,8 @@ test("answers followed by more of their turn keep quick actions", async () => {
     const tail = [...host.querySelectorAll<HTMLElement>(".msg.assistant")]
       .find((row) => row.querySelector(".bubble")?.textContent === "Tail interim.");
     assert.ok(tail);
-    assert.equal(tail.querySelector(".chat-response-footer") === null, true, "the tail answer has no footer while the turn runs");
+    assert.ok(tail.querySelector(".chat-response-footer .chat-response-identity"), "the tail answer keeps its footer while the turn runs");
+    assert.equal(live.querySelector(".chat-response-footer") === null, true, "a later answer took the footer from the interim one");
   } finally {
     await act(async () => {
       activateSession(null);

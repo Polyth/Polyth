@@ -255,6 +255,8 @@ test("GitView exposes diff Retry and refreshes an open selection after staging",
     if (url.startsWith("/api/worktrees")) return response([]);
     if (url.startsWith("/api/git/graph")) return response([]);
     if (url.startsWith("/api/git/stashes")) return response([]);
+    // An older server has no bulk counts: the per-file diffs below stay the path under test.
+    if (url.startsWith("/api/git/diff-stats")) return response({ message: "not found" }, 404);
     if (url.startsWith("/api/git/diff")) {
       diffAttempts += 1;
       // Attempt 1 is GitView's own background line-stat prefetch for the
@@ -329,6 +331,13 @@ test("GitView keeps the commit composer available while a file diff is open", as
     assert.ok(view.container.querySelector(".git-commit-composer"), "composer is available on the change list");
     assert.ok(view.container.querySelector(".git-commit-composer .git-commit-msg, .git-commit-composer textarea"), "composer keeps a message field");
     assert.ok(view.container.querySelector(".git-commit-rail"), "composer uses the action rail");
+    assert.equal(view.container.querySelector(".git-commit-composer strong, .git-commit-composer .mono"), null, "the composer repeats neither the staged count nor the branch");
+    assert.deepEqual(
+      [...view.container.querySelectorAll(".git-commit-actions .ui-btn")].map((button) => button.textContent?.trim()),
+      ["Generate", "Commit"],
+      "the composer's verbs are Generate and Commit; Sync stays in the header",
+    );
+    assert.equal(view.container.querySelector(".git-pane-summary .muted"), null, "the group headers, not the summary, count staged files");
     const disclosure = view.container.querySelector<HTMLButtonElement>(".git-change-group-head");
     assert.ok(disclosure);
     await act(async () => { disclosure.click(); });
@@ -343,7 +352,7 @@ test("GitView keeps the commit composer available while a file diff is open", as
     });
     assert.ok(view.container.querySelector(".git-master-detail.detail-open"), "file tap opens detail mode");
     assert.ok(view.container.querySelector(".git-commit-composer"), "composer stays visible while the diff is open");
-    assert.match(view.container.textContent ?? "", /Commit 1 staged file/);
+    assert.ok(view.container.querySelector(".git-commit-composer .git-commit-submit"), "the commit action stays reachable while the diff is open");
 
     const back = view.container.querySelector<HTMLButtonElement>(".git-mobile-detail-head button");
     assert.ok(back);
@@ -604,6 +613,7 @@ test("a running turn reads Git for what changed, not for every streamed event or
         conflicted: [], clean: false,
       }), { status: 200, headers: { "content-type": "application/json" } });
     }
+    if (url.startsWith("/api/git/diff-stats")) return new Response("{}", { status: 404 });
     if (url.startsWith("/api/git/diff")) {
       diffReads += 1;
       inFlightDiffs += 1;
@@ -666,6 +676,62 @@ test("a running turn reads Git for what changed, not for every streamed event or
       await delay(1_200);
     });
     assert.equal(statusReads, statusBefore + 1, "a burst of finished tools collapses into one status read");
+  } finally {
+    await view.unmount();
+    activateSession(null);
+    activateProject(null);
+  }
+});
+
+test("pending changes count every file with one diff-stats request and reads only a missing path's own diff", async () => {
+  const projectId = "bulk-stats-project";
+  const sessionId = "bulk-stats-session";
+  const files = ["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts"];
+  const repoRoot = "/tmp/bulk-stats";
+  const statsReads: string[] = [];
+  const diffReads: string[] = [];
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.startsWith("/api/git/status")) {
+      return response({
+        isRepo: true, branch: "main", ahead: 0, behind: 0, staged: [], untracked: [], conflicted: [], clean: false,
+        unstaged: files.map((path) => ({ path, status: "modified", staged: false })),
+      });
+    }
+    if (url.startsWith("/api/git/diff-stats")) {
+      statsReads.push(url);
+      return response({ staged: {}, unstaged: { "src/a.ts": { additions: 2, deletions: 1 }, "src/b.ts": { additions: 0, deletions: 0 }, "src/c.ts": { additions: 5, deletions: 0 } } });
+    }
+    if (url.startsWith("/api/git/diff")) {
+      diffReads.push(decodeURIComponent(/path=([^&]*)/.exec(url)?.[1] ?? ""));
+      return response({ diff: "@@ -1 +1 @@\n-old\n+new" });
+    }
+    return response({});
+  };
+  activateProject(projectId);
+  applyProjectAdded({ id: projectId, path: repoRoot, name: "bulk stats", createdAt: 1 });
+  seedSessionCache({ id: sessionId, projectId, title: "bulk", status: "working", createdAt: 1, updatedAt: 2 });
+  activateSession(sessionId);
+  let seq = 0;
+  const ev = (type: string, data: JsonObject): SessionEvent => {
+    seq += 1;
+    return { id: `${sessionId}-e${seq}`, sessionId, seq, time: 1_700_000_000_000 + seq, type, data, v: 1 };
+  };
+  await act(async () => {
+    applyEvents([
+      ev("user/message", { text: "edit" }),
+      ev("turn/started", { turnId: "t" }),
+      ...files.flatMap((path, index) => [
+        ev("tool/call", { callId: `edit-${index}`, tool: "write", input: { filePath: `${repoRoot}/${path}` } }),
+        ev("tool/result", { callId: `edit-${index}`, tool: "write", output: "ok" }),
+      ]),
+    ]);
+  });
+  const view = await mounted(createElement(PendingChangesBar));
+  try {
+    await act(async () => { await delay(500); });
+    assert.equal(statsReads.length, 1, "one bulk request");
+    assert.deepEqual(diffReads, ["src/d.ts"], "only the path the bulk answer omitted reads its own diff");
   } finally {
     await view.unmount();
     activateSession(null);
@@ -1096,17 +1162,24 @@ test("GitView chooses a named remote for sync actions", async () => {
   const view = await mounted(createElement(GitView));
   try {
     await act(async () => { await delay(40); });
-    const picker = view.container.querySelector<HTMLButtonElement>(".git-remote-picker .picker-chip");
-    assert.ok(picker, "multiple remotes expose the compact remote picker");
-    await act(async () => { picker.click(); await delay(20); });
-    const personal = [...document.querySelectorAll<HTMLElement>(".picker-item")]
+    assert.doesNotMatch(
+      view.container.querySelector(".source-control-head")?.textContent ?? "",
+      /\borigin\b/,
+      "the header does not print the remote's name",
+    );
+    const trigger = view.container.querySelector<HTMLButtonElement>('.source-remote-actions [aria-haspopup="menu"]');
+    assert.ok(trigger);
+    await act(async () => { trigger.click(); await delay(20); });
+    const remote = [...document.querySelectorAll<HTMLElement>('[role^="menuitem"]')]
+      .find((item) => item.textContent?.includes("Remote"));
+    assert.ok(remote, "multiple remotes are chosen inside the remote menu");
+    await act(async () => { remote.click(); await delay(20); });
+    const personal = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')]
       .find((item) => item.textContent?.includes("personal"));
     assert.ok(personal, "the second remote is reachable");
     await act(async () => { personal.click(); await delay(20); });
     assert.equal(view.container.querySelector(".git-ahead-behind"), null, "origin-only status counts are not shown for another selected remote");
 
-    const trigger = view.container.querySelector<HTMLButtonElement>('.source-remote-actions [aria-haspopup="menu"]');
-    assert.ok(trigger);
     await act(async () => { trigger.click(); await delay(20); });
     const push = [...document.querySelectorAll<HTMLElement>('[role^="menuitem"]')]
       .find((item) => /push/i.test(item.textContent ?? ""));

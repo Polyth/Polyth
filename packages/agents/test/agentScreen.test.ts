@@ -208,7 +208,7 @@ test("a report opens on its first paragraph; the rest waits behind Full report",
 test("the conversation shows reports, folds quiet checks, marks what is new and learns from feedback", async () => {
   resetRegistry();
   const writes = fakeServer([digest()]);
-  const { host } = fakeHost();
+  const { host, sessions } = fakeHost();
   const view = await mounted(createElement(AgentsPage, { host, resource: "agent-1" }));
   await act(async () => { await delay(30); });
 
@@ -221,7 +221,10 @@ test("the conversation shows reports, folds quiet checks, marks what is new and 
   assert.ok(alert.previousElementSibling?.classList.contains("agent-new"), "New sits right before the unread report");
   assert.doesNotMatch(alert.querySelector(".agent-report-meta")!.textContent ?? "", /Scheduled/, "a scheduled wake goes without saying");
   assert.equal(alert.querySelector(".agent-report-notes"), null, "the notes wait behind the report's one link");
-  assert.equal(alert.querySelectorAll(".agent-report-more").length, 1, "one link, never a second one for the notes");
+  assert.equal(alert.querySelectorAll(".agent-report-more:not(.agent-report-session)").length, 1,
+    "one link for the rest, never a second one for the notes");
+  await act(async () => { buttonNamed(alert, "Open session")!.click(); });
+  assert.deepEqual(sessions, ["ses-1"], "the whole run opens from the report, in its session");
   const notes = buttonNamed(alert, /^(1 note|Full report)$/)!;
   assert.equal(notes.getAttribute("aria-expanded"), "false");
   await act(async () => { notes.click(); });

@@ -254,7 +254,9 @@ export function createWsGateway(
 
   /** Canonical state must be replayable, never best-effort. Once a reader is
    * behind the general high-water mark, force it to reconnect from its cursor. */
-  const send = (ws: WebSocket, msg: unknown, visual = false, onWritten?: () => void): boolean => {
+  /** `msg` may be a thunk: a broadcast serializes one frame once and hands the
+   * same string to every reader, still only after the reader's backlog check. */
+  const send = (ws: WebSocket, msg: unknown | (() => string), visual = false, onWritten?: () => void): boolean => {
     if (closed || ws.readyState !== WebSocket.OPEN) return false;
     if (!visual) {
       // Check before serializing the next canonical frame: a slow reader must
@@ -264,7 +266,7 @@ export function createWsGateway(
         return false;
       }
     }
-    const payload = JSON.stringify(msg);
+    const payload = typeof msg === "function" ? (msg as () => string)() : JSON.stringify(msg);
     if (!visual) {
       if (Buffer.byteLength(payload) > (options?.maxCanonicalFrameBytes ?? MAX_CANONICAL_FRAME_BYTES)) {
         closeOversizedFrame(ws);
@@ -288,7 +290,17 @@ export function createWsGateway(
     sub.liveBufferSeq.clear();
   };
 
-  const liveEventBytes = (ev: SessionEvent): number => Buffer.byteLength(JSON.stringify({ type: "event", event: ev }));
+  // Measured once per event object: every reader of a session buffers the
+  // same event, and each measurement serializes it.
+  const liveEventByteCache = new WeakMap<SessionEvent, number>();
+  const liveEventBytes = (ev: SessionEvent): number => {
+    let bytes = liveEventByteCache.get(ev);
+    if (bytes === undefined) {
+      bytes = Buffer.byteLength(JSON.stringify({ type: "event", event: ev }));
+      liveEventByteCache.set(ev, bytes);
+    }
+    return bytes;
+  };
 
   const bufferLiveEvent = (ws: WebSocket, sub: Sub, ev: SessionEvent): boolean => {
     if (sub.liveBufferSeq.has(ev.seq)) return true;
@@ -595,7 +607,7 @@ export function createWsGateway(
         browserSessionId?: string; afterRevision?: number;
         tabId?: string; visible?: boolean; quality?: number;
         dictationId?: string;
-        clientId?: unknown; active?: unknown; idleMs?: unknown;
+        clientId?: unknown; active?: unknown; idleMs?: unknown; hidden?: unknown;
       } = {};
 
       try {
@@ -700,7 +712,7 @@ export function createWsGateway(
         if (!device) return;
         if (sub.presenceDevice !== device) sub.presenceElsewhere = undefined;
         sub.presenceDevice = device;
-        presence.report(ws, account, device, msg.active === true, typeof msg.idleMs === "number" ? msg.idleMs : 0);
+        presence.report(ws, account, device, msg.active === true, typeof msg.idleMs === "number" ? msg.idleMs : 0, msg.hidden === true);
         sendPresenceState(ws, sub);
         return;
       }
@@ -990,11 +1002,17 @@ export function createWsGateway(
     event(ev: SessionEvent) {
       if (closed) return;
       const owner = spaceOf(ev.sessionId);
+      let frame: string | undefined;
+      const serialized = (): string => frame ??= JSON.stringify({ type: "event", event: ev });
       for (const [ws, sub] of clients) {
+        // A reader of another chat receives nothing here, so its membership is
+        // not re-read for this event: that costs several control-plane queries
+        // per socket. It is still re-read before anything is delivered to it,
+        // and on every projection of its Space.
+        if (!sub.sessionId || ev.sessionId !== sub.sessionId) continue;
         const live = currentPrincipal(ws, sub);
         if (!allowWsCapability(live, REMOTE_CAPABILITY.coreSessionsRead)) continue;
         if (!inSpace(sub, owner)) continue;
-        if (!sub.sessionId || ev.sessionId !== sub.sessionId) continue;
         if (!sub.caughtUp) {
           bufferLiveEvent(ws, sub, ev);
           continue;
@@ -1009,17 +1027,17 @@ export function createWsGateway(
           continue;
         }
         if (!flushStreamBuffer(ws, sub)) continue;
-        if (send(ws, { type: "event", event: ev }) && sub.sessionId) sub.afterSeq = ev.seq;
+        if (send(ws, serialized) && sub.sessionId) sub.afterSeq = ev.seq;
       }
     },
     toolProgress(sessionId: string, callId: string, at: number) {
       if (closed) return;
       const owner = spaceOf(sessionId);
       for (const [ws, sub] of clients) {
+        if (!sub.sessionId || sub.sessionId !== sessionId) continue;
         const live = currentPrincipal(ws, sub);
         if (!allowWsCapability(live, REMOTE_CAPABILITY.coreSessionsRead)) continue;
         if (!inSpace(sub, owner)) continue;
-        if (!sub.sessionId || sub.sessionId !== sessionId) continue;
         // Best effort and never buffered: a missed pulse is not state, so a
         // backed-up reader just skips it (no resync).
         if ((options?.bufferedAmount?.(ws) ?? ws.bufferedAmount) > (options?.frameHighWater ?? FRAME_HIGH_WATER)) continue;
@@ -1029,10 +1047,22 @@ export function createWsGateway(
     projection(p: SessionProjection) {
       if (closed) return;
       const viewFor = readerViews(p);
+      // People with several tabs or devices share one view object; each shape
+      // of it is serialized once.
+      const frames = new Map<SessionProjection, { full?: string; summary?: string }>();
+      const frameOf = (view: SessionProjection, summary: boolean) => (): string => {
+        let slot = frames.get(view);
+        if (!slot) frames.set(view, slot = {});
+        return summary
+          ? slot.summary ??= JSON.stringify({ type: "projection", session: sessionSummary(view) })
+          : slot.full ??= JSON.stringify({ type: "projection", session: view });
+      };
       for (const [ws, sub] of clients) {
+        // Another Space's socket hears nothing about this chat; its membership
+        // is re-read when its own Space next publishes.
+        if (sub.spaceId !== null && p.spaceId !== sub.spaceId) continue;
         const live = currentPrincipal(ws, sub);
         if (!allowWsCapability(live, REMOTE_CAPABILITY.coreSessionsRead)) continue;
-        if (sub.spaceId !== null && p.spaceId !== sub.spaceId) continue;
         // An owner-set project list hides other projects' chats from this
         // account; live updates must not reveal them either.
         if (!projectVisibleToUser(sub.notificationAccount?.userId, p.projectId)) continue;
@@ -1045,7 +1075,7 @@ export function createWsGateway(
         const view = viewFor(sub.notificationAccount?.userId);
         if (!view) continue;
         if (p.id === sub.sessionId && !flushStreamBuffer(ws, sub)) continue;
-        send(ws, { type: "projection", session: sub.summaryProjections && sub.sessionId !== p.id ? sessionSummary(view) : view });
+        send(ws, frameOf(view, Boolean(sub.summaryProjections) && sub.sessionId !== p.id));
       }
     },
     sessionAccessChanged(projections: SessionProjection[], formerReaders?: ReadonlyMap<string, ReadonlySet<string>>) {

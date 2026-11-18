@@ -251,7 +251,11 @@ test("conversation code surfaces follow the configured glass material", () => {
   );
   assert.match(css, /\.msg \.bubble pre code,\s*\.msg \.bubble \.md-code-block pre\s*\{[^}]*background:\s*transparent/s);
   assert.match(css, /\.msg \.bubble pre,\s*\.msg \.bubble pre code\s*\{[^}]*font-size:\s*var\(--font-code\)/s);
-  assert.match(css, /\.msg\.assistant > \.bubble a\s*\{[^}]*color:\s*var\(--accent\)/s);
+  // Markdown links take the theme's link ink everywhere (never browser
+  // blue/purple), visited included, and the accent-tinted prompt its on-wash ink.
+  assert.match(css, /\.md-link \{[^}]*--md-link-ink:\s*var\(--link, var\(--chat-ink-accent, var\(--accent-text\)\)\);[^}]*color:\s*var\(--md-link-ink\)/s);
+  assert.match(css, /\.md-link:visited \{ color: var\(--md-link-ink\); \}/);
+  assert.match(css, /\.msg\.user \.bubble \{ --link: var\(--accent-on-wash\); \}/);
 });
 
 test("composer command suggestions stay compact and readable with backdrop blur", () => {
@@ -326,35 +330,19 @@ test("assistant identity panel renders once per turn, after the turn completes",
   const footer = read("../src/components/ChatResponseFooter.tsx");
   const chrome = read("../src/components/ChatChrome.css");
   const css = read("../src/styles.css");
-  // While a turn is in progress (working, waiting on a request, or a sent
-  // prompt not yet admitted) no answer shows its metadata. The terminal answer
-  // of the live turn mounts its panel only after the turn completes; answers
-  // already closed by a later prompt keep their panel in place, so the
-  // transcript above the live turn never reflows.
+  // Only a turn's last answer carries its footer (identity and quick
+  // actions), also while its turn works; interim answers show none.
   assert.match(timeline, /const sessionActive = sessionStatus === "working" \|\| sessionStatus === "waiting" \|\| pendingSends\.length > 0;/);
-  assert.match(timeline, /terminal=\{r\.kind === "assistant" && terminalAnswers\.terminal\.has\(r\.eventSeq\)\s*&& \(!turnInProgress \|\| pendingSends\.length > 0 \|\| r\.eventSeq !== terminalAnswers\.trailing\)\}/);
-  // Only the working turn's own answers are dormant: a closed turn's footer
-  // (its quick actions) stays visible while the next turn works; invisible, it
-  // was a blank band above the block under it.
-  assert.match(timeline, /dormant=\{turnInProgress && pendingSends\.length === 0 && r\.eventSeq > terminalAnswers\.openSeq\}/);
-  assert.match(timeline, /\{m\.finalized && hasAnswer && \(terminal \|\| settled\) && \(/);
+  assert.match(timeline, /\{m\.finalized && hasAnswer && terminal && \(\s*<ChatResponseFooter/);
   assert.match(timeline, /if \(lastAssistant !== null\) terminal\.set\(lastAssistant\.eventSeq, openAt\);/);
-  // Interim answers keep quick actions (no identity panel). In a live turn an
-  // interim answer takes its dormant footer's box as soon as a row lands under
-  // it, so the turn's end only reveals footers and moves no row below them.
-  assert.match(timeline, /settled=\{r\.kind === "assistant"\s*&& \(!turnInProgress \|\| pendingSends\.length > 0 \|\| r\.eventSeq < terminalAnswers\.openSeq\s*\|\| r\.id !== latestRowId\)\}/);
-  assert.match(footer, /data-actions-only=\{identity \? undefined : "true"\}/);
-  assert.match(footer, /data-dormant=\{dormant \|\| undefined\}/);
-  assert.match(chrome, /\.chat-response-footer\[data-dormant\] \{ visibility: hidden; \}/);
-  assert.match(chrome, /\.chat-response-footer\[data-actions-only\]:has\(\.chat-action-bar\[data-reveal="hover"\]\)\s*\{\s*margin-block-start:\s*0;\s*height:\s*0;\s*\}/);
+  assert.doesNotMatch(footer, /data-dormant|data-actions-only/);
+  assert.doesNotMatch(chrome, /data-dormant|data-actions-only/);
   assert.match(css, /\.timeline\s*>\s*\.msg\.assistant\s*\+\s*\.activity-group/);
-  // Touch shows no actions-only footer (it doubled the activity gaps); the
-  // final answer keeps its own. With a mouse, over a block the footer is the
-  // group gap itself, not a blank band on top of it. A hover bar keeps that
-  // box too: collapsed, it revealed into the block, which painted over it.
-  assert.match(chrome, /@media \(hover: none\), \(pointer: coarse\) \{\s*\.chat-response-footer\[data-actions-only\] \{ display: none; \}/);
-  assert.match(chrome, /\.timeline > \.msg\.assistant\.progress-update > \.chat-response-footer\[data-actions-only\] \{\s*height: auto;\s*margin-block: 0 calc\(-1 \* var\(--conversation-group-gap\)\);\s*\}/);
-  assert.doesNotMatch(chrome, /\.progress-update > \.chat-response-footer\[data-actions-only\]:has\(\.chat-action-bar\[data-reveal="hover"\]\)/);
+  // Next to prose the gap counts a row's empty band, so a row's title stands
+  // the group gap from the text's ink; looks that draw the summary zero it.
+  assert.match(css, /\.timeline > \.msg\.assistant \+ \.activity-group \{\s*margin-block-start: calc\(var\(--conversation-group-gap\) - var\(--timeline-gap\) - var\(--activity-row-trim\) - var\(--activity-row-band\)\);/);
+  assert.match(css, /\.timeline > \.activity-group \+ \.msg\.assistant:where\(:not\(\.activity-group\)\) \{\s*margin-block-start: calc\(var\(--conversation-group-gap\) - var\(--timeline-gap\) - var\(--activity-row-band\)\);/);
+  assert.match(css, /body\[data-activity-style="chip"\] \.timeline \{ --activity-row-band: 0px; \}/);
   // A thought keeps prose's ink gap: offsets from the timeline gap (not the
   // desktop message gap, which squeezed it to 4px on phones), less its pad.
   assert.match(css, /\.timeline > \.msg\.assistant\.reasoning-row \{\s*--reasoning-head-pad: var\(--space-1\);\s*margin-block:\s*calc\(var\(--conversation-group-gap\) - var\(--timeline-gap\) - var\(--reasoning-head-pad\)\)\s*calc\(-1 \* var\(--reasoning-head-pad\)\);/);
@@ -536,7 +524,7 @@ test("timeline vertical runway is represented by flex spacers instead of scroll-
   assert.match(css, /\.timeline::before,\s*\n\.timeline::after\s*\{[^}]*content:\s*"";[^}]*flex:\s*none;/s);
   assert.match(css, /\.timeline::before\s*\{[^}]*flex-basis:\s*var\(--timeline-pad-top\)/s);
   assert.match(css, /\.timeline::after\s*\{[^}]*flex-basis:\s*var\(--timeline-pad-bottom\)/s);
-  assert.match(css, /--timeline-pad-bottom:\s*calc\(var\(--conversation-message-gap\) \+ var\(--conversation-group-gap\) \+ var\(--timeline-turn-sheet-space, 0px\)\)/);
+  assert.match(css, /--timeline-pad-bottom:\s*calc\(var\(--conversation-message-gap\) \+ var\(--conversation-group-gap\) \+ var\(--timeline-dock-overlap, 0px\) \+ var\(--timeline-turn-sheet-space, 0px\)\)/);
 
   const rules = [...css.matchAll(/([^{}]*\.timeline(?![-\\w])[^{}]*)\{([^{}]*)\}/g)];
   assert.ok(rules.length > 0);

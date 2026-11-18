@@ -215,5 +215,5 @@ test("Antigravity native tools read as the command or file they act on", () => {
   assert.equal(write.path, "/repo/notes.md");
 
   assert.equal(classifyTool("run_command", { CommandLine: "ls" }), "shell");
-  assert.equal(executionGroupLabel([{ tool: "run_command", input: { CommandLine: "rg foo" } } as ToolMsg]), "Repository inspection");
+  assert.equal(executionGroupLabel([tool({ tool: "run_command", input: { CommandLine: "rg foo" } })]), "Repository inspection");
 });

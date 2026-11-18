@@ -48,11 +48,13 @@ selected generator uses the canonical session's lease for normal teardown.
 The generator may be a small, free or agent-tuned model, so nothing depends on it
 following the prompt:
 
-- **The request is framed, not forwarded.** The first message (at most 1,500
-  characters: its opening and its closing, since the ask often comes last) is
-  quoted as data between markers, the rules and a few examples come before it,
-  and the last line is the instruction and a `Title:` cue. A model reads what is
-  last, and an agent-tuned one otherwise acts on the message instead of naming it.
+- **The request is framed, not forwarded.** The input (at most 1,500 characters:
+  its opening and its closing, since the ask often comes last) is quoted as data
+  between markers, the rules and a few examples come before it, and the last line
+  is the instruction and a `Title:` cue. A model reads what is last, and an
+  agent-tuned one otherwise acts on the message instead of naming it. Automatic
+  naming gets the first message; **Regenerate title** gets the conversation's
+  requests (see below).
 - **The title is found in the reply.** Reasoning blocks (`<think>…</think>`, also
   unclosed or half-stripped), `<title>`/`<answer>` elements, JSON, code fences,
   markdown, labels (`Title:`, `Назва:`), "Sure! Here is a title:" preambles,
@@ -77,9 +79,13 @@ following the prompt:
   reply. Replies and messages are bounded before any work is done on them.
 
 When enabled, the package adds **Regenerate title** to the desktop and phone
-session menus. It uses the first non-empty visible user message (or, for a
-workflow parent, the task of its first run); a chat with no sent message yet
-uses the caller's own synced composer draft. It applies the current Space's
+session menus. It reads the whole conversation, not only its first message: the
+person's visible requests in order (also the task of each workflow run a parent
+hosted), each compacted to its opening and its closing, repeated requests
+dropped, and the list bounded to 1,500 characters by keeping the first request
+and the latest that fit — the first states the session's intent, the latest say
+what it became. A chat with no sent message yet uses the caller's own synced
+composer draft, framed as its first message. It applies the current Space's
 generator and the session project's language, style, and rules, regardless of the automatic naming mode.
 The existing title stays intact when generation fails or it changes during generation.
 Successful regeneration uses the canonical rename event path and protects the

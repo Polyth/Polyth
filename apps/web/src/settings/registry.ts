@@ -3,6 +3,7 @@
 // Search is diacritic-insensitive and groups hits by page; the view routes to
 // the page then focuses/flashes the exact row via its focusTarget.
 import { tr } from "../i18n/index.ts";
+import { onServerHostSurface } from "../desktopBridge.ts";
 import { assertOwnerCanReplace } from "../packages/ownership.ts";
 
 export interface SettingsSearchItem {
@@ -13,6 +14,10 @@ export interface SettingsSearchItem {
   keywords?: string[];
   /** data-settings-item value of the row to focus. */
   focusTarget: string;
+  /** False when this surface does not render the row at all (for example a
+   *  client-only choice on this computer's own server); such an item is left
+   *  out of search instead of leading to a dead click. */
+  available?: () => boolean;
   ownerPackageId?: string;
 }
 
@@ -129,6 +134,9 @@ export function searchSettingsItems(
   if (!q) return [];
   const hits: SettingsSearchHit[] = [];
   for (const item of registry.values()) {
+    // Package-contributed items are typed without `available`; a truthy non-
+    // function from one must not break every search.
+    if (typeof item.available === "function" && !item.available()) continue;
     const hay = [item.label, item.description ?? "", ...(item.keywords ?? [])].map(fold);
     if (!hay.some((h) => h.includes(q))) continue;
     // Items on pages the current build doesn't show (disposed plugin, hidden
@@ -149,7 +157,7 @@ const BUILTIN_ITEMS: SettingsSearchItem[] = [
   { id: "appearance.theme", pageId: "appearance", label: tr("settings.registry.theme"), description: tr("settings.registry.searchBundledSystemAndCustomColorThemes"), keywords: ["appearance", "dark", "light", "palette", "colors", "color scheme"], focusTarget: "appearance.theme" },
   { id: "appearance.accent", pageId: "appearance", label: tr("settings.registry.accentColor"), description: tr("settings.registry.accentColorDescription"), keywords: ["accent", "highlight", "selection", "tint", "color"], focusTarget: "appearance.accent" },
   { id: "appearance.shellLook", pageId: "appearance", label: tr("settings.pages.shellLook"), description: tr("settings.pages.shellLookHint"), keywords: ["look", "style", "interface style", "skin", "layout", "design", "glass", "wallpaper", "paper", "line", "air", "monolith", "obsidian", "editorial", "premium", "minimal", "serif"], focusTarget: "appearance.shellLook" },
-  { id: "appearance.sync", pageId: "appearance", label: tr("settings.pages.syncAppearance"), description: tr("settings.pages.syncAppearanceHint"), keywords: ["sync", "server", "account", "per-device", "device", "this browser"], focusTarget: "appearance.sync" },
+  { id: "appearance.sync", pageId: "appearance", label: tr("settings.pages.syncAppearance"), description: tr("settings.pages.syncAppearanceHint"), keywords: ["sync", "server", "account", "per-device", "device", "this browser"], focusTarget: "appearance.sync", available: () => !onServerHostSurface() },
   { id: "appearance.background", pageId: "appearance", label: tr("settings.pages.workspaceBackground"), description: tr("settings.registry.workspaceBackgroundDescription"), keywords: ["wallpaper", "image", "glass", "gradient"], focusTarget: "appearance.background" },
   { id: "appearance.glass", pageId: "appearance", label: tr("settings.pages.glassSurfaces"), description: tr("settings.pages.glassSurfacesHint"), keywords: ["glass", "blur", "transparency", "matte", "clear", "effects"], focusTarget: "appearance.glass" },
   { id: "appearance.topRailSurface", pageId: "appearance", label: tr("settings.pages.topRailSurface"), description: tr("settings.registry.topBarStyleDescription"), keywords: ["header", "top rail", "shadow", "flat", "floating", "bar", "divider", "border", "menu", "icons"], focusTarget: "appearance.topRailSurface" },

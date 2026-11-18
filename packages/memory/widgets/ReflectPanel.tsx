@@ -195,7 +195,7 @@ export default function ReflectPanel({ projectId, project, strings: t, memoryOff
   return (
     <section ref={sectionRef} className="memory-section memory-reflect" lang={t.lang} dir="ltr" aria-labelledby={`${uid}-heading`} aria-busy={busy || undefined}>
       <div className="memory-section-head">
-        <div><h3 id={`${uid}-heading`}>{t.heading}</h3><p>{t.intro}</p></div>
+        <div><h3 id={`${uid}-heading`}>{t.heading}</h3><p className="memory-section-copy">{t.intro}</p></div>
         <div className="memory-actions">
           <Btn disabled={scanDisabled} aria-describedby={off && view ? `${uid}-off` : undefined} onClick={() => void run(() => reflectApi.scan(projectId), (result) => ({ tone: "success", text: format(t.scanned, result) }))}>{t.scan}</Btn>
         </div>

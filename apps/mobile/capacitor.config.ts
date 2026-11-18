@@ -9,6 +9,9 @@ export interface CapacitorConfig {
   appName: string;
   webDir: string;
   backgroundColor: string;
+  /** Appended to the WebView's user agent on both platforms (Apple's
+   *  `applicationNameForUserAgent`, Android's `WebSettings` UA suffix). */
+  appendUserAgent: string;
   ios: { contentInset: "automatic" | "scrollableAxes" | "never" | "always" };
   server: {
     hostname: string;
@@ -42,6 +45,12 @@ const config: CapacitorConfig = {
   appName: "Polyth",
   webDir: "../web/dist",
   backgroundColor: "#07091c",
+  // Names the shell in sign-in requests, so the account's device list can tell
+  // the app from Safari/Chrome on the same phone: both ship the same WebKit UA
+  // and the phone app has no browser token of its own. Parsed by
+  // apps/web/src/clientUserAgent.ts; no version, since only the native build
+  // knows it. The desktop app sends `PolythDesktop/<version>` instead.
+  appendUserAgent: "PolythMobile",
   ios: {
     // The web bundle owns safe-area spacing through viewport-fit=cover and
     // --safe-* tokens. Never let WKWebView add a second native top inset:

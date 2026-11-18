@@ -267,7 +267,8 @@ width: 18px; height: 18px;
 }
 .model-capability-icons > span { display: inline-flex; }
 .model-capability-icons svg { width: 12px; height: 12px; }
-.model-row-offline {
+.model-row-offline,
+.model-row-fit {
 margin-inline-start: 6px; color: var(--amber); font-size: var(--font-meta); font-style: normal; font-weight: 520;
 }
 /* Row tools stay invisible until the row is hovered or keyboard-active, so

@@ -53,9 +53,9 @@ export interface RunSettlementOptions {
  *  enough that work lost with its process does not keep it "working". */
 const DEFAULT_BACKGROUND_WAIT_MS = 60 * 60_000;
 const WAITING_POLL_MS = 5_000;
-/** How long a turn the tool watchdog cut may take to be continued. The
- *  server continues at once after a proven abort; an unproven one waits for
- *  reconciliation first. */
+/** How long a turn the tool watchdog or a Polyth restart cut may take to be
+ *  continued. The server continues at once after a proven abort or a runtime
+ *  replacement; an unproven abort waits for reconciliation first. */
 const WATCHDOG_RESUME_MS = 15 * 60_000;
 const MOMENTS_KEPT = 20;
 const MOMENT_CHARS = 160;
@@ -351,7 +351,8 @@ export async function settleScheduledRun(
       if (phase === "resuming") {
         const data = event.data as JsonObject | undefined;
         if (event.type === "user/message" && data?.hiddenUserMessage === true && data.autoResume === true) {
-          // The watchdog's continuation: the run goes on in the next turn.
+          // The server's continuation (the watchdog's nudge, or the turn
+          // replayed on a fresh runtime after a restart): the run goes on.
           phase = "admitted";
           continue;
         }
@@ -375,8 +376,10 @@ export async function settleScheduledRun(
         continue;
       }
       if (phase === "turn" && event.type === "turn/abort-requested") {
-        // Only a watchdog abort that plans a continuation carries this source.
-        watchdogCut = str(event, "source") === "tool-watchdog";
+        // Only aborts the server follows with a continuation carry these
+        // sources: the tool watchdog's, and a restart's runtime replacement.
+        const source = str(event, "source");
+        watchdogCut = source === "tool-watchdog" || source === "runtime-epoch";
         continue;
       }
       if (phase === "turn" && opts.onActivity) noteActivity(event);

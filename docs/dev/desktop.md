@@ -19,7 +19,9 @@ random port on every launch; deleting the file makes the next launch take, and k
 a new one.
 
 Server features are selected from `polyth.serverEntry` manifests by
-`apps/desktop/serverPackageInventory.ts`. The main-process esbuild plugin generates
+`apps/desktop/serverPackageInventory.ts`, a thin wrapper over the inventory it shares
+with the [packaged server](../operations/running.md#packaged-server)
+(`scripts/server-packages-bundle.ts`). The main-process esbuild plugin generates
 static imports; installed applications do not scan repository directories. Source
 execution/tests load the same discovered inventory. The desktop-specific Chat
 Workspace factory is the only platform override. New features do not require a
@@ -117,6 +119,13 @@ server running* in the list applies from the next launch; turning it off never s
 work in progress. If first-run setup never finished and the person goes to another
 server, the setup server stops and the app counts as connect-only, since it held
 nothing. Choosing This computer starts it again.
+
+The main window's user agent is the Chromium default plus `userAgent.ts`'s token
+(`PolythDesktop/<version>`, or `PolythDesktop-Workstation/<version>` in the
+workstation edition), set before the first page loads. It is how the account's
+signed-in device list shows Polyth Desktop instead of "Chrome on macOS"; the
+server keeps the agent only as a display label (docs/dev/ui.md § Users and
+account settings), so this changes nothing about authorization.
 
 ### What another server's page may do
 
@@ -279,6 +288,11 @@ recorded in the operating-system account database (`os.userInfo().shell`), with
 app launched from Finder/Dock does not inherit `SHELL`, so the terminal must not
 silently drop to POSIX `sh`. That is the default (`auto`); Settings → Terminal can
 pin another installed shell (PowerShell 7/Windows PowerShell start with `-NoLogo`).
+The same Finder/Dock launch names no locale (`LANG`/`LC_*` unset), and zsh in the
+C locale mismeasures multibyte prompt glyphs (the prompt is redrawn over itself
+and split bytes show as `�`), so on macOS a local terminal whose environment
+names no locale gets `LANG=en_US.UTF-8` (`terminalLocaleEnv`); a locale that is
+already named is kept.
 Linux-only runtime containment and remote `flock`/
 `/proc` logic remains gated to Linux execution paths and is not a desktop host
 dependency on macOS or Windows.

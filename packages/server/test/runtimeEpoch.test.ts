@@ -61,7 +61,11 @@ const runtimeFor = (
   dispose: async () => undefined,
 });
 
-const harness = (runtime: AgentRuntime, prefix: string) => {
+const harness = (
+  runtime: AgentRuntime,
+  prefix: string,
+  extra: Partial<Parameters<typeof createSessionService>[0]> = {},
+) => {
   const dir = mkdtempSync(join(tmpdir(), prefix));
   const store = createStore(join(dir, "sessions.db"));
   const project: Project = {
@@ -97,6 +101,7 @@ const harness = (runtime: AgentRuntime, prefix: string) => {
       broadcast,
       queue: store,
       runtimes: { forProject: async () => runtime },
+      ...extra,
     }),
   };
 };
@@ -1171,6 +1176,131 @@ test("owned epoch recovery auto-continues when only an active tool was cut", asy
   }
 });
 
+const replacementEndpoint = (): RuntimeEndpoint => ({
+  authorityId: "owned:replacement",
+  continuity: "verified",
+  generation: 3,
+  url: "http://runtime.invalid",
+  location: { directory: "/project" },
+  control: { kind: "owned", instanceToken: "replacement-instance" },
+  config: { kind: "read-only" },
+  authentication: { kind: "none" },
+});
+
+const cutContinuation = (events: Awaited<ReturnType<ReturnType<typeof createStore>["events"]>>) =>
+  events.find((event) =>
+    event.type === "user/message"
+    && (event.data as { autoResume?: unknown }).autoResume === true
+    && (event.data as { runtimeEpochRecovery?: unknown }).runtimeEpochRecovery !== undefined);
+
+test("boot recovery continues a turn a Polyth restart cut, without anyone opening the chat", async () => {
+  const endpoint = replacementEndpoint();
+  const submitted: string[] = [];
+  const runtime = borrowedConfirmRuntime(endpoint, submitted);
+  const { dir, store, project, sessions } = harness(runtime, "polyth-epoch-boot-continue-");
+  const sessionId = "session-boot-continue";
+  try {
+    const projection = projectionFor(project, endpoint, sessionId, "backend-old", "owned:destroyed");
+    // What boot status repair leaves for a turn that was open at shutdown.
+    projection.status = "unknown";
+    await store.upsertProjection(projection);
+    await store.append(sessionId, "user/message", { text: "wait for the stable build" });
+    await store.append(sessionId, "turn/started", { turnId: "turn-cut" }, { ignorable: true });
+    await store.append(sessionId, "tool/started", {
+      callId: "tool-cut",
+      tool: "bash",
+      input: { command: "sleep 275; gh run list" },
+    }, { ignorable: true });
+
+    await sessions.recoverPendingWork!();
+    await waitFor(async () => Boolean(cutContinuation(await store.events(sessionId))));
+
+    const events = await store.events(sessionId);
+    const abort = events.find((event) => event.type === "turn/abort-requested");
+    const stopped = events.find((event) => event.type === "turn/stopped");
+    assert.deepEqual(abort?.data, { reason: "runtime-replaced", source: "runtime-epoch" });
+    assert.ok(abort && stopped && abort.seq < stopped.seq, "the cut is named before the turn closes");
+    assert.ok(events.some((event) => event.type === "tool/error"
+      && (event.data as { callId?: unknown }).callId === "tool-cut"));
+    assert.equal(submitted.length, 1);
+    assert.match(submitted[0]!, /wait for the stable build$/);
+  } finally {
+    await store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("boot recovery leaves a dormant session with a closed turn to recover on use", async () => {
+  const endpoint = replacementEndpoint();
+  const submitted: string[] = [];
+  const runtime = borrowedConfirmRuntime(endpoint, submitted);
+  const { dir, store, project, sessions } = harness(runtime, "polyth-epoch-boot-dormant-");
+  const sessionId = "session-boot-dormant";
+  try {
+    const projection = projectionFor(project, endpoint, sessionId, "backend-old", "owned:destroyed");
+    projection.status = "idle";
+    await store.upsertProjection(projection);
+    await store.append(sessionId, "user/message", { text: "done earlier" });
+    await store.append(sessionId, "turn/started", { turnId: "turn-done" }, { ignorable: true });
+    await store.append(sessionId, "turn/stopped", { turnId: "turn-done", reason: "completed" }, { ignorable: true });
+
+    await sessions.recoverPendingWork!();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const events = await store.events(sessionId);
+    assert.ok(!events.some((event) => event.type === "runtime/epoch-replaced"));
+    assert.equal(submitted.length, 0);
+    assert.equal((await store.projection(sessionId))?.status, "idle");
+  } finally {
+    await store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a tool watchdog that finds the runtime replaced hands the cut turn to epoch recovery", async () => {
+  const endpoint = replacementEndpoint();
+  const submitted: string[] = [];
+  const runtime = borrowedConfirmRuntime(endpoint, submitted);
+  const { dir, store, project, sessions } = harness(runtime, "polyth-epoch-watchdog-continue-");
+  const sessionId = "session-watchdog-continue";
+  try {
+    const projection = projectionFor(project, endpoint, sessionId, "backend-old", "owned:destroyed");
+    projection.status = "unknown";
+    await store.upsertProjection(projection);
+    await store.append(sessionId, "user/message", { text: "ship the release" });
+    await store.append(sessionId, "turn/started", { turnId: "turn-cut" }, { ignorable: true });
+    await store.append(sessionId, "tool/started", {
+      callId: "tool-cut",
+      tool: "bash",
+      input: { command: "sleep 275" },
+    }, { ignorable: true });
+    // A second process on the same data: nothing recovers at boot here, only
+    // its rehydrated watchdog fires.
+    sessions.dispose();
+    const rehydrated = createSessionService({
+      store,
+      projects: { list: async () => [project], get: async (id: string) => id === project.id ? project : undefined } as unknown as ProjectService,
+      permissions: { evaluate: () => "ask", addRule: () => undefined, rules: () => [] } as unknown as PermissionService,
+      broadcast: { event: () => undefined, projection: () => undefined },
+      queue: store,
+      runtimes: { forProject: async () => runtime },
+      toolExecutionTimeoutMs: 30,
+      toolRehydrateGraceMs: 0,
+    });
+    await waitFor(async () => Boolean(cutContinuation(await store.events(sessionId))));
+
+    const events = await store.events(sessionId);
+    const aborts = events.filter((event) => event.type === "turn/abort-requested");
+    assert.deepEqual(aborts.map((event) => (event.data as { source?: unknown }).source), ["runtime-epoch"]);
+    assert.equal(events.filter((event) => event.type === "turn/stopped").length, 1);
+    assert.equal(submitted.length, 1);
+    assert.match(submitted[0]!, /ship the release$/);
+    rehydrated.dispose();
+  } finally {
+    await store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("config-restart safety never reconciles a session bound to another runtime", async () => {
   // 2026-10-06: an OpenCode config restart assessed every session in the
   // workspace against the OpenCode facade. Claude/Codex/Pi sessions read as a
@@ -1451,6 +1581,11 @@ test("re-provisioning releases a safe-idle runtime at any idle age and names wha
     }
     await store.enqueue("session-queued", "next step", "queue");
 
+    // The read-only check an automatic harness update waits on agrees with
+    // the release gate and releases nothing.
+    assert.equal(await sessions.runtimeReleasable!("session-queued"), false);
+    assert.equal(await sessions.runtimeReleasable!("session-fresh"), true);
+    assert.deepEqual(retired, []);
     assert.deepEqual(await sessions.releaseRuntimeIfIdle!("session-queued"), { released: false, blocker: "queue" });
     assert.deepEqual(await sessions.releaseRuntimeIfIdle!("session-fresh"), { released: true });
     assert.deepEqual(retired, ["session-fresh"]);

@@ -73,9 +73,9 @@ test("edited files above the composer are a borderless line in every look", () =
 
 test("narrow Source Control header wraps by unit instead of clipping mid-word", () => {
   // The header always wraps by whole unit. In a phone-width pane its wrappers
-  // dissolve into two rows: branch … Sync, then identity … remote, menu and
-  // refresh, split by a zero-height break item; each item truncates instead
-  // of breaking its own label.
+  // dissolve into two rows: branch … Sync, then identity … the remote menu
+  // and refresh, split by a zero-height break item; each item truncates
+  // instead of breaking its own label.
   assert.match(mobileCss, /\.git-page \.source-control-head\s*\{[^}]*flex-wrap:\s*wrap;/);
   assert.match(mobileCss, /@container git-page \(max-width: 519px\)\s*\{[\s\S]*?\.source-control-head \.workspace-surface-header-context/);
   assert.match(
@@ -85,7 +85,9 @@ test("narrow Source Control header wraps by unit instead of clipping mid-word", 
   assert.match(mobileCss, /\.git-page \.source-control-head::after\s*\{[^}]*order:\s*4;[^}]*flex:\s*0 0 100%;/);
   assert.match(mobileCss, /\.git-page \.source-remote-buttons > \.source-sync-btn\s*\{\s*order:\s*3;\s*margin-inline-start:\s*auto;/);
   assert.match(mobileCss, /\.git-page \.source-control-title > \.source-branch\s*\{[^}]*flex:\s*1 1 0;\s*max-width:\s*max-content;/);
-  assert.match(mobileCss, /\.git-page \.git-remote-context\s*\{\s*order:\s*6;/);
+  assert.match(mobileCss, /\.git-page \.source-remote-buttons > \.source-sync-btn:first-child \+ :where\(\.ui-icon-btn\)\s*\{\s*margin-inline-start:\s*auto;/);
+  // The remote is no header label: no remote name or picker sits in the header.
+  assert.doesNotMatch(mobileCss, /git-remote-(?:context|name|picker)/);
   assert.match(
     mobileCss,
     /\.git-page \.source-control-identity\s*\{[^}]*flex-wrap:\s*nowrap;/,
@@ -198,6 +200,11 @@ test("identity/provider selection keeps the existing slot context", () => {
   // a member's own commit identity (Spaces §14.4). The GitHub provider copy is
   // pinned by the GitHub package's own host visual-grammar test.
   assert.equal((identity.match(/slot="git.repository.identity.provider"/g) ?? []).length, 2);
+  // The chip names who commits and nothing else: no "· GitHub" suffix on the
+  // trigger, and no pull-request chip beside it in the header.
+  assert.match(identity, /const triggerLabel = profile \|\| !resolution\.ok \? label : commitAuthor\?\.name \|\| label;/);
+  assert.doesNotMatch(identity, /identityAndProvider\b/);
+  assert.doesNotMatch(packageEntry, /change-request/);
 });
 
 test("Git locale catalogs share keys and interpolations", () => {

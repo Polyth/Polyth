@@ -100,7 +100,8 @@ test("project and configuration actions remain attached to their handlers", asyn
   const project = await read("../src/components/ProjectFolderDialog.tsx");
   const worktree = await read("../src/components/WorktreeSessionDialog.tsx");
 
-  assert.match(project, /variant="primary"[\s\S]*className="folder-open-btn"[\s\S]*onClick=\{\(\) => void openProject\(\)\}/);
+  // A typed path that does not exist turns Open into the create offer (81b096151).
+  assert.match(project, /variant="primary"[\s\S]*className="folder-open-btn"[\s\S]*onClick=\{\(\) => void \(missingPath \? createMissingFolder\(\) : openProject\(\)\)\}/);
   assert.match(project, /slot="project\.create\.options"/);
   assert.match(worktree, /onClick=\{submit\}/);
 });

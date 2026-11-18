@@ -11,6 +11,26 @@ const AGENT_WIDGETS = [
   "PageBar.tsx", "MakeAgentAction.tsx",
 ];
 
+/** The comma-separated parts of a selector list, splitting only outside
+ *  parentheses at any depth, so `:is(:is(a, b):has(+ c), d)` stays whole. */
+function topLevelSelectors(selector: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < selector.length; index += 1) {
+    const char = selector[index];
+    if (char === "(") depth += 1;
+    else if (char === ")") depth -= 1;
+    else if (char === "," && depth === 0) {
+      parts.push(selector.slice(start, index));
+      start = index + 1;
+    }
+  }
+  assert.equal(depth, 0, `"${selector}" has balanced parentheses`);
+  parts.push(selector.slice(start));
+  return parts;
+}
+
 test("project picking delegates to the shared canonical project picker", async () => {
   const source = await read("../widgets/PlannerProjectPicker.tsx");
   assert.match(
@@ -43,10 +63,11 @@ test("agent styles use canonical tokens only and stay inside the package roots",
   const selectors = css.replace(/\/\*[\s\S]*?\*\//g, "").replace(/@[^{]+\{/g, "").match(/[^{}]+(?=\{)/g) ?? [];
   for (const selector of selectors.map((value) => value.trim()).filter(Boolean)) {
     // Split the selector list on top-level commas only (`:is(a, b)` stays whole).
-    for (const part of selector.split(/,(?![^(]*\))/)) {
+    for (const part of topLevelSelectors(selector)) {
       // .agents-page is the agents' page in place of Chat; .agent-nav the rows in the navigator;
-      // .agent-chip the agent mark inside the host Back of its own session in Chat.
-      assert.match(part.trim(), /^(\.agents-page|\.agent-nav|\.agent-chip|:root|from|to|\d+%)/, `"${part.trim()}" is scoped to a package root`);
+      // .agent-chip the agent mark inside the host Back of its own session in Chat;
+      // .agent-future-approval the agent's checkbox on the host permission card.
+      assert.match(part.trim(), /^(\.agents-page|\.agent-nav|\.agent-chip|\.agent-future-approval|:root|from|to|\d+%)/, `"${part.trim()}" is scoped to a package root`);
     }
   }
 });

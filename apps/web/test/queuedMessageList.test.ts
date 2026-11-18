@@ -590,3 +590,29 @@ test("a starting chat's first prompt is neither a queue chip nor a stall", async
   // Once its canonical prompt lands with the queueId, the row is no longer starting.
   assert.equal(startingQueueIds([...events, ev("user/message", { queueId: "first", text: "build the thing" })]).size, 0);
 });
+
+test("streamed chunks do not re-read the queue; queue events and turn ends do", async () => {
+  const originalFetch = globalThis.fetch;
+  let reads = 0;
+  globalThis.fetch = (async () => { reads++; return response([]); }) as unknown as typeof fetch;
+  let seq = 0;
+  const event = (type: string, data: Record<string, unknown> = {}) =>
+    ({ id: `chunks-e${++seq}`, sessionId: "chunks", seq, time: 1, v: 1, type, data }) as SessionEvent;
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(createElement(QueuedMessageList, { sessionId: "chunks" })));
+    assert.equal(reads, 1, "one read on mount");
+    for (let i = 0; i < 25; i++) {
+      await act(async () => { applyEvents([event("assistant/chunk", { partId: "p", text: "x" })]); });
+    }
+    assert.equal(reads, 1, "25 chunk events cause no extra queue read");
+    await act(async () => { applyEvents([event("queue/enqueued", { queueId: "n1", text: "later", delivery: "queue" })]); });
+    assert.equal(reads, 2, "a queue event causes one read");
+    await act(async () => { applyEvents([event("turn/stopped")]); });
+    assert.equal(reads, 3, "a turn end (queue drains) causes one read");
+  } finally {
+    await act(async () => root.unmount());
+    globalThis.fetch = originalFetch;
+  }
+});

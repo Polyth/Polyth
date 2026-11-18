@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { HarnessContext, PackageDescriptorDto, ProjectComposition } from "@polyth/contracts";
 import {
@@ -14,12 +14,37 @@ const readJson = (path: string): unknown => {
   try { return JSON.parse(readFileSync(path, "utf8")); } catch { return undefined; }
 };
 
-function readProjectComposition(dataDir: string, projectId: string): ProjectComposition | undefined {
-  const raw = readJson(join(dataDir, "projects.json"));
+type CompositionRow = { internal: unknown; composition: unknown };
+type CompositionLookup = { stamp: string; rows: Map<string, CompositionRow> };
+
+/** One parsed lookup per data dir, valid while the file's identity is
+ *  unchanged (ino, size, mtime and ctime in ns). Only id -> row is kept, not
+ *  the whole registry. Any stat or parse failure caches nothing. */
+const lookups = new Map<string, CompositionLookup>();
+
+function compositionLookup(dataDir: string): Map<string, CompositionRow> | undefined {
+  const path = join(dataDir, "projects.json");
+  let stamp: string;
+  try {
+    const st = statSync(path, { bigint: true });
+    stamp = `${st.ino}:${st.size}:${st.mtimeNs}:${st.ctimeNs}`;
+  } catch { return undefined; }
+  const hit = lookups.get(dataDir);
+  if (hit && hit.stamp === stamp) return hit.rows;
+  const raw = readJson(path);
   if (!Array.isArray(raw)) return undefined;
-  const project = raw.find((row) => row && typeof row === "object" && (row as { id?: unknown }).id === projectId) as
-    | { composition?: unknown; internal?: unknown }
-    | undefined;
+  const rows = new Map<string, CompositionRow>();
+  for (const row of raw) {
+    if (!row || typeof row !== "object") continue;
+    const { id, internal, composition } = row as { id?: unknown; internal?: unknown; composition?: unknown };
+    if (typeof id === "string" && !rows.has(id)) rows.set(id, { internal, composition });
+  }
+  lookups.set(dataDir, { stamp, rows });
+  return rows;
+}
+
+function readProjectComposition(dataDir: string, projectId: string): ProjectComposition | undefined {
+  const project = compositionLookup(dataDir)?.get(projectId);
   // Package workspaces and malformed/legacy rows are intentionally general:
   // relevance is presentation, never an authorization boundary.
   if (!project || project.internal !== undefined || project.composition === undefined) return undefined;

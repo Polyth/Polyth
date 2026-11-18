@@ -843,7 +843,13 @@ export function gitRoutes(deps: {
         ...(query("path") ? { path: assertGitRelativePath(query("path")!) } : {}),
         staged: query("staged") === "true",
         ignoreWhitespace: query("ignoreWhitespace") === "true",
+        ...(query("since") ? { since: Number(query("since")) } : {}),
       }));
+      return true;
+    }
+    if (path === "/api/git/diff-stats" && method === "GET") {
+      const root = await rootOf(query("projectId"), query("sessionId"), null, query("repositoryId"));
+      json(200, await git.diffStats(root));
       return true;
     }
     if (path === "/api/git/show" && method === "GET") {
@@ -1424,6 +1430,7 @@ export const GIT_REMOTE_ACCESS: RemoteAccessPolicy = {
   http: [
     { methods: ["GET"], path: "/api/git/status", capability: REMOTE_CAPABILITY.gitRead, mutation: false },
     { methods: ["GET"], path: "/api/git/diff", capability: REMOTE_CAPABILITY.gitRead, mutation: false },
+    { methods: ["GET"], path: "/api/git/diff-stats", capability: REMOTE_CAPABILITY.gitRead, mutation: false },
     { methods: ["GET"], path: "/api/git/show", capability: REMOTE_CAPABILITY.gitRead, mutation: false },
     { methods: ["GET"], path: "/api/git/log", capability: REMOTE_CAPABILITY.gitRead, mutation: false },
     { methods: ["GET"], path: "/api/git/graph", capability: REMOTE_CAPABILITY.gitRead, mutation: false },

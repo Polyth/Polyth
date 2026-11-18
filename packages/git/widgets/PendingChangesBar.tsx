@@ -47,8 +47,14 @@ interface DiffStatsSnapshot {
 export function summarizeUnifiedDiff(diff: string): DiffLineStats {
   let additions = 0;
   let deletions = 0;
+  // `--- a/x` and `+++ b/x` are file headers only before a file's first hunk.
+  // Inside a hunk the same prefix is content: a removed `-- comment`, an added
+  // `++i`. Counting them keeps this equal to `git diff --numstat`.
+  let header = true;
   for (const line of diff.split("\n")) {
-    if (line.startsWith("+++") || line.startsWith("---")) continue;
+    if (line.startsWith("@@")) { header = false; continue; }
+    if (line.startsWith("diff ")) { header = true; continue; }
+    if (header && (line.startsWith("+++") || line.startsWith("---"))) continue;
     if (line.startsWith("+")) additions++;
     else if (line.startsWith("-")) deletions++;
   }
@@ -158,10 +164,15 @@ export default function PendingChangesBar() {
       return;
     }
 
+    // One request counts every changed file. An older server (404) or a path it
+    // left out falls back to that file's own diff below.
+    let bulk: Awaited<ReturnType<typeof api.gitDiffStats>> | null = null;
     const readStats = async (path: string) => {
       const parts: DiffLineStats[] = [];
       if (status.staged.some((file) => file.path === path)) {
-        try {
+        const known = bulk?.staged?.[path];
+        if (known) parts.push(known);
+        else try {
           const result = await api.gitDiff(projectId, path, true, false, sessionId ?? undefined);
           parts.push(summarizeUnifiedDiff(result.diff));
         } catch {
@@ -169,7 +180,9 @@ export default function PendingChangesBar() {
         }
       }
       if ([...status.unstaged, ...status.untracked, ...status.conflicted].some((file) => file.path === path)) {
-        try {
+        const known = bulk?.unstaged?.[path];
+        if (known) parts.push(known);
+        else try {
           const result = await api.gitDiff(projectId, path, false, false, sessionId ?? undefined);
           parts.push(summarizeUnifiedDiff(result.diff));
         } catch {
@@ -191,7 +204,10 @@ export default function PendingChangesBar() {
     // asks again: once per settled round during a turn, at once outside one.
     const startRound = () => {
       const startedAt = Date.now();
-      void Promise.all(Array.from({ length: DIFF_STAT_READERS }, worker)).then(() => {
+      const readBulk = projectId
+        ? api.gitDiffStats(projectId, sessionId ?? undefined).then((result) => { bulk = result; }, () => undefined)
+        : Promise.resolve();
+      void readBulk.then(() => (cancelled ? undefined : Promise.all(Array.from({ length: DIFF_STAT_READERS }, worker)))).then(() => {
         statRound.current = { at: Date.now(), tookMs: Date.now() - startedAt };
         if (cancelled) return;
         setDiffStats((prev) => {

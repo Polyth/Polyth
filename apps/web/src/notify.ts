@@ -430,8 +430,14 @@ export function installNotify(): void {
   const prev = new Map<string, SessionSnapshot>();
   const emitted = new Set<string>();
 
+  let seenSessions: unknown;
   subscribeStore(() => {
     const s = getState();
+    // Notifications come only from a change between two session lists. The
+    // store replaces the list when a row changes, so the same list (a streamed
+    // chunk, any other state) has nothing to compare.
+    if (s.sessions === seenSessions) return;
+    seenSessions = s.sessions;
     const ui = getUiSettings();
     const snapshots: SessionSnapshot[] = s.sessions.map((p) => ({
       id: p.id,

@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Disposable } from "@polyth/contracts";
 import type { CanonicalSecurity } from "./canonicalSecurity.ts";
@@ -20,6 +20,17 @@ const internalCoreEntry = resolve(fileURLToPath(new URL("./indexCore.ts", import
  * auth/tenancy compatibility path without canonical preflight. */
 export function isDirectInternalCoreEntrypoint(entry = process.argv[1]): boolean {
   return typeof entry === "string" && entry.length > 0 && resolve(entry) === internalCoreEntry;
+}
+
+/** True when the module at `moduleUrl` is the process entry as its own source
+ *  file `fileName` (`node packages/server/src/index.ts`). Inside a bundle (the
+ *  packaged server, Desktop, the setup tools) every module shares the bundle's
+ *  `import.meta.url`, so an `import.meta.url === argv[1]` check would start
+ *  each such module at once; there the bundle's own entry decides what runs. */
+export function isSourceEntrypoint(moduleUrl: string, fileName: string, entry = process.argv[1]): boolean {
+  if (typeof entry !== "string" || entry.length === 0) return false;
+  const self = fileURLToPath(moduleUrl);
+  return basename(self) === fileName && self === resolve(entry);
 }
 
 const canonicalEntrypointRequired = (): Error => Object.assign(

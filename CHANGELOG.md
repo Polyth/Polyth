@@ -7,6 +7,31 @@ milestones are named after what shipped.
 
 ---
 
+## Unreleased — packaged server archive
+
+### Added
+
+- `npm run build:server` builds the Polyth server as one archive for a platform
+  (`polyth-server-<version>-<platform>-<arch>.tar.gz`). A server machine needs only
+  Node.js and the agent CLIs: no checkout, Rust, compiler or development
+  dependencies. `polyth server start`, `setup-claim` and `break-glass` work from the
+  unpacked archive, and a smoke test checks an archive from first run to a signed-in
+  request. See [Packaged server](docs/operations/running.md#packaged-server).
+- The same build makes the `polyth` npm package (the code) and one
+  `@polyth/server-<platform>-<arch>` package per platform (its resources); every
+  release builds, smoke-tests and attaches the archives, and publishes the npm
+  packages when the repository has an npm token.
+- `polyth update` updates a packaged server: an npm install through npm, an archive
+  from the release (checksum-verified, swapped in place with the previous release
+  kept for `polyth update --rollback`), then restarts its service and puts the
+  previous release back if the new one does not answer.
+- Before a server migrates a database it copies it to `pre-migration/` in the data
+  directory, so a release older than the migration can be restored.
+
+### Fixed
+
+- The server reports its real version (`/api/health`, Settings) instead of 0.1.0.
+
 ## Unreleased — GitHub Copilot as a harness
 
 ### Added

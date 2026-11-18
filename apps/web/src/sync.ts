@@ -679,11 +679,11 @@ export class SyncClient {
 
   /** Tells the server whether this page's person is using it
    *  (devicePresence.ts). False while no socket is open: `onOpen` re-reports. */
-  sendPresence(report: { clientId: string; active: boolean; idleMs: number }): boolean {
+  sendPresence(report: { clientId: string; active: boolean; idleMs: number; hidden: boolean }): boolean {
     const ws = this.ws;
     if (!ws || ws.readyState !== WS_OPEN) return false;
     try {
-      ws.send(JSON.stringify({ type: "presence", clientId: report.clientId, active: report.active, idleMs: report.idleMs }));
+      ws.send(JSON.stringify({ type: "presence", clientId: report.clientId, active: report.active, idleMs: report.idleMs, hidden: report.hidden }));
       return true;
     } catch {
       return false;

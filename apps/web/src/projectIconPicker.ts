@@ -63,6 +63,55 @@ export function decodeSvgDataUrl(value: string): string | null {
   return null;
 }
 
+/** What `text.replace(/<opener>[\s\S]*?<closer>/gi, "")` does for a literal
+ *  closer, in one pass. The regex scans the rest of the text again from every
+ *  opener that has no closer, which is quadratic on a run of them; here the
+ *  first opener without one ends the search, since no later one can have it. */
+function withoutSpans(text: string, opener: RegExp, closer: string): string {
+  let out = "";
+  let at = 0;
+  for (let match = opener.exec(text); match; match = opener.exec(text)) {
+    const end = text.indexOf(closer, opener.lastIndex);
+    if (end < 0) break;
+    out += text.slice(at, match.index);
+    at = end + closer.length;
+    opener.lastIndex = at;
+  }
+  return at === 0 ? text : out + text.slice(at);
+}
+
+/** `<script …>…</script>` and `<foreignObject …>…</foreignObject>` with their
+ *  content, as `/<(script|foreignObject)\b[^>]*>[\s\S]*?<\/\1\s*>/gi` removes
+ *  them, in one pass: an element whose closing tag is missing is remembered,
+ *  not searched for again from every later opener. */
+function withoutPairedElements(text: string): string {
+  const opener = /<(script|foreignObject)\b/gi;
+  const closers: Record<string, RegExp> = { script: /<\/script\s*>/gi, foreignobject: /<\/foreignObject\s*>/gi };
+  const unclosed = new Set<string>();
+  let out = "";
+  let at = 0;
+  let tagEnd = -1;
+  for (let match = opener.exec(text); match; match = opener.exec(text)) {
+    const name = match[1]!.toLowerCase();
+    if (unclosed.has(name)) {
+      if (unclosed.size === 2) break;
+      continue;
+    }
+    if (tagEnd < opener.lastIndex) tagEnd = text.indexOf(">", opener.lastIndex);
+    if (tagEnd < 0) break;
+    const closer = closers[name]!;
+    closer.lastIndex = tagEnd + 1;
+    if (!closer.exec(text)) {
+      unclosed.add(name);
+      continue;
+    }
+    out += text.slice(at, match.index);
+    at = closer.lastIndex;
+    opener.lastIndex = at;
+  }
+  return at === 0 ? text : out + text.slice(at);
+}
+
 // Mirrors sanitizeProjectIconSvg in packages/server/src/projects.ts.
 export function sanitizeProjectIconSvg(svg: string): string {
   let clean = svg.replace(/^\uFEFF/, "");
@@ -71,9 +120,9 @@ export function sanitizeProjectIconSvg(svg: string): string {
   // that never closes is removed to the end, as a browser would read it.
   for (let previous = ""; previous !== clean;) {
     previous = clean;
-    clean = clean.replace(/<\?xml[\s\S]*?\?>/gi, "");
-    clean = clean.replace(/<!doctype[\s\S]*?>/gi, "");
-    clean = clean.replace(/<(script|foreignObject)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "");
+    clean = withoutSpans(clean, /<\?xml/gi, "?>");
+    clean = withoutSpans(clean, /<!doctype/gi, ">");
+    clean = withoutPairedElements(clean);
     clean = clean.replace(/<\/?(?:script|foreignObject)\b[^>]*>?/gi, "");
     clean = clean.replace(/\sxmlns:xlink\s*=\s*(?:"[^"]*"|'[^']*')/gi, "");
     clean = clean.replace(/\s(?:xlink:)?href\s*=\s*(?:"(?!#)[^"]*"?|'(?!#)[^']*'?|[^\s"'>#][^\s>]*)/gi, "");

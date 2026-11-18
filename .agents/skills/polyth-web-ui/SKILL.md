@@ -13,6 +13,7 @@ Repository-relative paths below. Read root `AGENTS.md` once. Locate the current 
 - `docs/dev/ui.md`
 - `docs/dev/widgets.md`
 - `docs/dev/components.md`
+- `docs/dev/package-ui-kit.md`
 
 ## Workflow and constraints
 Choose the existing extension seam by behavior: feature content/surface, widget, slot, settings page, resource view or command. Verify its current web-sdk signature and a live registration. Do not invent a new surface API from historical screenshots or old architecture prose. Packages provide content and metadata; the host owns layout, focus, global geometry and window modes.

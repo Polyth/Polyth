@@ -1101,8 +1101,8 @@
   }
 }
 
-/* Repository identity and transport target are deliberately quiet, separate
-   controls. The selected remote is the Git authority used by sync actions. */
+/* The commit identity is one quiet header control: who commits, by a short
+   name. Provider, source and e-mail live in the menu it opens. */
 .source-control-identity {
   display: flex;
   align-items: center;

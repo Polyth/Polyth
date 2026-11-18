@@ -7,19 +7,29 @@ import {
   parseReleaseRepository,
   releasesRoutes,
   type ReleasesFetch,
+  serverUpdate,
 } from "../src/routes/releases.ts";
+import { compareReleaseVersions } from "@polyth/contracts";
+import { updateCommand } from "../src/version.ts";
 import { fakeSpaceContext } from "./support/spaces.ts";
 
 function request(
   path: string,
   fetchImpl: ReleasesFetch,
-  options: { repository?: string | null | (() => string | null | undefined); principalKind?: string } = {},
+  options: {
+    repository?: string | null | (() => string | null | undefined);
+    principalKind?: string;
+    serverVersion?: string;
+    updateCommand?: string;
+  } = {},
 ) {
   let status = 0;
   let payload = "";
   const route = releasesRoutes({
     fetchImpl,
     repository: options.repository === undefined ? "acme/polyth" : options.repository,
+    ...(options.serverVersion ? { serverVersion: options.serverVersion } : {}),
+    ...(options.updateCommand ? { updateCommand: options.updateCommand } : {}),
   });
   const req = {
     req: { socket: { remoteAddress: "127.0.0.1" } },
@@ -177,4 +187,26 @@ test("workstation edition assets are never offered as downloads", () => {
   // The standard installers of the same release still classify.
   assert.equal(classifyReleasesAsset("Polyth-1.2.300-win-x64.exe")?.platform, "windows");
   assert.equal(classifyReleasesAsset("Polyth-1.2.300-mac-arm64.dmg")?.arch, "arm64");
+});
+
+test("a newer release is offered with the command that updates this install", async () => {
+  const offered = await request("/api/system/releases", okFetch, { serverVersion: "0.1.80", updateCommand: "polyth update" }).run();
+  assert.deepEqual((offered.payload as { update: unknown }).update, { version: "0.1.86", command: "polyth update" });
+  const current = await request("/api/system/releases", okFetch, { serverVersion: "0.1.86", updateCommand: "polyth update" }).run();
+  assert.equal((current.payload as { update: unknown }).update, null);
+
+  const deps = { serverVersion: "1.2.356", updateCommand: "polyth update" };
+  assert.deepEqual(serverUpdate("1.2.357", deps), { version: "1.2.357", command: "polyth update" });
+  assert.equal(serverUpdate("1.2.357", { ...deps, serverVersion: "1.2.358-nightly" }), null, "a newer nightly is not downgraded");
+  assert.equal(serverUpdate("1.2.357", { ...deps, serverVersion: "0.0.0-unknown" }), null);
+  assert.equal(serverUpdate("1.2.357", { serverVersion: "1.2.356" }), null);
+  assert.equal(serverUpdate(undefined, deps), null);
+
+  assert.equal(compareReleaseVersions("1.2.357", "1.2.357-nightly"), 1);
+  assert.equal(compareReleaseVersions("1.10.0", "1.9.9"), 1);
+  assert.equal(compareReleaseVersions("v1", "1.2.3"), null);
+
+  assert.equal(updateCommand("polyth update", true), "polyth update", "the host's command wins");
+  assert.match(updateCommand(undefined, true), /docker compose pull/);
+  assert.match(updateCommand(undefined, false), /git pull/);
 });

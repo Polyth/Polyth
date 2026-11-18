@@ -210,7 +210,8 @@ When `npm_packages` is enabled, Release packs:
 
 The tarballs are also attached to the GitHub Release. `publish_npm=true` publishes those exact tarballs to npm with provenance after checking whether the same version already exists, making a release-job retry safe.
 
-npm publication requires `NPM_TOKEN`.
+npm publication uses [trusted publishing](#npm-trusted-publishing) (trusted publisher file
+`release.yml`); no secret is needed, and both packages refuse tokens.
 
 Internal first-party workspaces are deliberately **not** bulk-published just because they lack `private: true`; the public npm release allowlist is explicit.
 
@@ -310,6 +311,77 @@ own runners; no deploy key or second repository is involved.
   `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`) and iOS/TestFlight (the five App
   Store Connect secrets under [iOS / TestFlight](#ios--testflight)); without them the builds are
   ad-hoc signed and the iOS job produces a simulator archive.
+- **Packaged server.** Target `server` (remote-build.mjs) runs on `linux-x64`, `linux-arm64`,
+  `darwin-arm64` and `darwin-x64` runners: `npm run build:server` with the release version, then
+  `apps/server/smoke.ts` on the archive and on the npm packages (first run, setup, full server,
+  sign-in). `update-feed.mjs` adds the archives `polyth-server-<version>-<target>.tar.gz` and
+  `SHA256SUMS-server.txt` to the release; like the APK they never block it, and a missing platform
+  is a warning. After the release is public, `scripts/ci/publish-server-npm.mjs` publishes the npm
+  packages (`@polyth/server-<target>` first, then `polyth`) only as a complete set, with provenance,
+  under the channel's dist-tag (`latest` for stable), through
+  [npm trusted publishing](#npm-trusted-publishing) (no secret; `NPM_TOKEN` is only a fallback), and
+  publishes the channels in the `POLYTH_SERVER_NPM_CHANNELS` variable (default `stable`; add
+  `nightly` to put nightlies under `polyth@nightly`). A stable release then rewrites `Formula/polyth.rb` in the
+  Homebrew tap (`POLYTH_HOMEBREW_TAP`, default `Polyth/homebrew-tap`) from
+  `SHA256SUMS-server.txt` with `scripts/ci/homebrew-formula.mjs`; it pushes over SSH with the
+  `HOMEBREW_TAP_DEPLOY_KEY` secret, the private half of a write deploy key of the tap (no access to
+  any other repository; GitHub's host keys come from `api.github.com/meta`), and skips an
+  incomplete archive set. To rotate it, add a new write deploy key to the tap, set the secret to
+  its private key and delete the old key.
+  The formula installs the archive into `libexec`, runs it with Homebrew's `node` and gives
+  `brew services` a service. That `node` is the newest major (26.13.1 on 2026-11-17, where the
+  archive passed `apps/server/smoke.ts`); the archive's only native module, `node-pty`, uses
+  N-API, so a new major does not need a rebuild; `homebrew/core` would want a source build instead, so the tap is
+  the channel. The packaged server itself is described in
+  [Ways to run Polyth](running.md#packaged-server).
+
+### npm trusted publishing
+
+npm is retiring tokens that publish without a 2FA challenge (management actions since August
+2026, direct publishing around January 2027), so both npm sets publish by OIDC from the job
+that builds them:
+
+| Packages | Workflow → job | Script |
+| --- | --- | --- |
+| `polyth`, `@polyth/server-linux-x64`, `-linux-arm64`, `-darwin-arm64`, `-darwin-x64` | `nightly.yml` → `publish`, channels in `POLYTH_SERVER_NPM_CHANNELS` | `publish-server-npm.mjs` |
+| `@polyth/contracts`, `@polyth/package-sdk` | `release.yml` → `publish`, with `publish_npm=true` | `publish-sdk-npm.mjs` |
+
+Both jobs have `id-token: write` and install npm 11.21.2 (trusted publishing needs 11.5.1 or
+newer; Node 22 ships npm 10). `scripts/ci/npm-publish.mjs` uses the job's identity before any
+`NPM_TOKEN`, publishes in order with provenance and skips versions already on npm, so a rerun is
+safe. npm checks provenance against a package's `repository` field: every published
+`package.json` must name `github.com/Polyth/Polyth`, or npm rejects the publish.
+
+Trusted publishing cannot create a package. While a package of the set is not on npm, the server
+step publishes nothing and says so in a warning (the release, the archives and the Homebrew tap
+are not affected); the SDK step fails, because someone asked for that publication.
+
+Since 2026-11-17 all seven packages have a deprecated `0.0.0` placeholder (`latest` until their
+first real release), a trusted publisher for `Polyth/Polyth` and their workflow file
+(`npm trust list <pkg>`), and *Require two-factor authentication and disallow tokens*
+(`npm access set mfa=publish`): no token can publish them, `NPM_TOKEN` included. For a new
+package, such as a new platform, a maintainer with 2FA in the `polyth` npm organization:
+
+1. Publishes it once by hand (`npm publish <tgz> --access public`, 2FA prompt), for example the
+   tarballs of a release run (`gh run download <run> --pattern 'products-*'`) or a `0.0.0`
+   placeholder. A directory is given as `./dir`: npm reads `pkgs/polyth` as the GitHub
+   shorthand `user/repo`. The registry answers `202` and shows a new package a few minutes later.
+2. Adds its trusted publisher (npm 11.15.0 or newer; one configuration per package; the
+   workflow from the table):
+
+   ```bash
+   npm trust github "$p" --repo Polyth/Polyth --file nightly.yml --allow-publish --yes
+   ```
+
+3. Deprecates a placeholder (`npm deprecate "$p@0.0.0" "<message>"`) and disallows tokens
+   (`npm access set mfa=publish "$p"`).
+
+Each `deprecate` and `access` call asks for its own web 2FA confirmation; the "skip for five
+minutes" choice covers publishes only. Put global flags such as `--registry` after the
+subcommand: npm 11.21 takes the first arguments after `npm` as the command path, so a flag in
+front makes `npm trust github` fail with *Unknown positional argument: github*. The web 2FA
+prompt (`--auth-type=web`) appears only when stdin and stdout are a terminal; without one npm
+fails with `EOTP`. In a script, run npm under `script -qfec`.
 
 ## External builder feed
 
@@ -326,7 +398,7 @@ With both variables unset, `remote-build.mjs` produces the same plain smoke arti
 
 ### Web download section
 
-The running server also reads `POLYTH_UPDATE_REPOSITORY` (runtime environment, not only at build time). When it is `owner/repo`, `GET /api/system/releases` asks the GitHub API for `releases/latest`, filters the payload to the installer assets the feed publishes (`-win-x64.exe`, `-mac-<arch>.dmg`, `-linux-<arch>.AppImage`, `-android.apk`; update metadata and blockmaps are excluded), caches the successful result for ten minutes, and returns it as a bounded DTO. The Settings → About page shows the per-platform links and hides the section entirely when the variable is unset, the lookup fails, or the client is the packaged desktop app. The same repository is used by every channel — the section follows whatever GitHub marks Latest, so it lists stable downloads while desktop clients keep their own channel updater.
+The running server also reads `POLYTH_UPDATE_REPOSITORY` (runtime environment, not only at build time). When it is `owner/repo`, `GET /api/system/releases` asks the GitHub API for `releases/latest`, filters the payload to the installer assets the feed publishes (`-win-x64.exe`, `-mac-<arch>.dmg`, `-linux-<arch>.AppImage`, `-android.apk`; update metadata and blockmaps are excluded), caches the successful result for ten minutes, and returns it as a bounded DTO. The Settings → About page shows the per-platform links and hides the section entirely when the variable is unset, the lookup fails, or the client is the packaged desktop app. When that release is newer than the server (`compareReleaseVersions` in `@polyth/contracts`), the DTO's `update` names it with the command for this install (`BootOptions.updateCommand`: the packaged server passes `polyth update` or Homebrew's; otherwise a container's or a checkout's) and About shows it above the downloads. The same repository is used by every channel — the section follows whatever GitHub marks Latest, so it lists stable downloads while desktop clients keep their own channel updater.
 
 After a full (`target=all`) build, the builder's `publish` job runs `node scripts/ci/update-feed.mjs assemble <products> <feed>`. That command merges the two macOS partials into one `latest-mac.yml`, copies only the files the metadata references (plus their blockmaps) and the Android debug APK as `Polyth-<version>-android.apk` (left out, without blocking, when the Android job failed), adds the channel copies of the metadata (below), adds the [macOS 12 build](../dev/desktop.md#macos-12-build)'s `legacy-mac.yml` and its files when the `mac-dmg-legacy` job produced them (no channel copies; a missing one is a workflow warning, never a blocker, and macOS 12 clients then wait for a later stable release), and refuses an incomplete desktop set, mismatched versions, or a version that does not belong to the run's channel. The job writes the [release notes](#release-notes), uploads into a draft release, publishes it, and keeps the three newest releases **of each channel**. A failed non-desktop target (Android/iOS/npm) does not block publication. A missing desktop platform does block it.
 

@@ -34,7 +34,7 @@ const until = async (check: () => boolean, what: string) => {
   assert.fail(`timed out: ${what}`);
 };
 const quiet = () => new Promise((r) => setTimeout(r, 150));
-const report = (ws: WebSocket, active: boolean, idleMs = 0) => ws.send(JSON.stringify({ type: "presence", clientId: "ignored-for-paired", active, idleMs }));
+const report = (ws: WebSocket, active: boolean, idleMs = 0, hidden?: unknown) => ws.send(JSON.stringify({ type: "presence", clientId: "ignored-for-paired", active, idleMs, ...(hidden === undefined ? {} : { hidden }) }));
 
 async function rig(grantsFor: (endpoint: string) => string[]) {
   const presence = createDevicePresence();
@@ -61,6 +61,11 @@ test("a presence report is answered with presence/state and the newest active de
     await until(() => one.states.length === 1, "first state");
     assert.deepEqual(one.states, [false]);
     assert.equal(t.presence.activeDevice(account), "device:ep1");
+    assert.equal(t.presence.activeUse(account)!.hidden, false, "an older page sends no hidden flag");
+    report(one.ws, true, 0, true);
+    await until(() => t.presence.activeUse(account)!.hidden, "hidden report");
+    report(one.ws, true, 0, "yes");
+    await until(() => !t.presence.activeUse(account)!.hidden, "only a boolean true counts");
     const two = await connect(t.port, "ep2");
     report(two.ws, true);
     await until(() => one.states.length === 2, "flip");

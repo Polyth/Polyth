@@ -39,9 +39,9 @@
   -webkit-tap-highlight-color: transparent;
 }
 @media (hover: hover) {
-  .turn-incomplete-continue:hover { text-decoration: underline; text-underline-offset: 2px; }
+  .turn-incomplete-continue:hover:where(:not(:disabled)) { text-decoration: underline; text-underline-offset: 2px; }
 }
-.turn-incomplete-continue:active { opacity: .72; }
+.turn-incomplete-continue:active:where(:not(:disabled)) { opacity: .72; }
 .turn-incomplete-continue:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 
 /* The word is the visible target; the hit area reaches the touch floor

@@ -39,7 +39,7 @@ on:
         type: choice
         required: true
         default: all
-        options: [all, android-apk, ios-app, mac-dmg, mac-dmg-legacy, mac-dmg-workstation, windows-exe, windows-exe-workstation, linux-appimage, linux-appimage-workstation, npm-packages]
+        options: [all, android-apk, ios-app, mac-dmg, mac-dmg-legacy, mac-dmg-workstation, windows-exe, windows-exe-workstation, linux-appimage, linux-appimage-workstation, npm-packages, server]
 
 permissions:
   contents: read
@@ -152,6 +152,12 @@ jobs:
             { target: 'windows-exe', artifact: 'windows-exe', runner: 'windows-2025', java: false, rust: false, rust_targets: '' },
             { target: 'linux-appimage', artifact: 'linux-appimage', runner: 'ubuntu-24.04', java: false, rust: true, rust_targets: '' },
             { target: 'npm-packages', artifact: 'npm-packages', runner: 'ubuntu-24.04', java: false, rust: false, rust_targets: '' },
+            // The packaged server (apps/server): a release archive and npm packages per
+            // platform, each smoke-tested on its runner. Never blocks publication.
+            { target: 'server', artifact: 'server-linux-x64', runner: 'ubuntu-24.04', java: false, rust: true, rust_targets: '' },
+            { target: 'server', artifact: 'server-linux-arm64', runner: 'ubuntu-24.04-arm', java: false, rust: true, rust_targets: '' },
+            { target: 'server', artifact: 'server-darwin-arm64', runner: 'macos-15', java: false, rust: true, rust_targets: '' },
+            { target: 'server', artifact: 'server-darwin-x64', runner: 'macos-15-intel', java: false, rust: true, rust_targets: '' },
           ];
           // `all` builds the workstation edition on stable and nightly releases; naming one of its targets builds it on any channel.
           const selected = env.TARGET === 'all'
@@ -325,6 +331,8 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: write
+      # npm trusted publishing (and provenance) for the server packages.
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -337,6 +345,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
+          registry-url: https://registry.npmjs.org
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -398,6 +407,62 @@ jobs:
           # Upload into a draft, then publish: the updater never sees a half-uploaded release.
           gh release upload "$tag" --repo "$GITHUB_REPOSITORY" --clobber "$RUNNER_TEMP"/feed/*
           gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest="$latest"
+
+      # After the release that carries the server archives: the npm packages of
+      # the same build, only as a complete set (scripts/ci/publish-server-npm.mjs).
+      # Trusted publishing (this job's id-token) needs npm >= 11.5.1; Node 22
+      # ships npm 10. NPM_TOKEN is only a fallback: npm is retiring tokens
+      # that publish without 2FA.
+      - name: npm for trusted publishing
+        run: npm install --global npm@11.21.2
+      - name: Publish the server to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ steps.feed.outputs.version }}
+          POLYTH_SERVER_NPM_CHANNELS: ${{ vars.POLYTH_SERVER_NPM_CHANNELS || 'stable' }}
+        run: node scripts/ci/publish-server-npm.mjs "$RUNNER_TEMP/products" "$VERSION"
+
+      # Stable releases rewrite Formula/polyth.rb in the Homebrew tap from the
+      # release's server checksums (scripts/ci/homebrew-formula.mjs). The tap is
+      # written with a deploy key that can write to that one repository only.
+      - name: Update the Homebrew tap
+        if: env.POLYTH_RELEASE_CHANNEL == 'stable'
+        env:
+          TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+          TAP_REPOSITORY: ${{ vars.POLYTH_HOMEBREW_TAP || 'Polyth/homebrew-tap' }}
+          VERSION: ${{ steps.feed.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$TAP_DEPLOY_KEY" ]; then
+            echo "::notice::HOMEBREW_TAP_DEPLOY_KEY is not set; the Homebrew tap is not updated"
+            exit 0
+          fi
+          sums="$RUNNER_TEMP/feed/SHA256SUMS-server.txt"
+          if ! node scripts/ci/homebrew-formula.mjs "$VERSION" "$sums" "$GITHUB_REPOSITORY" > "$RUNNER_TEMP/polyth.rb"; then
+            echo "::warning::Release $VERSION has no complete server archive set; the Homebrew tap is not updated"
+            exit 0
+          fi
+          key="$RUNNER_TEMP/tap-key"
+          hosts="$RUNNER_TEMP/tap-known-hosts"
+          trap 'rm -f "$key"' EXIT
+          (umask 077 && printf '%s\n' "$TAP_DEPLOY_KEY" > "$key")
+          # GitHub's SSH host keys from its API (TLS), not trust on first use.
+          curl -fsSL https://api.github.com/meta | jq -r '.ssh_keys[] | "github.com " + .' > "$hosts"
+          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$hosts"
+          git clone --depth 1 "git@github.com:${TAP_REPOSITORY}.git" "$RUNNER_TEMP/tap"
+          mkdir -p "$RUNNER_TEMP/tap/Formula"
+          cp "$RUNNER_TEMP/polyth.rb" "$RUNNER_TEMP/tap/Formula/polyth.rb"
+          cd "$RUNNER_TEMP/tap"
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "Formula/polyth.rb already describes $VERSION"
+            exit 0
+          fi
+          git config user.name "Max"
+          git config user.email "max@polyth.app"
+          git add Formula/polyth.rb
+          git commit --message "polyth $VERSION"
+          git push origin HEAD
 
       # Temporary: a nightly build's workstation edition replaces the edition assets
       # on the newest stable release, so the edition tracks devel while the app keeps

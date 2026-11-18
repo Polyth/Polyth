@@ -142,7 +142,8 @@ function SourceControlTabs({ tabs, value, onChange }: {
 /** Tab label: the name plus a count pill. The visible pill is decorative; the
  *  accessible name reads "Changes 11" from the same two text nodes. */
 function tabLabel(name: string, count?: number, tone: "neutral" | "accent" | "danger" = "neutral"): ReactNode {
-  return <span className="source-tab-label"><span>{name}</span>{count !== undefined && <> <CountBadge count={count} tone={tone} /></>}</span>;
+  // A zero count is noise: an empty tab just reads as its name.
+  return <span className="source-tab-label"><span>{name}</span>{count ? <> <CountBadge count={count} tone={tone} /></> : null}</span>;
 }
 
 const remoteProviderLabel = (hostname: string): string => {
@@ -1051,7 +1052,13 @@ export default function GitView({
     }
     const files = [...status.conflicted, ...status.staged, ...status.unstaged, ...status.untracked];
     let cancelled = false;
+    // One request counts every file; an older server (404) or a path it left
+    // out falls back to that file's own diff.
+    const bulk = api.gitDiffStats(projectId, sessionId ?? undefined, repositoryId).catch(() => null);
     void Promise.all(files.map(async (file) => {
+      const known = (await bulk)?.[file.staged ? "staged" : "unstaged"]?.[file.path];
+      if (known) return [fileStatKey(file), known] as const;
+      if (cancelled) return [fileStatKey(file), null] as const;
       try {
         const result = await api.gitDiff(projectId, file.path, file.staged, false, sessionId ?? undefined, repositoryId);
         return [fileStatKey(file), summarizeUnifiedDiff(result.diff)] as const;
@@ -1536,7 +1543,6 @@ export default function GitView({
   });
 
   const remoteBlocked = busy || busyRemote !== null || autoRebaseBusy || !remoteTargetAvailable;
-  const selectedRemote = remoteOptions.find((option) => option.remoteName === selectedRemoteName);
   const remoteNames = new Set([...remoteOptions.map((option) => option.remoteName), ...branches.branches.flatMap((branch) => branch.remote ? [branch.remote] : [])]);
   const subjectLength = commitMsg.split("\n", 1)[0]?.trim().length ?? 0;
   const selectedFile = selected ? all.find((file) => file.path === selected.path && file.staged === selected.staged) ?? null : null;
@@ -2315,31 +2321,10 @@ export default function GitView({
           {Slot && isPrimaryRepository && <Slot slot="git.repository.identity" context={{ projectId, sessionId }} />}
         </div>}
         actions={<div className="source-remote-actions" aria-label={tr("gitview.remoteRepositoryActions")}>
-          <div className="git-remote-context">
-            {remoteChoices.length > 1 ? (
-              <Select
-                label={tr("gitview.remote")}
-                ariaLabel={tr("gitview.chooseGitRemote")}
-                value={selectedRemoteName}
-                options={remoteChoices}
-                onChange={(next) => {
-                  if (!projectId) return;
-                  setStoredRemoteName(next);
-                  setGitRemoteSelection(projectId, sessionId, next, repositoryId);
-                }}
-                disabled={busy || busyRemote !== null || autoRebaseBusy || !remoteTargetAvailable}
-                className="git-remote-picker"
-              />
-            ) : (
-              <span
-                className={`git-remote-name${remoteTargetAvailable ? "" : " is-unavailable"}`}
-                title={selectedRemote ? `${remoteDetail(selectedRemote)} · ${tr("gitview.remoteTransportHint")}` : tr("gitview.remoteTransportHint")}
-              >
-                <span className="sr-only">{tr("gitview.remote")} </span>
-                {remoteTargetAvailable ? selectedRemoteName : tr("gitview.remoteUnavailable")}
-              </span>
-            )}
-          </div>
+          {/* The remote is a detail of Sync and its menu, not a header label:
+              Sync's tooltip and each menu row name it, and a second remote is
+              chosen inside the menu, as on the phone. A missing remote is the
+              notice under the header. */}
           <div className="source-remote-buttons">
             {remoteOptionsError && <Button size="sm" variant="ghost" onClick={retryRemoteInspection}>{tr("common.retry")}</Button>}
             <Button
@@ -2348,7 +2333,9 @@ export default function GitView({
               iconStart={SyncIcon}
               busy={busyRemote !== null || autoRebaseBusy}
               disabled={remoteBlocked}
-              title={tr("gitview.syncWithValue", { remote: selectedRemoteName })}
+              title={commitMsg.trim() && (status?.staged.length ?? 0) > 0
+                ? tr("gitview.commitAndSyncHint")
+                : tr("gitview.syncWithValue", { remote: selectedRemoteName })}
               onClick={() => void runRemote("sync")}
             >
               {busyRemote ? remoteLabel[busyRemote].busy : autoRebaseBusy ? remoteLabel.sync.busy : remoteLabel.sync.idle}
@@ -2356,14 +2343,38 @@ export default function GitView({
             <Menu
               label={tr("gitview.remoteRepositoryActions")}
               align="end"
-              entries={(["fetch", "pull", "push"] as const).map((step) => ({
-                id: step,
-                label: remoteLabel[step].idle,
-                detail: selectedRemoteName,
-                icon: step === "fetch" ? FetchIcon : step === "pull" ? PullIcon : PushIcon,
-                disabled: remoteBlocked,
-                onSelect: () => { void runRemote(step); },
-              }))}
+              entries={[
+                ...(["fetch", "pull", "push"] as const).map((step): MenuEntry => ({
+                  id: step,
+                  label: remoteLabel[step].idle,
+                  detail: selectedRemoteName,
+                  icon: step === "fetch" ? FetchIcon : step === "pull" ? PullIcon : PushIcon,
+                  disabled: remoteBlocked,
+                  onSelect: () => { void runRemote(step); },
+                })),
+                ...(remoteChoices.length > 1 ? [
+                  "separator" as const,
+                  {
+                    id: "remote",
+                    label: tr("gitview.remote"),
+                    value: selectedRemoteName,
+                    entries: remoteChoices.map((choice): MenuEntry => ({
+                      id: `remote:${choice.value}`,
+                      label: choice.label,
+                      ...(choice.detail ? { detail: choice.detail } : {}),
+                      kind: "radio",
+                      checked: choice.value === selectedRemoteName,
+                      disabled: remoteBlocked,
+                      onSelect: () => {
+                        if (!projectId) return;
+                        setStoredRemoteName(choice.value);
+                        setGitRemoteSelection(projectId, sessionId, choice.value, repositoryId);
+                      },
+                    })),
+                    onSelect: () => undefined,
+                  } satisfies MenuEntry,
+                ] : []),
+              ]}
             >
               {(trigger) => <IconButton {...trigger} icon={MoreIcon} size="sm" label={tr("gitview.remoteRepositoryActions")} disabled={remoteBlocked} />}
             </Menu>
@@ -2431,12 +2442,10 @@ export default function GitView({
             <div className={`git-master-detail ${mobileDetail ? "detail-open" : ""}${all.length === 0 ? " is-clean" : ""}`}>
               <section className="git-master-pane" aria-label={tr("gitview.changedFiles")}>
                 {all.length > 0 && <div className="git-pane-toolbar">
+                  {/* The total alone: each group header below counts its own
+                      files (merge, staged, changes, untracked). */}
                   <div className="git-pane-summary">
                     <strong>{all.length === 1 ? tr("gitview.oneChangedFile") : tr("gitview.changedFilesValue", { count: all.length })}</strong>
-                    <span className="muted">{[
-                      conflictCount > 0 ? tr("gitview.conflictedValue", { count: conflictCount }) : "",
-                      tr("gitview.stagedValue", { count: stagedCount }),
-                    ].filter(Boolean).join(" · ")}</span>
                   </div>
                   {(totalFileStats.additions > 0 || totalFileStats.deletions > 0) && (
                     <span
@@ -2557,19 +2566,15 @@ export default function GitView({
                   }
                 }}
               />
+              {/* The message and its verbs only: the card above counts the
+                  staged files and the header names the branch. Sync lives in
+                  the header (it commits a typed message first). */}
               <div className="git-commit-rail">
-                <div className="git-commit-heading">
-                  <strong>{status.staged.length === 1 ? tr("gitview.commitOneStagedFile") : tr("gitview.commitStagedFilesValue", { count: status.staged.length })}</strong>
-                  <span className="git-commit-branch" title={status.branch || "HEAD"}>
-                    <UiIcon icon={BranchIcon} size="sm" />
-                    <span className="mono">{status.branch || "HEAD"}</span>
+                {subjectLength > 0 && (
+                  <span className="git-commit-counter" data-over={subjectLength > SUBJECT_SOFT_LIMIT ? "true" : undefined} title={tr("gitview.subjectLengthValue", { count: subjectLength, limit: SUBJECT_SOFT_LIMIT })}>
+                    {subjectLength}/{SUBJECT_SOFT_LIMIT}
                   </span>
-                  {subjectLength > 0 && (
-                    <span className="git-commit-counter" data-over={subjectLength > SUBJECT_SOFT_LIMIT ? "true" : undefined} title={tr("gitview.subjectLengthValue", { count: subjectLength, limit: SUBJECT_SOFT_LIMIT })}>
-                      {subjectLength}/{SUBJECT_SOFT_LIMIT}
-                    </span>
-                  )}
-                </div>
+                )}
                 <div className="git-commit-actions">
                   <Button
                     size="sm"
@@ -2594,14 +2599,6 @@ export default function GitView({
                         });
                     }}
                   >{tr("gitview.generate")}</Button>
-                  <Button
-                    size="sm"
-                    iconStart={SyncIcon}
-                    busy={busyRemote === "sync"}
-                    disabled={busy || busyRemote !== null || !remoteTargetAvailable}
-                    title={tr("gitview.commitAndSyncHint")}
-                    onClick={() => void runRemote("sync")}
-                  >{tr("gitview.syncRepository")}</Button>
                   <Button
                     size="sm"
                     variant="primary"

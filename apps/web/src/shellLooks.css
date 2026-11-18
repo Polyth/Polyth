@@ -685,6 +685,46 @@ body:is([data-shell-look="monolith"], [data-shell-look="monolith-reverse"]):is([
   --look-work-inset: var(--space-2);
 }
 
+/* The work plane is a window in the chrome, not a layer on it. Painted on
+   .app, the chrome lay under the sheet or well too, so over a wallpaper the
+   work plane's own veil stacked on the chrome's: Reverse's well let through
+   only a few percent of the image and Monolith's sheet barely more. On the
+   desktop the chrome (--look-chrome) is the work plane's outer spread
+   instead: it fills the window around the plane, follows its corners, and
+   the plane's veil lies straight on the image. The navigator and the top rail
+   come before the plane in the tree, so they step above it (the launcher
+   column already does). Tablets and phones keep the chrome on .app: their
+   navigator and header are drawers and layers with their own stacking. */
+@media (min-width: 961px) {
+  /* (Double id strength: the looks' own .app rules come later, and light
+     Monolith's carries html.light.) */
+  body:is([data-shell-look="monolith"], [data-shell-look="monolith-reverse"]):not(#\#):not(#\#) .app {
+    background: transparent !important;
+  }
+
+  body:is([data-shell-look="monolith"], [data-shell-look="monolith-reverse"]):not(#\#) .app-shell > .workspace {
+    box-shadow: var(--look-work-shadow), 0 0 0 100vmax var(--look-chrome) !important;
+  }
+
+  /* The spread ends at .app-shell, which clips its overflow. Columns and
+     Bare lay the top rail over the shell, inside the spread; Classic stacks
+     it above the shell, where the rail row showed the bare image (a dark
+     band over the lit navigator and strip). There the rail paints the chrome
+     itself, on the same frosted image, so the two meet with no seam. It is a
+     band of the plane, not a card, so it keeps no corner; and the desktop
+     shell's gap under it (.app's gap, var(--space-2) in styles.css) is chrome
+     too: the rail casts its fill down over it, exactly that far. */
+  body:is([data-shell-look="monolith"], [data-shell-look="monolith-reverse"]):not([data-shell-layout="columns"]):not([data-shell-layout="bare"]):not(#\#):not(#\#) .app > .header {
+    background: var(--look-chrome) !important;
+    box-shadow: 0 var(--space-2) 0 0 var(--look-chrome) !important;
+    border-radius: 0 !important;
+  }
+
+  body:is([data-shell-look="monolith"], [data-shell-look="monolith-reverse"]):not(#\#) :is(.app > .header, .app-shell > .sidebar:not(.sidebar--rail-collapsed)) {
+    z-index: 1;
+  }
+}
+
 body:is([data-shell-look="monolith"], [data-shell-look="monolith-reverse"]):not(#\#):not(#\#) .railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]) > .rail:not(.rail-dynamic):not(.rail-fullscreen):not(.rail-dock-bottom):not(.rail-pinned-narrow) {
   background: var(--look-work) !important;
   backdrop-filter: var(--look-work-blur) !important;
@@ -1483,6 +1523,7 @@ body[data-shell-look="line"]:not(#\#) .md-code-block {
 
 /* The rule sits on the touch box's bottom edge: no touch trim under it. */
 body[data-shell-look="line"]:not(#\#) .activity-group { --activity-row-trim: 0px; }
+body[data-shell-look="line"]:not(#\#) .timeline { --activity-row-band: 0px; }
 
 /* The rule runs from frame edge to frame edge: this block does not bleed. */
 body[data-shell-look="line"]:not(#\#) .activity-group {
@@ -1757,6 +1798,7 @@ body[data-shell-look="air"]:not(#\#) .md-code-block {
 /* The pill (and the open block's island) fill the row's whole touch box:
    no touch trim, so they keep the full gap to the rows around them. */
 body[data-shell-look="air"]:not(#\#) .activity-group { --activity-row-trim: 0px; }
+body[data-shell-look="air"]:not(#\#) .timeline { --activity-row-band: 0px; }
 
 /* The pill's edge stands on the frame; the thread and the steps follow the
    mark and the title inside it. */
@@ -1933,15 +1975,18 @@ body[data-shell-look="air"]:not(#\#) :is(.mobile-float-navigation, .mobile-float
    «Моноліт» — premium. Chrome sits on a deep backdrop; the work is one solid
    sheet raised above it. Two planes only, no glass, no outlines; a short,
    light shadow. Over a wallpaper the backdrop becomes the tinted image and
-   the sheet frosts (--look-a). */
+   the sheet frosts as a canvas does (--look-veil), straight on the image: the
+   chrome is painted around it (--look-chrome, see "a window in the chrome"
+   above). */
 
 body[data-shell-look="monolith"]:not(#\#) {
   /* Fields (1f): the navigator's search sets the field for every input. */
   --look-field: color-mix(in srgb, var(--text) 6%, transparent);
   --look-field-radius: calc(9px * var(--look-round));
   --look-backdrop: color-mix(in srgb, var(--bg) 62%, black);
+  --look-chrome: color-mix(in srgb, var(--look-backdrop) var(--look-veil-soft), transparent);
   --look-sheet-solid: var(--bg);
-  --look-sheet: color-mix(in srgb, var(--look-sheet-solid) var(--look-a), transparent);
+  --look-sheet: color-mix(in srgb, var(--look-sheet-solid) var(--look-veil), transparent);
   --look-edge: color-mix(in srgb, var(--text) 9%, transparent);
   --look-sheet-shadow: 0 0 0 1px var(--look-edge), 0 6px 18px -10px rgba(0, 0, 0, 0.32), 0 1px 2px rgba(0, 0, 0, 0.14);
   --look-float: var(--look-sheet-solid);
@@ -1991,13 +2036,13 @@ html.light body[data-shell-look="monolith"]:not(#\#) {
 }
 
 body[data-shell-look="monolith"]:not(#\#) .app {
-  background: color-mix(in srgb, var(--look-backdrop) var(--look-veil-soft), transparent) !important;
+  background: var(--look-chrome) !important;
 }
 
 /* In light mode the chrome's backdrop must stay light enough for the theme's
    quiet inks, so it veils a wallpaper as densely as a canvas does. */
-html.light body[data-shell-look="monolith"]:not(#\#) .app {
-  background: color-mix(in srgb, var(--look-backdrop) var(--look-veil), transparent) !important;
+html.light body[data-shell-look="monolith"]:not(#\#) {
+  --look-chrome: color-mix(in srgb, var(--look-backdrop) var(--look-veil), transparent);
 }
 
 /* The sheet. */
@@ -2151,17 +2196,37 @@ body[data-shell-look="monolith"]:not(#\#) :is(.mobile-float-navigation, .mobile-
    (header, navigator, rails) is one raised, lit plane, and the conversation is
    a recessed well cut into it. Raised things in the well (composer, the
    person's message, cards) are made of the chrome plane; selection in the
-   chrome is carved down to the well's depth. Over a wallpaper the well
-   becomes a window onto the image. */
+   chrome is carved down to the well's depth. Over a wallpaper the plane is
+   lit, frosted glass that veils the image as Monolith's backdrop does
+   (--look-chrome, --look-veil-soft), and the well is a darker window onto the
+   image (--look-veil): the chrome is painted around it, not under it (see "a
+   window in the chrome" above). */
 
 body[data-shell-look="monolith-reverse"]:not(#\#) {
   /* Fields (1f): the navigator's search sets the field for every input. */
-  --look-field: var(--look-well-solid);
+  --look-field: var(--look-cut);
   --look-field-edge: inset 0 1px 2px rgba(0, 0, 0, 0.2);
   --look-field-radius: calc(9px * var(--look-round));
-  --look-plane-solid: color-mix(in srgb, var(--bg) 84%, white);
+  /* Dark: the plane is lit by a tenth of white, about the step a macOS
+     sidebar takes above its content. At a sixth (#424242 on the macOS
+     palettes) it read as a flat mid-gray slab, the raised composer and prompt
+     turned into gray blocks in a black well, and quiet ink on it fell under
+     4.5:1. */
+  --look-plane-solid: color-mix(in srgb, var(--bg) 90%, white);
   --look-well-solid: color-mix(in srgb, var(--bg) 70%, black);
-  --look-plane: color-mix(in srgb, var(--look-plane-solid) var(--look-a), transparent);
+  /* A cut in the plane that is not the well: fields and the control strips
+     sink halfway, so the plane is not pocked with black slots and the well
+     stays the one deep surface. Light mode cuts to the well's own gray. Over
+     a wallpaper it veils as the well does, so the glass is not pocked with
+     opaque slots either. */
+  --look-cut-solid: color-mix(in srgb, var(--look-well-solid) 55%, var(--look-plane-solid));
+  --look-cut: color-mix(in srgb, var(--look-cut-solid) var(--look-veil), transparent);
+  /* The chrome plane, and the raised pieces of it in the well (composer,
+     prompt, cards), are one material: over a wallpaper the same lit glass,
+     so a raised piece takes the image's colour as the chrome does instead of
+     standing in the well as a neutral gray block. */
+  --look-plane: color-mix(in srgb, var(--look-plane-solid) var(--look-veil-soft), transparent);
+  --look-chrome: var(--look-plane);
   --look-well: color-mix(in srgb, var(--look-well-solid) var(--look-veil), transparent);
   --look-edge: color-mix(in srgb, var(--text) 8%, transparent);
   --look-raise: 0 0 0 1px var(--look-edge), 0 4px 12px -8px rgba(0, 0, 0, 0.4);
@@ -2179,12 +2244,12 @@ body[data-shell-look="monolith-reverse"]:not(#\#) {
   --look-scrim-blur: blur(4px);
   /* Selection is carved to the well; strips are wells with raised segments. */
   --look-carve: inset 0 1px 2px rgba(0, 0, 0, 0.22);
-  --look-select: var(--look-well-solid);
+  --look-select: var(--look-well);
   --look-select-edge: var(--look-carve);
   --look-select-radius: calc(9px * var(--look-round));
-  --look-control: var(--look-well-solid);
+  --look-control: var(--look-cut);
   --look-control-edge: var(--look-carve);
-  --look-segment: var(--look-plane-solid);
+  --look-segment: var(--look-plane);
   --look-segment-edge: var(--look-raise);
   --look-rail-edge: var(--look-edge);
   --look-rail-seam: var(--look-edge);
@@ -2217,12 +2282,13 @@ body[data-shell-look="monolith-reverse"]:not(#\#) {
 html.light body[data-shell-look="monolith-reverse"]:not(#\#) {
   --look-plane-solid: color-mix(in srgb, var(--bg) 40%, white);
   --look-well-solid: color-mix(in srgb, var(--bg) 88%, var(--text) 9%);
+  --look-cut-solid: var(--look-well-solid);
   --look-raise: 0 0 0 1px var(--look-edge), 0 3px 10px -6px rgba(0, 0, 0, 0.14);
   --look-float-shadow: 0 10px 28px -16px rgba(0, 0, 0, 0.22);
 }
 
 body[data-shell-look="monolith-reverse"]:not(#\#) .app {
-  background: var(--look-plane) !important;
+  background: var(--look-chrome) !important;
   --look-canvas-blur: var(--look-blur);
 }
 
@@ -2339,12 +2405,13 @@ body[data-shell-look="monolith-reverse"]:not(#\#) .composer-card {
 /* Phone. */
 
 body[data-shell-look="monolith-reverse"]:not(#\#) .mobile-navigator .project-glyph:not(:has(> img)) {
-  background: var(--look-well-solid);
+  background: var(--look-cut);
   box-shadow: var(--look-carve);
 }
 
+/* The navigator's search is the look's field, as on the desktop. */
 body[data-shell-look="monolith-reverse"]:not(#\#) .mobile-nav-search {
-  background: var(--look-well-solid) !important;
+  background: var(--look-field) !important;
   border-radius: calc(10px * var(--look-round)) !important;
 }
 

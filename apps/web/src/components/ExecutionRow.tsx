@@ -697,7 +697,12 @@ function activityTrail(events: readonly SubagentEvent[]): TrailEntry[] {
     .slice(-6);
 }
 
-function SubagentWork({ sessionId, status }: { sessionId: string; status: string }) {
+/** First read: the newest events of the child's log. */
+const SUBAGENT_TRAIL_EVENTS = 400;
+/** Events kept for the trail while later reads append to them. */
+const SUBAGENT_TRAIL_KEPT = 2_000;
+
+export function SubagentWork({ sessionId, status }: { sessionId: string; status: string }) {
   const [events, setEvents] = useState<SubagentEvent[]>([]);
   const [steering, setSteering] = useState("");
   const [sending, setSending] = useState(false);
@@ -706,14 +711,37 @@ function SubagentWork({ sessionId, status }: { sessionId: string; status: string
 
   useEffect(() => {
     let alive = true;
+    let newest = -1;
+    let reading = false;
     const load = () => {
-      void api.getEvents(sessionId).then((next) => {
-        if (alive) setEvents(next as SubagentEvent[]);
-      }).catch(() => {});
+      if (reading || document.visibilityState === "hidden") return;
+      reading = true;
+      // A passive read that wakes no runtime. The first one takes the log's
+      // tail; each later one takes only what came after it, so a poll moves a
+      // few events instead of the whole log and earlier rows stay in the trail.
+      const after = Math.max(newest, 0);
+      void api.getEvents(sessionId, after, { limit: SUBAGENT_TRAIL_EVENTS, prefetch: true }).then((next) => {
+        if (!alive) return;
+        const fresh = (next as SubagentEvent[]).filter((event) => event.seq > newest);
+        if (fresh.length === 0) {
+          if (newest < 0) { newest = 0; setEvents([]); }
+          return;
+        }
+        const first = newest < 0;
+        newest = fresh[fresh.length - 1]!.seq;
+        setEvents((held) => (first ? fresh : [...held, ...fresh].slice(-SUBAGENT_TRAIL_KEPT)));
+      }).catch(() => {}).finally(() => { reading = false; });
     };
     load();
     const timer = running ? setInterval(load, 1_500) : undefined;
-    return () => { alive = false; if (timer) clearInterval(timer); };
+    // A hidden tab stops reading; showing it again reads once.
+    const onVisibility = () => { if (document.visibilityState !== "hidden") load(); };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      alive = false;
+      if (timer) clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [sessionId, running]);
 
   const trail = useMemo(() => activityTrail(events), [events]);
@@ -1222,7 +1250,7 @@ export function ExecutionRow({
         </div>
         {/* Headless, the block header's tail already carries the time and countdown. */}
         {status === "running" && !headless && presentation.kind !== "subagent" && !message.composerShell
-          ? <ToolPulseLine sessionId={sessionIdProp ?? activeSessionId} callId={message.callId} startedAt={message.time} kept={message.keptRunning === true} />
+          ? <ToolPulseLine sessionId={sessionIdProp ?? activeSessionId} callId={message.callId} startedAt={message.time} kept={message.keptRunning === true} keptBy={message.keptBy} />
           : null}
         <div className="execution-expand-shell" aria-hidden={!open}>
           <div className="execution-collapse-content">

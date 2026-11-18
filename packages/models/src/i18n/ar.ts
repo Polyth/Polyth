@@ -25,6 +25,8 @@ export const ar: ModelsMessages = {
   "modelpicker.noModelsFound": "لم يتم العثور على نماذج",
   "modelpicker.noModelsMatch": "لا توجد نماذج مطابقة \"",
   "modelpicker.notConnected": "غير متصل",
+  "modelpicker.chatWontFit": "Chat won't fit",
+  "modelpicker.chatWontFitTitle": "This chat no longer fits this model's context window",
   "modelpicker.notReported": "غير مذكور",
   "modelpicker.output": "الإخراج",
   "modelpicker.pdf": "PDF",

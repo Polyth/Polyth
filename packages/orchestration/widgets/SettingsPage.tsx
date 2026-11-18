@@ -258,11 +258,13 @@ export default function OrchestrationSettingsPage({ host, settingsTarget }: { ho
       >
         {tab === "now" && (
           <NowTab
-            state={saved}
+            state={view}
+            draft={draft}
+            setDraft={edit}
             loading={false}
             refreshing={refreshing}
-            mode={saved.policy.mode}
-            ceiling={saved.policy.quotaCeiling}
+            ceiling={draft.quotaCeiling}
+            overPaceCeiling={draft.mode === "roles" ? draft.overPaceCeiling : null}
             now={now}
             onRefresh={refresh}
             onOpenRole={(id) => { setTab("roles"); setTabChosen(true); setOpenRequest({ id, n: Date.now() }); }}
@@ -285,15 +287,19 @@ export default function OrchestrationSettingsPage({ host, settingsTarget }: { ho
           />
         )}
         {tab === "safeguards" && (
-          <>
-            {inactiveNote && (
+          <SafeguardsTab
+            draft={draft}
+            setDraft={edit}
+            harnesses={view?.harnesses ?? []}
+            onReset={() => void reset()}
+            busy={saveState === "saving"}
+            rolesOnlyNote={inactiveNote ? (
               <p className="orch-inline-note">
                 {tr("orchestration.roles.inactive")}{" "}
                 <button type="button" className="orch-link" onClick={() => edit({ ...draft, mode: "roles" })}>{tr("orchestration.roles.switch")}</button>
               </p>
-            )}
-            <SafeguardsTab draft={draft} setDraft={edit} onReset={() => void reset()} busy={saveState === "saving"} />
-          </>
+            ) : null}
+          />
         )}
       </SettingsTabs>
       <SaveBar

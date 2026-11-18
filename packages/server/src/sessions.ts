@@ -122,6 +122,7 @@ import {
   runtimeEpochRecoveryPending,
   recoveredUserText,
   unrestoredCompactionSeq,
+  CONTEXT_PRESSURE_LEVELS,
   contextPressureText,
   pendingContextPressure,
   redactContinuity,
@@ -276,17 +277,6 @@ export const PAUSE_CONTINUE_PROMPT = [
   "[polyth] A person paused you mid-turn and has now continued you.",
   "Your work so far is intact. Any tool call that was running when you were paused was cancelled and its output discarded, so check its effect before relying on it, and run it again only if it is still needed. Then carry on with your task from where you left off.",
 ].join("\n\n");
-
-/** Read as a stop is persisted: did the latest abort request of the turn
- *  being stopped come from Pause? A later plain Stop wins. */
-const pauseRequested = (events: readonly SessionEvent[]): boolean => {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index]!;
-    if (event.type === "turn/stopped" || event.type === "turn/started") return false;
-    if (event.type === "turn/abort-requested") return (event.data as { pause?: unknown }).pause === true;
-  }
-  return false;
-};
 
 /** SessionService historically accepted a bare ModelRef for rate-limit
  * recovery. Keep that call shape valid while giving new callers an explicit,
@@ -539,6 +529,10 @@ export interface RuntimeEpochSessionService extends RestartSafetySessionService 
    * the idle-release safety gate, so its next turn launches with freshly
    * reconciled capabilities (Spaces §14.6). `blocker` names why it stays. */
   releaseRuntimeIfIdle?(sessionId: string): Promise<{ released: boolean; blocker?: string }>;
+  /** Whether `releaseRuntimeIfIdle` would release this chat's runtime right
+   * now; reads only, releases nothing. A harness update waits on it so it
+   * never replaces a CLI under a working chat. */
+  runtimeReleasable?(sessionId: string): Promise<boolean>;
   /** Authorize one package-contributed MCP tool against the canonical session
    * that currently owns execution. Project-scoped native runtimes do not put a
    * session id in their MCP configuration, and a minted session id can name the
@@ -678,7 +672,11 @@ export interface TurnHooks {
    * settle temporary presentation or workspace metadata after work starts. */
   onSessionTitleChanged?(sessionId: string, title: string, source: "runtime" | "fallback"): void | Promise<void>;
   /** Decorate the next admitted turn after compaction. The returned context is
-   *  persisted on user/message before it is sent to the runtime. */
+   *  persisted on user/message before it is sent to the runtime. Called for
+   *  every ordinary send, but `events` is the session's log only when a
+   *  compaction awaits restoration (`unrestoredCompactionSeq` is non-null) or
+   *  the send replays the log for another recovery; otherwise it is empty,
+   *  so a send does not read the whole log just to find nothing to restore. */
   beforeTurn?(
     sessionId: string,
     events: readonly SessionEvent[],
@@ -939,6 +937,9 @@ export function createSessionService(deps: {
   failedStartupCleanupAllowed?: (projection: SessionProjection) => boolean | Promise<boolean>;
   /** Drop volatile provisioning state after the canonical session is gone. */
   onSessionReleased?: (info: { sessionId: string; projectId: string; cwd: string }) => void | Promise<void>;
+  /** The canonical session was permanently deleted (never fired for archive
+   * or runtime release). Owners of per-session bookkeeping drop it here. */
+  onSessionDeleted?: (sessionId: string) => void | Promise<void>;
   /** Package-owned destructive resource cleanup performed under the canonical
    * session lock before its durable rows are removed. The callback may request
    * verified release only for the exact cwd it is about to delete. */
@@ -1037,6 +1038,10 @@ export function createSessionService(deps: {
      *  Not called when a decided answer failed to deliver, nor for requests
      *  re-published after a reconnect. */
     permissionWaiting?(sessionId: string, requestId: string): void;
+    /** An open call has been quiet for `toolQuietNoticeMs` and nobody kept it
+     *  (SERVER_TOOL_QUIET_BUS): its silence stop is due at `stopsAt` unless it
+     *  shows activity or someone keeps it. Once per quiet stretch. */
+    toolQuiet?(event: { sessionId: string; callId: string; tool: string; startedAt: number; quietSince: number; stopsAt: number }): void;
     /** A `person/message` was appended. `mentions` are the kept mentioned
      *  people (kind `mention`); `audience`, only for a conversation, is every
      *  other person who can open it and has not muted it (kind `message`).
@@ -1063,6 +1068,9 @@ export function createSessionService(deps: {
   /** Absolute ceiling for one tool call even while it keeps showing activity.
    *  Defaults to sixty minutes. `toolExecutionTimeoutMs` is the silence limit. */
   toolExecutionHardLimitMs?: number;
+  /** How long a call is quiet before `notify.toolQuiet` hears it, once per
+   *  quiet stretch. Defaults to one minute before the silence stop. */
+  toolQuietNoticeMs?: number;
   /** Refuse every provider turn at admission (agent-beta without opt-in). */
   modelTurnsDisabled?: boolean;
   /** Test seam: grace after a restart before a rehydrated call's hard ceiling may fire (default 60 s). */
@@ -1508,6 +1516,10 @@ export function createSessionService(deps: {
   const pausedToolWatchdogs = new Set<string>();
   /** Calls a person marked `tool/keep-running`: no silence stop, ceiling only. */
   const keptToolCalls = new Set<string>();
+  /** The quiet notice comes this long into a silence; 0 or past the stop: never. */
+  const TOOL_QUIET_NOTICE_MS = Math.floor(deps.toolQuietNoticeMs ?? Math.max(0, TOOL_EXECUTION_TIMEOUT_MS - 60_000));
+  /** Per call, the `lastActivityAt` whose quiet stretch was already announced. */
+  const toolQuietNoticed = new Map<string, number>();
   // Per-call clock: when it started and when a runtime event last carried its
   // id. Survives a request pause so the hard ceiling is not reset by waiting.
   const toolWatchdogClocks = new Map<string, { startedAt: number; lastActivityAt: number; ceilingNotBefore: number }>();
@@ -1523,6 +1535,7 @@ export function createSessionService(deps: {
     pausedToolWatchdogs.delete(key);
     keptToolCalls.delete(key);
     toolWatchdogClocks.delete(key);
+    toolQuietNoticed.delete(key);
   };
   const clearSessionToolWatchdogs = (sessionId: string): void => {
     for (const [key, timer] of toolWatchdogs) {
@@ -1538,6 +1551,9 @@ export function createSessionService(deps: {
     }
     for (const key of keptToolCalls) {
       if (key.startsWith(`${sessionId}\0`)) keptToolCalls.delete(key);
+    }
+    for (const key of toolQuietNoticed.keys()) {
+      if (key.startsWith(`${sessionId}\0`)) toolQuietNoticed.delete(key);
     }
   };
   type ActiveTool = { tool: string; input: JsonObject; startedAt: number };
@@ -1588,14 +1604,29 @@ export function createSessionService(deps: {
       const ceiling = Math.max(clock.startedAt + TOOL_EXECUTION_HARD_LIMIT_MS, clock.ceilingNotBefore);
       // A kept call has no silence stop: only the hard ceiling remains.
       const kept = keptToolCalls.has(key);
-      const deadline = kept ? ceiling : Math.min(clock.lastActivityAt + TOOL_EXECUTION_TIMEOUT_MS, ceiling);
+      const silenceStop = clock.lastActivityAt + TOOL_EXECUTION_TIMEOUT_MS;
+      const deadline = kept ? ceiling : Math.min(silenceStop, ceiling);
+      // The same timer wakes once earlier for the quiet notice, so every path
+      // that clears the watchdog clears the notice too.
+      const noticeAt = !kept && deps.notify?.toolQuiet && TOOL_QUIET_NOTICE_MS > 0
+        && TOOL_QUIET_NOTICE_MS < TOOL_EXECUTION_TIMEOUT_MS && silenceStop <= ceiling
+        && toolQuietNoticed.get(key) !== clock.lastActivityAt
+        ? clock.lastActivityAt + TOOL_QUIET_NOTICE_MS
+        : Number.POSITIVE_INFINITY;
       const timer = setTimeout(() => {
         toolWatchdogs.delete(key);
         const current = toolWatchdogClocks.get(key);
         if (!current) return;
         const now = Date.now();
-        const silent = !keptToolCalls.has(key) && now - current.lastActivityAt >= TOOL_EXECUTION_TIMEOUT_MS;
+        const quietFor = now - current.lastActivityAt;
+        const silent = !keptToolCalls.has(key) && quietFor >= TOOL_EXECUTION_TIMEOUT_MS;
         const capped = now - current.startedAt >= TOOL_EXECUTION_HARD_LIMIT_MS && now >= current.ceilingNotBefore;
+        if (!silent && !capped && !keptToolCalls.has(key) && deps.notify?.toolQuiet
+          && TOOL_QUIET_NOTICE_MS > 0 && quietFor >= TOOL_QUIET_NOTICE_MS
+          && toolQuietNoticed.get(key) !== current.lastActivityAt) {
+          toolQuietNoticed.set(key, current.lastActivityAt);
+          void announceToolQuiet(sessionId, callId, { startedAt: current.startedAt, lastActivityAt: current.lastActivityAt });
+        }
         // Timers can fire a hair early; activity may also have landed meanwhile.
         if (!silent && !capped) {
           schedule();
@@ -1604,11 +1635,35 @@ export function createSessionService(deps: {
         void stopTimedOutTool(sessionId, callId, silent ? "silence" : "hard-limit").catch((error) => {
           console.error(`[polyth] failed to stop timed-out tool ${callId} in ${sessionId}`, error);
         });
-      }, Math.max(0, deadline - Date.now()));
+      }, Math.max(0, Math.min(deadline, noticeAt) - Date.now()));
       timer.unref?.();
       toolWatchdogs.set(key, timer);
     };
     schedule();
+  }
+  /** Tell listeners an open call went quiet (see `notify.toolQuiet`). The
+   *  call's name comes from the current turn; a call that already ended,
+   *  or was kept meanwhile, is not announced. */
+  async function announceToolQuiet(
+    sessionId: string,
+    callId: string,
+    clock: { startedAt: number; lastActivityAt: number },
+  ): Promise<void> {
+    try {
+      const call = (await currentTurnActiveTools(sessionId)).get(callId);
+      const key = toolWatchdogKey(sessionId, callId);
+      if (!call || keptToolCalls.has(key) || !toolWatchdogClocks.has(key)) return;
+      deps.notify?.toolQuiet?.({
+        sessionId,
+        callId,
+        tool: call.tool,
+        startedAt: clock.startedAt,
+        quietSince: clock.lastActivityAt,
+        stopsAt: clock.lastActivityAt + TOOL_EXECUTION_TIMEOUT_MS,
+      });
+    } catch (error) {
+      console.error(`[polyth] tool quiet notice failed for ${callId} in ${sessionId}`, error);
+    }
   }
   /** A runtime event carrying this call's id proves it is alive. The timer is
    *  left alone: it re-checks the clock when it fires, so a chatty call costs
@@ -1983,6 +2038,52 @@ export function createSessionService(deps: {
     /** The open turn's id as `openTurnFromEvents` reads it: absent when no
      *  turn is open or its turn/started carried no usable id. */
     openTurnId?: string;
+    // Facts a send and a turn end read on every call. Each mirrors a fold
+    // over the whole log (named on the field), so those paths need no replay.
+    /** Newest user/message of any kind (`lastUserMessage`). */
+    lastUserMessage?: SessionEvent;
+    /** `retryChainAnchorSeq`: newest prompt that is not an auto-resume replay. */
+    retryAnchorSeq?: number;
+    /** Newest user/message that could carry Polyth context: the start of the
+     *  pending package-context window when history has no rewind after it. */
+    lastPromptSeq: number;
+    /** The newest user/message is a context-free native command. */
+    lastUserContextFree: boolean;
+    /** `stoppedTurnWasContextFree`: the newest turn/started ran a native command. */
+    turnContextFree: boolean;
+    /** `contextTurnStarted`. */
+    contextTurnStarted: boolean;
+    /** Read as a stop is persisted (pauseRequested): the newest abort request
+     *  of the turn being stopped came from Pause. A later plain Stop wins; a
+     *  turn boundary after it clears it. */
+    abortPause: boolean;
+    /** Newest non-ignorable user/assistant message (`dialogueThrough` input). */
+    lastDialogueSeq: number;
+    /** Seqs of the newest and the previous turn/stopped. */
+    lastStopSeq: number;
+    previousStopSeq: number;
+    /** `unrestoredCompactionSeq` inputs. */
+    compactionSeq: number;
+    restoredCompactions: Set<number>;
+    /** `pendingContextPressure`: highest level announced since the newest compaction. */
+    announcedPressure: number;
+    /** `runtimeEpochRecoveryPending` inputs: the newest epoch marker, and the
+     *  user messages that claim to restore a marker (by marker seq). */
+    epochMarker?: SessionEvent;
+    epochRestores: Map<number, Array<{ seq: number; epoch: number }>>;
+    /** effectiveHistory's hidden rewind marker at the log's end, and the
+     *  newest rewind event: after it, effective history equals the raw log. */
+    historyHidden: number | null;
+    lastRewindEventSeq: number;
+  }
+
+  /** What a completed turn's incomplete-answer check reads, copied from the
+   *  facts the stop was applied with. */
+  interface StopTurnFacts {
+    throughSeq: number;
+    lastUserMessage: SessionEvent | undefined;
+    lastStopSeq: number;
+    previousStopSeq: number;
   }
 
   const FACTS_CACHE_MAX = 256;
@@ -2004,6 +2105,20 @@ export function createSessionService(deps: {
     turnAnswered: false,
     turnOpen: false,
     turnBoundarySeq: 0,
+    lastPromptSeq: 0,
+    lastUserContextFree: false,
+    turnContextFree: false,
+    contextTurnStarted: false,
+    abortPause: false,
+    lastDialogueSeq: 0,
+    lastStopSeq: 0,
+    previousStopSeq: 0,
+    compactionSeq: 0,
+    restoredCompactions: new Set(),
+    announcedPressure: 0,
+    epochRestores: new Map(),
+    historyHidden: null,
+    lastRewindEventSeq: 0,
   });
 
   /** Status after a turn stopped. A turn that already delivered its answer is
@@ -2069,6 +2184,38 @@ export function createSessionService(deps: {
           break;
         case "assistant/message":
           if (typeof data.text === "string" && data.text.trim()) facts.turnAnswered = true;
+          if (!ev.ignorable) facts.lastDialogueSeq = ev.seq;
+          break;
+        case "user/message": {
+          facts.lastUserMessage = ev;
+          if (data.githubConflictResolution !== true && data.autoResume !== true) facts.retryAnchorSeq = ev.seq;
+          const contextFree = isContextFreeNativeCommand(ev);
+          facts.lastUserContextFree = contextFree;
+          if (!contextFree) facts.lastPromptSeq = ev.seq;
+          if (!ev.ignorable) facts.lastDialogueSeq = ev.seq;
+          const restoredSeq = Number((data.compactionRecovery as { compactionSeq?: unknown } | undefined)?.compactionSeq);
+          if (Number.isSafeInteger(restoredSeq) && restoredSeq > 0) facts.restoredCompactions.add(restoredSeq);
+          const pressure = Number((data.contextPressure as { level?: unknown } | undefined)?.level);
+          if (Number.isFinite(pressure)) facts.announcedPressure = Math.max(facts.announcedPressure, pressure);
+          const restore = data.runtimeEpochRecovery as { markerSeq?: unknown; epoch?: unknown } | undefined;
+          const markerSeq = Number(restore?.markerSeq);
+          if (Number.isSafeInteger(markerSeq)) {
+            const claims = facts.epochRestores.get(markerSeq) ?? [];
+            claims.push({ seq: ev.seq, epoch: Number(restore?.epoch) });
+            facts.epochRestores.set(markerSeq, claims);
+          }
+          break;
+        }
+        case "turn/abort-requested":
+          facts.abortPause = data.pause === true;
+          break;
+        case "session/compacted":
+          facts.compactionSeq = ev.seq;
+          facts.announcedPressure = 0;
+          break;
+        case "runtime/epoch-replaced":
+        case "session/snapshot-imported":
+          facts.epochMarker = ev;
           break;
         case "turn/started":
           facts.lastStopReason = null;
@@ -2076,8 +2223,14 @@ export function createSessionService(deps: {
           facts.turnOpen = true;
           facts.turnBoundarySeq = ev.seq;
           facts.openTurnId = typeof data.turnId === "string" && data.turnId ? data.turnId : undefined;
+          facts.turnContextFree = facts.lastUserContextFree;
+          if (!facts.lastUserContextFree) facts.contextTurnStarted = true;
+          facts.abortPause = false;
           break;
         case "turn/stopped": {
+          facts.abortPause = false;
+          facts.previousStopSeq = facts.lastStopSeq;
+          facts.lastStopSeq = ev.seq;
           const reason = data.reason;
           facts.lastStopReason =
             reason === "completed" || reason === "aborted" || reason === "error" ? reason : null;
@@ -2090,11 +2243,22 @@ export function createSessionService(deps: {
           break;
         }
         case "session/rewound": {
+          facts.lastRewindEventSeq = ev.seq;
           const atSeq = Number(data.atSeq);
-          if (Number.isSafeInteger(atSeq) && atSeq > 0) facts.rewind = { markerSeq: ev.seq, atSeq };
+          if (Number.isSafeInteger(atSeq) && atSeq > 0) {
+            facts.rewind = { markerSeq: ev.seq, atSeq };
+            facts.historyHidden = ev.seq;
+          }
           break;
         }
         case "session/rewind-cleared": {
+          facts.lastRewindEventSeq = ev.seq;
+          // effectiveHistory's own marker match, which differs from the one
+          // below for a malformed rewindSeq.
+          if (facts.historyHidden !== null
+            && (data.rewindSeq === undefined || Number(data.rewindSeq) === facts.historyHidden)) {
+            facts.historyHidden = null;
+          }
           if (!facts.rewind) break;
           const rewindSeq = Number(data.rewindSeq);
           if (!Number.isSafeInteger(rewindSeq) || rewindSeq === facts.rewind.markerSeq) facts.rewind = null;
@@ -2115,7 +2279,7 @@ export function createSessionService(deps: {
     }
     const through = await store.latestSeq(sessionId);
     const originalSeq = facts.seq;
-    const types = ["permission/requested", "permission/resolved", "permission/expired", "permission/delegated", "question/asked", "question/answered", "question/expired", "secret/requested", "secret/resolved", "secret/expired", "turn/started", "turn/stopped", "assistant/message", "session/rewound", "session/rewind-cleared"];
+    const types = ["permission/requested", "permission/resolved", "permission/expired", "permission/delegated", "question/asked", "question/answered", "question/expired", "secret/requested", "secret/resolved", "secret/expired", "turn/started", "turn/stopped", "assistant/message", "session/rewound", "session/rewind-cleared", "user/message", "turn/abort-requested", "session/compacted", "runtime/epoch-replaced", "session/snapshot-imported"];
     while (facts.seq < through) {
       const tail = store.eventsOfTypes
         ? await store.eventsOfTypes(sessionId, types, facts.seq, through)
@@ -2143,6 +2307,88 @@ export function createSessionService(deps: {
     const work = readLogFacts(sessionId);
     factFlights.set(sessionId, work);
     try { return await work; } finally { factFlights.delete(sessionId); }
+  };
+
+  // Answers a send or a turn end used to fold the whole log for. `logFacts`
+  // returns the live cache entry, which later folds mutate: callers copy what
+  // they need before their next await. Each answer is exact; where a rewind
+  // makes effective history differ from the raw log, the caller replays.
+
+  /** No rewind changes what is visible after `seq`: from there on,
+   *  effectiveHistory keeps every raw event, in order. */
+  const rawHistoryAfter = (facts: LogFacts, seq: number): boolean =>
+    facts.historyHidden === null && (facts.lastRewindEventSeq === 0 || seq > facts.lastRewindEventSeq);
+
+  /** `dialogueThrough(log)`, or undefined when only a replay can tell. */
+  const factsDialogueThrough = (facts: LogFacts): number | undefined =>
+    rawHistoryAfter(facts, facts.lastDialogueSeq) ? facts.lastDialogueSeq : undefined;
+
+  /** `unrestoredCompactionSeq(log)`. */
+  const factsUnrestoredCompactionSeq = (facts: LogFacts): number | null =>
+    facts.compactionSeq > 0 && !facts.restoredCompactions.has(facts.compactionSeq) ? facts.compactionSeq : null;
+
+  /** `pendingContextPressure(log, fraction)` over the announced level. */
+  const factsPendingContextPressure = (announced: number, fraction: number | undefined): number | null => {
+    if (typeof fraction !== "number" || !Number.isFinite(fraction)) return null;
+    const level = CONTEXT_PRESSURE_LEVELS.filter((value) => fraction >= value).at(-1);
+    if (level === undefined) return null;
+    return level > announced ? level : null;
+  };
+
+  /** `runtimeEpochRecoveryPending(log, operations)`. */
+  const factsEpochRecoveryPending = (
+    marker: SessionEvent | undefined,
+    restores: ReadonlyMap<number, ReadonlyArray<{ seq: number; epoch: number }>>,
+    operations: readonly DurableOperation[],
+  ): boolean => {
+    if (!marker) return false;
+    const epoch = marker.type === "session/snapshot-imported"
+      ? 0
+      : Number((marker.data as { new?: { epoch?: unknown } }).new?.epoch);
+    const operationByOwnerSeq = new Map(
+      operations
+        .filter((operation) => operation.ownerEventSeq !== undefined)
+        .map((operation) => [operation.ownerEventSeq!, operation]),
+    );
+    return !(restores.get(marker.seq) ?? []).some((claim) =>
+      claim.epoch === epoch && operationByOwnerSeq.get(claim.seq)?.state === "confirmed");
+  };
+
+  /** Every event of `types` in (afterSeq, throughSeq], through the indexed read. */
+  const typedEventsBetween = async (
+    sessionId: string,
+    types: readonly string[],
+    afterSeq: number,
+    throughSeq: number,
+  ): Promise<SessionEvent[]> => {
+    const found: SessionEvent[] = [];
+    for (let after = afterSeq; after < throughSeq;) {
+      const page = await store.eventsOfTypes!(sessionId, types, after, throughSeq, 500);
+      found.push(...page);
+      if (page.length < 500) break;
+      after = page.at(-1)!.seq;
+    }
+    return found;
+  };
+
+  /** The events `pendingPackageContext` and `pendingPersonMessageAttachments`
+   *  read from the log, through `throughSeq`: the package context and person
+   *  messages after the newest context-carrying prompt. The selection gives
+   *  both the same answer as the whole log does. Undefined when a rewind
+   *  hides part of that window and only a replay can tell. */
+  const pendingContextWindow = async (
+    sessionId: string,
+    window: { lastPromptSeq: number; rawAfterPrompt: boolean },
+    throughSeq: number,
+  ): Promise<SessionEvent[] | undefined> => {
+    if (!store.eventsOfTypes || !window.rawAfterPrompt) return undefined;
+    return typedEventsBetween(sessionId, [PERSON_MESSAGE_EVENT, "package/context"], window.lastPromptSeq, throughSeq);
+  };
+
+  /** `lastUserMessage(await store.events(sessionId))` without the replay. */
+  const latestUserMessage = async (sessionId: string) => {
+    const facts = await logFacts(sessionId);
+    return lastUserMessage(facts.lastUserMessage ? [facts.lastUserMessage] : []);
   };
 
   // Tools still running in the current turn, for the tool watchdog. Same
@@ -3112,6 +3358,18 @@ export function createSessionService(deps: {
     const queued = deps.queue ? await deps.queue.queueList(sessionId) : [];
     return queued.some((item) => !item.heldForReview);
   };
+  /** Boot check for a turn left open in the log by the previous process.
+   *  Only uncertain statuses are read, by the store's indexed lookup. */
+  const turnCutByRestart = async (projection: SessionProjection): Promise<boolean> => {
+    if (
+      projection.status !== "unknown"
+      && projection.status !== "working"
+      && projection.status !== "reconciling"
+      && projection.status !== "epoch-pending"
+    ) return false;
+    if (store.lastTurnEventType) return (await store.lastTurnEventType(projection.id)) === "started";
+    return Boolean(openTurnFromEvents(await store.events(projection.id)));
+  };
   const recoverOwnedEpochIfWorkPending = async (sessionId: string): Promise<void> => {
     try {
       if (!await ownedEpochHasPendingWork(sessionId)) return;
@@ -3900,27 +4158,80 @@ export function createSessionService(deps: {
     const hex = createHash("sha256").update(sessionId + turnId + "incomplete-continue").digest("hex");
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-${(8 | (parseInt(hex[16]!, 16) & 3)).toString(16)}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
   };
+  const INCOMPLETE_WORK_TYPES = ["assistant/message", "tool/call", "tool/started", "tool/result", "tool/error"] as const;
+  const answeredWork = (event: SessionEvent): { text: boolean; tool: boolean } => ({
+    text: event.type === "assistant/message" && typeof (event.data as { text?: unknown }).text === "string"
+      && Boolean(((event.data as { text: string }).text).trim()),
+    tool: event.type === "tool/call" || event.type === "tool/started" || event.type === "tool/result" || event.type === "tool/error",
+  });
+  /** The stopped turn as the log stood when its stop was applied, through
+   *  `throughSeq`, with no other event read. A stop whose seq is not the
+   *  newest stop, or a newer prompt, is read from the log instead. */
+  const turnWorkFromFacts = async (
+    sessionId: string,
+    stopped: SessionEvent,
+    facts: StopTurnFacts,
+  ): Promise<{ message: SessionEvent | undefined; work: () => Promise<{ hasText: boolean; hasTool: boolean }> } | undefined> => {
+    if (!store.eventsOfTypes || facts.lastStopSeq !== stopped.seq) return undefined;
+    const prompt = facts.lastUserMessage && facts.lastUserMessage.seq < stopped.seq ? facts.lastUserMessage : undefined;
+    if (facts.lastUserMessage && !prompt) return undefined;
+    // Walking back from the stop, the newer of the previous stop and the
+    // newest prompt ends the turn.
+    if (!prompt || facts.previousStopSeq > prompt.seq) return { message: undefined, work: async () => ({ hasText: false, hasTool: false }) };
+    return {
+      message: prompt,
+      work: async () => {
+        let hasText = false;
+        let hasTool = false;
+        // Either kind of work decides it: stop at the first.
+        for (let after = prompt.seq; after < stopped.seq - 1 && !hasText && !hasTool;) {
+          const page = await store.eventsOfTypes!(sessionId, INCOMPLETE_WORK_TYPES, after, stopped.seq - 1, 100);
+          for (const event of page) {
+            const found = answeredWork(event);
+            if (found.text) hasText = true;
+            else if (found.tool) hasTool = true;
+          }
+          if (page.length < 100) break;
+          after = page.at(-1)!.seq;
+        }
+        return { hasText, hasTool };
+      },
+    };
+  };
   const recordIncompleteTurn = async (
     sessionId: string,
     stopped: SessionEvent,
-    events: readonly SessionEvent[],
+    facts: StopTurnFacts,
   ): Promise<void> => {
     const turnId = (stopped.data as { turnId?: unknown }).turnId;
     if (typeof turnId !== "string" || !turnId) return;
     // The agent is waiting on background work: a quiet turn is expected.
     if ((stopped.data as { background?: unknown }).background) return;
-    const end = events.findIndex((event) => event.seq === stopped.seq);
-    if (end < 0) return;
-    let hasText = false;
-    let hasTool = false;
     let message: SessionEvent | undefined;
-    for (let index = end - 1; index >= 0; index -= 1) {
-      const event = events[index]!;
-      if (event.type === "turn/stopped") break;
-      if (event.type === "user/message") { message = event; break; }
-      if (event.type === "assistant/message" && typeof (event.data as { text?: unknown }).text === "string"
-        && ((event.data as { text: string }).text).trim()) hasText = true;
-      else if (event.type === "tool/call" || event.type === "tool/started" || event.type === "tool/result" || event.type === "tool/error") hasTool = true;
+    let turnWork: () => Promise<{ hasText: boolean; hasTool: boolean }>;
+    let incompleteRecorded: () => Promise<boolean>;
+    const fromFacts = await turnWorkFromFacts(sessionId, stopped, facts);
+    if (fromFacts) {
+      message = fromFacts.message;
+      turnWork = fromFacts.work;
+      incompleteRecorded = async () => (await typedEventsBetween(sessionId, [TURN_INCOMPLETE_EVENT], 0, facts.throughSeq))
+        .some((event) => (event.data as { turnId?: unknown }).turnId === turnId);
+    } else {
+      const events = (await store.events(sessionId)).filter((event) => event.seq <= facts.throughSeq);
+      const end = events.findIndex((event) => event.seq === stopped.seq);
+      if (end < 0) return;
+      let hasText = false;
+      let hasTool = false;
+      for (let index = end - 1; index >= 0; index -= 1) {
+        const event = events[index]!;
+        if (event.type === "turn/stopped") break;
+        if (event.type === "user/message") { message = event; break; }
+        const found = answeredWork(event);
+        if (found.text) hasText = true;
+        else if (found.tool) hasTool = true;
+      }
+      turnWork = async () => ({ hasText, hasTool });
+      incompleteRecorded = async () => events.some((event) => event.type === TURN_INCOMPLETE_EVENT && (event.data as { turnId?: unknown }).turnId === turnId);
     }
     // No admitted prompt (a compaction), a keep-alive or a native command turn
     // is not a person's answer.
@@ -3928,9 +4239,13 @@ export function createSessionService(deps: {
     const sent = message.data as { keepAlive?: unknown; command?: unknown; hiddenUserMessage?: unknown; text?: unknown };
     if (sent.keepAlive === true || sent.command) return;
     const outputLimit = (stopped.data as { outputLimit?: unknown }).outputLimit === true;
-    const kind = outputLimit ? "length" : (!hasText && !hasTool ? "empty" : undefined);
+    let kind: "length" | "empty" | undefined = outputLimit ? "length" : undefined;
+    if (!kind) {
+      const { hasText, hasTool } = await turnWork();
+      kind = !hasText && !hasTool ? "empty" : undefined;
+    }
     if (!kind) return;
-    if (events.some((event) => event.type === TURN_INCOMPLETE_EVENT && (event.data as { turnId?: unknown }).turnId === turnId)) return;
+    if (await incompleteRecorded()) return;
     const isContinuation = sent.hiddenUserMessage === true && sent.text === INCOMPLETE_CONTINUE_PROMPT;
     const autoContinued = !isContinuation && deps.autoContinueIncomplete !== false;
     // The fact is durable before any continuation can be delivered.
@@ -3944,8 +4259,11 @@ export function createSessionService(deps: {
           const proj = await store.projection(sessionId);
           // A Pause, a Stop, a model switch or anything newer cancels it.
           if (!proj || proj.status !== "idle" || proj.paused || proj.harnessTransition) return false;
-          if ((await store.events(sessionId)).some((event) => event.seq > stoppedSeq
-            && (event.type === "turn/started" || event.type === "user/message" || event.type === "turn/abort-requested"))) return false;
+          const newerTypes = ["turn/started", "user/message", "turn/abort-requested"];
+          const newer = store.eventsOfTypes
+            ? (await store.eventsOfTypes(sessionId, newerTypes, stoppedSeq, await store.latestSeq(sessionId), 1)).length > 0
+            : (await store.events(sessionId)).some((event) => event.seq > stoppedSeq && newerTypes.includes(event.type));
+          if (newer) return false;
           if (deps.queue && (await deps.queue.queueList(sessionId)).some((item) => !item.heldForReview)) return false;
           return true;
         });
@@ -4503,14 +4821,29 @@ export function createSessionService(deps: {
     return undefined;
   };
 
+  /** What a limit stop's resume plan reads from the log. */
+  interface ResumeAnchors {
+    last: ReturnType<typeof lastUserMessage>;
+    chainAnchorSeq: number | undefined;
+  }
+  const resumeAnchors = (events: readonly SessionEvent[]): ResumeAnchors => ({
+    last: lastUserMessage(events),
+    chainAnchorSeq: retryChainAnchorSeq(events),
+  });
+  /** The same anchors from cached facts, copied before the next await. */
+  const resumeAnchorsOf = (facts: LogFacts): ResumeAnchors => ({
+    last: lastUserMessage(facts.lastUserMessage ? [facts.lastUserMessage] : []),
+    chainAnchorSeq: facts.retryAnchorSeq,
+  });
+
   const plannedResumeState = async (
     sessionId: string,
     hint: RateLimitRetryHint,
-    events: readonly SessionEvent[],
+    anchors: ResumeAnchors,
   ) => {
-    const last = lastUserMessage(events);
+    const last = anchors.last;
     if (!last) return undefined;
-    const anchorSeq = retryChainAnchorSeq(events) ?? last.seq;
+    const anchorSeq = anchors.chainAnchorSeq ?? last.seq;
     const chain = (await store.projection(sessionId))?.autoRetry;
     const previous = chain && chain.anchorSeq === anchorSeq
       ? { attempt: chain.attempts, userMessageSeq: anchorSeq }
@@ -4545,11 +4878,11 @@ export function createSessionService(deps: {
   const scheduleResume = async (
     sessionId: string,
     hint: RateLimitRetryHint,
-    events: readonly SessionEvent[],
+    anchors: ResumeAnchors,
   ): Promise<RateLimitRetry | undefined> => {
-    const state = await plannedResumeState(sessionId, hint, events);
+    const state = await plannedResumeState(sessionId, hint, anchors);
     if (!state) return undefined;
-    const anchorSeq = retryChainAnchorSeq(events);
+    const anchorSeq = anchors.chainAnchorSeq;
     await applyProjection(sessionId, (current) => ({
       ...current,
       resume: state,
@@ -4603,7 +4936,7 @@ export function createSessionService(deps: {
       if (proj.status === "working" || proj.status === "reconciling" || proj.status === "archived") {
         return null;
       }
-      const last = lastUserMessage(await store.events(sessionId));
+      const last = await latestUserMessage(sessionId);
       if (!last || last.seq !== proj.resume.userMessageSeq || !last.text.trim()) {
         await clearResume(sessionId, "user");
         return null;
@@ -4645,7 +4978,7 @@ export function createSessionService(deps: {
     } catch (error) {
       if ((error as { code?: unknown }).code === "conflict") {
         const current = await store.projection(sessionId);
-        const last = current ? lastUserMessage(await store.events(sessionId)) : undefined;
+        const last = current ? await latestUserMessage(sessionId) : undefined;
         if (
           current?.resume?.resumeAt === plan.resumeAt
           && current.resume.userMessageSeq === plan.userMessageSeq
@@ -5234,7 +5567,7 @@ export function createSessionService(deps: {
         ) ?? hint;
       }
       if (!active || !hint) continue;
-      const retry = await scheduleResume(row.id, hint, events);
+      const retry = await scheduleResume(row.id, hint, resumeAnchors(events));
       if (!retry) continue;
       await appendAndBroadcast(row.id, "turn/stopped", {
         turnId: lastTurnId.get(row.id) ?? "rate-limit-stall",
@@ -5794,14 +6127,14 @@ export function createSessionService(deps: {
         // then arms the durable timer.
         let retry: RateLimitRetry | undefined;
         if (effectiveReason === "error" && ev.retry) {
-          const eventsForResume = await store.events(sessionId);
+          const anchorsForResume = resumeAnchorsOf(await logFacts(sessionId));
           // Adapters that only classify the failure leave the wait to us; the
           // provider usually states it in the message ("resets in 1h 51m").
           const hint = withProviderStatedWait(ev.retry, ev.error);
           if (sideEffects) {
-            retry = await scheduleResume(sessionId, hint, eventsForResume);
+            retry = await scheduleResume(sessionId, hint, anchorsForResume);
           } else {
-            const state = await plannedResumeState(sessionId, hint, eventsForResume);
+            const state = await plannedResumeState(sessionId, hint, anchorsForResume);
             retry = state ? retryFromResumeState(state) : undefined;
           }
         }
@@ -5815,7 +6148,7 @@ export function createSessionService(deps: {
         }
         // Whichever leg reports the stop (the runtime, Stop's local fallback,
         // reconciliation), Pause's abort request makes it a paused one.
-        const pausing = effectiveReason === "aborted" && pauseRequested(await store.events(sessionId));
+        const pausing = effectiveReason === "aborted" && (await logFacts(sessionId)).abortPause;
         // Background work the child still has when its turn completes, frozen
         // into the terminal fact: a parent's wake text is derived from it and
         // must replay identically on retry, whatever the child does later.
@@ -5847,11 +6180,25 @@ export function createSessionService(deps: {
           const stopFacts = await logFacts(sessionId);
           const requestsOpen = blockingRequestTotal(stopFacts) > 0;
           const nextStatus = stoppedStatus(effectiveReason, stopFacts, requestsOpen);
-          const stopEvents = await store.events(sessionId);
-          const through = dialogueThrough(stopEvents);
+          // Copied before any await: the cache entry moves on with the log.
+          const stopTurn: StopTurnFacts = {
+            throughSeq: stopFacts.seq,
+            lastUserMessage: stopFacts.lastUserMessage,
+            lastStopSeq: stopFacts.lastStopSeq,
+            previousStopSeq: stopFacts.previousStopSeq,
+          };
+          const factsThrough = factsDialogueThrough(stopFacts);
           // A native-command turn delivered no Polyth context, so the leg
           // still owes its first-prompt bootstrap to the next ordinary turn.
-          const bootstrapOwed = stoppedTurnWasContextFree(stopEvents);
+          let bootstrapOwed = stopFacts.turnContextFree;
+          let through: number;
+          if (factsThrough !== undefined) through = factsThrough;
+          else {
+            // A rewind hides part of the dialogue: only a replay can tell.
+            const stopEvents = (await store.events(sessionId)).filter((event) => event.seq <= stopTurn.throughSeq);
+            through = dialogueThrough(stopEvents);
+            bootstrapOwed = stoppedTurnWasContextFree(stopEvents);
+          }
           const stalePause = paused ? undefined : (await store.projection(sessionId))?.paused;
           const applied = await applyRuntimeProjection(
             sessionId,
@@ -5888,7 +6235,7 @@ export function createSessionService(deps: {
             });
           }
           if (applied && stopped && effectiveReason === "completed" && !paused && !requestsOpen && !retry) {
-            await recordIncompleteTurn(sessionId, stopped, stopEvents);
+            await recordIncompleteTurn(sessionId, stopped, stopTurn);
           }
           // Background work held back by the limit wait reaches the agent now.
           if (!retry) releaseDeferredRuntimeWakes(sessionId);
@@ -6861,7 +7208,8 @@ export function createSessionService(deps: {
       );
       if (newer.length === 0) return false;
     }
-    return canonicalThroughSeq !== dialogueThrough(await store.events(sessionId));
+    const through = factsDialogueThrough(await logFacts(sessionId));
+    return canonicalThroughSeq !== (through ?? dialogueThrough(await store.events(sessionId)));
   };
 
   const runtimeFor = async (projection: SessionProjection, cwd: string, targetHarnessId?: string): Promise<AgentRuntime> => {
@@ -7078,7 +7426,11 @@ export function createSessionService(deps: {
         materializationFailures.delete(sessionId);
       }
       let attachedProjection = proj;
-      if (!proj.backendSessionId && (await store.events(sessionId)).some((event) => event.type === "session/snapshot-imported")) {
+      // A Snapshot import and a fork that branched nothing natively (a
+      // continuity fork, or Fork and edit on the first prompt) publish no
+      // native session: their own runtime creates it on first use.
+      if (!proj.backendSessionId && (await store.events(sessionId)).some((event) =>
+        event.type === "session/snapshot-imported" || event.type === "session/forked")) {
         let operation = (await durable.operations(sessionId)).find((op) => op.mutationKind === "session-create");
         if (!operation) operation = (await broadcastTail(sessionId, () => durable.prepareOperation({
           sessionId, mutationKind: "session-create",
@@ -8513,13 +8865,39 @@ export function createSessionService(deps: {
     }
     // The pending-context window is read before attachments are decided: a
     // carried person message keeps its attachments owed to this exact prompt.
-    const recoveryEvents = await store.events(sessionId);
     // A native command runs only as the runtime's exact input: recovery,
     // instructions or memory around it turn it into an ordinary prompt. None
     // rides with it; each stays pending for the next ordinary turn, whose
     // user/message records what it restored.
     const contextFree = nativeDescriptor !== undefined;
-    const carriedAttachments = contextFree ? [] : pendingPersonMessageAttachments(recoveryEvents);
+    // An ordinary send reads cached log facts and the few events after the
+    // last prompt, never the whole log. Only a send that restores something
+    // (a runtime epoch, a compaction) or one a rewind makes ambiguous
+    // replays the log, as every send once did. Copied before any await.
+    const sendFacts = await logFacts(sessionId);
+    const sendThroughSeq = sendFacts.seq;
+    const sendWindow = {
+      lastPromptSeq: sendFacts.lastPromptSeq,
+      rawAfterPrompt: rawHistoryAfter(sendFacts, sendFacts.lastPromptSeq),
+    };
+    const factsContextTurnStarted = sendFacts.contextTurnStarted;
+    const factsCompactionSeq = factsUnrestoredCompactionSeq(sendFacts);
+    const factsAnnouncedPressure = sendFacts.announcedPressure;
+    const epochMarker = sendFacts.epochMarker;
+    const epochRestores = new Map([...sendFacts.epochRestores].map(([seq, claims]) => [seq, [...claims]]));
+    let recoveryEvents: readonly SessionEvent[] | undefined;
+    let pendingWindow: SessionEvent[] | undefined;
+    if (!contextFree) {
+      // A marker whose recovery a confirmed prompt already carried stays in
+      // the log for good: it costs one operations read, not a replay.
+      const epochPending = epochMarker !== undefined
+        && factsEpochRecoveryPending(epochMarker, epochRestores, await durable.operations(sessionId));
+      pendingWindow = epochPending || factsCompactionSeq !== null
+        ? undefined
+        : await pendingContextWindow(sessionId, sendWindow, sendThroughSeq);
+      if (!pendingWindow) recoveryEvents = await store.events(sessionId);
+    }
+    const carriedAttachments = contextFree ? [] : pendingPersonMessageAttachments(recoveryEvents ?? pendingWindow ?? []);
     if (carriedAttachments.length > 0) {
       const merged = mergeAttachmentInputs(input.attachments, carriedAttachments);
       if (Array.isArray(merged) && merged.length > MAX_TURN_ATTACHMENTS) {
@@ -8657,11 +9035,11 @@ export function createSessionService(deps: {
     }
     const firstTurnOfRuntimeLeg = proj.runtimeLeg
       ? proj.runtimeLeg.bootstrap !== "native-resume"
-      : !contextTurnStarted(recoveryEvents);
+      : !(recoveryEvents ? contextTurnStarted(recoveryEvents) : factsContextTurnStarted);
     // Workspace instructions ride in the first user message of a runtime leg.
     // A native compaction may summarize that message away, so the first turn
     // after an unrestored compaction delivers them again, like goals and pins.
-    const pendingCompactionSeq = unrestoredCompactionSeq(recoveryEvents);
+    const pendingCompactionSeq = recoveryEvents ? unrestoredCompactionSeq(recoveryEvents) : factsCompactionSeq;
     let workspaceInstructions: string | null = null;
     let workspaceInstructionsEnabled = false;
     if (
@@ -8680,16 +9058,23 @@ export function createSessionService(deps: {
         proj.projectId,
       ) ?? "");
     }
+    // With no compaction awaiting restoration the hook has nothing to
+    // decorate and gets no log (see TurnHooks.beforeTurn).
     const decoration = hooks.beforeTurn && !contextFree
-      ? await hooks.beforeTurn(sessionId, recoveryEvents)
+      ? await hooks.beforeTurn(sessionId, recoveryEvents ?? [])
       : null;
-    const epochRecovery = contextFree ? null : await runtimeEpochRecoveryPlan(
+    // Without a replay no recovery is pending: the plan would be null.
+    const epochRecovery = contextFree || !recoveryEvents ? null : await runtimeEpochRecoveryPlan(
       sessionId,
       recoveryEvents,
       decoration === null,
     );
     const contextWindow = projectionContextWindow(sessionId, proj);
-    const pendingPressure = contextFree ? null : pendingContextPressure(recoveryEvents, contextWindow?.fraction);
+    const pendingPressure = contextFree
+      ? null
+      : recoveryEvents
+        ? pendingContextPressure(recoveryEvents, contextWindow?.fraction)
+        : factsPendingContextPressure(factsAnnouncedPressure, contextWindow?.fraction);
     const pressureLevel = pendingPressure !== null
       && deps.contextPressureEnabled
       && await deps.contextPressureEnabled().catch(() => false)
@@ -8703,12 +9088,12 @@ export function createSessionService(deps: {
       workspaceManifestContext(proj, turnWorkspace),
       workspaceInstructions,
       epochRecovery?.recoveryContext,
-      epochRecovery ? projectMoveContext(recoveryEvents, turnWorkspace.repositories.find((row) => row.repositoryId === proj.workspace?.executionRepositoryId)?.path) : undefined,
+      epochRecovery ? projectMoveContext(recoveryEvents ?? [], turnWorkspace.repositories.find((row) => row.repositoryId === proj.workspace?.executionRepositoryId)?.path) : undefined,
       decoration?.recoveryContext,
       // Package context (a finished workflow's result, ...) appended since the
       // previous prompt never reached the native leg on its own. An epoch
       // recovery already restores it as part of the confirmed dialogue.
-      epochRecovery ? undefined : pendingPackageContext(recoveryEvents),
+      epochRecovery ? undefined : pendingPackageContext(recoveryEvents ?? pendingWindow ?? []),
       pressureLevel !== null ? contextPressureText({
         level: pressureLevel,
         fraction: contextWindow!.fraction!,
@@ -9971,6 +10356,12 @@ export function createSessionService(deps: {
     // Terminalize the cut turn before the epoch marker so admission after
     // rehydration does not see a still-open turn in the durable log.
     if (interrupted) {
+      // Says why the turn stops: whoever waits on it (a scheduled agent run)
+      // keeps waiting for the continuation sent after the new epoch.
+      await appendAndBroadcast(sessionId, "turn/abort-requested", {
+        reason: "runtime-replaced",
+        source: "runtime-epoch",
+      }, { ignorable: true });
       await stopLocally(
         sessionId,
         "Runtime authority was replaced before the turn finished.",
@@ -10146,7 +10537,8 @@ export function createSessionService(deps: {
     source?: string,
     timedOutCallId?: string,
     pause = false,
-  ): Promise<MutationOutcome<Record<string, never>>["kind"]> {
+    epochHandoff = false,
+  ): Promise<MutationOutcome<Record<string, never>>["kind"] | "epoch-recovery"> {
     const projection = await store.projection(sessionId);
     if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
     // Stop is an unconditional intent. Whatever the session state — idle,
@@ -10158,6 +10550,16 @@ export function createSessionService(deps: {
       try {
         runtime = await ensureWired(sessionId, projection);
       } catch (error) {
+        // The runtime that ran this turn is gone (a Polyth restart replaced
+        // it), so nothing is left to kill. When the caller only wanted the
+        // turn unstuck, the owned-epoch recovery already queued by wiring
+        // closes the cut turn and continues it on a fresh runtime; closing it
+        // here first would leave that recovery nothing to continue.
+        if (
+          epochHandoff
+          && (error as { code?: unknown } | null)?.code === "epoch-pending"
+          && recoverableOwnedEpochs.has(sessionId)
+        ) return "epoch-recovery";
         console.error(`[polyth] abort could not wire a runtime for ${sessionId}`, error);
       }
     }
@@ -10204,8 +10606,11 @@ export function createSessionService(deps: {
     sessionId: string,
     callId: string,
     cause: "silence" | "hard-limit" = "silence",
+    epochHandoff = true,
   ): Promise<void> {
-    const continuation = await withSessionLock(sessionId, async () => {
+    const continuation = await withSessionLock(sessionId, async (): Promise<
+      { text: string } | { epoch: true } | undefined
+    > => {
       if (serviceDisposed) return undefined;
       const active = (await currentTurnActiveTools(sessionId)).get(callId);
       if (!active) return undefined;
@@ -10231,7 +10636,14 @@ export function createSessionService(deps: {
           : `${active.tool} was stopped at the ${duration} hard execution limit. Run long commands in the background and check on them instead of waiting.`,
         text ? "tool-watchdog" : undefined,
         callId,
+        false,
+        epochHandoff,
       );
+      if (kind === "epoch-recovery") {
+        // Nothing was stopped, so no watchdog nudge was spent.
+        if (text) toolTimeoutContinues.set(sessionId, Math.max(0, (toolTimeoutContinues.get(sessionId) ?? 1) - 1));
+        return { epoch: true };
+      }
       // An unproven abort must not be followed by more work: reconciliation
       // owns that session until the release is settled, and only a later
       // ready + idle settle runs the deferred nudge.
@@ -10244,6 +10656,17 @@ export function createSessionService(deps: {
       return { text };
     });
     if (!continuation) return;
+    if ("epoch" in continuation) {
+      // Runs outside the lock: recovery takes it itself. When it could not
+      // replace the runtime the turn is still open, and the plain local stop
+      // runs after all so the session never stays stuck behind it.
+      await recoverOwnedEpochIfPending(sessionId);
+      if (serviceDisposed || deps.isShuttingDown?.()) return;
+      if ((await currentTurnActiveTools(sessionId)).has(callId)) {
+        await stopTimedOutTool(sessionId, callId, cause, false);
+      }
+      return;
+    }
     await runToolTimeoutContinue(sessionId, continuation);
   }
 
@@ -10856,37 +11279,57 @@ export function createSessionService(deps: {
     return (await store.projection(sessionId)) ?? current;
   }
 
-  /** Fork for a runtime without exact native branching. The child gets the
-   *  exact canonical prefix and no native session yet: like a Snapshot import
-   *  (`session/snapshot-imported`, `mode: "fork"`), its native session is
-   *  created on first use and that leg's first prompt carries the prefix as
-   *  canonical continuity. Nothing is mutated on the source or its runtime,
-   *  so there is no outcome to reconcile, and the source may be mid-turn or
-   *  recovering: whatever the prefix leaves open is closed in the child. The
-   *  caller holds the source lock. */
+  /** The source projection without what a fork never inherits. The source's
+   *  draft, pin, acting person and automation origin are someone else's, and
+   *  everything tied to the source's running work stays with the source: a
+   *  scheduled resend, a retry chain, a pause, a harness move, background
+   *  work, a released execution or a suggested next prompt. A child that
+   *  inherited them would look busy, show a countdown or resend on its own
+   *  the moment it opened. */
+  function forkableProjection(proj: SessionProjection) {
+    const {
+      draft: _draft, draftUpdatedAt: _draftUpdatedAt, pinned: _pinned, actor: _actor, origin: _origin,
+      harnessTransition: _harnessTransition, runtimeControl: _runtimeControl,
+      resume: _resume, releasedExecution: _releasedExecution, paused: _paused,
+      autoRetry: _autoRetry, backgroundWork: _backgroundWork, promptSuggestion: _promptSuggestion,
+      // The parent's idle recap is pinned to the parent's log (`atSeq`); the
+      // fork starts a fresh one, so carrying it would show a foreign summary.
+      assist: _assist,
+      ...forkable
+    } = proj;
+    return forkable;
+  }
+
+  /** Fork that leaves every runtime alone. The child gets the exact canonical
+   *  prefix and no native session yet; its own runtime creates one on first
+   *  use. A prefix with dialogue is published like a Snapshot import
+   *  (`session/snapshot-imported`, `mode: "fork"`), so that leg's first prompt
+   *  carries the prefix as canonical continuity; an empty one has nothing to
+   *  carry and starts like a new chat. Nothing is mutated on the source or its
+   *  runtime, so there is no outcome to reconcile, and the source may be
+   *  mid-turn or recovering: whatever the prefix leaves open is closed in the
+   *  child. The caller holds the source lock. */
   async function publishContinuityFork(input: {
     sessionId: string;
     proj: SessionProjection;
     forkId: string;
     title: string;
     prefix: readonly SessionEvent[];
+    /** Model-visible dialogue in `prefix`; none means no continuity marker. */
+    carriesDialogue: boolean;
     copiedThroughSeq: number;
     draft: ForkDraft | undefined;
     atSeq: number | undefined;
   }): Promise<ForkResult> {
-    const { sessionId, proj, forkId, title, prefix, copiedThroughSeq, draft, atSeq } = input;
+    const { sessionId, proj, forkId, title, prefix, carriesDialogue, copiedThroughSeq, draft, atSeq } = input;
     const now = Date.now();
-    // Same ownership rules as a native fork. Everything bound to the source's
-    // native leg or its running work stays behind: the child has none yet.
+    // The child has no native leg yet, so nothing bound to the source's leg
+    // comes along either.
     const {
-      draft: _draft, draftUpdatedAt: _draftUpdatedAt, pinned: _pinned, actor: _actor, origin: _origin,
       backendSessionId: _backendSessionId, runtimeBinding: _runtimeBinding, runtimeLeg: _runtimeLeg,
-      harnessTransition: _harnessTransition, runtimeControl: _runtimeControl,
       runtimeObservationSeq: _runtimeObservationSeq, contextWindow: _contextWindow,
-      resume: _resume, releasedExecution: _releasedExecution, paused: _paused,
-      autoRetry: _autoRetry, backgroundWork: _backgroundWork, promptSuggestion: _promptSuggestion,
       ...forkable
-    } = proj;
+    } = forkableProjection(proj);
     const projection: SessionProjection = {
       ...forkable, id: forkId, parentId: sessionId, title,
       status: "idle",
@@ -10894,11 +11337,13 @@ export function createSessionService(deps: {
       updatedAt: now,
     };
     const closing = forkClosingEvents(prefix);
-    const continuity = {
-      type: "session/snapshot-imported",
-      data: { mode: "fork", fromSessionId: sessionId, copiedThroughSeq } as JsonObject,
-      ignorable: true as const,
-    };
+    const continuity = carriesDialogue
+      ? [{
+          type: "session/snapshot-imported",
+          data: { mode: "fork", fromSessionId: sessionId, copiedThroughSeq } as JsonObject,
+          ignorable: true as const,
+        }]
+      : [];
     const markerData: SessionForkedData = {
       fromSessionId: sessionId,
       ...(atSeq !== undefined ? { sourceAtSeq: atSeq } : {}),
@@ -10918,7 +11363,7 @@ export function createSessionService(deps: {
             sourceSeq: ev.seq,
           })),
           ...closing.map((event) => ({ time: now, ...event })),
-          { time: now, ...continuity },
+          ...continuity.map((event) => ({ time: now, ...event })),
         ],
         projection,
         marker: { type: "session/forked", data: markerData as unknown as JsonObject, ignorable: true },
@@ -10935,7 +11380,9 @@ export function createSessionService(deps: {
       for (const event of closing) {
         copied.push(await store.append(forkId, event.type, event.data, { ignorable: true }));
       }
-      copied.push(await store.append(forkId, continuity.type, continuity.data, { ignorable: true }));
+      for (const event of continuity) {
+        copied.push(await store.append(forkId, event.type, event.data, { ignorable: true }));
+      }
       await store.upsertProjection(projection);
       const marker = await store.append(
         forkId, "session/forked", markerData as unknown as JsonObject, { ignorable: true },
@@ -12556,9 +13003,19 @@ export function createSessionService(deps: {
             )).catch((cause: unknown) => console.error(`[polyth] start failure for ${projection.id} was not recorded`, cause));
             continue;
           }
-          if (!needsDelegatedSettlement(projection) && !queued.length && !await historyImportPending(projection)) continue;
+          // A turn Polyth's restart cut off waits for nobody: wiring finds its
+          // owned runtime gone, and the owned-epoch recovery that queues closes
+          // the turn and continues it on a fresh runtime (or, when the runtime
+          // outlived the restart, reattaches and reconciles it). Without this
+          // it sat until the tool watchdog closed it as a plain stop.
+          const cutTurn = await turnCutByRestart(projection);
+          if (!cutTurn && !needsDelegatedSettlement(projection) && !queued.length && !await historyImportPending(projection)) continue;
           try { await sessionJobs.enqueue(projection.id); }
           catch { /* durable queue/import state is retained for explicit recovery */ }
+          // One recovery at a time at boot: each may start a native process.
+          if (cutTurn && recoverableOwnedEpochs.has(projection.id)) {
+            await recoverOwnedEpochIfWorkPending(projection.id);
+          }
         }
       })().finally(() => { recoveryWork = undefined; });
     },
@@ -12839,6 +13296,12 @@ export function createSessionService(deps: {
         await runtimes.retireSession(sessionId);
         return { released: true };
       });
+    },
+
+    async runtimeReleasable(sessionId) {
+      if (isConversation(await store.projection(sessionId))) return false;
+      if (!runtimes.retireSession || !runtimes.isSessionScoped?.(sessionId)) return false;
+      return !(await idleRuntimeReleaseBlocker(sessionId));
     },
 
     async cancelHarnessSwitch(sessionId) {
@@ -13346,9 +13809,8 @@ export function createSessionService(deps: {
         throw Object.assign(new Error("client operation identity cannot replay steer or interrupt"), { code: "invalid-input" });
       }
       if (input.clientOperationId) {
-        const priorQueueAdmission = (await store.events(sessionId)).findLast((event) =>
-          event.type === "queue/enqueued"
-          && (event.data as { queueId?: unknown }).queueId === input.clientOperationId);
+        const priorQueueAdmission = (await eventsOfTypeList(sessionId, ["queue/enqueued"])).findLast((event) =>
+          (event.data as { queueId?: unknown }).queueId === input.clientOperationId);
         if (priorQueueAdmission) {
           const priorFingerprint = (priorQueueAdmission.data as { clientRequestFingerprint?: unknown })
             .clientRequestFingerprint;
@@ -14131,9 +14593,18 @@ export function createSessionService(deps: {
 
       return admitTurn(sessionId, proj, rt, input, undefined, clientRequestFingerprint);
       };
-      return input.clientOperationId
+      const result = await (input.clientOperationId
         ? withClientAdmissionLock(input.clientOperationId, execute)
-        : execute();
+        : execute());
+      // A promoted queue row leaves the queue with the accepted send itself; a
+      // separate client removal request can be lost to a reconnect, and the
+      // row would then stay visible and later dispatch a second time.
+      const consumedQueueId = input.consumesQueueId;
+      if (consumedQueueId && deps.queue && await deps.queue.queueRemove(sessionId, consumedQueueId)) {
+        await appendAndBroadcast(sessionId, "queue/removed", { queueId: consumedQueueId }, { ignorable: true });
+        releaseQueueEditHold(sessionId, consumedQueueId);
+      }
+      return result;
     },
 
     async queueList(sessionId) {
@@ -14297,6 +14768,12 @@ export function createSessionService(deps: {
       const userId = typeof options?.userId === "string" && options.userId && !options.userId.startsWith("system:")
         ? options.userId
         : undefined;
+      // A judge keeps a call only when nobody answered; the event says so, so
+      // a reader never mistakes it for a person's click.
+      const judge = options?.via === "judge";
+      const useId = judge && typeof options?.useId === "string" && options.useId.trim()
+        ? options.useId.trim().slice(0, 96)
+        : undefined;
       await withSessionLock(sessionId, async () => {
         if (!(await store.projection(sessionId))) {
           throw Object.assign(new Error("session not found"), { code: "not-found" });
@@ -14309,6 +14786,7 @@ export function createSessionService(deps: {
         await appendAndBroadcast(sessionId, TOOL_KEEP_RUNNING_EVENT, {
           callId,
           ...(userId ? { byUserId: userId } : {}),
+          ...(judge ? { via: "judge", ...(useId ? { useId } : {}) } : {}),
         }, { ignorable: true });
         keptToolCalls.add(key);
         // A waiting timer carries the old silence deadline; re-arm it against
@@ -14402,7 +14880,7 @@ export function createSessionService(deps: {
           // switch still continues THIS session with the same last prompt —
           // Polyth never picks the replacement model itself.
           const failed = proj.status === "failed" && (options.model || options.harness);
-          const last = failed ? lastUserMessage(await store.events(sessionId)) : undefined;
+          const last = failed ? await latestUserMessage(sessionId) : undefined;
           if (!last?.text.trim()) {
             throw Object.assign(new Error("no pending resume"), { code: "no-resume" });
           }
@@ -14420,7 +14898,7 @@ export function createSessionService(deps: {
             compact: options.compact === true && !options.harness,
           };
         }
-        const last = lastUserMessage(await store.events(sessionId));
+        const last = await latestUserMessage(sessionId);
         if (!last || last.seq !== proj.resume.userMessageSeq || !last.text.trim()) {
           await clearResume(sessionId, "user");
           throw Object.assign(new Error("resume target is stale"), { code: "no-resume" });
@@ -14519,8 +14997,10 @@ export function createSessionService(deps: {
         // resolve the SOURCE session's backend id to fork from it.
         // A busy or recovering source is never wired or branched: its
         // runtime is in use or unproven. A runtime that cannot be reached at
-        // all is no reason to refuse either; the child starts its own.
-        const rt = settled
+        // all is no reason to refuse either; the child starts its own. An
+        // empty prefix has nothing to branch, so the source's runtime is not
+        // even started for it.
+        const rt = settled && history.length > 0
           ? await ensureWired(sessionId, proj).catch((error: unknown) => {
               console.warn(`[polyth] fork of ${sessionId} continues without its runtime: ${materializationLogText(error instanceof Error ? error.message : error)}`);
               return undefined;
@@ -14533,21 +15013,28 @@ export function createSessionService(deps: {
           ...(proj.model ? { model: proj.model } : {}),
           ...(proj.agent ? { agent: proj.agent } : {}),
         };
-        // An empty prefix needs no branch — a fresh backend session already
-        // represents the same (empty) history. A runtime that can branch
-        // natively gets an exact native copy. Every other runtime (Claude
-        // Code, Codex, Pi, ACP…) — and a native branch that refuses because
-        // its history no longer matches Polyth's — gets a continuity fork:
-        // the canonical prefix is published exactly, and the child's first
-        // prompt hands it to a fresh native session, as a Snapshot import or
-        // harness switch does. The native session is never told it holds
-        // history it does not. The same fork serves a source that is busy,
-        // recovering or without a reachable runtime.
+        // A runtime that can branch natively gets an exact native copy. Every
+        // other runtime (Claude Code, Pi, ACP…) — and a native branch that
+        // refuses because its history no longer matches Polyth's — gets a
+        // continuity fork: the canonical prefix is published exactly, and the
+        // child's first prompt hands it to a fresh native session, as a
+        // Snapshot import or harness switch does. The native session is never
+        // told it holds history it does not. The same fork serves a source
+        // that is busy, recovering or without a reachable runtime.
+        //
+        // An empty prefix (Fork and edit on the first prompt) asks no runtime
+        // for anything: the child is a new chat whose own runtime creates its
+        // native session on first send. Creating it here would run on the
+        // SOURCE's runtime, and a runtime that holds one native session per
+        // chat (every ACP harness) would then point the source's next prompt
+        // at the child's conversation and share one agent between both chats.
         const nativeBranch = rt !== undefined && history.length > 0
           && Boolean(rt.branchSession || rt.branchSessionOperation)
           && (await Promise.resolve(rt.capabilities?.()).catch(() => undefined))?.fork !== false;
-        if (!rt || (history.length > 0 && !nativeBranch)) {
-          return publishContinuityFork({ sessionId, proj, forkId, title, prefix, copiedThroughSeq, draft, atSeq });
+        if (!rt || !nativeBranch) {
+          return publishContinuityFork({
+            sessionId, proj, forkId, title, prefix, carriesDialogue: history.length > 0, copiedThroughSeq, draft, atSeq,
+          });
         }
         const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
           sessionId,
@@ -14564,21 +15051,17 @@ export function createSessionService(deps: {
         }));
         const outcome = await runPreparedOperation<{ backendSessionId: string }, string>(
           prepared.operation,
-          (operationId) => history.length === 0
-            ? (rt.createSessionOperation
-                ? rt.createSessionOperation(target, operationId)
-                : rt.ensureSession(target))
-            : (rt.branchSessionOperation
-                ? rt.branchSessionOperation({
-                    sourceSessionId: sessionId,
-                    target,
-                    history,
-                  }, operationId)
-                : rt.branchSession!({
-                    sourceSessionId: sessionId,
-                    target,
-                    history,
-                  })),
+          (operationId) => rt.branchSessionOperation
+            ? rt.branchSessionOperation({
+                sourceSessionId: sessionId,
+                target,
+                history,
+              }, operationId)
+            : rt.branchSession!({
+                sourceSessionId: sessionId,
+                target,
+                history,
+              }),
           (backendSessionId) => ({ backendSessionId }),
         );
         // A definitive refusal made no branch, so the continuity fork is
@@ -14586,10 +15069,11 @@ export function createSessionService(deps: {
         // and never triggers a second mutation.
         if (
           outcome.kind === "rejected"
-          && history.length > 0
           && (outcome.code === "history-mismatch" || outcome.code === "unsupported" || outcome.code === "capability-unsupported")
         ) {
-          return publishContinuityFork({ sessionId, proj, forkId, title, prefix, copiedThroughSeq, draft, atSeq });
+          return publishContinuityFork({
+            sessionId, proj, forkId, title, prefix, carriesDialogue: true, copiedThroughSeq, draft, atSeq,
+          });
         }
         if (outcome.kind !== "confirmed") {
           if (outcome.kind === "unknown") {
@@ -14601,12 +15085,10 @@ export function createSessionService(deps: {
         const backendSessionId = outcome.value.backendSessionId;
 
         const now = Date.now();
-        // A fork belongs to whoever forked it: the source's draft, pin and
-        // acting person are someone else's and never carry over, and no
-        // automation started it.
-        const { draft: _draft, draftUpdatedAt: _draftUpdatedAt, pinned: _pinned, actor: _actor, origin: _origin, ...forkable } = proj;
+        // A fork belongs to whoever forked it, and the source's running work
+        // stays with the source (`forkableProjection`).
         const projection: SessionProjection = {
-          ...forkable, id: forkId, parentId: sessionId, title,
+          ...forkableProjection(proj), id: forkId, parentId: sessionId, title,
           status: "reconciling",
           createdAt: now,
           updatedAt: now,
@@ -15085,6 +15567,11 @@ export function createSessionService(deps: {
           await deps.onSessionReleased?.({ sessionId, projectId: proj.projectId, cwd });
         } catch {
           // Provisioning cleanup must not revive a deleted session.
+        }
+        try {
+          await deps.onSessionDeleted?.(sessionId);
+        } catch {
+          // Bookkeeping left behind is only stale; the session is gone either way.
         }
       });
     },

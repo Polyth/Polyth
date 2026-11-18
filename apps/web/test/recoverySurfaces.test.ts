@@ -73,9 +73,15 @@ test("recovery surfaces preserve drafts and never auto-send a failed turn", asyn
   assert.doesNotMatch(timeline, /applyComposerSeed\(sessionId, `turn-failed:\$\{turn\.turnId\}`/);
   assert.match(timeline, /sendMessage\(lastUser\.raw \?\? lastUser\.text[\s\S]{0,300}hiddenUserMessage: true/);
   assert.match(timeline, /eventSeq: lastUserMessage\.eventSeq/);
-  assert.match(responseFooter, /api\.rewind\(sessionId, regeneratePrompt\.eventSeq\)[\s\S]{0,400}\.then\(\(marker\) => \{[\s\S]{0,400}applyEventWithPendingSend\(marker,[\s\S]{0,300}return sendMessage\(regeneratePrompt\.text/);
-  assert.doesNotMatch(responseFooter, /sendMessage\(regeneratePrompt\.text[\s\S]{0,300}hiddenUserMessage: true/);
-  assert.doesNotMatch(responseFooter, /requestComposerReplace\(regeneratePrompt/);
+  assert.match(responseFooter, /api\.rewind\(sessionId, source\.eventSeq, files \? \{ files \} : undefined\)[\s\S]{0,400}\.then\(\(marker\) => \{[\s\S]{0,400}applyEventWithPendingSend\(marker,[\s\S]{0,300}return sendMessage\(source\.text/);
+  assert.doesNotMatch(responseFooter, /sendMessage\((regeneratePrompt|source)\.text[\s\S]{0,300}hiddenUserMessage: true/);
+  assert.doesNotMatch(responseFooter, /requestComposerReplace\((regeneratePrompt|source)/);
+  // Regenerate discards the replaced answer's file changes, and asks first
+  // whenever any file would change: no "conversation only" escape.
+  assert.match(responseFooter, /previewRewindFiles\(sessionId, source\.eventSeq\)[\s\S]{0,300}preview\?\.available && preview\.restore\.length > 0[\s\S]{0,200}setFilesConfirm\(/);
+  assert.match(responseFooter, /replaceAnswer\(dialog\.sessionId, dialog\.source, regenerateTimelineRef\.current, "restore"/);
+  assert.match(responseFooter, /<RewindFilesDialog\s+purpose="regenerate"/);
+  assert.doesNotMatch(responseFooter, /onConversationOnly/);
   assert.match(banner, /runtimeRecovery\.technicalDetails/);
   assert.match(banner, /uncertainRecoveryWarning/);
   assert.doesNotMatch(banner, /runtimeRecovery\.ownedBody/);

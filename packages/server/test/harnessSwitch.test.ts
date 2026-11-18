@@ -2718,7 +2718,7 @@ test("a neighbour on the same route keeps the old harness's runtime path", async
   assert.equal(direct, 0, "another session on that route may still need the process");
 });
 
-test("a send reads the whole log once, however many times the runtime was switched", async (t) => {
+test("a send after a restored runtime switch does not read the whole log", async (t) => {
   const f = fixture();
   t.after(() => f.close());
   const { id } = await f.sessions.create({ projectId: "p" });
@@ -2741,7 +2741,7 @@ test("a send reads the whole log once, however many times the runtime was switch
   };
   await f.sessions.send(id, { text: "ordinary send after the switch" });
   assert.doesNotMatch(engine.requests.at(-1)!.text, /Recovery context/, "the recovery travels once");
-  assert.equal(wholeLogReads, 1);
+  assert.equal(wholeLogReads, 0, "the restored marker is settled from cached log facts");
   (f.store as { events: unknown }).events = read;
   engine.complete();
   await f.idle(id);

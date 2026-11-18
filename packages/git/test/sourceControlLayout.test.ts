@@ -286,14 +286,10 @@ test("narrow source-control shell keeps every change group above the commit comp
                   <section id="composer" class="git-commit-composer" aria-label="Commit staged changes">
                     <textarea class="ui-textarea git-commit-msg">message</textarea>
                     <div class="git-commit-rail">
-                      <div class="git-commit-heading">
-                        <strong>Commit 4 staged files</strong>
-                        <span class="git-commit-branch"><span class="mono">feature/mobile-layout</span></span>
-                      </div>
+                      <span class="git-commit-counter">7/72</span>
                       <div class="git-commit-actions">
                         <button class="ui-btn ui-btn--ghost ui-btn--sm">Generate</button>
                         <button class="ui-btn ui-btn--primary ui-btn--sm git-commit-submit">Commit</button>
-                        <button class="ui-btn ui-btn--quiet ui-btn--sm">Sync</button>
                       </div>
                     </div>
                   </section>
@@ -371,14 +367,10 @@ test("commit composer stays visible below an open file diff", { skip: !CHROME },
     <section id="composer" class="git-commit-composer" aria-label="Commit staged changes">
       <textarea class="ui-textarea git-commit-msg" placeholder="Commit message…">Polish the source-control commit composer</textarea>
       <div class="git-commit-rail">
-        <div class="git-commit-heading">
-          <strong>Commit 4 staged files</strong>
-          <span class="git-commit-branch"><span class="mono">feature/commit-composer</span></span>
-        </div>
+        <span class="git-commit-counter">42/72</span>
         <div class="git-commit-actions">
           <button class="ui-btn ui-btn--ghost ui-btn--sm">Generate</button>
           <button class="ui-btn ui-btn--primary ui-btn--sm git-commit-submit">Commit</button>
-          <button class="ui-btn ui-btn--quiet ui-btn--sm">Sync</button>
         </div>
       </div>
     </section>`;
@@ -610,9 +602,8 @@ test("phone Source Control keeps the clean card, transport and tabs readable in 
     <div class="module-view-body"><div class="module-view-content module-view-content--workspace"><div class="rail-body"><div class="git-page">
       <header class="workspace-surface-header source-control-head"><div class="workspace-surface-header-context"><div class="source-control-title">
         <span class="source-branch">${icon}<span class="mono">polyth/isolate/61b6188499eb</span></span>
-        <div class="source-control-identity"><button class="ui-btn ui-btn--ghost ui-btn--sm source-control-identity-trigger" aria-haspopup="menu"><span class="ui-btn-label"><span class="source-control-identity-value">System Git · GitHub</span><span class="source-control-identity-compact-label">${en["gitview.identity"]}</span></span><svg class="ui-icon ui-icon--sm" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m6 9 6 6 6-6"/></svg></button></div>
+        <div class="source-control-identity"><button class="ui-btn ui-btn--ghost ui-btn--sm source-control-identity-trigger" aria-haspopup="menu"><span class="ui-btn-label"><span class="source-control-identity-value">Alex Rivera</span><span class="source-control-identity-compact-label">${en["gitview.identity"]}</span></span><svg class="ui-icon ui-icon--sm" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m6 9 6 6 6-6"/></svg></button></div>
       </div></div><div class="workspace-surface-header-actions"><div class="source-remote-actions">
-        <div class="git-remote-context"><span class="git-remote-name">origin</span></div>
         <div class="source-remote-buttons"><button class="ui-btn ui-btn--quiet ui-btn--sm source-action-btn source-sync-btn">${icon}<span class="ui-btn-label">${en["gitview.syncRepository"]}</span></button>
         <button class="ui-icon-btn ui-icon-btn--sm" aria-label="Remote actions">${icon}</button><button class="ui-icon-btn ui-icon-btn--sm source-refresh-btn" aria-label="Refresh">${icon}</button></div>
       </div></div></header><div id="tabs-mount"></div>
@@ -630,7 +621,7 @@ test("phone Source Control keeps the clean card, transport and tabs readable in 
         const element = (selector: string) => document.querySelector<HTMLElement>(selector)!;
         const box = (selector: string) => { const r = element(selector).getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, bottom: r.bottom }; };
         const style = (selector: string) => getComputedStyle(element(selector));
-        const remote = box(".git-remote-name"), sync = box(".source-sync-btn"), head = box(".source-control-head"), refresh = box(".source-refresh-btn"), branch = box(".source-branch"), identity = box(".source-control-identity-trigger");
+        const remote = box('[aria-label="Remote actions"]'), sync = box(".source-sync-btn"), head = box(".source-control-head"), refresh = box(".source-refresh-btn"), branch = box(".source-branch"), identity = box(".source-control-identity-trigger");
         const center = (rect: { y: number; height: number }) => rect.y + rect.height / 2;
         const pane = style(".git-master-pane"), empty = style(".git-change-groups > .empty-state");
         return {
@@ -638,16 +629,15 @@ test("phone Source Control keeps the clean card, transport and tabs readable in 
           header: box(".source-control-head"), pane: box(".git-master-pane"), empty: box(".git-change-groups > .empty-state"),
           border: style(".git-master-detail").borderLeftWidth, blur: pane.backdropFilter,
           emptyBorder: empty.borderWidth, emptyBackground: empty.backgroundColor,
-          syncFont: parseFloat(style(".source-sync-btn").fontSize), tabFont: parseFloat(style(".ui-tab").fontSize), metaFont: parseFloat(style(".git-remote-name").fontSize),
+          syncFont: parseFloat(style(".source-sync-btn").fontSize), tabFont: parseFloat(style(".ui-tab").fontSize), metaFont: parseFloat(style(".source-control-identity-trigger").fontSize),
           identityBorder: style(".source-control-identity-trigger").borderColor,
           mask: style(".source-tabs").maskImage, scrollWidth: element(".source-tabs").scrollWidth, clientWidth: element(".source-tabs").clientWidth,
-          // Row 1: branch capsule … Sync; row 2: identity … remote, its menu, refresh.
+          // Row 1: branch capsule … Sync; row 2: identity … the remote menu, refresh.
           statusRowDelta: Math.abs(center(branch) - center(sync)), contextRowDelta: Math.max(Math.abs(center(identity) - center(remote)), Math.abs(center(remote) - center(refresh))),
           leftEdges: [branch.x - head.x, identity.x - head.x], rightEdges: [head.x + head.width - sync.x - sync.width, head.x + head.width - refresh.x - refresh.width],
           rowsStack: identity.y >= branch.bottom && remote.y >= sync.bottom && remote.x + remote.width <= refresh.x,
           headerHeight: head.height,
           lefts: [box(".source-control-head").x, box(".source-tabs").x, box(".git-master-detail").x],
-          remoteClipped: element(".git-remote-name").scrollWidth > element(".git-remote-name").clientWidth,
           identityClipped: element(".source-control-identity-trigger .ui-btn-label").scrollWidth > element(".source-control-identity-trigger .ui-btn-label").clientWidth,
           targets: [...document.querySelectorAll<HTMLElement>(".source-control-head button, .source-tabs button")].map(e => {
             const r=e.getBoundingClientRect(), hit=getComputedStyle(e, "::after");
@@ -665,14 +655,13 @@ test("phone Source Control keeps the clean card, transport and tabs readable in 
       assert.equal(metrics.border, "1px", label);
       if (!glass) assert.equal(metrics.blur, "none", label);
       assert.ok(metrics.statusRowDelta <= 1 && metrics.contextRowDelta <= 1, `${label}: each header row shares one centre line`);
-      assert.ok([...metrics.leftEdges, ...metrics.rightEdges].every((edge) => Math.abs(edge) <= 1), `${label}: identity under the branch, the remote row under Sync`);
+      assert.ok([...metrics.leftEdges, ...metrics.rightEdges].every((edge) => Math.abs(edge) <= 1), `${label}: identity under the branch, the remote menu and refresh under Sync`);
       assert.ok(metrics.rowsStack && metrics.headerHeight <= 96, `${label}: two compact header rows (${metrics.headerHeight}px)`);
       assert.ok(Math.max(...metrics.lefts) - Math.min(...metrics.lefts) <= 1, `${label}: header, tabs and card share one content edge`);
       // Header controls share the metadata size (Sync stands out by its button
       // plate, not a larger label); the tabs outrank the header.
       assert.ok(metrics.syncFont === metrics.metaFont && metrics.tabFont > metrics.metaFont, `${label}: type hierarchy`);
       assert.notEqual(metrics.identityBorder, "rgba(0, 0, 0, 0)", label);
-      assert.equal(metrics.remoteClipped, false, `${label}: the remote target stays readable`);
       assert.equal(metrics.identityClipped, false, `${label}: compact identity caption stays readable`);
       assert.ok(metrics.targets.every(([w,h]) => w! >= 44 && h! >= 44), `${label}: coarse targets`);
       const hasOverflow = metrics.scrollWidth > metrics.clientWidth + 1;

@@ -29,8 +29,82 @@
 .orch-foot { margin-block-start: var(--space-2); color: var(--muted); font-size: var(--font-meta); }
 .orch-foot p { margin: 0; }
 .orch-refresh { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-2); font-size: var(--font-meta); min-inline-size: 0; }
-.orch-windows { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); justify-content: flex-end; font-size: var(--font-meta); }
-.orch-window { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Quota sources: the harness heads the row, its windows sit on lines under it
+   that share one grid (subgrid), so labels, meters and resets line up and the
+   meters keep to the right edge like the ranked rows above. */
+.orch-page .settings-list-row.orch-flat.orch-quota-row {
+  grid-template-columns: minmax(0, 1fr) var(--icon-sm);
+  grid-template-areas: "title chevron" "trailing trailing" "error error";
+  row-gap: var(--space-2);
+}
+.orch-page .orch-quota-row .settings-list-trailing { display: block; min-block-size: 0; min-inline-size: 0; }
+.orch-windows {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(4.5em, max-content);
+  gap: var(--space-2) var(--space-3); font-size: var(--font-meta);
+}
+.orch-window {
+  display: grid; grid-column: 1 / -1; align-items: center; gap: var(--space-3); min-inline-size: 0;
+  grid-template-columns: minmax(0, 1fr) auto 6em;
+  grid-template-columns: subgrid;
+}
+.orch-window .orch-meter-value { flex: 1 1 auto; min-inline-size: 4ch; }
+/* A window that limits listed models opens the list of them in place. */
+.orch-window--link {
+  appearance: none; margin: 0; padding: 2px 0; border: 0; border-radius: var(--radius-sm);
+  background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer;
+}
+.orch-window--link .orch-window-label > span:first-child { text-decoration: underline dotted var(--faint); text-underline-offset: 3px; }
+.orch-window--link[aria-expanded="true"] .orch-window-label { color: var(--text); }
+button.orch-window--link:hover:where(:not(:disabled)) { background: transparent; }
+button.orch-window--link:hover .orch-window-label > span:first-child { text-decoration-color: currentColor; }
+.orch-window--link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.orch-window-models {
+  grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3);
+  margin-block-end: var(--space-1); color: var(--text-dim);
+}
+.orch-window-model { display: inline-flex; align-items: baseline; gap: var(--space-1); }
+.orch-window-model .orch-rank { min-inline-size: auto; color: var(--muted); }
+
+/* Harness filter: chips that wrap, the chosen harness's rule under them. */
+.orch-filter { display: flex; flex-direction: column; gap: var(--space-2); margin-block-end: var(--space-3); min-inline-size: 0; }
+.orch-filter-chips { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.orch-filter-chip {
+  appearance: none; display: inline-flex; align-items: baseline; gap: var(--space-1);
+  margin: 0; padding: 3px var(--space-3); border: 0; border-radius: var(--radius-round);
+  background: var(--surface-overlay); color: var(--text-dim); font: inherit; font-size: var(--font-meta); line-height: 1.5;
+  cursor: pointer; white-space: nowrap;
+}
+.orch-filter-chip em { font-style: normal; color: var(--muted); font-variant-numeric: tabular-nums; }
+.orch-filter-chip[aria-pressed="true"] { background: color-mix(in oklab, var(--accent) 14%, transparent); color: var(--accent); font-weight: 600; }
+.orch-filter-chip[aria-pressed="true"] em { color: inherit; font-weight: 400; }
+.orch-filter-chip[data-rule="prefer"] .orch-filter-rule { color: var(--accent); }
+.orch-filter-chip[data-rule="never"] .orch-filter-rule { color: var(--red); }
+.orch-filter-chip[data-rule="never"] > span { text-decoration: line-through; text-decoration-color: var(--faint); }
+button.orch-filter-chip:hover:where(:not(:disabled)) { background: var(--surface-overlay-strong); }
+button.orch-filter-chip[aria-pressed="true"]:hover:where(:not(:disabled)) { background: color-mix(in oklab, var(--accent) 20%, transparent); }
+.orch-filter-chip:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.orch-rule { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); min-inline-size: 0; }
+.orch-rule-label { font-size: var(--font-label); color: var(--text); }
+.orch-rule .orch-hint { flex: 1 0 100%; margin: 0; }
+
+/* Where the agent's list ends: a quiet line between the two lists. */
+.orch-cut {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-1) var(--space-3);
+  margin-block: var(--space-3) var(--space-2); padding-inline: var(--space-3);
+  color: var(--muted); font-size: var(--font-meta);
+}
+.orch-cut::before { content: ""; flex: 0 0 100%; block-size: 0; border-block-start: 1px dashed var(--border); margin-block-end: var(--space-2); }
+
+/* Ranked rows: why chip, the row menu, and the menu's explanation. */
+.orch-chip--place { background: transparent; box-shadow: inset 0 0 0 1px var(--border-soft); color: var(--text-dim); }
+.orch-chip--pinned, .orch-chip--preferred { color: var(--accent); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 35%, transparent); }
+.orch-row-menu { margin-inline-start: var(--space-1); }
+.orch-why { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-2) var(--space-3) var(--space-2); max-inline-size: 22rem; }
+.orch-why > strong { font-size: var(--font-label); }
+.orch-why ul { margin: 0; padding-inline-start: 1.1em; color: var(--text-dim); font-size: var(--font-meta); line-height: 1.45; }
+.orch-window-label { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px var(--space-2); min-inline-size: 0; color: var(--text-dim); overflow-wrap: anywhere; }
+.orch-window-reset { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: end; }
 
 /* Quota meter: thin bar and its number. */
 .orch-meter { display: inline-flex; align-items: center; gap: var(--space-2); --orch-meter: var(--accent); }
@@ -177,13 +251,8 @@ button.orch-picker-option[data-active="true"]:hover:where(:not(:disabled)) { bac
     grid-template-areas: "tile title chevron" "tile trailing trailing" "tile error error";
     grid-template-columns: auto minmax(0, 1fr) var(--icon-sm);
   }
-  .orch-page .settings-list-row.orch-quota-row {
-    grid-template-columns: minmax(0, 1fr) var(--icon-sm);
-    grid-template-areas: "title chevron" "trailing trailing" "error error";
-  }
-  .orch-page .orch-ranked .settings-list-trailing,
-  .orch-page .orch-quota-row .settings-list-trailing { justify-content: flex-start; }
-  .orch-trailing, .orch-windows { justify-content: flex-start; }
+  .orch-page .orch-ranked .settings-list-trailing { justify-content: flex-start; }
+  .orch-trailing { justify-content: flex-start; }
   .orch-steps { grid-template-columns: 1fr; }
   .orch-meter-bar { inline-size: 48px; }
   .orch-chain-row { grid-template-columns: auto minmax(0, 1fr); }
@@ -212,15 +281,17 @@ button.orch-picker-option[data-active="true"]:hover:where(:not(:disabled)) { bac
   }
   .orch-picker-option { min-block-size: var(--tap); }
   .orch-link { min-block-size: var(--tap); }
+  .orch-filter-chip { min-block-size: var(--tap); align-items: center; }
+  .orch-window--link { min-block-size: var(--tap); }
 }
-
-/* Quota windows wrap inside the row instead of pushing it wider. */
-.orch-page .orch-quota-row .settings-list-trailing { flex-wrap: wrap; min-inline-size: 0; max-inline-size: 100%; }
-.orch-windows { min-inline-size: 0; }
-.orch-window { white-space: normal; }
 
 .orch-page .settings-list-row.orch-flat > .settings-list-tile { display: none; }
 @container orch (max-width: 520px) {
   .orch-at-once { flex: 1 1 100%; }
   .orch-chain-controls { gap: 0; }
+  /* The row menu keeps to the title line; the facts wrap under the title. */
+  .orch-page .orch-ranked .settings-list-trailing { position: static; }
+  .orch-page .orch-ranked .orch-row-menu { position: absolute; inset-block-start: var(--space-2); inset-inline-end: var(--space-2); z-index: 1; margin: 0; }
+  .orch-page .orch-ranked .settings-list-title { padding-inline-end: var(--space-5); }
+  .orch-page .orch-ranked .settings-list-trailing:not(:has(.orch-trailing > :not(.orch-row-menu))) { min-block-size: 0; }
 }

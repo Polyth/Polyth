@@ -788,14 +788,27 @@ export interface SessionPauseEndedData {
   source?: string;
 }
 
-/** `tool/keep-running`: a person told Polyth that one open call is just slow
- *  and silent, so its silence stop is off (the hard execution ceiling stays).
+/** `tool/keep-running`: a person (or, when nobody answered, an enabled
+ *  Judgment use) told Polyth that one open call is just slow and silent, so
+ *  its silence stop is off (the hard execution ceiling stays).
  *  Polyth-originated: not runtime turn content, not model-visible. Old
  *  reducers ignore the unknown type. */
 export const TOOL_KEEP_RUNNING_EVENT = "tool/keep-running" as const;
 export interface ToolKeepRunningData {
   callId: string;
   byUserId?: string;
+  /** Set when a judge kept it, never by a person's click. */
+  via?: "judge";
+  /** The Judgment use that decided (with `via: "judge"`). */
+  useId?: string;
+}
+/** Who may keep a call running, as `keepToolRunning` options: a person's id,
+ *  or a server-side judge (`via: "judge"` with its use id). The HTTP route
+ *  only ever passes the signed-in person's id. */
+export interface KeepToolRunningOptions {
+  userId?: string;
+  via?: "judge";
+  useId?: string;
 }
 
 export interface TurnResumeCancelledData {
@@ -1639,6 +1652,10 @@ export interface UserTurnInput {
   delivery?: DeliveryMode;
   /** Atomically reject open questions / deny open permissions of this session before admission. */
   dismissPending?: boolean;
+  /** The queue row this send promotes (steer from the queue). The server
+   *  removes it once the send is accepted, in the same request, so a dropped
+   *  connection cannot leave the delivered message waiting in the queue. */
+  consumesQueueId?: string;
   /** Resolve model/agent/options through a stored agent profile at send time.
    *  A string selects a profile, `null` explicitly clears the session's
    *  stored profile, and an omitted field inherits it. The three are never
@@ -2086,6 +2103,26 @@ export const isolationBlocksUserMutation = (status: SessionStatus): boolean =>
  *  An archived child is at rest: its unmerged work is stranded. */
 export const delegatedChildRunning = (status: SessionStatus): boolean =>
   isolationBlocksUserMutation(status) && status !== "archived";
+
+/** The subagents of `sessionId` (children, grandchildren…, by `parentId`)
+ *  that still run. Their work is unfinished — shared-workspace children write
+ *  straight into the parent's checkout — so the parent's isolated work is not
+ *  ready to integrate, discard or publish while any is listed. */
+export function runningSubagents<T extends Pick<SessionProjection, "id" | "parentId" | "status">>(
+  sessions: readonly T[],
+  sessionId: string,
+): T[] {
+  const byId = new Map(sessions.map((candidate) => [candidate.id, candidate]));
+  const descends = (candidate: T): boolean => {
+    const seen = new Set<string>();
+    for (let parentId = candidate.parentId; parentId && !seen.has(parentId); parentId = byId.get(parentId)?.parentId) {
+      if (parentId === sessionId) return true;
+      seen.add(parentId);
+    }
+    return false;
+  };
+  return sessions.filter((candidate) => candidate.id !== sessionId && delegatedChildRunning(candidate.status) && descends(candidate));
+}
 
 /** Blocking statuses where no agent turn runs but Polyth has not yet proven
  *  the runtime settled (recovery, reconciliation, an unconfirmed outcome).
@@ -3150,7 +3187,7 @@ export interface SessionService {
   /** Turn off the silence stop for one open call of the current turn (the
    *  hard ceiling stays); records `tool/keep-running`. Idempotent. Rejects
    *  `conflict` when the call is not open in the current turn. */
-  keepToolRunning?(sessionId: string, callId: string, options?: { userId?: string }): Promise<void>;
+  keepToolRunning?(sessionId: string, callId: string, options?: KeepToolRunningOptions): Promise<void>;
   /** Compact the conversation context: the runtime's native compaction when
    * it has one, otherwise Polyth's own (summary + fresh native leg); a native
    * compaction the harness refuses or fails falls back to Polyth's. Resolves
@@ -4914,6 +4951,24 @@ export interface HarnessUpdateStatus {
    *  can replace it: `launcher` is the file found, `location` what it starts
    *  (a file, or the folder it picks from), `app` who owns that when known. */
   external?: { launcher: string; location?: string; app?: string };
+  /** Automatic updates on this machine; absent for a remote project. */
+  autoUpdate?: HarnessAutoUpdateState;
+}
+/** Whether the server installs a harness CLI's new releases by itself
+ *  (`PUT /api/harnesses/:id/auto-update`). It updates only while none of the
+ *  harness's chats is working, then restarts each runtime still on the old
+ *  version once its chat is idle. Machine-wide; only the instance owner can
+ *  switch it and only the owner receives `pending` and `last`. */
+export interface HarnessAutoUpdateState {
+  enabled: boolean;
+  /** The caller may switch it: the instance owner, for a local CLI with an updater. */
+  canChange: boolean;
+  /** `update`: `version` is published and waits for the chats to go idle.
+   *  `restart`: the update ran; chats still on the old version restart once idle. */
+  pending?: { kind: "update"; version: string } | { kind: "restart" };
+  /** The last automatic attempt. `from`/`to` are the versions installed before
+   *  and after; a failed attempt for one release is retried a day later. */
+  last?: { at: number; ok: boolean; latest?: string; from?: string; to?: string; message?: string };
 }
 export interface HarnessContext {
   /** Server-validated context for provider-owned per-Space storage. */
@@ -6600,7 +6655,7 @@ export const UI_SLOTS = [
   // Settings → Source control: the person's own hosting accounts, the Space
   // admin's shared ones, and provider facts about the active project.
   "settings.pages", "settings.footer", "settings.integrations", "settings.integrations.space", "settings.integrations.project", "commandPalette.commands",
-  "git.repository.identity", "git.repository.identity.provider", "git.change-request.create", "git.repository.change-request.provider", "project.repository.options",
+  "git.repository.identity", "git.repository.identity.provider", "git.change-request.create", "project.repository.options",
   // Widget definitions enter through the catalog/settings seams. The six
   // workspace slots are first-class placement targets alongside panel and
   // toolbar slots, rather than a canvas-only parallel vocabulary.
@@ -6994,6 +7049,29 @@ export interface ReleaseDownloadsDto {
     downloads: ReleaseDownloadDto[];
   } | null;
   error: string | null;
+  /** Set when that release is newer than this server: the command that updates
+   *  it, for how it was installed (`polyth update`, Homebrew, Docker, a
+   *  checkout). Absent from older servers. */
+  update?: { version: string; command: string } | null;
+}
+
+const RELEASE_VERSION = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;
+
+/** Polyth release order: numbers first, then a stable release above its own
+ *  prerelease (`1.2.357` > `1.2.357-nightly` > `1.2.356`). Null when either is
+ *  not a release version. */
+export function compareReleaseVersions(a: string, b: string): number | null {
+  const left = RELEASE_VERSION.exec(a);
+  const right = RELEASE_VERSION.exec(b);
+  if (!left || !right) return null;
+  for (let i = 1; i <= 3; i += 1) {
+    const diff = Number(left[i]) - Number(right[i]);
+    if (diff !== 0) return Math.sign(diff);
+  }
+  if (left[4] === right[4]) return 0;
+  if (!left[4]) return 1;
+  if (!right[4]) return -1;
+  return left[4] < right[4] ? -1 : 1;
 }
 
 /** Server-persisted client preferences (Appearance, chat, notifications, and

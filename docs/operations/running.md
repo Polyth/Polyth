@@ -7,6 +7,7 @@ the [quick start](../../README.md#quick-start) covers the first one.
 | Setup | Server runs | Reach it from | Start here |
 |---|---|---|---|
 | [Local from source](#local-from-source) | your machine, `npm start` | this machine's browser | `npm start` |
+| [Packaged server](#packaged-server) | any machine with Node.js, no checkout or build tools | this machine's browser, or via a proxy | `npm run build:server` |
 | [Development supervisor](#development-supervisor) | your machine, auto-rebuild and restart | this machine's browser | `npm run watch` |
 | [Docker, this machine](#docker) | container on Linux, host network | this machine's browser | `deploy/docker/compose.yml` |
 | [Docker behind HTTPS](#docker) | container and Caddy TLS proxy | any browser, `https://your.domain` | `deploy/docker/compose.proxy.yml` |
@@ -32,6 +33,120 @@ everything in `POLYTH_DATA_DIR`.
 | `POLYTH_CHROMIUM_PATH` | auto | Chromium executable for the built-in browser |
 | `POLYTH_LINK_HOST` | auto | `polyth-link-host` executable (otherwise `target/release` after `npm run build:link`) |
 | `POLYTH_DEBUG_AGENT_ACCESS` | none | `1` allows loopback API access without sign-in, see [debug modes](#debug-and-disposable-modes) |
+
+## Packaged server
+
+`npm run build:server` builds one archive for the machine it runs on:
+`apps/server/release/polyth-server-<version>-<platform>-<arch>.tar.gz` and its
+`.sha256`, plus the same tree split for npm in `apps/server/release/npm/`: `polyth`
+(the code and the `polyth` command, identical on every platform) and
+`@polyth/server-<platform>-<arch>` (`resources/` for one platform, installed by npm
+only there through `os`/`cpu`). The server takes `resources/` beside itself, else
+from that package, and refuses one of another version. Inside is the server with every server package compiled in, the web app,
+`polyth-link-host`, the runtime supervisor (Linux) and the four runtime dependencies
+that cannot be bundled (`node-pty`, `playwright-core`, `esbuild`, `typescript`). The
+machine that runs it needs Node.js 22.16 or newer and the agent CLIs, nothing else:
+no checkout, no compilers, no development dependencies. The layout is described in
+`apps/server/src/layout.ts`; `resources/` has the same shape as Desktop's resources
+directory and is the server's `POLYTH_RESOURCES_DIR`.
+
+```bash
+tar -xzf polyth-server-<version>-linux-x64.tar.gz -C /opt   # unpacks /opt/polyth
+node /opt/polyth/bin/polyth.mjs server setup-claim           # first run only, server stopped
+node /opt/polyth/bin/polyth.mjs server start                 # foreground
+```
+
+`bin/polyth.mjs` is the ordinary [`polyth` CLI](../../packages/cli); in a packaged
+install `polyth server start`, `setup-claim` and `break-glass` run the bundled entries
+instead of a checkout's npm scripts, and `start` turns the CLI process into the
+server, so a service manager's stop signal reaches the server itself. Without
+`POLYTH_DATA_DIR` the data lives in `~/.local/share/polyth-server/data` (Linux,
+`XDG_DATA_HOME`), `~/Library/Application Support/Polyth Server/data` (macOS) or
+`%LOCALAPPDATA%\Polyth Server\data` (Windows), apart from Desktop's, so both can run on
+one machine. Every variable of [Local from source](#local-from-source) applies.
+
+Run it under the machine's service manager with one command:
+
+```bash
+polyth service install                      # systemd --user unit, or a macOS LaunchAgent
+sudo polyth service install --system --run-as polyth --env-file /etc/polyth/polyth.env
+polyth service status
+polyth service uninstall
+```
+
+`install` writes `polyth.service` (Linux: `~/.config/systemd/user/`, or
+`/etc/systemd/system/` with `--system`) or `app.polyth.server.plist` (macOS:
+`~/Library/LaunchAgents/`, or `/Library/LaunchDaemons/`), then enables and starts it.
+It records `POLYTH_DATA_DIR` (`--data-dir` or `POLYTH_DATA_DIR`, else the default above
+for the account the service runs as, which is where `polyth update` run by that account
+looks; with another directory, pass it to `polyth update` too) and, when given,
+`--host` and `--port`; it never writes tokens or secrets, so put those in the
+`--env-file` (systemd). A user service needs `loginctl enable-linger $USER` to run
+without a login session; a system service never runs as root unless you name it.
+`--dry-run` prints the file and commands, `--no-start` only writes, `--force` replaces
+an existing file and restarts the service with it. A hand-written unit
+(`ExecStart=/usr/bin/node /opt/polyth/bin/polyth.mjs server start`, `KillMode=mixed`,
+`Restart=on-failure`) still works.
+
+### Updating a packaged server
+
+```bash
+polyth update --check              # installed and newest release of this install's channel
+polyth update                      # install it, restart, confirm
+polyth update --channel nightly    # or --version 1.2.357; --no-restart installs only
+polyth update --rollback           # back to the release the last update replaced (archive)
+```
+
+`polyth update` works out what installed it. An npm install is updated with
+`npm install polyth@<version>` (global or in its prefix). A release archive downloads
+`polyth-server-<version>-<platform>-<arch>.tar.gz` from the release, checks it against
+the release's `SHA256SUMS-server.txt`, unpacks it into `<install>/.update-<version>/`
+and swaps it in place: the current entries move to `<install>/.previous/`, so the
+paths a service names never change and the server's own user, which owns the install,
+can update it. Homebrew, Docker and checkout installs are told the command their
+manager uses instead. Releases come from `POLYTH_UPDATE_REPOSITORY` (default
+`Polyth/Polyth`); `POLYTH_UPDATE_RELEASES_URL` may name a mirror that answers in the
+shape of GitHub's releases API, for hosts without GitHub access.
+
+When a systemd or launchd service from `polyth service install` runs this install
+(its command names this install's `bin/polyth.mjs`; a `polyth.service` that runs
+another install is left alone), the update restarts it and waits up to ten minutes
+for the server to answer with the new version. The server drains the turns running
+at SIGTERM before it exits. If it does not come back, the previous release is put
+back and restarted. Without such a service the update says that the server still
+runs the old release until it is restarted; the running server keeps its files, but
+the web assets it serves already belong to the new release. One update runs at a
+time (`.polyth-update.lock` beside the install).
+
+With `POLYTH_UPDATE_REPOSITORY` set, Settings → About offers a newer stable release
+with the command for this install: `polyth update`, Homebrew's
+`brew upgrade polyth && brew services restart polyth`, `docker compose pull` in a
+container, or the checkout's `git pull` sequence.
+
+Every server, however it was installed, copies a canonical database before it
+migrates its schema: the control plane (`control-plane/control.sqlite`) and the
+session history (`sessions.db`) go to
+`<data>/pre-migration/<name>-before-<version>-<time>.sqlite`, the three newest per
+database are kept, and a copy that would leave less than 512 MB free is skipped with
+a log line. Schema changes are forward-only and an older server refuses a control
+plane migrated past it, so going back to an older version after a migration means
+restoring these copies: stop the server, copy each snapshot over its database,
+delete that database's `-wal` and `-shm` files, start the older version. `polyth
+update` prints these steps when the previous release does not start either.
+
+`polyth server restart` is the checkout's rebuild-and-restart and is refused in a
+packaged install: restart through the service manager. Releases publish these archives
+and the npm packages ([Nightly builds from devel](releases.md#nightly-builds-from-devel)).
+
+Building needs the web build (`build:server` runs it first), `cargo` for
+`polyth-link-host` unless `POLYTH_LINK_BIN_DIR` names a directory that already has it,
+and a C compiler on Linux for the supervisor. `POLYTH_VERSION` sets the version (the
+root `package.json` version otherwise). The build copies the runtime dependencies from
+`node_modules` and refuses, under `CI`, versions that differ from `package-lock.json`;
+locally it warns. `npm run smoke --workspace @polyth/server-app [archive]` unpacks an
+archive into a temporary directory, completes first-run setup through the HTTP API the
+setup page uses, restarts into the full server, signs in, makes an authenticated
+request and stops it.
 
 ## Development supervisor
 

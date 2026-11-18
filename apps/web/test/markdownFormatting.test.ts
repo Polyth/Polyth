@@ -197,3 +197,15 @@ test("a file reference shows the path, the sentence's period stays prose", () =>
   assert.deepEqual(parts.map((p) => p.text), ["See ", "apps/web/src/markdown/render.tsx:376", "."]);
   assert.equal(parts.map((p) => p.text).join(""), "See apps/web/src/markdown/render.tsx:376.");
 });
+
+// ------------------------------------------------------------------- links
+
+test("links render themed: a bare URL reads by its host, a labelled link keeps its label", () => {
+  const bare = html("Відкрий і увійди: https://www.npmjs.com/login?next=/x");
+  assert.match(bare, /<a class="md-link md-link-url" href="https:\/\/www\.npmjs\.com\/login\?next=\/x" target="_blank" rel="noopener noreferrer"><span class="md-link-scheme">https:\/\/www\.<\/span>npmjs\.com\/login\?next=\/x<\/a>/);
+  const labelled = html("see [the docs](https://polyth.app/docs)");
+  assert.match(labelled, /<a class="md-link" href="https:\/\/polyth\.app\/docs"[^>]*>the docs<\/a>/);
+  // Visited links never fall back to the browser's purple; a bare address wraps.
+  assert.match(rule(".md-link:visited"), /color: var\(--md-link-ink\)/);
+  assert.match(rule(".md-link-url"), /overflow-wrap: anywhere/);
+});

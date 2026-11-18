@@ -27,6 +27,7 @@
 // (apps/desktop/src/updaterChannel.ts) keys on that id. The test channel
 // (X.Y.N-beta) is retired; stable releases still carry beta*.yml so installs
 // that followed it keep updating.
+import { createHash } from "node:crypto";
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,6 +35,12 @@ import { MAC_LEGACY_METADATA } from "./mac-legacy.mjs";
 import {
   WORKSTATION_ASSET_INFIX, WORKSTATION_METADATA, WORKSTATION_SUMS_NAME, sha256Sums, workstationMacPartialName,
 } from "./workstation.mjs";
+
+/** Platforms the packaged server is built for (apps/server/src/layout.ts SERVER_TARGETS). */
+export const SERVER_TARGETS = ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"];
+/** Checksums of the release's server archives; `polyth update` verifies downloads with it. */
+export const SERVER_SUMS_NAME = "SHA256SUMS-server.txt";
+export const serverArchiveName = (version, target) => `polyth-server-${version}-${target}.tar.gz`;
 
 const REPOSITORY = /^([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))\/([A-Za-z0-9._-]{1,100})$/;
 const STABLE_VERSION = /^(\d+)\.(\d+)\.(\d+)$/;
@@ -177,6 +184,20 @@ export function mergeMacMetadata(texts) {
   base.splice(end, 0, ...extra);
   return base.join("\n");
 }
+
+/** sha256 of one file, for duplicate-product comparison. */
+function sha256File(file) {
+  return createHash("sha256").update(readFileSync(file)).digest("hex");
+}
+
+/** Of two copies of the same product, the linux-x64 one is the published copy. */
+function preferredProduct(a, b) {
+  const score = (file) => (file.includes("server-linux-x64") ? 0 : 1);
+  return score(a) <= score(b) ? a : b;
+}
+
+/** The platform-independent server package (`polyth-<version>.tgz`), not a platform one. */
+const SERVER_MAIN_PACKAGE = /^polyth-(?!server-)[0-9][^/]*\.tgz$/;
 
 function filesIn(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -327,7 +348,21 @@ export function assembleFeed(productsDir, feedDir, channel = "stable") {
   const byName = new Map();
   for (const file of filesIn(resolve(productsDir))) {
     const name = basename(file);
-    if (byName.has(name)) throw new Error(`Two builder products are both named ${name}`);
+    const seen = byName.get(name);
+    if (seen !== undefined) {
+      // Every server runner packs the platform-independent `polyth-<version>.tgz`
+      // (see publish-server-npm.mjs), so one name legitimately appears in several
+      // product directories. Identical bytes are one asset; bytes that differ are
+      // only acceptable for that main package, where the linux-x64 copy is the
+      // published one. Any other clash is a real conflict and must never be picked
+      // silently.
+      const identical = sha256File(seen) === sha256File(file);
+      if (identical || SERVER_MAIN_PACKAGE.test(name)) {
+        byName.set(name, preferredProduct(seen, file));
+        continue;
+      }
+      throw new Error(`Two builder products are both named ${name} with different contents`);
+    }
     byName.set(name, file);
   }
   const macPartials = MAC_ARCHITECTURES.map((arch) => {
@@ -392,7 +427,32 @@ export function assembleFeed(productsDir, feedDir, channel = "stable") {
   const apks = [...byName.values()].filter((file) => file.endsWith(".apk"));
   if (apks.length > 1) throw new Error(`Builder products hold more than one APK: ${apks.map((file) => basename(file)).join(", ")}`);
   if (apks.length === 1) cpSync(apks[0], join(out, `Polyth-${version}-android.apk`));
+  const servers = serverArchives(byName, version, warnings);
+  for (const file of servers) cpSync(file, join(out, basename(file)));
+  if (servers.length > 0) writeFileSync(join(out, SERVER_SUMS_NAME), sha256Sums(servers.map((file) => join(out, basename(file)))));
   return { version, channel: releaseChannel, prerelease: releaseChannel !== "stable", files: readdirSync(out).sort(), warnings };
+}
+
+/**
+ * The packaged server's archives (apps/server), download-only extras like the
+ * APK: a missing platform is a warning, never a blocked desktop release. An
+ * archive of another version is an error.
+ */
+function serverArchives(byName, version, warnings) {
+  const found = [...byName.keys()].filter((name) => /^polyth-server-.+\.tar\.gz$/.test(name));
+  for (const name of found) {
+    if (!SERVER_TARGETS.some((target) => name === serverArchiveName(version, target))) {
+      throw new Error(`Server archive ${name} does not belong to release ${version}`);
+    }
+  }
+  if (found.length === 0) {
+    warnings.push("The server archives are missing; this release has no packaged server");
+    return [];
+  }
+  for (const target of SERVER_TARGETS) {
+    if (!byName.has(serverArchiveName(version, target))) warnings.push(`The ${target} server archive is missing`);
+  }
+  return found.sort().map((name) => byName.get(name));
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

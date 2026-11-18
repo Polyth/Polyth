@@ -40,6 +40,13 @@ const QUALITY_TEST_FILES = [
   "scripts/test/releaseQuality.test.ts",
   "scripts/test/release-notes.test.ts",
   "scripts/test/mac-notarize.test.ts",
+  // The release pipeline itself: a feed/publish regression is only caught here,
+  // because it runs after every build has already succeeded.
+  "scripts/test/update-feed.test.ts",
+  "scripts/test/publishServerNpm.test.ts",
+  "scripts/test/workstation.test.ts",
+  "scripts/test/workstationEdition.test.ts",
+  "scripts/test/promote-master.test.ts",
   "scripts/test/release-quality-gates.test.ts",
   "scripts/test/agentBeta.test.ts",
   "apps/desktop/test/configuration.test.ts",

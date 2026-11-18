@@ -42,6 +42,9 @@ export interface NotificationStore {
   /** Internal account-deletion hook; removes every Space-scoped row and
    * creator binding so recreating the same stable account id adopts nothing. */
   removeAccount(userId: string): Promise<{ cleared: number; recipients: number }>;
+  /** Drop a permanently deleted session's creator bindings in every Space.
+   * Inbox items stay; nothing is written when the session had none. */
+  forgetSession(sessionId: string): Promise<number>;
 }
 
 interface StoredNotification {
@@ -174,7 +177,7 @@ export function createNotificationStore(opts: {
   const persist = (nextItems: StoredNotification[]): void => {
     mkdirSync(dirname(opts.file), { recursive: true });
     const body: NotificationFile = { version: 2, items: nextItems, recipients: snapshotRecipients() };
-    atomicWriteSync(opts.file, `${JSON.stringify(body, null, 2)}\n`, 0o600);
+    atomicWriteSync(opts.file, `${JSON.stringify(body)}\n`, 0o600);
   };
 
   let chain: Promise<unknown> = Promise.resolve();
@@ -307,6 +310,20 @@ export function createNotificationStore(opts: {
       }
       items = nextItems;
       return { cleared, recipients: recipientCount };
+    }),
+    forgetSession: (sessionId) => serialized(() => {
+      if (!isNonEmptyString(sessionId)) return 0;
+      const before = [...recipients.entries()];
+      const doomed = before.filter(([key]) => key.slice(key.indexOf("\0") + 1) === sessionId);
+      if (!doomed.length) return 0;
+      for (const [key] of doomed) recipients.delete(key);
+      try { persist(items); }
+      catch (error) {
+        recipients.clear();
+        for (const [key, recipient] of before) recipients.set(key, recipient);
+        throw error;
+      }
+      return doomed.length;
     }),
   } as NotificationStore;
 }

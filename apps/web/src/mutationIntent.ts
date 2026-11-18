@@ -30,6 +30,7 @@ export interface DirectPromptBody {
   agent?: string;
   delivery?: "normal" | "queue";
   dismissPending?: boolean;
+  consumesQueueId?: string;
   agentProfileId?: string | null;
 }
 

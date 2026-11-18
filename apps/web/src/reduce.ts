@@ -69,6 +69,11 @@ export interface AssistantMsg {
   undone?: boolean;
   rewindMarkerSeq?: number;
   time: number;
+  /** Start and first output (chunk, reasoning or tool call) of the turn
+   *  this reply belongs to, stamped when the reply appears: an older answer
+   *  keeps its time to first token once `RenderModel.turn` moves on. */
+  turnStartedAt?: number;
+  turnFirstOutputAt?: number;
   /** Final `assistant/message.time` — the semantic completion time, distinct
    *  from `time` (the first streamed chunk) */
   completedAt?: number;
@@ -108,6 +113,8 @@ export interface ToolMsg {
   /** A person pressed Keep running (`tool/keep-running`): the server's silence
    *  stop is off for this call; only the hard ceiling remains. */
   keptRunning?: true;
+  /** A judge, not a person, kept it (`tool/keep-running` with `via: "judge"`). */
+  keptBy?: "judge";
   /** See UserMsg.rev. */
   rev?: number;
 }
@@ -407,6 +414,10 @@ export interface TurnState {
    *  copied/unmatched stop carries no start. */
   startedAt?: number;
   stoppedAt?: number;
+  /** First model output of this turn: an assistant or reasoning chunk, a
+   *  final message or a tool call. `firstOutputAt - startedAt` is the
+   *  turn's time to first token. */
+  firstOutputAt?: number;
   /** This turn's own usage, separate from lifetime totals — a branch child
    *  must not combine inherited totals with a zero-duration pseudo-turn. */
   usage?: { tokens: TokenUsage; cost: number };
@@ -866,6 +877,21 @@ function pushTool(m: RenderModel, msg: ToolMsg): void {
 /** A rate-limited request produces no answer, so a turn that stops with a
  *  resume plan and ends on a bare one-line text ends on the provider's limit
  *  line (logs from before the Claude backend withheld it still carry one). */
+/** Records the working turn's first model output (see `TurnState.firstOutputAt`). */
+function markFirstOutput(model: RenderModel, time: number): void {
+  const t = model.turn;
+  if (t?.status === "working" && t.startedAt !== undefined && t.firstOutputAt === undefined) t.firstOutputAt = time;
+}
+
+function turnTiming(model: RenderModel): Pick<AssistantMsg, "turnStartedAt" | "turnFirstOutputAt"> {
+  const t = model.turn;
+  if (t?.status !== "working" || t.startedAt === undefined) return {};
+  return {
+    turnStartedAt: t.startedAt,
+    ...(t.firstOutputAt !== undefined ? { turnFirstOutputAt: t.firstOutputAt } : {}),
+  };
+}
+
 function markProviderNotice(model: RenderModel, startedAt: number | undefined): void {
   const last = model.messages.at(-1);
   if (startedAt === undefined || last?.kind !== "assistant" || !last.finalized || last.time < startedAt) return;
@@ -1202,6 +1228,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
     }
     case "assistant/chunk":
     case "assistant/reasoning-chunk": {
+      markFirstOutput(model, ev.time);
       const partId = str(d, "partId") ?? "";
       let m = findAssistant(model, partId);
       if (!m) {
@@ -1220,6 +1247,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           ...(model.turn?.harnessId ? { harnessId: model.turn.harnessId } : {}),
           ...(model.turn?.runtimeLegId ? { runtimeLegId: model.turn.runtimeLegId } : {}),
           ...(model.turn?.profileId ? { profileId: model.turn.profileId } : {}),
+          ...turnTiming(model),
         };
         pushAssistant(model, m);
       }
@@ -1235,6 +1263,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       break;
     }
     case "assistant/message": {
+      markFirstOutput(model, ev.time);
       const partId = str(d, "partId") ?? "";
       const text = str(d, "text");
       let m = findAssistant(model, partId);
@@ -1258,6 +1287,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           ...(model.turn?.harnessId ? { harnessId: model.turn.harnessId } : {}),
           ...(model.turn?.runtimeLegId ? { runtimeLegId: model.turn.runtimeLegId } : {}),
           ...(model.turn?.profileId ? { profileId: model.turn.profileId } : {}),
+          ...turnTiming(model),
         };
         pushAssistant(model, m);
       }
@@ -1283,6 +1313,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       break;
     }
     case "tool/call": {
+      if (ev.producerPlugin !== "composer-shell") markFirstOutput(model, ev.time);
       const callId = str(d, "callId") ?? "";
       const lifecycleStatus = str(d, "status");
       const status = lifecycleStatus === "pending" ? "pending" : "running";
@@ -1366,6 +1397,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       const t = findTool(model, str(d, "callId") ?? "");
       if (t && !t.keptRunning) {
         t.keptRunning = true;
+        if (d.via === "judge") t.keptBy = "judge";
         touch(t);
       }
       break;

@@ -116,8 +116,48 @@ export function subscribeDismissed(listener: () => void): () => void {
   return () => { listeners.delete(listener); };
 }
 
+// Dismissed idle recaps: session → the recap's `atSeq`. A newer recap of the
+// same session shows again; the record survives reloads so a closed recap
+// does not come back on every app open.
+const RECAP_KEY = "polyth.recap.dismissedRecaps.v1";
+let recaps: Map<string, number> | null = null;
+
+function loadRecaps(): Map<string, number> {
+  if (recaps) return recaps;
+  recaps = new Map();
+  try {
+    const raw = JSON.parse(storage()?.getItem(RECAP_KEY) ?? "[]") as unknown;
+    if (Array.isArray(raw)) {
+      for (const row of raw) {
+        if (Array.isArray(row) && typeof row[0] === "string" && typeof row[1] === "number") recaps.set(row[0], row[1]);
+      }
+    }
+  } catch {
+    // Unreadable: nothing stays dismissed.
+  }
+  return recaps;
+}
+
+export function recapDismissed(sessionId: string, atSeq: number): boolean {
+  return loadRecaps().get(sessionId) === atSeq;
+}
+
+export function dismissRecap(sessionId: string, atSeq: number): void {
+  const entries = loadRecaps();
+  entries.delete(sessionId);
+  entries.set(sessionId, atSeq);
+  while (entries.size > MAX_SESSIONS) entries.delete(entries.keys().next().value!);
+  try {
+    storage()?.setItem(RECAP_KEY, JSON.stringify([...entries]));
+  } catch {
+    // Storage full or denied: the dismissal still holds for this page.
+  }
+  for (const listener of listeners) listener();
+}
+
 /** Tests: forget the in-memory copy so the next read comes from storage. */
 export function resetDismissedCacheForTests(): void {
+  recaps = null;
   cache = null;
   collapsed = null;
   snapshots.clear();

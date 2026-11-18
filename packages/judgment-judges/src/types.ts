@@ -142,6 +142,8 @@ export interface JudgeFire { label?: string; threshold: number; margin: number }
 
 export interface JudgeInput {
   name: string;
+  /** What the judge is for, in the person's words; shown under its name. */
+  description?: string;
   enabled: boolean;
   trigger: JudgeTrigger;
   /** `projectId` narrows to one project. Only limit and permission judges see delegated child sessions. */
@@ -165,7 +167,16 @@ export interface JudgeDefinition extends JudgeInput {
   updatedAt: number;
   /** The person who last saved the judge. Its actions run as them; set by the server, never from input. */
   ownerUserId?: string;
+  /**
+   * The starter template this judge still is (`src/starters.ts`): set when
+   * Polyth adds the starters, kept while only its switch changes, dropped by
+   * any other edit, which makes it the person's own judge. Never from input.
+   */
+  starter?: string;
 }
+
+/** A built-in judge's switch for this project, as Settings → Judgment resolves it. */
+export interface BuiltinJudgeState { id: string; enabled: boolean }
 
 /** Why the judge's last call today got no answer; cleared by its next answer. */
 export interface JudgeFailure { reason: string; at: number }
@@ -179,6 +190,10 @@ export interface JudgesSnapshot {
   judgmentAvailable: boolean;
   /** The signed-in person reading the list, so the page can say whose access a judge acts with. */
   viewer?: string;
+  /** Nothing was ever saved in this Space: the page adds the starter judges (`POST /api/judges/starters`). */
+  fresh?: boolean;
+  /** The built-in judges this package registers with Judgment, and whether each is on here. Absent while Judgment is not running. */
+  builtins?: BuiltinJudgeState[];
 }
 
 /** A route a limit judge may be allowed to switch to, as the person's model shortlist shows it. */
@@ -225,7 +240,7 @@ export interface AssessmentAction {
 export interface AssessmentData {
   useId: string;
   scope: string;
-  kind: "completion-check" | "needs-you" | "custom";
+  kind: "completion-check" | "needs-you" | "quiet-command" | "custom";
   /** Short human title of the judge that fired. */
   title: string;
   label: string;
@@ -302,6 +317,7 @@ export const MAX_DAILY_CAP = 1_000;
 export const MAX_JUDGES = 32;
 export const MAX_BACKTEST = 25;
 export const FOLLOW_UP_MAX = 500;
+export const DESCRIPTION_MAX = 300;
 export const MAX_ROUTES = 8;
 
 const SAFE_ID = /^[A-Za-z][A-Za-z0-9_.:-]{0,127}$/;
@@ -338,8 +354,11 @@ const probability = (value: unknown, what: string): number => {
 /** Validates and normalizes a judge from untrusted input; throws `invalid-input` with a readable message. */
 export function validateJudgeInput(value: unknown): JudgeInput {
   if (!record(value)) throw invalid("Invalid judge");
-  onlyKeys(value, ["name", "enabled", "trigger", "filters", "evidence", "question", "fire", "effects", "routes", "maxRounds", "model", "dailyCap"], "Judge");
+  onlyKeys(value, ["name", "description", "enabled", "trigger", "filters", "evidence", "question", "fire", "effects", "routes", "maxRounds", "model", "dailyCap"], "Judge");
   const name = text(value.name, 80, "Name");
+  // An empty description is no description.
+  const description = typeof value.description === "string" && !value.description.trim() ? undefined
+    : value.description === undefined ? undefined : text(value.description, DESCRIPTION_MAX, "Description");
   if (typeof value.enabled !== "boolean") throw invalid("Enabled must be true or false");
   if (!TRIGGERS.includes(value.trigger as JudgeTrigger)) throw invalid("Unknown trigger");
   const trigger = value.trigger as JudgeTrigger;
@@ -474,7 +493,7 @@ export function validateJudgeInput(value: unknown): JudgeInput {
 
   const dailyCap = value.dailyCap ?? DEFAULT_DAILY_CAP;
   if (!Number.isSafeInteger(dailyCap) || (dailyCap as number) < 1 || (dailyCap as number) > MAX_DAILY_CAP) throw invalid(`Daily limit must be 1–${MAX_DAILY_CAP}`);
-  return { name, enabled: value.enabled, trigger,
+  return { name, ...(description !== undefined ? { description } : {}), enabled: value.enabled, trigger,
     filters: filters.projectId !== undefined ? { projectId: filters.projectId as string } : {},
     evidence, question, fire, effects,
     ...(routes ? { routes } : {}),

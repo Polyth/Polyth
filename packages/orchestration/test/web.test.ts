@@ -4,9 +4,78 @@ import { DEFAULT_POLICY, type ModelOption } from "../src/contracts.ts";
 import { en } from "../src/i18n/en.ts";
 import { orchestrationLocales } from "../src/i18n/index.ts";
 import {
-  customRoleId, formatContext, formatSpan, groupModels, meterTone, moveItem, percent, policiesEqual, policyOf, removeItem, slugify,
-  skippedReasons, statusText, statusTone, withQuotaCeiling,
+  customRoleId, formatContext, formatSpan, groupModels, harnessChips, harnessLabel, meterTone, moveItem, orderEdits, orderRows, percent,
+  policiesEqual, policyOf, quotaSourceName, rankReasons, removeItem, rowsMeteredBy, slugify, skippedReasons, statusText, statusTone,
+  withQuotaCeiling,
 } from "../widgets/helpers.ts";
+import type { ShortlistRow } from "../src/contracts.ts";
+
+const srow = (key: string, harnessId: string, extra: Partial<ShortlistRow> = {}): ShortlistRow => ({
+  key, harnessId, providerID: "p", modelID: key, name: key, favorite: false, turns: 1, sessions: 1, failed: 0,
+  available: true, listed: true, blocked: false, ...extra,
+});
+
+test("the person's order applies at once: pins, preferred, rest, avoided, demoted; unusable last; never-listed gone", () => {
+  const rows = [srow("a", "claude"), srow("b", "pi"), srow("c", "cursor"), srow("d", "codex", { blocked: true }), srow("e", "pi"), srow("f", "grok")];
+  const policy = { ...policyOf(DEFAULT_POLICY), pinned: ["e", "d"], demoted: ["a"], harnesses: { cursor: "prefer" as const, grok: "avoid" as const, pi: "never" as const } };
+  const ordered = orderRows(rows, { ...policy, pinned: ["d"], excluded: [] });
+  assert.deepEqual(ordered.map((r) => `${r.key}:${r.placed ?? "-"}`), ["c:preferred", "f:avoided", "a:demoted", "d:pinned"]);
+  // A stale placement from the server is replaced by the draft's.
+  assert.equal(orderRows([srow("a", "claude", { placed: "pinned" })], policyOf(DEFAULT_POLICY))[0]!.placed, undefined);
+  assert.deepEqual(orderRows(rows, { ...policyOf(DEFAULT_POLICY), excluded: ["b"] }).map((r) => r.key), ["a", "c", "e", "f", "d"]);
+});
+
+test("row edits keep a key in one list and respect the limits", () => {
+  let p = policyOf(DEFAULT_POLICY);
+  p = orderEdits.demote(p, "x");
+  p = orderEdits.pin(p, "x");
+  assert.deepEqual([p.pinned, p.demoted], [["x"], []]);
+  p = orderEdits.pin(p, "y");
+  assert.deepEqual(p.pinned, ["y", "x"], "a new pin goes to the top");
+  assert.deepEqual(orderEdits.move(p, "y", 1).pinned, ["x", "y"]);
+  assert.equal(orderEdits.move(p, "z", 1), p);
+  p = orderEdits.never(p, "x");
+  assert.deepEqual([p.pinned, p.excluded], [["y"], ["x"]]);
+  assert.deepEqual(orderEdits.harness(p, "pi", "avoid").harnesses, { pi: "avoid" });
+  assert.deepEqual(orderEdits.harness(orderEdits.harness(p, "pi", "avoid"), "pi", "normal").harnesses, {});
+  const full = { ...p, pinned: Array.from({ length: 12 }, (_, i) => `k${i}`) };
+  assert.equal(orderEdits.pin(full, "new"), full);
+});
+
+test("why a row ranks where it does, chips per harness and the rows a window meters", () => {
+  const row = srow("opus", "claude", {
+    harnessName: "Claude Code", favorite: true, favoriteIndex: 1, turns: 7, placed: "preferred", quotaUsed: 0.79,
+    quotaWindow: { sourceId: "claude", label: "7d" }, quotaWindows: [{ sourceId: "claude", windowId: "7d" }],
+  });
+  assert.deepEqual(rankReasons(row, 30, t), [
+    'orchestration.why.preferred{"harness":"Claude Code"}',
+    'orchestration.why.starred{"n":2}',
+    'orchestration.why.turns{"count":7,"days":30}',
+    'orchestration.why.quota{"window":"7d","used":79}',
+  ]);
+  assert.equal(rankReasons(srow("x", "pi", { blocked: true, turns: 0 }), 30, t)[0], "orchestration.why.unusable");
+  const chips = harnessChips([row, srow("b", "pi")], [{ id: "cursor", name: "Cursor" }], { harnesses: { cursor: "never" } });
+  assert.deepEqual(chips, [
+    { id: "claude", name: "Claude Code", count: 1 },
+    { id: "pi", name: "Pi", count: 1 },
+    { id: "cursor", name: "Cursor", count: 0, rule: "never" },
+  ]);
+  assert.deepEqual(rowsMeteredBy([srow("b", "pi"), row], "claude", "7d").map((m) => m.rank), [2]);
+  // Roles mode: an over-pace window warns from the over-pace level.
+  assert.equal(meterTone(0.75, 85, false, { level: 70, pace: "over" }), "warning");
+  assert.equal(meterTone(0.75, 85, false, { level: null, pace: "over" }), "neutral");
+});
+
+test("a quota source reads as its harness, with a plan only when the label adds one", () => {
+  assert.equal(harnessLabel("opencode-go"), "Opencode Go");
+  assert.equal(harnessLabel("claude"), "Claude");
+  assert.equal(harnessLabel(""), "");
+  assert.deepEqual(quotaSourceName({ sourceId: "antigravity" }), { title: "Antigravity", plan: "" });
+  assert.deepEqual(quotaSourceName({ sourceId: "claude", label: "max" }), { title: "Claude", plan: "Max" });
+  assert.deepEqual(quotaSourceName({ sourceId: "opencode-go", label: "OpenCode Go" }), { title: "OpenCode Go", plan: "" });
+  assert.deepEqual(quotaSourceName({ sourceId: "claude", label: "max", harnessName: "Claude Code" }), { title: "Claude Code", plan: "Max" });
+  assert.deepEqual(quotaSourceName({ sourceId: "zen", label: "OpenCode Zen", harnessName: "OpenCode" }), { title: "OpenCode Zen", plan: "" });
+});
 import { orchestrationTour } from "../widgets/tour.ts";
 
 const t = (key: string, values: Record<string, string | number> = {}) =>

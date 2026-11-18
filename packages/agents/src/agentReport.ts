@@ -55,7 +55,13 @@ const LINK = /<?\bhttps?:\/\/[^\s<>()]+>?/i;
 
 const clean = (text: string, limit: number): string => {
   const plain = text.replace(/[*_`]+/g, "").replace(/\s+/g, " ").trim();
-  return plain.length <= limit ? plain : `${plain.slice(0, limit - 1).trimEnd()}…`;
+  if (plain.length <= limit) return plain;
+  // Cut between words, and never leave an operator or a dash hanging
+  // ("… to parentId ===…").
+  const cut = plain.slice(0, limit - 1);
+  const space = cut.lastIndexOf(" ");
+  const words = space >= limit * 0.7 ? cut.slice(0, space) : cut;
+  return `${words.replace(/[\s,;:=<>!&|+([{–—-]+$/u, "") || words.trimEnd()}…`;
 };
 
 /** "<what> — <why> — <link>": the link may stand anywhere, or be a
@@ -137,6 +143,30 @@ export function parseAgentReport(text: string | undefined): AgentReport {
     remember,
     needs,
   };
+}
+
+/** The text before a code block it opens and never closes: the opening half
+ *  of a cut block ("```ts\nif (session.p") reads as garbage. */
+export function withoutOpenFence(text: string): string {
+  let open = -1;
+  let offset = 0;
+  for (const line of text.split("\n")) {
+    if (FENCE.test(line)) open = open < 0 ? offset : -1;
+    offset += line.length + 1;
+  }
+  return open < 0 ? text : text.slice(0, open).trimEnd();
+}
+
+/** A report body the record can keep: at most `limit` characters, cut at a
+ *  paragraph (else a line, else a word) and never inside a code block, with
+ *  "…" saying there was more. The whole message stays in the run's session. */
+export function clipReport(body: string, limit: number): string {
+  if (body.length <= limit) return body;
+  const room = body.slice(0, Math.max(0, limit - 3));
+  const floor = room.length * 0.6;
+  const at = [room.lastIndexOf("\n\n"), room.lastIndexOf("\n"), room.lastIndexOf(" ")].find((index) => index >= floor);
+  const kept = withoutOpenFence((at === undefined ? room : room.slice(0, at)).trimEnd());
+  return kept ? `${kept}\n\n…` : "…";
 }
 
 /** First meaningful line of a body, as a headline when the agent gave none. */

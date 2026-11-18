@@ -403,11 +403,8 @@ html[data-theme-style="macos"] .composer-card:focus-within {
 }
 html[data-theme-style="macos"] .msg.user .bubble { box-shadow: none; }
 /* Links take linkColor (`blue`), separate from the accent as in AppKit. */
-html[data-theme-style="macos"] .msg.assistant > .bubble a {
-  color: var(--blue);
-  text-decoration-color: color-mix(in srgb, var(--blue) 40%, transparent);
-}
-html[data-theme-style="macos"] .msg.assistant > .bubble a:hover { color: var(--blue); text-decoration-color: currentColor; }
+html[data-theme-style="macos"] { --link: var(--blue); }
+html[data-theme-style="macos"] .msg.user .bubble { --link: color-mix(in srgb, var(--blue) 82%, var(--text)); }
 
 /* ---- progress, spinner, scrollbars, selection, focus ------------------------ */
 /* NSProgressIndicator: a flat accent bar in a rounded 10% track. */

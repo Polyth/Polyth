@@ -360,10 +360,14 @@ const polythQuestionReply = (failure: string | undefined): string | undefined =>
   return at.length ? failure.slice(Math.min(...at)) : undefined;
 };
 
+/** Step type of the worker's frame carrying a planner step's transcript thinking. */
+export const AGY_PLANNER_THINKING_STEP = "polyth_planner_thinking";
+
 /** Only public agent_response content is dialogue. Tool output and thinking stay separate. */
 export function createAgyTurn(turnId: string, model: ModelRef | undefined) {
   const messages = new Map<number, string>();
   const reasoning = new Map<number, string>();
+  const thoughts = new Set<number>();
   const finished = new Set<number>();
   const startedTools = new Set<number>();
   const openTools = new Map<number, string>();
@@ -397,6 +401,17 @@ export function createAgyTurn(turnId: string, model: ModelRef | undefined) {
       if (terminal) return [];
       const index = count(row.step_index);
       if (index === undefined) throw agyError("protocol-error", "Antigravity step has no valid index");
+      // The worker reads a planner step's thinking from the CLI transcript
+      // (stream-json carries only its token count). It shares the planner
+      // step's index, so it must neither be dropped because that step's stream
+      // frames already settled nor mark the step settled for frames still due.
+      if (row.step_type === AGY_PLANNER_THINKING_STEP) {
+        const thinking = text(row.thinking)?.trim();
+        if (!thinking || thoughts.has(index)) return [];
+        thoughts.add(index);
+        if (thoughts.size > 32768) throw agyError("protocol-error", "Antigravity turn exceeds the step limit");
+        return [{ type: "assistant/message", partId: `${turnId}:step:${index}:thinking`, text: "", reasoning: thinking }];
+      }
       if (finished.has(index)) return [];
       if (finished.size + messages.size + startedTools.size > 32768) throw agyError("protocol-error", "Antigravity turn exceeds the step limit");
       const state = text(row.state);

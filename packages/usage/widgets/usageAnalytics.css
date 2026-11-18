@@ -198,7 +198,7 @@
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
-.usage-clean-hidden-row:active { scale: .98; }
+.usage-clean-hidden-row:active:where(:not(:disabled)) { scale: .98; }
 .usage-clean-hidden-row > span:last-child { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .usage-clean-hidden-row strong { font-size: var(--font-label); font-weight: 600; }
 .usage-clean-hidden-row small {

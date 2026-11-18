@@ -27,6 +27,8 @@ export const en = {
   "modelpicker.noModelsFound": "No models found",
   "modelpicker.noModelsMatch": "No models match “",
   "modelpicker.notConnected": "Not connected",
+  "modelpicker.chatWontFit": "Chat won't fit",
+  "modelpicker.chatWontFitTitle": "This chat no longer fits this model's context window",
   "modelpicker.notReported": "Not reported",
   "modelpicker.output": "Output",
   "modelpicker.pdf": "PDF",

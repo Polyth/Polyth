@@ -1,9 +1,11 @@
 // Streaming hot paths must not replay a session's whole event log. Long agent
 // sessions reach tens of thousands of events (a 32k-event log costs ~0.4 s of
-// CPU to read and parse); replaying it on every tool start and on every quiet
-// check of a streaming turn kept the server's single thread busy. These tests
-// count unbounded store.events() reads while those paths run, and check that
-// the watchdog and the quiet-turn reconciliation still behave as before.
+// CPU to read and parse); replaying it on every tool start, every quiet check
+// of a streaming turn, every send and every turn end kept the server's single
+// thread busy. These tests count unbounded store.events() reads while those
+// paths run, and check that each still behaves as before: the watchdog, the
+// quiet-turn reconciliation, pending package context, epoch recovery, the
+// incomplete-turn continuation, Pause and the rate-limit resume plan.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
@@ -98,11 +100,15 @@ const harness = (options: { quietTurnCheckMs?: number; toolExecutionTimeoutMs?: 
   const store = createStore(join(dir, "s.db"));
   // Every read of a whole log from its first event, with no page bound.
   const fullReads: string[] = [];
+  const fullReadStacks: string[] = [];
   const countedStore = new Proxy(store, {
     get(target, property, receiver) {
       if (property === "events") {
         return (sessionId: string, afterSeq?: number, page?: EventPage) => {
-          if (!afterSeq && page === undefined) fullReads.push(sessionId);
+          if (!afterSeq && page === undefined) {
+            fullReads.push(sessionId);
+            fullReadStacks.push(new Error("full read").stack ?? "");
+          }
           return target.events(sessionId, afterSeq, page);
         };
       }
@@ -134,9 +140,43 @@ const harness = (options: { quietTurnCheckMs?: number; toolExecutionTimeoutMs?: 
     ...(options.quietTurnCheckMs === undefined ? {} : { quietTurnCheckMs: options.quietTurnCheckMs }),
   });
   return {
-    sessions, store, emit, aborted, fullReads, dir,
+    sessions, store, emit, aborted, fullReads, fullReadStacks, startedTexts, dir,
     reconciles: () => reconciles,
   };
+};
+
+type Harness = ReturnType<typeof harness>;
+
+/** Whole-log reads since `before`, with where they came from on failure. */
+const replaysSince = (h: Harness, before: number): { count: number; where: string } => ({
+  count: h.fullReads.length - before,
+  where: h.fullReadStacks.slice(before).map((stack) => stack.split("\n").slice(1, 5).join("\n")).join("\n---\n"),
+});
+
+const eventsOf = async (h: Harness, id: string, type: string) =>
+  (await h.store.events(id)).filter((event) => event.type === type);
+
+/** A finished exchange: prompt, answer and a few tool calls, then the stop. */
+const completedTurn = async (h: Harness, id: string, text: string, answer = `Answer to ${text}.`) => {
+  await h.sessions.send(id, { text });
+  await waitFor(async () => (await h.store.projection(id))?.status === "working");
+  for (let call = 0; call < 3; call += 1) {
+    h.emit(id, { type: "tool/started", callId: `${text}-${call}`, tool: "read", input: {} });
+    h.emit(id, { type: "tool/result", callId: `${text}-${call}`, tool: "read", input: {}, output: "ok" });
+  }
+  h.emit(id, { type: "assistant/message", partId: `${text}-answer`, text: answer });
+  h.emit(id, { type: "turn/stopped", reason: "completed" });
+  await waitFor(async () => (await h.store.projection(id))?.status === "idle");
+};
+
+/** A session with earlier turns and a long tail of stream events. */
+const longSession = async (h: Harness, title: string): Promise<string> => {
+  const { id } = await h.sessions.create({ projectId: "p1", title });
+  for (let turn = 0; turn < 3; turn += 1) await completedTurn(h, id, `task ${turn}`);
+  for (let step = 0; step < 400; step += 1) {
+    await h.store.append(id, "assistant/reasoning-chunk", { partId: "r", text: `thinking ${step}` }, { ignorable: true });
+  }
+  return id;
 };
 
 const toolCount = async (store: ReturnType<typeof createStore>, sessionId: string, type: string) =>
@@ -247,4 +287,146 @@ test("a quiet check for a turn that already stopped does not reconcile", async (
   await waitFor(async () => (await h.store.projection(id))?.status === "idle");
   await flush(120);
   assert.equal(h.reconciles(), reconcilesBefore);
+});
+
+test("a plain send on a long session reads no whole log and still carries pending package context", async (t) => {
+  const h = harness();
+  t.after(() => { h.sessions.dispose(); return h.store.close(); });
+  const id = await longSession(h, "Long send");
+  await h.store.append(id, "package/context", {
+    packageId: "workflows", sourceId: "run-1", title: "Workflow result", text: "All checks passed.",
+  });
+
+  const before = h.fullReads.length;
+  await h.sessions.send(id, { text: "next step" });
+  await waitFor(async () => (await h.store.projection(id))?.status === "working");
+  const replays = replaysSince(h, before);
+  assert.equal(replays.count, 0, `a send must not replay the log:\n${replays.where}`);
+  const sent = h.startedTexts.at(-1)!;
+  assert.match(sent, /<polyth-package-context>/);
+  assert.match(sent, /## Workflow result\nAll checks passed\./);
+  assert.match(sent, /\n\nnext step$/);
+  const prompt = (await eventsOf(h, id, "user/message")).at(-1)!;
+  assert.equal(prompt.data.text, "next step");
+  assert.match(String(prompt.data.recoveryContext), /All checks passed\./);
+
+  // Delivered once: the prompt that carried it closes the window.
+  h.emit(id, { type: "assistant/message", partId: "next", text: "Done." });
+  h.emit(id, { type: "turn/stopped", reason: "completed" });
+  await waitFor(async () => (await h.store.projection(id))?.status === "idle");
+  await h.sessions.send(id, { text: "and then" });
+  await waitFor(async () => (await h.store.projection(id))?.status === "working");
+  assert.doesNotMatch(h.startedTexts.at(-1)!, /polyth-package-context/);
+  assert.equal(replaysSince(h, before).count, 0);
+});
+
+test("a send after an already restored runtime epoch neither replays the log nor restores it again", async (t) => {
+  const h = harness();
+  t.after(() => { h.sessions.dispose(); return h.store.close(); });
+  const id = await longSession(h, "Restored epoch");
+  const marker = await h.store.append(id, "runtime/epoch-replaced", {
+    old: { authorityId: "fake-runtime", generation: 1, epoch: 0 },
+    new: { authorityId: "fake-runtime", generation: 2, epoch: 1 },
+    reason: "owned runtime authority changed; restoring confirmed canonical history",
+  });
+  // The first prompt of the epoch carries the recovery (a replay is expected).
+  await completedTurn(h, id, "continue");
+  assert.match(h.startedTexts.at(-1)!, /^<polyth-runtime-epoch-recovery epoch="1" marker-seq="\d+">/);
+  assert.match(h.startedTexts.at(-1)!, /task 0/);
+  const restored = (await eventsOf(h, id, "user/message")).at(-1)!;
+  assert.deepEqual(restored.data.runtimeEpochRecovery, { epoch: 1, markerSeq: marker.seq });
+
+  const before = h.fullReads.length;
+  await h.sessions.send(id, { text: "carry on" });
+  await waitFor(async () => (await h.store.projection(id))?.status === "working");
+  const replays = replaysSince(h, before);
+  assert.equal(replays.count, 0, `a restored marker must not cost a replay:\n${replays.where}`);
+  assert.doesNotMatch(h.startedTexts.at(-1)!, /polyth-runtime-epoch-recovery/);
+  assert.equal((await eventsOf(h, id, "user/message")).at(-1)!.data.runtimeEpochRecovery, undefined);
+});
+
+test("a completed turn reads no whole log; an empty one is still recorded and continued", async (t) => {
+  const h = harness();
+  t.after(() => { h.sessions.dispose(); return h.store.close(); });
+  const id = await longSession(h, "Turn ends");
+
+  await h.sessions.send(id, { text: "answer me" });
+  await waitFor(async () => (await h.store.projection(id))?.status === "working");
+  const before = h.fullReads.length;
+  h.emit(id, { type: "assistant/message", partId: "a", text: "Here it is." });
+  h.emit(id, { type: "turn/stopped", reason: "completed" });
+  await waitFor(async () => (await h.store.projection(id))?.status === "idle");
+  await flush(30);
+  assert.equal((await eventsOf(h, id, "turn/incomplete")).length, 0, "an answered turn is complete");
+
+  // A turn that ended with neither text nor tools is recorded as incomplete,
+  // and its hidden continuation is sent, without a replay either.
+  await h.sessions.send(id, { text: "say something" });
+  await waitFor(async () => (await h.store.projection(id))?.status === "working");
+  const startsBefore = h.startedTexts.length;
+  h.emit(id, { type: "turn/stopped", reason: "completed" });
+  await waitFor(async () => (await eventsOf(h, id, "turn/incomplete")).length === 1);
+  const incomplete = (await eventsOf(h, id, "turn/incomplete"))[0]!;
+  assert.equal(incomplete.data.kind, "empty");
+  assert.equal(incomplete.data.autoContinued, true);
+  await waitFor(() => h.startedTexts.length === startsBefore + 1);
+  assert.match(h.startedTexts.at(-1)!, /Your previous answer ended before it was complete/);
+  const replays = replaysSince(h, before);
+  assert.equal(replays.count, 0, `turn ends must not replay the log:\n${replays.where}`);
+});
+
+test("an aborted turn reads no whole log and still honours Pause's abort request", async (t) => {
+  const h = harness();
+  t.after(() => { h.sessions.dispose(); return h.store.close(); });
+  const id = await longSession(h, "Aborts");
+
+  await h.sessions.send(id, { text: "stop me" });
+  await waitFor(async () => (await h.store.projection(id))?.status === "working");
+  const before = h.fullReads.length;
+  // The abort requests Stop and Pause record before the runtime reports the stop.
+  await h.store.append(id, "turn/abort-requested", {}, { ignorable: true });
+  h.emit(id, { type: "turn/stopped", reason: "aborted" });
+  await waitFor(async () => (await h.store.projection(id))?.status === "idle");
+  const plain = (await eventsOf(h, id, "turn/stopped")).at(-1)!;
+  assert.equal(plain.data.reason, "aborted");
+  assert.equal(plain.data.paused, undefined);
+  assert.equal((await h.store.projection(id))?.paused, undefined);
+
+  await h.sessions.send(id, { text: "pause me" });
+  await waitFor(async () => (await h.store.projection(id))?.status === "working");
+  await h.store.append(id, "turn/abort-requested", { pause: true }, { ignorable: true });
+  h.emit(id, { type: "turn/stopped", reason: "aborted" });
+  await waitFor(async () => Boolean((await h.store.projection(id))?.paused));
+  const paused = (await eventsOf(h, id, "turn/stopped")).at(-1)!;
+  assert.equal(paused.data.paused, true);
+  assert.equal((await h.store.projection(id))?.paused?.stopSeq, paused.seq);
+  const replays = replaysSince(h, before);
+  assert.equal(replays.count, 0, `aborted stops must not replay the log:\n${replays.where}`);
+});
+
+test("a rate-limit stop reads no whole log and plans the resume for the last prompt", async (t) => {
+  const h = harness();
+  t.after(() => { h.sessions.dispose(); return h.store.close(); });
+  const id = await longSession(h, "Rate limit");
+
+  await h.sessions.send(id, { text: "hit the limit" });
+  await waitFor(async () => (await h.store.projection(id))?.status === "working");
+  const prompt = (await eventsOf(h, id, "user/message")).at(-1)!;
+  const before = h.fullReads.length;
+  h.emit(id, {
+    type: "turn/stopped", reason: "error", error: "rate limited",
+    retry: { scope: "rate", provider: "anthropic", retryAfterSec: 30 },
+  });
+  await waitFor(async () => Boolean((await h.store.projection(id))?.resume));
+  const stop = (await eventsOf(h, id, "turn/stopped")).at(-1)!;
+  const retry = stop.data.retry as { attempt?: unknown; resumeAt?: unknown; scope?: unknown };
+  assert.equal(retry.attempt, 1);
+  assert.equal(retry.scope, "rate");
+  assert.equal(typeof retry.resumeAt, "number");
+  const projection = await h.store.projection(id);
+  assert.equal(projection?.resume?.userMessageSeq, prompt.seq);
+  assert.equal(projection?.resume?.resumeAt, retry.resumeAt);
+  assert.equal(projection?.autoRetry?.anchorSeq, prompt.seq);
+  const replays = replaysSince(h, before);
+  assert.equal(replays.count, 0, `a limit stop must not replay the log:\n${replays.where}`);
 });

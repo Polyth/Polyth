@@ -25,6 +25,8 @@ export const fr: ModelsMessages = {
   "modelpicker.noModelsFound": "Aucun modèle trouvé",
   "modelpicker.noModelsMatch": "Aucun modèle ne correspond à «",
   "modelpicker.notConnected": "Non connecté",
+  "modelpicker.chatWontFit": "Chat won't fit",
+  "modelpicker.chatWontFitTitle": "This chat no longer fits this model's context window",
   "modelpicker.notReported": "Non renseigné",
   "modelpicker.output": "Sortie",
   "modelpicker.pdf": "PDF",

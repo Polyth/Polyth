@@ -125,6 +125,7 @@ export const en = {
   "files.changes.legend": "Chats with changes",
   "files.changes.notFromChat": "Not changed by a chat",
   "files.changes.other": "Other changes",
+  "files.changes.committed": "Committed or staged",
   "files.changes.undo": "Undo",
   "files.changes.keep": "Keep",
   "files.changes.inspect": "Show change",

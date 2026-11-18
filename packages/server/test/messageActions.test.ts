@@ -214,21 +214,88 @@ test("whole-session fork copies the complete effective history and creates no dr
   await store.close();
 });
 
-test("fork of the first prompt has an empty prefix and a fresh backend", async () => {
+test("fork of the first prompt asks no runtime for anything and starts like a new chat", async () => {
   const fake = fakeRuntime();
   const { sessions, store } = makeService(fake);
   const { id } = await sessions.create({ projectId: "p1", title: "T" });
   await seedTwoTurns(fake, sessions, id);
-  const first = (await store.events(id)).find((e) => e.type === "user/message")!;
+  const sourceBinding = (await store.projection(id))?.runtimeBinding;
+  const sourceEvents = await store.events(id);
+  const first = sourceEvents.find((e) => e.type === "user/message")!;
+  const ensuredBefore = fake.ensured.length;
+  const startedBefore = fake.startedTexts.length;
 
   const result = await sessions.fork(id, first.seq);
-  // empty model prefix: no branch call, a fresh backend session instead
-  assert.equal(fake.branchRequests.length, 0);
-  assert.deepEqual(fake.ensured.filter((s) => s === result.id), [result.id]);
-  assert.equal((await store.projection(result.id))?.backendSessionId, `be_${result.id}`);
-  assert.deepEqual(deriveMessages(await store.events(result.id)), []);
   assert.equal(result.draft?.text, "first");
+  // Empty model prefix: no branch, and no native session made on the
+  // source's runtime (a per-chat runtime would then serve both chats).
+  assert.equal(fake.branchRequests.length, 0);
+  assert.equal(fake.ensured.length, ensuredBefore);
+  assert.equal(fake.startedTexts.length, startedBefore);
+  assert.deepEqual(await store.events(id), sourceEvents);
+  assert.deepEqual((await store.projection(id))?.runtimeBinding, sourceBinding);
+  const child = await store.projection(result.id);
+  assert.equal(child?.status, "idle");
+  assert.equal(child?.backendSessionId, undefined);
+  assert.equal(child?.runtimeBinding, undefined);
+  // Nothing to carry: no continuity marker, only the lineage marker with the
+  // excluded prompt as an editable draft.
+  const childEvents = await store.events(result.id);
+  assert.deepEqual(deriveMessages(childEvents), []);
+  assert.equal(childEvents.some((e) => e.type === "session/snapshot-imported"), false);
+  assert.equal(childEvents.filter((e) => e.type === "session/forked").length, 1);
+  assert.equal(childEvents.some((e) => e.type === "user/message" || e.type === "turn/started"), false);
+  assert.equal(runtimeEpochRecoveryPending(childEvents, await store.operations(result.id)), false);
+
+  // The child's own first send creates its native session, as a new chat's
+  // does. (This fake has no `reconcile`, so the fresh session stays
+  // reconciling and the prompt waits in the child's own queue, exactly once.)
+  await sessions.send(result.id, { text: "first, edited" });
+  await flush();
+  // The fake's ensureSession both creates and attaches: only the child's.
+  const ensuredAfter = fake.ensured.slice(ensuredBefore);
+  assert.ok(ensuredAfter.length > 0 && ensuredAfter.every((s) => s === result.id));
+  assert.equal((await store.projection(result.id))?.backendSessionId, `be_${result.id}`);
+  assert.deepEqual((await sessions.queueList(result.id)).map((item) => item.text), ["first, edited"]);
+  assert.deepEqual(await sessions.queueList(id), []);
+  assert.equal(fake.startedTexts.length, startedBefore);
+  assert.equal(runtimeEpochRecoveryPending(await store.events(result.id), await store.operations(result.id)), false);
   await store.close();
+});
+
+test("a fork never inherits the source's pending resend, retry chain, pause, harness move, background work or idle recap", async () => {
+  for (const fork of [undefined, false] as const) {
+    const fake = fakeRuntime(fork === false ? { fork: false } : {});
+    const { sessions, store } = makeService(fake);
+    const { id } = await sessions.create({ projectId: "p1", title: "T" });
+    await seedTwoTurns(fake, sessions, id);
+    const second = (await store.events(id)).filter((e) => e.type === "user/message")[1]!;
+    const source = (await store.projection(id))!;
+    await store.upsertProjection({
+      ...source,
+      resume: { resumeAt: Date.now() + 60_000, scope: "unknown", attempt: 1, userMessageSeq: second.seq },
+      autoRetry: { anchorSeq: second.seq, attempts: 1 },
+      paused: { at: Date.now(), stopSeq: second.seq },
+      harnessTransition: {
+        id: "move", selection: { mode: "pinned", harnessId: "other" }, targetHarnessId: "other",
+        timing: "after-turn", phase: "requested",
+      },
+      backgroundWork: { count: 1, since: Date.now() },
+      promptSuggestion: { text: "next", atSeq: second.seq },
+      // Pinned to the source's log: in the child it would read as current.
+      assist: { recap: "the source's summary", atSeq: 9_999, generatedAt: Date.now() },
+    } as unknown as typeof source);
+
+    const result = await sessions.fork(id, second.seq);
+    const child = await store.projection(result.id);
+    const label = fork === false ? "continuity fork" : "native branch";
+    assert.equal(fake.branchRequests.length, fork === false ? 0 : 1, `${label} took the other path`);
+    for (const field of ["resume", "autoRetry", "paused", "harnessTransition", "backgroundWork", "promptSuggestion", "assist"] as const) {
+      assert.equal(child?.[field], undefined, `${label} inherited ${field}`);
+    }
+    assert.equal(fake.startedTexts.filter((text) => text === "second").length, 1, `${label} resent the prompt`);
+    await store.close();
+  }
 });
 
 /** A continuity fork: the exact canonical prefix, then the continuity marker

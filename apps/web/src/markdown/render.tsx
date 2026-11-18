@@ -14,7 +14,7 @@ import Mermaid from "./Mermaid.tsx";
 import MathTex from "./MathTex.tsx";
 import JsonTree, { tryParseJson } from "./JsonTree.tsx";
 import ImageLightbox, { type MarkdownImage } from "./ImageLightbox.tsx";
-import { tr } from "../i18n/index.ts";
+import { getLocale, tr } from "../i18n/index.ts";
 import {
   Button,
   ChatIcon,
@@ -104,6 +104,23 @@ function InlineImage({ src, alt }: { src: string; alt: string }) {
   );
 }
 
+/** The visible text of a link whose label is its own address (a bare URL),
+ *  or null for a labelled link. */
+function bareUrlText(n: Extract<Inline, { kind: "link" }>): string | null {
+  const only = n.children.length === 1 ? n.children[0] : undefined;
+  return only?.kind === "text" && only.text === n.href ? only.text : null;
+}
+
+const URL_LEAD_RE = /^(https?:\/\/(?:www\.)?)(.+)$/i;
+
+/** A bare URL reads by its host: the scheme (and `www.`) stays in the text,
+ *  so copying keeps the whole address, but steps back in ink. */
+function renderBareUrl(text: string): ReactNode {
+  const m = URL_LEAD_RE.exec(text);
+  if (!m) return text;
+  return <><span className="md-link-scheme">{m[1]}</span>{m[2]}</>;
+}
+
 export function renderInline(nodes: Inline[], keyBase: string, linkify = true): ReactNode[] {
   const out: ReactNode[] = [];
   nodes.forEach((n, i) => {
@@ -133,7 +150,14 @@ export function renderInline(nodes: Inline[], keyBase: string, linkify = true): 
         }
         const href = sanitizeLinkHref(n.href);
         if (href === null) out.push(<span key={k}>{renderInline(n.children, k, false)}</span>);
-        else out.push(<a key={k} href={href} target="_blank" rel="noopener noreferrer">{renderInline(n.children, k, false)}</a>);
+        else {
+          const bare = bareUrlText(n);
+          out.push(
+            <a key={k} className={bare ? "md-link md-link-url" : "md-link"} href={href} target="_blank" rel="noopener noreferrer">
+              {bare ? renderBareUrl(bare) : renderInline(n.children, k, false)}
+            </a>,
+          );
+        }
         break;
       }
       case "image":
@@ -428,8 +452,29 @@ function cellAlign(align: TableAlign | undefined): { style?: { textAlign: "start
 }
 
 export function renderBlocks(blocks: Block[], keyBase: string): ReactNode[] {
-  return blocks.map((b, i) => {
-    const k = `${keyBase}-b${i}`;
+  return blocks.map((b, i) => renderBlock(b, `${keyBase}-b${i}`));
+}
+
+/** One document's top-level blocks as last rendered. `identity` is what an
+ *  element depends on besides its block: the key base and the locale of the
+ *  labels it carries. */
+export interface RenderedBlocks { identity: string; sources: string[]; nodes: ReactNode[] }
+
+/** `renderBlocks(blocks, keyBase)` that hands back the previous element of
+ *  every block whose content is unchanged. A streaming answer re-parses on
+ *  each flush but only its last block grows; React skips a subtree whose
+ *  element is the same object, so the finished blocks above cost nothing. */
+export function renderBlocksReusing(previous: RenderedBlocks | null, blocks: Block[], keyBase: string): RenderedBlocks {
+  const identity = `${getLocale()}\n${keyBase}`;
+  const reuse = previous?.identity === identity ? previous : null;
+  const sources = blocks.map((block) => JSON.stringify(block));
+  const nodes = blocks.map((block, i) => reuse && reuse.sources[i] === sources[i]
+    ? reuse.nodes[i]
+    : renderBlock(block, `${keyBase}-b${i}`));
+  return { identity, sources, nodes };
+}
+
+function renderBlock(b: Block, k: string): ReactNode {
     switch (b.kind) {
       case "heading": {
         const H = HEADING_TAGS[Math.min(Math.max(b.level, 1), 6) - 1]!;
@@ -497,7 +542,6 @@ export function renderBlocks(blocks: Block[], keyBase: string): ReactNode[] {
       case "mathBlock":
         return <MathTex key={k} tex={b.tex} block />;
     }
-  });
 }
 
 // ---------------------------------------------------------------- document
@@ -525,8 +569,14 @@ export function MarkdownDoc({ text, keyBase = "md", showGalleryShortcut = false,
   const fm = useMemo(() => (frontmatter ? splitFrontmatter(text) : null), [text, frontmatter]);
   const parseSource = fm ? fm.body : text;
   const blocks = useMemo(() => parseMarkdown(streaming ? holdBackStreamingTail(parseSource) : parseSource), [parseSource, streaming]);
+  const renderedRef = useRef<RenderedBlocks | null>(null);
+  const rendered = useMemo(() => {
+    renderedRef.current = renderBlocksReusing(renderedRef.current, blocks, keyBase);
+    return renderedRef.current;
+  }, [blocks, keyBase]);
+  const imagesRef = useRef<MarkdownImage[]>([]);
   const images = useMemo(() => {
-    return collectImages(blocks)
+    const next = collectImages(blocks)
       .map((im) => {
         const src = sanitizeImageSrc(im.src, {
           ...(projectId !== undefined ? { projectId } : {}),
@@ -536,6 +586,12 @@ export function MarkdownDoc({ text, keyBase = "md", showGalleryShortcut = false,
         return src === null ? null : { src, alt: im.alt };
       })
       .filter((x): x is MarkdownImage => x !== null);
+    // The same images keep the same list, so the document context (and every
+    // block reading it) does not change on each streamed flush.
+    const held = imagesRef.current;
+    if (held.length === next.length && held.every((im, i) => im.src === next[i]!.src && im.alt === next[i]!.alt)) return held;
+    imagesRef.current = next;
+    return next;
   }, [blocks, projectId, sessionId, repositoryId]);
   const [galleryAt, setGalleryAt] = useState<number | null>(null);
 
@@ -573,7 +629,7 @@ export function MarkdownDoc({ text, keyBase = "md", showGalleryShortcut = false,
           </tbody>
         </table>
       )}
-      {renderBlocks(blocks, keyBase)}
+      {rendered.nodes}
       {showGalleryShortcut && images.length > 0 && (
         <Button size="sm" variant="ghost" className="gallery-shortcut" iconStart={ImageIcon} onClick={() => setGalleryAt(0)}>
           {tr("timeline.openAnswerImages")}

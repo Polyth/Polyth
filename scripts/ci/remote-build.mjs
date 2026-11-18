@@ -301,6 +301,10 @@ function validateOutputFormats(target, outputs) {
     case "npm-packages":
       requireFiles(outputs, ".tgz", "npm package", isGzip);
       break;
+    case "server":
+      requireFiles(outputs, ".tar.gz", "server archive", isGzip);
+      requireFiles(outputs, ".tgz", "server npm package", isGzip);
+      break;
     case "testflight":
       requireFiles(outputs, "testflight.json", "TestFlight distribution summary");
       break;
@@ -790,6 +794,28 @@ function buildNpmPackages() {
   copyFiles(walk(releaseDir).filter((p) => p.endsWith(".tgz")));
 }
 
+/** The packaged server for this runner's platform (apps/server): its release
+ *  archive and npm packages, each smoke-tested from first run to a signed-in
+ *  request before it leaves the runner. */
+function buildServer() {
+  npmCi();
+  run(npm, ["run", "build:server"], { env: { POLYTH_VERSION: feedVersion() } });
+  run(process.execPath, ["--experimental-strip-types", "apps/server/smoke.ts"]);
+  run(process.execPath, ["--experimental-strip-types", "apps/server/smoke.ts", "--npm"]);
+  const release = join(ROOT, "apps/server/release");
+  const npmTarballs = directFiles(join(release, "npm")).filter((p) => p.endsWith(".tgz"));
+  // `polyth-<version>.tgz` is the platform-independent code package and every
+  // server runner packs it, but npm pack/gzip output is not byte-identical across
+  // runner operating systems, so only the linux-x64 copy travels: it is the one
+  // publish-server-npm.mjs publishes, and the feed refuses two products under one
+  // name. Each runner still ships its own polyth-server-<target>-<version>.tgz.
+  const publishesMainPackage = process.platform === "linux" && process.arch === "x64";
+  copyFiles(npmTarballs.filter((p) => publishesMainPackage || basename(p).startsWith("polyth-server-")));
+  copyFiles([
+    ...directFiles(release).filter((p) => p.endsWith(".tar.gz") || p.endsWith(".tar.gz.sha256")),
+  ]);
+}
+
 const handlers = {
   "android-apk": buildAndroid,
   "ios-app": buildIos,
@@ -801,6 +827,7 @@ const handlers = {
   "linux-appimage": () => buildLinux(),
   "linux-appimage-workstation": () => buildLinux({ workstation: true }),
   "npm-packages": buildNpmPackages,
+  server: buildServer,
   testflight: distributeTestFlight,
 };
 

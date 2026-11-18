@@ -63,7 +63,10 @@
   gap: var(--space-2) var(--space-3);
 }
 .memory-section-head > div:first-child { display: grid; flex: 1 1 18rem; gap: var(--space-1); min-width: 0; }
-.memory-section-head > div:first-child > p { max-width: 68ch; font-size: var(--font-meta); }
+/* The class names the subject so a first-child change cannot restyle every
+   <p> below (apps/web/test/cssStructuralInvalidation.test.ts); :where() keeps
+   the rule's old specificity. */
+.memory-section-head > div:first-child > p:where(.memory-section-copy) { max-width: 68ch; font-size: var(--font-meta); }
 
 /* ---- Records: search, filter, rows */
 .memory-records { display: grid; gap: var(--space-3); min-width: 0; }

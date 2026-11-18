@@ -9,9 +9,11 @@ import {
   bindCanonicalSecurity,
   bindCanonicalSecurityFactory,
   canonicalSecurity,
+  isSourceEntrypoint,
 } from "./runtimeSecurity.ts";
 import { createSetupServer } from "./setupServer.ts";
 import { createProxyTrust } from "./trustedProxy.ts";
+import { serverVersion } from "./version.ts";
 import { assertWorkstationListener } from "./workstationPolicy.ts";
 import {
   acquireDataDirectoryLease,
@@ -233,7 +235,7 @@ export async function boot(opts: BootOptions = {}) {
     const setup = createSetupServer({
       security,
       webDist: resolve(opts.webDist ?? resolve(fileURLToPath(new URL("../../../apps/web/dist/", import.meta.url)))),
-      version: "0.1.0",
+      version: serverVersion(opts.version),
     });
     try {
       await new Promise<void>((resolveListen, rejectListen) => {
@@ -298,6 +300,6 @@ export async function boot(opts: BootOptions = {}) {
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+if (isSourceEntrypoint(import.meta.url, "index.ts")) {
   void boot();
 }

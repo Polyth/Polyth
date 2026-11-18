@@ -414,18 +414,37 @@ function queueFeatureRefresh(sessionId: string): void {
   pump();
 }
 
+/** Above this many tracked chats a lookup set is cheaper than scanning. */
+const RUNTIME_FEATURE_SCAN_LIMIT = 16;
+
 function pruneRuntimeFeatures(sessions: readonly { id: string }[]): void {
+  // Runs on every live projection frame, so it must not build a set of every
+  // known chat only to find that the few it tracks are all still listed.
+  const tracked = Object.keys(store.getState().runtimeFeatures);
+  if (tracked.length === 0) return;
+  if (tracked.length <= RUNTIME_FEATURE_SCAN_LIMIT
+    && tracked.every((id) => sessions.some((session) => session.id === id))) return;
   const live = new Set(sessions.map((session) => session.id));
   store.pruneRuntimeFeatures(live);
 }
 
+/** Batches at or under this size look their rows up by scanning. */
+const PROJECTION_SCAN_LIMIT = 8;
+
 export function handleProjectionBatch(incoming: readonly SessionProjection[]): void {
   const state = store.getState();
-  const previous = new Map(state.sessions.map((session) => [session.id, session]));
+  // A streaming chat sends one row per frame: looking that row up must not
+  // cost a map of every known chat. Only a real batch builds the map.
+  let byId: Map<string, SessionProjection> | undefined;
+  const previousOf = (id: string): SessionProjection | undefined => {
+    if (incoming.length <= PROJECTION_SCAN_LIMIT) return state.sessions.find((session) => session.id === id);
+    byId ??= new Map(state.sessions.map((session) => [session.id, session]));
+    return byId.get(id);
+  };
   const refresh: string[] = [];
   for (const session of incoming) {
     const hasLoaded = session.id === state.activeSessionId || Object.prototype.hasOwnProperty.call(state.events, session.id);
-    if (hasLoaded && shouldRefreshRuntimeFeatures(previous.get(session.id), session, true)) refresh.push(session.id);
+    if (hasLoaded && shouldRefreshRuntimeFeatures(previousOf(session.id), session, true)) refresh.push(session.id);
   }
   store.upsertSessions(incoming);
   pruneRuntimeFeatures(store.getState().sessions);
@@ -2537,6 +2556,8 @@ export interface SendOptions {
   delivery?: "normal" | "steer" | "queue" | "interrupt";
   /** Atomically reject open questions / deny open permissions before admission. */
   dismissPending?: boolean;
+  /** Queue row this send promotes; the server removes it with the accepted send. */
+  consumesQueueId?: string;
   /** Reusable execution configuration resolved server-side. A string
    *  selects a profile, `null` explicitly clears the session's stored one,
    *  omitted inherits it. */
@@ -2582,6 +2603,7 @@ export async function sendMessage(text: string, model?: JsonObject, agent?: stri
       ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}),
       ...(opts?.harness ? { harness: opts.harness } : {}),
       ...(opts?.dismissPending ? { dismissPending: true } : {}),
+      ...(opts?.consumesQueueId ? { consumesQueueId: opts.consumesQueueId } : {}),
       // Explicit null must reach the wire (it clears the stored profile);
       // only an omitted field means "inherit".
       ...(opts?.agentProfileId !== undefined ? { agentProfileId: opts.agentProfileId } : {}),

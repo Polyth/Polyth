@@ -5,11 +5,20 @@ import { createContext, type Command } from "./context.ts";
 import { createOutput, style, type Output } from "./output.ts";
 import { login, logout, target, whoami } from "./commands/auth.ts";
 import { api, models, open, projects, server, status } from "./commands/admin.ts";
+import { service } from "./commands/service.ts";
+import { update } from "./commands/update.ts";
 import { events, on, requests } from "./commands/automation.ts";
 import { chat } from "./commands/chat.ts";
 import { archive, fork, log, newSession, queue, remove, restore, send, sessions, show, stop, wait } from "./commands/sessions.ts";
+import { bundleVersion } from "./target.ts";
 
 export const VERSION = "0.1.0";
+
+/** What `polyth --version` prints: a packaged server's CLI is that server's
+ *  release (read when asked, after its launcher marked the install). */
+export function cliVersion(env: NodeJS.ProcessEnv = process.env): string {
+  return bundleVersion(env) ?? VERSION;
+}
 
 export const GLOBAL_FLAGS: FlagSpec[] = [
   { name: "json", description: "Machine-readable JSON output" },
@@ -27,7 +36,7 @@ const GROUPS: Array<[string, Command[]]> = [
   ["Automation", [events, on, requests]],
   ["Polyth", [status, projects, models, open, api]],
   ["Connection", [login, logout, whoami, target]],
-  ["This machine", [server]],
+  ["This machine", [server, service, update]],
 ];
 
 const completion: Command = {
@@ -183,7 +192,7 @@ export async function main(argv: string[]): Promise<number> {
   try {
     const { globals, rest } = splitGlobals(argv);
     o = createOutput({ json: globals.json === true, ...(globals["no-color"] === true ? { color: false } : {}) });
-    if (globals.version === true) { o.out(VERSION); return 0; }
+    if (globals.version === true) { o.out(cliVersion()); return 0; }
     const [name, ...commandArgs] = rest;
     if (!name || name === "--") { o.out(overview(o)); return name ? 2 : 0; }
     const command = find(name);
@@ -220,7 +229,10 @@ function report(o: Output, error: unknown): number {
 const invokedDirectly = (() => {
   try {
     const self = new URL(import.meta.url).pathname;
-    return process.argv[1] !== undefined && (process.argv[1] === self || process.argv[1].endsWith("/packages/cli/src/main.ts"));
+    // Only this source file: inside a bundle (the packaged server's dist/cli.mjs)
+    // import.meta.url is the bundle, whose own entry runs main().
+    return process.argv[1] !== undefined
+      && ((process.argv[1] === self && self.endsWith("/main.ts")) || process.argv[1].endsWith("/packages/cli/src/main.ts"));
   } catch {
     return false;
   }

@@ -11,9 +11,19 @@ for which kind of work, with quota fallbacks and a never-use list.
   of at most 5 models with an optional advisory `maxConcurrent`. Also
   `quotaCeiling`, `overPaceCeiling`, `whenExhausted` (`shortlist` | `direct`),
   `maxChildren` and a `excluded` never-list.
+- **The person's own order of the ranked list** (both modes): `pinned` (≤12
+  keys, listed first in that order, even unused), `demoted` (≤24, listed last)
+  and `harnesses` (≤24 harness id → `prefer` | `avoid` | `never`). A key sits in
+  one list only: `excluded` beats `pinned` beats `demoted` (parsing drops the
+  weaker copy). `never` hides every model of that harness from the list and
+  marks its role choices `excluded`. Empty fields are left out of the revision
+  hash, so a policy saved before they existed keeps its revision.
 - **Service**: provides `SERVER_DELEGATION_POLICY`. `agent.models` prints
-  `brief.text`, a blank line, then the Usage shortlist built with `brief.exclude`.
-  `auto` mode returns no brief.
+  `brief.text`, a blank line, then the Usage shortlist built with
+  `brief.exclude`, `brief.excludeHarnesses` and `brief.order` (`listOptions` in
+  `src/serverEntry.ts`). The never lists and the order apply in both modes: in
+  `auto` mode the brief has empty `text` (no policy block) and is undefined only
+  when the person set none of them.
 - **Resolution** (`src/resolve.ts`): one `SERVER_MODEL_ROUTING.candidates(space,
   { pairs, limit: 50 })` call; per choice the status is
   excluded > unlisted > unavailable > blocked > over-pace > ceiling > unverified > ready.
@@ -26,18 +36,30 @@ the shell's header "?" opens the package tour from `widgets/tour.ts`):
 
 - **How to choose**: Auto | By role, a hint that follows the mode, and a closed
   "How it works" disclosure with the three steps of that mode.
-- **Now**: what an agent gets if it delegates right now, from the *saved*
-  policy: each role's pick (Ready / Fallback / Nothing usable, with the reason),
-  the ranked list exactly as agents see it (first 12, with the omitted, retired
-  and never-delegate counts), quota sources with pace, and "What the agent sees"
-  (the verbatim `agent.models` text, copyable).
+- **Now**: what an agent gets if it delegates right now, from the *draft*
+  (the server's `POST /preview`, with `orderRows` applying the draft's order at
+  once so an edit never waits on it): each role's pick (Ready / Fallback /
+  Nothing usable, with the reason) and the ranked list, up to 50 rows with a
+  line after the first 12 ("Agents see the 12 models above", the rest behind
+  "Show N more"). Harness chips filter the list; choosing one shows its rule
+  (Prefer / Normal / Avoid / Never). Each row's ⋯ menu explains its rank
+  (`rankReasons`: usable or not, the person's placement, star position, use in
+  the window, fullest quota) and moves it: Pin to top / Move up / Move down /
+  Unpin, Push to bottom / Return to its place, Never use; a placement chip
+  marks moved rows. Quota sources are titled by the harness's registry name
+  with the plan beside it; each window is a line (label, meter, reset) that
+  opens the ranked models it meters (`quotaWindows`). In By role mode a meter
+  also warns from the over-pace level while its window runs over pace. "What
+  the agent sees" is the verbatim `agent.models` text, copyable.
 - **Roles**: one disclosure per role with its priority chain (move, remove, an
   advisory "at once" limit, live status from a debounced `POST /preview` of the
   unsaved draft), "Add model" (picker: starred, used, then each harness; facts
   only, never the name-based tier), custom roles (name + "when", read by agents
   verbatim) and "Fill from my models" (`POST /recommend`, never saves by itself).
-- **Safeguards**: quota threshold, the earlier over-pace threshold, what to do
-  when nothing fits, subagents at once, the never-delegate list, reset.
+- **Safeguards**: the never-delegate list first (models and harnesses set to
+  Never; it applies in both modes), then, under an Auto-mode note, the
+  roles-only quota threshold, earlier over-pace threshold, what to do when
+  nothing fits and subagents at once; reset.
 - One SaveBar; a 409 shows a reload notice instead of overwriting.
 
 Copy lives in `src/i18n` (12 locales). Visual acceptance: 1280×800, 1440×900 and

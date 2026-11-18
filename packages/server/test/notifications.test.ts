@@ -4,7 +4,7 @@
 // primary key — a repeated transition keeps both rows under fresh ids.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -413,4 +413,41 @@ test("records, ids, recipient policies, and revocation are account/Space scoped"
   assert.deepEqual(await store.removeAccount(b.userId), { cleared: 1, recipients: 1 });
   assert.deepEqual(await store.list(b), { items: [], unread: 0 });
   assert.equal(await store.recipientForSession("ses_same", { spaceId: "sp_b" }), undefined);
+});
+
+test("forgetSession drops only that session's recipients, writes once, and no-ops for an unknown session", async () => {
+  const file = tmpFile();
+  const store = createNotificationStore({ file });
+  const a = { userId: "u1", spaceId: "s1" };
+  const b = { userId: "u2", spaceId: "s2" };
+  await store.registerSessionRecipient("ses_gone", a);
+  await store.registerSessionRecipient("ses_gone", b);
+  await store.registerSessionRecipient("ses_kept", a);
+  await store.add(a, input(1, { sessionId: "ses_gone" }));
+  const ino = () => statSync(file, { bigint: true }).ino;
+  const before = ino();
+  assert.equal(await store.forgetSession("ses_gone"), 2);
+  assert.notEqual(ino(), before, "one write");
+  const written = ino();
+  assert.equal(await store.recipientForSession("ses_gone", a), undefined);
+  assert.equal(await store.recipientForSession("ses_gone", b), undefined);
+  assert.deepEqual(await store.recipientForSession("ses_kept", a), a);
+  assert.equal((await store.list(a)).items.length, 1, "inbox items are untouched");
+  assert.equal(await store.forgetSession("ses_unknown"), 0);
+  assert.equal(ino(), written, "an unknown session does not write");
+  const reopened = createNotificationStore({ file });
+  assert.equal(await reopened.recipientForSession("ses_gone", a), undefined);
+  assert.deepEqual(await reopened.recipientForSession("ses_kept", a), a);
+});
+
+test("notifications are written compact and a pretty-printed file still loads", async () => {
+  const file = tmpFile();
+  const store = createNotificationStore({ file });
+  const acct = { userId: "u1", spaceId: "s1" };
+  await store.registerSessionRecipient("ses_a", acct);
+  const text = readFileSync(file, "utf8");
+  assert.equal(text.trimEnd().includes("\n"), false);
+  assert.equal(text.endsWith("\n"), true);
+  writeFileSync(file, `${JSON.stringify(JSON.parse(text), null, 2)}\n`);
+  assert.deepEqual(await createNotificationStore({ file }).recipientForSession("ses_a", acct), acct);
 });

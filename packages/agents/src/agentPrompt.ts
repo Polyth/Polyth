@@ -207,7 +207,9 @@ export function spendInLastDay(history: readonly ScheduleRunRecord[] | undefined
 export const tokenTotal = (tokens: TokenUsage | undefined): number =>
   tokens ? tokens.input + tokens.output + (tokens.cacheWrite ?? 0) : 0;
 
-/** The first exhausted daily limit, as a sentence, or undefined. */
+/** The first exhausted daily limit, as a sentence, or undefined. Runs the
+ *  person started by hand count but are never held back, so the spend may
+ *  stand past the limit: the sentence says both, never "4 of 2". */
 export function budgetExceeded(
   task: Pick<ScheduleTask, "budget" | "history">,
   now: number,
@@ -216,15 +218,28 @@ export function budgetExceeded(
   if (!budget) return undefined;
   const spend = spendInLastDay(task.history, now);
   if (budget.runsPerDay !== undefined && spend.runs >= budget.runsPerDay) {
-    return `Daily run limit reached (${spend.runs} of ${budget.runsPerDay} in the last 24 h).`;
+    return `Daily run limit reached: ${spend.runs} ${spend.runs === 1 ? "run" : "runs"} in the last 24 h, the limit is ${budget.runsPerDay}.`;
   }
   if (budget.tokensPerDay !== undefined && spend.tokens >= budget.tokensPerDay) {
-    return `Daily token limit reached (${spend.tokens} of ${budget.tokensPerDay} in the last 24 h).`;
+    return `Daily token limit reached: ${spend.tokens} tokens in the last 24 h, the limit is ${budget.tokensPerDay}.`;
   }
   if (budget.costPerDay !== undefined && spend.cost >= budget.costPerDay) {
-    return `Daily spending limit reached ($${spend.cost.toFixed(2)} of $${budget.costPerDay.toFixed(2)} in the last 24 h).`;
+    return `Daily spending limit reached: $${spend.cost.toFixed(2)} in the last 24 h, the limit is $${budget.costPerDay.toFixed(2)}.`;
   }
   return undefined;
+}
+
+const LEGACY_BUDGET = /^Daily (run|token|spending) limit reached \((\$?[\d.]+) of (\$?[\d.]+) in the last 24 h\)\.$/;
+
+/** A skipped wake's reason as the page says it: runs recorded before the
+ *  sentence above changed read "(4 of 2 in the last 24 h)", which reads as
+ *  nonsense once a run the person started passed the limit. */
+export function budgetWords(reason: string): string {
+  const old = LEGACY_BUDGET.exec(reason);
+  if (!old) return reason;
+  const [, kind, spent, limit] = old as unknown as [string, string, string, string];
+  const amount = kind === "run" ? `${spent} ${spent === "1" ? "run" : "runs"}` : kind === "token" ? `${spent} tokens` : spent;
+  return `Daily ${kind} limit reached: ${amount} in the last 24 h, the limit is ${limit}.`;
 }
 
 /** True once the newest `limit` finished runs all failed. Unknown outcomes,

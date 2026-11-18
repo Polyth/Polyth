@@ -346,14 +346,36 @@ test("attachment support is re-evaluated against the harness that will run the t
   const { id } = await f.sessions.create({ projectId: "p" });
   const audio = { id: "att", name: "memo.mp3", mime: "audio/mpeg", size: 3, kind: "file" as const, path: "memo.mp3" };
   const pdf = { id: "pdf", name: "paper.pdf", mime: "application/pdf", size: 4, kind: "file" as const, path: "paper.pdf" };
-  // Neither engine takes audio; each refusal names the engine that would run.
-  await assert.rejects(f.sessions.send(id, { text: "read", attachments: [audio] }), /Engine A/);
+  // Every format is accepted (docs/architecture/multi-harness.md): in a local
+  // project what the engine cannot take as content is handed over by path,
+  // and the hand-over names the engine that runs this turn.
+  const turn = async (harnessId: string, attachment: typeof audio | typeof pdf) => {
+    await f.sessions.send(id, { text: "read", attachments: [attachment] });
+    const engine = f.engineFor(harnessId).at(-1)!;
+    const request = engine.requests.at(-1)!;
+    engine.complete();
+    await f.idle(id);
+    return request;
+  };
+  // Neither engine takes audio.
+  const audioA = await turn("fake-a", audio);
+  assert.match(audioA.text, /memo\.mp3/);
+  assert.match(audioA.text, /Engine A cannot take this kind of file as message content/);
+  assert.deepEqual(audioA.attachments ?? [], [], "the audio ref never reaches the adapter");
   // A says nothing about pdf, so Polyth projects its text: this one has none.
-  await assert.rejects(f.sessions.send(id, { text: "read", attachments: [pdf] }), /not a readable PDF/);
+  const pdfA = await turn("fake-a", pdf);
+  assert.match(pdfA.text, /paper\.pdf/);
+  assert.match(pdfA.text, /Polyth could not extract its text/);
+  assert.deepEqual(pdfA.attachments ?? [], [], "a projected pdf never reaches the adapter");
   await f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" });
-  await assert.rejects(f.sessions.send(id, { text: "read", attachments: [audio] }), /Engine B/);
+  const audioB = await turn("fake-b", audio);
+  assert.match(audioB.text, /Engine B cannot take this kind of file as message content/);
+  assert.doesNotMatch(audioB.text, /Engine A/);
+  assert.deepEqual(audioB.attachments ?? [], []);
   // B refuses pdf explicitly; Polyth's projection still applies.
-  await assert.rejects(f.sessions.send(id, { text: "read", attachments: [pdf] }), /not a readable PDF/);
+  const pdfB = await turn("fake-b", pdf);
+  assert.match(pdfB.text, /Polyth could not extract its text/);
+  assert.deepEqual(pdfB.attachments ?? [], []);
   await f.close();
 });
 

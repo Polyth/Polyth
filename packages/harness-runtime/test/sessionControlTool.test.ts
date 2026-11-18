@@ -474,6 +474,12 @@ test("agent.models leads with the person's routing policy and hides what it excl
   assert.equal(automatic.result.output, "Delegation candidates");
   assert.deepEqual(automatic.calls[1]!.options, { harnessId: "claude" });
 
+  // Auto mode with a reordered or trimmed list: no policy lines, the order rides along.
+  const order = { pin: ["claude::anthropic/sonnet"], harnesses: { pi: "avoid" as const } };
+  const reordered = await run(async () => ({ text: "", exclude: [], excludeHarnesses: ["cursor"], order }));
+  assert.equal(reordered.result.output, "Delegation candidates");
+  assert.deepEqual(reordered.calls[1]!.options, { harnessId: "claude", excludeHarnesses: ["cursor"], order });
+
   const broken = await run(async () => { throw new Error("policy store unreadable"); });
   assert.equal(broken.result.output, "Delegation candidates");
 });

@@ -25,6 +25,7 @@ import { budgetExceeded, failureStreakReached, pendingFeedback, type AgentTrigge
 import { computeNextBeat, validateHeartbeat, type AgentHeartbeat } from "./agentHeartbeat.ts";
 import {
   appendToNotebook,
+  clipReport,
   headlineFrom,
   NOTEBOOK_LIMIT,
   parseAgentReport,
@@ -1570,7 +1571,7 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
    *  notes are protocol, not prose: they are kept apart. */
   const applyReport = (task: ScheduleTask, rec: ScheduleRunRecord, text: string, ok: boolean): void => {
     const report = parseAgentReport(text);
-    if (report.body) rec.summary = report.body.slice(0, SUMMARY_LIMIT);
+    if (report.body) rec.summary = clipReport(report.body, SUMMARY_LIMIT);
     else delete rec.summary;
     const signal = report.signal ?? (ok ? "update" : undefined);
     if (signal) rec.signal = signal;
@@ -1668,7 +1669,7 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
           if (!scan.report && !scan.closed && !expired) continue;
           delete rec.lateReport;
           const late = scan.report;
-          const adopted = !!late && parseAgentReport(late.text).body.slice(0, SUMMARY_LIMIT) !== (rec.summary ?? "");
+          const adopted = !!late && clipReport(parseAgentReport(late.text).body, SUMMARY_LIMIT) !== (rec.summary ?? "");
           if (adopted) {
             applyReport(task, rec, late.text, true);
             if (late.tokens) rec.tokens = late.tokens;
@@ -2656,6 +2657,16 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
     syncLoops(projectId, scan, syncOpts) {
       const errors: Array<{ path: string; error: string }> = [];
       const seenIds = new Set<string>();
+      // The background scan runs for every project once a minute and almost
+      // always finds what it found before. Remember what this project's part
+      // of the document looked like, so an unchanged scan writes nothing.
+      // `updatedAt` is stamped by every scan, so alone it says nothing changed.
+      const loopTasksOf = (): string => JSON.stringify(
+        tasks.filter((t) => t.projectId === projectId && t.source === "loop-file"),
+        (key, value: unknown) => key === "updatedAt" ? undefined : value);
+      const errorsOf = (): string => JSON.stringify((loopErrorsByProject[projectId] ?? [])
+        .map((e) => [e.path, e.error, e.firstSeenAt, e.dismissed === true]));
+      const before = `${loopTasksOf()}\n${errorsOf()}`;
       for (const file of scan) {
         if (!file.loop) {
           if (file.parseError) {
@@ -2768,7 +2779,9 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
           ...(old?.dismissed && !syncOpts?.explicit ? { dismissed: true } : {}),
         };
       });
-      save();
+      // `lastSeenAt` and `updatedAt` move on every scan; alone they are not
+      // worth a write (the first scan after a restart sets them again).
+      if (`${loopTasksOf()}\n${errorsOf()}` !== before) save();
       return {
         tasks: tasks.filter((t) => t.projectId === projectId && t.source === "loop-file"),
         errors,

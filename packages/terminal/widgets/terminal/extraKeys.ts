@@ -392,10 +392,12 @@ export function encodeTypedText(text: string, mods: Modifiers, state: KeymapStat
   return out;
 }
 
-/** Merge sticky modifiers into a hardware key event. */
+/** Merge sticky modifiers into a hardware key event. The physical key stays,
+ *  so a sticky CTRL on a Cyrillic layout still finds the key's Latin letter. */
 export function withModifiers<T extends KeyLike>(event: T, mods: Modifiers): KeyLike {
   return {
     key: event.key,
+    ...(event.code ? { code: event.code } : {}),
     ctrlKey: event.ctrlKey || mods.ctrl !== 0,
     altKey: event.altKey || mods.alt !== 0,
     shiftKey: event.shiftKey || mods.shift !== 0,

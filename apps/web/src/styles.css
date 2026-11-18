@@ -1925,14 +1925,16 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   .session-btn:hover:where(:not(:disabled)) { background: transparent; }
 }
 .session-row:hover .session-btn::before { background: color-mix(in srgb, var(--session-blue, var(--accent)) 6%, transparent); opacity: 1; }
-/* Hover, selection, press, focus and the pinned fill share one extent; only
-   their paint differs. */
+/* Hover, selection, press and focus share one extent; only their paint
+   differs. A pinned chat is marked by its Pinned chats caption and its pin,
+   never by a second glass pill: two identical plates made the current chat
+   ambiguous in the Standard look (the looks already dropped it).
+   The current row takes the mode-aware strong overlay, the same weight as a
+   look's --look-select (ink 8-9% over the panel): the glass plate alone sat
+   one OKLab step off a dark sidebar and vanished there, while reading as a
+   bright white slab on a light one. */
 .session-row.active .session-btn::before {
-  background: var(--material-glass);
-  opacity: 1;
-}
-.session-row.pinned:not(.active) .session-btn::before {
-  background: var(--material-glass-medium);
+  background: var(--surface-overlay-strong);
   opacity: 1;
 }
 /* Keyboard focus rings the pill itself (inside its edge, so it stays clear of
@@ -2858,17 +2860,25 @@ body[data-desktop-low-resource="true"] .timeline > .rewind-leaving { animation: 
    out as 36px ones. The block reaches into the gaps around it by the trim,
    which only its rows' empty block padding fills. A look that draws the
    summary's box (a pill, an outline, a rule) has no such padding and sets
-   the trim to 0 on the block, or the drawn edge eats the gap. */
+   the trim to 0 on the block, or the drawn edge eats the gap.
+   --activity-row-band: a 36px row's title sits in an empty band about 10px
+   tall above and below it. Next to prose the gap counts that band, so the
+   title stands the group gap from the text's ink rather than the gap plus
+   the band (it read 28-36px against a 12px paragraph gap). A look that
+   draws the summary's box sets it to 0 on the timeline: its edge is ink. */
 .timeline {
   --activity-row-trim: max(0px, calc((var(--hit-min) - 36px) / 2));
+  --activity-row-band: var(--space-2);
 }
 .timeline > .msg.activity-group { margin-block-end: calc(-1 * var(--activity-row-trim)); }
-.timeline > .msg.user + .activity-group,
-.timeline > .msg.assistant + .activity-group {
+.timeline > .msg.user + .activity-group {
   margin-block-start: calc(var(--conversation-group-gap) - var(--timeline-gap) - var(--activity-row-trim));
 }
+.timeline > .msg.assistant + .activity-group {
+  margin-block-start: calc(var(--conversation-group-gap) - var(--timeline-gap) - var(--activity-row-trim) - var(--activity-row-band));
+}
 .timeline > .activity-group + .msg.assistant:where(:not(.activity-group)) {
-  margin-block-start: calc(var(--conversation-group-gap) - var(--timeline-gap));
+  margin-block-start: calc(var(--conversation-group-gap) - var(--timeline-gap) - var(--activity-row-band));
 }
 /* Consecutive folded blocks read as one list of steps, not separate groups;
    on touch their hit boxes meet and never overlap. */
@@ -6986,16 +6996,38 @@ li > .md-quote { margin-block: calc(var(--prose-gap) * 0.6); }
 .md-table :is(th, td) code {
   white-space: nowrap;
 }
-/* Links in answers use the active theme accent instead of browser blue. */
-.msg.assistant > .bubble a {
-  color: var(--accent);
+/* Markdown links, everywhere markdown renders (answers, the reader's own
+   prompt, quotes, previews). One look for every theme, tuned by `--link`:
+   the text-safe accent by default (washed toward the ink over a wallpaper),
+   a theme's own link colour where it has one (macOS-style `--blue`), and
+   the on-wash accent inside the accent-tinted user message. Visited links
+   keep the same colour: a conversation is not a browsing history, and the
+   browser's purple clashes with every palette. The underline is a quiet
+   40% hairline that firms to the full colour under the pointer or focus. */
+.md-link {
+  --md-link-ink: var(--link, var(--chat-ink-accent, var(--accent-text)));
+  color: var(--md-link-ink);
+  text-decoration-line: underline;
+  text-decoration-color: color-mix(in srgb, var(--md-link-ink) 40%, transparent);
+  text-decoration-thickness: max(1px, 0.07em);
+  text-underline-offset: 0.22em;
+  text-decoration-skip-ink: auto;
   border-radius: min(var(--radius-control), 0.25em);
-  text-decoration-color: var(--accent-line);
-  text-decoration-thickness: 1px;
-  text-underline-offset: 0.18em;
-  transition: color var(--motion-fast) var(--motion-ease), text-decoration-color var(--motion-fast) var(--motion-ease);
+  transition: color var(--motion-fast) var(--motion-ease), text-decoration-color var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease);
 }
-.msg.assistant > .bubble a:hover { color: var(--accent-hi); text-decoration-color: currentColor; }
+.md-link:visited { color: var(--md-link-ink); }
+@media (hover: hover) {
+  .md-link:hover { text-decoration-color: currentColor; background-color: color-mix(in srgb, var(--md-link-ink) 8%, transparent); }
+}
+.md-link:active { text-decoration-color: currentColor; background-color: color-mix(in srgb, var(--md-link-ink) 12%, transparent); }
+.md-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; text-decoration-color: currentColor; }
+/* A bare address breaks anywhere instead of pushing the bubble wider, and
+   reads by its host: the scheme stays in the copied text, one step quieter. */
+.md-link-url { overflow-wrap: anywhere; word-break: normal; }
+.md-link-scheme { opacity: 0.62; }
+/* The reader's own message is accent-tinted: its links take the accent that
+   holds 4.5:1 on its own wash. */
+.msg.user .bubble { --link: var(--accent-on-wash); }
 .md-blocked { opacity: 0.7; text-decoration: line-through; }
 .md-img-btn { background: none; border: 0; padding: 0; cursor: zoom-in; display: inline-block; max-width: 100%; }
 .md-img { max-width: min(420px, 100%); max-height: 280px; border-radius: var(--radius-control); border: 1px solid var(--border-soft); display: block; }
@@ -15018,21 +15050,35 @@ color: var(--muted);
    `pointer-events`, has to land in a fixed or sticky box at least 90% of the
    viewport wide with a backdrop filter or a solid fill
    (LocalFrameView::fixedContainerEdges); Safari then paints the status bar in
-   the page's colour. The islands start lower and are narrower, and a backdrop
-   filter on their row would bound the islands' own glass to it. The phone
-   header (Header.tsx) renders this strip for that hit test: full width, above
-   the conversation and under the islands, an identity backdrop filter (any
-   value but `none` counts), so it paints nothing and never takes a tap.
+   the page's colour. Only a fill gives Safari that colour: a backdrop filter
+   makes the edge "multiple colours", `_sampledTopFixedPositionContentColor`
+   is nil and Safari keeps the band (an identity-filter strip shipped first
+   and changed nothing on an iPhone). The islands start lower and are
+   narrower. The phone header (Header.tsx) renders this strip: full width,
+   from the top down to the islands, above the conversation and under the
+   islands, filled with the canvas colour (the html rule for wallpapers), and
+   never taking a tap. Boxes 10px tall or less have no fill for WebKit, hence
+   the 11px floor. Only iOS WebKit (-webkit-touch-callout) has the band; the
+   native app hides it itself and the home-screen app was never reported, so
+   other engines and those two shells keep their top as it was.
    phoneTopEdge.test.ts replays the hit test. */
-.phone-top-edge {
-  position: fixed;
-  inset-block-start: 0;
-  inset-inline: 0;
-  z-index: calc(var(--z-shell) + 1);
-  block-size: max(var(--space-2), var(--conversation-chrome-inset));
-  pointer-events: none;
-  -webkit-backdrop-filter: opacity(1);
-  backdrop-filter: opacity(1);
+.phone-top-edge { display: none; }
+@supports (-webkit-touch-callout: none) {
+  @media not all and (display-mode: standalone) {
+    body:not([data-native-platform]) .phone-top-edge {
+      display: block;
+      position: fixed;
+      inset-block-start: 0;
+      inset-inline: 0;
+      z-index: calc(var(--z-shell) + 1);
+      block-size: max(11px, calc(var(--safe-top) + var(--conversation-chrome-inset)));
+      pointer-events: none;
+      background-color: var(--bg);
+    }
+    html[data-background]:not([data-background="none"]) body:not([data-native-platform]) .phone-top-edge {
+      background-color: var(--app-system-bar-color, var(--bg));
+    }
+  }
 }
 
 /* Phone uses one three-segment shell bar for every workspace surface. The
@@ -17828,6 +17874,15 @@ html[data-font] body :is(
     calc(var(--conversation-group-gap) - var(--timeline-gap) - var(--reasoning-head-pad))
     calc(-1 * var(--reasoning-head-pad));
 }
+/* Under a block the thought also counts the row's empty band, and prose under
+   a thought stands the group gap from it, like prose under a block: without
+   these both read 28px against the 20px of every other group edge. */
+.timeline > .activity-group + .msg.assistant.reasoning-row {
+  margin-block-start: calc(var(--conversation-group-gap) - var(--timeline-gap) - var(--reasoning-head-pad) - var(--activity-row-band));
+}
+.timeline > .msg.assistant.reasoning-row + .msg.assistant:where(:not(.activity-group, .reasoning-row)) {
+  margin-block-start: calc(var(--conversation-group-gap) - var(--timeline-gap));
+}
 .msg > .reasoning + .bubble { margin-top: var(--space-1); }
 .reasoning-toggle {
   position: relative;
@@ -18122,12 +18177,29 @@ html[dir="rtl"] .reasoning-preview {
     gap: 5px;
     padding-inline: 0;
   }
-  .execution-main { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 7px; }
-  .execution-main .tool-name { font-size: calc(13.5px * var(--text-scale, 1)); }
-  .execution-main .tool-preview {
+  /* One text line per step: the name and its target share a line, and only the
+     end of that line truncates. Two separate boxes gave each side a width to
+     bargain over, and one reported phone had the name squeezed to "Re…" while
+     the target kept its room; inline text cannot trade the name away, because
+     the ellipsis always lands on the target's tail. */
+  .execution-main {
     display: block;
-    align-self: center;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .execution-main .tool-name {
+    display: inline;
+    font-size: calc(13.5px * var(--text-scale, 1));
+  }
+  .execution-main .tool-preview {
+    display: inline;
+    overflow: visible;
+    max-inline-size: none;
+    margin-inline-start: 7px;
     font-size: calc(12.5px * var(--text-scale, 1));
+    text-overflow: clip;
   }
   .execution-status { width: 67px; gap: 4px; font-size: calc(11.5px * var(--text-scale, 1)); }
   .execution-details.tool-body { padding: 0 0 5px; }
@@ -19628,8 +19700,10 @@ html:not(.light)[data-background]:not([data-background="none"]):not([data-backgr
   grid-row: 1;
   align-self: center;
   display: inline-flex;
+  gap: var(--space-2);
   margin-inline-end: var(--activity-bleed);
 }
+.activity-keep-running-error { align-self: center; font-size: var(--font-meta); white-space: nowrap; }
 /* Every block's chevron ends on the same edge, so Stop stands before it and
    nothing on the line moves when Stop arrives. The chevron stays part of the
    line's button; the block is its containing box because a folded summary is
@@ -19775,6 +19849,7 @@ body[data-activity-style="ledger"] .activity-group-items > * + * { box-shadow: i
 /* The outline is drawn on the row's whole touch box, so the block has no
    empty padding for the touch trim to reach into: it keeps the full gaps. */
 body[data-activity-style="chip"] .activity-group { --activity-step-inset: var(--space-3); --activity-row-trim: 0px; }
+body[data-activity-style="chip"] .timeline { --activity-row-band: 0px; }
 body[data-activity-style="chip"] .activity-group > .ui-run-summary {
   width: fit-content;
   max-width: calc(100% - 2 * var(--activity-bleed));
@@ -19919,19 +19994,53 @@ body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="s
    reserved outside the scrollport; keep a full reading gap below the last
    surface so activity text cannot crowd the above-composer status dock. */
 .focus-conversation:has(> .conversation-composer-dock) .timeline {
-  --timeline-pad-bottom: calc(var(--conversation-message-gap) + var(--conversation-group-gap) + var(--timeline-turn-sheet-space, 0px));
-  scroll-padding-bottom: calc(var(--conversation-message-gap) + var(--conversation-group-gap));
+  --timeline-pad-bottom: calc(var(--conversation-message-gap) + var(--conversation-group-gap) + var(--timeline-dock-overlap, 0px) + var(--timeline-turn-sheet-space, 0px));
+  scroll-padding-bottom: calc(var(--conversation-message-gap) + var(--conversation-group-gap) + var(--timeline-dock-overlap, 0px));
+}
+/* A scroller clips everything at its edge, shadows included, so a glass card
+   at the tail ended its shadow on a hard line above the composer. Instead the
+   transcript's box reaches under the composer dock (which paints above it)
+   by the composer's height, and the runway and scroll padding above grow by
+   the same amount: rows rest exactly where they did, and at the tail a
+   shadow lies under the dock instead of being cut.
+   Scrolled away from the tail, history would slide under the dock's
+   plateless lines, so a scroll-driven mask hides the overlap everywhere but
+   the last few pixels of the range (and a transcript that does not scroll has
+   no timeline, so no mask). Masking only while scrolled keeps the tail glass
+   blurring the wallpaper: a masked ancestor is its backdrop root. Without
+   scroll timelines there is no overlap at all. */
+@supports (animation-timeline: scroll()) {
+  .focus-conversation:has(> .conversation-composer-dock) {
+    --timeline-dock-overlap: var(--composer-height);
+  }
+  .focus-conversation:has(> .conversation-composer-dock) > .timeline-wrap {
+    margin-block-end: calc(-1 * var(--timeline-dock-overlap));
+  }
+  .focus-conversation:has(> .conversation-composer-dock) .timeline {
+    animation: timeline-dock-overlap-hidden linear none;
+    animation-timeline: scroll(self);
+    animation-range: 0 calc(100% - 4px);
+  }
+}
+@keyframes timeline-dock-overlap-hidden {
+  from, to {
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - var(--timeline-dock-overlap, 0px)), transparent 0);
+    mask-image: linear-gradient(to bottom, #000 calc(100% - var(--timeline-dock-overlap, 0px)), transparent 0);
+  }
 }
 /* ...but the phone authored its own smaller tail clearance (24px in the
    UX-MOBILE-01 section) and the rule above would re-derive it from the shared
    message/group gaps, leaving ~40px of over-reserved runway. This rule sits
    after both, so the phone value is the last word on a phone; the reading gap
    above still applies to the wider shells that authored no phone override.
-   The JS fresh-turn runway (--timeline-turn-sheet-space) still adds on top. */
+   The JS fresh-turn runway (--timeline-turn-sheet-space) still adds on top.
+   The phone needs no overlap: its own bottom mask dissolves the edge. */
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+  .focus-conversation:has(> .conversation-composer-dock) { --timeline-dock-overlap: 0px; }
   .focus-conversation:has(> .conversation-composer-dock) .timeline {
     --timeline-pad-bottom: calc(24px + var(--timeline-turn-sheet-space, 0px));
     scroll-padding-bottom: 24px;
+    animation: none;
   }
 }
 
@@ -21285,10 +21394,10 @@ body.desktop-app[data-desktop-platform="win32"][data-desktop-controls-position] 
 .settings-other-devices-toggle .settings-section-title { font-weight: 600; color: var(--text-dim); }
 .settings-other-devices-toggle .settings-section-hint { color: var(--faint); text-wrap: pretty; }
 @media (hover: hover) and (pointer: fine) {
-  .settings-other-devices-toggle:hover { background: var(--surface-overlay-hover); }
-  .settings-other-devices-toggle:hover :is(.settings-section-title, .settings-other-devices-chevron) { color: var(--text); }
+  .settings-other-devices-toggle:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
+  .settings-other-devices-toggle:hover:where(:not(:disabled)) :is(.settings-section-title, .settings-other-devices-chevron) { color: var(--text); }
 }
-.settings-other-devices-toggle:active { background: var(--surface-overlay-hover); }
+.settings-other-devices-toggle:active:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
 .settings-other-devices-toggle:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 .settings-other-devices[data-open="true"] .settings-other-devices-toggle .settings-section-title { color: var(--text); }
 .settings-other-devices-label { white-space: nowrap; }

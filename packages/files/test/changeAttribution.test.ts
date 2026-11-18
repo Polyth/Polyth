@@ -10,7 +10,7 @@ import {
   type EditCall,
   type EditSource,
 } from "../widgets/editor/checkoutEdits.ts";
-import { attributeChanges } from "../widgets/editor/changeAttribution.ts";
+import { attributeChanges, historyHunks } from "../widgets/editor/changeAttribution.ts";
 
 const call = (callId: string, seq: number, tool: string, input: Record<string, unknown>, changedFiles: string[], time = seq): EditCall =>
   ({ callId, seq, time, tool, input: input as EditCall["input"], changedFiles });
@@ -187,4 +187,37 @@ test("a fully deleted tail anchors after the last line and new files attribute w
     edits: [record("A", 1, [{ text: "x\ny\n", written: null, removed: [] }]), record("B", 2, [])],
   })!;
   assert.deepEqual(created[0]!.lines.map((line) => line.owner), ["A", "A"]);
+});
+
+test("history: committed and staged changes since the first edit show once, beside the pending ones", () => {
+  const base = "a\nb\nc\nd\ne\n";
+  const committed = "a\nB\nc\nd\ne\n";
+  const current = "a\nB\nc\nD\ne\n";
+  const worktree = unifiedDiff(committed, current, "f.py");
+  const history = unifiedDiff(base, current, "f.py");
+  const edits = [
+    record("A", 1, [fragmentFromReplace("a\nb\nc", "a\nB\nc")!]),
+    record("A", 2, [fragmentFromReplace("c\nd\ne", "c\nD\ne")!]),
+  ];
+  const hunks = historyHunks({ text: current, history, worktree, edits })!;
+  // Line 4 is still pending (Undo/Keep act on it); line 2 only shows as history.
+  assert.deepEqual(hunks.map((hunk) => [hunk.history, hunk.lines, hunk.removed.map((block) => [block.line, block.text])]), [
+    [true, [{ line: 2, owner: "A" }], [[2, ["b"]]]],
+  ]);
+  assert.equal(hunks[0]!.anchorLine, 2);
+  // Keeping the pending hunk does not bring its lines back as history.
+  const pendingDigest = attributeChanges({ text: current, diff: worktree, edits })![0]!.digest;
+  const afterKeep = historyHunks({ text: current, history, worktree, edits, accepted: new Set([pendingDigest]) })!;
+  assert.deepEqual(afterKeep.flatMap((hunk) => hunk.lines.map((line) => line.line)), [2]);
+  // Keeping the history hunk hides it until it changes.
+  assert.deepEqual(historyHunks({ text: current, history, worktree, edits, accepted: new Set([hunks[0]!.digest]) }), []);
+  // Stale against the loaded text: either diff.
+  assert.equal(historyHunks({ text: "other\n", history, worktree, edits }), null);
+});
+
+test("history never credits a lone chat with lines it did not write (others' commits share the diff)", () => {
+  const base = "a\nb\n";
+  const current = "a\nb\nfrom a teammate\n";
+  const hunks = historyHunks({ text: current, history: unifiedDiff(base, current, "f.py"), worktree: "", edits: [record("A", 1, [])] })!;
+  assert.deepEqual(hunks[0]!.lines, [{ line: 3, owner: null }]);
 });

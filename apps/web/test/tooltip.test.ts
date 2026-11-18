@@ -12,6 +12,7 @@ test(".ui-tooltip is a legible help tag drawn in the theme's own surface and ink
   const tooltipRule = styles.match(/(?:^|\n)\.ui-tooltip\s*\{([^}]+)\}/);
   assert.ok(tooltipRule, ".ui-tooltip rule exists in styles.css");
   const body = tooltipRule[1];
+  assert.ok(body, ".ui-tooltip rule has a body");
 
   // Light themes get a light tag, dark themes a dark one: no fixed colours.
   assert.match(body, /background:\s*var\(--material-glass\)/);

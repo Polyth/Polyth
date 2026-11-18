@@ -103,7 +103,6 @@ export default defineWebPackage((host) => () => {
     }),
     host.slots.register({ slot: "project.create.options", id: "git-clone-project", order: 20, render: (props) => createElement(GitProjectSource, { ...props, host }) }),
     host.slots.register({ slot: "git.repository.identity", id: "git.source-control-identity", order: 5, render: (props) => typeof props.projectId === "string" ? createElement(SourceControlIdentity, { host, projectId: props.projectId }) : null }),
-    host.slots.register({ slot: "git.repository.identity", id: "git.change-request-state", order: 15, render: (props) => <host.ui.Slot slot="git.repository.change-request.provider" context={props} /> }),
     host.slots.register({ slot: "session.timeline.after", id: "git-isolation-card", order: 20, render: () => createElement(IsolationCard) }),
     host.slots.register({ slot: "session.header.status", id: "git-isolation-lock", order: 15, render: () => createElement(IsolationLock) }),
     host.slots.register({

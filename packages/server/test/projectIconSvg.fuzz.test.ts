@@ -27,10 +27,56 @@ test("server sanitizeProjectIconSvg handles 50k repetitions of each token in bou
   assertBoundedTime(TOKENS, sanitizeProjectIconSvg, { skip: QUADRATIC });
 });
 
-// Finding: 5k repetitions already take 0.2-1 s and 50k take ~50 s (quadratic backtracking in the
-// paired-element and `<?xml`/`<!doctype` patterns), so a 350 KB icon pins the event loop.
-test("server sanitizeProjectIconSvg is linear on unterminated openers", { todo: "quadratic regex backtracking" }, () => {
+// These used to take 0.2-1 s at 5k repetitions and ~50 s at 50k (the paired-element and
+// `<?xml`/`<!doctype` patterns rescanned the tail from every opener), so a 350 KB icon pinned
+// the event loop. The sanitizer scans them in one pass now.
+test("server sanitizeProjectIconSvg is linear on unterminated openers", () => {
   assertBoundedTime(QUADRATIC, sanitizeProjectIconSvg, { reps: 5_000, limitMs: 100 });
+  // One far-away `>` that every opener's tag would run to.
+  for (const run of ["<script", "<foreignObject", "<script <foreignObject "]) {
+    const input = `${run.repeat(20_000)}>`;
+    const started = performance.now();
+    sanitizeProjectIconSvg(input);
+    const took = performance.now() - started;
+    assert.ok(took < 200, `${JSON.stringify(run)} x20000 + ">" took ${took.toFixed(0)} ms`);
+  }
+});
+
+/** The patterns this sanitizer used before its one-pass scanners. Kept as the
+ *  definition of what the scanners must remove: same output on every input. */
+function sanitizeWithPatterns(svg: string): string {
+  let clean = svg.replace(/^\uFEFF/, "");
+  for (let previous = ""; previous !== clean;) {
+    previous = clean;
+    clean = clean.replace(/<\?xml[\s\S]*?\?>/gi, "");
+    clean = clean.replace(/<!doctype[\s\S]*?>/gi, "");
+    clean = clean.replace(/<(script|foreignObject)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "");
+    clean = clean.replace(/<\/?(?:script|foreignObject)\b[^>]*>?/gi, "");
+    clean = clean.replace(/\sxmlns:xlink\s*=\s*(?:"[^"]*"|'[^']*')/gi, "");
+    clean = clean.replace(/\s(?:xlink:)?href\s*=\s*(?:"(?!#)[^"]*"?|'(?!#)[^']*'?|[^\s"'>#][^\s>]*)/gi, "");
+    clean = clean.replace(/\son\w+\s*=\s*(?:"[^"]*"?|'[^']*'?|[^\s"'>]+)/gi, "");
+  }
+  return clean.trim();
+}
+
+test("server sanitizeProjectIconSvg removes exactly what its patterns removed", () => {
+  forEachFuzzInput(TOKENS, (input) => {
+    assert.equal(sanitizeProjectIconSvg(input), sanitizeWithPatterns(input));
+  });
+  for (const input of [
+    "<?xml version='1.0'?><svg><script>a</script><path/></svg>",
+    "<?XML a ?><!DOCTYPE svg><svg/>",
+    "<svg><script >a</SCRIPT ><foreignObject x='1'>b</foreignobject\n>c</svg>",
+    // A closing tag of the other element does not end this one.
+    "<foreignObject>A<script>B</foreignObject>C</script>D",
+    "<script>B<foreignObject>A</script>C</foreignObject>D",
+    // An opener inside another opener's tag, and openers that never close.
+    "<script <script>x</script>y", "<script a<foreignObject>b</foreignObject>", "<script>a<foreignObject>b</foreignObject>c",
+    "<foreignObject>a<script>b</script>c", "<script<script>>a</script></script>", "<scr<script></script>ipt>alert(1)</script>",
+    "<?xml<?xml ?>x?>", "<!doctype<!doctype>>", "<?xml", "?><?xml?>", "<!doctype", "<scripty>keep</scripty><script-x>a</script-x>",
+  ]) {
+    assert.equal(sanitizeProjectIconSvg(input), sanitizeWithPatterns(input), input);
+  }
 });
 
 test("sanitizeProjectIconSvg drops attribute values whose quote never closes", () => {

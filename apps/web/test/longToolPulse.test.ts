@@ -222,6 +222,9 @@ test("Keep running: the button shows only in the silence countdown, a kept call 
     assert.match(kept, />No output for 8m 25s · kept running</);
     assert.doesNotMatch(kept, /tool-pulse-keep|Polyth stops it|<button/);
     assert.match(renderToStaticMarkup(createElement(ToolPulseInline, { ...countdown, kept: true })), />kept running</);
+    // A judge kept it: the same line says so, so nobody thinks they pressed it.
+    assert.match(renderToStaticMarkup(createElement(ToolPulseLine, { ...countdown, kept: true, keptBy: "judge" })), />No output for 8m 25s · a judge kept it running</);
+    assert.match(renderToStaticMarkup(createElement(ToolPulseInline, { ...countdown, kept: true, keptBy: "judge" })), />kept by a judge</);
     // Ceiling (from 50 minutes): every call, kept or not, no button.
     const late = { ...base, startedAt: now - 55 * 60_000 };
     for (const keptFlag of [false, true]) {
@@ -231,6 +234,29 @@ test("Keep running: the button shows only in the silence countdown, a kept call 
     }
     assert.match(renderToStaticMarkup(createElement(ToolPulseInline, { ...late })), />auto-stop in 5m</);
   });
+  progress.clearToolProgress();
+});
+
+test("Keep running beside the block's Stop: a collapsed or single-call block has an action in the countdown too", async () => {
+  progress.clearToolProgress();
+  const { ToolKeepRunning } = await import("../src/components/ToolPulse.tsx");
+  const now = 10_000_000;
+  withNow(now, () => {
+    const base = { sessionId: "s1", callId: "c1", onKept: () => {} };
+    // A harness without progress frames: quiet counts from the start.
+    assert.equal(renderToStaticMarkup(createElement(ToolKeepRunning, { ...base, startedAt: now - 7 * 60_000 })), "");
+    const countdown = renderToStaticMarkup(createElement(ToolKeepRunning, { ...base, startedAt: now - 8.5 * 60_000 }));
+    assert.match(countdown, /<button[^>]*activity-keep-running[^>]*aria-label="Keep running: [^"]*"[^>]*>.*Keep running/s);
+    assert.doesNotMatch(countdown, /ui-btn--ghost/, "a bordered button beside Stop, not ghost text");
+    assert.equal(renderToStaticMarkup(createElement(ToolKeepRunning, { ...base, startedAt: now - 8.5 * 60_000, kept: true })), "");
+    assert.equal(renderToStaticMarkup(createElement(ToolKeepRunning, { ...base, startedAt: now - 55 * 60_000 })), "", "no button at the ceiling");
+    assert.equal(renderToStaticMarkup(createElement(ToolKeepRunning, { ...base, sessionId: null, startedAt: now - 8.5 * 60_000 })), "");
+  });
+  const { readFileSync } = await import("node:fs");
+  const timeline = readFileSync(new URL("../src/components/Timeline.tsx", import.meta.url), "utf8");
+  const slot = timeline.slice(timeline.indexOf('className="activity-live-stop"'));
+  assert.ok(slot.indexOf("<ToolKeepRunning") > 0 && slot.indexOf("<ToolKeepRunning") < slot.indexOf('className="execution-stop"'),
+    "the block's live slot carries Keep running, before Stop so Stop never moves");
   progress.clearToolProgress();
 });
 
@@ -245,6 +271,16 @@ test("tool/keep-running marks the running call; old or unknown calls are ignored
   const tools = model.messages.filter((m) => m.kind === "tool");
   assert.equal(tools.length, 1);
   assert.equal((tools[0] as { keptRunning?: boolean }).keptRunning, true);
+  assert.equal((tools[0] as { keptBy?: string }).keptBy, undefined, "a person's keep names no judge");
+  const judged = buildModel([
+    ev(1, "user/message", { text: "go" }),
+    ev(2, "tool/started", { callId: "c1", tool: "bash", input: {} }),
+    ev(3, "tool/keep-running", { callId: "c1", via: "judge", useId: "judges.quiet-command" }),
+    ev(4, "tool/keep-running", { callId: "c1", byUserId: "u1" }),
+  ]);
+  const judgedTool = judged.messages.find((m) => m.kind === "tool") as { keptRunning?: boolean; keptBy?: string };
+  assert.equal(judgedTool.keptRunning, true);
+  assert.equal(judgedTool.keptBy, "judge", "the first keep wins; a later person keep is a no-op on the server too");
   const before = buildModel([ev(1, "user/message", { text: "go" }), ev(2, "tool/started", { callId: "c1", tool: "bash", input: {} })]);
   assert.equal((before.messages.find((m) => m.kind === "tool") as { keptRunning?: boolean }).keptRunning, undefined);
 });

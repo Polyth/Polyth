@@ -476,6 +476,15 @@ unmerged, its isolation card says why it cannot integrate and links each child;
 a nested child's card names the "parent workspace" instead of the managed
 branch. A nested child publishes only while its target isolation is
 still open.
+
+Any subagent still running under a session — every descendant by `parentId`,
+shared-workspace children included (`runningSubagents` in `@polyth/contracts`)
+— holds that session's isolated work back like its own turn: the status
+reports merge, discard, resolve and choose-target as unavailable, merge and
+discard refuse (`reason: "subagents-running"`, mutation rejected), the
+isolation card offers nothing to integrate and the landing line waits. The
+client applies the same rule from its store, so an older server's "ready"
+answer is not shown while the subagent list says it is waiting.
 `mergeDelegated` releases a child without unique changes and refuses
 overlapping uncommitted destination work (`reason: "target-overlap"`) instead
 of recording an AI repair receipt. A merged child is rebound to the
@@ -635,6 +644,15 @@ tinted lines, the removed text in place as a red block, a gutter bar per change
 with the exact-snapshot hunk API (refused while the buffer has unsaved edits);
 Keep only hides that hunk on this device until Git shows a different one there.
 A floating review bar steps through changes and through the chat's edited files.
+Work a chat already committed or staged still shows: for a file with chat
+edits, Files also fetches `GET /api/git/diff?since=<first edit, epoch ms>`,
+the working tree against the newest first-parent commit no later than that
+moment (HEAD when none is that old; the response names it as `base`).
+`historyHunks` keeps only the lines the working-tree diff does not cover (kept
+hunks included) and attributes them without the single-chat fallback, because
+other people's commits share that diff. Those hunks are `inert`: a gutter bar
+in the chat's colour with no tint, no Undo/Keep chips and no inspector, labelled
+"Committed or staged"; Keep all hides them like any other hunk.
 
 **Editing.** CodeMirror draws its caret as a border, so the editor keeps the
 caret, drop cursor and the border-only states (matching bracket, search match,

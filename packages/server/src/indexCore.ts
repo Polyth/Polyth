@@ -70,6 +70,7 @@ import {
   SERVER_TURN_COMPLETION_BUS,
   SERVER_TURN_STOPPED_BUS,
   SERVER_PERMISSION_WAITING_BUS,
+  SERVER_TOOL_QUIET_BUS,
   SERVER_ACCOUNT_REMOVAL_BUS,
   SERVER_PERSON_DATA_VOLUME,
   SESSION_ATTENTION_SERVICE,
@@ -86,6 +87,7 @@ import {
 import { createProjectService } from "./projects.ts";
 import { bindGitDiscoveryToDataDir } from "./gitDiscoveryBoundary.ts";
 import { createPermissionWaitingBus } from "./permissionWaiting.ts";
+import { createToolQuietBus } from "./toolQuiet.ts";
 import { defaultStallReport, watchEventLoopStalls, type EventLoopStall } from "./eventLoopStall.ts";
 import {
   createSpaceGateway,
@@ -166,7 +168,9 @@ import { erasePrivateChats, privateDataBytes, privateDataRoutes } from "./routes
 import { projectVisibleToUser, setPrivateRoomParentLookup } from "./accountLimits.ts";
 import { createPersonalMcpReprovisioner, type PersonalMcpReprovisioner } from "./personalMcpReprovision.ts";
 import { assertRemoteOpenCodeUsable, type RemoteOpenCodeAccessDeps } from "./remoteOpenCodeAccess.ts";
-import { canonicalSecurity } from "./runtimeSecurity.ts";
+import { canonicalSecurity, isSourceEntrypoint } from "./runtimeSecurity.ts";
+import { serverVersion, updateCommand } from "./version.ts";
+import { snapshotBeforeMigrations } from "./preMigrationSnapshot.ts";
 import { oneShot } from "./oneshot.ts";
 import {
   createSmallModelService,
@@ -177,6 +181,7 @@ import {
 } from "./smallModel.ts";
 import { createWsGateway, type WsGateway } from "./ws.ts";
 import { createDevicePresence } from "./devicePresence.ts";
+import { createDeferredAlerts } from "./deferredAlerts.ts";
 import { createRouteRegistry } from "./routeRegistry.ts";
 import { createPackageLifecycle } from "./packageLifecycle.ts";
 import {
@@ -230,6 +235,13 @@ export interface BootOptions {
   modelTurnsDisabled?: boolean;
   /** Static SPA directory override for packaged hosts. */
   webDist?: string;
+  /** The Polyth version a packaged host ships (its release version). A
+   *  checkout reports its root package.json (version.ts). */
+  version?: string;
+  /** How this install updates, shown with a newer release (Settings → About):
+   *  the packaged server passes `polyth update` or Homebrew's command; without
+   *  it a container or a checkout is assumed (version.ts). */
+  updateCommand?: string;
   opencode?: Partial<OpenCodeAdapterOptions>;
   /** Workspace packages/ directory scanned for polyth.serverEntry markers. */
   packagesDir?: string;
@@ -658,6 +670,7 @@ type DictationForWs = NonNullable<Parameters<typeof createWsGateway>[2]>;
 
 export async function boot(opts: BootOptions = {}) {
   const port = opts.port ?? Number(process.env.PORT ?? 4400);
+  const version = serverVersion(opts.version);
   opts.hostname ??= process.env.HOST;
   const localhostAuthOptional = process.env.POLYTH_UI_PASSWORD_LOCALHOST === "optional";
   let publicServerForSurface: import("node:http").Server | null = null;
@@ -667,6 +680,9 @@ export async function boot(opts: BootOptions = {}) {
   const dataDir = writerLease.canonicalDataDir;
   bindGitDiscoveryToDataDir(dataDir);
   try {
+  // Under the writer lease, before any database is opened for writing: a copy
+  // of each one this version is about to migrate (an update's way back).
+  snapshotBeforeMigrations(dataDir, { version });
   // Warm the engine identity cache while the rest of boot (sweep, packages,
   // HTTP) runs so the first owned spawn does not wait on `--version`/`db path`
   // / hashing the OpenCode binary.
@@ -2388,6 +2404,23 @@ export async function boot(opts: BootOptions = {}) {
   });
   liveActivityTouched = nativePush.sessionTouched;
   devicePresence.subscribe(nativePush.presenceChanged);
+  // What only the device in use was told is sent on to the person's other
+  // devices if it stays unread there (deferredAlerts.ts).
+  const deferredAlerts = createDeferredAlerts<{ payload: PushPayload; record: NotificationRecord }>({
+    activeUse: devicePresence.activeUse,
+    unread: async (account, id) => (await notifications.list(account)).items.some((item) => item.id === id && !item.read),
+    deliver: async (account, { payload, record }, exceptDevice) => {
+      await Promise.allSettled([
+        push.send(account, payload, { exceptDevice }),
+        nativePush.send({
+          userId: account.userId, spaceId: account.spaceId,
+          notificationId: record.id, kind: record.kind, transitionKey: record.key,
+          title: record.title, body: record.body, exceptDevice,
+        }),
+      ]);
+    },
+  });
+  devicePresence.subscribe(deferredAlerts.presenceChanged);
   // One recipient's delivery leg: durable inbox row -> recipient-filtered WS
   // broadcast -> independent Web/native push. Shared by the turn notifier and
   // by person-message notifications so neither duplicates the ordering.
@@ -2407,6 +2440,9 @@ export async function boot(opts: BootOptions = {}) {
     });
     if (!record) return;
     broadcast.notification?.(record, recipient);
+    // Held before the sends, so a device going quiet meanwhile is not missed.
+    const inUse = devicePresence.activeUse(recipient);
+    if (inUse) deferredAlerts.hold(recipient, record.id, { payload, record }, inUse.device);
     // Delivery transports are independent best-effort legs after the durable
     // row + WS fan-out. A failed or stalled leg cannot suppress the other.
     await Promise.allSettled([
@@ -2679,6 +2715,10 @@ export async function boot(opts: BootOptions = {}) {
     guardedSpace: spaceHasGuardedMember,
   });
   services.provide(SERVER_PERMISSION_WAITING_BUS, permissionWaiting.service);
+  // A call went quiet and nobody kept it: a package (a judge) may keep it
+  // before the silence stop.
+  const toolQuiet = createToolQuietBus({ projection: (sessionId) => store.projection(sessionId) });
+  services.provide(SERVER_TOOL_QUIET_BUS, toolQuiet.service);
   const accountRemovedListeners = new Set<(event: { userId: string }) => void | Promise<void>>();
   services.provide(SERVER_ACCOUNT_REMOVAL_BUS, {
     subscribe(listener) {
@@ -3039,6 +3079,9 @@ export async function boot(opts: BootOptions = {}) {
       if (!isolation) throw Object.assign(new Error("git isolation membership service is unavailable"), { code: "unsupported" });
       return isolation.updateIsolatedWorkspace(sessionId, selection);
     },
+    // A deleted chat can never notify again: its creator bindings would
+    // otherwise stay in notifications.json for as long as the file lives.
+    onSessionDeleted: async (sessionId) => { await notifications.forgetSession(sessionId); },
     onSessionReleased: async ({ sessionId, projectId, cwd }) => {
       const project = await projects.get(projectId);
       const space = spaceGateway.resolveInternal(project?.spaceId);
@@ -3080,6 +3123,7 @@ export async function boot(opts: BootOptions = {}) {
         });
       },
       permissionWaiting: (sessionId, requestId) => permissionWaiting.publish(sessionId, requestId),
+      toolQuiet: (notice) => toolQuiet.publish(notice),
       turnStopped(sessionId, reason) {
         pushNotifier.turnStopped(sessionId, reason);
         publishTurnStopped(sessionId, reason);
@@ -3259,13 +3303,38 @@ export async function boot(opts: BootOptions = {}) {
   // build) and reports the chats it had to leave running. The lock is
   // machine-wide, so every Space's leases count; only the instance owner can
   // ask. A shared workspace runtime is not released here.
+  // Automatic updates use the same gate with two options: `checkOnly` counts
+  // the chats that are working and releases nothing (an update waits until
+  // none is), and `createdBefore` restarts only the runtimes an update left on
+  // the previous build. With `createdBefore`, a shared workspace runtime
+  // (OpenCode) is restarted through the pending-config barrier, which defers
+  // while any of its sessions is unsafe to interrupt: reported as one busy.
   provideService("harness.runtime.releaseIdle", async (
     harnessId: string,
+    options: { checkOnly?: boolean; createdBefore?: number } = {},
   ): Promise<{ released: number; busy: number }> => {
     const provider = harnesses.get(harnessId);
-    if (!provider || provider.runtimeLifetime === "workspace") return { released: 0, busy: 0 };
+    if (!provider) return { released: 0, busy: 0 };
+    if (provider.runtimeLifetime === "workspace") {
+      if (options.checkOnly || options.createdBefore === undefined) return { released: 0, busy: 0 };
+      try {
+        return { released: (await pendingOpenCode.applyAndRestart({ force: true })).restarted, busy: 0 };
+      } catch (error) {
+        const code = (error as { code?: unknown } | null)?.code;
+        if (code === "restart-deferred" || code === "conflict") return { released: 0, busy: 1 };
+        throw error;
+      }
+    }
+    const ids = harnessPool.liveSessionIdsForHarness(
+      harnessId,
+      options.createdBefore === undefined ? {} : { createdBefore: options.createdBefore },
+    );
+    if (options.checkOnly) {
+      const idle = await Promise.allSettled(ids.map((id) => sessions.runtimeReleasable?.(id) ?? Promise.resolve(false)));
+      return { released: 0, busy: idle.filter((result) => !(result.status === "fulfilled" && result.value)).length };
+    }
     const results = await Promise.allSettled(
-      harnessPool.liveSessionIdsForHarness(harnessId).map((id) => sessions.releaseRuntimeIfIdle?.(id) ?? Promise.resolve({ released: false })),
+      ids.map((id) => sessions.releaseRuntimeIfIdle?.(id) ?? Promise.resolve({ released: false })),
     );
     const released = results.filter((result) => result.status === "fulfilled" && result.value.released).length;
     return { released, busy: results.length - released };
@@ -3398,7 +3467,7 @@ export async function boot(opts: BootOptions = {}) {
       return saved;
     },
     systemInfo: (local) => ({
-      version: "0.1.0",
+      version,
       applicationUrl: `http://${opts.hostname ?? "127.0.0.1"}:${port}`,
       tunnelUrl: process.env.POLYTH_TUNNEL_URL ?? null,
       dataDirLabel: local ? dataDir : "Polyth data directory",
@@ -3584,7 +3653,7 @@ export async function boot(opts: BootOptions = {}) {
       store,
       capabilities: () => allCapabilities(),
       goals: () => svc<AgentGoalService>("goals"),
-      version: "0.1.0",
+      version,
       onSessionCreated: async (sessionId, space, parentSessionId) => {
         if (parentSessionId) await notifications.inheritSessionRecipient(parentSessionId, sessionId, space);
         else await notifications.registerSessionRecipient(sessionId, space);
@@ -3608,7 +3677,7 @@ export async function boot(opts: BootOptions = {}) {
     notificationRoutes(notifications, async (space) => new Set((await spaceServices(space).projects.list()).map((p) => p.id))),
     browseRoutes(dataDir),
     iconifyRoutes(),
-    releasesRoutes(),
+    releasesRoutes({ serverVersion: version, updateCommand: updateCommand(opts.updateCommand) }),
     async (request) => {
       if (request.path.startsWith("/api/mcp/") || request.path.startsWith("/api/plugins")) return false;
       return settingsRoute(request);
@@ -3624,7 +3693,7 @@ export async function boot(opts: BootOptions = {}) {
     capabilities: allCapabilities,
     webDist: resolve(opts.webDist ?? resolve(__dirname, "../../../apps/web/dist")),
     packagesDir: resolve(opts.webPackagesDir ?? packagesDir),
-    version: "0.1.0",
+    version,
     remotePolicies: () => routeRegistry.policies(),
     listenerId: "public",
     admission: httpAdmission,
@@ -3741,6 +3810,7 @@ export async function boot(opts: BootOptions = {}) {
       live?.close();
       liveActivityTouched = null;
       nativePush.close();
+      deferredAlerts.close();
       devicePresence.close();
       await runtimeStorageMaintenance.dispose();
       await packageLifecycle.stopIngress();
@@ -3809,6 +3879,6 @@ export async function boot(opts: BootOptions = {}) {
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+if (isSourceEntrypoint(import.meta.url, "indexCore.ts")) {
   void boot();
 }

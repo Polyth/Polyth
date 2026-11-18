@@ -243,6 +243,14 @@ server's look (not the frozen local one) with no flicker and no push of the
 frozen look. While OFF, the pushed blob carries the server's appearance — never
 the local one — so a server that ignores the flag neither loses its account
 appearance nor receives this device's. The flag itself never reaches the blob.
+The toggle only exists where this window is a client of another Polyth
+(`onServerHostSurface` is false in `desktopBridge.ts`): a browser, native mobile,
+or a desktop window showing a remote or Link server. The desktop shell that runs
+this computer's own server is that server's own client — one app, not two sides
+— so the row and its search hit are not rendered there, and the stored flag
+counts as ON so an "off" saved before the row was hidden cannot freeze that
+window with no switch left. An unplaceable surface (`null`: a dropped Link
+address, a redirect, an IPC failure) is treated as a client and keeps the row.
 
 When two mechanisms look plausible, prefer the one with the smallest blast
 radius: slot contribution over surface, surface over workspace surface,
@@ -346,6 +354,18 @@ Enter during a composition still never sends. Text the platform writes without
 any `input` event (dictation and some phone keyboards have) is committed at the
 field's next caret move, key release or focus, so Send's enabled state cannot
 stay behind a draft the field visibly holds.
+
+**Focus when a chat opens.** On a mouse or trackpad screen
+(`primaryPointerIsFine`), opening a chat — an existing one from any path, or a
+new one — puts the caret in its composer, so typing can start at once. The chat
+composer (not a widget composer) runs this whenever the chat it shows changes
+(`session.id`, or the new chat's `newSessionOrigin`) and on mount
+(`focusOnChatOpen`, `apps/web/src/components/composerOpenFocus.ts`). It waits a
+few frames for a closing menu or palette and never takes focus from a text
+field, dialog, menu, listbox or popover (`openFocusIsFree`). A chat that is
+starting is skipped: the start's focus carry already keeps the writer in the
+field. Touch screens are left alone, because a focused field raises the
+keyboard there.
 
 Both navigators and the new chat's recent list show drafts among all chats
 with an accent **Draft** `Badge` (`apps/web/src/sessionDraft.ts`). A chat that
@@ -988,8 +1008,16 @@ Host-owned (`apps/web`), not a package seam.
   touch via negative block margin). It calls `api.keepToolRunning`; the
   countdown goes away when `tool/keep-running` arrives (the reducer sets
   `ToolMsg.keptRunning`), focus moves to the replacing line, and a failure
-  shows a short inline alert. A kept call reads "No output for 8m 25s · kept
-  running" (collapsed tail: `kept running`) with no countdown. From 50 minutes
+  shows a short inline alert. A collapsed block, or a block holding a single
+  call, never draws that line (its header names the call with the compact
+  tail, inside the header's toggle), so there `ToolKeepRunning` puts a bordered
+  **Keep running** into the block's live-Stop slot, before Stop so Stop never
+  moves; on success focus returns to the block's line. Without it the countdown
+  had no action in the most common view. A kept call reads "No output for 8m 25s · kept
+  running" (collapsed tail: `kept running`) with no countdown; when a judge
+  kept it (`tool/keep-running` with `via: "judge"`, `ToolMsg.keptBy`), "No
+  output for 8m 25s · a judge kept it running" (tail: `kept by a judge`), so
+  nobody thinks they pressed it. From 50 minutes
   after the start (`TOOL_HARD_HINT_MS`) every call, kept or not, reads "Polyth
   stops it in 5m: commands run at most 60 minutes" with no button, because the
   server's hard ceiling (`TOOL_HARD_STOP_MS`) applies regardless.
@@ -1656,6 +1684,21 @@ GitHub/GitLab account contributions describe the provider API account. A
 identity label must never imply that it changed credentials or selected a
 provider login, and the identity editor never stores or asks for a secret.
 
+The desktop header says each fact once: the branch capsule (with ahead/behind),
+the identity chip, then Sync, the remote menu and Refresh. The chip names who
+commits, nothing more: a chosen profile by its label, System Git by the name
+its Git config gives. Provider, source, e-mail and provider accounts wait in the
+menu it opens. The header prints no remote name and no pull-request chip: Sync's
+tooltip and the menu rows (Fetch, Pull, Push) name the remote, and with more
+than one remote the choice is the menu's *Remote* drill-in, as on the phone. A
+missing or unsafe remote is the notice under the header. The commit composer is
+the message and one rail: the subject counter while typing, *Generate* and
+*Commit*. Each change group's header counts its own files and the header names
+the branch, so neither the composer nor the file card's summary repeats them.
+Sync stays in the header only; it commits a typed message first, which its
+tooltip says while a message is typed. Tabs show a count only when it is not
+zero.
+
 **Git identities** (titled *Repository identities* in Settings) are
 Space-wide `SourceControlProfile`s (name, email, an
 optional SSH **signing key** `~/.ssh/*.pub`, an optional **hosting account**
@@ -1927,12 +1970,15 @@ host.slots.register({
   `projectId`, `spaceId`). The row only mounts with the model/effort chips, so
   a contribution must render `null` when the route is not its concern. `ContextPie.tsx`
   mounts `composer.context.details` inside its card; `Header.tsx` and
-  `MobileSessionHeader.tsx` mount `session.header.status` beside the shared
-  session status control (on the phone inline before the title text, like a
+  `MobileSessionHeader.tsx` mount `session.header.status` through
+  `SessionHeaderStatus.tsx` inside the shared session status control's button
+  (on the desktop before its chevron; on the phone inline before the title text, like a
   browser address pill's lock, in the same centred line and baseline; marks
   take a muted ink and a glyph sized from the title, and the title has no
   dropdown arrow and always keeps to one line, cut with an ellipsis at the end, so it sits at
-  the same height for every chat); both lead the title with Back from the chat
+  the same height for every chat). A click on a mark's own control, or in the
+  dialog or sheet it portals, stops there and never also opens the session
+  overview; a click on a plain glyph still does; both lead the title with Back from the chat
   (`SessionBack.tsx`, the `ui/SessionBackButton.tsx` control: a quiet
   `header-control` pill before the desktop title, an icon button before the
   menu in the phone's leading island). A delegated child (subagent, workflow
@@ -2034,8 +2080,8 @@ The command palette
   `--icon-sm` like its other status marks. One decision, `sessionLeadMark` (`apps/web/src/sessionLead.ts`),
   renders the mark and sets the row's `data-lead` (`mark` / `empty` /
   `select`) on desktop and phone alike, so the two cannot drift. The highlight
-  pill (`.session-btn::before`: hover, press, selection, keyboard focus, the
-  pinned resting fill, Fluent's accent bar) keeps `--nav-pill-air` (10px,
+  pill (`.session-btn::before`: hover, press, selection, keyboard focus,
+  Fluent's accent bar) keeps `--nav-pill-air` (10px,
   `tokens.css`) between its edge and the content on both sides: it starts at
   `--session-pill-start`, `--session-pill-inset` (= the air) before the state
   mark or, for `data-lead="empty"`, before the title
@@ -2055,8 +2101,11 @@ The command palette
   instead of the row box. Only the pill's start moves between the two
   starts, sliding with `--motion-fast` (off under reduced motion and the
   reduce-animations/low-resource settings); the columns never shift. Themes
-  and shell looks restyle the pill's paint, never its extent. The phone row
-  paints its fill (current, selected, failed) on
+  and shell looks restyle the pill's paint, never its extent. Only the current
+  chat and a failing row take a fill; a pinned chat is marked by its Pinned
+  chats caption and its pin, never by a second plate, so the current chat
+  stays unambiguous (the looks and the phone already work this way). The
+  phone row paints its fill (current, selected, failed) on
   `.mobile-nav-session-row::before` with the same rule: the same air before
   the status mark (or the title when the slot is empty) and after the ⋯
   glyph, reaching `--nav-fill-outset` past the row box (at most 2px short of
@@ -2149,9 +2198,11 @@ navigator passes `surface: "phone"` (its rows use the phone metrics). Rows
 take their measures from the list's own tokens (`--nav-row-session`,
 `--nav-session-size`, `--session-lead-size`, `--session-pill-inset`,
 `--session-menu-size`) so they read as peers of chats: nothing is highlighted
-at rest (no pinned-chat backing), hover and the current row use the chat
-row's wash and glass, state marks sit in the leading column (spinner, amber
-shield, red `!`, unread dot), and actions open from one menu reached by right
+at rest (no pinned-chat backing), hover uses the chat row's wash and the
+current row the mode-aware selection wash (`--surface-overlay-strong`, the
+fill the macOS, Liquid Glass and Fluent recipes already draw), state marks sit
+in the leading column (spinner, amber shield, red `!`, unread dot), and
+actions open from one menu reached by right
 click, the ⋮ trigger, long press and Shift+F10/ContextMenu. A row that opens a
 package page is current exactly while `store.getSnapshot().activePage` names
 it. The Agents package draws its agents here as a foldable group (see
@@ -2403,6 +2454,10 @@ While the chat starts, its first prompt waits on the server queue with the
 row as the prompt (the submit-frame echo hands over to it), the queue list
 never shows it as a chip and never calls it stalled, and the "Spawning agent…"
 dock shows while such a row waits — also after a reload or on another device.
+A fork's copied log ends with `session/forked`, and a `session-starting` row
+before that marker is the source's, never the child's: Fork and edit on a
+started chat's first prompt copies the row but not its admission, which left
+the child on "Spawning agent…" with the prompt stuck under its history.
 The projection status is no guide while it does (`reconciling`, then `idle`
 until the prompt is admitted), so `sessionStartingFromServer` reads the row and
 only excludes `failed` and `archived`; tying it to `reconciling` flashed the
@@ -2711,7 +2766,10 @@ client twin of the server's `compactionDueForNextModel`) opens the same row
 before anything is sent: "This chat is too long for {model}. Polyth will compact
 it before your next message." with no buttons, or, for a manual chat, "…Compact
 it, or continue in a new chat, before you send." with both actions. Unknown
-usage or an unknown window says nothing. Focus returns to the pie on close only when the pie
+usage or an unknown window says nothing. The model picker says it before the
+pick: with `usage` passed, every unselected row that the same rule flags
+carries an amber "Chat won't fit" tag beside its name, styled like "Not connected" (`chatOverflowsModel` in
+`packages/models/widgets/chatFit.ts`); the row stays selectable. Focus returns to the pie on close only when the pie
 held focus, so a tap while the phone editor is focused keeps the keyboard and
 the engaged composer. The resting phone row keeps the pie right after Add
 (the model line dissolves with `display: contents` and only the pie stays).
@@ -3179,6 +3237,15 @@ would change no file — nothing changed, not a repository, a remote project,
 no snapshot — stays the instant, dialog-free action. Groups are told apart by
 a fill, not a border, and red counts use `--red-on-wash`.
 
+**Regenerate with files:** Regenerate on an answer is a rewind to its source
+prompt plus a resend, and it always discards the files the replaced answer
+changed (`files: "restore"`). When the same preview lists any file, it first
+asks in `RewindFilesDialog` with `purpose="regenerate"`: "Regenerate and lose
+file changes?", the list headed "Changes will be lost · N", and two buttons —
+Cancel (initial focus) and a danger "Regenerate". There is no "conversation
+only" choice. A running turn is stopped first, as above. Nothing to change
+on disk keeps Regenerate instant and dialog-free (`ChatResponseFooter.tsx`).
+
 **Rewind cut and replacement:** an active Revert & edit is represented by one
 quiet cut marker at the end of the retained prefix. It does not count or narrate
 the hidden branch; when the rollback restored or left files it carries one
@@ -3261,6 +3328,11 @@ runs. Steps are separated by rhythm alone (34 px rows,
 `--hit-min` on touch). A finished step shows its duration but no tick, since
 the block's own mark says done; failures and running steps keep their glyph.
 The summary title (weight 500) never truncates; its counts give way first.
+A step's name never truncates either: on phones the name and its target share
+one text line, and only the line's end truncates, so the target gives way
+before the name instead of the two columns splitting the shortage
+(`--text-scale` included). `chatFrameGeometry.test.ts` measures that at phone
+widths.
 Every look keeps this geometry: the mark starts and the chevron ends on the prose
 edges, the thread hangs from the mark's centre (`--activity-thread-x`), and steps
 start on the title column. A look that draws a rule or a pill on the summary (Line,
@@ -3667,34 +3739,23 @@ and `online`; a 4xx is final. On the server the read uses the indexed newest
 `turn/stopped` fact instead of loading the session's whole log, and runs its
 independent Git reads together; the latency contract is
 `packages/git/test/isolationCardLatency.test.ts`. An idle read keeps only the
-held tail position described above. While a turn is in progress, answers
-already closed by a later prompt keep their response footer in place and
-visible (identity and quick actions); removing those footers reflowed the
-whole transcript at every send and again at turn end, and hiding them
-(`data-dormant`, now only the working turn's own answers) left a blank band
-above the block under the answer. The identity panel is one per
-turn (its terminal answer), but every finished answer keeps its quick actions:
-an interim answer that tools, an answered question or more prose of the same
-turn follow gets an actions-only footer (`data-actions-only`). In the live turn
-an interim answer takes that footer's (dormant) box the moment a row lands
-under it, while it is the tail's neighbour; added at turn end instead, every
-footer in view pushed the rows below it down at once. On touch
-(`(hover: none), (pointer: coarse)`) actions-only footers are not shown: a
-row of quick actions under every interim answer doubled the activity gaps;
-the turn's final answer keeps its footer. With a mouse, over a block that
-footer *is* the group gap (no top margin, a negative bottom margin of
-`--conversation-group-gap`), in every reveal mode: elsewhere a hover-revealed
-actions-only footer collapses to no height and its bar shows in the message
-gap below, but the group gap is narrower than the icon track, and the block
-(its own stacking context) painted over the revealed icons and took their
-clicks. On phones prose, thoughts and blocks share one
+held tail position described above. Only a turn's last answer
+carries the response footer (model identity and quick actions), also while the
+turn still works: hiding it until the turn ended made the model line and actions
+vanish during every run. An interim answer that tools, a question or more prose
+of the same turn follow shows none; a row per interim answer was noise and set
+the activity rows apart from the prose. The streaming answer has none yet.
+Next to prose an activity block's gap counts the
+empty band around a 36px row's title (`--activity-row-band`, `--space-2`), so
+the title stands the group gap from the text's ink on both sides (measured
+20px with a mouse, 16px on a phone). On phones prose, thoughts and blocks share one
 gap (`--conversation-group-gap` = `--timeline-gap`, 12px); touch block rows
 keep a 44px hit box but lay out as 36px (`--activity-row-trim` pulls the
 block into the gaps around it), and consecutive blocks' hit boxes meet
 (`--space-1` apart with a mouse). The trim only reaches into a row's empty
 padding, so a look that draws the summary's box (the Chip outline, Air's pill
-and open island, Line's rule) sets it to 0 on the block and keeps the full
-gap; trimmed, a prompt under Air's pill sat 8px from it. A thought row keeps prose's ink gap (group
+and open island, Line's rule) sets it (and `--activity-row-band`, on the
+timeline) to 0 and keeps the full gap; trimmed, a prompt under Air's pill sat 8px from it. A thought row keeps prose's ink gap (group
 gap less its header pad). A progress update (an
 interim answer followed by a block) only quiets its ink; new type metrics would
 reflow the lines right above the block that just arrived. The overflowing think
@@ -4833,6 +4894,20 @@ open that view directly (`OWN_ACCOUNT_TARGET`). Polyth Link's *This computer*
 card shows the host status, the address this browser uses and whether
 sign-in is required, above the paired phones.
 
+A signed-in row is labelled from the sign-in request's user agent
+(`clientUserAgent.ts` reads it; the server stores it, up to 200 characters):
+a browser name and system, or the shell token an app appends to the same
+agent — `PolythDesktop/<version>`, `PolythDesktop-Workstation/<version>`
+(desktop app, `userAgent.ts`) or `PolythMobile` (phone app, Capacitor
+`appendUserAgent`). That token is the only such signal: a phone app and phone
+Safari ship the same WebKit agent, and an Electron window otherwise reports a
+plain Chrome agent, which is why the app would read as "Chrome on macOS". The
+longer label bound exists for the same reason — a phone's agent alone already
+passes 120 characters, so a tighter cut would drop the token. Both tokens are
+client claims: render them, never authorize on them. A row that arrived before
+this logged-in shell keeps its browser-or-system label, and a browser stays
+version-less because the agent is its own.
+
 Harness-specific sections contribute to `settings.harness.detail` with
 `harnessId`, `sectionId`, and `label` metadata. Their `order` controls navigation;
 `handlesPendingChanges: true` identifies the section that reviews and applies
@@ -5496,7 +5571,16 @@ rendered once through `ShellDock` in `Sidebar` and
 vertical group reorders on the `y` axis and carries
 `data-orientation="vertical"`. "Start"/"end" are logical: a mirrored shell or
 an RTL locale swaps which screen edge they name, and the settings labels
-follow. Styling contract: [styles.md → Window layout](styles.md#window-layout).
+follow. A docked group with nothing on it is not a bar: an empty Tools row
+leaves no blank strip above the navigator, and an emptied actions rail no
+seam in the launcher strip. The group stays mounted, because a rail drag
+finds it by zone (`railDrag.ts`, and a rail with no box is measured again
+once it has one). The tools rail renders itself as soon as a drag offers it
+an icon, which un-empties its dock and brings the row back; the actions rail
+knows nothing of a drag, so its dock and its navigator row come back for any
+drag in the air (`body[data-rail-dragging]`) as the landing strip. Edit mode
+keeps the rows and the actions dock for their pencil. Styling contract:
+[styles.md → Window layout](styles.md#window-layout).
 
 **Optional and home-surface profiles** (`workbench/profileNavigation.ts`,
 `workbench/profileOffers.ts`). Two more presentation hints, again without the

@@ -74,6 +74,9 @@ test("Secure Safe's canonical deployment skill has a projection in every shipped
     fx: "prompt",
     grok: "prompt",
     deepseek: "prompt",
+    // backend-copilot is an ACP profile (createAcpProvisioner), like Cursor,
+    // Grok and DeepSeek.
+    copilot: "prompt",
     omp: "prompt",
   });
 });

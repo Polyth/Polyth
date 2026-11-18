@@ -73,24 +73,40 @@ const stopsIn = (pulse: ToolPulseState) => fmtDuration(Math.max(0, TOOL_SILENCE_
 /** Whole seconds left before the hard ceiling stops the call. */
 const ceilingIn = (pulse: ToolPulseState) => fmtDuration(Math.max(0, TOOL_HARD_STOP_MS - pulse.elapsedMs));
 
+/** The Keep running request. Its button vanishes once `tool/keep-running`
+ *  arrives, so `onKept` hands focus on (only after this client pressed it). */
+function useKeepRunning(sessionId: string | null | undefined, callId: string, kept: boolean, onKept: () => void) {
+  const pressed = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const onKeptRef = useRef(onKept);
+  onKeptRef.current = onKept;
+  useEffect(() => {
+    if (kept && pressed.current) {
+      pressed.current = false;
+      onKeptRef.current();
+    }
+  }, [kept]);
+  const keep = () => {
+    if (!sessionId || busy) return;
+    setBusy(true);
+    setFailed(false);
+    pressed.current = true;
+    api.keepToolRunning(sessionId, callId)
+      .catch(() => { pressed.current = false; setFailed(true); })
+      .finally(() => setBusy(false));
+  };
+  return { keep, busy, failed };
+}
+
 /** Under an expanded running tool row, one line: when output was last seen,
  *  and in the last two minutes before the watchdog, when the call stops. It
  *  claims silence only after a progress frame proved the harness reports
  *  output; elapsed time is in the row's status mark already. */
-export function ToolPulseLine({ sessionId, callId, startedAt, kept = false }: { sessionId: string | null | undefined; callId: string; startedAt: number; kept?: boolean }) {
+export function ToolPulseLine({ sessionId, callId, startedAt, kept = false, keptBy }: { sessionId: string | null | undefined; callId: string; startedAt: number; kept?: boolean; keptBy?: "judge" }) {
   const pulse = useToolPulse(sessionId, callId, startedAt, true, kept);
   const lineRef = useRef<HTMLDivElement>(null);
-  const pressed = useRef(false);
-  const [busy, setBusy] = useState(false);
-  const [failed, setFailed] = useState(false);
-  // The button vanishes once the event arrives: focus moves to the line that
-  // replaces it instead of dropping to the page.
-  useEffect(() => {
-    if (kept && pressed.current) {
-      pressed.current = false;
-      lineRef.current?.focus();
-    }
-  }, [kept]);
+  const { keep, busy, failed } = useKeepRunning(sessionId, callId, kept, () => lineRef.current?.focus());
   if (!pulse || (pulse.lastOutputAgoMs === undefined && !pulse.nearStop && !pulse.kept && !pulse.nearCeiling)) return null;
   if (pulse.nearCeiling) {
     return (
@@ -102,7 +118,7 @@ export function ToolPulseLine({ sessionId, callId, startedAt, kept = false }: { 
   if (pulse.kept) {
     return (
       <div className="tool-pulse" ref={lineRef} tabIndex={-1}>
-        <span className="tool-pulse-text" role="status">{tr("execution.pulseKept", { duration: fmtDuration(pulse.quietMs) })}</span>
+        <span className="tool-pulse-text" role="status">{tr(keptBy === "judge" ? "execution.pulseKeptByJudge" : "execution.pulseKept", { duration: fmtDuration(pulse.quietMs) })}</span>
       </div>
     );
   }
@@ -114,15 +130,6 @@ export function ToolPulseLine({ sessionId, callId, startedAt, kept = false }: { 
   const stop = pulse.lastOutputAgoMs === undefined
     ? tr("execution.pulseStopsInLine", { duration: stopsIn(pulse) })
     : tr("execution.pulseStopsInQuiet", { duration: stopsIn(pulse) });
-  const keep = () => {
-    if (!sessionId || busy) return;
-    setBusy(true);
-    setFailed(false);
-    pressed.current = true;
-    api.keepToolRunning(sessionId, callId)
-      .catch(() => { pressed.current = false; setFailed(true); })
-      .finally(() => setBusy(false));
-  };
   return (
     <div className="tool-pulse tool-pulse--stopping" ref={lineRef} tabIndex={-1} title={tr("execution.pulseStopHint")}>
       <span className="tool-pulse-text">
@@ -148,9 +155,33 @@ export function ToolPulseLine({ sessionId, callId, startedAt, kept = false }: { 
   );
 }
 
+/** Keep running beside a block's live Stop. A collapsed block, or one that
+ *  holds a single call, names the call on its line with `ToolPulseInline`
+ *  (a span inside the line's toggle, so no button there) and draws no
+ *  `ToolPulseLine`: without this the countdown had no action at all. */
+export function ToolKeepRunning({ sessionId, callId, startedAt, kept = false, onKept }: { sessionId: string | null | undefined; callId: string; startedAt: number; kept?: boolean; onKept: () => void }) {
+  const pulse = useToolPulse(sessionId, callId, startedAt, true, kept);
+  const { keep, busy, failed } = useKeepRunning(sessionId, callId, kept, onKept);
+  if (!sessionId || !pulse || !pulse.nearStop || pulse.nearCeiling) return null;
+  return (
+    <>
+      {failed ? <span className="tool-pulse-error activity-keep-running-error" role="alert">{tr("execution.keepRunningFailed")}</span> : null}
+      <Button
+        className="activity-keep-running"
+        size="sm"
+        busy={busy}
+        aria-label={tr("execution.keepRunningHint")}
+        onClick={keep}
+      >
+        {tr("execution.keepRunning")}
+      </Button>
+    </>
+  );
+}
+
 /** The same facts, compact, after the step a collapsed activity block names:
  *  "· 3m 12s · last output 6s ago", or near the watchdog "· 8m 50s · stops in 1m 10s". */
-export function ToolPulseInline({ sessionId, callId, startedAt, kept = false }: { sessionId: string | null | undefined; callId: string; startedAt: number; kept?: boolean }) {
+export function ToolPulseInline({ sessionId, callId, startedAt, kept = false, keptBy }: { sessionId: string | null | undefined; callId: string; startedAt: number; kept?: boolean; keptBy?: "judge" }) {
   const pulse = useToolPulse(sessionId, callId, startedAt, true, kept);
   if (!pulse) return null;
   return (
@@ -162,7 +193,7 @@ export function ToolPulseInline({ sessionId, callId, startedAt, kept = false }: 
       {pulse.nearCeiling
         ? <span className="tool-pulse-part tool-pulse-stop">{tr("execution.pulseStopsIn", { duration: ceilingIn(pulse) })}</span>
         : pulse.kept
-        ? <span className="tool-pulse-part">{tr("execution.pulseKeptInline")}</span>
+        ? <span className="tool-pulse-part">{tr(keptBy === "judge" ? "execution.pulseKeptByJudgeInline" : "execution.pulseKeptInline")}</span>
         : pulse.nearStop
         ? <span className="tool-pulse-part tool-pulse-stop">{tr("execution.pulseStopsIn", { duration: stopsIn(pulse) })}</span>
         : pulse.lastOutputAgoMs !== undefined

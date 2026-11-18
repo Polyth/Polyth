@@ -60,6 +60,9 @@ export interface MoveSessionResource {
 export interface ResourceRegistry {
   begin(input: BeginResourceProvisioning): { resource: CanonicalResource; provisioning: ResourceProvisioning; replayed: boolean };
   resource(resourceId: string): CanonicalResource | undefined;
+  /** The rows of many resources in one read each 500 ids. Ids without a row,
+   *  and ids `resource` would reject as invalid, are absent. */
+  resourcesByIds(resourceIds: readonly string[]): Map<string, CanonicalResource>;
   active(resourceId: string, scope: { orgId: string; spaceId: string }): CanonicalResource | undefined;
   provisioning(operationId: string): ResourceProvisioning | undefined;
   pending(): ResourceProvisioning[];
@@ -89,6 +92,8 @@ const IDENTIFIER = /^[A-Za-z0-9_][A-Za-z0-9_.:-]{0,199}$/;
 const KIND = /^[a-z][a-z0-9.-]{0,63}$/;
 const VISIBILITY = new Set<ResourceVisibility>(['private', 'restricted', 'space', 'inherit']);
 const SYSTEM_ACTOR = 'system:resource-provisioner';
+/** Ids per batched primary-key read; one bound JSON array each. */
+const BATCH_READ = 500;
 
 function identity(value: unknown, field: string): string {
   if (typeof value !== 'string' || !IDENTIFIER.test(value)) throw controlError('invalid-input', `Invalid ${field}`);
@@ -234,6 +239,19 @@ export function createResourceRegistry(control: ControlPlane, opts: { now?: () =
     },
     resource(resourceId) {
       return resource(resourceRow(identity(resourceId, 'resource ID')));
+    },
+    resourcesByIds(resourceIds) {
+      const ids = [...new Set(resourceIds.filter((resourceId) => typeof resourceId === 'string' && IDENTIFIER.test(resourceId)))];
+      const out = new Map<string, CanonicalResource>();
+      for (let start = 0; start < ids.length; start += BATCH_READ) {
+        for (const row of control.all<ResourceRow>(
+          `SELECT id,kind,org_id,space_id,parent_id,access_parent_id,owner_principal_id,created_by,visibility,lifecycle,
+                  access_revision,revision,created_at_ms,updated_at_ms
+             FROM resources WHERE id IN (SELECT value FROM json_each(?))`,
+          JSON.stringify(ids.slice(start, start + BATCH_READ)),
+        )) out.set(row.id, resource(row)!);
+      }
+      return out;
     },
     active(resourceId, scope) {
       const id = identity(resourceId, 'resource ID');

@@ -68,7 +68,7 @@ test("a fresh install writes assist.json only under the package directory", asyn
   const root = temporary();
   try {
     const pkg = registerPackage(registrationHost(root));
-    assert.deepEqual(await putSettings(pkg.routes!, 60), { idleSeconds: 60, suggestNextPrompt: true, suggestionPriority: "harness", showCallouts: false });
+    assert.deepEqual(await putSettings(pkg.routes!, 60), { idleSeconds: 60, suggestNextPrompt: true, suggestionPriority: "harness", showCallouts: false, showRecap: true, recapLength: "medium" });
 
     assert.deepEqual(readdirSync(root), ["packages"], "nothing is written to the shared root");
     assert.equal(existsSync(join(root, "packages", "recap", "assist.json")), true);

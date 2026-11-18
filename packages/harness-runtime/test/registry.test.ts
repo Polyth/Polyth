@@ -789,6 +789,13 @@ test("liveSessionIds names only this Space's canonical leases on one harness", a
     // The executable lock an update must free is machine-wide: every Space.
     assert.deepEqual(pool.liveSessionIdsForHarness("a").sort(), ["s1", "s3"]);
     assert.deepEqual(pool.liveSessionIdsForHarness("b"), ["s2"]);
+    // After an update, only leases created before it finished run the old build.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const updatedAt = Date.now();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await pool.forSession(session("s4", "space-1", "a"), "/tmp");
+    assert.deepEqual(pool.liveSessionIdsForHarness("a", { createdBefore: updatedAt }).sort(), ["s1", "s3"]);
+    assert.deepEqual(pool.liveSessionIdsForHarness("a").sort(), ["s1", "s3", "s4"]);
     await pool.dispose();
 });
 test("a pinned harness that cannot be selected says why, not just that it is unavailable", async () => {

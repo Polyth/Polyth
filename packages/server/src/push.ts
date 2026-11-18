@@ -147,6 +147,33 @@ function withoutTags(text: string): string {
   return out;
 }
 
+/** A markdown link reduced to its label, in one pass over the text:
+ *  `![label](…)` and `[label](…)` (start `![` or `[`, target `(`…`)`) and
+ *  `[label][ref]` (target `[`…`]`, label not empty). Same result as
+ *  `/\[([^\]]*)\]\([^)]*\)/g` → `$1` and its two siblings, which rescanned
+ *  to the next `]` from every `[` and so were quadratic on a run of them. */
+function unwrapLinks(text: string, start: "[" | "![", open: "(" | "[", close: ")" | "]", emptyLabel: boolean): string {
+  let out = "";
+  let at = 0;
+  for (let from = 0; ;) {
+    const begin = text.indexOf(start, from);
+    if (begin < 0) break;
+    const labelStart = begin + start.length;
+    const labelEnd = text.indexOf("]", labelStart);
+    if (labelEnd < 0) break;
+    // Every start before this `]` ends its label at it, so none of them links.
+    if ((!emptyLabel && labelEnd === labelStart) || text[labelEnd + 1] !== open) {
+      from = labelEnd + 1;
+      continue;
+    }
+    const end = text.indexOf(close, labelEnd + 2);
+    if (end < 0) break;
+    out += text.slice(at, begin) + text.slice(labelStart, labelEnd);
+    at = from = end + 1;
+  }
+  return at === 0 ? text : out + text.slice(at);
+}
+
 /** Plain-text excerpt of a markdown reply for a notification body: fenced
  *  blocks (including ```ui / ```page) are dropped, markdown syntax is reduced
  *  to its text, whitespace collapses, secret-shaped text is redacted, and the
@@ -175,11 +202,9 @@ export function plainTextExcerpt(raw: unknown, cap = MAX_BODY_CHARS): string {
       }
       lines.push(text);
     }
-    const flat = withoutTags(lines.join(" ")
-      .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
-      .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-      .replace(/\[([^\]]+)\]\[[^\]]*\]/g, "$1")
-      .replace(/<(https?:\/\/[^>\s]+)>/g, "$1"))
+    const joined = lines.join(" ");
+    const unlinked = unwrapLinks(unwrapLinks(unwrapLinks(joined, "![", "(", ")", true), "[", "(", ")", true), "[", "[", "]", false);
+    const flat = withoutTags(unlinked.replace(/<(https?:\/\/[^>\s]+)>/g, "$1"))
       .replace(/`+([^`]*)`+/g, "$1")
       .replace(/\*\*+([^*]+?)\*\*+/g, "$1")
       .replace(/(?<![\w*])\*(?!\s)([^*]+?)(?<!\s)\*(?![\w*])/g, "$1")
@@ -390,7 +415,9 @@ export interface PushService {
   removeAccount(userId: string): number;
   /** Encrypt + POST to every subscription; dead endpoints (404/410) drop.
    *  `failed` counts other rejections and network errors (kept, logged). */
-  send(account: NotificationAccount, payload: PushPayload): Promise<PushSendResult>;
+  /** `exceptDevice`: this device already has the alert (deferredAlerts.ts);
+   *  every other subscription of the person gets it now. */
+  send(account: NotificationAccount, payload: PushPayload, opts?: { exceptDevice?: string }): Promise<PushSendResult>;
   send(payload: PushPayload): Promise<PushSendResult>;
 }
 
@@ -568,7 +595,7 @@ export function createPushService(opts: {
       return before - s.subs.length;
     },
 
-    async send(first: NotificationAccount | PushPayload, second?: PushPayload) {
+    async send(first: NotificationAccount | PushPayload, second?: PushPayload, sendOpts?: { exceptDevice?: string }) {
       const account = second === undefined ? LEGACY_TEST_ACCOUNT : first as NotificationAccount;
       const payload = second === undefined ? first as PushPayload : second;
       if (!validAccount(account) || !hasAccess(account)) return { sent: 0, dropped: 0, failed: 0, droppedEndpoints: [] };
@@ -577,7 +604,11 @@ export function createPushService(opts: {
       // (an unnamed older subscription counts as another device). A test push
       // the person asked for goes everywhere.
       const active = payload.test === true ? undefined : opts.activeDevice?.(account);
-      const owned = s.subs.filter((sub) => sameAccount(sub.recipient, account) && (active === undefined || sub.device === active));
+      // An alert sent on from the device that had it first goes to the others.
+      const except = sendOpts?.exceptDevice;
+      const owned = s.subs.filter((sub) => sameAccount(sub.recipient, account)
+        && (active === undefined || sub.device === active)
+        && (except === undefined || sub.device !== except));
       if (owned.length === 0) return { sent: 0, dropped: 0, failed: 0, droppedEndpoints: [] };
       const plaintext = Buffer.from(JSON.stringify(payload));
       // A person's message is worth delivering after a phone wakes from doze

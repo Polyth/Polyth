@@ -5,6 +5,7 @@ const runtime = ReactDOM as typeof ReactDOM & Record<string, unknown>;
 
 export const {
   __DOM_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE,
+  browser,
   createPortal,
   flushSync,
   preconnect,

@@ -3,6 +3,7 @@ import { createApiTransport } from "@polyth/web-sdk";
 /** Which suggestion wins the composer chip when the harness offers its own
  * (Claude Code) and Session Assist has one too. */
 export type SuggestionPriority = "harness" | "assist";
+export type RecapLength = "short" | "medium" | "detailed";
 
 /** Browser copy of `/api/settings/assist`, shared by the settings page and the
  * composer widget so a toggle there applies here without a reload. */
@@ -11,6 +12,8 @@ export interface AssistSettings {
   suggestNextPrompt: boolean;
   suggestionPriority: SuggestionPriority;
   showCallouts: boolean;
+  showRecap: boolean;
+  recapLength: RecapLength;
 }
 
 const api = createApiTransport();
@@ -33,6 +36,8 @@ export function rememberAssistSettings(next: Partial<AssistSettings> & { idleSec
     suggestNextPrompt: next.suggestNextPrompt !== false,
     suggestionPriority: next.suggestionPriority === "assist" ? "assist" : "harness",
     showCallouts: next.showCallouts === true,
+    showRecap: next.showRecap !== false,
+    recapLength: next.recapLength === "short" || next.recapLength === "detailed" ? next.recapLength : "medium",
   };
   for (const listener of [...listeners]) listener();
 }

@@ -1132,7 +1132,7 @@ export const api = {
 
   // agentProfileId: string selects a profile, null explicitly clears the
   // session's stored profile, omitted inherits it.
-  sendMessage: (id: string, body: { text: string; clientOperationId?: string; command?: { id: string; args?: string }; autoTitle?: boolean; hiddenUserMessage?: boolean; memory?: MemoryNarrowing; attachments?: AttachmentRef[]; model?: JsonObject; agent?: string; harness?: HarnessSelection; delivery?: string; dismissPending?: boolean; agentProfileId?: string | null }) =>
+  sendMessage: (id: string, body: { text: string; clientOperationId?: string; command?: { id: string; args?: string }; autoTitle?: boolean; hiddenUserMessage?: boolean; memory?: MemoryNarrowing; attachments?: AttachmentRef[]; model?: JsonObject; agent?: string; harness?: HarnessSelection; delivery?: string; dismissPending?: boolean; consumesQueueId?: string; agentProfileId?: string | null }) =>
     jfetch<SendResult>(`/api/sessions/${id}/message`, json("POST", body)),
   memoryPolicyGet: (id: string) =>
     jfetch<{ setting: MemoryNarrowing }>(`/api/sessions/${id}/memory-policy`),
@@ -1531,6 +1531,10 @@ export const api = {
   gitDiff: (projectId: string, filePath: string, staged?: boolean, ignoreWhitespace?: boolean, sessionId?: string, repositoryId?: string) =>
     jfetch<GitDiffResult>(
       `/api/git/diff?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(filePath)}${staged ? "&staged=true" : ""}${ignoreWhitespace ? "&ignoreWhitespace=true" : ""}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}${repositoryId ? `&repositoryId=${encodeURIComponent(repositoryId)}` : ""}`,
+    ),
+  gitDiffStats: (projectId: string, sessionId?: string, repositoryId?: string) =>
+    jfetch<{ staged: Record<string, { additions: number; deletions: number }>; unstaged: Record<string, { additions: number; deletions: number }> }>(
+      `/api/git/diff-stats?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}${repositoryId ? `&repositoryId=${encodeURIComponent(repositoryId)}` : ""}`,
     ),
   gitShow: (projectId: string, sha: string, ignoreWhitespace?: boolean, sessionId?: string, repositoryId?: string) =>
     jfetch<{ sha: string; diff: string }>(

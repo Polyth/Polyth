@@ -1,14 +1,27 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { once } from "node:events";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { parseArgs, seconds, UsageError } from "../src/args.ts";
 import { openRequests, operationIdFor, type SessionEvent } from "../src/api.ts";
 import { exitCodeFor, PolythError } from "../src/client.ts";
 import { diffSession } from "../src/follow.ts";
-import { completionScript, main } from "../src/main.ts";
-import { controlSocketPath, desktopDataDir, normalizeUrl, readConfig, resolveTarget, writeConfig } from "../src/target.ts";
+import { cliVersion, completionScript, main, VERSION } from "../src/main.ts";
+import {
+  bundleBuild,
+  controlSocketPath,
+  desktopDataDir,
+  normalizeUrl,
+  readConfig,
+  repoRoot,
+  resolveTarget,
+  serverBundleRoot,
+  serverDataDir,
+  writeConfig,
+} from "../src/target.ts";
 
 test("argv parser: long/short/clustered flags, --flag=value, --no-x, -- rest, unknown flags", () => {
   const specs = [
@@ -47,6 +60,60 @@ test("desktop data directory follows Electron userData for product Polyth", () =
   assert.equal(desktopDataDir({ XDG_CONFIG_HOME: "/x" }, "linux"), "/x/Polyth/data");
   assert.match(desktopDataDir({}, "darwin"), /Library\/Application Support\/Polyth\/data$/);
   assert.match(desktopDataDir({ APPDATA: "C:\\Users\\me\\AppData\\Roaming" }, "win32"), /Polyth[\\/]data$/);
+});
+
+test("a packaged server has its own data directory, found before it first runs", async (t) => {
+  assert.equal(serverDataDir({ XDG_DATA_HOME: "/x" }, "linux"), "/x/polyth-server/data");
+  assert.match(serverDataDir({}, "linux"), /\.local\/share\/polyth-server\/data$/);
+  assert.match(serverDataDir({}, "darwin"), /Library\/Application Support\/Polyth Server\/data$/);
+  assert.match(serverDataDir({ LOCALAPPDATA: "C:\\Users\\me\\AppData\\Local" }, "win32"), /Polyth Server[\\/]data$/);
+  assert.notEqual(serverDataDir({}, "linux"), desktopDataDir({}, "linux"), "Desktop and a server can share a machine");
+  assert.equal(serverBundleRoot({}), undefined);
+  assert.equal(serverBundleRoot({ POLYTH_SERVER_BUNDLE: "rel/polyth" }), resolve("rel/polyth"));
+
+  const checkout = repoRoot();
+  if (checkout && existsSync(controlSocketPath(join(checkout, "data")))) {
+    t.skip("this checkout's own server is running, and discovery rightly prefers it");
+    return;
+  }
+  const dir = mkdtempSync(join(tmpdir(), "polyth-cli-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  // A running Desktop on the same machine is not this install's server.
+  const desktopSocket = process.platform === "win32" ? null : controlSocketPath(join(dir, "desktop", "data"));
+  if (desktopSocket) {
+    mkdirSync(dirname(desktopSocket), { recursive: true });
+    const listener = createServer().listen(desktopSocket);
+    t.after(() => { listener.close(); });
+    await once(listener, "listening");
+  }
+  const env = { POLYTH_SERVER_BUNDLE: "/opt/polyth", XDG_DATA_HOME: dir, POLYTH_DESKTOP_USER_DATA: join(dir, "desktop") };
+  const found = resolveTarget({ config: { targets: {} }, env, cwd: dir });
+  assert.deepEqual(
+    found.kind === "socket" && [found.name, found.source, found.dataDir],
+    ["local", "this server install", join(dir, "polyth-server", "data")],
+  );
+  if (desktopSocket) {
+    const desktop = resolveTarget({ config: { targets: {} }, env: { POLYTH_DESKTOP_USER_DATA: join(dir, "desktop") }, cwd: dir });
+    assert.equal(desktop.kind === "socket" && desktop.name, "desktop", "outside a packaged install, discovery still finds Desktop");
+  }
+  const nothing = mkdtempSync(join(tmpdir(), "polyth-cli-"));
+  t.after(() => rmSync(nothing, { recursive: true, force: true }));
+  assert.throws(
+    () => resolveTarget({ config: { targets: {} }, env: { POLYTH_DESKTOP_USER_DATA: nothing }, cwd: nothing }),
+    /No Polyth found/,
+    "without a packaged install there is still nothing to fall back to",
+  );
+});
+
+test("a packaged server's CLI reports that server's release", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-cli-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(join(dir, "BUILD.json"), JSON.stringify({ version: "1.2.356", commit: "abc", target: "linux-x64" }));
+  assert.equal(cliVersion({ POLYTH_SERVER_BUNDLE: dir }), "1.2.356");
+  assert.deepEqual(bundleBuild({ POLYTH_SERVER_BUNDLE: dir }), { version: "1.2.356", commit: "abc", target: "linux-x64" });
+  assert.equal(cliVersion({}), VERSION, "outside a packaged install it is the CLI's own version");
+  writeFileSync(join(dir, "BUILD.json"), "{not json");
+  assert.equal(cliVersion({ POLYTH_SERVER_BUNDLE: dir }), VERSION);
 });
 
 test("target resolution: flag > env > saved default > discovery; tokens stay in a 0600 file", (t) => {

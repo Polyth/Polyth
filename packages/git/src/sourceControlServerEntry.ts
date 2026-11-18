@@ -273,6 +273,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
           ...(query("path") ? { path: assertGitRelativePath(query("path")!) } : {}),
           staged: query("staged") === "true",
           ignoreWhitespace: query("ignoreWhitespace") === "true",
+          ...(query("since") ? { since: Number(query("since")) } : {}),
         });
         request.json(200, { ...result, snapshotDigest: gitDiffSnapshotDigest(result.diff) });
         return true;

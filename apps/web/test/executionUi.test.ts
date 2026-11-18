@@ -555,6 +555,8 @@ const { default: Timeline, ActivityGroupView, UserPrompt } = await import("../sr
 const { getUiSettings, setUiSettings } = await import("../src/uiPrefs.ts");
 installStatusbarWidgets();
 const { default: SessionWorkspace } = await import("../../../packages/files/widgets/SessionWorkspace.tsx");
+const { default: SessionHeaderStatus } = await import("../src/components/SessionHeaderStatus.tsx");
+const { registerSlot } = await import("../src/slots.ts");
 
 /** Build the derived activity projection the timeline hands to the group view. */
 const activityGroup = (
@@ -1339,6 +1341,87 @@ test("session workspace repairs only selected ordinary repositories after reloca
   } finally {
     api.updateSessionWorkspace = originalUpdate;
     await act(async () => root.unmount());
+    container.remove();
+    activateSession(null);
+    activateProject(null);
+    setSessions(project.id, []);
+  }
+});
+
+// The session title is one button and package marks sit inside it. The
+// repository mark opened its dialog and the session overview together, and
+// every click in that dialog reached the title again through React's portal
+// bubbling, so the overview kept covering the dialog.
+test("a header mark's own control and its dialog never also press the session title", async () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const project = {
+    id: "workspace-title-mark",
+    path: "/workspace",
+    name: "Title mark",
+    createdAt: 1,
+    repositories: [
+      { id: "web", alias: "Web", path: "/new/web" },
+      { id: "api", alias: "API", path: "/api" },
+    ],
+  };
+  const session = {
+    id: "workspace-title-mark-session",
+    projectId: project.id,
+    title: "Title mark",
+    status: "idle" as const,
+    createdAt: 1,
+    updatedAt: 1,
+    workspace: {
+      mode: "subset" as const,
+      revision: 3,
+      repositories: [{ repositoryId: "web", alias: "Web", path: "/old/web", state: "ready" as const }],
+    },
+  };
+  let titlePresses = 0;
+  const offMark = registerSlot("session.header.status", "test.title-mark.workspace", () => createElement(SessionWorkspace, { placement: "header" }), 20);
+  const offGlyph = registerSlot("session.header.status", "test.title-mark.glyph", () => createElement("span", { className: "test-title-glyph" }, "lock"), 15);
+  const originalUpdate = api.updateSessionWorkspace;
+  api.updateSessionWorkspace = async () => {
+    throw Object.assign(new Error("cannot change repository membership during active execution"), { code: "conflict" });
+  };
+  const buttonNamed = (text: string) => [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === text);
+  try {
+    applyProjectUpsert(project);
+    setSessions(project.id, [session]);
+    activateProject(project.id);
+    activateSession(session.id);
+    await act(async () => root.render(createElement("button", {
+      type: "button",
+      className: "test-session-title",
+      onClick: () => { titlePresses += 1; },
+    }, createElement(SessionHeaderStatus, { context: { projectId: project.id, sessionId: session.id, workspaceMode: "chat" } }))));
+    const indicator = container.querySelector<HTMLButtonElement>(".files-workspace-indicator");
+    assert.ok(indicator, "the repository mark renders inside the title");
+    await act(async () => indicator.click());
+    assert.ok(buttonNamed("Use located repositories"), "the repository dialog opened");
+    assert.equal(titlePresses, 0, "opening the mark's dialog must not also open the session overview");
+
+    // Plain dialog text, a radio row, a button that fails and shows an error.
+    await act(async () => document.querySelector<HTMLElement>(".files-workspace-intro")!.click());
+    const selectRow = [...document.querySelectorAll("label")].find((label) => label.textContent?.includes("Select repositories"));
+    assert.ok(selectRow);
+    await act(async () => selectRow.click());
+    await act(async () => buttonNamed("Use located repositories")!.click());
+    assert.ok(document.querySelector(".form-error"), "the refused update stays visible in the dialog");
+    await act(async () => buttonNamed("Cancel")!.click());
+    assert.equal(buttonNamed("Use located repositories") === undefined, true, "Cancel closes the dialog");
+    assert.equal(titlePresses, 0, "no click inside the mark's dialog reaches the session title");
+
+    // A plain glyph is part of the title: pressing it still opens the overview.
+    await act(async () => container.querySelector<HTMLElement>(".test-title-glyph")!.click());
+    assert.equal(titlePresses, 1);
+  } finally {
+    api.updateSessionWorkspace = originalUpdate;
+    await act(async () => root.unmount());
+    offMark();
+    offGlyph();
     container.remove();
     activateSession(null);
     activateProject(null);

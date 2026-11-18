@@ -377,7 +377,7 @@ test("an exclusion hides the model under every row that runs it, counts it, and 
     "the starred default runs the excluded Opus (and carries its turns), so it is hidden too");
   assert.equal(report.excluded, 1);
   assert.equal(report.unlisted, 0, "an exclusion the catalog no longer lists is not a retired favorite");
-  assert.match(report.text, /1 model is hidden by the routing policy above/);
+  assert.match(report.text, /1 model is hidden by the person.s routing policy/);
   assert.deepEqual(report.candidates[0]!.quotaWindow, { sourceId: "claude", label: "7d", resetsAt: NOW + DAY, pace: "over" });
 });
 
@@ -398,4 +398,83 @@ test("an Antigravity account's third-party window does not block its Gemini mode
   // The account's own windows meter it; the default login's 90% does not.
   assert.equal(gemini.quotaUsed, 0.2);
   assert.equal(gemini.blocked, false);
+});
+
+test("a person's order: pins lead, preferred harnesses next, avoided and demoted rows sink, usable still first", () => {
+  const report = buildModelRouting({
+    now: NOW,
+    observations: [
+      ...Array.from({ length: 6 }, () => observation("codex", "openai", "gpt-5.5")),
+      ...Array.from({ length: 4 }, () => observation("claude", "anthropic", "opus")),
+      ...Array.from({ length: 3 }, () => observation("pi", "x", "m1")),
+      ...Array.from({ length: 2 }, () => observation("grok", "xai", "grok-5")),
+      observation("cursor", "cursor", "auto"),
+    ],
+    favorites: ["claude::anthropic/opus"],
+    snapshots: [snapshot("codex", [["30d", 100, NOW + 5 * DAY]])],
+    available: () => true,
+    order: {
+      // An unused pin is listed anyway; a pin of a blocked model stays among the unusable rows.
+      pin: ["opencode::zen/unused-pick", "codex::openai/gpt-5.5"],
+      demote: ["claude::anthropic/opus"],
+      harnesses: { grok: "prefer", pi: "avoid" },
+    },
+  });
+  assert.deepEqual(report.candidates.map((c) => `${c.harnessId}:${c.modelID}:${c.placed ?? "-"}`), [
+    "opencode:unused-pick:pinned",
+    "grok:grok-5:preferred",
+    "cursor:auto:-",
+    "pi:m1:avoided",
+    "claude:opus:demoted",
+    "codex:gpt-5.5:pinned",
+  ]);
+  const claude = report.candidates.find((c) => c.harnessId === "claude")!;
+  assert.equal(claude.favoriteIndex, 0);
+  assert.equal(report.candidates.find((c) => c.harnessId === "cursor")!.favoriteIndex, undefined);
+  assert.match(report.text, /^1\. opencode zen\/unused-pick · unused · pinned by the person$/m);
+});
+
+test("a never-listed harness hides all its rows and counts them as excluded", () => {
+  const report = buildModelRouting({
+    now: NOW,
+    observations: [observation("claude", "anthropic", "opus"), observation("pi", "x", "m1"), observation("pi", "x", "m2")],
+    favorites: ["pi::x/m3"],
+    snapshots: [],
+    available: () => true,
+    excludeHarnesses: ["pi"],
+  });
+  assert.deepEqual(report.candidates.map((c) => c.harnessId), ["claude"]);
+  assert.equal(report.excluded, 3);
+});
+
+test("textLimit prints an agent's cut while the rows go to limit; names and metering windows ride along", () => {
+  const report = buildModelRouting({
+    now: NOW,
+    observations: [
+      ...Array.from({ length: 3 }, () => observation("claude", "anthropic", "opus")),
+      ...Array.from({ length: 2 }, () => observation("codex", "openai", "gpt-5.5")),
+      observation("pi", "x", "m1"),
+    ],
+    favorites: [],
+    snapshots: [
+      snapshot("claude", [["5h", 7, NOW + 2 * HOUR], ["7d", 51, NOW + 3 * DAY]]),
+      snapshot("codex", [["30d", 20, NOW + 5 * DAY]]),
+    ],
+    available: () => true,
+    limit: 3,
+    textLimit: 1,
+    harnessName: (id) => id === "claude" ? "Claude Code" : undefined,
+  });
+  assert.equal(report.candidates.length, 3);
+  assert.equal(report.omitted, 0);
+  assert.equal(report.quotas.length, 2);
+  assert.match(report.text, /^1\. claude anthropic\/opus/m);
+  assert.doesNotMatch(report.text, /codex openai/);
+  assert.match(report.text, /\(\+2 more; raise parameters\.limit\)/);
+  assert.doesNotMatch(report.text, /^- codex/m);
+  const [claude, codex] = report.candidates as [Candidate, Candidate];
+  assert.equal(claude.harnessName, "Claude Code");
+  assert.equal(codex.harnessName, undefined);
+  assert.deepEqual(claude.quotaWindows, [{ sourceId: "claude", windowId: "5h" }, { sourceId: "claude", windowId: "7d" }]);
+  assert.equal(report.quotas.find((q) => q.sourceId === "claude")?.harnessName, "Claude Code");
 });

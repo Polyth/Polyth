@@ -99,7 +99,7 @@ test("phone project rows omit session totals and group backgrounds", async () =>
 test("phone project status pills use the shared derived status counts", async () => {
   const source = await read("../src/components/mobile/MobileNavigator.tsx");
 
-  assert.match(source, /projectSessionStatusCounts\(matching, now\)/);
+  assert.match(source, /projectSessionStatusCounts\(searchMode \? matchingAll : \[\.\.\.matchingAll, \.\.\.roomSessions\], now\)/);
   assert.doesNotMatch(source, /const activeCount = matching\.filter/);
   assert.doesNotMatch(source, /const waitingCount = matching\.filter/);
   assert.doesNotMatch(source, /const completedCount = matching\.filter/);
@@ -253,7 +253,7 @@ test("the pin lives in the status slot while package identity badges use the sha
   assert.match(css, /\.mobile-nav-session-swipe\s*\{[^}]*margin-inline:\s*calc\(-1 \* var\(--nav-fill-outset\)\);[^}]*overflow:\s*hidden;/s);
   assert.match(css, /\.mobile-nav-session-row\[data-lead="empty"\]\s*\{\s*--mobile-nav-fill-start:\s*calc\(var\(--nav-title-start\) - var\(--nav-row-inset\)\);\s*\}/);
   assert.match(css, /\.mobile-nav-session-row::before\s*\{[^}]*inset-inline:\s*calc\(var\(--mobile-nav-fill-start\) - var\(--nav-fill-outset, 0px\)\) calc\(-1 \* var\(--nav-fill-outset, 0px\)\);[^}]*background:\s*var\(--mobile-nav-fill\);[^}]*inset-inline-start var\(--motion-fast\) var\(--motion-ease\);/s);
-  assert.match(css, /\.mobile-nav-session-row\.is-active\s*\{\s*--mobile-nav-fill:\s*var\(--material-glass\);\s*\}/);
+  assert.match(css, /\.mobile-nav-session-row\.is-active\s*\{\s*--mobile-nav-fill:\s*var\(--surface-overlay-strong\);\s*\}/);
   assert.match(css, /\.mobile-nav-session-row::before,\s*\.mobile-nav-project-main::before \{ transition: none; \}/, "reduced motion stops the slide");
   // Host marks (sharing, mention) draw at the package badges' glyph size and
   // weight, so the identity group reads at one optical size.
