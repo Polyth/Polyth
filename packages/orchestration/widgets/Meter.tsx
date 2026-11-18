@@ -5,10 +5,12 @@ import { formatSpan, meterTone, percent, type Translate } from "./helpers.ts";
 const translate: Translate = (key, values) => tr(key as never, values);
 
 /** Thin quota bar with its value beside it. Hidden when the quota is unknown. */
-export function QuotaMeter({ used, window, ceiling, blocked = false, now }: {
+export function QuotaMeter({ used, window, ceiling, overPaceCeiling = null, blocked = false, now }: {
   used: number | undefined;
   window?: QuotaWindowRef | undefined;
   ceiling: number;
+  /** Roles mode: the level an over-pace window warns from; null otherwise. */
+  overPaceCeiling?: number | null;
   blocked?: boolean;
   now: number;
 }) {
@@ -20,7 +22,7 @@ export function QuotaMeter({ used, window, ceiling, blocked = false, now }: {
     : tr("orchestration.meter.label", { window: name, used: value });
   return (
     <span
-      className={`orch-meter orch-meter--${meterTone(used, ceiling, blocked)}`}
+      className={`orch-meter orch-meter--${meterTone(used, ceiling, blocked, { level: overPaceCeiling, pace: window?.pace })}`}
       role="meter"
       aria-valuemin={0}
       aria-valuemax={100}
@@ -34,4 +36,4 @@ export function QuotaMeter({ used, window, ceiling, blocked = false, now }: {
   );
 }
 
-export const harnessLabel = (id: string): string => id.length > 0 ? id.charAt(0).toUpperCase() + id.slice(1) : id;
+export { harnessLabel } from "./helpers.ts";

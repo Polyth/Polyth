@@ -84,7 +84,7 @@ function resolveChoice(policy: RoutingPolicy, choice: ModelChoice, facts: Routin
     ...(row?.blockedUntil !== undefined ? { blockedUntil: row.blockedUntil } : {}),
   };
   const status = ((): ChoiceStatus => {
-    if (policy.excluded.includes(key)) return "excluded";
+    if (policy.excluded.includes(key) || policy.harnesses[choice.harnessId] === "never") return "excluded";
     if (row?.runs && facts.excludedModels?.has(sameModelKey(choice.harnessId, row.runs))) return "excluded";
     if (!facts.routingAvailable) return "unverified";
     if (!row) return facts.catalogUnavailable ? "unverified" : "unlisted";
@@ -173,6 +173,8 @@ export function formatBrief(policy: RoutingPolicy, roles: ResolvedRole[], now: n
     });
     lines.push(`Never delegate to: ${refs.join(", ")}.`);
   }
+  const neverHarnesses = Object.entries(policy.harnesses).filter(([, rule]) => rule === "never").map(([id]) => clean(id));
+  if (neverHarnesses.length) lines.push(`Never delegate to any model of: ${neverHarnesses.join(", ")}.`);
   lines.push(`Run at most ${policy.maxChildren} delegated children at once.`);
   lines.push(direct
     ? "No role fits the work, or its models are all skipped: do the work yourself."

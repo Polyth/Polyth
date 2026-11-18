@@ -83,4 +83,11 @@ test("revision is a stable 12-hex content hash", () => {
   assert.match(a, /^[0-9a-f]{12}$/);
   assert.equal(policyRevision(parsePolicy(base())), a);
   assert.notEqual(policyRevision({ ...DEFAULT_POLICY, maxChildren: 4 }), a);
+  // A policy saved before pins and harness rules existed keeps its revision.
+  assert.equal(a, "9c4169bb0135");
+  assert.notEqual(policyRevision({ ...DEFAULT_POLICY, pinned: ["claude::anthropic/opus"] }), a);
+  assert.equal(
+    policyRevision({ ...DEFAULT_POLICY, harnesses: { pi: "avoid", codex: "prefer" } }),
+    policyRevision({ ...DEFAULT_POLICY, harnesses: { codex: "prefer", pi: "avoid" } }),
+  );
 });

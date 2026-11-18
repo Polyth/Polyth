@@ -9,6 +9,7 @@ import {
   isBuiltinRole,
   modelKey,
   type ExhaustedBehavior,
+  type HarnessRule,
   type ModelChoice,
   type RoutingMode,
   type RoutingPolicy,
@@ -156,28 +157,58 @@ function rolesOf(raw: unknown, strict: boolean): RoutingRole[] {
   ];
 }
 
-function excludedOf(raw: unknown, strict: boolean): string[] {
+/** A list of model keys (`excluded`, `pinned`, `demoted`); keys already in
+ *  `taken` (a stronger list) are dropped, not an error. */
+function keysOf(raw: unknown, field: "excluded" | "pinned" | "demoted", strict: boolean, taken: ReadonlySet<string> = new Set()): string[] {
   if (raw === undefined) return [];
   if (!Array.isArray(raw)) {
-    if (strict) throw invalid("excluded must be a list");
+    if (strict) throw invalid(`${field} must be a list`);
     return [];
   }
+  const limit = POLICY_LIMITS[field];
   const out: string[] = [];
   const seen = new Set<string>();
   for (const item of raw) {
     const parsed = typeof item === "string" && item.length <= 3 * MAX_ID_CHARS ? parseModelKey(item.trim()) : undefined;
     if (!parsed) {
-      if (strict) throw invalid(`excluded: "${typeof item === "string" ? oneLine(item).slice(0, 60) : typeof item}" is not a harness::provider/model key`);
+      if (strict) throw invalid(`${field}: "${typeof item === "string" ? oneLine(item).slice(0, 60) : typeof item}" is not a harness::provider/model key`);
       continue;
     }
     const key = modelKey(parsed);
-    if (seen.has(key)) continue;
-    if (out.length >= POLICY_LIMITS.excluded) {
-      if (strict) throw invalid(`excluded holds at most ${POLICY_LIMITS.excluded} models`);
+    if (seen.has(key) || taken.has(key)) continue;
+    if (out.length >= limit) {
+      if (strict) throw invalid(`${field} holds at most ${limit} models`);
       break;
     }
     seen.add(key);
     out.push(key);
+  }
+  return out;
+}
+
+const HARNESS_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+function harnessesOf(raw: unknown, strict: boolean): Record<string, HarnessRule> {
+  if (raw === undefined) return {};
+  if (!isObject(raw) || Array.isArray(raw)) {
+    if (strict) throw invalid("harnesses must be an object of harness id → rule");
+    return {};
+  }
+  const out: Record<string, HarnessRule> = {};
+  for (const [id, rule] of Object.entries(raw as Record<string, unknown>)) {
+    if (id.length > MAX_ID_CHARS || !HARNESS_ID.test(id)) {
+      if (strict) throw invalid(`harnesses: "${oneLine(id).slice(0, 60)}" is not a harness id`);
+      continue;
+    }
+    if (rule !== "prefer" && rule !== "avoid" && rule !== "never") {
+      if (strict) throw invalid(`harnesses.${id} must be "prefer", "avoid" or "never"`);
+      continue;
+    }
+    if (Object.keys(out).length >= POLICY_LIMITS.harnesses) {
+      if (strict) throw invalid(`harnesses holds at most ${POLICY_LIMITS.harnesses} rules`);
+      break;
+    }
+    out[id] = rule;
   }
   return out;
 }
@@ -214,6 +245,10 @@ function build(input: unknown, strict: boolean): RoutingPolicy {
   if (m !== undefined) maxChildren = m;
   else if (strict) throw invalid(`maxChildren must be an integer ${POLICY_LIMITS.maxChildren.min}..${POLICY_LIMITS.maxChildren.max}`);
 
+  // Never beats pinned beats demoted: a key sits in one list only.
+  const excluded = keysOf(raw.excluded, "excluded", strict);
+  const pinned = keysOf(raw.pinned, "pinned", strict, new Set(excluded));
+  const demoted = keysOf(raw.demoted, "demoted", strict, new Set([...excluded, ...pinned]));
   return {
     mode,
     roles: rolesOf(raw.roles, strict),
@@ -221,7 +256,10 @@ function build(input: unknown, strict: boolean): RoutingPolicy {
     overPaceCeiling,
     whenExhausted,
     maxChildren,
-    excluded: excludedOf(raw.excluded, strict),
+    excluded,
+    pinned,
+    demoted,
+    harnesses: harnessesOf(raw.harnesses, strict),
   };
 }
 
@@ -258,6 +296,12 @@ const canonical = (policy: RoutingPolicy): string => JSON.stringify({
   whenExhausted: policy.whenExhausted,
   maxChildren: policy.maxChildren,
   excluded: policy.excluded,
+  // Absent while empty, so a policy saved before these existed keeps its revision.
+  ...(policy.pinned.length ? { pinned: policy.pinned } : {}),
+  ...(policy.demoted.length ? { demoted: policy.demoted } : {}),
+  ...(Object.keys(policy.harnesses).length
+    ? { harnesses: Object.fromEntries(Object.entries(policy.harnesses).sort(([a], [b]) => a.localeCompare(b))) }
+    : {}),
 });
 
 /** 12 hex of sha256 over the canonical JSON. The unsaved default is `"default"` (see the store). */

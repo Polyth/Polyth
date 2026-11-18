@@ -595,12 +595,41 @@ export interface ServerModelRoutingCandidate {
   /** Earliest reset of an exhausted window when `blocked`. */
   blockedUntil?: number;
   blocked: boolean;
+  /** The harness as its registry names it ("Claude Code · Work"); absent
+   *  when it is not registered now. */
+  harnessName?: string;
+  /** Position among the person's favorites (0 = first); absent when not starred. */
+  favoriteIndex?: number;
+  /** Why the caller's `order` moved this row; absent when it kept its place. */
+  placed?: ServerModelRoutingPlacement;
+  /** Every live quota window that meters this model, not just the fullest. */
+  quotaWindows?: Array<{ sourceId: string; windowId: string }>;
+}
+
+/** `pinned`/`demoted`: the row's own key; `preferred`/`avoided`: its harness. */
+export type ServerModelRoutingPlacement = "pinned" | "preferred" | "avoided" | "demoted";
+
+/** A person's own order on top of the automatic ranking. Usable rows still
+ *  come before unusable ones; inside each group, pinned rows (in `pin` order)
+ *  lead, then preferred harnesses, the rest, avoided harnesses and finally
+ *  demoted rows (in `demote` order), each keeping the automatic order. */
+export interface ServerModelRoutingOrder {
+  /** `harness::provider/model` keys listed first. A pinned pair is listed
+   *  even when unused in the window, like a favorite. */
+  pin?: readonly string[];
+  /** Keys listed last. */
+  demote?: readonly string[];
+  /** Harness-wide placement by harness id. */
+  harnesses?: Readonly<Record<string, "prefer" | "avoid">>;
 }
 
 export interface ServerModelRoutingQuota {
   /** Quota source id, e.g. `claude`, `claude-work`, `github-copilot`. */
   sourceId: string;
   label?: string;
+  /** Registry name of the one harness whose listed models this source
+   *  meters; absent when it meters several or none is registered. */
+  harnessName?: string;
   windows: Array<{ id: string; label: string; used: number; resetsAt?: number; pace?: "under" | "on-track" | "over" }>;
   stale: boolean;
   fetchedAt: number;
@@ -637,6 +666,12 @@ export interface ServerModelRoutingOptions {
    *  delegate to"). Matched after catalog naming, so an alias row and the
    *  model it runs are the same pair. */
   exclude?: readonly string[];
+  /** Harness ids never to list; their rows count as `excluded`. */
+  excludeHarnesses?: readonly string[];
+  order?: ServerModelRoutingOrder;
+  /** Rows `text` prints when fewer than `limit` (its "+N more" counts from
+   *  there): a settings page lists every row yet shows an agent's exact cut. */
+  textLimit?: number;
 }
 
 /** Usage-owned delegation shortlist: favorites ∪ most-used harness/model
@@ -654,15 +689,20 @@ export const SERVER_MODEL_ROUTING =
  *  to use. Provided by an optional package; the session control tool prints
  *  `brief.text`, a blank line, then the shortlist built with `exclude`. */
 export interface ServerDelegationPolicyBrief {
-  /** Agent-facing lines placed before the shortlist. */
+  /** Agent-facing lines placed before the shortlist; empty when the person
+   *  only reordered or trimmed the list. */
   text: string;
   /** `harness::provider/model` keys to leave out of the shortlist. */
   exclude: string[];
+  /** Harness ids to leave out of the shortlist. */
+  excludeHarnesses?: string[];
+  /** The person's own order for the shortlist. */
+  order?: ServerModelRoutingOrder;
 }
 
 export interface ServerDelegationPolicyService {
-  /** Undefined when the person behind `space` leaves routing to Polyth's
-   *  automatic ranking. `harnessId` narrows the brief to one harness. */
+  /** Undefined when the person behind `space` leaves routing entirely to
+   *  Polyth's automatic ranking. `harnessId` narrows the brief to one harness. */
   brief(space: SpaceContext, options?: { harnessId?: string }): Promise<ServerDelegationPolicyBrief | undefined>;
 }
 

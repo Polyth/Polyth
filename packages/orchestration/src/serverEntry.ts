@@ -6,11 +6,14 @@ import {
   SERVER_RUNTIME_CATALOG,
   localOnlyRemoteAccess,
   serverServiceKey,
+  type ServerModelRoutingOptions,
+  type ServerModelRoutingOrder,
   type ServerModelRoutingReport,
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
 import {
+  AGENT_SHORTLIST_ROWS,
   ORCHESTRATION_API,
   ORCHESTRATION_PACKAGE_ID,
   type OrchestrationState,
@@ -41,7 +44,28 @@ const publicError = (cause: unknown): { status: number; code: string; message: s
   return { status: 503, code: "unavailable", message: "Orchestration is unavailable" };
 };
 
-interface HarnessRegistryLike { get(id: string): unknown }
+interface HarnessRegistryLike {
+  get(id: string): unknown;
+  providers?(): Array<{ descriptor: { id: string; name: string; accountLabel?: string } }>;
+}
+
+/** What the person's policy asks of the ranked list, in either mode: never
+ *  lists (models and harnesses) and their own order. */
+export function listOptions(policy: RoutingPolicy): Pick<ServerModelRoutingOptions, "exclude" | "excludeHarnesses" | "order"> {
+  const rules = Object.entries(policy.harnesses);
+  const never = rules.filter(([, rule]) => rule === "never").map(([id]) => id);
+  const moves = Object.fromEntries(rules.filter(([, rule]) => rule !== "never")) as Record<string, "prefer" | "avoid">;
+  const order: ServerModelRoutingOrder = {
+    ...(policy.pinned.length ? { pin: policy.pinned } : {}),
+    ...(policy.demoted.length ? { demote: policy.demoted } : {}),
+    ...(Object.keys(moves).length ? { harnesses: moves } : {}),
+  };
+  return {
+    ...(policy.excluded.length ? { exclude: policy.excluded } : {}),
+    ...(never.length ? { excludeHarnesses: never } : {}),
+    ...(Object.keys(order).length ? { order } : {}),
+  };
+}
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
   const file = (space: SpaceContext) => personFile(host.spaceStorage(space).packageDir(ORCHESTRATION_PACKAGE_ID), space.userId);
@@ -100,20 +124,38 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     return { roles: resolveRoles(policy, full, { now, ...(harnessId ? { harnessId } : {}) }), now, names };
   }
 
+  /** Harnesses a rule can name: the registered ones plus any the policy names. */
+  function harnessList(policy: RoutingPolicy): OrchestrationState["harnesses"] {
+    const registry = host.services.get(serverServiceKey<HarnessRegistryLike>("harnesses"));
+    const out = new Map<string, OrchestrationState["harnesses"][number]>();
+    for (const provider of registry?.providers?.() ?? []) {
+      const { id, name, accountLabel } = provider.descriptor;
+      const account = accountLabel?.trim();
+      out.set(id, { id, name: account && !name.includes(account) ? `${name} · ${account}` : name, available: true });
+    }
+    for (const id of Object.keys(policy.harnesses)) if (!out.has(id)) out.set(id, { id, name: id, available: false });
+    return [...out.values()];
+  }
+
   async function stateFor(space: SpaceContext, saved: StoredRoutingPolicy, draft: RoutingPolicy): Promise<OrchestrationState> {
     const routing = host.services.get(SERVER_MODEL_ROUTING);
     const { roles, now, names } = await resolved(space, draft);
-    const hasNever = draft.mode === "roles" && draft.excluded.length > 0;
-    const report = routing ? await routing.candidates(space, hasNever ? { exclude: draft.excluded } : {}) : undefined;
+    // Every listed row (up to 50) for the page; the text keeps an agent's exact cut.
+    const report = routing
+      ? await routing.candidates(space, { ...listOptions(draft), limit: 50, textLimit: AGENT_SHORTLIST_ROWS })
+      : undefined;
     const brief = draft.mode === "roles" ? formatBrief(draft, roles, now) : undefined;
     const reportText = report?.text ?? UNAVAILABLE_TEXT;
+    const rows = report?.candidates ?? [];
     return {
       policy: saved,
       generatedAt: now,
       roles,
       routingAvailable: Boolean(routing),
+      harnesses: harnessList(draft),
       shortlist: {
-        rows: (report?.candidates ?? []).map((row) => ({
+        agentRows: Math.min(AGENT_SHORTLIST_ROWS, rows.length),
+        rows: rows.map((row) => ({
           key: keyOf(row),
           harnessId: row.harnessId,
           providerID: row.providerID,
@@ -131,6 +173,10 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
           ...(row.blockedUntil !== undefined ? { blockedUntil: row.blockedUntil } : {}),
           ...(row.quotaUsed !== undefined ? { quotaUsed: row.quotaUsed } : {}),
           ...(row.quotaWindow ? { quotaWindow: row.quotaWindow } : {}),
+          ...(row.harnessName ? { harnessName: row.harnessName } : {}),
+          ...(row.favoriteIndex !== undefined ? { favoriteIndex: row.favoriteIndex } : {}),
+          ...(row.placed ? { placed: row.placed } : {}),
+          ...(row.quotaWindows?.length ? { quotaWindows: row.quotaWindows } : {}),
         })),
         quotas: report?.quotas ?? [],
         omitted: report?.omitted ?? 0,
@@ -214,9 +260,17 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     async brief(space, options) {
       if (!active) return undefined;
       const policy = readSaved(space);
-      if (policy.mode === "auto") return undefined;
+      const list = listOptions(policy);
+      const shaped = {
+        exclude: policy.excluded,
+        ...(list.excludeHarnesses ? { excludeHarnesses: [...list.excludeHarnesses] } : {}),
+        ...(list.order ? { order: list.order } : {}),
+      };
+      // Auto mode: no policy lines, but the never lists and the person's own
+      // order still shape the ranked list agents get.
+      if (policy.mode === "auto") return Object.keys(list).length ? { text: "", ...shaped } : undefined;
       const { roles, now } = await resolved(space, policy, options?.harnessId);
-      return { text: formatBrief(policy, roles, now), exclude: policy.excluded };
+      return { text: formatBrief(policy, roles, now), ...shaped };
     },
   });
 

@@ -446,6 +446,16 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         ...(options.harnessId ? { harnessId: options.harnessId } : {}),
         ...(options.pairs ? { pairs: options.pairs } : {}),
         ...(options.exclude?.length ? { exclude: options.exclude } : {}),
+        ...(options.excludeHarnesses?.length ? { excludeHarnesses: options.excludeHarnesses } : {}),
+        ...(options.order ? { order: options.order } : {}),
+        ...(options.textLimit !== undefined ? { textLimit: options.textLimit } : {}),
+        harnessName(harnessId) {
+          const descriptor = harnesses?.get(harnessId)?.descriptor;
+          const name = descriptor?.name?.trim();
+          if (!name) return undefined;
+          const account = descriptor?.accountLabel?.trim();
+          return account && !name.includes(account) ? `${name} · ${account}` : name;
+        },
       });
     },
   });

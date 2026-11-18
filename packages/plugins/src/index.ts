@@ -85,6 +85,8 @@ export {
   type ServerModelRoutingReport,
   type ServerModelRoutingService,
   type ServerModelRoutingOptions,
+  type ServerModelRoutingOrder,
+  type ServerModelRoutingPlacement,
   type ServerDelegationPolicyBrief,
   type ServerDelegationPolicyService,
   type ServerRuntimeCatalogService,

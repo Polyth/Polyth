@@ -429,7 +429,8 @@ export function registerPolythSessionControl(
             return undefined;
           })
           : undefined;
-        const withBrief = (text: string): string => brief ? `${brief.text}\n\n${text}` : text;
+        // A policy that only reorders or trims the list has no lines of its own.
+        const withBrief = (text: string): string => brief?.text ? `${brief.text}\n\n${text}` : text;
         if (!routing) {
           return {
             output: withBrief("Model routing is unavailable: the Usage package is disabled. Choose from the user's favorites, or omit model on agent.spawn for Polyth Auto."),
@@ -441,6 +442,8 @@ export function registerPolythSessionControl(
           ...(parameters.windowDays !== undefined ? { windowDays: boundedLimit(parameters.windowDays, 30, 365) } : {}),
           ...(onlyHarness ? { harnessId: onlyHarness } : {}),
           ...(brief?.exclude.length ? { exclude: brief.exclude } : {}),
+          ...(brief?.excludeHarnesses?.length ? { excludeHarnesses: brief.excludeHarnesses } : {}),
+          ...(brief?.order ? { order: brief.order } : {}),
         });
         return {
           output: withBrief(report.text),

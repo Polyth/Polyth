@@ -1,12 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Button, CloseIcon, IconButton, PlusIcon } from "../../../apps/web/src/components/ui/index.ts";
 import { ItemList, ItemRow, ResetLink, Row, Section, Seg, SizeStepper, Toggle } from "../../../apps/web/src/components/settings/parts.tsx";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { POLICY_LIMITS, type ModelOption, type RoutingPolicy } from "../src/contracts.ts";
 import { loadModels } from "./client.ts";
-import { withQuotaCeiling } from "./helpers.ts";
+import { harnessDisplay, orderEdits, withQuotaCeiling } from "./helpers.ts";
 import ModelPicker from "./ModelPicker.tsx";
-import { harnessLabel } from "./Meter.tsx";
 
 /** Readable pieces of a `harness::provider/model` key when the catalog does not know it. */
 function splitKey(key: string): { harness: string; provider: string; model: string } {
@@ -15,11 +14,14 @@ function splitKey(key: string): { harness: string; provider: string; model: stri
   return slash < 0 ? { harness, provider: "", model: rest } : { harness, provider: rest.slice(0, slash), model: rest.slice(slash + 1) };
 }
 
-export default function SafeguardsTab({ draft, setDraft, onReset, busy }: {
+export default function SafeguardsTab({ draft, setDraft, harnesses, onReset, busy, rolesOnlyNote }: {
   draft: RoutingPolicy;
   setDraft: (next: RoutingPolicy) => void;
+  harnesses: ReadonlyArray<{ id: string; name: string }>;
   onReset: () => void;
   busy: boolean;
+  /** Shown above the settings that apply only in By role mode (automatic mode). */
+  rolesOnlyNote?: ReactNode;
 }) {
   const [picker, setPicker] = useState(false);
   const [known, setKnown] = useState<ReadonlyMap<string, ModelOption>>(() => new Map());
@@ -36,8 +38,73 @@ export default function SafeguardsTab({ draft, setDraft, onReset, busy }: {
     }
     setPicker(false);
   };
+  const neverHarnesses = Object.entries(draft.harnesses).filter(([, rule]) => rule === "never").map(([id]) => id);
+  const harnessName = (id: string) => harnessDisplay(id, harnesses.find((h) => h.id === id)?.name);
+  // The never list applies in both modes, so it leads; the rest is roles-only.
+  const never = (
+    <Section
+      title={tr("orchestration.safe.excluded")}
+      hint={tr("orchestration.safe.excludedHint")}
+      itemId="orchestration.excluded"
+      action={(
+        <Button iconStart={PlusIcon} size="sm" onClick={() => setPicker(true)} disabled={draft.excluded.length >= POLICY_LIMITS.excluded}>
+          {tr("orchestration.safe.excludedAdd")}
+        </Button>
+      )}
+    >
+      {draft.excluded.length === 0 && neverHarnesses.length === 0 ? (
+        <p className="orch-muted">{tr("orchestration.safe.excludedEmpty")}</p>
+      ) : (
+        <ItemList>
+          {neverHarnesses.map((id) => {
+            const name = harnessName(id);
+            return (
+              <ItemRow
+                key={`harness:${id}`}
+                icon={<span className="orch-rank" aria-hidden="true">⊘</span>}
+                title={tr("orchestration.safe.excludedHarness", { harness: name })}
+                meta={<span className="orch-meta">{tr("orchestration.safe.excludedHarnessMeta")}</span>}
+                trailing={(
+                  <IconButton
+                    icon={CloseIcon}
+                    label={tr("orchestration.safe.excludedRemove", { name })}
+                    size="sm"
+                    onClick={() => setDraft(orderEdits.harness(draft, id, "normal"))}
+                  />
+                )}
+              />
+            );
+          })}
+          {draft.excluded.map((key) => {
+            const model = known.get(key);
+            const parts = splitKey(key);
+            const name = model?.name ?? parts.model;
+            const harnessId = model?.harnessId ?? parts.harness;
+            return (
+              <ItemRow
+                key={key}
+                icon={<span className="orch-rank" aria-hidden="true">⊘</span>}
+                title={name}
+                meta={<span className="orch-meta">{[model?.providerName ?? model?.providerID ?? parts.provider, harnessName(harnessId)].filter(Boolean).join(" · ")}</span>}
+                trailing={(
+                  <IconButton
+                    icon={CloseIcon}
+                    label={tr("orchestration.safe.excludedRemove", { name })}
+                    size="sm"
+                    onClick={() => setDraft({ ...draft, excluded: draft.excluded.filter((k) => k !== key) })}
+                  />
+                )}
+              />
+            );
+          })}
+        </ItemList>
+      )}
+    </Section>
+  );
   return (
     <div className="orch-safeguards">
+      {never}
+      {rolesOnlyNote}
       <Section title={tr("orchestration.safe.quotaSection")} hint={tr("orchestration.safe.quotaHint")} itemId="orchestration.quota-ceiling">
         <Row label={tr("orchestration.safe.quota")}>
           <SizeStepper
@@ -95,44 +162,6 @@ export default function SafeguardsTab({ draft, setDraft, onReset, busy }: {
             onChange={(value) => setDraft({ ...draft, maxChildren: value })}
           />
         </Row>
-      </Section>
-      <Section
-        title={tr("orchestration.safe.excluded")}
-        hint={tr("orchestration.safe.excludedHint")}
-        itemId="orchestration.excluded"
-        action={(
-          <Button iconStart={PlusIcon} size="sm" onClick={() => setPicker(true)} disabled={draft.excluded.length >= POLICY_LIMITS.excluded}>
-            {tr("orchestration.safe.excludedAdd")}
-          </Button>
-        )}
-      >
-        {draft.excluded.length === 0 ? (
-          <p className="orch-muted">{tr("orchestration.safe.excludedEmpty")}</p>
-        ) : (
-          <ItemList>
-            {draft.excluded.map((key) => {
-              const model = known.get(key);
-              const parts = splitKey(key);
-              const name = model?.name ?? parts.model;
-              return (
-                <ItemRow
-                  key={key}
-                  icon={<span className="orch-rank" aria-hidden="true">⊘</span>}
-                  title={name}
-                  meta={<span className="orch-meta">{[model?.providerName ?? model?.providerID ?? parts.provider, harnessLabel(model?.harnessId ?? parts.harness)].filter(Boolean).join(" · ")}</span>}
-                  trailing={(
-                    <IconButton
-                      icon={CloseIcon}
-                      label={tr("orchestration.safe.excludedRemove", { name })}
-                      size="sm"
-                      onClick={() => setDraft({ ...draft, excluded: draft.excluded.filter((k) => k !== key) })}
-                    />
-                  )}
-                />
-              );
-            })}
-          </ItemList>
-        )}
       </Section>
       <ResetLink label={tr("orchestration.safe.reset")} onClick={onReset} disabled={busy} />
       {picker && (

@@ -39,6 +39,9 @@ export const POLICY_LIMITS = {
   customRoles: 4,
   modelsPerRole: 5,
   excluded: 24,
+  pinned: 12,
+  demoted: 24,
+  harnesses: 24,
   labelChars: 48,
   whenChars: 280,
   quotaCeiling: { min: 50, max: 100 },
@@ -93,9 +96,22 @@ export interface RoutingPolicy {
   /** Most delegated children an agent should run at once. Advisory. */
   maxChildren: number;
   /** `harness::provider/model` keys agents never delegate to. Hidden from the
-   *  shortlist and from every role. */
+   *  shortlist and from every role, in both modes. */
   excluded: string[];
+  /** Keys the ranked list shows first, in this order (both modes). A key is
+   *  in at most one of `excluded`, `pinned` and `demoted`. */
+  pinned: string[];
+  /** Keys the ranked list shows last, in this order. */
+  demoted: string[];
+  /** Harness-wide rules by harness id. `prefer`/`avoid` move its rows as a
+   *  group; `never` hides them from the list and every role. */
+  harnesses: Record<string, HarnessRule>;
 }
+
+export type HarnessRule = "prefer" | "avoid" | "never";
+
+/** Rows `agent.models` prints by default (Usage's DEFAULT_ROUTING_LIMIT). */
+export const AGENT_SHORTLIST_ROWS = 12;
 
 export interface StoredRoutingPolicy extends RoutingPolicy {
   /** Content hash of the saved policy; `"default"` before the first save. */
@@ -111,6 +127,9 @@ export const DEFAULT_POLICY: RoutingPolicy = {
   whenExhausted: "shortlist",
   maxChildren: 3,
   excluded: [],
+  pinned: [],
+  demoted: [],
+  harnesses: {},
 };
 
 /** `harness::provider/model`; the model id itself may contain `/`. */
@@ -180,11 +199,21 @@ export interface ShortlistRow {
   blockedUntil?: number;
   quotaUsed?: number;
   quotaWindow?: QuotaWindowRef;
+  /** The harness as its registry names it; absent when not registered. */
+  harnessName?: string;
+  /** Position among the person's favorites (0 = first). */
+  favoriteIndex?: number;
+  /** Why the person's order moved this row. */
+  placed?: "pinned" | "preferred" | "avoided" | "demoted";
+  /** Every live quota window that meters this model. */
+  quotaWindows?: Array<{ sourceId: string; windowId: string }>;
 }
 
 export interface QuotaSourceRow {
   sourceId: string;
   label?: string;
+  /** The one harness this source meters, as its registry names it. */
+  harnessName?: string;
   windows: Array<{ id: string; label: string; used: number; resetsAt?: number; pace?: "under" | "on-track" | "over" }>;
   stale: boolean;
   fetchedAt: number;
@@ -198,10 +227,15 @@ export interface OrchestrationState {
   roles: ResolvedRole[];
   /** False when the Usage package is off: no quota, use or catalog naming. */
   routingAvailable: boolean;
+  /** Harnesses a rule can name: every registered one plus any the policy
+   *  already names, by registry name. */
+  harnesses: Array<{ id: string; name: string; available: boolean }>;
   shortlist: {
+    /** The ranked list, up to 50 rows; agents see the first `agentRows`. */
     rows: ShortlistRow[];
+    agentRows: number;
     quotas: QuotaSourceRow[];
-    /** Rows beyond what agents see by default. */
+    /** Rows beyond the 50 listed here. */
     omitted: number;
     unlisted: number;
     excluded: number;

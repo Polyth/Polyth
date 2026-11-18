@@ -7,6 +7,8 @@ import type { ModelDescriptor } from "@polyth/contracts";
 import { friendlyModelId } from "@polyth/contracts/model-presentation";
 import type {
   ServerModelRoutingCandidate,
+  ServerModelRoutingOrder,
+  ServerModelRoutingPlacement,
   ServerModelRoutingQuota,
   ServerModelRoutingReport,
 } from "@polyth/plugins";
@@ -47,6 +49,14 @@ export interface ModelRoutingInput {
    *  naming and by the model an alias runs, so excluding `opus` also hides a
    *  `default` row that runs the same model. */
   exclude?: readonly string[];
+  /** Never list a row of these harnesses. */
+  excludeHarnesses?: readonly string[];
+  /** The person's own order on top of the automatic one. */
+  order?: ServerModelRoutingOrder;
+  /** Rows `text` prints when fewer than `limit`. */
+  textLimit?: number;
+  /** Registry name of a harness, when it is registered. */
+  harnessName?: (harnessId: string) => string | undefined;
 }
 
 /** `harness::provider/model`; the model id itself may contain `/`. */
@@ -147,13 +157,16 @@ const createCatalogResolver = (catalog: readonly ModelDescriptor[]) => {
 };
 
 export function buildModelRouting(input: ModelRoutingInput): ServerModelRoutingReport {
-  const report = rankModelRouting(input);
-  return { ...report, text: formatModelRouting(report) };
+  const { report, textReport } = rankModelRouting(input);
+  return { ...report, text: formatModelRouting(textReport) };
 }
 
-function rankModelRouting(input: ModelRoutingInput): Omit<ServerModelRoutingReport, "text"> {
+type RankedReport = Omit<ServerModelRoutingReport, "text">;
+
+function rankModelRouting(input: ModelRoutingInput): { report: RankedReport; textReport: RankedReport } {
   const windowDays = Math.max(1, Math.min(365, Math.round(input.windowDays ?? DEFAULT_ROUTING_WINDOW_DAYS)));
   const limit = Math.max(1, Math.min(MAX_ROUTING_LIMIT, Math.round(input.limit ?? DEFAULT_ROUTING_LIMIT)));
+  const textLimit = input.textLimit === undefined ? limit : Math.max(1, Math.min(limit, Math.round(input.textLimit)));
   const from = input.now - windowDays * 86_400_000;
   const onlyHarness = input.harnessId ? canonicalHarnessId(input.harnessId) : undefined;
 
@@ -216,6 +229,14 @@ function rankModelRouting(input: ModelRoutingInput): Omit<ServerModelRoutingRepo
   });
   const starred = (harnessId: string) => (row: ModelDescriptor): number | undefined =>
     favoriteRank.get(pairKey(harnessId, row.providerID, row.modelID));
+  // A pin is an explicit choice: like a favorite it is listed even unused.
+  const pinRank = new Map<string, number>();
+  (input.order?.pin ?? []).forEach((raw, index) => {
+    const parsed = parseFavoriteKey(raw);
+    if (!parsed || onlyHarness && parsed.harnessId !== onlyHarness) return;
+    const resolved = target(parsed, starred(parsed.harnessId));
+    if (resolved && !pinRank.has(resolved[0])) pinRank.set(resolved[0], index);
+  });
   for (const pair of observed.values()) {
     const resolved = target(pair, starred(pair.harnessId));
     if (!resolved) continue;
@@ -256,10 +277,27 @@ function rankModelRouting(input: ModelRoutingInput): Omit<ServerModelRoutingRepo
     excludedRows.add(pairKey(parsed.harnessId, providerID, modelID));
     excludedModels.add(sameModel(parsed.harnessId, providerID, row?.resolvedModelID ?? modelID));
   }
+  const excludedHarnesses = new Set((input.excludeHarnesses ?? []).map(canonicalHarnessId));
+  // Demotions name a row the same way, without listing an unused one.
+  const demoteRank = new Map<string, number>();
+  (input.order?.demote ?? []).forEach((raw, index) => {
+    const parsed = parseFavoriteKey(raw);
+    if (!parsed) return;
+    const resolution = resolve(parsed, starred(parsed.harnessId));
+    if (resolution.kind === "unlisted") return;
+    const row = resolution.kind === "listed" ? resolution.row : undefined;
+    const key = pairKey(parsed.harnessId, row?.providerID ?? parsed.providerID, row?.modelID ?? parsed.modelID);
+    if (!demoteRank.has(key)) demoteRank.set(key, index);
+  });
+  const harnessRules = new Map<string, "prefer" | "avoid">();
+  for (const [harnessId, rule] of Object.entries(input.order?.harnesses ?? {})) {
+    if (rule === "prefer" || rule === "avoid") harnessRules.set(canonicalHarnessId(harnessId), rule);
+  }
   let excluded = 0;
   const kept = ([key, tally]: [string, Tally]): boolean => {
     if (only && !only.has(key)) return false;
-    if (excludedRows.has(key) || excludedModels.has(sameModel(tally.harnessId, tally.providerID, tally.concrete))) {
+    if (excludedHarnesses.has(tally.harnessId)
+      || excludedRows.has(key) || excludedModels.has(sameModel(tally.harnessId, tally.providerID, tally.concrete))) {
       excluded += 1;
       return false;
     }
@@ -279,6 +317,7 @@ function rankModelRouting(input: ModelRoutingInput): Omit<ServerModelRoutingRepo
     let quotaWindow: ServerModelRoutingCandidate["quotaWindow"];
     let blockedUntil: number | undefined;
     let blocked = false;
+    const quotaWindows: Array<{ sourceId: string; windowId: string }> = [];
     const sources = sourcesOf(tally);
     sourcesByPair.set(key, sources);
     for (const snapshot of snapshots) {
@@ -287,6 +326,7 @@ function rankModelRouting(input: ModelRoutingInput): Omit<ServerModelRoutingRepo
         if (!windowMetersModel(snapshot, window.id, tally.quotaModel)) continue;
         // A window whose reset already passed no longer constrains anything.
         if (window.resetsAt !== undefined && window.resetsAt <= input.now) continue;
+        quotaWindows.push({ sourceId: snapshot.providerId, windowId: window.id });
         const used = Math.min(1, window.used / window.limit);
         if (quotaUsed === undefined || used > quotaUsed) {
           const pace = snapshot.pace[window.id]?.pace;
@@ -305,13 +345,21 @@ function rankModelRouting(input: ModelRoutingInput): Omit<ServerModelRoutingRepo
       }
     }
     const available = input.available(tally.harnessId);
+    const harnessName = input.harnessName?.(tally.harnessId);
+    const favoriteIndex = favoriteRank.get(key);
+    const harnessRule = harnessRules.get(tally.harnessId);
+    const placed: ServerModelRoutingPlacement | undefined = pinRank.has(key) ? "pinned"
+      : demoteRank.has(key) ? "demoted"
+        : harnessRule === "prefer" ? "preferred"
+          : harnessRule === "avoid" ? "avoided"
+            : undefined;
     return {
       harnessId: tally.harnessId,
       providerID: tally.providerID,
       modelID: tally.modelID,
       ...(tally.runs ? { runs: tally.runs } : {}),
       listed: tally.listed,
-      favorite: favoriteRank.has(key),
+      favorite: favoriteIndex !== undefined,
       turns: tally.turns,
       sessions: tally.sessions.size,
       failed: tally.failed,
@@ -321,58 +369,82 @@ function rankModelRouting(input: ModelRoutingInput): Omit<ServerModelRoutingRepo
       ...(quotaWindow ? { quotaWindow } : {}),
       ...(blockedUntil !== undefined ? { blockedUntil } : {}),
       blocked,
+      ...(harnessName ? { harnessName } : {}),
+      ...(favoriteIndex !== undefined ? { favoriteIndex } : {}),
+      ...(placed ? { placed } : {}),
+      ...(quotaWindows.length ? { quotaWindows } : {}),
     };
   });
 
-  // Usable before unusable; then favorites in the user's order weighted by
-  // real use, then everything else by use. A favorite nobody has run in the
-  // window still outranks an unstarred model with a handful of turns.
+  // Usable before unusable; then the person's own order (pins, preferred
+  // harnesses, the rest, avoided harnesses, demotions); inside each tier
+  // favorites in the user's order weighted by real use, then everything else
+  // by use. A favorite nobody has run in the window still outranks an
+  // unstarred model with a handful of turns.
   const usable = (candidate: ServerModelRoutingCandidate): number => candidate.available && !candidate.blocked ? 0 : 1;
   const rankKey = (candidate: ServerModelRoutingCandidate): string =>
     pairKey(candidate.harnessId, candidate.providerID, candidate.modelID);
+  const TIER: Record<ServerModelRoutingPlacement | "none", number> = { pinned: 0, preferred: 1, none: 2, avoided: 3, demoted: 4 };
+  const tier = (candidate: ServerModelRoutingCandidate): number => TIER[candidate.placed ?? "none"];
+  const within = (candidate: ServerModelRoutingCandidate): number =>
+    candidate.placed === "pinned" ? pinRank.get(rankKey(candidate)) ?? 0
+      : candidate.placed === "demoted" ? demoteRank.get(rankKey(candidate)) ?? 0
+        : 0;
   candidates.sort((a, b) =>
     usable(a) - usable(b)
+    || tier(a) - tier(b)
+    || within(a) - within(b)
     || Number(b.favorite) - Number(a.favorite)
     || b.turns - a.turns
     || (favoriteRank.get(rankKey(a)) ?? 0) - (favoriteRank.get(rankKey(b)) ?? 0)
     || (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0));
 
-  const shown = candidates.slice(0, limit);
-  const quotas: ServerModelRoutingQuota[] = snapshots
-    .filter((snapshot) => shown.some((candidate) => sourcesByPair.get(rankKey(candidate))?.has(snapshot.providerId)))
-    .map((snapshot) => ({
-      sourceId: snapshot.providerId,
-      // A plan or account name ("max", "Work") helps choose; an email
-      // address or a repeat of the source id is noise in model context.
-      ...(snapshot.accountLabel && !snapshot.accountLabel.includes("@")
-        && snapshot.accountLabel.toLowerCase() !== snapshot.providerId.toLowerCase()
-        ? { label: snapshot.accountLabel }
-        : {}),
-      windows: meteredWindows(snapshot).map((window) => {
-        const pace = snapshot.pace[window.id]?.pace;
+  const cut = (rows: number): RankedReport => {
+    const shown = candidates.slice(0, rows);
+    const quotas: ServerModelRoutingQuota[] = snapshots
+      .filter((snapshot) => shown.some((candidate) => sourcesByPair.get(rankKey(candidate))?.has(snapshot.providerId)))
+      .map((snapshot) => {
+        const metered = new Set(shown
+          .filter((candidate) => sourcesByPair.get(rankKey(candidate))?.has(snapshot.providerId))
+          .map((candidate) => candidate.harnessId));
+        const harnessName = metered.size === 1 ? input.harnessName?.([...metered][0]!) : undefined;
         return {
-          id: window.id,
-          label: window.label,
-          used: Math.min(1, window.used / window.limit),
-          ...(window.resetsAt !== undefined ? { resetsAt: window.resetsAt } : {}),
-          ...(pace ? { pace } : {}),
+          sourceId: snapshot.providerId,
+          // A plan or account name ("max", "Work") helps choose; an email
+          // address or a repeat of the source id is noise in model context.
+          ...(snapshot.accountLabel && !snapshot.accountLabel.includes("@")
+            && snapshot.accountLabel.toLowerCase() !== snapshot.providerId.toLowerCase()
+            ? { label: snapshot.accountLabel }
+            : {}),
+          ...(harnessName ? { harnessName } : {}),
+          windows: meteredWindows(snapshot).map((window) => {
+            const pace = snapshot.pace[window.id]?.pace;
+            return {
+              id: window.id,
+              label: window.label,
+              used: Math.min(1, window.used / window.limit),
+              ...(window.resetsAt !== undefined ? { resetsAt: window.resetsAt } : {}),
+              ...(pace ? { pace } : {}),
+            };
+          }),
+          stale: snapshot.stale,
+          fetchedAt: snapshot.fetchedAt,
         };
-      }),
-      stale: snapshot.stale,
-      fetchedAt: snapshot.fetchedAt,
-    }))
-    .filter((quota) => quota.windows.length > 0);
-
-  return {
-    windowDays,
-    generatedAt: input.now,
-    candidates: shown,
-    quotas,
-    omitted: candidates.length - shown.length,
-    unlisted: unlisted.size,
-    ...(excluded ? { excluded } : {}),
-    ...(input.catalog?.length ? {} : { catalogUnavailable: true }),
+      })
+      .filter((quota) => quota.windows.length > 0);
+    return {
+      windowDays,
+      generatedAt: input.now,
+      candidates: shown,
+      quotas,
+      omitted: candidates.length - shown.length,
+      unlisted: unlisted.size,
+      ...(excluded ? { excluded } : {}),
+      ...(input.catalog?.length ? {} : { catalogUnavailable: true }),
+    };
   };
+  const report = cut(limit);
+  return { report, textReport: textLimit === limit ? report : cut(textLimit) };
 }
 
 const percent = (fraction: number): string => `${Math.round(fraction * 100)}%`;
@@ -402,6 +474,7 @@ export function formatModelRouting(report: Omit<ServerModelRoutingReport, "text"
       candidate.turns
         ? `${candidate.turns}t/${candidate.sessions}s${candidate.failed ? ` ${percent(candidate.failed / candidate.turns)} fail` : ""}${candidate.lastUsedAt ? ` last ${formatDuration(report.generatedAt - candidate.lastUsedAt)} ago` : ""}`
         : "unused",
+      candidate.placed === "pinned" ? "pinned by the person" : "",
       candidate.quotaUsed !== undefined ? `quota ${percent(candidate.quotaUsed)}` : "",
       !candidate.available ? "UNAVAILABLE: harness not running" : "",
       candidate.available && !candidate.listed && !report.catalogUnavailable ? "model unverified: no live catalog" : "",
@@ -416,7 +489,7 @@ export function formatModelRouting(report: Omit<ServerModelRoutingReport, "text"
     lines.push(`(${report.unlisted} used or starred model${report.unlisted === 1 ? " is" : "s are"} no longer offered by ${report.unlisted === 1 ? "its harness" : "their harnesses"}; left out)`);
   }
   if (report.excluded) {
-    lines.push(`(${report.excluded} model${report.excluded === 1 ? " is" : "s are"} hidden by the routing policy above; never delegate to ${report.excluded === 1 ? "it" : "them"})`);
+    lines.push(`(${report.excluded} model${report.excluded === 1 ? " is" : "s are"} hidden by the person's routing policy; never delegate to ${report.excluded === 1 ? "it" : "them"})`);
   }
   if (report.quotas.length) {
     lines.push("Quotas:");
