@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { createMemoryStore, type MemoryScope } from "../src/memory.ts";
+import { createMemoryStore, type MemoryScope } from "../src/store.ts";
 
 const scope: MemoryScope = { spaceId: "space-a", projectId: "project-a", principalId: "user-a" };
 
@@ -130,12 +130,10 @@ test("off and clear rotate generation and stale harvest jobs", () => {
   db.close();
 });
 
-test("legacy memory rows migrate into the scoped store and imports stay bounded", () => {
+test("an export round-trips as duplicates and imports stay bounded", () => {
   const db = new DatabaseSync(":memory:");
-  db.exec("CREATE TABLE knowledge (id TEXT PRIMARY KEY, project_id TEXT, kind TEXT, title TEXT, body TEXT, tags TEXT, source TEXT, source_session_id TEXT, revision INTEGER, created_at INTEGER, updated_at INTEGER)");
-  db.prepare("INSERT INTO knowledge VALUES(?,?,?,?,?,?,?,?,?,?,?)").run("legacy-1", "project-a", "memory", "Legacy", "Keep WAL enabled", "[\"sqlite\"]", "user", "session-old", 1, 1, 1);
   const store = createMemoryStore(db, scope.spaceId, () => 100);
-  assert.equal(store.get(scope, "legacy-1")?.evidence, "user-stated");
+  store.create(scope, { projectId: scope.projectId, title: "WAL", body: "Keep WAL enabled", lifecycle: "active", evidence: "user-stated" });
   const exported = store.exportProject(scope, { includeCandidates: true });
   assert.equal(exported.records.length, 1);
   assert.equal(store.importPreview(scope, exported).duplicates, 1);
@@ -275,18 +273,18 @@ test("cross-project recall policy defaults to ask and accepts only off, ask or a
   db.close();
 });
 
-test("an existing store gets its substring index filled once", () => {
+test("substring search keeps no index of its own and follows every edit", () => {
   const db = new DatabaseSync(":memory:");
-  const first = createMemoryStore(db, scope.spaceId);
-  const policy = first.getPolicy(scope);
-  first.updatePolicy(scope, { projectId: scope.projectId, expectedSettingsRevision: policy.settingsRevision, patch: { mode: "auto" } });
-  const id = first.create(scope, { projectId: scope.projectId, title: "MemPalace retired", body: "Moved.", lifecycle: "active" }).memoryId!;
-  db.exec("DELETE FROM memory_fts_tri");
-  const reopened = createMemoryStore(db, scope.spaceId);
-  assert.deepEqual(reopened.search(scope, { q: "palace" }).items.map((item) => item.id), [id]);
-  // A writer that knows nothing about the index (an older server) keeps it current.
-  db.prepare("UPDATE memory_records SET title='Notebook retired', body='Moved to Polyth.' WHERE id=?").run(id);
-  assert.equal(reopened.search(scope, { q: "palace" }).total, 0);
-  assert.equal(Number((db.prepare("SELECT count(*) AS count FROM memory_fts_tri WHERE text LIKE '%Notebook%'").get() as { count: number }).count), 1);
+  const store = createMemoryStore(db, scope.spaceId);
+  const policy = store.getPolicy(scope);
+  store.updatePolicy(scope, { projectId: scope.projectId, expectedSettingsRevision: policy.settingsRevision, patch: { mode: "auto" } });
+  const id = store.create(scope, { projectId: scope.projectId, title: "MemPalace retired", body: "Moved.", lifecycle: "active" }).memoryId!;
+  assert.deepEqual(store.search(scope, { q: "palace" }).items.map((item) => item.id), [id]);
+  store.update(scope, { id, projectId: scope.projectId, expectedRevision: 1, patch: { title: "Notebook retired", body: "Moved to Polyth." } });
+  assert.equal(store.search(scope, { q: "palace" }).total, 0);
+  assert.deepEqual(store.search(scope, { q: "notebook" }).items.map((item) => item.id), [id]);
+  // One word index and nothing else: no second copy of the text on disk.
+  const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'memory_fts%'").all() as Array<{ name: string }>).map((row) => row.name).sort();
+  assert.deepEqual(tables, ["memory_fts", "memory_fts_config", "memory_fts_data", "memory_fts_docsize", "memory_fts_idx"]);
   db.close();
 });

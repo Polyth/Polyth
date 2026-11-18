@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { createMemoryStore, type MemoryCreateInput, type MemoryLayerGrant, type MemoryScope } from "../src/memory.ts";
+import { createMemoryStore, type MemoryCreateInput, type MemoryLayerGrant, type MemoryScope } from "../src/store.ts";
 
 const scope: MemoryScope = { spaceId: "space-a", projectId: "project-a", principalId: "user-a" };
 const all: MemoryLayerGrant[] = [{ layer: "project" }, { layer: "space" }, { layer: "agent", agentId: "agent-1" }, { layer: "person", userId: "user-a" }];
@@ -18,31 +18,6 @@ function autoStore(db = new DatabaseSync(":memory:"), spaceId: string | null = s
 
 const record = (title: string, body = "Keep SQLite in WAL mode."): MemoryCreateInput =>
   ({ projectId: scope.projectId, title, body, lifecycle: "active" });
-
-test("a store from before layers upgrades in place: old rows are project records with no author", () => {
-  const db = new DatabaseSync(":memory:");
-  db.exec(`CREATE TABLE memory_records (
-    id TEXT PRIMARY KEY, space_id TEXT NOT NULL, project_id TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL,
-    category TEXT NOT NULL, tags TEXT NOT NULL, aliases TEXT NOT NULL, applicability TEXT NOT NULL, sources TEXT NOT NULL,
-    lifecycle TEXT NOT NULL, evidence TEXT NOT NULL, freshness TEXT NOT NULL, pinned INTEGER NOT NULL DEFAULT 0,
-    user_locked INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`);
-  db.prepare("INSERT INTO memory_records VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(
-    "old-1", "space-a", "project-a", "Old rule", "Keep SQLite in WAL mode.", "convention", "[]", "[]", "{}", "[]", "active", "user-stated", "current", 1, 1, 1, 1, 1,
-  );
-  const first = createMemoryStore(db, scope.spaceId);
-  const columns = (db.prepare("PRAGMA table_info(memory_records)").all() as Array<{ name: string }>).map((column) => column.name);
-  for (const name of ["layer", "owner_id", "authored_by", "approved_by"]) assert.ok(columns.includes(name), name);
-  const item = first.get(scope, "old-1");
-  assert.equal(item?.layer, "project");
-  assert.equal(item?.ownerId, undefined);
-  assert.equal(item?.authoredBy, undefined);
-  assert.equal(item?.approvedBy, undefined);
-  assert.equal(first.list(scope).total, 1);
-  // Reopening runs the migration again without changing anything.
-  const second = createMemoryStore(db, scope.spaceId);
-  assert.deepEqual(second.get(scope, "old-1"), item);
-  db.close();
-});
 
 test("without grants every read sees exactly the project layer, as before layers", () => {
   const { db, store } = autoStore();
@@ -260,20 +235,6 @@ test("an offer works as its owner's note from the start, and only that owner can
   assert.equal(store.get(privateChat(olia), proposal!.id)?.lifecycle, "active");
   assert.equal(store.get(privateChat(olia), proposal!.id)?.shareProposedAt, undefined);
   assert.throws(() => store.create(scope, record("x"), { shareProposed: true }), /personal note/);
-});
-
-test("offers an older version left waiting become working notes when the store opens", () => {
-  const db = new DatabaseSync(":memory:");
-  const dinner = { projectId: scope.projectId, intent: "red meat dinner" };
-  const { store } = autoStore(db);
-  const { memoryId } = store.create(privateChat(olia), { ...record("More red meat", "Olia asks for more red meat at dinner."), lifecycle: "candidate" }, { placement: here(olia), shareProposed: true });
-  assert.equal(store.recall(privateChat(olia), dinner).selected.length, 0);
-  const { store: reopened } = autoStore(db);
-  const note = reopened.get(privateChat(olia), memoryId!);
-  assert.equal(note?.lifecycle, "active");
-  assert.equal(note?.shareProposedAt, undefined);
-  assert.equal(reopened.recall(privateChat(olia), dinner).selected.length, 1);
-  assert.equal(reopened.recall(privateChat(taras), dinner).selected.length, 0);
 });
 
 test("moving an old shared note to personal takes it, with history, out of the shared memory", () => {

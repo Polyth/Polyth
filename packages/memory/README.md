@@ -5,6 +5,17 @@ agent memory tools and the **Memory** project settings page. The canonical
 policy description is [docs/dev/memory.md](../../docs/dev/memory.md); this file
 covers package-local behaviour that is not described there.
 
+## Layout
+
+- `src/store.ts`: the SQLite store (records, word index, recall, search).
+- `src/spaceStore.ts`: one database per Space, `<space>/packages/memory/memory.db`.
+- `src/legacyImport.ts`: the one-time move out of the Knowledge database; see
+  [Storage](../../docs/dev/memory.md#storage). `package.json` declares
+  `@polyth/knowledge` only because this file names that database; drop both
+  together.
+- `src/service.ts`: scoping, harvest, HTTP routes and the agent tools.
+- `src/contracts.ts`: browser-safe DTOs (`@polyth/memory/contracts`).
+
 ## Reflect: rules learned from user corrections
 
 Reflect turns corrections a person types in any harness ("always…", "never…",

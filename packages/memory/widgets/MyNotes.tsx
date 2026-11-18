@@ -4,7 +4,7 @@
 // name anyone else's (Spaces §14.6).
 import { Fragment, useCallback, useEffect, useState, type ReactNode } from "react";
 import type { Project } from "@polyth/contracts";
-import type { MemoryReceiptDto } from "@polyth/knowledge/memory-contracts";
+import type { MemoryReceiptDto } from "../src/contracts.ts";
 import type { WebNotificationInput } from "@polyth/web-sdk";
 import { memoryError, personalMemoryApi, type MemoryDto, type PersonalMemoryPage } from "../src/client.ts";
 import type { Translate } from "./i18n.ts";

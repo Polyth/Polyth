@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { SessionEvent, SpaceContext } from "@polyth/contracts";
-import { createMemoryStore } from "../../knowledge/src/memory.ts";
+import { createMemoryStore } from "../src/store.ts";
 import { detectCorrections, reflectSessionEligible, ruleKey, stripLeadIn, stripPastedContent, userAuthoredText } from "../src/reflect.ts";
 import { appendInstructionRule, createReflectController, REFLECT_INSTRUCTION_CONFIRMATION, REFLECT_INSTRUCTION_HEADING, REFLECT_MEMORY_OFF } from "../src/reflectService.ts";
 import { createMemoryService, memoryRoutes } from "../src/service.ts";

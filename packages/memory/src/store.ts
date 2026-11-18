@@ -27,12 +27,12 @@ import type {
   MemoryReceiptDto,
   MemoryRecordDto,
   MemorySourceRef,
-} from "./memoryContracts.ts";
+} from "./contracts.ts";
 
 export type { MemoryApplicability, MemoryApproval, MemoryAuthor, MemoryCategory, MemoryContribution, MemoryCreateInput,
   MemoryCrossProjectRecall, MemoryEvidence, MemoryExport, MemoryFreshness, MemoryHarvestJobDto, MemoryImportMode, MemoryImportPreview, MemoryLayer, MemoryLayerGrant, MemoryLifecycle,
   MemoryListItemDto, MemoryListPage, MemoryMode, MemoryPatchInput, MemoryPolicyDto,
-  MemoryPolicyPatchInput, MemoryRecallInput, MemoryReceiptDto, MemoryRecordDto, MemorySourceRef } from "./memoryContracts.ts";
+  MemoryPolicyPatchInput, MemoryRecallInput, MemoryReceiptDto, MemoryRecordDto, MemorySourceRef } from "./contracts.ts";
 
 /** Trusted identity minted by the Space gateway. Never construct this from a
  * request body; future route handlers must receive it from rc.space. */
@@ -108,7 +108,11 @@ export interface MemoryStore {
    * listed project; a project whose memory is off, or that never enabled it,
    * is skipped and its exclusions apply. */
   searchProjects(scope: MemoryScope, query: { q: string; projectIds: readonly string[]; limit?: number }): { items: MemoryListItemDto[]; total: number; searchedProjectIds: string[] };
+  /** `id` is a record id or the short id agents are shown (see `shortId`). */
   get(scope: MemoryScope, id: string): MemoryRecordDto | undefined;
+  /** The handle agents see for a record: the start of its id, as long as that
+   * names one record among those this scope can reach. */
+  shortId(scope: MemoryScope, id: string): string;
   create(scope: MemoryScope, input: MemoryCreateInput, options?: MemoryWriteOptions): MemoryReceiptDto;
   update(scope: MemoryScope, input: MemoryPatchInput, actor?: "user" | "agent" | "system"): MemoryReceiptDto;
   /** `approver` is recorded as `approvedBy` when the record becomes active. */
@@ -154,6 +158,9 @@ export interface MemoryStore {
 }
 
 interface MemoryRow {
+  n: number;
+  /** bm25 score of a ranked row; lower is a better match. */
+  score?: number;
   id: string;
   space_id: string;
   project_id: string;
@@ -235,6 +242,9 @@ const freshness = new Set<MemoryFreshness>(["current", "needs-review", "unknown"
 const crossProjectValues = new Set<MemoryCrossProjectRecall>(["off", "ask", "allow"]);
 const MAX_SEARCH_PROJECTS = 200;
 const RANKED_ROWS = 64;
+const SUBSTRING_SCAN = 5_000;
+/** Characters of an id that agents are shown and may pass back. */
+const SHORT_ID = 8;
 
 const fail = (message: string, code = "invalid-input"): never => {
   throw Object.assign(new Error(message), { code });
@@ -456,16 +466,36 @@ const policyFrom = (row: PolicyRow): MemoryPolicyDto => ({
   updatedAt: Number(row.updated_at),
 });
 
-const listItem = (item: MemoryRecordDto): MemoryListItemDto => ({
+const SNIPPET_CHARS = 220;
+/** The part of a body a search hit is about: it starts a little before the
+ * first query word instead of always at the top of the note. */
+const snippetOf = (body: string, query?: string): string => {
+  const flat = body.replace(/\s+/g, " ").trim();
+  if (!query || flat.length <= SNIPPET_CHARS) return flat.slice(0, SNIPPET_CHARS);
+  const low = flat.toLowerCase();
+  let at = -1;
+  for (const token of queryTokens(query)) {
+    const found = low.indexOf(stemOf(token) ?? token);
+    if (found >= 0 && (at < 0 || found < at)) at = found;
+  }
+  if (at < 60) return flat.slice(0, SNIPPET_CHARS);
+  const start = Math.max(0, flat.lastIndexOf(" ", at - 40) + 1);
+  return `…${flat.slice(start, start + SNIPPET_CHARS - 1)}`;
+};
+const listItem = (item: MemoryRecordDto, query?: string): MemoryListItemDto => ({
   ...(({ body: _body, sources: _sources, applicability: _applicability, ...rest }) => rest)(item),
-  snippet: item.body.replace(/\s+/g, " ").trim().slice(0, 220),
+  snippet: snippetOf(item.body, query),
   bodyBytes: bytes(item.body), sourceCount: item.sources.length,
 });
 
+/** Text as the word index sees it. One Ukrainian word is written with any of
+ * several apostrophes (пам'ять, пам’ять, памʼять); dropping them inside a word
+ * makes every spelling one token, on the indexed and on the query side. */
+export const searchText = (value: string): string => value.normalize("NFKC").replace(/(?<=\p{L})['’ʼ`ʹ](?=\p{L})/gu, "");
 // Grammatical words should not outrank the task's subject in an OR query.
 const recallStopWords = new Set("a an and are as at be been being but by can could do does for from had has have how i if in into is it its me my of on or our please should than that the their them there these they this those to was we were what when where which who will with would you your а але без був була були в від він вона вони для до з за і із й на не по про та у це цей ця чи що як".split(" "));
 const queryTokens = (query: string): string[] => [...new Set(
-  (query.normalize("NFKC").toLowerCase().match(/[\p{L}\p{N}_./:-]+/gu) ?? [])
+  (searchText(query).toLowerCase().match(/[\p{L}\p{N}_./:-]+/gu) ?? [])
     .filter((token) => !recallStopWords.has(token)),
 )].slice(0, 24);
 /** Prefix stem of an inflected word, so "symptoms" also finds "symptom" and
@@ -481,16 +511,15 @@ const stemOf = (token: string): string | undefined => {
 };
 const quoted = (token: string): string => `"${token.replaceAll('"', '""')}"`;
 /** Every term matches exactly or by its stem; an exact hit scores both. */
-const ftsExpression = (query: string): string => queryTokens(query).flatMap((token) => {
+const ftsExpression = (query: string, tokens: readonly string[] = queryTokens(query)): string => tokens.flatMap((token) => {
   const stem = stemOf(token);
   return stem ? [quoted(token), `${quoted(stem)}*`] : [quoted(token)];
 }).join(" OR ").slice(0, 2_000);
-/** Substring terms for the trigram index: finds "palace" inside "MemPalace"
- * and parts of compounds. Short terms would match almost every record. */
-const trigramExpression = (query: string): string =>
-  queryTokens(query).filter((token) => [...token].length >= 4).slice(0, 12).map(quoted).join(" OR ");
 // A title or tag hit says more about a record than a passing word in its body.
-const FTS_RANK = "bm25(memory_fts, 0, 0, 0, 4.0, 1.0, 2.0, 2.0)";
+const FTS_RANK = "bm25(memory_fts, 4.0, 1.0, 2.0)";
+/** Text to look for a query word in. Cheaper than `searchText`: it runs over
+ * whole notes, and only has to agree with it on apostrophes and case. */
+const haystack = (...parts: string[]): string => parts.join("\n").replace(/['’ʼ`ʹ]/g, "").toLowerCase();
 /** Per-term LIKE fallback used when FTS is unavailable: any term may match,
  * like the FTS `OR` query, instead of requiring the whole phrase. */
 const lexicalClause = (query: string, alias = ""): { sql: string; params: string[] } | undefined => {
@@ -517,203 +546,175 @@ export const excludedByPolicy = (item: MemoryRecordDto, exclusions: MemoryPolicy
 const recordLabel = (item: Pick<MemoryContribution["selected"][number], "layer" | "about">): string =>
   `${item.layer === "person" ? " · personal" : ""}${item.about ? ` · about ${item.about}` : ""}`;
 
-const memoryEnvelope = (items: readonly MemoryContribution["selected"][number][]): string => {
+/** One recalled note as the model reads it: a short handle, then its title and
+ * either the whole note or its opening lines. */
+type RecalledNote = MemoryContribution["selected"][number] & { handle: string };
+const memoryEnvelope = (items: readonly RecalledNote[]): string => {
   if (!items.length) return "";
   return [
     "<polyth-project-memory>",
-    ...items.map((item) => `[${item.memoryId} rev ${item.revision}${recordLabel(item)}]\n${item.text}`),
+    ...items.map((item) => `[${item.handle}${recordLabel(item)}] ${item.text}`),
     "</polyth-project-memory>",
   ].join("\n");
 };
 
-/** Return a UTF-8 bounded prefix that ends at a sentence/line boundary. */
-const boundedEvidence = (value: string, maxBytes: number): string => {
-  if (maxBytes <= 0) return "";
-  let end = Math.min(value.length, maxBytes);
-  while (end > 0 && bytes(value.slice(0, end)) > maxBytes) end--;
-  while (end > 0 && !/[.!?\n]\s*$/.test(value.slice(0, end))) end--;
-  return value.slice(0, end).trimEnd();
+/** A note this small is delivered whole; a longer one by its opening, which
+ * names the full size so the agent can decide to read it with memory_get. */
+const RECALL_INLINE_BYTES = 480;
+const RECALL_GIST_CHARS = 200;
+const sizeLabel = (size: number): string => size < 1000 ? `${size}B` : `${(size / 1024).toFixed(1)}K`;
+/** Opening of a note, cut at a sentence or word boundary. */
+const gistOf = (body: string, chars = RECALL_GIST_CHARS): string => {
+  const flat = body.replace(/\s+/g, " ").trim();
+  if (flat.length <= chars) return flat;
+  const head = flat.slice(0, chars);
+  const sentence = Math.max(head.lastIndexOf(". "), head.lastIndexOf("; "), head.lastIndexOf(": "));
+  const end = sentence >= chars * 0.4 ? sentence + 1 : Math.max(head.lastIndexOf(" "), 1);
+  return head.slice(0, end).trimEnd();
 };
+/** A recalled note has to be about the request, not share one passing word
+ * with it: a query word in its title or tags, two different ones in its body,
+ * or a single one that few notes contain at all. */
+const relevant = (row: MemoryRow, tokens: readonly string[], rare: (needle: string) => boolean): boolean => {
+  if (!tokens.length) return true;
+  const needles = tokens.map((token) => stemOf(token) ?? token);
+  const head = haystack(row.title, row.tags, row.aliases);
+  if (needles.some((needle) => head.includes(needle))) return true;
+  const body = haystack(row.body);
+  const hits = needles.filter((needle) => body.includes(needle));
+  return hits.length >= 2 || (hits.length === 1 && rare(hits[0]!));
+};
+/** A word found in no more notes than this says something about each of them. */
+const RARE_WORD_NOTES = 3;
+/** A word found in more than this share of all notes tells none of them apart.
+ * In a small memory every word still counts, so the share starts to apply only
+ * above a floor. */
+const COMMON_WORD_SHARE = 0.1;
+const COMMON_WORD_FLOOR = 20;
+/** Ranked rows much weaker than the best one are noise for an automatic recall. */
+const RECALL_SCORE_FLOOR = 0.5;
 
-export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, now = nowDefault): MemoryStore {
-  db.exec(`
-    PRAGMA foreign_keys = ON;
-    PRAGMA busy_timeout = 5000;
-    PRAGMA journal_mode = WAL;
-    PRAGMA synchronous = FULL;
-    CREATE TABLE IF NOT EXISTS memory_meta (
-      space_id TEXT PRIMARY KEY,
-      data_revision INTEGER NOT NULL DEFAULT 0
-    );
-    CREATE TABLE IF NOT EXISTS memory_policy (
-      space_id TEXT NOT NULL,
-      project_id TEXT NOT NULL,
-      mode TEXT NOT NULL CHECK(mode IN ('auto','read-only','off')),
-      generation TEXT NOT NULL,
-      settings_revision INTEGER NOT NULL DEFAULT 1,
-      max_records INTEGER NOT NULL DEFAULT 6,
-      max_bytes INTEGER NOT NULL DEFAULT 6144,
-      max_tokens INTEGER,
-      harvesting TEXT NOT NULL DEFAULT 'paused',
-      utility_model TEXT,
-      utility_allowlist TEXT NOT NULL DEFAULT '[]',
-      utility_status TEXT NOT NULL DEFAULT 'disabled',
-      utility_max_calls INTEGER NOT NULL DEFAULT 0,
-      utility_used_calls INTEGER NOT NULL DEFAULT 0,
-      utility_reserved_calls INTEGER NOT NULL DEFAULT 0,
-      utility_model_allowed INTEGER NOT NULL DEFAULT 0,
-      consent_required INTEGER NOT NULL DEFAULT 1,
-      block_without_memory INTEGER NOT NULL DEFAULT 0,
-      review_policy TEXT NOT NULL DEFAULT 'manual',
-      exclusions TEXT NOT NULL DEFAULT '{"sessions":[],"sources":[],"paths":[]}',
-      cross_project TEXT NOT NULL DEFAULT 'ask',
-      updated_at INTEGER NOT NULL,
-      PRIMARY KEY(space_id, project_id)
-    );
-    CREATE TABLE IF NOT EXISTS memory_records (
-      id TEXT PRIMARY KEY,
-      space_id TEXT NOT NULL,
-      project_id TEXT NOT NULL,
-      title TEXT NOT NULL,
-      body TEXT NOT NULL,
-      category TEXT NOT NULL,
-      tags TEXT NOT NULL,
-      aliases TEXT NOT NULL,
-      applicability TEXT NOT NULL,
-      sources TEXT NOT NULL,
-      lifecycle TEXT NOT NULL,
-      evidence TEXT NOT NULL,
-      freshness TEXT NOT NULL,
-      pinned INTEGER NOT NULL DEFAULT 0,
-      user_locked INTEGER NOT NULL DEFAULT 0,
-      revision INTEGER NOT NULL DEFAULT 1,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      layer TEXT NOT NULL DEFAULT 'project',
-      owner_id TEXT NOT NULL DEFAULT '',
-      authored_by TEXT,
-      approved_by TEXT,
-      about TEXT,
-      share_proposed_at INTEGER
-    );
-    CREATE INDEX IF NOT EXISTS idx_memory_project ON memory_records(space_id, project_id, lifecycle, updated_at);
-    CREATE TABLE IF NOT EXISTS memory_revisions (
-      record_id TEXT NOT NULL,
-      project_id TEXT NOT NULL,
-      revision INTEGER NOT NULL,
-      payload TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      PRIMARY KEY(record_id, revision)
-    );
-    CREATE TABLE IF NOT EXISTS memory_idempotency (
-      project_id TEXT NOT NULL,
-      operation_key TEXT NOT NULL,
-      fingerprint TEXT NOT NULL,
-      receipt TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      PRIMARY KEY(project_id, operation_key)
-    );
-    CREATE TABLE IF NOT EXISTS memory_tombstones (
-      space_id TEXT NOT NULL,
-      project_id TEXT NOT NULL,
-      source_key TEXT NOT NULL,
-      generation TEXT NOT NULL,
-      reason TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      PRIMARY KEY(space_id, project_id, source_key)
-    );
-    CREATE TABLE IF NOT EXISTS memory_harvest_jobs (
-      job_key TEXT PRIMARY KEY,
-      space_id TEXT NOT NULL,
-      project_id TEXT NOT NULL,
-      session_id TEXT NOT NULL,
-      source_start_seq INTEGER NOT NULL,
-      source_end_seq INTEGER NOT NULL,
-      source_digest TEXT NOT NULL,
-      policy_generation TEXT NOT NULL,
-      extractor_version TEXT NOT NULL,
-      status TEXT NOT NULL,
-      attempts INTEGER NOT NULL DEFAULT 0,
-      lease_owner TEXT,
-      lease_expires_at INTEGER,
-      next_attempt_at INTEGER,
-      receipt_id TEXT,
-      checkpoint_digest TEXT,
-      error_code TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_memory_jobs_ready ON memory_harvest_jobs(space_id, project_id, status, next_attempt_at);
-    -- Claim scans only live work; terminal rows (denied/failed/done) can number
-    -- in the thousands per project and must not be walked and sorted each poll.
-    CREATE INDEX IF NOT EXISTS idx_memory_jobs_claimable ON memory_harvest_jobs(space_id, project_id, source_end_seq) WHERE status IN ('pending','leased');
-    CREATE TABLE IF NOT EXISTS memory_harvest_cursors (
-      space_id TEXT NOT NULL,
-      project_id TEXT NOT NULL,
-      session_id TEXT NOT NULL,
-      next_seq INTEGER NOT NULL,
-      policy_generation TEXT NOT NULL,
-      checkpoint_digest TEXT,
-      updated_at INTEGER NOT NULL,
-      PRIMARY KEY(space_id, project_id, session_id)
-    );
-    CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
-      memory_id UNINDEXED, space_id UNINDEXED, project_id UNINDEXED,
-      title, body, tags, aliases, tokenize='unicode61 remove_diacritics 2'
-    );
-  `);
-  // Substring index for agent search. Triggers keep it in step with every
-  // write, including writes by a server version that predates it. Optional:
-  // an SQLite without the trigram tokenizer keeps word and stem matching only.
-  let trigram = false;
-  try {
-    const text = "new.title || char(10) || new.body || char(10) || new.tags || char(10) || new.aliases";
-    db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts_tri USING fts5(
-      memory_id UNINDEXED, space_id UNINDEXED, project_id UNINDEXED, text, tokenize='trigram'
-    );
-    CREATE TRIGGER IF NOT EXISTS memory_fts_tri_insert AFTER INSERT ON memory_records BEGIN
-      INSERT INTO memory_fts_tri(memory_id, space_id, project_id, text) VALUES(new.id, new.space_id, new.project_id, ${text});
-    END;
-    CREATE TRIGGER IF NOT EXISTS memory_fts_tri_update AFTER UPDATE OF title, body, tags, aliases, project_id ON memory_records BEGIN
-      DELETE FROM memory_fts_tri WHERE memory_id = old.id;
-      INSERT INTO memory_fts_tri(memory_id, space_id, project_id, text) VALUES(new.id, new.space_id, new.project_id, ${text});
-    END;
-    CREATE TRIGGER IF NOT EXISTS memory_fts_tri_delete AFTER DELETE ON memory_records BEGIN
-      DELETE FROM memory_fts_tri WHERE memory_id = old.id;
-    END;`);
-    // Records written before the index existed are indexed once.
-    const indexed = Number((db.prepare("SELECT count(*) AS count FROM memory_fts_tri").get() as { count: number }).count);
-    const records = Number((db.prepare("SELECT count(*) AS count FROM memory_records").get() as { count: number }).count);
-    if (indexed !== records) {
-      db.exec(`BEGIN IMMEDIATE; DELETE FROM memory_fts_tri;
-        INSERT INTO memory_fts_tri(memory_id, space_id, project_id, text)
-          SELECT id, space_id, project_id, title || char(10) || body || char(10) || tags || char(10) || aliases FROM memory_records;
-        COMMIT;`);
-    }
-    trigram = true;
-  } catch {
-    try { db.exec("ROLLBACK"); } catch { /* no open transaction */ }
-    trigram = false;
-  }
-  const policyColumns = new Set((db.prepare("PRAGMA table_info(memory_policy)").all() as Array<{ name: string }>).map((column) => column.name));
-  if (!policyColumns.has("utility_allowlist")) db.exec("ALTER TABLE memory_policy ADD COLUMN utility_allowlist TEXT NOT NULL DEFAULT '[]'");
-  if (!policyColumns.has("utility_status")) db.exec("ALTER TABLE memory_policy ADD COLUMN utility_status TEXT NOT NULL DEFAULT 'disabled'");
-  if (!policyColumns.has("utility_max_calls")) db.exec("ALTER TABLE memory_policy ADD COLUMN utility_max_calls INTEGER NOT NULL DEFAULT 0");
-  if (!policyColumns.has("utility_used_calls")) db.exec("ALTER TABLE memory_policy ADD COLUMN utility_used_calls INTEGER NOT NULL DEFAULT 0");
-  if (!policyColumns.has("utility_reserved_calls")) db.exec("ALTER TABLE memory_policy ADD COLUMN utility_reserved_calls INTEGER NOT NULL DEFAULT 0");
-  if (!policyColumns.has("cross_project")) db.exec("ALTER TABLE memory_policy ADD COLUMN cross_project TEXT NOT NULL DEFAULT 'ask'");
-  // Layers and provenance (additive). Every record that predates them is a
-  // project record with an unknown author.
-  const recordColumns = new Set((db.prepare("PRAGMA table_info(memory_records)").all() as Array<{ name: string }>).map((column) => column.name));
-  if (!recordColumns.has("layer")) db.exec("ALTER TABLE memory_records ADD COLUMN layer TEXT NOT NULL DEFAULT 'project'");
-  if (!recordColumns.has("owner_id")) db.exec("ALTER TABLE memory_records ADD COLUMN owner_id TEXT NOT NULL DEFAULT ''");
-  if (!recordColumns.has("authored_by")) db.exec("ALTER TABLE memory_records ADD COLUMN authored_by TEXT");
-  if (!recordColumns.has("approved_by")) db.exec("ALTER TABLE memory_records ADD COLUMN approved_by TEXT");
-  if (!recordColumns.has("about")) db.exec("ALTER TABLE memory_records ADD COLUMN about TEXT");
-  if (!recordColumns.has("share_proposed_at")) db.exec("ALTER TABLE memory_records ADD COLUMN share_proposed_at INTEGER");
-  // Offers used to wait out of recall until someone decided. A note works from
-  // the start now, so those still waiting become ordinary personal notes.
-  db.exec("UPDATE memory_records SET lifecycle='active', share_proposed_at=NULL WHERE layer='person' AND lifecycle='candidate' AND share_proposed_at IS NOT NULL");
-  db.exec("CREATE INDEX IF NOT EXISTS idx_memory_layer ON memory_records(space_id, layer, owner_id, lifecycle, updated_at)");
-  db.exec(`CREATE TABLE IF NOT EXISTS memory_utility_reservations (
+/** Record columns, in the order `insertRecord` binds them. The legacy import
+ * writes the same rows, so the list lives in one place. */
+export const MEMORY_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS memory_meta (
+    space_id TEXT PRIMARY KEY,
+    data_revision INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE TABLE IF NOT EXISTS memory_policy (
+    space_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    mode TEXT NOT NULL CHECK(mode IN ('auto','read-only','off')),
+    generation TEXT NOT NULL,
+    settings_revision INTEGER NOT NULL DEFAULT 1,
+    max_records INTEGER NOT NULL DEFAULT 6,
+    max_bytes INTEGER NOT NULL DEFAULT 6144,
+    max_tokens INTEGER,
+    harvesting TEXT NOT NULL DEFAULT 'paused',
+    utility_model TEXT,
+    utility_allowlist TEXT NOT NULL DEFAULT '[]',
+    utility_status TEXT NOT NULL DEFAULT 'disabled',
+    utility_max_calls INTEGER NOT NULL DEFAULT 0,
+    utility_used_calls INTEGER NOT NULL DEFAULT 0,
+    utility_reserved_calls INTEGER NOT NULL DEFAULT 0,
+    utility_model_allowed INTEGER NOT NULL DEFAULT 0,
+    consent_required INTEGER NOT NULL DEFAULT 1,
+    block_without_memory INTEGER NOT NULL DEFAULT 0,
+    review_policy TEXT NOT NULL DEFAULT 'manual',
+    exclusions TEXT NOT NULL DEFAULT '{"sessions":[],"sources":[],"paths":[]}',
+    cross_project TEXT NOT NULL DEFAULT 'ask',
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY(space_id, project_id)
+  );
+  -- n is the word index's rowid. AUTOINCREMENT: a deleted note's number is
+  -- never handed to another one.
+  CREATE TABLE IF NOT EXISTS memory_records (
+    n INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE,
+    space_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    category TEXT NOT NULL,
+    tags TEXT NOT NULL,
+    aliases TEXT NOT NULL,
+    applicability TEXT NOT NULL,
+    sources TEXT NOT NULL,
+    lifecycle TEXT NOT NULL,
+    evidence TEXT NOT NULL,
+    freshness TEXT NOT NULL,
+    pinned INTEGER NOT NULL DEFAULT 0,
+    user_locked INTEGER NOT NULL DEFAULT 0,
+    revision INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    layer TEXT NOT NULL DEFAULT 'project',
+    owner_id TEXT NOT NULL DEFAULT '',
+    authored_by TEXT,
+    approved_by TEXT,
+    about TEXT,
+    share_proposed_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_memory_project ON memory_records(space_id, project_id, lifecycle, updated_at);
+  CREATE INDEX IF NOT EXISTS idx_memory_layer ON memory_records(space_id, layer, owner_id, lifecycle, updated_at);
+  -- Earlier states of a record only: the current one is the record itself.
+  CREATE TABLE IF NOT EXISTS memory_revisions (
+    record_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    payload TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY(record_id, revision)
+  ) WITHOUT ROWID;
+  CREATE TABLE IF NOT EXISTS memory_idempotency (
+    project_id TEXT NOT NULL,
+    operation_key TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    receipt TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY(project_id, operation_key)
+  ) WITHOUT ROWID;
+  CREATE TABLE IF NOT EXISTS memory_tombstones (
+    space_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    source_key TEXT NOT NULL,
+    generation TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY(space_id, project_id, source_key)
+  ) WITHOUT ROWID;
+  CREATE TABLE IF NOT EXISTS memory_harvest_jobs (
+    job_key TEXT PRIMARY KEY,
+    space_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    source_start_seq INTEGER NOT NULL,
+    source_end_seq INTEGER NOT NULL,
+    source_digest TEXT NOT NULL,
+    policy_generation TEXT NOT NULL,
+    extractor_version TEXT NOT NULL,
+    status TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    lease_owner TEXT,
+    lease_expires_at INTEGER,
+    next_attempt_at INTEGER,
+    receipt_id TEXT,
+    checkpoint_digest TEXT,
+    error_code TEXT
+  ) WITHOUT ROWID;
+  -- Claim scans only live work, never the rows a run has already settled.
+  CREATE INDEX IF NOT EXISTS idx_memory_jobs_claimable ON memory_harvest_jobs(space_id, project_id, source_end_seq) WHERE status IN ('pending','leased');
+  CREATE TABLE IF NOT EXISTS memory_harvest_cursors (
+    space_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    next_seq INTEGER NOT NULL,
+    policy_generation TEXT NOT NULL,
+    checkpoint_digest TEXT,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY(space_id, project_id, session_id)
+  ) WITHOUT ROWID;
+  CREATE TABLE IF NOT EXISTS memory_utility_reservations (
     reservation_id TEXT PRIMARY KEY,
     space_id TEXT NOT NULL,
     project_id TEXT NOT NULL,
@@ -722,8 +723,31 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
     state TEXT NOT NULL CHECK(state IN ('reserved','consumed','released')),
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
+  ) WITHOUT ROWID;
+  -- Word index of active records only, keyed by memory_records.n. Contentless:
+  -- it holds the index and no second copy of the text.
+  CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+    title, body, tags, content='', contentless_delete=1, tokenize='unicode61 remove_diacritics 2'
   );
-  CREATE INDEX IF NOT EXISTS idx_memory_utility_reservations_scope ON memory_utility_reservations(space_id, project_id, state);`);
+`;
+
+/** Puts a record in the word index, or takes it out when it is not active. */
+export const indexRecord = (db: DatabaseSync, n: number, item: Pick<MemoryRecordDto, "title" | "body" | "tags" | "aliases" | "lifecycle">): void => {
+  db.prepare("DELETE FROM memory_fts WHERE rowid = ?").run(n);
+  if (item.lifecycle !== "active") return;
+  db.prepare("INSERT INTO memory_fts(rowid, title, body, tags) VALUES(?,?,?,?)").run(n, searchText(item.title), searchText(item.body), searchText([...item.tags, ...item.aliases].join(" ")));
+};
+
+export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, now = nowDefault): MemoryStore {
+  db.exec(`
+    PRAGMA busy_timeout = 5000;
+    PRAGMA journal_mode = WAL;
+    PRAGMA synchronous = FULL;
+    ${MEMORY_SCHEMA}
+  `);
+  // A settled harvest job is only a record of work already done: the session
+  // cursor has moved past it, or its policy generation is gone.
+  db.exec("DELETE FROM memory_harvest_jobs WHERE status IN ('processed','skipped','stale')");
   if (expectedSpaceId && !db.prepare("SELECT 1 FROM memory_meta WHERE space_id = ?").get(expectedSpaceId)) {
     db.prepare("INSERT INTO memory_meta(space_id, data_revision) VALUES(?, 0)").run(expectedSpaceId);
   }
@@ -759,21 +783,22 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
     if (!key) return;
     db.prepare("INSERT INTO memory_idempotency(project_id, operation_key, fingerprint, receipt, created_at) VALUES(?,?,?,?,?)").run(scope.projectId, key, fingerprint!, json(receipt), now());
   };
-  const updateFts = (item: MemoryRecordDto, spaceId: string): void => {
-    db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(item.id);
-    db.prepare("INSERT INTO memory_fts(memory_id, space_id, project_id, title, body, tags, aliases) VALUES(?,?,?,?,?,?,?)").run(item.id, spaceId, item.projectId, item.title, item.body, item.tags.join(" "), item.aliases.join(" "));
+  /** Re-index a record after a write. `item.id` names the row. */
+  const updateFts = (item: MemoryRecordDto): void => {
+    const row = db.prepare("SELECT n FROM memory_records WHERE id = ?").get(item.id) as { n: number } | undefined;
+    if (row) indexRecord(db, Number(row.n), item);
   };
   /** Active records of `where` (columns prefixed `m.`) matching any query
    * term: pinned first, then by weighted FTS rank. Recall, agent search and
    * cross-project search share it so they never disagree. `substring` adds
-   * trigram hits the word index missed, for explicit agent searches only:
-   * a whole prompt would pull in every record sharing a common substring. */
-  const rankedRows = (spaceId: string, where: { sql: string; params: string[] }, queryText: string, substring = false): { rows: MemoryRow[]; degraded: boolean } => {
-    const fts = ftsExpression(queryText);
+   * records that only contain a term inside a longer word ("palace" in
+   * "MemPalace"), for explicit agent searches that found fewer than `want`. */
+  const rankedRows = (spaceId: string, where: { sql: string; params: string[] }, queryText: string, substring = 0, tokens?: readonly string[]): { rows: MemoryRow[]; degraded: boolean } => {
+    const fts = ftsExpression(queryText, tokens);
     let rows: MemoryRow[] | undefined;
     if (fts) {
       try {
-        rows = db.prepare(`SELECT m.* FROM memory_fts f JOIN memory_records m ON m.id=f.memory_id WHERE f.space_id=? AND m.space_id=? AND ${where.sql} AND memory_fts MATCH ? AND m.lifecycle='active' ORDER BY m.pinned DESC, ${FTS_RANK} LIMIT ${RANKED_ROWS}`).all(spaceId, spaceId, ...where.params, fts) as unknown as MemoryRow[];
+        rows = db.prepare(`SELECT m.*, ${FTS_RANK} AS score FROM memory_fts f JOIN memory_records m ON m.n=f.rowid WHERE m.space_id=? AND ${where.sql} AND memory_fts MATCH ? AND m.lifecycle='active' ORDER BY m.pinned DESC, score LIMIT ${RANKED_ROWS}`).all(spaceId, ...where.params, fts) as unknown as MemoryRow[];
       } catch { rows = undefined; }
     }
     if (!rows) {
@@ -781,59 +806,55 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
       if (!lexical) return { rows: [], degraded: Boolean(fts) };
       return { rows: db.prepare(`SELECT m.* FROM memory_records m WHERE m.space_id=? AND ${where.sql} AND m.lifecycle='active' AND ${lexical.sql} ORDER BY m.pinned DESC, m.updated_at DESC LIMIT ${RANKED_ROWS}`).all(spaceId, ...where.params, ...lexical.params) as unknown as MemoryRow[], degraded: true };
     }
-    const tri = substring && trigram && rows.length < RANKED_ROWS ? trigramExpression(queryText) : "";
-    if (tri) {
-      try {
-        const seen = new Set(rows.map((row) => row.id));
-        const extra = db.prepare(`SELECT m.* FROM memory_fts_tri t JOIN memory_records m ON m.id=t.memory_id WHERE t.space_id=? AND m.space_id=? AND ${where.sql} AND memory_fts_tri MATCH ? AND m.lifecycle='active' ORDER BY m.pinned DESC, bm25(memory_fts_tri) LIMIT ${RANKED_ROWS}`).all(spaceId, spaceId, ...where.params, tri) as unknown as MemoryRow[];
-        for (const row of extra) if (!seen.has(row.id) && rows.length < RANKED_ROWS) { seen.add(row.id); rows.push(row); }
-      } catch { /* word and stem matches stand on their own */ }
+    const needles = rows.length < substring ? queryTokens(queryText).filter((token) => [...token].length >= 4).slice(0, 12) : [];
+    if (needles.length) {
+      // ponytail: scans the newest SUBSTRING_SCAN active notes in scope, and only
+      // when the word index came up short. A trigram index made this O(1) at
+      // six times the size of the text; bring it back if scopes outgrow the scan.
+      const seen = new Set(rows.map((row) => row.id));
+      for (const row of db.prepare(`SELECT m.* FROM memory_records m WHERE m.space_id=? AND ${where.sql} AND m.lifecycle='active' ORDER BY m.pinned DESC, m.updated_at DESC LIMIT ${SUBSTRING_SCAN}`).iterate(spaceId, ...where.params) as unknown as Iterable<MemoryRow>) {
+        if (seen.has(row.id)) continue;
+        const text = haystack(row.title, row.body, row.tags, row.aliases);
+        if (!needles.some((needle) => text.includes(needle))) continue;
+        rows.push(row);
+        if (rows.length >= RANKED_ROWS) break;
+      }
     }
     return { rows, degraded: false };
   };
-  const rankedActiveRows = (scope: MemoryScope, queryText: string, substring = false) => rankedRows(scope.spaceId, layerClause(scope, "m."), queryText, substring);
-  /** One record by id, only when it lies in a granted layer of this Space. */
+  const rankedActiveRows = (scope: MemoryScope, queryText: string, substring = 0, tokens?: readonly string[]) => rankedRows(scope.spaceId, layerClause(scope, "m."), queryText, substring, tokens);
+  /** In how many indexed notes a word, or a word starting with it, occurs. */
+  const noteFrequency = (needle: string): number => {
+    try { return Number((db.prepare("SELECT count(*) AS count FROM memory_fts WHERE memory_fts MATCH ?").get(`${quoted(needle)}*`) as { count: number }).count); }
+    catch { return 0; }
+  };
+  /** One record by id, only when it lies in a granted layer of this Space.
+   * A short id (the start of an id) names a record when it names exactly one. */
   const grantedRow = (scope: MemoryScope, id: string): MemoryRow | undefined => {
     const layers = layerClause(scope);
-    return db.prepare(`SELECT * FROM memory_records WHERE id=? AND space_id=? AND ${layers.sql}`).get(id, scope.spaceId, ...layers.params) as unknown as MemoryRow | undefined;
+    const exact = db.prepare(`SELECT * FROM memory_records WHERE id=? AND space_id=? AND ${layers.sql}`).get(id, scope.spaceId, ...layers.params) as unknown as MemoryRow | undefined;
+    if (exact || id.length < SHORT_ID || id.length >= 36) return exact;
+    const matches = db.prepare(`SELECT * FROM memory_records WHERE id>=? AND id<? AND space_id=? AND ${layers.sql} LIMIT 2`).all(id, `${id}\u{10ffff}`, scope.spaceId, ...layers.params) as unknown as MemoryRow[];
+    return matches.length === 1 ? matches[0] : undefined;
+  };
+  const shortId = (scope: MemoryScope, id: string): string => {
+    if (id.length <= SHORT_ID) return id;
+    const prefix = id.slice(0, SHORT_ID);
+    return grantedRow(scope, prefix)?.id === id ? prefix : id;
   };
   const insertRecord = (spaceId: string, item: MemoryRecordDto, placement: { layer: MemoryLayer; ownerId: string }, authoredBy: MemoryAuthor | undefined): void => {
-    db.prepare(`INSERT INTO memory_records(id,space_id,project_id,title,body,category,tags,aliases,applicability,sources,lifecycle,evidence,freshness,pinned,user_locked,revision,created_at,updated_at,layer,owner_id,authored_by,approved_by,about,share_proposed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    const result = db.prepare(`INSERT INTO memory_records(id,space_id,project_id,title,body,category,tags,aliases,applicability,sources,lifecycle,evidence,freshness,pinned,user_locked,revision,created_at,updated_at,layer,owner_id,authored_by,approved_by,about,share_proposed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       item.id, spaceId, item.projectId, item.title, item.body, item.category, json(item.tags), json(item.aliases), json(item.applicability), json(item.sources), item.lifecycle, item.evidence, item.freshness, item.pinned ? 1 : 0, item.userLocked ? 1 : 0, item.revision, item.createdAt, item.updatedAt,
       placement.layer, placement.ownerId, authoredBy ? json(authoredBy) : null, item.approvedBy ? json(item.approvedBy) : null,
       item.about ?? null, item.shareProposedAt ?? null,
     );
+    indexRecord(db, Number(result.lastInsertRowid), item);
   };
-  const revision = (item: MemoryRecordDto, at: number): void => {
-    db.prepare("INSERT INTO memory_revisions(record_id, project_id, revision, payload, created_at) VALUES(?,?,?,?,?)").run(item.id, item.projectId, item.revision, json(item), at);
+  /** Keep the state a record is about to leave, so it can be restored. */
+  const keep = (row: MemoryRow, at: number): void => {
+    const item = itemFrom(row);
+    db.prepare("INSERT OR IGNORE INTO memory_revisions(record_id, project_id, revision, payload, created_at) VALUES(?,?,?,?,?)").run(item.id, item.projectId, item.revision, json(item), at);
   };
-  // Older knowledge stores represented memory as kind='memory' rows. Migrate
-  // those rows into the scoped memory tables once, preserving IDs and source
-  // provenance. A scoped store is required so legacy rows cannot be assigned
-  // to an ambient tenant.
-  if (expectedSpaceId && db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='knowledge'").get()) {
-    const legacyRows = db.prepare("SELECT * FROM knowledge WHERE kind='memory'").all() as Array<Record<string, unknown>>;
-    for (const legacy of legacyRows) {
-      const id = typeof legacy.id === "string" ? legacy.id : "";
-      const projectId = typeof legacy.project_id === "string" ? legacy.project_id : "";
-      const title = typeof legacy.title === "string" ? legacy.title.trim() : "";
-      const body = typeof legacy.body === "string" ? legacy.body : "";
-      if (!id || !projectId || !title || title.length > MAX.title || !body || bytes(body) > MAX.bodyBytes) continue;
-      const tags = parse<string[]>(typeof legacy.tags === "string" ? legacy.tags : "[]", []);
-      const createdAt = Number(legacy.created_at) || now(); const updatedAt = Number(legacy.updated_at) || createdAt;
-      const item: MemoryRecordDto = {
-        id, projectId, title, body, category: "observation", tags: tags.slice(0, MAX.array), aliases: [], applicability: {},
-        sources: [{ kind: "session", ...(typeof legacy.source_session_id === "string" && legacy.source_session_id ? { sessionId: legacy.source_session_id } : {}) }],
-        lifecycle: "active", evidence: legacy.source === "user" ? "user-stated" : "source-observed", freshness: "unknown", pinned: false,
-        userLocked: legacy.source === "user", revision: Math.max(1, Number(legacy.revision) || 1), createdAt, updatedAt,
-      };
-      db.prepare("INSERT OR IGNORE INTO memory_records(id,space_id,project_id,title,body,category,tags,aliases,applicability,sources,lifecycle,evidence,freshness,pinned,user_locked,revision,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(
-        item.id, expectedSpaceId, item.projectId, item.title, item.body, item.category, json(item.tags), json(item.aliases), json(item.applicability), json(item.sources), item.lifecycle, item.evidence, item.freshness, item.pinned ? 1 : 0, item.userLocked ? 1 : 0, item.revision, item.createdAt, item.updatedAt,
-      );
-      if (db.prepare("SELECT 1 FROM memory_revisions WHERE record_id=? AND revision=?").get(item.id, item.revision) === undefined) revision(item, item.updatedAt);
-      updateFts(item, expectedSpaceId);
-    }
-  }
 
   const updateRecord = (scope: MemoryScope, input: MemoryPatchInput, actor: "user" | "agent" | "system", approvedBy?: MemoryApproval): MemoryReceiptDto => {
     assertScope(scope);
@@ -856,7 +877,7 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
         nextItem.title, nextItem.body, nextItem.category, json(nextItem.tags), json(nextItem.aliases), json(nextItem.applicability), json(nextItem.sources), nextItem.lifecycle, nextItem.evidence, nextItem.freshness, nextItem.pinned ? 1 : 0, nextItem.userLocked ? 1 : 0, nextItem.revision, t, nextItem.approvedBy ? json(nextItem.approvedBy) : null, nextItem.about ?? null, nextItem.id, current.projectId, scope.spaceId, current.revision,
       );
       if (Number(result.changes) !== 1) fail("memory record changed since it was loaded", "conflict");
-      updateFts(nextItem, scope.spaceId); revision(nextItem, t); const policy = policyRow(scope); bump(scope);
+      keep(loaded, t); updateFts(nextItem); const policy = policyRow(scope); bump(scope);
       const receipt: MemoryReceiptDto = { operationId: input.idempotencyKey ?? randomUUID(), status: "committed", memoryId: nextItem.id, revision: nextItem.revision, generation: policy.generation, digest: digest(json(nextItem)) };
       saveIdempotency(scope, input.idempotencyKey, input.requestFingerprint, receipt); return receipt;
     });
@@ -954,10 +975,11 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
       const limit = Math.max(1, Math.min(Math.trunc(query.limit ?? 8) || 8, MAX_RECALL_RECORDS));
       // Delivery off means no agent may read memory, whatever the caller checked.
       if (policy.mode === "off") return { items: [], total: 0, policy };
-      const matches = rankedActiveRows(scope, query.q.trim(), true).rows
+      const q = query.q.trim();
+      const matches = rankedActiveRows(scope, q, limit).rows
         .map(itemFrom)
         .filter((item) => !excludedByPolicy(item, policy.exclusions));
-      return { items: matches.slice(0, limit).map(listItem), total: matches.length, policy };
+      return { items: matches.slice(0, limit).map((item) => listItem(item, q)), total: matches.length, policy };
     },
     searchProjects(scope, query) {
       assertScope(scope);
@@ -975,16 +997,18 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
       const searched = requested.filter((id) => policies.has(id));
       if (!searched.length) return { items: [], total: 0, searchedProjectIds: [] };
       const where = { sql: `(m.layer='project' AND m.project_id IN (${searched.map(() => "?").join(",")}))`, params: searched };
-      const matches = rankedRows(scope.spaceId, where, query.q.trim(), true).rows
+      const q = query.q.trim();
+      const matches = rankedRows(scope.spaceId, where, q, limit).rows
         .map(itemFrom)
         .filter((item) => !excludedByPolicy(item, policies.get(item.projectId)!.exclusions));
-      return { items: matches.slice(0, limit).map(listItem), total: matches.length, searchedProjectIds: searched };
+      return { items: matches.slice(0, limit).map((item) => listItem(item, q)), total: matches.length, searchedProjectIds: searched };
     },
     get(scope, id) {
       assertScope(scope);
       const row = grantedRow(scope, id);
       return row ? itemFrom(row) : undefined;
     },
+    shortId(scope, id) { assertScope(scope); return shortId(scope, id); },
     create(scope, input, options = {}) {
       assertScope(scope);
       if (input.projectId !== scope.projectId) fail("project scope mismatch", "forbidden");
@@ -1014,7 +1038,7 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
           ...(options.shareProposed ? { shareProposedAt: t } : {}),
         };
         insertRecord(scope.spaceId, item, placement, authoredBy);
-        updateFts(item, scope.spaceId); revision(item, t); const dataRevision = bump(scope);
+        const dataRevision = bump(scope);
         const receipt: MemoryReceiptDto = { operationId: input.idempotencyKey ?? randomUUID(), status: "committed", memoryId: id, revision: 1, generation: policy.generation, digest: digest(json(item)) };
         saveIdempotency(scope, input.idempotencyKey, input.requestFingerprint, receipt); void dataRevision; return receipt;
       });
@@ -1031,9 +1055,9 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
       assertScope(scope);
       const row = grantedRow(scope, id);
       if (!row) fail("memory record not found", "not-found");
-      const loaded = row as MemoryRow;
+      const loaded = row as MemoryRow; id = loaded.id;
       if (Number(loaded.revision) !== expectedRevision) fail("memory record changed since it was loaded", "conflict");
-      const source = db.prepare("SELECT payload FROM memory_revisions WHERE record_id=? AND project_id=? AND revision=?").get(id, loaded.project_id, sourceRevision) as unknown as { payload: string } | undefined;
+      const source = db.prepare("SELECT payload FROM memory_revisions WHERE record_id=? AND project_id=? AND revision=?").get(loaded.id, loaded.project_id, sourceRevision) as unknown as { payload: string } | undefined;
       if (!source) fail("memory revision not found", "not-found");
       const sourceRow = source as { payload: string };
       const restored = parse<MemoryRecordDto | undefined>(sourceRow.payload, undefined);
@@ -1051,7 +1075,7 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
           next.title, next.body, next.category, json(next.tags), json(next.aliases), json(next.applicability), json(next.sources), next.lifecycle, next.evidence, next.freshness, next.pinned ? 1 : 0, 1, next.revision, t, next.about ?? null, id, current.projectId, scope.spaceId, expectedRevision,
         );
         if (Number(result.changes) !== 1) fail("memory record changed since it was loaded", "conflict");
-        updateFts(next, scope.spaceId); revision(next, t); const policy = policyRow(scope); bump(scope);
+        keep(loaded, t); updateFts(next); const policy = policyRow(scope); bump(scope);
         return { operationId: randomUUID(), status: "committed", memoryId: id, revision: next.revision, generation: policy.generation, digest: digest(json(next)) };
       });
     },
@@ -1062,12 +1086,13 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
       if (loaded.revision !== input.expectedRevision) fail("memory record changed since it was loaded", "conflict");
       return tx(db, () => {
         const policy = policyRow(scope); const t = now(); const generation = randomUUID();
-        const result = db.prepare("UPDATE memory_records SET lifecycle='forgotten', revision=revision+1, updated_at=? WHERE id=? AND project_id=? AND space_id=? AND revision=?").run(t, input.id, loaded.project_id, scope.spaceId, input.expectedRevision);
+        const result = db.prepare("UPDATE memory_records SET lifecycle='forgotten', revision=revision+1, updated_at=? WHERE id=? AND project_id=? AND space_id=? AND revision=?").run(t, loaded.id, loaded.project_id, scope.spaceId, input.expectedRevision);
         if (Number(result.changes) !== 1) fail("memory record changed since it was loaded", "conflict");
+        keep(loaded, t); db.prepare("DELETE FROM memory_fts WHERE rowid=?").run(loaded.n);
         for (const key of input.sourceKeys ?? sourceKeys(parse<MemorySourceRef[]>(loaded.sources, []))) db.prepare("INSERT OR REPLACE INTO memory_tombstones(space_id,project_id,source_key,generation,reason,created_at) VALUES(?,?,?,?,?,?)").run(scope.spaceId, scope.projectId, key, generation, "forgotten", t);
         db.prepare("UPDATE memory_policy SET generation=?, settings_revision=settings_revision+1, updated_at=? WHERE space_id=? AND project_id=? AND generation=?").run(generation, t, scope.spaceId, scope.projectId, policy.generation);
         db.prepare("UPDATE memory_harvest_jobs SET status='stale', lease_owner=NULL, lease_expires_at=NULL WHERE space_id=? AND project_id=? AND status IN ('pending','leased')").run(scope.spaceId, scope.projectId);
-        bump(scope); return { operationId: randomUUID(), status: "committed", memoryId: input.id, revision: input.expectedRevision + 1, generation };
+        bump(scope); return { operationId: randomUUID(), status: "committed", memoryId: loaded.id, revision: input.expectedRevision + 1, generation };
       });
     },
     clear(scope, expectedGeneration) {
@@ -1082,7 +1107,7 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
           const current = itemFrom(row);
           const next: MemoryRecordDto = { ...current, lifecycle: "forgotten", revision: current.revision + 1, updatedAt: t };
           db.prepare("UPDATE memory_records SET lifecycle='forgotten', revision=?, updated_at=? WHERE id=? AND space_id=? AND project_id=? AND revision=?").run(next.revision, t, next.id, scope.spaceId, scope.projectId, current.revision);
-          revision(next, t); updateFts(next, scope.spaceId);
+          keep(row, t); db.prepare("DELETE FROM memory_fts WHERE rowid=?").run(row.n);
         }
         db.prepare("INSERT OR REPLACE INTO memory_tombstones(space_id,project_id,source_key,generation,reason,created_at) VALUES(?,?,?,?,?,?)").run(scope.spaceId, scope.projectId, "project-clear", generation, "clear", t);
         db.prepare("UPDATE memory_policy SET generation=?, settings_revision=settings_revision+1, harvesting='paused', updated_at=? WHERE space_id=? AND project_id=? AND generation=?").run(generation, t, scope.spaceId, scope.projectId, expectedGeneration);
@@ -1098,37 +1123,62 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
       const maxBytes = Math.max(0, Math.min(input.maxBytes ?? policy.contextBudget.maxBytes, MAX_RECALL_BYTES));
       if (!maxRecords || !maxBytes) return empty("empty", ["budget-zero"]);
       const queryText = [input.intent, ...(input.modules ?? []), ...(input.paths ?? []), input.error ?? "", ...(input.workingContext ?? [])].filter(Boolean).join(" ");
-      const ranked = rankedActiveRows(scope, queryText);
+      // A prompt is mostly words every note uses. The query keeps the ones that
+      // tell notes apart, so a long request is not answered with whatever
+      // shares its filler.
+      const frequency = new Map<string, number>();
+      const frequencyOf = (needle: string): number => {
+        let known = frequency.get(needle);
+        if (known === undefined) { known = noteFrequency(needle); frequency.set(needle, known); }
+        return known;
+      };
+      const indexed = Number((db.prepare("SELECT count(*) AS count FROM memory_fts").get() as { count: number }).count);
+      const common = Math.max(COMMON_WORD_FLOOR, indexed * COMMON_WORD_SHARE);
+      const tokens = queryTokens(queryText).filter((token) => {
+        const notes = frequencyOf(stemOf(token) ?? token);
+        return notes > 0 && notes <= common;
+      });
+      const rare = (needle: string): boolean => frequencyOf(needle) <= RARE_WORD_NOTES;
+      const ranked = tokens.length ? rankedActiveRows(scope, queryText, 0, tokens) : { rows: [] as MemoryRow[], degraded: false };
       const degraded = ranked.degraded;
       let rows = ranked.rows;
-      if (!queryText) {
+      if (!tokens.length) {
         const layers = layerClause(scope);
         rows = db.prepare(`SELECT * FROM memory_records WHERE space_id=? AND ${layers.sql} AND lifecycle='active' AND pinned=1 ORDER BY updated_at DESC LIMIT 64`).all(scope.spaceId, ...layers.params) as unknown as MemoryRow[];
       }
       const exclusions = policy.exclusions;
-      const selected: MemoryContribution["selected"] = [];
+      const earnedRows = new Map<number, boolean>();
+      // Pinned notes are the person's own choice; the rest must earn a place.
+      const earned = (row: MemoryRow): boolean => {
+        if (row.pinned === 1 || degraded || !tokens.length) return true;
+        let known = earnedRows.get(row.n);
+        if (known === undefined) { known = relevant(row, tokens, rare); earnedRows.set(row.n, known); }
+        return known;
+      };
+      const best = rows.find((row) => row.pinned !== 1 && row.score !== undefined && earned(row))?.score;
+      const selected: RecalledNote[] = [];
+      let considered = 0;
       for (const row of rows) {
+        if (!earned(row)) continue;
+        if (row.pinned !== 1 && best !== undefined && row.score !== undefined && row.score > best * RECALL_SCORE_FLOOR) continue;
         const item = itemFrom(row);
         if (excludedByPolicy(item, exclusions)) continue;
-        if (selected.length >= maxRecords) break;
-        const evidence = `${item.title}\n${item.body}`;
+        considered++;
+        if (selected.length >= maxRecords) continue;
         const reason = item.pinned ? "pinned" : (degraded ? "bounded-lexical-fallback" : "fts");
-        const full = { memoryId: item.id, revision: item.revision, digest: digest(json(item)), reason, text: evidence, ...(item.layer === "person" ? { layer: item.layer } : {}), ...(item.about ? { about: item.about } : {}) };
-        if (bytes(memoryEnvelope([...selected, full])) <= maxBytes) {
-          selected.push(full);
-          continue;
+        const note = (text: string, truncated: boolean): RecalledNote => ({ memoryId: item.id, revision: item.revision, digest: digest(json(item)), reason, text, handle: shortId(scope, item.id), ...(truncated ? { truncated: true } : {}), ...(item.layer === "person" ? { layer: item.layer } : {}), ...(item.about ? { about: item.about } : {}) });
+        const fits = (candidate: RecalledNote): boolean => bytes(memoryEnvelope([...selected, candidate])) <= maxBytes;
+        const whole = note(`${item.title}\n${item.body.trim()}`, false);
+        if (bytes(item.title) + bytes(item.body) <= RECALL_INLINE_BYTES && fits(whole)) { selected.push(whole); continue; }
+        // The opening, shortened until it fits what is left of the budget.
+        for (let chars = RECALL_GIST_CHARS; chars >= 24; chars = Math.floor(chars / 2)) {
+          const opening = note(`${item.title}\n${gistOf(item.body, chars)}… (${sizeLabel(bytes(item.body))} in all)`, true);
+          if (fits(opening)) { selected.push(opening); break; }
         }
-        const marker = `\n[truncated; id=${item.id}]`;
-        const empty = { ...full, text: marker };
-        const room = maxBytes - bytes(memoryEnvelope([...selected, empty]));
-        const clipped = boundedEvidence(evidence, room);
-        if (!clipped) continue;
-        const bounded = { ...full, text: `${clipped}${marker}`, truncated: true };
-        if (bytes(memoryEnvelope([...selected, bounded])) <= maxBytes) selected.push(bounded);
       }
       const modelVisibleText = selected.length ? memoryEnvelope(selected) : undefined;
       const status = selected.length ? (degraded ? "degraded" : "selected") : (degraded ? "degraded" : "empty");
-      return { status, ...(modelVisibleText ? { modelVisibleText } : {}), selected, omittedCount: Math.max(0, rows.length - selected.length), estimate: { bytes: bytes(modelVisibleText ?? ""), estimated: true }, dataRevision: String((db.prepare("SELECT data_revision FROM memory_meta WHERE space_id=?").get(scope.spaceId) as { data_revision?: number } | undefined)?.data_revision ?? 0), settingsRevision: policy.settingsRevision, generation: policy.generation, digest: digest(modelVisibleText ?? `${status}:${policy.generation}`), reasons: [degraded ? "fts-unavailable" : "fts"] };
+      return { status, ...(modelVisibleText ? { modelVisibleText } : {}), selected: selected.map(({ handle: _handle, ...note }) => note), omittedCount: Math.max(0, considered - selected.length), estimate: { bytes: bytes(modelVisibleText ?? ""), estimated: true }, dataRevision: String((db.prepare("SELECT data_revision FROM memory_meta WHERE space_id=?").get(scope.spaceId) as { data_revision?: number } | undefined)?.data_revision ?? 0), settingsRevision: policy.settingsRevision, generation: policy.generation, digest: digest(modelVisibleText ?? `${status}:${policy.generation}`), reasons: [degraded ? "fts-unavailable" : "fts"] };
     },
     enqueueHarvest(scope, input) {
       assertScope(scope); if (input.spaceId !== scope.spaceId || input.projectId !== scope.projectId) fail("harvest scope mismatch", "forbidden");
@@ -1192,7 +1242,6 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
           const authoredBy: MemoryAuthor = { kind: "system", via: "harvest" };
           const record: MemoryRecordDto = { id, projectId: placement.projectId, ...normalizedItem, userLocked: false, revision: 1, createdAt: t, updatedAt: t, layer: placement.layer, ...(placement.ownerId ? { ownerId: placement.ownerId } : {}), authoredBy };
           insertRecord(scope.spaceId, record, placement, authoredBy);
-          updateFts(record, scope.spaceId); revision(record, t);
           const receipt: MemoryReceiptDto = { operationId, status: "committed", memoryId: id, revision: 1, generation: policy.generation, digest: digest(json(record)) };
           db.prepare("INSERT INTO memory_idempotency(project_id,operation_key,fingerprint,receipt,created_at) VALUES(?,?,?,?,?)").run(scope.projectId, item.idempotencyKey, item.requestFingerprint, json(receipt), t);
           committed++;
@@ -1289,12 +1338,11 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
               normalized.title, normalized.body, normalized.category, json(normalized.tags), json(normalized.aliases), json(normalized.applicability), json(normalized.sources), normalized.lifecycle, normalized.evidence, normalized.freshness, normalized.pinned ? 1 : 0, nextRevision, t, record.id, scope.spaceId, scope.projectId,
             );
             const next: MemoryRecordDto = { ...itemFrom(existing), ...normalized, id: record.id, projectId: scope.projectId, revision: nextRevision, createdAt: Number(existing.created_at), updatedAt: t, userLocked: true };
-            updateFts(next, scope.spaceId); revision(next, t); imported++; continue;
+            keep(existing, t); updateFts(next); imported++; continue;
           }
           const authoredBy: MemoryAuthor = { kind: "system", via: "import" };
           const next: MemoryRecordDto = { ...normalized, id: record.id, projectId: scope.projectId, revision: 1, createdAt: t, updatedAt: t, userLocked: true, layer: "project", authoredBy };
-          insertRecord(scope.spaceId, next, { layer: "project", ownerId: "" }, authoredBy);
-          updateFts(next, scope.spaceId); revision(next, t); imported++;
+          insertRecord(scope.spaceId, next, { layer: "project", ownerId: "" }, authoredBy); imported++;
         }
         if (imported) bump(scope);
         return { operationId: randomUUID(), status: "committed", generation: policy.generation, message: `imported ${imported} record(s)` };
@@ -1305,7 +1353,7 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
       if (!grantsOf(scope).some((grant) => grantKey(grant) === grantKey(target))) fail("memory layer is not granted", "forbidden");
       const row = grantedRow(scope, id);
       if (!row) fail("memory record not found", "not-found");
-      const loaded = row as MemoryRow;
+      const loaded = row as MemoryRow; id = loaded.id;
       if (Number(loaded.revision) !== expectedRevision) fail("memory record changed since it was loaded", "conflict");
       if (loaded.lifecycle === "forgotten") fail("forgotten memory requires explicit restoration", "conflict");
       const placement = placementOf(scope, target);
@@ -1315,8 +1363,8 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
         if (Number(result.changes) !== 1) fail("memory record changed since it was loaded", "conflict");
         db.prepare("UPDATE memory_revisions SET project_id=? WHERE record_id=?").run(placement.projectId, id);
         const next = itemFrom({ ...loaded, layer: placement.layer, owner_id: placement.ownerId, project_id: placement.projectId, revision: expectedRevision + 1, updated_at: t });
-        updateFts(next, scope.spaceId); revision(next, t); bump(scope);
-        return { operationId: randomUUID(), status: "committed", memoryId: id, revision: next.revision, generation: policyRow(scope).generation, digest: digest(json(next)) };
+        keep(loaded, t); bump(scope);
+        return { operationId: randomUUID(), status: "committed", memoryId: loaded.id, revision: next.revision, generation: policyRow(scope).generation, digest: digest(json(next)) };
       });
     },
     shareProposals(scope) {
@@ -1329,7 +1377,7 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
       assertScope(scope);
       const row = grantedRow(scope, id);
       if (!row) fail("memory record not found", "not-found");
-      const loaded = row as MemoryRow;
+      const loaded = row as MemoryRow; id = loaded.id;
       if (loaded.layer !== "person" || (outcome === "kept" && loaded.share_proposed_at === null)) fail("this note is not waiting for a decision", "conflict");
       if (Number(loaded.revision) !== expectedRevision) fail("memory record changed since it was loaded", "conflict");
       return tx(db, () => {
@@ -1337,8 +1385,8 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
         const result = db.prepare("UPDATE memory_records SET lifecycle=?, share_proposed_at=NULL, revision=revision+1, updated_at=? WHERE id=? AND space_id=? AND revision=?").run(lifecycle, t, id, scope.spaceId, expectedRevision);
         if (Number(result.changes) !== 1) fail("memory record changed since it was loaded", "conflict");
         const next = itemFrom({ ...loaded, lifecycle, share_proposed_at: null, revision: expectedRevision + 1, updated_at: t });
-        updateFts(next, scope.spaceId); revision(next, t); bump(scope);
-        return { operationId: randomUUID(), status: "committed", memoryId: id, revision: next.revision, generation: policyRow(scope).generation };
+        keep(loaded, t); updateFts(next); bump(scope);
+        return { operationId: randomUUID(), status: "committed", memoryId: loaded.id, revision: next.revision, generation: policyRow(scope).generation };
       });
     },
     sessionSourcedRecords(scope, limit = 200) {
@@ -1357,14 +1405,14 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
     purgePerson(scope, userId) {
       assertScope(scope);
       return tx(db, () => {
-        const ids = (db.prepare("SELECT id FROM memory_records WHERE space_id=? AND layer='person' AND owner_id=?").all(scope.spaceId, userId) as Array<{ id: string }>).map((row) => row.id);
-        for (const id of ids) {
-          db.prepare("DELETE FROM memory_fts WHERE memory_id=?").run(id);
-          db.prepare("DELETE FROM memory_revisions WHERE record_id=?").run(id);
-          db.prepare("DELETE FROM memory_records WHERE id=? AND space_id=?").run(id, scope.spaceId);
+        const rows = db.prepare("SELECT n, id FROM memory_records WHERE space_id=? AND layer='person' AND owner_id=?").all(scope.spaceId, userId) as Array<{ n: number; id: string }>;
+        for (const row of rows) {
+          db.prepare("DELETE FROM memory_fts WHERE rowid=?").run(row.n);
+          db.prepare("DELETE FROM memory_revisions WHERE record_id=?").run(row.id);
+          db.prepare("DELETE FROM memory_records WHERE n=?").run(row.n);
         }
-        if (ids.length) bump(scope);
-        return ids.length;
+        if (rows.length) bump(scope);
+        return rows.length;
       });
     },
     close() { if (!closed) { closed = true; } },

@@ -11,7 +11,7 @@ import type {
   MemoryPolicyDto,
   MemoryRecordDto,
   MemoryReceiptDto,
-} from "@polyth/knowledge/memory-contracts";
+} from "./contracts.ts";
 import {
   REFLECT_INSTRUCTION_CONFIRMATION,
   type ReflectApproveInput,
