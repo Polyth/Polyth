@@ -202,6 +202,9 @@ test("server archives ride along as checksummed extras and never block a desktop
       put(`products-server-${target}`, `${serverArchiveName("0.1.86", target)}.sha256`, "sum");
       // npm tarballs go to the registry, not into the release.
       put(`products-server-${target}`, `polyth-server-${target}-0.1.86.tgz`);
+      // Every server runner also packs the platform-independent main package, so the
+      // same name appears once per product directory (publish-server-npm.mjs).
+      put(`products-server-${target}`, "polyth-0.1.86.tgz", "the same package bytes");
     }
     const feed = join(root, "feed");
     const result = assembleFeed(products, feed);
@@ -219,6 +222,11 @@ test("server archives ride along as checksummed extras and never block a desktop
 
     put("products-server-darwin-x64", serverArchiveName("0.1.85", "darwin-x64"));
     assert.throws(() => assembleFeed(products, feed), /polyth-server-0\.1\.85-darwin-x64\.tar\.gz does not belong to release 0\.1\.86/);
+    rmSync(join(products, "products-server-darwin-x64", serverArchiveName("0.1.85", "darwin-x64")));
+
+    // The same name with different bytes is a real conflict, never a silent pick.
+    put("products-server-linux-arm64", "polyth-0.1.86.tgz", "different bytes");
+    assert.throws(() => assembleFeed(products, feed), /both named polyth-0\.1\.86\.tgz with different contents/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

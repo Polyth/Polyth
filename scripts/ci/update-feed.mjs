@@ -27,6 +27,7 @@
 // (apps/desktop/src/updaterChannel.ts) keys on that id. The test channel
 // (X.Y.N-beta) is retired; stable releases still carry beta*.yml so installs
 // that followed it keep updating.
+import { createHash } from "node:crypto";
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -184,6 +185,17 @@ export function mergeMacMetadata(texts) {
   return base.join("\n");
 }
 
+/** sha256 of one file, for duplicate-product comparison. */
+function sha256File(file) {
+  return createHash("sha256").update(readFileSync(file)).digest("hex");
+}
+
+/** Of two copies of the same product, the linux-x64 one is the published copy. */
+function preferredProduct(a, b) {
+  const score = (file) => (file.includes("server-linux-x64") ? 0 : 1);
+  return score(a) <= score(b) ? a : b;
+}
+
 function filesIn(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
@@ -333,7 +345,18 @@ export function assembleFeed(productsDir, feedDir, channel = "stable") {
   const byName = new Map();
   for (const file of filesIn(resolve(productsDir))) {
     const name = basename(file);
-    if (byName.has(name)) throw new Error(`Two builder products are both named ${name}`);
+    const seen = byName.get(name);
+    if (seen !== undefined) {
+      // Every server runner packs the same platform-independent `polyth-<version>.tgz`
+      // (see publish-server-npm.mjs), so one name legitimately appears in several
+      // product directories. Identical bytes are one asset; different bytes are a
+      // real conflict and must never be silently picked.
+      if (sha256File(seen) === sha256File(file)) {
+        byName.set(name, preferredProduct(seen, file));
+        continue;
+      }
+      throw new Error(`Two builder products are both named ${name} with different contents`);
+    }
     byName.set(name, file);
   }
   const macPartials = MAC_ARCHITECTURES.map((arch) => {
