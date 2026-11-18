@@ -20,8 +20,10 @@ import {
   fallbackTitleFromRequest,
   readGeneratedTitle,
   selectOpenCodeFreeModel,
+  titleConversationInput,
   titlePromptInput,
   type CustomTitleAttempt,
+  type CustomTitleInputKind,
 } from "./title.ts";
 
 // Automatic naming holds back the session's fallback title, so it gives up
@@ -61,19 +63,25 @@ const publicError = (cause: unknown): { status: number; code: string; message: s
   return { status: 503, code: "unavailable", message: "Custom Titles is unavailable. Check the title generator in Custom Titles settings, or try again." };
 };
 
-/** The person's request a session is named after: its first visible message,
+/** The person's requests in a session, in order: every visible user message,
  * or the task of a workflow run it was created to host (that parent never
  * receives the task as a user turn). Hidden messages, such as a delegated
  * permission wake, are not the person's words. */
-export const namingRequest = (events: readonly SessionEvent[]): string | undefined => {
+export const namingConversation = (events: readonly SessionEvent[]): string[] => {
+  const requests: string[] = [];
   for (const event of events) {
     const text = event.type === "user/message" && event.data.hiddenUserMessage !== true
       ? event.data.text
       : event.type === "workflow/run-started" ? event.data.input : undefined;
-    if (typeof text === "string" && text.trim()) return text;
+    if (typeof text === "string" && text.trim()) requests.push(text);
   }
-  return undefined;
+  return requests;
 };
+
+/** The request a session is named after automatically: its first visible
+ * message, or the task of the workflow run it was created to host. */
+export const namingRequest = (events: readonly SessionEvent[]): string | undefined =>
+  namingConversation(events)[0];
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
   const settingsStore = createCustomTitleSettingsStore((space) => host.spaceStorage(space));
@@ -113,6 +121,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     signal: AbortSignal,
     timeoutMs: number,
     deadline: number,
+    kind: CustomTitleInputKind = "request",
   ): Promise<string | undefined> => {
     const { settings, projectId, rulesProjectId, cwd, projection } = await sessionContext(sessionId);
     signal.throwIfAborted();
@@ -151,8 +160,8 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       try {
         ({ text } = await host.smallModelComplete(runtime, {
           cwd,
-          prompt: buildCustomTitlePrompt(prompt, rules, attempt.kind),
-          systemPrompt: buildCustomTitleSystemPrompt(rules, attempt.kind),
+          prompt: buildCustomTitlePrompt(prompt, rules, attempt.kind, kind),
+          systemPrompt: buildCustomTitleSystemPrompt(rules, attempt.kind, kind),
           model,
           maxOutputTokens: attempt.maxOutputTokens,
           timeoutMs: budget,
@@ -181,7 +190,12 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     throw Object.assign(new Error("title generator returned no usable title"), { code: "invalid-response" });
   };
 
-  const generateWithin = async (sessionId: string, prompt: string, timeoutMs: number): Promise<string | undefined> => {
+  const generateWithin = async (
+    sessionId: string,
+    prompt: string,
+    timeoutMs: number,
+    kind: CustomTitleInputKind = "request",
+  ): Promise<string | undefined> => {
     if (!enabled) return undefined;
     const controller = new AbortController();
     const deadline = Date.now() + timeoutMs;
@@ -198,7 +212,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     try {
       // Bound setup and catalog discovery as well as inference. Otherwise
       // Always mode suppresses native titles without ever reaching fallback.
-      return await Promise.race([generateTitle(sessionId, prompt, controller.signal, timeoutMs, deadline), aborted]);
+      return await Promise.race([generateTitle(sessionId, prompt, controller.signal, timeoutMs, deadline, kind), aborted]);
     } finally {
       clearTimeout(timer);
       controller.signal.removeEventListener("abort", abort);
@@ -244,15 +258,20 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         if (regenerations.has(pendingKey)) throw Object.assign(new Error("Title regeneration is already in progress"), { code: "conflict" });
         key = pendingKey;
         regenerations.add(key);
-        // A chat that has only a draft is named after it. The Space-scoped
-        // snapshot carries the caller's own draft, never another person's.
-        const prompt = namingRequest(await sessions.events(sessionId))
-          ?? (before.draft?.trim() ? before.draft : undefined);
+        // A chat with requests is named after all of them (compacted: only the
+        // person's words, bounded), not just the first. One that has only a
+        // draft is named after it. The Space-scoped snapshot carries the
+        // caller's own draft, never another person's.
+        const requests = namingConversation(await sessions.events(sessionId));
+        const kind: CustomTitleInputKind = requests.length ? "conversation" : "request";
+        const prompt = requests.length
+          ? titleConversationInput(requests)
+          : before.draft?.trim() ? before.draft : undefined;
         if (prompt === undefined) throw Object.assign(new Error("Write a message before regenerating the title"), { code: "invalid-input" });
         let title: string | undefined;
         let fallback = false;
         try {
-          title = await generateWithin(sessionId, prompt, REGENERATE_TITLE_TIMEOUT_MS);
+          title = await generateWithin(sessionId, prompt, REGENERATE_TITLE_TIMEOUT_MS, kind);
         } catch (cause) {
           // The model answered, just never with a title. A click still earns one,
           // drawn from the user's own first message and flagged as such.

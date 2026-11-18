@@ -9,7 +9,7 @@ import {
   type ServerPackageHost,
   type ServerSessionTitleGenerator,
 } from "@polyth/plugins";
-import registerPackage, { namingRequest } from "../src/serverEntry.ts";
+import registerPackage, { namingConversation, namingRequest } from "../src/serverEntry.ts";
 import { DEFAULT_CUSTOM_TITLE_SETTINGS, type CustomTitleSettings } from "../src/settings.ts";
 import { createCustomTitleSettingsStore } from "../src/settingsStore.ts";
 import { httpErrorDiagnostics } from "../../server/src/errorDiagnostics.ts";
@@ -42,6 +42,8 @@ function fixture(t: TestContext, stage?: "context" | "runtime" | "catalog" | "co
     ["foreign", { id: "foreign", projectId: "foreign-project", spaceId: "foreign-space", title: "Private title", status: "idle", createdAt: 1, updatedAt: 1 }],
   ]);
   let prompt = "Fix title generation";
+  // The session's visible user requests, unless a test replaces them.
+  let conversation: string[] | undefined;
   const renames: Array<{ sessionId: string; title: string }> = [];
   const snapshot = async (sessionId: string) => {
     const projection = projections.get(sessionId);
@@ -88,7 +90,8 @@ function fixture(t: TestContext, stage?: "context" | "runtime" | "catalog" | "co
         snapshot,
         events: async (sessionId: string) => {
           await snapshot(sessionId);
-          return [{ type: "user/message", data: { text: "  " } }, { type: "user/message", data: { text: prompt } }];
+          const texts = conversation ?? ["  ", prompt];
+          return texts.map((text) => ({ type: "user/message", data: { text } }));
         },
         rename: async (sessionId: string, title: string) => {
           await snapshot(sessionId);
@@ -157,6 +160,7 @@ function fixture(t: TestContext, stage?: "context" | "runtime" | "catalog" | "co
     removeWorktree() { projections.set("session", { ...projections.get("session")!, worktreePath: undefined }); },
     useLegacyPool() { delete host.runtimes.forSession; },
     setPrompt(value: string) { prompt = value; },
+    setConversation(...texts: string[]) { conversation = texts; },
     setTitle(title: string) { projections.set("session", { ...projections.get("session")!, title, titleSource: "manual" }); },
     setDraft(draft: string) { projections.set("session", { ...projections.get("session")!, draft }); },
     saveSettings(value: CustomTitleSettings) {
@@ -291,9 +295,9 @@ test("explicit regeneration uses current settings in fallback mode and the canon
   assert.equal(response.status, 200);
   assert.deepEqual(response.data, { title: "Fix custom title generation" });
   assert.deepEqual(f.renames, [{ sessionId: "session", title: "Fix custom title generation" }]);
-  // The message is data between markers and the instruction comes last, so an
-  // agent-tuned model reads "title this" last rather than the message's own ask.
-  assert.match(f.completion()?.prompt ?? "", /^First message of the session:\n"""\nFix title generation\n"""\nReply with the title only\.\nTitle \(Ukrainian\):$/);
+  // The whole conversation names the chat: only the person's requests,
+  // compacted and bounded, with the instruction last.
+  assert.match(f.completion()?.prompt ?? "", /^The person's requests in this session, in order:\n"""\nFix title generation\n"""\nReply with the title only\.\nTitle \(Ukrainian\):$/);
   assert.match(f.completion()?.systemPrompt ?? "", /Ukrainian/);
   assert.match(f.completion()?.systemPrompt ?? "", /Concise/);
   assert.match(f.completion()?.systemPrompt ?? "", /Mention the feature/);
@@ -312,12 +316,31 @@ test("regeneration rejects a known-valid foreign-Space session like an unknown s
 
 test("a chat with only a draft is named after the draft", async (t) => {
   const f = fixture(t);
-  f.setPrompt("  ");
+  f.setConversation();
   f.setDraft("Draft about title generation");
   const response = await f.request();
   assert.equal(response.status, 200);
   assert.deepEqual(f.renames, [{ sessionId: "session", title: "Fix custom title generation" }]);
-  assert.match(f.completion()?.prompt ?? "", /Draft about title generation/);
+  assert.match(f.completion()?.prompt ?? "", /^First message of the session:\n"""\nDraft about title generation/);
+});
+
+test("regeneration names the chat from every request in the conversation, compacted", async (t) => {
+  const f = fixture(t);
+  f.setConversation(
+    "Add a date picker to the schedule form",
+    "It should default to today",
+    `${'pasted log line '.repeat(200)}\nNow make the picker keyboard accessible`,
+  );
+  const response = await f.request();
+  assert.equal(response.status, 200);
+  const prompt = f.completion()?.prompt ?? "";
+  assert.match(prompt, /^The person's requests in this session, in order:\n"""/);
+  assert.match(prompt, /Add a date picker to the schedule form\nIt should default to today\n/);
+  // A pasted log is compacted to its opening and its ask, not forwarded whole.
+  assert.match(prompt, /pasted log line/);
+  assert.match(prompt, /Now make the picker keyboard accessible/);
+  assert.ok(prompt.length < 1_600, `the conversation input stays bounded (${prompt.length})`);
+  assert.match(f.completion()?.systemPrompt ?? "", /the person's requests in the session/);
 });
 
 test("a sent message names the chat even when a draft is pending", async (t) => {
@@ -446,9 +469,9 @@ test("a reply with no title is retried once with the bare few-shot prompt", asyn
   assert.deepEqual(response.data, { title: "Fix the login redirect loop" });
   const [first, retry] = f.completions();
   assert.equal(f.calls(), 2);
-  assert.match(first!.prompt, /^First message of the session:/);
+  assert.match(first!.prompt, /^The person's requests in this session, in order:/);
   assert.match(retry!.prompt, /^Message: the cron job runs twice every night, find out why\nTitle: .+\n\n/);
-  assert.match(retry!.prompt, /\nMessage: Fix title generation\nTitle:$/);
+  assert.match(retry!.prompt, /\nRequests: Fix title generation\nTitle:$/);
   assert.ok(retry!.maxOutputTokens > first!.maxOutputTokens, "the retry leaves room for a model that thinks first");
   assert.notEqual(retry!.systemPrompt, first!.systemPrompt);
   assert.deepEqual(f.renames, [{ sessionId: "session", title: "Fix the login redirect loop" }]);
@@ -585,4 +608,13 @@ test("regeneration names a session after the person's request, not a hidden wake
     event("workflow/run-started", { input: "A later workflow" }),
   ]), "Fix title generation");
   assert.equal(namingRequest([event("user/message", { text: "Only hidden", hiddenUserMessage: true })]), undefined);
+  // Regeneration reads the whole conversation, still only the person's words.
+  assert.deepEqual(namingConversation([
+    event("session/created", { title: "New session" }),
+    event("user/message", { text: "First request" }),
+    event("user/message", { text: "Hidden wake", hiddenUserMessage: true }),
+    event("user/message", { text: "Second request" }),
+    event("workflow/run-started", { input: "A later workflow" }),
+  ]), ["First request", "Second request", "A later workflow"]);
+  assert.deepEqual(namingConversation([]), []);
 });
