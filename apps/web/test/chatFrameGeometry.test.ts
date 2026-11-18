@@ -33,16 +33,20 @@ const summary = (state: string, copy: string) => `
     <span class="ui-run-summary-copy">${copy}</span>
     <svg class="ui-run-summary-chevron ui-icon ui-icon--sm" width="16" height="16"></svg>
   </button>`;
-const step = `
+const stepRow = (name: string, target = "") => `
   <div class="tool-card execution-row"><div class="execution-summary-line">
     <button class="tool-disclosure execution-summary">
       <span class="tool-icon execution-icon"><svg></svg></span>
-      <span class="execution-main"><span class="tool-name">Shell</span></span>
+      <span class="execution-main"><span class="tool-name">${name}</span>${target ? `<span class="tool-preview">${target}</span>` : ""}</span>
       <span class="execution-diff-stat-slot"></span>
       <span class="execution-status done"><span class="execution-duration">4s</span></span>
       <span class="tool-chevron"><svg></svg></span>
     </button>
   </div></div>`;
+const step = stepRow("Shell");
+// A step's target is far longer than its name: the name must keep its words
+// and the target must be what truncates.
+const longTargetStep = stepRow("Read", "Read · .agents/skills/polyth-agent-beta/SKILL.md");
 
 const conversation = (rail: string) => `
 <div class="app mode-chat view-session"><div class="app-shell">
@@ -53,7 +57,7 @@ const conversation = (rail: string) => `
         <section class="msg assistant activity-group folded">${summary("completed", "<strong>Ran 1 command</strong>")}</section>
         <section class="msg assistant activity-group open">
           ${summary("completed", "<strong>Ran 1 command</strong>")}
-          <div class="activity-group-expand-shell"><div class="activity-group-collapse-content"><div class="activity-group-items">${step}</div></div></div>
+          <div class="activity-group-expand-shell"><div class="activity-group-collapse-content"><div class="activity-group-items">${step}${longTargetStep}</div></div></div>
         </section>
         <section class="msg assistant activity-group current has-live-stop">
           ${summary("active", "<strong>Shell</strong>")}
@@ -132,6 +136,22 @@ const measure = (page: Page) => page.evaluate(() => {
   };
 });
 
+/** The long-target step's name, as the reader sees it: its glyphs and the
+ *  line they stand on. */
+const measureStepLine = (page: Page) => page.evaluate(() => {
+  const rows = document.querySelectorAll(".open .execution-row");
+  const row = rows[rows.length - 1]!;
+  const main = row.querySelector<HTMLElement>(".execution-main")!;
+  const name = row.querySelector<HTMLElement>(".tool-name")!;
+  const range = document.createRange();
+  range.selectNodeContents(name);
+  return {
+    main: main.getBoundingClientRect().toJSON() as { right: number },
+    name: range.getBoundingClientRect().toJSON() as { width: number; right: number },
+    overflows: main.scrollWidth > main.clientWidth,
+  };
+});
+
 const near = (actual: number, expected: number, what: string, tolerance = 0.6) =>
   assert.ok(Math.abs(actual - expected) <= tolerance, `${what}: ${actual} vs ${expected}`);
 
@@ -165,6 +185,15 @@ for (const viewport of VIEWPORTS) {
         near(m.stepChevronRight, m.chevronRight, "step chevrons share the block's column");
       }
       near(m.threadX, m.openMarkCentre, "the thread hangs from the mark's centre", 1);
+      await page.context().close();
+    });
+
+    test(`${name}: a step names itself before its target truncates`, { skip: !CHROME || viewport.width > 430 }, async () => {
+      const page = await fixture(look, viewport, CLOSED_WINDOW);
+      const line = await measureStepLine(page);
+      assert.ok(line.name.width > 0, `the step's name keeps its glyphs: ${line.name.width}`);
+      assert.ok(line.name.right <= line.main.right + 0.5, `the name is not cut off: ${line.name.right} vs ${line.main.right}`);
+      assert.ok(line.overflows, "the target, not the name, takes the truncation");
       await page.context().close();
     });
 

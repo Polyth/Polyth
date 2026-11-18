@@ -3320,6 +3320,11 @@ runs. Steps are separated by rhythm alone (34 px rows,
 `--hit-min` on touch). A finished step shows its duration but no tick, since
 the block's own mark says done; failures and running steps keep their glyph.
 The summary title (weight 500) never truncates; its counts give way first.
+A step's name never truncates either: on phones the name and its target share
+one text line, and only the line's end truncates, so the target gives way
+before the name instead of the two columns splitting the shortage
+(`--text-scale` included). `chatFrameGeometry.test.ts` measures that at phone
+widths.
 Every look keeps this geometry: the mark starts and the chevron ends on the prose
 edges, the thread hangs from the mark's centre (`--activity-thread-x`), and steps
 start on the title column. A look that draws a rule or a pill on the summary (Line,

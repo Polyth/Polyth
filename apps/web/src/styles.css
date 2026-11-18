@@ -18166,12 +18166,29 @@ html[dir="rtl"] .reasoning-preview {
     gap: 5px;
     padding-inline: 0;
   }
-  .execution-main { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 7px; }
-  .execution-main .tool-name { font-size: calc(13.5px * var(--text-scale, 1)); }
-  .execution-main .tool-preview {
+  /* One text line per step: the name and its target share a line, and only the
+     end of that line truncates. Two separate boxes gave each side a width to
+     bargain over, and one reported phone had the name squeezed to "Re…" while
+     the target kept its room; inline text cannot trade the name away, because
+     the ellipsis always lands on the target's tail. */
+  .execution-main {
     display: block;
-    align-self: center;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .execution-main .tool-name {
+    display: inline;
+    font-size: calc(13.5px * var(--text-scale, 1));
+  }
+  .execution-main .tool-preview {
+    display: inline;
+    overflow: visible;
+    max-inline-size: none;
+    margin-inline-start: 7px;
     font-size: calc(12.5px * var(--text-scale, 1));
+    text-overflow: clip;
   }
   .execution-status { width: 67px; gap: 4px; font-size: calc(11.5px * var(--text-scale, 1)); }
   .execution-details.tool-body { padding: 0 0 5px; }
