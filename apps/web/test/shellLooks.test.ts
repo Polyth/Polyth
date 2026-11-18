@@ -350,6 +350,10 @@ test("over a wallpaper the Monoliths' work plane is a window in the chrome, and 
   assert.match(desktop, /body:is\(\[data-shell-look="monolith"\], \[data-shell-look="monolith-reverse"\]\):not\(#\\#\):not\(#\\#\) \.app \{\s*background: transparent !important;/);
   assert.match(desktop, /\.app-shell > \.workspace \{\s*box-shadow: var\(--look-work-shadow\), 0 0 0 100vmax var\(--look-chrome\) !important;/);
   assert.match(desktop, /:is\(\.app > \.header, \.app-shell > \.sidebar:not\(\.sidebar--rail-collapsed\)\) \{\s*z-index: 1;/);
+  // .app-shell clips the spread, and Classic stacks the top rail above the
+  // shell: there the rail paints the chrome itself, or its row is the bare
+  // image (railLauncherStability.test.ts measures the pixels).
+  assert.match(desktop, /:not\(\[data-shell-layout="columns"\]\):not\(\[data-shell-layout="bare"\]\):not\(#\\#\):not\(#\\#\) \.app > \.header \{\s*background: var\(--look-chrome\) !important;\s*box-shadow: 0 var\(--space-2\) 0 0 var\(--look-chrome\) !important;/);
   // Monolith: the backdrop veils as before; the sheet frosts as a canvas does.
   const mono = block(/body\[data-shell-look="monolith"\]:not\(#\\#\)/, "--look-backdrop:");
   assert.match(mono, /--look-chrome: color-mix\(in srgb, var\(--look-backdrop\) var\(--look-veil-soft\), transparent\);/);

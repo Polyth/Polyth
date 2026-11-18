@@ -765,7 +765,13 @@ at ≥ 6.6:1.
   image. Painted on `.app`, the chrome lay under the plane too and the two
   veils stacked, so Reverse's well let only a few percent of the image
   through. The navigator and the top rail come before the plane in the tree,
-  so they take `z-index: 1` (the launcher column already sits above). Tablets
+  so they take `z-index: 1` (the launcher column already sits above).
+  `.app-shell` clips its overflow, so the spread ends at the shell: Columns and
+  Bare lay the top rail over the shell, inside it, but Classic stacks the rail
+  above the shell, so there the rail paints `--look-chrome` itself, square,
+  and casts it `var(--space-2)` down over the desktop `.app` gap under it
+  (without it, the rail row was a band of bare image over the lit navigator,
+  and then a line of it). Tablets
   and phones keep the chrome on `.app`. A docked window's plane still lies on
   the spread, so over a wallpaper it shows a little less of the image than the
   conversation does. Guards: `shellLooks.test.ts`,

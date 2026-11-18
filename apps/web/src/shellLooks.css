@@ -706,6 +706,20 @@ body:is([data-shell-look="monolith"], [data-shell-look="monolith-reverse"]):is([
     box-shadow: var(--look-work-shadow), 0 0 0 100vmax var(--look-chrome) !important;
   }
 
+  /* The spread ends at .app-shell, which clips its overflow. Columns and
+     Bare lay the top rail over the shell, inside the spread; Classic stacks
+     it above the shell, where the rail row showed the bare image (a dark
+     band over the lit navigator and strip). There the rail paints the chrome
+     itself, on the same frosted image, so the two meet with no seam. It is a
+     band of the plane, not a card, so it keeps no corner; and the desktop
+     shell's gap under it (.app's gap, var(--space-2) in styles.css) is chrome
+     too: the rail casts its fill down over it, exactly that far. */
+  body:is([data-shell-look="monolith"], [data-shell-look="monolith-reverse"]):not([data-shell-layout="columns"]):not([data-shell-layout="bare"]):not(#\#):not(#\#) .app > .header {
+    background: var(--look-chrome) !important;
+    box-shadow: 0 var(--space-2) 0 0 var(--look-chrome) !important;
+    border-radius: 0 !important;
+  }
+
   body:is([data-shell-look="monolith"], [data-shell-look="monolith-reverse"]):not(#\#) :is(.app > .header, .app-shell > .sidebar:not(.sidebar--rail-collapsed)) {
     z-index: 1;
   }

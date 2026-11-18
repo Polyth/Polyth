@@ -355,6 +355,79 @@ test("in the Monoliths a docked window lies on a plane like the conversation's, 
   assert.deepEqual(off, []);
 });
 
+/** One painted pixel of the page, as [r, g, b]. */
+async function samplePixel(x: number, y: number): Promise<number[]> {
+  const shot = (await page!.screenshot({ clip: { x, y, width: 1, height: 1 }, type: "png" })).toString("base64");
+  return page!.evaluate(async (data) => {
+    const image = new Image();
+    image.src = `data:image/png;base64,${data}`;
+    await image.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
+    const context = canvas.getContext("2d")!;
+    context.drawImage(image, 0, 0);
+    return Array.from(context.getImageData(0, 0, 1, 1).data).slice(0, 3);
+  }, shot);
+}
+
+test("in the Monoliths the top rail is chrome like the rest of the frame in every layout, never the bare image", { skip: !CHROME }, async () => {
+  // On the desktop the chrome is the conversation's outer spread, and
+  // .app-shell clips it. Classic stacks the top rail above the shell, so over
+  // a wallpaper its row showed the bare image: a dark band over the lit
+  // navigator and strip (shellLooks.css, "a window in the chrome").
+  const off: string[] = [];
+  try {
+    for (const look of ["monolith", "monolith-reverse"]) {
+      for (const layout of ["classic", "columns"] as const) {
+        for (const light of [false, true]) {
+          const shape: Shape = { look, layout, floating: false };
+          await load(shape, "idle");
+          const at = await page!.evaluate((light) => {
+            const root = document.documentElement;
+            root.classList.toggle("light", light);
+            // A dark wallpaper, in a colour no look paints, so any row the
+            // chrome misses shows it.
+            root.dataset.backgroundTone = "dark";
+            root.style.background = "rgb(200, 20, 40)";
+            document.querySelector(".app")!.insertAdjacentHTML("afterbegin", `
+              <header class="header" id="bar" data-top-rail-surface="flat"
+                style="--shell-bar-left: 0px; --shell-bar-right: 0px; transition: none"></header>`);
+            const rect = (id: string) => {
+              const r = document.getElementById(id)!.getBoundingClientRect();
+              return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+            };
+            const shell = document.querySelector(".app-shell")!.getBoundingClientRect();
+            return { bar: rect("bar"), ws: rect("ws"), shellTop: shell.top, height: innerHeight };
+          }, light);
+          const label = `${name(shape)}${light ? " light" : ""}`;
+          // The chrome's own reference: the frame under the conversation.
+          assert.ok(at.ws.bottom + 4 < at.height, `${label}: no frame below the conversation to compare with`);
+          const frame = await samplePixel(Math.round((at.ws.left + at.ws.right) / 2), Math.round(at.ws.bottom + 4));
+          const middle = Math.round((at.bar.left + at.bar.right) / 2);
+          const differs = (pixel: number[]) => pixel.some((channel, i) => Math.abs(channel - frame[i]!) > 2);
+          const rail = await samplePixel(middle, Math.round((at.bar.top + at.bar.bottom) / 2));
+          if (differs(rail)) off.push(`${label}: the top rail paints rgb(${rail}), the frame around the conversation rgb(${frame})`);
+          // The desktop shell parts the rail from the shell by a gap
+          // (styles.css), which is chrome too, not a line of the image.
+          if (at.shellTop - at.bar.bottom >= 2) {
+            const seam = await samplePixel(middle, Math.floor((at.bar.bottom + at.shellTop) / 2));
+            if (differs(seam)) off.push(`${label}: the gap under the top rail paints rgb(${seam}), the frame rgb(${frame})`);
+          }
+        }
+      }
+    }
+  } finally {
+    await page!.evaluate(() => {
+      const root = document.documentElement;
+      root.classList.remove("light");
+      delete root.dataset.backgroundTone;
+      root.style.removeProperty("background");
+    });
+  }
+  assert.deepEqual(off, []);
+});
+
 test("the island bar stands beside a floating window, never under it, and nothing spills out of it", { skip: !CHROME }, async () => {
   // Header publishes how far a window overlays the workspace's edge
   // (--shell-bar-reserve-right). The capsule padded both sides by that
