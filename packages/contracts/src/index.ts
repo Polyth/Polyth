@@ -4951,6 +4951,24 @@ export interface HarnessUpdateStatus {
    *  can replace it: `launcher` is the file found, `location` what it starts
    *  (a file, or the folder it picks from), `app` who owns that when known. */
   external?: { launcher: string; location?: string; app?: string };
+  /** Automatic updates on this machine; absent for a remote project. */
+  autoUpdate?: HarnessAutoUpdateState;
+}
+/** Whether the server installs a harness CLI's new releases by itself
+ *  (`PUT /api/harnesses/:id/auto-update`). It updates only while none of the
+ *  harness's chats is working, then restarts each runtime still on the old
+ *  version once its chat is idle. Machine-wide; only the instance owner can
+ *  switch it and only the owner receives `pending` and `last`. */
+export interface HarnessAutoUpdateState {
+  enabled: boolean;
+  /** The caller may switch it: the instance owner, for a local CLI with an updater. */
+  canChange: boolean;
+  /** `update`: `version` is published and waits for the chats to go idle.
+   *  `restart`: the update ran; chats still on the old version restart once idle. */
+  pending?: { kind: "update"; version: string } | { kind: "restart" };
+  /** The last automatic attempt. `from`/`to` are the versions installed before
+   *  and after; a failed attempt for one release is retried a day later. */
+  last?: { at: number; ok: boolean; latest?: string; from?: string; to?: string; message?: string };
 }
 export interface HarnessContext {
   /** Server-validated context for provider-owned per-Space storage. */

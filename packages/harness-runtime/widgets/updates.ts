@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
-import type { HarnessInstallDto, HarnessUpdateStatus } from "@polyth/contracts";
+import type { HarnessAutoUpdateState, HarnessInstallDto, HarnessUpdateStatus } from "@polyth/contracts";
 import { createApiTransport } from "@polyth/web-sdk";
 import { invalidateRuntimeCatalogs } from "@polyth/models/runtime-catalog";
 import { installIsActive } from "./installPresentation.ts";
@@ -83,6 +83,20 @@ export async function runHarnessUpdate(harnessId: string, projectId?: string | n
     : { state: "failed", at: Date.now(), output: result?.output ?? "", exitCode: result?.exitCode ?? null, ...(message ? { message } : {}), ...(busy ? { busy: true as const } : {}) };
   setRun(run);
   return run;
+}
+
+/** Switch automatic updates of one harness (instance owner only; the server
+ *  enforces it) and show the saved answer on every project's row. */
+export async function setHarnessAutoUpdate(harnessId: string, enabled: boolean): Promise<HarnessAutoUpdateState> {
+  const state = await api.put<HarnessAutoUpdateState>(`/api/harnesses/${encodeURIComponent(harnessId)}/auto-update`, { enabled });
+  const projects = new Map(snapshot.projects);
+  for (const [key, entry] of projects) {
+    const status = entry.statuses.get(harnessId);
+    if (!status?.autoUpdate) continue;
+    projects.set(key, { ...entry, statuses: new Map(entry.statuses).set(harnessId, { ...status, autoUpdate: state }) });
+  }
+  publish({ ...snapshot, projects });
+  return state;
 }
 
 export function dismissHarnessUpdateRun(harnessId: string): void {

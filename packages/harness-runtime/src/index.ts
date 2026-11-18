@@ -724,6 +724,9 @@ type HarnessCacheEntry = {
     cwd: string;
     harnessId: string;
     lifetime: "session" | "workspace";
+    /** When the lease began creating its runtime (epoch ms): a lease created
+     * before an update finished still runs the previous build. */
+    createdAt: number;
     pending: Promise<AgentRuntime>;
     runtime?: AgentRuntime;
     acquisitionInfo?: RuntimeAcquisitionInfo;
@@ -828,6 +831,7 @@ export function createHarnessPool(options: {
                 cwd: context.cwd,
                 harnessId: provider.descriptor.id,
                 lifetime: provider.runtimeLifetime ?? "session",
+                createdAt: Date.now(),
                 pending: Promise.resolve(undefined as unknown as AgentRuntime),
             };
             created.pending = (async () => {
@@ -887,10 +891,13 @@ export function createHarnessPool(options: {
                 .map((entry) => entry.sessionId))];
         },
         /** Canonical sessions holding a live lease on `harnessId` in any Space:
-         * a running CLI locks its executable machine-wide on Windows. */
-        liveSessionIdsForHarness(harnessId: string): string[] {
+         * a running CLI locks its executable machine-wide on Windows.
+         * `createdBefore` keeps only leases created before that time, the
+         * ones an update that finished then left on the previous build. */
+        liveSessionIdsForHarness(harnessId: string, filter: { createdBefore?: number } = {}): string[] {
             return [...new Set([...cached.values()]
-                .filter((entry) => entry.sessionId && !entry.releasing && entry.harnessId === harnessId)
+                .filter((entry) => entry.sessionId && !entry.releasing && entry.harnessId === harnessId
+                    && (filter.createdBefore === undefined || entry.createdAt < filter.createdBefore))
                 .map((entry) => entry.sessionId))];
         },
         /** Metadata for the first acquisition of this exact canonical lease. */

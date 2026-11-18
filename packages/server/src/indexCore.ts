@@ -3303,13 +3303,38 @@ export async function boot(opts: BootOptions = {}) {
   // build) and reports the chats it had to leave running. The lock is
   // machine-wide, so every Space's leases count; only the instance owner can
   // ask. A shared workspace runtime is not released here.
+  // Automatic updates use the same gate with two options: `checkOnly` counts
+  // the chats that are working and releases nothing (an update waits until
+  // none is), and `createdBefore` restarts only the runtimes an update left on
+  // the previous build. With `createdBefore`, a shared workspace runtime
+  // (OpenCode) is restarted through the pending-config barrier, which defers
+  // while any of its sessions is unsafe to interrupt: reported as one busy.
   provideService("harness.runtime.releaseIdle", async (
     harnessId: string,
+    options: { checkOnly?: boolean; createdBefore?: number } = {},
   ): Promise<{ released: number; busy: number }> => {
     const provider = harnesses.get(harnessId);
-    if (!provider || provider.runtimeLifetime === "workspace") return { released: 0, busy: 0 };
+    if (!provider) return { released: 0, busy: 0 };
+    if (provider.runtimeLifetime === "workspace") {
+      if (options.checkOnly || options.createdBefore === undefined) return { released: 0, busy: 0 };
+      try {
+        return { released: (await pendingOpenCode.applyAndRestart({ force: true })).restarted, busy: 0 };
+      } catch (error) {
+        const code = (error as { code?: unknown } | null)?.code;
+        if (code === "restart-deferred" || code === "conflict") return { released: 0, busy: 1 };
+        throw error;
+      }
+    }
+    const ids = harnessPool.liveSessionIdsForHarness(
+      harnessId,
+      options.createdBefore === undefined ? {} : { createdBefore: options.createdBefore },
+    );
+    if (options.checkOnly) {
+      const idle = await Promise.allSettled(ids.map((id) => sessions.runtimeReleasable?.(id) ?? Promise.resolve(false)));
+      return { released: 0, busy: idle.filter((result) => !(result.status === "fulfilled" && result.value)).length };
+    }
     const results = await Promise.allSettled(
-      harnessPool.liveSessionIdsForHarness(harnessId).map((id) => sessions.releaseRuntimeIfIdle?.(id) ?? Promise.resolve({ released: false })),
+      ids.map((id) => sessions.releaseRuntimeIfIdle?.(id) ?? Promise.resolve({ released: false })),
     );
     const released = results.filter((result) => result.status === "fulfilled" && result.value.released).length;
     return { released, busy: results.length - released };

@@ -325,6 +325,40 @@ chat of that harness in every Space through `releaseRuntimeIfIdle`
 any chat is still working it answers 409 `conflict` without running anything, and
 the Version section says so instead of offering a reinstall that would hit the
 same lock. A shared workspace runtime (OpenCode) is not released by this path.
+**Update automatically** (Version section switch, `PUT /api/harnesses/:id/auto-update`
+`{ enabled }`, instance owner only, refused in the workstation edition and for a
+bundled CLI or one with no `updateCommand`) is machine-wide: the switch lives in
+the package data directory (`auto-update.json`), not in a Space, and
+`GET /api/harnesses/updates` reports it as `autoUpdate` for local projects
+(`HarnessAutoUpdateState`; `pending` and `last` reach only the instance owner,
+since they describe every Space's chats and the updater's output). The server
+(`harness-runtime/src/autoUpdate.ts`) checks each switched-on harness about every
+30 minutes (release lookups stay cached for hours) and runs the same update as the
+Update button only while none of the chats on that CLI is working: harnesses with
+the same `updateCommand[0]` (one per account) are one CLI, checked, updated and
+restarted together. "Working" is the idle-release gate read without releasing
+(`harness.runtime.releaseIdle` with `checkOnly`, `runtimeReleasable` on the
+session service: an active turn, admission, lifecycle work, a harness switch, a
+pending request or a queued message). While one works, the release waits and
+the row says so; a chat that starts between the check and a Windows file swap
+defers it rather than failing it. After an update that changed the installed
+version, each runtime whose pool lease was created before the update finished
+(`liveSessionIdsForHarness(id, { createdBefore })`) is released once its chat is
+idle, retried every minute until none is left, so its next turn launches the new
+build; nothing wakes a dormant chat or interrupts a working one. A shared
+workspace runtime (a non-bundled OpenCode) holds no per-chat lease, so the
+working check cannot see its turns and its update runs while it serves them
+(the running server keeps the old binary; on Windows the locked file fails the
+update, which is tried again a day later). It is restarted through the pending-config barrier
+(`applyAndRestart({ force: true })`, which also applies staged OpenCode changes
+and defers while a session is unsafe), retried every 5 minutes. A failed run, or
+a run whose updater left the version unchanged (a release channel behind the
+registry), is not repeated for the same release for a day. One update of a CLI
+runs at a time; the Update button answers 409 while an automatic one runs. A
+pass already running when the package stops starts no further update but is not
+waited for. Remote (SSH) leases of the same harness count as working and are
+released too, which only delays a local update. Not live-verified: no automatic
+update of a real CLI has been observed; unit tests cover the scheduler and routes.
 After a successful update of a provider with a `versionStore` (Claude Code's
 `…/claude/versions/<version>`, Cursor's `…/cursor-agent/versions/<release>/`,
 both left by side-by-side self-updaters that keep old versions), the server

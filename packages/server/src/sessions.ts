@@ -529,6 +529,10 @@ export interface RuntimeEpochSessionService extends RestartSafetySessionService 
    * the idle-release safety gate, so its next turn launches with freshly
    * reconciled capabilities (Spaces §14.6). `blocker` names why it stays. */
   releaseRuntimeIfIdle?(sessionId: string): Promise<{ released: boolean; blocker?: string }>;
+  /** Whether `releaseRuntimeIfIdle` would release this chat's runtime right
+   * now; reads only, releases nothing. A harness update waits on it so it
+   * never replaces a CLI under a working chat. */
+  runtimeReleasable?(sessionId: string): Promise<boolean>;
   /** Authorize one package-contributed MCP tool against the canonical session
    * that currently owns execution. Project-scoped native runtimes do not put a
    * session id in their MCP configuration, and a minted session id can name the
@@ -13292,6 +13296,12 @@ export function createSessionService(deps: {
         await runtimes.retireSession(sessionId);
         return { released: true };
       });
+    },
+
+    async runtimeReleasable(sessionId) {
+      if (isConversation(await store.projection(sessionId))) return false;
+      if (!runtimes.retireSession || !runtimes.isSessionScoped?.(sessionId)) return false;
+      return !(await idleRuntimeReleaseBlocker(sessionId));
     },
 
     async cancelHarnessSwitch(sessionId) {

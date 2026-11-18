@@ -1581,6 +1581,11 @@ test("re-provisioning releases a safe-idle runtime at any idle age and names wha
     }
     await store.enqueue("session-queued", "next step", "queue");
 
+    // The read-only check an automatic harness update waits on agrees with
+    // the release gate and releases nothing.
+    assert.equal(await sessions.runtimeReleasable!("session-queued"), false);
+    assert.equal(await sessions.runtimeReleasable!("session-fresh"), true);
+    assert.deepEqual(retired, []);
     assert.deepEqual(await sessions.releaseRuntimeIfIdle!("session-queued"), { released: false, blocker: "queue" });
     assert.deepEqual(await sessions.releaseRuntimeIfIdle!("session-fresh"), { released: true });
     assert.deepEqual(retired, ["session-fresh"]);

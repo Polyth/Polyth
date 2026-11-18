@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
-import type { HarnessSnapshot, HarnessUpdateStatus } from "@polyth/contracts";
+import type { HarnessAutoUpdateState, HarnessSnapshot, HarnessUpdateStatus } from "@polyth/contracts";
 import { createApiTransport, type WebPackageHost } from "@polyth/web-sdk";
 import { formatRelativeTime } from "@polyth/web/i18n";
 import { invalidateRuntimeCatalogs } from "@polyth/models/runtime-catalog";
-import { Button, DownloadIcon, Icon, InfoIcon, Notice, RefreshIcon } from "../../../apps/web/src/components/ui/index.ts";
+import { Button, DownloadIcon, Icon, InfoIcon, Notice, RefreshIcon, Switch } from "../../../apps/web/src/components/ui/index.ts";
 import { ReadonlyRow, Row, Section } from "../../../apps/web/src/components/settings/parts.tsx";
 import { displayVersion } from "./presentation.ts";
 import { failureCopy, machineWords } from "./installPresentation.ts";
 import { onHarnessInstallSettled, requestHarnessInstall, startHarnessInstall, useHarnessInstalls } from "./installs.ts";
-import { dismissHarnessUpdateRun, loadHarnessUpdates, reinstallOffer, runHarnessUpdate, useHarnessUpdates } from "./updates.ts";
+import { dismissHarnessUpdateRun, loadHarnessUpdates, reinstallOffer, runHarnessUpdate, setHarnessAutoUpdate, useHarnessUpdates } from "./updates.ts";
 
 const api = createApiTransport();
 
@@ -46,6 +46,51 @@ const MARK = "\u0001";
 function withCommand(text: string, command: string) {
   const [before = "", after = ""] = text.split(MARK);
   return <>{before}<code>{command}</code>{after}</>;
+}
+
+/** "Update automatically": the machine-wide switch, what it waits for and
+ *  what it last did (the last two only reach the instance owner). */
+function AutoUpdateRow({ harnessId, name, state, t }: {
+  harnessId: string;
+  name: string;
+  state: HarnessAutoUpdateState;
+  t: Translate;
+}) {
+  const [enabled, setEnabled] = useState(state.enabled);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => setEnabled(state.enabled), [harnessId, state.enabled]);
+  const save = async (next: boolean) => {
+    setEnabled(next);
+    setSaving(true);
+    setError("");
+    try {
+      await setHarnessAutoUpdate(harnessId, next);
+    } catch (cause) {
+      setEnabled(!next);
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setSaving(false);
+    }
+  };
+  const last = state.last;
+  const lastVersion = displayVersion(last?.to);
+  const lastLine = enabled && last?.ok && lastVersion && last.from !== last.to
+    ? ` ${t("autoUpdated", { version: lastVersion, when: checkedAgo(last.at) })}`
+    : "";
+  const failed = enabled && last && !last.ok && !state.pending ? last : undefined;
+  return <>
+    <Row label={t("autoUpdate")} hint={`${t("autoUpdateHint", { name })}${state.canChange ? lastLine : ` ${t("updateOwnerOnly")}`}`}>
+      <Switch label={t("autoUpdateSwitch", { name })} checked={enabled} disabled={saving || !state.canChange} onChange={(value) => void save(value)} />
+    </Row>
+    {enabled && state.pending?.kind === "update" && <Notice tone="info" role="status">{t("autoWaiting", { version: displayVersion(state.pending.version) ?? state.pending.version, name })}</Notice>}
+    {enabled && state.pending?.kind === "restart" && <Notice tone="info" role="status">{t("autoRestarting", { name })}</Notice>}
+    {failed && <>
+      <Notice tone="warning" role="status">{t("autoFailed", { version: displayVersion(failed.latest) ?? failed.latest ?? "", when: checkedAgo(failed.at) })}</Notice>
+      {failed.message && <details className="pkg-harnesses-update-log"><summary>{t("updaterOutput")}</summary><pre>{failed.message}</pre></details>}
+    </>}
+    {error ? <Notice tone="error" role="alert">{error}</Notice> : null}
+  </>;
 }
 
 /** Version and runtime maintenance for one harness: its CLI's own updater,
@@ -152,6 +197,7 @@ export default function HarnessMaintenance({ host, harnessId, snapshot, projectI
         <Button size="sm" iconStart={DownloadIcon} busy={running} disabled={!mayUpdate || running}
           onClick={() => void runHarnessUpdate(harnessId, projectId)}>{running ? t("updating") : status?.available ? t("update") : t("runUpdater")}</Button>
       </Row>}
+      {updateCommand && !external && status?.autoUpdate && <AutoUpdateRow harnessId={harnessId} name={name} state={status.autoUpdate} t={t} />}
       {run?.state === "failed" && run.busy && <Notice tone="warning" role="status">{t("busy", { name })}</Notice>}
       {run?.state === "failed" && run.output && <details className="pkg-harnesses-update-log" open><summary>{t("updaterOutput")}</summary><pre>{run.output}</pre></details>}
       {run?.state === "done" && run.output && <details className="pkg-harnesses-update-log"><summary>{t("updaterOutput")}</summary><pre>{run.output}</pre></details>}
