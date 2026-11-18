@@ -196,6 +196,9 @@ function preferredProduct(a, b) {
   return score(a) <= score(b) ? a : b;
 }
 
+/** The platform-independent server package (`polyth-<version>.tgz`), not a platform one. */
+const SERVER_MAIN_PACKAGE = /^polyth-(?!server-)[0-9][^/]*\.tgz$/;
+
 function filesIn(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
@@ -347,11 +350,14 @@ export function assembleFeed(productsDir, feedDir, channel = "stable") {
     const name = basename(file);
     const seen = byName.get(name);
     if (seen !== undefined) {
-      // Every server runner packs the same platform-independent `polyth-<version>.tgz`
+      // Every server runner packs the platform-independent `polyth-<version>.tgz`
       // (see publish-server-npm.mjs), so one name legitimately appears in several
-      // product directories. Identical bytes are one asset; different bytes are a
-      // real conflict and must never be silently picked.
-      if (sha256File(seen) === sha256File(file)) {
+      // product directories. Identical bytes are one asset; bytes that differ are
+      // only acceptable for that main package, where the linux-x64 copy is the
+      // published one. Any other clash is a real conflict and must never be picked
+      // silently.
+      const identical = sha256File(seen) === sha256File(file);
+      if (identical || SERVER_MAIN_PACKAGE.test(name)) {
         byName.set(name, preferredProduct(seen, file));
         continue;
       }

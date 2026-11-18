@@ -803,9 +803,16 @@ function buildServer() {
   run(process.execPath, ["--experimental-strip-types", "apps/server/smoke.ts"]);
   run(process.execPath, ["--experimental-strip-types", "apps/server/smoke.ts", "--npm"]);
   const release = join(ROOT, "apps/server/release");
+  const npmTarballs = directFiles(join(release, "npm")).filter((p) => p.endsWith(".tgz"));
+  // `polyth-<version>.tgz` is the platform-independent code package and every
+  // server runner packs it, but npm pack/gzip output is not byte-identical across
+  // runner operating systems, so only the linux-x64 copy travels: it is the one
+  // publish-server-npm.mjs publishes, and the feed refuses two products under one
+  // name. Each runner still ships its own polyth-server-<target>-<version>.tgz.
+  const publishesMainPackage = process.platform === "linux" && process.arch === "x64";
+  copyFiles(npmTarballs.filter((p) => publishesMainPackage || basename(p).startsWith("polyth-server-")));
   copyFiles([
     ...directFiles(release).filter((p) => p.endsWith(".tar.gz") || p.endsWith(".tar.gz.sha256")),
-    ...directFiles(join(release, "npm")).filter((p) => p.endsWith(".tgz")),
   ]);
 }
 
