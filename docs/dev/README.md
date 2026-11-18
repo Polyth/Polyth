@@ -36,6 +36,8 @@ Use the existing durable event path for model-visible state. `host.events.append
 
 Read relevant sections of [ui.md](ui.md), [components.md](components.md), [styles.md](styles.md), and [widgets.md](widgets.md) for widget work. Use current web-sdk registrations for surfaces, slots, settings, capabilities, widgets and resource views. The host owns window geometry and shared primitives; packages own content. Follow canonical tokens and scoped CSS, including mobile and user accessibility/performance settings.
 
+For the shared controls themselves — which `host.ui.components` part to take, its props, keyboard and ARIA behaviour, and how theme tokens such as `hideBorders` and `--elevated` change a package's surface — read [the package UI kit](package-ui-kit.md). It is the author reference; `components.md` stays the rulebook for building or changing a primitive.
+
 The import exceptions in `apps/web/test/packageContainment.test.ts` are authoritative boundary checks, not an invitation to add more exceptions. Do not import a Node-only root into a browser entry, even through a transitive barrel.
 
 ## Finish with evidence

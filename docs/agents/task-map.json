@@ -29,6 +29,8 @@
         "packages/plugins/src/managedRegistry.ts",
         "packages/plugins/src/trustedServerEntry.ts",
         "packages/plugins/test/installRepository.test.ts",
+        "packages/package-sdk/src/remoteUi.ts",
+        "apps/web/src/packages/sandbox/RemoteUi.tsx",
         "packages/*/src/serverEntry.ts",
         "packages/*/package.json"
       ],
@@ -40,6 +42,8 @@
       ],
       "references": [
         "docs/dev/extensions.md",
+        "docs/dev/package-content.md",
+        "docs/dev/package-ui-kit.md",
         "docs/dev/README.md",
         "docs/agents/security.md"
       ],
