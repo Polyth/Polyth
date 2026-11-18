@@ -386,7 +386,7 @@ Polyth bundles curated, high-performance variable `.woff2` fonts served locally 
 - **Serif:** Source Serif 4 (editorial reading typeface).
 - **Programmer Monospace:** JetBrains Mono, Fira Code, Geist Mono, Cascadia Code, and native System Monospace.
 
-All web font files reside in `apps/web/src/assets/fonts/`, are declared in `apps/web/src/fonts.css` with `font-display: swap`, and are copied to `dist/assets/fonts/` during the web build. They are all SIL OFL 1.1 fonts: a new font adds its copyright notice to `OFL.txt` and a row to the [font provenance table](../../apps/web/src/assets/fonts/README.md) in that directory. The files are Latin-only subsets, except that JetBrains Mono adds its Cyrillic as separate `unicode-range` files, so Cyrillic in terminals and code stays in the same face and cell width; other families still render Cyrillic in a system font.
+All web font files reside in `apps/web/src/assets/fonts/`, are declared in `apps/web/src/fonts.css` with `font-display: swap`, and are copied to `dist/assets/fonts/` during the web build. They are all SIL OFL 1.1 fonts: a new font adds its copyright notice to `OFL.txt` and a row to the [font provenance table](../../apps/web/src/assets/fonts/README.md) in that directory. The files are Latin-only subsets, except that JetBrains Mono adds its Cyrillic and its box drawing and block elements (U+2500–259F) as separate `unicode-range` files, so Cyrillic text, `tree` output and tmux or prompt frames in terminals and code stay in the same face and cell width; other families still render Cyrillic in a system font.
 
 Meaningful metadata uses `--font-meta`; 10–11px literals are only for
 tertiary decorative labels, never instructions or state. Navigator session

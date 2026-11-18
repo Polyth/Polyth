@@ -27,6 +27,15 @@ pyftsubset 'JetBrainsMono[wght].ttf' --flavor=woff2 \
 The range is every Cyrillic code point that version contains; keep the
 `unicode-range` in `fonts.css` equal to it.
 
+Its box drawing and block elements (U+2500–259F, all 160 code points) are cut
+the same way into `jetbrains-mono-box.woff2`. The italic font draws them
+identically, so `fonts.css` declares this one upright file for both styles:
+
+```sh
+pyftsubset 'JetBrainsMono[wght].ttf' --flavor=woff2 --unicodes='U+2500-259F' \
+  --output-file=jetbrains-mono-box.woff2
+```
+
 When adding a font, add its copyright notice (the `name` table copyright
 string of the file) to `OFL.txt` and a row here. A font under any other
 license needs its own license file next to it.
@@ -41,7 +50,7 @@ license needs its own license file next to it.
 | Geist | `geist-italic.woff2`, `geist-normal.woff2` | https://github.com/vercel/geist-font |
 | Geist Mono | `geist-mono-italic.woff2`, `geist-mono-normal.woff2` | https://github.com/vercel/geist-font |
 | Inter | `inter-italic.woff2`, `inter-normal.woff2` | https://github.com/rsms/inter |
-| JetBrains Mono | `jetbrains-mono-italic.woff2`, `jetbrains-mono-normal.woff2`, `jetbrains-mono-cyrillic-italic.woff2`, `jetbrains-mono-cyrillic-normal.woff2` | https://github.com/JetBrains/JetBrainsMono |
+| JetBrains Mono | `jetbrains-mono-italic.woff2`, `jetbrains-mono-normal.woff2`, `jetbrains-mono-cyrillic-italic.woff2`, `jetbrains-mono-cyrillic-normal.woff2`, `jetbrains-mono-box.woff2` | https://github.com/JetBrains/JetBrainsMono |
 | Manrope | `manrope-normal.woff2` | https://github.com/sharanda/manrope |
 | Montserrat | `montserrat-italic.woff2`, `montserrat-normal.woff2` | https://github.com/JulietaUla/Montserrat |
 | Noto Sans | `noto-sans-italic.woff2`, `noto-sans-normal.woff2` | https://github.com/notofonts/latin-greek-cyrillic |
