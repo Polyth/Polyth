@@ -12,7 +12,11 @@ import { JudgmentExecutionError, type ProviderJudgmentRequest, type ProviderJudg
 import registerJudges from "../src/serverEntry.ts";
 import { reserveCall, usageToday } from "../src/store.ts";
 import { KEEP_ALIVE_PROMPT } from "../src/keepWarm.ts";
-import { ASSESSMENT_EVENT, type BacktestResult, type JudgeInput, type JudgesSnapshot } from "../src/types.ts";
+import { ASSESSMENT_EVENT, validateJudgeInput, type BacktestResult, type JudgeInput, type JudgesSnapshot } from "../src/types.ts";
+import { STARTERS } from "../src/starters.ts";
+import { en } from "../src/i18n/en.ts";
+import { uk } from "../src/i18n/uk.ts";
+import { judgmentJudgesLocales } from "../src/i18n/index.ts";
 
 const scratch = resolve(import.meta.dirname, "../../../.scratch/judgment-judges");
 type Answer = ProviderJudgmentResponse | JudgmentExecutionError;
@@ -356,4 +360,77 @@ test("keep warm pings a clearly unfinished chat with a hidden keep-alive, and no
   await f.pkg.onDisable?.();
   t.mock.timers.tick(60_000); await quiet();
   assert.equal(f.sent.length, 1, "disabling stops keeping warm");
+});
+
+test("a Space that never saved a judge gets the starters once, off and owned by no one, in the page's language", async (t) => {
+  const f = fixture(t, () => ({ answers: {} }));
+  await f.pkg.onEnable?.();
+  const fresh = await f.call(f.a, "/api/judges");
+  assert.equal(fresh.fresh, true, "nothing was ever saved here");
+  const seeded = await f.call(f.a, "/api/judges/starters", "POST", { locale: "uk" });
+  assert.equal(seeded.fresh, undefined);
+  assert.equal(seeded.revision, 1);
+  assert.deepEqual(seeded.judges.map((entry) => entry.starter), STARTERS.filter((starter) => starter.seeded).map((starter) => starter.id));
+  assert.deepEqual(seeded.judges.map((entry) => entry.starter), ["stop-destructive", "approve-routine", "review-commands", "keep-going", "stay-on-task"],
+    "the guard that denies is asked before the one that approves");
+  assert.ok(seeded.judges.every((entry) => !entry.enabled && !entry.ownerUserId), "starters are off and act for no one until a person turns them on");
+  assert.equal(seeded.judges[1]!.name, "Схвалювати рутинні кроки", "the page's language names them");
+  assert.equal(seeded.judges[1]!.description, uk["judgesstarter.approveRoutine.description"]);
+  // A second request, from this page or another one, changes nothing.
+  const again = await f.call(f.a, "/api/judges/starters", "POST", { locale: "de" });
+  assert.equal(again.revision, 1); assert.deepEqual(again.judges.map((entry) => entry.id), seeded.judges.map((entry) => entry.id));
+  // An unknown language falls back to English.
+  assert.equal((await f.call(f.b, "/api/judges/starters", "POST", { locale: "xx-YY" })).judges[0]!.name, "Stop destructive actions");
+
+  // Turning one on keeps it a starter and makes the person who did it its owner; any other edit makes it theirs.
+  const [guard, approver] = seeded.judges;
+  const { id: _i, createdAt: _c, updatedAt: _u, ownerUserId: _o, starter: _s, ...input } = approver!;
+  const on = await f.call(f.a, `/api/judges/${approver!.id}`, "PUT", { revision: 1, judge: { ...input, enabled: true } });
+  const turnedOn = on.judges.find((entry) => entry.id === approver!.id)!;
+  assert.equal(turnedOn.starter, "approve-routine"); assert.equal(turnedOn.ownerUserId, "user-a"); assert.equal(turnedOn.enabled, true);
+  const edited = await f.call(f.a, `/api/judges/${approver!.id}`, "PUT", { revision: 2, judge: { ...input, enabled: true, dailyCap: 10 } });
+  assert.equal(edited.judges.find((entry) => entry.id === approver!.id)!.starter, undefined, "an edited starter is the person's own judge");
+  assert.equal(edited.judges.find((entry) => entry.id === guard!.id)!.starter, "stop-destructive");
+
+  // A list that exists, even emptied, is never seeded again.
+  let state = edited;
+  for (const entry of edited.judges) state = await f.call(f.a, `/api/judges/${entry.id}?revision=${state.revision}`, "DELETE");
+  assert.deepEqual(state.judges, []);
+  assert.equal(state.fresh, undefined);
+  assert.deepEqual((await f.call(f.a, "/api/judges/starters", "POST", { locale: "en" })).judges, []);
+
+  // A starter id the package does not know is corrupt storage, not a judge.
+  const file = join(f.root, "space-a", "judgment-judges", "judges.json");
+  const stored = JSON.parse(readFileSync(file, "utf8"));
+  writeFileSync(file, JSON.stringify({ ...stored, judges: [{ ...seeded.judges[0], starter: "rm-rf" }] }));
+  await assert.rejects(f.call(f.a, "/api/judges"), /unreadable/);
+});
+
+test("every starter template is a valid judge in every language", () => {
+  for (const [locale, bundle] of Object.entries(judgmentJudgesLocales)) {
+    for (const starter of STARTERS) {
+      const input = starter.build((key) => bundle[key]);
+      // A limit judge needs the person's own models before it can be saved.
+      const ready = starter.id === "switch-at-limit" ? { ...input, routes: ["codex::openai/gpt-x"] } : input;
+      assert.doesNotThrow(() => validateJudgeInput(ready), `${locale} ${starter.id}`);
+      assert.equal(input.enabled, false, `${starter.id} starts off`);
+    }
+  }
+  assert.throws(() => validateJudgeInput(STARTERS.find((starter) => starter.id === "switch-at-limit")!.build((key) => en[key])), /Allow 1–8 models/);
+});
+
+test("a judge may say what it is for; the snapshot says which built-in judges are on", async (t) => {
+  const f = fixture(t, () => ({ answers: {} }));
+  await f.pkg.onEnable?.(); await f.judgmentPkg.onEnable?.();
+  const described = await f.call(f.a, "/api/judges", "POST", { revision: 0, judge: judge({ description: "  Keeps changes on topic.  " }) });
+  assert.equal(described.judges[0]!.description, "Keeps changes on topic.");
+  const blank = await f.call(f.a, `/api/judges/${described.judges[0]!.id}`, "PUT", { revision: 1, judge: judge({ description: "   " }) });
+  assert.equal("description" in blank.judges[0]!, false, "an empty description is no description");
+  await assert.rejects(f.call(f.a, "/api/judges", "POST", { revision: 2, judge: judge({ description: "x".repeat(301) }) }), /Description must be 1–300/);
+  assert.deepEqual(blank.builtins, [
+    { id: "judges.completion-check", enabled: false }, { id: "judges.needs-you", enabled: false },
+    { id: "judges.keep-warm", enabled: false }, { id: "judges.quiet-command", enabled: false },
+  ]);
+  await f.judgmentSettings({ "judges.quiet-command": { enabled: true } });
+  assert.deepEqual((await f.call(f.a, "/api/judges")).builtins?.filter((builtin) => builtin.enabled).map((builtin) => builtin.id), ["judges.quiet-command"]);
 });

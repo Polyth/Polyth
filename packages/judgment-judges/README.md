@@ -43,7 +43,8 @@ trimmed, and known credential shapes (API keys, tokens, bearer headers,
 ## Built-in uses
 
 All four are registered through `JUDGMENT_SERVICE.registerUse`, are off by default,
-and are switched on and tuned in **Settings → Judgment → Uses**. Use state is
+and are switched on and tuned in **Settings → Judgment → Uses**; Settings →
+Judges lists them with their state for the project. Use state is
 resolved before every evaluation. Registration follows the live Judgment
 service, so either package may enable first.
 
@@ -131,13 +132,48 @@ mutation needs the current `revision`, and corrupt storage fails instead of
 resetting. Ids are server-generated (`j` + 12 hex characters); a project filter
 must name a project of the same Space.
 
-A judge has: `name`, `enabled`, `trigger`, `filters.projectId?`, `evidence`,
+A judge has: `name`, optional `description` (what it is for, ≤ 300 characters;
+blank means none), `enabled`, `trigger`, `filters.projectId?`, `evidence`,
 one `question`, `fire` (`threshold`, `margin`, and `label` for a choice's
 markers), `effects`, optional `routes`, `maxRounds` and `model`, and `dailyCap`
 (1–1,000, default 40). Unknown fields are rejected. The server adds
-`ownerUserId` (see [Ownership](#ownership-whose-access-a-judge-uses)); input
-never sets it. All shapes and rules are in `src/types.ts`
-(`validateJudgeInput`).
+`ownerUserId` (see [Ownership](#ownership-whose-access-a-judge-uses)) and
+`starter` (see [Starter judges](#starter-judges)); input never sets either.
+All shapes and rules are in `src/types.ts` (`validateJudgeInput`).
+
+### Starter judges
+
+`src/starters.ts` holds ready-made judges: basic settings to start from, **not
+recommendations**, and every surface that offers them says so. Their copy
+(name, description, question, answer meanings, follow-up) comes from the
+package's own i18n keys (`judgesstarter.*`), so a starter is created in the
+person's language; message texts reuse the English `MESSAGE_PRESETS`.
+
+| Starter | Category | Trigger | Asks | Does | Seeded |
+| --- | --- | --- | --- | --- | --- |
+| `stop-destructive` | permissions | permission | would the request destroy data, rewrite history or expose secrets (`destructive` / `harmless`) | denies on `destructive` and flags the chat (80% / lead 30) | yes |
+| `approve-routine` | permissions | permission | is it a routine, low-risk step of the request (`routine` / `needs_look`) | approves once on `routine` (90% / lead 40) | yes |
+| `review-commands` | actions | turn | did the turn run or change something risky (yes/no) | flags the chat | yes |
+| `keep-going` | long-work | turn | did the assistant stop before finishing (`unfinished` / `finished` / `needs_person`) | sends *Continue* on `unfinished`, 3 in a row at most | yes |
+| `stay-on-task` | quality | turn | did the turn change unrelated files (yes/no) | marks the chat and offers a follow-up | yes |
+| `merge-when-done` | actions | turn | is the work finished and verified (`done` / `not_done`) | merges an isolated chat on `done` (90% / lead 40) | no |
+| `audit-big-changes` | quality | turn | how large and risky is the change (`big` / `small`) | sends *Spawn an auditor* on `big`, once in a row | no |
+| `switch-at-limit` | limits | limit | the person's wait-or-switch instructions | switches model; needs the person's allowed models | no |
+
+Seeding: while a Space never saved a judge (`judges.json` does not exist),
+`GET /api/judges` answers `fresh: true`, and the page then calls
+`POST /api/judges/starters { locale }`. The server writes the seeded starters
+(the denying guard first, so it is asked before the approver) switched off,
+owned by no one, each stamped `starter: <id>`, at revision 1. A list that
+exists, even an emptied one, is never seeded again, and repeated calls change
+nothing. A locale the package does not speak falls back to English.
+
+`starter` marks a judge that is still its template. Turning it on or off keeps
+the mark (and, like any save, makes the person who did it the owner, so an
+acting starter acts only once someone turned it on); any other change drops
+it, and the judge is the person's own. A stored `starter` the package does not
+know makes the list unreadable, like any corrupt entry. Every template,
+seeded or not, is offered again in **Add judge**.
 
 ### Who answers
 
@@ -359,8 +395,9 @@ All routes are local-only (`routeScopes: ["judges"]`) and require an owned
 
 | Route | Purpose |
 | --- | --- |
-| `GET /api/judges` | `JudgesSnapshot`: revision, judges (with `ownerUserId`), today's usage, `judgmentAvailable`, `viewer` |
+| `GET /api/judges` | `JudgesSnapshot`: revision, judges (with `ownerUserId` and `starter`), today's usage, `judgmentAvailable`, `viewer`, `fresh` while nothing was ever saved, and `builtins` (each built-in use's resolved switch for this project, through `JUDGMENT_SERVICE.resolveUse`; absent while Judgment is not running) |
 | `POST /api/judges` | `{ revision, judge }` create; the saver becomes the owner |
+| `POST /api/judges/starters` | `{ locale? }`: adds the seeded starters to a Space that never saved a judge, then answers the snapshot; otherwise changes nothing |
 | `PUT /api/judges/:id` | `{ revision, judge }` replace; the saver becomes the owner |
 | `DELETE /api/judges/:id?revision=N` | delete |
 | `GET /api/judges/routes` | `JudgeRoutesSnapshot`: the caller's model shortlist (favorites and most-used, ≤ 50) with availability, quota used and blocked-until, for picking a limit judge's routes |
@@ -369,23 +406,59 @@ All routes are local-only (`routeScopes: ["judges"]`) and require an owned
 ## Settings
 
 **Settings → Judges** (group Engineering, order 56) is built from the shared
-settings parts and `@polyth/web/ui`. It lists judges with a switch, a summary
-(trigger · question · effects · scope), an *Acts as you* / *Acts as another
-member* badge for acting judges, today's usage and Backtest (turn judges). The
-editor offers: what the judge answers (*After a turn*, *Permission request*,
-*Usage limit*), project scope, question type and answers/levels (or the
-instructions and the allowed-models checklist for a limit judge, from
-`GET /api/judges/routes`), evidence picks with lengths, threshold, margin,
-*Show in the chat* (markers, with the answer they follow), *Act* (a warning that
-actions use the saver's access, then the actions per answer for a choice or for
-the whole judge, with message presets and an Auto-Approve level; approving and
-denying on one answer exclude each other), *Messages in a
-row*, the daily limit, Save/Discard and Delete with confirmation. Renaming or
-removing an answer carries or drops its actions. It also shows the backtest
-table and explains that the built-in judges live in Settings → Judgment → Uses.
+settings parts (`PageHead`, `Section`, `ItemList`/`ItemRow`, `DisclosureRow`,
+`FormField`, `Row`, `Seg`, `NumberField`, `SaveBar`) and `@polyth/web/ui`. It
+is the one place that lists everything that judges a chat:
+
+- **How judges work** (`widgets/JudgesGuide.tsx`): one row that opens onto the
+  three facts every judge reduces to (*When* it wakes, what it *Asks*, what it
+  *Does*) and three rules (close calls do nothing; actions use the access of
+  whoever turned the judge on; daily limits and backtests). It is open while no
+  judge (custom or built-in) is on; opening or closing it is remembered on this
+  device only (`localStorage` `polyth.judges.guide.v1`). The header's `?` opens
+  the package tour (`widgets/onboardingTour.ts`, `host.onboarding.registerTour`).
+- **Your judges**: while any starter remains, an info notice says starter
+  judges are basic settings to get going, not recommendations, and off until
+  turned on. Each judge is an `ItemRow`: its category tile (`widgets/judgeKinds.tsx`:
+  permissions, actions, long-running work, quality, usage limits, attention;
+  the glyph on a wash of the category's tint mixed into the raised surface),
+  its name, a *Starter* badge, *when · does* in words (hidden on a list under
+  520px, where the description says it), whose access an acting judge uses
+  (said only for a judge that is on or that someone saved), *No answer* and
+  *Daily limit reached* badges, its description (else its question), the last
+  failure with what to do about it, the switch, and a chevron that opens it.
+- **Built-in judges**: Completion check, Waiting for you, Keep warm and Quiet
+  commands with *On*/*Off* for this project; a row opens Settings → Judgment,
+  which still owns their switches and parameters.
+
+**Add judge** opens a template view (`widgets/StarterGallery.tsx`): a blank
+judge, the starters disclaimer, then every template grouped by category, marked
+*In your list* when a starter with that id is already there and *Pick models
+first* for the limit template. A template only fills the editor; nothing is
+saved until Save, and a judge added this way is on.
+
+A judge opens as a detail view (`widgets/JudgeEditor.tsx`) in place of the
+list, with *All judges* to go back: its tile, name, badges and today's usage;
+the **When / Asks / Does** strip (one line per answer that does something,
+`unfinished → sends a message`, kept live while editing); for a starter, a
+notice that it is a starting point and that saving a change makes it the
+person's own; then *Basics* (name, description, trigger, project scope),
+*Question* (type and answers or levels; for a limit judge the instructions and
+allowed models), *Show in the chat*, *Act* (the access warning, then the
+actions per answer or for the whole judge, message presets, Auto-Approve
+level, *Messages in a row*; approving and denying on one answer exclude each
+other), *How sure it must be* (*Very sure* 90%/lead 40, *Sure* 80/30, *Fairly
+sure* 70/20, or *Custom* with the two numbers; a score judge keeps its
+threshold), *More settings* (closed rows showing their value: *Answered by*,
+*Evidence* with lengths, *Daily limit*), *Try it on past turns* for a saved
+turn judge (backtest size and table; changes must be saved first), the
+`SaveBar` (Save offered only once the draft differs) and a danger section with
+Delete. Renaming or removing an answer carries or drops its actions.
+
 The package CSS is scoped under `.judges-settings`, `.judges-marker` and
-`.judges-verdict` and uses inline-size container queries, so the layout works
-at phone, tablet and desktop widths.
+`.judges-verdict` and lays out by inline-size container queries (the page at
+40rem and 32rem, the shared list at 520px), so it works at phone, tablet and
+desktop widths.
 
 ## Verification
 
@@ -419,4 +492,13 @@ choice, yes/no and score questions, for judges that approve, deny or both, and
 the approve-or-deny validation; `test/settings.test.ts` renders the card line
 (latest note per judge, checking, no answer and a stale check, mirror
 filtering, live update, localized skip reasons) and the editor's
-approve-or-deny guard.
+approve-or-deny guard, the first visit (the starters request in the person's
+language, the disclaimer, off starters claiming nobody's access, the guide open
+and remembered closed), the starter's own view (its notice, Save offered only
+after a change, the sureness steps and *Custom*), the template view (every
+template grouped by category, *In your list*, a template that saves nothing by
+itself) and the built-in rows. `test/server.test.ts` also covers seeding once,
+off and unowned, in the asked language with an English fallback, the denying
+guard before the approver, a toggle keeping `starter` and an edit dropping it,
+an emptied list never seeded again, an unknown stored starter refused, every
+template valid in every locale, the description field and the built-in states.

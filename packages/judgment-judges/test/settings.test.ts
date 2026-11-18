@@ -26,8 +26,27 @@ const saved: JudgeDefinition = { id: "j0123456789ab", name: "Scope creep", enabl
   evidence: [{ pick: "changed-files", maxChars: 600 }], question: { type: "noul", text: "Did it touch unrelated files?" },
   fire: { threshold: 0.7, margin: 0.2 }, effects: [{ kind: "timeline-marker" }], dailyCap: 40, createdAt: 1, updatedAt: 1 };
 const snapshot = (judges: JudgeDefinition[] = [saved], revision = 3): JudgesSnapshot =>
-  ({ revision, judges, usage: { [saved.id]: { day: "2026-10-11", count: 4 } }, judgmentAvailable: true });
+  ({ revision, judges, usage: { [saved.id]: { day: "2026-10-11", count: 4 } }, judgmentAvailable: true,
+    builtins: [{ id: "judges.completion-check", enabled: true }, { id: "judges.needs-you", enabled: false },
+      { id: "judges.keep-warm", enabled: false }, { id: "judges.quiet-command", enabled: true }] });
 const button = (root: ParentNode, text: string) => [...root.querySelectorAll("button")].find((entry) => entry.textContent?.trim() === text) as HTMLButtonElement | undefined;
+/** A list row's open button, by its accessible name. */
+const opener = (root: ParentNode, label: string) => root.querySelector(`.settings-list-hit[aria-label="${label}"]`) as HTMLButtonElement | null;
+/** The control a visible field label names. */
+const field = (root: ParentNode, label: string) => {
+  const element = [...root.querySelectorAll("label")].find((entry) => entry.querySelector(".settings-field-label")?.firstChild?.textContent === label);
+  return root.querySelector(`[id="${element?.getAttribute("for")}"]`) as HTMLInputElement | HTMLTextAreaElement;
+};
+/** Opens a closed "More settings" row by its name. */
+const disclose = async (root: ParentNode, label: string) => {
+  const head = [...root.querySelectorAll(".settings-disclosure-head")].find((entry) => entry.querySelector(".settings-disclosure-label")?.textContent === label) as HTMLButtonElement;
+  await act(async () => { head.click(); await pause(); });
+};
+/** "Add judge" opens the templates; a blank judge starts the editor empty. */
+const addBlank = async (root: ParentNode) => {
+  await act(async () => { button(root, "Add judge")!.click(); await pause(); });
+  await act(async () => { opener(root, "Blank judge")!.click(); await pause(); });
+};
 function type(element: HTMLInputElement | HTMLTextAreaElement, value: string) {
   const prototype = element instanceof dom.HTMLTextAreaElement ? dom.HTMLTextAreaElement.prototype : dom.HTMLInputElement.prototype;
   Object.getOwnPropertyDescriptor(prototype, "value")!.set!.call(element, value);
@@ -58,18 +77,27 @@ test("the Judges page lists, toggles, edits and backtests through package routes
   const view = await mount(createElement(JudgesSettings, { projectId: "p1", openJudgment: () => { opened++; } }));
   try {
     const text = view.container.textContent ?? "";
-    assert.match(text, /Settings → Judgment → Uses/);
-    assert.match(text, /Scope creep/); assert.match(text, /4 \/ 40 today/);
-    await act(async () => { button(view.container, "Open Judgment")!.click(); await pause(); });
+    assert.match(text, /Scope creep/);
+    assert.match(view.container.querySelector(".judges-row .settings-list-meta")?.textContent ?? "", /After each turn · marks the chat/, "a row says when the judge asks and what it does");
+    // The built-in judges are listed with their state and open Settings → Judgment.
+    const builtins = [...view.container.querySelectorAll('[data-settings-item="judges.builtins"] .judges-row')];
+    assert.deepEqual(builtins.map((row) => [row.querySelector("strong")?.textContent, row.querySelector(".ui-badge")?.textContent]),
+      [["Completion check", "On"], ["Waiting for you", "Off"], ["Keep warm", "Off"], ["Quiet commands", "On"]]);
+    await act(async () => { opener(view.container, "Set up Quiet commands in Settings → Judgment")!.click(); await pause(); });
     assert.equal(opened, 1);
 
-    const toggle = view.container.querySelector('.judges-item [role="switch"]') as HTMLButtonElement;
+    const toggle = view.container.querySelector('.judges-row [role="switch"]') as HTMLButtonElement;
+    assert.equal(toggle.getAttribute("aria-label"), "Turn Scope creep on or off");
     await act(async () => { toggle.click(); await pause(); });
     assert.deepEqual({ path: calls.at(-1)!.path, revision: calls.at(-1)!.body.revision, enabled: calls.at(-1)!.body.judge.enabled },
       { path: `/api/judges/${saved.id}?projectId=p1`, revision: 3, enabled: false });
     assert.equal(calls.at(-1)!.body.judge.id, undefined, "server-owned fields are not sent back");
 
-    await act(async () => { button(view.container, "Edit")!.click(); await pause(); });
+    await act(async () => { opener(view.container, "Edit Scope creep")!.click(); await pause(); });
+    assert.equal(view.container.querySelector(".judges-list"), null, "the editor replaces the list");
+    assert.match(view.container.querySelector(".judges-detail-meta")?.textContent ?? "", /4 \/ 40 today/);
+    assert.deepEqual([...view.container.querySelectorAll(".judges-glance dt")].map((term) => term.textContent), ["When", "Asks", "Does"]);
+    assert.match(view.container.querySelector(".judges-glance")?.textContent ?? "", /After each turn.*“Did it touch unrelated files\?”.*Yes.*marks the chat/);
     const name = view.container.querySelector(".judges-editor input") as HTMLInputElement;
     assert.equal(name.value, "Scope creep");
     await act(async () => { type(name, "Unrelated edits"); await pause(); });
@@ -78,6 +106,8 @@ test("the Judges page lists, toggles, edits and backtests through package routes
     assert.equal(calls.at(-1)!.body.judge.name, "Unrelated edits");
     assert.equal(view.container.querySelector(".judges-editor"), null, "the editor closes after saving");
 
+    // Backtests live in the judge's own view.
+    await act(async () => { opener(view.container, "Edit Unrelated edits")!.click(); await pause(); });
     await act(async () => { button(view.container, "Backtest")!.click(); await pause(); });
     assert.equal(calls.at(-1)!.path, `/api/judges/${saved.id}/backtest?projectId=p1`); assert.deepEqual(calls.at(-1)!.body, { limit: 10 });
     const rows = [...view.container.querySelectorAll(".judges-table tbody tr")];
@@ -105,7 +135,7 @@ test("a new judge is validated before sending; delete asks first", async () => {
   const view = await mount(createElement(JudgesSettings, { projectId: "p1", openJudgment() {}, confirm: async (text: string) => { confirms.push(text); return answer; } }));
   try {
     assert.match(view.container.textContent ?? "", /No judges yet/);
-    await act(async () => { button(view.container, "Add judge")!.click(); await pause(); });
+    await addBlank(view.container);
     await act(async () => { button(view.container, "Add judge")!.click(); await pause(); });
     assert.match(view.container.querySelector('.judges-editor [role="alert"]')?.textContent ?? "", /Name must be/);
     const effects = view.container.querySelector(".judges-safe")?.closest("fieldset");
@@ -121,7 +151,7 @@ test("a new judge is validated before sending; delete asks first", async () => {
     assert.equal(calls.filter((call) => !call.path.startsWith("/api/judges/routes")).length, 1, "an invalid judge is not sent");
     const [name] = view.container.querySelectorAll(".judges-editor input") as NodeListOf<HTMLInputElement>;
     await act(async () => { type(name!, "Waiting on me"); await pause(); });
-    await act(async () => { type(view.container.querySelector(".judges-editor textarea") as HTMLTextAreaElement, "Is a decision needed?"); await pause(); });
+    await act(async () => { type(field(view.container, "Question"), "Is a decision needed?"); await pause(); });
     // Switching to a choice question offers answers and a fires-on picker.
     await act(async () => { button(view.container, "Choice")!.click(); await pause(); });
     assert.equal(view.container.querySelectorAll(".judges-option").length, 2);
@@ -134,7 +164,7 @@ test("a new judge is validated before sending; delete asks first", async () => {
     assert.equal(sent.body.judge.question.type, "choice"); assert.equal(sent.body.judge.fire.label, "yes");
     assert.deepEqual(sent.body.judge.effects, [{ kind: "timeline-marker" }]);
 
-    await act(async () => { button(view.container, "Edit")!.click(); await pause(); });
+    await act(async () => { opener(view.container, "Edit Waiting on me")!.click(); await pause(); });
     await act(async () => { button(view.container, "Delete judge")!.click(); await pause(); });
     // Opening the editor reads the model list; declining sends nothing else.
     assert.equal(confirms.length, 1); assert.equal(calls.filter((call) => !call.path.startsWith("/api/judges/routes")).at(-1)!.method, "POST", "declining keeps the judge");
@@ -196,10 +226,10 @@ test("a choice judge ties actions to its answers, with message presets and a rou
   };
   const view = await mount(createElement(JudgesSettings, { projectId: "p1", openJudgment() {} }));
   try {
-    await act(async () => { button(view.container, "Add judge")!.click(); await pause(); });
+    await addBlank(view.container);
     const [name] = view.container.querySelectorAll(".judges-editor input") as NodeListOf<HTMLInputElement>;
     await act(async () => { type(name!, "Finish the work"); await pause(); });
-    await act(async () => { type(view.container.querySelector(".judges-editor textarea") as HTMLTextAreaElement, "Is the work finished?"); await pause(); });
+    await act(async () => { type(field(view.container, "Question"), "Is the work finished?"); await pause(); });
     await act(async () => { button(view.container, "Choice")!.click(); await pause(); });
     const names = [...view.container.querySelectorAll(".judges-option-name")] as HTMLInputElement[];
     await act(async () => { type(names[0]!, "unfinished"); await pause(); });
@@ -240,7 +270,7 @@ test("a limit judge allows models from the person's shortlist", async () => {
   };
   const view = await mount(createElement(JudgesSettings, { projectId: "p1", openJudgment() {} }));
   try {
-    await act(async () => { button(view.container, "Add judge")!.click(); await pause(); });
+    await addBlank(view.container);
     await act(async () => { type(view.container.querySelector(".judges-editor input") as HTMLInputElement, "Keep going"); await pause(); });
     await act(async () => { button(view.container, "Usage limit")!.click(); await pause(); });
     assert.ok(calls.some((call) => call.path === "/api/judges/routes?projectId=p1"));
@@ -269,10 +299,13 @@ test("a judge that got no answer says why, and its editor names the model that a
   };
   const view = await mount(createElement(JudgesSettings, { projectId: "p1", openJudgment() {} }));
   try {
-    const failure = view.container.querySelector(".judges-item-failure")?.textContent ?? "";
+    const failure = view.container.querySelector(".judges-row .settings-list-error")?.textContent ?? "";
     assert.match(failure, /got no answer\. Its model is not available\. Choose a Small Model in Settings → Sessions, or pick a model for this judge\./);
-    assert.match(view.container.querySelector(".judges-item-meta")?.textContent ?? "", /No answer/);
-    await act(async () => { button(view.container, "Edit")!.click(); await pause(); });
+    assert.match(view.container.querySelector(".judges-row .settings-list-meta")?.textContent ?? "", /No answer/);
+    await act(async () => { opener(view.container, "Edit Scope creep")!.click(); await pause(); });
+    // A closed row already names the model; opening it shows the picker.
+    assert.match(view.container.querySelector(".judges-more")?.textContent ?? "", /Answered bycodex · openai\/gpt-x/);
+    await disclose(view.container, "Answered by");
     const answeredBy = view.container.querySelector('.judges-editor [aria-label="Answered by"]');
     assert.ok(answeredBy, "the editor shows who answers");
     assert.match(answeredBy!.textContent ?? "", /codex · openai\/gpt-x/);
@@ -437,7 +470,7 @@ test("a permission judge denies on its own answer, never on one that lets the re
   };
   const view = await mount(createElement(JudgesSettings, { projectId: "p1", openJudgment() {} }));
   try {
-    await act(async () => { button(view.container, "Add judge")!.click(); await pause(); });
+    await addBlank(view.container);
     const [name] = view.container.querySelectorAll(".judges-editor input") as NodeListOf<HTMLInputElement>;
     await act(async () => { type(name!, "Gatekeeper"); await pause(); });
     await act(async () => { button(view.container, "Permission request")!.click(); await pause(); });
@@ -486,4 +519,123 @@ test("a check that arrives while the card is open is timed by this device's cloc
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 120)); });
     assert.equal(note().getAttribute("data-verdict"), "no-answer", "five minutes on this clock end it");
   } finally { await act(async () => root.unmount()); container.remove(); }
+});
+
+test("a Space that never saved a judge gets the starters, off, under a note that they are a starting point", async () => {
+  const calls: Array<{ path: string; method: string; body?: any }> = [];
+  const starter = (patch: Partial<JudgeDefinition>): JudgeDefinition => ({ ...saved, enabled: false, ...patch });
+  const seeded = [
+    starter({ id: "j00000000000a", name: "Approve routine steps", description: "Allows routine steps once.", trigger: "permission-requested",
+      evidence: [{ pick: "permission-request", maxChars: 1_500 }], question: { type: "choice", text: "Routine?", labels: [
+        { label: "routine", description: "Routine." }, { label: "needs_look", description: "Anything else." }] },
+      fire: { threshold: 0.9, margin: 0.4 }, effects: [{ kind: "approve-request", when: "routine" }], starter: "approve-routine" }),
+    starter({ id: "j00000000000b", name: "Stay on task", starter: "stay-on-task" }),
+  ];
+  handleFetch = async (path, init) => {
+    const body = init?.body ? JSON.parse(init.body as string) : undefined;
+    calls.push({ path, method: init?.method ?? "GET", body });
+    if (path.startsWith("/api/judges/routes")) return json({ routes: [] });
+    if (path.startsWith("/api/judges/starters")) return json({ ...snapshot(seeded, 1), usage: {}, viewer: "user-a", builtins: [{ id: "judges.needs-you", enabled: false }] });
+    return json({ ...snapshot([], 0), usage: {}, fresh: true, viewer: "user-a" });
+  };
+  localStorage.removeItem("polyth.judges.guide.v1");
+  const view = await mount(createElement(JudgesSettings, { projectId: "p1", openJudgment() {} }));
+  try {
+    assert.deepEqual(calls.map((call) => [call.method, call.path]), [["GET", "/api/judges?projectId=p1"], ["POST", "/api/judges/starters?projectId=p1"]]);
+    assert.equal(calls[1]!.body.locale, "en", "the starters come in the person's language");
+    const notice = view.container.querySelector(".judges-starter-notice")?.textContent ?? "";
+    assert.match(notice, /Starter judges are a starting point/);
+    assert.match(notice, /basic settings to get you going, not recommendations/);
+    const rows = [...view.container.querySelectorAll('[data-settings-item="judges.list"] .judges-row')];
+    assert.equal(rows.length, 2);
+    assert.ok(rows.every((row) => row.classList.contains("is-inactive")), "starters are off");
+    assert.match(rows[0]!.textContent ?? "", /Approve routine steps.*Starter.*On permission requests · approves.*Allows routine steps once\./);
+    assert.doesNotMatch(rows[0]!.textContent ?? "", /Acts/, "an off starter that nobody saved does not claim anyone's access");
+    assert.equal(rows[0]!.querySelector(".judges-tile")?.getAttribute("data-category"), "permissions");
+    // Nothing is on yet, so the guide is open.
+    assert.equal(view.container.querySelector(".judges-guide .settings-disclosure")?.getAttribute("data-open"), "true");
+    assert.deepEqual([...view.container.querySelectorAll(".judges-guide-step-title")].map((title) => title.textContent), ["When", "Asks", "Does"]);
+    await act(async () => { (view.container.querySelector(".judges-guide .settings-disclosure-head") as HTMLButtonElement).click(); await pause(); });
+    assert.equal(localStorage.getItem("polyth.judges.guide.v1"), "closed", "closing the guide is remembered on this device");
+    // A starter's own view repeats that it is a starting point.
+    await act(async () => { opener(view.container, "Edit Approve routine steps")!.click(); await pause(); });
+    assert.match(view.container.querySelector(".judges-editor .judges-starter-notice")?.textContent ?? "", /not a recommendation/);
+    assert.equal(button(view.container, "Save judge")!.disabled, true, "nothing to save until something changes");
+    // "Very sure" is the starter's setting; picking another step sets the chance and the lead together.
+    assert.equal(view.container.querySelector('[aria-label="Acts when"] [aria-pressed="true"]')?.textContent, "Very sure");
+    await act(async () => { button(view.container, "Sure")!.click(); await pause(); });
+    assert.match(view.container.textContent ?? "", /At least 80% sure, and 30% ahead of any other answer\./);
+    assert.equal(view.container.querySelector('[aria-label^="Threshold"]'), null, "the numbers stay folded away");
+    await act(async () => { button(view.container, "Custom")!.click(); await pause(); });
+    assert.ok(view.container.querySelector('[aria-label^="Threshold"]') && view.container.querySelector('[aria-label^="Minimum lead"]'));
+    assert.equal(button(view.container, "Save judge")!.disabled, false);
+  } finally { await view.unmount(); }
+});
+
+test("Add judge offers a blank judge and every template; a template only fills the editor", async () => {
+  const calls: Array<{ path: string; method: string; body?: any }> = [];
+  let state: JudgesSnapshot = { ...snapshot([{ ...saved, starter: "keep-going" }]), viewer: "user-a" };
+  handleFetch = async (path, init) => {
+    const body = init?.body ? JSON.parse(init.body as string) : undefined;
+    calls.push({ path, method: init?.method ?? "GET", body });
+    if (path.startsWith("/api/judges/routes")) return json({ routes: [] });
+    if (init?.method === "POST") state = { ...state, revision: 4, judges: [...state.judges, { ...saved, ...body.judge, id: "j00000000000c", ownerUserId: "user-a" }] };
+    return json(state);
+  };
+  const view = await mount(createElement(JudgesSettings, { projectId: "p1", openJudgment() {} }));
+  try {
+    await act(async () => { button(view.container, "Add judge")!.click(); await pause(); });
+    assert.match(view.container.querySelector(".judges-gallery .judges-starter-notice")?.textContent ?? "", /basic settings to start from, not recommendations/);
+    const titles = [...view.container.querySelectorAll(".judges-gallery .settings-section-title")].map((title) => title.textContent);
+    assert.deepEqual(titles, ["Start from", "Permissions", "Actions", "Long-running work", "Quality", "Usage limits"]);
+    const names = [...view.container.querySelectorAll(".judges-gallery .settings-list-title strong")].map((title) => title.textContent);
+    assert.deepEqual(names, ["Blank judge", "Stop destructive actions", "Approve routine steps", "Review risky commands", "Merge finished work",
+      "Keep going until done", "Stay on task", "Audit big changes", "Switch model at a limit"]);
+    assert.match(opener(view.container, "Start from Keep going until done")!.closest(".judges-row")?.textContent ?? "", /In your list/);
+    await act(async () => { opener(view.container, "Start from Audit big changes")!.click(); await pause(); });
+    assert.equal(calls.filter((call) => call.method !== "GET").length, 0, "a template saves nothing by itself");
+    assert.equal((view.container.querySelector(".judges-editor input") as HTMLInputElement).value, "Audit big changes");
+    assert.match(view.container.querySelector(".judges-glance")?.textContent ?? "", /big→thensends a message/);
+    assert.match(view.container.querySelector(".judges-editor .judges-starter-notice")?.textContent ?? "", /not a recommendation/);
+    await act(async () => { button(view.container, "Add judge")!.click(); await pause(); });
+    const sent = calls.at(-1)!;
+    assert.equal(sent.method, "POST");
+    assert.equal(sent.body.judge.name, "Audit big changes");
+    assert.equal(sent.body.judge.enabled, true, "a judge you add yourself is on");
+    assert.deepEqual(sent.body.judge.effects, [{ kind: "send-message", text: "Spawn a separate agent to validate and audit this work: have it review the changes against the request and run the relevant checks. Then fix what it finds.", when: "big" }]);
+    assert.equal(sent.body.judge.maxRounds, 1);
+  } finally { await view.unmount(); }
+});
+
+test("turning on a judge that acts asks first, unless it already acts as you", async () => {
+  const calls: Array<{ path: string; method: string; body?: any }> = [];
+  const approver: JudgeDefinition = { ...saved, id: "j00000000000a", name: "Approve routine steps", enabled: false, trigger: "permission-requested",
+    evidence: [{ pick: "permission-request", maxChars: 1_500 }], question: { type: "choice", text: "Routine?", labels: [
+      { label: "routine", description: "Routine." }, { label: "needs_look", description: "Anything else." }] },
+    fire: { threshold: 0.9, margin: 0.4 }, effects: [{ kind: "approve-request", when: "routine" }], starter: "approve-routine" };
+  const mine: JudgeDefinition = { ...approver, id: "j00000000000b", name: "Mine", ownerUserId: "user-a", starter: undefined };
+  handleFetch = async (path, init) => {
+    calls.push({ path, method: init?.method ?? "GET", body: init?.body ? JSON.parse(init.body as string) : undefined });
+    return json({ ...snapshot([approver, mine, { ...saved, enabled: false }]), viewer: "user-a" });
+  };
+  const asked: string[] = [];
+  let answer = false;
+  const view = await mount(createElement(JudgesSettings, { projectId: "p1", openJudgment() {}, confirmAct: async (text: string) => { asked.push(text); return answer; } }));
+  try {
+    const flip = async (name: string) => {
+      const row = opener(view.container, `Edit ${name}`)!.closest(".judges-row")!;
+      await act(async () => { (row.querySelector('[role="switch"]') as HTMLButtonElement).click(); await pause(); });
+    };
+    await flip("Approve routine steps");
+    assert.match(asked[0] ?? "", /Approve routine steps acts with your access once it is on/);
+    assert.equal(calls.filter((call) => call.method === "PUT").length, 0, "declining leaves it off");
+    answer = true;
+    await flip("Approve routine steps");
+    assert.equal(calls.filter((call) => call.method === "PUT").at(-1)?.body.judge.enabled, true);
+    // A judge that already acts as you, and one that only marks chats, switch at once.
+    await flip("Mine");
+    await flip("Scope creep");
+    assert.equal(asked.length, 2);
+    assert.equal(calls.filter((call) => call.method === "PUT").length, 3);
+  } finally { await view.unmount(); }
 });

@@ -6,6 +6,7 @@ import { ASSESSMENT_EVENT } from "../src/types.ts";
 import AssessmentMarker from "./AssessmentMarker.tsx";
 import JudgesSettings from "./JudgesSettings.tsx";
 import RequestVerdicts from "./RequestVerdict.tsx";
+import { judgesTour } from "./onboardingTour.ts";
 
 export default defineWebPackage((host) => () => {
   const translate = (key: string, values?: Record<string, string | number>) => host.ui.locale.translate(key, values);
@@ -17,8 +18,12 @@ export default defineWebPackage((host) => () => {
     host.settings.registerPage({ id: "judges", packageId: "judgment-judges", label: translate("judgesui.pageLabel"), group: "Engineering", order: 56, icon: "circle-check", component: SettingsPage }),
     host.settings.registerItems([
       { id: "judges.list", pageId: "judges", label: translate("judgesui.itemJudges"), description: translate("judgesui.itemJudgesDescription"),
-        keywords: ["judges", "judgment", "rules", "checks", "backtest"], focusTarget: "judges.list" },
+        keywords: ["judges", "judgment", "rules", "checks", "backtest", "starter", "templates", "permissions", "approve", "continue"], focusTarget: "judges.list" },
+      { id: "judges.builtins", pageId: "judges", label: translate("judgesui.builtinsTitle"), description: translate("judgesui.builtinsHint"),
+        keywords: ["completion check", "waiting for you", "keep warm", "quiet commands", "keep running"], focusTarget: "judges.builtins" },
     ]),
+    // The header's "?" on Settings → Judges: what judges are, starters, whose access, trying before trusting.
+    host.onboarding ? host.onboarding.registerTour(judgesTour(translate)) : () => {},
     // The fill-only action inserts into the composer; the person decides whether to send.
     host.slots.register({ id: "judges.assessment-marker", slot: "session.timeline.event", order: 40, meta: { eventTypes: [ASSESSMENT_EVENT] },
       render: (props) => <AssessmentMarker event={props.event as SessionEvent} insert={(text) => host.conversation.insert(text)} /> }),

@@ -1,42 +1,121 @@
-/* Rows, sections, fields and empty/error states come from the shared settings
-   primitives; this file styles only the judge list, the editor's repeated
-   option rows, the backtest table and the timeline marker. */
-.judges-settings { display: grid; gap: var(--space-4); color: var(--text); container: judges-settings / inline-size; }
+/* Rows, sections, fields, item lists and empty/error states come from the
+   shared settings primitives; this file styles only what is the Judges page's
+   own: category tiles, the when/asks/does strip, the guide, the detail head,
+   the editor's repeated option rows, the backtest table, the timeline marker
+   and the request card's note. Layout follows the page's own width through
+   container queries, never the viewport. */
+.judges-settings { display: grid; gap: var(--space-4); min-width: 0; color: var(--text); container: judges-settings / inline-size; }
 .judges-settings > .settings-page-blurb { margin-bottom: 0; }
 .judges-settings .settings-section-body { display: grid; gap: var(--space-3); padding-block-start: var(--space-3); }
+.judges-settings .settings-section-body > .settings-list { margin-top: 0; }
 .judges-settings .judges-note { margin: 0; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); overflow-wrap: anywhere; }
 .judges-settings .judges-note code { font-family: var(--mono); font-size: 0.95em; color: var(--text); }
 
-/* Judge list: one bordered list with hairline rows, like Settings → Judgment → Uses.
-   The switch carries on/off; an accent edge marks the judges that are on. */
-.judges-list { display: grid; margin: 0; padding: 0; list-style: none; border: 1px solid var(--control-border); border-radius: var(--radius-card); overflow: hidden; }
-.judges-item { display: grid; gap: var(--space-2); padding: var(--space-3) var(--space-4); min-width: 0; }
-.judges-item + .judges-item { border-top: 1px solid var(--hair); }
-.judges-item[data-on] { box-shadow: inset 3px 0 0 var(--accent); }
-.judges-item[data-editing] { background: var(--accent-wash); }
-.judges-item-main { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-1) var(--space-4); }
-.judges-item-name { grid-column: 1; grid-row: 1; font-size: var(--font-label); font-weight: 600; overflow-wrap: anywhere; }
-.judges-item-main > .ui-switch { grid-column: 2; grid-row: 1; align-self: start; }
-.judges-item-question { grid-column: 1 / -1; max-width: 72ch; color: var(--text-dim); font-size: var(--font-meta); line-height: var(--font-meta-lh); overflow-wrap: anywhere; }
-.judges-item-meta { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
-.judges-item-meta > span { overflow-wrap: anywhere; }
-.judges-item-failure { margin: 0; max-width: 72ch; color: var(--danger); font-size: var(--font-meta); line-height: var(--font-meta-lh); overflow-wrap: anywhere; }
-/* Ghost actions read as part of the text column: their labels start where the copy does. */
-.judges-item-actions { display: flex; flex-wrap: wrap; gap: 0 var(--space-1); margin-block: calc(-1 * var(--space-1)); margin-inline-start: calc(-1 * var(--control-pad-x-sm)); }
-.judges-item-actions > .ui-btn--ghost { color: var(--text); }
+/* A judge's tile: its glyph on a wash of its category's tint. The wash mixes
+   into the raised surface (never into transparency), so the tint reads on
+   light and dark themes alike; the glyph mixes toward the text ink so it keeps
+   its contrast. An off judge keeps a trace of its tint. */
+.judges-tile {
+  --judges-tint: var(--text-dim);
+  display: grid; place-items: center; inline-size: 100%; block-size: 100%;
+  background: color-mix(in srgb, var(--judges-tint) 14%, var(--raised));
+  color: color-mix(in srgb, var(--judges-tint) 74%, var(--text));
+  transition: background-color var(--motion-normal) var(--motion-ease), color var(--motion-normal) var(--motion-ease);
+}
+.judges-tile[data-category="permissions"] { --judges-tint: var(--green); }
+.judges-tile[data-category="actions"] { --judges-tint: var(--blue); }
+.judges-tile[data-category="long-work"] { --judges-tint: var(--purple); }
+.judges-tile[data-category="quality"] { --judges-tint: var(--amber); }
+.judges-tile[data-category="limits"] { --judges-tint: var(--accent); }
+.judges-tile[data-category="attention"] { --judges-tint: var(--red); }
+.judges-settings .judges-row .settings-list-tile { padding: 0; overflow: hidden; }
+.judges-settings .judges-row.is-inactive .judges-tile {
+  background: color-mix(in srgb, var(--judges-tint) 6%, var(--raised));
+  color: color-mix(in srgb, var(--judges-tint) 40%, var(--faint));
+}
+/* When a judge asks and what it does, as quiet words beside its badges. A
+   narrow list drops them: the description says it, and the judge's own view
+   opens with all three facts. */
+.judges-settings .judges-row-when { color: var(--muted); font-size: var(--font-meta); }
+@container settings-list (max-width: 520px) {
+  .judges-settings .judges-row-when { display: none; }
+}
+
+/* The guide: one row that opens onto three numbered steps and three rules. */
+.judges-guide-label { display: inline-flex; align-items: center; gap: var(--space-2); font-weight: 600; }
+.judges-guide-label > .ui-icon { color: var(--accent-text); }
+.judges-guide-steps {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-4);
+  margin: 0; padding: var(--space-1) 0 0; list-style: none;
+}
+.judges-guide-step { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; align-content: start; gap: var(--space-1) var(--space-2); min-width: 0; }
+.judges-guide-mark {
+  position: relative; display: grid; place-items: center;
+  inline-size: var(--control-h-sm); block-size: var(--control-h-sm);
+  border-radius: var(--radius-control); background: var(--accent-wash); color: var(--accent-on-wash);
+}
+.judges-guide-mark > i {
+  position: absolute; inset-block-start: -5px; inset-inline-end: -5px;
+  display: grid; place-items: center; min-inline-size: 16px; block-size: 16px; padding-inline: 3px;
+  border-radius: var(--radius-round); background: var(--elevated); box-shadow: 0 0 0 1px var(--border-soft);
+  color: var(--text-dim); font-size: 10.5px; font-style: normal; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1;
+}
+.judges-guide-step-title { font-size: var(--font-label); font-weight: 600; }
+.judges-guide-step-body { grid-column: 1 / -1; margin: 0; color: var(--text-dim); font-size: var(--font-meta); line-height: var(--font-meta-lh); overflow-wrap: anywhere; }
+.judges-guide-rules {
+  display: grid; gap: var(--space-1); margin: var(--space-3) 0 0; padding: var(--space-3) 0 0; list-style: none;
+  border-top: 1px solid var(--border-soft);
+}
+.judges-guide-rules > li { display: flex; align-items: flex-start; gap: var(--space-2); color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.judges-guide-rules > li > .ui-icon { flex: none; margin-top: 2px; color: var(--green-on-wash); }
+
+/* A starter's disclaimer and other page notices sit flush in the section rhythm. */
+.judges-settings .judges-starter-notice { margin: 0; }
+
+/* Detail views (the editor, the template gallery) replace the list: a quiet
+   way back, the judge's identity, then its sections. */
+.judges-detail { display: grid; gap: var(--space-4); min-width: 0; scroll-margin-top: var(--space-4); }
+.judges-detail > .judges-back { justify-self: start; margin-inline-start: calc(-1 * var(--control-pad-x-sm)); margin-block-end: calc(-1 * var(--space-2)); color: var(--text-dim); }
+html[dir="rtl"] .judges-detail > .judges-back .ui-icon { transform: scaleX(-1); }
+.judges-detail-head { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--space-3); min-width: 0; }
+.judges-detail-head > .judges-tile {
+  inline-size: calc(var(--control-h) + var(--space-2)); block-size: calc(var(--control-h) + var(--space-2));
+  border: 1px solid var(--border-soft); border-radius: var(--radius-card); box-shadow: var(--inset-hi);
+}
+.judges-detail-head > .judges-tile .ui-icon { inline-size: var(--icon-lg); block-size: var(--icon-lg); }
+.judges-detail-copy { display: grid; gap: 2px; min-width: 0; }
+.judges-detail-title { font-size: var(--font-heading); font-weight: 650; line-height: 1.3; overflow-wrap: anywhere; }
+.judges-detail-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); color: var(--muted); font-size: var(--font-meta); font-variant-numeric: tabular-nums; }
+
+/* When / asks / does: three facts side by side on one quiet surface, stacked
+   when the page is narrow. The answers are the person's own words in mono. */
+.judges-glance {
+  display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.4fr) minmax(0, 1.1fr);
+  margin: 0; min-width: 0; overflow: hidden;
+  border: 1px solid var(--border-soft); border-radius: var(--radius-card); background: var(--elevated);
+}
+.judges-glance-part { display: grid; align-content: start; gap: var(--space-1); min-width: 0; padding: var(--space-3); }
+.judges-glance-part + .judges-glance-part { border-inline-start: 1px solid var(--border-soft); }
+.judges-glance dt { color: var(--muted); font-size: var(--font-meta); font-weight: 600; line-height: var(--font-meta-lh); }
+.judges-glance dd { margin: 0; color: var(--text); font-size: var(--font-label); line-height: 1.45; overflow-wrap: anywhere; }
+.judges-glance-lines { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.judges-glance-lines > li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-1); min-width: 0; }
+.judges-glance-answer { font-family: var(--mono); font-size: var(--font-technical); color: var(--accent-text); overflow-wrap: anywhere; }
+.judges-glance-arrow { color: var(--faint); }
+html[dir="rtl"] .judges-glance-arrow { display: inline-block; transform: scaleX(-1); }
+.judges-glance-empty { color: var(--faint); }
 
 /* Editor. */
-.judges-editor { display: grid; gap: var(--space-3); min-width: 0; scroll-margin-top: var(--space-4); }
 .judges-options { display: grid; gap: var(--space-2); min-width: 0; margin: 0; padding: 0; border: 0; }
 .judges-options:disabled { opacity: 0.6; }
-.judges-options > legend { padding: 0; margin-bottom: var(--space-1); font-size: var(--font-label); font-weight: 600; }
-.judges-editor > .judges-options { padding-top: var(--space-2); }
+.judges-options > legend:not(.sr-only) { padding: 0; margin-bottom: var(--space-1); font-size: var(--font-label); font-weight: 600; }
 .judges-options > .ui-btn { justify-self: start; }
+/* Prose fields grow with their text where the engine supports it; elsewhere they resize by hand. */
+.judges-settings .judges-grow.ui-textarea { min-height: calc(var(--control-h) * 1.6); field-sizing: content; }
 /* Choice answers: name | meaning | remove on wide panes; a small card per answer on narrow ones. */
 .judges-option-head, .judges-option { display: grid; grid-template-columns: minmax(7rem, 11rem) minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); }
 .judges-option-head { color: var(--muted); font-size: var(--font-meta); }
 .judges-option-name { font-family: var(--mono); }
-/* Meanings grow with their text where the engine supports it; elsewhere they resize by hand. */
 .judges-option-meaning.ui-textarea { min-height: var(--control-h); field-sizing: content; }
 .judges-option.is-level { grid-template-columns: 1.5rem minmax(0, 1fr) auto; }
 .judges-level-index { color: var(--muted); font-size: var(--font-meta); font-variant-numeric: tabular-nums; text-align: center; }
@@ -63,9 +142,23 @@
 /* The shared check group aligns to a row's control column; here it is the whole field. */
 .judges-routes .settings-check-group { justify-content: start; }
 .judges-route-name { font-family: var(--mono); font-size: var(--font-meta); overflow-wrap: anywhere; }
+/* "More settings": closed rows show their current value; an open row's setting sits under it. */
+.judges-more .settings-disclosure-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.judges-more .settings-disclosure-body > .judges-options { padding-block: var(--space-1) var(--space-2); }
+.judges-try { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
 
-.judges-editor-danger { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3);
-  padding-top: var(--space-3); border-top: 1px solid var(--hair); }
+.judges-editor-danger { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3); }
+
+/* Medium panes: the three facts and the guide steps stack. */
+@container judges-settings (max-width: 40rem) {
+  .judges-glance { grid-template-columns: minmax(0, 1fr); }
+  .judges-glance-part { grid-template-columns: 4.5rem minmax(0, 1fr); align-items: baseline; gap: var(--space-3); padding-block: var(--space-2); }
+  .judges-glance-part + .judges-glance-part { border-inline-start: 0; border-top: 1px solid var(--border-soft); }
+  .judges-guide-steps { grid-template-columns: minmax(0, 1fr); gap: var(--space-3); }
+  .judges-guide-step { grid-template-columns: auto minmax(0, 1fr); align-items: start; column-gap: var(--space-3); }
+  .judges-guide-step-title { align-self: center; }
+  .judges-guide-step-body { grid-column: 2; }
+}
 
 /* Backtest results. */
 .judges-backtest { display: grid; gap: var(--space-2); min-width: 0; }
@@ -79,19 +172,9 @@
 .judges-table .judges-table-quiet { color: var(--muted); }
 .judges-table .judges-table-title { width: 100%; max-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
-/* Narrow panes: the intro notice's action moves under its copy so the text
-   keeps the full card width instead of being squeezed into a column. */
-@container judges-settings (max-width: 30rem) {
-  .judges-settings .judges-intro-notice .ui-notice-actions {
-    flex-basis: 100%;
-    margin-inline-start: 0;
-    justify-content: flex-start;
-  }
-}
-
 /* Narrow panes: each turn becomes two lines (chat title, then answer · chance · result), no sideways scroll. */
 @container judges-settings (max-width: 32rem) {
-  .judges-item { padding-inline: var(--space-3); }
+  .judges-glance-part { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .judges-option-head { display: none; }
   .judges-option { grid-template-columns: minmax(0, 1fr) auto; padding: var(--space-2); border: 1px solid var(--hair); border-radius: var(--radius-control); }
   .judges-option > .judges-option-meaning { grid-column: 1 / -1; grid-row: 2; }

@@ -16,12 +16,18 @@ import { currentRoute, routeAsk, routeDecision, routeOptions } from "./routes.ts
 import {
   completedTurns, currentTurnEvidence, isKeepAlive, latestTurnEvidence, mirroredRequestOpen, permissionEvidence, type TurnEvidence,
 } from "./evidence.ts";
-import { createJudge, deleteJudge, noteOutcome, readJudges, reserveCall, updateJudge, usageToday } from "./store.ts";
+import { createJudge, deleteJudge, neverSaved, noteOutcome, readJudges, reserveCall, seedStarters, updateJudge, usageToday } from "./store.ts";
+import { STARTERS } from "./starters.ts";
+import { en, type JudgmentJudgesMessageKey } from "./i18n/en.ts";
+import { judgmentJudgesLocales } from "./i18n/index.ts";
 import {
   ASSESSMENT_EVENT, decidesRequests, hasActions, JUDGE_ID, MAX_BACKTEST, PACKAGE_ID, REQUEST_CHECK_EVENT, REQUEST_VERDICT_EVENT, routeKey,
   validateJudgeInput, type AssessmentAction, type AssessmentData, type BacktestRow, type JudgeDefinition, type JudgeRoutesSnapshot, type JudgesSnapshot,
-  type JudgeTrigger, type RequestCheckData, type RequestVerdictData, type RequestVerdictKind,
+  type BuiltinJudgeState, type JudgeTrigger, type RequestCheckData, type RequestVerdictData, type RequestVerdictKind,
 } from "./types.ts";
+
+/** The built-in judges, in the order the Judges page lists them. */
+const BUILTIN_IDS = [...BUILTIN_USES, KEEP_WARM, QUIET_COMMAND].map((use) => use.id);
 
 /** Background evaluations in flight at once; a newer event of the same kind replaces a queued one. */
 const MAX_ACTIVE = 4;
@@ -375,10 +381,25 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   const validateProject = async (space: SpaceContext, projectId: string) => {
     if (!projectId || !await host.forSpace(space).projects.get(projectId)) throw Object.assign(new Error("Project not found"), { code: "not-found" });
   };
-  const snapshot = (space: SpaceContext): JudgesSnapshot => {
-    const stored = readJudges(judgesFile(space));
-    return { revision: stored.revision, judges: stored.judges, usage: usageToday(usageFile(space)), judgmentAvailable: !!judgment(),
-      ...(isPerson(space) ? { viewer: space.userId } : {}) };
+  /** Each built-in judge's switch for this project; a use Judgment cannot resolve reads as off. */
+  const builtins = async (service: JudgmentService, space: SpaceContext, projectId: string): Promise<BuiltinJudgeState[]> =>
+    Promise.all(BUILTIN_IDS.map(async (id) => ({ id,
+      enabled: await service.resolveUse({ space, projectId }, id).then((use) => use.enabled, () => false) })));
+  const snapshot = async (space: SpaceContext, projectId: string): Promise<JudgesSnapshot> => {
+    const file = judgesFile(space);
+    const stored = readJudges(file);
+    const service = judgment();
+    return { revision: stored.revision, judges: stored.judges, usage: usageToday(usageFile(space)), judgmentAvailable: !!service,
+      ...(isPerson(space) ? { viewer: space.userId } : {}),
+      ...(neverSaved(file) ? { fresh: true } : {}),
+      ...(service ? { builtins: await builtins(service, space, projectId) } : {}) };
+  };
+  /** The starters in the language the page asked for, English when it names none this package speaks. */
+  const starterJudges = (locale: unknown) => {
+    const bundle = typeof locale === "string" && Object.hasOwn(judgmentJudgesLocales, locale)
+      ? judgmentJudgesLocales[locale as keyof typeof judgmentJudgesLocales] : en;
+    const t = (key: JudgmentJudgesMessageKey) => bundle[key] || en[key];
+    return STARTERS.filter((starter) => starter.seeded).map((starter) => ({ starter: starter.id, input: starter.build(t) }));
   };
   const bodyOf = async (rc: Parameters<NonNullable<ServerPackage["routes"]>>[0]) => {
     const body = await rc.body();
@@ -449,12 +470,18 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       if (rc.path !== "/api/judges" && !rc.path.startsWith("/api/judges/")) return false;
       const space = rc.space, projectId = rc.url.searchParams.get("projectId") ?? "";
       await validateProject(space, projectId);
-      if (rc.path === "/api/judges" && rc.method === "GET") { rc.json(200, snapshot(space)); return true; }
+      if (rc.path === "/api/judges" && rc.method === "GET") { rc.json(200, await snapshot(space, projectId)); return true; }
       if (rc.path === "/api/judges" && rc.method === "POST") {
         const body = await bodyOf(rc);
         await checkJudge(space, body.judge);
         createJudge(judgesFile(space), body.revision, body.judge, Date.now(), owner(space));
-        rc.json(200, snapshot(space)); return true;
+        rc.json(200, await snapshot(space, projectId)); return true;
+      }
+      // A Space that never saved a judge starts with the starters, off and owned by no one; any saved list is left as it is.
+      if (rc.path === "/api/judges/starters" && rc.method === "POST") {
+        const body = await bodyOf(rc);
+        seedStarters(judgesFile(space), starterJudges(body.locale));
+        rc.json(200, await snapshot(space, projectId)); return true;
       }
       if (rc.path === "/api/judges/routes" && rc.method === "GET") { rc.json(200, await routes(space)); return true; }
       const match = rc.path.match(/^\/api\/judges\/([^/]+)(\/backtest)?$/);
@@ -477,12 +504,12 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         const body = await bodyOf(rc);
         await checkJudge(space, body.judge);
         updateJudge(judgesFile(space), body.revision, id, body.judge, Date.now(), owner(space));
-        rc.json(200, snapshot(space)); return true;
+        rc.json(200, await snapshot(space, projectId)); return true;
       }
       if (rc.method === "DELETE") {
         const revision = rc.url.searchParams.get("revision");
         deleteJudge(judgesFile(space), revision === null ? Number.NaN : Number(revision), id);
-        rc.json(200, snapshot(space)); return true;
+        rc.json(200, await snapshot(space, projectId)); return true;
       }
       return false;
     },

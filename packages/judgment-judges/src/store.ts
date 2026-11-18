@@ -3,8 +3,9 @@
 // usage.json (today's call count per judge). Synchronous file I/O keeps every
 // read-modify-write atomic within the single server thread.
 import { randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { atomicWriteSync } from "@polyth/plugins";
+import { isStarterId } from "./starters.ts";
 import { JUDGE_ID, MAX_JUDGES, validateJudgeInput, type JudgeDefinition, type JudgeInput, type JudgeFailure, type JudgeUsage } from "./types.ts";
 
 export interface StoredJudges { version: 1; revision: number; judges: JudgeDefinition[] }
@@ -29,9 +30,12 @@ export function readJudges(file: string): StoredJudges {
   // Corrupt stored judges fail loudly instead of silently resetting the list.
   const judges = raw.judges.map((judge) => {
     if (!judge || typeof judge !== "object" || !JUDGE_ID.test(judge.id) || !Number.isSafeInteger(judge.createdAt) || !Number.isSafeInteger(judge.updatedAt)) throw corrupt();
-    const { id, createdAt, updatedAt, ownerUserId, ...input } = judge;
+    const { id, createdAt, updatedAt, ownerUserId, starter, ...input } = judge;
     if (ownerUserId !== undefined && !ownerId(ownerUserId)) throw corrupt();
-    try { return { ...validateJudgeInput(input), id, createdAt, updatedAt, ...(ownerUserId ? { ownerUserId } : {}) }; } catch { throw corrupt(); }
+    if (starter !== undefined && !isStarterId(starter)) throw corrupt();
+    try {
+      return { ...validateJudgeInput(input), id, createdAt, updatedAt, ...(ownerUserId ? { ownerUserId } : {}), ...(starter ? { starter } : {}) };
+    } catch { throw corrupt(); }
   });
   return { version: 1, revision: raw.revision as number, judges };
 }
@@ -46,16 +50,41 @@ const checkRevision = (current: StoredJudges, expected: unknown) => {
 };
 
 /** `ownerUserId` is the signed-in person saving the judge: its actions run as them. */
+const freshId = (judges: readonly JudgeDefinition[]) => {
+  let id: string;
+  do id = `j${randomBytes(6).toString("hex")}`; while (judges.some((judge) => judge.id === id));
+  return id;
+};
+
 export function createJudge(file: string, expectedRevision: unknown, input: unknown, now = Date.now(), ownerUserId?: string): { store: StoredJudges; judge: JudgeDefinition } {
   const valid = validateJudgeInput(input);
   const current = readJudges(file);
   checkRevision(current, expectedRevision);
   if (current.judges.length >= MAX_JUDGES) throw Object.assign(new Error(`At most ${MAX_JUDGES} judges per Space`), { code: "invalid-input" });
-  let id: string;
-  do id = `j${randomBytes(6).toString("hex")}`; while (current.judges.some((judge) => judge.id === id));
-  const judge: JudgeDefinition = { ...valid, id, createdAt: now, updatedAt: now, ...owner(ownerUserId) };
+  const judge: JudgeDefinition = { ...valid, id: freshId(current.judges), createdAt: now, updatedAt: now, ...owner(ownerUserId) };
   return { store: write(file, { ...current, revision: current.revision + 1, judges: [...current.judges, judge] }), judge };
 }
+
+/** True while nothing was ever saved in this Space: no list, not even an emptied one. */
+export const neverSaved = (file: string) => !existsSync(file);
+
+/**
+ * Adds the starter judges to a Space that never saved one, switched off and
+ * owned by no one. A list that exists, even emptied, is the Space's own choice
+ * and is never touched: it returns as it is.
+ */
+export function seedStarters(file: string, starters: ReadonlyArray<{ starter: string; input: unknown }>, now = Date.now()): StoredJudges {
+  if (!neverSaved(file)) return readJudges(file);
+  const judges: JudgeDefinition[] = [];
+  for (const { starter, input } of starters.slice(0, MAX_JUDGES)) {
+    if (!isStarterId(starter)) throw Object.assign(new Error("Unknown starter judge"), { code: "invalid-input" });
+    judges.push({ ...validateJudgeInput(input), enabled: false, id: freshId(judges), createdAt: now, updatedAt: now, starter });
+  }
+  return write(file, { version: 1, revision: 1, judges });
+}
+
+/** The judge as saved, apart from its switch: what decides whether it is still its starter. */
+const content = (judge: JudgeInput) => JSON.stringify({ ...judge, enabled: false });
 
 /** Whoever saves a judge becomes its owner: the policy they saved acts with their access, never with someone else's. */
 export function updateJudge(file: string, expectedRevision: unknown, id: string, input: unknown, now = Date.now(), ownerUserId?: string): StoredJudges {
@@ -64,8 +93,11 @@ export function updateJudge(file: string, expectedRevision: unknown, id: string,
   checkRevision(current, expectedRevision);
   const existing = current.judges.find((judge) => judge.id === id);
   if (!existing) throw notFound();
+  // Turning a starter on or off keeps it a starter; any other change makes it the person's own judge.
+  const { id: _id, createdAt: _c, updatedAt: _u, ownerUserId: _o, starter, ...before } = existing;
+  const stillStarter = starter && content(before) === content(valid) ? { starter } : {};
   return write(file, { ...current, revision: current.revision + 1,
-    judges: current.judges.map((judge) => (judge.id === id ? { ...valid, id, createdAt: existing.createdAt, updatedAt: now, ...owner(ownerUserId) } : judge)) });
+    judges: current.judges.map((judge) => (judge.id === id ? { ...valid, id, createdAt: existing.createdAt, updatedAt: now, ...owner(ownerUserId), ...stillStarter } : judge)) });
 }
 
 export function deleteJudge(file: string, expectedRevision: unknown, id: string): StoredJudges {
