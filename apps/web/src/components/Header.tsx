@@ -13,6 +13,7 @@ import {
 } from "../capabilities.ts";
 import { isCapabilityActive, toggleCapability } from "../builtinCapabilities.ts";
 import SlotHost, { useSlotHasContent } from "./slots/SlotHost.ts";
+import SessionHeaderStatus from "./SessionHeaderStatus.tsx";
 import { POLYTH_MARK_SRC } from "../brandAsset.ts";
 import {
   setWorkspaceEditing,
@@ -541,12 +542,7 @@ export default function Header() {
   const island = shell.layout === "columns" && shell.barStyle === "island";
   useShellBarFrame(occupancy.headerRef, fullHeight && (shell.layout !== "bare" || bareBar));
   const sessionStatusContribution = session ? (
-    <span className="session-header-status">
-      <SlotHost
-        slot="session.header.status"
-        context={{ projectId: project?.id ?? null, sessionId: session.id, workspaceMode }}
-      />
-    </span>
+    <SessionHeaderStatus context={{ projectId: project?.id ?? null, sessionId: session.id, workspaceMode }} />
   ) : null;
   useResizeFocusHandoff(mode);
   // Phone widths use one shell header for every workspace surface. Keeping the

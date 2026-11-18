@@ -167,7 +167,7 @@ test("mobile header title has no arrow, keeps its context on a quiet line, and k
   // Package status marks lead the name inside its own text (one centred group
   // on the title's baseline, inked and sized from the title); the owner's name
   // alone takes a quiet line under it.
-  assert.match(mobileHeaderTsx, /<span className="mobile-island-title-text">\s*\{!attentionCue && \(\s*<span className="session-header-status">[\s\S]*?<\/span>\s*\)\}\s*\{activeTitleText\}\s*<\/span>/);
+  assert.match(mobileHeaderTsx, /<span className="mobile-island-title-text">\s*\{!attentionCue && \(\s*<SessionHeaderStatus context=\{[^}]*\}\} \/>\s*\)\}\s*\{activeTitleText\}\s*<\/span>/);
   assert.match(mobileHeaderTsx, /\{activeTitleText\}\s*<\/span>[\s\S]*?\{!attentionCue && !conversation && session\?\.sharing\?\.owner && \(\s*<span className="mobile-island-owner"/);
   assert.doesNotMatch(mobileHeaderTsx, /mobile-island-meta/);
   assert.match(styles, /\.mobile-island-text \{[^}]*flex-direction: column;/);

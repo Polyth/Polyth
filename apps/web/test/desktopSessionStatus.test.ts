@@ -12,8 +12,8 @@ test("desktop status shares the live chat column geometry", async () => {
   assert.match(header, /--header-leading-inline-end/);
   assert.match(header, /--header-trailing-inline-size/);
   assert.match(header, /session && \(\s*<DesktopSessionStatus\s+showTrigger=\{showSessionStatus\}\s+leading=\{<SessionBack sessionId=\{session\.id\} presentation="bar" \/>\}\s+trailing=/);
-  assert.match(header, /slot="session\.header\.status"/);
-  assert.match(rail, /--workspace-pane-inline-size/);
+  assert.match(header, /<SessionHeaderStatus context=/);
+  assert.match(rail,/--workspace-pane-inline-size/);
   assert.match(styles, /\.desktop-session-status[^}]+--sidebar-inline-size[^}]+--workspace-pane-inline-size/);
   assert.match(styles, /\.desktop-session-status[^}]+--header-leading-inline-end[^}]+--header-trailing-inline-size/s);
   assert.match(styles, /\.desktop-session-status-row\s*\{[^}]*display: flex;[^}]*align-items: center;/s);
@@ -147,7 +147,7 @@ test("desktop and phone session titles use centered size roles", async () => {
   assert.match(styles, /\.mobile-session-selector\s*\{[^}]*display: grid;[^}]*grid-template-columns: minmax\(0, 1fr\);[^}]*font-size: var\(--font-session-title-compact\)/s);
   assert.match(styles, /\.mobile-session-title-row\s*\{[^}]*display: flex;[^}]*align-items: center;/s);
   assert.match(styles, /\.mobile-island-text\s*\{[^}]*text-align: center;/s);
-  assert.match(mobile, /slot="session\.header\.status"/);
+  assert.match(mobile, /<SessionHeaderStatus context=/);
   // Tablet tools never scroll sideways: whole shortcuts fit, the rest is in More.
   assert.match(styles, /\.mobile-shortcut-track\s*\{[^}]*display: flex;/s);
   assert.doesNotMatch(styles, /\.mobile-shortcut-rail\s*\{[^}]*overflow-x: auto/s);

@@ -1970,12 +1970,15 @@ host.slots.register({
   `projectId`, `spaceId`). The row only mounts with the model/effort chips, so
   a contribution must render `null` when the route is not its concern. `ContextPie.tsx`
   mounts `composer.context.details` inside its card; `Header.tsx` and
-  `MobileSessionHeader.tsx` mount `session.header.status` beside the shared
-  session status control (on the phone inline before the title text, like a
+  `MobileSessionHeader.tsx` mount `session.header.status` through
+  `SessionHeaderStatus.tsx` inside the shared session status control's button
+  (on the desktop before its chevron; on the phone inline before the title text, like a
   browser address pill's lock, in the same centred line and baseline; marks
   take a muted ink and a glyph sized from the title, and the title has no
   dropdown arrow and always keeps to one line, cut with an ellipsis at the end, so it sits at
-  the same height for every chat); both lead the title with Back from the chat
+  the same height for every chat). A click on a mark's own control, or in the
+  dialog or sheet it portals, stops there and never also opens the session
+  overview; a click on a plain glyph still does; both lead the title with Back from the chat
   (`SessionBack.tsx`, the `ui/SessionBackButton.tsx` control: a quiet
   `header-control` pill before the desktop title, an icon button before the
   menu in the phone's leading island). A delegated child (subagent, workflow
