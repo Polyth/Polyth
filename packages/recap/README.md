@@ -47,8 +47,17 @@ automatic request off; automatic failures stay silent, explicit ones report a
 notice.
 
 **Recap** is one quiet caption at the transcript tail, on the prose text edge:
-the ≤20-word recap and a dismiss held to its last word (revealed on hover for a
-fine pointer). It has no glyph or visible label; the note's accessible name is
+the recap (written in the conversation's language; 12, 20 or 40 words by the
+**Recap length** setting) and a dismiss held to its last word (revealed on hover
+for a fine pointer). A dismissal is remembered per session and recap in this
+browser's `localStorage`, so it survives a reload; a newer recap shows again.
+The strip draws only the latest word on an idle chat (`visibleRecap`): no
+conversation activity after the recap, no running turn, and a recap pinned to
+this log. A recap whose `atSeq` lies past the loaded log's last event came with
+a copied projection (a fork made before forks dropped `assist`) and describes
+another chat, so it is never shown; the server's `/api/sessions/:id/assist`
+applies the same rule. **Show recap** off skips the small-model call and hides
+recaps already written. It has no glyph or visible label; the note's accessible name is
 "Recap". It draws no suggestion of its own: when the idle recap also
 grounds a next prompt and the conversation has not moved, Session Assist offers
 it on the same composer chip, after its own answer for that conversation state
@@ -112,6 +121,8 @@ requests validate the resource through the request's scoped services before
 reading history or invoking a model. Quiet-time settings keep the legacy
 `assist.json` location; their existing deployment-wide storage is unchanged.
 `showCallouts` joins the same file and defaults to off when absent.
+`showRecap` (default on) and `recapLength` (`short` | `medium` | `detailed`,
+default `medium`) join it too.
 
 Run deterministic checks with
 `node --experimental-strip-types --test packages/recap/test/*.test.ts` and

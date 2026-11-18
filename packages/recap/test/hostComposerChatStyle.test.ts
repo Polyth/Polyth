@@ -17,7 +17,7 @@ test("idle recap is package-owned and mounts at the transcript tail", () => {
   assert.doesNotMatch(timeline, /AssistStrip/);
   assert.match(entry, /slot: "session\.timeline\.after"/);
   assert.match(strip, /assistFreshnessSeq/);
-  assert.match(strip, /freshnessSeq > assist\.atSeq/);
+  assert.match(strip, /assistFreshnessSeq\(events\) > assist\.atSeq/);
   assert.equal(css.match(/\.assist-strip\s*\{/g)?.length, 1);
   // The dismiss keeps the IconButton's own centring grid and sm box (its ::after
   // carries the touch target): an inline-flex or resized box pinned the glyph

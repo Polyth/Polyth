@@ -22,9 +22,9 @@ test("recap settings keep legacy quiet time while package lifecycle owns enablem
   const file = join(tmp(), "assist.json");
   writeFileSync(file, JSON.stringify({ enabled: false, idleSeconds: 45 }));
   const settings = createRecapSettings({ file });
-  assert.deepEqual(settings.get(), { idleSeconds: 45, suggestNextPrompt: true, suggestionPriority: "harness", showCallouts: false }, "next-prompt suggestions default on, after a harness hint");
+  assert.deepEqual(settings.get(), { idleSeconds: 45, suggestNextPrompt: true, suggestionPriority: "harness", showCallouts: false, showRecap: true, recapLength: "medium" }, "next-prompt suggestions default on, after a harness hint");
 
-  assert.deepEqual(settings.put({ enabled: true, idleSeconds: 3 }), { idleSeconds: 10, suggestNextPrompt: true, suggestionPriority: "harness", showCallouts: false });
+  assert.deepEqual(settings.put({ enabled: true, idleSeconds: 3 }), { idleSeconds: 10, suggestNextPrompt: true, suggestionPriority: "harness", showCallouts: false, showRecap: true, recapLength: "medium" });
   assert.doesNotMatch(readFileSync(file, "utf8"), /"enabled"/);
   assert.equal(settings.put({ idleSeconds: 99_999 }).idleSeconds, 3600);
   assert.throws(() => settings.put({ idleSeconds: "soon" }), /number/);
@@ -46,7 +46,7 @@ test("recap settings leave corrupt legacy state untouched until a deliberate wri
   writeFileSync(file, "{{{");
   const before = readFileSync(file, "utf8");
   const settings = createRecapSettings({ file });
-  assert.deepEqual(settings.get(), { idleSeconds: 120, suggestNextPrompt: true, suggestionPriority: "harness", showCallouts: false });
+  assert.deepEqual(settings.get(), { idleSeconds: 120, suggestNextPrompt: true, suggestionPriority: "harness", showCallouts: false, showRecap: true, recapLength: "medium" });
   assert.equal(readFileSync(file, "utf8"), before);
 });
 
@@ -75,6 +75,7 @@ function serviceHarness(opts: {
   idleSeconds?: number;
   completeDelayMs?: number;
   reply?: string;
+  settings?: { showRecap?: boolean; recapLength?: "short" | "medium" | "detailed" };
 }) {
   let seq = 10;
   const events: SessionEvent[] = [];
@@ -95,7 +96,7 @@ function serviceHarness(opts: {
     } as SessionEvent);
   };
   const service = createRecapService({
-    settings: () => ({ idleSeconds: opts.idleSeconds ?? 0.01 }),
+    settings: () => ({ idleSeconds: opts.idleSeconds ?? 0.01, ...opts.settings }),
     latestSeq: async () => seq,
     eventsAfter: async (_sessionId, afterSeq) => events.filter((event) => event.seq > afterSeq),
     transcript: async () => "User: fix the bug\n\nAssistant: fixed it",
@@ -184,18 +185,18 @@ function routeHarness(opts: {
 
 test("recap package owns quiet-time settings and freshness-checked reads", async () => {
   const settings = routeHarness({});
-  assert.deepEqual((await settings.call("GET", "/api/settings/assist")).payload, { idleSeconds: 120, suggestNextPrompt: true, suggestionPriority: "harness", showCallouts: false });
+  assert.deepEqual((await settings.call("GET", "/api/settings/assist")).payload, { idleSeconds: 120, suggestNextPrompt: true, suggestionPriority: "harness", showCallouts: false, showRecap: true, recapLength: "medium" });
   assert.deepEqual(
     (await settings.call("PUT", "/api/settings/assist", { idleSeconds: 60, enabled: true })).payload,
-    { idleSeconds: 60, suggestNextPrompt: true, suggestionPriority: "harness", showCallouts: false },
+    { idleSeconds: 60, suggestNextPrompt: true, suggestionPriority: "harness", showCallouts: false, showRecap: true, recapLength: "medium" },
   );
   assert.deepEqual(
     (await settings.call("PUT", "/api/settings/assist", { suggestNextPrompt: false })).payload,
-    { idleSeconds: 60, suggestNextPrompt: false, suggestionPriority: "harness", showCallouts: false },
+    { idleSeconds: 60, suggestNextPrompt: false, suggestionPriority: "harness", showCallouts: false, showRecap: true, recapLength: "medium" },
   );
   assert.deepEqual(
     (await settings.call("PUT", "/api/settings/assist", { suggestionPriority: "assist" })).payload,
-    { idleSeconds: 60, suggestNextPrompt: false, suggestionPriority: "assist", showCallouts: false },
+    { idleSeconds: 60, suggestNextPrompt: false, suggestionPriority: "assist", showCallouts: false, showRecap: true, recapLength: "medium" },
   );
 
   const fresh: SessionAssist = { recap: "r", suggestion: "s", atSeq: 7, generatedAt: 1 };
@@ -215,4 +216,50 @@ test("recap package owns quiet-time settings and freshness-checked reads", async
       .call("GET", "/api/sessions/s1/assist")).payload,
     fresh,
   );
+});
+
+test("recap settings: an on/off switch and a length, both validated and persisted", () => {
+  const file = join(tmp(), "assist.json");
+  const settings = createRecapSettings({ file });
+  assert.equal(settings.get().showRecap, true, "recaps default on while the package is enabled");
+  assert.equal(settings.get().recapLength, "medium");
+  assert.equal(settings.put({ showRecap: false }).showRecap, false);
+  assert.equal(settings.put({ recapLength: "short" }).recapLength, "short");
+  const reread = createRecapSettings({ file }).get();
+  assert.equal(reread.showRecap, false, "the switch persists");
+  assert.equal(reread.recapLength, "short", "the length persists");
+  assert.throws(() => settings.put({ showRecap: "no" }), /boolean/);
+  assert.throws(() => settings.put({ recapLength: "huge" }), /recapLength/);
+  assert.throws(() => settings.put({ recapLength: "toString" }), /recapLength/, "no prototype keys");
+  assert.equal(settings.get().recapLength, "short", "a rejected value changes nothing");
+});
+
+test("recap prompt follows the chosen length and the conversation's language", () => {
+  assert.match(buildRecapPrompt("T", 12), /at most 12 words/);
+  assert.match(buildRecapPrompt("T"), new RegExp(`at most ${RECAP_MAX_WORDS} words`));
+  assert.match(buildRecapPrompt("T"), /language the user writes in/);
+  const parsed = parseRecapReply(`Recap: ${"слово ".repeat(30)}`, 12);
+  assert.equal(parsed!.recap.split(/\s+/).length, 12);
+});
+
+test("recap service honours the length and skips the model call while recaps are off", async () => {
+  const short = serviceHarness({ settings: { recapLength: "short" }, reply: `Recap: ${"word ".repeat(30)}` });
+  short.service.onTurnCompleted("s1");
+  await sleep(80);
+  assert.match(short.completes[0]!, /at most 12 words/);
+  assert.equal(short.saves[0]!.assist.recap.split(/\s+/).length, 12);
+  short.service.stop();
+
+  const off = serviceHarness({ settings: { showRecap: false } });
+  off.service.onTurnCompleted("s1");
+  await sleep(80);
+  assert.equal(off.completes.length, 0, "no small-model call");
+  assert.equal(off.saves.length, 0);
+  off.service.stop();
+});
+
+test("a recap pinned past the session's own log (a copied projection) is never fresh", () => {
+  assert.equal(isFresh({ atSeq: 1845 }, 35, 199), false, "a forked chat's inherited recap");
+  assert.equal(isFresh({ atSeq: 199 }, 190, 205), true, "bookkeeping after the recap keeps it fresh");
+  assert.equal(isFresh({ atSeq: 199 }, 200, 205), false);
 });

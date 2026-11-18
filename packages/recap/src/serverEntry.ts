@@ -28,6 +28,7 @@ export function recapRoutes(deps: {
   settings: { get(): { idleSeconds: number }; put(patch: Record<string, unknown>): { idleSeconds: number } };
   projection(sessionId: string): Promise<SessionProjection | undefined>;
   latestConversationSeq(sessionId: string): Promise<number>;
+  latestSeq?(sessionId: string): Promise<number>;
 }): RouteHandler {
   return async (rc) => {
     const { path, method, json } = rc;
@@ -53,7 +54,8 @@ export function recapRoutes(deps: {
         json(404, { error: "not-found", message: "no recap generated yet" });
         return true;
       }
-      if (!isFresh(assist, await deps.latestConversationSeq(sessionId))) {
+      const latestSeq = deps.latestSeq ? await deps.latestSeq(sessionId) : undefined;
+      if (!isFresh(assist, await deps.latestConversationSeq(sessionId), latestSeq)) {
         json(404, { error: "stale", message: "the session moved past this recap" });
         return true;
       }
@@ -209,6 +211,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     projection: (sessionId) => host.store.projection(sessionId),
     latestConversationSeq: async (sessionId) =>
       assistFreshnessSeq(await host.store.events(sessionId)),
+    latestSeq: (sessionId) => host.store.latestSeq(sessionId),
   });
 
   return {

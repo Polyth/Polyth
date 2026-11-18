@@ -10977,6 +10977,9 @@ export function createSessionService(deps: {
       harnessTransition: _harnessTransition, runtimeControl: _runtimeControl,
       resume: _resume, releasedExecution: _releasedExecution, paused: _paused,
       autoRetry: _autoRetry, backgroundWork: _backgroundWork, promptSuggestion: _promptSuggestion,
+      // The parent's idle recap is pinned to the parent's log (`atSeq`); the
+      // fork starts a fresh one, so carrying it would show a foreign summary.
+      assist: _assist,
       ...forkable
     } = proj;
     return forkable;

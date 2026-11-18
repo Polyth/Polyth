@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { createApiTransport, isImeComposing, type WebPackageHost } from "@polyth/web-sdk";
 import { Select, Switch } from "../../../apps/web/src/components/ui/index.ts";
-import { rememberAssistSettings, type AssistSettings as RecapSettings, type SuggestionPriority } from "./assistSettings.ts";
+import { rememberAssistSettings, type AssistSettings as RecapSettings, type RecapLength, type SuggestionPriority } from "./assistSettings.ts";
 
 const api = createApiTransport();
 
@@ -40,7 +40,7 @@ export default function RecapSettings({ host }: { host: WebPackageHost }) {
       .catch(() => setValue(String(settings.idleSeconds)));
   };
 
-  const patch = (change: Partial<Pick<RecapSettings, "suggestNextPrompt" | "suggestionPriority" | "showCallouts">>) => {
+  const patch = (change: Partial<Pick<RecapSettings, "suggestNextPrompt" | "suggestionPriority" | "showCallouts" | "showRecap" | "recapLength">>) => {
     if (!settings) return;
     setSettings({ ...settings, ...change });
     void api.put<RecapSettings>("/api/settings/assist", change)
@@ -54,6 +54,13 @@ export default function RecapSettings({ host }: { host: WebPackageHost }) {
   const priorityOptions = [
     { value: "harness", label: tr("settings.pages.suggestionPriorityHarness") },
     { value: "assist", label: tr("settings.pages.suggestionPriorityAssist") },
+  ];
+  const recapOn = settings?.showRecap !== false;
+  const length: RecapLength = settings?.recapLength ?? "medium";
+  const lengthOptions: { value: RecapLength; label: string }[] = [
+    { value: "short", label: tr("settings.pages.recapLengthShort") },
+    { value: "medium", label: tr("settings.pages.recapLengthMedium") },
+    { value: "detailed", label: tr("settings.pages.recapLengthDetailed") },
   ];
 
   return (
@@ -109,6 +116,35 @@ export default function RecapSettings({ host }: { host: WebPackageHost }) {
         <h2>{tr("assiststrip.recap")}</h2>
         <p>{tr("settings.pages.afterASessionGoesQuietTheSmall")}</p>
       </header>
+      <div className="recap-setting-row">
+        <div>
+          <strong id="recap-show-recap">{tr("settings.pages.showRecap")}</strong>
+          <span className="recap-setting-hint">{tr("settings.pages.showRecapHint")}</span>
+        </div>
+        <Switch
+          checked={recapOn}
+          disabled={!settings}
+          labelledBy="recap-show-recap"
+          onChange={(showRecap: boolean) => patch({ showRecap })}
+        />
+      </div>
+      {recapOn ? (
+      <>
+      <div className="recap-setting-row recap-setting-row-control">
+        <div>
+          <strong>{tr("settings.pages.recapLength")}</strong>
+        </div>
+        <div className="recap-setting-control recap-setting-choice">
+          <Select
+            ariaLabel={tr("settings.pages.recapLength")}
+            label={lengthOptions.find((option) => option.value === length)!.label}
+            value={length}
+            options={lengthOptions}
+            disabled={!settings}
+            onChange={(value: string) => patch({ recapLength: value === "short" || value === "detailed" ? value : "medium" })}
+          />
+        </div>
+      </div>
       <div className="recap-setting-row recap-setting-row-control">
         <div>
           <strong>{tr("settings.pages.quietTime")}</strong>
@@ -129,6 +165,8 @@ export default function RecapSettings({ host }: { host: WebPackageHost }) {
           <span>{tr("settings.pages.s")}</span>
         </div>
       </div>
+      </>
+      ) : null}
     </section>
   );
 }

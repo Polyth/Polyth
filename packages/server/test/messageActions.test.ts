@@ -263,7 +263,7 @@ test("fork of the first prompt asks no runtime for anything and starts like a ne
   await store.close();
 });
 
-test("a fork never inherits the source's pending resend, retry chain, pause, harness move or background work", async () => {
+test("a fork never inherits the source's pending resend, retry chain, pause, harness move, background work or idle recap", async () => {
   for (const fork of [undefined, false] as const) {
     const fake = fakeRuntime(fork === false ? { fork: false } : {});
     const { sessions, store } = makeService(fake);
@@ -282,13 +282,15 @@ test("a fork never inherits the source's pending resend, retry chain, pause, har
       },
       backgroundWork: { count: 1, since: Date.now() },
       promptSuggestion: { text: "next", atSeq: second.seq },
+      // Pinned to the source's log: in the child it would read as current.
+      assist: { recap: "the source's summary", atSeq: 9_999, generatedAt: Date.now() },
     } as unknown as typeof source);
 
     const result = await sessions.fork(id, second.seq);
     const child = await store.projection(result.id);
     const label = fork === false ? "continuity fork" : "native branch";
     assert.equal(fake.branchRequests.length, fork === false ? 0 : 1, `${label} took the other path`);
-    for (const field of ["resume", "autoRetry", "paused", "harnessTransition", "backgroundWork", "promptSuggestion"] as const) {
+    for (const field of ["resume", "autoRetry", "paused", "harnessTransition", "backgroundWork", "promptSuggestion", "assist"] as const) {
       assert.equal(child?.[field], undefined, `${label} inherited ${field}`);
     }
     assert.equal(fake.startedTexts.filter((text) => text === "second").length, 1, `${label} resent the prompt`);
