@@ -1,6 +1,7 @@
 // Keyboard → PTY byte encoding (pure, DOM-free). Mirrors xterm behavior:
 // application cursor keys, modifyOtherKeys-style CSI 1;<mod> encodings for
-// navigation/function keys, Ctrl+letter C0 codes, and Alt as an ESC prefix —
+// navigation/function keys, Ctrl+letter C0 codes (on the physical key's US
+// letter when a non-Latin layout reports its own), and Alt as an ESC prefix —
 // except where macOS Option composed the character the key types, which sends
 // that character as plain text instead.
 
@@ -63,6 +64,23 @@ const optionComposedSymbol = (ev: KeyLike, state: KeymapState): boolean => {
   return ev.key !== base;
 };
 
+/** Physical keys whose US character has a C0 control (`Ctrl+[` is ESC). */
+const CONTROL_SYMBOL_CODES: Readonly<Record<string, string>> = {
+  BracketLeft: "[", BracketRight: "]", Backslash: "\\", Slash: "/",
+};
+
+/** The character a Ctrl chord is defined on. A non-Latin layout (Ukrainian,
+ *  Russian, Greek…) reports its own letter, so Ctrl+С arrives as `с` and
+ *  matched no control; like Terminal.app and xterm, use the physical key's US
+ *  character then. A Latin layout keeps its own letter (AZERTY Ctrl+A is the
+ *  key labelled A). */
+const controlBase = (ev: KeyLike): string => {
+  if (ev.key.charCodeAt(0) < 0x80 || !ev.code) return ev.key;
+  return /^Key([A-Z])$/u.exec(ev.code)?.[1]?.toLowerCase()
+    ?? CONTROL_SYMBOL_CODES[ev.code]
+    ?? ev.key;
+};
+
 /**
  * Translate a keydown event to the byte sequence a terminal sends, or null
  * when the key is not terminal input (the view handles copy/paste/scroll).
@@ -103,7 +121,7 @@ export function keyEventToBytes(ev: KeyLike, state: KeymapState): string | null 
 
   // Ctrl+letter and Ctrl+symbol C0 controls
   if (ev.ctrlKey && !ev.metaKey) {
-    const ch = ev.key;
+    const ch = controlBase(ev);
     const lower = ch.toLowerCase();
     let byte: string | null = null;
     if (lower >= "a" && lower <= "z") {

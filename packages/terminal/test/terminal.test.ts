@@ -14,6 +14,7 @@ import {
   localShellCommand,
   resolveLoginShell,
   systemShellCommand,
+  terminalLocaleEnv,
 } from "../src/index.ts";
 
 let cwd: string;
@@ -108,6 +109,19 @@ test("a desktop launch without SHELL resolves the system login shell", () => {
   // Non-macOS keeps POSIX sh only when no login shell can be resolved.
   assert.equal(resolveLoginShell("linux", {}, null), "/bin/sh");
   assert.equal(resolveLoginShell("linux", {}, "/usr/bin/fish"), "/usr/bin/fish");
+});
+
+test("a macOS launch without a locale gives the shell UTF-8, and a named locale is kept", () => {
+  // launchd starts Dock/Finder apps with no LANG or LC_*; zsh would run in C
+  // and break multibyte prompt glyphs (wrong widths, `�` from split bytes).
+  assert.deepEqual(terminalLocaleEnv({}, "darwin"), { LANG: "en_US.UTF-8" });
+  assert.deepEqual(terminalLocaleEnv({ LANG: " ", LC_ALL: "" }, "darwin"), { LANG: "en_US.UTF-8" });
+  assert.deepEqual(terminalLocaleEnv({ LANG: "uk_UA.UTF-8" }, "darwin"), {});
+  assert.deepEqual(terminalLocaleEnv({ LC_CTYPE: "UTF-8" }, "darwin"), {});
+  assert.deepEqual(terminalLocaleEnv({ LC_ALL: "C" }, "darwin"), {});
+  // Elsewhere the inherited environment stays exactly as it is.
+  assert.deepEqual(terminalLocaleEnv({}, "linux"), {});
+  assert.deepEqual(terminalLocaleEnv({}, "win32"), {});
 });
 
 test("create + write + read roundtrip through a long-lived child", async () => {

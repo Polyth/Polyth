@@ -50,6 +50,20 @@ test("keymap: Ctrl+letter C0 codes, Alt prefix, printables", () => {
   assert.equal(keyEventToBytes(key("é"), norm), "é");
 });
 
+// A Ukrainian layout reports `с` for the C key: Ctrl+C has to stay ^C.
+test("keymap: Ctrl chords on a Cyrillic layout use the physical key", () => {
+  assert.equal(keyEventToBytes(key("с", { code: "KeyC", ctrlKey: true }), norm), "\x03");
+  assert.equal(keyEventToBytes(key("в", { code: "KeyD", ctrlKey: true }), norm), "\x04");
+  assert.equal(keyEventToBytes(key("К", { code: "KeyR", ctrlKey: true, shiftKey: true }), norm), "\x12");
+  assert.equal(keyEventToBytes(key("х", { code: "BracketLeft", ctrlKey: true }), norm), "\x1b");
+  assert.equal(keyEventToBytes(key("ф", { code: "KeyA", ctrlKey: true, altKey: true }), norm), "\x1b\x01");
+  // Typing itself is unchanged, and a Latin layout keeps its own letter.
+  assert.equal(keyEventToBytes(key("с", { code: "KeyC" }), norm), "с");
+  assert.equal(keyEventToBytes(key("a", { code: "KeyQ", ctrlKey: true }), norm), "\x01");
+  // Without a physical key there is nothing to map: still no control byte.
+  assert.equal(keyEventToBytes(key("с", { ctrlKey: true }), norm), null);
+});
+
 // Swedish, German and Ukrainian macOS layouts type $ | \ { } [ ] @ only with
 // Option; sending them as Meta chords left the shell without the symbol.
 test("keymap: macOS Option composes a symbol, and stays Meta elsewhere", () => {

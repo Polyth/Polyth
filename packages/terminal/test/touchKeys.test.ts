@@ -9,6 +9,7 @@ import {
   type ExtraKeyAction, type Modifiers,
 } from "../widgets/terminal/extraKeys.ts";
 import { createImeBridge, diffImeText, IME_SENTINEL } from "../widgets/terminal/imeBridge.ts";
+import { keyEventToBytes } from "../widgets/terminal/keymap.ts";
 import { collectUrls } from "../widgets/terminal/linkify.ts";
 import { normalizeTouchPrefs } from "../widgets/terminal/touchPrefs.ts";
 import { extendFromWord, moveSelectionEdge, orderedSelection } from "../widgets/terminal/touchSelection.ts";
@@ -116,6 +117,10 @@ test("typed text takes the sticky modifiers on its first character only", () => 
   assert.equal(encodeTypedText("é", mods({ alt: 1 }), plain).bytes, "\x1bé");
   const merged = withModifiers({ key: "c", ctrlKey: false, altKey: false, shiftKey: false, metaKey: false }, mods({ ctrl: 2 }));
   assert.equal(merged.ctrlKey, true);
+  // A hardware Cyrillic key keeps its physical code, so sticky CTRL + С is ^C.
+  const cyrillic = withModifiers({ key: "с", code: "KeyC", ctrlKey: false, altKey: false, shiftKey: false, metaKey: false }, mods({ ctrl: 1 }));
+  assert.equal(cyrillic.code, "KeyC");
+  assert.equal(keyEventToBytes(cyrillic, plain), "\x03");
 });
 
 test("the IME bridge echoes composition live and turns edits into DELs", () => {

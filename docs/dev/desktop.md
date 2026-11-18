@@ -288,6 +288,11 @@ recorded in the operating-system account database (`os.userInfo().shell`), with
 app launched from Finder/Dock does not inherit `SHELL`, so the terminal must not
 silently drop to POSIX `sh`. That is the default (`auto`); Settings → Terminal can
 pin another installed shell (PowerShell 7/Windows PowerShell start with `-NoLogo`).
+The same Finder/Dock launch names no locale (`LANG`/`LC_*` unset), and zsh in the
+C locale mismeasures multibyte prompt glyphs (the prompt is redrawn over itself
+and split bytes show as `�`), so on macOS a local terminal whose environment
+names no locale gets `LANG=en_US.UTF-8` (`terminalLocaleEnv`); a locale that is
+already named is kept.
 Linux-only runtime containment and remote `flock`/
 `/proc` logic remains gated to Linux execution paths and is not a desktop host
 dependency on macOS or Windows.
