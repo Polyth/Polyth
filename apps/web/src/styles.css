@@ -17872,6 +17872,15 @@ html[data-font] body :is(
     calc(var(--conversation-group-gap) - var(--timeline-gap) - var(--reasoning-head-pad))
     calc(-1 * var(--reasoning-head-pad));
 }
+/* Under a block the thought also counts the row's empty band, and prose under
+   a thought stands the group gap from it, like prose under a block: without
+   these both read 28px against the 20px of every other group edge. */
+.timeline > .activity-group + .msg.assistant.reasoning-row {
+  margin-block-start: calc(var(--conversation-group-gap) - var(--timeline-gap) - var(--reasoning-head-pad) - var(--activity-row-band));
+}
+.timeline > .msg.assistant.reasoning-row + .msg.assistant:where(:not(.activity-group, .reasoning-row)) {
+  margin-block-start: calc(var(--conversation-group-gap) - var(--timeline-gap));
+}
 .msg > .reasoning + .bubble { margin-top: var(--space-1); }
 .reasoning-toggle {
   position: relative;
