@@ -1925,14 +1925,16 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   .session-btn:hover:where(:not(:disabled)) { background: transparent; }
 }
 .session-row:hover .session-btn::before { background: color-mix(in srgb, var(--session-blue, var(--accent)) 6%, transparent); opacity: 1; }
-/* Hover, selection, press, focus and the pinned fill share one extent; only
-   their paint differs. */
+/* Hover, selection, press and focus share one extent; only their paint
+   differs. A pinned chat is marked by its Pinned chats caption and its pin,
+   never by a second glass pill: two identical plates made the current chat
+   ambiguous in the Standard look (the looks already dropped it).
+   The current row takes the mode-aware strong overlay, the same weight as a
+   look's --look-select (ink 8-9% over the panel): the glass plate alone sat
+   one OKLab step off a dark sidebar and vanished there, while reading as a
+   bright white slab on a light one. */
 .session-row.active .session-btn::before {
-  background: var(--material-glass);
-  opacity: 1;
-}
-.session-row.pinned:not(.active) .session-btn::before {
-  background: var(--material-glass-medium);
+  background: var(--surface-overlay-strong);
   opacity: 1;
 }
 /* Keyboard focus rings the pill itself (inside its edge, so it stays clear of

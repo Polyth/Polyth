@@ -2080,8 +2080,8 @@ The command palette
   `--icon-sm` like its other status marks. One decision, `sessionLeadMark` (`apps/web/src/sessionLead.ts`),
   renders the mark and sets the row's `data-lead` (`mark` / `empty` /
   `select`) on desktop and phone alike, so the two cannot drift. The highlight
-  pill (`.session-btn::before`: hover, press, selection, keyboard focus, the
-  pinned resting fill, Fluent's accent bar) keeps `--nav-pill-air` (10px,
+  pill (`.session-btn::before`: hover, press, selection, keyboard focus,
+  Fluent's accent bar) keeps `--nav-pill-air` (10px,
   `tokens.css`) between its edge and the content on both sides: it starts at
   `--session-pill-start`, `--session-pill-inset` (= the air) before the state
   mark or, for `data-lead="empty"`, before the title
@@ -2101,8 +2101,11 @@ The command palette
   instead of the row box. Only the pill's start moves between the two
   starts, sliding with `--motion-fast` (off under reduced motion and the
   reduce-animations/low-resource settings); the columns never shift. Themes
-  and shell looks restyle the pill's paint, never its extent. The phone row
-  paints its fill (current, selected, failed) on
+  and shell looks restyle the pill's paint, never its extent. Only the current
+  chat and a failing row take a fill; a pinned chat is marked by its Pinned
+  chats caption and its pin, never by a second plate, so the current chat
+  stays unambiguous (the looks and the phone already work this way). The
+  phone row paints its fill (current, selected, failed) on
   `.mobile-nav-session-row::before` with the same rule: the same air before
   the status mark (or the title when the slot is empty) and after the ⋯
   glyph, reaching `--nav-fill-outset` past the row box (at most 2px short of
@@ -2195,9 +2198,11 @@ navigator passes `surface: "phone"` (its rows use the phone metrics). Rows
 take their measures from the list's own tokens (`--nav-row-session`,
 `--nav-session-size`, `--session-lead-size`, `--session-pill-inset`,
 `--session-menu-size`) so they read as peers of chats: nothing is highlighted
-at rest (no pinned-chat backing), hover and the current row use the chat
-row's wash and glass, state marks sit in the leading column (spinner, amber
-shield, red `!`, unread dot), and actions open from one menu reached by right
+at rest (no pinned-chat backing), hover uses the chat row's wash and the
+current row the mode-aware selection wash (`--surface-overlay-strong`, the
+fill the macOS, Liquid Glass and Fluent recipes already draw), state marks sit
+in the leading column (spinner, amber shield, red `!`, unread dot), and
+actions open from one menu reached by right
 click, the ⋮ trigger, long press and Shift+F10/ContextMenu. A row that opens a
 package page is current exactly while `store.getSnapshot().activePage` names
 it. The Agents package draws its agents here as a foldable group (see

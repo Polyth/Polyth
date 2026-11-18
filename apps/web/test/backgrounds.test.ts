@@ -310,8 +310,11 @@ test("text-bearing glass surfaces keep a readable mode-aware floor", async () =>
     assert.match(tokens, new RegExp(`${token}: calc\\(`), `${token} is a shared readable floor`);
   }
   assert.match(styles, /\.sidebar-sessions-peek[\s\S]*?var\(--material-glass-readable-fill\)/s);
-  assert.match(styles, /\.session-row\.active \.session-btn::before\s*\{[^}]*var\(--material-glass\)/s);
-  assert.match(styles, /\.session-row\.pinned:not\(.active\) \.session-btn::before\s*\{[^}]*var\(--material-glass-medium\)/s);
+  // The navigator's current chat is a selection wash, not a text-bearing glass
+  // plate of its own: a fixed glass fill vanished on dark canvases.
+  assert.match(styles, /\.session-row\.active \.session-btn::before\s*\{[^}]*var\(--surface-overlay-strong\)/s);
+  // A pinned chat carries no second plate: only the current row is filled.
+  assert.doesNotMatch(styles, /\.session-row\.pinned[^{]*\.session-btn::before/);
   assert.ok(styles.includes("background: color-mix(in srgb, var(--material-glass-medium) var(--material-glass-readable-fill), transparent);"));
   assert.match(mobile, /\.mobile-nav-search\s*\{[^}]*var\(--material-glass-readable-control-fill\)/s);
   assert.match(module, /\.module-view--phone \.module-view-head[\s\S]*?var\(--material-glass-readable-fill\)/s);

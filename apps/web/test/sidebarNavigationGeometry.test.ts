@@ -183,8 +183,21 @@ test("the highlight pill hugs the title when the state column is empty, and a re
   // same inset before the title when the column shows nothing.
   assert.match(styles, /\.session-row\s*\{[^}]*--session-pill-start:\s*calc\(var\(--session-body-start\) - var\(--session-pill-inset\)\);/);
   assert.match(styles, /\.session-row\[data-lead="empty"\]\s*\{\s*--session-pill-start:\s*calc\(var\(--session-title-start\) - var\(--session-pill-inset\)\);\s*\}/);
-  // Hover, press, focus, selection and the pinned fill share one extent.
+  // Hover, press, focus and selection share one extent.
   assert.match(styles, /\.session-btn::before\s*\{\s*inset-inline:\s*var\(--session-pill-start\) var\(--session-pill-end, 0px\);[^}]*inset-inline-start var\(--motion-fast\) var\(--motion-ease\);/);
+  // The Standard look is the current chat's plate alone: a pinned chat is
+  // marked by its Pinned chats caption and its pin, never by a second glass
+  // pill (two identical plates made the current chat ambiguous). The looks
+  // state the same rule in shellLooks.css and the phone navigator in
+  // MobileNavigator.css.
+  assert.doesNotMatch(styles, /\.session-row\.pinned:not\(\.active\)[^{]*\{[^}]*background/, "no pinned row fill in the Standard look");
+  assert.doesNotMatch(styles, /\.session-row\.pinned[^{]*\.session-btn::before/, "a pinned row never paints the pill");
+  // The current row takes the shared mode-aware selection wash that the macOS,
+  // Liquid Glass and Fluent recipes already use, never a fixed glass fill: the
+  // glass sat one OKLab step off a dark sidebar and vanished there.
+  assert.match(styles, /\.session-row\.active \.session-btn::before\s*\{([^}]*)\}/, "the current row rule exists");
+  const activePill = styles.match(/\.session-row\.active \.session-btn::before\s*\{([^}]*)\}/)![1]!;
+  assert.match(activePill, /background:\s*var\(--surface-overlay-strong\);/, "the current row is the mode-aware selection wash");
   assert.match(styles, /\.session-btn:focus-visible::before\s*\{[^}]*outline:\s*2px solid var\(--focus-ring\);[^}]*outline-offset:\s*-2px;/,
     "keyboard focus rings the pill, not the row box");
   assert.doesNotMatch(styles, /\.session-btn::before\s*\{[^}]*inset-inline:\s*calc\(var\(--session-body-start\)/,
