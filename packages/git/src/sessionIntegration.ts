@@ -1119,16 +1119,41 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
     && isolationWorkspaceRows(candidate).some((row) => row.isolation.originPath !== undefined
       && samePath(row.isolation.originPath, checkoutPath)));
 
+  /** One reading of every session plus the project lookups made against it.
+   *  A package's `projects.get` runs control-plane SQL synchronously, so
+   *  resolving it per session row (thousands of awaits with no I/O between
+   *  them) held the event loop for seconds. Each project is resolved once per
+   *  scan instead; a scan is never kept past the call that took it, and a
+   *  listing taken before a mutation must not be reused after it. */
+  interface DependentsScan {
+    candidates: readonly SessionProjection[];
+    projects: Map<string, Promise<IsolationRepositoryProject | undefined>>;
+  }
+  const dependentsScan = async (candidates?: readonly SessionProjection[]): Promise<DependentsScan> => ({
+    candidates: candidates ?? await deps.sessions.list(),
+    projects: new Map(),
+  });
+  const scannedProject = (scan: DependentsScan, projectId: string): Promise<IsolationRepositoryProject | undefined> => {
+    let project = scan.projects.get(projectId);
+    if (!project) {
+      project = deps.projects.get(projectId);
+      scan.projects.set(projectId, project);
+    }
+    return project;
+  };
+
   const sourceDependentsAt = async (
     sessionId: string,
     worktreePath: string,
+    scan?: DependentsScan,
   ): Promise<SessionProjection[]> => {
     const dependents: SessionProjection[] = [];
-    const candidates = await deps.sessions.list();
+    const current = scan ?? await dependentsScan();
+    const { candidates } = current;
     const nested = new Set(nestedIsolationsAt(candidates, sessionId, worktreePath).map((candidate) => candidate.id));
     for (const candidate of candidates) {
       if (candidate.id === sessionId) continue;
-      const project = candidate.worktreePath ? undefined : await deps.projects.get(candidate.projectId);
+      const project = candidate.worktreePath ? undefined : await scannedProject(current, candidate.projectId);
       const cwd = candidate.worktreePath ?? project?.path;
       const workspacePaths = candidate.workspace?.repositories.map((row) => row.path) ?? [];
       if ((cwd && samePath(cwd, worktreePath))
@@ -1195,8 +1220,8 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
     }
   };
 
-  const sourceDependents = (sessionId: string, isolation: SessionIsolation): Promise<SessionProjection[]> =>
-    sourceDependentsAt(sessionId, isolation.worktreePath);
+  const sourceDependents = (sessionId: string, isolation: SessionIsolation, scan?: DependentsScan): Promise<SessionProjection[]> =>
+    sourceDependentsAt(sessionId, isolation.worktreePath, scan);
 
   /** True only when neither the checkout nor its branch exists any more: the
    * record then refers to nothing. A Git error is never read as absence. */
@@ -1255,7 +1280,9 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
       }
       return false;
     };
-    for (const candidate of await sourceDependents(session.id, isolation)) {
+    // The listing just taken feeds the dependents scan: nothing changed in
+    // between. The rebinds below do change it, so callers re-list afterwards.
+    for (const candidate of await sourceDependents(session.id, isolation, await dependentsScan(all))) {
       // A descendant archived or left unknown before it ever reached a native
       // session (a failed startup) has no execution here; it moves as metadata
       // only, so it never pins its owner's cleanup. Core re-checks this.
@@ -1454,8 +1481,10 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
     // else still needs it, whatever state they are in.
     const members = new Set(tree.map((member) => member.id));
     const sharers = new Map<string, SessionProjection>();
+    // One reading serves every leaving checkout: this loop only reads it.
+    const scan = await dependentsScan();
     for (const isolation of released) {
-      for (const dependent of await sourceDependentsAt(session.id, isolation.worktreePath)) {
+      for (const dependent of await sourceDependentsAt(session.id, isolation.worktreePath, scan)) {
         if (!members.has(dependent.id)) {
           throw err("conflict", "another session still depends on an isolated workspace; delete or move it first");
         }
@@ -3041,8 +3070,10 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
         const rows = isolationWorkspaceRows(session);
         if (rows.length === 0) throw err("invalid-input", "session is not isolated");
         const inspected = await inspectLeavingCheckouts(session, rows);
+        // One reading serves every leaving checkout: this loop only reads it.
+        const scan = inspected.length > 0 ? await dependentsScan() : undefined;
         for (const entry of inspected) {
-          const dependents = await sourceDependentsAt(session.id, entry.row.isolation.worktreePath);
+          const dependents = await sourceDependentsAt(session.id, entry.row.isolation.worktreePath, scan);
           if (dependents.length > 0) {
             throw err("conflict", "another session still depends on an isolated workspace; delete or move it first");
           }

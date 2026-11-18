@@ -231,7 +231,12 @@ test("phone: a still press lifts a project, it moves under the finger and lands 
     assert.ok(section("beta").classList.contains("is-arrange-held"), "its own place stays behind");
     assert.equal(document.querySelector<HTMLElement>(".mobile-navigator")!.dataset.arrangeDragging, "true");
 
-    await pointer("pointermove", window, 200, 430);
+    // Past gamma's middle (+10px hysteresis) is inside the bottom auto-scroll
+    // band, where the list creeps a few px per frame for as long as the finger
+    // rests, so how far it got depends on how many frames a loaded host ran.
+    // The list has only 32px to scroll: at 416 the lifted centre lands between
+    // gamma's middle (346) and delta's (398) for every scroll offset 0–32.
+    await pointer("pointermove", window, 200, 416);
     await sleep(20);
     assert.deepEqual(phoneOrder(), ["alpha", "gamma", "beta", "delta"], "past gamma's middle the hole moves");
     await pointer("pointermove", window, 200, 490);

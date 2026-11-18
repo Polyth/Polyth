@@ -663,7 +663,7 @@ export default function MemorySettings({ projectId, project, mobile, locale, tra
 
       <TabPane idBase={tabsId} id="settings" active={tab === "settings"}>
         <section className="memory-section" aria-labelledby="memory-policy-heading">
-          <div className="memory-section-head"><div><h3 id="memory-policy-heading">{t("memory.policy.heading")}</h3><p>{t("memory.policy.description")}</p></div></div>
+          <div className="memory-section-head"><div><h3 id="memory-policy-heading">{t("memory.policy.heading")}</h3><p className="memory-section-copy">{t("memory.policy.description")}</p></div></div>
           {policy ? (
             <div className="memory-settings" aria-disabled={writesBlocked}>
               {writesBlocked && <p className="memory-help">{t("memory.policy.readOnly")}</p>}
@@ -684,7 +684,7 @@ export default function MemorySettings({ projectId, project, mobile, locale, tra
 
         {policy && (
           <section className="memory-section" aria-labelledby="memory-harvest-heading">
-            <div className="memory-section-head"><div><h3 id="memory-harvest-heading">{t("memory.policy.harvesting")}</h3><p>{t("memory.policy.reviewHelp")}</p></div></div>
+            <div className="memory-section-head"><div><h3 id="memory-harvest-heading">{t("memory.policy.harvesting")}</h3><p className="memory-section-copy">{t("memory.policy.reviewHelp")}</p></div></div>
             <div className="memory-settings" aria-disabled={writesBlocked}>
               <Setting label={t("memory.policy.harvestReview")}>
                 <Choice label={t("memory.policy.harvestReview")} value={policy.reviewPolicy} disabled={busy || writesBlocked} align="end" onChange={(value) => updatePolicy({ reviewPolicy: value as MemoryPolicy["reviewPolicy"] })} options={[{ value: "low-risk-auto-active", label: t("memory.policy.reviewAuto") }, { value: "manual", label: t("memory.policy.reviewManual") }]} />
@@ -704,7 +704,7 @@ export default function MemorySettings({ projectId, project, mobile, locale, tra
         <section className="memory-section" aria-labelledby="memory-maintenance-heading">
           <div className="memory-section-head"><div>
             <h3 id="memory-maintenance-heading">{t("memory.maintenance.heading")}</h3>
-            <p><WithProject template={t("memory.maintenance.description")} name={project.name} /></p>
+            <p className="memory-section-copy"><WithProject template={t("memory.maintenance.description")} name={project.name} /></p>
           </div></div>
           <div className="memory-actions">
             <Btn onClick={() => void download()} disabled={busy}>{t("memory.export")}</Btn>

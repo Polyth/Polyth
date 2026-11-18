@@ -1691,8 +1691,8 @@
 }
 .agents-page .agent-report-session-arrow:dir(rtl) { scale: -1 1; }
 @media (hover: hover) {
-  .agents-page .agent-report-session:hover .agent-report-session-arrow { translate: 2px 0; }
-  .agents-page .agent-report-session:dir(rtl):hover .agent-report-session-arrow { translate: -2px 0; }
+  .agents-page .agent-report-session:hover:where(:not(:disabled)) .agent-report-session-arrow { translate: 2px 0; }
+  .agents-page .agent-report-session:dir(rtl):hover:where(:not(:disabled)) .agent-report-session-arrow { translate: -2px 0; }
 }
 @media (hover: hover) {
   .agents-page .agent-report-more:hover:where(:not(:disabled)) { color: var(--text); }
@@ -2001,15 +2001,17 @@
   line-height: var(--font-meta-lh);
 }
 
-/* Sits right above the card's policy action, the decision it extends. */
-.perm-banner .agent-future-approval {
+/* Sits right above the card's policy action, the decision it extends.
+   Inside the host permission card: `:is(.perm-banner *)` matches what
+   `.perm-banner .agent-future-approval` did, with the same specificity. */
+.agent-future-approval:is(.perm-banner *) {
   display: flex;
   justify-content: flex-end;
   min-width: 0;
 }
-.perm-banner .agent-future-approval .ui-checkbox { align-items: center; }
-.perm-banner .agent-future-approval .ui-checkbox-box { margin-block-start: 0; }
-.perm-banner .agent-future-approval .ui-checkbox-label {
+.agent-future-approval:is(.perm-banner *) .ui-checkbox { align-items: center; }
+.agent-future-approval:is(.perm-banner *) .ui-checkbox-box { margin-block-start: 0; }
+.agent-future-approval:is(.perm-banner *) .ui-checkbox-label {
   color: var(--muted);
   font-size: var(--font-meta);
   line-height: var(--font-meta-lh);

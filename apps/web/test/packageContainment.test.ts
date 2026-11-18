@@ -317,6 +317,9 @@ const GENERIC_PACKAGE_IMPORTS = new Map<string, ReadonlySet<string>>([
   // The agent's status line and its subagents' marks tint each harness logo
   // with the profile color from the same roster the composer's model chip reads.
   ["components/AgentLiveStatusDock.tsx", new Set(["@polyth/models/runtime-catalog"])],
+  // The answer's info line names the thinking level with the same label the
+  // composer's model chip shows for it.
+  ["components/ChatResponseFooter.tsx", new Set(["@polyth/models/model-presentation"])],
   ["components/SubagentActivityDock.tsx", new Set(["@polyth/models/runtime-catalog"])],
   // The island's transcript fallback shares the canonical todo normalizer
   // every harness adapter uses, so both read the same native todo shapes.

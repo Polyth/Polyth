@@ -2,7 +2,7 @@
 // MCP config service (secret non-disclosure, duplicate names, apply rollback).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RouteRequest, SpaceContext } from "@polyth/contracts";
@@ -640,4 +640,29 @@ test("client settings: patchSection with undefined removes the section", () => {
   svc.patchSection("usr_alice", "modelVisibility", undefined);
   assert.equal("modelVisibility" in svc.get("usr_alice").settings, false);
   assert.deepEqual(svc.get("usr_alice").settings.product, { density: "compact" });
+});
+
+test("client settings: an identical put still advances the revision; an identical patchSection writes nothing", () => {
+  const file = join(tmp(), "client-settings.json");
+  const svc = createClientSettings({ file });
+  const first = svc.put("usr_a", { theme: "dark", n: 1 });
+  assert.equal(first.revision, 1);
+  assert.doesNotMatch(readFileSync(file, "utf8"), /\n/, "written compact");
+  // A client takes only a higher revision as proof that its push landed.
+  // Answered with the same one, it would send the same blob again and again.
+  assert.equal(svc.put("usr_a", { theme: "dark", n: 1 }, 1).revision, 2);
+
+  const ino = () => statSync(file, { bigint: true }).ino;
+  const beforePatch = ino();
+  svc.patchSection!("usr_a", "modelVisibility", { hidden: ["x"] });
+  const patched = ino();
+  assert.notEqual(patched, beforePatch);
+  const rev = svc.get("usr_a").revision;
+  assert.equal(svc.patchSection!("usr_a", "modelVisibility", { hidden: ["x"] }).revision, rev);
+  assert.equal(ino(), patched, "an identical patch does not write");
+  assert.equal(svc.patchSection!("usr_a", "modelVisibility", { hidden: ["y"] }).revision, rev + 1);
+  assert.notEqual(ino(), patched);
+
+  // The compact file reads back.
+  assert.deepEqual(createClientSettings({ file }).get("usr_a").settings.modelVisibility, { hidden: ["y"] });
 });

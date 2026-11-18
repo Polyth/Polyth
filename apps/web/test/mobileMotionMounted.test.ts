@@ -238,7 +238,10 @@ test("header overview keeps its full-screen exit frame and the Tools button stil
   document.body.appendChild(container);
   const root = createRoot(container);
   const selector = () => container.querySelector<HTMLButtonElement>(".mobile-session-selector")!;
-  const toolsButton = () => container.querySelector<HTMLButtonElement>(`button[aria-label="${tr("mobile.island.openTools")}"]`)!;
+  // An open chat keeps Tools inside its ⋯ session menu (733e8cfa5).
+  const menuTrigger = () => container.querySelector<HTMLButtonElement>(".mobile-session-menu-trigger")!;
+  const toolsItem = () => [...document.querySelectorAll<HTMLElement>('[role="menu"] [role="menuitem"]')]
+    .find((item) => item.textContent?.includes(tr("mobile.island.openTools")))!;
   const sheet = () => document.querySelector<HTMLElement>(".mobile-island-sheet");
   try {
     await act(async () => { root.render(createElement(MobileSessionHeader)); });
@@ -270,9 +273,11 @@ test("header overview keeps its full-screen exit frame and the Tools button stil
     // Tools while the overview is open: the overview leaves, the Workspace opens.
     await act(async () => { click(selector()); });
     assert.ok(sheet());
-    await act(async () => { click(toolsButton()); });
+    await act(async () => { click(menuTrigger()); });
+    assert.ok(toolsItem(), "the session menu offers Tools");
+    await act(async () => { click(toolsItem()); });
     assert.equal(getMobileWorkspaceNavigationSnapshot().homeOpen, true, "the Tools click reached the Workspace");
-    assert.equal(toolsButton().getAttribute("aria-expanded"), "true");
+    assert.equal(menuTrigger().getAttribute("aria-expanded"), "false", "the menu leaves once Tools is chosen");
     assert.equal(selector().getAttribute("aria-expanded"), "false");
     await waitFor(() => sheet() === null, "the overview exit finished while the Workspace opened");
     assert.deepEqual(thrown(), []);

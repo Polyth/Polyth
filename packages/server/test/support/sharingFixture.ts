@@ -137,8 +137,11 @@ export function sharingFixture(t: test.TestContext) {
   const system = (spaceId = "spc_home"): SpaceContext => ({
     ...ctx("system:polyth-runtime", spaceId), role: "owner", authority: { kind: "system", serviceId: "polyth-runtime" },
   } as SpaceContext);
+  /** The canonical lifecycle layer alone, without the access layer above it. */
+  const canonicalFor = (context: SpaceContext): SessionService =>
+    canonicalSessionService(context, base, projectsFor(context.spaceId));
   const sessionsFor = (context: SpaceContext): SessionService =>
-    accessControlledSessionService(context, canonicalSessionService(context, base, projectsFor(context.spaceId)));
+    accessControlledSessionService(context, canonicalFor(context));
   const changed: SessionProjection[][] = [];
   type Listener = (rows: SessionProjection[], formerReaders: ReadonlyMap<string, ReadonlySet<string>>) => void;
   let listener: Listener | undefined;
@@ -152,7 +155,7 @@ export function sharingFixture(t: test.TestContext) {
     rmSync(root, { recursive: true, force: true });
   });
   return {
-    security, ctx, system, sessionsFor, sharing, changed, sent, projections,
+    security, ctx, system, sessionsFor, canonicalFor, base, sharing, changed, sent, projections,
     /** Route sharing changes to a live broadcaster as production does. */
     onAccessChanged(fn: Listener) { listener = fn; },
   };

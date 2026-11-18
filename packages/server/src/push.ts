@@ -147,6 +147,33 @@ function withoutTags(text: string): string {
   return out;
 }
 
+/** A markdown link reduced to its label, in one pass over the text:
+ *  `![label](…)` and `[label](…)` (start `![` or `[`, target `(`…`)`) and
+ *  `[label][ref]` (target `[`…`]`, label not empty). Same result as
+ *  `/\[([^\]]*)\]\([^)]*\)/g` → `$1` and its two siblings, which rescanned
+ *  to the next `]` from every `[` and so were quadratic on a run of them. */
+function unwrapLinks(text: string, start: "[" | "![", open: "(" | "[", close: ")" | "]", emptyLabel: boolean): string {
+  let out = "";
+  let at = 0;
+  for (let from = 0; ;) {
+    const begin = text.indexOf(start, from);
+    if (begin < 0) break;
+    const labelStart = begin + start.length;
+    const labelEnd = text.indexOf("]", labelStart);
+    if (labelEnd < 0) break;
+    // Every start before this `]` ends its label at it, so none of them links.
+    if ((!emptyLabel && labelEnd === labelStart) || text[labelEnd + 1] !== open) {
+      from = labelEnd + 1;
+      continue;
+    }
+    const end = text.indexOf(close, labelEnd + 2);
+    if (end < 0) break;
+    out += text.slice(at, begin) + text.slice(labelStart, labelEnd);
+    at = from = end + 1;
+  }
+  return at === 0 ? text : out + text.slice(at);
+}
+
 /** Plain-text excerpt of a markdown reply for a notification body: fenced
  *  blocks (including ```ui / ```page) are dropped, markdown syntax is reduced
  *  to its text, whitespace collapses, secret-shaped text is redacted, and the
@@ -175,11 +202,9 @@ export function plainTextExcerpt(raw: unknown, cap = MAX_BODY_CHARS): string {
       }
       lines.push(text);
     }
-    const flat = withoutTags(lines.join(" ")
-      .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
-      .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-      .replace(/\[([^\]]+)\]\[[^\]]*\]/g, "$1")
-      .replace(/<(https?:\/\/[^>\s]+)>/g, "$1"))
+    const joined = lines.join(" ");
+    const unlinked = unwrapLinks(unwrapLinks(unwrapLinks(joined, "![", "(", ")", true), "[", "(", ")", true), "[", "[", "]", false);
+    const flat = withoutTags(unlinked.replace(/<(https?:\/\/[^>\s]+)>/g, "$1"))
       .replace(/`+([^`]*)`+/g, "$1")
       .replace(/\*\*+([^*]+?)\*\*+/g, "$1")
       .replace(/(?<![\w*])\*(?!\s)([^*]+?)(?<!\s)\*(?![\w*])/g, "$1")

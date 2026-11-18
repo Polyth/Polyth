@@ -1052,7 +1052,13 @@ export default function GitView({
     }
     const files = [...status.conflicted, ...status.staged, ...status.unstaged, ...status.untracked];
     let cancelled = false;
+    // One request counts every file; an older server (404) or a path it left
+    // out falls back to that file's own diff.
+    const bulk = api.gitDiffStats(projectId, sessionId ?? undefined, repositoryId).catch(() => null);
     void Promise.all(files.map(async (file) => {
+      const known = (await bulk)?.[file.staged ? "staged" : "unstaged"]?.[file.path];
+      if (known) return [fileStatKey(file), known] as const;
+      if (cancelled) return [fileStatKey(file), null] as const;
       try {
         const result = await api.gitDiff(projectId, file.path, file.staged, false, sessionId ?? undefined, repositoryId);
         return [fileStatKey(file), summarizeUnifiedDiff(result.diff)] as const;

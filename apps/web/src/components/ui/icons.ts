@@ -7,7 +7,7 @@
 // reviewable and swap-outs happen in one place. The glyph data is vendored
 // from Lucide (ISC, see ./LUCIDE-LICENSE and ./iconNodes.ts): add or refresh an
 // icon with `node scripts/icons/lucide.mjs add <Name>` and wire it below.
-import { createIcon, createLucideIcon, type LucideIcon } from "./iconBase.tsx";
+import { createIcon, createLucideIcon, type LucideIcon } from "./iconBase.ts";
 import * as nodes from "./iconNodes.ts";
 
 // One component per Lucide glyph in use. The kebab name is the glyph's Lucide
@@ -253,7 +253,7 @@ export const QueueSendIcon = createLucideIcon("QueueSend", [
   }],
 ]);
 
-export type { LucideIcon } from "./iconBase.tsx";
+export type { LucideIcon } from "./iconBase.ts";
 
 export {
   // dismiss / confirm

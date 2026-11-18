@@ -41,9 +41,38 @@ async function refreshLinkAvailability(): Promise<void> {
   }
 }
 
+const LINK_POLL_MS = 5_000;
+
+/** Poll while the document is visible; read once when it shows again or the
+ *  connection returns. A hidden tab issues no reads. Returns the disposer. */
+export function pollLinkAvailability(refresh: () => void, intervalMs = LINK_POLL_MS): () => void {
+  let timer: ReturnType<typeof setInterval> | undefined;
+  const hidden = () => document.visibilityState === "hidden";
+  const start = () => {
+    if (timer === undefined) timer = setInterval(() => { if (!hidden()) refresh(); }, intervalMs);
+  };
+  const stop = () => {
+    if (timer !== undefined) clearInterval(timer);
+    timer = undefined;
+  };
+  const onVisibility = () => {
+    if (hidden()) { stop(); return; }
+    refresh();
+    start();
+  };
+  const onOnline = () => { if (!hidden()) refresh(); };
+  if (!hidden()) { refresh(); start(); }
+  document.addEventListener("visibilitychange", onVisibility);
+  window.addEventListener("online", onOnline);
+  return () => {
+    stop();
+    document.removeEventListener("visibilitychange", onVisibility);
+    window.removeEventListener("online", onOnline);
+  };
+}
+
 export default defineWebPackage((host) => () => {
-  void refreshLinkAvailability();
-  const timer = setInterval(() => { void refreshLinkAvailability(); }, 5_000);
+  const stopPolling = pollLinkAvailability(() => { void refreshLinkAvailability(); });
   const translate = host.ui.locale.translate;
   const linkCapability = {
     id: "polyth-link",
@@ -76,7 +105,7 @@ export default defineWebPackage((host) => () => {
     },
   ];
   return () => {
-    clearInterval(timer);
+    stopPolling();
     off.toReversed().forEach((dispose) => dispose());
   };
 });

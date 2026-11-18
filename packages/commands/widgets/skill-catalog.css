@@ -694,7 +694,7 @@ html[dir="rtl"] .skills-back > .ui-icon { transform: scaleX(-1); }
 }
 .skills-reset:focus-visible { outline: none; border-radius: var(--radius-control); box-shadow: 0 0 0 2px var(--focus-ring); }
 @media (hover: hover) {
-  .skills-reset:hover { text-decoration: underline; }
+  .skills-reset:hover:where(:not(:disabled)) { text-decoration: underline; }
 }
 .skills-reach-summary {
   margin: var(--space-2) 0 0;

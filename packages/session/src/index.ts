@@ -783,6 +783,16 @@ export function createStore(dbPath: string): Store {
   };
   sqliteExec("PRAGMA journal_mode = WAL");
   sqliteExec("PRAGMA synchronous = NORMAL");
+  // Transaction control statements are compiled once per connection: every
+  // appended event runs BEGIN IMMEDIATE + COMMIT. Created before migrations
+  // (which run inside transaction()); cleared in close().
+  const txStmts = new Map<string, StatementSync>();
+  const txRun = (sql: string): void => {
+    assertOpen();
+    let st = txStmts.get(sql);
+    if (!st) { st = raw.prepare(sql); txStmts.set(sql, st); }
+    st.run();
+  };
   sqliteExec(`
     CREATE TABLE IF NOT EXISTS events (
       session_id TEXT NOT NULL,
@@ -1427,12 +1437,32 @@ export function createStore(dbPath: string): Store {
 
   // Prepared-statement cache for the fixed queries below (compiled once, then
   // reused). Created only after migrations so no statement predates an ALTER.
-  // Queries with a variable placeholder count (attentionFor) stay uncached.
+  // Queries with a variable placeholder count go through prepShaped (bounded LRU).
   const stmts = new Map<string, StatementSync>();
   const prep = (sql: string): StatementSync => {
     assertOpen();
     let s = stmts.get(sql);
     if (!s) { s = sqlitePrepare(sql); stmts.set(sql, s); }
+    return s;
+  };
+  // Bounded LRU for queries whose SQL text varies with an argument count or
+  // a filter set (IN lists, summary filters). Only for callers that finish
+  // with .get()/.all()/.run(), never an open iterator.
+  const SHAPED_STMT_CACHE_MAX = 64;
+  const shapedStmts = new Map<string, StatementSync>();
+  const prepShaped = (sql: string): StatementSync => {
+    assertOpen();
+    let s = shapedStmts.get(sql);
+    if (s) {
+      shapedStmts.delete(sql);
+    } else {
+      s = sqlitePrepare(sql);
+      if (shapedStmts.size >= SHAPED_STMT_CACHE_MAX) {
+        const oldest = shapedStmts.keys().next().value;
+        if (oldest !== undefined) shapedStmts.delete(oldest);
+      }
+    }
+    shapedStmts.set(sql, s);
     return s;
   };
   const workspaceIndex = workspaceReferences(raw);
@@ -1742,7 +1772,7 @@ export function createStore(dbPath: string): Store {
 
   function transaction<T>(run: () => SyncOnly<T>): SyncOnly<T> {
     assertOpen();
-    return withImmediateTransaction((sql) => sqliteExec(sql), run);
+    return withImmediateTransaction(txRun, run);
   }
 
   function appendInTransaction(
@@ -2771,7 +2801,7 @@ export function createStore(dbPath: string): Store {
   function eventsOfTypes(sessionId: string, types: readonly string[], afterSeq: number, throughSeq: number, limit = 500): Promise<SessionEvent[]> {
     if (!types.length) return Promise.resolve([]);
     if (types.length > 64 || !Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw Object.assign(new Error("invalid fact query"), { code: "invalid-input" });
-    const rows = sqlitePrepare(`SELECT * FROM events WHERE session_id = ? AND type IN (${types.map(() => "?").join(",")}) AND seq > ? AND seq <= ? ORDER BY seq LIMIT ?`)
+    const rows = prepShaped(`SELECT * FROM events WHERE session_id = ? AND type IN (${types.map(() => "?").join(",")}) AND seq > ? AND seq <= ? ORDER BY seq LIMIT ?`)
       .all(sessionId, ...types, afterSeq, throughSeq, limit) as unknown as Row[];
     return Promise.resolve(rows.map(rowToEvent));
   }
@@ -3130,7 +3160,7 @@ export function createStore(dbPath: string): Store {
     const limit = Math.min(input.railStatus ? RAIL_STATUS_LIMIT_MAX : 100, Math.max(1, Number.isSafeInteger(input.limit) ? input.limit! : 50));
     const sql = `SELECT json_object('isolationSummary', json_extract(data, '$.isolation.kind'), ${fields.map((key) => `'${key}', json_extract(data, '$.${key}')`).join(",")}) AS summary, substr(json_extract(data, '$.draft'), 1, 4096) AS draft, json_extract(data, '$.workspace') AS workspace FROM projections
       WHERE ${conditions.join(" AND ")} ORDER BY CAST(json_extract(data, '$.updatedAt') AS INTEGER) DESC, session_id DESC LIMIT ?`;
-    const rows = sqlitePrepare(sql).all(...args, limit + 1) as Array<{ summary: string; draft: string | null; workspace: string | null }>;
+    const rows = prepShaped(sql).all(...args, limit + 1) as Array<{ summary: string; draft: string | null; workspace: string | null }>;
     const sessions = rows.slice(0, limit).map((row) => {
       const draftPreview = sessionDraftPreview(row.draft);
       const repositoryScope = summaryRepositoryScope(row.workspace);
@@ -3891,7 +3921,7 @@ export function createStore(dbPath: string): Store {
   const eventsAtSeqs = (sessionId: string, seqs: readonly number[]): SessionEvent[] => {
     if (seqs.length === 0) return [];
     const placeholders = seqs.map(() => "?").join(",");
-    const rows = sqlitePrepare(
+    const rows = prepShaped(
       `SELECT * FROM events
        WHERE session_id = ? AND seq IN (${placeholders}) ORDER BY seq`,
     ).all(sessionId, ...seqs) as unknown as Row[];
@@ -4706,7 +4736,7 @@ export function createStore(dbPath: string): Store {
     // Counters come from the append-maintained attention_open table — a
     // primary-key range count per session instead of replaying event logs.
     const placeholders = sessionIds.map(() => "?").join(",");
-    const rows = sqlitePrepare(
+    const rows = prepShaped(
         `SELECT session_id, kind, COUNT(*) AS n FROM attention_open
          WHERE session_id IN (${placeholders}) GROUP BY session_id, kind`,
       )
@@ -4726,7 +4756,7 @@ export function createStore(dbPath: string): Store {
     }
     // Unread assistant messages past the read cursor (session_read). The
     // (session_id, seq) primary key keeps this a per-session range scan.
-    const unreadRows = sqlitePrepare(
+    const unreadRows = prepShaped(
         `SELECT e.session_id, COUNT(*) AS n FROM events e
          JOIN session_read r ON r.session_id = e.session_id
          WHERE e.session_id IN (${placeholders})
@@ -5122,6 +5152,8 @@ export function createStore(dbPath: string): Store {
     if (closed) return Promise.resolve();
     closed = true;
     stmts.clear();
+    shapedStmts.clear();
+    txStmts.clear();
     raw.close();
     return Promise.resolve();
   }

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -70,4 +70,28 @@ test("controller gate batches one context but observes later project changes", a
   await Promise.resolve();
   assert.equal(relevant("finance", context), true);
   assert.equal(relevant("git", context), false);
+});
+
+test("the registry is parsed once while projects.json is unchanged, and re-read after a rewrite", async () => {
+  const dir = fixture();
+  const file = join(dir, "projects.json");
+  write(dir, "projects.json", [{ id: "p", composition: { version: 1, directions: ["engineering"], packageOverrides: { x: "exclude" } } }]);
+  const gate = createAgentPackageRelevanceGate(dir);
+  const parse = JSON.parse;
+  let parses = 0;
+  JSON.parse = ((...args: Parameters<typeof JSON.parse>) => { parses++; return parse(...args); }) as typeof JSON.parse;
+  try {
+    for (let turn = 0; turn < 5; turn++) {
+      assert.equal(gate("x", { projectId: "p" }), false);
+      await Promise.resolve();
+    }
+    assert.equal(parses, 1, "projects.json is parsed once across five turns");
+    const rewritten = JSON.stringify([{ id: "p", composition: { version: 1, directions: ["engineering"], packageOverrides: { x: "include" } } }]);
+    writeFileSync(`${file}.tmp`, rewritten);
+    renameSync(`${file}.tmp`, file);
+    await Promise.resolve();
+    assert.equal(gate("x", { projectId: "p" }), true);
+  } finally {
+    JSON.parse = parse;
+  }
 });

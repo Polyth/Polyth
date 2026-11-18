@@ -140,7 +140,7 @@ export default function MyNotes({ projectId, project, translate, notify }: { pro
       <div className="memory-section-head">
         <div>
           <h3 id="memory-mine-heading">{translate("memory.mine.title")}</h3>
-          <p>{translate("memory.mine.hint")}</p>
+          <p className="memory-section-copy">{translate("memory.mine.hint")}</p>
         </div>
         <div className="memory-actions">
           <Btn disabled={busy} onClick={() => startAdding("here")}>{translate("memory.mine.add")}</Btn>

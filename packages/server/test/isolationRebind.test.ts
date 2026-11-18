@@ -915,7 +915,26 @@ test("children that never reached a native session move out without a runtime; e
     /archived/,
   );
 
+  // An unsettled subagent blocks the merge itself, started or not: an
+  // unresolved create may still be running (`runningSubagents`).
+  await assert.rejects(
+    () => restartedIsolation.mergeBack(owner.id),
+    (error: Error & { reason?: string; sessionIds?: string[] }) =>
+      error.reason === "subagents-running" && error.sessionIds?.length === 1 && error.sessionIds[0] === unknownId,
+  );
+  assert.equal(resolve((await restarted.snapshot(owner.id)).isolation!.worktreePath), resolve(source), "a refused merge moves nothing");
+  // Cleanup must still survive one whose create goes unresolved after that
+  // check: it is at rest when the merge starts and unknown by the time the
+  // owner is rebound, after publish and before its dependents are relocated.
+  await initial.store.upsertProjection({ ...(await restarted.snapshot(unknownId)), status: "idle" });
+  const rebind = restarted.rebindWorkspace!;
+  restarted.rebindWorkspace = async (id, input) => {
+    if (id === owner.id) await initial.store.upsertProjection({ ...(await restarted.snapshot(unknownId)), status: "unknown" });
+    return rebind(id, input);
+  };
+
   const merged = await restartedIsolation.mergeBack(owner.id);
+  assert.equal((await restarted.snapshot(unknownId)).status, "unknown", "the late child was unknown when cleanup ran");
   assert.equal(merged.finalized, false, "the executed archived child still depends on the source");
   for (const id of [archivedId, unknownId]) {
     const moved = await restarted.snapshot(id);

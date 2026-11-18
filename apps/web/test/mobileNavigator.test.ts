@@ -99,7 +99,7 @@ test("phone project rows omit session totals and group backgrounds", async () =>
 test("phone project status pills use the shared derived status counts", async () => {
   const source = await read("../src/components/mobile/MobileNavigator.tsx");
 
-  assert.match(source, /projectSessionStatusCounts\(matching, now\)/);
+  assert.match(source, /projectSessionStatusCounts\(searchMode \? matchingAll : \[\.\.\.matchingAll, \.\.\.roomSessions\], now\)/);
   assert.doesNotMatch(source, /const activeCount = matching\.filter/);
   assert.doesNotMatch(source, /const waitingCount = matching\.filter/);
   assert.doesNotMatch(source, /const completedCount = matching\.filter/);

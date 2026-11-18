@@ -111,7 +111,7 @@ test("lane counts follow width without moving any saved launcher", () => {
 
 test("an idle phone composer rests as one row and keeps every launcher mounted", async () => {
   const composer = await readFile(new URL("../src/components/Composer.tsx", import.meta.url), "utf8");
-  assert.match(composer, /composerLayoutState\(\{[^}]*railEditing: mobileRailEditing \}\)/, "only rail editing, not the rail itself, keeps an idle composer engaged");
+  assert.match(composer, /const layoutInput = \{[^}]*railEditing: mobileRailEditing \};[\s\S]*?composerLayoutState\(\{ \.\.\.layoutInput,/, "only rail editing, not the rail itself, keeps an idle composer engaged");
   // Presented resting only once the card has shrunk to the row (composerMorph.ts).
   assert.match(composer, /resting=\{!presentedExpanded\}/);
   assert.doesNotMatch(composer, /MobileComposerEditButton/, "no pencil: holding a button is the way in");

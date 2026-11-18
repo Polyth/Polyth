@@ -100,7 +100,7 @@ export function createClientSettings(opts: { file: string }): ClientSettingsServ
 
   const persist = (): void => {
     const state: ClientSettingsFileV2 = { version: 2, users };
-    atomicWriteSync(opts.file, JSON.stringify(state, null, 2));
+    atomicWriteSync(opts.file, JSON.stringify(state));
   };
   if (migratedLegacy) persist();
 
@@ -139,6 +139,11 @@ export function createClientSettings(opts: { file: string }): ClientSettingsServ
         merged = rest;
       }
     }
+    // Every accepted put advances the revision, an identical blob included.
+    // A client confirms its push only by a higher revision (settingsSync.ts
+    // `push`); answered with the same one it keeps the blob as unsent and
+    // sends it again on every later change. Shells already installed on
+    // phones behave that way, so this cannot be skipped server-side.
     const next = { revision: current.revision + 1, updatedAt: Date.now(), settings: merged };
     users = { ...users, [userId]: next };
     persist();
@@ -158,6 +163,11 @@ export function createClientSettings(opts: { file: string }): ClientSettingsServ
       const serialized = JSON.stringify(settings);
       if (Buffer.byteLength(serialized, "utf8") > MAX_BYTES) {
         throw invalid("client settings exceed 4 MiB");
+      }
+      // Server-written sections have no client waiting on the revision, so
+      // writing the value a section already holds is a no-op.
+      if (users[userId] && JSON.stringify(settings) === JSON.stringify(current.settings)) {
+        return { ...current, settings: { ...current.settings } };
       }
       const next = { revision: current.revision + 1, updatedAt: Date.now(), settings };
       users = { ...users, [userId]: next };

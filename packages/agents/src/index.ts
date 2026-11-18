@@ -2657,6 +2657,16 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
     syncLoops(projectId, scan, syncOpts) {
       const errors: Array<{ path: string; error: string }> = [];
       const seenIds = new Set<string>();
+      // The background scan runs for every project once a minute and almost
+      // always finds what it found before. Remember what this project's part
+      // of the document looked like, so an unchanged scan writes nothing.
+      // `updatedAt` is stamped by every scan, so alone it says nothing changed.
+      const loopTasksOf = (): string => JSON.stringify(
+        tasks.filter((t) => t.projectId === projectId && t.source === "loop-file"),
+        (key, value: unknown) => key === "updatedAt" ? undefined : value);
+      const errorsOf = (): string => JSON.stringify((loopErrorsByProject[projectId] ?? [])
+        .map((e) => [e.path, e.error, e.firstSeenAt, e.dismissed === true]));
+      const before = `${loopTasksOf()}\n${errorsOf()}`;
       for (const file of scan) {
         if (!file.loop) {
           if (file.parseError) {
@@ -2769,7 +2779,9 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
           ...(old?.dismissed && !syncOpts?.explicit ? { dismissed: true } : {}),
         };
       });
-      save();
+      // `lastSeenAt` and `updatedAt` move on every scan; alone they are not
+      // worth a write (the first scan after a restart sets them again).
+      if (`${loopTasksOf()}\n${errorsOf()}` !== before) save();
       return {
         tasks: tasks.filter((t) => t.projectId === projectId && t.source === "loop-file"),
         errors,

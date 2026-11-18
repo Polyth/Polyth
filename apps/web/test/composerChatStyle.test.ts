@@ -524,7 +524,7 @@ test("timeline vertical runway is represented by flex spacers instead of scroll-
   assert.match(css, /\.timeline::before,\s*\n\.timeline::after\s*\{[^}]*content:\s*"";[^}]*flex:\s*none;/s);
   assert.match(css, /\.timeline::before\s*\{[^}]*flex-basis:\s*var\(--timeline-pad-top\)/s);
   assert.match(css, /\.timeline::after\s*\{[^}]*flex-basis:\s*var\(--timeline-pad-bottom\)/s);
-  assert.match(css, /--timeline-pad-bottom:\s*calc\(var\(--conversation-message-gap\) \+ var\(--conversation-group-gap\) \+ var\(--timeline-turn-sheet-space, 0px\)\)/);
+  assert.match(css, /--timeline-pad-bottom:\s*calc\(var\(--conversation-message-gap\) \+ var\(--conversation-group-gap\) \+ var\(--timeline-dock-overlap, 0px\) \+ var\(--timeline-turn-sheet-space, 0px\)\)/);
 
   const rules = [...css.matchAll(/([^{}]*\.timeline(?![-\\w])[^{}]*)\{([^{}]*)\}/g)];
   assert.ok(rules.length > 0);

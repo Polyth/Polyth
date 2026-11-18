@@ -1532,6 +1532,10 @@ export const api = {
     jfetch<GitDiffResult>(
       `/api/git/diff?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(filePath)}${staged ? "&staged=true" : ""}${ignoreWhitespace ? "&ignoreWhitespace=true" : ""}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}${repositoryId ? `&repositoryId=${encodeURIComponent(repositoryId)}` : ""}`,
     ),
+  gitDiffStats: (projectId: string, sessionId?: string, repositoryId?: string) =>
+    jfetch<{ staged: Record<string, { additions: number; deletions: number }>; unstaged: Record<string, { additions: number; deletions: number }> }>(
+      `/api/git/diff-stats?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}${repositoryId ? `&repositoryId=${encodeURIComponent(repositoryId)}` : ""}`,
+    ),
   gitShow: (projectId: string, sha: string, ignoreWhitespace?: boolean, sessionId?: string, repositoryId?: string) =>
     jfetch<{ sha: string; diff: string }>(
       `/api/git/show?projectId=${encodeURIComponent(projectId)}&sha=${encodeURIComponent(sha)}${ignoreWhitespace ? "&ignoreWhitespace=true" : ""}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}${repositoryId ? `&repositoryId=${encodeURIComponent(repositoryId)}` : ""}`,

@@ -322,6 +322,8 @@ test("the watchdog identifies the timed-out call among concurrent tools", async 
   }));
   assert.match(byCall.stuck ?? "", /stopped after .* without output/);
   assert.equal(byCall.neighbor, "Canceled because another tool exceeded its execution safety limit.");
+  // The stop settles after both tool errors are durable.
+  await waitFor(async () => (await h.store.projection(id))?.status === "idle");
   assert.equal((await h.store.projection(id))?.status, "idle");
   await h.store.close();
 });

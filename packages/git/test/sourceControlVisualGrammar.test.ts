@@ -85,7 +85,7 @@ test("narrow Source Control header wraps by unit instead of clipping mid-word", 
   assert.match(mobileCss, /\.git-page \.source-control-head::after\s*\{[^}]*order:\s*4;[^}]*flex:\s*0 0 100%;/);
   assert.match(mobileCss, /\.git-page \.source-remote-buttons > \.source-sync-btn\s*\{\s*order:\s*3;\s*margin-inline-start:\s*auto;/);
   assert.match(mobileCss, /\.git-page \.source-control-title > \.source-branch\s*\{[^}]*flex:\s*1 1 0;\s*max-width:\s*max-content;/);
-  assert.match(mobileCss, /\.git-page \.source-remote-buttons > \.source-sync-btn:first-child \+ \*\s*\{\s*margin-inline-start:\s*auto;/);
+  assert.match(mobileCss, /\.git-page \.source-remote-buttons > \.source-sync-btn:first-child \+ :where\(\.ui-icon-btn\)\s*\{\s*margin-inline-start:\s*auto;/);
   // The remote is no header label: no remote name or picker sits in the header.
   assert.doesNotMatch(mobileCss, /git-remote-(?:context|name|picker)/);
   assert.match(

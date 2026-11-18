@@ -219,7 +219,8 @@ test("the branch lists every active subagent with its action, nested runs and St
     assert.deepEqual(rows.map((row) => text(row.querySelector(".subagent-branch-title"))), ["Data migration", "Schema check", "Delegating helper"],
       "waiting first, then in delegation order");
     assert.equal(rows[0]!.dataset.state, "waiting");
-    assert.match(text(rows[1]!.querySelector(".subagent-branch-detail")), /^Edit · queue\.ts/, "a working child's action is read from its log");
+    // In the timeline row's own words (81c39b6f8): the file, then the step and its folder.
+    assert.match(text(rows[1]!.querySelector(".subagent-branch-detail")), /^queue\.ts · Edit · packages\/server\/src/, "a working child's action is read from its log");
     assert.match(text(rows[2]!.querySelector(".subagent-branch-detail")), /Nested: 1$/, "a grandchild folds into its parent's row");
     // The action read is passive: it never wakes the child's runtime.
     const peek = calls.find((call) => call.path === "/api/sessions/p-b/events");

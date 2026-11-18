@@ -12,8 +12,10 @@ import {
   rename,
   rm,
   rmdir,
+  stat,
   symlink,
   unlink,
+  utimes,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -185,7 +187,15 @@ async function createPrivateSnapshotTree(
       const realIndexPath = isAbsolute(rawGitPath)
         ? rawGitPath
         : resolve(root, rawGitPath);
+      // Git trusts an entry's cached stat only when the file is older than
+      // the index itself ("racy git"). A plain copy is newer than every
+      // entry, so a same-size file rewritten in the second the index was
+      // written would look clean and `add` would snapshot its old content.
+      // Keep the real index's timestamp: read first, so a rewrite in between
+      // only makes the copy look older, which re-checks more, never less.
+      const realIndexStat = await stat(realIndexPath);
       await copyFile(realIndexPath, tempIndex);
+      await utimes(tempIndex, realIndexStat.atime, realIndexStat.mtime);
       copiedRealIndex = true;
     } catch {
       copiedRealIndex = false;

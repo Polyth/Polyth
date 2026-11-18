@@ -124,12 +124,13 @@ test("assistant response header carries identity, timing, and configured actions
   ]) assert.ok(footerSource.includes(`tr("${key}")`), `${key} is available`);
   assert.match(footerSource, /<ProviderLogo/);
   assert.match(footerSource, /className="chat-response-duration"/);
-  assert.match(footerSource, /timeShort\(assistantTime\(m\)\)/);
+  assert.match(footerSource, /const completedAt = assistantTime\(m\);[\s\S]*?dateTimeMedium\(completedAt\)/);
   const response = timeline.indexOf("<div className=\"bubble\"");
   const footer = timeline.lastIndexOf("<ChatResponseFooter");
   assert.ok(footer > response, "assistant identity and actions follow the response body");
-  assert.match(timeline, /terminal=\{r\.kind === "assistant" && terminalAnswers\.terminal\.has\(r\.eventSeq\)\s*&& \(!turnInProgress \|\| pendingSends\.length > 0 \|\| r\.eventSeq !== terminalAnswers\.trailing\)\}/,
-    "the identity panel renders once per completed turn, on the terminal answer only");
+  // Since 9bcdbeae1 the turn's latest answer keeps the panel while the turn still works.
+  assert.match(timeline, /terminal=\{r\.kind === "assistant" && terminalAnswers\.has\(r\.eventSeq\)\}/,
+    "the identity panel renders once per turn, on its terminal answer only");
 });
 
 test("the session list shows an edge shadow while rows are scrolled out above it", async () => {

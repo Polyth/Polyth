@@ -128,11 +128,13 @@ export default function ShareSessionDialog() {
     if (state.projectRegistry.projects.find((candidate) => candidate.id === row.projectId)?.parentProjectId) return "room" as const;
     return row.personalContext ? "personal" as const : null;
   });
+  // Every hook runs before the early return: saving closes the dialog
+  // (sharingSessionId -> null) and a hook below it would change the order.
+  const openChat = useStore((state) => state.sessions.find((candidate) => candidate.id === sessionId));
 
   if (!sessionId) return null;
   const close = () => setOverlay(null);
   // Someone else can read this chat: take the next words somewhere they can't.
-  const openChat = useStore((state) => state.sessions.find((candidate) => candidate.id === sessionId));
   const continueAway = openChat && chatReadByOthers(openChat) && openChat.sharing?.access !== "view" && openChat.purpose !== "conversation"
     ? (
       <Button size="sm" className="session-sharing-continue" iconStart={LockIcon} onClick={() => { close(); void continuePrivately(openChat); }}>

@@ -2251,12 +2251,33 @@ test("cleanup preserves active, unrelated, foreign-Space and independently isola
     { status: "idle" as const, parentId: parent.id, isolation: (await sessions.snapshot(parent.id)).isolation },
   ];
   const ids: string[] = [];
+  // A running subagent makes mergeBack refuse outright (delegatedIsolation:
+  // "cannot integrate or discard while any of its subagents still works").
+  // Cleanup still has to survive one that starts after that guard: the
+  // working and unknown descendants rest until the parent is rebound, after
+  // publish and before its dependents are relocated.
+  const lateActive: Array<{ id: string; status: "working" | "unknown" }> = [];
   for (const fields of cases) {
     const child = await sessions.create({ projectId: "p1", worktreePath: source });
-    Object.assign(sessions.projections.get(child.id)!, fields);
+    const projection = sessions.projections.get(child.id)!;
+    if (fields.status === "working" || fields.status === "unknown") {
+      Object.assign(projection, { ...fields, status: "idle" });
+      lateActive.push({ id: child.id, status: fields.status });
+    } else {
+      Object.assign(projection, fields);
+    }
     ids.push(child.id);
   }
+  const rebind = sessions.rebindWorkspace!;
+  sessions.rebindWorkspace = async (id, input) => {
+    if (id === parent.id) {
+      for (const { id: childId, status } of lateActive) sessions.projections.get(childId)!.status = status;
+    }
+    return rebind(id, input);
+  };
   const merged = await isolation.mergeBack(parent.id);
+  assert.deepEqual(lateActive.map(({ id }) => sessions.projections.get(id)!.status), ["working", "unknown"],
+    "the late subagents were active when cleanup ran");
   assert.equal(merged.finalized, false);
   assert.equal(existsSync(source), true);
   for (const id of ids) assert.equal((await sessions.snapshot(id)).worktreePath, source);

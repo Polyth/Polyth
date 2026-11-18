@@ -31,6 +31,8 @@ import {
   type SpaceSharingPolicyDto,
 } from "@polyth/contracts";
 import type { CanonicalResource, ResourceLifecycle } from "@polyth/control-plane/resources";
+import type { ResourceAccess } from "@polyth/control-plane/resource-access";
+import type { ResourceGrant } from "@polyth/control-plane/resource-sharing";
 import { privateRoomParent } from "./accountLimits.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
 import { isSystemContext } from "./sessionPeople.ts";
@@ -109,11 +111,13 @@ export function sessionClosedTo(ctx: Pick<SpaceContext, "userId" | "spaceId">, s
 
 /** The row whose sharing a session follows: itself, unless it is a delegated
  *  subagent that inherits its parent chat's. */
-function shareRoot(row: CanonicalResource): CanonicalResource {
-  const resources = canonicalSecurity()!.resources;
+type ResourceLookup = (resourceId: string) => CanonicalResource | undefined;
+const registryLookup: ResourceLookup = (resourceId) => canonicalSecurity()!.resources.resource(resourceId);
+
+function shareRoot(row: CanonicalResource, resource: ResourceLookup = registryLookup): CanonicalResource {
   let current = row;
   for (let depth = 0; depth < 32 && current.visibility === "inherit" && current.accessParentId; depth += 1) {
-    const parent = resources.resource(current.accessParentId);
+    const parent = resource(current.accessParentId);
     if (!parent) break;
     current = parent;
   }
@@ -121,13 +125,12 @@ function shareRoot(row: CanonicalResource): CanonicalResource {
 }
 
 /** Audience after inheritance; a broken chain reads as private. */
-function effectiveVisibility(row: CanonicalResource): SessionVisibility {
-  const resources = canonicalSecurity()!.resources;
+function effectiveVisibility(row: CanonicalResource, resource: ResourceLookup = registryLookup): SessionVisibility {
   let current: CanonicalResource | undefined = row;
   for (let depth = 0; current && depth < 32; depth += 1) {
     if (current.visibility !== "inherit") return current.visibility;
     const parentId: string | undefined = current.accessParentId ?? current.parentId;
-    current = parentId ? resources.resource(parentId) : undefined;
+    current = parentId ? resource(parentId) : undefined;
   }
   return "private";
 }
@@ -218,8 +221,10 @@ export function projectPresence(spaceId: string): (projectId: string) => Set<str
   };
 }
 
-/** Per-call memo for decorating many rows of one Space. */
+/** Per-call memo for decorating many rows of one Space. It reads within one
+ *  synchronous pass, so it never outlives a write. */
 function viewer(spaceId: string, readerId: string) {
+  const security = canonicalSecurity()!;
   let others: boolean | undefined;
   const memberIds = (): Set<string> => new Set(spaceMembers(spaceId).map((member) => member.userId));
   let members: Set<string> | undefined;
@@ -235,10 +240,30 @@ function viewer(spaceId: string, readerId: string) {
     if (!owners.has(principalId)) owners.set(principalId, isHuman(principalId) ? person(principalId) : null);
     return owners.get(principalId) ?? undefined;
   };
+  // Rows, share roots and their grants are each read once per pass.
+  const known = new Map<string, CanonicalResource | undefined>();
+  const resource: ResourceLookup = (resourceId) => {
+    if (!known.has(resourceId)) known.set(resourceId, security.resources.resource(resourceId));
+    return known.get(resourceId);
+  };
+  const granted = new Map<string, ResourceGrant[]>();
+  const grantsOf = (resourceId: string): ResourceGrant[] => {
+    let list = granted.get(resourceId);
+    if (!list) granted.set(resourceId, list = security.sharing.grants(resourceId));
+    return list;
+  };
   return {
+    /** Read ahead what `view` will read for these rows. */
+    prefetch(rows: readonly CanonicalResource[]): void {
+      for (const row of rows) known.set(row.id, row);
+      const roots = new Set<string>();
+      for (const row of rows) if (effectiveVisibility(row, resource) !== "private") roots.add(shareRoot(row, resource).id);
+      const found = security.sharing.grantsByResource([...roots]);
+      for (const id of roots) granted.set(id, found.get(id) ?? []);
+    },
     view(row: CanonicalResource, level: SessionAccessLevel): SessionSharingView {
-      const root = shareRoot(row);
-      const visibility = effectiveVisibility(row);
+      const root = shareRoot(row, resource);
+      const visibility = effectiveVisibility(row, resource);
       const inherited = row.visibility === "inherit" && !!row.accessParentId;
       const owner = root.ownerPrincipalId === readerId ? undefined : ownerOf(root.ownerPrincipalId);
       let shared = owner !== undefined;
@@ -246,7 +271,7 @@ function viewer(spaceId: string, readerId: string) {
       let named = false;
       if (visibility !== "private") {
         members ??= memberIds();
-        named = canonicalSecurity()!.sharing.grants(root.id)
+        named = grantsOf(root.id)
           .some((grant) => grant.principalId !== readerId && members!.has(grant.principalId));
       }
       if (!shared && visibility === "restricted") shared = named;
@@ -259,6 +284,10 @@ function viewer(spaceId: string, readerId: string) {
  * Rows as one person sees them: only the chats they can open, each with
  * their own `sharing` view. System work and installations without canonical
  * identity see everything, undecorated.
+ *
+ * One synchronous pass: every row is decided exactly as `sessionAccess`
+ * decides it, but the canonical rows, the reader's membership, grants and
+ * project policy are read once for the pass instead of once per row.
  */
 export function rowsForReader(
   rows: readonly SessionProjection[],
@@ -266,15 +295,37 @@ export function rowsForReader(
   spaceId: string,
   lifecycles?: readonly ResourceLifecycle[],
 ): SessionProjection[] {
-  if (!readerId || readerId.startsWith("system:") || !canonicalSecurity()) return [...rows];
-  const memo = viewer(spaceId, readerId);
-  const out: SessionProjection[] = [];
+  const security = canonicalSecurity();
+  if (!readerId || readerId.startsWith("system:") || !security) return [...rows];
+  const passes = new Map<string, ((resourceId: string) => ResourceAccess | undefined) | undefined>();
+  const accessOf = (rowSpaceId: string, sessionId: string): SessionAccess | undefined => {
+    if (!passes.has(rowSpaceId)) {
+      const orgId = orgOfSpace(rowSpaceId);
+      passes.set(rowSpaceId, orgId ? security.resourceAccess.accessPass(
+        { principalId: readerId, orgId, spaceId: rowSpaceId, ...(lifecycles ? { lifecycles } : {}) },
+        rows.filter((row) => (row.spaceId ?? spaceId) === rowSpaceId).map((row) => row.id),
+      ) : undefined);
+    }
+    const pass = passes.get(rowSpaceId);
+    if (!pass) return undefined;
+    let result: ResourceAccess | undefined;
+    try { result = pass(sessionId); } catch (cause) {
+      // Malformed ids are indistinguishable from unknown ones.
+      if ((cause as { code?: unknown } | null)?.code === "invalid-input") return undefined;
+      throw cause;
+    }
+    if (!result || result.resource.kind !== "session") return undefined;
+    return { resource: result.resource, level: result.level };
+  };
+  const readable: Array<{ row: SessionProjection; access: SessionAccess }> = [];
   for (const row of rows) {
-    const access = sessionAccess(readerId, row.spaceId ?? spaceId, row.id, lifecycles);
-    if (!access) continue;
-    out.push({ ...row, sharing: memo.view(access.resource, access.level) });
+    const access = accessOf(row.spaceId ?? spaceId, row.id);
+    if (access) readable.push({ row, access });
   }
-  return out;
+  if (!readable.length) return [];
+  const memo = viewer(spaceId, readerId);
+  memo.prefetch(readable.map(({ access }) => access.resource));
+  return readable.map(({ row, access }) => ({ ...row, sharing: memo.view(access.resource, access.level) }));
 }
 
 /** Every active Space member who can open one session, in stable member

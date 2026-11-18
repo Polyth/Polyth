@@ -40,8 +40,10 @@ test("phone header controls show focus as the glyph colour, never a clipped outl
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const keyboard = css.match(/:is\(\.mobile-float-navigation, \.mobile-float-actions\) > \.ui-icon-btn:focus-visible \{([^}]*)\}/);
   assert.ok(keyboard, "keyboard focus rule exists");
-  assert.match(keyboard[1], /outline: none/);
-  assert.match(keyboard[1], /color: var\(--accent-text\)/);
+  const keyboardBody = keyboard[1];
+  assert.ok(keyboardBody, "keyboard focus rule has a body");
+  assert.match(keyboardBody, /outline: none/);
+  assert.match(keyboardBody, /color: var\(--accent-text\)/);
   assert.match(css, /html\[data-input-modality="pointer"\] :is\(\.mobile-float-navigation, \.mobile-float-actions\) > \.ui-icon-btn:focus-visible:not\(:active, \[aria-expanded="true"\]\) \{\s*color: var\(--text-dim\)/);
   const looks = readFileSync(new URL("../src/shellLooks.css", import.meta.url), "utf8");
   for (const line of looks.split("\n").filter((l) => /mobile-float-actions\) \.ui-icon-btn:not\(:active/.test(l))) {

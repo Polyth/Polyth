@@ -89,6 +89,20 @@ const QUEUE_LEFT_EVENT_TYPES = new Set(["queue/dispatched", "queue/removed"]);
 const TURN_END_EVENT_TYPES = new Set(["turn/stopped", "turn/failed"]);
 const NO_IDS: ReadonlySet<string> = new Set();
 
+/** Seq of the newest event that can change the queue: a queue/* record, a
+ *  fallback-queue, an admitted prompt (`user/message` carries the promoted
+ *  row's queueId) or a turn end (the queue drains then). A primitive, so a
+ *  streamed chunk neither re-renders the list nor re-reads the queue. */
+export function queueSignalSeq(events: readonly Pick<SessionEvent, "type" | "seq">[] | undefined): number {
+  if (!events) return -1;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const { type, seq } = events[i]!;
+    if (type.startsWith("queue/") || type === "delivery/fallback-queued" || type === "user/message"
+      || TURN_END_EVENT_TYPES.has(type)) return seq;
+  }
+  return -1;
+}
+
 /** Queue rows the event log already shows outside the queue. The server keeps
  *  a dispatched row (reserved) until the runtime confirms the turn, but its
  *  `user/message` — stamped with the `queueId` — is in the chat from the start
@@ -412,9 +426,11 @@ export default function QueuedMessageList({
     setSheetOpen(false);
     return () => { scope.alive = false; scope.request++; };
   }, [scope]);
-  // queue/* events bump the model version; refetch on any event activity
-  const events = useStore((s) => s.events[sessionId]);
-  const eventCount = events?.length ?? 0;
+  // Refetch only when the queue can have changed (see queueSignalSeq), not on
+  // every streamed event. The log itself is read only while rows are listed.
+  const queueSignal = useStore((s) => queueSignalSeq(s.events[sessionId]));
+  const listed = items.length > 0;
+  const events = useStore((s) => listed ? s.events[sessionId] : undefined);
 
   const refresh = useCallback(async () => {
     const request = ++scope.request;
@@ -432,7 +448,7 @@ export default function QueuedMessageList({
     }
   }, [sessionId, onItemsChange, scope]);
 
-  useEffect(() => { refresh(); }, [refresh, eventCount]);
+  useEffect(() => { refresh(); }, [refresh, queueSignal]);
 
   // Track the composer's promotion in render so the row never flashes back
   // between its send ending and the queue re-read that settles it.

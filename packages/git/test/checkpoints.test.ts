@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -768,4 +769,43 @@ test("12. an outside edit between turns survives: first-change and last-change s
   // q.txt: the person edited it after turn 1 left it → stays as it is.
   assert.equal(readFileSync(join(dir, "q.txt"), "utf8"), "q1 agent + person\n");
   assert.ok(outcome.keptFiles?.some((kept) => kept.path === "q.txt" && kept.reason === "changed-after"));
+});
+
+test("13. a same-size edit in the second the index was written is snapshotted (racy-git index timestamp)", async () => {
+  // Git trusts an index entry's cached stat only for files older than the
+  // index file. The snapshot works on a copy of the real index, so the copy
+  // must keep the real index's timestamp, or this edit looks clean on a git
+  // that compares whole seconds and the "after" snapshot keeps the old text.
+  const second = (ms: number) => Math.floor(ms / 1000);
+  const startOfSecond = () => new Promise((done) => setTimeout(done, 1010 - (Date.now() % 1000)));
+  for (let attempt = 0; ; attempt++) {
+    const { dir, git } = createRepo(false);
+    const svc = createWorkspaceCheckpoints();
+    await startOfSecond();
+    writeFileSync(join(dir, "racy.txt"), "r0\n");
+    git("add", ".");
+    git("commit", "-qm", "racy commit");
+    const before = await svc.capture({ cwd: dir, sessionId: "s1", promptSeq: 1, phase: "before", budgetMs: 10000 });
+    assert("commit" in before);
+    writeFileSync(join(dir, "racy.txt"), "r1\n");
+    const indexMs = statSync(join(dir, ".git", "index")).mtimeMs;
+    const fileMs = statSync(join(dir, "racy.txt")).mtimeMs;
+    if (second(indexMs) !== second(fileMs) || second(Date.now()) !== second(indexMs)) {
+      // A second boundary fell inside the setup, so the case is not racy.
+      assert.ok(attempt < 3, "the setup fits in one second");
+      continue;
+    }
+    // Snapshot from a later second than both the index and the edit.
+    await startOfSecond();
+    const after = await svc.capture({ cwd: dir, sessionId: "s1", promptSeq: 1, phase: "after", budgetMs: 10000 });
+    assert("commit" in after);
+    assert.equal(git("show", `${after.commit}:racy.txt`), "r1\n", "the after snapshot holds the edit");
+    const preview = await svc.previewRewind({
+      cwd: dir,
+      sessionId: "s1",
+      turns: [{ promptSeq: 1, before: before.commit, after: after.commit, touched: ["racy.txt"] }],
+    });
+    assert.ok(preview.restore.some((change: RewindFileChange) => change.path === "racy.txt"), "the edit can be rewound");
+    break;
+  }
 });

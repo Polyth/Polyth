@@ -144,7 +144,7 @@ test("desktop and phone session titles use centered size roles", async () => {
   assert.match(styles, /\.desktop-session-status-trigger\s*\{[^}]*display: inline-grid;[^}]*grid-template-columns: minmax\(0, 1fr\) auto;[^}]*font-size: var\(--font-session-title\)/s);
   assert.match(styles, /\.desktop-session-status-end\s*\{[^}]*display: inline-flex;[^}]*align-items: center;/s);
   assert.match(styles, /\.desktop-session-status-copy\s*\{[^}]*justify-content: center;/s);
-  assert.match(styles, /\.mobile-session-selector\s*\{[^}]*display: grid;[^}]*grid-template-columns: minmax\(0, 1fr\) var\(--icon-md\);[^}]*font-size: var\(--font-session-title-compact\)/s);
+  assert.match(styles, /\.mobile-session-selector\s*\{[^}]*display: grid;[^}]*grid-template-columns: minmax\(0, 1fr\);[^}]*font-size: var\(--font-session-title-compact\)/s);
   assert.match(styles, /\.mobile-session-title-row\s*\{[^}]*display: flex;[^}]*align-items: center;/s);
   assert.match(styles, /\.mobile-island-text\s*\{[^}]*text-align: center;/s);
   assert.match(mobile, /slot="session\.header\.status"/);

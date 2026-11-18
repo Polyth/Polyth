@@ -34,6 +34,23 @@ export interface ResourceAccessAuthority {
   requireReadable(input: ResourceAccessInput): CanonicalResource;
   /** The principal's effective access, or undefined when it cannot read. */
   access(input: ResourceAccessInput): ResourceAccess | undefined;
+  /**
+   * `access` for many resources of one principal in one scope: each call
+   * decides, and throws, exactly as `access` with that `resourceId` would.
+   * The rows of `resourceIds`, the principal's kind, membership, grants and
+   * project policy are read once for the pass, so use it within one
+   * synchronous pass only: it never sees a write made after it read.
+   */
+  accessPass(input: Omit<ResourceAccessInput, "resourceId">, resourceIds: readonly string[]): (resourceId: string) => ResourceAccess | undefined;
+}
+
+/** What one access decision reads; the pass memoizes the same reads. */
+interface AccessReads {
+  resource(resourceId: string): CanonicalResource | undefined;
+  principalKind(principalId: string): string | undefined;
+  membershipRole(principalId: string, spaceId: string): string | undefined;
+  grantOf(resourceId: string, principalId: string): ResourceAccessLevel | undefined;
+  projectAllowed: ((principalId: string, projectId: string) => boolean) | undefined;
 }
 
 const IDENTIFIER = /^[A-Za-z0-9_][A-Za-z0-9_.:-]{0,199}$/;
@@ -41,6 +58,8 @@ const LIFECYCLES = new Set<ResourceLifecycle>([
   "provisioning", "active", "archiving", "archived", "deleting", "deleted", "quarantined",
 ]);
 const DEFAULT_READABLE: readonly ResourceLifecycle[] = ["active", "archived"];
+/** Ids per batched grant read in an access pass; one bound JSON array each. */
+const GRANT_BATCH = 500;
 const id = (value: unknown, label: string): string => {
   if (typeof value !== "string" || !IDENTIFIER.test(value)) throw controlError("invalid-input", `Invalid ${label}`);
   return value;
@@ -85,12 +104,12 @@ export function createResourceAccessAuthority(
   const projectAllowed = opts.projectAllowed;
 
   /** The project a resource lives under (itself for a project), if any. */
-  const projectOf = (row: CanonicalResource): string | undefined => {
+  const projectOf = (reads: AccessReads, row: CanonicalResource): string | undefined => {
     let current: CanonicalResource | undefined = row;
     for (let depth = 0; current && depth < 32; depth += 1) {
       if (current.kind === "project") return current.id;
       if (!current.parentId) return undefined;
-      current = resources.resource(current.parentId);
+      current = reads.resource(current.parentId);
     }
     throw controlError("recovery-required", "Resource ancestry is inconsistent");
   };
@@ -121,6 +140,7 @@ export function createResourceAccessAuthority(
     role === "owner" || role === "admin" ? "manage" : role === "member" ? "collaborate" : "view";
 
   const levelOf = (
+    reads: AccessReads,
     row: CanonicalResource,
     principalId: string,
     role: string,
@@ -128,7 +148,7 @@ export function createResourceAccessAuthority(
   ): ResourceAccessLevel | undefined => {
     if (row.ownerPrincipalId === principalId) return "manage";
     if (row.visibility === "private") return undefined;
-    const granted = grantOf(row.id, principalId);
+    const granted = reads.grantOf(row.id, principalId);
     if (row.visibility === "restricted") return granted;
     if (row.visibility === "space") return higher(granted, spaceWide(role));
     const parentId = row.accessParentId ?? row.parentId;
@@ -136,41 +156,118 @@ export function createResourceAccessAuthority(
       throw controlError("recovery-required", "Resource visibility inheritance is inconsistent");
     }
     seen.add(row.id);
-    const parent = resources.resource(parentId);
+    const parent = reads.resource(parentId);
     if (!parent) throw controlError("recovery-required", "Inherited resource parent is missing");
     if (parent.orgId !== row.orgId || parent.spaceId !== row.spaceId) return granted;
     // A child may be in a transient lifecycle while its parent remains active,
     // so parent visibility uses normal readable lifecycle semantics.
     if (!DEFAULT_READABLE.includes(parent.lifecycle)) return granted;
-    return higher(granted, levelOf(parent, principalId, role, seen));
+    return higher(granted, levelOf(reads, parent, principalId, role, seen));
   };
 
-  const access = (raw: ResourceAccessInput): ResourceAccess | undefined => {
-    const input = {
-      resourceId: id(raw.resourceId, "resource ID"),
-      principalId: id(raw.principalId, "principal ID"),
-      orgId: id(raw.orgId, "organization ID"),
-      spaceId: id(raw.spaceId, "Space ID"),
-      lifecycles: allowedLifecycles(raw.lifecycles),
-    };
-    const row = resources.resource(input.resourceId);
+  const scopeOf = (raw: Omit<ResourceAccessInput, "resourceId">) => ({
+    principalId: id(raw.principalId, "principal ID"),
+    orgId: id(raw.orgId, "organization ID"),
+    spaceId: id(raw.spaceId, "Space ID"),
+    lifecycles: allowedLifecycles(raw.lifecycles),
+  });
+  type Scope = ReturnType<typeof scopeOf>;
+
+  const decide = (reads: AccessReads, input: Scope, resourceId: string): ResourceAccess | undefined => {
+    const row = reads.resource(resourceId);
     if (!row) return undefined;
     if (row.orgId !== input.orgId || row.spaceId !== input.spaceId) return undefined;
     if (!input.lifecycles.has(row.lifecycle)) return undefined;
     // Durable system principals are the runtime itself. They intentionally have
     // no Space membership, so background work reads inside the Space it was
     // already scoped to instead of impersonating a member.
-    if (principalKind(input.principalId) === "system") return { resource: row, level: "manage" };
-    if (projectAllowed) {
-      const projectId = projectOf(row);
-      if (projectId !== undefined && !projectAllowed(input.principalId, projectId)) return undefined;
+    if (reads.principalKind(input.principalId) === "system") return { resource: row, level: "manage" };
+    if (reads.projectAllowed) {
+      const projectId = projectOf(reads, row);
+      if (projectId !== undefined && !reads.projectAllowed(input.principalId, projectId)) return undefined;
     }
     // Human access, ownership included, never outlives tenant membership.
-    const role = membershipRole(input.principalId, input.spaceId);
+    const role = reads.membershipRole(input.principalId, input.spaceId);
     if (role === undefined) return undefined;
-    const level = levelOf(row, input.principalId, role, new Set());
+    const level = levelOf(reads, row, input.principalId, role, new Set());
     if (level === undefined) return undefined;
     return { resource: row, level: role === "viewer" || role === "reference" ? "view" : level };
+  };
+
+  const direct: AccessReads = {
+    resource: (resourceId) => resources.resource(resourceId),
+    principalKind,
+    membershipRole,
+    grantOf,
+    projectAllowed,
+  };
+
+  const access = (raw: ResourceAccessInput): ResourceAccess | undefined => {
+    const resourceId = id(raw.resourceId, "resource ID");
+    return decide(direct, scopeOf(raw), resourceId);
+  };
+
+  const accessPass = (
+    raw: Omit<ResourceAccessInput, "resourceId">,
+    resourceIds: readonly string[],
+  ): ((resourceId: string) => ResourceAccess | undefined) => {
+    // Invalid scope fails every call, as it fails every `access` call.
+    let scope: Scope | undefined;
+    let scopeError: unknown;
+    try { scope = scopeOf(raw); } catch (cause) { scopeError = cause; }
+    const rows = new Map<string, CanonicalResource | undefined>();
+    if (scope) {
+      const valid = resourceIds.filter((resourceId) => typeof resourceId === "string" && IDENTIFIER.test(resourceId));
+      const found = resources.resourcesByIds(valid);
+      for (const resourceId of valid) rows.set(resourceId, found.get(resourceId));
+    }
+    const kinds = new Map<string, string | undefined>();
+    const roles = new Map<string, string | undefined>();
+    const allowed = new Map<string, boolean>();
+    const grants = new Map<string, Map<string, ResourceAccessLevel | undefined>>();
+    const memo = <K, V>(map: Map<K, V>, key: K, read: () => V): V => {
+      if (map.has(key)) return map.get(key) as V;
+      const value = read();
+      map.set(key, value);
+      return value;
+    };
+    const reads: AccessReads = {
+      resource: (resourceId) => memo(rows, resourceId, () => resources.resource(resourceId)),
+      principalKind: (principalId) => memo(kinds, principalId, () => principalKind(principalId)),
+      membershipRole: (principalId, spaceId) => memo(roles, `${principalId}\n${spaceId}`, () => membershipRole(principalId, spaceId)),
+      // The principal's unexpired grants on the pass's rows in one read: the
+      // same rows `grantOf` finds one at a time. Any other resource (an
+      // ancestor) is read on its own, once.
+      grantOf: (resourceId, principalId) => {
+        let held = grants.get(principalId);
+        if (!held) {
+          held = new Map();
+          const listed = [...rows.keys()];
+          for (let start = 0; start < listed.length; start += GRANT_BATCH) {
+            for (const grant of control.all<{ resource_id: string; access: string }>(
+              `SELECT resource_id,access FROM resource_grants
+                WHERE principal_id=? AND resource_id IN (SELECT value FROM json_each(?))
+                  AND (expires_at_ms IS NULL OR expires_at_ms>?)`,
+              principalId,
+              JSON.stringify(listed.slice(start, start + GRANT_BATCH)),
+              now(),
+            )) held.set(grant.resource_id, isResourceAccessLevel(grant.access) ? grant.access : undefined);
+            for (const listedId of listed.slice(start, start + GRANT_BATCH)) if (!held.has(listedId)) held.set(listedId, undefined);
+          }
+          grants.set(principalId, held);
+        }
+        if (!held.has(resourceId)) held.set(resourceId, grantOf(resourceId, principalId));
+        return held.get(resourceId);
+      },
+      projectAllowed: projectAllowed
+        ? (principalId, projectId) => memo(allowed, `${principalId}\n${projectId}`, () => projectAllowed(principalId, projectId))
+        : undefined,
+    };
+    return (resourceId) => {
+      const checked = id(resourceId, "resource ID");
+      if (!scope) throw scopeError;
+      return decide(reads, scope, checked);
+    };
   };
 
   const readable = (input: ResourceAccessInput): CanonicalResource | undefined => access(input)?.resource;
@@ -178,6 +275,7 @@ export function createResourceAccessAuthority(
   return {
     readable,
     access,
+    accessPass,
     requireReadable(input) {
       const row = readable(input);
       if (!row) throw controlError("not-found", "Resource not found");

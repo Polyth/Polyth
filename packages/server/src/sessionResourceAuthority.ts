@@ -46,6 +46,12 @@ const receipt = (projection: SessionProjection): string => JSON.stringify({
 
 type CanonicalLifecycle = CanonicalResource["lifecycle"];
 
+/** Canonical rows a list reads ahead in one batch. */
+const LIST_READ_AHEAD = 1000;
+/** After a row was repaired, read ahead little and grow again, so a list of
+ *  rows that all need repair does not re-read the remainder each time. */
+const LIST_READ_AFTER_REPAIR = 16;
+
 export function canonicalSessionService(
   ctx: SpaceContext,
   base: SessionService,
@@ -727,14 +733,53 @@ export function canonicalSessionService(
   ]);
   const readableMethodNames = new Set<PropertyKey>(["debug", "clientMutationStatus", "mentionCandidates", "chatMentionCandidates"]);
 
-  const reconciledList = async (projectId?: string): Promise<SessionProjection[]> => {
-    await reconcileMissingDeletes();
+  /** Whether `admitProjection` would admit this row as it is: its canonical
+   *  row exists in this Space and project, and its lifecycle already matches
+   *  the projection, so there is nothing to adopt, move, finalize or repair. */
+  const settled = (projection: SessionProjection, row: CanonicalResource | undefined): boolean =>
+    row !== undefined
+    && row.kind === "session" && row.orgId === org.id && row.spaceId === ctx.spaceId
+    && projection.spaceId === ctx.spaceId && row.parentId === projection.projectId
+    && (projection.status === "archived" ? row.lifecycle === "archived" : row.lifecycle === "active");
+
+  /**
+   * `admitProjection` over many rows. Canonical rows are read in batches just
+   * before use, with no await in between, so each is as current as its own
+   * read would be. A settled row is admitted without further reads; every
+   * other row (adoption, move, provisioning, lifecycle repair, recovery,
+   * another Space) takes the per-row path unchanged, and because that path
+   * may write or await, the rows read ahead are dropped after it.
+   */
+  const admitAll = async (projections: readonly SessionProjection[]): Promise<SessionProjection[]> => {
     const visible: SessionProjection[] = [];
-    for (const projection of await base.list(projectId)) {
+    let ahead = new Map<string, CanonicalResource>();
+    let readUpTo = 0;
+    let window = LIST_READ_AHEAD;
+    for (let index = 0; index < projections.length; index += 1) {
+      const projection = projections[index]!;
+      // Exactly `admitProjection`'s first decision, which reads nothing.
+      if (projection.spaceId !== undefined && projection.spaceId !== ctx.spaceId) continue;
+      if (index >= readUpTo) {
+        readUpTo = Math.min(projections.length, index + window);
+        ahead = security.resources.resourcesByIds(projections.slice(index, readUpTo).map((row) => row.id));
+        window = Math.min(LIST_READ_AHEAD, window * 2);
+      }
+      if (settled(projection, ahead.get(projection.id))) {
+        visible.push(projection);
+        continue;
+      }
       const admitted = await admitProjection(projection);
       if (admitted) visible.push(admitted);
+      // Re-read the rest: the per-row path may have written or yielded.
+      readUpTo = index + 1;
+      window = LIST_READ_AFTER_REPAIR;
     }
     return visible;
+  };
+
+  const reconciledList = async (projectId?: string): Promise<SessionProjection[]> => {
+    await reconcileMissingDeletes();
+    return admitAll(await base.list(projectId));
   };
 
   return new Proxy(base, {
@@ -760,12 +805,7 @@ export function canonicalSessionService(
       if (property === "sync") {
         return async (projectId: string) => {
           await reconcileMissingDeletes();
-          const visible: SessionProjection[] = [];
-          for (const projection of await target.sync(projectId)) {
-            const admitted = await admitProjection(projection);
-            if (admitted) visible.push(admitted);
-          }
-          return visible;
+          return admitAll(await target.sync(projectId));
         };
       }
       if (property === "importBackendSessions" && target.importBackendSessions) {

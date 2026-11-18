@@ -147,7 +147,7 @@ test("phone quick actions keep their contrast and taps after a touch", async () 
 // Timeline publishes must still add on top, or a new answer loses its reserve.
 test("the phone keeps its own transcript tail clearance", async () => {
   const css = await readWebStyles();
-  const dockRule = css.lastIndexOf("  --timeline-pad-bottom: calc(var(--conversation-message-gap) + var(--conversation-group-gap) + var(--timeline-turn-sheet-space, 0px));");
+  const dockRule = css.lastIndexOf("  --timeline-pad-bottom: calc(var(--conversation-message-gap) + var(--conversation-group-gap) + var(--timeline-dock-overlap, 0px) + var(--timeline-turn-sheet-space, 0px));");
   const phoneRule = css.lastIndexOf("    --timeline-pad-bottom: calc(24px + var(--timeline-turn-sheet-space, 0px));\n    scroll-padding-bottom: 24px;");
   assert.ok(dockRule > 0 && phoneRule > dockRule, "the phone tail clearance is stated after the shared dock rule");
   assert.match(

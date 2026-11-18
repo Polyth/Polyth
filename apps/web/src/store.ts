@@ -66,6 +66,7 @@ import { MAX_PREVIOUS_NEW_SESSION_DRAFTS, hydrateScopedDraftRecord, loadScopedDr
 import { seedAttachments } from "./attachments.ts";
 import { activeDraftLanePurpose, newSessionLaneDraftId } from "./workbench/lanes.ts";
 import { getMobileWorkspaceNavigationSnapshot } from "./mobileWorkspaceNavigation.ts";
+import { jsonEqual } from "./presentationMerge.ts";
 import {
   PROJECT_PRESENTATION_HYDRATED_EVENT,
   projectPresentationEventHasKey,
@@ -2281,6 +2282,11 @@ export function upsertSession(p: SessionProjection): void {
   const i = state.sessions.findIndex((s) => s.id === p.id);
   const cur = i >= 0 ? state.sessions[i] : undefined;
   const incoming = cur ? preserveTitle(cur, p) : p;
+  // The row already says exactly this: nothing to publish.
+  if (cur && jsonEqual(cur, incoming)) {
+    reconcileWorkspaceProjectFromSession();
+    return;
+  }
   const sessions = i >= 0 ? state.sessions.map((s, j) => (j === i ? incoming : s)) : [...state.sessions, incoming];
   const movedTo = movedActiveSessionProject([p]);
   set({ sessions: withOptimisticSessionChanges(sessions) });
@@ -2295,16 +2301,27 @@ export function upsertSessions(list: readonly SessionProjection[]): void {
   // Drop empty zombie sessions — creation failed before any user turn.
   const zombieIds = new Set(list.filter(isEmptyZombie).map((p) => p.id));
   const byId = new Map(list.filter((p) => !zombieIds.has(p.id)).map((p) => [p.id, p]));
+  // A row the server repeats unchanged keeps its object, so the lists that
+  // render it skip it; a batch that changes nothing (a reconnect re-sending
+  // what this client already shows) publishes nothing at all.
+  let changed = false;
   const sessions = state.sessions
     .filter((s) => !zombieIds.has(s.id))
     .map((s) => {
       const next = byId.get(s.id);
       if (next) {
         byId.delete(s.id);
-        return preserveTitle(s, next);
+        const merged = preserveTitle(s, next);
+        if (jsonEqual(s, merged)) return s;
+        changed = true;
+        return merged;
       }
       return s;
     });
+  if (!changed && byId.size === 0 && sessions.length === state.sessions.length) {
+    reconcileWorkspaceProjectFromSession();
+    return;
+  }
   for (const p of byId.values()) sessions.push(p);
   const movedTo = movedActiveSessionProject(list);
   if (zombieIds.size) {

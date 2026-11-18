@@ -3,7 +3,7 @@
 // <Name>` inserts or updates one entry (sorted), and `node
 // scripts/icons/lucide.mjs check` verifies this file and that icons.ts uses
 // every node here.
-import type { IconNode } from "./iconBase.tsx";
+import type { IconNode } from "./iconBase.ts";
 
 export const Activity: IconNode = [
   ["path", { d: "M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2", key: "169zse" }],

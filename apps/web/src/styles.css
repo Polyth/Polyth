@@ -21392,10 +21392,10 @@ body.desktop-app[data-desktop-platform="win32"][data-desktop-controls-position] 
 .settings-other-devices-toggle .settings-section-title { font-weight: 600; color: var(--text-dim); }
 .settings-other-devices-toggle .settings-section-hint { color: var(--faint); text-wrap: pretty; }
 @media (hover: hover) and (pointer: fine) {
-  .settings-other-devices-toggle:hover { background: var(--surface-overlay-hover); }
-  .settings-other-devices-toggle:hover :is(.settings-section-title, .settings-other-devices-chevron) { color: var(--text); }
+  .settings-other-devices-toggle:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
+  .settings-other-devices-toggle:hover:where(:not(:disabled)) :is(.settings-section-title, .settings-other-devices-chevron) { color: var(--text); }
 }
-.settings-other-devices-toggle:active { background: var(--surface-overlay-hover); }
+.settings-other-devices-toggle:active:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
 .settings-other-devices-toggle:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 .settings-other-devices[data-open="true"] .settings-other-devices-toggle .settings-section-title { color: var(--text); }
 .settings-other-devices-label { white-space: nowrap; }

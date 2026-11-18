@@ -6,7 +6,7 @@ import { execFile } from "node:child_process";
 import { scrubInheritedEnv } from "@polyth/kernel/inherited-env";
 import { createHash } from "node:crypto";
 import { constants as FS_CONSTANTS, existsSync, rmSync, statSync } from "node:fs";
-import { copyFile, lstat, mkdir, mkdtemp, open, readlink, realpath, rm, rmdir, writeFile, type FileHandle } from "node:fs/promises";
+import { copyFile, lstat, mkdir, mkdtemp, open, readFile, readlink, realpath, rm, rmdir, writeFile, type FileHandle } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, posix, resolve, sep } from "node:path";
 import type { ProjectCloneInput, RemoteHost } from "@polyth/contracts";
@@ -25,6 +25,19 @@ export interface GitFileEntry {
   staged: boolean;
   origPath?: string; // rename source
 }
+
+export interface GitFileLineStats { additions: number; deletions: number }
+export interface GitDiffStats {
+  staged: Record<string, GitFileLineStats>;
+  unstaged: Record<string, GitFileLineStats>;
+}
+
+/** Untracked files above this are left to the per-file diff. */
+const DIFF_STATS_MAX_UNTRACKED_BYTES = 1024 * 1024;
+/** One request reads at most this many untracked files and bytes; the rest are
+ *  left to the per-file diff, so a tree of generated files costs a bounded read. */
+const DIFF_STATS_MAX_UNTRACKED_FILES = 200;
+const DIFF_STATS_MAX_UNTRACKED_TOTAL_BYTES = 8 * 1024 * 1024;
 
 export interface GitStatus {
   branch: string | null;
@@ -223,6 +236,13 @@ export interface GitService {
    *  first-parent line had reached by then, so committed, staged and unstaged
    *  changes since that moment all show; `base` names that commit. */
   diff(root: string, opts?: { path?: string; staged?: boolean; ignoreWhitespace?: boolean; since?: number }): Promise<{ path: string | null; diff: string; base?: string }>;
+  /** +/- line counts for every changed file in a constant number of git
+   *  processes. Each number equals what `summarizeUnifiedDiff` reports for
+   *  `diff(root, { path, staged })`; a path that cannot be counted exactly
+   *  (conflicted, symlink, very large untracked file) or lies beyond the
+   *  per-request untracked read bound is left out so the caller falls back to
+   *  the per-file diff. `unstaged` covers untracked files. */
+  diffStats(root: string): Promise<GitDiffStats>;
   show(root: string, sha: string, opts?: { ignoreWhitespace?: boolean }): Promise<{ sha: string; diff: string }>;
   /** All uncommitted changes (staged + unstaged) against HEAD; plain `git diff` on a fresh repo. */
   diffHead(root: string): Promise<string>;
@@ -1457,6 +1477,62 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
       if (tracked) return withBase("");
       const untracked = await run(root, ["diff", "--no-color", "--no-index", "--", "/dev/null", path], true);
       return withBase(untracked.stdout);
+    },
+
+    async diffStats(root) {
+      // Three processes however many files changed. `--no-renames` matches the
+      // per-file diff, whose pathspec hides a rename's old name from git.
+      const [statusRaw, unstagedRaw, stagedRaw] = await Promise.all([
+        run(root, ["status", "--porcelain=v1", "-z", "-b", "--untracked-files=all"]),
+        run(root, ["diff", "--numstat", "-z", "--no-renames", "--no-color"], true),
+        run(root, ["diff", "--cached", "--numstat", "-z", "--no-renames", "--no-color"], true),
+      ]);
+      const lists = parseStatus(statusRaw.stdout);
+      const parse = (r: RunResult) => {
+        const out = new Map<string, GitFileLineStats>();
+        if (r.code !== 0) return null;
+        for (const record of r.stdout.split("\0")) {
+          const a = record.indexOf("\t");
+          const b = a < 0 ? -1 : record.indexOf("\t", a + 1);
+          if (b < 0) continue;
+          const add = record.slice(0, a);
+          const del = record.slice(a + 1, b);
+          // `-` marks a binary file; its patch has no +/- lines.
+          out.set(record.slice(b + 1), {
+            additions: /^\d+$/.test(add) ? Number(add) : 0,
+            deletions: /^\d+$/.test(del) ? Number(del) : 0,
+          });
+        }
+        return out;
+      };
+      const unstagedCounts = parse(unstagedRaw);
+      const stagedCounts = parse(stagedRaw);
+      const result: GitDiffStats = { staged: {}, unstaged: {} };
+      // A tracked path git does not list has an empty diff: zero lines.
+      if (stagedCounts) for (const f of lists.staged) result.staged[f.path] = stagedCounts.get(f.path) ?? { additions: 0, deletions: 0 };
+      if (unstagedCounts) for (const f of lists.unstaged) result.unstaged[f.path] = unstagedCounts.get(f.path) ?? { additions: 0, deletions: 0 };
+      // Untracked: the per-file diff is synthesised with --no-index, every line
+      // an addition.
+      let untrackedRead = 0;
+      let untrackedBytes = 0;
+      for (const f of lists.untracked) {
+        if (untrackedRead >= DIFF_STATS_MAX_UNTRACKED_FILES) break;
+        try {
+          const abs = join(root, f.path);
+          const info = await lstat(abs);
+          if (!info.isFile() || info.size > DIFF_STATS_MAX_UNTRACKED_BYTES) continue;
+          if (untrackedBytes + info.size > DIFF_STATS_MAX_UNTRACKED_TOTAL_BYTES) break;
+          untrackedRead += 1;
+          untrackedBytes += info.size;
+          const buf = await readFile(abs);
+          if (buf.subarray(0, 8000).includes(0)) { result.unstaged[f.path] = { additions: 0, deletions: 0 }; continue; }
+          let lines = 0;
+          for (let at = buf.indexOf(10); at !== -1; at = buf.indexOf(10, at + 1)) lines += 1;
+          if (buf.length > 0 && buf[buf.length - 1] !== 10) lines += 1;
+          result.unstaged[f.path] = { additions: lines, deletions: 0 };
+        } catch { /* left out: the caller reads this one file's diff */ }
+      }
+      return result;
     },
 
     async show(root, sha, o = {}) {

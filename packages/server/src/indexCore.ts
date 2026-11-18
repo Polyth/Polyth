@@ -3079,6 +3079,9 @@ export async function boot(opts: BootOptions = {}) {
       if (!isolation) throw Object.assign(new Error("git isolation membership service is unavailable"), { code: "unsupported" });
       return isolation.updateIsolatedWorkspace(sessionId, selection);
     },
+    // A deleted chat can never notify again: its creator bindings would
+    // otherwise stay in notifications.json for as long as the file lives.
+    onSessionDeleted: async (sessionId) => { await notifications.forgetSession(sessionId); },
     onSessionReleased: async ({ sessionId, projectId, cwd }) => {
       const project = await projects.get(projectId);
       const space = spaceGateway.resolveInternal(project?.spaceId);

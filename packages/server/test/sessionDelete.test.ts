@@ -53,6 +53,7 @@ function makeService(
     releaseExecution(cwd: string): Promise<void>;
   }) => Promise<void>,
   runtimePool?: RuntimePool,
+  extraDeps: Partial<Parameters<typeof createSessionService>[0]> = {},
 ) {
   const dir = mkdtempSync(join(tmpdir(), "polyth-delete-"));
   const store = createStore(join(dir, "s.db"));
@@ -74,6 +75,7 @@ function makeService(
     store, projects, permissions, broadcast, queue: store,
     runtimes: runtimePool ?? { forProject: runtimeFor },
     ...(cleanupSessionResources ? { cleanupSessionResources } : {}),
+    ...extraDeps,
   });
   return { sessions, store };
 }
@@ -113,6 +115,31 @@ test("delete of a running session aborts first and leaves no resurrected events"
   assert.equal(await store.projection(id), undefined);
   // The abort's turn/stopped must not re-append to the deleted log.
   assert.deepEqual(await store.events(id), []);
+});
+
+test("a permanent delete tells bookkeeping owners once; archive and a refused delete do not", async () => {
+  const fake = fakeRuntime();
+  const deleted: string[] = [];
+  const { sessions, store } = makeService(fake, undefined, undefined, undefined, {
+    onSessionDeleted: (sessionId) => { deleted.push(sessionId); },
+  });
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await sessions.archive(id);
+  await assert.rejects(sessions.delete!("nope"));
+  await assert.rejects(sessions.delete!(id, { expectedLastEventSeq: -1 }));
+  assert.deepEqual(deleted, [], "the session still exists");
+
+  await sessions.delete!(id);
+  assert.deepEqual(deleted, [id]);
+  assert.equal(await store.projection(id), undefined);
+
+  // An owner that fails leaves stale bookkeeping, never a half-deleted session.
+  const failing = makeService(fakeRuntime(), undefined, undefined, undefined, {
+    onSessionDeleted: () => { throw new Error("bookkeeping store is read-only"); },
+  });
+  const other = await failing.sessions.create({ projectId: "p1", title: "T" });
+  await failing.sessions.delete!(other.id);
+  assert.equal(await failing.store.projection(other.id), undefined);
 });
 
 test("delete of an unknown session is a typed not-found", async () => {

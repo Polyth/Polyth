@@ -106,7 +106,8 @@ test("mobile surface motion uses shared tokens, directional exits, and no privat
   assert.match(headerCss, /@keyframes mobile-session-sheet-lift/);
   assert.match(headerCss, /\.mobile-island-sheet--full-screen\.sheet\.is-closing\s*\{[^}]*mobile-session-overview-out/s);
   assert.match(headerCss, /@keyframes mobile-session-overview-out/);
-  assert.match(headerCss, /mobile-session-selector\[aria-expanded="true"\][\s\S]*?rotate\(180deg\)/);
+  // The phone title has no dropdown arrow, so there is no arrow turn to time.
+  assert.doesNotMatch(headerCss, /mobile-session-selector-arrow/);
   // Phone sheets rise from the bottom edge and go back down it (from wherever a
   // drag let go); centered sheets on wider screens rise and sink in place.
   assert.match(coreCss, /animation:\s*sheet-slide-in var\(--motion-stack\) var\(--motion-stack-ease\) backwards/);

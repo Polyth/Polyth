@@ -2,7 +2,7 @@
 // inline rename, archive entry, bulk archive/restore with partial-failure
 // reporting. All mutations go through the REST org endpoints.
 import {
-  useEffect, useId, useMemo, useRef, useState, useSyncExternalStore,
+  useEffect, useId, useMemo, useRef, useState,
   type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode,
 } from "react";
 import type { SessionProjection, WorkspaceLabel } from "@polyth/contracts";
@@ -19,6 +19,7 @@ import { markSessionPerformance } from "../../sessionPerformance.ts";
 import { collectSessionSummaries } from "../../sessionSummaryPages.ts";
 import { useSessionSummaryPages } from "../../useSessionSummaryPages.ts";
 import { resolveSessionStatus, type SessionRowStatus } from "../../sessionStatus.ts";
+import { useNowTick } from "../../nowTicker.ts";
 import { sessionLeadMark, sessionLeadState, type SessionLeadMark } from "../../sessionLead.ts";
 import { fmtSessionElapsed, fullSessionTitle } from "../../format.ts";
 import { draftTitleSource, sessionDraftMark } from "../../sessionDraft.ts";
@@ -121,37 +122,6 @@ const statusDescription = (status: SessionRowStatus, opening: boolean): string |
   }
   return status.kind === "regular" || status.kind === "resume-ready" ? undefined : status.label;
 };
-
-// Re-render clock for the running badge's elapsed label. ONE shared interval
-// drives every subscribed row (previously each working row scheduled its own
-// 1s timer); the interval stops as soon as the last working row unsubscribes.
-let tickerTimer: ReturnType<typeof setInterval> | null = null;
-let tickerNow = Date.now();
-const tickerSubscribers = new Set<() => void>();
-
-function subscribeTicker(onChange: () => void): () => void {
-  tickerSubscribers.add(onChange);
-  if (tickerTimer === null) {
-    tickerNow = Date.now();
-    tickerTimer = setInterval(() => {
-      tickerNow = Date.now();
-      for (const notify of tickerSubscribers) notify();
-    }, 1_000);
-  }
-  return () => {
-    tickerSubscribers.delete(onChange);
-    if (tickerSubscribers.size === 0 && tickerTimer !== null) {
-      clearInterval(tickerTimer);
-      tickerTimer = null;
-    }
-  };
-}
-
-const subscribeNothing = () => () => {};
-
-function useNowTick(enabled: boolean): number {
-  return useSyncExternalStore(enabled ? subscribeTicker : subscribeNothing, () => tickerNow);
-}
 
 /** Running clock: the one piece of status that is a measurement, so it sits
  *  in the trailing meta column rather than the leading state slot. */

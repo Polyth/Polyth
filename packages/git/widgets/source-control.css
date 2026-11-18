@@ -1745,9 +1745,11 @@ body[data-desktop-low-resource="true"] .git-page .git-landing {
   .git-page .source-remote-buttons > .source-sync-btn { order: 3; margin-inline-start: auto; }
   .git-page .source-remote-buttons > :not(.source-sync-btn) { order: 7; }
   /* The second row's trailing group (Retry when shown, else the menu) starts
-     at the far edge. */
+     at the far edge. The menu is named by its class, at no added specificity:
+     `:first-child + *` would make every first-child change restyle the whole
+     subtree (apps/web/test/cssStructuralInvalidation.test.ts). */
   .git-page .source-remote-buttons > :first-child:not(.source-sync-btn),
-  .git-page .source-remote-buttons > .source-sync-btn:first-child + * { margin-inline-start: auto; }
+  .git-page .source-remote-buttons > .source-sync-btn:first-child + :where(.ui-icon-btn) { margin-inline-start: auto; }
   .git-page .source-remote-buttons > .ui-icon-btn { width: var(--sc-sub-h); height: var(--sc-sub-h); }
   .git-page .source-control-identity { flex: 1 1 0; max-width: max-content; min-width: 0; flex-wrap: nowrap; }
   .git-page .source-control-title .source-control-identity-trigger { min-height: var(--sc-sub-h); max-width: 100%; }

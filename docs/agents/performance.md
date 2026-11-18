@@ -297,6 +297,18 @@ changed timeline frontiers, ingestion queue caps, and server control paths that
 must not replay a whole session log (`historyReplayHotPaths.test.ts`). They
 complement, rather than replace, real rendering and resource-retention profiles.
 
+Send and turn end (2026-11-17): a user send replayed the whole log twice
+(pending context, epoch recovery plan, client-operation lookup) and every turn
+end once (rate-limit anchors, Pause check, dialogue frontier, incomplete-turn
+record). They now read the incremental `logFacts` fold and typed windows after
+the last prompt. An already-restored `runtime/epoch-replaced` or
+`session/snapshot-imported` marker is settled from the fold plus one operations
+read, before any clone, redaction or git spawn. Only a pending epoch or
+compaction recovery, or a rewind in the log, still replays. In-process bench
+on a fake runtime, 32k events: send 2 → 0 whole-log reads, ~350 → ~36 ms
+(the first send after start builds the fold, ~190 ms); turn end 1 → 0,
+~160 → ~3 ms.
+
 ## Timeline scroll and composer typing
 
 Workload: one synthetic session (120 turns: markdown, code, table, three tool
@@ -336,3 +348,249 @@ opens the inspector on 127.0.0.1:9229, and a CDP client records windowed
 counts GC and libuv threads. The inspector keeps listening on loopback until
 that process exits, so profile only with the operator's consent. Keep profiles
 under `.scratch/<task>/`; they contain code paths, not payloads.
+
+## Isolation cleanup after a merge (2026-11-17)
+
+A production host (4 CPUs, 3,316 sessions in 16 projects) logged 4–7
+event-loop blocks of 1.1–3.8 s between `isolation cleanup {worktreePath}` and
+`{done:true}`. The dependents scan in `packages/git/src/sessionIntegration.ts`
+(`sourceDependentsAt`) called `projects.get` once per session row. For a
+package that call is the governed proxy (`packageHostAuthority.ts` →
+system Space context → `canonicalProjectService`), which runs control-plane
+SQL synchronously, so thousands of awaits ran as one microtask chain.
+
+Measured with a scratch bench and `packages/git/test/isolationCleanupWorkCount.test.ts`
+(3,300 sessions, 16 projects; dev machine, idle test control DB):
+
+- Governed `projects.get` per row: 190–280 ms per 3,300 calls (5 samples,
+  59–85 µs each); once per project: 1.0–1.7 ms.
+- Base `sessions.list(projectId)` across all 16 projects: 12–27 ms
+  (5 samples, real SQLite, no Space wrapper). The listing was not the block.
+- One merge+cleanup, before → after: `projects.get` 6,609 → 41;
+  whole-installation `sessions.list()` 3 → 2; longest run of project reads
+  with no macrotask turn 6,601 → 33. A cleanup-pending `getStatus`:
+  3,302 → 18.
+
+Invariant: a dependents scan resolves each project at most once and takes
+one listing; the scan lives only for the call that took it. A listing may
+feed a scan only while nothing changed in between: the child relocation
+reuses its own listing, and the re-check after the rebinds takes a fresh one.
+Production timing after the change is not yet measured.
+
+## Idle request sources (2026-11-17)
+
+A streaming or merely open chat must not poll on every event or while hidden:
+`QueuedMessageList` refetches the queue only when `queueSignalSeq` (newest
+`queue/*`, fallback-queued, `user/message` or turn-end seq) moves; `SubagentWork`
+reads the child's passive tail (400 events) once, then every 1.5 s, only while
+visible, just the events after the newest one it holds, and re-renders only
+when something new arrived; the tunnel widget polls its status
+every 5 s only while visible, and reads once on visibility or `online`.
+
+## 2026-11-17 — Source control line counts: one git call, not one per file
+
+The changes list and the pending-changes bar each fetched a whole unified
+diff per changed file (up to two for the bar) only to count `+`/`-` lines: one
+git process and one patch per file on every change of the status.
+`GET /api/git/diff-stats` (`git.diffStats`, same root resolution and
+`gitRead` capability as `/api/git/diff`) returns `{ staged, unstaged }` maps of
+`{ additions, deletions }` from `status` plus `diff --numstat -z --no-renames`
+(unstaged and `--cached`): three processes however many files changed.
+Untracked files are counted by reading them (≤ 1 MiB, regular files, NUL ⇒
+binary ⇒ 0/0), the way the synthesised `--no-index` diff counts them.
+One request reads at most 200 untracked files and 8 MiB of them. Conflicted
+files, symlinks, larger untracked files and those beyond that bound are left
+out, and the widgets read just those paths' own diffs; an older server (404)
+leaves every path to the per-file diff. Counts equal `summarizeUnifiedDiff` of
+the per-file diff (`packages/git/test/diffStats.test.ts`): that counter skips
+`---`/`+++` only as file headers before a hunk, so a removed `-- comment` or an
+added `++i` is one line in both. Production timing not measured.
+
+## Space-scoped session list (2026-11-17)
+`GET /api/sessions?projectId=…` took 0.93 s to first byte on the production
+host for 2,456 visible rows (≈0.38 ms per row, all synchronous), and every
+server-side `sessions.list` paid the same. Profiled with a scratch bench on
+`packages/server/test/support/sharingFixture.ts` (canonical + access layers,
+real control-plane SQLite, 2,500 sessions in one project, `node:inspector`
+CPU profile): the self time was point reads — native `StatementSync.get`,
+the control store's `get` wrapper and row mapping — about 6.4 control-plane
+reads per row: the canonical row twice in admission
+(`sessionResourceAuthority.ts`), then row, principal kind, project ancestry,
+membership and grant per row in `resourceAccess.access`, then share-root
+grants per row in the sharing view (`sessionSharing.ts`).
+
+Now a list reads canonical rows in batches (`resources.resourcesByIds`,
+`sharing.grantsByResource`) and decides access through
+`resourceAccess.accessPass`, which runs the same decision body as `access`
+with the principal's kind, membership, grants and project policy read once.
+Bench, 5 samples each, min/row (dev machine):
+
+- owner, 2,250 rows returned: 275–308 ms → 54–60 ms (0.122 → 0.024 ms/row);
+  control-plane reads per list 16,050 → 22.
+- system principal, 2,500 rows: 116–125 ms → 21–26 ms; reads 5,001 → 6.
+- member with no visible row, 2,500 evaluated: 270–282 ms → 49–57 ms.
+
+Invariant: a list decides each row exactly as the per-row path does. Only a
+row whose canonical row exists in this Space and project and whose lifecycle
+already matches its projection is admitted from the batch; adoption, moves,
+provisioning, lifecycle repair and recovery take the unchanged per-row path,
+after which rows read ahead are discarded. Batched reads live for one
+synchronous pass and never across an await or a write; membership and grant
+expiry are judged at one instant per pass, not once per row.
+`packages/server/test/sessionListBatch.test.ts` holds results and
+control-plane writes equal to a per-row reference for six readers and caps
+reads at a constant; `packages/control-plane/test/resourceAccessPass.test.ts`
+holds `accessPass` equal to `access`, errors included. The rest of the 0.38 ms
+seen in production (the store `list` in `sessions.ts`, people state, JSON and
+compression) was not measured here; production timing after the change is
+not yet measured.
+
+## Streaming Markdown: finished blocks are not rendered again (2026-11-17)
+
+`MarkdownDoc` re-parses the whole answer on each streamed flush, and used to
+build a new element for every block, so React diffed the entire message each
+time. `renderBlocksReusing` (`apps/web/src/markdown/render.tsx`) now hands back
+the previous element of each top-level block whose parsed content is unchanged
+(same key base and locale); React skips a subtree whose element is the same
+object. The document's image list keeps its identity while its images are the
+same, so the document context does not change per flush either. The parse
+itself still runs over the whole text. `apps/web/test/markdownBlockReuse.test.ts`
+checks element reuse and that every streamed prefix renders the same DOM as a
+fresh render. Not timed in a browser.
+
+## Session store: compiled statements (2026-11-17)
+
+`packages/session/src/index.ts` compiles SQL once per connection on the hot
+paths: transaction control (`BEGIN IMMEDIATE`/`COMMIT`/`ROLLBACK`, a cache
+built before migrations) and the queries whose text varies with a list length
+or filter set (`eventsOfTypes`, `attentionFor`, `eventsAtSeqs`, the session
+summary query) through `prepShaped`, a 64-entry LRU. Only `.get()`/`.all()`/
+`.run()` callers use it, never an open iterator; `close()` clears every cache
+before `raw.close()`. `statementReuse.test.ts` counts `prepare` calls.
+
+Synthetic store (300k events, 200 sessions, one 30k-event session; median of
+3 runs in one process, interleaved before/after copies of the same DB):
+`eventsOfTypes` x2000 1,449 → 1,332 ms (about -5%, query-dominated);
+30k-event fold 90 → 83 ms; 5,000 appends 1,353 → 1,371 ms (no change; the
+cost is the write); `attentionFor` x2000 191 → 85 ms (-55%).
+
+Connection settings measured and **not** adopted: `cache_size=-65536` and
+`temp_store=MEMORY` (alone and together) moved every figure by less than the
+run-to-run noise (about ±8%); the benchmark DB (360 MB) fits the OS page cache,
+so a gain on the 8 GB live store is not shown. `PRAGMA optimize` was not
+adopted: SQLite's guidance (lang_analyze §4–5) is to run it at close or
+periodically with a bounded analysis, but it writes `sqlite_stat1`, which can
+change query plans on the live database, and no benchmark here can show it
+helping. `mmap_size` and `busy_timeout` are deliberately absent. Other
+`new DatabaseSync(` openers (server preflights, tenancy migrations, knowledge,
+tunnel) use default settings; not changed.
+
+## Live projection frames and running clocks on the client (2026-11-18)
+
+A projection frame (`handleProjectionBatch`, `apps/web/src/init.ts`) arrives
+for every change of any running chat and in whole pages on every reconnect.
+Two things made it cost more than the change it carried:
+
+- **Unchanged rows.** `upsertSessions`/`upsertSession`
+  (`apps/web/src/store.ts`) replaced every row object, so each list rendered
+  again even when the server repeated what the client already showed. A row
+  whose merged content is structurally equal (`jsonEqual`) now keeps its
+  object, and a frame that changes nothing publishes nothing. Per frame the
+  handler also built a map and a set of every known chat; a batch of up to 8
+  rows now scans for its rows and the runtime-feature sweep builds its set
+  only when a tracked chat is missing.
+- **The phone navigator's clock.** `MobileNavigator` set `now` every second
+  while any chat was working, which rendered the whole navigator to move one
+  label. The label is its own component (`WorkingClock`) on the shared
+  one-second clock in `apps/web/src/nowTicker.ts` (the desktop list's ticker,
+  moved out of `SessionList.tsx`); the navigator keeps a 60 s interval for its
+  date headings. The shared clock notifies nobody while the page is hidden and
+  catches up in one step on `visibilitychange`. The navigator's project order
+  is scored once per project, not once per comparison, and a row's status
+  rank is cached per projection object.
+
+Measured with a node benchmark over the real modules (happy-dom, React
+development build, 1,000 sessions in 18 projects, this host; a mounted
+`MobileNavigator` inside a `Profiler`), before → after:
+
+| Case | Before | After |
+|---|---|---|
+| Store work per frame, no React | 239 µs | 71 µs |
+| One clock tick, navigator open, 2 working chats | 39 ms render | 0.26 ms |
+| A page of 50 rows re-sent unchanged | 14 ms render, 1 commit | 0 commits |
+| A changed row, navigator open, same project | 21.9 ms | 19.6 ms |
+| A changed row, navigator open, another project | 15.8 ms | 13.8 ms |
+| A changed row, navigator closed | 2.4 ms | 0.8 ms |
+
+The development build of React inflates render times; a production browser
+was not measured, and neither was the real rate of projection frames. What a
+changed row still costs is the navigator rendering as one component: only
+splitting it into memoized project sections removes that. Measured and left
+alone: the navigator snapshot write (`navigatorSnapshotBoot.ts`) costs about
+0.1 ms once per 2.5 s. The other one-second timers (`AgentLiveStatusDock`,
+`ToolPulse`, `SubagentActivityDock`, `SessionActivityDetails`, `ExecutionRow`
+status mark) each drive one small component and were not changed.
+
+Tests: `sessionRowIdentity.test.ts`, `nowTicker.test.ts`,
+`mobileNavigatorClock.test.ts` (asserts the open navigator registers no
+interval under 60 s).
+
+## JSON stores: compact files and skipped no-op writes (2026-11-18)
+
+`projects.json`, `notifications.json` and `client-settings.json` are each
+rewritten whole, synchronously and atomically, on a change. That stays: no
+deferred writes, no split files, no format change, so an older build reads
+them unchanged. What changed:
+
+- All three are written compact. On the live data that was 965 → 510 KB for
+  the project registry, of which per-project `presentation` is 80%.
+- The project registry remembers the text it last wrote and skips an
+  identical rewrite; an unchanged presentation PUT keeps its revision (the
+  client accepts an equal revision, `projectPresentationSync.ts`). Synthetic
+  0.8 MB registry, 200 iterations: a changed persist 25.6 → 6.7 ms, an
+  identical one 21.8 → 2.7 ms (what remains is `JSON.stringify`).
+- `projectCompositionAgentGate.ts` re-read and re-parsed the whole registry
+  for every provisioning batch. It now reuses its parsed id → composition
+  lookup while the file's inode, size, mtime and ctime are unchanged.
+- A permanently deleted chat's notification recipients are dropped
+  (`SessionDeps.onSessionDeleted` → `NotificationStore.forgetSession`). They
+  used to stay for the life of the file: 1,049 rows, 270 KB of the live
+  590 KB. Rows of chats deleted before this change are not swept.
+- `patchSection` (server-written settings sections) skips a write that would
+  store the value already held.
+
+**A client settings PUT still advances the revision for an identical blob, on
+purpose.** `settingsSync.ts` confirms a push only by a higher revision;
+answered with the same one it keeps the blob as unsent and sends it again on
+every later change, and shells already installed on phones behave that way.
+Skipping the write server-side would trade one file write for a PUT per
+change.
+
+## Quadratic patterns in the icon sanitizer and push excerpts (2026-11-18)
+
+Three text passes rescanned the rest of their input from every opening token
+that had no closing one, so a run of openers cost the square of its length on
+the server's event loop:
+
+- `sanitizeProjectIconSvg` (`packages/server/src/projects.ts`, mirrored in
+  `apps/web/src/projectIconPicker.ts`): the `<?xml…?>`, `<!doctype…>` and
+  paired `<script>`/`<foreignObject>` patterns. One-pass scanners
+  (`withoutSpans`, `withoutPairedElements`) replace them; the attribute
+  patterns were already linear and are unchanged.
+- `plainTextExcerpt` (`packages/server/src/push.ts`): the three markdown link
+  patterns, replaced by `unwrapLinks`.
+
+Same output as the patterns: each fuzz test keeps the old patterns as its
+oracle and compares on the fuzz corpus, hand-picked malformed inputs and
+4,000 random bracket strings. This host, one run:
+
+| Input | Patterns | Now |
+|---|---|---|
+| `<?xml` ×20,000 (98 KB) | 946 ms | 1.2 ms |
+| `<script>x` ×20,000 (176 KB) | 1,160 ms | 8.5 ms |
+| `<!doctype` ×20,000 (176 KB) | 1,842 ms | 0.9 ms |
+| `[` ×8,000 (the excerpt's input window) | 217 ms | 1.7 ms |
+
+The three tests that recorded these as known findings (`{ todo }`) now run as
+ordinary tests. The sanitizer's outer loop still repeats until nothing
+changes, so deeply nested openers (`<scr<scr<scr…`) cost one pass per level.

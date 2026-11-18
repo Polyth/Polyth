@@ -27,7 +27,8 @@ import {
   removeProject,
   renameProject,
 } from "../../init.ts";
-import { resolveSessionStatus } from "../../sessionStatus.ts";
+import { resolveSessionStatus, sessionWorkingSince } from "../../sessionStatus.ts";
+import { useNowTick } from "../../nowTicker.ts";
 import { sessionLeadMark, sessionLeadState, type SessionLeadMark } from "../../sessionLead.ts";
 import { canMoveSession } from "../../sessionMove.ts";
 import { draftTitleSource, sessionDraftMark } from "../../sessionDraft.ts";
@@ -158,6 +159,9 @@ function swipeActionLabel(id: RowSwipeActionId, session: SessionProjection): str
 /** How long after the navigator comes up the current chat's project is kept
  *  in place while session lists are still arriving. */
 const REVEAL_WINDOW_MS = 1500;
+/** How often the open navigator re-reads the time for its date headings.
+ *  Running rows tick their own label (`WorkingClock`). */
+const NAVIGATOR_CLOCK_MS = 60_000;
 
 /** Scrolls the list so the project — and the current chat's row, when it is
  *  listed — is in view. Already in view, nothing moves; otherwise the
@@ -207,7 +211,20 @@ function loadShowAll(): ReadonlySet<string> {
   return new Set();
 }
 
+/** A projection is never changed in place and its rank does not depend on the
+ *  time, so each one is ranked once however often the navigator renders. */
+const statusPriorityCache = new WeakMap<SessionProjection, number>();
+
 function statusPriority(session: SessionProjection): number {
+  let priority = statusPriorityCache.get(session);
+  if (priority === undefined) {
+    priority = rankSessionStatus(session);
+    statusPriorityCache.set(session, priority);
+  }
+  return priority;
+}
+
+function rankSessionStatus(session: SessionProjection): number {
   const status = resolveSessionStatus(session);
   if (status.kind === "working") return 0;
   if (
@@ -228,6 +245,13 @@ function workingDuration(ms: number): string {
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m`;
   return `${Math.floor(minutes / 60)}h`;
+}
+
+/** A working row's running clock. It ticks by itself on the shared one-second
+ *  clock, so the navigator around it is not rendered again every second. */
+function WorkingClock({ since }: { since: number }) {
+  const now = useNowTick(true);
+  return <span className="mobile-nav-duration" aria-hidden="true">{workingDuration(now - since)}</span>;
 }
 
 function statusIcon(kind: MobileStatusKind) {
@@ -778,9 +802,7 @@ function SessionRow({
                 {repositoryMark && (
                   <RepositoryMark repositories={repositoryMark.repositories} active={repositoryMark.active} />
                 )}
-                {!conversation && rowStatus.kind === "working" && (
-                  <span className="mobile-nav-duration" aria-hidden="true">{workingDuration(rowStatus.elapsedMs)}</span>
-                )}
+                {!conversation && rowStatus.kind === "working" && <WorkingClock since={sessionWorkingSince(session)} />}
                 {draftMark && <span aria-hidden="true" className="session-draft-slot"><Badge tone="accent" className="session-draft-mark">{draftLabel}</Badge></span>}
                 <span className="mobile-nav-session-flags">
                   <SlotHost
@@ -1176,13 +1198,14 @@ export default function MobileNavigator() {
     void ensureSessionsListed(workspaceId ?? activeProjectId);
   }, [drawerOpen, activeProjectId, workspaceId]);
 
+  const hasWorking = sessions.some((session) => session.status === "working");
   useEffect(() => {
-    if (!drawerOpen) return;
-    const hasWorking = sessions.some((session) => session.status === "working");
-    if (!hasWorking) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    if (!drawerOpen || !hasWorking) return;
+    // Running rows tick their own clock (`WorkingClock`). `now` is left for
+    // what changes by the day: the date headings of the list.
+    const timer = window.setInterval(() => setNow(Date.now()), NAVIGATOR_CLOCK_MS);
     return () => window.clearInterval(timer);
-  }, [drawerOpen, sessions]);
+  }, [drawerOpen, hasWorking]);
 
   useEffect(() => {
     if (drawerOpen) setNow(Date.now());
@@ -1292,16 +1315,18 @@ export default function MobileNavigator() {
   const orderedProjects = useMemo(() => {
     if (sort === "manual") return applyManualProjectOrder(projects, projectOrder);
     if (sort === "frequent") return frequentProjects;
-    const score = (id: string) => {
-      const list = (projectSessions.get(id) ?? []).filter((session) => sessionMatchesDateFilter(session, dateFilter));
+    if (sort === "name") return [...projects].sort((a, b) => (a.name || a.path).localeCompare(b.name || b.path));
+    // Scored once per project, not once per comparison: a sort compares each
+    // project several times and a score reads every chat of the project.
+    const scores = new Map(projects.map((project) => {
+      const list = (projectSessions.get(project.id) ?? []).filter((session) => sessionMatchesDateFilter(session, dateFilter));
       const bestPriority = list.reduce((best, session) => Math.min(best, statusPriority(session)), 4);
       const latest = list.reduce((value, session) => Math.max(value, session.lastTurnAt ?? session.updatedAt ?? session.createdAt), 0);
-      return { bestPriority, latest };
-    };
+      return [project.id, { bestPriority, latest }] as const;
+    }));
     return [...projects].sort((a, b) => {
-      if (sort === "name") return (a.name || a.path).localeCompare(b.name || b.path);
-      const left = score(a.id);
-      const right = score(b.id);
+      const left = scores.get(a.id)!;
+      const right = scores.get(b.id)!;
       return left.bestPriority - right.bestPriority || right.latest - left.latest;
     });
   }, [dateFilter, frequentProjects, projectOrder, projectSessions, projects, sort]);

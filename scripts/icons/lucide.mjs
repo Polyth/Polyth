@@ -191,8 +191,8 @@ const check = async () => {
   if (!prefix.startsWith(pinnedLine)) {
     problems.push(`header must name the pinned Lucide release ("${pinnedLine}")`);
   }
-  if (!prefix.includes('import type { IconNode } from "./iconBase.tsx";')) {
-    problems.push("header must import `IconNode` from ./iconBase.tsx");
+  if (!prefix.includes('import type { IconNode } from "./iconBase.ts";')) {
+    problems.push("header must import `IconNode` from ./iconBase.ts");
   }
 
   const names = [...entries.keys()];

@@ -21,6 +21,10 @@ function harness(session?: SessionProjection) {
       identityWrites.push({ root, name: identity.name });
       throw Object.assign(new Error("stop after the write"), { code: "conflict" });
     },
+    diffStats: async (root: string) => {
+      roots.push(root);
+      return { staged: {}, unstaged: {} };
+    },
     status: async (root: string) => {
       roots.push(root);
       return { branch: "main", ahead: 0, behind: 0, staged: [], unstaged: [], untracked: [], conflicted: [], clean: true };
@@ -49,9 +53,9 @@ function harness(session?: SessionProjection) {
   return { roots, routes, identityWrites, get sessionCreates() { return sessionCreates; }, get sessionSends() { return sessionSends; } };
 }
 
-async function call(routes: ReturnType<typeof gitRoutes>, query: Record<string, string>, method = "GET") {
+async function call(routes: ReturnType<typeof gitRoutes>, query: Record<string, string>, method = "GET", route = "/api/git/status") {
   let payload: unknown;
-  const url = new URL("http://x/api/git/status");
+  const url = new URL(`http://x${route}`);
   for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value);
   await routes({
     req: {}, res: {}, space: { userId: "u1" }, url, path: url.pathname, method,
@@ -457,4 +461,23 @@ test("isolation lifecycle routes resolve the session in the requester's Space an
   await assert.rejects(() => call("POST", "/api/isolation/collaborator/merge"), { code: "forbidden" });
   await call("POST", "/api/isolation/own/discard");
   assert.deepEqual(calls, ["getStatus", "resolveWithAgent", "discard"]);
+});
+
+test("diff-stats resolves its root exactly as diff does and refuses the same contexts", async () => {
+  const diffStats = (h: ReturnType<typeof harness>, q: Record<string, string>) => call(h.routes, q, "GET", "/api/git/diff-stats");
+  const ok = harness();
+  assert.deepEqual(await diffStats(ok, { projectId: "p1", repositoryId: "api" }), { staged: {}, unstaged: {} });
+  assert.deepEqual(ok.roots, ["/api"]);
+  const session = {
+    id: "s1", projectId: "p1", title: "Session", status: "idle", createdAt: 1, updatedAt: 1,
+    worktreePath: "/api-session",
+    workspace: { mode: "subset", executionRepositoryId: "api", repositories: [{ repositoryId: "api", path: "/api-session", state: "ready" }] },
+  } as SessionProjection;
+  const scoped = harness(session);
+  await diffStats(scoped, { projectId: "p1", sessionId: "s1" });
+  assert.deepEqual(scoped.roots, ["/api-session"]);
+  await assert.rejects(() => diffStats(harness(), { projectId: "p1", repositoryId: "missing" }), { code: "not-found" });
+  await assert.rejects(() => diffStats(harness(), { projectId: "nope" }));
+  const foreign = harness({ id: "foreign", projectId: "other", title: "Foreign", status: "idle", createdAt: 1, updatedAt: 1 });
+  await assert.rejects(() => diffStats(foreign, { projectId: "p1", sessionId: "foreign", repositoryId: "primary" }), { code: "not-found" });
 });
