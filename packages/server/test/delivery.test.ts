@@ -1294,6 +1294,26 @@ for (const scenario of [
     && event.data.operationId === operationId).length, claims);
 });
 
+test("a steered queue row leaves the queue with the accepted send, not a later client request", async () => {
+  const fake = fakeRuntime({ steering: true });
+  const { sessions, store } = makeService(fake);
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await sessions.send(id, { text: "turn" });
+  await flush();
+  const a = await sessions.send(id, { text: "a", delivery: "queue" });
+  const b = await sessions.send(id, { text: "b", delivery: "queue" });
+  const reserved = await sessions.queueEditStart!(id, a.queueId!);
+  await sessions.send(id, { text: reserved.text, delivery: "steer", dismissPending: true, consumesQueueId: a.queueId! });
+  // The client's follow-up removal is lost to a reconnect: nothing else runs.
+  assert.deepEqual(fake.steeredTexts, ["a"]);
+  assert.deepEqual((await sessions.queueList!(id)).map((item) => item.id), [b.queueId!]);
+  assert.ok((await store.events(id)).some((event) => event.type === "queue/removed" && event.data.queueId === a.queueId));
+
+  fake.emit(id, { type: "turn/stopped", reason: "completed" });
+  await flush();
+  assert.deepEqual(fake.startedTexts, ["turn", "b"]);
+});
+
 test("queue edit and reorder persist into dispatch while remove stays session-scoped", async () => {
   const fake = fakeRuntime();
   const { sessions, store } = makeService(fake);

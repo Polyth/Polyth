@@ -2694,6 +2694,7 @@ function ComposerBody({
         ...(cfgSent.harness ? { harness: cfgSent.harness } : {}),
         ...(current.attachments?.length ? { attachments: current.attachments } : {}),
         dismissPending: true,
+        consumesQueueId: current.id,
         ...(profile !== undefined ? { agentProfileId: profile } : {}),
       });
       if (!ok) {
@@ -2708,6 +2709,8 @@ function ComposerBody({
       promoted = true;
       consumeComposerConfig(target, cfgSent);
       if (sessionIdRef.current === target) setCfg(loadComposerConfig(target));
+      // The server already removed the row with the send; this only covers an
+      // older server that ignores consumesQueueId.
       await api.queueRemove(target, current.id).catch(() => {});
     } catch (error) {
       if (promoted) return;

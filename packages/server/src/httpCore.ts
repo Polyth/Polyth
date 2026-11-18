@@ -1142,6 +1142,8 @@ async function dispatchHttp(
           ...(delivery === "steer" || delivery === "queue" || delivery === "interrupt" || delivery === "normal"
             ? { delivery } : {}),
           ...(b.dismissPending === true ? { dismissPending: true } : {}),
+          ...(typeof b.consumesQueueId === "string" && b.consumesQueueId
+            ? { consumesQueueId: b.consumesQueueId } : {}),
           // string selects a profile, explicit null clears the stored one,
           // absent field inherits it — never conflated
           ...(b.agentProfileId !== undefined

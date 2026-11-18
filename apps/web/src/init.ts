@@ -2537,6 +2537,8 @@ export interface SendOptions {
   delivery?: "normal" | "steer" | "queue" | "interrupt";
   /** Atomically reject open questions / deny open permissions before admission. */
   dismissPending?: boolean;
+  /** Queue row this send promotes; the server removes it with the accepted send. */
+  consumesQueueId?: string;
   /** Reusable execution configuration resolved server-side. A string
    *  selects a profile, `null` explicitly clears the session's stored one,
    *  omitted inherits it. */
@@ -2582,6 +2584,7 @@ export async function sendMessage(text: string, model?: JsonObject, agent?: stri
       ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}),
       ...(opts?.harness ? { harness: opts.harness } : {}),
       ...(opts?.dismissPending ? { dismissPending: true } : {}),
+      ...(opts?.consumesQueueId ? { consumesQueueId: opts.consumesQueueId } : {}),
       // Explicit null must reach the wire (it clears the stored profile);
       // only an omitted field means "inherit".
       ...(opts?.agentProfileId !== undefined ? { agentProfileId: opts.agentProfileId } : {}),

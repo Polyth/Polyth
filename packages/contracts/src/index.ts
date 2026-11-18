@@ -1652,6 +1652,10 @@ export interface UserTurnInput {
   delivery?: DeliveryMode;
   /** Atomically reject open questions / deny open permissions of this session before admission. */
   dismissPending?: boolean;
+  /** The queue row this send promotes (steer from the queue). The server
+   *  removes it once the send is accepted, in the same request, so a dropped
+   *  connection cannot leave the delivered message waiting in the queue. */
+  consumesQueueId?: string;
   /** Resolve model/agent/options through a stored agent profile at send time.
    *  A string selects a profile, `null` explicitly clears the session's
    *  stored profile, and an omitted field inherits it. The three are never

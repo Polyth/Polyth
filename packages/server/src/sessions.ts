@@ -14273,9 +14273,18 @@ export function createSessionService(deps: {
 
       return admitTurn(sessionId, proj, rt, input, undefined, clientRequestFingerprint);
       };
-      return input.clientOperationId
+      const result = await (input.clientOperationId
         ? withClientAdmissionLock(input.clientOperationId, execute)
-        : execute();
+        : execute());
+      // A promoted queue row leaves the queue with the accepted send itself; a
+      // separate client removal request can be lost to a reconnect, and the
+      // row would then stay visible and later dispatch a second time.
+      const consumedQueueId = input.consumesQueueId;
+      if (consumedQueueId && deps.queue && await deps.queue.queueRemove(sessionId, consumedQueueId)) {
+        await appendAndBroadcast(sessionId, "queue/removed", { queueId: consumedQueueId }, { ignorable: true });
+        releaseQueueEditHold(sessionId, consumedQueueId);
+      }
+      return result;
     },
 
     async queueList(sessionId) {

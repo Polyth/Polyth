@@ -1132,7 +1132,7 @@ export const api = {
 
   // agentProfileId: string selects a profile, null explicitly clears the
   // session's stored profile, omitted inherits it.
-  sendMessage: (id: string, body: { text: string; clientOperationId?: string; command?: { id: string; args?: string }; autoTitle?: boolean; hiddenUserMessage?: boolean; memory?: MemoryNarrowing; attachments?: AttachmentRef[]; model?: JsonObject; agent?: string; harness?: HarnessSelection; delivery?: string; dismissPending?: boolean; agentProfileId?: string | null }) =>
+  sendMessage: (id: string, body: { text: string; clientOperationId?: string; command?: { id: string; args?: string }; autoTitle?: boolean; hiddenUserMessage?: boolean; memory?: MemoryNarrowing; attachments?: AttachmentRef[]; model?: JsonObject; agent?: string; harness?: HarnessSelection; delivery?: string; dismissPending?: boolean; consumesQueueId?: string; agentProfileId?: string | null }) =>
     jfetch<SendResult>(`/api/sessions/${id}/message`, json("POST", body)),
   memoryPolicyGet: (id: string) =>
     jfetch<{ setting: MemoryNarrowing }>(`/api/sessions/${id}/memory-policy`),
