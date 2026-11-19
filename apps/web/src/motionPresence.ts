@@ -5,13 +5,21 @@ const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
 const SURFACE_EXIT_TAIL_MS = 34;
 
 /** Duration tokens a presentation-only exit (or a scripted motion) can wait on. */
-export type MotionDurationToken = "--motion-normal" | "--motion-surface" | "--motion-stack" | "--motion-keyboard";
+export type MotionDurationToken =
+  | "--motion-normal"
+  | "--motion-surface"
+  | "--motion-stack"
+  | "--motion-keyboard"
+  | "--motion-window"
+  | "--motion-window-exit";
 
 const MOTION_FALLBACK_MS: Record<MotionDurationToken, number> = {
   "--motion-normal": 180,
   "--motion-surface": 240,
   "--motion-stack": 300,
   "--motion-keyboard": 250,
+  "--motion-window": 340,
+  "--motion-window-exit": 220,
 };
 
 export function parseCssDurationMs(value: string): number | null {

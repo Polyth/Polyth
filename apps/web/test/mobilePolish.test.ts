@@ -151,7 +151,8 @@ test("fresh mobile chat exposes project targets and attachments use the platform
   assert.match(mobileHeader, /useTaskProgressTitle\(session\?\.id, overviewTasks\)/);
   assert.match(mobileHeader, /tr\("timeline\.valueCompleteOfValue"/);
   assert.doesNotMatch(mobileHeader, /label="Recent sessions"/);
-  assert.match(mobileHeader, /lastUserTextCached/);
+  // The latest request is read by the activity panel the status line opens.
+  assert.match(read("../src/components/SessionActivityPanel.tsx"), /prompt=\{lastUserTextCached\(events\)\}/);
   assert.match(mobileHeader, /origin="top"/);
   assert.match(mobileHeader, /tr\("mobile.island.tasks"\)/);
   assert.match(css, /\.mobile-float-navigation, \.mobile-float-actions \{ display: inline-grid; grid-auto-flow: column;/);
@@ -172,7 +173,6 @@ test("the phone session island combines recents, tasks, and requests", () => {
   const css = readWebStylesSync();
   assert.match(mobileHeader, /buildIslandItems\(/);
   assert.match(mobileHeader, /origin="top"/);
-  assert.match(mobileHeader, /lastUserTextCached/);
   assert.match(mobileHeader, /eventsHaveCodeChanges/);
   assert.match(mobileHeader, /prefetchSessionTail/);
   assert.doesNotMatch(mobileHeader, /ClockIcon|Recent sessions|SessionSwitcher|taskBrief/);

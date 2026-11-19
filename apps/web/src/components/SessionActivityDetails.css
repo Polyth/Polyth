@@ -1,6 +1,8 @@
 .session-activity-details {
   --session-activity-card: var(--sunken);
+  --session-activity-gutter: var(--space-3);
   container: session-activity / inline-size;
+  position: relative;
   min-width: 0;
   color: var(--text);
 }
@@ -14,10 +16,6 @@ body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .session-ac
 body[data-glass="off"] .session-activity-details,
 body[data-desktop-low-resource="true"] .session-activity-details {
   --session-activity-card: var(--sunken);
-}
-
-.session-activity-hero {
-  padding: var(--space-2) var(--space-3) 0;
 }
 
 .session-activity-section-label {
@@ -39,28 +37,13 @@ body[data-desktop-low-resource="true"] .session-activity-details {
   gap: var(--space-2);
 }
 
-.session-activity-title {
-  display: -webkit-box;
-  width: 100%;
-  min-width: 0;
-  margin: 0;
-  overflow: hidden;
-  font-size: var(--font-heading);
-  font-weight: 650;
-  line-height: 1.25;
-  letter-spacing: -.015em;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
+/* ---- tabs: a compact two-way switch ------------------------------------ */
 .session-activity-details .session-activity-tabs {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-1);
-  margin: var(--space-3) var(--space-3) 0;
-  padding: var(--space-1);
+  margin: var(--space-1) var(--session-activity-gutter) 0;
+  padding: 3px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-round);
   background: var(--session-activity-card);
@@ -69,6 +52,10 @@ body[data-desktop-low-resource="true"] .session-activity-details {
 .session-activity-tabs button {
   min-width: 0;
   min-height: var(--control-h-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
   padding: 0 var(--space-2);
   border: 0;
   border-radius: var(--radius-round);
@@ -79,6 +66,7 @@ body[data-desktop-low-resource="true"] .session-activity-details {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
 }
 
 .session-activity-tabs button[aria-selected="true"] {
@@ -92,10 +80,59 @@ body[data-desktop-low-resource="true"] .session-activity-details {
   outline-offset: -2px;
 }
 
-.session-activity-panel {
+/* The plan's progress rides on its tab, so it reads without switching. */
+.session-activity-tab-count {
+  flex: none;
+  color: var(--muted);
+  font: 600 var(--font-meta) / 1 var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.session-activity-tabs button[aria-selected="true"] .session-activity-tab-count { color: var(--accent); }
+
+/* A switched tab settles in from the side it came from (not on first open:
+   the panel's own entrance is enough). */
+.session-activity-swipe-content[data-switched] > .session-activity-tab-panel {
+  animation: session-activity-tab-in var(--motion-normal) var(--motion-ease) backwards;
+}
+.session-activity-swipe-content[data-switched][data-direction="back"] > .session-activity-tab-panel {
+  animation-name: session-activity-tab-in-back;
+}
+.session-activity-tab-panel:focus { outline: none; }
+.session-activity-tab-panel:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; border-radius: var(--radius-card); }
+
+@keyframes session-activity-tab-in {
+  from { opacity: 0; transform: translate3d(var(--space-3), 0, 0); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes session-activity-tab-in-back {
+  from { opacity: 0; transform: translate3d(calc(-1 * var(--space-3)), 0, 0); }
+  to { opacity: 1; transform: none; }
+}
+:dir(rtl) .session-activity-swipe-content[data-switched] > .session-activity-tab-panel { animation-name: session-activity-tab-in-back; }
+:dir(rtl) .session-activity-swipe-content[data-switched][data-direction="back"] > .session-activity-tab-panel { animation-name: session-activity-tab-in; }
+
+/* ---- the blocks --------------------------------------------------------- */
+/* One grid: figure tiles flow two to a line, rows (the context card, the
+   request, the plan) fill a line, in the person's order. */
+.session-activity-blocks {
   display: grid;
-  gap: var(--space-3);
-  padding: var(--space-3);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  padding: var(--session-activity-gutter);
+}
+
+.session-activity-block {
+  position: relative;
+  min-width: 0;
+  border-radius: var(--radius-card);
+}
+.session-activity-block.is-row { grid-column: 1 / -1; }
+.session-activity-block > :is(.session-activity-stat, .session-activity-context-card) { height: 100%; }
+
+@media (pointer: coarse) {
+  /* A long press arranges the blocks: it must not select their text or raise
+     the system callout first. */
+  .session-activity-blocks { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 }
 
 .session-activity-context-card,
@@ -107,20 +144,29 @@ body[data-desktop-low-resource="true"] .session-activity-details {
   background: var(--session-activity-card);
 }
 
-.session-activity-context-card,
-.session-activity-plan { display: grid; gap: var(--space-2); }
-/* The request and the plan read as text, like the chat's activity block:
-   no cards. Figures keep their tiles; words do not need boxes. */
-.session-activity-intent,
-.session-activity-plan { min-width: 0; padding-inline: var(--space-3); }
-/* Their copy starts where the tiles' copy does; without boxes, air
-   separates them instead. */
-.session-activity-intent + .session-activity-plan { margin-block-start: var(--space-2); }
-.session-activity-context-head strong,
-.session-activity-section-head strong { display: block; margin-top: var(--space-1); font-size: var(--font-label); line-height: 1.2; }
-.session-activity-context-percent,
-.session-activity-plan-percent { flex: none; color: var(--accent); font: 650 var(--font-technical) / var(--font-technical-lh) var(--mono); }
-.session-activity-context-model { overflow: hidden; color: var(--muted); font-size: var(--font-meta); text-overflow: ellipsis; white-space: nowrap; }
+.session-activity-context-card { display: grid; gap: var(--space-1); }
+.session-activity-context-value {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--font-heading);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.01em;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-activity-context-percent {
+  flex: none;
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-round);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font: 650 var(--font-meta) / var(--font-meta-lh) var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.session-activity-context-model { overflow: hidden; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); text-overflow: ellipsis; white-space: nowrap; }
+.session-activity-context-card > .session-activity-meter { margin-block: var(--space-1); }
 
 .session-activity-meter {
   height: var(--space-1);
@@ -141,15 +187,47 @@ body[data-desktop-low-resource="true"] .session-activity-details {
 .session-activity-meter.level-red > span { background: var(--red); }
 .session-activity-meter.level-unknown > span { background: var(--muted); }
 
-.session-activity-stat-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); }
 /* A label that wraps (long locales) keeps the row's figures on one line. */
-.session-activity-stat { display: grid; align-content: space-between; gap: var(--space-1); }
+.session-activity-stat {
+  display: grid;
+  align-content: space-between;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+}
 .session-activity-stat-label { color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
-.session-activity-stat-value { overflow: hidden; font: 650 var(--font-technical) / var(--font-technical-lh) var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.session-activity-stat-value {
+  overflow: hidden;
+  font: 650 var(--font-label) / 1.3 var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Only the edit mode shows a figure this agent does not report. */
+.session-activity-stat.is-unreported .session-activity-stat-value { color: var(--faint); font-weight: 500; }
 
-.session-activity-intent p { margin: var(--space-2) 0 0; color: var(--text-dim); font-size: var(--font-meta); line-height: var(--font-meta-lh); overflow-wrap: anywhere; }
-.session-activity-plan-meter { margin-top: var(--space-1); }
-.session-activity-plan-meter { margin-block-end: var(--space-1); }
+.session-activity-footnote {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding-inline: var(--space-3);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
+/* The request and the plan read as text, like the chat's activity block:
+   no cards. Figures keep their tiles; words do not need boxes. Their copy
+   starts where the tiles' copy does. */
+.session-activity-intent,
+.session-activity-plan { min-width: 0; padding: var(--space-1) var(--space-3); }
+.session-activity-plan { display: grid; gap: var(--space-2); }
+.session-activity-section-head strong { display: block; margin-top: var(--space-1); font-size: var(--font-label); line-height: 1.2; }
+.session-activity-plan-percent { flex: none; color: var(--accent); font: 650 var(--font-technical) / var(--font-technical-lh) var(--mono); }
+
+.session-activity-intent p,
+.session-activity-plan.is-empty p { margin: var(--space-2) 0 0; color: var(--text-dim); font-size: var(--font-meta); line-height: var(--font-meta-lh); overflow-wrap: anywhere; }
+.session-activity-plan.is-empty { gap: 0; }
+.session-activity-plan.is-empty p { color: var(--muted); }
+.session-activity-plan-meter { margin-block: var(--space-1); }
 /* Steps hang from one thread (drawn from --borderless-edge, so it survives
    Borderless appearance); the step in progress lights its own stretch. */
 .session-activity-task-list {
@@ -202,33 +280,245 @@ body[data-desktop-low-resource="true"] .session-activity-details {
 .session-activity-task-mark.is-active i { width: var(--space-1); height: var(--space-1); border-radius: var(--radius-circle); background: var(--accent); }
 .session-activity-task-mark.is-pending { width: calc(var(--icon-md) - 4px); height: calc(var(--icon-md) - 4px); margin: 2px; box-shadow: 0 0 0 1px var(--muted); border-radius: var(--radius-circle); }
 
-/* Wider surfaces (the desktop overview spans the chat column) reflow the
-   figures instead of stretching them: four across, then at a full chat
-   column the context card stands beside them. Words stay one column, so a
-   short request never leaves a hole beside a long plan. */
+/* Wider surfaces (the desktop panel spans the composer, the overview the
+   chat column) reflow the figures instead of stretching them: four across,
+   then a whole line of eight. Words stay one column, so a short request
+   never leaves a hole beside a long plan. */
 @container session-activity (min-width: 540px) {
-  .session-activity-stat-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .session-activity-blocks { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .session-activity-blocks:is([data-tiles="1"], [data-tiles="2"]) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .session-activity-blocks[data-tiles="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   /* Two tabs stay a compact switch, not a bar across the column. */
-  .session-activity-details .session-activity-tabs { width: min(360px, 100% - 2 * var(--space-3)); margin-inline: auto; }
+  .session-activity-details .session-activity-tabs { width: min(360px, 100% - 2 * var(--session-activity-gutter)); margin-inline: auto; }
 }
-@container session-activity (min-width: 720px) {
-  .session-activity-usage { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }
-  .session-activity-usage > .session-activity-context-card { grid-template-rows: 1fr auto auto; }
-  .session-activity-usage > .session-activity-context-card > .session-activity-context-head { align-self: start; }
+@container session-activity (min-width: 900px) {
+  .session-activity-blocks[data-tiles="4"] { grid-template-columns: repeat(8, minmax(0, 1fr)); }
 }
 
-.session-activity-combined { display: grid; gap: 0; }
-.session-activity-combined .session-activity-panel + .session-activity-panel {
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--border-soft);
+/* ---- edit mode: the Home Screen's ----------------------------------------
+   No edit button: holding a block still turns editing on and lifts it, so
+   the same press drags it (workspaceArrange.ts `activate`); holding an empty
+   spot turns it on as well. Motion here is compositor-only and each kind
+   owns one property, so none of them fight: `scale` for the hold, `rotate`
+   for the jiggle, `transform` for the engine's glides (FLIP) and the lifted
+   copy. Card edges are box-shadows, so Borderless appearance keeps them. */
+
+/* A held block sinks a little while the hold builds up (the engine sets the
+   attribute for the hold, and lifts a copy when it completes). */
+.session-activity-block { transition: scale 200ms var(--motion-ease); }
+.session-activity-block[data-arrange-pressing] {
+  scale: .955;
+  transition: scale 300ms cubic-bezier(.2, .8, .3, 1) 70ms;
 }
+/* A full-width row sinks less: the same scale would pull its ends in far. */
+.session-activity-block.is-row[data-arrange-pressing] { scale: .98; }
+
+.session-activity-block[data-editing="true"] {
+  isolation: isolate;
+  cursor: grab;
+  -webkit-user-select: none;
+  user-select: none;
+  /* Vertical swipes still scroll the panel; a still touch lifts. */
+  touch-action: pan-y;
+  -webkit-tap-highlight-color: transparent;
+  animation: session-activity-jiggle-tile 270ms linear infinite;
+  animation-delay: calc(var(--jiggle-phase, 0) * -39ms);
+}
+/* A row sways far less: the same angle would swing its far end by pixels. */
+.session-activity-block.is-row[data-editing="true"] {
+  animation-name: session-activity-jiggle-row;
+  animation-duration: 330ms;
+  animation-delay: calc(var(--jiggle-phase, 0) * -47ms);
+}
+/* A press lands on the block, never on what it shows. */
+.session-activity-block[data-editing="true"] > * { pointer-events: none; }
+
+/* Every block becomes an object to pick up: the figures keep their tiles,
+   and the request and the plan, which read as text otherwise, get the same
+   card behind them (their words do not move). */
+.session-activity-block[data-editing="true"] > :is(.session-activity-stat, .session-activity-context-card) {
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--motion-normal) var(--motion-ease);
+}
+.session-activity-block.is-row[data-editing="true"]:has(> :is(.session-activity-intent, .session-activity-plan))::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: var(--radius-card);
+  background: var(--session-activity-card);
+  box-shadow: inset 0 0 0 1px var(--border-soft), var(--shadow-sm);
+  animation: session-activity-card-in var(--motion-normal) var(--motion-ease) both;
+  pointer-events: none;
+}
+.session-activity-block[data-editing="true"] > :is(.session-activity-intent, .session-activity-plan) { padding-block: var(--space-2); }
+.session-activity-block[data-editing="true"]:focus { outline: none; }
+.session-activity-block[data-editing="true"]:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+
+@keyframes session-activity-jiggle-tile {
+  0%, 100% { rotate: -.9deg; }
+  50% { rotate: .9deg; }
+}
+@keyframes session-activity-jiggle-row {
+  0%, 100% { rotate: -.3deg; }
+  50% { rotate: .3deg; }
+}
+@keyframes session-activity-card-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* The held block's own slot: a faint outline that travels as a hole. */
+.session-activity-block.is-hole {
+  animation: none;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  box-shadow: inset 0 0 0 1.5px var(--accent-line);
+}
+.session-activity-block.is-hole > *,
+.session-activity-block.is-hole::before { visibility: hidden; }
+/* While a drag is on, every block keeps its own layer, so the neighbours'
+   glides are pure compositing. */
+.session-activity-details[data-arrange-dragging="true"] .session-activity-block { will-change: transform; }
+
+/* The lifted copy (workspaceArrange.ts, drawn inside the details over the
+   list): held still, so it neither jiggles nor sinks; it rises with an
+   opaque card and a deep shadow. A row rises less than a tile. */
+.session-activity-details .workspace-arrange-ghost-body > .session-activity-block {
+  width: 100%;
+  height: 100%;
+  animation: none;
+  rotate: none;
+  scale: none;
+  border-radius: var(--radius-card);
+  transition: box-shadow var(--motion-normal) var(--motion-ease);
+}
+.session-activity-details .workspace-arrange-ghost-body > .session-activity-block > :is(.session-activity-stat, .session-activity-context-card) { height: 100%; }
+.session-activity-details .workspace-arrange-ghost-body.is-lifted:has(> .is-row) { transform: scale(1.03); }
+.session-activity-details .workspace-arrange-ghost-body.is-lifted > .session-activity-block {
+  box-shadow: 0 18px 40px -16px rgb(0 0 0 / .5), 0 4px 12px -6px rgb(0 0 0 / .35);
+}
+.session-activity-details .workspace-arrange-ghost-body.is-lifted > .session-activity-block::before,
+.session-activity-details .workspace-arrange-ghost-body.is-lifted > .session-activity-block > :is(.session-activity-stat, .session-activity-context-card) {
+  background: var(--elevated);
+}
+.session-activity-details[data-arrange-dragging="true"],
+.session-activity-details[data-arrange-dragging="true"] * {
+  cursor: grabbing !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+
+/* Leaving the mode: the figures only editing shows fade where they stood
+   (copies, SessionActivityDetails.tsx) while the rest glide together. */
+.session-activity-block.is-leaving {
+  position: absolute;
+  z-index: 1;
+  margin: 0;
+  animation: none;
+  pointer-events: none;
+}
+
+/* ---- the dock: the hint, Reset (and Done standing alone) -----------------
+   Floats over the bottom edge of whatever scrolls the blocks. Nearly opaque
+   instead of blurred: a backdrop blur over jiggling blocks would re-filter
+   every frame. A tap on the hint is a tap beside the blocks (Done). */
+.session-activity-edit-dock {
+  position: sticky;
+  inset-block-end: var(--space-2);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: fit-content;
+  max-width: calc(100% - 2 * var(--session-activity-gutter));
+  min-height: var(--control-h);
+  margin: 0 auto var(--space-2);
+  padding: 0 var(--space-1) 0 var(--space-4);
+  border-radius: var(--radius-round);
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  box-shadow:
+    0 0 0 .5px color-mix(in srgb, var(--text) 14%, transparent),
+    0 10px 28px -14px rgb(0 0 0 / .5);
+  animation: session-activity-dock-in var(--motion-surface) cubic-bezier(.3, 1.3, .6, 1) both;
+}
+.session-activity-edit-hint {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-activity-edit-dock > .ui-btn { flex: none; border-radius: var(--radius-round); }
+@keyframes session-activity-dock-in {
+  from { opacity: 0; transform: translateY(40%) scale(.96); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Done: the accent pill that ends editing (the panel's head, or the dock). */
+.session-activity-done {
+  position: relative;
+  flex: none;
+  min-width: calc(var(--tap) + var(--space-4));
+  min-height: var(--control-h-sm);
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-round);
+  color: var(--accent-ink);
+  background: var(--accent);
+  box-shadow: 0 6px 16px -10px var(--accent);
+  font: 650 var(--font-label) / 1 var(--ui-font-family);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: scale var(--motion-fast) var(--motion-ease);
+}
+/* A full touch target around the smaller pill. */
+.session-activity-done::after {
+  content: "";
+  position: absolute;
+  inset: calc((var(--control-h-sm) - var(--tap)) / 2) 0;
+}
+.session-activity-done:active { scale: .92; }
+.session-activity-done:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+/* The keyboard's way in: out of sight until focus reaches it. */
+.session-activity-arrange-entry {
+  position: absolute;
+  inset-block-end: var(--space-2);
+  inset-inline-start: 50%;
+  translate: -50% 0;
+  min-height: var(--control-h-sm);
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-round);
+  color: var(--text);
+  background: var(--elevated);
+  box-shadow: var(--shadow-sm);
+  font: 600 var(--font-label) / 1 var(--ui-font-family);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.session-activity-arrange-entry:not(:focus-visible) {
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.session-activity-arrange-entry:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 
 @media (pointer: coarse) {
   .session-activity-tabs button { min-height: var(--tap); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .session-activity-meter > span { transition: none; }
+  .session-activity-meter > span,
+  .session-activity-block,
+  .session-activity-details .workspace-arrange-ghost-body > .session-activity-block { transition: none; }
 }
 
 html[data-reduce-animations="true"] .session-activity-meter > span,

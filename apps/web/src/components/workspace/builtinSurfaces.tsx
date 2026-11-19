@@ -46,6 +46,7 @@ import { ago, displaySessionTitle, isPlaceholderTitle } from "../../format.ts";
 import { conversationUnread, unreadBadgeText } from "../../sessionPeople.ts";
 import AgentLiveStatusDock from "../AgentLiveStatusDock.tsx";
 import AnswerLaterLine from "../AnswerLaterLine.tsx";
+import SessionActivityPanelHost from "../SessionActivityPanel.tsx";
 import SubagentActivityDock, { SubagentBranchIsland, SubagentBranchScope } from "../SubagentActivityDock.tsx";
 import CustomizeZoneButton from "../CustomizeZoneButton.tsx";
 import { useWidgetCatalog } from "../../widgets/catalog.ts";
@@ -847,6 +848,9 @@ function ChatSessionSurface() {
               {working && !hasLiveFooterDock && <AgentLiveStatusDock activity={activity} model={model} />}
               {!working && !startupDock && <SubagentActivityDock />}
             </SubagentBranchScope>
+            {/* What the status line opens: it grows out of the line and
+                stands on it, never over the composer (portalled). */}
+            <SessionActivityPanelHost sessionId={sessionId} model={model} />
             <Composer />
           </div>}
     </div>

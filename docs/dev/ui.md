@@ -3669,36 +3669,92 @@ render; the raw call stays behind "View raw result". Native todo tools and
 `polyth_todo` share the `@polyth/todos` normalizer and the same checklist.
 
 **Session activity details:** the Chat settings row `chat.activityDetails`
-controls the reusable details surface opened from the agent activity dock and
-session status. `tabs` (the default) exposes Usage & cost and Plan & review as
-keyboard-accessible tabs with horizontal swipe switching only on tab content;
-`all` renders
-both panels together and lets the containing popover or sheet own vertical
-scrolling. The dock opens details on wide, compact, and phone layouts; the
-header opens the full session overview on compact and phone layouts.
-The details sheet gives the session title the full content width, with up to two
-lines at the largest size that fits between the title and label type roles.
-It refits when its width, title, UI font, or text preferences change; titles
-that still exceed two lines at the readable floor are clamped. The sheet keeps
-its accessible overview name and close target, without repeating overview,
-activity-detail, or status labels beside the title. Its height follows the
-visible viewport with a bottom safe-area reserve, and the body scrolls to
-Recent when needed.
+controls the reusable details surface (`SessionActivityDetails.tsx`). `tabs`
+(the default) exposes Usage and Plan as keyboard-accessible tabs with
+horizontal swipe switching only on tab content, and opens again on the tab
+that was open last; the Plan tab carries the plan's `done/total`. `all` renders
+every block in one view and lets the containing surface own vertical scrolling.
 
-Figures (context, usage) keep their tiles. The latest request and the task plan
-read as text, aligned with the tiles' copy. The plan's steps hang from the same
-`--borderless-edge` thread as chat activity, and the step in progress lights
-its stretch in accent. A failure is told by its mark, not by red words.
+**Agent activity panel** (`SessionActivityPanel.tsx`): the status line above the
+composer (`AgentStatusDock`, `aria-expanded`) opens the details on every shell.
+The conversation owns the panel (its host sits in the chat's composer dock), so
+it opens whether or not the header carries the session title, and it stays open
+when the line itself leaves as the turn ends (standing where the line was, on
+the composer). It stands on the status line
+(the line's own top, not its touch reach) with `--space-2` between them, never
+over the composer, is as wide as the composer card and tops out under the
+conversation's chrome (the phone's floating islands, the desktop header). Its
+material is the canonical glass dock (`.ui-glass-dock`), so glass-off,
+low-resource and every interface look apply, but its corner is the sheet's
+(`--radius-sheet`): the dock radius is for small floating layers and in the
+classic style runs half again rounder than the composer under the panel, while
+the sheet radius matches the composer and stays concentric with the card tiles
+over the `--space-3` gutter, at every Rounding value. It grows out of the line and folds
+back into it: Web Animations clip the panel to a strip lying exactly on the line
+and unfold it upwards (`--motion-window` / `--motion-window-ease`), and the close
+folds it back (`--motion-window-exit` / `--motion-window-exit-ease`); the
+content fades in after the shape and out before it. A change of mind mid-flight
+plays the running motion back from where it is. Reduced motion opens and closes
+it in place. It is non-modal: focus moves into it and returns to the line, a
+press outside closes it (the composer still takes its press; a press above the
+line goes no further, and on phone and tablet that area steps back under a
+light scrim that thins out towards the line), and Escape or Android Back close
+it through the shared Escape stack. The header title opens the session overview
+instead (`sessionOverviewMode`: a popover opened from the line closes it).
 
-On wide desktop the overview popover is as wide as the chat column of the
-window it opens from: the conversation holding the opener (the status dock),
-else the chat under the header title. `DesktopSessionStatus` measures the
-timeline's content box into `--session-status-column`; 360px is the floor and
-the width with no chat on screen. Sections reflow by container width, never
-the viewport: from 540px the figures go four across, from 720px the context
-card stands beside them, and from 560px the sharing line joins the title row.
-The request and the plan stay one column, so a short request never leaves a
-hole beside a long plan.
+The panel's head is the title (up to two lines at the largest size that fits
+between the title and label type roles, refitting on width, title, font and
+text-preference changes), Close (Done while the blocks are arranged) and the
+sharing line. There is no edit button. Recent sessions and other chats'
+requests belong to the overview the title opens, not to this run's details.
+
+Blocks are the person's to arrange (`sessionActivityLayout.ts`, per browser,
+`polyth.sessionActivityLayout.v1`; never session history), the iOS Home Screen
+way, like the phone Workspace ("Phone Workspace editor"): holding any block
+still for `ARRANGE_ACTIVATE_MS` (420 ms, any pointer; a move past the slop is
+a scroll) sinks it slightly while the hold builds (`data-arrange-pressing`,
+`scale`), then turns editing on and lifts it under the finger, so the same
+press drags it (`workspaceArrange.ts` `activate`); holding an empty spot between
+the blocks turns editing on without lifting anything. Keyboard users reach a
+visually hidden *Arrange blocks* button after the blocks (focus lands on the
+first block), and arrow keys and Home/End move a focused block. While editing
+every block jiggles with a stable per-block phase (`rotate` only, a row less
+than a tile; `transform` stays free for the engine's glides and the lifted
+copy), takes no taps and is drawn as a card (the request and the plan get one
+behind their text); figures this agent does not report show as "—" so the
+order is complete; a still touch lifts a block, a vertical swipe scrolls. The
+held block's slot travels as a faint hole, and the copy rises (scale and a
+deep shadow; a row rises less) and flies home when set down. A dock floats
+over the bottom edge (sticky, nearly opaque rather than blurred) with the hint
+and *Reset to default* (disabled while the order is the default); the head's
+Close pops into Done. The surface keeps its size meanwhile: the scroller's
+height is pinned when the mode starts and released when it ends, and the
+tile columns are counted from what shows outside editing, so neither the
+panel's edge nor any block resizes; what no longer fits scrolls. Done, Escape
+(before it can close the panel), a tap beside the blocks or closing the panel
+ends the mode, with a tap of haptic feedback; the figures only editing shows
+fade where they stood while the rest glide together. The order is one list for
+both tabs: arranging one tab keeps the other tab's blocks in their places. A
+block the stored record predates joins right after its default predecessor.
+Standing alone (the desktop session overview), the details put Done in their
+dock.
+
+Figures keep their tiles: the context card (a row: label, used/limit, a pill
+with the percent, the level-tinted meter, the model) and two tiles to a line.
+Outside the edit mode a figure the agent does not report is not a tile of "—":
+one line after the figures names them (`Not reported: Tokens · Cost …`). The
+latest request and the task plan read as text, aligned with the tiles' copy; the
+plan's steps hang from the same `--borderless-edge` thread as chat activity, the
+step in progress lights its stretch in accent, and a failure is told by its
+mark, not by red words. With no plan the Plan tab says so. Blocks reflow by
+container width, never the viewport: from 540px figures go four across (fewer
+when fewer show, so a line never ends empty) and from 900px a full set goes
+eight across; rows always fill their line.
+
+On wide desktop the title's overview popover is as wide as the chat column of
+the window it opens from. `DesktopSessionStatus` measures the timeline's
+content box into `--session-status-column`; 360px is the floor and the width
+with no chat on screen; from 560px the sharing line joins the title row.
 
 The surface reads the live render model for context, token usage, separate cache
 reads/writes, cost, session duration, and task-plan

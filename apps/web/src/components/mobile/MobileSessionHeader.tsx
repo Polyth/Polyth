@@ -46,7 +46,7 @@ import {
   showMobileWorkspaceHome,
   useMobileWorkspaceNavigation,
 } from "../../mobileWorkspaceNavigation.ts";
-import { copyText, firstUserTextCached, lastUserTextCached } from "../../utils.ts";
+import { copyText, firstUserTextCached } from "../../utils.ts";
 import { scheduleSurfaceExit } from "../../motionPresence.ts";
 import { Button, ComposeIcon, GlassIsland, IconButton, LayersIcon, Menu, MenuIcon, type MenuEntry } from "../ui/index.ts";
 import { setHeroEditing, useHeroEditing } from "../../heroEditing.ts";
@@ -63,12 +63,9 @@ import { announce } from "../a11y/live.tsx";
 import {
   contextGaugeForTelemetry,
   contextHasSample,
-  contextTelemetryNotice,
   contextTelemetryStatus,
   formatContextPercent,
-  type RenderModel,
 } from "../../reduce.ts";
-import SessionActivityDetails from "../SessionActivityDetails.tsx";
 import { useUiSettings } from "../../uiPrefs.ts";
 import { POLYTH_MARK_SRC } from "../../brandAsset.ts";
 import { MobileStatusIcon } from "./MobileStatusIcon.tsx";
@@ -456,11 +453,7 @@ export function SessionQuickAccessSheet({
   activeSession,
   gauge,
   contextPercent,
-  contextNotice,
-  modelName,
-  model,
   sessionTitle,
-  prompt,
   tasks,
   requests,
   recent,
@@ -476,19 +469,13 @@ export function SessionQuickAccessSheet({
   onClose,
   active = [],
   activeTotal,
-  fullScreen = false,
 }: {
   active?: SessionProjection[];
   activeTotal?: number;
-  fullScreen?: boolean;
   activeSession?: SessionProjection | null;
   gauge?: ReturnType<typeof contextGaugeForTelemetry> | null;
   contextPercent?: string | null;
-  contextNotice?: string | null;
-  modelName?: string | null;
-  model: RenderModel;
   sessionTitle: string;
-  prompt: string | undefined;
   tasks: IslandTask[];
   requests: IslandItem[];
   recent: SessionProjection[];
@@ -503,21 +490,17 @@ export function SessionQuickAccessSheet({
   closing?: boolean;
   onClose: () => void;
 }) {
-  const actionNeededCopy = tr("mobile.island.requests");
-  const actionNeededLabel = actionNeededCopy === "Requests" ? "Action needed" : actionNeededCopy;
   const progressCopy = tr("mobile.island.tasks");
   const progressLabel = progressCopy === "Tasks" ? "Progress" : progressCopy;
   const currentStep = progressStep(tasks);
   const locale = useSyncExternalStore(subscribeLocale, getLocaleSnapshot, getLocaleSnapshot);
   const recentGroups = useMemo(() => groupRecentSessionsByDay(recent, locale), [recent, locale]);
   const activeIds = useMemo(() => new Set(active.map((item) => item.id)), [active]);
-  const inlineRequests = fullScreen
-    ? requests.filter((request) => {
-      const peerId = request.id.startsWith("peer:") ? request.id.slice(5) : null;
-      return !peerId || !activeIds.has(peerId);
-    })
-    : requests;
-  const showActiveSection = fullScreen && (active.length > 0 || inlineRequests.length > 0);
+  const inlineRequests = requests.filter((request) => {
+    const peerId = request.id.startsWith("peer:") ? request.id.slice(5) : null;
+    return !peerId || !activeIds.has(peerId);
+  });
+  const showActiveSection = active.length > 0 || inlineRequests.length > 0;
   const showRecentSection = recent.length > 0 || recentTotal === 0;
 
   const recentSection = (
@@ -526,10 +509,9 @@ export function SessionQuickAccessSheet({
         <p className="mobile-island-recent-empty" role="status">{tr("mobile.island.noRecent")}</p>
       ) : (
         <div
-          className={`mobile-island-recent-scroll${fullScreen ? " is-full-screen" : ""}`}
+          className="mobile-island-recent-scroll is-full-screen"
           role="region"
           aria-label={tr("mobile.island.recent")}
-          tabIndex={fullScreen ? undefined : 0}
         >
           {recentGroups.map((group) => (
             <div className="mobile-island-recent-day" key={group.key}>
@@ -665,80 +647,26 @@ export function SessionQuickAccessSheet({
 
   return (
     <Sheet
-      title={fullScreen ? tr("header.polyth") : tr("mobile.island.overview")}
-      headerLeading={fullScreen ? <img src={POLYTH_MARK_SRC} alt="" aria-hidden="true" /> : undefined}
+      title={tr("header.polyth")}
+      headerLeading={<img src={POLYTH_MARK_SRC} alt="" aria-hidden="true" />}
       origin="top"
       closing={closing}
-      className={`mobile-island-sheet${fullScreen ? " mobile-island-sheet--full-screen" : " mobile-island-sheet--details"}`}
+      className="mobile-island-sheet mobile-island-sheet--full-screen"
       onClose={onClose}
     >
-      {fullScreen ? (
-        <>
-          {activeSession && (
-            <section className="mobile-island-current-session" aria-label={tr("mobile.sessionmenu.sessionTitle")}>
-              <span>{tr("mobile.sessionmenu.sessionTitle")}</span>
-              <h2>{sessionTitle}</h2>
-              <SessionSharingLine session={activeSession} onOpen={onClose} />
-            </section>
-          )}
-          {activeSection}
-          {showRecentSection && recentSection}
-        </>
-      ) : (
-        <>
-          {activeSession && <SessionSharingLine session={activeSession} onOpen={onClose} />}
-          <SessionActivityDetails
-            sessionTitle={sessionTitle}
-            prompt={prompt}
-            modelName={modelName}
-            tasks={tasks}
-            session={activeSession ?? null}
-            model={model}
-            usageEvents={activeSession ? events[activeSession.id] : undefined}
-            gauge={gauge}
-            contextNotice={contextNotice}
-          />
-
-          {requests.length > 0 && (
-            <SheetSection title={`${actionNeededLabel} · ${formatNumber(requests.length)}`}>
-              <ul className="mobile-task-list mobile-action-needed-list">
-                {requests.map((request) => {
-                  const peerId = request.id.startsWith("peer:") ? request.id.slice(5) : null;
-                  return (
-                    <li key={request.id} className="request">
-                      {peerId ? (
-                        <button
-                          type="button"
-                          className="mobile-task-action-btn"
-                          onClick={() => {
-                            void openSession(peerId);
-                            onClose();
-                          }}
-                        >
-                          <span className={`mobile-island-dot ${request.tone ?? request.kind}`} aria-hidden="true" />
-                          <span className="mobile-task-text">{request.text}</span>
-                        </button>
-                      ) : (
-                        <>
-                          <span className={`mobile-island-dot ${request.tone ?? request.kind}`} aria-hidden="true" />
-                          <span className="mobile-task-text">{request.text}</span>
-                        </>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            </SheetSection>
-          )}
-
-          {showRecentSection && recentSection}
-        </>
+      {activeSession && (
+        <section className="mobile-island-current-session" aria-label={tr("mobile.sessionmenu.sessionTitle")}>
+          <span>{tr("mobile.sessionmenu.sessionTitle")}</span>
+          <h2>{sessionTitle}</h2>
+          <SessionSharingLine session={activeSession} onOpen={onClose} />
+        </section>
       )}
+      {activeSection}
+      {showRecentSection && recentSection}
     </Sheet>
   );
 }
 
-/** Phone navigation is intentionally a small overlay, not a second application header. */
 export default function MobileSessionHeader() {
   const { mobileSessionTitle } = useUiSettings();
   const TitleContainer = mobileSessionTitle === "button" ? GlassIsland : "div";
@@ -766,7 +694,6 @@ export default function MobileSessionHeader() {
   const title = session
     ? displaySessionTitle(session.title, session.id, firstUserTextCached(events[session.id]) ?? draftTitleSource(session))
     : tr("mobile.island.newChat");
-  const prompt = lastUserTextCached(session ? events[session.id] : undefined);
 
   const active = useMemo(
     () => activeSessionsForIsland(projectSessions, session?.id),
@@ -869,7 +796,6 @@ export default function MobileSessionHeader() {
   const gauge = contextGaugeForTelemetry(model, contextTokens, session?.contextWindow ?? null, telemetryStatus,
     { model: activeModel, harnessId: session?.resolvedHarnessId });
   const contextPercent = formatContextPercent(gauge);
-  const contextNotice = contextTelemetryNotice(telemetryStatus, gauge);
 
   const modelName = descriptor?.name ?? activeModel?.modelID ?? null;
   const sessionStatus = session ? resolveSessionStatus(session) : null;
@@ -879,12 +805,9 @@ export default function MobileSessionHeader() {
   }, [statusPopover.open]);
 
   // Presentation-only: the overview sheet keeps its last frame mounted
-  // through the exit animation for either trigger (header or dock), instead
-  // of unmounting the instant the semantic state closes.
+  // through the exit animation instead of unmounting the instant the
+  // semantic state closes.
   const [overviewMounted, setOverviewMounted] = useState(overviewOpen);
-  const lastOverviewModeRef = useRef<"full" | "details">(overviewMode === "closed" ? "full" : overviewMode);
-  if (overviewMode !== "closed") lastOverviewModeRef.current = overviewMode;
-  const renderedOverviewMode = overviewMode === "closed" ? lastOverviewModeRef.current : overviewMode;
 
   useEffect(() => {
     if (overviewOpen) {
@@ -1028,15 +951,10 @@ export default function MobileSessionHeader() {
       <SessionQuickAccessSheet
         active={active}
         activeTotal={active.length}
-        fullScreen={renderedOverviewMode === "full"}
         activeSession={session}
         gauge={gauge}
         contextPercent={contextPercent}
-        contextNotice={contextNotice}
-        modelName={modelName}
-        model={model}
         sessionTitle={title}
-        prompt={prompt}
         tasks={overviewTasks}
         requests={requests}
         recent={recent}

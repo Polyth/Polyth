@@ -46,7 +46,6 @@ register("./tsxHooks.mjs", import.meta.url);
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { SessionQuickAccessSheet } = await import("../src/components/mobile/MobileSessionHeader.tsx");
-const { emptyModel } = await import("../src/reduce.ts");
 const { registerSlot } = await import("../src/slots.ts");
 const { tr } = await import("../src/i18n/index.ts");
 
@@ -68,7 +67,7 @@ async function mount() {
   const root = createRoot(container);
   await act(async () => {
     root.render(createElement(SessionQuickAccessSheet, {
-      model: emptyModel(), sessionTitle: "", prompt: undefined, tasks: [], requests: [],
+      sessionTitle: "", tasks: [], requests: [],
       recent: [recent], events: {}, onClose: () => { closed++; },
     }));
     await sleep(0);

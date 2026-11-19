@@ -95,8 +95,6 @@ test("the activity details render a localized context sample", async () => {
     const root = createRoot(container as unknown as HTMLElement);
     try {
       await act(async () => root.render(createElement(SessionActivityDetails, {
-        sessionTitle: "Довгий тестовий сеанс",
-        showIdentity: false,
         tasks: [],
         session: null,
         model: emptyModel(),

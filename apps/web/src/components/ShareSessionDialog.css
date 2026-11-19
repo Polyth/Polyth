@@ -103,7 +103,7 @@
 .session-sharing-sheet-foot > .ui-btn { flex: 1; }
 .ui-dialog-foot > .session-sharing-continue { margin-inline-end: auto; }
 
-/* Overview line (session status popover and phone overview). */
+/* Overview line (session status popover, phone overview, activity panel). */
 .session-sharing-line {
   display: flex;
   align-items: center;
@@ -124,4 +124,3 @@
 @container session-status (min-width: 560px) {
   .desktop-session-status-popover > header > .session-sharing-line { flex: none; max-width: 50%; padding: 0 var(--space-2) 0 0; }
 }
-.mobile-island-sheet .sheet-body > .session-sharing-line { padding: var(--space-2) var(--space-2) 0; }
