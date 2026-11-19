@@ -20051,7 +20051,12 @@ body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="s
    the last few pixels of the range (and a transcript that does not scroll has
    no timeline, so no mask). Masking only while scrolled keeps the tail glass
    blurring the wallpaper: a masked ancestor is its backdrop root. Without
-   scroll timelines there is no overlap at all. */
+   scroll timelines there is no overlap at all.
+   The mask is geometry, not motion: it must outlive the reduced-motion and
+   low-resource switches, whose `animation: none !important` (top of this
+   file) would otherwise drop it and leave the overlap, so history showed
+   through the edited-files and status lines. Hence !important here, on the
+   timeline and range too (the shorthand resets both). */
 @supports (animation-timeline: scroll()) {
   .focus-conversation:has(> .conversation-composer-dock) {
     --timeline-dock-overlap: var(--composer-height);
@@ -20060,9 +20065,9 @@ body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="s
     margin-block-end: calc(-1 * var(--timeline-dock-overlap));
   }
   .focus-conversation:has(> .conversation-composer-dock) .timeline {
-    animation: timeline-dock-overlap-hidden linear none;
-    animation-timeline: scroll(self);
-    animation-range: 0 calc(100% - 4px);
+    animation: timeline-dock-overlap-hidden linear none !important;
+    animation-timeline: scroll(self) !important;
+    animation-range: 0 calc(100% - 4px) !important;
   }
 }
 @keyframes timeline-dock-overlap-hidden {
@@ -20083,7 +20088,7 @@ body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="s
   .focus-conversation:has(> .conversation-composer-dock) .timeline {
     --timeline-pad-bottom: calc(24px + var(--timeline-turn-sheet-space, 0px));
     scroll-padding-bottom: 24px;
-    animation: none;
+    animation: none !important;
   }
 }
 

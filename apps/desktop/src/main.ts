@@ -88,6 +88,7 @@ import {
 import {
   desktopChromeOptions,
   macCaptionGeometry,
+  macTrafficLightGroup,
   macTrafficLightPosition,
   normalizeTitleBarAppearance,
   trayIconSize,
@@ -1350,7 +1351,7 @@ const firstWindowUrl = (): string => {
 const createWindow = async (startUrl = firstWindowUrl()): Promise<void> => {
   const saved = readSavedWindowState();
   const bounds = visibleBounds(saved.bounds);
-  const chrome = desktopChromeOptions(process.platform, nativeTheme.shouldUseDarkColors);
+  const chrome = desktopChromeOptions(process.platform, nativeTheme.shouldUseDarkColors, process.getSystemVersion());
   const window = new BrowserWindow({
     width: bounds?.width ?? (startupLowResourceMode ? 1100 : 1360),
     height: bounds?.height ?? (startupLowResourceMode ? 720 : 860),
@@ -1702,9 +1703,12 @@ const installIpc = (): void => {
   trustedHandle("desktop:window:caption", (_event, band: unknown) => {
     if (process.platform !== "darwin" || !mainWindow || mainWindow.isDestroyed()) return null;
     const zoom = mainWindow.webContents.getZoomFactor();
-    mainWindow.setWindowButtonPosition(macTrafficLightPosition(band, zoom));
+    // The size this macOS draws its lights at: it moves both the centre line
+    // and the width the header keeps clear.
+    const group = macTrafficLightGroup(process.getSystemVersion());
+    mainWindow.setWindowButtonPosition(macTrafficLightPosition(band, zoom, group));
     // Report what the window applied, not what was asked for.
-    return macCaptionGeometry(mainWindow.getWindowButtonPosition(), zoom);
+    return macCaptionGeometry(mainWindow.getWindowButtonPosition(), zoom, group);
   });
   trustedHandle("desktop:window:titlebar", (_event, appearance: unknown) => {
     if (process.platform !== "win32" || !mainWindow || mainWindow.isDestroyed()) return;

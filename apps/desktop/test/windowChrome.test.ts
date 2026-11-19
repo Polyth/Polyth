@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   DESKTOP_TITLEBAR_HEIGHT,
+  MACOS_26_TRAFFIC_LIGHT_GROUP,
   MACOS_TRAFFIC_LIGHT_GROUP,
   MACOS_TRAFFIC_LIGHT_POSITION,
   WINDOWS_CAPTION_HEIGHT,
   desktopChromeOptions,
   macCaptionGeometry,
+  macTrafficLightGroup,
   macTrafficLightPosition,
   normalizeTitleBarAppearance,
   trayIconSize,
@@ -41,6 +43,35 @@ test("traffic lights are centred on the header band", () => {
   const groupHeight = 14;
   const { y } = MACOS_TRAFFIC_LIGHT_POSITION;
   assert.ok(Math.abs((y + groupHeight / 2) - DESKTOP_TITLEBAR_HEIGHT / 2) <= 1);
+});
+
+test("macOS 26 and later get the larger traffic-light group", () => {
+  for (const version of ["12.7.6", "15.6.1", "16.0", "", undefined, null, 26, "garbage"]) {
+    assert.equal(macTrafficLightGroup(version), MACOS_TRAFFIC_LIGHT_GROUP, `version ${String(version)}`);
+  }
+  for (const version of ["26.0", "26.1.2", "27.0.1", "30.0"]) {
+    assert.equal(macTrafficLightGroup(version), MACOS_26_TRAFFIC_LIGHT_GROUP, `version ${version}`);
+  }
+  // The larger lights are still centred on the 52 px band from the first
+  // paint: at the smaller group's y they sat 2 px low.
+  const tahoe = desktopChromeOptions("darwin", false, "26.1");
+  assert.deepEqual(tahoe.trafficLightPosition, { x: 18, y: 17 });
+  assert.equal(tahoe.trafficLightPosition!.y + MACOS_26_TRAFFIC_LIGHT_GROUP.height / 2, DESKTOP_TITLEBAR_HEIGHT / 2);
+  assert.deepEqual(desktopChromeOptions("darwin", false, "15.6").trafficLightPosition, MACOS_TRAFFIC_LIGHT_POSITION);
+  for (const zoom of [0.8, 1, 1.25, 1.5, 2]) {
+    const { x, y } = macTrafficLightPosition(52, zoom, MACOS_26_TRAFFIC_LIGHT_GROUP);
+    assert.equal(x, 18);
+    assert.ok(Math.abs(y + MACOS_26_TRAFFIC_LIGHT_GROUP.height / 2 - (52 * zoom) / 2) <= 0.5, `zoom ${zoom}`);
+  }
+  // The zone the header keeps clear ends past the real third light (18 + 68
+  // = 86 DIP), not at the smaller group's 72 DIP, under the green light.
+  assert.deepEqual(
+    macCaptionGeometry({ x: 18, y: 17 }, 1, MACOS_26_TRAFFIC_LIGHT_GROUP),
+    { x: 18, y: 17, width: 68, height: 18 },
+  );
+  assert.deepEqual(macCaptionGeometry(null, 1, MACOS_26_TRAFFIC_LIGHT_GROUP), { x: 18, y: 17, width: 68, height: 18 });
+  const zoomed = macCaptionGeometry({ x: 18, y: 24 }, 1.25, MACOS_26_TRAFFIC_LIGHT_GROUP);
+  assert.equal(zoomed.x + zoomed.width, 68.8);
 });
 
 test("title bar appearance from the renderer is validated and zoom-scaled", () => {

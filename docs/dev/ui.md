@@ -3501,7 +3501,12 @@ spans the composer's full width. A line reads `--composer-stack-row` tall; on to
 that opens something keeps its full target by reaching up into the timeline's
 bottom space (`--composer-stack-reach`). Their inks follow the wallpaper wash
 ([styles](styles.md), "Wallpaper wash"), so they keep 4.5:1 on any preset theme and
-wallpaper.
+wallpaper. The transcript reaches under the dock by `--composer-height` (so a tail
+card's shadow is not cut) and a scroll-driven mask hides that overlap whenever the
+reader is away from the tail, so history never shows through these plateless lines.
+The mask is geometry, not motion: it holds under the system's Reduce motion and
+Desktop's Reduce animations and low-resource mode, whose blanket `animation: none`
+must not drop it (`apps/web/test/composerPendingStack.test.ts`).
 
 The status (`AgentStatusDock`, also used for the spawn status and on the Agents
 page) reads mark · action, then the files tally and the elapsed time. The mark (the

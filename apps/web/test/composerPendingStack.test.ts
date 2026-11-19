@@ -262,3 +262,69 @@ test("tablet: a coarse pointer keeps full targets outside the phone shell, uncli
     await page.context().close();
   }
 });
+
+// The transcript reaches under the dock by --composer-height so a tail card's
+// shadow is not cut, and a scroll-driven mask hides that overlap while the
+// reader is away from the tail. The stack's lines paint no plate, so without
+// the mask history shows straight through them. Every "no animations" switch
+// used to drop it (`animation: none !important`) while keeping the overlap.
+test("desktop: history never shows through the plateless lines, with animations off too", { skip: !CHROME }, async () => {
+  const modes: Array<{ name: string; context?: { reducedMotion: "reduce" }; flag?: [target: "html" | "body", key: string] }> = [
+    { name: "animations on" },
+    { name: "the system's Reduce motion", context: { reducedMotion: "reduce" } },
+    { name: "Desktop's Reduce animations", flag: ["html", "reduceAnimations"] },
+    { name: "Desktop's low-resource mode", flag: ["body", "desktopLowResource"] },
+  ];
+  for (const mode of modes) {
+    assert.ok(browser);
+    const context = await browser.newContext({ viewport: { width: 1100, height: 760 }, ...mode.context });
+    await context.route(`${ORIGIN}/**`, (route) => route.fulfill({ contentType: "text/html", body: html }));
+    const page = await context.newPage();
+    try {
+      await page.goto(`${ORIGIN}/`);
+      await page.waitForSelector(".agent-status-dock");
+      const measured = await page.evaluate(async (flag) => {
+        if (flag) (flag[0] === "html" ? document.documentElement : document.body).dataset[flag[1]] = "true";
+        // The transcript's real chain (Timeline.tsx): wrap > viewport > scroller.
+        const wrap = document.createElement("div");
+        wrap.className = "timeline-wrap";
+        wrap.innerHTML = `<div class="timeline-viewport"><div class="timeline">${
+          Array.from({ length: 60 }, (_, index) => `<p style="margin:0;flex:none">History line ${index}</p>`).join("")
+        }</div></div>`;
+        const conversation = document.querySelector(".focus-conversation") as HTMLElement;
+        conversation.style.height = "100%";
+        conversation.prepend(wrap);
+        const timeline = wrap.querySelector(".timeline") as HTMLElement;
+        const settle = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const line = document.querySelector(".agent-status-dock")!.getBoundingClientRect();
+        const state = async (scrollTop: number) => {
+          timeline.scrollTop = scrollTop;
+          await settle();
+          const style = getComputedStyle(timeline);
+          const box = timeline.getBoundingClientRect();
+          // The mask's opaque part ends this far above the scroller's bottom.
+          const cut = /calc\(100% - ([\d.]+)px\)/.exec(style.maskImage);
+          return { mask: style.maskImage, visibleBottom: cut ? box.bottom - Number(cut[1]) : box.bottom };
+        };
+        const end = timeline.scrollHeight - timeline.clientHeight;
+        return {
+          scrolls: end > 200,
+          reachesUnder: timeline.getBoundingClientRect().bottom - line.top,
+          lineTop: line.top,
+          away: await state(Math.round(end / 2)),
+          tail: await state(end),
+        };
+      }, mode.flag ?? null);
+      assert.ok(measured.scrolls, `${mode.name}: the fixture transcript scrolls`);
+      assert.ok(measured.reachesUnder > 8, `${mode.name}: the transcript reaches under the dock (${measured.reachesUnder}px)`);
+      assert.notEqual(measured.away.mask, "none", `${mode.name}: scrolled away, the overlap is masked`);
+      assert.ok(
+        measured.away.visibleBottom <= measured.lineTop + 0.5,
+        `${mode.name}: history stops at the status line's top (${measured.away.visibleBottom} vs ${measured.lineTop})`,
+      );
+      assert.equal(measured.tail.mask, "none", `${mode.name}: at the tail the mask lifts, so a tail card keeps its glass`);
+    } finally {
+      await context.close();
+    }
+  }
+});

@@ -359,9 +359,15 @@ height (below). `windowChrome.ts` owns the per-platform
   (`macCaptionGeometry`). The caption zone (`--desktop-macos-titlebar-inset`, inline on
   `<body>`) is that extent plus a 14 px gap: 86 px at 100 %, wider below it, where a fixed
   86 px ended under the green light. Electron exposes the lights' position but not their
-  size, so the 54×14 DIP group (`MACOS_TRAFFIC_LIGHT_GROUP`) is the one assumed constant;
-  a shell without the call keeps the 86 px CSS default. The zone drops in fullscreen (the
-  lights hide there).
+  size, so the group's size is the one assumed constant, picked by
+  `macTrafficLightGroup(process.getSystemVersion())`: 54×14 DIP up to macOS 15
+  (`MACOS_TRAFFIC_LIGHT_GROUP`) and 68×18 DIP from macOS 26 on
+  (`MACOS_26_TRAFFIC_LIGHT_GROUP`), which draws larger buttons for an app linked against
+  its SDK, so the zone there is 100 px at 100 %. The larger size was measured from a
+  screenshot of a real window (lights 2 px low and the first header control against the
+  green light under the 54×14 assumption), not read from an API: re-measure it when a
+  macOS release changes the buttons again. A shell without the call keeps the 86 px CSS
+  default. The zone drops in fullscreen (the lights hide there).
 - **Windows** — `titleBarStyle: "hidden"` with the native Window Controls Overlay, so the
   caption buttons, Snap Layouts flyout, rounded corners, and shadow are the operating
   system's. The caption zone takes the overlay's rectangle as `desktop.tsx` measures it
