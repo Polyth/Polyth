@@ -52,7 +52,7 @@ test("a queued run waits for its own dispatch, ignoring the turn that was alread
   ]]);
   assert.deepEqual(
     await settleScheduledRun({ ...run, queueId: "q1" }, opts(source.events)),
-    { status: "failed", error: "tool exploded" },
+    { status: "failed", cause: "error", error: "tool exploded" },
   );
 });
 
@@ -81,14 +81,33 @@ test("a turn the tool watchdog cut and continued is still the run, not a stop", 
   assert.equal(settled.status, "ok");
   assert.match(settled.summary ?? "", /Shipped/);
 
-  // The person's own message instead of the continuation ends the run as stopped.
+  // The person's own message instead of the continuation: the run goes on
+  // with the turn their message starts, and its report is the run's.
   const overtaken = feed([[
+    ev(11, "turn/started"),
+    ev(12, "turn/abort-requested", { reason: "tool-timeout", source: "tool-watchdog" }),
+    ev(13, "turn/stopped", { reason: "aborted" }),
+    ev(14, "user/message", { text: "build it again from the new devel" }),
+    ev(15, "turn/started"),
+    ev(16, "assistant/message", { text: "Rebuilt.\n\nReport: update — rebuilt from devel" }),
+    ev(17, "turn/stopped", { reason: "completed" }),
+  ]]);
+  const followed = await settleScheduledRun(run, opts(overtaken.events));
+  assert.equal(followed.status, "ok");
+  assert.equal(followed.steered, true);
+  assert.match(followed.summary ?? "", /Rebuilt/);
+
+  // A message that starts no turn leaves the run as the person's stop.
+  const silent = feed([[
     ev(11, "turn/started"),
     ev(12, "turn/abort-requested", { reason: "tool-timeout", source: "tool-watchdog" }),
     ev(13, "turn/stopped", { reason: "aborted" }),
     ev(14, "user/message", { text: "stop that" }),
   ]]);
-  assert.equal((await settleScheduledRun(run, opts(overtaken.events))).status, "failed");
+  const left = await settleScheduledRun(run, opts(silent.events));
+  assert.equal(left.status, "failed");
+  assert.equal(left.stopped, true);
+  assert.equal(left.cause, "person");
 
   // A watchdog abort with no continuation planned (no source) is a plain stop.
   const spent = feed([[
@@ -109,7 +128,7 @@ test("a turn the tool watchdog cut and continued is still the run, not a stop", 
     now: () => clock,
     sleep: async (ms: number) => { clock += ms; },
   }));
-  assert.deepEqual(gaveUp, { status: "failed", error: "Stopped before it finished." });
+  assert.deepEqual(gaveUp, { status: "failed", cause: "cut", error: "Cut off before it finished." });
   assert.ok(clock >= 15 * 60_000 && clock < 60 * 60_000, `gave up after ${clock} ms`);
 });
 
@@ -288,4 +307,170 @@ test("a Monitor that wakes the agent twice still counts as one launch", async ()
   const settled = await settleScheduledRun(run, opts(source.events));
   assert.equal(settled.status, "ok");
   assert.deepEqual(settled.timeline?.map((moment) => moment.kind), ["wait"]);
+});
+
+// ---- who cut the turn, and what the run does about it ----
+
+/** A runner that records each continuation and appends its marker, like the
+ *  server's: `log` is the live session the settlement reads. */
+function resumer(log: SessionEvent[], next: (attempt: number) => SessionEvent[]) {
+  const asked: Array<{ attempt: number; cause: string }> = [];
+  return {
+    asked,
+    onCut: async (attempt: number, cause: string) => {
+      asked.push({ attempt, cause });
+      const seq = log.at(-1)!.seq;
+      log.push(ev(seq + 1, "schedule/run-resumed", { runId: "r1", attempt }), ...next(attempt));
+      return true;
+    },
+  };
+}
+
+const live = (log: SessionEvent[]) => async (_sessionId: string, afterSeq: number) => log.filter((event) => event.seq > afterSeq);
+const instant = { resumeDelaysMs: [0] };
+const owned = { ...run, runId: "r1" };
+
+test("a person's interrupting message redirects the run: its turn and report are the run's", async () => {
+  const source = feed([[
+    ev(11, "turn/started"),
+    ev(12, "assistant/message", { text: "I'll start by checking what the previous run left behind." }),
+    ev(13, "turn/abort-requested", { reason: "interrupt", queueId: "q9" }),
+    ev(14, "turn/stopped", { reason: "aborted" }),
+    ev(15, "user/message", { text: "devel has new changes, build again", queueId: "q9" }),
+    ev(16, "turn/started"),
+    ev(17, "assistant/message", { text: "Rebuilt from the new devel.\n\nReport: update — nightly rebuilt" }),
+    ev(18, "turn/stopped", { reason: "completed" }),
+  ]]);
+  const settled = await settleScheduledRun(run, opts(source.events));
+  assert.equal(settled.status, "ok");
+  assert.equal(settled.steered, true);
+  assert.match(settled.summary ?? "", /Rebuilt from the new devel/);
+});
+
+test("a stop someone asked for is theirs: never a failure of the agent, never continued", async () => {
+  for (const source of ["http", "agent-stop", "composer"]) {
+    const log = [
+      ev(11, "turn/started"),
+      ev(12, "turn/abort-requested", { reason: "user", source }),
+      ev(13, "turn/stopped", { reason: "aborted" }),
+    ];
+    const cut = resumer(log, () => []);
+    const settled = await settleScheduledRun(owned, opts(live(log), { onCut: cut.onCut, ...instant }));
+    assert.deepEqual(settled, { status: "failed", stopped: true, cause: "person", error: "Stopped before it finished." });
+    assert.equal(cut.asked.length, 0, source);
+  }
+  // An approval nobody answered stopped it: the person has to act, a retry would not help.
+  const waited = feed([[
+    ev(11, "turn/started"),
+    ev(12, "turn/abort-requested", { reason: "user", source: "agent-approval-timeout" }),
+    ev(13, "turn/stopped", { reason: "aborted" }),
+  ]]);
+  const expired = await settleScheduledRun(run, opts(waited.events, { onCut: async () => true, ...instant }));
+  assert.equal(expired.status, "failed");
+  assert.equal(expired.cause, "approval");
+  assert.equal(expired.stopped, undefined);
+});
+
+test("a turn cut under the agent is continued by the run itself, once caught up, and reports as one run", async () => {
+  const log = [
+    ev(11, "turn/started"),
+    ev(12, "assistant/message", { text: "Dispatching the nightly." }),
+    // No abort request: nobody asked for this stop.
+    ev(13, "turn/stopped", { reason: "aborted" }),
+  ];
+  const cut = resumer(log, () => [
+    ev(15, "user/message", { text: "Polyth: your turn was cut off" }),
+    ev(16, "turn/started"),
+    ev(17, "assistant/message", { text: "All platforms delivered.\n\nReport: update — nightly delivered" }),
+    ev(18, "turn/stopped", { reason: "completed" }),
+  ]);
+  const settled = await settleScheduledRun(owned, opts(live(log), { onCut: cut.onCut, ...instant }));
+  assert.equal(settled.status, "ok");
+  assert.equal(settled.resumed, 1);
+  assert.deepEqual(cut.asked, [{ attempt: 1, cause: "cut" }]);
+  assert.match(settled.summary ?? "", /All platforms delivered/);
+  assert.ok(settled.timeline?.some((moment) => moment.kind === "resume"), "the page can say it continued");
+});
+
+test("a continuation already in the log is never sent twice (a restart reads the same events again)", async () => {
+  const log = [
+    ev(11, "turn/started"),
+    ev(12, "turn/stopped", { reason: "aborted" }),
+    ev(13, "schedule/run-resumed", { runId: "r1", attempt: 1 }),
+    ev(14, "user/message", { text: "Polyth: your turn was cut off" }),
+    ev(15, "turn/started"),
+    ev(16, "turn/stopped", { reason: "completed" }),
+  ];
+  const cut = resumer(log, () => []);
+  const settled = await settleScheduledRun(owned, opts(live(log), { onCut: cut.onCut, ...instant }));
+  assert.equal(settled.status, "ok");
+  assert.equal(settled.resumed, 1);
+  assert.equal(cut.asked.length, 0);
+  // Another run's marker is not this run's continuation.
+  const foreign = [
+    ev(11, "turn/started"),
+    ev(12, "turn/stopped", { reason: "aborted" }),
+    ev(13, "schedule/run-resumed", { runId: "someone-else", attempt: 1 }),
+  ];
+  const other = resumer(foreign, () => [ev(15, "turn/started"), ev(16, "turn/stopped", { reason: "completed" })]);
+  await settleScheduledRun(owned, opts(live(foreign), { onCut: other.onCut, ...instant }));
+  assert.equal(other.asked.length, 1);
+});
+
+test("a run continues itself a bounded number of times, then ends as cut and says how often it tried", async () => {
+  const log = [ev(11, "turn/started"), ev(12, "turn/stopped", { reason: "aborted" })];
+  const cut = resumer(log, (attempt) => {
+    const seq = 20 * attempt;
+    return [ev(seq, "turn/started"), ev(seq + 1, "turn/stopped", { reason: "aborted" })];
+  });
+  const settled = await settleScheduledRun(owned, opts(live(log), { onCut: cut.onCut, ...instant }));
+  assert.deepEqual(cut.asked.map((ask) => ask.attempt), [1, 2]);
+  assert.equal(settled.status, "failed");
+  assert.equal(settled.cause, "cut");
+  assert.equal(settled.resumed, 2);
+  assert.equal(settled.error, "Cut off before it finished.");
+});
+
+test("a transient turn error gets a continuation; an error no retry can fix ends the run with its cause", async () => {
+  const log = [ev(11, "turn/started"), ev(12, "turn/stopped", { reason: "error", error: "socket hang up" })];
+  const cut = resumer(log, () => [ev(14, "turn/started"), ev(15, "turn/stopped", { reason: "completed" })]);
+  const settled = await settleScheduledRun(owned, opts(live(log), { onCut: cut.onCut, ...instant }));
+  assert.equal(settled.status, "ok");
+  assert.deepEqual(cut.asked, [{ attempt: 1, cause: "error" }]);
+
+  for (const [code, cause] of [["auth-expired", "route"], ["model-unavailable", "route"], ["context-full", "error"]] as const) {
+    const final = [ev(11, "turn/started"), ev(12, "turn/stopped", { reason: "error", code, error: `refused: ${code}` })];
+    const never = resumer(final, () => []);
+    const ended = await settleScheduledRun(owned, opts(live(final), { onCut: never.onCut, ...instant }));
+    assert.deepEqual(ended, { status: "failed", cause, error: `refused: ${code}` });
+    assert.equal(never.asked.length, 0, code);
+  }
+});
+
+test("a continuation waits its delay, and a watchdog continuation that never comes is taken over by the run", async () => {
+  let clock = 1_000;
+  const log = [
+    ev(11, "turn/started"),
+    ev(12, "turn/abort-requested", { reason: "tool-timeout", source: "tool-watchdog" }),
+    { ...ev(13, "turn/stopped", { reason: "aborted" }), time: 1_000 } as SessionEvent,
+  ];
+  const sentAt: number[] = [];
+  const cut = resumer(log, () => [ev(15, "turn/started"), ev(16, "turn/stopped", { reason: "completed" })]);
+  const settled = await settleScheduledRun({ ...owned, startedAt: 0 }, opts(live(log), {
+    now: () => clock,
+    sleep: async (ms: number) => { clock += ms; },
+    onCut: async (attempt: number, cause: string) => { sentAt.push(clock); return cut.onCut(attempt, cause); },
+  }));
+  assert.equal(settled.status, "ok");
+  assert.equal(settled.resumed, 1);
+  // The server had 15 minutes to continue the turn it cut; only then the run did.
+  assert.ok(sentAt[0]! >= 15 * 60_000 && sentAt[0]! < 20 * 60_000, `sent at ${sentAt[0]}`);
+});
+
+test("a continuation that cannot be sent ends the run where it was cut", async () => {
+  const source = feed([[ev(11, "turn/started"), ev(12, "turn/stopped", { reason: "aborted" })]]);
+  const settled = await settleScheduledRun(owned, opts(source.events, {
+    onCut: async () => { throw new Error("session gone"); }, ...instant,
+  }));
+  assert.deepEqual(settled, { status: "failed", cause: "cut", error: "Cut off before it finished." });
 });

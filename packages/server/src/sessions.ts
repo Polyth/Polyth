@@ -14103,21 +14103,42 @@ export function createSessionService(deps: {
         if (projection.status === "unknown" && !stoppedTurnRecorded) return "session-unknown";
         return undefined;
       };
-      const queueUntilAdmissible = (reason: string): Promise<SendResult> => enqueueMessage(
-        sessionId,
-        input.text,
-        delivery === "normal" ? "queue" : delivery,
-        reason,
-        input.attachments,
-        input.command,
-        undefined,
-        input.clientOperationId,
-        clientRequestFingerprint,
-        hiddenUserMessage,
-        input.memory,
-        input.author,
-        input.displayText,
-      );
+      const queueUntilAdmissible = async (reason: string): Promise<SendResult> => {
+        const queued = await enqueueMessage(
+          sessionId,
+          input.text,
+          delivery === "normal" ? "queue" : delivery,
+          reason,
+          input.attachments,
+          input.command,
+          undefined,
+          input.clientOperationId,
+          clientRequestFingerprint,
+          hiddenUserMessage,
+          input.memory,
+          input.author,
+          input.displayText,
+        );
+        // The queue delivers once the barrier releases, and for a dormant
+        // session nothing releases it by itself: a stop that found the
+        // runtime gone leaves the session idle behind a blocked barrier, and
+        // only opening the chat used to start the replacement. A sender
+        // nobody watches (a scheduled agent, a delegated worker) has no one
+        // to open it, so its message waited until a person happened to
+        // (2026-11-18: a nightly wake sat two hours). Sending is use: start
+        // the same recover-on-use pass opening runs. It takes the session
+        // lock itself, after this send has released it. Never for the
+        // server's own resumes, which must not start a recovery of their own.
+        if (input.autoResume !== true && !deps.isShuttingDown?.()) {
+          queueMicrotask(() => {
+            void service.activate!(sessionId).catch((error: unknown) => {
+              if ((error as { code?: unknown } | null)?.code === "epoch-pending") return;
+              console.warn(`[polyth] recovery for a message queued in ${sessionId} (${reason}) did not complete`, error);
+            });
+          });
+        }
+        return queued;
+      };
       // When the session stays uncertain after in-place recovery, a new user
       // message runs the same release → epoch → fresh-leg transaction a
       // harness switch does, on the current harness. Only an owned runtime

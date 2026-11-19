@@ -1573,7 +1573,9 @@
   line-height: 1.35;
   text-wrap: balance;
 }
-.agents-page .agent-report[data-signal="failed"] .agent-report-headline { color: color-mix(in srgb, var(--red) 70%, var(--text)); }
+/* A run that did not finish: its mark carries the colour, its words read in
+   the page's ink. A column of red headlines says "broken" louder than any of
+   them means. */
 /* Every time: the column's end, in quiet figures. */
 .agents-page .agent-quiet-list time {
   flex: none;
@@ -1651,6 +1653,39 @@
   line-height: var(--font-meta-lh);
   white-space: pre-wrap;
 }
+
+/* Where a run that did not finish was: its last words, said as that and not
+   as a report, then what happens next. */
+.agents-page .agent-report-reached {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px var(--space-2);
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.agents-page .agent-report-reached-label { flex: none; color: var(--faint); }
+.agents-page .agent-report-reached-label::after { content: ":"; }
+.agents-page .agent-report-reached-words {
+  display: -webkit-box;
+  flex: 1 1 24ch;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.agents-page .agent-report-reached-steps { flex: none; color: var(--faint); font-variant-numeric: tabular-nums; }
+.agents-page .agent-report-reached-steps::before { content: "·"; margin-inline-end: var(--space-2); }
+.agents-page .agent-report-next {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.agents-page .agent-report[data-signal="failed"] .agent-report-error { color: var(--text-dim); font-size: var(--font-response); line-height: 1.45; }
 
 /* The footer: one quiet link, then (on hover) feedback and what the run
    cost at the end. */
@@ -1811,7 +1846,6 @@
   transition: color var(--motion-fast) var(--motion-ease);
 }
 .agents-page .agent-quiet-label { color: var(--muted); }
-.agents-page .agent-report[data-signal="failed"] .agent-report-line-title { color: color-mix(in srgb, var(--red) 70%, var(--text)); }
 @media (hover: hover) {
   .agents-page .agent-report-line:hover:where(:not(:disabled)) .agent-report-line-title { color: var(--text); }
 }
@@ -1850,7 +1884,7 @@
 /* A read report opened under its row. The row stays its header and closes
    it again; its headline reads whole, in the headline's ink. */
 .agents-page .agent-report-line[aria-expanded="true"] .agent-report-line-title { -webkit-line-clamp: none; }
-.agents-page .agent-report:not([data-signal="failed"]) > .agent-report-line[aria-expanded="true"] .agent-report-line-title { color: var(--text); }
+.agents-page .agent-report > .agent-report-line[aria-expanded="true"] .agent-report-line-title { color: var(--text); }
 /* On a wide column the words start under the row's headline. */
 @container agents-page (min-width: 521px) {
   .agents-page .agent-report-card { padding-inline-start: calc(8px + var(--font-meta) * 5.2 + var(--space-3) * 2); }
@@ -1906,6 +1940,130 @@
   overflow-wrap: anywhere;
 }
 .agents-page .agent-need-open { flex: none; text-decoration: none; }
+/* Under a report the requests are its record: what still waits is listed
+   once, above the conversation. */
+.agents-page .agent-report .agent-needs { gap: var(--space-1); }
+.agents-page .agent-report .agent-needs-label { color: var(--faint); font-weight: 500; }
+.agents-page .agent-report .agent-needs-list { gap: var(--space-1); }
+.agents-page .agent-report .agent-need-words { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--space-2); }
+.agents-page .agent-report .agent-need-text { color: var(--text-dim); font-size: var(--font-meta); font-weight: 500; line-height: var(--font-meta-lh); }
+.agents-page .agent-report .agent-need-text a { color: inherit; text-decoration: underline; text-decoration-color: var(--hair); text-underline-offset: 3px; }
+.agents-page .agent-report .agent-need[data-done] .agent-need-text { color: var(--faint); text-decoration: line-through; text-decoration-color: var(--hair); }
+.agents-page .agent-need-state { color: var(--faint); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+
+/* ---- What waits for the person ---------------------------------------------
+   One place above the conversation, whatever report asked: why the agent no
+   longer wakes, what stopped its newest run, what its reports asked for.
+   Type on the page, no card: a label, then one line per thing with its way
+   to do it at the end. */
+.agents-page .agent-attention { flex: none; padding-block-start: var(--space-3); }
+.agents-page .agent-attention-column {
+  display: grid;
+  gap: var(--space-2);
+  width: var(--agents-column);
+  margin-inline: auto;
+  padding-block-end: var(--space-3);
+  border-bottom: 1px solid var(--surface-divider);
+}
+.agents-page .agent-attention-label {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0;
+  color: color-mix(in oklab, var(--amber) 72%, var(--muted));
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: var(--font-meta-lh);
+}
+.agents-page .agent-attention-count { color: var(--faint); font-weight: 500; font-variant-numeric: tabular-nums; }
+/* One grid for every line, so the dates and the actions each keep a column
+   whatever a line carries. */
+.agents-page .agent-attention-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: var(--space-3) var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.agents-page .agent-attention-item {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  row-gap: var(--space-1);
+  min-width: 0;
+}
+.agents-page .agent-attention-words { display: grid; gap: 2px; min-width: 0; }
+.agents-page .agent-attention-title {
+  color: var(--text);
+  font-size: var(--font-response);
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.agents-page .agent-attention-item[data-tone="stopped"] .agent-attention-title::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-inline-end: var(--space-2);
+  border-radius: 50%;
+  background: var(--red);
+  vertical-align: 0.12em;
+}
+.agents-page .agent-attention-detail {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.agents-page .agent-attention-since {
+  grid-column: 2;
+  justify-self: end;
+  color: var(--faint);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  white-space: nowrap;
+}
+.agents-page .agent-attention-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  grid-column: 3;
+}
+.agents-page .agent-attention-item:not(:has(.agent-attention-since)) .agent-attention-actions { grid-column: 2 / 4; }
+.agents-page .agent-attention-more {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  cursor: pointer;
+}
+.agents-page .agent-attention-more:focus-visible { outline: var(--focus-ring-width, 2px) solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm, 4px); }
+@media (hover: hover) {
+  .agents-page .agent-attention-more:hover { color: var(--text); }
+}
+/* A narrow page: the way to do it goes under the words it belongs to. */
+@container agents-page (max-width: 560px) {
+  /* Words and the way to do it side by side; the date goes under the words. */
+  .agents-page .agent-attention-list { grid-template-columns: minmax(0, 1fr) auto; }
+  .agents-page .agent-attention-item { row-gap: 2px; }
+  .agents-page .agent-attention-since { grid-column: 1; grid-row: 2; justify-self: start; }
+  .agents-page .agent-attention-actions,
+  .agents-page .agent-attention-item:not(:has(.agent-attention-since)) .agent-attention-actions { grid-column: 2; grid-row: 1 / span 2; }
+  .agents-page .agent-attention-detail { -webkit-line-clamp: 1; }
+}
 
 /* How the run went: the full report's account, time by time. */
 .agents-page .agent-steps { margin-block-start: var(--space-1); }

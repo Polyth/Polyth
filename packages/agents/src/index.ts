@@ -24,6 +24,7 @@ import { fallbacksFromFile, fallbacksToFile, type AgentFileSpec } from "./agentF
 import { budgetExceeded, failureStreakReached, pendingFeedback, type AgentTrigger, type AgentWake } from "./agentPrompt.ts";
 import { computeNextBeat, validateHeartbeat, type AgentHeartbeat } from "./agentHeartbeat.ts";
 import {
+  sameNeed,
   appendToNotebook,
   clipReport,
   headlineFrom,
@@ -58,18 +59,23 @@ export * from "./agentThread.ts";
 export {
   budgetExceeded,
   composeAgentPrompt,
+  composeResumePrompt,
   estimateTokens,
   failureStreakReached,
+  failureWords,
   journalNotes,
   pendingFeedback,
   spendInLastDay,
+  unfinishedRun,
   DEFAULT_ROTATE_AT,
+  WORKING_REMINDER,
+  WORKING_RULES,
 } from "./agentPrompt.ts";
 export type { AgentSpend, AgentTrigger, AgentWake } from "./agentPrompt.ts";
 export { describeCron, nextRun, nextRuns, validateCron } from "./cron.ts";
 export { parseLoopFile, scanLoopsDir } from "./loops.ts";
 export type { LoopFileResult, LoopSpec } from "./loops.ts";
-export { scanLateReport, settleScheduledRun } from "./runSettlement.ts";
+export { DEFAULT_MAX_RESUMES, RUN_RESUMED_EVENT, scanLateReport, settleScheduledRun } from "./runSettlement.ts";
 export type { LateReportScan, RunSettlementOptions } from "./runSettlement.ts";
 import type { LateReportScan } from "./runSettlement.ts";
 
@@ -176,6 +182,14 @@ export interface ScheduleRunRecord {
   feedback?: AgentRunFeedback;
   /** The person stopped this run: not a failure of the agent. */
   stopped?: boolean;
+  /** Why a run that did not finish ended (see `AgentRunCause`). Absent on
+   *  runs that finished and on records from before it was kept. */
+  cause?: AgentRunCause;
+  /** How often the run continued itself after its turn was cut. */
+  resumed?: number;
+  /** A person's message in the run's session redirected it; the run went on
+   *  with that message and reports its result. */
+  steered?: boolean;
   /** 1-based position of the backup model that served the run, when the
    *  main model could not. */
   backup?: number;
@@ -210,6 +224,15 @@ export interface ScheduleRunRecord {
   needs?: AgentNeed[];
 }
 
+/** Why a run ended without finishing. `person`: someone stopped it. `cut`:
+ *  its turn was cut under it (a restart, an overlong tool call) and its
+ *  continuations ran out. `route`: the model route refused (sign-in, quota,
+ *  the model itself) and no backup could take it. `error`: the turn failed
+ *  otherwise. `approval`: a request waited too long for an answer. `start`:
+ *  the run never reached its session. */
+export type AgentRunCause = "person" | "cut" | "route" | "error" | "approval" | "start";
+export const AGENT_RUN_CAUSES: readonly AgentRunCause[] = ["person", "cut", "route", "error", "approval", "start"];
+
 /** A run waiting for background work (a command, a monitor) to wake it. */
 export interface AgentBackgroundWait {
   /** When the turn ended to wait. */
@@ -223,8 +246,9 @@ export interface AgentRunMoment {
   at: number;
   /** The first line of a message, bounded; for a wait, what it waited on. */
   text: string;
-  /** The turn ended to wait for background work; `until`: when it woke. */
-  kind?: "wait";
+  /** `wait`: the turn ended to wait for background work; `until`: when it
+   *  woke. `resume`: the run continued itself after its turn was cut. */
+  kind?: "wait" | "resume";
   until?: number;
 }
 
@@ -560,6 +584,15 @@ export const ROUTE_FAILURE_CODES: ReadonlySet<string> = new Set([
   "profile-harness-mismatch",
 ]);
 
+/** Start refusals that pass by themselves: the session's runtime is being
+ *  replaced after a restart and nothing was sent. */
+export const START_RETRY_CODES: ReadonlySet<string> = new Set(["epoch-pending"]);
+const DEFAULT_START_RETRY_DELAYS_MS: readonly number[] = [15_000, 90_000];
+const startRetryable = (error: unknown): boolean => {
+  const code = (error as { code?: unknown } | null)?.code;
+  return typeof code === "string" && START_RETRY_CODES.has(code);
+};
+
 export const isRouteFailure = (error: unknown): boolean => {
   const code = (error as { code?: unknown } | null)?.code;
   return typeof code === "string" && ROUTE_FAILURE_CODES.has(code);
@@ -752,6 +785,11 @@ export interface ScheduleRunSettlement {
   /** 1-based backup the run moved to while it ran. */
   backup?: number;
   timeline?: AgentRunMoment[];
+  /** See the run record's fields of the same names. */
+  cause?: AgentRunCause;
+  resumed?: number;
+  steered?: boolean;
+  stopped?: boolean;
 }
 
 export interface ScheduleRunner {
@@ -815,8 +853,12 @@ export interface ScheduleServiceOptions {
   /** Runs a wake script in a sandbox. Without it, a wake with a script never fires. */
   runScript?: (task: ScheduleTask, script: string, events: AgentEvent[]) => Promise<WakeScriptResult>;
   /** A finished run deserves the person's attention: its report met the
-   *  agent's notify policy, or a failure streak stopped the agent. */
-  notify?: (task: ScheduleTask, run: ScheduleRunRecord, reason: "report" | "tripped") => void;
+   *  agent's notify policy, a failure streak stopped the agent, or the run
+   *  did not finish and only the person can clear what stopped it. */
+  notify?: (task: ScheduleTask, run: ScheduleRunRecord, reason: "report" | "tripped" | "failed") => void;
+  /** Waits before a refused start is tried again (see `START_RETRY_CODES`);
+   *  empty never retries. */
+  startRetryDelaysMs?: readonly number[];
 }
 
 export interface SchedulePreview {
@@ -887,6 +929,8 @@ export interface ScheduleService {
   markSeen(id: string, at?: number): ScheduleTask;
   /** Record (or with `null` clear) the person's verdict on one run's report. */
   setFeedback(id: string, runId: string, feedback: { verdict: "up" | "down"; note?: string } | null): ScheduleTask;
+  /** The person settles (or reopens) what a report said only they can do. */
+  setNeedDone(id: string, runId: string, index: number, done: boolean): ScheduleTask;
   /** The person stops the runs in progress: marks them and returns their
    *  sessions, which the caller aborts. */
   requestStop(id: string): string[];
@@ -947,6 +991,15 @@ const targetModeOf = (t: Pick<ScheduleTask, "target" | "sessionId">): NonNullabl
 
 /** Whether a finished run reaches the person as a notification. Failures
  *  speak through the failure streak instead (see `pauseAfterFailures`). */
+/** A run that did not finish and will not by itself: the person hears of it
+ *  at once instead of finding it on the page the next day. A run someone
+ *  stopped is their own doing; a wake nobody asked for by hand that merely
+ *  was cut retries on its next wake and speaks through the failure streak. */
+export function failureNeedsPerson(run: Pick<ScheduleRunRecord, "status" | "cause" | "stopped" | "trigger">): boolean {
+  if (run.status !== "failed" || run.stopped) return false;
+  return run.cause === "route" || run.cause === "approval" || run.trigger === "manual";
+}
+
 export function reportNotifies(
   policy: AgentNotifyPolicy | undefined,
   run: Pick<ScheduleRunRecord, "status" | "signal">,
@@ -1388,6 +1441,7 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
   const minCronMinutes = opts.minCronIntervalMinutes ?? 1;
   const missedGraceMs = opts.missedGraceMs ?? DEFAULT_MISSED_GRACE_MS;
   const maxConcurrent = opts.maxConcurrentRuns ?? DEFAULT_MAX_CONCURRENT_RUNS;
+  const startRetryDelays = opts.startRetryDelaysMs ?? DEFAULT_START_RETRY_DELAYS_MS;
   let timer: ReturnType<typeof setInterval> | null = null;
   const legacy = load(opts.file);
   let tasks: ScheduleTask[] = [];
@@ -1581,7 +1635,18 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
     else delete rec.headline;
     if (report.needs.length) rec.needs = report.needs;
     else delete rec.needs;
-    if (ok) remember(task, rec, report.remember);
+    if (ok) {
+      remember(task, rec, report.remember);
+      // What the agent says no longer waits is settled wherever it was asked.
+      for (const words of report.resolved) {
+        for (const run of task.history ?? []) {
+          if (run === rec) continue;
+          for (const need of run.needs ?? []) {
+            if (!need.done && sameNeed(need.text, words)) need.done = { at: now(), by: "agent" };
+          }
+        }
+      }
+    }
   };
 
   /** `task` owns canonical history/clock state; `executableTask` may be an
@@ -1607,6 +1672,11 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
     if (result.cost !== undefined) rec.cost = result.cost;
     if (result.backup) rec.backup = result.backup;
     if (result.timeline?.length) rec.timeline = result.timeline;
+    if (result.stopped) rec.stopped = true;
+    if (result.resumed) rec.resumed = result.resumed;
+    if (result.steered) rec.steered = true;
+    if (result.status === "failed") rec.cause = rec.stopped ? "person" : result.cause ?? "error";
+    else delete rec.cause;
     // The newest step only means something while the run works; the count stays.
     delete rec.activity;
     delete rec.background;
@@ -1631,6 +1701,7 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
     }
     try {
       if (tripped && (task.notify ?? "alerts") !== "off") opts.notify?.(task, rec, "tripped");
+      else if (failureNeedsPerson(rec) && (task.notify ?? "alerts") !== "off") opts.notify?.(task, rec, "failed");
       else if (reportNotifies(task.notify, rec)) opts.notify?.(task, rec, "report");
     } catch { /* delivery never changes the run's record */ }
   };
@@ -1739,6 +1810,25 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
     }
   };
 
+  /** Hands the run to its session. A session whose runtime is still being
+   *  replaced refuses for a moment and nothing ran, so the same start is
+   *  tried again shortly instead of losing the wake until the next one. */
+  const admit = async (task: ScheduleTask, runId: string, wake: AgentWake): Promise<ScheduleRunOutcome | void> => {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await opts.runner.run(task, runId, wake);
+      } catch (error) {
+        const delay = startRetryDelays[attempt];
+        if (delay === undefined || !startRetryable(error) || paused()) throw error;
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, delay);
+          timer.unref?.();
+        });
+        if (paused()) throw error;
+      }
+    }
+  };
+
   /** `task` owns canonical history/clock state; `executableTask` may be an
    * exact one-shot repository snapshot which must never replace canonical
    * approved prompt/cadence fields. `admitted` resolves once the prompt is
@@ -1799,7 +1889,7 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
     save();
     const admission = (async (): Promise<boolean> => {
       try {
-        const outcome = await opts.runner.run(executableTask, runId, wake);
+        const outcome = await admit(executableTask, runId, wake);
         for (const run of task.history ?? []) {
           if (run.feedback && feedbackRuns.includes(run.runId)) run.feedback.delivered = true;
         }
@@ -1826,7 +1916,11 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
         save();
         return true;
       } catch (e) {
-        finish(task, rec, { status: "failed", error: e instanceof Error ? e.message : String(e) });
+        finish(task, rec, {
+          status: "failed",
+          cause: isRouteFailure(e) ? "route" : "start",
+          error: e instanceof Error ? e.message : String(e),
+        });
         return false;
       }
     })();
@@ -2381,6 +2475,24 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
         t.seenAt = seen;
         save();
       }
+      return t;
+    },
+    setNeedDone(id, runId, index, done) {
+      const t = mustGet(id);
+      const run = t.history?.find((record) => record.runId === runId);
+      const need = run?.needs?.[index];
+      if (!run || !need) throw err("request not found", "not-found");
+      // The same request asked in several reports is one to-do: settle (or
+      // reopen) every copy, so it does not come back from an older report.
+      for (const record of t.history ?? []) {
+        for (const other of record.needs ?? []) {
+          if (other !== need && !sameNeed(other.text, need.text)) continue;
+          if (done) other.done = { at: now(), by: "user" };
+          else delete other.done;
+        }
+      }
+      t.updatedAt = now();
+      save();
       return t;
     },
     setFeedback(id, runId, feedback) {

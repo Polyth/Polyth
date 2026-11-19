@@ -3091,7 +3091,9 @@ the queue is re-read (`departedQueueIds`, `launchingId` in
 `queue/dispatched`) or a failed promotion brings the row back from the next
 read. A row that the server queued because the session's runtime could not be
 recovered (`delivery/fallback-queued` with `runtime-recovery-unavailable`,
-`reconciliation-blocked`/`-unknown`, `session-epoch-pending`/`-unknown`) does
+`reconciliation-blocked`/`-unknown`, `session-epoch-pending`/`-unknown`) is
+first retried by the send itself, which starts the same recover-on-use pass
+opening the chat runs; when that does not succeed the row does
 not drain by itself, so the list leads with a status row that says so and
 offers Resume, which promotes the oldest waiting row and retries the recovery
 (`queueStalledOnRecovery`). Reasons that clear alone (a running turn, a pending
@@ -4511,6 +4513,52 @@ that opens the navigator). Rules, pinned by `apps/web/test/packagePages.test.ts`
   chat row current.
 - `host.store.getSnapshot().activePage` reports the open page; disposing a
   package's registration closes its open page.
+
+#### What waits for the person on an agent's page
+
+An agent's page opens on its conversation, and above the conversation it
+lists what waits for the person, once, whatever report asked for it
+(`packages/agents/widgets/AgentAttention.tsx`; the model is
+`agentAttention` in `widgets/agentFailure.ts`, DOM-free and tested in
+`packages/agents/test/agentAttention.test.ts`). Nothing waits: nothing is
+drawn. Most urgent first:
+
+- **Why it no longer wakes.** A failure streak or the daily limit stopped
+  the agent: the line says so, names how its last run ended, and carries
+  Resume (the limit lifts by itself and has no action). The header's status
+  stays the one word "Stopped"; the explanation and its action sit together.
+- **What stopped its newest run that only the person can clear.** A refused
+  model route (the provider's own message, with Harness settings for the
+  route that served the run) or an approval that waited past its timeout.
+  Only the newest finished run speaks; a later run that finished, or one in
+  progress, clears it. A run that was merely cut is not listed: it continues
+  itself.
+- **What its reports asked for.** Every open `Needs you` request across the
+  journal (`openNeeds`): the newest wording, since when, a web link when the
+  report gave one, and Done. Done settles the request wherever it was asked;
+  the agent closes one itself with a `Resolved:` line.
+
+The list shows three lines (two on a phone) and folds the rest behind
+"N more". It is type on the page with a label, never a card or a banner, and
+all lines share one grid so dates and actions keep their columns; on a narrow
+page the action sits beside the words and the date under them.
+
+Under a report, `Needs you` is only the record of what that report asked
+("Asked you", settled ones struck through): the to-do lives above, never in
+two places. Requests that wait inside a run in progress (approvals,
+questions) are answered at the composer's dock, not here.
+
+A run that did not finish never reads "The run failed" with its first
+passing line presented as a report. Its headline says what happened
+(`failureTitle`: cut off, the model refused, could not start, stopped on an
+unanswered request, stopped by you; a record kept before causes existed says
+only "Stopped before it finished"), the line under it why (`failureDetail`;
+a provider's JSON error is reduced to its message and source by
+`plainError`), then "Where it was" with the agent's last words and its step
+count, and, on the newest run of an agent that will wake again, when it
+starts from what this run left. Only the row's mark is red; the words stay
+in the page's ink. A report reached after a continuation or after the
+person redirected the run says so beside its time.
 
 #### Split sessions view (two chats side by side)
 

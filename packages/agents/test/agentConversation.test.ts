@@ -301,6 +301,16 @@ function fakeServer(tasks: ScheduleTaskDto[]) {
     if (url === "/api/files/upload") return response({ ok: true });
     const task = tasks.find((item) => url.includes(`/${item.id}/`)) ?? tasks[0]!;
     if (url.endsWith("/run") || url.endsWith("/stop") || url.endsWith("/seen")) return response(url.endsWith("/stop") ? { stopped: 1 } : task);
+    // As the server settles a request: on the run that asked it.
+    const need = /\/runs\/([^/]+)\/needs\/(\d+)$/.exec(url);
+    if (need) {
+      const asked = task.history?.find((run) => run.runId === need[1])?.needs?.[Number(need[2])];
+      if (asked) {
+        if (body.done) asked.done = { at: Date.now(), by: "user" };
+        else delete asked.done;
+      }
+      return response(task);
+    }
     return response({});
   }) as typeof fetch;
   return writes;
@@ -586,13 +596,31 @@ test("nights read as one row each; the newest report says when and how long, and
   const latest = feed.querySelector('.agent-report[data-latest]')!;
   assert.match(latest.querySelector(".agent-report-when")!.textContent ?? "", /^(Today|Yesterday) · .+ · 58 min$/);
   assert.equal(latest.querySelector(".agent-report-headline")!.textContent, "devel fixed; 2 PRs merged");
-  const needs = latest.querySelector(".agent-needs")!;
-  assert.match(needs.textContent ?? "", /Electron 45 · PR #32.*waits for your smoke test/);
-  const links = [...needs.querySelectorAll<HTMLAnchorElement>("a")];
+  // What waits for the person is listed once, above the conversation, with
+  // the way to do it; the report keeps only the record of what it asked.
+  const attention = view.container.querySelector(".agent-attention")!;
+  assert.equal(attention.getAttribute("aria-label"), "Needs you");
+  const asks = [...attention.querySelectorAll(".agent-attention-item")];
+  assert.deepEqual(asks.map((item) => item.querySelector(".agent-attention-title")!.textContent),
+    ["Electron 45 · PR #32", "Rotate the deploy key"]);
+  assert.match(asks[0]!.textContent ?? "", /waits for your smoke test/);
+  const links = [...attention.querySelectorAll<HTMLAnchorElement>("a")];
   assert.equal(links.length, 1, "only a web link opens");
   assert.equal(links[0]!.textContent, "Open PR");
   assert.equal(links[0]!.getAttribute("href"), "https://github.com/acme/app/pull/32");
   assert.equal(links[0]!.getAttribute("rel"), "noopener noreferrer");
+  const record = latest.querySelector(".agent-needs")!;
+  assert.equal(record.getAttribute("aria-label"), "Asked you");
+  assert.match(record.textContent ?? "", /Electron 45 · PR #32.*Rotate the deploy key/);
+  assert.equal(record.querySelectorAll("a").length, 1, "the record links only to the web too");
+  assert.equal(record.querySelector("button"), null, "the record carries no action");
+  // Settling one takes it off the list at once, wherever it was asked.
+  await act(async () => { buttonNamed(asks[1]!, "Done")!.click(); await delay(20); });
+  assert.deepEqual(
+    [...view.container.querySelectorAll(".agent-attention-title")].map((title) => title.textContent),
+    ["Electron 45 · PR #32"],
+  );
+  assert.equal(latest.querySelector('.agent-need[data-done="user"]')?.textContent, "Rotate the deploy keyDone");
 
   // The words act like the foot's links for a pointer: the headline opens the
   // run's session, the opening paragraph reads on into the full report.

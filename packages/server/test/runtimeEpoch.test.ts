@@ -2109,3 +2109,60 @@ test("later unrelated session-reset does not become the epoch send barrier", asy
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a message sent to a dormant session behind a replaced runtime is delivered without anyone opening the chat", async () => {
+  const endpoint = replacementEndpoint();
+  const submitted: string[] = [];
+  const runtime = borrowedConfirmRuntime(endpoint, submitted);
+  const { dir, store, project, sessions } = harness(runtime, "polyth-epoch-send-dormant-");
+  const sessionId = "session-send-dormant";
+  try {
+    const projection = projectionFor(project, endpoint, sessionId, "backend-old", "owned:destroyed");
+    projection.status = "working";
+    await store.upsertProjection(projection);
+    await store.append(sessionId, "user/message", { text: "wait for the stable build" });
+    await store.append(sessionId, "turn/started", { turnId: "turn-cut" }, { ignorable: true });
+    // What a stop that found the runtime gone leaves behind: the turn is
+    // closed locally, the epoch break is on record, and with no work pending
+    // nothing replaced the runtime.
+    await sessions.abort(sessionId).catch(() => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal((await store.projection(sessionId))?.status, "idle");
+    assert.equal((await store.reconciliation(sessionId))?.state, "blocked");
+    assert.equal(submitted.length, 0);
+
+    // Polyth restarts in between: the next process knows the break only
+    // from what was persisted.
+    sessions.dispose();
+    const rehydrated = createSessionService({
+      store,
+      projects: { list: async () => [project], get: async (id: string) => id === project.id ? project : undefined } as unknown as ProjectService,
+      permissions: { evaluate: () => "ask", addRule: () => undefined, rules: () => [] } as unknown as PermissionService,
+      broadcast: { event: () => undefined, projection: () => undefined },
+      queue: store,
+      runtimes: { forProject: async () => runtime },
+    });
+    await rehydrated.recoverPendingWork!();
+    assert.equal(submitted.length, 0, "a dormant session is not recovered eagerly");
+
+    // A scheduled agent wakes into that session hours later.
+    await rehydrated.send(sessionId, { text: "nightly wake" });
+    await waitFor(async () => submitted.length === 1);
+    rehydrated.dispose();
+
+    assert.match(submitted[0]!, /nightly wake$/);
+    const events = await store.events(sessionId);
+    assert.ok(events.some((event) => event.type === "runtime/epoch-replaced"));
+    assert.equal(deliveredQueue(events), queuedCount(events), "nothing is left waiting in the queue");
+  } finally {
+    await store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function queuedCount(events: Awaited<ReturnType<ReturnType<typeof createStore>["events"]>>): number {
+  return events.filter((event) => event.type === "queue/enqueued").length;
+}
+function deliveredQueue(events: Awaited<ReturnType<ReturnType<typeof createStore>["events"]>>): number {
+  return events.filter((event) => event.type === "queue/dispatched").length;
+}
