@@ -30,6 +30,8 @@ export interface SessionSnapshot {
   title: string;
   status: string;
   parentId?: string;
+  /** A forked chat: its `parentId` is lineage, never delegated attribution. */
+  forkOf?: string;
   attention?: { questions: number; permissions: number };
   backgroundWork?: BackgroundWorkState;
   /** Server time of the snapshot's projection. */
@@ -138,7 +140,7 @@ export function diffNotifications(
       // The server writes this transition's record after the status change,
       // so it is never older than the working snapshot before it.
       const since = before.updatedAt !== undefined ? { since: before.updatedAt } : {};
-      if (s.parentId) {
+      if (s.parentId && !s.forkOf) {
         // delegated agent: attribute to the parent session
         if (opts.kinds.has("subagent")) {
           const parent = byId.get(s.parentId);

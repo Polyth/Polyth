@@ -2122,7 +2122,10 @@ The command palette
   (an `agent.spawn` subagent, a workflow unit) is listed only inside its
   listed parent's disclosure, pinned parents included, and never takes a row
   or a page slot of its own (`isNavigatorRoot`, `apps/web/src/sessionTree.ts`).
-  A child whose parent has not loaded is withheld while
+  A fork carries `parentId` for lineage plus `forkOf`, and `forkOf` makes it a
+  chat of its own: its own navigator row, never a subagent row, never rolled
+  into the source's subagent counts or notifications. A child whose parent
+  has not loaded is withheld while
   `apps/web/src/sessionParents.ts` reads the parent once; it stands alone only
   when the parent is archived, filtered out or gone. Opening a child unfolds
   its ancestors and keeps its top ancestor in view. Search lists matching
@@ -3622,7 +3625,8 @@ own, rows drop the chevron (the row itself opens the chat) and a running row
 leaves the model out so its action and time stay readable. The agent's own
 logo wears its harness profile's color, as the composer's model chip does.
 The island is text on the canvas in every look, on the pending stack's grid. State
-comes from the canonical child projections (`parentId`) rolled up through
+comes from the canonical child projections (`parentId`, minus `forkOf` forks,
+which are chats of their own) rolled up through
 grandchildren (`apps/web/src/subagentActivity.ts`), the same source as the
 navigator's disclosure pill. Pinned in `apps/web/test/subagentBranch.test.ts`.
 

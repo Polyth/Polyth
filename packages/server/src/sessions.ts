@@ -6391,7 +6391,10 @@ export function createSessionService(deps: {
           ...(turnId ? { turnId } : {}),
           ...(harnessId ? { harnessId } : {}),
           ...(ev.agentKind || currentProjection?.parentId
-            ? { agentKind: ev.agentKind ?? (currentProjection?.parentId ? "subagent" : "main") }
+            ? {
+                agentKind: ev.agentKind
+                  ?? (currentProjection?.parentId && !currentProjection?.forkOf ? "subagent" : "main"),
+              }
             : {}),
         }, { ignorable: true });
         if (sideEffects) {
@@ -11292,6 +11295,10 @@ export function createSessionService(deps: {
       harnessTransition: _harnessTransition, runtimeControl: _runtimeControl,
       resume: _resume, releasedExecution: _releasedExecution, paused: _paused,
       autoRetry: _autoRetry, backgroundWork: _backgroundWork, promptSuggestion: _promptSuggestion,
+      // The source's move receipt is its own: a fork was never moved, so
+      // carrying `projectMove` would publish a false move and let the
+      // startup reconciler act on a receipt that does not belong to the child.
+      projectMove: _projectMove,
       // The parent's idle recap is pinned to the parent's log (`atSeq`); the
       // fork starts a fresh one, so carrying it would show a foreign summary.
       assist: _assist,
@@ -11331,7 +11338,7 @@ export function createSessionService(deps: {
       ...forkable
     } = forkableProjection(proj);
     const projection: SessionProjection = {
-      ...forkable, id: forkId, parentId: sessionId, title,
+      ...forkable, id: forkId, parentId: sessionId, forkOf: sessionId, title,
       status: "idle",
       createdAt: now,
       updatedAt: now,
@@ -11908,7 +11915,9 @@ export function createSessionService(deps: {
     const seen = new Set([root.id]);
     for (let index = 0; index < family.length && family.length <= SESSION_MOVE_FAMILY_LIMIT; index += 1) {
       for (const child of children.get(family[index]!.id) ?? []) {
-        if (seen.has(child.id) || await sessionEventExists(child.id, "session/forked")) continue;
+        if (seen.has(child.id)) continue;
+        // A fork carries `forkOf`; a legacy fork has only its marker event.
+        if (child.forkOf || await sessionEventExists(child.id, "session/forked")) continue;
         seen.add(child.id);
         family.push(child);
       }
@@ -11935,7 +11944,7 @@ export function createSessionService(deps: {
       return { reason: "private", message: "A chat in Only me stays there. Share a note from My notes instead." };
     }
     if (root.status === "archived") return { reason: "archived", message: "Restore this chat before moving it" };
-    if (root.parentId && await store.projection(root.parentId) && !await sessionEventExists(root.id, "session/forked")) {
+    if (root.parentId && !root.forkOf && await store.projection(root.parentId) && !await sessionEventExists(root.id, "session/forked")) {
       return { reason: "delegated", message: "Move the chat that started this subagent instead" };
     }
     if (family.length > SESSION_MOVE_FAMILY_LIMIT) {
@@ -15088,7 +15097,7 @@ export function createSessionService(deps: {
         // A fork belongs to whoever forked it, and the source's running work
         // stays with the source (`forkableProjection`).
         const projection: SessionProjection = {
-          ...forkableProjection(proj), id: forkId, parentId: sessionId, title,
+          ...forkableProjection(proj), id: forkId, parentId: sessionId, forkOf: sessionId, title,
           status: "reconciling",
           createdAt: now,
           updatedAt: now,

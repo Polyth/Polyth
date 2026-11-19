@@ -68,7 +68,7 @@ function workStartedAt(session: SessionProjection): number | undefined {
 /** Subagent and workflow children mirror their requests into the parent and
  *  are not navigator roots, so only root chats compete for the island. */
 function rootChats(sessions: readonly SessionProjection[]): SessionProjection[] {
-  return sessions.filter((session) => session.status !== "archived" && !session.parentId);
+  return sessions.filter((session) => session.status !== "archived" && (!session.parentId || session.forkOf));
 }
 
 /** Which chat the island shows, the other chats its line counts and what it

@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { buildSessionTree, includeSessionTreeContext, isNavigatorRoot } from "../src/sessionTree.ts";
 
-const item = (id: string, parentId?: string) => ({ id, ...(parentId ? { parentId } : {}) });
+const item = (id: string, parentId?: string, forkOf?: string) => ({ id, ...(parentId ? { parentId } : {}), ...(forkOf ? { forkOf } : {}) });
 
 test("session tree context keeps parents and descendants around a paged seed", () => {
   const sessions = [item("root"), item("child", "root"), item("grandchild", "child"), item("other")];
@@ -40,6 +40,20 @@ test("a delegated child rides with its listed parent and waits for an unread one
   assert.equal(isNavigatorRoot(item("child", "parent"), listed, pending), false);
   assert.equal(isNavigatorRoot(item("early", "loading-parent"), listed, pending), false);
   assert.equal(isNavigatorRoot(item("orphan", "archived-parent"), listed, pending), true);
+});
+
+test("a fork is a chat of its own, never a nested subagent row", () => {
+  const listed = new Set(["parent", "fork"]);
+  const pending = () => false;
+  assert.equal(isNavigatorRoot(item("fork", "parent", "parent"), listed, pending), true);
+
+  const sessions = [item("root"), item("child", "root"), item("fork", "root", "root")];
+  const roots = buildSessionTree(sessions);
+  assert.deepEqual(roots.map((node) => node.item.id), ["root", "fork"], "the fork stands beside its source");
+  assert.deepEqual(roots[0]!.children.map((node) => node.item.id), ["child"], "the fork never nests");
+
+  const aroundFork = includeSessionTreeContext(sessions, [sessions[2]!]);
+  assert.deepEqual(aroundFork.map((session) => session.id), ["fork"], "the source is not pulled in as an ancestor");
 });
 
 test("pinned context can include descendants without pulling in ancestors", () => {

@@ -18,7 +18,7 @@ const NO_CLAIMED_PURPOSES: ReadonlySet<string> = new Set();
 
 /** The fields "did an automation start this?" reads, so callers can pass any
  *  session-shaped row (summary or full projection). */
-export type AutomationSession = Pick<SessionProjection, "id" | "purpose" | "parentId" | "origin">;
+export type AutomationSession = Pick<SessionProjection, "id" | "purpose" | "parentId" | "forkOf" | "origin">;
 
 /** Whether an automation started this session: it carries an `origin` (an
  *  agent's own run, a monitoring incident chat), its `purpose` is a purpose a
@@ -37,7 +37,7 @@ export function isAutomatedSession(
     seen.add(current.id);
     if (current.origin) return true;
     if (current.purpose && claimedPurposes.has(current.purpose)) return true;
-    current = current.parentId ? byId.get(current.parentId) : undefined;
+    current = current.parentId && !current.forkOf ? byId.get(current.parentId) : undefined;
   }
   return false;
 }
@@ -72,7 +72,7 @@ export function selectHeroRecentSessions(
     .filter((session) => {
       if (session.status === "archived") return false;
       if (projects && !projects.has(session.projectId)) return false;
-      if (!prefs.subagents && session.parentId) return false;
+      if (!prefs.subagents && session.parentId && !session.forkOf) return false;
       if (!prefs.automated && isAutomatedSession(session, byId, claimedPurposes)) return false;
       if (prefs.filter === "unread") return (session.attention?.unread ?? 0) > 0;
       if (prefs.filter === "active") return ACTIVE_KINDS.has(resolveSessionStatus(session, now).kind);

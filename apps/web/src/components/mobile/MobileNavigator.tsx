@@ -1223,11 +1223,12 @@ export default function MobileNavigator() {
     const byId = new Map(sessions.map((session) => [session.id, session]));
     const ancestors = new Set<string>();
     const seen = new Set<string>();
-    let parentId = byId.get(activeSessionId)?.parentId;
+    let parentId = byId.get(activeSessionId)?.forkOf ? undefined : byId.get(activeSessionId)?.parentId;
     while (parentId && !seen.has(parentId)) {
       seen.add(parentId);
       ancestors.add(parentId);
-      parentId = byId.get(parentId)?.parentId;
+      const next = byId.get(parentId);
+      parentId = next?.forkOf ? undefined : next?.parentId;
     }
     if (ancestors.size === 0) return;
     setExpandedSubagents((current) => {

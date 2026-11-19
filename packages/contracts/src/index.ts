@@ -2108,7 +2108,7 @@ export const delegatedChildRunning = (status: SessionStatus): boolean =>
  *  that still run. Their work is unfinished — shared-workspace children write
  *  straight into the parent's checkout — so the parent's isolated work is not
  *  ready to integrate, discard or publish while any is listed. */
-export function runningSubagents<T extends Pick<SessionProjection, "id" | "parentId" | "status">>(
+export function runningSubagents<T extends Pick<SessionProjection, "id" | "parentId" | "forkOf" | "status">>(
   sessions: readonly T[],
   sessionId: string,
 ): T[] {
@@ -2121,7 +2121,7 @@ export function runningSubagents<T extends Pick<SessionProjection, "id" | "paren
     }
     return false;
   };
-  return sessions.filter((candidate) => candidate.id !== sessionId && delegatedChildRunning(candidate.status) && descends(candidate));
+  return sessions.filter((candidate) => candidate.id !== sessionId && !candidate.forkOf && delegatedChildRunning(candidate.status) && descends(candidate));
 }
 
 /** Blocking statuses where no agent turn runs but Polyth has not yet proven
@@ -2836,6 +2836,12 @@ export interface SessionProjection {
   /** Resumable native import; canonical events remain authoritative. */
   historyImport?: { state: "pending" | "in-progress" | "failed" | "complete"; count: number; digest?: string; code?: string };
   id: string; projectId: string; parentId?: string;
+  /** The chat this one was forked from (`session/forked`): a fork carries
+   *  `parentId` for lineage but is a chat of its own — never a delegated
+   *  subagent, so subagent classification excludes `forkOf` rows. Absent on
+   *  ordinary chats and legacy forks (whose lineage lives in the copied
+   *  `session/forked` marker alone). */
+  forkOf?: string;
   /** Immutable package-owned session kind, set at creation. A purpose session
    * belongs to the workbench profile that declares the same `sessionPurpose`
    * and receives that package's per-turn context; forks inherit it. Absent
@@ -3485,7 +3491,7 @@ export interface SessionReplayPage {
  * the correct icon before it is opened: without `resume`, `runtimeControl`
  * and `harnessTransition` a summary row misreads a provider-limit pause as a
  * failure and a dormant owned epoch as an unexpected runtime change. */
-export const SESSION_SUMMARY_FIELDS = ["id", "spaceId", "projectId", "parentId", "purpose", "origin", "title", "titleSource", "status", "createdAt", "updatedAt", "lastTurnAt", "model", "agent", "resolvedHarnessId", "folderId", "labelIds", "pinned", "branch", "worktreeId", "worktreePath", "autoAcceptSetting", "autoAccept", "autoAcceptAll", "attention", "resume", "paused", "runtimeControl", "harnessTransition", "historyImport", "backgroundWork", "goal", "isolationSummary", "isolationMerge", "sharing", "draftPreview", "repositoryScope"] as const satisfies readonly (keyof SessionProjection)[];
+export const SESSION_SUMMARY_FIELDS = ["id", "spaceId", "projectId", "parentId", "forkOf", "purpose", "origin", "title", "titleSource", "status", "createdAt", "updatedAt", "lastTurnAt", "model", "agent", "resolvedHarnessId", "folderId", "labelIds", "pinned", "branch", "worktreeId", "worktreePath", "autoAcceptSetting", "autoAccept", "autoAcceptAll", "attention", "resume", "paused", "runtimeControl", "harnessTransition", "historyImport", "backgroundWork", "goal", "isolationSummary", "isolationMerge", "sharing", "draftPreview", "repositoryScope"] as const satisfies readonly (keyof SessionProjection)[];
 
 /** Unread top-level chats per project the rail query returns; enough to show "9+". */
 export const RAIL_STATUS_UNREAD_PER_PROJECT = 10;

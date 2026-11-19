@@ -22,7 +22,7 @@ import { isIsolatedSession } from "./sidebarPrefs.ts";
 import { getState, setUiError, upsertSession } from "./store.ts";
 
 type MovableSession = Pick<SessionProjection,
-  "id" | "projectId" | "title" | "status" | "parentId" | "purpose" | "origin" | "sharing" | "isolation" | "isolationSummary" | "branch">;
+  "id" | "projectId" | "title" | "status" | "parentId" | "forkOf" | "purpose" | "origin" | "sharing" | "isolation" | "isolationSummary" | "branch">;
 
 const projectName = (project: Pick<Project, "name" | "path"> | undefined): string =>
   project?.name || project?.path || tr("sessionMove.unknownProject");
@@ -37,7 +37,7 @@ export function sessionMoveTargets(session: Pick<SessionProjection, "projectId">
  *  fork is a chat of its own, which only the sharing view can tell apart. */
 export function canMoveSession(session: MovableSession, projects: readonly Project[]): boolean {
   if (!canManageSession(session) || session.status === "archived" || session.purpose || session.origin) return false;
-  if (session.parentId && session.sharing?.inherited !== false) return false;
+  if (session.parentId && !session.forkOf && session.sharing?.inherited !== false) return false;
   if (isIsolatedSession(session)) return false;
   const source = projects.find((project) => project.id === session.projectId);
   if (!source || source.parentProjectId || source.remote) return false;

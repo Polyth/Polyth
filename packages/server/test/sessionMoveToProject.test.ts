@@ -251,6 +251,26 @@ test("a fork is its own chat and stays; it can also move alone", async (t) => {
   assert.equal((await moved(f, fork.id)).projectId, "three");
 });
 
+test("a real fork carries forkOf and never the source's move receipt", async (t) => {
+  const f = fixture(t);
+  const root = await f.sessions.create({ projectId: "one", title: "Root" });
+  await f.sessions.moveToProject!(root.id, { projectId: "two" });
+  assert.ok((await moved(f, root.id)).projectMove, "the moved root carries its receipt");
+
+  const fork = await f.sessions.fork(root.id);
+  const forkRow = await moved(f, fork.id);
+  assert.equal(forkRow.projectId, "two");
+  assert.equal(forkRow.parentId, root.id);
+  assert.equal(forkRow.forkOf, root.id, "lineage marks the fork without an event scan");
+  assert.equal(forkRow.projectMove, undefined, "a fork was never moved; the source's receipt is not its own");
+
+  // forkOf alone keeps the fork out of a later move family, with no marker event
+  // in the fork's copied prefix to consult.
+  const again = await f.sessions.moveToProject!(root.id, { projectId: "three" });
+  assert.deepEqual(again.sessionIds, [root.id]);
+  assert.equal((await moved(f, fork.id)).projectId, "two");
+});
+
 for (const sharedAuthority of [true, false]) {
   test(`the next message starts a fresh leg in the target folder (${sharedAuthority ? "one daemon" : "a runtime per folder"})`, async (t) => {
     const f = fixture(t, { sharedAuthority });

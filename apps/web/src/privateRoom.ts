@@ -28,11 +28,11 @@ export const privateRoomOf = (projects: readonly Project[], parentId: string): P
 export const offersPrivateRoom = (project: Pick<Project, "othersHere" | "personal" | "parentProjectId">): boolean =>
   project.othersHere === true && !project.personal && !project.parentProjectId;
 
-type RoomSession = Pick<SessionProjection, "projectId" | "status" | "attention" | "parentId">;
+type RoomSession = Pick<SessionProjection, "projectId" | "status" | "attention" | "parentId" | "forkOf">;
 
 /** A room's own chats: what its row counts. Delegated children ride inside them. */
 export const roomChatCount = (sessions: readonly RoomSession[], roomId: string | undefined): number =>
-  roomId === undefined ? 0 : sessions.filter((session) => session.projectId === roomId && session.status !== "archived" && !session.parentId).length;
+  roomId === undefined ? 0 : sessions.filter((session) => session.projectId === roomId && session.status !== "archived" && (!session.parentId || session.forkOf)).length;
 
 /** Whether a chat in a room is waiting for its person, for when its row is closed. */
 export const roomWaiting = (sessions: readonly RoomSession[], roomId: string | undefined): boolean =>

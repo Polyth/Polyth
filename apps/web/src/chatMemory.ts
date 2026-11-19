@@ -21,13 +21,13 @@ export interface ChatMemoryState {
 }
 
 export function chatMemoryState(
-  session: Pick<SessionProjection, "compactionPreference" | "parentId" | "purpose">,
+  session: Pick<SessionProjection, "compactionPreference" | "parentId" | "forkOf" | "purpose">,
   personDefault: CompactionPreference,
   canSwitchOffAutoCompaction: boolean,
 ): ChatMemoryState {
   const chosen = effectiveCompactionPreference(
     session.compactionPreference,
-    session.parentId || session.purpose ? undefined : personDefault,
+    (session.parentId && !session.forkOf) || session.purpose ? undefined : personDefault,
   );
   return {
     chosen,
