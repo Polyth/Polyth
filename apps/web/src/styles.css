@@ -1856,6 +1856,12 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
      target); the grid's column gap keeps the title clear of it. */
   --session-menu-size: 28px;
   --session-menu-slot: calc(2px + var(--session-menu-size));
+  /* Centre of the last trailing mark (a 14px identity icon ending on the
+     trailing inset). Hover controls — the ⋯ trigger and the Shift quick
+     buttons — centre their last glyph here so they stand in the same column
+     as the row's status icons. */
+  --session-trailing-axis: calc(var(--nav-trailing-inset) + (var(--icon-sm) - 2px) / 2);
+  --session-quick-size: 26px;
 }
 /* Under a worktree heading the state column shares the heading's +/− axis. */
 .session-worktree-group { --nav-indent-session: var(--nav-worktree-row-indent, var(--nav-indent-worktree)); }
@@ -2406,9 +2412,9 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
    hover or keyboard focus; touch and drawer layouts only for the open or
    keyboard-focused row (rules near the end of the cascade). Whenever it is
    shown it takes its own trailing slot in place of the meta column, so it
-   never paints over the title or the subagent disclosure. Its glyph centre
-   matches the project row's ⋯. Opacity — not display — keeps it in the tab
-   order. */
+   never paints over the title or the subagent disclosure. On fine pointers
+   its glyph centres on the status-icon column (--session-trailing-axis).
+   Opacity — not display — keeps it in the tab order. */
 .session-menu-trigger {
   position: absolute;
   z-index: 3;
@@ -2430,6 +2436,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 }
 .session-menu-trigger svg { width: 16px; height: 16px; }
 @media (hover: hover) and (pointer: fine) {
+  .session-menu-trigger { inset-inline-end: calc(var(--session-trailing-axis) - var(--session-menu-size) / 2); }
   .session-row:hover .session-menu-trigger,
   .session-row:has(:focus-visible) .session-menu-trigger,
   .session-row.menu-open .session-menu-trigger {
@@ -14925,7 +14932,8 @@ button[aria-busy="true"] { position: relative; }
     position: absolute;
     z-index: 3;
     top: 50%;
-    right: 4px;
+    /* The ✕ centres on the status column, like the ⋯ it replaces. */
+    inset-inline-end: calc(var(--session-trailing-axis) - var(--session-quick-size) / 2);
     transform: translateY(-50%);
     display: flex;
     gap: var(--space-1);
@@ -14938,9 +14946,9 @@ button[aria-busy="true"] { position: relative; }
     pointer-events: auto;
   }
   .session-row.shift-quick .session-quick > .session-quick-btn {
-    width: 26px;
-    min-width: 26px;
-    height: 26px;
+    width: var(--session-quick-size);
+    min-width: var(--session-quick-size);
+    height: var(--session-quick-size);
     display: inline-grid;
     place-items: center;
     color: var(--text-dim);
@@ -14955,7 +14963,7 @@ button[aria-busy="true"] { position: relative; }
   /* The two quick buttons claim their footprint like the ⋯ slot does. */
   .session-row.shift-quick:hover .session-row-body,
   .session-row.shift-quick:has(.session-quick :focus-visible) .session-row-body {
-    padding-inline-end: calc(4px + 2 * 26px + var(--space-1) + 4px);
+    padding-inline-end: calc(var(--session-trailing-axis) + 1.5 * var(--session-quick-size) + var(--space-1) + 4px);
   }
 }
 @media (pointer: coarse), (max-width: 480px) {
