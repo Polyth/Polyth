@@ -6,8 +6,8 @@
       "tools/release/package-lock.json": 308
     },
     "cargoLockCrates": {
-      "Cargo.lock": 510,
-      "fuzz/Cargo.lock": 436
+      "Cargo.lock": 494,
+      "fuzz/Cargo.lock": 411
     }
   },
   "npm": {

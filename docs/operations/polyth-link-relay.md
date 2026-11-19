@@ -1,7 +1,7 @@
 # Polyth Link relay operations
 
 The `polyth-link-relay` binary is an **experimental** packaging wrapper around
-upstream `iroh-relay = 1.1.0`. It is not a production TLS/443 product and it
+upstream `iroh-relay = 1.5.0`. It is not a production TLS/443 product and it
 does not reconnect paired devices.
 
 Default listen address is `127.0.0.1:3340`. `metrics_bind` is rejected until
@@ -27,4 +27,4 @@ Iroh endpoint when bound. They are not hard-coded diagnostics.
   `{ "http_bind": "127.0.0.1:3340" }` file)
 - No production certificate/key handling
 - Health is process liveness of this experimental binary
-- Pin client, host, and relay to Iroh 1.1.0 if you experiment with relays
+- Pin client, host, and relay to Iroh 1.5.0 if you experiment with relays
