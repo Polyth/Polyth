@@ -599,7 +599,8 @@ export function startMobileViewport(options: MobileViewportOptions = {}): void {
 export const KEEP_KEYBOARD_ATTRIBUTE = "data-keep-keyboard";
 const KEEP_KEYBOARD_SURFACE = `[${KEEP_KEYBOARD_ATTRIBUTE}]`;
 const KEEP_KEYBOARD_TAP_TARGET = `${KEEP_KEYBOARD_SURFACE}, .ui-popover, .ui-popover-backdrop`;
-const FOCUS_TAKING_ENTRY = "input, textarea, select, [contenteditable]:not([contenteditable='false'])";
+/** Elements a tap gives focus to: the tap is theirs, not a control's. */
+export const FOCUS_TAKING_ENTRY = "input, textarea, select, [contenteditable]:not([contenteditable='false'])";
 let keyboardTap = false;
 
 function noteKeyboardTap(event: PointerEvent): void {

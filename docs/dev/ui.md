@@ -350,7 +350,27 @@ the word (focus changes are not reported for it), so the sent text and the
 submit-time clear see the final draft. A composition the browser drops without
 `compositionend` (Chromium does so when script writes `value`) is closed by the
 next non-composition `input` or by blur, never left to ignore later typing.
-Enter during a composition still never sends. Text the platform writes without
+Enter during a composition still never sends.
+
+The composer keeps its editor focused through a tap on its controls
+(`data-keep-keyboard`), so nothing else ends the composition before a tap is
+released, and iOS gives a tap within 66px of a word still being composed to its
+text interaction even when the tap lands outside the field (WebKit
+`isNearMarkedText`). The rail sits one row under the end of the message, so
+with the last word still marked Send did nothing until a new line committed
+the word and moved it away. Two rules close that. A touch or pen that lands on
+any composer control outside a text field first calls `finishComposition()`
+(`commitComposingWordOnPress`, a capture handler on the composer root), so the
+word is ordinary text before the platform decides what the tap was. Send
+itself cancels `touchstart` and `touchend` through a listener that is not
+passive (`ownPrimaryTouch`; React's touch listeners are passive, and cancelling
+`pointerdown` does not withhold a touch from native gestures): the press is
+the page's, the release sends, and no click follows. A new control that must
+work beside the end of a draft acts on `click` and relies on the first rule;
+only a control that already acts on `pointerup` may cancel the touch.
+`composerSendTouchTarget.test.ts` covers both with a real touch and a CDP IME
+composition; the iOS classification itself is read from WebKit source and is
+not device-verified. Text the platform writes without
 any `input` event (dictation and some phone keyboards have) is committed at the
 field's next caret move, key release or focus, so Send's enabled state cannot
 stay behind a draft the field visibly holds.
