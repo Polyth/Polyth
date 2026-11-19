@@ -151,6 +151,71 @@ starts Node or OpenCode. See `docs/mobile/architecture.md`.
   Notifications that arrive inside a live turn stay with that turn
   (`packages/backend-claude/test/streamingAdmission.test.ts`,
   `packages/server/test/runtimeFeaturesHardening.test.ts`).
+  A notice can only come from the process that runs the work, so that process
+  must not end silently first. The adapter reports the process's full set of
+  live, non-ambient background tasks as the non-content
+  `runtime/background-tasks` `{ tasks, lost? }` whenever it changes (Claude
+  Code's `background_tasks_changed` level; task start/settle edges on older
+  CLIs). When its stream ends with tasks still live, they are reported as
+  `lost`. The session service keeps the last set durably on
+  `projection.nativeBackgroundTasks`. Its effects:
+  - The idle sweep, and an explicit idle release, keep that runtime
+    (`background-task` blocker) for up to `backgroundHoldMs` (3 h) after the
+    work started.
+  - `unwire` marks the set detached. Unless the same runtime object is wired
+    again within `backgroundGraceMs`, the set becomes `lost`. `unwire` is the
+    path every release, harness switch, epoch replacement and eviction runs
+    through.
+  - Boot treats every recorded set as detached, because no native process
+    outlives its server.
+  - Lost work becomes one hidden `send` saying which tasks will never report.
+    Its client operation id is derived from the lost tasks. The record is
+    cleared only after the send is admitted or queued, so a failure or restart
+    retries the same wake from the idle sweep, with backoff.
+  - Archived sessions drop the record without a wake. A pending provider-limit
+    resume or a pause defers the wake.
+
+  Coverage by harness:
+  - `backend-codex`: a `commandExecution` item still open at `turn/completed`
+    is background work. Its `item/completed` while idle becomes a wake.
+    Closing the connection or disposing the runtime reports the open items as
+    lost. Whether app-server keeps a yielded unified-exec item open past the
+    turn is unverified; if it does not, the set simply stays empty.
+  - `backend-opencode` (V2): shells that the `background` shell tool starts
+    map to their session through `Shell.Info.metadata.sessionID`.
+    - The set follows `shell.created`, `shell.exited` and `shell.deleted`, and
+      every (re)connect reconciles it against `GET /api/shell`.
+    - `shell.exited` while idle becomes a wake. A loop that OpenCode starts
+      by itself after that wake is aborted and dropped.
+    - A new server authority or generation reports the shells as lost.
+  - `backend-omp`: OMP delivers async-job results in a follow-up turn that ACP
+    never forwards. Polyth therefore turns those jobs off through its
+    `PI_CONFIG_FILES` overlay (`packages/backend-omp/assets/polyth.config.yml`).
+    Remote (SSH) launches do not carry the overlay.
+  - Not applicable: Pi, Antigravity, CommandCode and the ACP profiles
+    (Copilot, Cursor, DeepSeek, Grok). Their protocols are turn-synchronous,
+    or Polyth disables their native background agents. fx is unverified.
+
+  The harness-independent path is the `wait` package's `polyth_wait` tool
+  (`packages/wait`). An agent in any harness that ends its turn while work it
+  started keeps running registers a server-owned wait. Polyth wakes the same
+  chat with one hidden, idempotent send when the wait fires.
+  - Conditions: `pid` (a local process whose working directory lies in the
+    chat's workspace), `file` (a path inside the chat's cwd, the project or the
+    temp directory), `github_run` (contributed by `packages/github` through
+    the optional `wait.conditions` service, checked with the person's
+    account), or `seconds`.
+  - Every wait ends by `timeoutMinutes` (default 2 h, at most 24 h) and is
+    never silent: a send that keeps failing raises a chat attention notice.
+  - Waits are stored per Space under the package's directory and survive a
+    restart. A `firing` record re-sends with the same client operation id.
+  - `pid` and `file` waits hold the chat's runtime through
+    `SessionService.holdRuntime`, because the process lives in that runtime's
+    process tree.
+  - An always-on instruction tells every agent never to end a turn promising
+    to wait without one.
+
+  Covered by `packages/server/test/nativeBackgroundTasks.test.ts`.
   `ScheduleWakeup` is disallowed: a firing wake is a plain queued prompt with no
   task notification to hand off, so its loop would be refused and interrupted
   while the agent waits for it. `CronCreate`, `CronDelete` and `CronList` go with

@@ -2143,6 +2143,33 @@ export interface SessionAttention {
   mentions?: number;
 }
 
+/** One piece of work a harness runs in the background for a session (a
+ *  backgrounded shell, monitor or subagent) that will report back when it
+ *  settles. Ids are the harness's own task ids. */
+export interface RuntimeBackgroundTask {
+  id: string;
+  description?: string;
+  kind?: string;
+}
+
+/** Background work of the session's native process that has not reported back
+ *  yet. Server-owned and durable: a process can only report its own work, so
+ *  when that process ends first this record is what still knows the work
+ *  existed. Polyth then wakes the session to say it was lost, so nothing it
+ *  promised to wait for is left unanswered. */
+export interface SessionNativeBackgroundTasks {
+  /** Live tasks of the process wired when they were reported. */
+  tasks?: RuntimeBackgroundTask[];
+  /** When `tasks` became non-empty. */
+  since?: number;
+  /** The process that reported `tasks` was detached at this time; unless the
+   *  same process is wired again they are lost. */
+  orphanedAt?: number;
+  /** Tasks whose process ended before they reported, awaiting the wake that
+   *  tells the session. */
+  lost?: { tasks: RuntimeBackgroundTask[]; at: number; reason: string };
+}
+
 export type BackgroundWorkKind = "multirun" | "fusion" | "workflow";
 export interface BackgroundWorkState {
   multirun?: number;
@@ -2926,6 +2953,8 @@ export interface SessionProjection {
   pinned?: { position: number };
   /** Durable navigation/notification state for workflows that outlive a view. */
   backgroundWork?: BackgroundWorkState;
+  /** See `SessionNativeBackgroundTasks`. */
+  nativeBackgroundTasks?: SessionNativeBackgroundTasks;
   /** Small-model idle assist; stale once the log grows past atSeq. */
   assist?: SessionAssist;
   /** Pending auto-resume after a provider rate-limit / quota stop. The server
@@ -3336,6 +3365,13 @@ export interface SessionService {
     relocateManagedCheckout?: boolean;
   }): Promise<SessionProjection>;
   queueList?(sessionId: string): Promise<QueueItemDto[]>;
+  /** Keep this session's native runtime (and with it every process the
+   *  agent started inside it) from being released as idle until `untilMs`,
+   *  or until the hold is released. For server-owned waits on work that runs
+   *  in the agent's process tree. Bounded by the idle policy's background
+   *  hold; in memory only, so the owner re-applies it after a restart. */
+  holdRuntime?(sessionId: string, holdId: string, untilMs: number): void;
+  releaseRuntimeHold?(sessionId: string, holdId: string): void;
   /** Temporarily holds the queue head while it is edited in the composer. */
   queueEditStart?(sessionId: string, queueId: string): Promise<QueueItemDto>;
   queueEdit?(sessionId: string, queueId: string, text: string): Promise<QueueItemDto>;
@@ -5559,6 +5595,11 @@ export type RuntimeEvent =
    * admits a turn for it itself: Polyth turns `text` into one hidden, idempotent
    * send keyed by `wakeId`. Not dialogue and never a canonical row. */
   | { type: "runtime/wake-requested"; wakeId: string; reason: "background-task"; text: string }
+  /** The full set of the process's live background tasks, sent whenever it
+   * changes (replace semantics). `lost` names tasks the runtime knows ended
+   * with their process and will never report. Not dialogue and never a
+   * canonical row: the server keeps it on the projection. */
+  | { type: "runtime/background-tasks"; tasks: RuntimeBackgroundTask[]; lost?: RuntimeBackgroundTask[] }
   | { type: "turn/stopped"; turnId?: string; reason: "completed" | "aborted" | "error"; error?: string; code?: RuntimeErrorCode; retry?: RateLimitRetryHint; outputLimit?: true }
   | ({ type: "usage/recorded" } & UsageRecordedData)
   // Full revisioned snapshots: replay-deterministic task/subagent state.

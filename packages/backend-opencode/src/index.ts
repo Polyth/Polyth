@@ -1,6 +1,8 @@
 /** OpenCode runtime composition. Released wire formats stay in the legacy and
  * V2 protocol adapters; detection and transport are generation-local. */
 
+import { createBackgroundShells } from "./backgroundShells.ts";
+import { hasShellListing } from "./protocolV2.ts";
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import type {
@@ -601,6 +603,36 @@ export const createOpenCodeRuntimeFacade = (
     for (const cb of listeners) cb(canonical, ev);
   };
 
+  // Sessions whose finished background shell was handed to Polyth as a wake:
+  // OpenCode also delivers its own completion notification and may start a
+  // loop for it, which Polyth must not admit. The loop is interrupted and its
+  // events dropped so the result arrives once, through the wake.
+  const pendingShellWake = new Set<string>();
+  const stopNativeLoop = (canonical: string): void => {
+    void lifecycleBinding(canonical)
+      .then((binding) => lifecycle.abort(binding, randomUUID()))
+      .catch((error) => log("debug", "opencode native shell-notification loop stop failed", { error: String(error) }));
+  };
+  const backgroundShells = createBackgroundShells({
+    canonicalOf: (backendId) => maps.reverse.get(backendId),
+    turnAdmitted: (canonical) => activeTurn.has(canonical),
+    emit,
+    onWake: (canonical) => { pendingShellWake.add(canonical); },
+  });
+  /** Missed events must not wedge the set: re-read the listing on (re)connect. */
+  const reconcileShells = async (endpoint: RuntimeEndpoint): Promise<void> => {
+    // A new authority or generation is a new server process: the old one's
+    // shells died with it. A mere stream reconnect keeps the same key.
+    backgroundShells.generation(`${endpoint.authorityId}\0${endpoint.generation}`);
+    try {
+      const list = await lifecycle.usingProtocol((protocol) =>
+        hasShellListing(protocol) ? protocol.shells(endpoint.location) : Promise.resolve(undefined));
+      if (list && !disposed) backgroundShells.reconcile(list);
+    } catch (error) {
+      log("debug", "opencode shell listing failed", { error: String(error) });
+    }
+  };
+
   const refreshNativeCommands = (): void => {
     void lifecycle.usingProtocol((protocol) =>
       protocol.commands ? protocol.commands() : Promise.resolve([]))
@@ -631,6 +663,7 @@ export const createOpenCodeRuntimeFacade = (
     if (disposed) return;
     clearRateLimitStall(sessionId);
     suppressedAfterAbort.delete(sessionId);
+    pendingShellWake.delete(sessionId);
     if (activeTurn.has(sessionId)) return;
     const turnId = `turn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     activeTurn.set(sessionId, { turnId, aborting: false });
@@ -722,11 +755,21 @@ export const createOpenCodeRuntimeFacade = (
         if (first) seenEventIds.delete(first);
       }
     }
+    if (ev.type === "shell.created") { backgroundShells.created(ev.properties?.info); return; }
+    if (ev.type === "shell.exited") { backgroundShells.exited(ev.properties ?? {}); return; }
+    if (ev.type === "shell.deleted") { backgroundShells.deleted(ev.properties?.id); return; }
     const backendId = backendSessionId(ev);
     if (!backendId) return;
     const canonical = maps.reverse.get(backendId);
     if (!canonical) {
       log("debug", "opencode event for unmapped session", { backendId, type: ev.type ?? "" });
+      return;
+    }
+    if (pendingShellWake.has(canonical) && !activeTurn.has(canonical) && ev.type !== "session.updated") {
+      const status = (ev.properties?.status as { type?: unknown } | undefined)?.type;
+      if (ev.type === "session.status" && (status === "idle" || status === "interrupted")) pendingShellWake.delete(canonical);
+      else if (ev.type === "session.error") pendingShellWake.delete(canonical);
+      else if (ev.type === "session.step.started" || (ev.type === "session.status" && status !== undefined)) stopNativeLoop(canonical);
       return;
     }
     freeModelUsage.observe(canonical, ev);
@@ -819,6 +862,7 @@ export const createOpenCodeRuntimeFacade = (
         continue;
       }
       if (disposed) return;
+      backgroundShells.generation(`${currentEndpoint.authorityId}\0${currentEndpoint.generation}`);
       const endpointFields = {
         authorityId: currentEndpoint.authorityId,
         generation: currentEndpoint.generation,
@@ -833,6 +877,7 @@ export const createOpenCodeRuntimeFacade = (
             connectedAt = Date.now();
             emitLifecycle({ type: "stream-connected", ...endpointFields });
             armStall();
+            void reconcileShells(currentEndpoint);
           },
           onActivity: armStall,
           onEvent(observation) {

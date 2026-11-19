@@ -709,9 +709,17 @@ const sessionCreateBody = (location: RuntimeLocation): JsonObject => ({
   },
 });
 
+/** Optional V2 extra: the full `GET /api/shell` listing for one location. */
+export interface ShellListingAdapter {
+  shells(location: RuntimeLocation): Promise<unknown[]>;
+}
+
+export const hasShellListing = (adapter: unknown): adapter is ShellListingAdapter =>
+  typeof (adapter as Partial<ShellListingAdapter> | undefined)?.shells === "function";
+
 export const createV2ProtocolAdapter = (
   options: CreateV2ProtocolAdapterOptions,
-): ProtocolAdapter => {
+): ProtocolAdapter & ShellListingAdapter => {
   const deadlineMs = options.deadlineMs ?? 10_000;
   let reconciliationOrdinal = 0;
   const freshSessionEvidence = new Map<string, string>();
@@ -939,6 +947,10 @@ export const createV2ProtocolAdapter = (
     },
     eventStreamPath() {
       return "/api/event";
+    },
+    async shells(location) {
+      const path = withLocation("/api/shell", location);
+      return requiredDataArray(await queryRequired(options.transport, path, deadlineMs), path);
     },
     async ensureSession(input, operationId) {
       const mismatch = bindingError(input, options.endpoint);

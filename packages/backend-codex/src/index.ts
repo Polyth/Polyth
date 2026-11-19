@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute, join, resolve } from "node:path";
-import type { AgentRuntime, CanonicalTurnRequest, HarnessCapabilityApplicationReceipt, HarnessContext, JsonObject, ModelDescriptor, ModelRef, MutationOutcome, RateLimitRetryHint, RuntimeErrorCode, RuntimeEvent, RuntimeObservation, RuntimeSnapshot, TokenUsage } from "@polyth/contracts";
+import type { AgentRuntime, CanonicalTurnRequest, HarnessCapabilityApplicationReceipt, HarnessContext, JsonObject, ModelDescriptor, ModelRef, MutationOutcome, RateLimitRetryHint, RuntimeBackgroundTask, RuntimeErrorCode, RuntimeEvent, RuntimeObservation, RuntimeSnapshot, TokenUsage } from "@polyth/contracts";
 import { createToolProgressThrottle } from "@polyth/contracts";
 import {
     acknowledgeCapabilityApplication,
@@ -679,7 +679,38 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer, 
         if (!Array.isArray(page?.data)) return read(threadId);
         return { ...await readThread(threadId), turns: [...page.data].reverse() };
     };
-    rpc.onClose(() => { connected = false; for (const cb of lifecycle)
+    // Commands Codex still runs after the turn that started them. Unverified
+    // whether app-server keeps a yielded unified-exec item open past
+    // turn/completed; if it completes such items at yield time this set simply
+    // stays empty, and the logic below is correct either way.
+    const openCommands = new Map<string, RuntimeBackgroundTask>();
+    const backgroundCommands = new Map<string, RuntimeBackgroundTask>();
+    let backgroundRevision = 0;
+    const publishBackgroundCommands = (lost?: RuntimeBackgroundTask[]) => {
+        backgroundRevision += 1;
+        emit({ type: "runtime/background-tasks", tasks: [...backgroundCommands.values()], ...(lost?.length ? { lost } : {}) }, `${endpoint.authorityId}:${endpoint.generation}:background-tasks:${backgroundRevision}`);
+    };
+    /** The process is gone: none of its background commands can report now. */
+    const loseBackgroundCommands = () => {
+        openCommands.clear();
+        if (!backgroundCommands.size) return;
+        const lost = [...backgroundCommands.values()];
+        backgroundCommands.clear();
+        publishBackgroundCommands(lost);
+    };
+    const backgroundCommandWakeText = (item: Record<string, unknown>, task: RuntimeBackgroundTask): string => {
+        const output = typeof item.aggregatedOutput === "string" ? item.aggregatedOutput.slice(-2000) : "";
+        return [
+            "A background command you started has finished while no turn was running.",
+            `Command: ${task.description ?? task.id}`,
+            `Status: ${String(item.status ?? "completed")}`,
+            ...(typeof item.exitCode === "number" ? [`Exit code: ${item.exitCode}`] : []),
+            ...(output ? ["Output (last 2000 characters):", output] : []),
+            "",
+            "Read its result and continue your task.",
+        ].join("\n");
+    };
+    rpc.onClose(() => { loseBackgroundCommands(); connected = false; for (const cb of lifecycle)
         cb({ type: "stream-disconnected", authorityId: endpoint.authorityId, generation: endpoint.generation }); });
     rpc.onNotification((method, params) => {
         if (method === "account/rateLimits/updated") {
@@ -762,6 +793,11 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer, 
             lastUsageDigest = "";
             lastUsageTurnId = "";
             order++;
+            let backgroundChanged = false;
+            for (const [id, task] of openCommands)
+                if (!backgroundCommands.has(id)) { backgroundCommands.set(id, task); backgroundChanged = true; }
+            openCommands.clear();
+            if (backgroundChanged) publishBackgroundCommands();
             if (compactionPending) {
                 // The compaction's own turn ended without its item.
                 compactionPending = false;
@@ -781,6 +817,23 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer, 
             emit({ type: "assistant/chunk", partId: params.itemId, text: params.delta }, params.itemId + ":chunk:" + (++order));
         if (method === "item/reasoning/delta")
             emit({ type: "assistant/reasoning-chunk", partId: params.itemId, text: params.delta }, params.itemId + ":reasoning:" + (++order));
+        if (params.item?.type === "commandExecution" && typeof params.item.id === "string") {
+            const item = params.item as Record<string, unknown> & { id: string };
+            if (method === "item/started") {
+                const command = typeof item.command === "string" ? item.command.replace(/\s+/g, " ").trim().slice(0, 200) : "";
+                openCommands.set(item.id, { id: item.id, ...(command ? { description: command } : {}), kind: "command" });
+            }
+            else if (method === "item/completed") {
+                openCommands.delete(item.id);
+                const task = backgroundCommands.get(item.id);
+                if (task) {
+                    backgroundCommands.delete(item.id);
+                    publishBackgroundCommands();
+                    if (!activeTurn)
+                        emit({ type: "runtime/wake-requested", wakeId: `codex-background:${item.id}`, reason: "background-task", text: backgroundCommandWakeText(item, task) }, `${item.id}:wake`);
+                }
+            }
+        }
         if (method === "item/completed" || (method === "item/started" && params.item?.type !== "agentMessage")) {
             if (method === "item/completed" && params.item?.type === "contextCompaction") {
                 compactionPending = false;
@@ -1302,7 +1355,7 @@ export async function createCodexRuntime(context: HarnessContext, rpc: RpcPeer, 
         onEvent: (cb) => { listeners.add(cb); return { dispose: () => { listeners.delete(cb); } }; },
         onObservation: (cb) => { observations.add(cb); return { dispose: () => { observations.delete(cb); } }; },
         onLifecycle: (cb) => { lifecycle.add(cb); return { dispose: () => { lifecycle.delete(cb); } }; },
-        dispose: () => rpc.close(),
+        dispose: () => { loseBackgroundCommands(); return rpc.close(); },
     };
     return runtime;
 }

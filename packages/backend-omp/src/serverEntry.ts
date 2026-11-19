@@ -1,5 +1,7 @@
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { homedir } from "node:os";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { HarnessRegistry } from "@polyth/contracts";
@@ -17,6 +19,22 @@ const exec = promisify(execFile);
  *  `%LOCALAPPDATA%\omp\omp.exe`, added to the User PATH only. */
 export const OMP_INSTALLER = { posix: "https://omp.sh/install", posixShell: "sh", windowsPowerShell: "https://omp.sh/install.ps1" } as const;
 const OMP_INSTALL = vendorScriptInstallCommand(OMP_INSTALLER, process.platform);
+
+/** A file in this package's `assets/` folder; the Desktop app ships it to
+ *  `resources/packages/<folder>/assets` (see backend-deepseek). */
+const assetPath = (name: string): string => {
+    const local = fileURLToPath(new URL(`../assets/${name}`, import.meta.url));
+    const resources = process.env.POLYTH_RESOURCES_DIR;
+    return existsSync(local) || !resources ? local : join(resources, "packages", "backend-omp", "assets", name);
+};
+/** Polyth's settings overlay: background jobs off (see the file). */
+export const OMP_CONFIG_OVERLAY = assetPath("polyth.config.yml");
+/** `env` with Polyth's overlay appended to OMP's `PI_CONFIG_FILES` list, so
+ *  it wins over any overlay already named there. */
+export const withPolythOverlay = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
+    const files = (env.PI_CONFIG_FILES ?? "").split(delimiter).filter((file) => file && file !== OMP_CONFIG_OVERLAY);
+    return { ...env, PI_CONFIG_FILES: [...files, OMP_CONFIG_OVERLAY].join(delimiter) };
+};
 
 /** Last resolved executable, for the synchronous sign-in command. */
 let knownOmpCommand: string | undefined;
@@ -67,7 +85,7 @@ export function createOmpProfile(account?: ResolvedHarnessAccount): RegisteredAc
         },
         command: process.env.POLYTH_OMP_BIN?.trim() || "omp",
         args: ["acp"],
-        ...(account ? { env: { ...process.env, ...accountEnv(account) } } : {}),
+        env: withPolythOverlay({ ...process.env, ...accountEnv(account) }),
         async probe(context) {
             if (context.remote)
                 return { harnessId, installed: false, authenticated: "unknown", healthy: false, message: "Local execution only" };
@@ -75,7 +93,7 @@ export function createOmpProfile(account?: ResolvedHarnessAccount): RegisteredAc
                 const { command, env: baseEnv } = await resolveOmpBinary();
                 const env = { ...baseEnv, ...accountEnv(account) };
                 profile.command = command;
-                profile.env = env;
+                profile.env = withPolythOverlay(env);
                 const version = await exec(windowsShim(command) ? `"${command}"` : command, ["--version"], { timeout: 5000, maxBuffer: 4096, env, shell: windowsShim(command) })
                     .then(({ stdout, stderr }) => (stdout || stderr).trim())
                     .catch(() => undefined);

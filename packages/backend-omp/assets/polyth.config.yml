@@ -1,0 +1,16 @@
+# Polyth's settings overlay for OMP, loaded through PI_CONFIG_FILES. It sits
+# above the person's global and project settings.
+#
+# OMP's async jobs (and long bash commands it backgrounds automatically) are
+# delivered later in a follow-up turn OMP starts by itself. Over ACP that turn
+# reaches no client, so Polyth could neither see the job nor the result, nor
+# keep the process alive for it. The agent would end its turn waiting for a
+# result that never reaches the session. Run them in the foreground instead.
+async:
+  enabled: false
+bash:
+  autoBackground:
+    enabled: false
+eval:
+  autoBackground:
+    enabled: false

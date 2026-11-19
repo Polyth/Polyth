@@ -1,0 +1,26 @@
+{
+  "name": "@polyth/wait",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "descriptor": {
+      "name": "Wait",
+      "description": "Lets an agent end its turn while something keeps running; Polyth wakes the chat when it finishes.",
+      "core": false,
+      "enabled": true,
+      "maturity": "stable",
+      "settingsGroup": "Engineering",
+      "icon": "schedule",
+      "hasSettings": false,
+      "category": "engineering"
+    }
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/plugins": "0.1.0"
+  }
+}

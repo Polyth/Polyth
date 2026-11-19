@@ -113,6 +113,13 @@ const defaultExec: ExecFn = (bin, args, opts) =>
     }
   });
 
+/** One `gh` call in the current account context (withGithubAuth), for callers
+ *  that need a command the service does not wrap. */
+export function runGh(args: string[], cwd: string, exec: ExecFn = defaultExec): Promise<{ stdout: string; stderr: string }> {
+  const env = githubCallEnv();
+  return exec("gh", args, Object.keys(env).length ? { cwd, env } : { cwd });
+}
+
 export type GhResult<T> = HostingResult<T>;
 export type GithubRepo = HostingRepository;
 export type GithubIssue = HostingIssue;
