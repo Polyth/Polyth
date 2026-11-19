@@ -17376,9 +17376,16 @@ color: var(--text);
   gap: var(--space-3);
   min-width: 0;
 }
+/* The track must be able to shrink: an implicit auto track sizes to the
+   toggle's min-content (a nowrap path's full width), and the toggle's
+   `width: 100%` resolves against that overflowing track — so the row spilled
+   past its container with no ellipsis, clipped mid-glyph by the viewport.
+   `minmax(0, 1fr)` keeps the toggle on the container's width and lets the
+   path ellipsize at the line's end. */
 .execution-file-change {
   min-width: 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-2);
 }
 .execution-file-toggle {
@@ -17548,7 +17555,10 @@ color: var(--text);
 }
 .execution-mcp-list-title > a { text-decoration: none; }
 .execution-mcp-list-title > a:hover { text-decoration: underline; text-underline-offset: 2px; }
-.execution-mcp-list-title small { flex: none; margin-inline-start: auto; color: var(--faint); font-size: var(--font-meta); }
+.execution-mcp-list-title small { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-inline-start: auto; color: var(--faint); font-size: var(--font-meta); }
+/* The item's title gives way last: its meta shrinks a thousand times harder
+   and ellipsizes first, so a long title never cuts mid-row while the meta
+   stays whole (the same order as the block's own summary). */
 .execution-mcp-list-detail {
   display: -webkit-box;
   overflow: hidden;
@@ -17685,11 +17695,18 @@ color: var(--text);
 }
 .execution-subagent-branch { display: grid; place-items: center; color: var(--accent); }
 .execution-subagent-branch svg { width: 18px; height: 18px; }
-.execution-subagent-detail > div { min-width: 0; display: grid; grid-template-columns: minmax(0, max-content) auto; align-items: center; gap: 2px 8px; }
-.execution-subagent-detail strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.execution-subagent-detail p { grid-column: 1 / -1; margin: 0; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.execution-subagent-detail > div { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; row-gap: 2px; }
+/* The name gives way last: the state label shrinks a thousand times harder
+   and ellipsizes first, so a long delegated title keeps the line instead of
+   cutting mid-row with the state still whole. This used to be a grid whose
+   second track (auto) could not shrink below the state's full min-content,
+   so the name's track absorbed every shortage; the wrap replaces the grid
+   rows the detail's extra lines used to span. */
+.execution-subagent-detail strong { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.execution-subagent-state { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: var(--font-meta); }
+.execution-subagent-detail p { flex: 1 1 100%; margin: 0; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .execution-subagent-meta {
-  grid-column: 1 / -1;
+  flex: 1 1 100%;
   display: flex;
   flex-wrap: wrap;
   gap: 2px 14px;
@@ -17700,13 +17717,12 @@ color: var(--text);
 .execution-subagent-meta > div { display: inline-flex; gap: 5px; min-width: 0; }
 .execution-subagent-meta dt { color: var(--faint); }
 .execution-subagent-meta dd { min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.execution-subagent-state { color: var(--muted); font-size: var(--font-meta); }
 .execution-subagent-state.running { color: var(--accent); }
 .execution-subagent-state.failed { color: var(--red); }
 .execution-subagent-detail > button { min-height: var(--control-h); display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .execution-subagent-detail > button:disabled { opacity: .65; cursor: wait; }
 .execution-subagent-detail > button svg { width: 12px; height: 12px; }
-.execution-subagent-disclosure { grid-column: 1 / -1; margin-top: var(--space-1); border-top: 1px solid var(--border-soft); padding-top: var(--space-2); }
+.execution-subagent-disclosure { flex: 1 1 100%; margin-top: var(--space-1); border-top: 1px solid var(--border-soft); padding-top: var(--space-2); }
 .execution-subagent-disclosure summary { cursor: pointer; color: var(--text-dim); font-size: var(--font-meta); font-weight: 600; list-style: none; }
 .execution-subagent-disclosure summary::-webkit-details-marker { display: none; }
 .execution-subagent-disclosure summary::before { content: "▸"; display: inline-block; margin-right: var(--space-2); color: var(--accent); transition: transform var(--motion-fast) var(--motion-ease); }
@@ -19530,9 +19546,23 @@ html:not(.light)[data-background]:not([data-background="none"]):not([data-backgr
   padding: var(--space-1) var(--activity-bleed);
   border-radius: var(--radius-control);
 }
-.activity-group .ui-run-summary-copy strong { flex: none; overflow: visible; color: var(--text-dim); font-weight: 500; }
-/* The title never truncates; the counts give way first. */
-.activity-group .ui-run-summary-copy small { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.activity-group .ui-run-summary-copy strong {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The title gives way last: the counts shrink a thousand times harder, and
+   only once they are spent does the title ellipsize — at the row's end, never
+   under the chevron. The title used to be `flex: none` with `overflow:
+   visible`, so a long one ran past the row edge and clipped mid-glyph at the
+   summary's own `overflow: hidden` on a narrow screen. A look whose summary
+   is a pill that hugs its words (chip, Air) sizes to content, so nothing
+   shrinks there and nothing changes. */
+.activity-group .ui-run-summary-copy small { flex: 0 1000 auto; min-width: 0; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
 .activity-group .ui-run-summary-chevron { color: var(--faint); transition: color var(--motion-fast) var(--motion-ease); }
 @media (hover: hover) {
   .activity-group > .ui-run-summary:hover:where(:not(:disabled)) :is(.ui-run-summary-copy strong, .ui-run-summary-chevron) { color: var(--text); }
@@ -19662,12 +19692,18 @@ html:not(.light)[data-background]:not([data-background="none"]):not([data-backgr
   gap: var(--space-2);
   overflow: hidden;
 }
-/* The step's name is the anchor of the line and never gives way to the
-   preview: WebKit still shrank a weighted `0 1 auto` name to "Sear…" on a
-   393pt phone. Only a runaway tool name is capped, so its preview keeps room. */
+/* The name is the anchor of the line and gives way last. It is not the first
+   to go: the preview shrinks far harder (weight 1000 against the name's 1), so
+   the name truncates only once the preview is spent or the name alone is
+   longer than the line. Its old `flex: none` under `max-inline-size: 60%` was
+   a cap against the ticker's own hug width — the more the name needed, the
+   wider the cap got — so a name alone on the line was cut to 60% of itself
+   with the rest of the row empty ("Session m…" for "Session messages" on
+   Chromium, which resolves that percentage against the words; WebKitGTK
+   resolved it against the line and showed the whole name). */
 .activity-group .activity-ticker-step strong {
-  flex: none;
-  max-inline-size: 60%;
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   color: var(--text);
   text-overflow: ellipsis;

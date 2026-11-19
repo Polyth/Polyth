@@ -3352,7 +3352,9 @@ carries the steps of an open block, warming toward the accent while the turn
 runs. Steps are separated by rhythm alone (34 px rows,
 `--hit-min` on touch). A finished step shows its duration but no tick, since
 the block's own mark says done; failures and running steps keep their glyph.
-The summary title (weight 500) never truncates; its counts give way first.
+The summary title (weight 500) gives way last: its counts shrink first,
+and only a title longer than the row ellipsizes — at the row's end,
+never under the chevron.
 A step's name never truncates either: on phones the name and its target share
 one text line, and only the line's end truncates, so the target gives way
 before the name instead of the two columns splitting the shortage
@@ -3363,6 +3365,23 @@ edges, the thread hangs from the mark's centre (`--activity-thread-x`), and step
 start on the title column. A look that draws a rule or a pill on the summary (Line,
 Air) sets `--activity-bleed: 0px` so its edge stands on the frame instead of resetting
 the summary's padding. `chatFrameGeometry.test.ts` measures this in every look.
+
+**One line, one truncation point.** Every one-line row in the transcript —
+the block summary (title and counts), a step (name and target), the live line,
+a task row (text and kind), and the detail rows an opened call shows (a changed
+file's path, an MCP result's title and meta, a delegated agent's name and
+state, its trail, a search hit, a thinking line) — truncates the same way:
+the row's primary words give way last (whatever pairs with them shrinks a
+thousand times harder), and the ellipsis lands at the end of the line, never
+a clip mid-row with the rest of the row still empty and never past the row's
+edge. Percentage caps and rigid siblings that would take the line away from
+the primary are the defect class here: a cap inside a shrink-to-fit box
+(`max-inline-size: 60%` on the ticker's name) resolved against the words it
+capped; a summary title with `flex: none; overflow: visible` ran past the row
+and clipped mid-glyph; a grid track that sizes to a nowrap row's min-content
+(`.execution-file-change` before `minmax(0, 1fr)`) let the whole row spill.
+`chatFrameGeometry.test.ts` sweeps the phone-width rows against their real
+containers.
 An open summary pins to the top while its steps scroll. It does so only where
 `container-type: scroll-state` exists, and it takes the readable glass only
 while `scroll-state(stuck: top)` holds. Elsewhere it stays in flow rather than
@@ -3376,8 +3395,14 @@ and Stop follows it.
 working turn (nothing follows it yet), its summary line names the step in
 progress — the step's glyph, its name and quiet preview, exactly as the folded
 step reads (`ActivityTicker.tsx`, `activityTicker.ts`). On a narrow line only
-the preview gives way; the name stays whole (a runaway tool name is capped at
-60% of the line). Each new step takes
+the preview gives way: the name stays whole while the line has room for it,
+and truncates (at its end, with the ellipsis) only once the preview is spent
+or the name alone is longer than the line. No percentage cap may stand on that
+name — inside the shrink-to-fit ticker it resolves against the words it caps,
+so `max-inline-size: 60%` cut a lone name to 60% of itself beside an empty
+row (Chromium; WebKitGTK read the same rule against the line).
+`chatFrameGeometry.test.ts` measures a live line with and without a preview at
+phone widths. Each new step takes
 the line's place in it: the old words rise away as the new ones rise in, in one
 grid cell, transform and opacity only, so the block never adds, removes or
 resizes a row while it works (the leaving words are out of flow, so a look whose
