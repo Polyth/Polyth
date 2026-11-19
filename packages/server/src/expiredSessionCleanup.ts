@@ -1,17 +1,34 @@
-// "Clean up automatically" in Settings → Sessions: expired sessions go without
-// anyone pressing the button. The choice is `product.autoCleanupExpiredSessions`
-// in the synced client-settings record, read with the period and action the same
-// person set beside it (`sessionDefaults.retentionDays` / `retentionAction`).
+// Automatic cleanup of expired sessions, set per project in Settings →
+// Projects → Cleanup. Each person chooses it for each project separately, in
+// their synced client-settings record:
+// `sessionDefaults.projectRetention[projectId] = { autoCleanup, days, action,
+// skipIsolated, archiveDays }`. A private room follows its project's entry.
 //
 // It is off unless a person turned it on, and it decides per session whose
 // choice applies, so one member's setting never reaches another member's chats.
 //
+// Before the choice moved to projects it was one global choice per person
+// (`product.autoCleanupExpiredSessions` + `sessionDefaults.retentionDays` /
+// `retentionAction` / `retentionSkipIsolated`). A project without an entry
+// still follows that record, so nothing changes until the person edits a
+// project; the client then writes an entry for every project and turns the
+// global switch off.
+//
+// Archived sessions can go too: with `autoDeleteArchives` on, an archive older
+// than that project's `archiveDays` is deleted permanently. Only a project's own
+// entry turns it on (the older global record never had it).
+//
 // Isolated sessions are skipped until the same person says otherwise
-// (`sessionDefaults.retentionSkipIsolated: false`). Then nothing of theirs stays:
-// a delete takes the checkouts with the sessions, and an archive removes them
-// while the sessions stay restorable on their target checkouts.
+// (`skipIsolated: false`). Then nothing of theirs stays: a delete takes the
+// checkouts with the sessions, and an archive removes them while the sessions
+// stay restorable on their target checkouts.
 import type { QueueItemDto, SessionProjection } from "@polyth/contracts";
-import { normalizedRetentionDays, sessionOwnsIsolatedCheckout, sessionRetentionSummary } from "@polyth/session";
+import {
+  archivedSessionRetentionSummary,
+  normalizedRetentionDays,
+  sessionOwnsIsolatedCheckout,
+  sessionRetentionSummary,
+} from "@polyth/session";
 import { accountsDecidingFor, type SessionAccountDeps } from "./failedStartupCleanup.ts";
 
 /** Cleanup is routine housekeeping; an hour is fresh enough for a period counted in days. */
@@ -30,22 +47,105 @@ export interface ExpiredCleanupPreference {
   skipIsolated: boolean;
 }
 
+type RetentionRecord = {
+  autoCleanup?: unknown;
+  retentionDays?: unknown;
+  retentionAction?: unknown;
+  retentionSkipIsolated?: unknown;
+};
+type SettingsRecord = {
+  product?: { autoCleanupExpiredSessions?: unknown };
+  sessionDefaults?: RetentionRecord & { projectRetention?: unknown };
+} | null | undefined;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 /** Only an explicit `true` turns this on. A missing period or action falls back
  *  to the Settings page's own defaults (30 days, archive). Only an explicit
  *  `false` lets it take isolated work: an older client's settings write drops
  *  fields it does not know, which must never widen what goes. */
-export function autoCleanupPreference(settings: unknown): ExpiredCleanupPreference | undefined {
-  const record = settings as {
-    product?: { autoCleanupExpiredSessions?: unknown };
-    sessionDefaults?: { retentionDays?: unknown; retentionAction?: unknown; retentionSkipIsolated?: unknown };
-  } | null | undefined;
-  if (record?.product?.autoCleanupExpiredSessions !== true) return undefined;
-  const days = record.sessionDefaults?.retentionDays;
+function preferenceFrom(on: unknown, days: unknown, action: unknown, skipIsolated: unknown): ExpiredCleanupPreference | undefined {
+  if (on !== true) return undefined;
   return {
     days: normalizedRetentionDays(typeof days === "number" ? days : 30),
-    action: record.sessionDefaults?.retentionAction === "delete" ? "delete" : "archive",
-    skipIsolated: record.sessionDefaults?.retentionSkipIsolated !== false,
+    action: action === "delete" ? "delete" : "archive",
+    skipIsolated: skipIsolated !== false,
   };
+}
+
+function legacyPreference(record: SettingsRecord): ExpiredCleanupPreference | undefined {
+  return preferenceFrom(
+    record?.product?.autoCleanupExpiredSessions,
+    record?.sessionDefaults?.retentionDays,
+    record?.sessionDefaults?.retentionAction,
+    record?.sessionDefaults?.retentionSkipIsolated,
+  );
+}
+
+function projectEntries(record: SettingsRecord): Record<string, unknown> {
+  const map = record?.sessionDefaults?.projectRetention;
+  return isRecord(map) ? map : {};
+}
+
+function entryPreference(entry: Record<string, unknown>): ExpiredCleanupPreference | undefined {
+  return preferenceFrom(entry.autoCleanup, entry.days, entry.action, entry.skipIsolated);
+}
+
+/** One person's choice for one project (a room passes its project's id). A
+ *  project with no entry of its own follows the older global choice. */
+export function autoCleanupPreference(settings: unknown, projectId?: string): ExpiredCleanupPreference | undefined {
+  const record = settings as SettingsRecord;
+  const entries = projectEntries(record);
+  if (projectId !== undefined && Object.hasOwn(entries, projectId)) {
+    const entry = entries[projectId];
+    return isRecord(entry) ? entryPreference(entry) : undefined;
+  }
+  return legacyPreference(record);
+}
+
+export interface ArchivePurgePreference {
+  days: number;
+  /** Archived trees still holding an isolated checkout stay unless `false`. */
+  skipIsolated: boolean;
+}
+
+/** One person's "delete from the archive automatically" for one project. Only
+ *  an explicit `true` in the project's own entry turns it on. */
+export function archivePurgePreference(settings: unknown, projectId: string): ArchivePurgePreference | undefined {
+  const entries = projectEntries(settings as SettingsRecord);
+  if (!Object.hasOwn(entries, projectId)) return undefined;
+  const entry = entries[projectId];
+  if (!isRecord(entry) || entry.autoDeleteArchives !== true) return undefined;
+  return {
+    days: normalizedRetentionDays(typeof entry.archiveDays === "number" ? entry.archiveDays : 30),
+    skipIsolated: entry.skipIsolated !== false,
+  };
+}
+
+/** Every archive purge one person turned on, keyed by project. */
+export function archivePurgeChoices(settings: unknown): Record<string, ArchivePurgePreference> {
+  const choices: Record<string, ArchivePurgePreference> = {};
+  for (const projectId of Object.keys(projectEntries(settings as SettingsRecord))) {
+    const preference = archivePurgePreference(settings, projectId);
+    if (preference) choices[projectId] = preference;
+  }
+  return choices;
+}
+
+/** Every choice one person made that turns cleanup on somewhere, keyed by
+ *  project, with the older global choice under `*`. */
+export function autoCleanupChoices(settings: unknown): Record<string, ExpiredCleanupPreference> {
+  const record = settings as SettingsRecord;
+  const choices: Record<string, ExpiredCleanupPreference> = {};
+  const legacy = legacyPreference(record);
+  if (legacy) choices["*"] = legacy;
+  for (const [projectId, entry] of Object.entries(projectEntries(record))) {
+    const preference = isRecord(entry) ? entryPreference(entry) : undefined;
+    if (preference) choices[projectId] = preference;
+  }
+  return choices;
 }
 
 export interface ExpiredSessionPolicy {
@@ -55,22 +155,52 @@ export interface ExpiredSessionPolicy {
    *  needs every member's consent, on the longest period and the gentlest terms
    *  among them; an unresolvable Space keeps the session. */
   forSession(projection: SessionProjection): Promise<ExpiredCleanupPreference | undefined>;
+  /** The shortest archive period anyone in the Space opted into deleting after. */
+  shortestArchiveDays?(spaceId: string): number | undefined;
+  /** Whether this archived session (tree) may be deleted, on what terms. The
+   *  same accounts decide as for {@link forSession}; every one must opt in. */
+  forArchivedSession?(projection: SessionProjection): Promise<ArchivePurgePreference | undefined>;
 }
 
-export function createExpiredSessionPolicy(deps: SessionAccountDeps): ExpiredSessionPolicy {
+export function createExpiredSessionPolicy(
+  deps: SessionAccountDeps & {
+    /** The project whose cleanup choice applies: a private room's parent
+     *  project, otherwise the project itself. */
+    settingsProjectOf?: (projectId: string) => string;
+  },
+): ExpiredSessionPolicy {
   return {
     shortestDays(spaceId) {
-      const days = deps.members(spaceId).flatMap((userId) => {
-        const preference = autoCleanupPreference(deps.settingsFor(userId));
-        return preference ? [preference.days] : [];
-      });
+      const days = deps.members(spaceId).flatMap((userId) =>
+        Object.values(autoCleanupChoices(deps.settingsFor(userId))).map((preference) => preference.days));
       return days.length > 0 ? Math.min(...days) : undefined;
+    },
+    shortestArchiveDays(spaceId) {
+      const days = deps.members(spaceId).flatMap((userId) =>
+        Object.values(archivePurgeChoices(deps.settingsFor(userId))).map((preference) => preference.days));
+      return days.length > 0 ? Math.min(...days) : undefined;
+    },
+    async forArchivedSession(projection) {
+      const accounts = await accountsDecidingFor(deps, projection);
+      const projectId = deps.settingsProjectOf?.(projection.projectId) ?? projection.projectId;
+      const preferences: ArchivePurgePreference[] = [];
+      for (const userId of accounts) {
+        const preference = archivePurgePreference(deps.settingsFor(userId), projectId);
+        if (!preference) return undefined;
+        preferences.push(preference);
+      }
+      if (preferences.length === 0) return undefined;
+      return {
+        days: Math.max(...preferences.map((preference) => preference.days)),
+        skipIsolated: preferences.some((preference) => preference.skipIsolated),
+      };
     },
     async forSession(projection) {
       const accounts = await accountsDecidingFor(deps, projection);
+      const projectId = deps.settingsProjectOf?.(projection.projectId) ?? projection.projectId;
       const preferences: ExpiredCleanupPreference[] = [];
       for (const userId of accounts) {
-        const preference = autoCleanupPreference(deps.settingsFor(userId));
+        const preference = autoCleanupPreference(deps.settingsFor(userId), projectId);
         if (!preference) return undefined;
         preferences.push(preference);
       }
@@ -122,6 +252,8 @@ export interface ExpiredSweepResult {
   deleted: string[];
   /** Trees whose isolated checkouts were removed while the sessions stayed archived. */
   released: string[];
+  /** Archived trees deleted because they sat in the archive past its period. */
+  purged: string[];
   failed: Array<{ id: string; code: string }>;
 }
 
@@ -135,17 +267,20 @@ export async function sweepExpiredSessions(input: {
   /** The host's removal of an archived tree's checkouts. Absent: isolated
    *  sessions are always skipped. */
   releaseCheckouts?: (sessionId: string) => Promise<void>;
-  policy: Pick<ExpiredSessionPolicy, "forSession">;
-  /** From {@link ExpiredSessionPolicy.shortestDays}. Undefined ends the pass
-   *  before listing anything, so the feature costs nothing while it is off. */
+  policy: Pick<ExpiredSessionPolicy, "forSession" | "forArchivedSession">;
+  /** From {@link ExpiredSessionPolicy.shortestDays}. Undefined, with no archive
+   *  period either, ends the pass before listing anything, so the feature
+   *  costs nothing while it is off. */
   shortestDays: number | undefined;
+  /** From {@link ExpiredSessionPolicy.shortestArchiveDays}. */
+  shortestArchiveDays?: number | undefined;
   keep?: (sessionIds: readonly string[]) => ReadonlySet<string>;
   now?: () => number;
   pause?: () => Promise<void>;
   stopped?: () => boolean;
 }): Promise<ExpiredSweepResult> {
-  const result: ExpiredSweepResult = { scanned: 0, archived: [], deleted: [], released: [], failed: [] };
-  if (input.shortestDays === undefined) return result;
+  const result: ExpiredSweepResult = { scanned: 0, archived: [], deleted: [], released: [], purged: [], failed: [] };
+  if (input.shortestDays === undefined && input.shortestArchiveDays === undefined) return result;
   const now = (input.now ?? Date.now)();
   const pause = input.pause ?? (() => new Promise<void>((resolve) => {
     setTimeout(resolve, EXPIRED_SESSION_PAUSE_MS).unref();
@@ -166,7 +301,9 @@ export async function sweepExpiredSessions(input: {
   };
   // Every longer period's expired set sits inside the shortest period's, and
   // skipping isolated sessions only ever takes sessions out.
-  const candidates = expiredAfter(input.shortestDays, !input.releaseCheckouts);
+  const candidates = input.shortestDays === undefined
+    ? new Set<string>()
+    : expiredAfter(input.shortestDays, !input.releaseCheckouts);
   const childrenOf = new Map<string, SessionProjection[]>();
   for (const row of rows) {
     if (!row.parentId) continue;
@@ -227,7 +364,57 @@ export async function sweepExpiredSessions(input: {
       result.failed.push({ id: top.id, code: typeof code === "string" && code ? code : "internal" });
     }
   }
+  if (input.shortestArchiveDays !== undefined && input.policy.forArchivedSession) {
+    await purgeOldArchives(input, rows, keep, treeOf, now, pause, result);
+  }
   return result;
+}
+
+/** Archives past their period go for good. The unit is the topmost archived
+ *  session of each tree; deleting it takes the rest. A tree anyone pinned, left
+ *  a draft in, queued delivery to or touched since the list stays. */
+async function purgeOldArchives(
+  input: Parameters<typeof sweepExpiredSessions>[0],
+  rows: readonly SessionProjection[],
+  keep: ReadonlySet<string> | undefined,
+  treeOf: (top: SessionProjection) => SessionProjection[],
+  now: number,
+  pause: () => Promise<void>,
+  result: ExpiredSweepResult,
+): Promise<void> {
+  if (!input.sessions.delete || input.shortestArchiveDays === undefined || !input.policy.forArchivedSession) return;
+  const oldAfter = (days: number) => new Set(archivedSessionRetentionSummary(rows, days, now).eligible.map((row) => row.id));
+  const candidates = oldAfter(input.shortestArchiveDays);
+  const done = new Set([...result.archived, ...result.deleted]);
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  for (const top of rows) {
+    if (!candidates.has(top.id) || done.has(top.id)) continue;
+    const parent = top.parentId ? byId.get(top.parentId) : undefined;
+    if (parent?.status === "archived") continue;
+    if (input.stopped?.()) break;
+    try {
+      const preference = await input.policy.forArchivedSession(top);
+      if (!preference || !oldAfter(preference.days).has(top.id)) continue;
+      const tree = treeOf(top);
+      // Every member must itself be an old archive: a live child keeps the tree.
+      if (!tree.every((member) => member.status === "archived" && candidates.has(member.id))) continue;
+      if (tree.some((member) => keep?.has(member.id))) continue;
+      if (preference.skipIsolated && tree.some(sessionOwnsIsolatedCheckout)) continue;
+      let queued = false;
+      for (const member of tree) {
+        if ((await input.sessions.queueList?.(member.id) ?? []).length > 0) { queued = true; break; }
+      }
+      if (queued) continue;
+      const fresh = await input.sessions.snapshot(top.id);
+      if (fresh.status !== "archived" || fresh.updatedAt !== top.updatedAt) continue;
+      await pause();
+      await input.sessions.delete(top.id);
+      result.purged.push(top.id);
+    } catch (error) {
+      const code = (error as { code?: unknown } | null)?.code;
+      result.failed.push({ id: top.id, code: typeof code === "string" && code ? code : "internal" });
+    }
+  }
 }
 
 export interface ExpiredSessionCleanup {
@@ -263,12 +450,13 @@ export function startExpiredSessionCleanup(deps: {
             ...(deps.releaseCheckouts ? { releaseCheckouts: deps.releaseCheckouts } : {}),
             policy: deps.policy,
             shortestDays: deps.policy.shortestDays(spaceId),
+            shortestArchiveDays: deps.policy.shortestArchiveDays?.(spaceId),
             keep: (ids) => deps.keep(spaceId, ids),
             stopped: () => ended || deps.stopped(),
             ...(deps.pause ? { pause: deps.pause } : {}),
           });
-          if (result.archived.length > 0 || result.deleted.length > 0 || result.released.length > 0) {
-            console.log(`[polyth] expired session cleanup archived ${result.archived.length} and deleted ${result.deleted.length} session(s) and removed the isolated checkouts of ${result.released.length} tree(s) in space ${spaceId}`);
+          if (result.archived.length > 0 || result.deleted.length > 0 || result.released.length > 0 || result.purged.length > 0) {
+            console.log(`[polyth] expired session cleanup archived ${result.archived.length} and deleted ${result.deleted.length} session(s), removed the isolated checkouts of ${result.released.length} tree(s) and deleted ${result.purged.length} old archive(s) in space ${spaceId}`);
           }
           for (const failure of result.failed) {
             console.warn(`[polyth] expired session cleanup kept ${failure.id} (${failure.code})`);
@@ -291,11 +479,12 @@ export function startExpiredSessionCleanup(deps: {
 
   return {
     settingsChanged(userId, settings) {
-      const preference = autoCleanupPreference(settings);
-      const choice = JSON.stringify(preference ?? null);
+      const choices = autoCleanupChoices(settings);
+      const purges = archivePurgeChoices(settings);
+      const choice = JSON.stringify({ choices, purges });
       if (lastChoice.get(userId) === choice) return;
       lastChoice.set(userId, choice);
-      if (!preference || ended) return;
+      if ((Object.keys(choices).length === 0 && Object.keys(purges).length === 0) || ended) return;
       if (soonTimer) clearTimeout(soonTimer);
       soonTimer = setTimeout(() => { void run(); }, deps.settingsDelayMs ?? EXPIRED_SESSION_SETTINGS_SWEEP_DELAY_MS);
       soonTimer.unref();

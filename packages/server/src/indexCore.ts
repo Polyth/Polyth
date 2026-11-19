@@ -3428,7 +3428,7 @@ export async function boot(opts: BootOptions = {}) {
       },
     });
   };
-  // "Clean up automatically" in Settings → Sessions. Nothing here runs before
+  // "Clean up automatically" in Settings → Projects → Cleanup. Nothing here runs before
   // its first timer, well after boot recovery.
   const releaseArchivedCheckouts = (sessionId: string): Promise<void> => {
     if (!sessionsImpl?.releaseArchivedCheckouts) {
@@ -3440,7 +3440,10 @@ export async function boot(opts: BootOptions = {}) {
     spaceIds: () => spaceGateway.store.allSpaces().map((space) => space.id),
     sessionsFor: (spaceId) => spaceServices(spaceGateway.resolveInternal(spaceId)).sessions,
     releaseCheckouts: releaseArchivedCheckouts,
-    policy: createExpiredSessionPolicy(sessionAccounts),
+    policy: createExpiredSessionPolicy({
+      ...sessionAccounts,
+      settingsProjectOf: (projectId) => projects.parentOfRoom(projectId) ?? projectId,
+    }),
     keep: (spaceId, sessionIds) => sessionsKeptByPeople(sessionIds, sessionAccounts.members(spaceId), store.personStates),
     stopped: isShuttingDown,
   });

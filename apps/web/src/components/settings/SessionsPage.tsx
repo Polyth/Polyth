@@ -1,14 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import type { HarnessSelection, ModelDescriptor, ModelRef } from "@polyth/contracts";
-import { api } from "@polyth/session/web-api";
-import { setUiError, updateSettings, useStore } from "../../store.ts";
+import { updateSettings, useStore } from "../../store.ts";
 import {
-  friendlyError,
   MAX_VISIBLE_SESSION_COUNT,
   VISIBLE_SESSION_WARNING_THRESHOLD,
 } from "../../settings.ts";
 import { setGlobalDefaultModel, setSessionDefaults, useSessionDefaults } from "../../sessionDefaults.ts";
-import { NumberField, PageHead, Row, Section, Seg, Toggle } from "./parts.tsx";
+import { PageHead, Row, Section, Seg, Toggle } from "./parts.tsx";
 import ChatMemorySection from "./ChatMemorySection.tsx";
 import { type CatalogState, harnessModelCatalog, modelSupportsTextWorkflow } from "../../composer/discovery.ts";
 import { roleKind, useRolePrefs } from "../../rolePrefs.ts";
@@ -18,9 +16,6 @@ import SlotHost from "../slots/SlotHost.ts";
 import { tr } from "../../i18n/index.ts";
 import { Button, Dialog, Notice, Select, TextInput } from "../ui/index.ts";
 import { isImeComposing } from "../input/editorCore.ts";
-import { confirmAlert } from "../../alerts.ts";
-
-type RetentionAction = "archive" | "delete";
 
 function SessionModelPicker({
   value,
@@ -128,11 +123,6 @@ export default function SessionsPage() {
   const mainAgents = agents.filter((agent) =>
     roleKind(agent, rolePrefs) === "main" && agent.name.toLowerCase() !== "compaction");
   const defaults = useSessionDefaults();
-  const retentionDays = defaults.retentionDays ?? 30;
-  const retentionAction: RetentionAction = defaults.retentionAction ?? "archive";
-  const skipIsolated = defaults.retentionSkipIsolated !== false;
-  const archiveRetentionDays = defaults.archiveRetentionDays ?? 30;
-  const autoCleanup = settings.autoCleanupExpiredSessions;
   const defaultAgent = defaults.defaultAgent
     && mainAgents.some((agent) => agent.name === defaults.defaultAgent)
     ? defaults.defaultAgent
@@ -166,13 +156,6 @@ export default function SessionsPage() {
       }
     : undefined;
   const thinkingOptions = [...new Set(models.flatMap((model) => model.variants ?? []))];
-  const [eligible, setEligible] = useState<number | null>(null);
-  const [archivesEligible, setArchivesEligible] = useState<number | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [archiveBusy, setArchiveBusy] = useState(false);
-  // NumberField keeps its typed text; a remount restores the period after a
-  // declined confirmation.
-  const [retentionFieldKey, setRetentionFieldKey] = useState(0);
   const [visibleSessionCountInput, setVisibleSessionCountInput] = useState(
     String(settings.defaultVisibleSessionCount),
   );
@@ -230,148 +213,9 @@ export default function SessionsPage() {
     setPendingVisibleSessionCount(null);
   };
 
-  useEffect(() => {
-    let live = true;
-    setEligible(null);
-    void api.sessionRetention(retentionDays, "sessions", { skipIsolated })
-      .then((summary) => {
-        if (live) setEligible(typeof summary.eligibleCount === "number" ? summary.eligibleCount : 0);
-      })
-      .catch(() => { if (live) setEligible(0); });
-    return () => { live = false; };
-  }, [retentionDays, skipIsolated]);
-
-  useEffect(() => {
-    let live = true;
-    setArchivesEligible(null);
-    void api.sessionRetention(archiveRetentionDays, "archives")
-      .then((summary) => {
-        if (live) setArchivesEligible(typeof summary.eligibleCount === "number" ? summary.eligibleCount : 0);
-      })
-      .catch(() => { if (live) setArchivesEligible(0); });
-    return () => { live = false; };
-  }, [archiveRetentionDays]);
-
-  // The server cleans up on its own schedule, so the count moves without this page.
-  useEffect(() => {
-    if (!autoCleanup) return;
-    const timer = setInterval(() => {
-      void api.sessionRetention(retentionDays, "sessions", { skipIsolated })
-        .then((summary) => setEligible(typeof summary.eligibleCount === "number" ? summary.eligibleCount : 0))
-        .catch(() => {});
-    }, 60_000);
-    return () => clearInterval(timer);
-  }, [autoCleanup, retentionDays, skipIsolated]);
-
-  // Each of these starts permanent deletion that nobody confirms later, so the
-  // person confirms it here. Archiving can be undone and needs no question,
-  // unless it takes isolated work with it; that has its own question below.
-  const confirmAutoDelete = () => confirmAlert(
-    tr("settings.sessionspage.confirmAutoCleanupDelete", { count: eligible ?? 0 }),
-    { title: tr("settings.sessionspage.autoCleanup"), confirmLabel: tr("settings.sessionspage.autoCleanupDeleteConfirm"), destructive: true },
-  );
-
-  const changeAutoCleanup = async (on: boolean) => {
-    if (on && retentionAction === "delete" && !await confirmAutoDelete()) return;
-    updateSettings({ autoCleanupExpiredSessions: on });
-  };
-
-  const changeRetentionAction = async (action: RetentionAction) => {
-    if (action === "delete" && autoCleanup && !await confirmAutoDelete()) return;
-    setSessionDefaults({ retentionAction: action });
-  };
-
-  const changeSkipIsolated = async (skip: boolean) => {
-    if (!skip && !await confirmAlert(
-      tr("settings.sessionspage.confirmCleanIsolated"),
-      { title: tr("settings.sessionspage.skipIsolated"), confirmLabel: tr("settings.sessionspage.cleanIsolatedConfirm"), destructive: true },
-    )) return;
-    setSessionDefaults({ retentionSkipIsolated: skip });
-  };
-
-  const changeRetentionDays = async (days: number) => {
-    if (days < retentionDays && autoCleanup && retentionAction === "delete" && !await confirmAlert(
-      tr("settings.sessionspage.confirmAutoCleanupShorterPeriod", { days }),
-      { title: tr("settings.sessionspage.autoCleanup"), confirmLabel: tr("settings.sessionspage.autoCleanupDeleteConfirm"), destructive: true },
-    )) {
-      setRetentionFieldKey((key) => key + 1);
-      return;
-    }
-    setSessionDefaults({ retentionDays: days });
-  };
-
-  const cleanup = async () => {
-    if (retentionAction === "delete" && !await confirmAlert(
-      tr("settings.sessionspage.confirmDeleteEligibleSessions", { count: eligible ?? 0 }),
-      { title: tr("settings.sessionspage.cleanUpExpiredSessions"), confirmLabel: tr("common.delete"), destructive: true },
-    )) return;
-    setBusy(true);
-    try {
-      const result = await api.runSessionRetention(retentionDays, retentionAction, { skipIsolated });
-      setEligible(Math.max(0, result.eligibleCount - result.succeeded.length));
-      if (result.failed.length > 0) {
-        setUiError(tr(retentionAction === "delete"
-          ? "settings.sessionspage.eligibleSessionsCouldNotDelete"
-          : "settings.sessionspage.eligibleSessionsCouldNotArchive", {
-          count: result.failed.length,
-        }));
-      }
-    } catch (e) {
-      setUiError(friendlyError(tr("common.error"), e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const deleteOldArchives = async () => {
-    if (!await confirmAlert(
-      tr("settings.sessionspage.confirmDeleteArchivesOlderThan", { count: archivesEligible ?? 0, days: archiveRetentionDays }),
-      { title: tr("settings.sessionspage.deleteOldArchives"), confirmLabel: tr("common.delete"), destructive: true },
-    )) return;
-    setArchiveBusy(true);
-    try {
-      const result = await api.deleteArchivedSessions(archiveRetentionDays);
-      setArchivesEligible(Math.max(0, result.eligibleCount - result.succeeded.length));
-      if (result.failed.length > 0) {
-        setUiError(tr("settings.sessionspage.archivesCouldNotDelete", { count: result.failed.length }));
-      }
-    } catch (e) {
-      setUiError(friendlyError(tr("common.error"), e));
-    } finally {
-      setArchiveBusy(false);
-    }
-  };
-
-  const deleteAllArchives = async () => {
-    if (!await confirmAlert(
-      tr("settings.sessionspage.confirmDeleteAllArchives"),
-      { title: tr("settings.sessionspage.deleteAllArchives"), confirmLabel: tr("common.delete"), destructive: true },
-    )) return;
-    setArchiveBusy(true);
-    try {
-      const result = await api.deleteAllArchivedSessions();
-      setArchivesEligible(Math.max(0, result.eligibleCount - result.succeeded.length));
-      if (result.failed.length > 0) {
-        setUiError(tr("settings.sessionspage.archivesCouldNotDelete", { count: result.failed.length }));
-      }
-    } catch (e) {
-      setUiError(friendlyError(tr("common.error"), e));
-    } finally {
-      setArchiveBusy(false);
-    }
-  };
-
-  const cleanupVerb = retentionAction === "delete" ? "delete" : "archive";
-  const expiredHint = eligible === null
-    ? tr("common.loading")
-    : tr("settings.sessionspage.expiredSessionsNow", { count: eligible });
-  const oldArchivesHint = archivesEligible === null
-    ? tr("common.loading")
-    : tr("settings.sessionspage.oldArchivesNow", { count: archivesEligible, days: archiveRetentionDays });
-
   return (
     <>
-      <PageHead title={tr("settings.sessionspage.sessions")} blurb={tr("settings.sessionspage.setDefaultsAndRetentionForSessions")} />
+      <PageHead title={tr("settings.sessionspage.sessions")} blurb={tr("settings.sessionspage.sessionDefaultsBlurb")} />
       <Section
         title={tr("settings.sessionspage.sessionDefaults")}
         hint={<>
@@ -485,107 +329,6 @@ export default function SessionsPage() {
         </Row>
       </Section>
 
-      <Section
-        title={tr("settings.sessionspage.sessionRetention")}
-        hint={tr("settings.sessionspage.cleanupSectionHint")}
-        itemId="sessions.cleanup"
-      >
-        <Row label={tr("settings.sessionspage.retentionPeriod")} hint={tr("settings.sessionspage.idleCompletedSessionsOlderThanThisBecome")}>
-          <NumberField
-            key={retentionFieldKey}
-            value={retentionDays}
-            min={1}
-            max={3650}
-            unit={tr("settings.sessionspage.days")}
-            label={tr("settings.sessionspage.retentionPeriod")}
-            onCommit={(days) => void changeRetentionDays(days)}
-            />
-        </Row>
-        <Row
-          label={tr("settings.sessionspage.cleanupAction")}
-          hint={tr(retentionAction === "delete"
-            ? "settings.sessionspage.cleanupDeleteIsPermanent"
-            : "settings.sessionspage.chooseWhatHappensToExpiredSessions")}
-        >
-          <Seg
-            value={retentionAction}
-            options={[
-              ["archive", tr("common.archive")],
-              ["delete", tr("common.delete")],
-            ]}
-            onChange={(value) => void changeRetentionAction(value as RetentionAction)}
-          />
-        </Row>
-        <Row
-          label={tr("settings.sessionspage.skipIsolated")}
-          hint={tr(skipIsolated
-            ? "settings.sessionspage.skipIsolatedOnHint"
-            : "settings.sessionspage.skipIsolatedOffHint")}
-          itemId="sessions.retentionSkipIsolated"
-        >
-          <Toggle
-            on={skipIsolated}
-            onChange={(skip) => void changeSkipIsolated(skip)}
-            label={tr("settings.sessionspage.skipIsolated")}
-          />
-        </Row>
-        <Row
-          label={tr("settings.sessionspage.autoCleanup")}
-          hint={tr(!autoCleanup
-            ? "settings.sessionspage.autoCleanupOffHint"
-            : retentionAction === "delete"
-              ? "settings.sessionspage.autoCleanupDeleteHint"
-              : "settings.sessionspage.autoCleanupArchiveHint")}
-          itemId="sessions.autoCleanupExpiredSessions"
-        >
-          <Toggle
-            on={autoCleanup}
-            onChange={(on) => void changeAutoCleanup(on)}
-            label={tr("settings.sessionspage.autoCleanup")}
-          />
-        </Row>
-        <Row label={tr("settings.sessionspage.cleanUpExpiredSessions")} hint={expiredHint}>
-          <Button
-            size="sm"
-            variant={cleanupVerb === "delete" ? "danger" : "quiet"}
-            busy={busy}
-            disabled={!eligible}
-            onClick={() => void cleanup()}
-          >
-            {busy
-              ? cleanupVerb === "delete" ? tr("settings.sessionspage.deleting") : tr("settings.sessionspage.archiving")
-              : cleanupVerb === "delete" ? tr("settings.sessionspage.deleteEligibleSessions") : tr("settings.sessionspage.archiveEligibleSessions")}
-          </Button>
-        </Row>
-      </Section>
-
-      <Section
-        title={tr("settings.sessionspage.archiveCleanup")}
-        tone="danger"
-        hint={tr("settings.sessionspage.archiveSectionHint")}
-        itemId="sessions.archives"
-      >
-        <Row label={tr("settings.sessionspage.deleteArchivesOlderThan")} hint={oldArchivesHint}>
-          <div className="retention-actions">
-            <NumberField
-              value={archiveRetentionDays}
-              min={1}
-              max={3650}
-              unit={tr("settings.sessionspage.days")}
-              label={tr("settings.sessionspage.deleteArchivesOlderThan")}
-              onCommit={(days) => setSessionDefaults({ archiveRetentionDays: days })}
-              />
-            <Button size="sm" variant="danger" busy={archiveBusy} disabled={busy || !archivesEligible} onClick={() => void deleteOldArchives()}>
-              {tr("common.delete")}
-            </Button>
-          </div>
-        </Row>
-        <Row label={tr("settings.sessionspage.deleteAllArchives")} hint={tr("settings.sessionspage.deleteAllArchivesHint")}>
-          <Button size="sm" variant="danger" busy={archiveBusy} disabled={busy} onClick={() => void deleteAllArchives()}>
-            {tr("settings.sessionspage.deleteAllArchivesButton")}
-          </Button>
-        </Row>
-      </Section>
       {pendingVisibleSessionCount !== null && (
         <Dialog
           title={tr("settings.sessionspage.manySessionsWarningTitle")}

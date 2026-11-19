@@ -34,6 +34,7 @@ import {
 } from "./appearanceSizes.ts";
 import { COMPACT_SHORTCUTS_SETTINGS_ITEM } from "../../compactHeaderFit.ts";
 import { removeProject, saveProjectDefaultsOptimistic } from "../../init.ts";
+import ProjectCleanupSections from "./ProjectCleanupSections.tsx";
 import ProjectFolderDialog from "../ProjectFolderDialog.tsx";
 import { parseMcpServersJson, type McpImportResult } from "../../mcpImport.ts";
 import {
@@ -1963,6 +1964,14 @@ export function ProjectsPage() {
               />
             </Row>
           </Section>
+
+          {/* Each person chooses cleanup for each project; it reaches only
+              their own chats here. */}
+          <ProjectCleanupSections
+            key={selectedProject.id}
+            projectId={selectedProject.id}
+            projectIds={projects.map((project) => project.id)}
+          />
 
           {/* Isolation ships off: until a project opts in, no isolation
               control appears anywhere. A virtualized environment is the

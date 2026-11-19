@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import type { QueueItemDto, SessionProjection } from "@polyth/contracts";
 import {
+  archivePurgePreference,
   autoCleanupPreference,
   createExpiredSessionPolicy,
   sessionsKeptByPeople,
@@ -126,6 +127,47 @@ test("a session with no recorded account needs every member, on the gentlest ter
   assert.equal(empty.shortestDays("space-1"), undefined);
 });
 
+const perProject = (entries: Record<string, unknown>, legacy: Record<string, unknown> = {}) => ({
+  ...legacy,
+  sessionDefaults: { ...(legacy.sessionDefaults as object | undefined), projectRetention: entries },
+});
+
+test("each project carries its own choice, and a project without one follows the older global choice", async () => {
+  const settings = perProject(
+    { p: { autoCleanup: true, days: 5, action: "delete" }, q: { autoCleanup: false, days: 1 } },
+    auto(20, "archive"),
+  );
+  assert.deepEqual(autoCleanupPreference(settings, "p"), { days: 5, action: "delete", skipIsolated: true });
+  assert.equal(autoCleanupPreference(settings, "q"), undefined);
+  assert.deepEqual(autoCleanupPreference(settings, "unset"), { days: 20, action: "archive", skipIsolated: true });
+  // Only an explicit `true` / `false` counts inside an entry too.
+  assert.equal(autoCleanupPreference(perProject({ p: { autoCleanup: "true" } }), "p"), undefined);
+  assert.equal(autoCleanupPreference(perProject({ p: { autoCleanup: true, skipIsolated: "false" } }), "p")?.skipIsolated, true);
+  assert.equal(autoCleanupPreference(perProject({ p: "on" }, auto(3)), "p"), undefined);
+  // An inherited key is never a project's entry.
+  assert.deepEqual(autoCleanupPreference(perProject({}, auto(3)), "constructor"), { days: 3, action: "archive", skipIsolated: true });
+
+  const rows = [row("in-p"), row("in-q", { projectId: "q" }), row("in-room", { projectId: "room-of-p" })];
+  const policy = createExpiredSessionPolicy({
+    ...accounts({ rows, recipients: { "in-p": "alice", "in-q": "alice", "in-room": "alice" }, settings: { alice: settings } }),
+    settingsProjectOf: (projectId) => projectId === "room-of-p" ? "p" : projectId,
+  });
+  assert.deepEqual(await policy.forSession(rows[0]!), { days: 5, action: "delete", skipIsolated: true });
+  assert.equal(await policy.forSession(rows[1]!), undefined);
+  // A private room follows its project.
+  assert.deepEqual(await policy.forSession(rows[2]!), { days: 5, action: "delete", skipIsolated: true });
+  // The shortest period across every project anyone turned on.
+  assert.equal(policy.shortestDays("space-1"), 5);
+});
+
+test("turning the global switch off after the move leaves only projects that opted in", async () => {
+  const settings = perProject({ p: { autoCleanup: true, days: 9 } }, { product: { autoCleanupExpiredSessions: false } });
+  const policy = createExpiredSessionPolicy(accounts({ recipients: { a: "alice", b: "alice" }, settings: { alice: settings } }));
+  assert.deepEqual(await policy.forSession(row("a")), { days: 9, action: "archive", skipIsolated: true });
+  assert.equal(await policy.forSession(row("b", { projectId: "other" })), undefined);
+  assert.equal(policy.shortestDays("space-1"), 9);
+});
+
 test("an unresolvable Space keeps the session", async () => {
   const policy = createExpiredSessionPolicy({
     ...accounts({ settings: { alice: auto(5) } }),
@@ -187,7 +229,7 @@ test("with nobody opted in the sweep does not even list sessions", async () => {
   const sessions = source({ rows: [row("old")] });
   const result = await sweep(sessions, undefined);
   assert.equal(sessions.listed, 0);
-  assert.deepEqual(result, { scanned: 0, archived: [], deleted: [], released: [], failed: [] });
+  assert.deepEqual(result, { scanned: 0, archived: [], deleted: [], released: [], purged: [], failed: [] });
 });
 
 test("the sweep archives expired sessions and leaves the rest alone", async () => {
@@ -203,7 +245,70 @@ test("the sweep archives expired sessions and leaves the rest alone", async () =
   const result = await sweep(sessions, { days: 30, action: "archive", skipIsolated: true }, { keep: () => new Set(["kept-by-person"]) });
   assert.deepEqual(sessions.archived, ["old"]);
   assert.deepEqual(sessions.deleted, []);
-  assert.deepEqual(result, { scanned: 7, archived: ["old"], deleted: [], released: [], failed: [] });
+  assert.deepEqual(result, { scanned: 7, archived: ["old"], deleted: [], released: [], purged: [], failed: [] });
+});
+
+test("old archives are deleted only where the owner turned it on, as whole settled trees", async () => {
+  const rows = [
+    row("old-archive", { status: "archived", updatedAt: NOW - 40 * DAY }),
+    row("young-archive", { status: "archived", updatedAt: NOW - 5 * DAY }),
+    row("other-project", { status: "archived", projectId: "q", updatedAt: NOW - 40 * DAY }),
+    row("pinned-archive", { status: "archived", updatedAt: NOW - 40 * DAY }),
+    row("isolated-archive", { status: "archived", updatedAt: NOW - 40 * DAY, isolation: isolation() }),
+    row("archived-parent", { status: "archived", updatedAt: NOW - 40 * DAY }),
+    row("live-child", { parentId: "archived-parent", status: "idle", updatedAt: NOW - DAY }),
+    row("archive-root", { status: "archived", updatedAt: NOW - 40 * DAY }),
+    row("archive-child", { parentId: "archive-root", status: "archived", updatedAt: NOW - 40 * DAY }),
+    row("touched", { status: "archived", updatedAt: NOW - 40 * DAY }),
+    row("live", { updatedAt: NOW - 40 * DAY }),
+  ];
+  const sessions = source({ rows, fresh: { touched: { updatedAt: NOW } } });
+  const result = await sweepExpiredSessions({
+    sessions,
+    policy: {
+      forSession: async () => undefined,
+      forArchivedSession: async (projection) => projection.projectId === "p" ? { days: 30, skipIsolated: true } : undefined,
+    },
+    shortestDays: undefined,
+    shortestArchiveDays: 30,
+    keep: () => new Set(["pinned-archive"]),
+    now: () => NOW,
+    pause: async () => {},
+  });
+  assert.deepEqual(sessions.deleted.sort(), ["archive-root", "old-archive"]);
+  assert.deepEqual(sessions.archived, [], "auto-archive is a separate choice");
+  assert.deepEqual(result.purged.sort(), ["archive-root", "old-archive"]);
+
+  // Turning isolated work over to cleanup lets an isolated archive go too.
+  const isolatedOnly = source({ rows: [rows[4]!] });
+  await sweepExpiredSessions({
+    sessions: isolatedOnly,
+    policy: { forSession: async () => undefined, forArchivedSession: async () => ({ days: 30, skipIsolated: false }) },
+    shortestDays: undefined,
+    shortestArchiveDays: 30,
+    now: () => NOW,
+    pause: async () => {},
+  });
+  assert.deepEqual(isolatedOnly.deleted, ["isolated-archive"]);
+});
+
+test("archive deletion reads each project's own entry, and every deciding account must opt in", async () => {
+  const on = perProject({ p: { autoDeleteArchives: true, archiveDays: 7 } });
+  assert.deepEqual(archivePurgePreference(on, "p"), { days: 7, skipIsolated: true });
+  assert.equal(archivePurgePreference(on, "q"), undefined);
+  assert.equal(archivePurgePreference(perProject({ p: { autoDeleteArchives: "true" } }), "p"), undefined);
+  // The older global record never carried this choice.
+  assert.equal(archivePurgePreference(auto(5, "delete"), "p"), undefined);
+
+  const policy = createExpiredSessionPolicy(accounts({
+    recipients: { mine: "alice" },
+    settings: { alice: on, bob: perProject({ p: { autoDeleteArchives: true, archiveDays: 20 } }) },
+  }));
+  assert.deepEqual(await policy.forArchivedSession!(row("mine")), { days: 7, skipIsolated: true });
+  assert.deepEqual(await policy.forArchivedSession!(row("nobody's")), { days: 20, skipIsolated: true });
+  assert.equal(policy.shortestArchiveDays!("space-1"), 7);
+  const oneOut = createExpiredSessionPolicy(accounts({ settings: { alice: on, bob: {} } }));
+  assert.equal(await oneOut.forArchivedSession!(row("nobody's")), undefined);
 });
 
 test("each session is held to the period its owner chose, not the shortest in the Space", async () => {

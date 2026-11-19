@@ -20,6 +20,46 @@ export interface SessionDefaults {
    *  reads the same field, and an older client that drops it only skips more. */
   retentionSkipIsolated?: boolean;
   archiveRetentionDays?: number;
+  /** Per-project cleanup (Settings → Projects → Cleanup), keyed by project id.
+   *  Absent until the person first edits one; until then every project follows
+   *  the older global `retention*` fields above. See projectRetention.ts. */
+  projectRetention?: Record<string, ProjectRetentionEntry>;
+}
+
+export interface ProjectRetentionEntry {
+  autoCleanup?: boolean;
+  days?: number;
+  action?: "archive" | "delete";
+  skipIsolated?: boolean;
+  archiveDays?: number;
+  /** Delete archives older than `archiveDays` on the server's schedule. */
+  autoDeleteArchives?: boolean;
+}
+
+function retentionDaysOf(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(3650, Math.max(1, Math.round(value)))
+    : undefined;
+}
+
+function projectRetentionOf(value: unknown): Record<string, ProjectRetentionEntry> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const map: Record<string, ProjectRetentionEntry> = {};
+  for (const [projectId, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (!projectId || !raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const entry = raw as Record<string, unknown>;
+    const days = retentionDaysOf(entry.days);
+    const archiveDays = retentionDaysOf(entry.archiveDays);
+    map[projectId] = {
+      ...(typeof entry.autoCleanup === "boolean" ? { autoCleanup: entry.autoCleanup } : {}),
+      ...(days ? { days } : {}),
+      ...(entry.action === "archive" || entry.action === "delete" ? { action: entry.action } : {}),
+      ...(typeof entry.skipIsolated === "boolean" ? { skipIsolated: entry.skipIsolated } : {}),
+      ...(archiveDays ? { archiveDays } : {}),
+      ...(typeof entry.autoDeleteArchives === "boolean" ? { autoDeleteArchives: entry.autoDeleteArchives } : {}),
+    };
+  }
+  return map;
 }
 
 function modelRef(value: unknown): StoredModelRef | undefined {
@@ -51,12 +91,9 @@ export function parseSessionDefaults(raw: string | null): SessionDefaults {
     const defaultAgent = typeof data?.defaultAgent === "string" && data.defaultAgent
       ? data.defaultAgent
       : undefined;
-    const retentionDays = typeof data?.retentionDays === "number" && Number.isFinite(data.retentionDays)
-      ? Math.min(3650, Math.max(1, Math.round(data.retentionDays)))
-      : undefined;
-    const archiveRetentionDays = typeof data?.archiveRetentionDays === "number" && Number.isFinite(data.archiveRetentionDays)
-      ? Math.min(3650, Math.max(1, Math.round(data.archiveRetentionDays)))
-      : undefined;
+    const retentionDays = retentionDaysOf(data?.retentionDays);
+    const archiveRetentionDays = retentionDaysOf(data?.archiveRetentionDays);
+    const projectRetention = projectRetentionOf(data?.projectRetention);
     const compactionModel = data?.compactionModel === "session" || data?.compactionModel === "small"
       ? data.compactionModel
       : undefined;
@@ -77,6 +114,7 @@ export function parseSessionDefaults(raw: string | null): SessionDefaults {
       ...(retentionAction ? { retentionAction } : {}),
       ...(retentionSkipIsolated !== undefined ? { retentionSkipIsolated } : {}),
       ...(archiveRetentionDays ? { archiveRetentionDays } : {}),
+      ...(projectRetention ? { projectRetention } : {}),
     };
   } catch {
     return {};

@@ -433,10 +433,23 @@ starts Node or OpenCode. See `docs/mobile/architecture.md`.
   (`turn/failed`, `turn/stopped` reason `error`, e.g. `rate-limited`) is never
   auto-deleted. Forensics for a vanished session: `deletion_tombstones` and
   `runtime_operations` rows with `mutation_kind` `session-delete`.
-- `expiredSessionCleanup.ts` — "Clean up automatically" (Settings → Sessions →
-  Cleanup). Off until a person turns on the synced
-  `product.autoCleanupExpiredSessions`; it then applies that person's
-  `sessionDefaults.retentionDays`/`retentionAction`. Passes run 10 minutes after
+- `expiredSessionCleanup.ts` — "Clean up automatically" (Settings → Projects →
+  Cleanup), chosen by each person for each project and reaching only that
+  person's chats. Off until a person turns on `autoCleanup` in their synced
+  `sessionDefaults.projectRetention[projectId]` (`days`, `action`,
+  `skipIsolated`, `archiveDays` beside it); a private room follows its
+  project's entry. A project without an entry follows the older global choice
+  (`product.autoCleanupExpiredSessions` + `sessionDefaults.retention*`); the
+  client's first project edit writes an entry for every project from it and
+  turns that switch off (`apps/web/src/projectRetention.ts`), so an older
+  client that drops the map cleans up nothing. The Cleanup/Archive buttons send
+  `projectId` to `/api/session-retention`, which narrows them to that project
+  and its rooms within the caller's Space. A second, separate switch,
+  `autoDeleteArchives`, deletes archived trees older than that project's
+  `archiveDays` (only a project's own entry can turn it on; every deciding
+  account must opt in, on the longest period; a tree with a live member, a pin,
+  a draft, queued delivery, a change since the list, or an isolated checkout
+  while `skipIsolated` holds stays). Passes run 10 minutes after
   boot, hourly, and 30 seconds after a changed choice, one session at a time and
   paced. With nobody opted in, a pass ends before listing anything. Whose choice
   applies is resolved per session as in `failedStartupCleanup.ts`; a session with
@@ -451,7 +464,7 @@ starts Node or OpenCode. See `docs/mobile/architecture.md`.
   another member's pin or draft. A `delete` choice archives instead when the tree
   is in an uncertain state (`unknown`, `epoch-pending`), so unattended deletion can
   never take a possibly live turn. Isolated sessions are skipped, whole tree,
-  unless the same person set `sessionDefaults.retentionSkipIsolated: false`; an
+  unless the same person set `skipIsolated: false` for that project; an
   older client that drops the field only skips more, and a session with no recorded
   account needs every member to agree. When they are not skipped nothing stays
   behind: `delete` goes through `cleanupForSessionDelete`, and `archive` archives

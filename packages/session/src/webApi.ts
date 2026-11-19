@@ -2156,25 +2156,32 @@ export const api = {
     jfetch<ReviewFlowStateDto>(`/api/sessions/${encodeURIComponent(sessionId)}/review-flow/${action}`, { method: "POST" }),
 
 
-  /** Isolated sessions count only with an explicit `skipIsolated: false`. */
-  sessionRetention: (days: number, target: SessionRetentionTarget = "sessions", options: { skipIsolated?: boolean } = {}) =>
+  /** Isolated sessions count only with an explicit `skipIsolated: false`. A
+   *  `projectId` narrows the count and the cleanup to that project and its
+   *  private rooms. */
+  sessionRetention: (days: number, target: SessionRetentionTarget = "sessions", options: { skipIsolated?: boolean; projectId?: string } = {}) =>
     jfetch<SessionRetentionDto>(
-      `/api/session-retention?days=${encodeURIComponent(days)}&target=${encodeURIComponent(target)}${options.skipIsolated === false ? "&skipIsolated=false" : ""}`,
+      `/api/session-retention?days=${encodeURIComponent(days)}&target=${encodeURIComponent(target)}${options.skipIsolated === false ? "&skipIsolated=false" : ""}${options.projectId ? `&projectId=${encodeURIComponent(options.projectId)}` : ""}`,
     ),
-  runSessionRetention: (days: number, action: SessionRetentionAction = "archive", options: { skipIsolated?: boolean } = {}) =>
+  runSessionRetention: (days: number, action: SessionRetentionAction = "archive", options: { skipIsolated?: boolean; projectId?: string } = {}) =>
     jfetch<SessionRetentionResultDto>(
       "/api/session-retention",
-      json("POST", { days, action, ...(options.skipIsolated === false ? { skipIsolated: false } : {}) }),
+      json("POST", {
+        days,
+        action,
+        ...(options.skipIsolated === false ? { skipIsolated: false } : {}),
+        ...(options.projectId ? { projectId: options.projectId } : {}),
+      }),
     ),
-  deleteArchivedSessions: (days: number) =>
+  deleteArchivedSessions: (days: number, options: { projectId?: string } = {}) =>
     jfetch<SessionRetentionResultDto>(
       "/api/session-retention",
-      json("POST", { target: "archives", days }),
+      json("POST", { target: "archives", days, ...(options.projectId ? { projectId: options.projectId } : {}) }),
     ),
-  deleteAllArchivedSessions: () =>
+  deleteAllArchivedSessions: (options: { projectId?: string } = {}) =>
     jfetch<SessionRetentionResultDto>(
       "/api/session-retention",
-      json("POST", { target: "archives", all: true }),
+      json("POST", { target: "archives", all: true, ...(options.projectId ? { projectId: options.projectId } : {}) }),
     ),
 
   // ---- session control ---------------------------------------------------------
