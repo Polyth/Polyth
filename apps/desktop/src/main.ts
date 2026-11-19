@@ -38,17 +38,30 @@ import { withoutForeignSessionCookies } from "./sessionCookieGuard.ts";
 import { readSavedServerPort, reserveServerPort, saveServerPort } from "./serverPort.ts";
 import {
   DEFAULT_SERVERS_STATE,
+  forgetServerKey,
   isConnectionId,
   isThisComputersServer,
   normalizeServerAddress,
   readServersStateSync,
   rememberAddress,
   sameTarget,
+  serverKey,
   startupPlan,
   writeServersState,
   type DesktopServersState,
   type DesktopServerTarget,
 } from "./servers.ts";
+import {
+  foldZone,
+  planZoneOpen,
+  pruneZoneSnapshots,
+  readZoneSnapshotsSync,
+  recordZoneReport,
+  serverZonesView,
+  writeZoneSnapshots,
+  type ZoneSnapshots,
+  type ZoneSources,
+} from "./serverZones.ts";
 import {
   DEFAULT_DESKTOP_SETTINGS,
   normalizeDesktopSettings,
@@ -65,6 +78,7 @@ import type {
   DesktopServerAnchor,
   DesktopServerInfo,
   DesktopServersResult,
+  DesktopServerZonesView,
   DesktopServersView,
   DesktopSettings,
   DesktopSystemControls,
@@ -194,6 +208,9 @@ let serversPath = "";
 let linkClientDir = "";
 let servers: DesktopServersState = DEFAULT_SERVERS_STATE;
 let serversWrite: Promise<void> = Promise.resolve();
+let zoneSnapshotsPath = "";
+let zoneSnapshots: ZoneSnapshots = {};
+let zoneSnapshotsWrite: Promise<void> = Promise.resolve();
 let linkClient: PolythLinkClient | null = null;
 /** Other servers this launch has opened: their origin, and which server it is. */
 const remoteOrigins = new Map<string, Exclude<DesktopServerTarget, { kind: "local" }>>();
@@ -697,6 +714,14 @@ const persistServers = (next: DesktopServersState): void => {
     .catch((error: unknown) => log("Could not save the server list", error));
 };
 
+const persistZoneSnapshots = (next: ZoneSnapshots): void => {
+  if (next === zoneSnapshots) return;
+  zoneSnapshots = next;
+  zoneSnapshotsWrite = zoneSnapshotsWrite
+    .then(() => writeZoneSnapshots(zoneSnapshotsPath, zoneSnapshots))
+    .catch((error: unknown) => log("Could not save the server zones", error));
+};
+
 const windowOrigins = (): WindowOrigins => ({
   local: baseUrl ? new URL(baseUrl).origin : null,
   remote: new Set(remoteOrigins.keys()),
@@ -768,6 +793,14 @@ const rememberLinkConnections = (raw: unknown): void => {
       hostLabel: typeof item.hostLabel === "string" ? item.hostLabel : "",
       revoked: item.revoked === true || item.pairingState === "revoked",
     }));
+  // A real answer names every paired server: the zones of the rest are stale.
+  if (Array.isArray(raw)) {
+    persistZoneSnapshots(pruneZoneSnapshots(zoneSnapshots, new Set([
+      "local",
+      ...linkConnections.map((link) => `link:${link.id}`),
+      ...servers.addresses.map((address) => `address:${address.url}`),
+    ])));
+  }
   rebuildTrayMenu();
 };
 
@@ -839,12 +872,9 @@ const linkCall = async (rawMethod: unknown, rawParams: unknown): Promise<Desktop
           const active = servers.active.kind === "link" && servers.active.id === id
             ? { kind: "local" as const }
             : servers.active;
-          const forgotten = (key: string) => key !== `link:${id}`;
-          persistServers({
-            ...servers, linkPorts, active,
-            microphoneServers: servers.microphoneServers.filter(forgotten),
-            clipboardServers: servers.clipboardServers.filter(forgotten),
-          });
+          persistServers(forgetServerKey({ ...servers, linkPorts, active }, `link:${id}`));
+          const { [`link:${id}`]: _zone, ...zones } = zoneSnapshots;
+          persistZoneSnapshots(zones);
         }
         await refreshLinkConnections();
         return { ok: true, result };
@@ -956,7 +986,7 @@ const openServer = async (target: DesktopOpenServer): Promise<void> => {
   if (isThisComputersServer(url, baseUrl)) return openServer({ kind: "local" });
   remoteOrigins.set(url, { kind: "address", url });
   persistServers(rememberAddress(servers, url, Date.now()));
-  await loadInWindow(url);
+  await loadInWindow(`${url}${safeNextPath(target.path) ?? ""}`);
 };
 
 /**
@@ -1004,13 +1034,10 @@ const nudgeActiveLink = (): void => {
   void linkClient.invoke("status", { connectionId: active.id }).catch(() => undefined);
 };
 
-const serverKey = (target: Exclude<DesktopServerTarget, { kind: "local" }>): string =>
-  target.kind === "link" ? `link:${target.id}` : `address:${target.url}`;
-
-type RemoteConsent = "microphone" | "clipboard";
+type RemoteConsent = "microphone" | "clipboard" | "zones";
 
 const REMOTE_CONSENT: Record<RemoteConsent, {
-  list: "microphoneServers" | "clipboardServers";
+  list: "microphoneServers" | "clipboardServers" | "zoneServers";
   message: (label: string) => string;
   detail: string;
 }> = {
@@ -1023,6 +1050,11 @@ const REMOTE_CONSENT: Record<RemoteConsent, {
     list: "clipboardServers",
     message: (label) => `Let ${label} read the clipboard?`,
     detail: "This Polyth is on another computer. It reads what you copied on this computer when you choose Paste in it.",
+  },
+  zones: {
+    list: "zoneServers",
+    message: (label) => `Show your other servers in ${label}?`,
+    detail: "Its sidebar will list this computer and the other servers you connected, with their projects, so you can move between them. That server will see their names.",
   },
 };
 
@@ -1069,6 +1101,54 @@ const allowRemote = (origin: string, use: RemoteConsent): Promise<boolean> => {
   })().finally(() => remoteConsentAsks.delete(`${use}:${key}`));
   remoteConsentAsks.set(`${use}:${key}`, ask);
   return ask;
+};
+
+const zoneSources = (): ZoneSources => {
+  const lifecycle = serverLifecycle;
+  return {
+    servers,
+    links: linkConnections,
+    // A server still in first-run setup holds nothing to go back to.
+    localAvailable: lifecycle ? !("setup" in lifecycle && lifecycle.setup === true) : servers.runLocalServer,
+    snapshots: zoneSnapshots,
+  };
+};
+
+/** The server a page belongs to, read from its own frame, never from what it says. */
+const senderServer = (event: IpcMainInvokeEvent): DesktopServerTarget | null => {
+  const url = event.senderFrame?.url ?? "";
+  const surface = surfaceOf(url);
+  if (surface === "local") return { kind: "local" };
+  if (surface !== "remote") return null;
+  try { return remoteOrigins.get(new URL(url).origin) ?? null; } catch { return null; }
+};
+
+const NO_ZONES: DesktopServerZonesView = { access: "granted", zones: [] };
+
+const zonesFor = async (event: IpcMainInvokeEvent): Promise<DesktopServerZonesView> => {
+  const sender = senderServer(event);
+  if (workstation || !sender) return NO_ZONES;
+  await refreshLinkConnections();
+  return serverZonesView(sender, zoneSources());
+};
+
+const openZone = async (event: IpcMainInvokeEvent, request: unknown): Promise<DesktopServersResult<void>> => {
+  const sender = senderServer(event);
+  if (workstation || !sender) return { ok: false, code: "invalid-request" };
+  const plan = planZoneOpen(sender, zoneSources(), request as { key?: unknown; projectId?: unknown } | null);
+  if (!plan) return { ok: false, code: "invalid-request" };
+  try {
+    if (plan.kind === "server-list") await openServerList();
+    else if (plan.kind === "link") await openServerList({ open: plan.id, ...(plan.path ? { next: plan.path } : {}) });
+    else await openServer(plan);
+    return { ok: true, result: undefined };
+  } catch (error) {
+    log("Could not open the server zone", error);
+    // The list says why, in the page's language, and offers the way on.
+    const code = failureCode(error);
+    void openServerList({ error: code });
+    return { ok: false, code };
+  }
 };
 
 const serverMenuItems = (): MenuItemConstructorOptions[] => {
@@ -1133,6 +1213,7 @@ const shutdownServer = async (): Promise<void> => {
   await linkClient?.close().catch((error: unknown) => log("Link client shutdown failed", error));
   linkClient = null;
   await serversWrite;
+  await zoneSnapshotsWrite;
   await serverLifecycle?.shutdown().catch((error) => log("Server shutdown failed", error));
   serverLifecycle = null;
   log("Polyth server stopped");
@@ -1670,15 +1751,38 @@ const installIpc = (): void => {
   trustedHandle("desktop:servers:forget-address", (_event, url: unknown): DesktopServersView => {
     if (typeof url !== "string") return serversView();
     const active = servers.active.kind === "address" && servers.active.url === url ? { kind: "local" as const } : servers.active;
-    persistServers({
+    persistServers(forgetServerKey({
       ...servers,
       active,
       addresses: servers.addresses.filter((address) => address.url !== url),
-      microphoneServers: servers.microphoneServers.filter((key) => key !== `address:${url}`),
-      clipboardServers: servers.clipboardServers.filter((key) => key !== `address:${url}`),
-    });
+    }, `address:${url}`));
+    const { [`address:${url}`]: _zone, ...zones } = zoneSnapshots;
+    persistZoneSnapshots(zones);
     rebuildTrayMenu();
     return serversView();
+  });
+  trustedHandle("desktop:servers:zones", zonesFor);
+  trustedHandle("desktop:servers:zones:report", (event, projects: unknown): void => {
+    const sender = senderServer(event);
+    if (workstation || !sender) return;
+    persistZoneSnapshots(recordZoneReport(zoneSnapshots, serverKey(sender), projects, Date.now()));
+  });
+  trustedHandle("desktop:servers:zones:allow", async (event): Promise<DesktopServerZonesView> => {
+    const url = event.senderFrame?.url ?? "";
+    // Only the top page asks, as with the clipboard: never a frame inside it.
+    if (!workstation && event.senderFrame === event.sender.mainFrame && senderServer(event)?.kind !== "local") {
+      try { await allowRemote(new URL(url).origin, "zones"); } catch { /* no origin, no question */ }
+    }
+    return zonesFor(event);
+  });
+  trustedHandle("desktop:servers:zones:open", openZone);
+  trustedHandle("desktop:servers:zones:fold", async (event, request: unknown): Promise<DesktopServerZonesView> => {
+    const sender = senderServer(event);
+    if (!workstation && sender) {
+      const next = foldZone(sender, zoneSources(), request as { key?: unknown; folded?: unknown } | null);
+      if (next !== servers) persistServers(next);
+    }
+    return zonesFor(event);
   });
   trustedHandle("desktop:servers:run-local", async (_event, run: unknown): Promise<DesktopServersView> => {
     persistServers({ ...servers, runLocalServer: run === true });
@@ -1957,6 +2061,8 @@ async function start(): Promise<void> {
   serversPath = join(desktopDir, "servers.json");
   linkClientDir = join(desktopDir, "link-client");
   servers = workstation ? workstationServersState(readServersStateSync(serversPath)) : readServersStateSync(serversPath);
+  zoneSnapshotsPath = join(desktopDir, "server-zones.json");
+  zoneSnapshots = workstation ? {} : readZoneSnapshotsSync(zoneSnapshotsPath);
   updatePendingPath = join(desktopDir, "update-pending.json");
   settings = await readDesktopSettings(settingsPath, desktopSettingsDefaults);
   if (startupLowResourceMode) log("Low-resource mode active");

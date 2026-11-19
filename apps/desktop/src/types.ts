@@ -181,7 +181,37 @@ export interface DesktopServersView {
  *  list decides by code. */
 export type DesktopServersResult<T> = { ok: true; result: T } | { ok: false; code: string };
 
-export type DesktopOpenServer = { kind: "local"; path?: string } | { kind: "address"; url: string };
+export type DesktopOpenServer = { kind: "local"; path?: string } | { kind: "address"; url: string; path?: string };
+
+/** A project as another server's zone lists it: what its row draws. */
+export interface DesktopServerZoneProject {
+  id: string;
+  name: string;
+  icon?: string;
+  color?: string;
+}
+
+/** A server other than the one on screen, with the projects its own page
+ *  listed the last time it was open (src/serverZones.ts). */
+export interface DesktopServerZone {
+  key: string;
+  kind: "local" | "link" | "address";
+  /** Empty for this computer: the page names it in its own language. */
+  label: string;
+  /** False once a pairing was revoked: opening leads to the server list. */
+  available: boolean;
+  folded: boolean;
+  projects: DesktopServerZoneProject[];
+  /** Null until that server's page was open once. */
+  reportedAt: number | null;
+}
+
+export interface DesktopServerZonesView {
+  /** "ask": this page is another server's, and the person has not let that
+   *  server list their other servers yet. */
+  access: "granted" | "ask";
+  zones: DesktopServerZone[];
+}
 
 export interface PolythDesktopServersApi {
   /** The native server menu at `anchor`. The app draws it, so the page never reads the list. */
@@ -195,6 +225,15 @@ export interface PolythDesktopServersApi {
   link(method: string, params?: Record<string, unknown>): Promise<DesktopServersResult<unknown>>;
   forgetAddress(url: string): Promise<DesktopServersView>;
   setRunLocalServer(run: boolean): Promise<DesktopServersView>;
+  /** The other servers as zones, for the page of the server on screen. */
+  zones(): Promise<DesktopServerZonesView>;
+  /** This page's own projects, kept for the other servers' navigators. */
+  reportZoneProjects(projects: DesktopServerZoneProject[]): Promise<void>;
+  /** Another server's page asks to list the zones: the app asks the person. */
+  allowZones(): Promise<DesktopServerZonesView>;
+  /** Moves the window to a zone's server, at one of its listed projects. */
+  openZone(key: string, projectId?: string): Promise<DesktopServersResult<void>>;
+  foldZone(key: string, folded: boolean): Promise<DesktopServerZonesView>;
 }
 
 export interface PolythDesktopApi {

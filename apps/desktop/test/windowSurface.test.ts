@@ -189,3 +189,16 @@ test("another server's page keeps its own requests, and the window can still com
   assert.equal(blockedFromLocalServer({ url: "http://127.0.0.1:4400/api", resourceType: "xhr" }, page, { local: null, remote: new Set([page]) }), false);
   assert.equal(blockedFromLocalServer({ url: "not a url", resourceType: "xhr" }, page, origins), false);
 });
+
+test("server zones: a page lists its own projects and asks for the others; only another server needs permission", () => {
+  for (const channel of ["desktop:servers:zones", "desktop:servers:zones:report", "desktop:servers:zones:open", "desktop:servers:zones:fold"]) {
+    assert.equal(channelAllowed("local", channel), true, channel);
+    assert.equal(channelAllowed("remote", channel), true, channel);
+    // The list shows servers itself and has no navigator.
+    assert.equal(channelAllowed("hub", channel), false, channel);
+    assert.equal(channelAllowed(null, channel), false, channel);
+  }
+  assert.equal(channelAllowed("remote", "desktop:servers:zones:allow"), true);
+  assert.equal(channelAllowed("local", "desktop:servers:zones:allow"), false);
+  assert.equal(channelAllowed("hub", "desktop:servers:zones:allow"), false);
+});

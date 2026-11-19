@@ -4,6 +4,7 @@ import type {
   DesktopInfo,
   DesktopServersResult,
   DesktopServersView,
+  DesktopServerZonesView,
   DesktopWindowPlacement,
   DesktopKeepAwakeState,
   DesktopLocalSetupResult,
@@ -43,6 +44,13 @@ const servers: PolythDesktopServersApi = {
   link: (method, params) => ipcRenderer.invoke("desktop:link", method, params) as Promise<DesktopServersResult<unknown>>,
   forgetAddress: (url) => ipcRenderer.invoke("desktop:servers:forget-address", url) as Promise<DesktopServersView>,
   setRunLocalServer: (run) => ipcRenderer.invoke("desktop:servers:run-local", run === true) as Promise<DesktopServersView>,
+  zones: () => ipcRenderer.invoke("desktop:servers:zones") as Promise<DesktopServerZonesView>,
+  reportZoneProjects: (projects) => ipcRenderer.invoke("desktop:servers:zones:report", projects) as Promise<void>,
+  allowZones: () => ipcRenderer.invoke("desktop:servers:zones:allow") as Promise<DesktopServerZonesView>,
+  openZone: (key, projectId) =>
+    ipcRenderer.invoke("desktop:servers:zones:open", { key, ...(projectId ? { projectId } : {}) }) as Promise<DesktopServersResult<void>>,
+  foldZone: (key, folded) =>
+    ipcRenderer.invoke("desktop:servers:zones:fold", { key, folded: folded === true }) as Promise<DesktopServerZonesView>,
 };
 
 const place = placement();

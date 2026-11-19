@@ -100,8 +100,9 @@ all. There are two ways to reach a server.
   user data, with Unix file modes where the platform has them. Unlike the phones it
   has no OS keychain, so the private key is protected like an SSH key.
 - **Saved state** (`src/servers.ts`, `desktop/servers.json`). The server on screen,
-  whether to run this computer's server, saved addresses, per-server microphone and
-  clipboard choices, and each Link server's proxy port. The port is part of the page's origin, so
+  whether to run this computer's server, saved addresses, per-server microphone,
+  clipboard and [zone](#server-zones) choices, folded zones, and each Link server's
+  proxy port. Any number of servers may be saved; the file bounds addresses at 64. The port is part of the page's origin, so
   keeping it keeps that server's shell state between launches. It is kept apart from
   `settings.json`, which pages may read and write. Rollback: an older build ignores
   the file and opens this computer's server.
@@ -110,6 +111,36 @@ all. There are two ways to reach a server.
   the tray (Servers) and the app menu (Switch Server…). The command palette and
   Settings → Desktop open the list. Screens with no shell (sign-in, setup, "couldn't
   reach") carry *Choose another server*.
+
+### Server zones
+
+The app works on this computer and in any number of other servers at once: the
+navigator lists every saved server as a **zone** with its projects, and a click on a
+project moves the window to that server at that project (`src/serverZones.ts`, the
+shell's `apps/web/src/serverZones.ts` and `components/sidebar/ServerZones.tsx`; UI in
+[ui.md](ui.md#server-zones-in-the-navigator)).
+
+- **No connection is kept for a zone.** Only the server on screen has a page, and a
+  Link session exists only for that one, as before. Each server's own page lists its
+  projects to the main process while it is open (`desktop:servers:zones:report`:
+  id, name, icon and colour of the root projects of its current Space, never a path);
+  the main process keeps the last list per server in `desktop/server-zones.json`
+  (mode 0600) and hands the other servers' lists to the page on screen. A zone is a
+  snapshot from that server's last visit: a project a teammate added since appears
+  after the next visit. A server never opened here, or one whose shell is older than
+  zones, is a heading with one row that opens it.
+- **A page speaks only for its own server.** The key a list is filed under comes from
+  the sender frame's origin, never from the payload, and the list is validated and
+  bounded (200 projects, names of 120 characters, icons of 4 KiB).
+- **A click goes only where a zone leads.** `planZoneOpen` accepts a zone the sender
+  may see and a project that zone listed, and builds the route itself (`/p/<id>`). A
+  failure to reach the server lands on the server list with its error, like the
+  native menu.
+- **Zones are ordered to stay put**: this computer, paired servers by name, addresses
+  by host. Folding a zone is saved in `servers.json` (`foldedZones`), never in a
+  server's synced preferences, where it would name the person's other servers.
+- Forgetting a server drops its list, its fold and its permissions. The workstation
+  edition has no zones.
 
 ### Launch
 
@@ -138,6 +169,13 @@ that server, so treat it as untrusted code in this window.
   worst: updates stay signed, and quitting loses nothing durable.
 - It may not pair, connect, forget, list saved servers, reach paths, the data folder,
   setup or the owner session. `desktop:info` hides the data and log paths from it.
+- It lists its own projects for its [zone](#server-zones), and that is all it does
+  with zones until the person allows more. Asked for the other zones, the main
+  process answers only `access: "ask"`, with no name and no count beyond "there is
+  something to ask for". The navigator then shows one row, *Show my other servers
+  here*; choosing it makes the app ask once per server, by name, like the microphone
+  (`zoneServers`). After that the page reads the other servers' names and project
+  names and may move the window to them. This computer's own page never asks.
 - `settingsPatchFor` drops the choices that outlive the window: launch at login and
   automatic updates and their channel. These stay in the tray.
 - It cannot call this computer's server. Sites ignore ports, so a Link page on
@@ -160,6 +198,11 @@ Known limit: two servers opened by address on one host name (two tunnels on
 other's session cookie. This computer's session stays out of that, in both directions.
 
 ### Not verified
+
+Server zones have unit tests for the main-process rules and the shell's store, and a
+browser screenshot of the navigator against a stand-in bridge. No Electron window has
+run them: the native question, the hand-over to a Link server at a project and the
+saved files are untested on every platform.
 
 Live-tested only on Linux arm64 with debug binaries in an unpackaged Electron: pairing,
 Link and address sessions, restart, connect-only launch, client crash, revocation and

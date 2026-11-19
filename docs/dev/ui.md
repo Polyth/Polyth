@@ -646,6 +646,35 @@ conversation, Project settings…, Repositories…, Memory). New chat is a row
 action (and a toolbar or rail-header control); New conversation lives only in
 the menu.
 
+#### Server zones in the navigator
+
+In Polyth Desktop the navigator also lists the other servers the app can open
+(this computer, servers paired through Link, servers saved by address), each as
+a **zone**: a quiet heading (`--font-meta`, weight 600, `--muted`, the server's
+mark in the glyph column) over its projects as 34px rows on the navigator's own
+axes. While other zones are on show, the projects of the server on screen get
+the same heading with that server's name, so the list reads as one sequence of
+zones. A zone's projects are the ones that server listed the last time it was
+open ([desktop.md](desktop.md#server-zones)); nothing in the row says "live".
+
+- A project row moves the window to that server at that project. The clicked
+  row holds the hover wash and every zone row is disabled until the page
+  unloads.
+- The heading folds its zone; the chevron shows on hover and focus, and stays
+  while folded. A zone shows six projects, then *Show N more*.
+- A server not opened here yet shows one muted row, *Open it to see its
+  projects*; a revoked pairing shows *Access revoked. Pair again.*, which opens
+  the server list.
+- On another server's page the zones appear only after the person allowed that
+  server; before that there is one muted row, *Show my other servers here*,
+  and the app asks.
+- The project icon rail draws each zone after this server's icons: a hairline,
+  the server's mark (opens the server) and up to six project icons, whose
+  tooltips name project and server. Zone icons carry no arrange id.
+- Zones hide while the navigator is searching. They are absent in a browser
+  tab, in the phone layout (the phone apps, and a desktop window narrowed to it)
+  and in the workstation edition.
+
 Archived sessions are not listed inline in the navigator. When a project has any
 archived session (a loaded row, or one bounded `archived=true` summary probe), a
 quiet `Archived` entry under its session list — and `Archived sessions` in the

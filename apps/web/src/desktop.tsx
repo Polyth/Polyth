@@ -19,6 +19,8 @@ import { Button, confirmAlert, Progress } from "./components/ui/index.ts";
 import { POLYTH_MARK_SRC } from "./brandAsset.ts";
 import { DesktopUpdateNotice } from "./desktopUpdateNotice.tsx";
 import { installDesktopKeepAwake } from "./desktopKeepAwake.tsx";
+import { installServerZones } from "./serverZones.ts";
+import { getState, subscribeStore } from "./store.ts";
 import { tr, type TranslationKey } from "./i18n/index.ts";
 
 const DEFAULTS: DesktopSettings = {
@@ -828,6 +830,10 @@ export function installDesktopIntegration(): () => void {
     1_001,
   );
   const uninstallKeepAwake = installDesktopKeepAwake(api);
+  const uninstallServerZones = installServerZones(api, {
+    get: () => getState().projectRegistry,
+    subscribe: subscribeStore,
+  });
   const unregisterSettings = registerSlot(
     "settings.pages",
     "desktop",
@@ -858,6 +864,7 @@ export function installDesktopIntegration(): () => void {
   );
   return () => {
     uninstallKeepAwake();
+    uninstallServerZones();
     offCommand();
     offWindowState();
     overlay?.removeEventListener?.("geometrychange", applyCaptionSide);

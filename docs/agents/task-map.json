@@ -365,7 +365,9 @@
         "scripts/test/workstationEdition.test.ts",
         "apps/desktop/test/serverPackages.test.ts",
         "apps/desktop/test/windowSurface.test.ts",
-        "apps/web/test/desktopServerList.test.ts"
+        "apps/desktop/test/serverZones.test.ts",
+        "apps/web/test/desktopServerList.test.ts",
+        "apps/web/test/serverZones.test.ts"
       ],
       "risk": "high"
     },

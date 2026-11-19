@@ -114,7 +114,21 @@ const WINDOW_CHANNELS = [
 ] as const;
 
 const LEAVE_CHANNELS = ["desktop:servers:menu", "desktop:servers:list"] as const;
-const REMOTE_CHANNELS = new Set<string>([...WINDOW_CHANNELS, ...LEAVE_CHANNELS, "desktop:servers:resume"]);
+/** Server zones (serverZones.ts). A page lists its own projects and asks for
+ *  the other servers'; what it gets back is decided per server there. */
+const ZONE_CHANNELS = [
+  "desktop:servers:zones",
+  "desktop:servers:zones:report",
+  "desktop:servers:zones:open",
+  "desktop:servers:zones:fold",
+] as const;
+const REMOTE_CHANNELS = new Set<string>([
+  ...WINDOW_CHANNELS,
+  ...LEAVE_CHANNELS,
+  ...ZONE_CHANNELS,
+  "desktop:servers:zones:allow",
+  "desktop:servers:resume",
+]);
 const HUB_CHANNELS = new Set<string>([
   ...WINDOW_CHANNELS,
   ...LEAVE_CHANNELS,
@@ -132,6 +146,8 @@ const LOCAL_DENIED = new Set<string>([
   "desktop:servers:run-local",
   "desktop:servers:state",
   "desktop:servers:resume",
+  // This computer's page always reads the zones: there is nothing to ask.
+  "desktop:servers:zones:allow",
 ]);
 
 export function channelAllowed(surface: WindowSurface | null, channel: string): boolean {

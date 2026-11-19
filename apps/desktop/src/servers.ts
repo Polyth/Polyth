@@ -29,6 +29,13 @@ export interface DesktopServersState {
   microphoneServers: string[];
   /** Other servers the person let read this computer's clipboard (Paste). */
   clipboardServers: string[];
+  /** Other servers the person let list their remaining servers and those
+   *  servers' projects in its navigator (src/serverZones.ts). */
+  zoneServers: string[];
+  /** Server zones the person folded in the navigator, this computer's
+   *  (`local`) included. Kept here so it never joins a server's synced
+   *  preferences, where it would name the person's other servers. */
+  foldedZones: string[];
 }
 
 export const DEFAULT_SERVERS_STATE: DesktopServersState = {
@@ -38,9 +45,13 @@ export const DEFAULT_SERVERS_STATE: DesktopServersState = {
   addresses: [],
   microphoneServers: [],
   clipboardServers: [],
+  zoneServers: [],
+  foldedZones: [],
 };
 
-const MAX_ADDRESSES = 8;
+/** A bound on a file a person fills by hand, not a product limit: the
+ *  navigator lists every saved server as a zone. */
+const MAX_ADDRESSES = 64;
 const CONNECTION_ID = /^[A-Za-z0-9]{1,128}$/;
 
 export const isConnectionId = (value: unknown): value is string =>
@@ -122,11 +133,32 @@ export function normalizeServersState(raw: unknown): DesktopServersState {
     addresses: addresses.slice(0, MAX_ADDRESSES),
     microphoneServers: serverKeys(value.microphoneServers),
     clipboardServers: serverKeys(value.clipboardServers),
+    zoneServers: serverKeys(value.zoneServers),
+    foldedZones: serverKeys(value.foldedZones, true),
   };
 }
 
-const serverKeys = (value: unknown): string[] =>
-  Array.isArray(value) ? value.filter((key): key is string => typeof key === "string" && /^(?:link|address):/.test(key)) : [];
+const serverKeys = (value: unknown, withLocal = false): string[] =>
+  Array.isArray(value)
+    ? [...new Set(value.filter((key): key is string =>
+      typeof key === "string" && key.length <= 2100 && (/^(?:link|address):/.test(key) || (withLocal && key === "local"))))]
+    : [];
+
+/** How a saved server is named in the per-server lists above. */
+export const serverKey = (target: DesktopServerTarget): string =>
+  target.kind === "local" ? "local" : target.kind === "link" ? `link:${target.id}` : `address:${target.url}`;
+
+/** Everything remembered about a server the person forgot. */
+export function forgetServerKey(state: DesktopServersState, key: string): DesktopServersState {
+  const kept = (value: string): boolean => value !== key;
+  return {
+    ...state,
+    microphoneServers: state.microphoneServers.filter(kept),
+    clipboardServers: state.clipboardServers.filter(kept),
+    zoneServers: state.zoneServers.filter(kept),
+    foldedZones: state.foldedZones.filter(kept),
+  };
+}
 
 export function readServersStateSync(path: string): DesktopServersState {
   try {
