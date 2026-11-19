@@ -284,6 +284,15 @@ function escapeMarkdown(text) {
   return text.replace(/([\\`*_<>[\]|])/g, "\\$1");
 }
 
+/**
+ * The summary lives inside an HTML `<sub>`, where Markdown is not parsed: a
+ * backslash escape would show up literally. Escape only what HTML reads, and
+ * drop inline-code backticks so `` `memory.db` `` reads as plain text.
+ */
+function escapeHtml(text) {
+  return text.replace(/`/g, "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 function formatDate(date) {
   return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Kyiv" }).format(date);
 }
@@ -328,7 +337,7 @@ export function renderReleaseNotes({ channel, version, commits, base, basis, sou
     if (entries.length === 0) continue;
     const shown = entries.slice(0, SECTION_LIMIT);
     const body = shown.flatMap((entry) => entry.summary && !section.collapsed
-      ? [`- **${escapeMarkdown(entry.title)}**`, `  <br><sub>${escapeMarkdown(entry.summary)}</sub>`]
+      ? [`- **${escapeMarkdown(entry.title)}**`, `  <br><sub>${escapeHtml(entry.summary)}</sub>`]
       : [`- ${section.collapsed ? escapeMarkdown(entry.title) : `**${escapeMarkdown(entry.title)}**`}`]);
     if (entries.length > shown.length) body.push(`- …and ${entries.length - shown.length} more`);
     if (section.collapsed) {

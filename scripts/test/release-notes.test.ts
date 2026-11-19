@@ -96,6 +96,28 @@ test("contributors merge identities and skip bots and AI agents", () => {
   ]);
 });
 
+test("a summary inside <sub> stays plain text", () => {
+  const notes = renderReleaseNotes({
+    channel: "nightly",
+    version: "1.2.366-nightly",
+    commits: [{
+      subject: "Memory: own per-Space store",
+      body: "Memory moves into `memory.db` under <space>/packages/memory.\n",
+      files: ["packages/memory/src/store.ts"],
+      author: { name: "Max", email: "max@polyth.app" },
+      coAuthors: [],
+    }],
+    basis: "recent",
+    source: "0".repeat(40),
+    repository: "o/r",
+    date: new Date("2026-11-19T08:00:00Z"),
+  });
+  // The sub line is HTML, not Markdown: a backslash escape would render literally,
+  // and a raw `<space>` would open a tag.
+  assert.match(notes, /<br><sub>Memory moves into memory\.db under &lt;space&gt;\/packages\/memory\.<\/sub>/);
+  assert.doesNotMatch(notes, /\\`/);
+});
+
 test("notes are collected from the marked source range and rendered by section", () => {
   const repo = mkdtempSync(join(tmpdir(), "release-notes-"));
   const run = (...args: string[]) => {
