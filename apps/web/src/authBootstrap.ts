@@ -13,6 +13,9 @@ export interface BrowserAuthStatus extends AuthStatusDto {
   /** `local`: the owner has no password and only Polyth Desktop on that
    *  machine opens this installation. Absent before setup and on older servers. */
   accessMode?: 'local' | 'accounts';
+  /** The signed-in account's password was set by someone else: until its
+   *  holder chooses their own, the server opens nothing else to the session. */
+  passwordChangeRequired?: true;
 }
 
 export function validateAuthStatus(value: unknown): BrowserAuthStatus {
@@ -38,6 +41,9 @@ export function validateAuthStatus(value: unknown): BrowserAuthStatus {
   if (status.accessMode !== undefined && status.accessMode !== 'local' && status.accessMode !== 'accounts') {
     throw new Error('Invalid access mode');
   }
+  if (status.passwordChangeRequired !== undefined && status.passwordChangeRequired !== true) {
+    throw new Error('Invalid password change state');
+  }
   return status;
 }
 
@@ -58,12 +64,13 @@ export function claimOwnerSessionRenewal(
   return true;
 }
 
-export function authBootstrapPhase(status: unknown): 'setup' | 'restart' | 'locked' | 'ready' | 'unavailable' {
+export function authBootstrapPhase(status: unknown): 'setup' | 'restart' | 'locked' | 'password-change' | 'ready' | 'unavailable' {
   const value = validateAuthStatus(status);
   if (value.state === 'recovery') return 'unavailable';
   if (value.bootstrapMode === 'setup' && value.state === 'ready') return 'restart';
   if (value.bootstrapMode === 'setup' || (value.state && value.state !== 'ready')) return 'setup';
-  return value.authorized ? 'ready' : 'locked';
+  if (!value.authorized) return 'locked';
+  return value.passwordChangeRequired === true && value.scope === 'ui-session' ? 'password-change' : 'ready';
 }
 
 const LINK_SESSION_BOUNCE_KEY = 'polyth.link.sessionBounceAt';

@@ -6,6 +6,13 @@ import { OWNER_LOGIN } from './ownerCredential.ts';
 import type { SessionService } from './sessions.ts';
 import type { IdentityUser } from './types.ts';
 
+/** Someone else chose this password: an owner creating or resetting the
+ *  account, or the operator's break-glass recovery. */
+const ADMIN_SET_PASSWORD = ['identity.local-account-created', 'auth.password-reset', 'auth.break-glass-password-reset'] as const;
+/** The holder chose it themselves. */
+const SELF_SET_PASSWORD = ['auth.password-changed', 'auth.recovery-used', 'auth.owner-credential-established', 'setup.completed'] as const;
+const PASSWORD_SETTERS = [...ADMIN_SET_PASSWORD, ...SELF_SET_PASSWORD];
+
 const expected = (revision: number): void => {
   if (!Number.isSafeInteger(revision) || revision < 1) throw controlError('invalid-input', 'Expected revision is required');
 };
@@ -64,8 +71,29 @@ export function createAccounts(control: ControlPlane, passwords: PasswordService
       'SELECT u.id FROM users u JOIN principals p ON p.id=u.id ORDER BY u.created_at_ms,u.id',
     ).map(row => get(row.id));
   };
+  // Every password write stores a freshly salted hash, so the audit answer is
+  // read once per write instead of on every request.
+  const changeRequired = new Map<string, { hash: string; required: boolean }>();
+  const passwordChangeRequired = (userId: string): boolean => {
+    const credential = control.get<{ password_hash: string }>('SELECT password_hash FROM password_credentials WHERE user_id=?', userId);
+    if (!credential) { changeRequired.delete(userId); return false; }
+    const cached = changeRequired.get(userId);
+    if (cached && cached.hash === credential.password_hash) return cached.required;
+    const latest = control.get<{ action: string }>(
+      `SELECT action FROM audit_events WHERE resource_id=? AND action IN (${PASSWORD_SETTERS.map(() => '?').join(',')})
+        ORDER BY seq DESC LIMIT 1`,
+      userId, ...PASSWORD_SETTERS,
+    );
+    const required = !!latest && (ADMIN_SET_PASSWORD as readonly string[]).includes(latest.action);
+    changeRequired.set(userId, { hash: credential.password_hash, required });
+    return required;
+  };
   return {
     activeOwnerUserId,
+    /** The password was set by someone else (an owner creating or resetting
+     *  the account, or break-glass recovery) and the holder has not chosen
+     *  their own since. Until they do, the session may only change it. */
+    passwordChangeRequired,
     /** When someone else last set this person's password, while they haven't
      *  set their own since. Read from the append-only audit log, which no UI
      *  can edit, so it stays until they themselves take the account back. */

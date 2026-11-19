@@ -96,8 +96,12 @@ export function createCanonicalAuthGateway(options: {
       || latest.deviceId !== principal.deviceId || directUser(latest) !== userId) return null;
     return withCeiling(latest, userId);
   };
+  /** A password someone else set still waits to be replaced: until then the
+   *  account's browser sessions and tokens reach only `/api/auth/*` (which
+   *  answers `password-change-required` to everything but the change). */
+  const changePending = (userId: string): boolean => options.identity.accounts.passwordChangeRequired(userId);
   const tokenPrincipal = (token: ReturnType<IdentityService["accessTokens"]["resolve"]>): AuthPrincipal | null => {
-    if (!token) return null;
+    if (!token || changePending(token.userId)) return null;
     const principal = {
       kind: "access-token",
       tokenId: token.id,
@@ -144,6 +148,7 @@ export function createCanonicalAuthGateway(options: {
     if (trusted) return { principal: trusted, authenticated: true };
     const token = cookieToken(request.headers.cookie, options.cookieName);
     const session = options.identity.sessions.resolve(token);
+    if (session && changePending(session.userId)) return { principal: ANONYMOUS, authenticated: false };
     if (session) return { principal: withCeiling(principalForSession(session) as Extract<AuthPrincipal, { kind: "ui-session" }>, session.userId), authenticated: true };
     const debugPrincipal = ingress.loopback ? debugOwnerPrincipal() : null;
     return debugPrincipal
@@ -171,6 +176,12 @@ export function createCanonicalAuthGateway(options: {
     },
     gate(request, ingress) {
       if (gateway.resolve(request, ingress).authenticated) return null;
+      if (ingress.kind === "public-http" && bearerToken(request) === null) {
+        const session = options.identity.sessions.resolve(cookieToken(request.headers.cookie, options.cookieName));
+        if (session && changePending(session.userId)) {
+          return { status: 403, body: { error: "password-change-required", message: "choose your own password first" } };
+        }
+      }
       return { status: 401, body: { error: "unauthorized", message: "authentication required" } };
     },
     refreshPrincipal(principal) {
@@ -204,7 +215,7 @@ export function createCanonicalAuthGateway(options: {
           const userId = directUser(principal);
           if (!userId) return null;
           const live = options.identity.sessions.resolveId(principal.sessionId, userId);
-          return live ? withCeiling(principalForSession(live) as Extract<AuthPrincipal, { kind: "ui-session" }>, live.userId) : null;
+          return live && !changePending(live.userId) ? withCeiling(principalForSession(live) as Extract<AuthPrincipal, { kind: "ui-session" }>, live.userId) : null;
         }
       }
     },

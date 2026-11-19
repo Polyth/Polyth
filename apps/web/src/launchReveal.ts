@@ -10,7 +10,7 @@
 // the controller below only feeds it milestones and lifts the veil.
 import type { LaunchVeil } from "@polyth/mobile/launch";
 
-export type LaunchBootPhase = "checking" | "setup" | "restart" | "locked" | "ready" | "unavailable";
+export type LaunchBootPhase = "checking" | "setup" | "restart" | "locked" | "password-change" | "ready" | "unavailable";
 
 /** Milestones in ms on one clock (performance.now() of the document). */
 export interface LaunchProgress {

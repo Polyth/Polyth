@@ -401,6 +401,10 @@ test('HTTP account permissions: only an elevated instance owner grants them, and
   await member.request('/api/auth/status');
   assert.equal((await member.request('/api/auth/login', { login: 'ida', password: 'member test passphrase' })).status, 200);
   assert.deepEqual((await member.request('/api/auth/me')).value.permissions, ['harnesses.manage']);
+  // The owner chose this password, so Ida replaces it before anything else.
+  assert.equal((await member.request(`/api/auth/accounts/${id}/permissions`)).status, 403);
+  assert.equal((await member.request('/api/auth/password', { password: 'ida own passphrase' })).status, 200);
+  assert.equal((await member.request('/api/auth/login', { login: 'ida', password: 'ida own passphrase' })).status, 200);
   assert.equal((await member.request(`/api/auth/accounts/${id}/permissions`)).status, 200);
   // A permitted account still cannot change permissions, its own or anyone's.
   assert.equal((await member.request(`/api/auth/accounts/${id}/permissions`, { permissions: [], expectedRevision: 1 })).status, 403);
@@ -416,6 +420,34 @@ test('HTTP account permissions: only an elevated instance owner grants them, and
 // the in-process owner session into its own window; any other browser or
 // local process on this machine reaches only a locked status, and a page
 // re-pointed at loopback (DNS rebinding) is refused on Host before any cookie.
+test('HTTP: a created account must choose its own password before anything else', async t => {
+  const f = await httpFixture(t), owner = f.browser();
+  await f.setup(owner);
+  await owner.request('/api/auth/accounts', { login: 'noa', name: 'Noa', password: 'owner chose this one' });
+  assert.equal((await owner.request('/api/auth/status')).value.passwordChangeRequired, undefined);
+
+  const member = f.browser();
+  await member.request('/api/auth/status');
+  assert.equal((await member.request('/api/auth/login', { login: 'noa', password: 'owner chose this one' })).status, 200);
+  assert.equal((await member.request('/api/auth/status')).value.passwordChangeRequired, true);
+  const me = await member.request('/api/auth/me');
+  assert.equal(me.status, 200);
+  assert.equal(me.value.passwordChangeRequired, true);
+  for (const path of ['/api/auth/sessions', '/api/auth/passkeys', '/api/auth/cli']) {
+    const denied = await member.request(path);
+    assert.equal(denied.status, 403, path);
+    assert.equal(denied.value.error, 'password-change-required', path);
+  }
+  assert.equal((await member.request('/api/auth/me', { name: 'Someone else', expectedRevision: 1 })).status, 403);
+
+  assert.equal((await member.request('/api/auth/reauthenticate', { password: 'owner chose this one' })).status, 200);
+  assert.equal((await member.request('/api/auth/password', { password: 'noa chose her own' })).status, 200);
+  assert.equal((await member.request('/api/auth/login', { login: 'noa', password: 'noa chose her own' })).status, 200);
+  assert.equal((await member.request('/api/auth/status')).value.passwordChangeRequired, undefined);
+  assert.equal((await member.request('/api/auth/me')).value.passwordChangeRequired, undefined);
+  assert.equal((await member.request('/api/auth/sessions')).status, 200);
+});
+
 test('a password-less owner: only the Desktop session opens the API; other browsers and rebound pages stay out', async t => {
   const f = await httpFixture(t);
   const owner = f.identity.setup.completeLocal({ name: 'Ida' });

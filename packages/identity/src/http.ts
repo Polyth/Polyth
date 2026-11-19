@@ -85,12 +85,23 @@ const statusFor: Readonly<Record<string, number>> = {
   conflict: 409, 'login-taken': 409, 'last-owner': 409, 'last-auth-method': 409, 'invalid-transition': 409, 'setup-completed': 409,
   replayed: 409, cancelled: 409, 'uncertain-exchange': 409, 'provider-scope-escalation': 409,
   'private-network-approval-required': 409, 'owner-credential-required': 409,
-  'owner-confirmation-required': 403,
+  'owner-confirmation-required': 403, 'password-change-required': 403,
   'invalid-input': 400, 'invalid-provider-transaction': 400, 'callback-mismatch': 400,
   'request-timeout': 408, 'recovery-ack-required': 400, 'body-too-large': 413, 'rate-limited': 429,
   'invalid-provider-response': 502, 'invalid-identity': 502,
   'recovery-required': 503, unavailable: 503, 'provider-unavailable': 503,
 };
+/** All a session may do while its password, set by someone else, still waits
+ *  to be replaced: read itself, confirm the current password, change it, sign
+ *  out — and the sign-in routes, which don't act as the session at all. */
+const PASSWORD_CHANGE_ROUTES: ReadonlySet<string> = new Set([
+  'GET /api/auth/status', 'GET /api/auth/providers', 'GET /api/auth/me',
+  'POST /api/auth/reauthenticate', 'POST /api/auth/password', 'POST /api/auth/logout', 'POST /api/auth/logout-all',
+  'POST /api/auth/login', 'POST /api/auth/recover',
+  'POST /api/auth/passkeys/authenticate/options', 'POST /api/auth/passkeys/authenticate/complete',
+  'POST /api/auth/providers/login/begin', 'POST /api/auth/providers/login/complete',
+  'POST /api/auth/cli/device', 'POST /api/auth/cli/device/token', 'POST /api/auth/cli/logout',
+]);
 const accountStatusPath = /^\/api\/auth\/accounts\/([A-Za-z0-9][A-Za-z0-9_-]{0,199})\/status$/;
 const accountGuardrailsPath = /^\/api\/auth\/accounts\/([A-Za-z0-9][A-Za-z0-9_-]{0,199})\/guardrails$/;
 const accountLimitsPath = /^\/api\/auth\/accounts\/([A-Za-z0-9][A-Za-z0-9_-]{0,199})\/limits$/;
@@ -214,6 +225,7 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
       authorized: !!actor || localTrust,
       scope: actor ? 'ui-session' : localTrust ? 'local-user' : 'anonymous',
       ...(actor ? { accountId: actor.userId } : {}),
+      ...(actor && identity.accounts.passwordChangeRequired(actor.userId) ? { passwordChangeRequired: true } : {}),
       csrfToken: csrfFor(nonce),
     };
   };
@@ -241,7 +253,12 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
     ...(identity.accounts.adminPasswordResetAt(user.id) !== undefined
       ? { adminPasswordResetAt: identity.accounts.adminPasswordResetAt(user.id) }
       : {}),
+    ...(identity.accounts.passwordChangeRequired(user.id) ? { passwordChangeRequired: true } : {}),
   });
+  const passwordChangePending = (token: string | null): boolean => {
+    const session = identity.sessions.resolve(token);
+    return !!session && identity.accounts.passwordChangeRequired(session.userId);
+  };
   const cliBody = (tokens: readonly AccessTokenSummary[], canManageTrust: boolean) => {
     const trust = identity.accessTokens.trust.get();
     return {
@@ -417,7 +434,9 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
     authorizeUpgrade(req: IncomingMessage) {
       transport(req); sameOrigin(req);
       if (req.url !== '/ws') throw controlError('not-found', 'WebSocket route not found');
-      return identity.sessions.require(tokenOf(req));
+      const session = identity.sessions.require(tokenOf(req));
+      if (identity.accounts.passwordChangeRequired(session.userId)) throw controlError('password-change-required', 'Choose your own password first');
+      return session;
     },
     async handle(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
       if (!req.url?.startsWith('/api/auth/')) return false;
@@ -430,6 +449,9 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
         const path = req.url;
         if (path.includes('?') || path.includes('#')) throw controlError('invalid-input', 'Authentication parameters belong in the request body');
         const token = tokenOf(req);
+        if (!PASSWORD_CHANGE_ROUTES.has(`${req.method} ${path}`) && passwordChangePending(token)) {
+          throw controlError('password-change-required', 'Choose your own password first');
+        }
         if (req.method === 'GET' && path === '/api/auth/status') {
           send(200, authStatus(req, res, token));
           return true;
