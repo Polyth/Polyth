@@ -75,8 +75,14 @@ export function sanitizeNextActionReply(raw: string, maxChars = NEXT_ACTION_OUTP
     .replace(/^(?:suggestion|(?:improved\s+)?prompt|next(?:\s+(?:user\s+)?(?:message|action))?)\s*:\s*/i, "");
   const quoted = text.match(/^["“]([\s\S]*)["”]$/);
   if (quoted) text = quoted[1]!.trim();
+  // Asked for an empty answer, some models spell the emptiness out instead
+  // ("(empty)", "<empty string>", "None"); that is no suggestion, not a message.
+  if (NO_ANSWER_PLACEHOLDER.test(text)) return "";
   return capChars(text, maxChars);
 }
+
+const NO_ANSWER_PLACEHOLDER =
+  /^[([{<"'`*_\s]*(?:empty(?:\s+(?:string|answer|response|message))?|none|null|nil|nothing|n\/a|no\s+(?:suggestion|next\s+(?:action|message)|message|answer)|""|''|-{1,2})[.!)\]}>"'`*_\s]*$/i;
 
 export interface ManualSuggestionService {
   generate(
