@@ -302,6 +302,7 @@ const fs = require("node:fs");
 const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ startup: args }) + "\\n");
 if (args[0] === "--version") { process.stdout.write("2026.09.02\\n"); process.exit(0); }
+if (args[0] === "status") { process.stdout.write(JSON.stringify({ isAuthenticated: true, userInfo: { email: "t@example.test" } })); process.exit(0); }
 require("node:readline").createInterface({ input: process.stdin }).on("line", line => {
   const request = JSON.parse(line);
     fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ method: request.method, params: request.params }) + "\\n");
@@ -319,6 +320,10 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", li
     const previousPath = process.env.PATH;
     process.env.PATH = `${dir}:${previousPath ?? ""}`;
     t.after(() => { if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath; });
+    // The sign-in check reads `$XDG_CONFIG_HOME/cursor/auth.json`; never this host's.
+    const previousConfig = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = dir;
+    t.after(() => { if (previousConfig === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = previousConfig; });
 
     const registry = createHarnessRegistry();
     const host = {
@@ -342,8 +347,9 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", li
         undefined, ["low", "medium", "high"],
     ]);
     const before = (await readFile(log, "utf8")).trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
-    assert.deepEqual(before.filter((entry) => entry.startup).slice(0, 3).map((entry) => entry.startup), [
-        ["--version"], ["--version"], ["acp"],
+    // The probe asks for the sign-in before discovery starts the agent.
+    assert.deepEqual(before.filter((entry) => entry.startup).slice(0, 4).map((entry) => entry.startup), [
+        ["--version"], ["--version"], ["status", "--format", "json"], ["acp"],
     ]);
     await provider.discover!(discoveryContext);
     const after = (await readFile(log, "utf8")).trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));

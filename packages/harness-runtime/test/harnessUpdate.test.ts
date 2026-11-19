@@ -5,8 +5,9 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { HarnessRegistry, HarnessSnapshot, RouteRequest, SpaceContext } from "@polyth/contracts";
 import { createServerServiceRegistry, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
-import { externalHarnessCopy, freeHarnessExecutable, harnessRoutes, npmGlobalPrefixOf, runHarnessUpdate, updateCrashName, wrapperNote } from "../src/serverEntry.ts";
+import { externalHarnessCopy, freeHarnessExecutable, harnessRoutes, npmGlobalPrefixOf, runHarnessUpdate, runInstallerUpdate, updateCrashName, wrapperNote } from "../src/serverEntry.ts";
 import { windowsCmdWrapperTarget } from "../src/executableDiscovery.ts";
+import type { InstallLauncher } from "../src/installJobs.ts";
 
 test("runHarnessUpdate runs the argv without a shell and reports the exit", async () => {
     const dir = mkdtempSync(join(tmpdir(), "harness-update-"));
@@ -186,6 +187,43 @@ test("npmGlobalPrefixOf recognizes only a launcher that leads into the npm packa
     assert.equal(await externalHarnessCopy(hit(shim), codex, "win32"), undefined, "npm's own shim");
     assert.equal(await externalHarnessCopy(hit(exe), codex, "win32"), undefined, "a native program keeps its own updater");
     assert.equal(await externalHarnessCopy(hit(late), codex, "linux", { APPBIN: bin }), undefined);
+});
+
+test("a failed update falls back to the vendor installer when the backend allows it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "harness-update-fallback-"));
+    const bin = join(dir, "fake-cli");
+    writeFileSync(bin, "#!/bin/sh\necho 'Error: Update failed: [unauthenticated] Error'\nexit 1\n");
+    chmodSync(bin, 0o755);
+    const launched: string[] = [];
+    const launcher: InstallLauncher = async (command) => {
+        launched.push(command);
+        return {
+            onOutput: (listener) => { queueMicrotask(() => listener("\x1b[32mInstalled 2026.11.05\x1b[0m\n")); },
+            onExit: (listener) => { setTimeout(() => listener(0), 5); },
+            kill: async () => {},
+        };
+    };
+    const result = await runHarnessUpdate([bin, "update"], undefined, { fallback: () => runInstallerUpdate(launcher, "curl -fsSL https://example.test/install | bash") });
+    assert.equal(result.ok, true);
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(launched, ["curl -fsSL https://example.test/install | bash"]);
+    assert.match(result.output, /\[unauthenticated\][\s\S]*vendor installer[\s\S]*Installed 2026\.11\.05$/);
+    // Without a fallback the failure is reported as it was.
+    const plain = await runHarnessUpdate([bin, "update"]);
+    assert.equal(plain.ok, false);
+    assert.equal(plain.exitCode, 1);
+});
+
+test("an installer update reports a non-zero exit, a refused launch and a timeout", async () => {
+    const exiting = (code: number | null): InstallLauncher => async () => ({ onOutput: () => {}, onExit: (listener) => { setTimeout(() => listener(code), 1); }, kill: async () => {} });
+    assert.deepEqual(await runInstallerUpdate(exiting(2), "x"), { ok: false, exitCode: 2, output: "" });
+    const refused = await runInstallerUpdate(async () => { throw new Error("spawn failed"); }, "x");
+    assert.deepEqual(refused, { ok: false, exitCode: null, output: "spawn failed" });
+    let killed = false;
+    const hanging: InstallLauncher = async () => ({ onOutput: () => {}, onExit: () => {}, kill: async () => { killed = true; } });
+    const timedOut = await runInstallerUpdate(hanging, "x", 10);
+    assert.equal(timedOut.ok, false);
+    assert.equal(killed, true);
 });
 
 const space = { spaceId: "space-a", spaceSlug: "space-a", userId: "user-a", role: "owner", deployment: "local-trusted", storageDir: "/tmp/polyth-space-a" } as SpaceContext;

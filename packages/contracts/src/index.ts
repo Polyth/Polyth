@@ -4696,6 +4696,11 @@ export interface HarnessDescriptor {
   /** The CLI's own self-update argv; `[0]` is the binary name, resolved like the
    *  harness executable and run without a shell. */
   updateCommand?: readonly string[];
+  /** `"installer"`: when `updateCommand` fails, Polyth runs `installCommand`
+   *  instead, which installs the newest release in place. For a CLI whose
+   *  own updater needs things its installer does not (Cursor's `agent update`
+   *  needs a live sign-in; its installer downloads anonymously). */
+  updateFallback?: "installer";
   /** Where the newest release of this CLI is published, so Settings can say
    *  an update exists before running `updateCommand`. */
   releaseSource?: HarnessReleaseSource;

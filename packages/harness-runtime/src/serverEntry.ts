@@ -151,18 +151,24 @@ export async function freeHarnessExecutable(
 /** Run one harness's update the way Settings does (`runHarnessUpdate`, npm
  *  into the prefix an npm-installed CLI lives in), then drop every cached
  *  answer about the harnesses it changed: registry snapshots, the server model
- *  catalog and, after a success, the release lookup. */
+ *  catalog and, after a success, the release lookup. A harness whose updater
+ *  can fail where its installer cannot (`updateFallback: "installer"`) falls
+ *  back to that installer through `launcher`. */
 async function updateHarnessCli(
     host: Pick<ServerPackageHost, "services">,
     provider: Pick<HarnessProvider, "descriptor" | "versionStore">,
     checker: HarnessUpdateChecker,
     harnessIds: readonly string[] = [provider.descriptor.id],
+    launcher?: InstallLauncher,
 ): Promise<HarnessUpdateResult> {
     const { descriptor } = provider;
     if (!descriptor.updateCommand?.length)
         throw harnessError("unsupported", "this harness has no update command");
     const source = descriptor.releaseSource;
-    const result = await runHarnessUpdate(descriptor.updateCommand, provider.versionStore, source?.kind === "npm" ? { npmPackage: source.package, ...(source.bin ? { npmBin: source.bin } : {}), ...(source.distTag ? { npmDistTag: source.distTag } : {}) } : {});
+    const npmTarget: HarnessUpdateNpmTarget = source?.kind === "npm" ? { npmPackage: source.package, ...(source.bin ? { npmBin: source.bin } : {}), ...(source.distTag ? { npmDistTag: source.distTag } : {}) } : {};
+    const installer = launcher && descriptor.updateFallback === "installer" ? descriptor.installCommand?.trim() : undefined;
+    const result = await runHarnessUpdate(descriptor.updateCommand, provider.versionStore,
+        installer ? { ...npmTarget, fallback: () => runInstallerUpdate(launcher!, installer) } : npmTarget);
     const registry = host.services.get(serverServiceKey<HarnessRegistry>("harnesses"));
     for (const harnessId of harnessIds) registry?.invalidate({ harnessId });
     host.services.get(serverServiceKey<{ invalidateModels(): void }>("runtime.catalog"))?.invalidateModels();
@@ -187,7 +193,7 @@ async function withExternalCopy(status: HarnessUpdateStatus, descriptor: Harness
 /** The package's automatic updater: machine-wide settings in the package data
  *  directory, this machine's status as the owner sees it, and the same update
  *  path as Settings (Windows first frees the CLI of every harness on it). */
-export function harnessAutoUpdater(host: ServerPackageHost, checker: HarnessUpdateChecker): HarnessAutoUpdater {
+export function harnessAutoUpdater(host: ServerPackageHost, checker: HarnessUpdateChecker, launcher?: InstallLauncher): HarnessAutoUpdater {
     const registry = () => host.services.require(serverServiceKey<HarnessRegistry>("harnesses"));
     return createHarnessAutoUpdater({
         file: () => join(packageDataDir(host), "auto-update.json"),
@@ -200,7 +206,7 @@ export function harnessAutoUpdater(host: ServerPackageHost, checker: HarnessUpda
         async update(harness, group) {
             for (const member of group) await freeHarnessExecutable(host, member.descriptor);
             const provider = registry().get(harness.descriptor.id) ?? harness;
-            return updateHarnessCli(host, provider, checker, group.map((member) => member.descriptor.id));
+            return updateHarnessCli(host, provider, checker, group.map((member) => member.descriptor.id), launcher);
         },
         release: () => host.services.get(serverServiceKey<AutoUpdateRelease>("harness.runtime.releaseIdle")),
     });
@@ -222,8 +228,19 @@ export type HarnessUpdateNpmTarget = {
  *  prefix it lives in (`npm install -g <package>@<tag>`). After
  *  a successful update of a side-by-side install, the old versions no running
  *  process uses are removed (`versionStore`). */
-export async function runHarnessUpdate(command: readonly string[], versionStore?: HarnessVersionStore, options: HarnessUpdateNpmTarget = {}): Promise<HarnessUpdateResult> {
-    const result = await runUpdateCommand(command, options);
+export async function runHarnessUpdate(
+    command: readonly string[],
+    versionStore?: HarnessVersionStore,
+    options: HarnessUpdateNpmTarget & { fallback?: () => Promise<HarnessUpdateResult> } = {},
+): Promise<HarnessUpdateResult> {
+    const { fallback, ...target } = options;
+    const first = await runUpdateCommand(command, target);
+    let result = first;
+    if (!first.ok && fallback) {
+        const retried = await fallback();
+        const output = `${first.output}\n\n${command.join(" ")} failed; installed the newest release with the vendor installer instead.\n${retried.output}`;
+        result = { ...retried, output: output.trim().slice(-UPDATE_OUTPUT_TAIL) };
+    }
     if (!result.ok || !versionStore) return result;
     // The update moved the launcher to the new version; resolve it again.
     const { hit } = await discoverHarnessExecutable(command[0]!);
@@ -348,6 +365,24 @@ export async function wrapperNote(launcher: string, platform: NodeJS.Platform = 
         ...(file ? [`It starts: ${file}`] : folder ? [`It starts a program in: ${folder}`] : []),
         "This launcher is a wrapper around a copy that npm did not install, so Polyth cannot update it. Update it with the app that installed it, or remove the wrapper and install the CLI from Polyth.",
     ].join("\n");
+}
+/** Run a backend's fixed installer as an update, through the launcher a
+ *  background install uses, bounded like `runUpdateCommand`. */
+export async function runInstallerUpdate(launch: InstallLauncher, command: string, timeoutMs = UPDATE_TIMEOUT_MS): Promise<HarnessUpdateResult> {
+    let child: Awaited<ReturnType<InstallLauncher>>;
+    try {
+        child = await launch(command);
+    } catch (error) {
+        return { ok: false, exitCode: null, output: error instanceof Error ? error.message : String(error) };
+    }
+    let output = "";
+    child.onOutput((text) => { output = (output + text).slice(-8 * UPDATE_OUTPUT_TAIL); });
+    const exitCode = await new Promise<number | null>((resolve) => {
+        const timer = setTimeout(() => { void child.kill().finally(() => resolve(null)); }, timeoutMs);
+        child.onExit((code) => { clearTimeout(timer); resolve(code); });
+    });
+    const text = output.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").trim().slice(-UPDATE_OUTPUT_TAIL);
+    return { ok: exitCode === 0, exitCode, output: text || (exitCode === null ? "The installer did not finish in time" : "") };
 }
 async function runUpdateCommand(command: readonly string[], target: HarnessUpdateNpmTarget): Promise<HarnessUpdateResult> {
     const [binary, ...ownArgs] = command;
@@ -1002,7 +1037,7 @@ export function harnessRoutes(
                 throw harnessError("unsupported", "this harness has no update command");
             const update = async () => {
                 await freeHarnessExecutable(host, provider.descriptor);
-                return updateHarnessCli(host, provider, updateChecker);
+                return updateHarnessCli(host, provider, updateChecker, undefined, localLauncher);
             };
             // One update of a CLI at a time, whether Settings or the automatic
             // updater started it.
@@ -1160,7 +1195,10 @@ export default function registerPackage(host: ServerPackageHost) {
     const installContainment = createInstallContainment(() => join(packageDataDir(host), "install-executions"));
     const defaults = personDefaults(host);
     const updateChecker = createHarnessUpdateChecker();
-    const autoUpdates = harnessAutoUpdater(host, updateChecker);
+    // The automatic updater falls back to a harness installer the same way
+    // Settings does, contained like a background install.
+    const autoUpdates = harnessAutoUpdater(host, updateChecker,
+        localInstallLauncher({ env: () => localSetupEnv(), containment: installContainment }));
     // Answers only while the package is enabled: a disabled package's saved
     // defaults pin nothing.
     let active = false;

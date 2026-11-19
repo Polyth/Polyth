@@ -14,6 +14,7 @@ import { createCursorClientTranslator } from "./todos.ts";
 import { cursorModelDiscoverySupport } from "./version.ts";
 import { createCursorSmallModelRunner } from "./smallModel.ts";
 import { cursorSessionsDir, listCursorSessions, readCursorSession } from "./history.ts";
+import { readCursorAuthReport } from "./authStatus.ts";
 const exec = promisify(execFile);
 /** Cursor's CLI installers (cursor.com/docs/cli/installation). */
 const CURSOR_INSTALLER = { posix: "https://cursor.com/install", windowsPowerShell: "https://cursor.com/install?win32=true" };
@@ -158,21 +159,24 @@ const prepareCursorAccount = (account: ResolvedHarnessAccount) =>
 const accountSessionsDir = (account?: ResolvedHarnessAccount) =>
     account ? join(accountConfigRoot(account), "cursor", "acp-sessions") : cursorSessionsDir();
 
-/** `agent status --format json` is the CLI's local sign-in report. */
-const cursorAccountStatus = async (account?: ResolvedHarnessAccount): Promise<HarnessAccountStatus> => {
-    const { command, env } = await resolveCursorBinary();
-    const { stdout } = await exec(windowsShim(command) ? `"${command}"` : command, ["status", "--format", "json"], {
+/** Cursor's sign-in (see `authStatus.ts`): the CLI's own report, checked
+ *  against the stored session's end. */
+const cursorAuthReport = async (account?: ResolvedHarnessAccount, binary?: { command: string; env?: NodeJS.ProcessEnv }) => {
+    const { command, env } = binary ?? await resolveCursorBinary();
+    // A Windows `.cmd` shim runs through the shell, which splits an unquoted path.
+    return readCursorAuthReport(() => exec(windowsShim(command) ? `"${command}"` : command, ["status", "--format", "json"], {
         timeout: 20_000,
         maxBuffer: 64 * 1024,
         env: { ...env, ...accountEnv(account) },
         shell: windowsShim(command),
-    }).catch((error: { stdout?: string }) => ({ stdout: error.stdout ?? "" }));
-    const report = asRecord(JSON.parse(stdout));
-    const user = asRecord(report?.userInfo);
-    if (typeof report?.isAuthenticated !== "boolean") return { loggedIn: "unknown" };
+    }), account ? accountConfigRoot(account) : realConfigRoot());
+};
+const cursorAccountStatus = async (account?: ResolvedHarnessAccount): Promise<HarnessAccountStatus> => {
+    const report = await cursorAuthReport(account);
     return {
-        loggedIn: report.isAuthenticated,
-        ...(report.isAuthenticated && typeof user?.email === "string" && user.email ? { email: user.email } : {}),
+        loggedIn: report.loggedIn,
+        ...(report.email ? { email: report.email } : {}),
+        ...(report.expiresAt !== undefined ? { expiresAt: report.expiresAt } : {}),
     };
 };
 
@@ -187,6 +191,10 @@ export function createCursorProfile(account?: ResolvedHarnessAccount): Registere
             priority: 60,
             setupUrl: "https://cursor.com/docs/cli/acp",
             updateCommand: ["agent", "update"],
+            // `agent update` asks Cursor who is signed in first and fails
+            // with `[unauthenticated]` once the session ended; the installer
+            // fetches the same release without a sign-in.
+            updateFallback: "installer",
             releaseSource: { kind: "page", url: "https://cursor.com/install", pattern: "downloads\\.cursor\\.com/lab/([0-9]{4}\\.[0-9]{2}\\.[0-9]{2}-[0-9a-f]+)/" },
             // The agent publishes `cursor_login` as its ACP auth method; the
             // CLI runs that flow.
@@ -227,10 +235,16 @@ export function createCursorProfile(account?: ResolvedHarnessAccount): Registere
                 if (account) await prepareCursorAccount(account);
                 profile.command = command;
                 profile.env = { ...env, ...accountEnv(account) };
-                // Installation alone is not proof of authentication. The profile is
-                // offered for explicit selection but excluded from automatic routing
-                // until a native auth/status contract is verified.
-                return { harnessId, installed: true, authenticated: "unknown", healthy: true, version, message: "Native sign-in status is not available" };
+                // Installation alone is not proof of authentication; the
+                // CLI's report checked against the stored session's end is.
+                // The profile stays out of automatic routing (`autoSelect`).
+                const auth = await cursorAuthReport(account, { command, env });
+                return {
+                    harnessId, installed: true, healthy: true, version,
+                    authenticated: auth.loggedIn,
+                    ...(auth.loggedIn === true && auth.expiresAt !== undefined ? { authExpiresAt: auth.expiresAt } : {}),
+                    ...(auth.loggedIn !== true && auth.reason ? { message: auth.reason } : {}),
+                };
             }
             catch {
                 return { harnessId, installed: false, authenticated: "unknown", healthy: false };
