@@ -14735,19 +14735,18 @@ width: var(--tap);
 }
 /* No pointer or trackpad has to acquire a 7px/12px/32px target. */
 .sidebar-resize { inset-inline-end: -6px; width: 12px; }
-/* The strip's gutters: the wider one faces the workspace (or a window), the
-   narrow one the window edge, where the frame itself already gives the icons
-   air. A strip that floats as a card of its own (the tablet cluster, floating
-   columns, a look's island) splits the same width evenly, as its frame
-   closes on both sides. Badges clear either edge; touch input expands a
-   transparent hit area, not the strip. */
+/* The strip's gutters. Centered by default: an icon sits dead-centre of the
+   rail, whatever paints its frame. Looks/states that need a different total
+   air (the tablet cluster, floating columns, a look's island) override
+   --rail-strip-gutter-start/end with symmetric values. Badges clear either
+   edge; touch input expands a transparent hit area, not the strip. */
 .rail-icon-col.plugin-strip {
   box-sizing: border-box;
   width: var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-3) + 1px));
   min-width: var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-3) + 1px));
   gap: var(--space-2);
   padding-block: var(--space-2);
-  padding-inline: var(--rail-strip-gutter-start, var(--space-2)) var(--rail-strip-gutter-end, var(--space-1));
+  padding-inline: var(--rail-strip-gutter-start, calc(var(--space-3) / 2)) var(--rail-strip-gutter-end, calc(var(--space-3) / 2));
 }
 .rail-icon-col.plugin-strip .strip-btn,
 .rail-icon-col.plugin-strip .capability-launcher {

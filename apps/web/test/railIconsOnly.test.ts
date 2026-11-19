@@ -46,8 +46,8 @@ test("desktop rail width and header geometry use the configured icon strip", asy
   );
   assert.match(
     css,
-    /\.rail-icon-col\.plugin-strip\s*\{[^}]*width:\s*var\(--rail-strip-width-right[^}]*min-width:\s*var\(--rail-strip-width-right[^}]*padding-inline:\s*var\(--rail-strip-gutter-start, var\(--space-2\)\) var\(--rail-strip-gutter-end, var\(--space-1\)\)/s,
-    "the icon strip is the configured button width plus token gutters, the wider one toward the workspace",
+    /\.rail-icon-col\.plugin-strip\s*\{[^}]*width:\s*var\(--rail-strip-width-right[^}]*min-width:\s*var\(--rail-strip-width-right[^}]*padding-inline:\s*var\(--rail-strip-gutter-start, calc\(var\(--space-3\) \/ 2\)\) var\(--rail-strip-gutter-end, calc\(var\(--space-3\) \/ 2\)\)/s,
+    "the icon strip is the configured button width plus symmetric token gutters, so icons centre in the rail",
   );
   assert.doesNotMatch(
     css,

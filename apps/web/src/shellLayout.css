@@ -279,12 +279,12 @@ body[data-shell-floating="true"]:is([data-shell-layout="columns"], [data-shell-l
   --rail-strip-gutter-start: calc(var(--space-3) / 2);
   --rail-strip-gutter-end: calc(var(--space-3) / 2);
 }
-/* A flush strip has no frame or window inset to give its icons air at the
-   window edge (the classic strip's narrow edge gutter assumes one), so it
-   mirrors the navigator's project rail instead: a full --space-2 on both
-   sides, the strip one gutter wider. Declared on .app so every consumer of
-   the width (workspace reserve, package windows, status bar) follows; a
-   hidden strip still zeroes it (styles.css, higher priority). */
+/* A flush strip has no frame or window inset to give its icons air at
+   either edge, so it mirrors the navigator's project rail instead: a full
+   --space-2 on both sides, the strip one gutter wider. Declared on .app so
+   every consumer of the width (workspace reserve, package windows, status
+   bar) follows; a hidden strip still zeroes it (styles.css, higher
+   priority). */
 body[data-shell-floating="false"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app {
   --rail-strip-width-right: calc(var(--rail-icon-size-right) + var(--space-4) + 1px);
 }

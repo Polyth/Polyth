@@ -284,7 +284,8 @@ without their track.
 At 100% both side rails use the `--icon-rail` glyph and a 4px gap between tiles.
 The project rail is a 49px track (36px tiles, a 6px gutter each side, the 1px
 divider; `SIDEBAR_RAIL_WIDTH` in `sidebarLayout.ts` mirrors it) and the launcher
-strip a 41px column (32px tiles, 4px gutters, the 1px seam a docked pane adds).
+strip a 45px column (32px tiles, 6px gutters each side, the 1px seam a docked
+pane adds).
 Every control in them is one tile — the collapse toggle, Add, Settings and the
 project icons alike — and a tile's keyboard ring is drawn inside it, because
 both lists scroll and would clip an outside ring. Touch widens the gap to 8px
@@ -815,13 +816,11 @@ at ≥ 6.6:1.
 - Desktop spacing is logical, so a mirrored shell mirrors the looks.
 - A raised `.workspace` leaves room for the right launcher strip with
   `--rail-strip-width-right`.
-- The launcher strip's gutters are `--rail-strip-gutter-start` (default
-  `--space-2`, toward the workspace) and `--rail-strip-gutter-end` (default
-  `--space-1`, the window edge). A strip that floats as a card of its own (the
-  tablet cluster, Air and Obsidian islands) and every full-height strip
-  (`columns`/`bare`, floating or flush — a flush strip has no frame to give
-  the edge-side icons air) split the same width evenly; a flush strip is one
-  gutter wider (`--space-2` on both sides), mirroring the navigator's rail.
+- The launcher strip's gutters are symmetric, so every icon sits centred in
+  the rail: `--rail-strip-gutter-start`/`--rail-strip-gutter-end` both default
+  to half of `--space-3` (6px). A flush strip (`columns`/`bare` with floating
+  off) has no frame to give the edge-side icons air, so it is one gutter
+  wider — a full `--space-2` on both sides — mirroring the navigator's rail.
   With Floating columns the workspace ends at the columns' bottom
   (`--shell-edge`).
 - **The launcher column is the same thing with a window as without one**
