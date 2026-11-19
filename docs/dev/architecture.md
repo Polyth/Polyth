@@ -693,7 +693,9 @@ the subscription moves, ignores receipts for a superseded token, and — only
 until it has seen one receipt — settles an old gateway after
 `receiptFallbackMs`. `apps/web/src/syncCatchUp.ts` turns that into the
 "Updating…/Reconnecting…" pill (after 700 ms; stale data stays visible and
-usable) and holds connection-loss toasts for up to 20 s while healing; see
+usable; a Desktop window on its own in-process server never says
+"Reconnecting…", since its loopback cannot be lost, and retries a refused dial
+within 1 s) and holds connection-loss toasts for up to 20 s while healing; see
 [mobile platform behavior](../mobile/platform-behavior.md).
 
 ## Event vocabulary

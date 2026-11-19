@@ -23,6 +23,14 @@ test("a quick catch-up shows nothing; a slow one says updating, or reconnecting 
     "the list still catching up is still not current");
 });
 
+test("a window on this computer's own server never says reconnecting: there is no connection to lose", () => {
+  for (const status of ["reconnecting", "connecting", "disconnected", "offline"] as const) {
+    assert.equal(catchUpView({ freshness: stale, status, staleSince: 0, now: CATCH_UP_INDICATOR_DELAY_MS, ownServer: true }).indicator, "updating", status);
+  }
+  assert.equal(catchUpView({ freshness: stale, status: "reconnecting", staleSince: 0, now: CATCH_UP_INDICATOR_DELAY_MS - 1, ownServer: true }).indicator, "hidden");
+  assert.equal(catchUpView({ freshness: fresh, status: "reconnecting", staleSince: 0, now: 5_000, ownServer: true }).indicator, "hidden");
+});
+
 test("transport errors are held only while the system can still heal, and never in the background's favour", () => {
   assert.equal(catchUpView({ freshness: stale, status: "reconnecting", staleSince: 0, now: CATCH_UP_ERROR_GRACE_MS - 1 }).holdNetworkErrors, true);
   assert.equal(catchUpView({ freshness: stale, status: "reconnecting", staleSince: 0, now: CATCH_UP_ERROR_GRACE_MS }).holdNetworkErrors, false);

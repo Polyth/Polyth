@@ -9,6 +9,7 @@ import type { SyncFreshness, SyncStatus } from "./sync.ts";
 import { getSyncFreshness, getSyncStatus, subscribeSyncFreshness, subscribeSyncStatus } from "./init.ts";
 import { presentUiError } from "./errorPresentation.ts";
 import { isMutationOutcomeUnknownMessage } from "./settings.ts";
+import { onServerHostSurface } from "./desktopBridge.ts";
 
 /** A catch-up shorter than this is never announced: it would read as flicker. */
 export const CATCH_UP_INDICATOR_DELAY_MS = 700;
@@ -36,6 +37,10 @@ export function catchUpView(input: {
   status: SyncStatus;
   staleSince: number | null;
   now: number;
+  /** The window runs this computer's own server (Polyth Desktop): the socket
+   *  is a loopback to the same app, so there is no connection to lose. A gap
+   *  is that server starting or busy, and the screen is only catching up. */
+  ownServer?: boolean;
 }): CatchUpView {
   const fresh = isFresh(input.freshness);
   if (fresh || input.staleSince === null || input.status === "suspended") {
@@ -44,7 +49,7 @@ export function catchUpView(input: {
   const elapsed = input.now - input.staleSince;
   const indicator: CatchUpIndicator = elapsed < CATCH_UP_INDICATOR_DELAY_MS
     ? "hidden"
-    : input.status === "connected" ? "updating" : "reconnecting";
+    : input.status === "connected" || input.ownServer === true ? "updating" : "reconnecting";
   return { fresh, indicator, holdNetworkErrors: elapsed < CATCH_UP_ERROR_GRACE_MS };
 }
 
@@ -92,5 +97,5 @@ export function useSyncCatchUp(): CatchUpView {
     return () => { for (const timer of timers) clearTimeout(timer); };
   }, [staleSince]);
 
-  return catchUpView({ freshness, status, staleSince, now });
+  return catchUpView({ freshness, status, staleSince, now, ownServer: onServerHostSurface() });
 }

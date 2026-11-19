@@ -35,7 +35,7 @@ import { initPluginBridge } from "./pluginBridge.ts";
 import { installExternalCapabilityDrag } from "./dnd.ts";
 import { reconcilePackage } from "./packages/reconcile.ts";
 import { tr } from "./i18n/index.ts";
-import { desktopBridge } from "./desktopBridge.ts";
+import { desktopBridge, onServerHostSurface } from "./desktopBridge.ts";
 import { clearSendFailure, reportSendFailure } from "./sendFailure.ts";
 import { markSessionPerformance } from "./sessionPerformance.ts";
 import { shouldRefreshRuntimeFeatures } from "./runtimeFeaturesSync.ts";
@@ -1309,6 +1309,10 @@ function startSync(): void {
     resumeProbeMs: 2_000,
     connectTimeoutMs: 8_000,
     settledRetryDelayMs: 0,
+    // This computer's own server (Desktop) is a loopback in the same app: a
+    // refused dial means it is starting or busy, so retry soon rather than
+    // climbing the network backoff ladder to 5 s.
+    ...(onServerHostSurface() ? { maxDelayMs: 1_000 } : {}),
   });
   sync.setRetryHints({
     online: typeof navigator === "undefined" || navigator.onLine !== false,
