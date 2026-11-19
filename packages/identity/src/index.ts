@@ -5,6 +5,7 @@ import { createPasswordService, type PasswordService } from './passwords.ts';
 import { createSessions, type IssuedSession } from './sessions.ts';
 import { createSetup } from './setup.ts';
 import { createCredentials } from './credentials.ts';
+import { createPairedDevice } from './pairedDevice.ts';
 import { createAccounts } from './accounts.ts';
 import { createGuardrails, type GuardrailsNormalizer } from './guardrails.ts';
 import { createLimits, type LimitsNormalizer } from './limits.ts';
@@ -27,6 +28,8 @@ export type { LimitsNormalizer, LimitsService, StoredLimits, UsageMetric, UsageT
 export type { PermissionsNormalizer, PermissionsService, StoredPermissions } from './permissions.ts';
 export type { CompleteSetup, CompleteLocalSetup } from './setup.ts';
 export type { AccessMode } from './access.ts';
+export { PAIRED_SESSION_LABEL } from './pairedDevice.ts';
+export type { PairedDeviceService } from './pairedDevice.ts';
 export { OWNER_LOGIN } from './ownerCredential.ts';
 export type { OwnerCredentialService } from './ownerCredential.ts';
 export type { IssuedSession } from './sessions.ts';
@@ -121,6 +124,7 @@ export function createIdentityService(control: ControlPlane, opts: {
     },
   } : null;
   const accounts = createAccounts(control, passwords, sessions, now);
+  const credentials = createCredentials(control, passwords, sessions, now);
   const guardrails = createGuardrails(control, sessions, now, opts.normalizeGuardrails ?? (() => {
     throw controlError('unavailable', 'Account guardrails are unavailable');
   }));
@@ -146,7 +150,10 @@ export function createIdentityService(control: ControlPlane, opts: {
   return {
     setup: createSetup(control, passwords, sessions, now, () => passkeys.available()),
     sessions,
-    credentials: createCredentials(control, passwords, sessions, now),
+    credentials,
+    /** Account administration from a full-access paired device; see
+     *  `pairedDevice.ts` for the session/elevation boundary. */
+    pairedDevice: createPairedDevice(control, sessions, credentials, now),
     accounts,
     guardrails,
     limits,

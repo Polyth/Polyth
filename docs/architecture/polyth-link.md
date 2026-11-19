@@ -258,15 +258,29 @@ rotate, password, package install, secure-safe export, shutdown) are never
 grantable to guarded accounts or CLI tokens; the owner may grant them to a
 paired device. From the `/api/auth/*` tree, Link ingress answers
 `GET /api/auth/status`, and for a full-access device (an unguarded account)
-also `GET /api/auth/accounts`, `GET /api/auth/me` and `GET /api/auth/cli` for
-the device's own account (`handlePairedRead` in `@polyth/identity`, gated in
-`packages/server/src/http.ts`). These answers are read-only: `readOnly: true`
-(with `canManage` and `canManageTrust` false, and `canManageInBrowser` for an
-owner on the account list) tells Settings → Users and Command line to send
-changes to a browser signed in to the server. Account and token changes,
-terminal sign-in approval, passkeys, sessions and every other identity route
-need a browser identity session (same origin, CSRF, owner re-authentication)
-and stay public-HTTP-only.
+`handlePaired` in `@polyth/identity` (gated in `packages/server/src/http.ts`)
+also answers that device's own `GET /api/auth/accounts`, `/me` and `/cli`, plus
+`GET` of an account's `guardrails`, `limits` and `permissions`. An owner of a
+credential-backed installation additionally creates and changes people:
+`POST /api/auth/accounts` and `/accounts/:id/{profile,login,password,status,guardrails,limits,permissions}`.
+
+That administration keeps one server-side identity session per device
+(`packages/identity/src/pairedDevice.ts`); its token never leaves the server and
+its row is left out of the browser's session list. The device grant is the
+request credential (no cookie, so no CSRF/same-origin check applies), but every
+change first needs the person's password via `POST /api/auth/reauthenticate`,
+which elevates that session for five minutes exactly like a browser's recent
+sign-in; without it the answer is `403 reauth-required`, which Settings → Users
+turns into its password prompt. Elevation is per device and per process.
+
+Everything else over Link stays refused: the device's own name, password,
+passkeys, sessions and command-line tokens, terminal sign-in approval, provider
+configuration and every other identity route need a browser identity session
+(same origin, CSRF, owner re-authentication) and stay public-HTTP-only. Those
+answers keep `readOnly: true` (and `canManageTrust: false`), so Settings → Users
+shows the owner's own card as browser-only and Command line stays read-only. A
+password-less `local` installation also keeps the read-only people list
+(`canManage: false`), because a device has no credential to confirm.
 
 A route that refuses paired devices itself must let a full-access device
 through (`principalHasFullAccess`), as `/api/system/info` and

@@ -50,6 +50,21 @@ export function createCredentials(control: ControlPlane, passwords: PasswordServ
         return sessions.issue(observed.user_id, input.label);
       });
     },
+    /**
+     * A full-access paired device (Polyth Link) proves the person before it may
+     * administer accounts. Same password verification and rate limit as a
+     * browser's recent sign-in; the caller owns the device-side elevation.
+     */
+    async confirmDevicePassword(input: { userId: string; password: string; address?: string }): Promise<void> {
+      const observed = control.get<Credential & { login_name: string }>(
+        `SELECT c.user_id,c.login_name,c.password_hash,p.status,p.auth_epoch,u.managed FROM password_credentials c
+         JOIN principals p ON p.id=c.user_id JOIN users u ON u.id=p.id WHERE c.user_id=?`, input.userId,
+      );
+      // An unknown account does the same work and answers the same way.
+      limiter.admit(input.address, observed?.login_name ?? `user:${input.userId}`);
+      const checked = await passwords.verify(input.password, live(observed) ? observed.password_hash : null);
+      if (!checked.valid || !live(observed)) throw invalidCredentials();
+    },
     async reauthenticate(token: string, password: string, address?: string) {
       const actor = sessions.require(token), login = accountLogin(actor.userId);
       limiter.admit(address, login);

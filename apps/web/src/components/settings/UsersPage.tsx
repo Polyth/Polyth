@@ -56,7 +56,8 @@ export default function UsersPage({ settingsTarget }: { settingsTarget?: Setting
   const [currentAccountId, setCurrentAccountId] = useState("");
   const [loadError, setLoadError] = useState<unknown>(null);
   const [canManageAccounts, setCanManageAccounts] = useState(false);
-  // A paired phone reads accounts; changes happen in a signed-in browser.
+  // A paired phone may read and (as the owner) administer people; its own
+  // account's name, password and passkeys still change in a signed-in browser.
   const [readOnly, setReadOnly] = useState<{ owner: boolean } | null>(null);
   const [spaceAccess, setSpaceAccess] = useState<CurrentSpaceAccess | null>(null);
   const [harnessNames, setHarnessNames] = useState<Record<string, string>>({});
@@ -353,7 +354,8 @@ export default function UsersPage({ settingsTarget }: { settingsTarget?: Setting
 
       <SharingPolicySection />
 
-      {canManageAccounts && !localAccess && <SignInProviders withReauth={withReauth} />}
+      {/* Sign-in providers are configured in a browser identity session. */}
+      {canManageAccounts && !localAccess && !readOnly && <SignInProviders withReauth={withReauth} />}
       {securing && (
         <SecureAccountDialog
           reason={tr("settings.users.secureReason")}

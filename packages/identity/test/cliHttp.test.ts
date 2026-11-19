@@ -93,20 +93,20 @@ test('a full-access paired device reads its own command-line access, read-only',
   const ownerId = (await browser('/api/auth/me')).value.id as string;
   const made = await browser('/api/auth/cli/tokens', { label: 'ci', profile: 'read', expiresInDays: 30, spaceId: null });
   assert.equal(made.status, 200);
-  const read = (userId: string) => {
+  const read = async (userId: string, deviceId = 'dev_phone') => {
     const res = { statusCode: 0, body: '', setHeader() {}, end(chunk: string) { this.body = chunk; } };
-    assert.equal(adapter.handlePairedRead({ method: 'GET', url: '/api/auth/cli' } as never, res as never, userId), true);
+    assert.equal(await adapter.handlePaired({ method: 'GET', url: '/api/auth/cli' } as never, res as never, { userId, deviceId }), true);
     assert.equal(res.statusCode, 200);
     return JSON.parse(res.body) as Record<string, any>;
   };
-  const own = read(ownerId);
+  const own = await read(ownerId);
   assert.equal(own.readOnly, true);
   assert.equal(own.canManageTrust, false);
   assert.deepEqual(own.tokens.map((x: { label: string }) => x.label), ['ci']);
   assert.deepEqual(Object.keys(own.trust).sort(), ['mode', 'revision']);
   assert.equal(JSON.stringify(own).includes(made.value.token), false);
   // Another account's tokens never show up.
-  assert.deepEqual(read('usr_someone_else').tokens, []);
+  assert.deepEqual((await read('usr_someone_else')).tokens, []);
 });
 
 test('CLI endpoints refuse browser-originated requests; UI endpoints refuse requests without the browser binding', async (t) => {

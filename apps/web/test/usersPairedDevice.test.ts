@@ -45,7 +45,33 @@ async function mount() {
   return { container, unmount: () => act(async () => { root.unmount(); container.remove(); }) };
 }
 
-test("a full-access phone lists the owner's users read-only and points changes to a browser", async () => {
+test("a full-access owner phone edits the people list; its own account stays browser-only", async () => {
+  accounts = {
+    status: 200,
+    body: {
+      currentAccountId: owner.id, canManage: true, readOnly: true, canManageInBrowser: true,
+      accounts: [{ ...owner, name: owner.displayName, current: true }, { ...member, name: member.displayName, current: false }],
+    },
+  };
+  const { container, unmount } = await mount();
+  const text = container.textContent ?? "";
+  assert.doesNotMatch(text, /Users unavailable/);
+  assert.match(text, /Max/);
+  assert.match(text, /Olena/);
+  // People can be added and changed here; only the owner's own name, password
+  // and passkeys still need a signed-in browser.
+  const buttons = [...container.querySelectorAll("button")].map((button) => button.textContent ?? "");
+  assert.equal(buttons.some((label) => /Add user/.test(label)), true, buttons.join(" | "));
+  assert.ok(container.querySelector("button.user-row"));
+  assert.match(text, /Change your name, password and passkeys in a browser signed in to this server/);
+  assert.equal(container.querySelector("button.users-self-card"), null);
+  assert.ok(container.querySelector("div.users-self-card.is-readonly"));
+  await unmount();
+});
+
+test("a full-access phone of an owner without a credential points people changes to a browser", async () => {
+  // A `local` installation has no password a device could confirm, so its
+  // owner still administers people in a signed-in browser.
   accounts = {
     status: 200,
     body: {
@@ -55,16 +81,9 @@ test("a full-access phone lists the owner's users read-only and points changes t
   };
   const { container, unmount } = await mount();
   const text = container.textContent ?? "";
-  assert.doesNotMatch(text, /Users unavailable/);
-  assert.match(text, /Max/);
-  assert.match(text, /Olena/);
   assert.match(text, /Add or change users in a browser signed in to this server\./);
-  assert.match(text, /Change your name, password and passkeys in a browser signed in to this server/);
-  // No control that the phone's connection would refuse.
   const buttons = [...container.querySelectorAll("button")].map((button) => button.textContent ?? "");
   assert.equal(buttons.some((label) => /Add user/.test(label)), false, buttons.join(" | "));
-  assert.equal(container.querySelector("button.users-self-card"), null);
-  assert.ok(container.querySelector("div.users-self-card.is-readonly"));
   assert.equal(container.querySelector("button.user-row"), null);
   await unmount();
 });
