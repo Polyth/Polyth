@@ -34,7 +34,7 @@ const { default: TermPane } = await import("../widgets/TermPane.tsx");
 
 const URL_TEXT = "open https://example.com/docs now";
 
-async function mountTerminal() {
+async function mountTerminal(send: (data: string) => void = () => {}) {
   opened.length = 0;
   const emu = createTerminalEmulator({ cols: 60, rows: 8 });
   emu.write(URL_TEXT);
@@ -44,7 +44,7 @@ async function mountTerminal() {
   const root = createRoot(container);
   await act(async () => {
     root.render(createElement(TermPane, {
-      emu, label: "shell", running: true, send: () => {}, onResize: () => {},
+      emu, label: "shell", running: true, send, onResize: () => {},
     }));
   });
   const link = container.querySelector<HTMLElement>(".tlink");
@@ -57,7 +57,7 @@ async function mountTerminal() {
   }) as unknown as Event;
   const menuOpen = () => document.body.querySelector(".ui-menu-item") !== null;
   const cleanup = async () => { await act(async () => { root.unmount(); }); container.remove(); };
-  return { link, dispatch, mouse, menuOpen, cleanup };
+  return { container, link, dispatch, mouse, menuOpen, cleanup };
 }
 
 test("Ctrl+click opens a terminal link", async () => {
@@ -101,4 +101,42 @@ test("Ctrl+click on a non-link shows the terminal menu", async () => {
   assert.deepEqual(opened, []);
   assert.equal(t.menuOpen(), true);
   await t.cleanup();
+});
+
+test("the right-click menu anchors at the pointer, outside the package window", async () => {
+  const t = await mountTerminal();
+  try {
+    // A package window is translated, so a fixed anchor inside it would resolve
+    // against the window instead of the viewport and the menu opened elsewhere.
+    t.container.style.transform = "translate(400px, 120px)";
+    await t.dispatch(t.link.parentElement!, t.mouse("contextmenu", { button: 2, clientX: 200, clientY: 90 }));
+    const anchor = document.body.querySelector<HTMLElement>(".term-ctx-anchor");
+    assert.ok(anchor);
+    assert.equal(anchor.parentElement, document.body, "the anchor is not inside the transformed window");
+    assert.equal(t.container.contains(anchor), false);
+    assert.equal(anchor.style.position, "fixed");
+    assert.equal(anchor.style.left, "200px");
+    assert.equal(anchor.style.top, "90px");
+  } finally {
+    await t.cleanup();
+  }
+  assert.equal(document.body.querySelector(".term-ctx-anchor"), null, "unmounting removes the anchor");
+});
+
+test("the menu's Paste sends the clipboard text to the shell", async () => {
+  const sent: string[] = [];
+  const clipboard = { readText: async () => "echo pasted" };
+  Object.defineProperty(dom.navigator, "clipboard", { value: clipboard, configurable: true });
+  const t = await mountTerminal((data) => { sent.push(data); });
+  try {
+    await t.dispatch(t.link.parentElement!, t.mouse("contextmenu", { button: 2 }));
+    const paste = [...document.body.querySelectorAll<HTMLElement>(".ui-menu-item")]
+      .find((item) => item.textContent?.includes("Paste"));
+    assert.ok(paste, "the menu offers Paste");
+    await t.dispatch(paste, t.mouse("click"));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    assert.deepEqual(sent, ["echo pasted"]);
+  } finally {
+    await t.cleanup();
+  }
 });

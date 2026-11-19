@@ -98,6 +98,7 @@ import { keepAwakeWanted } from "./keepAwake.ts";
 import {
   blockedFromLocalServer,
   channelAllowed,
+  clipboardReadAccess,
   HUB_SCHEME,
   hubUrl,
   linkRequest,
@@ -837,8 +838,12 @@ const linkCall = async (rawMethod: unknown, rawParams: unknown): Promise<Desktop
           const active = servers.active.kind === "link" && servers.active.id === id
             ? { kind: "local" as const }
             : servers.active;
-          const microphoneServers = servers.microphoneServers.filter((key) => key !== `link:${id}`);
-          persistServers({ ...servers, linkPorts, active, microphoneServers });
+          const forgotten = (key: string) => key !== `link:${id}`;
+          persistServers({
+            ...servers, linkPorts, active,
+            microphoneServers: servers.microphoneServers.filter(forgotten),
+            clipboardServers: servers.clipboardServers.filter(forgotten),
+          });
         }
         await refreshLinkConnections();
         return { ok: true, result };
@@ -1001,33 +1006,68 @@ const nudgeActiveLink = (): void => {
 const serverKey = (target: Exclude<DesktopServerTarget, { kind: "local" }>): string =>
   target.kind === "link" ? `link:${target.id}` : `address:${target.url}`;
 
-/**
- * This window never asks before using the microphone on this computer's own
- * server. Another server is asked about once, by name, because its packages run
- * in this window. Remembered per server.
- */
-const allowRemoteMicrophone = async (origin: string): Promise<boolean> => {
+type RemoteConsent = "microphone" | "clipboard";
+
+const REMOTE_CONSENT: Record<RemoteConsent, {
+  list: "microphoneServers" | "clipboardServers";
+  message: (label: string) => string;
+  detail: string;
+}> = {
+  microphone: {
+    list: "microphoneServers",
+    message: (label) => `Let ${label} use the microphone?`,
+    detail: "This Polyth is on another computer. It hears what the microphone on this computer picks up while it records.",
+  },
+  clipboard: {
+    list: "clipboardServers",
+    message: (label) => `Let ${label} read the clipboard?`,
+    detail: "This Polyth is on another computer. It reads what you copied on this computer when you choose Paste in it.",
+  },
+};
+
+/** Whether the person already let another server have this. */
+const remoteConsented = (origin: string, use: RemoteConsent): boolean => {
   const target = remoteOrigins.get(origin);
-  if (!target) return false;
+  return target !== undefined && servers[REMOTE_CONSENT[use].list].includes(serverKey(target));
+};
+
+const remoteConsentAsks = new Map<string, Promise<boolean>>();
+
+/**
+ * This window never asks before using the microphone or reading the clipboard
+ * on this computer's own server. Another server is asked about once, by name,
+ * because its packages run in this window. Remembered per server; a second
+ * request while the question is open waits for the same answer.
+ */
+const allowRemote = (origin: string, use: RemoteConsent): Promise<boolean> => {
+  const target = remoteOrigins.get(origin);
+  if (!target) return Promise.resolve(false);
   const key = serverKey(target);
-  if (servers.microphoneServers.includes(key)) return true;
+  const { list, message, detail } = REMOTE_CONSENT[use];
+  if (servers[list].includes(key)) return Promise.resolve(true);
+  const pending = remoteConsentAsks.get(`${use}:${key}`);
+  if (pending) return pending;
   const label = target.kind === "address"
     ? addressLabel(target.url)
     : linkConnections.find((item) => item.id === target.id)?.hostLabel || "this server";
   const options = {
     type: "question" as const,
-    message: `Let ${label} use the microphone?`,
-    detail: "This Polyth is on another computer. It hears what the microphone on this computer picks up while it records.",
+    message: message(label),
+    detail,
     buttons: ["Allow", "Don't allow"],
     defaultId: 1,
     cancelId: 1,
   };
-  const { response } = await (mainWindow && !mainWindow.isDestroyed()
-    ? dialog.showMessageBox(mainWindow, options)
-    : dialog.showMessageBox(options));
-  if (response !== 0) return false;
-  persistServers({ ...servers, microphoneServers: [...servers.microphoneServers, key] });
-  return true;
+  const ask = (async () => {
+    const { response } = await (mainWindow && !mainWindow.isDestroyed()
+      ? dialog.showMessageBox(mainWindow, options)
+      : dialog.showMessageBox(options));
+    if (response !== 0) return false;
+    if (!servers[list].includes(key)) persistServers({ ...servers, [list]: [...servers[list], key] });
+    return true;
+  })().finally(() => remoteConsentAsks.delete(`${use}:${key}`));
+  remoteConsentAsks.set(`${use}:${key}`, ask);
+  return ask;
 };
 
 const serverMenuItems = (): MenuItemConstructorOptions[] => {
@@ -1634,6 +1674,7 @@ const installIpc = (): void => {
       active,
       addresses: servers.addresses.filter((address) => address.url !== url),
       microphoneServers: servers.microphoneServers.filter((key) => key !== `address:${url}`),
+      clipboardServers: servers.clipboardServers.filter((key) => key !== `address:${url}`),
     });
     rebuildTrayMenu();
     return serversView();
@@ -1926,14 +1967,25 @@ async function start(): Promise<void> {
     const mediaTypes = "mediaTypes" in details && Array.isArray(details.mediaTypes) ? details.mediaTypes : [];
     const microphone = permission === "media" && mediaTypes.length > 0 && mediaTypes.every((type) => type === "audio");
     if (surface === "remote" && microphone) {
-      void allowRemoteMicrophone(new URL(url).origin).then(callback, () => callback(false));
+      void allowRemote(new URL(url).origin, "microphone").then(callback, () => callback(false));
+      return;
+    }
+    if (permission === "clipboard-read") {
+      const access = clipboardReadAccess(url, details.requestingUrl, details.isMainFrame, windowOrigins());
+      if (access === "ask") void allowRemote(new URL(url).origin, "clipboard").then(callback, () => callback(false));
+      else callback(access === "allow");
       return;
     }
     // The workstation edition ships no dictation or voice package: no microphone.
     callback(permission === "notifications" || (microphone && !workstation));
   });
   session.defaultSession.setPermissionCheckHandler((webContents, permission, _origin, details) => {
-    const surface = webContents ? surfaceOf(webContents.getURL()) : null;
+    const url = webContents?.getURL() ?? "";
+    const surface = webContents ? surfaceOf(url) : null;
+    if (permission === "clipboard-read") {
+      const access = clipboardReadAccess(url, details.requestingUrl, details.isMainFrame, windowOrigins());
+      return access === "allow" || (access === "ask" && remoteConsented(new URL(url).origin, "clipboard"));
+    }
     return (surface === "local" || surface === "remote")
       && (permission === "notifications" || (!workstation && permission === "media" && details.mediaType === "audio"));
   });

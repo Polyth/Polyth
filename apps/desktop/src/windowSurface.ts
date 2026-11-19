@@ -42,6 +42,26 @@ export function windowSurface(rawUrl: string, origins: WindowOrigins): WindowSur
   return origins.remote.has(origin) ? "remote" : null;
 }
 
+/**
+ * Whether the window's page may read the clipboard (`navigator.clipboard.readText`,
+ * a terminal's Paste). This computer's own page may. Another server's page is
+ * asked about once, like a browser asks a site, because its packages run here.
+ * Only the top page may read it: never a frame inside it (a chat ```page block,
+ * a preview), and never the server list.
+ */
+export function clipboardReadAccess(
+  pageUrl: string,
+  requestingUrl: string | undefined,
+  isMainFrame: boolean,
+  origins: WindowOrigins,
+): "allow" | "ask" | "deny" {
+  if (!isMainFrame) return "deny";
+  const page = originOf(pageUrl);
+  if (!page || originOf(requestingUrl ?? pageUrl) !== page) return "deny";
+  const surface = windowSurface(pageUrl, origins);
+  return surface === "local" ? "allow" : surface === "remote" ? "ask" : "deny";
+}
+
 /** A page may navigate itself within its own origin. The list may also hand the
  *  window to a server it just connected; every other change of server goes
  *  through the main process, which never asks the page. */

@@ -100,8 +100,8 @@ all. There are two ways to reach a server.
   user data, with Unix file modes where the platform has them. Unlike the phones it
   has no OS keychain, so the private key is protected like an SSH key.
 - **Saved state** (`src/servers.ts`, `desktop/servers.json`). The server on screen,
-  whether to run this computer's server, saved addresses, per-server microphone
-  choices, and each Link server's proxy port. The port is part of the page's origin, so
+  whether to run this computer's server, saved addresses, per-server microphone and
+  clipboard choices, and each Link server's proxy port. The port is part of the page's origin, so
   keeping it keeps that server's shell state between launches. It is kept apart from
   `settings.json`, which pages may read and write. Rollback: an older build ignores
   the file and opens this computer's server.
@@ -148,6 +148,10 @@ that server, so treat it as untrusted code in this window.
   shares its host (an SSH tunnel to `127.0.0.1:<port>`).
 - The microphone asks once per server, by name; agents on another computer do not hold
   this one awake.
+- Reading the clipboard (`navigator.clipboard.readText`, a terminal's **Paste** menu
+  item) asks once per server, by name, like a browser asks a site. Only the top page
+  may read it, never a frame inside it (`clipboardReadAccess`). Cmd/Ctrl+V needs no
+  permission: it is the Edit menu's native paste.
 - Reveal-in-file-manager stays off (`localDesktopBridge`): those paths name files
   over there.
 
@@ -579,6 +583,7 @@ xvfb-run -a node apps/desktop/test/appimage-profile.mjs \
   (see [What another server's page may do](#what-another-servers-page-may-do)).
 - Navigation: a page stays on its own origin, and only the server list may hand the
   window to a server it connected; allowlisted HTTP(S)/mailto links open in the system browser.
-- Permissions: only audio capture (not camera/video) and notifications. Another server asks once for the microphone.
+- Permissions: only audio capture (not camera/video), notifications and clipboard read
+  for the top page. Another server asks once for the microphone and once for the clipboard.
 - Server: binds to `127.0.0.1` in desktop mode.
 - Secrets: desktop settings contain presentation and lifecycle preferences only.

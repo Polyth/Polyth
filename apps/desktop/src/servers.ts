@@ -27,6 +27,8 @@ export interface DesktopServersState {
   addresses: SavedServerAddress[];
   /** Other servers the person let use this computer's microphone. */
   microphoneServers: string[];
+  /** Other servers the person let read this computer's clipboard (Paste). */
+  clipboardServers: string[];
 }
 
 export const DEFAULT_SERVERS_STATE: DesktopServersState = {
@@ -35,6 +37,7 @@ export const DEFAULT_SERVERS_STATE: DesktopServersState = {
   linkPorts: {},
   addresses: [],
   microphoneServers: [],
+  clipboardServers: [],
 };
 
 const MAX_ADDRESSES = 8;
@@ -117,11 +120,13 @@ export function normalizeServersState(raw: unknown): DesktopServersState {
     runLocalServer: typeof value.runLocalServer === "boolean" ? value.runLocalServer : true,
     linkPorts,
     addresses: addresses.slice(0, MAX_ADDRESSES),
-    microphoneServers: Array.isArray(value.microphoneServers)
-      ? value.microphoneServers.filter((key): key is string => typeof key === "string" && /^(?:link|address):/.test(key))
-      : [],
+    microphoneServers: serverKeys(value.microphoneServers),
+    clipboardServers: serverKeys(value.clipboardServers),
   };
 }
+
+const serverKeys = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((key): key is string => typeof key === "string" && /^(?:link|address):/.test(key)) : [];
 
 export function readServersStateSync(path: string): DesktopServersState {
   try {

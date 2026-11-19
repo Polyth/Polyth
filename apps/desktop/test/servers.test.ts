@@ -61,6 +61,7 @@ test("a damaged file keeps what is still good", () => {
       { url: "b.example" },
     ],
     microphoneServers: ["link:abc", "other:x", 7],
+    clipboardServers: ["address:https://a.example", "../x", null],
   });
   assert.deepEqual(state, {
     active: { kind: "local" },
@@ -68,6 +69,7 @@ test("a damaged file keeps what is still good", () => {
     linkPorts: { abc: 41234 },
     addresses: [{ url: "https://a.example", lastUsedAt: 5 }, { url: "https://b.example", lastUsedAt: 0 }],
     microphoneServers: ["link:abc"],
+    clipboardServers: ["address:https://a.example"],
   });
 });
 

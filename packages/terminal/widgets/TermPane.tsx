@@ -14,7 +14,7 @@ import {
   type ClipboardEvent as ReactClipboardEvent, type CompositionEvent as ReactCompositionEvent,
   type PointerEvent as ReactPointerEvent, type CSSProperties,
 } from "react";
-import { flushSync } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import {
   ATTR_BLINK, ATTR_BOLD, ATTR_DIM, ATTR_HIDDEN, ATTR_INVERSE, ATTR_ITALIC,
   ATTR_OVERLINE, ATTR_STRIKE, ATTR_UNDERLINE, lineInfo,
@@ -1888,7 +1888,7 @@ export default function TermPane(props: TermPaneProps) {
           {
             id: "copy",
             label: tr("terminalview.copy"),
-            detail: "Ctrl+Shift+C",
+            detail: macOptionPlatform() ? "⌘C" : "Ctrl+Shift+C",
             disabled: !selection,
             onSelect: () => {
               void copySelection();
@@ -1898,7 +1898,7 @@ export default function TermPane(props: TermPaneProps) {
           {
             id: "paste",
             label: tr("terminalview.paste"),
-            detail: "Ctrl+Shift+V",
+            detail: macOptionPlatform() ? "⌘V" : "Ctrl+Shift+V",
             onSelect: () => {
               pasteFromClipboard();
               bodyRef.current?.focus();
@@ -1925,7 +1925,11 @@ export default function TermPane(props: TermPaneProps) {
           },
         ]}
       >
-        {(trigger) => (
+        {/* The click-point anchor lives on document.body: a package window
+            (`.rail-dynamic`) is translated, and a transformed ancestor makes a
+            nested `position: fixed` resolve against that window instead of
+            the viewport, so the menu opened away from the pointer. */}
+        {(trigger) => typeof document === "undefined" ? null : createPortal(
           <button
             {...trigger}
             type="button"
@@ -1940,11 +1944,14 @@ export default function TermPane(props: TermPaneProps) {
               height: 1,
               padding: 0,
               margin: 0,
+              border: 0,
+              background: "transparent",
               overflow: "hidden",
               opacity: 0,
               pointerEvents: "none",
             }}
-          />
+          />,
+          document.body,
         )}
       </Menu>
 
