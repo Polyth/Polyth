@@ -13,6 +13,7 @@ export const ptBR: DictationMessages = {
   "dictation.error.micPermissionDenied": "A permissão do microfone foi negada",
   "dictation.error.micUnavailableEnvironment": "A captura do microfone não está disponível neste ambiente",
   "dictation.error.microphoneLost": "O microfone ficou indisponível durante o ditado",
+  "dictation.error.noAudio": "O microfone está ligado, mas nenhum som está chegando. Feche outros apps que usam áudio e tente de novo",
   "dictation.error.noTransport": "O {provider} não tem transporte de cliente direto",
   "dictation.error.replayBudget": "O ditado direto do {provider} excedeu o limite de reconexão",
   "dictation.error.replayOverflow": "Não foi possível reproduzir o áudio do ditado com segurança porque o buffer de rede transbordou",

@@ -13,6 +13,7 @@ export const pl: DictationMessages = {
   "dictation.error.micPermissionDenied": "Odmówiono dostępu do mikrofonu",
   "dictation.error.micUnavailableEnvironment": "Przechwytywanie z mikrofonu jest niedostępne w tym środowisku",
   "dictation.error.microphoneLost": "Mikrofon stał się niedostępny podczas dyktowania",
+  "dictation.error.noAudio": "Mikrofon jest włączony, ale nie dociera dźwięk. Zamknij inne aplikacje korzystające z dźwięku i spróbuj ponownie",
   "dictation.error.noTransport": "{provider} nie ma bezpośredniego transportu klienta",
   "dictation.error.replayBudget": "Bezpośrednie dyktowanie {provider} przekroczyło limit ponownego odtwarzania",
   "dictation.error.replayOverflow": "Nie można bezpiecznie odtworzyć audio dyktowania, ponieważ bufor sieciowy się przepełnił",

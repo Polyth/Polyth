@@ -13,6 +13,7 @@ export const de: DictationMessages = {
   "dictation.error.micPermissionDenied": "Die Mikrofonberechtigung wurde verweigert",
   "dictation.error.micUnavailableEnvironment": "Mikrofonaufnahme ist in dieser Umgebung nicht verfügbar",
   "dictation.error.microphoneLost": "Das Mikrofon ist während des Diktats nicht mehr verfügbar",
+  "dictation.error.noAudio": "Das Mikrofon ist an, aber es kommt kein Ton an. Schließe andere Apps, die Audio nutzen, und versuche es erneut",
   "dictation.error.noTransport": "{provider} hat keinen direkten Client-Transport",
   "dictation.error.replayBudget": "Das direkte Diktat über {provider} hat das Budget für Wiederverbindungen überschritten",
   "dictation.error.replayOverflow": "Diktat-Audio konnte nicht sicher erneut gesendet werden, weil der Netzwerkpuffer übergelaufen ist",

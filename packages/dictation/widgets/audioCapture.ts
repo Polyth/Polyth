@@ -17,7 +17,32 @@ export interface Pcm16CaptureOptions {
    *  and any perceptual curve belong to the caller that renders it. */
   onLevel?: (rms: number) => void;
   onEnded?: () => void;
+  /** No audio arrived for a while although capture is live and recovery
+   *  (resume, then a fresh audio graph) did not help. Fired once. */
+  onStalled?: () => void;
 }
+
+/** How long a live capture may go without a chunk before recovery starts. */
+export const CAPTURE_STALL_MS = 1500;
+/** Recovery steps (resume, rebuild) before the stall is reported. */
+const STALL_RECOVERY_STEPS = 2;
+const RESUME_WAIT_MS = 1000;
+
+type CaptureState = AudioContextState | "interrupted";
+
+/** Resume a context without letting a WebKit resume() that never settles
+ *  (an interrupted iOS audio session) hold capture start hostage. */
+const resumeBounded = async (context: AudioContext): Promise<void> => {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    await Promise.race([
+      context.resume().catch(() => {}),
+      new Promise<void>((resolve) => { timer = setTimeout(resolve, RESUME_WAIT_MS); }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
 
 /** RMS of a little-endian PCM16 chunk, normalized to 0..1. */
 export function pcm16Rms(pcm: Uint8Array): number {
@@ -112,8 +137,13 @@ export async function startPcm16Capture(options: Pcm16CaptureOptions): Promise<P
   let objectUrl: string | null = null;
   let tracks = media.getAudioTracks();
   let stopped = false;
+  let paused = false;
   let replaceFlight: Promise<void> | null = null;
   let endedReported = false;
+  let lastAudioAt = Date.now();
+  let recoverySteps = 0;
+  let stallReported = false;
+  let watchdog: ReturnType<typeof setInterval> | null = null;
 
   const reportEnded = () => {
     if (stopped || endedReported) return;
@@ -121,16 +151,74 @@ export async function startPcm16Capture(options: Pcm16CaptureOptions): Promise<P
     options.onEnded?.();
   };
 
+  const closeGraph = () => {
+    try { node?.disconnect(); } catch { /* already detached */ }
+    try { source?.disconnect(); } catch { /* already detached */ }
+    if (node) node.port.onmessage = null;
+    if (context) {
+      context.onstatechange = null;
+      void context.close().catch(() => {});
+    }
+    node = null;
+    source = null;
+    context = null;
+  };
+
   const cleanup = () => {
     if (stopped) return;
     stopped = true;
+    if (watchdog) clearInterval(watchdog);
+    watchdog = null;
     for (const track of tracks) track.onended = null;
-    try { node?.disconnect(); } catch { /* already detached */ }
-    try { source?.disconnect(); } catch { /* already detached */ }
+    closeGraph();
     for (const track of media.getTracks()) track.stop();
     if (objectUrl) URL.revokeObjectURL(objectUrl);
     objectUrl = null;
-    if (context) void context.close().catch(() => {});
+  };
+
+  /** Bring a live context back to "running". iOS WebKit parks a context in
+   *  "interrupted" (or "suspended") when its audio session is taken — a
+   *  call, Siri, another app's playback — and a context in that state renders
+   *  nothing: the microphone indicator is lit, yet no chunk ever arrives. */
+  const wake = async (): Promise<void> => {
+    const current = context;
+    if (stopped || paused || !current) return;
+    const state = current.state as CaptureState;
+    if (state === "running" || state === "closed") return;
+    await resumeBounded(current);
+  };
+
+  const buildGraph = async (): Promise<void> => {
+    const next = new AudioContext({ latencyHint: "interactive" });
+    context = next;
+    if (!next.audioWorklet) throw new Error(tr("dictation.error.audioWorkletUnsupported"));
+    objectUrl = URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: "text/javascript" }));
+    await next.audioWorklet.addModule(objectUrl);
+    URL.revokeObjectURL(objectUrl);
+    objectUrl = null;
+    if (stopped || context !== next) return;
+
+    source = next.createMediaStreamSource(media);
+    node = new AudioWorkletNode(next, "polyth-pcm16-capture", {
+      numberOfInputs: 1,
+      numberOfOutputs: 0,
+      channelCount: 1,
+      processorOptions: { targetRate: targetSampleRate, chunkSamples },
+    });
+    node.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
+      if (!stopped && event.data instanceof ArrayBuffer && event.data.byteLength) {
+        lastAudioAt = Date.now();
+        recoverySteps = 0;
+        const pcm = new Uint8Array(event.data);
+        // Level first: onChunk may transfer or retain the buffer.
+        options.onLevel?.(pcm16Rms(pcm));
+        options.onChunk(pcm);
+      }
+    };
+    source.connect(node);
+    next.onstatechange = () => { void wake(); };
+    lastAudioAt = Date.now();
+    await wake();
   };
 
   const armTracks = () => {
@@ -177,45 +265,54 @@ export async function startPcm16Capture(options: Pcm16CaptureOptions): Promise<P
     return replaceFlight;
   };
 
-  try {
-    context = new AudioContext({ latencyHint: "interactive" });
-    if (!context.audioWorklet) throw new Error(tr("dictation.error.audioWorkletUnsupported"));
-    objectUrl = URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: "text/javascript" }));
-    await context.audioWorklet.addModule(objectUrl);
-    URL.revokeObjectURL(objectUrl);
-    objectUrl = null;
-
-    source = context.createMediaStreamSource(media);
-    node = new AudioWorkletNode(context, "polyth-pcm16-capture", {
-      numberOfInputs: 1,
-      numberOfOutputs: 0,
-      channelCount: 1,
-      processorOptions: { targetRate: targetSampleRate, chunkSamples },
+  /** A live capture that delivers nothing is recovered, then reported: first
+   *  resume the context, then rebuild the audio graph on the same microphone,
+   *  and only then tell the caller instead of showing a silent 0:00. */
+  const checkStall = () => {
+    if (stopped || paused || stallReported || replaceFlight) return;
+    if (Date.now() - lastAudioAt < CAPTURE_STALL_MS) return;
+    lastAudioAt = Date.now();
+    if (recoverySteps >= STALL_RECOVERY_STEPS) {
+      stallReported = true;
+      options.onStalled?.();
+      return;
+    }
+    recoverySteps++;
+    if (recoverySteps === 1) {
+      void wake();
+      return;
+    }
+    closeGraph();
+    void buildGraph().catch(() => {
+      if (stopped || stallReported) return;
+      stallReported = true;
+      options.onStalled?.();
     });
-    node.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
-      if (!stopped && event.data instanceof ArrayBuffer && event.data.byteLength) {
-        const pcm = new Uint8Array(event.data);
-        // Level first: onChunk may transfer or retain the buffer.
-        options.onLevel?.(pcm16Rms(pcm));
-        options.onChunk(pcm);
-      }
-    };
-    source.connect(node);
+  };
+
+  try {
+    await buildGraph();
     armTracks();
-    if (context.state === "suspended") await context.resume();
   } catch (error) {
     cleanup();
     throw microphoneError(error);
   }
+  watchdog = setInterval(checkStall, Math.round(CAPTURE_STALL_MS / 3));
 
   return {
     sampleRate: targetSampleRate,
     channels: 1,
     async pause() {
-      if (!stopped && context?.state === "running") await context.suspend();
+      if (stopped) return;
+      paused = true;
+      if (context?.state === "running") await context.suspend();
     },
     async resume() {
-      if (!stopped && context?.state === "suspended") await context.resume();
+      if (stopped) return;
+      paused = false;
+      lastAudioAt = Date.now();
+      const current = context;
+      if (current && (current.state as CaptureState) !== "running") await current.resume();
     },
     stop: cleanup,
   };

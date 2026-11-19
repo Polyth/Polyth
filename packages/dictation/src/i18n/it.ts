@@ -13,6 +13,7 @@ export const it: DictationMessages = {
   "dictation.error.micPermissionDenied": "L’autorizzazione al microfono è stata negata",
   "dictation.error.micUnavailableEnvironment": "L’acquisizione del microfono non è disponibile in questo ambiente",
   "dictation.error.microphoneLost": "Il microfono è diventato non disponibile durante la dettatura",
+  "dictation.error.noAudio": "Il microfono è attivo ma non arriva alcun suono. Chiudi le altre app che usano l’audio e riprova",
   "dictation.error.noTransport": "{provider} non ha un trasporto client diretto",
   "dictation.error.replayBudget": "La dettatura diretta {provider} ha superato il limite di replay per la riconnessione",
   "dictation.error.replayOverflow": "Non è stato possibile riprodurre in sicurezza l’audio della dettatura perché il buffer di rete è traboccato",

@@ -13,6 +13,7 @@ export const fr: DictationMessages = {
   "dictation.error.micPermissionDenied": "L’autorisation du micro a été refusée",
   "dictation.error.micUnavailableEnvironment": "La capture du micro n’est pas disponible dans cet environnement",
   "dictation.error.microphoneLost": "Le micro est devenu indisponible pendant la dictée",
+  "dictation.error.noAudio": "Le micro est actif mais aucun son ne parvient. Fermez les autres apps qui utilisent l’audio et réessayez",
   "dictation.error.noTransport": "{provider} n’a pas de transport client direct",
   "dictation.error.replayBudget": "La dictée directe {provider} a dépassé le budget de reconnexion",
   "dictation.error.replayOverflow": "L’audio de dictée n’a pas pu être rejoué en toute sécurité car le tampon réseau a débordé",

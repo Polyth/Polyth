@@ -15,6 +15,7 @@ export const en = {
   "dictation.error.micPermissionDenied": "Microphone permission was denied",
   "dictation.error.micUnavailableEnvironment": "Microphone capture is not available in this environment",
   "dictation.error.microphoneLost": "Microphone became unavailable during dictation",
+  "dictation.error.noAudio": "The microphone is on but no sound is coming through. Close other apps using audio and try again",
   "dictation.error.noTransport": "{provider} has no direct client transport",
   "dictation.error.replayBudget": "Direct {provider} dictation exceeded the reconnect replay budget",
   "dictation.error.replayOverflow": "Dictation audio could not be replayed safely because the network buffer overflowed",

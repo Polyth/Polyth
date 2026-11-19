@@ -180,3 +180,110 @@ test("capture reports a level for every chunk before handing it on", async () =>
     });
   });
 });
+
+const fakeStream = () => {
+  const track = { onended: null as (() => void) | null, stop() {} };
+  return {
+    getAudioTracks: () => [track as unknown as MediaStreamTrack],
+    getTracks: () => [track as unknown as MediaStreamTrack],
+  } as unknown as MediaStream;
+};
+
+class FakeWorkletNode {
+  static last: FakeWorkletNode | null = null;
+  port = { onmessage: null as ((event: MessageEvent<ArrayBuffer>) => void) | null };
+  constructor() { FakeWorkletNode.last = this; }
+  connect() {}
+  disconnect() {}
+}
+
+const settle = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
+
+// iOS WebKit parks a context in "interrupted" when its audio session is taken;
+// such a context renders nothing although the microphone indicator is lit.
+test("an interrupted context is resumed, then rebuilt, then reported as stalled", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval", "setTimeout", "Date"] });
+  const contexts: StuckContext[] = [];
+  class StuckContext {
+    state = "interrupted";
+    resumes = 0;
+    closed = false;
+    onstatechange: (() => void) | null = null;
+    audioWorklet = { addModule: async () => {} };
+    constructor() { contexts.push(this); }
+    createMediaStreamSource() { return { connect() {}, disconnect() {} } as unknown as MediaStreamAudioSourceNode; }
+    // A resume() that never settles, as WebKit does while interrupted.
+    resume() { this.resumes++; return new Promise<void>(() => {}); }
+    async suspend() {}
+    async close() { this.closed = true; this.state = "closed"; }
+  }
+  const stream = fakeStream();
+  await withNavigator({ mediaDevices: { async getUserMedia() { return stream; } } }, async () => {
+    await withGlobal("AudioContext", StuckContext, async () => {
+      await withGlobal("AudioWorkletNode", FakeWorkletNode, async () => {
+        let stalled = 0;
+        const starting = startPcm16Capture({ onChunk() {}, onStalled: () => { stalled++; } });
+        await settle();
+        // Start must not hang on a resume() that never settles.
+        t.mock.timers.tick(1000);
+        const capture = await starting;
+        assert.equal(contexts.length, 1);
+        assert.equal(contexts[0]!.resumes, 1, "start tries to resume a non-running context");
+
+        // A state change (the interruption ending) triggers another resume.
+        contexts[0]!.onstatechange?.();
+        assert.equal(contexts[0]!.resumes, 2);
+
+        t.mock.timers.tick(1500);
+        assert.equal(contexts[0]!.resumes, 3, "first recovery step resumes again");
+        t.mock.timers.tick(1500);
+        await settle();
+        assert.equal(contexts.length, 2, "second recovery step rebuilds the audio graph");
+        assert.equal(contexts[0]!.closed, true);
+        t.mock.timers.tick(1000);
+        await settle();
+        assert.equal(stalled, 0);
+        t.mock.timers.tick(1500);
+        assert.equal(stalled, 1, "the stall is reported instead of a silent capture");
+        t.mock.timers.tick(10_000);
+        assert.equal(stalled, 1, "reported once");
+        capture.stop();
+        assert.equal(contexts[1]!.closed, true);
+      });
+    });
+  });
+});
+
+test("audio arriving or a deliberate pause keeps the watchdog quiet", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval", "setTimeout", "Date"] });
+  let built = 0;
+  class FakeContext {
+    state = "running";
+    onstatechange: (() => void) | null = null;
+    audioWorklet = { addModule: async () => {} };
+    constructor() { built++; }
+    createMediaStreamSource() { return { connect() {}, disconnect() {} } as unknown as MediaStreamAudioSourceNode; }
+    async resume() { this.state = "running"; }
+    async suspend() { this.state = "suspended"; }
+    async close() {}
+  }
+  const stream = fakeStream();
+  await withNavigator({ mediaDevices: { async getUserMedia() { return stream; } } }, async () => {
+    await withGlobal("AudioContext", FakeContext, async () => {
+      await withGlobal("AudioWorkletNode", FakeWorkletNode, async () => {
+        let stalled = 0;
+        const capture = await startPcm16Capture({ onChunk() {}, onStalled: () => { stalled++; } });
+        for (let i = 0; i < 20; i++) {
+          t.mock.timers.tick(500);
+          FakeWorkletNode.last!.port.onmessage?.({ data: pcm16([0.1, -0.1]).buffer } as MessageEvent<ArrayBuffer>);
+        }
+        // A paused (backgrounded) capture is silent on purpose.
+        await capture.pause();
+        t.mock.timers.tick(20_000);
+        assert.equal(built, 1);
+        assert.equal(stalled, 0);
+        capture.stop();
+      });
+    });
+  });
+});

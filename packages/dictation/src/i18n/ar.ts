@@ -13,6 +13,7 @@ export const ar: DictationMessages = {
   "dictation.error.micPermissionDenied": "تم رفض إذن الميكروفون",
   "dictation.error.micUnavailableEnvironment": "التقاط الميكروفون غير متاح في هذه البيئة",
   "dictation.error.microphoneLost": "أصبح الميكروفون غير متاح أثناء الإملاء",
+  "dictation.error.noAudio": "الميكروفون يعمل لكن لا يصل أي صوت. أغلق التطبيقات الأخرى التي تستخدم الصوت وحاول مرة أخرى",
   "dictation.error.noTransport": "لا يوجد نقل عميل مباشر لـ {provider}",
   "dictation.error.replayBudget": "تجاوز الإملاء المباشر عبر {provider} حد إعادة الاتصال",
   "dictation.error.replayOverflow": "تعذّرت إعادة تشغيل صوت الإملاء بأمان لأن مخزن الشبكة فاض",

@@ -13,6 +13,7 @@ export const zhCN: DictationMessages = {
   "dictation.error.micPermissionDenied": "麦克风权限被拒绝",
   "dictation.error.micUnavailableEnvironment": "此环境中不支持麦克风采集",
   "dictation.error.microphoneLost": "听写过程中麦克风不可用",
+  "dictation.error.noAudio": "麦克风已开启，但没有收到声音。请关闭其他正在使用音频的应用后重试",
   "dictation.error.noTransport": "{provider} 没有直接客户端传输",
   "dictation.error.replayBudget": "{provider} 直连听写超出了重连重放上限",
   "dictation.error.replayOverflow": "由于网络缓冲区溢出，无法安全重放听写音频",

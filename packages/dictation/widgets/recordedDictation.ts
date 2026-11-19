@@ -38,6 +38,8 @@ export async function startRecording(opts: {
   onLimit?: () => void;
   /** The microphone went away; call stop() to keep what was recorded. */
   onEnded?: () => void;
+  /** The microphone is live but delivers no audio; capture already stopped. */
+  onStalled?: () => void;
 } = {}): Promise<ActiveRecording> {
   const chunkBytes = DICTATION_RECORDING_LIMITS.chunkBytes;
   const maxDurationMs = Math.min(opts.maxDurationMs ?? DICTATION_RECORDING_LIMITS.maxDurationMs, DICTATION_RECORDING_LIMITS.maxDurationMs);
@@ -97,6 +99,11 @@ export async function startRecording(opts: {
       if (!active) return;
       release();
       queueMicrotask(() => opts.onEnded?.());
+    },
+    onStalled() {
+      if (!active) return;
+      release();
+      queueMicrotask(() => opts.onStalled?.());
     },
   });
   document.addEventListener("visibilitychange", onVisibility);
