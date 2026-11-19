@@ -50,6 +50,14 @@ no checkout, no compilers, no development dependencies. The layout is described 
 `apps/server/src/layout.ts`; `resources/` has the same shape as Desktop's resources
 directory and is the server's `POLYTH_RESOURCES_DIR`.
 
+Releases publish it through three channels, all the same tree:
+[npm](https://www.npmjs.com/package/polyth) (`npm install -g polyth`, which pulls the
+matching `@polyth/server-<platform>-<arch>`), the
+[Homebrew tap](https://github.com/Polyth/homebrew-tap) (`brew install polyth/tap/polyth`,
+then `brew services start polyth`) and the archives on each GitHub Release
+([publication](releases.md)). An npm or Homebrew install puts `polyth` on the `PATH`;
+an unpacked archive runs `bin/polyth.mjs` with Node:
+
 ```bash
 tar -xzf polyth-server-<version>-linux-x64.tar.gz -C /opt   # unpacks /opt/polyth
 node /opt/polyth/bin/polyth.mjs server setup-claim           # first run only, server stopped

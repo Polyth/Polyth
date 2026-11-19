@@ -221,6 +221,25 @@ and sign in to them as usual. It updates itself and lets you pick a release chan
 
 For a team, run one Polyth server on a machine everyone can reach (a workstation, a
 home server or a VPS). People sign in from any browser and pair their phones to it.
+The server comes ready to run, for Linux and macOS on x86-64 and arm64, and needs
+Node.js 22.16 or newer:
+
+| Source | Install | Update |
+|---|---|---|
+| [npm](https://www.npmjs.com/package/polyth) | `npm install -g polyth` | `polyth update` |
+| [Homebrew tap](https://github.com/Polyth/homebrew-tap) | `brew install polyth/tap/polyth` | `brew upgrade polyth` |
+| [Release archive](https://github.com/Polyth/Polyth/releases/latest) | `polyth-server-<version>-<platform>-<arch>.tar.gz` | `polyth update` |
+| Docker | [`deploy/docker`](docs/operations/docker.md) | rebuild the image, or `docker compose pull` for a published one |
+
+```bash
+npm install -g polyth
+polyth server setup-claim    # first run only, with the server stopped: prints a setup token
+polyth service install       # systemd user service or macOS LaunchAgent; or `polyth server start`
+```
+
+With Homebrew, run `polyth server setup-claim` and then `brew services start polyth`.
+Services, data locations and updates are in
+[Packaged server](docs/operations/running.md#packaged-server).
 
 Polyth is free and open source under the Apache License 2.0, with no paid edition. You
 keep paying your agent providers as you do today: Polyth runs the command-line agents
@@ -254,6 +273,7 @@ browser, the desktop window and the phone are clients.
 
 | Setup | Reach it from | Start here |
 |---|---|---|
+| Packaged server (npm, Homebrew, archive) | any browser that reaches the machine | `polyth server start` |
 | Local from source | this machine's browser | `npm start` |
 | Development supervisor | this machine's browser | `npm run watch` |
 | Docker | this machine, or any browser behind Caddy HTTPS | `docker compose -f deploy/docker/compose.yml up -d` |
