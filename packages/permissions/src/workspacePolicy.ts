@@ -16,7 +16,7 @@
 // no Node imports.
 import { assessPermissionRisk, riskParsing } from "./risk.ts";
 
-const { parseShell, commandOf, gitCommand, placeOf, isSecretPath, normalizeAbsolute, base, trimTrailingSlashes } = riskParsing;
+const { lookupTable, parseShell, commandOf, gitCommand, placeOf, isSecretPath, normalizeAbsolute, base, trimTrailingSlashes } = riskParsing;
 
 export const WORKSPACE_TOOLS = ["bash", "read", "write", "edit", "grep", "glob"] as const;
 export type WorkspaceTool = (typeof WORKSPACE_TOOLS)[number];
@@ -78,7 +78,7 @@ const READ_ONLY_COMMANDS = new Set([
   "md5sum", "sha1sum", "sha256sum", "grep", "egrep", "fgrep", "jq", "seq", "expr",
 ]);
 /** Read-only unless one of these options is present. */
-const READ_ONLY_UNLESS: Record<string, RegExp> = {
+const READ_ONLY_UNLESS = lookupTable<RegExp>({
   sort: /^(-o|--output)/,
   uniq: /^$/,
   tree: /^(-o|--output)/,
@@ -86,9 +86,9 @@ const READ_ONLY_UNLESS: Record<string, RegExp> = {
   hostname: /^$/,
   rg: /^--pre(-glob)?(=|$)/,
   find: /^-(delete|exec|execdir|ok|okdir|fprint|fprint0|fprintf|fls)$/,
-};
+});
 /** `uniq in out` and `hostname name` write through a plain argument. */
-const MAX_POSITIONALS: Record<string, number> = { uniq: 1, hostname: 0 };
+const MAX_POSITIONALS = lookupTable<number>({ uniq: 1, hostname: 0 });
 /** Prefix words that run the command unchanged. Others (`npx`, `xargs`,
  * `watch`, `env`, assignments) can change what runs or where. */
 const PLAIN_RUNNERS = new Set(["time", "command", "nice", "timeout", "stdbuf", "builtin"]);
@@ -199,7 +199,7 @@ const workspaceRoots = (context: Pick<WorkspacePolicyContext, "root" | "extraRoo
 
 interface ParsedRule { source: string; tool: string; spec?: string }
 
-const RULE_TOOLS: Record<string, readonly WorkspaceTool[]> = {
+const RULE_TOOLS = lookupTable<readonly WorkspaceTool[]>({
   bash: ["bash"],
   read: ["read", "grep", "glob"],
   grep: ["grep"],
@@ -207,7 +207,7 @@ const RULE_TOOLS: Record<string, readonly WorkspaceTool[]> = {
   edit: ["edit", "write"],
   multiedit: ["edit"],
   write: ["write"],
-};
+});
 
 function parseRule(source: string): ParsedRule | undefined {
   const match = /^\s*([A-Za-z_][\w-]*)\s*(?:\(([\s\S]*)\))?\s*$/.exec(source);

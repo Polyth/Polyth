@@ -272,6 +272,10 @@ starts Node or OpenCode. See `docs/mobile/architecture.md`.
   is not proven within the 8 s abort deadline defers the nudge instead of
   dropping it: it runs once a later reconciliation settles `ready` with the
   session idle, and is discarded if any turn or user message started meanwhile.
+  The same holds for a proven stop that finds the barrier already closed
+  (`reconciling`, `blocked` or `unknown` from a reconciliation that failed
+  during the turn): the nudge is kept, not dropped, and an `unknown` barrier
+  gets a fresh bounded re-probe, since the earlier ones gave up on the open turn.
   A reconciliation that settles `unknown` for lack of status evidence (a probe
   timing out while the killed tool is still dying) is not a dead runtime: it is
   re-probed read-only on a bounded backoff (`reconcileRetryDelaysMs`, default
@@ -351,7 +355,12 @@ starts Node or OpenCode. See `docs/mobile/architecture.md`.
   dynamic to read ("unreviewable"). The same assessment builds the preview's
   `risk` and stable `reasons`, so a held card states why; it is a tripwire on
   what the harness reported, not a sandbox, and cannot see inside scripts or
-  package scripts. A request that only writes the session's own todo list
+  package scripts. The assessment is total: it never throws, and a request it
+  fails on is held as "unreviewable", because a preview that throws loses the
+  `permission/requested` event and leaves the agent waiting on a card nobody
+  was shown. Its tables keyed by a command word have no prototype
+  (`lookupTable`), so `constructor` or `toString` in a heredoc body is an
+  unknown command, not an inherited member. A request that only writes the session's own todo list
   (`isSessionPlanPermission`: bare native todo/plan tools such as `TodoWrite`,
   `todowrite`, `update_plan`, plus Polyth's `polyth_todo` under the
   `polyth-agent-tools` MCP names — Claude `mcp__…__`, OpenCode `…_`, Antigravity

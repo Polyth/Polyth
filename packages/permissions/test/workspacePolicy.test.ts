@@ -306,3 +306,11 @@ test("odd input never throws", () => {
   assert.equal(decideWorkspaceToolCall({ tool: "bash" }, context).action, "ask");
   assert.equal(decideWorkspaceToolCall({ tool: "read" }, context).action, "allow");
 });
+
+test("a command or rule named like an Object.prototype member is not read as a known one", () => {
+  for (const word of Object.getOwnPropertyNames(Object.prototype)) {
+    assert.equal(isReadOnlyShellCommand(`${word} --flag`, context), false, word);
+    assert.equal(bash(`${word} --flag`).action, "ask", word);
+    assert.equal(bash("ls", { rules: { deny: [`${word}(*)`] } }).action, "allow", word);
+  }
+});

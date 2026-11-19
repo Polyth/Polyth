@@ -10935,6 +10935,22 @@ export function createSessionService(deps: {
         && (reconciliation.state === "reconciling"
           || reconciliation.state === "blocked"
           || reconciliation.state === "unknown")) {
+        // The barrier was already closed when the tool was stopped (a
+        // reconciliation that failed or lacked evidence during the turn). The
+        // stop itself is proven, so keep the nudge for the next ready + idle
+        // settle instead of leaving the agent stopped for good. A mid-turn
+        // `unknown` spent its re-probes while the turn was open; start them
+        // again now that it is closed.
+        deferredToolTimeoutContinues.set(sessionId, {
+          text: continuation.text,
+          afterSeq: continuation.afterSeq ?? await store.latestSeq(sessionId),
+        });
+        const wired = sessionRuntime.get(sessionId);
+        if (reconciliation.state === "unknown" && wired) {
+          // Only the first deferral restarts the backoff, so it stays bounded.
+          if (continuation.afterSeq === undefined) clearReconcileRetry(sessionId);
+          scheduleReconcileRetry(sessionId, wired);
+        }
         return undefined;
       }
       const events = await store.events(sessionId);

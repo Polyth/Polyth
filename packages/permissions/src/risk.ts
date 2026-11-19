@@ -371,11 +371,18 @@ function parseShell(text: string, hidden: { found: boolean }, depth = 0): Segmen
   return segments;
 }
 
+/** A table looked up by a word taken from the command under review. It has
+ * no prototype, so a word such as `constructor` or `toString` (a heredoc
+ * body holding source code is read as commands too) finds no entry instead
+ * of an inherited `Object.prototype` member. */
+const lookupTable = <T>(entries: Record<string, T>): Record<string, T> =>
+  Object.assign(Object.create(null) as Record<string, T>, entries);
+
 const PRIVILEGE_WRAPPERS = new Set(["sudo", "doas", "pkexec", "gsudo", "runas"]);
 /** Prefix commands that run the remaining words, how many plain arguments
  * (e.g. `timeout 10`) they take before the command, and which of their
  * options consume a value. */
-const RUNNERS: Record<string, [number, RegExp?]> = {
+const RUNNERS = lookupTable<[number, RegExp?]>({
   nohup: [0], time: [0], exec: [0], command: [0], builtin: [0], caffeinate: [0], unbuffer: [0], bunx: [0], pnpx: [0],
   stdbuf: [0, /^-[ioe]$/],
   nice: [0, /^(-n|--adjustment)$/],
@@ -388,7 +395,7 @@ const RUNNERS: Record<string, [number, RegExp?]> = {
   chroot: [1],
   chrt: [1],
   taskset: [1],
-};
+});
 
 interface Command {
   name: string;
@@ -481,7 +488,7 @@ const leading = (args: readonly string[], count = 3): string[] =>
 // ---- shell rules -------------------------------------------------------------
 
 /** Remote publishing, deployment and infrastructure verbs per CLI. */
-const REMOTE_VERBS: Record<string, RegExp> = {
+const REMOTE_VERBS = lookupTable<RegExp>({
   npm: /^(publish|unpublish|deprecate)$/,
   pnpm: /^(publish|unpublish|deprecate)$/,
   bun: /^publish$/,
@@ -527,13 +534,13 @@ const REMOTE_VERBS: Record<string, RegExp> = {
   doctl: /^(delete|create|update|deploy)$/,
   gsutil: /^(rm|rb)$/,
   rclone: /^(delete|purge|deletefile|rmdir|rmdirs)$/,
-};
+});
 const AWS_MUTATION = /^(delete|terminate|remove|deregister|revoke|detach|disable|stop|reboot|put|update|create|deploy|modify|attach|associate|disassociate|reset|restore|replace|invoke|publish|send|run)[a-z0-9-]*$/;
 
 /** Commands that destroy whole resources (stacks, clusters objects, VMs,
  * container volumes, storage pools) rather than files: [verb pattern, extra
  * reason]. Matched against the leading words. */
-const DESTROY_VERBS: Record<string, [RegExp, PermissionRiskReason?]> = {
+const DESTROY_VERBS = lookupTable<[RegExp, PermissionRiskReason?]>({
   terraform: [/^destroy$/], tofu: [/^destroy$/], terragrunt: [/^destroy$/],
   pulumi: [/^destroy$/], cdk: [/^destroy$/], serverless: [/^remove$/], sls: [/^remove$/], sam: [/^delete$/],
   fly: [/^destroy$/], flyctl: [/^destroy$/], heroku: [/^(apps:destroy|destroy)$/],
@@ -545,7 +552,7 @@ const DESTROY_VERBS: Record<string, [RegExp, PermissionRiskReason?]> = {
   lxc: [/^delete$/, "system-change"], incus: [/^delete$/, "system-change"],
   zfs: [/^destroy$/, "destructive-delete"], zpool: [/^destroy$/, "destructive-delete"],
   lvremove: [/^/, "destructive-delete"], vgremove: [/^/, "destructive-delete"], pvremove: [/^/, "destructive-delete"],
-};
+});
 
 interface InfrastructureDestruction {
   /** The command and its leading words, e.g. `kubectl delete ns prod`. */
@@ -594,11 +601,11 @@ function infrastructureDestruction(name: string, args: readonly string[]): Infra
 }
 
 /** Commands that write to their path arguments, and which arguments. */
-const WRITERS: Record<string, "all" | "last" | "all-but-first"> = {
+const WRITERS = lookupTable<"all" | "last" | "all-but-first">({
   tee: "all", touch: "all", mkdir: "all", truncate: "all", rmdir: "all", mv: "all",
   cp: "last", install: "last", ln: "last",
   chmod: "all-but-first", chown: "all-but-first", chgrp: "all-but-first", setfacl: "all-but-first", chattr: "all-but-first",
-};
+});
 
 const DELETERS = new Set(["rm", "unlink", "del", "erase", "rd", "remove-item", "ri"]);
 const DOWNLOADERS = new Set(["curl", "wget", "fetch", "iwr", "irm", "invoke-webrequest", "invoke-restmethod"]);
@@ -1110,10 +1117,24 @@ export function isSessionPlanPermission(input: Pick<PermissionRiskInput, "permis
   return SESSION_PLAN_TOOLS.has(name) || POLYTH_TODO_TOOL.test(name);
 }
 
-/** Assess one permission request. Pure and bounded. */
+/** Assess one permission request. Pure, bounded and total: a request this
+ * code cannot read is `unreviewable` and goes to a person. It never throws,
+ * because a caller that lost the request to an exception would leave the
+ * agent waiting on an approval nobody was ever shown. */
 export function assessPermissionRisk(
   input: PermissionRiskInput,
   context: PermissionRiskContext = {},
+): PermissionRiskAssessment {
+  try {
+    return assessRisk(input, context);
+  } catch {
+    return { risk: "high", reasons: ["unreviewable"] };
+  }
+}
+
+function assessRisk(
+  input: PermissionRiskInput,
+  context: PermissionRiskContext,
 ): PermissionRiskAssessment {
   const reasons = new Set<PermissionRiskReason>();
   const roots = (context.workspaceRoots ?? [])
@@ -1545,4 +1566,4 @@ export function describeBlastRadius(
 
 /** The parsing behind the assessment, for the workspace tool policy
  * (`workspacePolicy.ts`), so one command is read the same way by both. */
-export const riskParsing = { parseShell, commandOf, gitCommand, placeOf, isSecretPath, normalizeAbsolute, base, trimTrailingSlashes };
+export const riskParsing = { lookupTable, parseShell, commandOf, gitCommand, placeOf, isSecretPath, normalizeAbsolute, base, trimTrailingSlashes };

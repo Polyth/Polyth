@@ -337,3 +337,37 @@ test("trailing-slash trimming is linear on long separator runs (CodeQL js/polyno
   assert.equal(isSecretPath(hostile), false);
   assert.ok(performance.now() - started < 1_000);
 });
+
+// Incident 2026-11-19: a heredoc holding TypeScript (`constructor() { … }`) made
+// the assessment throw on an inherited `Object.prototype` member, so the
+// approval request was lost and the agent waited ten minutes on a card nobody
+// was shown.
+const INHERITED_WORDS = Object.getOwnPropertyNames(Object.prototype);
+
+test("a command word that names an Object.prototype member is an ordinary unknown command", () => {
+  for (const word of INHERITED_WORDS) {
+    for (const shape of ["WORD", "WORD --flag value", "WORD destroy -rf x", "echo ok | WORD", "/usr/bin/WORD a b"]) {
+      const command = shape.replace("WORD", word);
+      assert.deepEqual(bash(command), bash(shape.replace("WORD", "frobnicate")), command);
+    }
+  }
+});
+
+test("source code in a heredoc body is assessed, not thrown on", () => {
+  const command = [
+    "cat >> test/audioCapture.test.ts <<'EOF'",
+    "  class FakeContext {",
+    "    constructor() { built++; }",
+    "    toString() { return \"fake\"; }",
+    "    async resume() {}",
+    "  }",
+    "EOF",
+    "timeout 120 node --test test/audioCapture.test.ts 2>&1 | tail -30",
+  ].join("\n");
+  assert.equal(bash(command).risk, "medium");
+});
+
+test("an input the assessment cannot read is held for a person instead of throwing", () => {
+  const hostile = { permission: "bash", get patterns(): string[] { throw new Error("unreadable"); } };
+  assert.deepEqual(assessPermissionRisk(hostile, context), { risk: "high", reasons: ["unreviewable"] });
+});
