@@ -78,7 +78,9 @@ export function issueLabels(report: BugReportPayload): string[] {
 const fileUrl = (context: FormatContext, path: string): string =>
   `https://github.com/${context.repo}/blob/${context.branch}/${path}?raw=true`;
 
-const cell = (value: string): string => neutralize(value).replace(/\|/g, "\\|").replace(/\n/g, " ");
+/** A table cell: backslashes first, so a trailing `\` cannot eat the `|` escape. */
+const cell = (value: string): string =>
+  neutralize(value).replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\r?\n|\r/g, " ");
 
 function details(report: BugReportPayload): string {
   const bag = JSON.stringify({ settings: report.settings, packages: report.packages, errors: report.errors }, null, 2);

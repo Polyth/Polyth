@@ -209,3 +209,16 @@ test("prune leaves the branch alone when GitHub truncates the tree listing", asy
   await assert.rejects(client(fetchFn).prune({ keepDays: 30, now }), GitHubFailure);
   assert.equal(calls.some((call) => call.method !== "GET"), false, "nothing is rewritten");
 });
+
+test("trailing slashes on the API base are trimmed", async () => {
+  const { calls, fetchFn } = fakeFetch(() => json({ number: 4 }, 201));
+  const github = new GitHubClient({
+    repo: "Polyth/private-nightly-reports",
+    branch: "attachments",
+    token: "github_pat_test_token_1234567890",
+    fetchFn,
+    apiBase: `https://github.example${"/".repeat(5000)}`,
+  });
+  await github.createIssue({ title: "t", body: "b", labels: [] });
+  assert.equal(calls[0]!.url, "https://github.example/repos/Polyth/private-nightly-reports/issues");
+});

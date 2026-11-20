@@ -24,3 +24,9 @@ test("text the person or their machine wrote can never ping or cross-link", () =
     assert.equal((markdown.match(/^````/gm) ?? []).length, 2);
   }
 });
+
+test("a table cell cannot break out of its column", () => {
+  const base = report();
+  const markdown = issueBody(report({ web: { ...base.web, view: "chat\\|x | y\r\nz" } }), context);
+  assert.ok(markdown.includes("| View | chat\\\\\\|x \\| y z |"), markdown);
+});

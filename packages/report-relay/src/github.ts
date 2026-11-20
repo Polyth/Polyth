@@ -16,6 +16,13 @@ export interface GitHubClientOptions {
 
 const DEFAULT_API = "https://api.github.com";
 const DEFAULT_TIMEOUT = 10_000;
+
+/** Linear, unlike `/\/+$/`, which backtracks on a long run of `/`. */
+function trimTrailingSlashes(url: string): string {
+  let end = url.length;
+  while (end > 0 && url.charCodeAt(end - 1) === 47) end -= 1;
+  return url.slice(0, end);
+}
 const DAY = 86_400_000;
 const BRANCH_README = [
   "# Polyth nightly report attachments",
@@ -65,7 +72,7 @@ export class GitHubClient implements RelayGitHub {
     this.branch = options.branch;
     this.token = options.token;
     this.fetchFn = options.fetchFn ?? ((input, init) => fetch(input, init));
-    this.apiBase = (options.apiBase ?? DEFAULT_API).replace(/\/+$/, "");
+    this.apiBase = trimTrailingSlashes(options.apiBase ?? DEFAULT_API);
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT;
     this.logger = options.logger;
   }
