@@ -619,6 +619,20 @@ export interface SecretRequestData {
   purpose?: string;
   kind?: SecureSafeKind;
   existing?: boolean;
+  /** `agent-tool`: opened by the Credential Vault request tool, which is
+   *  waiting on it; the reply settles that call instead of a runtime request.
+   *  Absent: a runtime question marked as a secret request. */
+  origin?: "agent-tool";
+  /** The waiting package tool's name, for `origin: "agent-tool"`. */
+  tool?: string;
+}
+/** What an agent asks the person to store; the value never passes through
+ *  the agent. See `ToolExecutionContext.requestSecret`. */
+export interface AgentSecretRequest {
+  handle: string;
+  label: string;
+  purpose?: string;
+  kind?: SecureSafeKind;
 }
 /** Where a saved secret request lands; see `SessionService.replySecret`. */
 export type SecretSaveDestination =
@@ -5855,6 +5869,11 @@ export interface ToolExecutionContext {
    *  credential uses this person's and nobody else's; absent means system
    *  work with no person, which must never borrow a member's account. */
   actorUserId?: string;
+  /** Show the person the protected Credential Vault form in this session and
+   *  wait until they save or dismiss it. Resolves with the handle and outcome
+   *  only; the value goes from the form straight to the server. Absent when
+   *  the call has no canonical session or the Vault is unavailable. */
+  requestSecret?(request: AgentSecretRequest): Promise<SecretResolvedData>;
 }
 export type ToolExecutor = (input: JsonObject, ctx: ToolExecutionContext) => Promise<{ output: string; metadata?: JsonObject }>;
 

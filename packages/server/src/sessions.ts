@@ -34,7 +34,7 @@ import type {
   RuntimeEndpoint, RuntimeLifecycleNotification, RuntimeObservation, ObservationIngestionInput, ObservationIngestionResult,
   RuntimeSessionBinding, RuntimeSnapshot,
   PermissionDelegatedData, PermissionRequestData,
-  SecretRequestData, SecretResolvedData, SecureSafeKind, SecureSafeService,
+  AgentSecretRequest, SecretRequestData, SecretResolvedData, SecureSafeKind, SecureSafeService,
   RuntimeSession, SendResult, SessionDebugEndpointDto, SessionEvent, SessionFolderDto, SessionForkedData, SessionIsolation, SessionOrganizePatch, SessionProjection, SessionRef, SessionWorkspace, MemoryNarrowing,
   SessionService, SessionPersistence, SessionWorkspaceSelection, UserTurnInput, WorkspaceMutationScope, WorkspaceContext,
   Project, SessionMoveBlock, SessionMoveInput, SessionProjectMove, SessionProjectMovedData, SessionReleasedExecution,
@@ -571,6 +571,16 @@ export interface RuntimeEpochSessionService extends RestartSafetySessionService 
     /** Bounded argument summary for the permission card and risk assessment. */
     metadata?: JsonObject;
   }): Promise<"allow" | "deny" | "permission-required">;
+  /** Show the protected Credential Vault form for one package tool call in
+   * the canonical session that owns it, and resolve once the person saves or
+   * dismisses it (or the call is cancelled, as dismissed). The value is
+   * stored by `replySecret`; this never sees it. */
+  requestAgentToolSecret(
+    sessionId: string,
+    request: AgentSecretRequest,
+    tool: { name: string; owner: string },
+    signal?: AbortSignal,
+  ): Promise<SecretResolvedData>;
   /** Complete the durable runtime epoch after Phase 4 has protocol-confirmed a
    * fresh session-reset. This never creates or hydrates a backend session. */
   transitionRuntimeEpoch(
@@ -1364,6 +1374,19 @@ export function createSessionService(deps: {
     sessionId: string;
     resolve(decision: "allow" | "deny"): void;
   }>();
+  // Credential Vault forms a package tool call is waiting on (in memory, like
+  // the approvals above: after a restart the form still saves, but no call
+  // is left to resume).
+  const pendingAgentToolSecrets = new Map<string, {
+    sessionId: string;
+    resolve(result: SecretResolvedData): void;
+  }>();
+  const settleAgentToolSecret = (sessionId: string, result: SecretResolvedData): void => {
+    const pending = pendingAgentToolSecrets.get(result.requestId);
+    if (pending?.sessionId !== sessionId) return;
+    pendingAgentToolSecrets.delete(result.requestId);
+    pending.resolve(result);
+  };
   // sessions whose turn admission is in flight (startTurn sent, turn/started
   // not yet observed) — a concurrent send must treat these as active
   const admitting = new Set<string>();
@@ -1696,13 +1719,15 @@ export function createSessionService(deps: {
         (typeof request.data.sourceSessionId !== "string" || request.data.sourceSessionId === sessionId)
         && (requestId === callId
           || request.data.tool === callId
-          || (request.data.permission === "package-tool" && request.data.tool === tool)
+          || ((request.data.permission === "package-tool" || request.data.origin === "agent-tool")
+            && request.data.tool === tool)
           || (request.type !== "permission/requested" && tool === "question"))));
 
   // Human response time is not tool execution time. Only this session's own
   // requests pause the associated tools; a mirrored child card or unrelated
-  // approval cannot shelter a runaway execution. Package approvals correlate
-  // by tool name; native approvals correlate by call ID. Resume only once.
+  // approval cannot shelter a runaway execution. Package approvals and
+  // tool-opened Credential Vault forms correlate by tool name; native
+  // approvals correlate by call ID. Resume only once.
   const syncToolWatchdogsForRequests = async (sessionId: string): Promise<void> => {
     if (serviceDisposed) return;
     const prefix = `${sessionId}\0`;
@@ -8239,9 +8264,14 @@ export function createSessionService(deps: {
         action: "dismiss",
         ...(handle ? { handle } : {}),
       });
+      // A tool-opened form has no runtime request behind it: its tool call
+      // is the one waiting.
+      const toolOrigin = (requested.data as { origin?: unknown }).origin === "agent-tool";
       const outcome = await runResponseOperation<Record<string, never>, void>(
         operation,
-        (operationId) => rt.replySecret
+        (operationId) => toolOrigin
+          ? Promise.resolve()
+          : rt.replySecret
           ? (rt.replySecretOperation
               ? rt.replySecretOperation(sessionId, rid, result, operationId)
               : rt.replySecret(sessionId, rid, result))
@@ -8252,6 +8282,7 @@ export function createSessionService(deps: {
         { type: "secret/resolved", data: result as unknown as JsonObject, ignorable: true },
       );
       if (outcome.kind !== "confirmed") throw outcomeError(outcome);
+      if (toolOrigin) settleAgentToolSecret(sessionId, result);
     }
   };
 
@@ -13473,6 +13504,69 @@ export function createSessionService(deps: {
         });
       });
     },
+    async requestAgentToolSecret(sessionId, request, tool, signal) {
+      if (!deps.secureSafe) {
+        throw Object.assign(new Error("Credential Vault unavailable"), { code: "unsupported" });
+      }
+      const handle = request.handle.trim();
+      const label = request.label.trim();
+      const purpose = request.purpose?.trim();
+      if (!handle || !label) {
+        throw Object.assign(new Error("handle and label are required"), { code: "invalid-input" });
+      }
+      const requestId = `vault_${randomUUID()}`;
+      const dismissed: SecretResolvedData = { requestId, action: "dismissed", handle };
+      if (signal?.aborted) return dismissed;
+      if (!await store.projection(sessionId)) {
+        throw Object.assign(new Error("session not found"), { code: "not-found" });
+      }
+      return new Promise<SecretResolvedData>((resolveResult, rejectResult) => {
+        const abort = () => {
+          if (!pendingAgentToolSecrets.delete(requestId)) return;
+          resolveResult(dismissed);
+          void withSessionLock(sessionId, async () => {
+            const facts = await logFacts(sessionId);
+            if (!facts.openSecrets.has(requestId)) return;
+            await appendAndBroadcast(sessionId, "secret/expired", { requestId }, { ignorable: true });
+            await settleAfterLastRequest(sessionId);
+          }).catch(() => undefined);
+        };
+        pendingAgentToolSecrets.set(requestId, {
+          sessionId,
+          resolve: (result) => {
+            signal?.removeEventListener("abort", abort);
+            resolveResult(result);
+          },
+        });
+        signal?.addEventListener("abort", abort, { once: true });
+        void withSessionLock(sessionId, async () => {
+          if (signal?.aborted) return;
+          const data: SecretRequestData = {
+            requestId,
+            handle,
+            label,
+            ...(purpose ? { purpose } : {}),
+            ...(request.kind ? { kind: request.kind } : {}),
+            existing: deps.secureSafe?.hasHandle(handle) ?? false,
+            origin: "agent-tool",
+            tool: tool.name,
+          };
+          await appendAndBroadcast(sessionId, "secret/requested", data as unknown as JsonObject, {
+            ignorable: true,
+            producerPlugin: tool.owner,
+          });
+          // Waiting on a person is not tool execution time.
+          await syncToolWatchdogsForRequests(sessionId);
+          const current = await store.projection(sessionId);
+          if (current?.status !== "unknown") await updateProjection(sessionId, { status: "waiting" });
+          deps.notify?.attention(sessionId, "question");
+        }).catch((error: unknown) => {
+          if (!pendingAgentToolSecrets.delete(requestId)) return;
+          signal?.removeEventListener("abort", abort);
+          rejectResult(error);
+        });
+      });
+    },
     async switchHarness(sessionId, selection, timing = "after-turn", launch) {
       return withSessionLock(sessionId, async () => {
         let projection = await store.projection(sessionId);
@@ -17092,7 +17186,9 @@ export function createSessionService(deps: {
         const data = requested.data as unknown as SecretRequestData;
         const proj = await store.projection(sessionId);
         if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
-        const rt = await ensureWired(sessionId, proj);
+        // A tool-opened form answers the waiting tool call, not the runtime.
+        const toolOrigin = data.origin === "agent-tool";
+        const rt = toolOrigin ? undefined : await ensureWired(sessionId, proj);
         const intentAction = reply.action === "save" ? "save" : "dismiss";
         const expected: JsonObject = { action: intentAction, handle: data.handle };
         const choice = await broadcastTail(sessionId, () => durable.chooseResponseIntent({
@@ -17158,7 +17254,9 @@ export function createSessionService(deps: {
 
         const outcome = await runResponseOperation<Record<string, never>, void>(
           operation,
-          (operationId) => rt.replySecret
+          (operationId) => !rt
+            ? Promise.resolve()
+            : rt.replySecret
             ? (rt.replySecretOperation
                 ? rt.replySecretOperation(sessionId, requestId, result, operationId)
                 : rt.replySecret(sessionId, requestId, result))
@@ -17173,12 +17271,13 @@ export function createSessionService(deps: {
           },
         );
         if (outcome.kind !== "confirmed") {
-          if (outcome.kind === "unknown") {
+          if (outcome.kind === "unknown" && rt) {
             await updateProjection(sessionId, { status: "unknown" });
             scheduleReconciliation(sessionId, proj, rt, "secret-outcome-unknown");
           }
           throw outcomeError(outcome);
         }
+        if (toolOrigin) settleAgentToolSecret(sessionId, result);
         await settleAfterLastRequest(sessionId);
       });
     },

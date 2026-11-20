@@ -2208,11 +2208,18 @@ export async function boot(opts: BootOptions = {}) {
   let requestAgentToolPermission:
     RuntimeEpochSessionService["requestAgentToolPermission"] | undefined;
   let resolveAgentToolSession: RuntimeEpochSessionService["resolveAgentToolSession"] | undefined;
+  let requestAgentToolSecret: RuntimeEpochSessionService["requestAgentToolSecret"] | undefined;
   const agentTools = createAgentToolBridge({
     executor: (id) => capabilityContributions.executor(id),
     contribution: (id) => capabilityContributions.contribution(id),
     outputCache,
     actorOf: async (sessionId) => (await store.projection(sessionId))?.actor?.userId,
+    requestSecret: (sessionId, request, tool, signal) => {
+      if (!requestAgentToolSecret) {
+        return Promise.reject(Object.assign(new Error("Credential Vault requests are unavailable"), { code: "unsupported" }));
+      }
+      return requestAgentToolSecret(sessionId, request, tool, signal);
+    },
     resolveSession: (grant, runtimeSessionId) => resolveAgentToolSession?.({ ...grant, runtimeSessionId }) ?? Promise.resolve(undefined),
     requested: async (tool, grant) => {
       const event = await store.append(grant.sessionId!, "package-tool/requested", {
@@ -3264,6 +3271,7 @@ export async function boot(opts: BootOptions = {}) {
     },
   });
   requestAgentToolPermission = sessions.requestAgentToolPermission.bind(sessions);
+  requestAgentToolSecret = sessions.requestAgentToolSecret.bind(sessions);
   resolveAgentToolSession = sessions.resolveAgentToolSession.bind(sessions);
   sessionsImpl = sessions;
   // A chat that stops being private drops its owner's personal MCP servers

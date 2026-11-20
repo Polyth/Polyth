@@ -173,7 +173,7 @@ export function secureSafeBehaviorSection(_manifestPath: string, _manifest: Secu
     "## Credential boundary",
     "",
     "Credential Vault is relevant only when the current task needs a stored credential, secret-backed authentication, a secret-backed browser fill, or a handle lookup. For unrelated tasks, do not call Credential Vault tools, inspect manifests, or mention this capability.",
-    "When it is relevant, use the `polyth-secure-safe` skill and its server-authorized handle workflow. Never request, accept, echo, print, log, or summarize a plaintext secret in chat.",
+    "When it is relevant, use the `polyth-secure-safe` skill and its server-authorized handle workflow. When the task needs a credential that is not stored yet, call `polyth_credential_vault_request`: it shows the user a protected form and returns only a handle. Do not refuse or tell the user to withhold it; never request, accept, echo, print, log, or summarize a plaintext secret in chat.",
   ].join("\n");
 }
 

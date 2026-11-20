@@ -10,7 +10,7 @@ import {
 } from "@polyth/plugins";
 import { SECURE_SAFE_PACKAGE_ID, secureSafeSkill } from "../src/agentSkill.ts";
 import { secureSafeBehaviorSection } from "../src/index.ts";
-import { createCredentialVaultListAgentTool } from "../src/agentTool.ts";
+import { createCredentialVaultListAgentTool, createCredentialVaultRequestAgentTool } from "../src/agentTool.ts";
 import registerPackage from "../src/serverEntry.ts";
 
 const SKILL_ID = `${SECURE_SAFE_PACKAGE_ID}.skill.polyth-secure-safe`;
@@ -51,6 +51,8 @@ test("Credential Vault package contributes an inherited deployment skill", async
   assert.match(descriptor.description, /never handle secret values in chat/i);
   assert.match(descriptor.instructions, /Sensitive data: yes/);
   assert.match(descriptor.instructions, /secureSafe/);
+  assert.match(descriptor.instructions, /polyth_credential_vault_request/);
+  assert.match(descriptor.instructions, /Do not refuse/);
   assert.match(descriptor.instructions, /POLYTH_SAFE_/);
   assert.match(descriptor.instructions, /composer-shell|runShell/);
   assert.match(descriptor.instructions, /never ask for it in chat/);
@@ -61,6 +63,10 @@ test("Credential Vault package contributes an inherited deployment skill", async
   assert.equal(listTool?.descriptor.kind, "tool");
   assert.equal(listTool?.descriptor.scope, "project");
   assert.match(listTool?.descriptor.description ?? "", /current task needs a stored credential or handle/i);
+  const requestTool = registry.contribution("secure-safe.credential-vault-request");
+  assert.ok(requestTool, "Credential Vault request tool must be registered");
+  assert.equal(requestTool?.descriptor.kind, "tool");
+  assert.equal(requestTool?.descriptor.scope, "project");
   assert.equal(registry.resolve(context({ spaceId: "spc_b", projectId: "project-b" }))
     .some((row) => row.id === SKILL_ID), true);
 
@@ -94,6 +100,9 @@ test("Credential Vault behavior is conditional and does not enumerate handles by
   assert.match(section, /only when the current task needs/i);
   assert.match(section, /For unrelated tasks, do not call Credential Vault tools/i);
   assert.doesNotMatch(section, /polyth_credential_vault_list/);
+  // Agents learn the form exists before they load the skill, so they offer
+  // it instead of refusing the credential.
+  assert.match(section, /polyth_credential_vault_request/);
   assert.doesNotMatch(section, /forbidden-config\.json/);
 });
 
@@ -119,4 +128,47 @@ test("Credential Vault list tool returns only current-project metadata", async (
     ],
   });
   assert.doesNotMatch(result.output, /FOREIGN|secret|value/i);
+});
+
+const toolContext = {
+  sessionId: "session-a",
+  projectId: "project-a",
+  cwd: "/tmp/project-a",
+  spaceId: "space-a",
+};
+
+test("Credential Vault request tool opens the form and returns only the handle and outcome", async () => {
+  const tool = createCredentialVaultRequestAgentTool();
+  const asked: unknown[] = [];
+  const saved = await tool.execute?.({ handle: "STRIPE_KEY", label: "Stripe key", purpose: "Billing", kind: "env" }, {
+    ...toolContext,
+    requestSecret: async (request) => {
+      asked.push(request);
+      return { requestId: "vault_1", action: "saved", handle: request.handle };
+    },
+  });
+  assert.deepEqual(asked, [{ handle: "STRIPE_KEY", label: "Stripe key", purpose: "Billing", kind: "env" }]);
+  const output = JSON.parse(saved?.output ?? "{}");
+  assert.equal(output.status, "saved");
+  assert.equal(output.envRef, "POLYTH_SAFE_STRIPE_KEY");
+  assert.equal(output.value, undefined);
+
+  const dismissed = await tool.execute?.({ handle: "STRIPE_KEY", label: "Stripe key" }, {
+    ...toolContext,
+    requestSecret: async (request) => ({ requestId: "vault_2", action: "dismissed", handle: request.handle }),
+  });
+  assert.equal(JSON.parse(dismissed?.output ?? "{}").status, "dismissed");
+});
+
+test("Credential Vault request tool validates input and never falls back without the form", async () => {
+  const tool = createCredentialVaultRequestAgentTool();
+  const never = async (): Promise<never> => { throw new Error("must not open the form"); };
+  await assert.rejects(tool.execute!({ handle: "1bad", label: "x" }, { ...toolContext, requestSecret: never }),
+    (error: { code?: string }) => error.code === "invalid-input");
+  await assert.rejects(tool.execute!({ handle: "OK" }, { ...toolContext, requestSecret: never }),
+    (error: { code?: string }) => error.code === "invalid-input");
+  await assert.rejects(tool.execute!({ handle: "OK", label: "x", kind: "secret" }, { ...toolContext, requestSecret: never }),
+    (error: { code?: string }) => error.code === "invalid-input");
+  await assert.rejects(tool.execute!({ handle: "OK", label: "x" }, toolContext),
+    (error: { code?: string }) => error.code === "unavailable");
 });
