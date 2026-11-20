@@ -11,6 +11,7 @@ import {
   powerMonitor,
   powerSaveBlocker,
   protocol,
+  safeStorage,
   screen,
   session,
   shell,
@@ -25,6 +26,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { boot } from "@polyth/server";
+import { bugReportOrigin, createBugReportClient, encodeScreenshot, type BugReportClient } from "./bugReport.ts";
 import { cliLauncherPlan, installCliLauncher, openPathFromArgv } from "./cliInstall.ts";
 import { setLinuxAutostartEnabled } from "./linuxAutostart.ts";
 import { validateAbsoluteLocalPath } from "./localPath.ts";
@@ -141,6 +143,8 @@ const edition = desktopEdition(__POLYTH_DESKTOP_FLAVOR__);
 const workstation = edition === "workstation";
 /** A feed the build is pinned to whatever the chosen channel; null = the chosen channel. */
 const pinnedUpdates = pinnedUpdaterChannel(__POLYTH_DESKTOP_FLAVOR__, process.platform, process.getSystemVersion());
+/** Where nightly bug reports go; null on builds that send none (src/bugReport.ts). */
+const reportOrigin = bugReportOrigin({ version: app.getVersion(), edition, env: process.env });
 
 interface SavedWindowState {
   bounds?: Rectangle;
@@ -212,6 +216,7 @@ let zoneSnapshotsPath = "";
 let zoneSnapshots: ZoneSnapshots = {};
 let zoneSnapshotsWrite: Promise<void> = Promise.resolve();
 let linkClient: PolythLinkClient | null = null;
+let bugReports: BugReportClient | null = null;
 /** Other servers this launch has opened: their origin, and which server it is. */
 const remoteOrigins = new Map<string, Exclude<DesktopServerTarget, { kind: "local" }>>();
 /** The saved Link servers as the native menus show them; the list refreshes it. */
@@ -1364,6 +1369,11 @@ const installApplicationMenu = (): void => {
       { type: "separator" }, { role: "togglefullscreen" },
     ] },
     { role: "windowMenu" },
+    // Nightly builds only: the report sheet belongs to the page, which owns
+    // ⌘⇧B / Ctrl+Shift+B through its remappable keymap (`reportBug`).
+    ...(reportOrigin ? [{ role: "help" as const, submenu: [
+      { label: "Report a Bug…", ...rendererShortcut("CommandOrControl+Shift+B"), click: () => sendCommand("report-bug") },
+    ] }] : []),
   ]));
 };
 
@@ -1702,6 +1712,76 @@ const reportPendingUpdate = (): void => {
   if (outcome.phase === "installed") closeUpdateWindowLater(8_000);
 };
 
+/** Desktop settings a bug report carries: choices and window facts only,
+ *  never a path, a server address or a name. */
+const bugReportDesktopSettings = (): Record<string, string | number | boolean> => {
+  const window = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+  const server = servers.active.kind;
+  return {
+    "desktop.closeToTray": settings.closeToTray,
+    "desktop.startMinimized": settings.startMinimized,
+    "desktop.launchAtLogin": settings.launchAtLogin,
+    "desktop.keepAwake": settings.keepAwake,
+    "desktop.keepAwakeMode": settings.keepAwakeMode ?? "always",
+    "desktop.automaticUpdates": settings.automaticUpdates,
+    "desktop.updateChannel": settings.updateChannel,
+    "desktop.lowResourceMode": settings.lowResourceMode,
+    "desktop.softwareRendering": settings.softwareRendering,
+    "desktop.reduceAnimations": settings.reduceAnimations,
+    "desktop.controlsPosition": settings.controlsPosition,
+    "desktop.controlsFollowSystem": settings.controlsFollowSystem ?? false,
+    "desktop.controlsTheme": settings.controlsTheme,
+    "desktop.surface": window ? surfaceOf(window.webContents.getURL()) ?? "none" : "none",
+    "desktop.server": server,
+    "desktop.maximized": window?.isMaximized() ?? false,
+    "desktop.fullscreen": window?.isFullScreen() ?? false,
+    "desktop.zoom": window ? Math.round(window.webContents.getZoomFactor() * 100) / 100 : 1,
+    "desktop.tray": tray !== null,
+  };
+};
+
+const createDesktopBugReports = (desktopDir: string): BugReportClient => createBugReportClient({
+  dir: desktopDir,
+  origin: reportOrigin,
+  app: {
+    version: app.getVersion(),
+    edition,
+    platform: process.platform === "darwin" || process.platform === "win32" ? process.platform : "linux",
+    arch: process.arch,
+    osVersion: process.getSystemVersion().slice(0, 64),
+    electron: process.versions.electron ?? "0",
+    chromium: process.versions.chrome ?? "0",
+    packaged: app.isPackaged,
+  },
+  locale: () => app.getLocale(),
+  desktopSettings: bugReportDesktopSettings,
+  // The OS keychain seals the tester password; without one it lasts this run.
+  encrypt: (plain) => {
+    try {
+      if (!safeStorage.isEncryptionAvailable()) return null;
+      if (process.platform === "linux" && safeStorage.getSelectedStorageBackend() === "basic_text") return null;
+      return safeStorage.encryptString(plain).toString("base64");
+    } catch { return null; }
+  },
+  decrypt: (stored) => {
+    try { return safeStorage.decryptString(Buffer.from(stored, "base64")); } catch { return null; }
+  },
+  fetch: (input, init) => net.fetch(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, init),
+  log,
+});
+
+/** This window only, captured before the report sheet covers it. */
+const captureForBugReport = async () => {
+  const window = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+  if (!window) return null;
+  try {
+    return encodeScreenshot(await window.webContents.capturePage());
+  } catch (error) {
+    log("Could not capture the window for a bug report", error);
+    return null;
+  }
+};
+
 const installIpc = (): void => {
   // Sent while a page loads, before it has a surface to reason about.
   ipcMain.on("desktop:surface", (event) => {
@@ -1735,6 +1815,13 @@ const installIpc = (): void => {
     await openServerList({ open: servers.active.id, resume: true, ...(next ? { next } : {}) });
   });
   trustedHandle("desktop:servers:state", serversView);
+  trustedHandle("desktop:report:state", () => bugReports?.state() ?? { available: false, needsPassword: true, queued: 0 });
+  trustedHandle("desktop:report:capture", async () => {
+    if (!bugReports?.state().available) throw new Error("Bug reports are off on this build");
+    return bugReports.capture(await captureForBugReport());
+  });
+  trustedHandle("desktop:report:send", async (_event, draft: unknown) =>
+    bugReports ? bugReports.send(draft) : { result: "unavailable" as const });
   trustedHandle("desktop:servers:open", async (_event, target: unknown): Promise<DesktopServersResult<void>> => {
     const wanted = target as { kind?: unknown; url?: unknown; path?: unknown } | null;
     try {
@@ -2065,6 +2152,7 @@ async function start(): Promise<void> {
   zoneSnapshots = workstation ? {} : readZoneSnapshotsSync(zoneSnapshotsPath);
   updatePendingPath = join(desktopDir, "update-pending.json");
   settings = await readDesktopSettings(settingsPath, desktopSettingsDefaults);
+  bugReports = createDesktopBugReports(desktopDir);
   if (startupLowResourceMode) log("Low-resource mode active");
   if (startupSoftwareRendering) log("Software rendering active (GPU acceleration disabled)");
   await applyLoginSetting();
@@ -2162,6 +2250,8 @@ async function start(): Promise<void> {
   powerMonitor.on("unlock-screen", nudgeActiveLink);
   await createWindow();
   if (app.isPackaged) reportPendingUpdate();
+  // Reports that could not go last time (no network, relay busy).
+  void bugReports?.flushOutbox();
 }
 
 bootstrapTrace("before requestSingleInstanceLock");
@@ -2183,6 +2273,7 @@ else {
   app.on("before-quit", (event) => {
     quitting = true;
     quitStarted = true;
+    bugReports?.dispose();
     if (serverStopped) return;
     event.preventDefault();
     void shutdownServer().finally(() => app.quit());

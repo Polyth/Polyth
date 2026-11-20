@@ -109,7 +109,7 @@ export interface DesktopTitleBarAppearance {
 }
 
 /** Native menu commands the renderer carries out with its own handlers. */
-export type DesktopCommand = "open-settings" | "new-session" | "search-sessions" | "command-palette";
+export type DesktopCommand = "open-settings" | "new-session" | "search-sessions" | "command-palette" | "report-bug";
 
 export interface DesktopUpdateState {
   phase:
@@ -266,6 +266,9 @@ export interface PolythDesktopApi {
   onWindowState(listener: (state: DesktopWindowState) => void): () => void;
   onCommand(listener: (command: DesktopCommand) => void): () => void;
   onUpdateState(listener: (state: DesktopUpdateState) => void): () => void;
+  /** Nightly bug reports (apps/desktop/src/types.ts `PolythDesktopBugReportApi`).
+   *  Only the bug-report package uses it, through its own structural type. */
+  bugReport?: unknown;
 }
 
 declare global {

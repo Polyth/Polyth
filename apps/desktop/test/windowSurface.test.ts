@@ -86,6 +86,15 @@ test("only the server list holds connection authority", () => {
   assert.equal(channelAllowed("hub", "desktop:session:renew"), false);
 });
 
+test("a bug report comes from this computer's page or another server's, never the server list", () => {
+  for (const channel of ["desktop:report:state", "desktop:report:capture", "desktop:report:send"]) {
+    assert.equal(channelAllowed("local", channel), true, channel);
+    assert.equal(channelAllowed("remote", channel), true, channel);
+    assert.equal(channelAllowed("hub", channel), false, channel);
+    assert.equal(channelAllowed(null, channel), false, channel);
+  }
+});
+
 test("this computer's page keeps what it always had, and an unknown page gets nothing", () => {
   for (const channel of ["desktop:path:reveal", "desktop:setup:claim", "desktop:session:confirm", "desktop:data:open", "desktop:servers:menu"]) {
     assert.equal(channelAllowed("local", channel), true, channel);

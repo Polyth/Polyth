@@ -302,6 +302,21 @@ own runners; no deploy key or second repository is involved.
   downgrade; every dispatched run, skipped or not, consumes a run number.
 - **Publication.** Only a full (`all`) run publishes: draft, upload, then public prerelease, never
   marked Latest. The three newest nightlies are kept; stable releases are never pruned.
+- **Bug reports.** Nightly desktop builds send ⌘⇧B / Ctrl+Shift+B reports (screenshot,
+  build, allowlisted settings, a note) with a shared tester password to the report relay,
+  which files them as issues in the team's private reports repository and drops data and
+  screenshots after 30 days ([desktop](../dev/desktop.md#bug-reports-nightly),
+  [relay](../../packages/report-relay/README.md)). The relay accepts a published nightly
+  or an older one, never a version newer than the newest nightly. The reports repository
+  is `Polyth/nightly-reports` (private). Setting the relay up needs a fine-grained token
+  limited to that repository (Issues and Contents read/write, Metadata read), placed with
+  `sudo polyth-reports-token`, and the tester password, placed with
+  `sudo polyth-reports-password`; without both it answers every report `503`. Rotating the
+  password is running the helper again; every tester is asked at their next send. The
+  **Nightly bug triage** agent template (Agents → Templates) works through new reports
+  every night at 01:45, before the captain: it merges duplicates, ties each report to its
+  source commit through the release marker and turns real bugs into public issues written
+  without the reporter's data, or into bounded fixes.
 - **Stable.** A manual run with `channel` `stable` (set `ref` to `master`) builds
   the same way and publishes `vX.Y.N` (marked **Latest**, never pruned), sharing the
   build-number sequence, so every channel's build is

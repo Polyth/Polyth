@@ -1,0 +1,130 @@
+/* Nightly bug-report sheet. Every rule is scoped under .bug-report-*; sizes,
+   colours and type come from the canonical tokens. */
+
+.bug-report-sheet {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.bug-report-sheet__intro,
+.bug-report-sheet__note {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+}
+
+.bug-report-sheet__field {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.bug-report-sheet__label {
+  color: var(--text-dim);
+  font-size: var(--font-label);
+  font-weight: 600;
+}
+
+.bug-report-sheet__hint {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.bug-report-sheet__error {
+  color: var(--red);
+  font-size: var(--font-meta);
+}
+
+/* The capture beside its switches: the sheet stays short enough that the
+   password field is in view on a laptop-height window. */
+.bug-report-sheet__attachments {
+  display: grid;
+  grid-template-columns: minmax(0, 220px) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.bug-report-sheet__attachments:not(:has(.bug-report-sheet__image)) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.bug-report-sheet__toggles {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* The capture as it will be sent: whole, never cropped. */
+.bug-report-sheet__image {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 150px;
+  object-fit: contain;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-overlay);
+}
+
+.bug-report-sheet__image[data-included="false"] {
+  opacity: 0.35;
+}
+
+.bug-report-sheet__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  /* Labels of different lengths: the inputs still share one baseline. */
+  align-items: end;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.bug-report-sheet__row[data-columns="2"] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.bug-report-sheet__hint,
+.bug-report-sheet__error {
+  margin: calc(var(--space-2) * -1) 0 0;
+}
+
+@media (max-width: 560px) {
+  .bug-report-sheet__attachments,
+  .bug-report-sheet__row[data-columns="2"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* A grid item sizes to its content: without this the preview's longest line
+   would widen the whole sheet instead of scrolling inside its box. */
+.bug-report-sheet__details {
+  min-width: 0;
+}
+
+.bug-report-sheet__details > summary {
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  cursor: pointer;
+}
+
+.bug-report-sheet__json {
+  box-sizing: border-box;
+  max-width: 100%;
+  max-height: 220px;
+  margin: var(--space-2) 0 0;
+  padding: var(--space-3);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-overlay);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--font-code);
+  white-space: pre;
+}
+
+.bug-report-sheet__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}

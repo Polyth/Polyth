@@ -7,6 +7,7 @@ export const zhCN: HotkeysMessages = {
   "settings.shortcutspage.action.newSession": "新建会话",
   "settings.shortcutspage.action.notificationCentre": "通知中心",
   "settings.shortcutspage.action.palette": "命令面板",
+  "settings.shortcutspage.action.reportBug": "报告错误",
   "settings.shortcutspage.action.searchFiles": "搜索文件",
   "settings.shortcutspage.action.searchSessions": "搜索会话",
   "settings.shortcutspage.action.searchWorkspace": "搜索工作区内容",

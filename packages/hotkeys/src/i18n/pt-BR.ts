@@ -7,6 +7,7 @@ export const ptBR: HotkeysMessages = {
   "settings.shortcutspage.action.newSession": "Nova sessão",
   "settings.shortcutspage.action.notificationCentre": "Central de notificações",
   "settings.shortcutspage.action.palette": "Paleta de comandos",
+  "settings.shortcutspage.action.reportBug": "Relatar um bug",
   "settings.shortcutspage.action.searchFiles": "Pesquisar arquivos",
   "settings.shortcutspage.action.searchSessions": "Pesquisar sessões",
   "settings.shortcutspage.action.searchWorkspace": "Pesquisar conteúdo do espaço de trabalho",

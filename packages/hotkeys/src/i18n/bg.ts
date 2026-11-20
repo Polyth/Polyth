@@ -7,6 +7,7 @@ export const bg: HotkeysMessages = {
   "settings.shortcutspage.action.newSession": "Нова сесия",
   "settings.shortcutspage.action.notificationCentre": "Център за известия",
   "settings.shortcutspage.action.palette": "Палитра с команди",
+  "settings.shortcutspage.action.reportBug": "Докладване на грешка",
   "settings.shortcutspage.action.searchFiles": "Търсене на файлове",
   "settings.shortcutspage.action.searchSessions": "Търсене на сесии",
   "settings.shortcutspage.action.searchWorkspace": "Търсене в съдържанието на работното пространство",

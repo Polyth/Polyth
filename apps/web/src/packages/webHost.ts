@@ -50,6 +50,7 @@ import {
   closePage,
   closeWorkspacePane,
   focusComposer,
+  getRecentUiErrors,
   getState,
   openPage,
   openSettingsPage,
@@ -388,6 +389,7 @@ export const webPackageHost: WebPackageHost = {
   errors: {
     friendly: friendlyError,
     show: (message, action, options) => setUiError(message, action ?? null, undefined, options?.kind),
+    recent: getRecentUiErrors,
   },
   notifications,
   handoffTargets: {

@@ -17,7 +17,8 @@ export type HotkeyAction =
   | "viewGit"
   | "viewTerminal"
   | "dictate"
-  | "voiceMode";
+  | "voiceMode"
+  | "reportBug";
 
 export const HOTKEYS_KEY = "polyth.hotkeys";
 
@@ -37,6 +38,7 @@ export const HOTKEY_ACTIONS: ReadonlyArray<{ id: HotkeyAction; label: string; pl
   { id: "viewTerminal", label: "Open Terminal", pluginName: "Terminal" },
   { id: "dictate", label: "Start or stop dictation", pluginName: "Voice" },
   { id: "voiceMode", label: "Voice mode", pluginName: "Voice" },
+  { id: "reportBug", label: "Report a bug", pluginName: "Bug reports" },
 ];
 
 export const DEFAULT_KEYMAP: Record<HotkeyAction, string> = {
@@ -57,6 +59,8 @@ export const DEFAULT_KEYMAP: Record<HotkeyAction, string> = {
   // also fire while typing, so dictation starts from inside the composer.
   dictate: "mod+shift+d",
   voiceMode: "mod+shift+h",
+  // Nightly desktop builds only; elsewhere the key stays the browser's.
+  reportBug: "mod+shift+b",
 };
 
 export interface KeyEventLike {

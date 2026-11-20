@@ -12,7 +12,7 @@ import {
   type DesktopUpdateState,
   type DesktopWindowState,
 } from "./desktopBridge.ts";
-import { runCommand } from "./commands.ts";
+import { REPORT_BUG_COMMAND, runCommand } from "./commands.ts";
 import { registerSlot } from "./slots.ts";
 import { ReadonlyRow, Row, Seg, Toggle } from "./components/settings/parts.tsx";
 import { Button, confirmAlert, Progress } from "./components/ui/index.ts";
@@ -797,6 +797,7 @@ const DESKTOP_COMMANDS: Readonly<Record<DesktopCommand, string>> = {
   "new-session": "cmd.new",
   "search-sessions": "cmd.search",
   "command-palette": "cmd.palette",
+  "report-bug": REPORT_BUG_COMMAND,
 };
 
 export function installDesktopIntegration(): () => void {

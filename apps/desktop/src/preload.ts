@@ -1,5 +1,8 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
+  DesktopBugReportCapture,
+  DesktopBugReportOutcome,
+  DesktopBugReportState,
   DesktopCommand,
   DesktopInfo,
   DesktopServersResult,
@@ -16,6 +19,7 @@ import type {
   DesktopWindowAction,
   DesktopWindowState,
   PolythDesktopApi,
+  PolythDesktopBugReportApi,
   PolythDesktopServersApi,
 } from "./types.ts";
 
@@ -51,6 +55,12 @@ const servers: PolythDesktopServersApi = {
     ipcRenderer.invoke("desktop:servers:zones:open", { key, ...(projectId ? { projectId } : {}) }) as Promise<DesktopServersResult<void>>,
   foldZone: (key, folded) =>
     ipcRenderer.invoke("desktop:servers:zones:fold", { key, folded: folded === true }) as Promise<DesktopServerZonesView>,
+};
+
+const bugReport: PolythDesktopBugReportApi = {
+  state: () => ipcRenderer.invoke("desktop:report:state") as Promise<DesktopBugReportState>,
+  capture: () => ipcRenderer.invoke("desktop:report:capture") as Promise<DesktopBugReportCapture>,
+  send: (draft) => ipcRenderer.invoke("desktop:report:send", draft) as Promise<DesktopBugReportOutcome>,
 };
 
 const place = placement();
@@ -107,6 +117,7 @@ const api: PolythDesktopApi = {
   onWindowState: (listener) => subscribe("desktop:window:state", listener),
   onCommand: (listener) => subscribe<DesktopCommand>("desktop:command", listener),
   onUpdateState: (listener) => subscribe("desktop:update:state", listener),
+  bugReport: Object.freeze(bugReport),
 };
 
 contextBridge.exposeInMainWorld("polythDesktop", Object.freeze(api));

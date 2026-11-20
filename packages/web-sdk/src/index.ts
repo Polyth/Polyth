@@ -1739,6 +1739,10 @@ export interface WebPackageHost {
      * older package hosts; packages keep contextual form errors in place.
      * `options.kind` (default "error") marks a calm word that is no failure. */
     show?(message: string, action?: WebErrorAction, options?: { kind?: "error" | "warning" | "info" }): void;
+    /** The tab's last error notices (at most 10, oldest first): the time and
+     *  the copyable report, or the words shown. For a bug report the person
+     *  reviews before sending. Optional for older hosts. */
+    recent?(): ReadonlyArray<{ time: string; text: string }>;
   };
   /** The single transient-notification standard (errors, results, updates,
    *  news, hints). Optional for older hosts; feature-detect it. Persistent
