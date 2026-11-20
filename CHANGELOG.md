@@ -7,6 +7,18 @@ milestones are named after what shipped.
 
 ---
 
+## Unreleased — nightly bug reports
+
+### Added
+
+- Nightly desktop builds report bugs with ⌘⇧B / Ctrl+Shift+B (or Help → Report a
+  Bug…): a screenshot of the Polyth window taken at the keypress, the build and its
+  allowlisted settings, recent error notices and an optional note, all shown before
+  anything is sent. A tester password is asked once and kept in the system keychain.
+  Reports go through the new report relay into the team's private GitHub repository,
+  where repeats of the same error become comments on one issue; data and screenshots
+  are kept 30 days. See [Bug reports](docs/dev/desktop.md#bug-reports-nightly).
+
 ## Unreleased — packaged server archive
 
 ### Added

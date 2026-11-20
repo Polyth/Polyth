@@ -2115,6 +2115,28 @@ export function updateSettings(patch: Partial<PolythSettings>): void {
 export interface UiErrorAction {
   label: string;
   run(): void | Promise<void>;
+  /** The copyable report behind "Copy error" (errorReport.ts), kept with the
+   *  notice so a nightly bug report can carry it. */
+  report?: string;
+}
+
+/** One recent error notice as a bug report carries it. */
+export interface RecentUiError {
+  /** ISO time the notice appeared. */
+  time: string;
+  /** Its copyable report when it has one, else the words shown. */
+  text: string;
+}
+
+const RECENT_UI_ERRORS_CAP = 10;
+const RECENT_UI_ERROR_CHARS = 1_200;
+const recentUiErrors: RecentUiError[] = [];
+
+/** The last error notices of this tab, oldest first (a nightly bug report
+ *  shows them to the person before sending). Warnings and info are no
+ *  failures and are not kept. */
+export function getRecentUiErrors(): readonly RecentUiError[] {
+  return recentUiErrors.map((entry) => ({ ...entry }));
 }
 
 /** `error` by default; `warning`/`info` for calm words that are no failure
@@ -2145,6 +2167,10 @@ export function setUiError(
     if (seenUiErrorKeys.size > UI_ERROR_KEY_CAP) {
       seenUiErrorKeys.delete(seenUiErrorKeys.values().next().value!);
     }
+  }
+  if (kind === "error" && message) {
+    recentUiErrors.push({ time: new Date().toISOString(), text: (action?.report || message).slice(0, RECENT_UI_ERROR_CHARS) });
+    if (recentUiErrors.length > RECENT_UI_ERRORS_CAP) recentUiErrors.shift();
   }
   if (uiErrorTimer !== undefined) clearTimeout(uiErrorTimer);
   uiErrorTimer = undefined;

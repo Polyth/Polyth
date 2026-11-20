@@ -9,6 +9,7 @@ export const en = {
   "settings.shortcutspage.action.newSession": "New session",
   "settings.shortcutspage.action.notificationCentre": "Notification centre",
   "settings.shortcutspage.action.palette": "Command palette",
+  "settings.shortcutspage.action.reportBug": "Report a bug",
   "settings.shortcutspage.action.searchFiles": "Search files",
   "settings.shortcutspage.action.searchSessions": "Search sessions",
   "settings.shortcutspage.action.searchWorkspace": "Search workspace contents",

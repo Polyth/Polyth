@@ -59,6 +59,10 @@ export function filterPalette(all: PaletteCommand[], q: string): PaletteCommand[
   });
 }
 
+/** The nightly bug-report sheet: a package's `bug-report` capability, present
+ *  only on nightly desktop builds. The hotkey and the desktop Help menu run it. */
+export const REPORT_BUG_COMMAND = "capability.bug-report";
+
 export function runCommand(id: string): boolean {
   const c = cmds.get(id);
   if (!c || (c.when && !c.when())) return false;

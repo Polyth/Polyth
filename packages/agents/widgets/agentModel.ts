@@ -370,6 +370,29 @@ export const AGENT_TEMPLATES: readonly AgentTemplate[] = [
     },
   },
   {
+    id: "nightly-bug-triage",
+    icon: "search",
+    color: "amber",
+    name: () => tr("agents.templateBugTriageName"),
+    description: () => tr("agents.templateBugTriageDescription"),
+    charter: () => tr("agents.templateBugTriageCharter"),
+    // Reports arrive through the day; this runs an hour before the captain, so
+    // the night's real bugs are public issues by the time it reports.
+    schedule: { days: [0, 1, 2, 3, 4, 5, 6], hour: 1, minute: 45 },
+    context: "rolling",
+    // Nobody answers at night: an unanswered request is declined after 20
+    // minutes so the run still reports by morning, and every run notifies.
+    settings: {
+      runsPerDay: "2",
+      pauseAfterFailures: 2,
+      approvalAction: "reject",
+      approvalMinutes: 20,
+      notify: "updates",
+      catchUp: "once",
+      overlap: "skip",
+    },
+  },
+  {
     id: "morning-digest",
     icon: "docs",
     color: "blue",

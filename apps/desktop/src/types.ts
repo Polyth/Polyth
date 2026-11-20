@@ -1,3 +1,11 @@
+import type {
+  BugReportApp,
+  BugReportError,
+  BugReportPackage,
+  BugReportSettingValue,
+  BugReportWeb,
+} from "@polyth/contracts/bug-report";
+
 export type DesktopControlPosition = "left" | "right";
 export type DesktopControlTheme = "system" | "dark" | "light";
 export type DesktopWindowAction = "minimize" | "toggle-maximize" | "close";
@@ -141,7 +149,67 @@ export interface DesktopTitleBarAppearance {
 }
 
 /** Native menu commands the renderer carries out with its own handlers. */
-export type DesktopCommand = "open-settings" | "new-session" | "search-sessions" | "command-palette";
+export type DesktopCommand = "open-settings" | "new-session" | "search-sessions" | "command-palette" | "report-bug";
+
+/** Nightly bug reports (src/bugReport.ts). */
+export interface DesktopBugReportState {
+  /** False on stable and workstation builds: no hotkey, no menu item. */
+  available: boolean;
+  /** No tester password is held yet (or the relay stopped taking it). */
+  needsPassword: boolean;
+  /** Reports waiting for the relay. */
+  queued: number;
+}
+
+export interface DesktopBugReportCapture {
+  /** Pass back in the draft to include this screenshot. */
+  captureId: string;
+  /** This window only, as the person will see it in the preview. */
+  screenshot: { dataUrl: string; width: number; height: number; bytes: number } | null;
+  /** What the desktop adds to every report, shown before sending. */
+  base: { app: BugReportApp; install: string; settings: Record<string, BugReportSettingValue> };
+  needsPassword: boolean;
+  /** Where an accepted password is kept: the OS keychain, or only this run
+   *  (Linux without a keyring). Absent from older shells. */
+  passwordStorage?: "keychain" | "session";
+}
+
+/** The renderer's part of a report. The desktop adds build, install id and
+ *  `desktop.*` settings itself and validates the whole report. */
+export interface DesktopBugReportDraft {
+  /** null sends no screenshot. */
+  captureId: string | null;
+  text: string;
+  contact: string;
+  web: BugReportWeb;
+  /** `ui.*` keys only; anything else is dropped. */
+  settings: Record<string, BugReportSettingValue>;
+  packages: BugReportPackage[];
+  errors: BugReportError[];
+  /** The tester password, typed once; kept (OS-encrypted) after the relay takes it. */
+  password?: string;
+}
+
+export type DesktopBugReportOutcome =
+  | { result: "created" | "added"; issue: number }
+  /** Kept on this computer; it goes when the relay can take it. */
+  | { result: "queued" }
+  /** Ask for the tester password (again). */
+  | { result: "password" }
+  /** This computer sent too many reports for now. */
+  | { result: "rate" }
+  /** This build is not a published nightly. */
+  | { result: "version" }
+  | { result: "invalid" }
+  /** Reports are off on this build. */
+  | { result: "unavailable" };
+
+export interface PolythDesktopBugReportApi {
+  state(): Promise<DesktopBugReportState>;
+  /** Screenshot this window now; call before showing the report sheet. */
+  capture(): Promise<DesktopBugReportCapture>;
+  send(draft: DesktopBugReportDraft): Promise<DesktopBugReportOutcome>;
+}
 
 export interface DesktopSetupClaim {
   claimToken: string;
@@ -281,4 +349,7 @@ export interface PolythDesktopApi {
   onWindowState(listener: (state: DesktopWindowState) => void): () => void;
   onCommand(listener: (command: DesktopCommand) => void): () => void;
   onUpdateState(listener: (state: DesktopUpdateState) => void): () => void;
+  /** Nightly bug reports. Absent from older shells; `state().available` is
+   *  false on builds that send none. */
+  bugReport?: PolythDesktopBugReportApi;
 }

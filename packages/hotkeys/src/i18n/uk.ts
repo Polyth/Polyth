@@ -7,6 +7,7 @@ export const uk: HotkeysMessages = {
   "settings.shortcutspage.action.newSession": "Нова сесія",
   "settings.shortcutspage.action.notificationCentre": "Центр сповіщень",
   "settings.shortcutspage.action.palette": "Палітра команд",
+  "settings.shortcutspage.action.reportBug": "Повідомити про помилку",
   "settings.shortcutspage.action.searchFiles": "Пошук файлів",
   "settings.shortcutspage.action.searchSessions": "Пошук сесій",
   "settings.shortcutspage.action.searchWorkspace": "Пошук вмісту робочого простору",

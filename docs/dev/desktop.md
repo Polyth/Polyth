@@ -192,6 +192,9 @@ that server, so treat it as untrusted code in this window.
   permission: it is the Edit menu's native paste.
 - Reveal-in-file-manager stays off (`localDesktopBridge`): those paths name files
   over there.
+- On a nightly build it may open the bug-report sheet (`desktop:report:*`, see
+  [Bug reports](#bug-reports-nightly)): the capture is its own window, and the main
+  process holds the tester password, which no page ever reads back.
 
 Known limit: two servers opened by address on one host name (two tunnels on
 `127.0.0.1`) share a cookie jar, as they would in any browser, so each receives the
@@ -513,7 +516,8 @@ control inert.
 ### Native menus
 
 The application menu (macOS menu bar; Windows/Linux keep accelerators without an in-window
-menu bar) carries Settings, New Chat, Search Chats, and Command Palette. Their shortcuts are
+menu bar) carries Settings, New Chat, Search Chats, and Command Palette, and on nightly
+builds **Help → Report a Bug…** ([Bug reports](#bug-reports-nightly)). Their shortcuts are
 displayed with `registerAccelerator: false`: the renderer keymap (`@polyth/hotkeys`, which
 honours remapping) stays the single owner, and a menu click sends a `desktop:command` that
 the renderer maps to the shell's `cmd.*` commands. Electron draws no context menu by itself,
@@ -623,11 +627,60 @@ xvfb-run -a node apps/desktop/test/appimage-profile.mjs \
   low-resource
 ```
 
+## Bug reports (nightly)
+
+Nightly builds of the standard edition (`X.Y.N-nightly`; `bugReportOrigin` in
+`src/bugReport.ts`) send bug reports to the team's private GitHub repository through
+the report relay ([`packages/report-relay`](../../packages/report-relay/README.md),
+`https://reports.polyth.app`). Stable and workstation builds have no hotkey, menu item
+or network call for it.
+
+- **Opening.** ⌘⇧B / Ctrl+Shift+B (`reportBug` in `@polyth/hotkeys`, remappable),
+  **Help → Report a Bug…** (a `report-bug` desktop command), or the command palette all
+  run `capability.bug-report`, which the `@polyth/bug-report` package registers only
+  when `bugReport.state().available` says so.
+- **Capture first.** The sheet asks `desktop:report:capture` before it renders, so the
+  screenshot shows the window as it was: `webContents.capturePage()` of this window
+  only (no screen-recording permission, no other app), downscaled to 1600 px and
+  re-encoded as JPEG until it is at most 1.5 MB (`encodeScreenshot`).
+- **The sheet** shows the screenshot (with a switch), the tab's last error notices
+  (`errors.recent()` on the web host, home folders replaced by `~`), an optional note
+  and GitHub username, and the exact JSON that goes, minus the image bytes.
+- **What goes** is the shared wire shape (`@polyth/contracts/bug-report`, exact fields;
+  the relay rejects anything else): build and OS, the web build and server version, the
+  view name (never a session or project id), viewport, allowlisted `ui.*` settings from
+  the page and `desktop.*` settings from main (`bugReportDesktopSettings`), enabled
+  package ids, recent errors, the note and the screenshot. Never paths, server
+  addresses, names, chat text outside the screenshot, tokens or Vault values. The
+  install id is an HMAC of a local secret and the UTC date: one computer's reports
+  group within a day and cannot be linked across days.
+- **Tester password.** Asked once, at the first send; kept only after the relay accepts
+  it, sealed by `safeStorage` (the OS keychain). On Linux without a keyring it lasts the
+  run, the sheet says so (`passwordStorage: "session"`), and reports queued offline wait
+  until it is entered again. A send while the relay is unreachable keeps the typed
+  password unverified so the queued report can go later; a `401` at that point forgets
+  it and the sheet asks again. It travels only in the
+  `Authorization` header and is printable ASCII without spaces (`isTesterPassword`).
+- **Limits and outbox.** One report a minute and ten a day leave a computer. A relay that
+  cannot be reached, or answers `429`/`503`, leaves the report in
+  `<userData>/desktop/bug-reports/` (at most 10, each dropped after 7 days); it goes at
+  the next start or every 15 minutes. `POLYTH_BUG_REPORT_ORIGIN` points at another relay
+  (`https:` or loopback `http:`) or `off`; `POLYTH_BUG_REPORT=1` turns reports on for a
+  development build; the relay still refuses a version that is not a nightly or is newer
+  than every published one.
+- **Verified:** unit tests (`apps/desktop/test/bugReport.test.ts`, the contract, package
+  and relay tests), a browser render of the real sheet on the real web host, and an
+  unpackaged Electron run on Linux under Xvfb against a local relay with a fake GitHub
+  (shortcut, capture, send, rate limit, wrong password, offline queue and delivery; no
+  keyring on that host). Not yet: a packaged nightly, a keychain-sealed password, and the
+  relay against real GitHub.
+
 ## Security boundary
 
 - Renderer: `sandbox: true`, `contextIsolation: true`, no Node integration.
 - Preload: a fixed API for settings, window actions/state, title-bar overlay colors,
-  native menu commands, updates, absolute local paths and the server list.
+  native menu commands, updates, absolute local paths, the server list and nightly bug
+  reports.
 - IPC: decided per channel from the sender frame's own origin
   (see [What another server's page may do](#what-another-servers-page-may-do)).
 - Navigation: a page stays on its own origin, and only the server list may hand the

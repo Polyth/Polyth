@@ -5914,6 +5914,11 @@ its revealed chats.
   use it for action failures instead of inventing a second phrasing. It strips
   JSON envelopes and proxy/gateway HTML bodies (`errorBodyText`) so raw markup
   never reaches an error surface.
+- `host.errors.recent?()` — the tab's last ten error notices (kind `error`
+  only), oldest first, as `{ time, text }`: the notice's copyable report
+  (`UiErrorAction.report`, set by `copyErrorAction`) or else its words. Only
+  for a report the person reviews before sending (the nightly bug-report sheet);
+  never send it anywhere silently.
 - `host.errors.show(message, action?, { kind? })` — the host's one transient
   error (`setUiError(message, action, dedupeKey?, kind?)`). It is drawn as a
   notification of the stack below (`kind` `error` by default; `warning`/`info`

@@ -1,0 +1,21 @@
+{
+  "name": "@polyth/report-relay",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.16.0" },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "polyth-report-relay": "./bin/polyth-report-relay.mjs"
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "typecheck": "node ../../node_modules/typescript/bin/tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0"
+  }
+}

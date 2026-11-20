@@ -1,0 +1,39 @@
+{
+  "name": "@polyth/bug-report",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./i18n": "./src/i18n/index.ts",
+    "./i18n/*": "./src/i18n/*.ts",
+    "./widgets": "./widgets/index.tsx"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Bug reports",
+      "description": "Nightly desktop builds: press ⌘⇧B (Ctrl+Shift+B) to send the Polyth team a screenshot of this window, the build and its settings, with your note.",
+      "core": false,
+      "enabled": true,
+      "settingsGroup": "System",
+      "icon": "bug",
+      "hasSettings": false,
+      "category": "workspace",
+      "projectAffinity": {}
+    }
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "typecheck": "node ../../node_modules/typescript/bin/tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}
