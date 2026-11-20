@@ -6217,10 +6217,25 @@ html[data-density="compact"] .set-row { padding: 6px 0; }
 }
 .users-self-card .user-avatar.is-large { width: 52px; height: 52px; }
 .user-row-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
-.user-row-name { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-1); min-width: 0; font-size: var(--font-body); }
-.user-row-name strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+/* One name line in a list row: a long name gives way (ellipsis) and its
+   status badges keep their place beside it, so rows keep one rhythm on a
+   320px phone instead of dropping a badge onto a line of its own. */
+.user-row-name { display: flex; align-items: center; gap: var(--space-1) var(--space-2); min-width: 0; font-size: var(--font-body); }
+.user-row-name strong { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.user-row-name > .ui-badge { flex: none; }
+/* On the narrowest phones a name matters more than one line: its badges move
+   under it rather than cutting it to a few letters. Your own card is a heading
+   and always wraps. */
+.users-list { container: users-list / inline-size; }
+@container users-list (max-width: 340px) {
+  .user-row-name { flex-wrap: wrap; }
+}
+.users-self-card .user-row-name { flex-wrap: wrap; }
+.users-self-card .user-row-name strong { white-space: normal; overflow-wrap: anywhere; }
+/* The summary (login · role · limits) wraps to a second line before it cuts. */
 .user-row-meta {
-  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+  min-width: 0; overflow: hidden; overflow-wrap: anywhere;
   font-size: var(--font-meta); line-height: var(--font-meta-lh); color: var(--muted);
 }
 .user-row-badges { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: 2px; }
@@ -6229,7 +6244,9 @@ html[data-density="compact"] .set-row { padding: 6px 0; }
 .user-detail-head { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-3); }
 .user-detail-back { margin-inline-start: calc(var(--space-2) * -1); }
 .user-detail-identity { display: flex; align-items: center; gap: var(--space-3); min-width: 0; width: 100%; }
-.user-detail-identity .user-row-name strong { font-size: var(--font-heading); font-weight: 650; line-height: 1.25; letter-spacing: -.015em; }
+/* A page's own heading wraps a long name rather than cutting it. */
+.user-detail-identity .user-row-name { flex-wrap: wrap; }
+.user-detail-identity .user-row-name strong { font-size: var(--font-heading); font-weight: 650; line-height: 1.25; letter-spacing: -.015em; white-space: normal; overflow-wrap: anywhere; }
 /* Own account: long ids and lists of keys/devices on the shared list surface. */
 .account-detail-id { display: inline-block; max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 .settings-section-body > .account-detail-list { margin-block: var(--space-1) var(--space-3); }

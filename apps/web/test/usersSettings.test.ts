@@ -15,9 +15,12 @@ test("Users is a first-class visible Settings page", async () => {
 
 test("Users page lists accounts and drills into one management view", async () => {
   const users = await source("../src/components/settings/UsersPage.tsx");
+  const wizard = await source("../src/components/settings/AddUserWizard.tsx");
   assert.match(users, />\{tr\("settings\.users\.addUser"\)\}</);
-  assert.match(users, /title=\{tr\("settings\.users\.addUser"\)\}/);
-  assert.match(users, /tr\("settings\.users\.createUser"\)/);
+  // Add user opens the three-step flow (who → what they can do → their sign-in).
+  assert.match(users, /<AddUserWizard/);
+  assert.match(wizard, /title=\{tr\("settings\.users\.addUser"\)\}/);
+  assert.match(wizard, /tr\("settings\.users\.createUser"\)/);
   assert.match(users, /tr\("settings\.users\.searchUsers"\)/);
   assert.match(users, /aria-label=\{tr\("settings\.users\.manageUser", \{ name \}\)\}/);
   assert.equal(en["settings.users.addUser"], "Add user");
@@ -28,6 +31,39 @@ test("Users page lists accounts and drills into one management view", async () =
   // The owner's password is asked only when the server wants it, inside a prompt.
   assert.doesNotMatch(users, /Confirm with your password/);
   assert.match(users, /useOwnerReauth/);
+  assert.match(wizard, /withReauth\(\(\) => createAccount\(/);
+});
+
+test("alone, the guide is the People empty state; with people it opens from How it works", async () => {
+  const users = await source("../src/components/settings/UsersPage.tsx");
+  const guide = await source("../src/components/settings/UsersGuide.tsx");
+  assert.match(users, /canManageAccounts && \(others\.length === 0 \|\| guideOpen\) && \(\s*<UsersGuide/);
+  assert.match(users, /others\.length === 0 \? \{ onAdd: openAdd \} : \{ onClose: \(\) => setGuideOpen\(false\) \}/);
+  assert.match(users, /aria-expanded=\{guideOpen\}/);
+  assert.match(users, /action=\{canManageAccounts && others\.length > 0 \?/);
+  for (const step of [1, 2, 3, 4]) assert.match(guide, new RegExp(`"settings\\.users\\.guide\\.step${step}Title"`));
+  assert.match(guide, /roleText\(role\)/);
+  assert.equal(en["settings.users.guide.toggle"], "How it works");
+  assert.match(en["settings.users.guide.step3"], /choose their own password/);
+  assert.match(en["settings.users.guide.step4"], /private chats stay private, even from you/);
+});
+
+test("a person's page is three tabs, and its save bar shows only with something to save", async () => {
+  const detail = await source("../src/components/settings/UserDetail.tsx");
+  assert.match(detail, /<SettingsTabs/);
+  for (const [id, key] of [["access", "tabAccess"], ["limits", "tabLimits"], ["account", "tabAccount"]] as const) {
+    assert.match(detail, new RegExp(`\\{ id: "${id}", label: tr\\("settings\\.users\\.${key}"\\) \\}`));
+  }
+  const access = detail.slice(detail.indexOf('{tab === "access"'), detail.indexOf('{tab === "limits"'));
+  const limits = detail.slice(detail.indexOf('{tab === "limits"'), detail.indexOf('{tab === "account"'));
+  const account = detail.slice(detail.indexOf('{tab === "account"'), detail.indexOf("</SettingsTabs>"));
+  assert.match(access, /settings\.users\.accessTo/);
+  assert.match(access, /title=\{tr\("settings\.users\.protectedMode"\)\}/);
+  for (const key of ["projects", "assistants", "dailyLimits"]) assert.match(limits, new RegExp(`title=\\{tr\\("settings\\.users\\.${key}"\\)`));
+  for (const key of ["profile", "password", "disableAccount"]) assert.match(account, new RegExp(`title=\\{tr\\("settings\\.users\\.${key}"\\)`));
+  // Drafts span two tabs: one save bar outside them, only while dirty or reporting.
+  assert.match(detail, /\{limitsDraft && guardDraft && \(dirty \|\| saveStatus !== "idle"\) && \(\s*<div className="user-detail-savebar">/);
+  assert.match(detail, /if \(saveStatus !== "saved"\) return;\s*const timer = setTimeout\(\(\) => setSaveStatus\("idle"\), 2400\);/);
 });
 
 test("anyone renames themselves and the owner renames others, bounded like the server, and the hint says Git stays", async () => {
@@ -140,6 +176,25 @@ test("Users page has a hairline list and a phone layout", async () => {
   assert.match(styles, /\.user-row\s*\{[^}]*min-height:\s*max\(56px, var\(--hit-min\)\)/s);
   assert.match(styles, /\.user-detail-savebar\s*\{[^}]*position:\s*sticky/s);
   assert.match(styles, /@media \(max-width: 700px\)[\s\S]*?\.user-detail-inline\s*\{[^}]*width:\s*100%/s);
+  // A long name gives way to its badges instead of pushing them to a new line.
+  assert.match(styles, /\.user-row-name strong\s*\{[^}]*flex:\s*0 1 auto[^}]*text-overflow:\s*ellipsis/s);
+  assert.match(styles, /\.user-row-name > \.ui-badge\s*\{\s*flex:\s*none;\s*\}/);
+  assert.match(styles, /\.user-row-meta\s*\{[^}]*-webkit-line-clamp:\s*2/s);
+  assert.match(styles, /\.user-detail-identity \.user-row-name\s*\{\s*flex-wrap:\s*wrap;\s*\}/);
+});
+
+test("the add-user flow is one frame on desktop and a bottom sheet with split footer on a phone", async () => {
+  const css = await source("../src/components/settings/UsersPage.css");
+  assert.match(await source("../src/components/settings/UsersPage.tsx"), /import "\.\/UsersPage\.css";/);
+  assert.match(css, /@media \(min-width: 701px\)\s*\{\s*\.user-wizard\.dialog-panel\s*\{[^}]*height:\s*min\(600px/s);
+  assert.match(css, /@container dialog-panel \(max-width: 480px\)\s*\{[\s\S]*?\.user-wizard-foot > \.ui-btn\s*\{\s*flex:\s*1 1 0;/);
+  assert.match(css, /\.user-wizard-foot\s*\{[^}]*\}[\s\S]*?padding:\s*var\(--space-3\) var\(--space-4\) max\(var\(--space-3\), var\(--safe-bottom\)\)/);
+  assert.match(css, /\.user-wizard-preset\s*\{[^}]*min-height:\s*max\(60px, var\(--hit-min\)\)/s);
+  assert.match(css, /\.user-wizard-preset:has\(input:focus-visible\)/);
+  // Hover is pointer-only (docs/dev/design-system.md, Buttons).
+  assert.doesNotMatch(css.replace(/@media \(hover: hover\)\s*\{[^{}]*\{[^}]*\}\s*\}/g, ""), /:hover/);
+  // No raw colours: tokens only.
+  assert.doesNotMatch(css, /#[0-9a-f]{3,8}\b|rgba?\(/i);
 });
 
 test("the Access page is gone and its settings live in Users and Polyth Link", async () => {

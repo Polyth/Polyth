@@ -1,44 +1,37 @@
-import SlotHost from "../slots/SlotHost.ts";
 import { refreshProjects } from "../../init.ts";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { isSpaceRole, type SpaceRole } from "@polyth/contracts";
 import { api } from "@polyth/session/web-api";
 import {
   accountState,
-  createAccount,
   currentBrowserLogin,
   type AccountChoice,
 } from "../../accounts.ts";
 import {
-  grantSpaceMember,
   loadCurrentSpaceAccess,
   type CurrentSpaceAccess,
 } from "../../spaceAccess.ts";
 import type { SettingsNavigationTarget } from "@polyth/web-sdk";
-import { EmptyState, ErrorState, FormField, PageHead, Section } from "./parts.tsx";
-import { Badge, Button, Dialog, Notice, Select, TextInput } from "../ui/index.ts";
-import { AddIcon, ChevronRightIcon } from "../ui/icons.ts";
-import UserDetail, { PassphraseField } from "./UserDetail.tsx";
+import { EmptyState, ErrorState, PageHead, Section } from "./parts.tsx";
+import { Badge, Button, Notice, TextInput } from "../ui/index.ts";
+import { AddIcon, ChevronRightIcon, HelpIcon } from "../ui/icons.ts";
+import UserDetail from "./UserDetail.tsx";
 import AccountDetail from "./AccountDetail.tsx";
+import AddUserWizard from "./AddUserWizard.tsx";
+import UsersGuide from "./UsersGuide.tsx";
 import SecureAccountDialog from "./SecureAccountDialog.tsx";
 import { fetchAuthStatus } from "../../authClient.ts";
 import { SignInProviders } from "./ExternalIdentitySettings.tsx";
 import SharingPolicySection from "./SharingPolicySection.tsx";
-import { isReauthCancelled, useOwnerReauth } from "./ownerReauth.tsx";
+import { useOwnerReauth } from "./ownerReauth.tsx";
 import {
-  accountErrorText,
-  generatePassphrase,
   initials,
   limitsSummary,
   OWN_ACCOUNT_TARGET,
-  LOGIN_PATTERN,
-  MIN_PASSWORD_LENGTH,
   roleText,
-  suggestLogin,
 } from "./usersModel.ts";
 import { getLocale, tr } from "../../i18n/index.ts";
+import "./UsersPage.css";
 
-type AccessChoice = SpaceRole | "none";
 type Feedback = { tone: "success" | "error" | "info"; text: string };
 
 /** The server falls back to the raw account id when no name is set; never
@@ -65,6 +58,9 @@ export default function UsersPage({ settingsTarget }: { settingsTarget?: Setting
   const [query, setQuery] = useState("");
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [adding, setAdding] = useState(false);
+  // "How it works" beside Add user; while the owner is alone it is the page's
+  // empty state instead.
+  const [guideOpen, setGuideOpen] = useState(false);
   // No password yet ("only me" first run): protect the account before the
   // first other person gets one.
   const [localAccess, setLocalAccess] = useState(false);
@@ -274,10 +270,30 @@ export default function UsersPage({ settingsTarget }: { settingsTarget?: Setting
               ? "settings.users.peopleHintOne"
               : "settings.users.peopleHintOther", { count: others.length })
           : readOnly?.owner ? tr("settings.users.manageInBrowser") : tr("settings.users.peopleHintReadonly")}
-        action={canManageAccounts ? (
-          <Button variant="primary" size="sm" iconStart={AddIcon} onClick={openAdd}>{tr("settings.users.addUser")}</Button>
+        // Alone, the guide below is the empty state and carries Add user itself.
+        action={canManageAccounts && others.length > 0 ? (
+          <div className="users-people-actions">
+            <Button
+              variant="ghost"
+              size="sm"
+              iconStart={HelpIcon}
+              aria-expanded={guideOpen}
+              className="users-guide-toggle"
+              onClick={() => setGuideOpen(!guideOpen)}
+            >
+              {tr("settings.users.guide.toggle")}
+            </Button>
+            <Button variant="primary" size="sm" iconStart={AddIcon} className="users-add-button" onClick={openAdd}>{tr("settings.users.addUser")}</Button>
+          </div>
         ) : undefined}
       >
+        {canManageAccounts && (others.length === 0 || guideOpen) && (
+          <UsersGuide
+            space={spaceAccess?.name ?? null}
+            {...(others.length === 0 ? { onAdd: openAdd } : { onClose: () => setGuideOpen(false) })}
+          />
+        )}
+
         {showSearch && (
           <div className="users-page-filter">
             <TextInput
@@ -293,15 +309,12 @@ export default function UsersPage({ settingsTarget }: { settingsTarget?: Setting
         {visibleAccounts.length === 0 ? (
           query.trim() && showSearch
             ? <EmptyState compact icon="user" title={tr("settings.users.noMatch")} body={tr("settings.users.noMatchBody")} />
-            : (
+            : canManageAccounts ? null : (
               <EmptyState
                 compact
                 icon="user"
                 title={tr("settings.users.onlyYou")}
-                body={canManageAccounts
-                  ? tr("settings.users.onlyYouBody")
-                  : readOnly?.owner ? tr("settings.users.manageInBrowser") : tr("settings.users.onlyYouBodyReadonly")}
-                {...(canManageAccounts ? { action: { label: tr("settings.users.addUser"), onClick: openAdd } } : {})}
+                body={readOnly?.owner ? tr("settings.users.manageInBrowser") : tr("settings.users.onlyYouBodyReadonly")}
               />
             )
         ) : (
@@ -309,6 +322,8 @@ export default function UsersPage({ settingsTarget }: { settingsTarget?: Setting
             {visibleAccounts.map((account) => {
               const name = displayName(account);
               const role = spaceAccess?.members.find((member) => member.userId === account.id)?.role;
+              // Limits read as words in the summary line, so the name line
+              // keeps only what changes how the account behaves at a glance.
               const summary = [
                 account.login ? `@${account.login}` : null,
                 spaceAccess ? (role ? roleText(role).label : tr("settings.users.noAccess")) : null,
@@ -324,7 +339,6 @@ export default function UsersPage({ settingsTarget }: { settingsTarget?: Setting
                       {(account.status === "disabled" || account.status === "offboarding") && <Badge tone="danger">{tr("settings.users.disabled")}</Badge>}
                       {account.managed && <Badge>{tr("settings.users.managed")}</Badge>}
                       {canManageAccounts && account.guarded && <Badge tone="info">{tr("settings.users.protected")}</Badge>}
-                      {canManageAccounts && account.limits && <Badge tone="info">{tr("settings.users.limited")}</Badge>}
                     </span>
                     <span className="user-row-meta" title={account.id}>{summary || account.id}</span>
                   </span>
@@ -371,154 +385,19 @@ export default function UsersPage({ settingsTarget }: { settingsTarget?: Setting
       )}
 
       {adding && (
-        <AddUserDialog
+        <AddUserWizard
           spaceAccess={spaceAccess}
           withReauth={withReauth}
           onClose={() => setAdding(false)}
-          onCreated={async (account, text) => {
+          onCreated={() => { setGuideOpen(false); void accountChanged(); }}
+          onOpenAccount={(accountId) => {
             setAdding(false);
-            await refresh();
-            // Straight into the new account so its limits can be set now.
-            setSelectedId(account.id);
-            setFeedback({ tone: "success", text });
+            setFeedback(null);
+            setSelectedId(accountId);
           }}
         />
       )}
       {prompt}
     </div>
-  );
-}
-
-function AddUserDialog({ spaceAccess, withReauth, onClose, onCreated }: {
-  spaceAccess: CurrentSpaceAccess | null;
-  withReauth: ReturnType<typeof useOwnerReauth>["withReauth"];
-  onClose: () => void;
-  onCreated: (account: AccountChoice, message: string) => Promise<void>;
-}) {
-  const [name, setName] = useState("");
-  const [login, setLogin] = useState("");
-  const [loginEdited, setLoginEdited] = useState(false);
-  const [password, setPassword] = useState("");
-  const [visible, setVisible] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [role, setRole] = useState<AccessChoice>(spaceAccess?.canManageMembers ? "member" : "none");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const normalizedLogin = login.trim().toLowerCase();
-  const loginValid = LOGIN_PATTERN.test(normalizedLogin);
-  const passwordValid = [...password].length >= MIN_PASSWORD_LENGTH;
-  const ready = !!name.trim() && loginValid && passwordValid;
-
-  const create = async () => {
-    if (!ready || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const account = await withReauth(() => createAccount(normalizedLogin, name.trim(), password));
-      let grantFailure: string | null = null;
-      if (role !== "none" && spaceAccess?.canManageMembers) {
-        try {
-          await grantSpaceMember(spaceAccess.id, account.id, role);
-          void refreshProjects();
-        } catch (cause) {
-          grantFailure = accountErrorText(cause);
-        }
-      }
-      const created = account.name || name.trim();
-      await onCreated(account, grantFailure
-        ? spaceAccess
-          ? tr("settings.users.createdGrantFailed", { name: created, space: spaceAccess.name, reason: grantFailure })
-          : tr("settings.users.createdGrantFailedNoSpace", { name: created, reason: grantFailure })
-        : role !== "none" && spaceAccess
-          ? tr("settings.users.createdWithRole", { name: created, login: normalizedLogin, role: roleText(role).label, space: spaceAccess.name })
-          : tr("settings.users.createdNoAccess", { name: created, login: normalizedLogin }));
-    } catch (cause) {
-      if (!isReauthCancelled(cause)) setError(accountErrorText(cause));
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Dialog
-      title={tr("settings.users.addUser")}
-      size="sm"
-      className="users-dialog"
-      onClose={() => { if (!busy) onClose(); }}
-      footer={(
-        <>
-          <Button variant="ghost" disabled={busy} onClick={onClose}>{tr("common.cancel")}</Button>
-          <Button variant="primary" busy={busy} disabled={!ready} onClick={() => void create()}>{tr("settings.users.createUser")}</Button>
-        </>
-      )}
-    >
-      <form className="users-dialog-form" onSubmit={(event) => { event.preventDefault(); void create(); }}>
-        <p className="users-dialog-intro">
-          {tr("settings.users.addUserIntro")}
-        </p>
-        {/* What the new person can read from day one, for whoever is inviting. */}
-        <SlotHost slot="settings.users.invite.notice" />
-        <FormField label={tr("settings.users.name")}>
-          <TextInput
-            className="users-dialog-name"
-            value={name}
-            placeholder={tr("settings.users.namePlaceholder")}
-            autoComplete="off"
-            disabled={busy}
-            onChange={(event) => {
-              setName(event.target.value);
-              if (!loginEdited) setLogin(suggestLogin(event.target.value));
-            }}
-          />
-        </FormField>
-        <FormField
-          label={tr("settings.users.login")}
-          hint={tr("settings.users.loginHint")}
-          {...(login.length > 0 && !loginValid ? { error: tr("settings.users.loginInvalid") } : {})}
-        >
-          {(field) => (
-            <TextInput
-              {...field}
-              value={login}
-              placeholder="maria"
-              autoComplete="off"
-              autoCapitalize="none"
-              spellCheck={false}
-              disabled={busy}
-              invalid={login.length > 0 && !loginValid}
-              onChange={(event) => { setLogin(event.target.value); setLoginEdited(true); }}
-            />
-          )}
-        </FormField>
-        <PassphraseField
-          value={password}
-          visible={visible}
-          copied={copied}
-          disabled={busy}
-          onChange={(next) => { setPassword(next); setCopied(false); }}
-          onToggleVisible={() => setVisible(!visible)}
-          onGenerate={() => { setPassword(generatePassphrase()); setVisible(true); setCopied(false); }}
-          onCopied={() => setCopied(true)}
-        />
-        <FormField label={spaceAccess ? tr("settings.users.accessTo", { space: spaceAccess.name }) : tr("settings.users.spaceAccess")}>
-          <Select
-            label={tr("settings.users.initialSpaceAccess")}
-            ariaLabel={tr("settings.users.initialSpaceAccess")}
-            value={role}
-            disabled={busy || !spaceAccess?.canManageMembers}
-            options={spaceAccess?.canManageMembers
-              ? [
-                  { value: "none", label: tr("settings.users.noAccess"), detail: tr("settings.users.noAccessCreateOnly") },
-                  ...(["viewer", "member", "admin", "owner"] as const)
-                    .filter((value) => value !== "owner" || spaceAccess.role === "owner")
-                    .map((value) => ({ value, ...roleText(value) })),
-                ]
-              : [{ value: "none", label: tr("settings.users.noAccess"), detail: tr("settings.users.cannotManageMembers") }]}
-            onChange={(value) => { if (value === "none" || isSpaceRole(value)) setRole(value); }}
-          />
-        </FormField>
-        {error && <Notice tone="error" role="alert">{error}</Notice>}
-      </form>
-    </Dialog>
   );
 }

@@ -1691,7 +1691,7 @@ what cannot be defaulted:
   "Choose another server" (`DesktopServerExit`), since they show no shell. Settings →
   Users → your account offers "Set a password…" (`SecureAccountDialog`:
   password → recovery codes → Protect account); "Add user" opens the same
-  dialog first, then the add-user form.
+  dialog first, then the add-user flow (§3.6).
 - **A claim never strands the flow.** Desktop requests its claim only when the
   person continues, and replaces a claim the server refuses once with
   `requestSetupClaim({ fresh: true })`. A claim that expired while the codes
@@ -1715,6 +1715,66 @@ what cannot be defaulted:
 Mounted coverage is in `apps/web/test/setupScreen.test.ts` (with the real
 desktop claim broker, and the usage step); source guards are in
 `setupRecoveryUi.test.ts` and `authBootstrap.test.ts`.
+
+### 3.6 Settings → Users: adding and managing people
+
+The page serves an owner who has never heard of a Space role as well as one
+who adds people every week, so every step has a plain-language default and
+every default is one Enter away (`UsersPage.tsx`, `AddUserWizard.tsx`,
+`UsersGuide.tsx`, `UserDetail.tsx`; copy and presets in `usersModel.ts`;
+feature CSS in `settings/UsersPage.css`, list and detail rules in
+`styles.css`).
+
+- **Guide.** While the owner is alone, "How adding people works" (four steps
+  and, folded, what each role and Protected mode can do) *is* the People empty
+  state and carries Add user. Once anyone else is listed it leaves the page and
+  opens on demand from "How it works" beside Add user (`aria-expanded`). On a
+  phone both buttons drop under the section hint as one row, Add user filling it.
+- **Add user** is a three-step dialog in the new-project flow's grammar: step
+  label and X, title, hint, a progress hairline along the head's bottom edge
+  (half, full, then green), one scroll region and a pinned footer with the way
+  back first and the one primary last. On a desktop all steps share one
+  `min(600px, …)` frame; a phone gets the shell's bottom sheet, 16px gutters,
+  a split footer clearing the home indicator. A phone opens on the title (no
+  keyboard), a fine pointer on the Name field; each later step focuses its
+  title, step 2 its chosen option.
+  1. *Who*: Name, Login (follows the name until edited) and a **temporary
+     password already generated** and visible (`generatePassphrase`), with
+     copy and regenerate. The `settings.users.invite.notice` slot renders here.
+  2. *What they can do*: one preset in a radio well — Teammate (member),
+     Protected (member + Protected mode), Viewer, Admin, Account only — each
+     with its role as a quiet tag for people who think in roles. Owner is never
+     a preset. Without the right to add members only Account only and Protected
+     (account + guardrails) are offered. Create user runs
+     `createAccount` → guardrails (when Protected) → `grantSpaceMember`, in that
+     order: if Protected mode can't be set, no Space access is granted and the
+     done step says so.
+  3. *Done*: the login, the temporary password (shown for the last time),
+     the access and — when the page was opened through an address another
+     device can reach (`shareableAddress`: not loopback, not a desktop shell) —
+     the address, each with its own copy button; "Copy invitation" (and
+     "Share…" where `navigator.share` exists) produces a ready message that
+     ends the password without a full stop. At first sign-in the person must
+     choose their own password (`passwordChangeRequired`,
+     `PasswordChangeScreen.tsx`). Done returns to the list; "Fine-tune access"
+     opens the person's page.
+- **A person's page** keeps its header (back to All users, avatar, name,
+  status) above three tabs: *Access* (role in the current Space, Protected
+  mode), *Limits* (projects, assistants and their permissions, daily limits)
+  and *Account* (name, login, sign-in pause, password, private data, disable).
+  Limits and Protected mode are one draft across two tabs: their save bar sits
+  outside the tabs and appears only while there is something to save or a
+  result to report ("Saved" folds away after ~2.4s). On a phone the tabs share
+  the strip evenly and a stacked Select reads as a field (soft edge under the
+  borderless appearance).
+- **List rows** keep one name line: a long name ellipsizes beside its status
+  badges (Paused, Disabled, Managed, Protected); limits read as words in the
+  summary, which wraps to two lines before it cuts. Lists narrower than 340px
+  (`users-list` container) and your own card wrap the name instead.
+
+Mounted coverage is in `apps/web/test/addUserWizard.test.ts` and
+`usersPairedDevice.test.ts`; source and CSS guards in `usersSettings.test.ts`;
+presets, addresses and invitation copy in `usersModel.test.ts`.
 
 ## 4. The seams in detail
 
