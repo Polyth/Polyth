@@ -123,14 +123,31 @@ export function releaseMarker(channel, source) {
   return `<!-- polyth-release: channel=${channel} source=${source} -->`;
 }
 
+/**
+ * A squash-merged branch starts its body with the pull request's bullet list,
+ * whose items repeat the commit subjects (`* [Feature] …`). Those lines are
+ * navigation, not prose, so they never become the public summary.
+ */
+const BODY_NAVIGATION = /^\s*(?:[-*+]\s+)?\[[A-Za-z][A-Za-z0-9 _-]{0,24}\]\s/;
+
+/** A paragraph made only of list items reads as a table of contents, not a sentence. */
+function firstProseParagraph(text) {
+  const paragraphs = text.split(/\n\s*\n/);
+  const prose = paragraphs.find((paragraph) =>
+    paragraph.split(/\r?\n/).some((line) => line.trim() && !/^\s*(?:[-*+]|\d+[.)])\s/.test(line)),
+  );
+  return (prose ?? "").replace(/\s+/g, " ").trim();
+}
+
 /** Commit message body without trailers and with the first paragraph's first sentence as the summary. */
 export function commitSummary(body) {
   const text = (body ?? "")
     .split(/\r?\n/)
     .filter((line) => !/^[A-Za-z-]+:\s+\S.*<[^>]+>\s*$/.test(line) && !/^(signed-off-by|change-id):/i.test(line))
+    .filter((line) => !BODY_NAVIGATION.test(line) && !/^\s*#{1,6}\s+\S/.test(line))
     .join("\n")
     .trim();
-  const paragraph = text.split(/\n\s*\n/)[0]?.replace(/\s+/g, " ").trim() ?? "";
+  const paragraph = firstProseParagraph(text);
   if (!paragraph || /^started by session\b/i.test(paragraph)) return "";
   const sentence = /^(.+?[.!?])(\s|$)/.exec(paragraph)?.[1] ?? paragraph;
   if (sentence.length <= SUMMARY_LIMIT) return sentence;

@@ -71,6 +71,13 @@ test("commits group by conventional type, leading verb and touched paths", () =>
 
 test("the summary is the body's first sentence without trailers", () => {
   assert.equal(commitSummary("Swipes track the finger. Menus animate out.\n\nMore.\n\nCo-Authored-By: Claude <noreply@anthropic.com>"), "Swipes track the finger.");
+  // A squash-merged branch opens its body with the pull request's commit list;
+  // the repeated subjects and their tags never reach the public notes.
+  assert.equal(
+    commitSummary("* [Feature] Nightly bug reports\n* [Fix] Escape backslashes\n\nNightly builds open a report sheet on Cmd+Shift+B.\n\n- packages/bug-report: the sheet."),
+    "Nightly builds open a report sheet on Cmd+Shift+B.",
+  );
+  assert.equal(commitSummary("- one item\n- another item"), "");
   assert.equal(commitSummary("Co-Authored-By: Claude <noreply@anthropic.com>"), "");
   assert.equal(commitSummary("Started by session 9fdb0279; narrowed here."), "");
   const long = commitSummary(`${"word ".repeat(80)}end.`);
