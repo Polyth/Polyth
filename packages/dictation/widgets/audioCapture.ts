@@ -1,5 +1,6 @@
 import { DictationError } from "../src/providers.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
+import { nativeAudioCapture, nativeCaptureDenied, startNativePcm16Capture } from "./nativeCapture.ts";
 
 export interface Pcm16Capture {
   readonly sampleRate: number;
@@ -117,11 +118,22 @@ const microphoneConstraints: MediaStreamConstraints = {
 };
 
 export async function startPcm16Capture(options: Pcm16CaptureOptions): Promise<Pcm16Capture> {
+  const targetSampleRate = options.targetSampleRate ?? 16_000;
+  const chunkMs = Math.max(20, Math.min(100, options.chunkMs ?? 40));
+  // The iOS app captures natively: its WKWebView getUserMedia → Web Audio
+  // path delivered no audio at all. A refusal is final; any other native
+  // failure still tries the web path below.
+  const native = nativeAudioCapture();
+  if (native) {
+    try {
+      return await startNativePcm16Capture(native, options, targetSampleRate, chunkMs, pcm16Rms);
+    } catch (error) {
+      if (nativeCaptureDenied(error) || !navigator.mediaDevices?.getUserMedia) throw error;
+    }
+  }
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new DictationError("mic_denied", "Microphone capture is not available in this environment");
   }
-  const targetSampleRate = options.targetSampleRate ?? 16_000;
-  const chunkMs = Math.max(20, Math.min(100, options.chunkMs ?? 40));
   const chunkSamples = Math.max(1, Math.round(targetSampleRate * chunkMs / 1000));
 
   let media: MediaStream;

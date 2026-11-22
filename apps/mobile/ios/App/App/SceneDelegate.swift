@@ -290,6 +290,7 @@ final class PolythRootBridgeViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(PolythNavigationPlugin())
         bridge?.registerPluginInstance(PolythKeyboardMotionPlugin())
         bridge?.registerPluginInstance(PolythLiveActivityPlugin())
+        bridge?.registerPluginInstance(PolythAudioCapturePlugin())
         bridge?.registerPluginInstance(PolythPushPlugin.shared)
         PolythPushPlugin.shared.installNotificationDelegate()
     }

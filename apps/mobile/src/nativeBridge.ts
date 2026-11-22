@@ -56,6 +56,7 @@ export {
   type NativeLiveActivityContext,
   type NativeLiveActivityStatus,
 } from "./nativeLiveActivity.ts";
+import { installNativeAudioCapture } from "./nativeAudioCapture.ts";
 
 export interface NativeMobileCallbacks {
   handleBack(): boolean;
@@ -345,6 +346,8 @@ export function installNativeMobileIntegration(callbacks: NativeMobileCallbacks)
   const generation = ++installationGeneration;
   installNativePolythLink();
   document.body.dataset.nativePlatform = Capacitor.getPlatform();
+  // Packages capture the microphone through this on iOS (see nativeAudioCapture.ts).
+  disposers.push(installNativeAudioCapture());
 
   void SafeArea.setSystemBarsStyle({ style: SystemBarsStyle.Default });
   // The launch screen is not lifted here: the page hands it over to its own

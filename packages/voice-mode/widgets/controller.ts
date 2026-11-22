@@ -207,6 +207,10 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
   let runs = 0;
   let runId = "";
   let routes: RecognitionRoute[] = [];
+  /** Why an earlier route of this round failed. A fallback route refused
+   *  afterwards (Web Speech without its permission) must not hide it behind
+   *  "microphone blocked". Cleared when the round starts over. */
+  let routeFailure: string | null = null;
   let routeIndex = 0;
   let listener: Listener | null = null;
   let listenerToken = 0;
@@ -389,6 +393,7 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
   function recover(): void {
     retryTimer = clear(retryTimer);
     routeIndex = 0;
+    routeFailure = null;
     if (routes.length) {
       void listen();
       return;
@@ -471,9 +476,11 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
         listener = null;
         setLevels({ input: 0 });
         if (isMicDenied(error)) {
-          retryLater(deps.strings().micDenied, true);
+          if (routeIndex > 0 && routeFailure) retryLater(routeFailure);
+          else retryLater(deps.strings().micDenied, true);
           return;
         }
+        routeFailure = error.message || routeFailure;
         // The route broke mid-turn (network, provider): continue on the next.
         releaseSpan();
         if (routeIndex + 1 < routes.length) {
@@ -503,9 +510,11 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
       } catch (error) {
         if (stale()) return;
         if (isMicDenied(error)) {
-          retryLater(deps.strings().micDenied, true);
+          if (index > 0 && routeFailure) retryLater(routeFailure);
+          else retryLater(deps.strings().micDenied, true);
           return;
         }
+        routeFailure = (error instanceof Error && error.message) || routeFailure;
       }
     }
     retryLater(deps.strings().unavailable);
