@@ -27,12 +27,9 @@ const MAX_WINDOWS = 50_000;
 const MAX_FAILURE_KEYS = 20_000;
 const MAX_PASSWORD_HEADER = 512;
 
+/** No per-address or per-computer cap: a tester sends as many reports as they
+ *  need. The service-wide daily cap bounds what a leaked password can file. */
 export interface ReportRelayLimits {
-  /** Reports per source address. */
-  perSourceDay: number;
-  perSourceMinute: number;
-  /** Reports per install id (it changes every UTC day). */
-  perInstallDay: number;
   /** Issues and comments filed per day, the whole service. */
   globalDay: number;
   /** Failed password attempts per source address per 10 minutes. */
@@ -157,9 +154,6 @@ export class ReportRelay {
   private readonly state: ReportState | null;
   private readonly releases: ReleaseCache;
   private readonly fetchFn: typeof fetch;
-  private readonly sourceDay = new RateWindow(DAY);
-  private readonly sourceMinute = new RateWindow(MINUTE);
-  private readonly installDay = new RateWindow(DAY);
   private readonly globalDay = new RateWindow(DAY);
   private readonly failures = new FailureWindow();
   private readonly retentionDays: number;
@@ -173,9 +167,6 @@ export class ReportRelay {
     this.logger = options.logger ?? (() => {});
     this.fetchFn = options.fetchFn ?? ((input, init) => fetch(input, init));
     this.limits = {
-      perSourceDay: positive(options.limits?.perSourceDay, 30),
-      perSourceMinute: positive(options.limits?.perSourceMinute, 5),
-      perInstallDay: positive(options.limits?.perInstallDay, 10),
       globalDay: positive(options.limits?.globalDay, 200),
       passwordFailures: positive(options.limits?.passwordFailures, 10),
     };
@@ -237,9 +228,6 @@ export class ReportRelay {
   async report(raw: string, sourceIp: string, authorization?: string): Promise<BugReportResult> {
     const now = this.now();
     if (this.options.off) return { result: "unavailable" };
-    if (!this.sourceDay.take(sourceIp, this.limits.perSourceDay, now)
-      || !this.sourceMinute.take(sourceIp, this.limits.perSourceMinute, now)) return { result: "rate" };
-
     if (this.failures.count(sourceIp, now) > this.limits.passwordFailures) return { result: "rate" };
     const record = this.password();
     if (!record) return { result: "unavailable" };
@@ -260,8 +248,6 @@ export class ReportRelay {
       if (!versions) return { result: "unavailable" };
       if (!acceptedVersion(payload.app.version, versions)) return { result: "version" };
     }
-
-    if (!this.installDay.take(payload.install, this.limits.perInstallDay, now)) return { result: "rate" };
 
     const prior = this.state?.report(payload.reportId);
     if (prior) return { result: prior.result, issue: prior.issue };

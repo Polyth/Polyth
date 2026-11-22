@@ -28,4 +28,10 @@ export const pt: BugReportMessages = {
   "bugreport.invalid": "Não foi possível preparar o relatório. Copie os detalhes e avise a equipa.",
   "bugreport.unavailable": "Os relatórios de erros estão desativados nesta versão.",
   "bugreport.openFailed": "Não foi possível iniciar um relatório de erro.",
+  "bugreport.screenshotBrowser": "Incluir esta captura de ecrã",
+  "bugreport.attachHint": "Ainda sem captura. Cole uma com Ctrl+V (⌘V no Mac) ou anexe uma imagem.",
+  "bugreport.attach": "Anexar captura de ecrã",
+  "bugreport.replace": "Substituir captura de ecrã",
+  "bugreport.attachFailed": "Não foi possível ler essa imagem. Experimente outro ficheiro.",
+  "bugreport.passwordHintServer": "Pedida uma vez. Este servidor Polyth guarda-a para todos os que enviam relatórios a partir dele.",
 };

@@ -30,6 +30,12 @@ export const en = {
   "bugreport.invalid": "The report could not be prepared. Copy the details and tell the team.",
   "bugreport.unavailable": "Bug reports are off on this build.",
   "bugreport.openFailed": "Could not start a bug report.",
+  "bugreport.screenshotBrowser": "Include this screenshot",
+  "bugreport.attachHint": "No screenshot yet. Paste one with Ctrl+V (⌘V on a Mac) or attach an image.",
+  "bugreport.attach": "Attach screenshot",
+  "bugreport.replace": "Replace screenshot",
+  "bugreport.attachFailed": "That image could not be read. Try another file.",
+  "bugreport.passwordHintServer": "Asked once. This Polyth server keeps it for everyone who reports from it.",
 } as const;
 
 export type BugReportMessageKey = keyof typeof en;

@@ -36,6 +36,31 @@ test("a complete report parses to an equal copy", () => {
   assert.ok(parseBugReport({ ...input, createdAt: "2026-11-13T12:00:00.000Z" }, NOW));
 });
 
+test("a browser report sent by its server parses; desktop-only and foreign fields do not", () => {
+  const browser = () => ({
+    ...report(),
+    app: {
+      client: "browser", version: "1.2.371-nightly", channel: "nightly", edition: "standard", platform: "ios",
+      browser: "Safari 18", serverPlatform: "linux", serverArch: "x64", locale: "uk",
+    },
+  }) as Record<string, any>;
+  const input = browser();
+  assert.deepEqual(parseBugReport(structuredClone(input), NOW), input);
+  assert.ok(parseBugReport({ ...input, app: { ...input.app, browser: "", platform: "unknown" } }, NOW), "an unknown browser still goes");
+  const refuse = (mutate: (value: Record<string, any>) => void, label: string) => {
+    const value = structuredClone(browser());
+    mutate(value);
+    assert.equal(parseBugReport(value, NOW), null, label);
+  };
+  refuse((v) => { v.app.electron = "39.2.1"; }, "desktop field on a browser report");
+  refuse((v) => { v.app.userAgent = "Mozilla/5.0"; }, "raw user agent");
+  refuse((v) => { v.app.browser = "Chrome/131.0.6778.85 (X11)"; }, "browser is name + major only");
+  refuse((v) => { v.app.serverPlatform = "android"; }, "server platform");
+  refuse((v) => { v.app.edition = "workstation"; }, "edition");
+  refuse((v) => { v.app.channel = "stable"; }, "channel contradicts version");
+  refuse((v) => { v.app.client = "phone"; }, "unknown client");
+});
+
 test("unknown fields anywhere reject the report", () => {
   const refuse = (mutate: (value: Record<string, any>) => void, label: string) => {
     const value = structuredClone(report()) as Record<string, any>;

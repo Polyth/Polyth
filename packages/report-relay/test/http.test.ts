@@ -77,7 +77,7 @@ test("a body over the cap is refused before parsing", async (t) => {
 });
 
 test("the password is required, and repeated failures lock the source out", async (t) => {
-  const setup = await serve({ limits: { perSourceMinute: 200, perSourceDay: 200 } });
+  const setup = await serve();
   t.after(() => setup.close());
 
   assert.equal((await setup.post(report(), { authorization: "" })).status, 401);
@@ -88,7 +88,7 @@ test("the password is required, and repeated failures lock the source out", asyn
   assert.equal(setup.github.issues.length, 1);
 
   // A fresh relay so the successful report above did not consume the source.
-  const locked = await serve({ limits: { perSourceMinute: 200, perSourceDay: 200 } });
+  const locked = await serve();
   t.after(() => locked.close());
   for (let attempt = 0; attempt < 11; attempt++) {
     assert.equal((await locked.post(report(), { authorization: "Bearer wrong" })).status, 401, `attempt ${attempt}`);
@@ -147,23 +147,21 @@ test("a release list that was never fetched answers unavailable instead of accep
   assert.equal(setup.github.issues.length, 0);
 });
 
-test("per source, per install and the global issue budget each answer rate", async (t) => {
-  const source = await serve({ limits: { perSourceMinute: 1, perSourceDay: 100 } });
-  t.after(() => source.close());
-  assert.equal((await source.post(report())).status, 200);
-  assert.equal((await source.post(report({ reportId: uuid(2) }))).status, 429);
+test("one source and one install send without a cap; only the global issue budget answers rate", async (t) => {
+  const open = await serve();
+  t.after(() => open.close());
+  for (let index = 1; index <= 40; index++) {
+    const response = await open.post(report({ reportId: uuid(index), text: `Report number ${index}` }));
+    assert.equal(response.status, 200, `report ${index} from one source and one install`);
+  }
+  assert.equal(open.github.issues.length + open.github.comments.length, 40);
 
-  const install = await serve({ limits: { perInstallDay: 1, perSourceMinute: 100, perSourceDay: 100 } });
-  t.after(() => install.close());
-  assert.equal((await install.post(report())).status, 200);
-  const again = await install.post(report({ reportId: uuid(2) }));
-  assert.equal(again.status, 429);
-  assert.deepEqual(await again.json(), { result: "rate" });
-
-  const global = await serve({ limits: { globalDay: 1, perSourceMinute: 100, perSourceDay: 100, perInstallDay: 100 } });
+  const global = await serve({ limits: { globalDay: 1 } });
   t.after(() => global.close());
   assert.equal((await global.post(report())).status, 200);
-  assert.equal((await global.post(report({ reportId: uuid(3), install: "b".repeat(32) }))).status, 429);
+  const over = await global.post(report({ reportId: uuid(3), install: "b".repeat(32) }));
+  assert.equal(over.status, 429);
+  assert.deepEqual(await over.json(), { result: "rate" });
 });
 
 test("health names only whether GitHub is configured, and unknown routes are 404", async (t) => {

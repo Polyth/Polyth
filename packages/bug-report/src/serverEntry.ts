@@ -1,8 +1,74 @@
-// The report sheet is browser-only: the desktop shell captures and sends.
-// This entry exists so the package is discovered, can be turned off in
-// Settings → Packages, and its web entry is activated. It adds no routes.
-import type { ServerPackage, ServerPackageHost } from "@polyth/plugins";
+// Nightly bug reports from a page opened in a browser. The desktop shell
+// captures and sends its own window's reports; a browser has no shell, so
+// this server sends them instead (src/sender.ts): `GET /api/bug-report/state`
+// says whether it reports and what it adds, `POST /api/bug-report/send` takes
+// the sheet's draft with the screenshot the page captured. Paired devices
+// reach the routes only with full access (default-deny).
+import { arch, platform } from "node:os";
+import type { RouteHandler } from "@polyth/contracts";
+import { isWorkstationEdition } from "@polyth/contracts/edition";
+import { localOnlyRemoteAccess, packageDataDir, type ServerPackage, type ServerPackageHost } from "@polyth/plugins";
+import { BUG_REPORT_CAPABILITY_ID } from "./index.ts";
+import { createServerReporter, serverBugReportOrigin, type ServerReporter } from "./sender.ts";
 
-export default function registerPackage(_host: ServerPackageHost): ServerPackage {
-  return {};
+export const BUG_REPORT_ROUTE_SCOPE = "bug-report";
+
+export function bugReportRoutes(reporter: () => ServerReporter | null): RouteHandler {
+  return async ({ path, method, json, body }) => {
+    if (path === "/api/bug-report/state" && method === "GET") {
+      const current = reporter();
+      json(200, current?.state() ?? { available: false, needsPassword: false, queued: 0, base: null });
+      return true;
+    }
+    if (path === "/api/bug-report/send" && method === "POST") {
+      const current = reporter();
+      if (!current) {
+        json(503, { result: "unavailable" });
+        return true;
+      }
+      let draft: unknown;
+      try {
+        draft = await body();
+      } catch {
+        json(400, { result: "invalid" });
+        return true;
+      }
+      // The outcome is the answer; the sheet reads `result`, not the status.
+      json(200, await current.send(draft));
+      return true;
+    }
+    return false;
+  };
+}
+
+export default function registerPackage(host: ServerPackageHost): ServerPackage {
+  let reporter: ServerReporter | null = null;
+  return {
+    remoteAccess: localOnlyRemoteAccess([BUG_REPORT_ROUTE_SCOPE]),
+    routes: bugReportRoutes(() => reporter),
+    onEnable() {
+      if (reporter) return;
+      const origin = serverBugReportOrigin({
+        version: host.version,
+        workstation: isWorkstationEdition(process.env),
+        multiTenant: host.deployment === "multi-tenant-sandboxed",
+        env: process.env,
+      });
+      if (!origin || !host.version) return;
+      reporter = createServerReporter({
+        dir: packageDataDir(host),
+        origin,
+        version: host.version,
+        platform: platform(),
+        arch: arch(),
+        fetch: globalThis.fetch,
+        log: (message, detail) => console.warn(`[${BUG_REPORT_CAPABILITY_ID}] ${message}`, detail ?? ""),
+      });
+      void reporter.flushOutbox();
+    },
+    onDisable() {
+      reporter?.dispose();
+      reporter = null;
+    },
+  };
 }

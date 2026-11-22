@@ -28,4 +28,10 @@ export const ar: BugReportMessages = {
   "bugreport.invalid": "تعذّر تجهيز البلاغ. انسخ التفاصيل وأبلغ الفريق.",
   "bugreport.unavailable": "بلاغات الأخطاء متوقفة في هذا الإصدار.",
   "bugreport.openFailed": "تعذّر بدء بلاغ عن خطأ.",
+  "bugreport.screenshotBrowser": "تضمين لقطة الشاشة هذه",
+  "bugreport.attachHint": "لا توجد لقطة بعد. الصق واحدة بـ Ctrl+V (⌘V على Mac) أو أرفق صورة.",
+  "bugreport.attach": "إرفاق لقطة شاشة",
+  "bugreport.replace": "استبدال لقطة الشاشة",
+  "bugreport.attachFailed": "تعذّرت قراءة هذه الصورة. جرّب ملفًا آخر.",
+  "bugreport.passwordHintServer": "تُطلب مرة واحدة. يحتفظ خادم Polyth هذا بها لكل من يرسل التقارير منه.",
 };

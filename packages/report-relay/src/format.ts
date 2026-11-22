@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import type { BugReportPayload } from "@polyth/contracts/bug-report";
+import { isBrowserReportApp, type BugReportPayload } from "@polyth/contracts/bug-report";
 
 /** Issue title, body, labels and fingerprint computed from an accepted report.
  *  Everything the person wrote is neutralized before it can ping a person or
@@ -19,6 +19,14 @@ export interface FormatContext {
   reportJsonPath: string;
   screenshotPath?: string;
   previousIssue?: number;
+}
+
+/** `<platform> <arch>` for a desktop report, `<platform> <browser>` (`ios
+ *  Safari 18`) for a page opened in a browser. */
+function where(report: BugReportPayload): string {
+  const app = report.app;
+  if (isBrowserReportApp(app)) return `${app.platform} ${app.browser || "browser"}`;
+  return `${app.platform} ${app.arch}`;
 }
 
 /** `@name` and `#123` in report text can never notify or cross-link. */
@@ -61,15 +69,16 @@ export function fingerprintOf(report: BugReportPayload): string {
   return createHash("sha256").update(basis).digest("hex").slice(0, 16);
 }
 
-/** `[<version>] <first line, max 80 chars> · <platform> <arch>`. */
+/** `[<version>] <first line, max 80 chars> · <platform> <arch|browser>`. */
 export function issueTitle(report: BugReportPayload): string {
   const first = report.text.split("\n")[0]?.trim() ?? "";
   const description = first ? neutralize(first).slice(0, TITLE_LINE) : "No description";
-  return `[${report.app.version}] ${description} · ${report.app.platform} ${report.app.arch}`;
+  return `[${report.app.version}] ${description} · ${neutralize(where(report))}`;
 }
 
 export function issueLabels(report: BugReportPayload): string[] {
   const labels = ["nightly-report", `v${report.app.version}`, `platform:${report.app.platform}`];
+  if (isBrowserReportApp(report.app)) labels.push("client:browser");
   if (report.screenshot) labels.push("has-screenshot");
   if (!report.text.trim() && report.errors.length === 0) labels.push("low-signal");
   return labels;
@@ -89,14 +98,25 @@ function details(report: BugReportPayload): string {
 
 function table(report: BugReportPayload): string {
   const viewport = report.web.viewport;
+  const app = report.app;
+  const client: Array<[string, string]> = isBrowserReportApp(app)
+    ? [
+      ["Client", "browser"],
+      ["Platform", app.platform],
+      ["Browser", app.browser || "—"],
+      ["Server", `${app.serverPlatform} ${app.serverArch}`],
+    ]
+    : [
+      ["Platform", `${app.platform} ${app.arch}`],
+      ["OS", app.osVersion],
+      ["Electron", app.electron],
+      ["Chromium", app.chromium],
+    ];
   const rows: Array<[string, string]> = [
-    ["Version", report.app.version],
-    ["Channel", report.app.channel],
-    ["Edition", report.app.edition],
-    ["Platform", `${report.app.platform} ${report.app.arch}`],
-    ["OS", report.app.osVersion],
-    ["Electron", report.app.electron],
-    ["Chromium", report.app.chromium],
+    ["Version", app.version],
+    ["Channel", app.channel],
+    ["Edition", app.edition],
+    ...client,
     ["Web build", report.web.build || "—"],
     ["Server version", report.web.serverVersion || "—"],
     ["View", report.web.view || "—"],
@@ -138,7 +158,8 @@ export function commentBody(report: BugReportPayload, context: FormatContext): s
   if (text) parts.push(quoted(text));
   const screenshot = image(context);
   if (screenshot) parts.push(screenshot);
-  parts.push(`**${report.app.version}** · ${report.app.platform} ${report.app.arch} · ${cell(report.app.osVersion)} · ${cell(report.web.view || "—")}`);
+  const os = isBrowserReportApp(report.app) ? "browser" : report.app.osVersion;
+  parts.push(`**${report.app.version}** · ${cell(where(report))} · ${cell(os)} · ${cell(report.web.view || "—")}`);
   parts.push(details(report));
   parts.push(`Report data: [report.json](${fileUrl(context, context.reportJsonPath)})`);
   parts.push(marker(report, context));

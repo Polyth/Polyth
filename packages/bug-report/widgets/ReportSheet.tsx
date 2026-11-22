@@ -1,8 +1,9 @@
-// The report sheet: the screenshot taken when the key was pressed, an
-// optional note, and every byte that will go, shown before anything leaves
-// the computer. The desktop shell adds the build and sends; this sheet never
-// sees the stored tester password, only what the person types once.
-import { useMemo, useRef, useState, type KeyboardEvent } from "react";
+// The report sheet: the screenshot taken when the key was pressed (in a
+// browser: this tab, or an image the person pastes or attaches), an optional
+// note, and every byte that will go, shown before anything is sent. The
+// desktop shell or the Polyth server adds the build and sends; this sheet
+// never sees the stored tester password, only what the person types once.
+import { useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
 import type { WebPackageHost } from "@polyth/web-sdk";
 import type { BugReportError, BugReportPackage, BugReportSettingValue, BugReportWeb } from "@polyth/contracts/bug-report";
 import { BUG_REPORT_LIMITS } from "@polyth/contracts/bug-report";
@@ -38,14 +39,19 @@ export function ReportSheet({ host, bridge, capture, page, onClose }: ReportShee
   const [password, setPassword] = useState("");
   const [needsPassword, setNeedsPassword] = useState(capture.needsPassword);
   const [passwordWrong, setPasswordWrong] = useState(false);
+  const [shot, setShot] = useState(capture.screenshot);
   const [withScreenshot, setWithScreenshot] = useState(capture.screenshot !== null);
+  const [attaching, setAttaching] = useState(false);
+  const [attachFailed, setAttachFailed] = useState(false);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const canAttach = typeof bridge.attach === "function";
   const [withErrors, setWithErrors] = useState(page.errors.length > 0);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<Problem>(null);
   const passwordRef = useRef<HTMLInputElement | null>(null);
 
   const draft = (): ReportDraft => ({
-    captureId: withScreenshot && capture.screenshot ? capture.captureId : null,
+    captureId: withScreenshot && shot ? capture.captureId : null,
     text: text.trim(),
     contact: contactName(contact),
     web: page.web,
@@ -65,12 +71,40 @@ export function ReportSheet({ host, bridge, capture, page, onClose }: ReportShee
     errors: withErrors ? page.errors : [],
     text: text.trim(),
     contact: contactName(contact),
-    screenshot: withScreenshot && capture.screenshot
-      ? `image/jpeg ${capture.screenshot.width}×${capture.screenshot.height}, ${kb(capture.screenshot.bytes)}`
+    screenshot: withScreenshot && shot
+      ? `image/jpeg ${shot.width}×${shot.height}, ${kb(shot.bytes)}`
       : null,
-  }, null, 2), [capture, page, withErrors, withScreenshot, text, contact]);
+  }, null, 2), [capture, page, shot, withErrors, withScreenshot, text, contact]);
 
-  const canSend = !busy && (!needsPassword || password.trim() !== "");
+  const canSend = !busy && !attaching && (!needsPassword || password.trim() !== "");
+
+  const attach = async (file: Blob) => {
+    if (!bridge.attach) return;
+    setAttaching(true);
+    setAttachFailed(false);
+    try {
+      const next = await bridge.attach(capture.captureId, file);
+      if (next) {
+        setShot(next);
+        setWithScreenshot(true);
+      } else {
+        setAttachFailed(true);
+      }
+    } catch {
+      setAttachFailed(true);
+    } finally {
+      setAttaching(false);
+    }
+  };
+
+  // A pasted image becomes the screenshot; pasted text goes where it always does.
+  const onPaste = (event: ClipboardEvent<HTMLFormElement>) => {
+    if (!canAttach) return;
+    const image = [...event.clipboardData.items].find((item) => item.kind === "file" && item.type.startsWith("image/"))?.getAsFile();
+    if (!image) return;
+    event.preventDefault();
+    void attach(image);
+  };
 
   const finish = (outcome: ReportOutcome) => {
     if (outcome.result === "created" || outcome.result === "added") {
@@ -127,7 +161,7 @@ export function ReportSheet({ host, bridge, capture, page, onClose }: ReportShee
   );
 
   const body = (
-    <form className="bug-report-sheet" onSubmit={(event) => { event.preventDefault(); void submit(); }} onKeyDown={onKeyDown}>
+    <form className="bug-report-sheet" onSubmit={(event) => { event.preventDefault(); void submit(); }} onKeyDown={onKeyDown} onPaste={onPaste}>
       <p className="bug-report-sheet__intro">{t("bugreport.intro")}</p>
       <label className="bug-report-sheet__field">
         <span className="bug-report-sheet__label">{t("bugreport.textLabel")}</span>
@@ -143,20 +177,41 @@ export function ReportSheet({ host, bridge, capture, page, onClose }: ReportShee
         />
       </label>
       <div className="bug-report-sheet__attachments">
-        {capture.screenshot ? (
+        {shot ? (
           <img
             className="bug-report-sheet__image"
             data-included={withScreenshot ? "true" : "false"}
-            src={capture.screenshot.dataUrl}
-            width={capture.screenshot.width}
-            height={capture.screenshot.height}
+            src={shot.dataUrl}
+            width={shot.width}
+            height={shot.height}
             alt={t("bugreport.screenshotAlt")}
           />
         ) : null}
         <div className="bug-report-sheet__toggles">
-          {capture.screenshot
-            ? <Checkbox checked={withScreenshot} onChange={setWithScreenshot} label={t("bugreport.screenshot")} />
-            : <p className="bug-report-sheet__note">{t("bugreport.screenshotMissing")}</p>}
+          {shot
+            ? <Checkbox checked={withScreenshot} onChange={setWithScreenshot} label={t(canAttach ? "bugreport.screenshotBrowser" : "bugreport.screenshot")} />
+            : <p className="bug-report-sheet__note">{t(canAttach ? "bugreport.attachHint" : "bugreport.screenshotMissing")}</p>}
+          {canAttach && (
+            <div className="bug-report-sheet__attach">
+              <Button size="sm" busy={attaching} onClick={() => fileRef.current?.click()}>
+                {t(shot ? "bugreport.replace" : "bugreport.attach")}
+              </Button>
+              <input
+                ref={fileRef}
+                className="bug-report-sheet__file"
+                type="file"
+                accept="image/*"
+                tabIndex={-1}
+                aria-hidden="true"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  if (file) void attach(file);
+                }}
+              />
+            </div>
+          )}
+          {attachFailed && <p className="bug-report-sheet__error" role="alert">{t("bugreport.attachFailed")}</p>}
           {page.errors.length > 0 && (
             <Checkbox checked={withErrors} onChange={setWithErrors} label={t("bugreport.errors", { count: page.errors.length })} />
           )}
@@ -193,7 +248,8 @@ export function ReportSheet({ host, bridge, capture, page, onClose }: ReportShee
       {needsPassword && (
         <p id="bug-report-password-hint" className={passwordWrong ? "bug-report-sheet__error" : "bug-report-sheet__hint"} role={passwordWrong ? "alert" : undefined}>
           {t(passwordWrong ? "bugreport.passwordWrong"
-            : capture.passwordStorage === "session" ? "bugreport.passwordHintSession" : "bugreport.passwordHint")}
+            : capture.passwordStorage === "session" ? "bugreport.passwordHintSession"
+              : capture.passwordStorage === "server" ? "bugreport.passwordHintServer" : "bugreport.passwordHint")}
         </p>
       )}
       <details className="bug-report-sheet__details">

@@ -281,7 +281,8 @@ const ACTIONS: Record<HotkeyAction, () => void | false> = {
   // key so the browser keeps its own binding.
   dictate: () => runCommand("voice.dictate") ? undefined : false,
   voiceMode: () => runCommand("capability.voice-mode") ? undefined : false,
-  // A package registers the report command on nightly desktop builds only.
+  // A package registers the report command on nightly desktop builds and
+  // on pages served by a nightly server.
   reportBug: () => runCommand(REPORT_BUG_COMMAND) ? undefined : false,
 };
 

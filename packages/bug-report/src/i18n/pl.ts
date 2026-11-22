@@ -28,4 +28,10 @@ export const pl: BugReportMessages = {
   "bugreport.invalid": "Nie udało się przygotować zgłoszenia. Skopiuj szczegóły i powiadom zespół.",
   "bugreport.unavailable": "Zgłoszenia błędów są wyłączone w tej wersji.",
   "bugreport.openFailed": "Nie udało się rozpocząć zgłoszenia błędu.",
+  "bugreport.screenshotBrowser": "Dołącz ten zrzut ekranu",
+  "bugreport.attachHint": "Nie ma jeszcze zrzutu. Wklej go skrótem Ctrl+V (⌘V na Macu) lub dołącz obraz.",
+  "bugreport.attach": "Dołącz zrzut ekranu",
+  "bugreport.replace": "Zastąp zrzut ekranu",
+  "bugreport.attachFailed": "Nie udało się odczytać tego obrazu. Spróbuj innego pliku.",
+  "bugreport.passwordHintServer": "Pytamy raz. Ten serwer Polyth przechowuje je dla wszystkich, którzy wysyłają z niego zgłoszenia.",
 };

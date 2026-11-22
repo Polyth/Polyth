@@ -195,19 +195,14 @@ test("without OS encryption the password lasts only this run", async (t) => {
   assert.equal(next.state().needsPassword, true);
 });
 
-test("one report a minute and ten a day leave this computer", async (t) => {
+test("this computer does not cap how many reports it sends", async (t) => {
   const h = harness(t);
-  for (let index = 0; index < 10; index += 1) {
+  for (let index = 0; index < 15; index += 1) {
     h.reply(200, { result: "created", issue: index + 1 });
-    assert.equal((await h.client.send(draft({ password: "p" }))).result, "created", `report ${index}`);
-    assert.deepEqual(await h.client.send(draft()), { result: "rate" }, "a second one within the minute");
-    h.advance(61_000);
+    assert.equal((await h.client.send(draft({ password: "p" }))).result, "created", `report ${index}, same minute`);
   }
-  assert.deepEqual(await h.client.send(draft()), { result: "rate" }, "the eleventh of the day");
-  assert.equal(h.calls.length, 10);
-  h.advance(24 * 60 * 60_000);
-  h.reply(200, { result: "created", issue: 11 });
-  assert.equal((await h.client.send(draft())).result, "created");
+  assert.equal(h.calls.length, 15);
+  assert.ok(!readFileSync(join(h.dir, "bug-report.json"), "utf8").includes("sent"), "no send log is kept");
 });
 
 test("an unreachable or busy relay keeps the report and sends it later", async (t) => {
