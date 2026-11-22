@@ -40,6 +40,7 @@ import {
   type RuntimeSessionBinding,
   type RuntimeSnapshot,
   type SessionEvent,
+  type SessionMessageSearch,
   type SessionProjection,
   type SessionService,
 } from "@polyth/contracts";
@@ -899,6 +900,9 @@ export async function boot(opts: BootOptions = {}) {
   // bridge mints the virtual URIs the model pages with `read_file`.
   const outputCache = new SessionOutputCache();
   provideService("session.output-cache", outputCache);
+  // Raw message search for agent tools; the caller filters by its reader.
+  provideService<SessionMessageSearch>("session.message-search", ({ spaceId, projectId, q, limit }) =>
+    store.searchMessages({ q, spaceId, ...(projectId ? { projectId } : {}), ...(limit ? { limit } : {}) }));
 
   // --- per-project opencode runtime pool (lazy spawn, one serve process per project)
   const runtimeDiagnostics = createRuntimeDiagnostics();
