@@ -661,7 +661,9 @@ or network call for it.
   password unverified so the queued report can go later; a `401` at that point forgets
   it and the sheet asks again. It travels only in the
   `Authorization` header and is printable ASCII without spaces (`isTesterPassword`).
-- **Limits and outbox.** One report a minute and ten a day leave a computer. A relay that
+- **Limits and outbox.** A computer sends as many reports as the tester needs; neither the
+  shell nor the relay caps them per computer or address (the relay keeps only its
+  service-wide daily budget and the failed-password lockout). A relay that
   cannot be reached, or answers `429`/`503`, leaves the report in
   `<userData>/desktop/bug-reports/` (at most 10, each dropped after 7 days); it goes at
   the next start or every 15 minutes. `POLYTH_BUG_REPORT_ORIGIN` points at another relay

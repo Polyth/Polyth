@@ -196,8 +196,6 @@ export type DesktopBugReportOutcome =
   | { result: "queued" }
   /** Ask for the tester password (again). */
   | { result: "password" }
-  /** This computer sent too many reports for now. */
-  | { result: "rate" }
   /** This build is not a published nightly. */
   | { result: "version" }
   | { result: "invalid" }

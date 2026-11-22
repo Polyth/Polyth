@@ -38,16 +38,17 @@ whether a token and repository are configured. Any other route is
 ## Checks and limits
 
 Cheap checks run first: route and method, content type, declared and streamed
-body size, then per-source address (30 reports/day, 5/minute), then the
-password (more than 10 failures per address in 10 minutes locks that address
-out with `429`), then the exact JSON shape, then the app version, then the
-install id (10/day, it changes every UTC day), then idempotency. A version is
+body size, then the password (more than 10 failures per address in 10 minutes
+locks that address out with `429`), then the exact JSON shape, then the app
+version, then idempotency. There is no cap per source address or per install:
+a tester sends as many reports as they need. A version is
 accepted when it is a published nightly, or an older nightly the release list no
 longer shows (only the newest few nightlies are kept, and a tester may not have
 updated yet); a version newer than every published nightly is a local build and
 is refused. The whole
-service files at most 200 issues and comments per day. Windows are in memory
-and bounded to 50 000 keys. Every limit is overridable through the
+service files at most 200 issues and comments per day, which bounds what a
+leaked password can file. Windows are in memory and bounded to 50 000 keys.
+Both limits are overridable through the
 `ReportRelay` options for tests.
 
 A repeated `reportId` within 30 days answers the stored result without calling
