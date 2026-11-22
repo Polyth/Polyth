@@ -46,9 +46,13 @@ test("iOS explains every protected resource the app touches", async () => {
   };
   // Native QR scanner and the WebView fallback both use the camera.
   assert.match(purpose("NSCameraUsageDescription"), /pairing QR/);
-  // Dictation and voice mode both capture through WKWebView getUserMedia.
+  // Dictation and voice mode capture the microphone natively on iOS
+  // (PolythAudioCapturePlugin.swift); WKWebView getUserMedia elsewhere.
   assert.match(purpose("NSMicrophoneUsageDescription"), /dictat/);
   assert.match(purpose("NSMicrophoneUsageDescription"), /voice mode/);
+  // WebKit denies Web Speech recognition ("not-allowed") in an app without
+  // this purpose string; Safari carries its own.
+  assert.match(purpose("NSSpeechRecognitionUsageDescription"), /speech recognition/);
   // Local discovery browses this Bonjour type on both platforms.
   assert.match(purpose("NSLocalNetworkUsageDescription"), /local network/);
   assert.match(plist, /<key>NSBonjourServices<\/key>\s*<array>\s*<string>_polyth\._udp<\/string>/);

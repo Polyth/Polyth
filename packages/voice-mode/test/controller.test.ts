@@ -783,3 +783,44 @@ test("failures and full thoughts never wait for the model, and the reply cancels
   assert.equal(h.narrations[0]!.signal.aborted, true, "the reply comes first");
   h.controller.stop();
 });
+
+test("a fallback route refused after the first route failed shows the first route's reason", async () => {
+  // iOS app: the server route heard no audio, then Web Speech (the fallback)
+  // was refused — "microphone blocked" would name the wrong cause.
+  const routes: RecognitionRoute[] = [
+    { kind: "server", language: "uk-UA" },
+    { kind: "browser", lang: "uk-UA", onDevice: false, punctuation: false },
+  ];
+  let calls = 0;
+  const h = harness({
+    routes,
+    startError: () => {
+      calls++;
+      if (calls === 1) return null;
+      return Object.assign(new Error("denied"), { code: "mic_denied" });
+    },
+  });
+  h.controller.start();
+  await flush();
+  assert.equal(h.listener().route.kind, "server");
+  h.listener().events.onError(Object.assign(new Error("The microphone is on but no sound is coming through"), { code: "audio_format_error" }));
+  await flush();
+  await flush();
+  assert.equal(h.controller.getSnapshot().phase, "error");
+  assert.equal(h.controller.getSnapshot().error, "The microphone is on but no sound is coming through");
+  h.controller.stop();
+});
+
+test("a refusal on the first route still reads as a blocked microphone", async () => {
+  const h = harness({
+    routes: [
+      { kind: "server", language: "uk-UA" },
+      { kind: "browser", lang: "uk-UA", onDevice: false, punctuation: false },
+    ],
+    startError: () => Object.assign(new Error("denied"), { code: "mic_denied" }),
+  });
+  h.controller.start();
+  await flush();
+  assert.equal(h.controller.getSnapshot().error, strings.micDenied);
+  h.controller.stop();
+});
