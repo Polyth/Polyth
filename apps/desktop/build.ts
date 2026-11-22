@@ -10,7 +10,8 @@ import { writeThirdPartyNotices } from "../../scripts/third-party-notices.mjs";
 const here = import.meta.dirname;
 const flavor = process.env.POLYTH_DESKTOP_FLAVOR ?? "";
 // The workstation build (scripts/ci/workstation.mjs, docs/security/workstation-edition.md)
-// ships no Polyth Link binaries, no Chromium and only the packages that opt in.
+// ships no Polyth Link binaries and only the packages that opt in. The browser
+// package opts in, so the bundled Chromium is staged for both flavors.
 const edition = desktopEdition(flavor);
 const workstation = edition === "workstation";
 const dist = join(here, "dist");
@@ -55,8 +56,7 @@ const linkClientName = process.platform === "win32" ? "polyth-link-client.exe" :
 await rm(linkDir, { recursive: true, force: true });
 if (workstation) {
   await mkdir(linkDir, { recursive: true });
-  await rm(join(here, "resources", "chromium"), { recursive: true, force: true });
-  console.log("Workstation edition: Polyth Link and Chromium are not packaged.");
+  console.log("Workstation edition: Polyth Link is not packaged.");
 } else {
   await buildLinkBinaries();
 }

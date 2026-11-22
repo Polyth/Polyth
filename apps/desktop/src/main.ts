@@ -137,7 +137,7 @@ const macLegacyUpdates = followsMacLegacyFeed(__POLYTH_DESKTOP_FLAVOR__, process
 /**
  * The workstation edition (docs/security/workstation-edition.md) is a
  * local-only shell: this computer's server on loopback, no Polyth Link, no
- * other servers, no bundled Chromium, and a stable-only update feed of its own.
+ * other servers, and a stable-only update feed of its own.
  */
 const edition = desktopEdition(__POLYTH_DESKTOP_FLAVOR__);
 const workstation = edition === "workstation";
@@ -2087,11 +2087,7 @@ const startServer = async (preferredPort?: number): Promise<void> => {
   else delete process.env.POLYTH_LINK_HOST;
   if (app.isPackaged) process.env.POLYTH_RESOURCES_DIR ??= process.resourcesPath;
   const bundledChromium = stagedChromiumExecutable(process.resourcesPath, process.platform, process.arch);
-  if (workstation) {
-    // No embedded browser package ships, so nothing may start a browser.
-    delete process.env.POLYTH_CHROMIUM_PATH;
-    delete process.env.POLYTH_REQUIRE_BUNDLED_CHROMIUM;
-  } else if (app.isPackaged) {
+  if (app.isPackaged) {
     if (!bundledChromium) {
       throw new Error(`Packaged Chromium is missing for ${process.platform}-${process.arch}`);
     }

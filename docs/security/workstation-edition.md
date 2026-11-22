@@ -59,6 +59,15 @@ person clicks open in their default browser. On Linux and Windows the
 spell checker is pointed at a folder inside the app, so Chromium does not fetch
 dictionaries from Google.
 
+**The embedded browser.** The app ships with the same embedded Chromium as
+the standard build (a full browser build staged at packaging time; it is never
+downloaded or updated at runtime, and the server refuses to drive any other
+executable). It is the sandboxed, isolated-context browser of the `browser`
+package: it opens only the pages the person or an approved agent asks for, and
+its connections go straight to those sites — no proxying or inspection by
+Polyth, and no other destination is contacted by it. It can be removed from the
+edition again by dropping the package from the list below.
+
 **Harness CLIs.** The agent CLIs are separate programs the person installs and
 signs in to. Settings shows each CLI's official install command to copy and
 run in the person's own terminal; it offers no Install button, and the install
@@ -78,7 +87,6 @@ code and binaries are absent from the installed files:
   and the `polyth-link-host` / `polyth-link-client` binaries.
 - Client mode: the app cannot connect to another Polyth server, and server
   addresses saved by an earlier standard install are dropped on launch.
-- The embedded Chromium browser and browser automation (`playwright-core`).
 - Computer use (screen capture and input control), Docker, SSH remote hosts,
   Terraform, monitoring.
 - Web search and web fetch tools, dictation and voice (microphone access is
@@ -107,6 +115,7 @@ is always present.
 - backend-opencode
 - backend-pi
 - bookmarks
+- browser
 - btw
 - chat-blocks
 - commands
@@ -181,15 +190,16 @@ is always present.
 1. Compare the installer's SHA-256 with `SHA256SUMS-workstation.txt` on the
    release page.
 2. In the installed app's `resources` folder there is no `polyth-link` folder
-   with binaries and no `chromium` folder; `resources/packages` holds only the
-   packages listed above.
+   with binaries; there is a `chromium` folder (the embedded browser), and
+   `resources/packages` holds only the packages listed above.
 3. While the app runs, list its sockets (`lsof -nP -iTCP -iUDP -a -p <pid>` on
    macOS/Linux, `Get-NetTCPConnection -OwningProcess <pid>` and
    `Get-NetUDPEndpoint -OwningProcess <pid>` on Windows): one listener on
    `127.0.0.1`, no UDP.
 4. With *Update automatically* off, the app process opens no outbound
    connection; the harness CLIs it starts are separate processes with their own
-   connections.
+   connections, and so is the embedded Chromium, whose connections are only
+   the pages opened in it.
 5. The SBOM lists every third-party package bundled into the app's main process.
 
 ## Build

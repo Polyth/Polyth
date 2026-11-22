@@ -86,7 +86,18 @@ async function asarWriter(): Promise<(dir: string, out: string) => Promise<void>
   };
 }
 
-const CLEAN_INPUTS = ["../../packages/ws/src/a.ts", "../../packages/lib/src/b.ts", "../../node_modules/left-pad/index.js"];
+/** Clean bundle inputs: a workstation package, a framework library, and the
+ *  browser package's driver (playwright-core), which the edition ships. */
+const CLEAN_INPUTS = [
+  "../../packages/ws/src/a.ts",
+  "../../packages/lib/src/b.ts",
+  "../../node_modules/left-pad/index.js",
+  "../../node_modules/playwright-core/lib/index.js",
+];
+/** The same bundle without the browser driver. */
+const NO_PLAYWRIGHT_INPUTS = ["../../packages/ws/src/a.ts", "../../packages/lib/src/b.ts", "../../node_modules/left-pad/index.js"];
+/** A clean package's resources: web bundles, its packages and the Chromium folder. */
+const CLEAN_RESOURCES = ["web/index.html", "packages/ws/dist/web/index.js", "chromium/darwin-arm64/chrome"];
 
 test("workstation package ids come from polyth.editions, sorted", () => {
   const f = fixture();
@@ -102,26 +113,28 @@ test("workstation package ids come from polyth.editions, sorted", () => {
   assert.deepEqual(real, [...real].sort());
 });
 
-test("the derived electron-builder config drops Chromium and Link and narrows packages", () => {
+test("the derived electron-builder config drops Link, keeps Chromium and narrows packages", () => {
   const f = fixture();
   try {
     const file = join(f.root, "eb.json");
     assert.deepEqual(workstationBuilderArgs({ repoRoot: f.root, file, packageIds: ["ws", "aa"] }), ["--config", file]);
     const config = JSON.parse(readFileSync(file, "utf8"));
     assert.equal(config.artifactName, "${productName}-${version}-${os}-${arch}-workstation.${ext}");
-    assert.deepEqual(config.extraResources.map((entry: { to: string }) => entry.to), ["web", "packages", "icon.png"]);
-    assert.deepEqual(config.extraResources[1].filter, ["ws/dist/web/**/*", "ws/assets/**/*", "aa/dist/web/**/*", "aa/assets/**/*"]);
-    assert.deepEqual(config.files, ["dist/**/*", "!**/node_modules/playwright-core/**"]);
+    assert.deepEqual(config.extraResources.map((entry: { to: string }) => entry.to), ["web", "chromium/${platform}-${arch}", "packages", "icon.png"]);
+    assert.deepEqual(config.extraResources[2].filter, ["ws/dist/web/**/*", "ws/assets/**/*", "aa/dist/web/**/*", "aa/assets/**/*"]);
+    assert.deepEqual(config.files, ["dist/**/*"]);
     assert.deepEqual(config.publish, { provider: "github", owner: "Polyth", repo: "Polyth", releaseType: "release", channel: "workstation" });
     assert.equal(config.productName, "Polyth");
   } finally {
     f.done();
   }
-  // The real configuration: nothing but the edition survives.
+  // The real configuration: everything but the Link survives; the browser's
+  // Chromium resource is kept for the workstation edition too.
   const base = JSON.parse(readFileSync(join(REPO, "apps/desktop/package.json"), "utf8")).build;
   const config = workstationBuildConfig(base, { packageIds: ["backend-claude"] });
   const targets = config.extraResources.map((entry: { to: string }) => entry.to);
-  assert.ok(!targets.some((to: string) => to.startsWith("chromium") || to.startsWith("polyth-link")), targets.join(","));
+  assert.ok(!targets.some((to: string) => to.startsWith("polyth-link")), targets.join(","));
+  assert.ok(targets.some((to: string) => to.startsWith("chromium")), targets.join(","));
   assert.ok(targets.includes("opencode/${platform}-${arch}") && targets.includes("web"));
   assert.equal(base.artifactName.includes("workstation"), false, "the base config is not mutated");
   assert.equal(base.extraResources.some((entry: { to: string }) => entry.to === "chromium/${platform}-${arch}"), true);
@@ -130,7 +143,7 @@ test("the derived electron-builder config drops Chromium and Link and narrows pa
 test("the package check passes a clean workstation package", () => {
   const f = fixture();
   try {
-    const resources = f.resources("packages/ws/dist/web/index.js", "web/index.html");
+    const resources = f.resources(...CLEAN_RESOURCES);
     assert.doesNotThrow(() => assertWorkstationPackage({ resourcesDir: resources, metafilePath: f.metafile(CLEAN_INPUTS), packageIds: ["ws"], repoRoot: f.root }));
     // An .app/win-unpacked layout resolves its resources directory.
     assert.equal(resourcesDirOf(join(f.root, "out")), resources);
@@ -141,18 +154,18 @@ test("the package check passes a clean workstation package", () => {
   }
 });
 
-test("the package check fails on every forbidden payload", () => {
+test("the package check fails on every forbidden or missing payload", () => {
   const cases: Array<[string, string[], string[], RegExp]> = [
-    ["chromium", ["chromium/darwin-arm64/chrome"], CLEAN_INPUTS, /resources\/chromium is packaged/],
-    ["link", ["polyth-link/polyth-link-host"], CLEAN_INPUTS, /resources\/polyth-link holds polyth-link-host/],
-    ["foreign package resources", ["packages/other/dist/web/x.js"], CLEAN_INPUTS, /resources\/packages\/other is not a workstation package/],
-    ["foreign feature package in the bundle", [], [...CLEAN_INPUTS, "../../packages/other/src/serverEntry.ts"], /main bundle includes packages\/other/],
-    ["playwright-core in the bundle", [], [...CLEAN_INPUTS, "../../node_modules/playwright-core/lib/index.js"], /main bundle includes or imports playwright-core/],
+    ["missing chromium", ["web/index.html"], CLEAN_INPUTS, /resources\/chromium \(the bundled browser\) is missing/],
+    ["link", ["polyth-link/polyth-link-host", ...CLEAN_RESOURCES], CLEAN_INPUTS, /resources\/polyth-link holds polyth-link-host/],
+    ["foreign package resources", ["packages/other/dist/web/x.js", "web/index.html", "chromium/darwin-arm64/chrome"], CLEAN_INPUTS, /resources\/packages\/other is not a workstation package/],
+    ["foreign feature package in the bundle", CLEAN_RESOURCES, [...CLEAN_INPUTS, "../../packages/other/src/serverEntry.ts"], /main bundle includes packages\/other/],
+    ["no playwright-core in the bundle", CLEAN_RESOURCES, NO_PLAYWRIGHT_INPUTS, /main bundle does not include playwright-core/],
   ];
   for (const [label, files, inputs, message] of cases) {
     const f = fixture();
     try {
-      const resources = f.resources("web/index.html", ...files);
+      const resources = f.resources(...files);
       assert.throws(
         () => assertWorkstationPackage({ resourcesDir: resources, metafilePath: f.metafile(inputs), packageIds: ["ws"], repoRoot: f.root }),
         message,
@@ -165,7 +178,7 @@ test("the package check fails on every forbidden payload", () => {
   // Framework libraries without a server entry are allowed; an empty polyth-link directory is fine.
   const f = fixture();
   try {
-    const resources = f.resources("web/index.html");
+    const resources = f.resources(...CLEAN_RESOURCES);
     mkdirSync(join(resources, "polyth-link"));
     assert.doesNotThrow(() => assertWorkstationPackage({
       resourcesDir: resources, metafilePath: f.metafile([...CLEAN_INPUTS, "../../packages/lib/src/c.ts"]), packageIds: ["ws"], repoRoot: f.root,
@@ -188,7 +201,7 @@ test("the SBOM is CycloneDX 1.5 with bundled packages, Electron and OpenCode", (
     assert.match(sbom.serialNumber, /^urn:uuid:[0-9a-f-]{36}$/);
     assert.equal(sbom.metadata.component.version, "1.2.3");
     const byName = Object.fromEntries(sbom.components.map((c: { name: string }) => [c.name, c]));
-    assert.deepEqual(Object.keys(byName).sort(), ["@scope/pkg", "electron", "left-pad", "missing", "opencode"]);
+    assert.deepEqual(Object.keys(byName).sort(), ["@scope/pkg", "electron", "left-pad", "missing", "opencode", "playwright-core"]);
     assert.equal(byName["left-pad"].purl, "pkg:npm/left-pad@1.3.0");
     assert.deepEqual(byName["left-pad"].licenses, [{ expression: "WTFPL" }]);
     assert.equal(byName["@scope/pkg"].purl, "pkg:npm/%40scope/pkg@2.0.1");
@@ -218,13 +231,14 @@ test("sha256Sums writes sha256sum format sorted by name", () => {
   assert.equal(WORKSTATION_FLAVOR, "workstation");
 });
 
-test("the package check sees an external playwright-core import and one shipped in app.asar", async () => {
+test("the package check accepts a bundled playwright-core import and one shipped in app.asar", async () => {
   const f = fixture();
   try {
-    const resources = f.resources("web/index.html");
-    assert.throws(() => assertWorkstationPackage({
+    const resources = f.resources(...CLEAN_RESOURCES);
+    // The browser's external driver import is exactly what the edition expects.
+    assert.doesNotThrow(() => assertWorkstationPackage({
       resourcesDir: resources, metafilePath: f.metafile(CLEAN_INPUTS, ["electron", "playwright-core"]), packageIds: ["ws"], repoRoot: f.root,
-    }), /imports playwright-core/);
+    }));
     assert.doesNotThrow(() => assertWorkstationPackage({
       resourcesDir: resources, metafilePath: f.metafile(CLEAN_INPUTS, ["electron", "electron-updater"]), packageIds: ["ws"], repoRoot: f.root,
     }));
@@ -237,12 +251,12 @@ test("the package check sees an external playwright-core import and one shipped 
     f.put("app/node_modules/ok/index.js", "x");
     await createPackage(app, join(resources, "app.asar"));
     assert.deepEqual(asarFiles(join(resources, "app.asar")).sort(), ["dist/main.js", "node_modules/ok/index.js"]);
-    assert.doesNotThrow(() => assertWorkstationPackage({ resourcesDir: resources, metafilePath: f.metafile(CLEAN_INPUTS), packageIds: ["ws"], repoRoot: f.root }));
+    assert.throws(() => assertWorkstationPackage({ resourcesDir: resources, metafilePath: f.metafile(CLEAN_INPUTS), packageIds: ["ws"], repoRoot: f.root }),
+      /app\.asar does not ship node_modules\/playwright-core/);
 
     f.put("app/node_modules/playwright-core/index.js", "x");
     await createPackage(app, join(resources, "app.asar"));
-    assert.throws(() => assertWorkstationPackage({ resourcesDir: resources, metafilePath: f.metafile(CLEAN_INPUTS), packageIds: ["ws"], repoRoot: f.root }),
-      /app\.asar ships node_modules\/playwright-core/);
+    assert.doesNotThrow(() => assertWorkstationPackage({ resourcesDir: resources, metafilePath: f.metafile(CLEAN_INPUTS), packageIds: ["ws"], repoRoot: f.root }));
   } finally {
     f.done();
   }
