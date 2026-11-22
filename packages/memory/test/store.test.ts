@@ -288,3 +288,29 @@ test("substring search keeps no index of its own and follows every edit", () => 
   assert.deepEqual(tables, ["memory_fts", "memory_fts_config", "memory_fts_data", "memory_fts_docsize", "memory_fts_idx"]);
   db.close();
 });
+
+test("the page list matches every typed word in any order and any case, Cyrillic included", () => {
+  const db = new DatabaseSync(":memory:");
+  const store = createMemoryStore(db, scope.spaceId);
+  const deploy = store.create(scope, { projectId: scope.projectId, title: "Деплой лише через CI", body: "Реліз збирається тільки в GitHub Actions.", tags: ["release"], lifecycle: "active" });
+  const memory = store.create(scope, { projectId: scope.projectId, title: "Пам’ять проєкту", body: "100% покриття_тестами не вимагаємо.", lifecycle: "active" });
+  store.create(scope, { projectId: scope.projectId, title: "Other", body: "Render the menu.", lifecycle: "active" });
+  const ids = (q: string) => store.list(scope, { q }).items.map((item) => item.id);
+  // SQLite's LIKE folds ASCII only: a lower-case Cyrillic search used to miss.
+  assert.deepEqual(ids("деплой"), [deploy.memoryId]);
+  assert.deepEqual(ids("ci ДЕПЛОЙ"), [deploy.memoryId], "words in any order and case");
+  assert.deepEqual(ids("деплой menu"), [], "every word must match");
+  assert.deepEqual(ids("RELEASE"), [deploy.memoryId], "tags are searched too");
+  assert.deepEqual(ids("пам'ятка"), [], "a longer word is not a match");
+  assert.deepEqual(ids("пам'ять"), [memory.memoryId], "any apostrophe spelling finds the word");
+  assert.deepEqual(ids("ПАМʼЯТЬ"), [memory.memoryId]);
+  // LIKE wildcards in the query are literal characters.
+  assert.deepEqual(ids("100%"), [memory.memoryId]);
+  assert.deepEqual(ids("_"), [memory.memoryId]);
+  assert.deepEqual(ids("%"), [memory.memoryId]);
+  assert.equal(store.list(scope, { q: "деплой" }).total, 1);
+  // The snippet starts near the match when the body is long.
+  const long = store.create(scope, { projectId: scope.projectId, title: "Long", body: `${"filler words here. ".repeat(30)}The zebra appears only here.`, lifecycle: "active" });
+  assert.match(store.list(scope, { q: "zebra" }).items.find((item) => item.id === long.memoryId)!.snippet, /zebra/);
+  db.close();
+});

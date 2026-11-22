@@ -13,15 +13,41 @@ import and clear). Tabs stay mounted, so a draft in one survives a look at
 another. A record is one row: tapping it opens the editor, and its ⋯ menu holds
 mark reviewed, pin, lock, archive and forget. A row names only what sets the
 record apart (category, a lifecycle other than active, pinned, locked, a
-freshness other than current or unknown). Passing results go to the host
-notification stack; errors stay on the page. The page is drawn with the host's
-controls, handed to the package through `MemoryUiContext`
-(`packages/memory/widgets/ui.tsx`), and is laid out by container queries on
-`.pkg-memory`, phone first.
+freshness other than current or unknown) and ends with its age. Passing results
+go to the host notification stack; errors stay on the page. The page is drawn
+with the host's controls (and confirms through `host.ui.confirm`), handed to the
+package through `MemoryUiContext` (`packages/memory/widgets/ui.tsx`), and is
+laid out by container queries on `.pkg-memory`, phone first.
+
+**List.** The search matches every typed word in title, body, tags or aliases,
+in any order and any case (Cyrillic included: both sides go through the same
+Unicode fold, `memory_fold`, because SQLite's `LIKE` folds ASCII only), marks
+the matches in the rows, and its snippet starts near the first match. Escape in
+a search with text clears it before the dialog may close. The lifecycle filter
+is one row of chips. The list shows 20 rows and **Show more** adds the next 20;
+a refresh after a change keeps every row that was on screen.
+
+**Editor** (`MemoryEditor.tsx`). A tapped row opens at once with what the row
+already knows; the whole record (read ahead on hover, focus or press) fills in
+and the fields stay read-only until it does. The list stays mounted underneath,
+so Back returns to the same scroll position, search and row. The title wraps and
+grows; category is a chip group; the body grows with its text and shows its size
+once past half of the 8 KiB limit; tags, aliases, paths and sources are chip
+fields (Enter or a comma adds, Backspace takes the last back), with the last
+three behind **More details**. Save is enabled only for a changed, valid draft;
+Ctrl/⌘+Enter saves and Escape steps back to the list (asking before dropping a
+draft) instead of closing the dialog. A save sends values that were already on
+the record in their original form, so a session source stays a session source
+and a module stays a module; only typed-in values become manual sources or
+paths. The editor's ⋯ menu offers the row's actions while the draft is clean and
+re-reads the record after one. Every manual save is user locked.
+
+**My notes** rows open their editor in place; their ⋯ menu holds Edit, Share…
+and Delete, and Delete asks first.
 
 Selection is a mode entered from the toolbar's ⋯ menu (**Select records**):
 rows gain checkboxes and a bar offers Archive and Forget.
-Visible-page selection is limited to one page; **Select all filtered** may select
+**Select all shown** selects the rows on screen; **Select all filtered** may select
 and act on at most 50 matching records. The filter is captured when selection is
 made, and changing it clears the selection. Each bulk archive or forget uses the
 record revision as a CAS check and reports successful and failed records

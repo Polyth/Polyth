@@ -12,6 +12,10 @@
 }
 /* A short tab keeps the sheet's height: switching tabs must not move it. */
 .memory-page { align-content: start; min-block-size: 30rem; }
+/* The list stays mounted under an open record, so its search, scroll and
+   drafts are where they were on the way back. */
+.memory-list-view { display: grid; gap: var(--space-4); min-width: 0; align-content: start; }
+.memory-list-view[hidden] { display: none; }
 
 .pkg-memory h3,
 .pkg-memory h4,
@@ -70,22 +74,69 @@
 
 /* ---- Records: search, filter, rows */
 .memory-records { display: grid; gap: var(--space-3); min-width: 0; }
-.memory-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); }
-.memory-toolbar-end { display: flex; align-items: center; gap: var(--space-1); min-width: 0; }
+.memory-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-1); }
 .memory-search {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
   min-height: max(var(--control-h), var(--hit-min));
-  padding-inline: var(--space-3);
+  padding-inline: var(--space-3) var(--space-1);
   border: 1px solid var(--control-border);
   border-radius: var(--radius-control);
   background: var(--input-bg);
   color: var(--muted);
 }
 .memory-search:focus-within { border-color: var(--focus-ring); box-shadow: 0 0 0 3px var(--focus-wash); }
-.memory-search-input { flex: 1; min-width: 0; }
+.memory-search-input { flex: 1; min-width: 0; padding-inline: 0; }
+/* The field's own clear button is replaced by the labelled one. */
+.memory-search-input::-webkit-search-cancel-button { display: none; }
+.memory-search > .memory-busy { display: inline-flex; flex: none; color: var(--faint); }
+.memory-busy--plain { width: var(--icon-sm); height: var(--icon-sm); }
+.memory-search-clear { flex: none; }
+
+/* One choice in view: lifecycle filter, a record's category. */
+.memory-chips { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); min-width: 0; }
+.pkg-memory .memory-chip {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  min-height: var(--control-h-sm);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-round);
+  background: var(--surface-overlay);
+  box-shadow: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-meta);
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+/* A light chip, a full press target: the target grows to the tap floor
+   above and below, where the gap to the next row of chips is. */
+.pkg-memory .memory-chip::before { position: absolute; inset: min(0px, calc((var(--control-h-sm) - var(--hit-min)) / 2)) 0; content: ""; }
+/* Accent ink on its own wash is too faint on light presets: the chosen chip
+   keeps the wash and an accent edge, its words stay in the primary ink. */
+.pkg-memory .memory-chip[aria-checked="true"] {
+  background: var(--accent-wash);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+  color: var(--text);
+  font-weight: 600;
+}
+/* Rows of chips leave room for the taller press targets between them. */
+.memory-chips:not(.memory-filter) { row-gap: max(var(--space-2), calc(var(--hit-min) - var(--control-h-sm))); }
+.pkg-memory .memory-chip:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.pkg-memory .memory-chip:disabled { opacity: .55; cursor: default; }
+@media (hover: hover) {
+  .pkg-memory .memory-chip:hover:where(:not(:disabled, [aria-checked="true"])) { background: var(--surface-overlay-hover); color: var(--text); }
+}
+.memory-summary { color: var(--muted); font-size: var(--font-meta); font-variant-numeric: tabular-nums; }
+.memory-mark { padding-inline: 1px; border-radius: calc(var(--radius-control) / 3); background: var(--accent-wash); color: inherit; box-shadow: inset 0 -1px 0 var(--accent-line); }
 
 .memory-list { display: grid; margin: 0; padding: 0; list-style: none; }
 .memory-row {
@@ -118,7 +169,11 @@
 @media (hover: hover) {
   .pkg-memory button.memory-row-main:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
 }
+/* A tap answers at once, before the record is on screen. */
+.pkg-memory button.memory-row-main:active:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
 .pkg-memory button.memory-row-main:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+/* A new search keeps the old rows on screen, quieter, until its answer. */
+.memory-list[data-stale="true"] { opacity: .55; transition: opacity var(--motion-fast) var(--motion-ease); }
 .pkg-memory .memory-row[data-picked="true"] button.memory-row-main { background: var(--accent-wash); }
 .memory-row-title { font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
 .memory-row-snippet {
@@ -134,6 +189,9 @@
 .memory-meta { display: flex; flex-wrap: wrap; column-gap: var(--space-2); margin-block-start: 2px; color: var(--faint); font-size: var(--font-meta); }
 .memory-meta > span + span::before { content: "·"; margin-inline-end: var(--space-2); }
 .memory-meta-strong { color: var(--accent-text); }
+/* A row's age sits at its end, so a wrapped line never starts with a dot. */
+.memory-meta > .memory-meta-age { margin-inline-start: auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.memory-meta > .memory-meta-age::before { content: none; }
 
 .memory-bulk-bar,
 .memory-import-stage {
@@ -151,9 +209,15 @@
 .memory-import-copy { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
 .memory-import-copy span { color: var(--muted); font-size: var(--font-meta); }
 
-.memory-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); color: var(--muted); font-size: var(--font-meta); }
-.memory-empty,
-.memory-loading { padding: var(--space-5) var(--space-4); text-align: center; }
+.memory-more { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); color: var(--muted); font-size: var(--font-meta); font-variant-numeric: tabular-nums; }
+.memory-empty { display: grid; justify-items: center; gap: var(--space-3); padding: var(--space-5) var(--space-4); text-align: center; }
+.memory-skeleton { display: grid; }
+.memory-skeleton-row { display: grid; gap: var(--space-2); padding-block: var(--space-3); border-block-start: 1px solid var(--surface-divider); }
+.memory-skeleton-row:first-child { border-block-start: 0; }
+.memory-skeleton-row > span { block-size: .8em; border-radius: var(--radius-round); background: var(--surface-overlay); }
+.memory-skeleton-row > span:nth-child(1) { inline-size: 55%; block-size: 1em; }
+.memory-skeleton-row > span:nth-child(2) { inline-size: 92%; }
+.memory-skeleton-row > span:nth-child(3) { inline-size: 30%; }
 
 /* ---- Settings rows: what it is, then its control */
 .memory-settings { display: grid; min-width: 0; }
@@ -184,9 +248,120 @@
 .memory-model-picker { border: 0; margin: 0; padding: 0; min-width: 0; }
 
 /* ---- Forms: the record editor and the inline editors */
-.memory-field { display: grid; gap: var(--space-1); min-width: 0; }
-.memory-field > span { color: var(--text-dim); font-size: var(--font-label); }
-.memory-field-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-3); }
+.memory-field { display: grid; gap: var(--space-2); min-width: 0; }
+.memory-field-label { color: var(--text-dim); font-size: var(--font-meta); font-weight: 600; line-height: 1.3; }
+.memory-field-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); min-width: 0; }
+.memory-size { color: var(--muted); font-size: var(--font-meta); font-variant-numeric: tabular-nums; }
+.memory-size--over { color: var(--red); font-weight: 600; }
+
+/* The open record: head, a title that wraps, then the fields. */
+.memory-editor { display: grid; gap: var(--space-4); min-width: 0; align-content: start; outline: 0; }
+.memory-editor-head-end { display: flex; flex: 0 1 auto; align-items: center; justify-content: flex-end; gap: var(--space-1); }
+.memory-editor-head-end > :not(.memory-unsaved) { flex: none; }
+.memory-editor-title { display: grid; gap: var(--space-1); min-width: 0; }
+/* The title reads as the page's heading and still is a field: it keeps the
+   field's well, with heading type (never under the input size, so focusing
+   it cannot zoom a phone). */
+.pkg-memory .memory-title-input {
+  font-size: max(var(--font-input), var(--font-heading));
+  font-weight: 650;
+  line-height: 1.3;
+  resize: none;
+}
+.pkg-memory .memory-body-input { line-height: 1.5; resize: none; }
+.memory-editor-facts { margin-block-start: var(--space-1); }
+.memory-unsaved {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  white-space: nowrap;
+}
+.memory-unsaved > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.memory-unsaved::before { flex: none; content: ""; inline-size: .5em; block-size: .5em; border-radius: var(--radius-round); background: var(--accent); }
+.memory-editor-head-end { min-width: 0; }
+.memory-editor-head { flex-wrap: nowrap; }
+.memory-editor-head > :first-child { flex: none; }
+.memory-editor-head .memory-unsaved { flex: 0 1 auto; margin-inline-end: var(--space-1); }
+.memory-editor-more { display: grid; gap: var(--space-3); min-width: 0; }
+.memory-editor-more > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: fit-content;
+  min-height: var(--hit-min);
+  border-radius: var(--radius-control);
+  color: var(--text-dim);
+  font-size: var(--font-label);
+  cursor: pointer;
+}
+.memory-editor-more > summary::-webkit-details-marker { display: none; }
+.memory-editor-more > summary { list-style: none; }
+.memory-chevron { inline-size: 1em; block-size: 1em; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transition: transform var(--motion-fast) var(--motion-ease); }
+.memory-chevron:dir(rtl) { transform: scaleX(-1); }
+.memory-editor-more[open] > summary .memory-chevron { transform: rotate(90deg); }
+.memory-editor-more > summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.memory-editor-more-body { display: grid; gap: var(--space-4); padding-block-start: var(--space-1); }
+.memory-editor-help { max-width: 68ch; }
+@media (hover: hover) {
+  .memory-editor-more > summary:hover { color: var(--text); }
+}
+
+/* A list of short values as chips with one input after them. */
+.memory-list-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  min-height: max(var(--control-h), var(--hit-min));
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-2);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-control);
+  background: var(--input-bg);
+  cursor: text;
+}
+.memory-list-field:focus-within { border-color: var(--focus-ring); box-shadow: 0 0 0 3px var(--focus-wash); }
+.memory-list-field[data-disabled] { opacity: .55; cursor: default; }
+.pkg-memory .memory-list-input { flex: 1 1 8ch; min-width: 8ch; min-height: var(--control-h-sm); padding-inline: var(--space-1); }
+.memory-list-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: var(--control-h-sm);
+  padding-inline: var(--space-2) 0;
+  border-radius: var(--radius-round);
+  background: var(--surface-overlay-hover);
+  color: var(--text);
+  font-size: var(--font-meta);
+  line-height: 1.2;
+}
+.memory-list-chip-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pkg-memory .memory-list-chip-remove {
+  position: relative;
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  inline-size: var(--control-h-sm);
+  block-size: var(--control-h-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-round);
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+/* The glyph stays small; the press target reaches the tap floor. */
+.pkg-memory .memory-list-chip-remove::before { position: absolute; inset: calc((var(--control-h-sm) - var(--hit-min)) / 2); content: ""; }
+.memory-list-chip-remove svg { inline-size: .9em; block-size: .9em; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
+.pkg-memory .memory-list-chip-remove:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+@media (hover: hover) {
+  .pkg-memory .memory-list-chip-remove:hover:where(:not(:disabled)) { color: var(--text); background: var(--surface-overlay); }
+}
 
 /* ---- Notices that belong to the page */
 .memory-notice { padding: var(--space-3); border-radius: var(--radius-control); overflow-wrap: anywhere; }
@@ -239,9 +414,21 @@
   .memory-reflect-confirm .memory-actions > * { flex: 1 1 auto; }
 }
 
-/* ---- Wider containers: the editor takes a second column */
-@container pkg-memory (min-width: 520px) {
-  .pkg-memory .memory-field-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* ---- Narrow containers (a phone sheet): the filter is one row that scrolls
+   sideways instead of a second and third line of chips. */
+@container pkg-memory (max-width: 519px) {
+  .pkg-memory .memory-filter {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    /* Room inside the scroller for the focus ring and the chips' taller
+       press targets, which it would otherwise clip. */
+    --memory-filter-room: max(3px, calc((var(--hit-min) - var(--control-h-sm)) / 2));
+    padding: var(--memory-filter-room) 3px;
+    margin: calc(-1 * var(--memory-filter-room)) -3px;
+  }
+  .pkg-memory .memory-filter::-webkit-scrollbar { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -252,18 +439,48 @@
 .memory-mine-group { display: grid; gap: var(--space-2); }
 .memory-mine-group h4 { margin: 0; font-size: var(--font-label); font-weight: 600; }
 .memory-mine-empty { color: var(--muted); font-size: var(--font-meta); }
+.memory-mine-list { display: grid; margin: 0; padding: 0; list-style: none; }
 .memory-mine-note {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: var(--space-3);
-  padding-block: var(--space-2);
+  gap: var(--space-1);
+  min-width: 0;
+  padding-block: var(--space-1);
   border-top: 1px solid var(--surface-divider);
 }
-.memory-mine-note-copy { display: grid; gap: var(--space-1); min-width: 0; overflow-wrap: anywhere; }
+.memory-mine-note[data-open] { display: block; padding-block: var(--space-3); }
+.memory-mine-note > .memory-button,
+.memory-mine-note > :not(.memory-mine-note-main, .memory-mine-note-copy, .memory-mine-editor, .memory-mine-sharing) { flex: none; margin-block-start: var(--space-1); }
+.pkg-memory button.memory-mine-note-main {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+  margin-inline-start: calc(-1 * var(--space-2));
+  padding: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.memory-mine-note-main strong { font-weight: 600; line-height: 1.35; }
+.memory-mine-note-main span { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; color: var(--muted); font-size: var(--font-meta); line-height: 1.45; }
+.memory-mine-note-main small { color: var(--faint); font-size: var(--font-meta); }
+.pkg-memory button.memory-mine-note-main:active:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
+.pkg-memory button.memory-mine-note-main:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+@media (hover: hover) {
+  .pkg-memory button.memory-mine-note-main:hover:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
+}
+/* The review list keeps its plain copy-and-button rows. */
+.memory-mine-note-copy { display: grid; flex: 1 1 0; gap: var(--space-1); min-width: 0; overflow-wrap: anywhere; }
 .memory-mine-note-copy span { color: var(--muted); }
-.memory-mine-note-copy small { color: var(--muted); font-size: var(--font-meta); }
-.memory-mine-editor { display: grid; gap: var(--space-2); }
+.memory-mine-editor { display: grid; gap: var(--space-3); }
 /* The context card's own inset, under its other notes. */
 .memory-chat-scope {
   display: grid;
@@ -284,11 +501,8 @@
   font: inherit;
   cursor: pointer;
 }
-.memory-mine-note-copy { flex: 1 1 0; }
-.memory-mine-note > .memory-actions,
 .memory-mine > .memory-section-head > .memory-actions { flex: none; flex-wrap: nowrap; }
 @container pkg-memory (max-width: 480px) {
-  .pkg-memory .memory-mine-note { flex-direction: column; }
   .pkg-memory .memory-mine > .memory-section-head > .memory-actions { flex: 1 1 100%; flex-wrap: wrap; }
 }
 
@@ -336,7 +550,7 @@
   overflow-wrap: anywhere;
 }
 .memory-share-who { margin: 0; color: var(--muted); font-size: var(--font-meta); }
-.memory-mine-sharing { display: grid; gap: var(--space-2); padding-block-end: var(--space-3); }
+.memory-mine-sharing { display: grid; gap: var(--space-2); }
 .memory-mine-sharing .memory-share-text { margin: 0; }
 .memory-share-confirm {
   min-height: max(var(--control-h-sm), var(--hit-min));

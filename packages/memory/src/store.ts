@@ -492,6 +492,11 @@ const listItem = (item: MemoryRecordDto, query?: string): MemoryListItemDto => (
  * several apostrophes (пам'ять, пам’ять, памʼять); dropping them inside a word
  * makes every spelling one token, on the indexed and on the query side. */
 export const searchText = (value: string): string => value.normalize("NFKC").replace(/(?<=\p{L})['’ʼ`ʹ](?=\p{L})/gu, "");
+/** The page search's comparison form: the word index's spelling, any case. */
+const foldText = (value: string): string => searchText(value).toLocaleLowerCase("und");
+/** The words of a page search, folded; each must match (at most 8). */
+const listWords = (query: string | undefined): string[] =>
+  [...new Set(foldText(query ?? "").split(/\s+/).filter(Boolean))].slice(0, 8);
 // Grammatical words should not outrank the task's subject in an OR query.
 const recallStopWords = new Set("a an and are as at be been being but by can could do does for from had has have how i if in into is it its me my of on or our please should than that the their them there these they this those to was we were what when where which who will with would you your а але без був була були в від він вона вони для до з за і із й на не по про та у це цей ця чи що як".split(" "));
 const queryTokens = (query: string): string[] => [...new Set(
@@ -745,6 +750,7 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
     PRAGMA synchronous = FULL;
     ${MEMORY_SCHEMA}
   `);
+  db.function("memory_fold", { deterministic: true }, (value: unknown) => typeof value === "string" ? foldText(value) : "");
   // A settled harvest job is only a record of work already done: the session
   // cursor has moved past it, or its policy generation is gone.
   db.exec("DELETE FROM memory_harvest_jobs WHERE status IN ('processed','skipped','stale')");
@@ -964,10 +970,17 @@ export function createMemoryStore(db: DatabaseSync, expectedSpaceId?: string, no
       const clauses = ["space_id = ?", layers.sql];
       const params: Array<string | number> = [scope.spaceId, ...layers.params];
       if (lifecycle) { clauses.push("lifecycle = ?"); params.push(lifecycle); }
-      if (q) { clauses.push("(title LIKE ? OR body LIKE ? OR tags LIKE ? OR aliases LIKE ?)"); const needle = `%${q}%`; params.push(needle, needle, needle, needle); }
+      // Every typed word must appear somewhere, in any order and any case.
+      // SQLite's LIKE folds ASCII only, so "деплой" would miss "Деплой":
+      // both sides go through the same Unicode fold instead.
+      for (const word of listWords(q)) {
+        clauses.push("(memory_fold(title) LIKE ? ESCAPE '\\' OR memory_fold(body) LIKE ? ESCAPE '\\' OR memory_fold(tags) LIKE ? ESCAPE '\\' OR memory_fold(aliases) LIKE ? ESCAPE '\\')");
+        const needle = `%${word.replace(/[\\%_]/g, "\\$&")}%`;
+        params.push(needle, needle, needle, needle);
+      }
       const rows = db.prepare(`SELECT * FROM memory_records WHERE ${clauses.join(" AND ")} ORDER BY pinned DESC, updated_at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset) as unknown as MemoryRow[];
       const total = Number((db.prepare(`SELECT count(*) AS count FROM memory_records WHERE ${clauses.join(" AND ")}`).get(...params) as { count: number }).count);
-      return { items: rows.map((row) => listItem(itemFrom(row))), total, policy };
+      return { items: rows.map((row) => listItem(itemFrom(row), q)), total, policy };
     },
     search(scope, query) {
       assertScope(scope);
