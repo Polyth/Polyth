@@ -130,6 +130,9 @@ export function releaseMarker(channel, source) {
  */
 const BODY_NAVIGATION = /^\s*(?:[-*+]\s+)?\[[A-Za-z][A-Za-z0-9 _-]{0,24}\]\s/;
 
+/** Trailing words that leave a truncated summary dangling (`…, so…`, `… and…`). */
+const DANGLING_CONNECTOR = /\s+(?:and|or|but|so|because|which|that|while|when|where|with|without|for|to|of|in|on|at|by|from|as|if|than|then|into|over|under|after|before|the|a|an|its|their|our|his|her|this|these|those|is|are|was|were|be|been|will|would|can|could|may|might|must|should|has|have|had)$/i;
+
 /** A paragraph made only of list items reads as a table of contents, not a sentence. */
 function firstProseParagraph(text) {
   const paragraphs = text.split(/\n\s*\n/);
@@ -152,7 +155,12 @@ export function commitSummary(body) {
   const sentence = /^(.+?[.!?])(\s|$)/.exec(paragraph)?.[1] ?? paragraph;
   if (sentence.length <= SUMMARY_LIMIT) return sentence;
   const cut = sentence.slice(0, SUMMARY_LIMIT);
-  return `${cut.slice(0, Math.max(cut.lastIndexOf(" "), SUMMARY_LIMIT - 40)).replace(/[,;:\s]+$/, "")}…`;
+  let summary = cut.slice(0, Math.max(cut.lastIndexOf(" "), SUMMARY_LIMIT - 40)).replace(/[,;:\s]+$/, "");
+  // A cut that lands after "so" or "and" ends in a dangling fragment; drop the connector too.
+  for (let match = DANGLING_CONNECTOR.exec(summary); match; match = DANGLING_CONNECTOR.exec(summary)) {
+    summary = summary.slice(0, match.index).replace(/[,;:\s]+$/, "");
+  }
+  return `${summary}…`;
 }
 
 /** { section, title } for a commit: conventional type, then leading verb, then the paths it touched. */

@@ -82,6 +82,10 @@ test("the summary is the body's first sentence without trailers", () => {
   assert.equal(commitSummary("Started by session 9fdb0279; narrowed here."), "");
   const long = commitSummary(`${"word ".repeat(80)}end.`);
   assert.ok(long.length <= 221 && long.endsWith("…"), long);
+  // A cut that would land on a connector word drops it, so the note never ends in ", so…".
+  const dangling = commitSummary(`${"A squash-merged pull request starts its commit body with the branch's own titles, so ".repeat(3)}end.`);
+  assert.ok(dangling.endsWith("…"), dangling);
+  assert.ok(!/[\s,](?:and|or|but|so|because|which|that|with|for|to|the|its)$/.test(dangling.slice(0, -1)), dangling);
 });
 
 test("contributors merge identities and skip bots and AI agents", () => {
