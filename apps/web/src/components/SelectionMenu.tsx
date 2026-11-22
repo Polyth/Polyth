@@ -128,9 +128,12 @@ function FloatingSelectionMenu({ container }: {
     setMenu(null);
   };
 
+  // Clear the page selection first: the quote then focuses the composer, and
+  // a later removeAllRanges must not take that focus back.
   const quote = () => {
-    quoteSelectionInComposer(menu.text);
+    const { text } = menu;
     dismiss();
+    quoteSelectionInComposer(text);
   };
 
   const newSession = () => {

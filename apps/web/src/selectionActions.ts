@@ -11,7 +11,9 @@ const MAX_QUOTE_CHARS = 4000;
 /** Markdown-quote a transcript selection for the composer: every line gets a
  *  "> " prefix (bare ">" for blank lines so the quote stays one block), output
  *  is capped so a select-all cannot flood the draft, and a trailing blank line
- *  leaves the caret ready for the reply. Empty selections quote to "". */
+ *  leaves the caret ready for the reply. The composer's quote layer draws that
+ *  blank line as the band's padding and the gap below it, so the caret sits
+ *  visually right under the quote. Empty selections quote to "". */
 export function quoteForReply(raw: string): string {
   const text = raw.replace(/\r\n?/g, "\n").trim();
   if (!text) return "";

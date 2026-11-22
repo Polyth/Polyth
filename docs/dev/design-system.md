@@ -523,6 +523,18 @@ a tab cut at the border with nothing hinting at more. Strips that opt into
   swipes down to clear the selection, and shares the selection-menu glass
   rules. Both surfaces run the same commands (`selectionCommands.ts`) and list
   the same package actions (`session.selection.actions`).
+- Quote in reply (`requestComposerQuote`) adds the quote as its own Markdown
+  block after the draft, followed by a blank line, and focuses the composer
+  inside the same tap/click (a phone raises its keyboard) with the caret at the
+  end. The composer and its expanded editor draw every line the transcript
+  renders as a quote (`quoteLineMask` in `markdown/parse.ts`: a leading `>`
+  outside code fences and math blocks, typed or inserted) like `.md-quote`
+  (bar, fill, dim ink, `>` marks hidden) through the `quoteMirror` text layer
+  under the textarea. That is presentation only: the draft string is
+  unchanged. The textarea's own glyphs turn transparent only while the draft
+  holds a quote. Line boxes are fixed, so the band takes its vertical padding
+  from a blank line beside it, which also reads as the gap before the reply,
+  and a wrapped quote line continues at the field's text start.
 - Package/panel content adapts with container queries; viewport media queries
   are shell-only.
 - Narrow phones (320–375px) are first-class: check every surface at 320, 360

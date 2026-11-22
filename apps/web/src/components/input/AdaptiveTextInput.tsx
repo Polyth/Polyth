@@ -25,6 +25,7 @@ import {
   type EditorCommand,
   type TextSelection,
 } from "./editorCore.ts";
+import { createQuoteMirror, type QuoteMirror } from "./quoteMirror.ts";
 
 export interface TextInputHandle {
   /** Replace all text. Deferred while an IME composition is active.
@@ -90,6 +91,10 @@ export interface AdaptiveTextInputProps {
   onUnmovedArrow?: (key: "ArrowUp" | "ArrowDown") => void;
   onPaste?: (e: ClipboardEvent<HTMLTextAreaElement>) => void;
   onFocusChange?: (focused: boolean) => void;
+  /** Draw Markdown quote lines the way the transcript does (bar, fill, dim
+   *  ink, no `>` marks) through a text layer under the field. Presentation
+   *  only: the text is unchanged. */
+  quoteMirror?: boolean;
 }
 
 const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(function AdaptiveTextInput(
@@ -98,10 +103,15 @@ const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(fu
     "data-composer-input": dataComposerInput,
     role, ariaAutocomplete, ariaExpanded, ariaControls, ariaActiveDescendant,
     onTextChange, onComposingText, onKeyIntercept, onUnmovedArrow, onPaste, onFocusChange,
+    quoteMirror = false,
   },
   ref,
 ) {
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const layerRef = useRef<HTMLDivElement>(null);
+  const mirror = useRef<QuoteMirror | null>(null);
+  // Every path that changes the field's value redraws the quote layer.
+  const syncMirror = () => mirror.current?.sync();
   // The mount-time text only. A host that passes its live draft here would
   // otherwise have React rewrite `defaultValue` (the textarea's child text)
   // on every keystroke: an O(draft) DOM mutation that also re-runs `:has()`
@@ -132,6 +142,7 @@ const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(fu
       el.setSelectionRange(r.caret, r.caret);
     }
     committed.current = el.value;
+    syncMirror();
     if (cmd.kind !== "replace" || !cmd.silent) onTextChange?.(el.value, "program");
   };
 
@@ -152,6 +163,7 @@ const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(fu
     latest.current.onComposingText?.(null);
     if (el) {
       committed.current = el.value;
+      syncMirror();
       latest.current.onTextChange?.(el.value, "user");
     }
     for (const cmd of deferred) applyCommand(cmd);
@@ -231,6 +243,19 @@ const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(fu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useLayoutEffect(() => {
+    const el = taRef.current;
+    const layer = layerRef.current;
+    if (!quoteMirror || !el || !layer) return;
+    const m = createQuoteMirror(el, layer);
+    mirror.current = m;
+    m.sync();
+    return () => {
+      m.destroy();
+      mirror.current = null;
+    };
+  }, [quoteMirror]);
+
   // The platform can change the field without an `input` event (dictation and
   // some phone keyboards have). The host would go on holding the old text and
   // keep Send disabled over a visible draft, so the next sign of life in the
@@ -241,6 +266,7 @@ const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(fu
     if (!el || gate.current.composing || el.value === committed.current) return;
     commitEdit(gate.current);
     committed.current = el.value;
+    syncMirror();
     latest.current.onTextChange?.(el.value, "user");
   };
   useEffect(() => {
@@ -258,6 +284,8 @@ const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(fu
 
   const onInput = (e: FormEvent<HTMLTextAreaElement>) => {
     const el = e.currentTarget;
+    // The composing word is in the field's value too; the layer shows it live.
+    syncMirror();
     if (gate.current.composing) {
       const native = e.nativeEvent as Partial<InputEvent>;
       // An input that is not part of any composition proves the composition
@@ -325,7 +353,7 @@ const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(fu
     }
   };
 
-  return (
+  const field = (
     <textarea
       ref={taRef}
       className={className}
@@ -352,6 +380,15 @@ const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(fu
       }}
       onBlur={onBlur}
     />
+  );
+  if (!quoteMirror) return field;
+  // The layer comes first: both are positioned without a z-index, so the
+  // field paints over it in DOM order and stacks nothing above its siblings.
+  return (
+    <>
+      <div ref={layerRef} className="quote-mirror" aria-hidden="true" hidden />
+      {field}
+    </>
   );
 });
 

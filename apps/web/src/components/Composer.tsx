@@ -90,10 +90,12 @@ import {
   COMPOSER_SUBMIT,
   type ComposerSubmitRequest,
   COMPOSER_INSERT,
+  COMPOSER_QUOTE,
   COMPOSER_REPLACE,
   COMPOSER_COMPARE_REPLACE,
   drainComposerReplacement,
   drainInserts,
+  joinComposerInsert,
   requestComposerReplace,
   requestComposerCompareReplace,
   type ComposerCompareReplace,
@@ -2476,8 +2478,22 @@ function ComposerBody({
       if (!h) return;
       draftRevisionRef.current += 1;
       const visible = sessionIdRef.current === null ? stripRecoveryContextBlocks(detail) : detail;
-      const cur = h.getText();
-      h.replaceText(cur ? `${cur} ${visible}` : visible);
+      h.replaceText(joinComposerInsert(h.getText(), visible));
+    };
+    // "Quote in reply" from a transcript selection: the quote lands as its
+    // own block, then the field takes focus with the caret on the line under
+    // it (replaceText puts the caret at the end). This runs inside the
+    // selection surface's click, so a phone raises its keyboard. A composer
+    // that is not on screen still takes the text, as with any insert, but
+    // leaves focus where it is.
+    const quote = (detail: string) => {
+      insert(detail);
+      const h = inputRef.current;
+      const el = h?.element();
+      if (!h || !el || el.getClientRects().length === 0) return;
+      followDictationRef.current = true;
+      h.focus();
+      el.scrollTop = el.scrollHeight;
     };
     // Live dictation writes straight into the draft so spoken words are visible
     // as they land. The transcript is cumulative, so each update rewrites the
@@ -2543,7 +2559,14 @@ function ComposerBody({
       e.preventDefault();
       replaceText(detail.text);
     };
+    const quoteHandler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (typeof detail !== "string") return;
+      e.preventDefault();
+      quote(detail);
+    };
     window.addEventListener(COMPOSER_INSERT, handler);
+    window.addEventListener(COMPOSER_QUOTE, quoteHandler);
     window.addEventListener(COMPOSER_REPLACE, replace);
     window.addEventListener(COMPOSER_COMPARE_REPLACE, compareReplace);
     // A hands-free voice turn sends the draft exactly like the Send control.
@@ -2560,6 +2583,7 @@ function ComposerBody({
     return () => {
       window.removeEventListener(COMPOSER_SUBMIT, submit);
       window.removeEventListener(COMPOSER_INSERT, handler);
+      window.removeEventListener(COMPOSER_QUOTE, quoteHandler);
       window.removeEventListener(COMPOSER_REPLACE, replace);
       window.removeEventListener(COMPOSER_COMPARE_REPLACE, compareReplace);
       window.removeEventListener(COMPOSER_DICTATION, dictation);
@@ -5321,6 +5345,7 @@ function ComposerBody({
           initialText={text}
           rows={3}
           className="composer-editor"
+          quoteMirror
           ariaLabel={tr("composer.message")}
           placeholder={activeMode
             ? modeText(activeMode.placeholder) || activeModeLabel
