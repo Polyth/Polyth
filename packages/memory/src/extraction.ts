@@ -59,7 +59,7 @@ const secretPatterns = [
 const injectionPattern = /(?:ignore|disregard|forget)\s+(?:all\s+)?(?:previous|prior|above)\s+instructions?/i;
 const urlPattern = /\bhttps?:\/\//i;
 
-const redact = (value: string): string => secretPatterns.reduce((out, pattern) => out.replace(pattern, "[redacted]"), value).slice(0, 8_000);
+export const redact = (value: string): string => secretPatterns.reduce((out, pattern) => out.replace(pattern, "[redacted]"), value).slice(0, 8_000);
 
 export const sanitizeHarvestText = (value: unknown): string | undefined => {
   if (typeof value !== "string") return undefined;

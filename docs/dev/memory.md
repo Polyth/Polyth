@@ -138,10 +138,27 @@ member and an unopenable project (reported as not found). The source project's
 auto-approves it, `off` refuses it. Explicit permission denies still win, and a
 chat on Auto-approve answers the prompt as it does for other read-only tools.
 
+**Earlier chats.** `session_search` searches the message text of this
+project's earlier chats (the session store's `events_fts` index, through the
+host service `session.message-search`, scoped in SQL to the Space and project).
+Every query word must match as a word start. A hit names the chat id, the
+message `#seq`, its date, role and chat title, with an excerpt; `session_read`
+reads up to six messages from that seq onward. Both keep only chats the person
+the turn acts for can open (`personSpaceContext` sessions list), never the
+current chat, and in a chat others read only chats that are not private and that
+every one of its readers can open; any other chat reads as not found. Quoting a
+private chat marks the current chat as holding personal context, like reading a
+personal note. They follow the project's memory policy (refused when memory is
+off) and redact known secret shapes from what they return.
+
 The memory package also projects one deployment instruction, *Polyth long-term
 memory*, into every harness: Polyth memory is where durable project knowledge
 goes (not a separate memory MCP server such as MemPalace), search before answering
-about earlier work, save settled facts with `memory_remember`, and use
+about earlier work and fall back to `session_search` before concluding something
+does not exist, save settled facts with `memory_remember`, save what the user
+asks to remember or track right away (even when the harness keeps memory files
+of its own), keep data the user wants current (an inventory, a running list) in
+one record replaced whole through `supersedes`, and use
 `memory_search_projects` for other projects.
 
 Every harness (Claude, Codex, OpenCode, Pi, Antigravity, Command Code and the

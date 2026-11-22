@@ -2011,6 +2011,23 @@ export interface SessionPrivacy {
   inPrivateRoom?: boolean;
 }
 
+/** One chat message that matched a full-text search. */
+export interface SessionMessageSearchHit {
+  sessionId: string;
+  /** Event seq of the matching message. */
+  seq: number;
+  role: "user" | "assistant";
+  time: number;
+  /** Bounded plain-text excerpt around the best match. */
+  snippet: string;
+}
+
+/** Server service `session.message-search`: full-text search over chat
+ *  message text, scoped in SQL to one Space and optionally one project, best
+ *  match first. Every word must match as a prefix. It knows nothing about who
+ *  reads: callers keep only the sessions their reader can open. */
+export type SessionMessageSearch = (input: { spaceId: string; projectId?: string; q: string; limit?: number }) => Promise<SessionMessageSearchHit[]>;
+
 /** A person a chat is shared with by name. */
 export interface SessionShareGrantDto {
   userId: string;
