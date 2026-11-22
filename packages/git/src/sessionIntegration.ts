@@ -47,6 +47,7 @@ import type {
   StartSessionResult,
 } from "@polyth/contracts";
 import {
+  ISOLATION_BRANCH_TARGETS_MAX,
   isolationBlocksUserMutation,
   isolationRuntimeUnsettled,
   isolationNeedsRecovery,
@@ -68,6 +69,7 @@ import {
   createManagedWorktrees,
   isolateBranchName,
   isManagedBranch,
+  PRESERVED_BRANCH_PREFIX,
   readManagedMarker,
   type ManagedWorktreeService,
 } from "./managedWorktrees.ts";
@@ -196,6 +198,9 @@ export interface IsolationIntegrationDeps {
     requester?: GitActor;
     transport?: { root: string; remote: string };
   }, fn: () => Promise<T>) => Promise<T>;
+  /** A linked checkout was opened in `root` (integrating into a branch that
+   *  was checked out nowhere): settle and announce the project's worktrees. */
+  checkoutOpened?: (projectId: string, root: string) => Promise<void>;
   testHooks?: IsolationTestHooks;
 }
 
@@ -696,19 +701,29 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
     return { path: resolve(checkout.path), isProjectRoot: samePath(checkout.path, projectRoot), branch };
   };
 
-  /** Every ordinary local branch checked out in a checkout of this repository
-   *  — what the work can be integrated into instead of the recorded target.
-   *  One `git worktree list`: the per-checkout identity check runs only when a
-   *  target is actually chosen. A delegated isolation (its target is a managed
-   *  branch) and a pending AI target repair keep their recorded target. */
-  const targetsFor = async (isolation: SessionIsolation): Promise<IsolationTargetDto[]> => {
+  /** Where the work can be integrated instead of the recorded target:
+   *  `targets`, every ordinary local branch checked out in a checkout of this
+   *  repository, and `branches`, the ordinary local branches checked out
+   *  nowhere (choosing one opens a checkout of it first). One `git worktree
+   *  list` and one branch listing: the per-checkout identity check runs only
+   *  when a target is actually chosen. A delegated isolation (its target is a
+   *  managed branch) and a pending AI target repair keep their recorded
+   *  target. */
+  const targetsFor = async (isolation: SessionIsolation): Promise<{ targets: IsolationTargetDto[]; branches: string[] }> => {
     const recorded = localBranchName(isolation.targetBranch);
-    if (isManagedBranch(recorded) || isolation.targetRepair) return [];
-    const list = await git.worktrees.list(isolation.targetPath);
+    if (isManagedBranch(recorded) || isolation.targetRepair) return { targets: [], branches: [] };
+    const [list, local] = await Promise.all([
+      git.worktrees.list(isolation.targetPath),
+      git.branches(isolation.targetPath).catch(() => ({ current: null, branches: [] })),
+    ]);
+    const checkedOut = new Set(list.map((item) => item.branch).filter((branch): branch is string => !!branch));
     const targets: IsolationTargetDto[] = [];
     for (const item of list) {
       if (!item.branch || isManagedBranch(item.branch) || samePath(item.path, isolation.worktreePath)) continue;
       if (!existsSync(item.path)) continue;
+      // Another chat's isolated checkout, even on an ordinary branch its
+      // agent made, is that chat's workspace, not a place to integrate into.
+      if (await readManagedMarker(git, item.path).catch(() => "corrupt" as const)) continue;
       const origin = !!isolation.originPath && samePath(item.path, isolation.originPath);
       targets.push({
         branch: item.branch,
@@ -717,9 +732,64 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
         current: item.branch === recorded && (isolation.originPath ? origin : true),
       });
     }
-    return targets.sort((a, b) => Number(b.current) - Number(a.current)
-      || Number(b.origin) - Number(a.origin)
-      || a.branch.localeCompare(b.branch));
+    const branches = local.branches
+      .filter((item) => !item.remote && openableBranch(item.name) && !checkedOut.has(item.name))
+      .map((item) => item.name)
+      .sort((a, b) => a.localeCompare(b))
+      .slice(0, ISOLATION_BRANCH_TARGETS_MAX);
+    return {
+      targets: targets.sort((a, b) => Number(b.current) - Number(a.current)
+        || Number(b.origin) - Number(a.origin)
+        || a.branch.localeCompare(b.branch)),
+      branches,
+    };
+  };
+
+  /** A branch Polyth may open an ordinary checkout of to integrate into: a
+   *  plain local branch name, never a managed or preserved one. */
+  const openableBranch = (branch: string): boolean =>
+    !!branch && !branch.startsWith("-") && !isManagedBranch(branch) && !branch.startsWith(PRESERVED_BRANCH_PREFIX);
+
+  /** Resolve a chosen target to a checkout. A `path` names one already; a
+   *  bare branch reuses its checkout when it has one, else must be an
+   *  ordinary local branch checked out nowhere, and gets a linked checkout of
+   *  its own, exactly as a chat started on that branch would. Nothing is
+   *  created unless the work has something the branch lacks. */
+  const checkoutFor = async (
+    session: SessionProjection,
+    isolation: SessionIsolation,
+    target: { branch: string; path?: string },
+  ): Promise<{ branch: string; path: string }> => {
+    const branch = localBranchName(target.branch.trim());
+    if (target.path) return { branch, path: target.path };
+    // retargetAtRest refuses these too; nothing is opened for a refusal.
+    if (isManagedBranch(localBranchName(isolation.targetBranch))) {
+      throw unpublished(err("unsupported", "a delegated isolation integrates into the checkout it was delegated from"));
+    }
+    if (isolation.targetRepair) {
+      throw unpublished(err("conflict", `finish the AI repair for ${isolation.targetBranch} before choosing another branch`));
+    }
+    if (!openableBranch(branch)) {
+      throw unpublished(err("invalid-input", "managed isolation branches cannot be a merge target"));
+    }
+    const existing = (await git.worktrees.list(isolation.targetPath)).find((item) => item.branch === branch);
+    // A branch already checked out goes through that checkout; retargetAtRest
+    // proves it is an ordinary checkout of this repository.
+    if (existing) return { branch, path: resolve(existing.path) };
+    const head = await git.readRef(isolation.targetPath, `refs/heads/${branch}`);
+    if (!head) throw unpublished(err("not-found", `there is no local branch ${branch}`));
+    if (!(await git.hasUniqueChanges(isolation.worktreePath, head))) {
+      throw unpublished(err("invalid-input", `No isolated changes to merge into ${branch}.`));
+    }
+    let path: string;
+    try {
+      path = (await git.worktrees.create(isolation.targetPath, { branch })).path;
+    } catch (error) {
+      throw unpublished(error);
+    }
+    isolationLog("target-checkout-opened", { sessionId: session.id, branch, path });
+    await deps.checkoutOpened?.(session.projectId, isolation.targetPath).catch(() => undefined);
+    return { branch, path: resolve(path) };
   };
 
   /** Point an at-rest isolation at another checked-out branch before merging.
@@ -750,6 +820,9 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
     if (!checkout || checkout.branch !== branch || samePath(path, isolation.worktreePath)
       || !await checkoutMatchesTarget(path, branch, isolation)) {
       throw unpublished(err("conflict", `${branch} is not checked out at ${path}`));
+    }
+    if (await readManagedMarker(git, path).catch(() => "corrupt" as const)) {
+      throw unpublished(err("conflict", `${path} is another chat's isolated workspace`));
     }
     const targetHead = await git.revParse(path, "HEAD");
     if (!(await git.hasUniqueChanges(isolation.worktreePath, targetHead))) {
@@ -857,6 +930,11 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
         reason: source.reason === "marker-corrupt" ? "corrupt" : "unowned",
       };
     }
+    // The agent may work on a branch of its own in the checkout; Push
+    // defaults to that branch.
+    const switched = source.worktree.branch !== isolation.worktreeBranch
+      ? { checkedOutBranch: source.worktree.branch }
+      : {};
     // Read-only Git work, so the independent reads run together; a status
     // read is on the path that shows "Changes ready" after every turn.
     const targetRead = inspectTarget(isolation).catch(() => null);
@@ -875,13 +953,13 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
       path: isolation.targetPath,
     };
     if (runtimeUnsettled) {
-      return { eligible: false, hasChanges, targetBranch, targetDirty: target.dirty, revision, reason: "runtime-recovering" };
+      return { eligible: false, hasChanges, targetBranch, targetDirty: target.dirty, revision, reason: "runtime-recovering", ...switched };
     }
     if (!hasChanges) {
-      return { eligible: false, hasChanges: false, targetBranch, targetDirty: target.dirty, revision, reason: "no-changes" };
+      return { eligible: false, hasChanges: false, targetBranch, targetDirty: target.dirty, revision, reason: "no-changes", ...switched };
     }
     if (isolation.dismissedRevision && isolation.dismissedRevision === revision) {
-      return { eligible: false, hasChanges: true, targetBranch, targetDirty: target.dirty, revision, reason: "dismissed" };
+      return { eligible: false, hasChanges: true, targetBranch, targetDirty: target.dirty, revision, reason: "dismissed", ...switched };
     }
     if (isolation.targetRepair && !isolation.targetRepair.applied) {
       return {
@@ -891,6 +969,7 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
         targetDirty: target.dirty,
         revision,
         reason: "target-overlap",
+        ...switched,
       };
     }
     if (isolation.state === "conflict") {
@@ -904,11 +983,12 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
             targetDirty: target.dirty,
             revision,
             reason: "conflict",
+            ...switched,
           };
         }
       }
       if (events && turnCompletedAfterConflict(isolation, events)) {
-        return { eligible: true, hasChanges: true, targetBranch, targetDirty: target.dirty, revision };
+        return { eligible: true, hasChanges: true, targetBranch, targetDirty: target.dirty, revision, ...switched };
       }
       return {
         eligible: false,
@@ -917,6 +997,7 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
         targetDirty: target.dirty,
         revision,
         reason: "conflict",
+        ...switched,
       };
     }
     if (events) {
@@ -925,12 +1006,12 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
         ? (stopped.data as { reason?: unknown }).reason
         : undefined;
       if (stopped?.type !== "turn/stopped" || reason !== "completed") {
-        return { eligible: false, hasChanges: true, targetBranch, targetDirty: target.dirty, revision, reason: "no-turn" };
+        return { eligible: false, hasChanges: true, targetBranch, targetDirty: target.dirty, revision, reason: "no-turn", ...switched };
       }
     } else if (isolation.state !== "merge-ready") {
-      return { eligible: false, hasChanges: true, targetBranch, targetDirty: target.dirty, revision, reason: "no-turn" };
+      return { eligible: false, hasChanges: true, targetBranch, targetDirty: target.dirty, revision, reason: "no-turn", ...switched };
     }
-    return { eligible: true, hasChanges: true, targetBranch, targetDirty: target.dirty, revision };
+    return { eligible: true, hasChanges: true, targetBranch, targetDirty: target.dirty, revision, ...switched };
   };
 
   const derivedState = (
@@ -2299,8 +2380,11 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
       incorporated = await git.isAncestor(isolation.worktreePath, repair.snapshotSha, head).catch(() => false);
     }
     if (!incorporated) {
+      // The checkout may be on a branch its agent made; the checkpoint lands
+      // on whichever branch is checked out, as in an ordinary checkout.
+      const source = await assertOwnedSource(session.id, isolation);
       const before = await git.status(isolation.worktreePath);
-      if (before.branch !== isolation.worktreeBranch) {
+      if (before.branch !== source.branch) {
         throw err("conflict", "the isolated workspace branch changed while preparing the target repair");
       }
       if (before.conflicted.length > 0) {
@@ -2321,7 +2405,7 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
         );
         if (!await git.updateRef(
           isolation.worktreePath,
-          `refs/heads/${localBranchName(isolation.worktreeBranch)}`,
+          `refs/heads/${localBranchName(source.branch)}`,
           checkpoint.sha,
           beforeHead,
         )) {
@@ -3196,15 +3280,18 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
       const choosable = !blocked && sourceReady && hasChanges && !delegated
         && suggestion?.reason !== "runtime-recovering"
         && USER_OPS.merge.has(isolation.state);
-      const targets = choosable ? await targetsFor(isolation).catch(() => []) : [];
+      const { targets, branches } = choosable
+        ? await targetsFor(isolation).catch(() => ({ targets: [], branches: [] }))
+        : { targets: [], branches: [] };
       return {
         isolation,
         suggestion,
         ...(delegated ? { delegated } : {}),
         effectiveState,
         ...(targets.length ? { targets } : {}),
+        ...(branches.length ? { branches } : {}),
         actions: {
-          ...(targets.some((target) => !target.current) ? { canChooseTarget: true } : {}),
+          ...(targets.some((target) => !target.current) || branches.length ? { canChooseTarget: true } : {}),
           canReview: sourceReady,
           canMerge: !blocked && sourceReady && destinationReady && hasChanges
             && !conflict && suggestion?.reason !== "target-overlap" && !delegated,
@@ -3289,8 +3376,9 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
       options: {
         allowTargetRepair?: boolean;
         requester?: GitActor;
-        /** Integrate into this checked-out branch instead of the recorded one. */
-        target?: { branch: string; path: string };
+        /** Integrate into this branch instead of the recorded one. Without
+         *  `path`, a branch checked out nowhere gets a checkout first. */
+        target?: { branch: string; path?: string };
         /** Push the target branch once the work is published there. */
         push?: boolean;
       } = {},
@@ -3322,7 +3410,8 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
         }
         if (options.target) {
           await assertOwnedSource(sessionId, isolation);
-          ({ session, isolation } = await retargetAtRest(session, isolation, options.target));
+          const target = await checkoutFor(session, isolation, options.target);
+          ({ session, isolation } = await retargetAtRest(session, isolation, target));
         }
         if (isolation.targetRepair && !isolation.targetRepair.applied) {
           throw err("conflict", `${isolation.targetBranch} has local changes that need AI reconciliation before integration`);
@@ -3479,13 +3568,14 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
 
     /** Choose the branch this session's work will be integrated into, without
      *  integrating: one of the status's `targets` (a checked-out ordinary
-     *  branch). Allowed only while the work rests (`active`, `merge-ready`,
+     *  branch), or one of its `branches` without a path (a checkout of it is
+     *  opened first). Allowed only while the work rests (`active`, `merge-ready`,
      *  `conflict`: states that by contract carry no publication intent or
      *  result commit), recorded as an `isolation/retargeted` event. Choosing
      *  the current target is a no-op. */
     async retarget(
       sessionId: string,
-      target: { branch: string; path: string },
+      target: { branch: string; path?: string },
     ): Promise<SessionProjection> {
       return withSession(sessionId, async () => {
         const { session, isolation } = await load(sessionId);
@@ -3495,7 +3585,7 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
           throw err("not-found", "the isolated workspace is no longer available");
         }
         await assertOwnedSource(sessionId, isolation);
-        return (await retargetAtRest(session, isolation, target)).session;
+        return (await retargetAtRest(session, isolation, await checkoutFor(session, isolation, target))).session;
       });
     },
 
@@ -3518,9 +3608,10 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
         if (!existsSync(isolation.worktreePath)) {
           throw err("not-found", "the isolated workspace is no longer available");
         }
-        await assertOwnedSource(sessionId, isolation);
+        const source = await assertOwnedSource(sessionId, isolation);
         const remote = input.remote?.trim() || "origin";
-        const branch = input.branch?.trim() || isolation.worktreeBranch;
+        // A branch the agent checked out is the one it means to publish.
+        const branch = input.branch?.trim() || source.branch;
         if (localBranchName(branch) === localBranchName(isolation.targetBranch)) {
           throw err("invalid-input", `pushing the isolated branch over ${isolation.targetBranch} is not allowed`);
         }

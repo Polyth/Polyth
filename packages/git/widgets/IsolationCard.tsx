@@ -1,6 +1,6 @@
 import { handoffReviewScope } from "./reviewScopeHandoff.ts";
-import { cloneElement, useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState, type CSSProperties, type ReactElement, type ReactNode, type RefObject } from "react";
-import type { IsolationStatusDto, IsolationTargetDto, SessionIsolation, SessionProjection } from "@polyth/contracts";
+import { cloneElement, useCallback, useEffect, useId, useLayoutEffect, useReducer, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactElement, type ReactNode, type RefObject } from "react";
+import type { IsolationStatusDto, SessionIsolation, SessionProjection } from "@polyth/contracts";
 import { delegatedChildRunning, isManagedIsolationBranch, isolationActions, isolationBlocksUserMutation, isolationNeedsRecovery, isolationRuntimeUnsettled, runningSubagents } from "@polyth/contracts";
 import { api } from "@polyth/session/web-api";
 import { reportGitError } from "./gitRefusal.ts";
@@ -21,6 +21,7 @@ import {
 import {
   BranchIcon,
   Button,
+  CheckIcon,
   ChevronDownIcon,
   CombineIcon,
   DeleteIcon,
@@ -32,6 +33,7 @@ import {
   Menu,
   MoreIcon,
   PushIcon,
+  SearchIcon,
   Spinner,
   TextInput,
   WarningIcon,
@@ -230,6 +232,194 @@ function ProgressSteps({ steps }: { steps: Array<{ id: string; label: string; st
         </li>
       ))}
     </ol>
+  );
+}
+
+/** A branch the work can be integrated into: one checked out somewhere
+ *  (`path` set, from `status.targets`) or one checked out nowhere (no
+ *  `path`, from `status.branches`; the server opens a checkout first). */
+type Destination = { key: string; branch: string; path?: string; origin: boolean; current: boolean };
+
+const destinationKey = (branch: string, path?: string): string => path === undefined ? `branch:${branch}` : `path:${path}`;
+
+/** Past this many choices the list gets a filter field. */
+const DESTINATION_FILTER_AT = 8;
+
+/**
+ * Where the work goes, as a disclosure inside the card. Collapsed it is one
+ * quiet row naming the destination, so the card keeps its two-plus-one shape;
+ * expanded it lists the checked-out branches (the original checkout marked)
+ * and then every other local branch. Picking a row only chooses: the card's
+ * primary button, whose label always names the chosen branch, is the one
+ * place that integrates.
+ */
+function DestinationPicker({
+  checkedOut, others, selected, open, disabled, onOpenChange, onSelect,
+}: {
+  checkedOut: readonly Destination[];
+  others: readonly Destination[];
+  selected: Destination | null;
+  open: boolean;
+  disabled: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSelect: (destination: Destination) => void;
+}) {
+  const panelId = useId();
+  const otherHeadingId = useId();
+  const toggleRef = useRef<HTMLButtonElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const [query, setQuery] = useState("");
+  const total = checkedOut.length + others.length;
+  const needle = query.trim().toLowerCase();
+  const matches = (destination: Destination) => !needle
+    || destination.branch.toLowerCase().includes(needle)
+    || (destination.path?.toLowerCase().includes(needle) ?? false);
+  const shownCheckedOut = checkedOut.filter(matches);
+  const shownOthers = others.filter(matches);
+  useEffect(() => { if (!open) setQuery(""); }, [open]);
+
+  const radios = () => [...(listRef.current?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? [])];
+  const choose = (destination: Destination) => {
+    onSelect(destination);
+    onOpenChange(false);
+    toggleRef.current?.focus();
+  };
+  // Radio-group keys: arrows move the choice with focus, Escape folds the
+  // list back into its row.
+  const onListKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      onOpenChange(false);
+      toggleRef.current?.focus();
+      return;
+    }
+    const keys: Record<string, number> = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 };
+    const all = radios();
+    if (!all.length) return;
+    const at = all.indexOf(document.activeElement as HTMLButtonElement);
+    let next: number | null = null;
+    if (event.key in keys) next = at < 0 ? 0 : (at + keys[event.key]! + all.length) % all.length;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = all.length - 1;
+    if (next === null) return;
+    event.preventDefault();
+    all[next]!.focus();
+    const key = all[next]!.dataset.destination;
+    const destination = [...checkedOut, ...others].find((candidate) => candidate.key === key);
+    if (destination) onSelect(destination);
+  };
+  const tabbable = selected && [...shownCheckedOut, ...shownOthers].some((candidate) => candidate.key === selected.key)
+    ? selected.key
+    : (shownCheckedOut[0] ?? shownOthers[0])?.key;
+
+  const row = (destination: Destination) => {
+    const checked = selected?.key === destination.key;
+    return (
+      <button
+        key={destination.key}
+        type="button"
+        role="radio"
+        aria-checked={checked}
+        data-destination={destination.key}
+        tabIndex={destination.key === tabbable ? 0 : -1}
+        className="isolation-target-row"
+        disabled={disabled}
+        onClick={() => choose(destination)}
+      >
+        <span className="isolation-target-mark" aria-hidden="true">
+          {checked ? <Icon icon={CheckIcon} size="sm" /> : null}
+        </span>
+        <span className="isolation-target-text">
+          <span className="isolation-target-name">
+            <span className="isolation-target-branch">{targetLabel(destination.branch)}</span>
+            {destination.origin && <span className="isolation-target-tag">{tr("isolation.targetOrigin")}</span>}
+          </span>
+          {destination.path !== undefined && (
+            <span className="isolation-target-path" title={destination.path}><bdi>{destination.path}</bdi></span>
+          )}
+        </span>
+      </button>
+    );
+  };
+
+  return (
+    <div className="isolation-target" data-open={open ? "" : undefined}>
+      <button
+        ref={toggleRef}
+        type="button"
+        className="isolation-target-toggle"
+        aria-expanded={open}
+        aria-controls={panelId}
+        disabled={disabled}
+        onClick={() => onOpenChange(!open)}
+      >
+        <span className="isolation-target-label">{tr("isolation.destination")}</span>
+        <span className="isolation-target-value">
+          {selected ? (
+            <>
+              <span className="isolation-target-branch">{targetLabel(selected.branch)}</span>
+              {selected.path === undefined && <span className="isolation-target-hint">{tr("isolation.targetOpensCheckout")}</span>}
+            </>
+          ) : <span className="isolation-target-hint">{tr("isolation.chooseDestination")}</span>}
+        </span>
+        <span className="isolation-target-change">
+          {tr("isolation.changeDestination")}
+          <Icon icon={ChevronDownIcon} size="sm" className="isolation-target-chevron" />
+        </span>
+      </button>
+      {open && (
+        <div id={panelId} className="isolation-target-panel" role="group" aria-label={tr("isolation.integrateElsewhere")}>
+          {total > DESTINATION_FILTER_AT && (
+            <div className="isolation-target-filter">
+              <Icon icon={SearchIcon} size="sm" />
+              <input
+                type="search"
+                className="isolation-target-filter-input"
+                value={query}
+                placeholder={tr("isolation.filterBranches")}
+                aria-label={tr("isolation.filterBranches")}
+                aria-controls={`${panelId}-list`}
+                autoComplete="off"
+                spellCheck={false}
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowDown") { event.preventDefault(); radios()[0]?.focus(); }
+                  else if (event.key === "Escape" && query) { event.preventDefault(); event.stopPropagation(); setQuery(""); }
+                }}
+              />
+            </div>
+          )}
+          <div
+            ref={listRef}
+            id={`${panelId}-list`}
+            className="isolation-target-list"
+            role="radiogroup"
+            aria-label={tr("isolation.integrateElsewhere")}
+            onKeyDown={onListKeyDown}
+          >
+            {shownCheckedOut.length > 0 && (
+              <div className="isolation-target-group" role="presentation">
+                <span className="isolation-target-heading" aria-hidden="true">{tr("isolation.targetsCheckedOut")}</span>
+                {shownCheckedOut.map(row)}
+              </div>
+            )}
+            {shownOthers.length > 0 && (
+              <div className="isolation-target-group" role="presentation">
+                <span id={otherHeadingId} className="isolation-target-heading">
+                  {tr("isolation.targetsOther")}
+                  <span className="isolation-target-heading-hint">{tr("isolation.targetsOtherHint")}</span>
+                </span>
+                {shownOthers.map(row)}
+              </div>
+            )}
+            {shownCheckedOut.length + shownOthers.length === 0 && (
+              <p className="isolation-target-empty" role="status">{tr("isolation.noMatchingBranches")}</p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -485,6 +675,10 @@ function useIsolationCardView(cardRef: RefObject<HTMLElement | null>): CardView 
   // that branch before the server's status read reports the new target.
   const [mergingIntoFor, setMergingIntoFor] = useState<{ sessionId: string; branch: string } | null>(null);
   const mergingInto = mergingIntoFor && mergingIntoFor.sessionId === sessionId ? mergingIntoFor.branch : null;
+  // The destination picked in the card's picker, and whether the picker is
+  // open; both belong to the session they were chosen for.
+  const [destinationFor, setDestinationFor] = useState<{ sessionId: string; key: string } | null>(null);
+  const [destinationOpenFor, setDestinationOpenFor] = useState<{ sessionId: string; open: boolean } | null>(null);
   const rowClient = useRef(createIsolationClient()).current;
 
   const refresh = useCallback(async () => {
@@ -702,9 +896,9 @@ function useIsolationCardView(cardRef: RefObject<HTMLElement | null>): CardView 
   // Other checked-out branches the work can go to instead. When the recorded
   // origin checkout has since switched branches, its new branch is offered as
   // the way forward rather than a dead end.
-  const otherTargets = actions?.canChooseTarget === true && !mergeRequested
-    ? (status?.targets ?? []).filter((target) => !target.current)
-    : [];
+  const choosing = actions?.canChooseTarget === true && !mergeRequested;
+  const allTargets = choosing ? status?.targets ?? [] : [];
+  const otherTargets = allTargets.filter((target) => !target.current);
   const originSwitched = destinationUnavailable ? otherTargets.find((target) => target.origin) : undefined;
   const canDelete = status !== null && !working && !recovering && !ownershipUnverified;
   // Once resolving is handed to the agent, the conflict is its work in
@@ -764,7 +958,8 @@ function useIsolationCardView(cardRef: RefObject<HTMLElement | null>): CardView 
   };
 
   const openPushDialog = () => {
-    setPushBranchName(live.worktreeBranch);
+    // A branch the agent made in the checkout is the one to publish.
+    setPushBranchName(status?.suggestion?.checkedOutBranch ?? live.worktreeBranch);
     setPushMessage(session.title?.trim() && session.title !== "New session" ? session.title.trim() : "");
     setPushDialogOpen(true);
   };
@@ -828,7 +1023,7 @@ function useIsolationCardView(cardRef: RefObject<HTMLElement | null>): CardView 
       branch: targetBranch,
     })
     : stranded
-    ? tr(otherTargets.length ? "isolation.restoreOriginOrChoose" : "isolation.restoreOrigin", {
+    ? tr(otherTargets.length || (choosing && (status?.branches?.length ?? 0) > 0) ? "isolation.restoreOriginOrChoose" : "isolation.restoreOrigin", {
       path: live.originPath ?? live.targetPath,
       branch: targetBranch,
     })
@@ -870,40 +1065,50 @@ function useIsolationCardView(cardRef: RefObject<HTMLElement | null>): CardView 
 
   // Integrating elsewhere rewrites the session's target on the server, then
   // runs the same merge-back; a conflict there is shown against that branch.
-  const integrateInto = (target: IsolationTargetDto) => {
-    setMergingIntoFor({ sessionId, branch: target.branch });
+  // A branch checked out nowhere goes without a path: the server opens a
+  // checkout of it first, and the session returns there.
+  const integrateInto = (destination: { branch: string; path?: string }) => {
+    setMergingIntoFor({ sessionId, branch: destination.branch });
+    const target = destination.path === undefined
+      ? { branch: destination.branch }
+      : { branch: destination.branch, path: destination.path };
     void run("merge", async () => {
-      applySession((await api.isolationMerge(sessionId, { target: { branch: target.branch, path: target.path } })).session);
+      applySession((await api.isolationMerge(sessionId, { target })).session);
     }).finally(() => setMergingIntoFor((current) => current?.sessionId === sessionId ? null : current));
   };
-  const targetRows: MenuEntry[] = otherTargets
-    .filter((target) => target !== originSwitched)
-    .map((target) => ({
-      id: `target:${target.path}`,
-      label: targetLabel(target.branch),
-      detail: target.path,
-      icon: BranchIcon,
-      disabled: busy !== null || working,
-      onSelect: () => integrateInto(target),
-    }));
-  const canChooseTarget = targetRows.length > 0 && !recovering && !unavailable && !working && !runtimeRecovering;
-  // Another branch is an alternative, so it waits one level down in the
-  // overflow and the card keeps its two-plus-one shape. Only when no default
-  // target can take the work is choosing one the card's own way forward.
-  const chooseOnCard = canChooseTarget && stranded;
+
+  // Every place the work can go: the checked-out branches (recorded target
+  // first, then the original checkout), then the branches checked out
+  // nowhere. A branch the agent checked out inside this workspace is never
+  // one of them (the server leaves it out too).
+  const rank = (target: { current: boolean; origin: boolean }) => target.current ? 0 : target.origin ? 1 : 2;
+  const checkedOutDestinations: Destination[] = [...allTargets]
+    .sort((left, right) => rank(left) - rank(right))
+    .map((target) => ({ key: destinationKey(target.branch, target.path), branch: target.branch, path: target.path, origin: target.origin, current: target.current }));
+  const agentBranch = status?.suggestion?.checkedOutBranch;
+  const otherDestinations: Destination[] = (choosing ? status?.branches ?? [] : [])
+    .filter((branch) => branch !== agentBranch)
+    .map((branch) => ({ key: destinationKey(branch), branch, origin: false, current: false }));
+  const allDestinations = [...checkedOutDestinations, ...otherDestinations];
+  // The default is the recorded target; when the original checkout switched
+  // branches, its new branch is the way forward instead.
+  const defaultDestination = checkedOutDestinations.find((destination) => destination.current)
+    ?? (originSwitched ? checkedOutDestinations.find((destination) => destination.path === originSwitched.path) : undefined)
+    ?? null;
+  const pickedKey = destinationFor?.sessionId === sessionId ? destinationFor.key : null;
+  const selectedDestination = allDestinations.find((destination) => destination.key === pickedKey) ?? defaultDestination;
+  const canPickDestination = choosing && !recovering && !unavailable && !working && !runtimeRecovering && !delegatedPending
+    && allDestinations.some((destination) => destination !== defaultDestination);
+  // Collapsed by default; when no recorded destination can take the work,
+  // choosing one is the card's own way forward, so it starts open.
+  const destinationOpen = canPickDestination
+    && (destinationOpenFor?.sessionId === sessionId ? destinationOpenFor.open : !defaultDestination);
+  const chosenElsewhere = choosing && selectedDestination !== null && !selectedDestination.current
+    && !recovering && !unavailable && !working && !runtimeRecovering && !delegatedPending;
 
   // Destructive endings live behind the overflow whenever a better action is
   // on the card. They stay in the open only when they are the only way out.
   const overflow: MenuEntry[] = [];
-  if (canChooseTarget && !chooseOnCard) {
-    overflow.push({
-      id: "integrate-elsewhere",
-      label: tr("isolation.integrateElsewhere"),
-      icon: CombineIcon,
-      entries: targetRows,
-      onSelect: () => {},
-    });
-  }
   overflow.push({
     id: "hide",
     label: tr("isolation.hideUntilNextTurn"),
@@ -1012,6 +1217,17 @@ function useIsolationCardView(cardRef: RefObject<HTMLElement | null>): CardView 
         )}
         {steps && <ProgressSteps steps={steps} />}
         {showPath && <p className="isolation-card-path mono">{live.worktreePath}</p>}
+        {canPickDestination && (
+          <DestinationPicker
+            checkedOut={checkedOutDestinations}
+            others={otherDestinations}
+            selected={selectedDestination}
+            open={destinationOpen}
+            disabled={busy !== null || working}
+            onOpenChange={(open) => setDestinationOpenFor({ sessionId, open })}
+            onSelect={(destination) => setDestinationFor({ sessionId, key: destination.key })}
+          />
+        )}
         <div className="isolation-card-actions">
           {(stranded || dirtyBlocked) && (
             <Button size="sm" disabled={busy !== null} onClick={() => void refresh()}>
@@ -1058,7 +1274,7 @@ function useIsolationCardView(cardRef: RefObject<HTMLElement | null>): CardView 
               {tr("isolation.retryRecovery")}
             </Button>
           )}
-          {conflict && actions?.canResolve === true && (
+          {conflict && actions?.canResolve === true && !chosenElsewhere && (
             <Button
               size="sm"
               variant="primary"
@@ -1072,25 +1288,7 @@ function useIsolationCardView(cardRef: RefObject<HTMLElement | null>): CardView 
               {tr("isolation.resolveAndProceed")}
             </Button>
           )}
-          {chooseOnCard && (
-            <Menu label={tr("isolation.integrateElsewhere")} align="end" entries={targetRows}>
-              {(trigger) => (
-                <Button
-                  {...trigger}
-                  size="sm"
-                  variant="primary"
-                  className="isolation-card-primary"
-                  iconStart={CombineIcon}
-                  iconEnd={ChevronDownIcon}
-                  disabled={busy !== null || working}
-                  busy={busy === "merge"}
-                >
-                  {tr("isolation.integrateElsewhere")}
-                </Button>
-              )}
-            </Menu>
-          )}
-          {originSwitched && !recovering && (
+          {chosenElsewhere && selectedDestination && (
             <Button
               size="sm"
               variant="primary"
@@ -1098,12 +1296,12 @@ function useIsolationCardView(cardRef: RefObject<HTMLElement | null>): CardView 
               iconStart={CombineIcon}
               disabled={busy !== null || working}
               busy={busy === "merge"}
-              onClick={() => integrateInto(originSwitched)}
+              onClick={() => integrateInto(selectedDestination)}
             >
-              {tr("isolation.integrateInto", { branch: targetLabel(originSwitched.branch) })}
+              {tr("isolation.integrateInto", { branch: targetLabel(selectedDestination.branch) })}
             </Button>
           )}
-          {!conflict && !unavailable && !dirtyBlocked && ready && (
+          {!conflict && !unavailable && !dirtyBlocked && ready && !chosenElsewhere && (
             <Button
               size="sm"
               variant="primary"

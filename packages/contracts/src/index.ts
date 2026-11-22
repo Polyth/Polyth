@@ -2606,6 +2606,9 @@ export interface IsolationSuggestionDto {
     | "corrupt"
     | "destination-unavailable"
     | "merging";
+  /** Set when the agent checked out a branch of its own in the session's
+   *  checkout (the work integrates from it as usual): that branch's name. */
+  checkedOutBranch?: string;
 }
 
 /** A delegated agent session working in its own managed checkout. The checkout
@@ -2642,6 +2645,12 @@ export interface IsolationStatusDto {
    *  repository. Listed only while there is work to integrate and the target
    *  can still be chosen; older servers omit it. */
   targets?: IsolationTargetDto[];
+  /** Local branches checked out nowhere that the work can be integrated into
+   *  too (`IsolationMergeInput.target` without `path`): Polyth first opens an
+   *  ordinary linked checkout of the chosen branch, and the session returns
+   *  there. Sorted by name, at most `ISOLATION_BRANCH_TARGETS_MAX`; listed
+   *  under the same conditions as `targets`. Older servers omit it. */
+  branches?: string[];
   actions?: {
     canReview: boolean;
     canMerge: boolean;
@@ -2651,7 +2660,7 @@ export interface IsolationStatusDto {
     canRecover: boolean;
     canAbandon: boolean;
     /** The work can be integrated into a branch from `targets` other than the
-     *  recorded one (`IsolationMergeInput.target`). */
+     *  recorded one, or into one of `branches` (`IsolationMergeInput.target`). */
     canChooseTarget?: boolean;
   };
 }
@@ -2674,7 +2683,9 @@ export interface IsolationTargetDto {
  *  remote (else `origin`) with the acting person's account; a refused push
  *  never undoes the merge (`IsolationMergeResultDto.pushed`). */
 export interface IsolationMergeInput {
-  target?: { branch: string; path: string };
+  /** Without `path`, `branch` is one of the status's `branches`: a checkout
+   *  of it is opened first. */
+  target?: { branch: string; path?: string };
   push?: boolean;
 }
 
@@ -2683,8 +2694,12 @@ export interface IsolationMergeInput {
  *  `targets`; the change is recorded as an `isolation/retargeted` event. */
 export interface IsolationRetargetInput {
   branch: string;
-  path: string;
+  /** Omitted for one of the status's `branches` (a checkout is opened). */
+  path?: string;
 }
+
+/** Cap on `IsolationStatusDto.branches`. */
+export const ISOLATION_BRANCH_TARGETS_MAX = 200;
 
 /** The push a merge ran after publishing (`IsolationMergeInput.push`). */
 export type IsolationTargetPushDto =

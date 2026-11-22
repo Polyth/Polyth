@@ -109,14 +109,17 @@ const log = (event: string, data: JsonObject): void => {
 export const isManagedBranch = (branch: string | null | undefined): boolean =>
   !!branch && branch.startsWith(MANAGED_BRANCH_PREFIX);
 
+const localBranch = (branch: string): string => branch.replace(/^refs\/heads\//, "");
+
 export function isolateBranchName(sessionId: string): string {
   const short = sessionId.replaceAll("-", "").slice(0, 12);
   return `${MANAGED_BRANCH_PREFIX}${short}`;
 }
 
+export const PRESERVED_BRANCH_PREFIX = "polyth-preserved/";
 const preservedBranchName = (sessionId: string): string => {
   const short = sessionId.replaceAll("-", "").slice(0, 12);
-  return `polyth-preserved/${short}-${randomUUID().slice(0, 8)}`;
+  return `${PRESERVED_BRANCH_PREFIX}${short}-${randomUUID().slice(0, 8)}`;
 };
 
 /** Per-user home for managed checkouts of a repository whose parent folder
@@ -526,8 +529,7 @@ export function createManagedWorktrees(git: GitService) {
     if (!existsSync(ref.worktreePath)) return { status: "missing" };
     // An agent stopped mid-rebase leaves its own checkout detached.
     const detachedWhileLeaving = options.sessionLeaving === true && listed.branch === null;
-    if (listed.isMain || (listed.branch !== ref.worktreeBranch && !detachedWhileLeaving)
-      || !samePath(await realpath(ref.worktreePath), ref.worktreePath)) {
+    if (listed.isMain || !samePath(await realpath(ref.worktreePath), ref.worktreePath)) {
       return { status: "unowned", reason: "branch-mismatch" };
     }
     const marker = await readManagedMarker(git, listed.path);
@@ -536,8 +538,22 @@ export function createManagedWorktrees(git: GitService) {
     if (marker.kind === "integration") return { status: "unowned", reason: "wrong-kind" };
     if (marker.sessionId !== ref.sessionId) return { status: "unowned", reason: "session-mismatch" };
     if (marker.worktreeBranch !== ref.worktreeBranch) return { status: "unowned", reason: "branch-mismatch" };
+    // The marker, not the checked-out branch, proves the checkout is this
+    // session's. Its agent may work on a branch of its own in it (one to open
+    // a pull request from, say), just as in an ordinary checkout: the work is
+    // still the checkout's HEAD and integrates the same way. Only another
+    // managed branch, a branch Polyth preserved while relinquishing the
+    // checkout, or the merge target itself would make the checkout something
+    // else, so those fail closed.
+    const checkedOut = listed.branch ?? (detachedWhileLeaving ? ref.worktreeBranch : null);
+    if (checkedOut === null) return { status: "unowned", reason: "branch-mismatch" };
+    if (checkedOut !== ref.worktreeBranch
+      && (isManagedBranch(checkedOut) || checkedOut.startsWith(PRESERVED_BRANCH_PREFIX)
+        || checkedOut === localBranch(marker.targetBranch))) {
+      return { status: "unowned", reason: "branch-mismatch" };
+    }
     if (options.sessionLeaving) {
-      return { status: "owned", worktree: { path: listed.path, branch: ref.worktreeBranch, head: listed.head, meta: marker } };
+      return { status: "owned", worktree: { path: listed.path, branch: checkedOut, head: listed.head, meta: marker } };
     }
     if ((ref.targetPath !== undefined && !samePath(marker.targetPath, ref.targetPath))
       || (ref.targetBranch !== undefined && marker.targetBranch !== ref.targetBranch
@@ -548,7 +564,7 @@ export function createManagedWorktrees(git: GitService) {
       || !(await descendsFromOrigin(root, marker, listed.head))) {
       return { status: "unowned", reason: "base-mismatch" };
     }
-    return { status: "owned", worktree: { path: listed.path, branch: ref.worktreeBranch, head: listed.head, meta: marker } };
+    return { status: "owned", worktree: { path: listed.path, branch: checkedOut, head: listed.head, meta: marker } };
   };
 
   /** The isolate's line of work still grows from where Polyth placed it. The
@@ -828,17 +844,32 @@ export function createManagedWorktrees(git: GitService) {
         });
         return inspection;
       }
+      // The agent may have moved the checkout to a branch of its own. That
+      // branch outlives the checkout like any branch the agent made, and the
+      // session's managed branch, no longer checked out, goes only when the
+      // agent's branch holds everything on it.
+      const switched = inspection.worktree.branch !== ref.worktreeBranch;
       // A detached checkout's HEAD says nothing about where its branch points.
-      const branchTip = options.sessionLeaving
+      let branchTip = options.sessionLeaving || switched
         ? await git.readRef(root, `refs/heads/${ref.worktreeBranch}`)
         : inspection.worktree.head;
+      if (switched && branchTip && !options.sessionLeaving && branchTip !== inspection.worktree.meta.baseCommit
+        && !await git.isAncestor(root, branchTip, inspection.worktree.head).catch(() => false)) {
+        log("cleanup-branch-kept", { sessionId: ref.sessionId, branch: ref.worktreeBranch, reason: "unmerged-commits" });
+        branchTip = null;
+      }
       await git.worktrees.remove(root, { path: inspection.worktree.path, deleteBranch: false, force: true });
       if (branchTip && !await git.deleteRef(root, `refs/heads/${ref.worktreeBranch}`, branchTip)) {
         throw invalid("owned branch cleanup failed");
       }
       await git.worktrees.prune(root);
       await removeEmptyParent(inspection.worktree.path);
-      log("cleanup", { sessionId: ref.sessionId, worktreePath: ref.worktreePath, branch: ref.worktreeBranch });
+      log("cleanup", {
+        sessionId: ref.sessionId,
+        worktreePath: ref.worktreePath,
+        branch: ref.worktreeBranch,
+        ...(switched ? { keptBranch: inspection.worktree.branch } : {}),
+      });
       return { status: "removed" };
     },
 
@@ -851,17 +882,32 @@ export function createManagedWorktrees(git: GitService) {
         );
       }
       const branch = preservedBranchName(ref.sessionId);
-      // Rename first. If any later metadata cleanup is interrupted, the branch
-      // mismatch makes every managed deletion path fail closed and also makes
-      // the preserved worktree visible in ordinary Git inventory.
-      await git.renameBranch(root, ref.worktreeBranch, branch);
       const gitDir = resolve(await git.gitDir(ref.worktreePath));
-      const marker = await readManagedMarker(git, ref.worktreePath);
-      if (!marker || marker === "corrupt" || marker.kind === "integration"
-        || marker.sessionId !== ref.sessionId || marker.worktreeBranch !== ref.worktreeBranch) {
-        throw Object.assign(new Error("managed marker changed while relinquishing ownership"), { code: "conflict" });
+      const assertMarker = async () => {
+        const marker = await readManagedMarker(git, ref.worktreePath);
+        if (!marker || marker === "corrupt" || marker.kind === "integration"
+          || marker.sessionId !== ref.sessionId || marker.worktreeBranch !== ref.worktreeBranch) {
+          throw Object.assign(new Error("managed marker changed while relinquishing ownership"), { code: "conflict" });
+        }
+      };
+      // The first step is the fence: if any later cleanup is interrupted,
+      // every managed deletion path fails closed. With the session's branch
+      // checked out, renaming it to a preserved branch is that fence and also
+      // makes the worktree visible in ordinary Git inventory. With a branch of
+      // the agent's own checked out, the rename moves nothing the checkout
+      // stands on, so dropping the marker comes first instead.
+      const switched = inspection.worktree.branch !== ref.worktreeBranch;
+      if (switched) {
+        await assertMarker();
+        await rm(join(gitDir, MARKER), { force: true });
+        if (await git.readRef(root, `refs/heads/${ref.worktreeBranch}`)) {
+          await git.renameBranch(root, ref.worktreeBranch, branch);
+        }
+      } else {
+        await git.renameBranch(root, ref.worktreeBranch, branch);
+        await assertMarker();
+        await rm(join(gitDir, MARKER), { force: true });
       }
-      await rm(join(gitDir, MARKER), { force: true });
       const tokenPath = join(gitDir, CREATION_TOKEN);
       const nonce = await readFile(tokenPath, "utf8").catch(() => "");
       if (SESSION_ID.test(nonce)) await rm(tokenPath, { force: true });
@@ -882,12 +928,15 @@ export function createManagedWorktrees(git: GitService) {
       }
       const directory = await open(gitDir, "r");
       try { await directory.sync(); } finally { await directory.close(); }
+      // The work stays on the branch the checkout has; the agent's own branch
+      // is where it lives when it switched.
+      const kept = switched ? inspection.worktree.branch : branch;
       log("ownership-relinquished", {
         sessionId: ref.sessionId,
         worktreePath: ref.worktreePath,
-        branch,
+        branch: kept,
       });
-      return { branch };
+      return { branch: kept };
     },
 
     async removeIfOwned(root: string, worktreePath: string): Promise<boolean> {
