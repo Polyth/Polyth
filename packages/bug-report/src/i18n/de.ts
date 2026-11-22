@@ -28,4 +28,10 @@ export const de: BugReportMessages = {
   "bugreport.invalid": "Der Bericht konnte nicht vorbereitet werden. Kopiere die Details und informiere das Team.",
   "bugreport.unavailable": "Fehlerberichte sind in diesem Build ausgeschaltet.",
   "bugreport.openFailed": "Fehlerbericht konnte nicht gestartet werden.",
+  "bugreport.screenshotBrowser": "Diesen Screenshot anhängen",
+  "bugreport.attachHint": "Noch kein Screenshot. Füge einen mit Strg+V (⌘V auf dem Mac) ein oder hänge ein Bild an.",
+  "bugreport.attach": "Screenshot anhängen",
+  "bugreport.replace": "Screenshot ersetzen",
+  "bugreport.attachFailed": "Dieses Bild konnte nicht gelesen werden. Versuche eine andere Datei.",
+  "bugreport.passwordHintServer": "Wird einmal abgefragt. Dieser Polyth-Server speichert es für alle, die von ihm aus Fehler melden.",
 };

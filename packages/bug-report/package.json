@@ -14,7 +14,7 @@
     "webEntry": "./widgets/index.tsx",
     "descriptor": {
       "name": "Bug reports",
-      "description": "Nightly desktop builds: press ⌘⇧B (Ctrl+Shift+B) to send the Polyth team a screenshot of this window, the build and its settings, with your note.",
+      "description": "Nightly builds, in the desktop app or a browser: press ⌘⇧B (Ctrl+Shift+B) to send the Polyth team a screenshot, the build and its settings, with your note.",
       "core": false,
       "enabled": true,
       "settingsGroup": "System",

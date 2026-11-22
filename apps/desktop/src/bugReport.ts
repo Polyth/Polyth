@@ -15,7 +15,7 @@ import {
   BUG_REPORT_VERSION,
   isTesterPassword,
   parseBugReport,
-  type BugReportApp,
+  type BugReportDesktopApp,
   type BugReportPayload,
   type BugReportSettingValue,
 } from "@polyth/contracts/bug-report";
@@ -107,7 +107,7 @@ export interface BugReportClientOptions {
   /** `<userData>/desktop`: the store file and the outbox live here. */
   dir: string;
   origin: string | null;
-  app: Omit<BugReportApp, "channel" | "locale">;
+  app: Omit<BugReportDesktopApp, "channel" | "locale">;
   locale: () => string;
   /** What the desktop adds to the settings: `desktop.*` keys. */
   desktopSettings: () => Record<string, BugReportSettingValue>;
@@ -276,7 +276,7 @@ export function createBugReportClient(options: BugReportClientOptions): BugRepor
     };
   }
 
-  function appInfo(): BugReportApp {
+  function appInfo(): BugReportDesktopApp {
     return {
       ...options.app,
       channel: options.app.version.endsWith("-nightly") ? "nightly" : "stable",

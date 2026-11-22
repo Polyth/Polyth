@@ -28,4 +28,10 @@ export const bg: BugReportMessages = {
   "bugreport.invalid": "Докладът не можа да бъде подготвен. Копирайте подробностите и уведомете екипа.",
   "bugreport.unavailable": "Докладите за грешки са изключени в тази версия.",
   "bugreport.openFailed": "Не можа да започне доклад за грешка.",
+  "bugreport.screenshotBrowser": "Включи тази екранна снимка",
+  "bugreport.attachHint": "Все още няма снимка. Поставете с Ctrl+V (⌘V на Mac) или прикачете изображение.",
+  "bugreport.attach": "Прикачи снимка",
+  "bugreport.replace": "Замени снимката",
+  "bugreport.attachFailed": "Изображението не можа да бъде прочетено. Опитайте с друг файл.",
+  "bugreport.passwordHintServer": "Пита се веднъж. Този сървър на Polyth го пази за всички, които изпращат доклади от него.",
 };

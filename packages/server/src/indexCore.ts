@@ -2858,6 +2858,7 @@ export async function boot(opts: BootOptions = {}) {
     markPersonalContext: async (sessionId) => { await lazySessions.markPersonalContext?.(sessionId); },
     storageDir: dataDir,
     deployment: spaceGateway.deployment,
+    version,
     spaceStorage: (ctx) => createSpaceStorage(ctx.storageDir),
     routes: routeRegistry,
     root,

@@ -28,4 +28,10 @@ export const zhCN: BugReportMessages = {
   "bugreport.invalid": "无法准备报告。请复制详细信息并告知团队。",
   "bugreport.unavailable": "此版本已关闭错误报告。",
   "bugreport.openFailed": "无法开始错误报告。",
+  "bugreport.screenshotBrowser": "附上这张截图",
+  "bugreport.attachHint": "还没有截图。用 Ctrl+V（Mac 上为 ⌘V）粘贴，或附加一张图片。",
+  "bugreport.attach": "附加截图",
+  "bugreport.replace": "替换截图",
+  "bugreport.attachFailed": "无法读取这张图片。请换一个文件试试。",
+  "bugreport.passwordHintServer": "只需输入一次。这台 Polyth 服务器会为所有从它发送报告的人保存密码。",
 };

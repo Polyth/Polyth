@@ -28,4 +28,10 @@ export const uk: BugReportMessages = {
   "bugreport.invalid": "Не вдалося підготувати звіт. Скопіюйте подробиці й повідомте команду.",
   "bugreport.unavailable": "У цій збірці звіти про помилки вимкнено.",
   "bugreport.openFailed": "Не вдалося почати звіт про помилку.",
+  "bugreport.screenshotBrowser": "Додати цей скриншот",
+  "bugreport.attachHint": "Скриншота ще немає. Вставте його через Ctrl+V (⌘V на Mac) або прикріпіть зображення.",
+  "bugreport.attach": "Прикріпити скриншот",
+  "bugreport.replace": "Замінити скриншот",
+  "bugreport.attachFailed": "Не вдалося прочитати це зображення. Спробуйте інший файл.",
+  "bugreport.passwordHintServer": "Питаємо один раз. Сервер Polyth зберігає пароль для всіх, хто надсилає звіти з нього.",
 };

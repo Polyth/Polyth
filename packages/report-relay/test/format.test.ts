@@ -30,3 +30,24 @@ test("a table cell cannot break out of its column", () => {
   const markdown = issueBody(report({ web: { ...base.web, view: "chat\\|x | y\r\nz" } }), context);
   assert.ok(markdown.includes("| View | chat\\\\\\|x \\| y z |"), markdown);
 });
+
+test("a browser report names its browser and server instead of a desktop build", async () => {
+  const { issueLabels, issueTitle } = await import("../src/format.ts");
+  const base = report();
+  const browser = report({
+    text: "Sidebar overlaps on the phone",
+    app: {
+      client: "browser", version: base.app.version, channel: base.app.channel, edition: "standard", platform: "ios",
+      browser: "Safari 18", serverPlatform: "linux", serverArch: "x64", locale: "uk",
+    },
+  });
+  assert.equal(issueTitle(browser), `[${base.app.version}] Sidebar overlaps on the phone · ios Safari 18`);
+  assert.ok(issueLabels(browser).includes("client:browser"));
+  assert.ok(!issueLabels(base).includes("client:browser"));
+  const body = issueBody(browser, context);
+  assert.match(body, /\| Client \| browser \|/);
+  assert.match(body, /\| Browser \| Safari 18 \|/);
+  assert.match(body, /\| Server \| linux x64 \|/);
+  assert.doesNotMatch(body, /Electron|undefined/);
+  assert.match(commentBody(browser, context), /· ios Safari 18 · browser ·/);
+});

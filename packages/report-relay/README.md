@@ -1,7 +1,9 @@
 # Polyth report relay
 
-Nightly bug-report intake for the Polyth desktop app. A tester's nightly build
-sends one report to `POST /v1/report`; the relay checks the tester password and
+Nightly bug-report intake for Polyth. A tester's nightly desktop app, or the
+nightly Polyth server behind a page opened in a browser (`app.client: "browser"`,
+labelled `client:browser`; its version is the server's), sends one report to
+`POST /v1/report`; the relay checks the tester password and
 the app version, files the report as an issue in a private GitHub repository,
 uploads the attachments to that repository's `attachments` branch and answers
 `created` or `added`. It is not part of the push service: push promises it
