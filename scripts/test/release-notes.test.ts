@@ -112,9 +112,11 @@ test("a summary inside <sub> stays plain text", () => {
     channel: "nightly",
     version: "1.2.366-nightly",
     commits: [{
-      subject: "Memory: own per-Space store",
-      body: "Memory moves into `memory.db` under <space>/packages/memory.\n",
-      files: ["packages/memory/src/store.ts"],
+      // A fictional package: naming a real removable one here would trip
+      // scripts/test/packageRemovability.test.ts.
+      subject: "Notes: own per-Space store",
+      body: "Notes move into `notes.db` under <space>/packages/example-notes.\n",
+      files: ["packages/example-notes/src/store.ts"],
       author: { name: "Max", email: "max@polyth.app" },
       coAuthors: [],
     }],
@@ -125,7 +127,7 @@ test("a summary inside <sub> stays plain text", () => {
   });
   // The sub line is HTML, not Markdown: a backslash escape would render literally,
   // and a raw `<space>` would open a tag.
-  assert.match(notes, /<br><sub>Memory moves into memory\.db under &lt;space&gt;\/packages\/memory\.<\/sub>/);
+  assert.match(notes, /<br><sub>Notes move into notes\.db under &lt;space&gt;\/packages\/example-notes\.<\/sub>/);
   assert.doesNotMatch(notes, /\\`/);
 });
 
