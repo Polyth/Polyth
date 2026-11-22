@@ -158,6 +158,9 @@ test("fresh mobile chat exposes project targets and attachments use the platform
   assert.match(css, /\.mobile-float-navigation, \.mobile-float-actions \{ display: inline-grid; grid-auto-flow: column;/);
   assert.match(mobileHeader, /label=\{tr\("mobile\.island\.openNavigation"\)\} size="lg" variant="ghost"/);
   assert.match(css, /\.mobile-float-navigation > \.ui-icon-btn,[\s\S]*?background: transparent !important;[\s\S]*?box-shadow: none;/);
+  // WebKit's tap highlight would paint its own plate (button corner + touch
+  // box) over the island's outline; island presses are the glyph colour only.
+  assert.match(css, /:is\(\.mobile-float-navigation, \.mobile-float-actions\) :is\(button, \[role="button"\]\),\s*\.mobile-session-title-island \.mobile-session-selector \{\s*-webkit-tap-highlight-color: transparent;/);
   assert.match(css, /\.mobile-island-now\s*\{/s);
   assert.match(css, /\.sheet-origin-top\s*\{/s);
   assert.match(css, /@keyframes sheet-drop/);

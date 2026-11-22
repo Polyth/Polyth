@@ -2586,7 +2586,11 @@ completion even if the user opens another chat or project meanwhile. Only a
 changed connection, account or Space (`persistenceScopeIsCurrent`) aborts it;
 the captured project/session name the target, not the current view. The new
 chat is focused only while the user still watches its spawn surface; otherwise
-it is listed and keeps working in the background. Send-pending holds are per
+it is listed and keeps working in the background. New chat counts as leaving:
+while a start has no chat id yet it owns the id-less new-chat surface, so
+`startNewSession` releases that unbound `sessionSpawn` and the surface becomes a
+fresh, usable new chat instead of staying on "Spawning agent…" (a spawn already
+bound to its chat id is kept for that chat's startup dock). Send-pending holds are per
 surface, so the chat the user moved to stays sendable; the new-chat surface's
 hold stays with the composer that sent, so a fresh new chat in the same project
 does not wait for the earlier creation. Pinned by

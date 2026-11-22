@@ -1741,10 +1741,17 @@ export function startNewSession(
     ? hydrateNewSessionDraft(projectId) : null;
   if (!restore) saveNewSessionDraft(intent);
   saveNavigationHint("polyth.activeSessionId", "");
+  // A chat whose create has not returned an id yet owns the id-less new-chat
+  // surface ("Spawning agent…"). Asking for a new chat leaves that surface:
+  // the start keeps running in the background and the chat joins the list
+  // when it exists, while this surface becomes a fresh, usable new chat.
+  // Without this, New chat during a slow start changed nothing on screen.
+  const detachSpawn = state.sessionSpawn !== null && state.sessionSpawn.sessionId === null;
   set({
     activeSessionId: null,
     openingSessionId: null,
     newSessionIntent: intent,
+    ...(detachSpawn ? { sessionSpawn: null } : {}),
   });
   persistClientNavigation(projectId, null);
   showSessionChat();

@@ -20378,6 +20378,14 @@ body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="s
   .mobile-session-title-island .mobile-session-selector {
     transition: color var(--motion-normal) var(--motion-ease);
   }
+  /* No platform press plate either. WebKit's tap highlight (the global accent
+     wash on every button) is painted over the button box plus its 44px
+     `::after` touch box with the button's corner, not the island's: a plate
+     that missed the pill's outline on ✎/⧉/☰/⋯ and Back. */
+  :is(.mobile-float-navigation, .mobile-float-actions) :is(button, [role="button"]),
+  .mobile-session-title-island .mobile-session-selector {
+    -webkit-tap-highlight-color: transparent;
+  }
   :is(.mobile-float-navigation, .mobile-float-actions) > .ui-icon-btn:is(:active, [aria-expanded="true"]):not(:disabled),
   .mobile-session-title-island .mobile-session-selector:active:where(:not(:disabled, [data-conversation])) {
     color: var(--accent-text);
