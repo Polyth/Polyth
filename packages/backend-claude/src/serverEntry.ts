@@ -4,7 +4,7 @@ import { mkdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
-import type { HarnessProvider, HarnessRegistry, HarnessVersionStore, SmallModelCompletionRequest } from "@polyth/contracts";
+import type { HarnessProvider, HarnessRegistry, HarnessVersionStore, NativeHarnessMemory, SmallModelCompletionRequest } from "@polyth/contracts";
 import { releaseHarnessProcessExecution } from "@polyth/harness-runtime";
 import { discoverHarnessExecutable, harnessExecutableChildEnv, windowsCmdShimTarget } from "@polyth/harness-runtime/executable-discovery";
 import { createHarnessProcessAuthority } from "@polyth/harness-runtime/process-authority";
@@ -22,7 +22,8 @@ import { createClaudeNativePlugins } from "./nativePlugins.ts";
 import { claudeConfigDir, createClaudePreferences, nativeSkillsUnsupported } from "./preferences.ts";
 import { createClaudeProvisioner } from "./provisioner.ts";
 import { createClaudeSmallModelRunner } from "./smallModel.ts";
-import { claudeProjectsDir, listClaudeSessions, readClaudeSession } from "./history.ts";
+import { claudeProjectDir, claudeProjectsDir, listClaudeSessions, readClaudeSession } from "./history.ts";
+import { readClaudeMemoryNotes } from "./nativeMemory.ts";
 const exec = promisify(execFile);
 const windowsShim = (command: string) => process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command);
 /** Local report commands. A shim left on `cmd.exe` gets its path quoted: the
@@ -277,6 +278,28 @@ export function createClaudeProvider(host: ServerPackageHost, account?: Resolved
         },
     });
     const settings = preferences;
+    /** Whether this launch keeps Claude Code's own memory files. Where Polyth
+     *  memory replaces them (the memory package's seam), they go off and
+     *  their notes are handed over first, on a local single-operator Polyth
+     *  where the host's files are that person's. */
+    const keepsNativeMemory = async (context: Parameters<HarnessProvider["createRuntime"]>[0]): Promise<boolean> => {
+        const memory = host.services.get(serverServiceKey<NativeHarnessMemory>("memory.native-harness"));
+        if (!memory || !await memory.replaces({ spaceId: context.spaceId, projectId: context.projectId }).catch(() => false)) return true;
+        if (!context.remote && !nativeSkillsUnsupported(context)) {
+            try {
+                // Worktrees and isolates share the project's memory directory.
+                const project = context.space ? await host.forSpace(context.space).projects.get(context.projectId) : undefined;
+                const notes = await readClaudeMemoryNotes(join(claudeProjectDir(project?.path ?? context.cwd, projectsDir), "memory"));
+                if (notes.length) await memory.adopt({ spaceId: context.spaceId, projectId: context.projectId, ...(context.sessionId ? { sessionId: context.sessionId } : {}), harness: "claude-code", notes });
+            }
+            catch (error) {
+                console.warn(`[polyth] ${harnessId}: Claude Code memory notes were not moved: ${error instanceof Error ? error.message : String(error)}`);
+            }
+        }
+        return false;
+    };
+    const launchPreferences = (context: Parameters<HarnessProvider["createRuntime"]>[0]) => async () =>
+        ({ ...await settings.launch(context), nativeMemory: await keepsNativeMemory(context) });
     const stateFile = (context: Parameters<HarnessProvider["createRuntime"]>[0]) => {
         const key = createHash("sha256").update(JSON.stringify([context.projectId, context.cwd, context.sessionId ?? "catalog"])).digest("hex");
         return host.spaceStorage(context.space!).path(`runtime/${harnessId}/${key}.json`);
@@ -438,7 +461,7 @@ export function createClaudeProvider(host: ServerPackageHost, account?: Resolved
                 const authority = await createHarnessProcessAuthority(stateFile(context));
                 try {
                     const sdk = await loadTitleSafeClaudeSdk(CLAUDE_REMOTE_BINARY, process.env, { host: remote, cwd: context.cwd });
-                    const runtime = await createClaudeRuntime(context, sdk, authority, { harnessId, authFingerprint: remoteFingerprint(remote), launchPreferences: () => settings.launch(context) });
+                    const runtime = await createClaudeRuntime(context, sdk, authority, { harnessId, authFingerprint: remoteFingerprint(remote), launchPreferences: launchPreferences(context) });
                     const capabilities = runtime.capabilities.bind(runtime);
                     runtime.capabilities = async () => ({ ...await capabilities(), title: "emulated" as const });
                     // Utility print-mode turns are a local CLI run; a remote
@@ -456,7 +479,7 @@ export function createClaudeProvider(host: ServerPackageHost, account?: Resolved
                 const runtime = await createClaudeRuntime(context, await loadTitleSafeClaudeSdk(sdkCommand, env), authority, {
                     harnessId,
                     authFingerprint: fingerprint(),
-                    launchPreferences: () => settings.launch(context),
+                    launchPreferences: launchPreferences(context),
                     ...(here ? { remoteWorkspace: claudeRemoteWorkspace({
                         remote: here.remote,
                         root: context.cwd,

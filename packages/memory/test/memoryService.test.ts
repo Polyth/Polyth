@@ -301,7 +301,7 @@ test("memory package keeps paired/remote route access default-deny", () => {
   // The policy inventory requires every package to declare remoteAccess; an
   // empty http list with no websocket rules keeps paired devices out.
   assert.deepEqual(pkg.remoteAccess, { routeScopes: ["memory"], http: [] });
-  assert.deepEqual(provided, ["polyth.service.memory", "polyth.service.memory.runtime"]);
+  assert.deepEqual(provided, ["polyth.service.memory", "polyth.service.memory.runtime", "polyth.service.memory.native-harness"]);
 });
 
 const readyUtility = {

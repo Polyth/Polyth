@@ -971,4 +971,8 @@ test("claudeChildEnv opts into native todo tools but keeps an operator's explici
     assert.equal(claudeChildEnv({ PATH: "/bin" }).CLAUDE_CODE_ENABLE_TODO_TOOLS, "true");
     assert.equal(claudeChildEnv({ PATH: "/bin" }).PATH, "/bin");
     assert.equal(claudeChildEnv({ CLAUDE_CODE_ENABLE_TODO_TOOLS: "0" }).CLAUDE_CODE_ENABLE_TODO_TOOLS, "0");
+    // Polyth memory replacing Claude Code's own turns its memory files off.
+    assert.equal(claudeChildEnv({}).CLAUDE_CODE_DISABLE_AUTO_MEMORY, undefined);
+    assert.equal(claudeChildEnv({}, { nativeMemory: true }).CLAUDE_CODE_DISABLE_AUTO_MEMORY, undefined);
+    assert.equal(claudeChildEnv({}, { nativeMemory: false }).CLAUDE_CODE_DISABLE_AUTO_MEMORY, "1");
 });

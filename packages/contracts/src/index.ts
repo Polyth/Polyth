@@ -2011,6 +2011,27 @@ export interface SessionPrivacy {
   inPrivateRoom?: boolean;
 }
 
+/** One note from a harness's own memory files, as its backend parsed it. */
+export interface NativeMemoryNote {
+  /** File name inside the harness's memory directory. */
+  file: string;
+  title: string;
+  body: string;
+  /** The harness's own note type (Claude Code: user, feedback, project, reference). */
+  type?: string;
+}
+
+/** Server service `memory.native-harness`, provided by the project memory
+ *  package when it is installed. While it says Polyth memory replaces a
+ *  harness's own memory in a project, the backend launches the harness with
+ *  its memory files off and hands their notes over once. */
+export interface NativeHarnessMemory {
+  replaces(input: { spaceId: string; projectId: string }): Promise<boolean>;
+  /** Saves notes not handed over before, where the chat's own saves go. Only a
+   *  chat private to one person takes them; any other saves nothing yet. */
+  adopt(input: { spaceId: string; projectId: string; sessionId?: string; harness: string; notes: readonly NativeMemoryNote[] }): Promise<{ imported: number; deferred?: true }>;
+}
+
 /** A person a chat is shared with by name. */
 export interface SessionShareGrantDto {
   userId: string;
