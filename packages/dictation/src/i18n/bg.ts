@@ -13,6 +13,7 @@ export const bg: DictationMessages = {
   "dictation.error.micPermissionDenied": "Разрешението за микрофон беше отказано",
   "dictation.error.micUnavailableEnvironment": "Записът от микрофон не е наличен в тази среда",
   "dictation.error.microphoneLost": "Микрофонът стана недостъпен по време на диктовката",
+  "dictation.error.noAudio": "Микрофонът е включен, но не постъпва звук. Затворете другите приложения, които използват звук, и опитайте отново",
   "dictation.error.noTransport": "{provider} няма директен клиентски транспорт",
   "dictation.error.replayBudget": "Директната диктовка през {provider} надхвърли лимита за повторно свързване",
   "dictation.error.replayOverflow": "Аудиото от диктовката не можа да се възпроизведе безопасно, защото мрежовият буфер преля",

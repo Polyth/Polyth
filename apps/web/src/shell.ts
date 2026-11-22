@@ -1,7 +1,7 @@
 import { projectIsolationLevel } from "@polyth/contracts";
 import { matchAction, formatCombo, type HotkeyAction } from "@polyth/hotkeys";
 import { getKeymap } from "@polyth/hotkeys/widgets";
-import { registerCommand, runCommand } from "./commands.ts";
+import { REPORT_BUG_COMMAND, registerCommand, runCommand } from "./commands.ts";
 import { exportSessionMarkdown, forkSession, abortSession, openSession } from "./init.ts";
 import { closeSessionSplit, getSessionSplit, splitOtherSessionId, swapSessionSplit, toggleSessionSplit } from "./sessionSplit.ts";
 import { shellModeForViewport } from "./responsiveShell.ts";
@@ -79,6 +79,7 @@ const CAPABILITY_HOTKEY: Readonly<Record<string, HotkeyAction>> = {
   terminal: "viewTerminal",
   "conversation-find": "findInConversation",
   "voice-mode": "voiceMode",
+  "bug-report": "reportBug",
 };
 
 /** One palette command per capability descriptor: same id, same open()
@@ -280,6 +281,8 @@ const ACTIONS: Record<HotkeyAction, () => void | false> = {
   // key so the browser keeps its own binding.
   dictate: () => runCommand("voice.dictate") ? undefined : false,
   voiceMode: () => runCommand("capability.voice-mode") ? undefined : false,
+  // A package registers the report command on nightly desktop builds only.
+  reportBug: () => runCommand(REPORT_BUG_COMMAND) ? undefined : false,
 };
 
 function splitViewAvailable(): boolean {

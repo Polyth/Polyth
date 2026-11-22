@@ -5,6 +5,7 @@
 import type { AgentsMessageKey } from "@polyth/agents/i18n";
 import type { BookmarksMessageKey } from "@polyth/bookmarks/i18n";
 import type { BrowserMessageKey } from "@polyth/browser/i18n";
+import type { BugReportMessageKey } from "@polyth/bug-report/i18n";
 import type { CommandsMessageKey } from "@polyth/commands/i18n";
 import type { CustomActionMessageKey } from "@polyth/custom-action/i18n";
 import type { DictationMessageKey } from "@polyth/dictation/i18n";
@@ -45,6 +46,7 @@ import type { WalkthroughMessageKey } from "@polyth/walkthrough/i18n";
 import { en as p_agents } from "@polyth/agents/i18n/en";
 import { en as p_bookmarks } from "@polyth/bookmarks/i18n/en";
 import { en as p_browser } from "@polyth/browser/i18n/en";
+import { en as p_bug_report } from "@polyth/bug-report/i18n/en";
 import { en as p_commands } from "@polyth/commands/i18n/en";
 import { en as p_custom_action } from "@polyth/custom-action/i18n/en";
 import { en as p_dictation } from "@polyth/dictation/i18n/en";
@@ -86,6 +88,7 @@ export type PackageMessageKey =
   | AgentsMessageKey
   | BookmarksMessageKey
   | BrowserMessageKey
+  | BugReportMessageKey
   | CommandsMessageKey
   | CustomActionMessageKey
   | DictationMessageKey
@@ -127,6 +130,7 @@ export const packageEnCatalogs: ReadonlyArray<Record<string, string>> = [
   p_agents,
   p_bookmarks,
   p_browser,
+  p_bug_report,
   p_commands,
   p_custom_action,
   p_dictation,

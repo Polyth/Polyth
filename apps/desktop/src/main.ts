@@ -11,6 +11,7 @@ import {
   powerMonitor,
   powerSaveBlocker,
   protocol,
+  safeStorage,
   screen,
   session,
   shell,
@@ -25,6 +26,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { boot } from "@polyth/server";
+import { bugReportOrigin, createBugReportClient, encodeScreenshot, type BugReportClient } from "./bugReport.ts";
 import { cliLauncherPlan, installCliLauncher, openPathFromArgv } from "./cliInstall.ts";
 import { setLinuxAutostartEnabled } from "./linuxAutostart.ts";
 import { validateAbsoluteLocalPath } from "./localPath.ts";
@@ -38,17 +40,30 @@ import { withoutForeignSessionCookies } from "./sessionCookieGuard.ts";
 import { readSavedServerPort, reserveServerPort, saveServerPort } from "./serverPort.ts";
 import {
   DEFAULT_SERVERS_STATE,
+  forgetServerKey,
   isConnectionId,
   isThisComputersServer,
   normalizeServerAddress,
   readServersStateSync,
   rememberAddress,
   sameTarget,
+  serverKey,
   startupPlan,
   writeServersState,
   type DesktopServersState,
   type DesktopServerTarget,
 } from "./servers.ts";
+import {
+  foldZone,
+  planZoneOpen,
+  pruneZoneSnapshots,
+  readZoneSnapshotsSync,
+  recordZoneReport,
+  serverZonesView,
+  writeZoneSnapshots,
+  type ZoneSnapshots,
+  type ZoneSources,
+} from "./serverZones.ts";
 import {
   DEFAULT_DESKTOP_SETTINGS,
   normalizeDesktopSettings,
@@ -65,6 +80,7 @@ import type {
   DesktopServerAnchor,
   DesktopServerInfo,
   DesktopServersResult,
+  DesktopServerZonesView,
   DesktopServersView,
   DesktopSettings,
   DesktopSystemControls,
@@ -88,6 +104,7 @@ import {
 import {
   desktopChromeOptions,
   macCaptionGeometry,
+  macTrafficLightGroup,
   macTrafficLightPosition,
   normalizeTitleBarAppearance,
   trayIconSize,
@@ -98,6 +115,7 @@ import { keepAwakeWanted } from "./keepAwake.ts";
 import {
   blockedFromLocalServer,
   channelAllowed,
+  clipboardReadAccess,
   HUB_SCHEME,
   hubUrl,
   linkRequest,
@@ -119,12 +137,14 @@ const macLegacyUpdates = followsMacLegacyFeed(__POLYTH_DESKTOP_FLAVOR__, process
 /**
  * The workstation edition (docs/security/workstation-edition.md) is a
  * local-only shell: this computer's server on loopback, no Polyth Link, no
- * other servers, no bundled Chromium, and a stable-only update feed of its own.
+ * other servers, and a stable-only update feed of its own.
  */
 const edition = desktopEdition(__POLYTH_DESKTOP_FLAVOR__);
 const workstation = edition === "workstation";
 /** A feed the build is pinned to whatever the chosen channel; null = the chosen channel. */
 const pinnedUpdates = pinnedUpdaterChannel(__POLYTH_DESKTOP_FLAVOR__, process.platform, process.getSystemVersion());
+/** Where nightly bug reports go; null on builds that send none (src/bugReport.ts). */
+const reportOrigin = bugReportOrigin({ version: app.getVersion(), edition, env: process.env });
 
 interface SavedWindowState {
   bounds?: Rectangle;
@@ -192,7 +212,11 @@ let serversPath = "";
 let linkClientDir = "";
 let servers: DesktopServersState = DEFAULT_SERVERS_STATE;
 let serversWrite: Promise<void> = Promise.resolve();
+let zoneSnapshotsPath = "";
+let zoneSnapshots: ZoneSnapshots = {};
+let zoneSnapshotsWrite: Promise<void> = Promise.resolve();
 let linkClient: PolythLinkClient | null = null;
+let bugReports: BugReportClient | null = null;
 /** Other servers this launch has opened: their origin, and which server it is. */
 const remoteOrigins = new Map<string, Exclude<DesktopServerTarget, { kind: "local" }>>();
 /** The saved Link servers as the native menus show them; the list refreshes it. */
@@ -695,6 +719,14 @@ const persistServers = (next: DesktopServersState): void => {
     .catch((error: unknown) => log("Could not save the server list", error));
 };
 
+const persistZoneSnapshots = (next: ZoneSnapshots): void => {
+  if (next === zoneSnapshots) return;
+  zoneSnapshots = next;
+  zoneSnapshotsWrite = zoneSnapshotsWrite
+    .then(() => writeZoneSnapshots(zoneSnapshotsPath, zoneSnapshots))
+    .catch((error: unknown) => log("Could not save the server zones", error));
+};
+
 const windowOrigins = (): WindowOrigins => ({
   local: baseUrl ? new URL(baseUrl).origin : null,
   remote: new Set(remoteOrigins.keys()),
@@ -766,6 +798,14 @@ const rememberLinkConnections = (raw: unknown): void => {
       hostLabel: typeof item.hostLabel === "string" ? item.hostLabel : "",
       revoked: item.revoked === true || item.pairingState === "revoked",
     }));
+  // A real answer names every paired server: the zones of the rest are stale.
+  if (Array.isArray(raw)) {
+    persistZoneSnapshots(pruneZoneSnapshots(zoneSnapshots, new Set([
+      "local",
+      ...linkConnections.map((link) => `link:${link.id}`),
+      ...servers.addresses.map((address) => `address:${address.url}`),
+    ])));
+  }
   rebuildTrayMenu();
 };
 
@@ -837,8 +877,9 @@ const linkCall = async (rawMethod: unknown, rawParams: unknown): Promise<Desktop
           const active = servers.active.kind === "link" && servers.active.id === id
             ? { kind: "local" as const }
             : servers.active;
-          const microphoneServers = servers.microphoneServers.filter((key) => key !== `link:${id}`);
-          persistServers({ ...servers, linkPorts, active, microphoneServers });
+          persistServers(forgetServerKey({ ...servers, linkPorts, active }, `link:${id}`));
+          const { [`link:${id}`]: _zone, ...zones } = zoneSnapshots;
+          persistZoneSnapshots(zones);
         }
         await refreshLinkConnections();
         return { ok: true, result };
@@ -950,7 +991,7 @@ const openServer = async (target: DesktopOpenServer): Promise<void> => {
   if (isThisComputersServer(url, baseUrl)) return openServer({ kind: "local" });
   remoteOrigins.set(url, { kind: "address", url });
   persistServers(rememberAddress(servers, url, Date.now()));
-  await loadInWindow(url);
+  await loadInWindow(`${url}${safeNextPath(target.path) ?? ""}`);
 };
 
 /**
@@ -998,36 +1039,121 @@ const nudgeActiveLink = (): void => {
   void linkClient.invoke("status", { connectionId: active.id }).catch(() => undefined);
 };
 
-const serverKey = (target: Exclude<DesktopServerTarget, { kind: "local" }>): string =>
-  target.kind === "link" ? `link:${target.id}` : `address:${target.url}`;
+type RemoteConsent = "microphone" | "clipboard" | "zones";
+
+const REMOTE_CONSENT: Record<RemoteConsent, {
+  list: "microphoneServers" | "clipboardServers" | "zoneServers";
+  message: (label: string) => string;
+  detail: string;
+}> = {
+  microphone: {
+    list: "microphoneServers",
+    message: (label) => `Let ${label} use the microphone?`,
+    detail: "This Polyth is on another computer. It hears what the microphone on this computer picks up while it records.",
+  },
+  clipboard: {
+    list: "clipboardServers",
+    message: (label) => `Let ${label} read the clipboard?`,
+    detail: "This Polyth is on another computer. It reads what you copied on this computer when you choose Paste in it.",
+  },
+  zones: {
+    list: "zoneServers",
+    message: (label) => `Show your other servers in ${label}?`,
+    detail: "Its sidebar will list this computer and the other servers you connected, with their projects, so you can move between them. That server will see their names.",
+  },
+};
+
+/** Whether the person already let another server have this. */
+const remoteConsented = (origin: string, use: RemoteConsent): boolean => {
+  const target = remoteOrigins.get(origin);
+  return target !== undefined && servers[REMOTE_CONSENT[use].list].includes(serverKey(target));
+};
+
+const remoteConsentAsks = new Map<string, Promise<boolean>>();
 
 /**
- * This window never asks before using the microphone on this computer's own
- * server. Another server is asked about once, by name, because its packages run
- * in this window. Remembered per server.
+ * This window never asks before using the microphone or reading the clipboard
+ * on this computer's own server. Another server is asked about once, by name,
+ * because its packages run in this window. Remembered per server; a second
+ * request while the question is open waits for the same answer.
  */
-const allowRemoteMicrophone = async (origin: string): Promise<boolean> => {
+const allowRemote = (origin: string, use: RemoteConsent): Promise<boolean> => {
   const target = remoteOrigins.get(origin);
-  if (!target) return false;
+  if (!target) return Promise.resolve(false);
   const key = serverKey(target);
-  if (servers.microphoneServers.includes(key)) return true;
+  const { list, message, detail } = REMOTE_CONSENT[use];
+  if (servers[list].includes(key)) return Promise.resolve(true);
+  const pending = remoteConsentAsks.get(`${use}:${key}`);
+  if (pending) return pending;
   const label = target.kind === "address"
     ? addressLabel(target.url)
     : linkConnections.find((item) => item.id === target.id)?.hostLabel || "this server";
   const options = {
     type: "question" as const,
-    message: `Let ${label} use the microphone?`,
-    detail: "This Polyth is on another computer. It hears what the microphone on this computer picks up while it records.",
+    message: message(label),
+    detail,
     buttons: ["Allow", "Don't allow"],
     defaultId: 1,
     cancelId: 1,
   };
-  const { response } = await (mainWindow && !mainWindow.isDestroyed()
-    ? dialog.showMessageBox(mainWindow, options)
-    : dialog.showMessageBox(options));
-  if (response !== 0) return false;
-  persistServers({ ...servers, microphoneServers: [...servers.microphoneServers, key] });
-  return true;
+  const ask = (async () => {
+    const { response } = await (mainWindow && !mainWindow.isDestroyed()
+      ? dialog.showMessageBox(mainWindow, options)
+      : dialog.showMessageBox(options));
+    if (response !== 0) return false;
+    if (!servers[list].includes(key)) persistServers({ ...servers, [list]: [...servers[list], key] });
+    return true;
+  })().finally(() => remoteConsentAsks.delete(`${use}:${key}`));
+  remoteConsentAsks.set(`${use}:${key}`, ask);
+  return ask;
+};
+
+const zoneSources = (): ZoneSources => {
+  const lifecycle = serverLifecycle;
+  return {
+    servers,
+    links: linkConnections,
+    // A server still in first-run setup holds nothing to go back to.
+    localAvailable: lifecycle ? !("setup" in lifecycle && lifecycle.setup === true) : servers.runLocalServer,
+    snapshots: zoneSnapshots,
+  };
+};
+
+/** The server a page belongs to, read from its own frame, never from what it says. */
+const senderServer = (event: IpcMainInvokeEvent): DesktopServerTarget | null => {
+  const url = event.senderFrame?.url ?? "";
+  const surface = surfaceOf(url);
+  if (surface === "local") return { kind: "local" };
+  if (surface !== "remote") return null;
+  try { return remoteOrigins.get(new URL(url).origin) ?? null; } catch { return null; }
+};
+
+const NO_ZONES: DesktopServerZonesView = { access: "granted", zones: [] };
+
+const zonesFor = async (event: IpcMainInvokeEvent): Promise<DesktopServerZonesView> => {
+  const sender = senderServer(event);
+  if (workstation || !sender) return NO_ZONES;
+  await refreshLinkConnections();
+  return serverZonesView(sender, zoneSources());
+};
+
+const openZone = async (event: IpcMainInvokeEvent, request: unknown): Promise<DesktopServersResult<void>> => {
+  const sender = senderServer(event);
+  if (workstation || !sender) return { ok: false, code: "invalid-request" };
+  const plan = planZoneOpen(sender, zoneSources(), request as { key?: unknown; projectId?: unknown } | null);
+  if (!plan) return { ok: false, code: "invalid-request" };
+  try {
+    if (plan.kind === "server-list") await openServerList();
+    else if (plan.kind === "link") await openServerList({ open: plan.id, ...(plan.path ? { next: plan.path } : {}) });
+    else await openServer(plan);
+    return { ok: true, result: undefined };
+  } catch (error) {
+    log("Could not open the server zone", error);
+    // The list says why, in the page's language, and offers the way on.
+    const code = failureCode(error);
+    void openServerList({ error: code });
+    return { ok: false, code };
+  }
 };
 
 const serverMenuItems = (): MenuItemConstructorOptions[] => {
@@ -1092,6 +1218,7 @@ const shutdownServer = async (): Promise<void> => {
   await linkClient?.close().catch((error: unknown) => log("Link client shutdown failed", error));
   linkClient = null;
   await serversWrite;
+  await zoneSnapshotsWrite;
   await serverLifecycle?.shutdown().catch((error) => log("Server shutdown failed", error));
   serverLifecycle = null;
   log("Polyth server stopped");
@@ -1242,6 +1369,11 @@ const installApplicationMenu = (): void => {
       { type: "separator" }, { role: "togglefullscreen" },
     ] },
     { role: "windowMenu" },
+    // Nightly builds only: the report sheet belongs to the page, which owns
+    // ⌘⇧B / Ctrl+Shift+B through its remappable keymap (`reportBug`).
+    ...(reportOrigin ? [{ role: "help" as const, submenu: [
+      { label: "Report a Bug…", ...rendererShortcut("CommandOrControl+Shift+B"), click: () => sendCommand("report-bug") },
+    ] }] : []),
   ]));
 };
 
@@ -1310,7 +1442,7 @@ const firstWindowUrl = (): string => {
 const createWindow = async (startUrl = firstWindowUrl()): Promise<void> => {
   const saved = readSavedWindowState();
   const bounds = visibleBounds(saved.bounds);
-  const chrome = desktopChromeOptions(process.platform, nativeTheme.shouldUseDarkColors);
+  const chrome = desktopChromeOptions(process.platform, nativeTheme.shouldUseDarkColors, process.getSystemVersion());
   const window = new BrowserWindow({
     width: bounds?.width ?? (startupLowResourceMode ? 1100 : 1360),
     height: bounds?.height ?? (startupLowResourceMode ? 720 : 860),
@@ -1580,6 +1712,76 @@ const reportPendingUpdate = (): void => {
   if (outcome.phase === "installed") closeUpdateWindowLater(8_000);
 };
 
+/** Desktop settings a bug report carries: choices and window facts only,
+ *  never a path, a server address or a name. */
+const bugReportDesktopSettings = (): Record<string, string | number | boolean> => {
+  const window = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+  const server = servers.active.kind;
+  return {
+    "desktop.closeToTray": settings.closeToTray,
+    "desktop.startMinimized": settings.startMinimized,
+    "desktop.launchAtLogin": settings.launchAtLogin,
+    "desktop.keepAwake": settings.keepAwake,
+    "desktop.keepAwakeMode": settings.keepAwakeMode ?? "always",
+    "desktop.automaticUpdates": settings.automaticUpdates,
+    "desktop.updateChannel": settings.updateChannel,
+    "desktop.lowResourceMode": settings.lowResourceMode,
+    "desktop.softwareRendering": settings.softwareRendering,
+    "desktop.reduceAnimations": settings.reduceAnimations,
+    "desktop.controlsPosition": settings.controlsPosition,
+    "desktop.controlsFollowSystem": settings.controlsFollowSystem ?? false,
+    "desktop.controlsTheme": settings.controlsTheme,
+    "desktop.surface": window ? surfaceOf(window.webContents.getURL()) ?? "none" : "none",
+    "desktop.server": server,
+    "desktop.maximized": window?.isMaximized() ?? false,
+    "desktop.fullscreen": window?.isFullScreen() ?? false,
+    "desktop.zoom": window ? Math.round(window.webContents.getZoomFactor() * 100) / 100 : 1,
+    "desktop.tray": tray !== null,
+  };
+};
+
+const createDesktopBugReports = (desktopDir: string): BugReportClient => createBugReportClient({
+  dir: desktopDir,
+  origin: reportOrigin,
+  app: {
+    version: app.getVersion(),
+    edition,
+    platform: process.platform === "darwin" || process.platform === "win32" ? process.platform : "linux",
+    arch: process.arch,
+    osVersion: process.getSystemVersion().slice(0, 64),
+    electron: process.versions.electron ?? "0",
+    chromium: process.versions.chrome ?? "0",
+    packaged: app.isPackaged,
+  },
+  locale: () => app.getLocale(),
+  desktopSettings: bugReportDesktopSettings,
+  // The OS keychain seals the tester password; without one it lasts this run.
+  encrypt: (plain) => {
+    try {
+      if (!safeStorage.isEncryptionAvailable()) return null;
+      if (process.platform === "linux" && safeStorage.getSelectedStorageBackend() === "basic_text") return null;
+      return safeStorage.encryptString(plain).toString("base64");
+    } catch { return null; }
+  },
+  decrypt: (stored) => {
+    try { return safeStorage.decryptString(Buffer.from(stored, "base64")); } catch { return null; }
+  },
+  fetch: (input, init) => net.fetch(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, init),
+  log,
+});
+
+/** This window only, captured before the report sheet covers it. */
+const captureForBugReport = async () => {
+  const window = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+  if (!window) return null;
+  try {
+    return encodeScreenshot(await window.webContents.capturePage());
+  } catch (error) {
+    log("Could not capture the window for a bug report", error);
+    return null;
+  }
+};
+
 const installIpc = (): void => {
   // Sent while a page loads, before it has a surface to reason about.
   ipcMain.on("desktop:surface", (event) => {
@@ -1613,6 +1815,13 @@ const installIpc = (): void => {
     await openServerList({ open: servers.active.id, resume: true, ...(next ? { next } : {}) });
   });
   trustedHandle("desktop:servers:state", serversView);
+  trustedHandle("desktop:report:state", () => bugReports?.state() ?? { available: false, needsPassword: true, queued: 0 });
+  trustedHandle("desktop:report:capture", async () => {
+    if (!bugReports?.state().available) throw new Error("Bug reports are off on this build");
+    return bugReports.capture(await captureForBugReport());
+  });
+  trustedHandle("desktop:report:send", async (_event, draft: unknown) =>
+    bugReports ? bugReports.send(draft) : { result: "unavailable" as const });
   trustedHandle("desktop:servers:open", async (_event, target: unknown): Promise<DesktopServersResult<void>> => {
     const wanted = target as { kind?: unknown; url?: unknown; path?: unknown } | null;
     try {
@@ -1629,14 +1838,38 @@ const installIpc = (): void => {
   trustedHandle("desktop:servers:forget-address", (_event, url: unknown): DesktopServersView => {
     if (typeof url !== "string") return serversView();
     const active = servers.active.kind === "address" && servers.active.url === url ? { kind: "local" as const } : servers.active;
-    persistServers({
+    persistServers(forgetServerKey({
       ...servers,
       active,
       addresses: servers.addresses.filter((address) => address.url !== url),
-      microphoneServers: servers.microphoneServers.filter((key) => key !== `address:${url}`),
-    });
+    }, `address:${url}`));
+    const { [`address:${url}`]: _zone, ...zones } = zoneSnapshots;
+    persistZoneSnapshots(zones);
     rebuildTrayMenu();
     return serversView();
+  });
+  trustedHandle("desktop:servers:zones", zonesFor);
+  trustedHandle("desktop:servers:zones:report", (event, projects: unknown): void => {
+    const sender = senderServer(event);
+    if (workstation || !sender) return;
+    persistZoneSnapshots(recordZoneReport(zoneSnapshots, serverKey(sender), projects, Date.now()));
+  });
+  trustedHandle("desktop:servers:zones:allow", async (event): Promise<DesktopServerZonesView> => {
+    const url = event.senderFrame?.url ?? "";
+    // Only the top page asks, as with the clipboard: never a frame inside it.
+    if (!workstation && event.senderFrame === event.sender.mainFrame && senderServer(event)?.kind !== "local") {
+      try { await allowRemote(new URL(url).origin, "zones"); } catch { /* no origin, no question */ }
+    }
+    return zonesFor(event);
+  });
+  trustedHandle("desktop:servers:zones:open", openZone);
+  trustedHandle("desktop:servers:zones:fold", async (event, request: unknown): Promise<DesktopServerZonesView> => {
+    const sender = senderServer(event);
+    if (!workstation && sender) {
+      const next = foldZone(sender, zoneSources(), request as { key?: unknown; folded?: unknown } | null);
+      if (next !== servers) persistServers(next);
+    }
+    return zonesFor(event);
   });
   trustedHandle("desktop:servers:run-local", async (_event, run: unknown): Promise<DesktopServersView> => {
     persistServers({ ...servers, runLocalServer: run === true });
@@ -1661,9 +1894,12 @@ const installIpc = (): void => {
   trustedHandle("desktop:window:caption", (_event, band: unknown) => {
     if (process.platform !== "darwin" || !mainWindow || mainWindow.isDestroyed()) return null;
     const zoom = mainWindow.webContents.getZoomFactor();
-    mainWindow.setWindowButtonPosition(macTrafficLightPosition(band, zoom));
+    // The size this macOS draws its lights at: it moves both the centre line
+    // and the width the header keeps clear.
+    const group = macTrafficLightGroup(process.getSystemVersion());
+    mainWindow.setWindowButtonPosition(macTrafficLightPosition(band, zoom, group));
     // Report what the window applied, not what was asked for.
-    return macCaptionGeometry(mainWindow.getWindowButtonPosition(), zoom);
+    return macCaptionGeometry(mainWindow.getWindowButtonPosition(), zoom, group);
   });
   trustedHandle("desktop:window:titlebar", (_event, appearance: unknown) => {
     if (process.platform !== "win32" || !mainWindow || mainWindow.isDestroyed()) return;
@@ -1851,11 +2087,7 @@ const startServer = async (preferredPort?: number): Promise<void> => {
   else delete process.env.POLYTH_LINK_HOST;
   if (app.isPackaged) process.env.POLYTH_RESOURCES_DIR ??= process.resourcesPath;
   const bundledChromium = stagedChromiumExecutable(process.resourcesPath, process.platform, process.arch);
-  if (workstation) {
-    // No embedded browser package ships, so nothing may start a browser.
-    delete process.env.POLYTH_CHROMIUM_PATH;
-    delete process.env.POLYTH_REQUIRE_BUNDLED_CHROMIUM;
-  } else if (app.isPackaged) {
+  if (app.isPackaged) {
     if (!bundledChromium) {
       throw new Error(`Packaged Chromium is missing for ${process.platform}-${process.arch}`);
     }
@@ -1912,8 +2144,11 @@ async function start(): Promise<void> {
   serversPath = join(desktopDir, "servers.json");
   linkClientDir = join(desktopDir, "link-client");
   servers = workstation ? workstationServersState(readServersStateSync(serversPath)) : readServersStateSync(serversPath);
+  zoneSnapshotsPath = join(desktopDir, "server-zones.json");
+  zoneSnapshots = workstation ? {} : readZoneSnapshotsSync(zoneSnapshotsPath);
   updatePendingPath = join(desktopDir, "update-pending.json");
   settings = await readDesktopSettings(settingsPath, desktopSettingsDefaults);
+  bugReports = createDesktopBugReports(desktopDir);
   if (startupLowResourceMode) log("Low-resource mode active");
   if (startupSoftwareRendering) log("Software rendering active (GPU acceleration disabled)");
   await applyLoginSetting();
@@ -1926,14 +2161,25 @@ async function start(): Promise<void> {
     const mediaTypes = "mediaTypes" in details && Array.isArray(details.mediaTypes) ? details.mediaTypes : [];
     const microphone = permission === "media" && mediaTypes.length > 0 && mediaTypes.every((type) => type === "audio");
     if (surface === "remote" && microphone) {
-      void allowRemoteMicrophone(new URL(url).origin).then(callback, () => callback(false));
+      void allowRemote(new URL(url).origin, "microphone").then(callback, () => callback(false));
+      return;
+    }
+    if (permission === "clipboard-read") {
+      const access = clipboardReadAccess(url, details.requestingUrl, details.isMainFrame, windowOrigins());
+      if (access === "ask") void allowRemote(new URL(url).origin, "clipboard").then(callback, () => callback(false));
+      else callback(access === "allow");
       return;
     }
     // The workstation edition ships no dictation or voice package: no microphone.
     callback(permission === "notifications" || (microphone && !workstation));
   });
   session.defaultSession.setPermissionCheckHandler((webContents, permission, _origin, details) => {
-    const surface = webContents ? surfaceOf(webContents.getURL()) : null;
+    const url = webContents?.getURL() ?? "";
+    const surface = webContents ? surfaceOf(url) : null;
+    if (permission === "clipboard-read") {
+      const access = clipboardReadAccess(url, details.requestingUrl, details.isMainFrame, windowOrigins());
+      return access === "allow" || (access === "ask" && remoteConsented(new URL(url).origin, "clipboard"));
+    }
     return (surface === "local" || surface === "remote")
       && (permission === "notifications" || (!workstation && permission === "media" && details.mediaType === "audio"));
   });
@@ -2000,6 +2246,8 @@ async function start(): Promise<void> {
   powerMonitor.on("unlock-screen", nudgeActiveLink);
   await createWindow();
   if (app.isPackaged) reportPendingUpdate();
+  // Reports that could not go last time (no network, relay busy).
+  void bugReports?.flushOutbox();
 }
 
 bootstrapTrace("before requestSingleInstanceLock");
@@ -2021,6 +2269,7 @@ else {
   app.on("before-quit", (event) => {
     quitting = true;
     quitStarted = true;
+    bugReports?.dispose();
     if (serverStopped) return;
     event.preventDefault();
     void shutdownServer().finally(() => app.quit());

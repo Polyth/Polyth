@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { createMemoryStore, type MemoryScope } from "../src/memory.ts";
+import { createMemoryStore, type MemoryScope } from "../src/store.ts";
 
 const scope: MemoryScope = { spaceId: "space-a", projectId: "project-a", principalId: "user-a" };
 
@@ -130,12 +130,10 @@ test("off and clear rotate generation and stale harvest jobs", () => {
   db.close();
 });
 
-test("legacy memory rows migrate into the scoped store and imports stay bounded", () => {
+test("an export round-trips as duplicates and imports stay bounded", () => {
   const db = new DatabaseSync(":memory:");
-  db.exec("CREATE TABLE knowledge (id TEXT PRIMARY KEY, project_id TEXT, kind TEXT, title TEXT, body TEXT, tags TEXT, source TEXT, source_session_id TEXT, revision INTEGER, created_at INTEGER, updated_at INTEGER)");
-  db.prepare("INSERT INTO knowledge VALUES(?,?,?,?,?,?,?,?,?,?,?)").run("legacy-1", "project-a", "memory", "Legacy", "Keep WAL enabled", "[\"sqlite\"]", "user", "session-old", 1, 1, 1);
   const store = createMemoryStore(db, scope.spaceId, () => 100);
-  assert.equal(store.get(scope, "legacy-1")?.evidence, "user-stated");
+  store.create(scope, { projectId: scope.projectId, title: "WAL", body: "Keep WAL enabled", lifecycle: "active", evidence: "user-stated" });
   const exported = store.exportProject(scope, { includeCandidates: true });
   assert.equal(exported.records.length, 1);
   assert.equal(store.importPreview(scope, exported).duplicates, 1);
@@ -275,18 +273,44 @@ test("cross-project recall policy defaults to ask and accepts only off, ask or a
   db.close();
 });
 
-test("an existing store gets its substring index filled once", () => {
+test("substring search keeps no index of its own and follows every edit", () => {
   const db = new DatabaseSync(":memory:");
-  const first = createMemoryStore(db, scope.spaceId);
-  const policy = first.getPolicy(scope);
-  first.updatePolicy(scope, { projectId: scope.projectId, expectedSettingsRevision: policy.settingsRevision, patch: { mode: "auto" } });
-  const id = first.create(scope, { projectId: scope.projectId, title: "MemPalace retired", body: "Moved.", lifecycle: "active" }).memoryId!;
-  db.exec("DELETE FROM memory_fts_tri");
-  const reopened = createMemoryStore(db, scope.spaceId);
-  assert.deepEqual(reopened.search(scope, { q: "palace" }).items.map((item) => item.id), [id]);
-  // A writer that knows nothing about the index (an older server) keeps it current.
-  db.prepare("UPDATE memory_records SET title='Notebook retired', body='Moved to Polyth.' WHERE id=?").run(id);
-  assert.equal(reopened.search(scope, { q: "palace" }).total, 0);
-  assert.equal(Number((db.prepare("SELECT count(*) AS count FROM memory_fts_tri WHERE text LIKE '%Notebook%'").get() as { count: number }).count), 1);
+  const store = createMemoryStore(db, scope.spaceId);
+  const policy = store.getPolicy(scope);
+  store.updatePolicy(scope, { projectId: scope.projectId, expectedSettingsRevision: policy.settingsRevision, patch: { mode: "auto" } });
+  const id = store.create(scope, { projectId: scope.projectId, title: "MemPalace retired", body: "Moved.", lifecycle: "active" }).memoryId!;
+  assert.deepEqual(store.search(scope, { q: "palace" }).items.map((item) => item.id), [id]);
+  store.update(scope, { id, projectId: scope.projectId, expectedRevision: 1, patch: { title: "Notebook retired", body: "Moved to Polyth." } });
+  assert.equal(store.search(scope, { q: "palace" }).total, 0);
+  assert.deepEqual(store.search(scope, { q: "notebook" }).items.map((item) => item.id), [id]);
+  // One word index and nothing else: no second copy of the text on disk.
+  const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'memory_fts%'").all() as Array<{ name: string }>).map((row) => row.name).sort();
+  assert.deepEqual(tables, ["memory_fts", "memory_fts_config", "memory_fts_data", "memory_fts_docsize", "memory_fts_idx"]);
+  db.close();
+});
+
+test("the page list matches every typed word in any order and any case, Cyrillic included", () => {
+  const db = new DatabaseSync(":memory:");
+  const store = createMemoryStore(db, scope.spaceId);
+  const deploy = store.create(scope, { projectId: scope.projectId, title: "Деплой лише через CI", body: "Реліз збирається тільки в GitHub Actions.", tags: ["release"], lifecycle: "active" });
+  const memory = store.create(scope, { projectId: scope.projectId, title: "Пам’ять проєкту", body: "100% покриття_тестами не вимагаємо.", lifecycle: "active" });
+  store.create(scope, { projectId: scope.projectId, title: "Other", body: "Render the menu.", lifecycle: "active" });
+  const ids = (q: string) => store.list(scope, { q }).items.map((item) => item.id);
+  // SQLite's LIKE folds ASCII only: a lower-case Cyrillic search used to miss.
+  assert.deepEqual(ids("деплой"), [deploy.memoryId]);
+  assert.deepEqual(ids("ci ДЕПЛОЙ"), [deploy.memoryId], "words in any order and case");
+  assert.deepEqual(ids("деплой menu"), [], "every word must match");
+  assert.deepEqual(ids("RELEASE"), [deploy.memoryId], "tags are searched too");
+  assert.deepEqual(ids("пам'ятка"), [], "a longer word is not a match");
+  assert.deepEqual(ids("пам'ять"), [memory.memoryId], "any apostrophe spelling finds the word");
+  assert.deepEqual(ids("ПАМʼЯТЬ"), [memory.memoryId]);
+  // LIKE wildcards in the query are literal characters.
+  assert.deepEqual(ids("100%"), [memory.memoryId]);
+  assert.deepEqual(ids("_"), [memory.memoryId]);
+  assert.deepEqual(ids("%"), [memory.memoryId]);
+  assert.equal(store.list(scope, { q: "деплой" }).total, 1);
+  // The snippet starts near the match when the body is long.
+  const long = store.create(scope, { projectId: scope.projectId, title: "Long", body: `${"filler words here. ".repeat(30)}The zebra appears only here.`, lifecycle: "active" });
+  assert.match(store.list(scope, { q: "zebra" }).items.find((item) => item.id === long.memoryId)!.snippet, /zebra/);
   db.close();
 });

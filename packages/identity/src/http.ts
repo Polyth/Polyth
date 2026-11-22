@@ -7,6 +7,7 @@ import { newToken, validToken } from './validation.ts';
 import type { IdentitySession, IdentityUser } from './types.ts';
 import type { IdentityService } from './index.ts';
 import type { AccessTokenSummary } from './accessTokens.ts';
+import { PAIRED_SESSION_LABEL } from './pairedDevice.ts';
 
 const loopback = (address?: string): boolean => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(address ?? '');
 
@@ -19,6 +20,14 @@ export const TERMINATED_TLS = Symbol.for('polyth.identity.terminatedTls');
 const terminatedTls = (req: IncomingMessage): boolean =>
   (req as unknown as Record<symbol, unknown>)[TERMINATED_TLS] === true;
 const csrfFor = (token: string): string => digest(`csrf:${token}`);
+const writeJson = (res: ServerResponse, status: number, body: unknown): void => {
+  res.statusCode = status;
+  res.end(JSON.stringify(body));
+};
+const safeErrorCode = (error: unknown): string => {
+  const code = (error as { code?: unknown } | null)?.code;
+  return typeof code === 'string' && Object.hasOwn(statusFor, code) ? code : 'internal-error';
+};
 const csrfMatches = (received: unknown, nonce: string): boolean => typeof received === 'string' && /^[a-f0-9]{64}$/.test(received)
   && timingSafeEqual(Buffer.from(received, 'hex'), Buffer.from(csrfFor(nonce), 'hex'));
 const cookieToken = (request: IncomingMessage, name: string): string | null => {
@@ -76,12 +85,23 @@ const statusFor: Readonly<Record<string, number>> = {
   conflict: 409, 'login-taken': 409, 'last-owner': 409, 'last-auth-method': 409, 'invalid-transition': 409, 'setup-completed': 409,
   replayed: 409, cancelled: 409, 'uncertain-exchange': 409, 'provider-scope-escalation': 409,
   'private-network-approval-required': 409, 'owner-credential-required': 409,
-  'owner-confirmation-required': 403,
+  'owner-confirmation-required': 403, 'password-change-required': 403,
   'invalid-input': 400, 'invalid-provider-transaction': 400, 'callback-mismatch': 400,
   'request-timeout': 408, 'recovery-ack-required': 400, 'body-too-large': 413, 'rate-limited': 429,
   'invalid-provider-response': 502, 'invalid-identity': 502,
   'recovery-required': 503, unavailable: 503, 'provider-unavailable': 503,
 };
+/** All a session may do while its password, set by someone else, still waits
+ *  to be replaced: read itself, confirm the current password, change it, sign
+ *  out — and the sign-in routes, which don't act as the session at all. */
+const PASSWORD_CHANGE_ROUTES: ReadonlySet<string> = new Set([
+  'GET /api/auth/status', 'GET /api/auth/providers', 'GET /api/auth/me',
+  'POST /api/auth/reauthenticate', 'POST /api/auth/password', 'POST /api/auth/logout', 'POST /api/auth/logout-all',
+  'POST /api/auth/login', 'POST /api/auth/recover',
+  'POST /api/auth/passkeys/authenticate/options', 'POST /api/auth/passkeys/authenticate/complete',
+  'POST /api/auth/providers/login/begin', 'POST /api/auth/providers/login/complete',
+  'POST /api/auth/cli/device', 'POST /api/auth/cli/device/token', 'POST /api/auth/cli/logout',
+]);
 const accountStatusPath = /^\/api\/auth\/accounts\/([A-Za-z0-9][A-Za-z0-9_-]{0,199})\/status$/;
 const accountGuardrailsPath = /^\/api\/auth\/accounts\/([A-Za-z0-9][A-Za-z0-9_-]{0,199})\/guardrails$/;
 const accountLimitsPath = /^\/api\/auth\/accounts\/([A-Za-z0-9][A-Za-z0-9_-]{0,199})\/limits$/;
@@ -205,6 +225,7 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
       authorized: !!actor || localTrust,
       scope: actor ? 'ui-session' : localTrust ? 'local-user' : 'anonymous',
       ...(actor ? { accountId: actor.userId } : {}),
+      ...(actor && identity.accounts.passwordChangeRequired(actor.userId) ? { passwordChangeRequired: true } : {}),
       csrfToken: csrfFor(nonce),
     };
   };
@@ -232,7 +253,12 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
     ...(identity.accounts.adminPasswordResetAt(user.id) !== undefined
       ? { adminPasswordResetAt: identity.accounts.adminPasswordResetAt(user.id) }
       : {}),
+    ...(identity.accounts.passwordChangeRequired(user.id) ? { passwordChangeRequired: true } : {}),
   });
+  const passwordChangePending = (token: string | null): boolean => {
+    const session = identity.sessions.resolve(token);
+    return !!session && identity.accounts.passwordChangeRequired(session.userId);
+  };
   const cliBody = (tokens: readonly AccessTokenSummary[], canManageTrust: boolean) => {
     const trust = identity.accessTokens.trust.get();
     return {
@@ -242,44 +268,159 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
       canManageTrust,
     };
   };
+  /**
+   * Account administration shared by the browser's cookie route and a
+   * full-access paired device. Each service call enforces its own owner and
+   * elevation checks; this only maps routes to them. Null when `path` is not
+   * one of them.
+   */
+  const administerAccounts = async (
+    path: string, method: string, body: Record<string, unknown>, token: string | null,
+  ): Promise<unknown | null> => {
+    if (method !== 'POST') return null;
+    const session = (): string => {
+      if (!token) throw controlError('unauthorized', 'Authentication required');
+      return token;
+    };
+    const actorId = (): string => {
+      const actor = token ? identity.sessions.resolve(token) : null;
+      if (!actor) throw controlError('unauthorized', 'Authentication required');
+      return actor.userId;
+    };
+    if (path === '/api/auth/accounts') {
+      const account = await identity.accounts.createLocal(session(), {
+        login: text(body, 'login'), name: text(body, 'name'), password: text(body, 'password'),
+      });
+      return { ...account, name: account.displayName, current: false };
+    }
+    const guardrails = accountGuardrailsPath.exec(path);
+    if (guardrails) {
+      if (!Object.hasOwn(body, 'guardrails')) throw controlError('invalid-input', 'guardrails is required');
+      return identity.guardrails.set(session(), guardrails[1]!, body.guardrails, Number(body.expectedRevision));
+    }
+    const limits = accountLimitsPath.exec(path);
+    if (limits) {
+      if (!Object.hasOwn(body, 'limits')) throw controlError('invalid-input', 'limits is required');
+      return identity.limits.set(session(), limits[1]!, body.limits, Number(body.expectedRevision));
+    }
+    const permissions = accountPermissionsPath.exec(path);
+    if (permissions) {
+      if (!Object.hasOwn(body, 'permissions')) throw controlError('invalid-input', 'permissions is required');
+      return identity.permissions.set(session(), permissions[1]!, body.permissions, Number(body.expectedRevision));
+    }
+    const profile = accountProfilePath.exec(path);
+    if (profile) {
+      const account = identity.accounts.renameAccount(session(), profile[1]!, text(body, 'name'), Number(body.expectedRevision));
+      return { ...account, name: account.displayName, current: account.id === actorId() };
+    }
+    const login = accountLoginPath.exec(path);
+    if (login) {
+      const account = identity.accounts.changeAccountLogin(session(), login[1]!, text(body, 'login'), Number(body.expectedRevision));
+      return { ...account, name: account.displayName, current: account.id === actorId() };
+    }
+    const password = accountPasswordPath.exec(path);
+    if (password) {
+      const account = await identity.accounts.resetPassword(session(), password[1]!, text(body, 'password'));
+      return { ...account, name: account.displayName, current: false };
+    }
+    const status = accountStatusPath.exec(path);
+    if (status) {
+      const account = identity.accounts.setStatus(
+        session(), status[1]!, text(body, 'status') as 'active' | 'suspended' | 'offboarding' | 'disabled',
+        Number(body.expectedRevision),
+      );
+      return { ...account, name: account.displayName, current: account.id === actorId() };
+    }
+    return null;
+  };
+  /** Whether a full-access paired device may administer this installation's
+   *  people: an owner whose own password the device can confirm. A password-less
+   *  `local` installation, or a passkey-only owner a phone cannot re-confirm,
+   *  keeps the browser-only answer. */
+  const pairedCanManage = (userId: string): boolean =>
+    identity.accessMode() === 'accounts'
+    && identity.accounts.byUser.isOwner(userId)
+    && Boolean(identity.accounts.byUser.current(userId).login);
   return {
     cookieName,
     requireHuman,
     requireRecentHuman,
     /**
-     * `GET /api/auth/accounts`, `/me` and `/cli` for an account the host
-     * authenticated without a browser session: a full-access paired device.
-     * Only reads. Management and self-service need a browser identity session
-     * (same origin, CSRF, owner re-authentication), so `canManage` stays false
-     * and `readOnly` tells the UI to send those changes to a browser. Answers
-     * false for any other request.
+     * Identity for a full-access paired device (Polyth Link).
+     *
+     * The Link device grant authenticates every request and no cookie is
+     * involved, so same-origin and CSRF do not apply. Reads its own
+     * installation's people; an owner's device also administers them through
+     * the same services as the browser, with a server-side session for that
+     * device (`identity.pairedDevice`). The token never reaches the client, and
+     * a change first needs the person's password (`reauthenticate`), which
+     * elevates that session for five minutes. `readOnly: true` still tells
+     * Settings → Users and Command line that its own account's name, password,
+     * passkeys and tokens need a browser signed in to this server. Answers
+     * false for anything else.
      */
-    handlePairedRead(req: IncomingMessage, res: ServerResponse, userId: string): boolean {
-      const path = req.url;
-      if (req.method !== 'GET' || (path !== '/api/auth/accounts' && path !== '/api/auth/me' && path !== '/api/auth/cli')) return false;
+    handlePaired(req: IncomingMessage, res: ServerResponse, caller: { userId: string; deviceId: string }): Promise<boolean> {
+      const path = req.url ?? '';
+      const { userId, deviceId } = caller;
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('X-Content-Type-Options', 'nosniff');
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
-      let status = 200, body: unknown;
-      try {
-        body = path === '/api/auth/me'
-          ? meBody(identity.accounts.byUser.current(userId))
-          : path === '/api/auth/cli'
-            ? { ...cliBody(identity.accessTokens.byUser.list(userId), false), readOnly: true }
-            : {
-                ...accountsBody(userId, identity.accounts.byUser.list(userId), false),
-                readOnly: true,
-                ...(identity.accounts.byUser.isOwner(userId) ? { canManageInBrowser: true } : {}),
-              };
-      } catch (error) {
-        const code = (error as { code?: unknown } | null)?.code;
-        const safeCode = typeof code === 'string' && Object.hasOwn(statusFor, code) ? code : 'internal-error';
-        status = statusFor[safeCode] ?? 500;
-        body = { error: safeCode };
-      }
-      res.statusCode = status;
-      res.end(JSON.stringify(body));
-      return true;
+      const canManage = pairedCanManage(userId);
+      const run = async (): Promise<boolean> => {
+        if (req.method === 'GET') {
+          if (path === '/api/auth/accounts') {
+            writeJson(res, 200, {
+              ...accountsBody(userId, identity.accounts.byUser.list(userId), canManage),
+              readOnly: true,
+              ...(canManage ? { canManageInBrowser: true } : {}),
+            });
+            return true;
+          }
+          if (path === '/api/auth/me') {
+            writeJson(res, 200, meBody(identity.accounts.byUser.current(userId)));
+            return true;
+          }
+          if (path === '/api/auth/cli') {
+            writeJson(res, 200, { ...cliBody(identity.accessTokens.byUser.list(userId), false), readOnly: true });
+            return true;
+          }
+          const guardrails = accountGuardrailsPath.exec(path);
+          const limits = accountLimitsPath.exec(path);
+          const permissions = accountPermissionsPath.exec(path);
+          if (!guardrails && !limits && !permissions) return false;
+          if (!canManage) throw controlError('forbidden', 'Instance owner access required');
+          const token = identity.pairedDevice.session(userId, deviceId);
+          writeJson(res, 200, guardrails
+            ? identity.guardrails.get(token, guardrails[1]!)
+            : limits
+              ? identity.limits.get(token, limits[1]!)
+              : identity.permissions.get(token, permissions![1]!));
+          return true;
+        }
+        if (req.method !== 'POST') return false;
+        const body = await readBody(req);
+        if (path === '/api/auth/reauthenticate') {
+          if (!canManage) throw controlError('forbidden', 'Instance owner access required');
+          await identity.pairedDevice.confirm({ userId, deviceId, password: text(body, 'password'), address: req.socket.remoteAddress });
+          writeJson(res, 200, { ok: true });
+          return true;
+        }
+        if (!canManage) throw controlError('forbidden', 'Instance owner access required');
+        const administered = await administerAccounts(path, 'POST', body, identity.pairedDevice.session(userId, deviceId));
+        if (administered === null) return false;
+        writeJson(res, 200, administered);
+        return true;
+      };
+      return run().catch((error: unknown) => {
+        const code = safeErrorCode(error);
+        if (code === 'body-too-large' || code === 'request-timeout') res.setHeader('Connection', 'close');
+        if (code === 'rate-limited') {
+          const retry = (error as { retryAfterSec?: number }).retryAfterSec;
+          res.setHeader('Retry-After', Number.isSafeInteger(retry) && retry! > 0 ? retry! : 1);
+        }
+        writeJson(res, statusFor[code] ?? 500, { error: code });
+        return true;
+      });
     },
     /** The auth status embedded in the served HTML shell, so boot needs no
      *  status round trip. Null when this transport could not ask for it. The
@@ -293,7 +434,9 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
     authorizeUpgrade(req: IncomingMessage) {
       transport(req); sameOrigin(req);
       if (req.url !== '/ws') throw controlError('not-found', 'WebSocket route not found');
-      return identity.sessions.require(tokenOf(req));
+      const session = identity.sessions.require(tokenOf(req));
+      if (identity.accounts.passwordChangeRequired(session.userId)) throw controlError('password-change-required', 'Choose your own password first');
+      return session;
     },
     async handle(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
       if (!req.url?.startsWith('/api/auth/')) return false;
@@ -306,6 +449,9 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
         const path = req.url;
         if (path.includes('?') || path.includes('#')) throw controlError('invalid-input', 'Authentication parameters belong in the request body');
         const token = tokenOf(req);
+        if (!PASSWORD_CHANGE_ROUTES.has(`${req.method} ${path}`) && passwordChangePending(token)) {
+          throw controlError('password-change-required', 'Choose your own password first');
+        }
         if (req.method === 'GET' && path === '/api/auth/status') {
           send(200, authStatus(req, res, token));
           return true;
@@ -325,7 +471,11 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
           const actor = requireHuman(req);
           if (path === '/api/auth/accounts') {
             send(200, accountsBody(actor.userId, identity.accounts.list(token!), identity.accounts.canManage(token!)));
-          } else if (path === '/api/auth/sessions') send(200, { sessions: identity.sessions.list(token!) });
+          } else if (path === '/api/auth/sessions') {
+            // A paired device administers with a server-side session of its own;
+            // it is not a browser sign-in and never appears in this list.
+            send(200, { sessions: identity.sessions.list(token!).filter(session => !session.label.startsWith(PAIRED_SESSION_LABEL)) });
+          }
           else if (path === '/api/auth/me') {
             send(200, meBody(identity.accounts.current(token!)));
           } else if (accountGuardrailsPath.test(path)) {
@@ -382,6 +532,8 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
           ]);
           send(200, { ok: true, csrfToken: csrfFor(freshNonce), ...extra });
         };
+        const administered = await administerAccounts(path, req.method ?? '', body, token);
+        if (administered !== null) { send(200, administered); return true; }
         if (req.method === 'POST' && path === '/api/auth/setup/claim') {
           send(200, identity.setup.bindClaim(text(body, 'claimToken'), nonce));
         } else if (req.method === 'POST' && path === '/api/auth/setup/recovery') {
@@ -420,7 +572,7 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
         } else if (req.method === 'POST' && path === '/api/auth/logout') {
           identity.sessions.logout(token); res.setHeader('Set-Cookie', cookie(cookieName, '', 0)); send(200, { ok: true });
         } else {
-          const actor = requireHuman(req);
+          requireHuman(req);
           const requireOwner = (elevated = false): void => {
             if (elevated) identity.sessions.require(token!, true);
             if (!identity.accounts.canManage(token!)) throw controlError('forbidden', 'Instance owner access required');
@@ -435,11 +587,6 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
             send(200, identity.accounts.renameSelf(token!, text(body, 'name'), Number(body.expectedRevision)));
           } else if (req.method === 'POST' && path === '/api/auth/me/login') {
             send(200, identity.accounts.changeLogin(token!, text(body, 'login'), Number(body.expectedRevision)));
-          } else if (req.method === 'POST' && path === '/api/auth/accounts') {
-            const account = await identity.accounts.createLocal(token!, {
-              login: text(body, 'login'), name: text(body, 'name'), password: text(body, 'password'),
-            });
-            send(200, { ...account, name: account.displayName, current: false });
           } else if (req.method === 'POST' && path === '/api/auth/owner-credential/recovery') {
             send(200, identity.ownerCredential.prepareRecovery(token!));
           } else if (req.method === 'POST' && path === '/api/auth/owner-credential') {
@@ -475,40 +622,7 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
             const match = linkPath.exec(path)!;
             linkService().unlink(token!, match[1]!, Number(body.expectedRevision)); send(200, { ok: true });
           } else {
-            const statusMatch = req.method === 'POST' ? accountStatusPath.exec(path) : null;
-            const guardrailsMatch = req.method === 'POST' ? accountGuardrailsPath.exec(path) : null;
-            const limitsMatch = req.method === 'POST' ? accountLimitsPath.exec(path) : null;
-            const permissionsMatch = req.method === 'POST' ? accountPermissionsPath.exec(path) : null;
-            const profileMatch = req.method === 'POST' ? accountProfilePath.exec(path) : null;
-            const passwordMatch = req.method === 'POST' ? accountPasswordPath.exec(path) : null;
-            const loginMatch = req.method === 'POST' ? accountLoginPath.exec(path) : null;
-            if (guardrailsMatch) {
-              if (!Object.hasOwn(body, 'guardrails')) throw controlError('invalid-input', 'guardrails is required');
-              send(200, identity.guardrails.set(token!, guardrailsMatch[1]!, body.guardrails, Number(body.expectedRevision)));
-            } else if (limitsMatch) {
-              if (!Object.hasOwn(body, 'limits')) throw controlError('invalid-input', 'limits is required');
-              send(200, identity.limits.set(token!, limitsMatch[1]!, body.limits, Number(body.expectedRevision)));
-            } else if (permissionsMatch) {
-              if (!Object.hasOwn(body, 'permissions')) throw controlError('invalid-input', 'permissions is required');
-              send(200, identity.permissions.set(token!, permissionsMatch[1]!, body.permissions, Number(body.expectedRevision)));
-            } else if (profileMatch) {
-              const account = identity.accounts.renameAccount(token!, profileMatch[1]!, text(body, 'name'), Number(body.expectedRevision));
-              send(200, { ...account, name: account.displayName, current: account.id === actor.userId });
-            } else if (loginMatch) {
-              const account = identity.accounts.changeAccountLogin(token!, loginMatch[1]!, text(body, 'login'), Number(body.expectedRevision));
-              send(200, { ...account, name: account.displayName, current: account.id === actor.userId });
-            } else if (passwordMatch) {
-              const account = await identity.accounts.resetPassword(token!, passwordMatch[1]!, text(body, 'password'));
-              send(200, { ...account, name: account.displayName, current: false });
-            } else if (statusMatch) {
-              const status = text(body, 'status');
-              const account = identity.accounts.setStatus(
-                token!, statusMatch[1]!,
-                status as 'active' | 'suspended' | 'offboarding' | 'disabled',
-                Number(body.expectedRevision),
-              );
-              send(200, { ...account, name: account.displayName, current: account.id === identity.accounts.current(token!).id });
-            } else if (req.method === 'POST' && path === '/api/auth/cli/tokens') {
+            if (req.method === 'POST' && path === '/api/auth/cli/tokens') {
               send(200, identity.accessTokens.create(token!, {
                 label: body.label, profile: body.profile, grants: body.grants, spaceId: body.spaceId, expiresInDays: body.expiresInDays,
               }));
@@ -535,11 +649,9 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
               identity.sessions.revoke(token!, path.slice('/api/auth/sessions/'.length), body.expectedRevision as number); send(200, { ok: true });
             } else throw controlError('not-found', 'Authentication route not found');
           }
-          void actor;
         }
       } catch (error) {
-        const code = (error as { code?: unknown } | null)?.code;
-        const safeCode = typeof code === 'string' && Object.hasOwn(statusFor, code) ? code : 'internal-error';
+        const safeCode = safeErrorCode(error);
         if (safeCode === 'body-too-large' || safeCode === 'request-timeout') res.setHeader('Connection', 'close');
         if (safeCode === 'rate-limited') {
           const retry = (error as { retryAfterSec?: number }).retryAfterSec;

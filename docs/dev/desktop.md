@@ -100,8 +100,9 @@ all. There are two ways to reach a server.
   user data, with Unix file modes where the platform has them. Unlike the phones it
   has no OS keychain, so the private key is protected like an SSH key.
 - **Saved state** (`src/servers.ts`, `desktop/servers.json`). The server on screen,
-  whether to run this computer's server, saved addresses, per-server microphone
-  choices, and each Link server's proxy port. The port is part of the page's origin, so
+  whether to run this computer's server, saved addresses, per-server microphone,
+  clipboard and [zone](#server-zones) choices, folded zones, and each Link server's
+  proxy port. Any number of servers may be saved; the file bounds addresses at 64. The port is part of the page's origin, so
   keeping it keeps that server's shell state between launches. It is kept apart from
   `settings.json`, which pages may read and write. Rollback: an older build ignores
   the file and opens this computer's server.
@@ -110,6 +111,36 @@ all. There are two ways to reach a server.
   the tray (Servers) and the app menu (Switch Server…). The command palette and
   Settings → Desktop open the list. Screens with no shell (sign-in, setup, "couldn't
   reach") carry *Choose another server*.
+
+### Server zones
+
+The app works on this computer and in any number of other servers at once: the
+navigator lists every saved server as a **zone** with its projects, and a click on a
+project moves the window to that server at that project (`src/serverZones.ts`, the
+shell's `apps/web/src/serverZones.ts` and `components/sidebar/ServerZones.tsx`; UI in
+[ui.md](ui.md#server-zones-in-the-navigator)).
+
+- **No connection is kept for a zone.** Only the server on screen has a page, and a
+  Link session exists only for that one, as before. Each server's own page lists its
+  projects to the main process while it is open (`desktop:servers:zones:report`:
+  id, name, icon and colour of the root projects of its current Space, never a path);
+  the main process keeps the last list per server in `desktop/server-zones.json`
+  (mode 0600) and hands the other servers' lists to the page on screen. A zone is a
+  snapshot from that server's last visit: a project a teammate added since appears
+  after the next visit. A server never opened here, or one whose shell is older than
+  zones, is a heading with one row that opens it.
+- **A page speaks only for its own server.** The key a list is filed under comes from
+  the sender frame's origin, never from the payload, and the list is validated and
+  bounded (200 projects, names of 120 characters, icons of 4 KiB).
+- **A click goes only where a zone leads.** `planZoneOpen` accepts a zone the sender
+  may see and a project that zone listed, and builds the route itself (`/p/<id>`). A
+  failure to reach the server lands on the server list with its error, like the
+  native menu.
+- **Zones are ordered to stay put**: this computer, paired servers by name, addresses
+  by host. Folding a zone is saved in `servers.json` (`foldedZones`), never in a
+  server's synced preferences, where it would name the person's other servers.
+- Forgetting a server drops its list, its fold and its permissions. The workstation
+  edition has no zones.
 
 ### Launch
 
@@ -138,6 +169,13 @@ that server, so treat it as untrusted code in this window.
   worst: updates stay signed, and quitting loses nothing durable.
 - It may not pair, connect, forget, list saved servers, reach paths, the data folder,
   setup or the owner session. `desktop:info` hides the data and log paths from it.
+- It lists its own projects for its [zone](#server-zones), and that is all it does
+  with zones until the person allows more. Asked for the other zones, the main
+  process answers only `access: "ask"`, with no name and no count beyond "there is
+  something to ask for". The navigator then shows one row, *Show my other servers
+  here*; choosing it makes the app ask once per server, by name, like the microphone
+  (`zoneServers`). After that the page reads the other servers' names and project
+  names and may move the window to them. This computer's own page never asks.
 - `settingsPatchFor` drops the choices that outlive the window: launch at login and
   automatic updates and their channel. These stay in the tray.
 - It cannot call this computer's server. Sites ignore ports, so a Link page on
@@ -148,14 +186,26 @@ that server, so treat it as untrusted code in this window.
   shares its host (an SSH tunnel to `127.0.0.1:<port>`).
 - The microphone asks once per server, by name; agents on another computer do not hold
   this one awake.
+- Reading the clipboard (`navigator.clipboard.readText`, a terminal's **Paste** menu
+  item) asks once per server, by name, like a browser asks a site. Only the top page
+  may read it, never a frame inside it (`clipboardReadAccess`). Cmd/Ctrl+V needs no
+  permission: it is the Edit menu's native paste.
 - Reveal-in-file-manager stays off (`localDesktopBridge`): those paths name files
   over there.
+- On a nightly build it may open the bug-report sheet (`desktop:report:*`, see
+  [Bug reports](#bug-reports-nightly)): the capture is its own window, and the main
+  process holds the tester password, which no page ever reads back.
 
 Known limit: two servers opened by address on one host name (two tunnels on
 `127.0.0.1`) share a cookie jar, as they would in any browser, so each receives the
 other's session cookie. This computer's session stays out of that, in both directions.
 
 ### Not verified
+
+Server zones have unit tests for the main-process rules and the shell's store, and a
+browser screenshot of the navigator against a stand-in bridge. No Electron window has
+run them: the native question, the hand-over to a Link server at a project and the
+saved files are untested on every platform.
 
 Live-tested only on Linux arm64 with debug binaries in an unpackaged Electron: pairing,
 Link and address sessions, restart, connect-only launch, client crash, revocation and
@@ -332,9 +382,9 @@ The renderer learns about updates only through the preload bridge: `onUpdateStat
 
 The workstation edition is a local-only shell for coding harnesses on a managed work computer (rules and network endpoints: [workstation edition](../security/workstation-edition.md)). It is the same app (`com.polyth.desktop`, product name Polyth) built for every desktop target and published as extra assets on the same GitHub release. `scripts/ci/workstation.mjs` owns the build helpers; `remote-build.mjs` targets `mac-dmg-workstation` (arm64 and x64), `windows-exe-workstation` and `linux-appimage-workstation` run them.
 
-- **Flavor.** `POLYTH_DESKTOP_FLAVOR=workstation` for `build:desktop`: `build.ts` bundles only packages whose manifest lists `"editions": ["workstation"]`, builds no Link binaries and removes `resources/chromium`. These targets skip `desktop:stage-chromium` and the Playwright download.
-- **electron-builder configuration.** `workstationBuilderArgs` derives a full config from the `build` field of `apps/desktop/package.json` and passes it as `--config <file>`. electron-builder 26 reads only that file in place of the `build` field (`app-builder-lib` `util/config/load.js`), so the file is complete; relative `from` paths still resolve against `apps/desktop`; later `--config.*` flags merge on top. The derived config names artifacts `Polyth-<v>-<os>-<arch>-workstation.<ext>` (the edition after `<os>-<arch>`, so no standard-name filter can match it), drops the `chromium` and `polyth-link` extra resources, narrows the `packages` resource to `<id>/dist/web/**` and `<id>/assets/**` of workstation packages, excludes `node_modules/playwright-core/**` from the app files and sets the publish channel `workstation`. Output goes to `release/{mac-workstation-<arch>,win-workstation,linux-workstation}`.
-- **Package check.** After electron-builder, `assertWorkstationPackage` fails the job when the unpacked app has `resources/chromium`, any `resources/polyth-link` file, a `resources/packages/<dir>` outside the workstation list, or when `build-meta/main.metafile.json` (esbuild's inputs for `dist/main.js`) reads a feature package (`polyth.serverEntry`) outside the list or `playwright-core`.
+- **Flavor.** `POLYTH_DESKTOP_FLAVOR=workstation` for `build:desktop`: `build.ts` bundles only packages whose manifest lists `"editions": ["workstation"]` and builds no Link binaries. These targets also stage Chromium (`desktop:stage-chromium` and the Playwright download) exactly like the standard build, because the `browser` package ships in the edition.
+- **electron-builder configuration.** `workstationBuilderArgs` derives a full config from the `build` field of `apps/desktop/package.json` and passes it as `--config <file>`. electron-builder 26 reads only that file in place of the `build` field (`app-builder-lib` `util/config/load.js`), so the file is complete; relative `from` paths still resolve against `apps/desktop`; later `--config.*` flags merge on top. The derived config names artifacts `Polyth-<v>-<os>-<arch>-workstation.<ext>` (the edition after `<os>-<arch>`, so no standard-name filter can match it), drops the `polyth-link` extra resource, narrows the `packages` resource to `<id>/dist/web/**` and `<id>/assets/**` of workstation packages and sets the publish channel `workstation`. Output goes to `release/{mac-workstation-<arch>,win-workstation,linux-workstation}`.
+- **Package check.** After electron-builder, `assertWorkstationPackage` fails the job when the unpacked app has any `resources/polyth-link` file, a `resources/packages/<dir>` outside the workstation list, or when `build-meta/main.metafile.json` (esbuild's inputs for `dist/main.js`) reads a feature package (`polyth.serverEntry`) outside the list. It also requires what the edition does ship: the `resources/chromium` browser and `playwright-core` in the main bundle.
 - **SBOM and sums.** `workstationSbom` writes a CycloneDX 1.5 document from the same metafile (every bundled `node_modules` package, Electron, the bundled OpenCode); `update-feed.mjs` adds `SHA256SUMS-workstation.txt` over every workstation asset.
 - **Updates.** The build reads `workstation*.yml` (channel `workstation`, prereleases off) from the latest stable release; see [release operations](../operations/releases.md#workstation-edition-assets). The Linux job runs the startup smoke test under Xvfb instead of `appimage-e2e.mjs`, which drives the Link host this edition does not ship. While the edition tracks devel, a nightly build replaces those assets on the newest stable release; the app code and its updater channel are unchanged.
 
@@ -355,9 +405,15 @@ height (below). `windowChrome.ts` owns the per-platform
   (`macCaptionGeometry`). The caption zone (`--desktop-macos-titlebar-inset`, inline on
   `<body>`) is that extent plus a 14 px gap: 86 px at 100 %, wider below it, where a fixed
   86 px ended under the green light. Electron exposes the lights' position but not their
-  size, so the 54×14 DIP group (`MACOS_TRAFFIC_LIGHT_GROUP`) is the one assumed constant;
-  a shell without the call keeps the 86 px CSS default. The zone drops in fullscreen (the
-  lights hide there).
+  size, so the group's size is the one assumed constant, picked by
+  `macTrafficLightGroup(process.getSystemVersion())`: 54×14 DIP up to macOS 15
+  (`MACOS_TRAFFIC_LIGHT_GROUP`) and 68×18 DIP from macOS 26 on
+  (`MACOS_26_TRAFFIC_LIGHT_GROUP`), which draws larger buttons for an app linked against
+  its SDK, so the zone there is 100 px at 100 %. The larger size was measured from a
+  screenshot of a real window (lights 2 px low and the first header control against the
+  green light under the 54×14 assumption), not read from an API: re-measure it when a
+  macOS release changes the buttons again. A shell without the call keeps the 86 px CSS
+  default. The zone drops in fullscreen (the lights hide there).
 - **Windows** — `titleBarStyle: "hidden"` with the native Window Controls Overlay, so the
   caption buttons, Snap Layouts flyout, rounded corners, and shadow are the operating
   system's. The caption zone takes the overlay's rectangle as `desktop.tsx` measures it
@@ -460,7 +516,8 @@ control inert.
 ### Native menus
 
 The application menu (macOS menu bar; Windows/Linux keep accelerators without an in-window
-menu bar) carries Settings, New Chat, Search Chats, and Command Palette. Their shortcuts are
+menu bar) carries Settings, New Chat, Search Chats, and Command Palette, and on nightly
+builds **Help → Report a Bug…** ([Bug reports](#bug-reports-nightly)). Their shortcuts are
 displayed with `registerAccelerator: false`: the renderer keymap (`@polyth/hotkeys`, which
 honours remapping) stays the single owner, and a menu click sends a `desktop:command` that
 the renderer maps to the shell's `cmd.*` commands. Electron draws no context menu by itself,
@@ -570,15 +627,65 @@ xvfb-run -a node apps/desktop/test/appimage-profile.mjs \
   low-resource
 ```
 
+## Bug reports (nightly)
+
+Nightly builds of the standard edition (`X.Y.N-nightly`; `bugReportOrigin` in
+`src/bugReport.ts`) send bug reports to the team's private GitHub repository through
+the report relay ([`packages/report-relay`](../../packages/report-relay/README.md),
+`https://reports.polyth.app`). Stable and workstation builds have no hotkey, menu item
+or network call for it.
+
+- **Opening.** ⌘⇧B / Ctrl+Shift+B (`reportBug` in `@polyth/hotkeys`, remappable),
+  **Help → Report a Bug…** (a `report-bug` desktop command), or the command palette all
+  run `capability.bug-report`, which the `@polyth/bug-report` package registers only
+  when `bugReport.state().available` says so.
+- **Capture first.** The sheet asks `desktop:report:capture` before it renders, so the
+  screenshot shows the window as it was: `webContents.capturePage()` of this window
+  only (no screen-recording permission, no other app), downscaled to 1600 px and
+  re-encoded as JPEG until it is at most 1.5 MB (`encodeScreenshot`).
+- **The sheet** shows the screenshot (with a switch), the tab's last error notices
+  (`errors.recent()` on the web host, home folders replaced by `~`), an optional note
+  and GitHub username, and the exact JSON that goes, minus the image bytes.
+- **What goes** is the shared wire shape (`@polyth/contracts/bug-report`, exact fields;
+  the relay rejects anything else): build and OS, the web build and server version, the
+  view name (never a session or project id), viewport, allowlisted `ui.*` settings from
+  the page and `desktop.*` settings from main (`bugReportDesktopSettings`), enabled
+  package ids, recent errors, the note and the screenshot. Never paths, server
+  addresses, names, chat text outside the screenshot, tokens or Vault values. The
+  install id is an HMAC of a local secret and the UTC date: one computer's reports
+  group within a day and cannot be linked across days.
+- **Tester password.** Asked once, at the first send; kept only after the relay accepts
+  it, sealed by `safeStorage` (the OS keychain). On Linux without a keyring it lasts the
+  run, the sheet says so (`passwordStorage: "session"`), and reports queued offline wait
+  until it is entered again. A send while the relay is unreachable keeps the typed
+  password unverified so the queued report can go later; a `401` at that point forgets
+  it and the sheet asks again. It travels only in the
+  `Authorization` header and is printable ASCII without spaces (`isTesterPassword`).
+- **Limits and outbox.** One report a minute and ten a day leave a computer. A relay that
+  cannot be reached, or answers `429`/`503`, leaves the report in
+  `<userData>/desktop/bug-reports/` (at most 10, each dropped after 7 days); it goes at
+  the next start or every 15 minutes. `POLYTH_BUG_REPORT_ORIGIN` points at another relay
+  (`https:` or loopback `http:`) or `off`; `POLYTH_BUG_REPORT=1` turns reports on for a
+  development build; the relay still refuses a version that is not a nightly or is newer
+  than every published one.
+- **Verified:** unit tests (`apps/desktop/test/bugReport.test.ts`, the contract, package
+  and relay tests), a browser render of the real sheet on the real web host, and an
+  unpackaged Electron run on Linux under Xvfb against a local relay with a fake GitHub
+  (shortcut, capture, send, rate limit, wrong password, offline queue and delivery; no
+  keyring on that host). Not yet: a packaged nightly, a keychain-sealed password, and the
+  relay against real GitHub.
+
 ## Security boundary
 
 - Renderer: `sandbox: true`, `contextIsolation: true`, no Node integration.
 - Preload: a fixed API for settings, window actions/state, title-bar overlay colors,
-  native menu commands, updates, absolute local paths and the server list.
+  native menu commands, updates, absolute local paths, the server list and nightly bug
+  reports.
 - IPC: decided per channel from the sender frame's own origin
   (see [What another server's page may do](#what-another-servers-page-may-do)).
 - Navigation: a page stays on its own origin, and only the server list may hand the
   window to a server it connected; allowlisted HTTP(S)/mailto links open in the system browser.
-- Permissions: only audio capture (not camera/video) and notifications. Another server asks once for the microphone.
+- Permissions: only audio capture (not camera/video), notifications and clipboard read
+  for the top page. Another server asks once for the microphone and once for the clipboard.
 - Server: binds to `127.0.0.1` in desktop mode.
 - Secrets: desktop settings contain presentation and lifecycle preferences only.

@@ -194,10 +194,7 @@ export function trackRoutes(tracks: TrackWorkflow): RouteHandler {
 }
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
-  // The router is the sole owner of tenant knowledge/memory stores. Memory's
-  // service resolves this seam lazily, so package discovery order does not
-  // affect storage admission and disabling the Memory UI cannot select a
-  // deployment-wide fallback database.
+  // The router is the sole owner of tenant knowledge stores.
   const router = createSpaceKnowledgeRouter(host);
   const knowledge = router.routed;
   const dataDir = packageDataDir(host);
@@ -214,10 +211,6 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   host.services.provide(serverServiceKey<KnowledgeStore>("knowledge"), knowledge);
   host.services.provide(serverServiceKey<TrackStore>("tracks.store"), trackStore);
   host.services.provide(serverServiceKey<TrackWorkflow>("tracks.workflow"), tracks);
-  host.services.provide(serverServiceKey("knowledge.space"), {
-    prepareProject: (space: Parameters<SpaceKnowledgeRouter["prepareProject"]>[0], projectId: string) =>
-      router.prepareProject(space, projectId),
-  });
   let routes: RouteHandler | null = null;
   return {
     remoteAccess: localOnlyRemoteAccess(["knowledge"]),

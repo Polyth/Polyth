@@ -13,6 +13,7 @@ export const uk: DictationMessages = {
   "dictation.error.micPermissionDenied": "Доступ до мікрофона відхилено",
   "dictation.error.micUnavailableEnvironment": "Захоплення звуку з мікрофона недоступне в цьому середовищі",
   "dictation.error.microphoneLost": "Мікрофон став недоступним під час диктування",
+  "dictation.error.noAudio": "Мікрофон увімкнений, але звук не надходить. Закрийте інші програми, що використовують звук, і спробуйте ще раз",
   "dictation.error.noTransport": "{provider} не має прямого клієнтського транспорту",
   "dictation.error.replayBudget": "Пряме диктування через {provider} перевищило ліміт повторного відтворення під час перепідключення",
   "dictation.error.replayOverflow": "Аудіо диктування не вдалося безпечно відтворити, бо мережевий буфер переповнився",

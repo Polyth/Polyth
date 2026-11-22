@@ -78,7 +78,7 @@ test("the last Report line sets the signal and headline; Remember lines become n
   assert.match(report.body, /inside a code sample/, "fenced protocol text is content");
   assert.doesNotMatch(report.body, /3 commits landed/);
 
-  assert.deepEqual(parseAgentReport("Report: quiet"), { signal: "quiet", body: "", remember: [], needs: [] });
+  assert.deepEqual(parseAgentReport("Report: quiet"), { signal: "quiet", body: "", remember: [], needs: [], resolved: [] });
   assert.equal(parseAgentReport("All good.").signal, undefined);
 });
 

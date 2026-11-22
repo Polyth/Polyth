@@ -68,6 +68,7 @@ export function errorReportText(error: unknown, context: ErrorReportContext): st
 export function copyErrorAction(report: string): UiErrorAction {
   return {
     label: tr("app.copyError"),
+    report,
     run: async () => {
       const copied = await copyText(report);
       setUiError(tr(copied ? "app.errorCopied" : "app.errorCopyFailed"), null, undefined, copied ? "info" : "warning");

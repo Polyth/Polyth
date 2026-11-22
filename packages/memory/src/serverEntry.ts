@@ -8,19 +8,16 @@ import {
   type ServerPackageHost,
 } from "@polyth/plugins";
 import { JUDGMENT_SERVICE } from "@polyth/judgment/server";
-import { createMemoryRuntimeService, createMemoryService, erasePersonMemory, MEMORY_SCOPE_SERVICE, personMemoryBytes, memoryRoutes, registerMemoryTool, type ScopedMemorySource } from "./service.ts";
+import { createMemoryRuntimeService, createMemoryService, erasePersonMemory, openEverySpace, personMemoryBytes, memoryRoutes, registerMemoryTool, type ScopedMemorySource } from "./service.ts";
+import { createSpaceMemoryStores } from "./spaceStore.ts";
 import { REFLECT_DURABILITY_DESCRIPTOR, unregisterReflectDurability } from "./reflectService.ts";
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
-  // The knowledge package owns the database. Resolve its Space router only
-  // when a request/job is admitted; package discovery order is not a data
-  // dependency order and opening a fallback DB here would break isolation.
+  // One database per Space, in this package's own directory. A store is opened
+  // only for a Space context the gateway or the host has already admitted.
+  const stores = createSpaceMemoryStores(host);
   const source: ScopedMemorySource = {
-    async prepareProject(space, projectId) {
-      const router = host.services.get(MEMORY_SCOPE_SERVICE);
-      if (!router) throw Object.assign(new Error("memory service is unavailable"), { code: "unavailable" });
-      return router.prepareProject(space, projectId);
-    },
+    async prepareProject(space) { return { memory: stores.forSpace(space) }; },
   };
   const service = createMemoryService(host, source);
   host.services.provide(serverServiceKey("memory"), service);
@@ -55,6 +52,9 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         erasePersonMemory(host, service, userId).then(() => undefined));
       dataVolume = host.services.get(SERVER_PERSON_DATA_VOLUME)?.contribute((userId) => personMemoryBytes(host, service, userId));
       service.harvest.start();
+      // Every Space moves to this store at start, not when someone first opens
+      // its memory: the old tables are gone for everyone after one restart.
+      void openEverySpace(host, service);
     },
     async onDisable() {
       unregisterUse?.();
@@ -65,6 +65,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       dataVolume?.dispose(); dataVolume = undefined;
       tool?.dispose(); tool = undefined;
       await service.harvest.stop();
+      stores.close();
     },
   };
 }

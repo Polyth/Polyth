@@ -24,7 +24,7 @@ import {
   createSecureSafeService,
 } from "./index.ts";
 import { SECURE_SAFE_PACKAGE_ID, secureSafeSkill } from "./agentSkill.ts";
-import { createCredentialVaultListAgentTool } from "./agentTool.ts";
+import { createCredentialVaultListAgentTool, createCredentialVaultRequestAgentTool } from "./agentTool.ts";
 
 const kind = (value: unknown): SecureSafeKind => {
   if (value === "env" || value === "token" || value === "password") return value;
@@ -261,6 +261,9 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
             (spaceId, userId) => spaces.forPerson(spaceId, userId),
           ),
         ),
+        // Opens the protected form in the session that owns the call; the
+        // host stores the value, the agent gets only the handle.
+        capabilities.register(SECURE_SAFE_PACKAGE_ID, createCredentialVaultRequestAgentTool()),
       ];
     },
     async onDisable() {

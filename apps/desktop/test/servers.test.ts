@@ -61,6 +61,9 @@ test("a damaged file keeps what is still good", () => {
       { url: "b.example" },
     ],
     microphoneServers: ["link:abc", "other:x", 7],
+    clipboardServers: ["address:https://a.example", "../x", null],
+    zoneServers: ["link:abc", "local", "link:abc", {}],
+    foldedZones: ["local", "address:https://a.example", "elsewhere"],
   });
   assert.deepEqual(state, {
     active: { kind: "local" },
@@ -68,6 +71,9 @@ test("a damaged file keeps what is still good", () => {
     linkPorts: { abc: 41234 },
     addresses: [{ url: "https://a.example", lastUsedAt: 5 }, { url: "https://b.example", lastUsedAt: 0 }],
     microphoneServers: ["link:abc"],
+    clipboardServers: ["address:https://a.example"],
+    zoneServers: ["link:abc"],
+    foldedZones: ["local", "address:https://a.example"],
   });
 });
 
@@ -76,8 +82,13 @@ test("the list keeps the newest addresses first, without duplicates", () => {
   for (let index = 0; index < 12; index += 1) state = rememberAddress(state, `https://s${index}.example`, index);
   state = rememberAddress(state, "https://s10.example", 100);
   assert.equal(state.addresses[0]?.url, "https://s10.example");
-  assert.equal(state.addresses.length, 8);
-  assert.equal(new Set(state.addresses.map((address) => address.url)).size, 8);
+  // Every saved server is a zone in the navigator, so a dozen all stay.
+  assert.equal(state.addresses.length, 12);
+  assert.equal(new Set(state.addresses.map((address) => address.url)).size, 12);
+  // The file is still bounded, far above what anyone saves by hand.
+  for (let index = 12; index < 90; index += 1) state = rememberAddress(state, `https://s${index}.example`, index);
+  assert.equal(state.addresses.length, 64);
+  assert.equal(state.addresses[0]?.url, "https://s89.example");
 });
 
 test("targets compare by which server they are", () => {

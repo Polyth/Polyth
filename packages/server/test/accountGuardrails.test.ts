@@ -52,7 +52,9 @@ async function fixture(t: test.TestContext) {
     claimToken: claim.token, browserBinding: binding, name: "Owner", organizationName: "Local",
     login: "owner", password: "owner test passphrase", recoverySetId: recovery.setId, recoveryAcknowledged: true,
   });
-  const member = await identity.accounts.createLocal(owner.token, { login: "olena", name: "Olena", password: "member test passphrase" });
+  const member = await identity.accounts.createLocal(owner.token, { login: "olena", name: "Olena", password: "owner chose this one" });
+  // Olena has already replaced the password the owner chose for her.
+  await identity.credentials.changePassword(control.transaction(() => identity.sessions.issue(member.id, "first")).token, "member test passphrase");
   const memberSession = control.transaction(() => identity.sessions.issue(member.id, "test"));
   const cookieName = identity.sessions.cookieName();
   const gateway = createCanonicalAuthGateway({ control, identity, cookieName });

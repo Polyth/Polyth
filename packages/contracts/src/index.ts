@@ -619,6 +619,20 @@ export interface SecretRequestData {
   purpose?: string;
   kind?: SecureSafeKind;
   existing?: boolean;
+  /** `agent-tool`: opened by the Credential Vault request tool, which is
+   *  waiting on it; the reply settles that call instead of a runtime request.
+   *  Absent: a runtime question marked as a secret request. */
+  origin?: "agent-tool";
+  /** The waiting package tool's name, for `origin: "agent-tool"`. */
+  tool?: string;
+}
+/** What an agent asks the person to store; the value never passes through
+ *  the agent. See `ToolExecutionContext.requestSecret`. */
+export interface AgentSecretRequest {
+  handle: string;
+  label: string;
+  purpose?: string;
+  kind?: SecureSafeKind;
 }
 /** Where a saved secret request lands; see `SessionService.replySecret`. */
 export type SecretSaveDestination =
@@ -2108,7 +2122,7 @@ export const delegatedChildRunning = (status: SessionStatus): boolean =>
  *  that still run. Their work is unfinished — shared-workspace children write
  *  straight into the parent's checkout — so the parent's isolated work is not
  *  ready to integrate, discard or publish while any is listed. */
-export function runningSubagents<T extends Pick<SessionProjection, "id" | "parentId" | "status">>(
+export function runningSubagents<T extends Pick<SessionProjection, "id" | "parentId" | "forkOf" | "status">>(
   sessions: readonly T[],
   sessionId: string,
 ): T[] {
@@ -2121,7 +2135,7 @@ export function runningSubagents<T extends Pick<SessionProjection, "id" | "paren
     }
     return false;
   };
-  return sessions.filter((candidate) => candidate.id !== sessionId && delegatedChildRunning(candidate.status) && descends(candidate));
+  return sessions.filter((candidate) => candidate.id !== sessionId && !candidate.forkOf && delegatedChildRunning(candidate.status) && descends(candidate));
 }
 
 /** Blocking statuses where no agent turn runs but Polyth has not yet proven
@@ -2141,6 +2155,33 @@ export interface SessionAttention {
   /** Per reader: `person/message` events mentioning the reader after the
    *  reader's own read cursor. Absent or 0 means none. */
   mentions?: number;
+}
+
+/** One piece of work a harness runs in the background for a session (a
+ *  backgrounded shell, monitor or subagent) that will report back when it
+ *  settles. Ids are the harness's own task ids. */
+export interface RuntimeBackgroundTask {
+  id: string;
+  description?: string;
+  kind?: string;
+}
+
+/** Background work of the session's native process that has not reported back
+ *  yet. Server-owned and durable: a process can only report its own work, so
+ *  when that process ends first this record is what still knows the work
+ *  existed. Polyth then wakes the session to say it was lost, so nothing it
+ *  promised to wait for is left unanswered. */
+export interface SessionNativeBackgroundTasks {
+  /** Live tasks of the process wired when they were reported. */
+  tasks?: RuntimeBackgroundTask[];
+  /** When `tasks` became non-empty. */
+  since?: number;
+  /** The process that reported `tasks` was detached at this time; unless the
+   *  same process is wired again they are lost. */
+  orphanedAt?: number;
+  /** Tasks whose process ended before they reported, awaiting the wake that
+   *  tells the session. */
+  lost?: { tasks: RuntimeBackgroundTask[]; at: number; reason: string };
 }
 
 export type BackgroundWorkKind = "multirun" | "fusion" | "workflow";
@@ -2836,6 +2877,12 @@ export interface SessionProjection {
   /** Resumable native import; canonical events remain authoritative. */
   historyImport?: { state: "pending" | "in-progress" | "failed" | "complete"; count: number; digest?: string; code?: string };
   id: string; projectId: string; parentId?: string;
+  /** The chat this one was forked from (`session/forked`): a fork carries
+   *  `parentId` for lineage but is a chat of its own — never a delegated
+   *  subagent, so subagent classification excludes `forkOf` rows. Absent on
+   *  ordinary chats and legacy forks (whose lineage lives in the copied
+   *  `session/forked` marker alone). */
+  forkOf?: string;
   /** Immutable package-owned session kind, set at creation. A purpose session
    * belongs to the workbench profile that declares the same `sessionPurpose`
    * and receives that package's per-turn context; forks inherit it. Absent
@@ -2920,6 +2967,8 @@ export interface SessionProjection {
   pinned?: { position: number };
   /** Durable navigation/notification state for workflows that outlive a view. */
   backgroundWork?: BackgroundWorkState;
+  /** See `SessionNativeBackgroundTasks`. */
+  nativeBackgroundTasks?: SessionNativeBackgroundTasks;
   /** Small-model idle assist; stale once the log grows past atSeq. */
   assist?: SessionAssist;
   /** Pending auto-resume after a provider rate-limit / quota stop. The server
@@ -3330,6 +3379,13 @@ export interface SessionService {
     relocateManagedCheckout?: boolean;
   }): Promise<SessionProjection>;
   queueList?(sessionId: string): Promise<QueueItemDto[]>;
+  /** Keep this session's native runtime (and with it every process the
+   *  agent started inside it) from being released as idle until `untilMs`,
+   *  or until the hold is released. For server-owned waits on work that runs
+   *  in the agent's process tree. Bounded by the idle policy's background
+   *  hold; in memory only, so the owner re-applies it after a restart. */
+  holdRuntime?(sessionId: string, holdId: string, untilMs: number): void;
+  releaseRuntimeHold?(sessionId: string, holdId: string): void;
   /** Temporarily holds the queue head while it is edited in the composer. */
   queueEditStart?(sessionId: string, queueId: string): Promise<QueueItemDto>;
   queueEdit?(sessionId: string, queueId: string, text: string): Promise<QueueItemDto>;
@@ -3485,7 +3541,7 @@ export interface SessionReplayPage {
  * the correct icon before it is opened: without `resume`, `runtimeControl`
  * and `harnessTransition` a summary row misreads a provider-limit pause as a
  * failure and a dormant owned epoch as an unexpected runtime change. */
-export const SESSION_SUMMARY_FIELDS = ["id", "spaceId", "projectId", "parentId", "purpose", "origin", "title", "titleSource", "status", "createdAt", "updatedAt", "lastTurnAt", "model", "agent", "resolvedHarnessId", "folderId", "labelIds", "pinned", "branch", "worktreeId", "worktreePath", "autoAcceptSetting", "autoAccept", "autoAcceptAll", "attention", "resume", "paused", "runtimeControl", "harnessTransition", "historyImport", "backgroundWork", "goal", "isolationSummary", "isolationMerge", "sharing", "draftPreview", "repositoryScope"] as const satisfies readonly (keyof SessionProjection)[];
+export const SESSION_SUMMARY_FIELDS = ["id", "spaceId", "projectId", "parentId", "forkOf", "purpose", "origin", "title", "titleSource", "status", "createdAt", "updatedAt", "lastTurnAt", "model", "agent", "resolvedHarnessId", "folderId", "labelIds", "pinned", "branch", "worktreeId", "worktreePath", "autoAcceptSetting", "autoAccept", "autoAcceptAll", "attention", "resume", "paused", "runtimeControl", "harnessTransition", "historyImport", "backgroundWork", "goal", "isolationSummary", "isolationMerge", "sharing", "draftPreview", "repositoryScope"] as const satisfies readonly (keyof SessionProjection)[];
 
 /** Unread top-level chats per project the rail query returns; enough to show "9+". */
 export const RAIL_STATUS_UNREAD_PER_PROJECT = 10;
@@ -4690,6 +4746,11 @@ export interface HarnessDescriptor {
   /** The CLI's own self-update argv; `[0]` is the binary name, resolved like the
    *  harness executable and run without a shell. */
   updateCommand?: readonly string[];
+  /** `"installer"`: when `updateCommand` fails, Polyth runs `installCommand`
+   *  instead, which installs the newest release in place. For a CLI whose
+   *  own updater needs things its installer does not (Cursor's `agent update`
+   *  needs a live sign-in; its installer downloads anonymously). */
+  updateFallback?: "installer";
   /** Where the newest release of this CLI is published, so Settings can say
    *  an update exists before running `updateCommand`. */
   releaseSource?: HarnessReleaseSource;
@@ -5548,6 +5609,11 @@ export type RuntimeEvent =
    * admits a turn for it itself: Polyth turns `text` into one hidden, idempotent
    * send keyed by `wakeId`. Not dialogue and never a canonical row. */
   | { type: "runtime/wake-requested"; wakeId: string; reason: "background-task"; text: string }
+  /** The full set of the process's live background tasks, sent whenever it
+   * changes (replace semantics). `lost` names tasks the runtime knows ended
+   * with their process and will never report. Not dialogue and never a
+   * canonical row: the server keeps it on the projection. */
+  | { type: "runtime/background-tasks"; tasks: RuntimeBackgroundTask[]; lost?: RuntimeBackgroundTask[] }
   | { type: "turn/stopped"; turnId?: string; reason: "completed" | "aborted" | "error"; error?: string; code?: RuntimeErrorCode; retry?: RateLimitRetryHint; outputLimit?: true }
   | ({ type: "usage/recorded" } & UsageRecordedData)
   // Full revisioned snapshots: replay-deterministic task/subagent state.
@@ -5803,6 +5869,11 @@ export interface ToolExecutionContext {
    *  credential uses this person's and nobody else's; absent means system
    *  work with no person, which must never borrow a member's account. */
   actorUserId?: string;
+  /** Show the person the protected Credential Vault form in this session and
+   *  wait until they save or dismiss it. Resolves with the handle and outcome
+   *  only; the value goes from the form straight to the server. Absent when
+   *  the call has no canonical session or the Vault is unavailable. */
+  requestSecret?(request: AgentSecretRequest): Promise<SecretResolvedData>;
 }
 export type ToolExecutor = (input: JsonObject, ctx: ToolExecutionContext) => Promise<{ output: string; metadata?: JsonObject }>;
 

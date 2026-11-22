@@ -458,6 +458,48 @@ test("the status re-probe is bounded when the runtime never answers", async (t) 
   assert.equal((await nudges(h.store, id)).length, 0);
 });
 
+// Incident 2026-11-19: a reconciliation failed while the turn was still open
+// and settled `unknown`; its re-probes found the turn active and gave up. The
+// watchdog then stopped the tool with a proven abort, the nudge met the closed
+// barrier and was dropped, and the chat stayed idle until a person asked why.
+test("a tool stopped behind a barrier that closed during the turn is continued once the runtime is proven idle", async (t) => {
+  // The first re-probe (150 ms) lands inside the turn; the stop comes at 200 ms.
+  const h = harness({ reconcileRetryDelaysMs: [150, 150, 150], toolExecutionTimeoutMs: 200 });
+  t.after(() => { h.sessions.dispose(); return h.store.close(); });
+  let statusAvailable = true;
+  const snapshot = h.runtime.reconcile!;
+  h.runtime.reconcile = async (...args) => {
+    const result = await snapshot(...args);
+    return statusAvailable ? result : { ...result, state: { value: "unknown" } };
+  };
+  let notify: Parameters<NonNullable<AgentRuntime["onLifecycle"]>>[0] | undefined;
+  h.runtime.onLifecycle = (callback) => {
+    notify = callback;
+    return { dispose: () => { notify = undefined; } };
+  };
+  const { id } = await h.sessions.create({ projectId: "p1", title: "Lost approval" });
+  await h.sessions.send(id, { text: "add the test" });
+  h.emit(id, { type: "tool/started", callId: "stuck", tool: "bash", input: { command: "node --test test/audioCapture.test.ts" } });
+
+  statusAvailable = false;
+  notify!({ type: "stream-connected" });
+  await waitFor(() => settledUnknown(h.store, id));
+  assert.deepEqual(h.aborted, [], "the barrier closed while the tool was still running");
+
+  await waitFor(async () => (await h.store.events(id)).some((event) => event.type === "tool/error"));
+  await waitFor(async () => (await h.store.projection(id))?.status === "idle");
+  assert.deepEqual(h.aborted, [id]);
+  assert.equal((await nudges(h.store, id)).length, 0, "no more work while the barrier is closed");
+
+  statusAvailable = true;
+  await waitFor(async () => (await nudges(h.store, id)).length === 1);
+  const text = String((await nudges(h.store, id))[0]!.data.text);
+  assert.match(text, /Tool watchdog/);
+  assert.match(text, /audioCapture/);
+  await waitFor(() => h.startedTexts.length === 2);
+  assert.deepEqual(h.startedTexts, ["add the test", text]);
+});
+
 const toolErrors = async (store: ReturnType<typeof createStore>, sessionId: string, callId: string) =>
   (await store.events(sessionId)).filter((event) => event.type === "tool/error" && event.data.callId === callId);
 

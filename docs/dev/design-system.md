@@ -117,12 +117,13 @@ scale — see "Type surfaces" in `docs/dev/styles.md`.
 | `--motion-normal` | 180ms | Component state changes (progress fill, toggles). |
 | `--motion-surface` | 240ms | Dialog/sheet/panel enter/exit. |
 | `--motion-stack` | 300ms | Full-screen phone layers (Workspace ⇄ package window): push, Back, dismiss. Pairs with `--motion-stack-ease`, not `--motion-ease`. |
-| `--motion-window` | 340ms | Desktop package window arriving out of its launcher rail (floating glide, docked growth, seam, tablet cluster dock, focused split). Pairs with `--motion-window-ease`, a long ease-out. |
-| `--motion-window-exit` | 220ms | The same window leaving back into its rail. Pairs with `--motion-window-exit-ease`, which accelerates. |
+| `--motion-window` | 340ms | Desktop package window arriving out of its launcher rail (floating glide, docked growth, seam, tablet cluster dock, focused split), and the agent activity panel growing out of the status line above the composer. Pairs with `--motion-window-ease`, a long ease-out. |
+| `--motion-window-exit` | 220ms | The same window leaving back into its rail (and the activity panel folding back into its line). Pairs with `--motion-window-exit-ease`, which accelerates. |
 
 Always pair with `--motion-ease` (stack motion with `--motion-stack-ease`, window motion with its `--motion-window*` curve). No decorative/looping motion except
 Spinner/Skeleton, the composer's context liquid (it drifts only while a
-turn runs), the subagent state dot's ping (only while a chat's subagents
+turn runs), the slight jiggle of blocks in an edit mode (the new chat's tiles,
+the phone Workspace, the activity panel's blocks; `rotate` only, only while that mode is on), the subagent state dot's ping (only while a chat's subagents
 work; a waiting dot holds still), the arc travelling round a working agent's
 mark (only while its run works; reduced motion leaves the arc still), the
 dictation recording's waveform (only while a recording runs, drawn from the

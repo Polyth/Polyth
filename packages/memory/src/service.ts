@@ -16,7 +16,6 @@ import type {
   MemoryContribution,
   MemoryCreateInput,
   MemoryExport,
-  MemoryHarvestRecordInput,
   MemoryLayerGrant,
   MemoryListPage,
   MemoryPatchInput,
@@ -24,9 +23,9 @@ import type {
   MemoryPolicyPatchInput,
   MemoryRecordDto,
   MemoryRecallInput,
-  MemoryStore,
-} from "@polyth/knowledge";
-import { excludedByPolicy as excludedRecord } from "@polyth/knowledge";
+  MemoryListItemDto,
+} from "./contracts.ts";
+import { excludedByPolicy as excludedRecord, type MemoryHarvestRecordInput, type MemoryStore } from "./store.ts";
 import { harvestSegments, parseHarvestExtraction, sanitizeHarvestText, type HarvestCandidate } from "./extraction.ts";
 import { createReflectController, personOf, reflectRoutes, type ReflectController } from "./reflectService.ts";
 
@@ -37,8 +36,6 @@ export interface ScopedMemorySource {
 /** Where `memory_remember` is asked to save. `auto` is the chat's own default. */
 export type RememberTarget = "auto" | "shared" | "personal" | "about-me";
 const REMEMBER_TARGETS: readonly RememberTarget[] = ["auto", "shared", "personal", "about-me"];
-
-export const MEMORY_SCOPE_SERVICE = serverServiceKey<ScopedMemorySource>("knowledge.space");
 
 /** A store scope, with the layers its caller was granted (absent: project only). */
 export type ChatMemoryScope = { spaceId: string; projectId: string; principalId: string; layers?: readonly MemoryLayerGrant[] };
@@ -70,7 +67,7 @@ export interface MemoryService {
   recall(space: SpaceContext, input: MemoryRecallInput): Promise<MemoryContribution>;
   /** Saves an agent memory; `supersedes` retires outdated agent/system
    * records of the same project (never a person's) in favour of it. */
-  remember(input: MemoryCreateInput, ctx: ToolExecutionContext, supersedes?: readonly string[], target?: RememberTarget): Promise<ReturnType<MemoryStore["create"]> & { superseded?: string[] }>;
+  remember(input: MemoryCreateInput, ctx: ToolExecutionContext, supersedes?: readonly string[], target?: RememberTarget): Promise<ReturnType<MemoryStore["create"]> & { superseded?: string[]; handle?: string }>;
   harvest: MemoryHarvestController;
   /** Correction/preference proposals awaiting explicit user review. */
   reflect: ReflectController;
@@ -565,11 +562,11 @@ export function createMemoryService(host: ServerPackageHost, source: ScopedMemor
         superseded.push(record.id);
       }
       const saved = staysPersonal ? {
-        ...receipt,
+        ...receipt, ...(receipt.memoryId ? { handle: store.shortId(scope, receipt.memoryId) } : {}),
         message: proposing
           ? "saved to this person's notes, where their chats here recall it; a line under your reply lets them share it if they want, so don't ask them about it"
           : `saved to this person's notes, where their chats here recall it; not offered for the shared memory: ${noOffer}. Don't save it again`,
-      } : receipt;
+      } : { ...receipt, ...(receipt.memoryId ? { handle: store.shortId(scope, receipt.memoryId) } : {}) };
       return superseded.length ? { ...saved, superseded } : saved;
     },
     harvest: undefined as unknown as MemoryHarvestController,
@@ -905,6 +902,21 @@ async function eachSpaceMemory(host: ServerPackageHost, service: MemoryService, 
   }
 }
 
+/** Opens the memory store of every Space that has a project, which moves in
+ * whatever that Space still keeps in the old store. One Space failing leaves
+ * the others alone and is retried at the next start. */
+export async function openEverySpace(host: ServerPackageHost, service: MemoryService): Promise<void> {
+  const seen = new Set<string>();
+  let projects: Awaited<ReturnType<ServerPackageHost["projects"]["list"]>> = [];
+  try { projects = await host.projects.list(); } catch { return; }
+  for (const project of projects) {
+    if (!project.spaceId || seen.has(project.spaceId)) continue;
+    seen.add(project.spaceId);
+    try { await service.storeFor(host.systemSpaceContext(project.spaceId), project.id); }
+    catch (cause) { console.warn(`[memory] the memory store of Space ${project.spaceId} did not open: ${(cause as Error).message}`); }
+  }
+}
+
 /** Erase one person's notes in every Space: on account removal they go with the
  * person and are never handed to anyone (Spaces §14.5). */
 export async function erasePersonMemory(host: ServerPackageHost, service: MemoryService, userId: string): Promise<number> {
@@ -928,11 +940,26 @@ export const memoryInstruction = {
     kind: "instruction" as const,
     owner: "memory",
     scope: "deployment" as const,
-    revision: "2",
+    revision: "3",
     title: "Polyth long-term memory",
-    text: "Polyth project memory is your long-term memory across sessions, harnesses and models, and the place to keep durable project knowledge: do not file it into a separate memory MCP server or palace (such as MemPalace), which other sessions and harnesses cannot see. Records relevant to a turn arrive at its start in a <polyth-project-memory> block. Before answering about earlier work, decisions, people, hosts or the user's preferences that the block does not cover, call memory_search with a few keywords; read full records with memory_get. When a decision, convention, gotcha, procedure or stated preference is settled, save it with memory_remember (one fact per record; no secrets or transient progress) and pass supersedes with the ids of records it replaces. A record labelled personal belongs to the one person this chat is private to: never copy it anywhere others can read. If the answer may live in another of the user's projects, memory_search_projects searches them; it asks the user first unless the project's Memory settings allow it. If a memory tool reports that memory is off, tell the user it can be turned on in Project settings → Memory.",
+    text: "Polyth project memory is your long-term memory across sessions, harnesses and models, and the place to keep durable project knowledge: do not file it into a separate memory MCP server or palace (such as MemPalace), which other sessions and harnesses cannot see. Notes that may bear on a turn arrive at its start in a <polyth-project-memory> block, each as [id] title, then the whole note or its opening and full size. Read the rest with memory_get when it matters and ignore a note that does not apply. Before answering about earlier work, decisions, people, hosts or the user's preferences that the block does not cover, call memory_search with a few keywords. When a decision, convention, gotcha, procedure or stated preference is settled, save it with memory_remember (one fact per record; no secrets or transient progress) and pass supersedes with the ids of records it replaces. A record labelled personal belongs to the one person this chat is private to: never copy it anywhere others can read. If the answer may live in another of the user's projects, memory_search_projects searches them; it asks the user first unless the project's Memory settings allow it. If a memory tool reports that memory is off, tell the user it can be turned on in Project settings → Memory.",
   },
 } satisfies AgentCapabilityContribution;
+
+// What a memory tool hands back is read by a model on every call, so it is the
+// note and a handle to it, in plain lines, without the record's management
+// fields. The host gets ids and counts in `metadata`.
+const noteLabel = (item: { layer?: string; about?: string }): string =>
+  `${item.layer === "person" ? " · personal" : ""}${item.about ? ` · about ${item.about}` : ""}`;
+const hitLines = (handle: string, item: MemoryListItemDto, where = ""): string =>
+  `[${handle}${where}${noteLabel(item)}] ${item.title}\n${item.snippet}${item.bodyBytes > Buffer.byteLength(item.snippet, "utf8") ? "…" : ""}`;
+const moreLine = (shown: number, total: number): string[] => total > shown ? [`(${total - shown} more match; narrow the query to see them)`] : [];
+const noteText = (handle: string, item: MemoryRecordDto, where = ""): string => [
+  `[${handle} rev ${item.revision}${where} · ${item.category}${item.lifecycle === "active" ? "" : ` · ${item.lifecycle}`}${item.tags.length ? ` · tags: ${item.tags.join(", ")}` : ""} · updated ${new Date(item.updatedAt).toISOString().slice(0, 10)}${noteLabel(item)}]`,
+  item.title,
+  "",
+  item.body,
+].join("\n");
 
 export function registerMemoryTool(host: ServerPackageHost, service: MemoryService): Disposable | undefined {
   const registry = host.services.get(serverServiceKey<AgentCapabilityContributionRegistry>("harness.capabilities"));
@@ -980,7 +1007,7 @@ export function registerMemoryTool(host: ServerPackageHost, service: MemoryServi
   };
   const crossProjectRecall = (policy: { crossProjectRecall?: string }): string => policy.crossProjectRecall ?? "ask";
   const descriptor = (id: string, name: string, description: string, inputSchema: JsonObject, mutating: boolean) => ({
-    id, kind: "tool" as const, owner: "memory", scope: "project" as const, revision: "5", name, description, inputSchema, trust: "workspace" as const, mutating,
+    id, kind: "tool" as const, owner: "memory", scope: "project" as const, revision: "6", name, description, inputSchema, trust: "workspace" as const, mutating,
   });
   const contributions: AgentCapabilityContribution[] = [
     memoryInstruction,
@@ -997,11 +1024,12 @@ export function registerMemoryTool(host: ServerPackageHost, service: MemoryServi
         // archived and unreviewed candidate records to agents.
         const { store, scope } = await scoped(ctx); const page = store.search(scope, { q: query, limit: Math.max(1, Math.min(8, Number(input.limit) || 6)) });
         await markExposed(ctx.sessionId, page.items.map((item) => item.layer));
-        return { output: JSON.stringify(page), metadata: { count: page.items.length, status: "selected" } };
+        const output = page.items.length ? [...page.items.map((item) => hitLines(store.shortId(scope, item.id), item)), ...moreLine(page.items.length, page.total)].join("\n") : "No notes match.";
+        return { output, metadata: { count: page.items.length, total: page.total, ids: page.items.map((item) => item.id), status: "selected" } };
       },
     },
     {
-      descriptor: descriptor("memory.memory_get", "memory_get", "Read one bounded project memory record by id.", {
+      descriptor: descriptor("memory.memory_get", "memory_get", "Read one project memory record in full, by the id shown in the memory block or in a search result.", {
         type: "object", additionalProperties: false, required: ["memoryId"], properties: { memoryId: { type: "string", minLength: 1, maxLength: 128 } },
       }, false),
       autoApprove: autoApprove(false),
@@ -1012,7 +1040,7 @@ export function registerMemoryTool(host: ServerPackageHost, service: MemoryServi
         // must never reach an agent again.
         if (!item || item.lifecycle === "forgotten") throw error("not-found", "memory record not found");
         await markExposed(ctx.sessionId, [item.layer]);
-        return { output: JSON.stringify(item), metadata: { memoryId: item.id, status: "selected" } };
+        return { output: noteText(store.shortId(scope, item.id), item), metadata: { memoryId: item.id, revision: item.revision, lifecycle: item.lifecycle, status: "selected" } };
       },
     },
     {
@@ -1025,12 +1053,13 @@ export function registerMemoryTool(host: ServerPackageHost, service: MemoryServi
         const memoryId = text(input.memoryId).trim(); const expectedRevision = Number(input.expectedRevision); const action = text(input.action);
         if (!memoryId || !Number.isSafeInteger(expectedRevision) || expectedRevision < 1 || !["review", "pin", "lock", "archive", "forget"].includes(action)) throw error("invalid-input", "memory feedback is invalid");
         const { store, scope } = await scoped(ctx, true);
-        if (action === "forget") return { output: JSON.stringify(store.forget(scope, { id: memoryId, projectId: scope.projectId, expectedRevision })), metadata: { memoryId, status: "committed" } };
-        if (action === "review") return { output: JSON.stringify(store.review(scope, memoryId, expectedRevision, "active")), metadata: { memoryId, status: "committed" } };
-        if (action === "archive") return { output: JSON.stringify(store.review(scope, memoryId, expectedRevision, "archived")), metadata: { memoryId, status: "committed" } };
         const current = store.get(scope, memoryId); if (!current) throw error("not-found", "memory record not found");
-        const receipt = store.update(scope, { id: memoryId, projectId: scope.projectId, expectedRevision, patch: action === "pin" ? { pinned: !current.pinned } : { userLocked: true } }, "user");
-        return { output: JSON.stringify(receipt), metadata: { memoryId, status: receipt.status } };
+        const id = current.id;
+        const receipt = action === "forget" ? store.forget(scope, { id, projectId: scope.projectId, expectedRevision })
+          : action === "review" ? store.review(scope, id, expectedRevision, "active")
+            : action === "archive" ? store.review(scope, id, expectedRevision, "archived")
+              : store.update(scope, { id, projectId: scope.projectId, expectedRevision, patch: action === "pin" ? { pinned: !current.pinned } : { userLocked: true } }, "user");
+        return { output: `${action}: ${receipt.status}${receipt.revision ? `, now rev ${receipt.revision}` : ""}`, metadata: { memoryId: id, status: receipt.status } };
       },
     },
     {
@@ -1050,7 +1079,13 @@ export function registerMemoryTool(host: ServerPackageHost, service: MemoryServi
         const target = (REMEMBER_TARGETS as readonly unknown[]).includes(input.target) ? input.target as RememberTarget : "auto";
         const about = sanitizeHarvestText(input.about);
         const receipt = await service.remember({ projectId: ctx.projectId, title, body, ...(typeof input.category === "string" ? { category: input.category as MemoryCreateInput["category"] } : {}), ...(Array.isArray(input.tags) ? { tags: input.tags.map(String) } : {}), ...(about ? { about } : {}) }, ctx, supersedes, target);
-        return { output: JSON.stringify(receipt), metadata: { memoryId: receipt.memoryId ?? "", status: receipt.status } };
+        const handle = receipt.memoryId ? receipt.handle ?? receipt.memoryId : "";
+        const output = [
+          receipt.status === "duplicate" ? `already saved as ${handle}` : `saved ${handle}`,
+          ...(receipt.superseded?.length ? [`replaced ${receipt.superseded.length} older record(s)`] : []),
+          ...(receipt.message ? [receipt.message] : []),
+        ].join("; ");
+        return { output, metadata: { memoryId: receipt.memoryId ?? "", status: receipt.status, ...(receipt.superseded?.length ? { superseded: receipt.superseded } : {}) } };
       },
     },
     {
@@ -1073,9 +1108,10 @@ export function registerMemoryTool(host: ServerPackageHost, service: MemoryServi
         const wanted = Array.isArray(input.projectIds) ? new Set(input.projectIds.map((id) => text(id).trim())) : undefined;
         const projectIds = [...projects.keys()].filter((id) => !wanted || wanted.has(id));
         const page = store.searchProjects(scope, { q: query, projectIds, limit: Math.max(1, Math.min(8, Number(input.limit) || 6)) });
-        const items = page.items.map((item) => ({ ...item, projectName: projects.get(item.projectId) ?? item.projectId }));
-        const searched = page.searchedProjectIds.map((id) => ({ id, name: projects.get(id) ?? id }));
-        return { output: JSON.stringify({ items, total: page.total, searchedProjects: searched }), metadata: { count: items.length, projects: searched.length, status: "selected" } };
+        // A handle is unique in the project it is read from with memory_get_project.
+        const lines = page.items.map((item) => hitLines(store.shortId({ spaceId: scope.spaceId, projectId: item.projectId, principalId: scope.principalId }, item.id), item, ` · ${projects.get(item.projectId) ?? item.projectId} (project ${item.projectId})`));
+        const output = lines.length ? [...lines, ...moreLine(lines.length, page.total)].join("\n") : `No notes match in ${page.searchedProjectIds.length} project(s).`;
+        return { output, metadata: { count: lines.length, total: page.total, ids: page.items.map((item) => item.id), projects: page.searchedProjectIds.length, projectIds: page.searchedProjectIds, status: "selected" } };
       },
     },
     {
@@ -1099,7 +1135,7 @@ export function registerMemoryTool(host: ServerPackageHost, service: MemoryServi
         const targetPolicy = target.store.getPolicy(target.scope);
         const item = targetPolicy.mode === "off" ? undefined : target.store.get(target.scope, memoryId);
         if (!item || item.lifecycle !== "active" || excludedRecord(item, targetPolicy.exclusions)) throw error("not-found", "memory record not found");
-        return { output: JSON.stringify({ ...item, projectName: projects.get(projectId) }), metadata: { memoryId: item.id, status: "selected" } };
+        return { output: noteText(target.store.shortId(target.scope, item.id), item, ` · ${projects.get(projectId) ?? projectId}`), metadata: { memoryId: item.id, status: "selected" } };
       },
     },
   ];

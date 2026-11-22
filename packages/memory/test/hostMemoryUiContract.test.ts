@@ -25,7 +25,8 @@ test("memory service exposes staged import, recovery export, and lock reversal r
 });
 
 test("memory settings guards stale project responses and dirty drafts", async () => {
-  const source = await read("../widgets/MemorySettings.tsx");
+  // The open record is its own component; the page and it are one surface.
+  const source = `${await read("../widgets/MemorySettings.tsx")}\n${await read("../widgets/MemoryEditor.tsx")}`;
   // The copy moved into the package catalog; the source now references keys.
   const messages = await read("../src/i18n/en.ts");
   assert.match(source, /AbortController/);
@@ -36,7 +37,7 @@ test("memory settings guards stale project responses and dirty drafts", async ()
   assert.match(messages, /Manual saves are user locked/);
   assert.match(messages, /already delivered native context/);
   assert.match(source, /memory\.bulk\.selectVisible/);
-  assert.match(messages, /Select this page/);
+  assert.match(messages, /Select all shown/);
   assert.match(source, /memory\.action\.selectAll/);
   assert.match(messages, /Select all \{count\} filtered/);
   assert.match(source, /requestFilterEpoch/);

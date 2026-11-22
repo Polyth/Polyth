@@ -4,7 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createMemoryStore, type MemoryScope } from "../../knowledge/src/memory.ts";
+import { createMemoryStore, type MemoryScope } from "../src/store.ts";
 
 const scope: MemoryScope = { spaceId: "space-a", projectId: "project-a", principalId: "principal-a" };
 const job = (generation: string, key: string) => ({
@@ -21,7 +21,7 @@ const job = (generation: string, key: string) => ({
 
 test("harvest lease expiry is durable across reopen and resumes from the checkpoint range", () => {
   const dir = mkdtempSync(join(tmpdir(), "memory-harvest-restart-"));
-  const file = join(dir, "knowledge.db");
+  const file = join(dir, "memory.db");
   const first = new DatabaseSync(file);
   const store = createMemoryStore(first, scope.spaceId, () => 100);
   const generation = store.getPolicy(scope).generation;
@@ -158,7 +158,7 @@ test("recall honors an explicit zero budget without invoking any model path", ()
 
 test("utility call budget reserves durably and never refunds an unknown outcome", () => {
   const dir = mkdtempSync(join(tmpdir(), "memory-utility-budget-"));
-  const file = join(dir, "knowledge.db");
+  const file = join(dir, "memory.db");
   const first = new DatabaseSync(file);
   const store = createMemoryStore(first, scope.spaceId);
   const policy = store.getPolicy(scope);
@@ -193,7 +193,7 @@ test("harvest attempts stop after bounded retries and terminal failures stay vis
 
 test("remember-off ranges are durably skipped and cannot reharvest after reopen", () => {
   const dir = mkdtempSync(join(tmpdir(), "memory-skip-restart-"));
-  const file = join(dir, "knowledge.db");
+  const file = join(dir, "memory.db");
   const first = new DatabaseSync(file);
   const store = createMemoryStore(first, scope.spaceId);
   const generation = store.getPolicy(scope).generation;

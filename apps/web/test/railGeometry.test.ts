@@ -90,8 +90,8 @@ test("the launcher strip is a tight column that keeps its badges and gaps", asyn
   const css = await source("styles.css");
   assert.match(
     css,
-    /\.rail-icon-col\.plugin-strip\s*\{[^}]*padding-block:\s*var\(--space-2\);[^}]*padding-inline:\s*var\(--rail-strip-gutter-start, var\(--space-2\)\) var\(--rail-strip-gutter-end, var\(--space-1\)\)/s,
-    "the wider gutter faces the workspace, the narrow one the window edge",
+    /\.rail-icon-col\.plugin-strip\s*\{[^}]*padding-block:\s*var\(--space-2\);[^}]*padding-inline:\s*var\(--rail-strip-gutter-start, calc\(var\(--space-3\) \/ 2\)\) var\(--rail-strip-gutter-end, calc\(var\(--space-3\) \/ 2\)\)/s,
+    "the gutters are symmetric, so an icon sits centred in the rail",
   );
   assert.match(
     css,

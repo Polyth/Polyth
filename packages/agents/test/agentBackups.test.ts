@@ -112,7 +112,7 @@ test("a turn stopped by its route continues on the next backup; other failures s
     events: async () => [ev(11, "turn/started"), ev(12, "turn/stopped", { reason: "error", error: "tool exploded" })],
     onRouteFailure: async () => { asked += 1; return true; },
   });
-  assert.deepEqual(plain, { status: "failed", error: "tool exploded" });
+  assert.deepEqual(plain, { status: "failed", cause: "error", error: "tool exploded" });
   assert.equal(asked, 0, "a failure of the work itself is not the route's");
 
   const exhausted = await settleScheduledRun({ sessionId: "s1", markerSeq: 10, startedAt: Date.now() }, {
@@ -121,7 +121,7 @@ test("a turn stopped by its route continues on the next backup; other failures s
     events: async () => [ev(11, "turn/started"), ev(12, "turn/stopped", { reason: "error", code: "model-unavailable", error: "refused" })],
     onRouteFailure: async () => false,
   });
-  assert.deepEqual(exhausted, { status: "failed", error: "refused" });
+  assert.deepEqual(exhausted, { status: "failed", cause: "route", error: "refused" });
 });
 
 test("the approval level reaches the session; raising it needs an owner, and a chosen chat changes only when set", async () => {

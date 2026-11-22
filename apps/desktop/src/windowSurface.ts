@@ -42,6 +42,26 @@ export function windowSurface(rawUrl: string, origins: WindowOrigins): WindowSur
   return origins.remote.has(origin) ? "remote" : null;
 }
 
+/**
+ * Whether the window's page may read the clipboard (`navigator.clipboard.readText`,
+ * a terminal's Paste). This computer's own page may. Another server's page is
+ * asked about once, like a browser asks a site, because its packages run here.
+ * Only the top page may read it: never a frame inside it (a chat ```page block,
+ * a preview), and never the server list.
+ */
+export function clipboardReadAccess(
+  pageUrl: string,
+  requestingUrl: string | undefined,
+  isMainFrame: boolean,
+  origins: WindowOrigins,
+): "allow" | "ask" | "deny" {
+  if (!isMainFrame) return "deny";
+  const page = originOf(pageUrl);
+  if (!page || originOf(requestingUrl ?? pageUrl) !== page) return "deny";
+  const surface = windowSurface(pageUrl, origins);
+  return surface === "local" ? "allow" : surface === "remote" ? "ask" : "deny";
+}
+
 /** A page may navigate itself within its own origin. The list may also hand the
  *  window to a server it just connected; every other change of server goes
  *  through the main process, which never asks the page. */
@@ -94,7 +114,27 @@ const WINDOW_CHANNELS = [
 ] as const;
 
 const LEAVE_CHANNELS = ["desktop:servers:menu", "desktop:servers:list"] as const;
-const REMOTE_CHANNELS = new Set<string>([...WINDOW_CHANNELS, ...LEAVE_CHANNELS, "desktop:servers:resume"]);
+/** Server zones (serverZones.ts). A page lists its own projects and asks for
+ *  the other servers'; what it gets back is decided per server there. */
+const ZONE_CHANNELS = [
+  "desktop:servers:zones",
+  "desktop:servers:zones:report",
+  "desktop:servers:zones:open",
+  "desktop:servers:zones:fold",
+] as const;
+/** Nightly bug reports: the page captures only its own window, and the main
+ *  process holds the tester password, so another server's page may report
+ *  too (people use the desktop app with a server elsewhere). The server list
+ *  has no report sheet. */
+const REPORT_CHANNELS = ["desktop:report:state", "desktop:report:capture", "desktop:report:send"] as const;
+const REMOTE_CHANNELS = new Set<string>([
+  ...WINDOW_CHANNELS,
+  ...LEAVE_CHANNELS,
+  ...ZONE_CHANNELS,
+  ...REPORT_CHANNELS,
+  "desktop:servers:zones:allow",
+  "desktop:servers:resume",
+]);
 const HUB_CHANNELS = new Set<string>([
   ...WINDOW_CHANNELS,
   ...LEAVE_CHANNELS,
@@ -112,6 +152,8 @@ const LOCAL_DENIED = new Set<string>([
   "desktop:servers:run-local",
   "desktop:servers:state",
   "desktop:servers:resume",
+  // This computer's page always reads the zones: there is nothing to ask.
+  "desktop:servers:zones:allow",
 ]);
 
 export function channelAllowed(surface: WindowSurface | null, channel: string): boolean {

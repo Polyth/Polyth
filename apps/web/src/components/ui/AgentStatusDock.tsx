@@ -19,6 +19,8 @@ export interface AgentStatusDockProps {
   /** Opens active-run details when present. Without it the dock is a passive,
    * live status surface (used while a new agent is being spawned). */
   onClick?: (event: MouseEvent<HTMLButtonElement>) => void;
+  /** The details it opens are showing (the activity panel stands on it). */
+  expanded?: boolean;
   /** The agent itself is not running (its subagents may be): no live dot,
    * no light through the words, not busy. */
   idle?: boolean;
@@ -35,6 +37,7 @@ export default function AgentStatusDock({
   label,
   diffLabel,
   onClick,
+  expanded,
   idle = false,
 }: AgentStatusDockProps) {
   const hasSecondary = Boolean(files || additions > 0 || deletions > 0);
@@ -90,6 +93,8 @@ export default function AgentStatusDock({
       className={dockClass}
       aria-label={label}
       aria-busy={!idle}
+      aria-haspopup="dialog"
+      aria-expanded={expanded ?? false}
       onClick={onClick}
     >
       {content}

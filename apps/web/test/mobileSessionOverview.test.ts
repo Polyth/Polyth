@@ -12,24 +12,20 @@ test("mobile session overview only renders sections that have content", () => {
   assert.match(source, /showRecentSection/);
   assert.match(source, /mobile\.island\.active/);
   assert.match(source, /mobile\.island\.noRecent/);
-  assert.match(source, /fullScreen/);
   assert.match(source, /origin="top"/);
 });
 
-test("phone activity details reuse the session model and dock anchor", () => {
+test("the phone title opens the full-screen overview; the status line's details live in the activity panel", () => {
   const source = read("../src/components/mobile/MobileSessionHeader.tsx");
-  assert.match(source, /fullScreen \? tr\("header\.polyth"\) : tr\("mobile\.island\.overview"\)/);
-  assert.match(source, /headerLeading=\{fullScreen \? <img src=\{POLYTH_MARK_SRC\}/);
+  assert.match(source, /title=\{tr\("header\.polyth"\)\}/);
+  assert.match(source, /headerLeading=\{<img src=\{POLYTH_MARK_SRC\}/);
+  assert.match(source, /className="mobile-island-sheet mobile-island-sheet--full-screen"/);
   assert.match(source, /activeSessionsForIsland\(projectSessions, session\?\.id\)/);
-  assert.match(source, /\{fullScreen \? \(/);
-  assert.match(source, /<SessionActivityDetails/);
-  // The rendered variant follows the live mode and keeps the last one through
-  // the exit, so a closing full-screen overview does not flip to the compact sheet.
-  assert.match(source, /fullScreen=\{renderedOverviewMode === "full"\}/);
-  assert.match(source, /const renderedOverviewMode = overviewMode === "closed" \? lastOverviewModeRef\.current : overviewMode/);
   assert.match(source, /sessionOverviewMode\(surface === "island", statusPopover\)/);
+  // The overview no longer has a compact details variant: the agent's
+  // activity opens from the status line as its own panel.
+  assert.doesNotMatch(source, /<SessionActivityDetails|mobile-island-sheet--details|fullScreen/);
   assert.doesNotMatch(source, /classList\.contains\("agent-status-dock"\)/);
-  assert.match(source, /model=\{model\}/);
   assert.doesNotMatch(source, /mobile-island-project-tile|ProjectStatusPills/);
   assert.match(source, /statusLabel\(itemStatus\)/);
   assert.match(source, /contextMeta\(gauge, contextPercent\)/);
@@ -40,8 +36,7 @@ test("recent sessions render grouped, bounded, and accessible load-more semantic
   const source = read("../src/components/mobile/MobileSessionHeader.tsx");
   const css = read("../src/components/mobile/MobileSessionHeader.css");
   assert.match(source, /groupRecentSessionsByDay\(recent, locale\)/);
-  assert.match(source, /mobile-island-recent-scroll\$\{fullScreen \? " is-full-screen" : ""\}/);
-  assert.match(source, /role="region"[\s\S]*tabIndex=\{fullScreen \? undefined : 0\}/);
+  assert.match(source, /className="mobile-island-recent-scroll is-full-screen"\s+role="region"/);
   assert.match(source, /className="mobile-island-load-more"/);
   assert.match(source, /aria-busy=\{isLoadingMore\}/);
   // Each tap reveals one more bounded step; the server pages in only once the
@@ -74,7 +69,6 @@ test("quick menu uses a product header and section counts instead of project til
   const source = read("../src/components/mobile/MobileSessionHeader.tsx");
   assert.match(source, /POLYTH_MARK_SRC/);
   assert.match(source, /activeTotal=\{active\.length\}/);
-  assert.match(source, /fullScreen/);
   assert.doesNotMatch(source, /ProjectStatusPills|ProjectGlyph|projectStatusCounts\(/);
 });
 
@@ -134,14 +128,13 @@ test("phone session overview opens from the above-composer agent activity dock",
   assert.match(mobile, /statusPopover\.open/);
 });
 
-test("overview mode routes dock to details and header to full navigation without inspecting DOM", () => {
+test("overview mode answers the title only: the status line opens the activity panel", () => {
   const closed = { open: false, source: null } as const;
   const dock = { open: true, source: "dock" } as const;
   const header = { open: true, source: "header" } as const;
   assert.equal(sessionOverviewMode(false, closed), "closed");
   assert.equal(sessionOverviewMode(true, closed), "full", "phone header opens full overview");
-  assert.equal(sessionOverviewMode(false, dock), "details", "phone and compact dock open details");
-  assert.equal(sessionOverviewMode(true, dock), "details", "dock wins over a previously open header");
+  assert.equal(sessionOverviewMode(false, dock), "closed", "the status line's details are the activity panel");
+  assert.equal(sessionOverviewMode(true, dock), "closed", "opening the panel closes a previously open header overview");
   assert.equal(sessionOverviewMode(false, header), "full", "compact header opens full overview");
-  assert.equal(sessionOverviewMode(true, closed), "full", "header handoff after closing dock keeps overview open");
 });

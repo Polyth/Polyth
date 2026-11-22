@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
@@ -10,8 +10,12 @@ import {
   createPublicHttpServer,
   type IdentityHttpHandler,
 } from "../src/http.ts";
+import { openControlPlane } from "@polyth/control-plane";
+import { createIdentityService, type PasswordService } from "@polyth/identity";
+import { createIdentityHttpAdapter } from "@polyth/identity/http";
 import { GRANT_PROFILE_PRESETS, REMOTE_CAPABILITY } from "@polyth/contracts";
 import { createAuthService } from "../src/auth.ts";
+import { createCanonicalAuthGateway } from "../src/canonicalAuth.ts";
 import { authRoutes } from "../src/routes/auth.ts";
 import { testTenancy } from "./support/spaces.ts";
 
@@ -178,9 +182,9 @@ test("only a full-access paired device reads its own account views over Link", a
         browserCalls += 1;
         return true;
       },
-      handlePairedRead(req, res, userId) {
+      async handlePaired(req, res, { userId, deviceId }) {
         if (req.method !== "GET" || (req.url !== "/api/auth/accounts" && req.url !== "/api/auth/me")) return false;
-        reads.push(`${req.url} ${userId}`);
+        reads.push(`${req.url} ${userId} ${deviceId}`);
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ currentAccountId: userId, readOnly: true }));
         return true;
@@ -200,7 +204,7 @@ test("only a full-access paired device reads its own account views over Link", a
     assert.equal(accounts.status, 200);
     assert.deepEqual(await accounts.json(), { currentAccountId: "usr_owner", readOnly: true });
     assert.equal((await fetch(`${base}/api/auth/me`)).status, 200);
-    assert.deepEqual(reads, ["/api/auth/accounts usr_owner", "/api/auth/me usr_owner"]);
+    assert.deepEqual(reads, ["/api/auth/accounts usr_owner dev-full", "/api/auth/me usr_owner dev-full"]);
     // Changes and other identity routes still need a browser identity session.
     for (const [path, method] of [["/api/auth/me", "POST"], ["/api/auth/accounts", "POST"], ["/api/auth/sessions", "GET"], ["/api/auth/login", "POST"]] as const) {
       const response = await fetch(`${base}${path}`, { method });
@@ -214,6 +218,85 @@ test("only a full-access paired device reads its own account views over Link", a
     }
     assert.equal(reads.length, 2);
     assert.equal(browserCalls, 0);
+  } finally {
+    await close(server);
+  }
+});
+
+test("an owner's full-access Link device administers people after confirming the password", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-paired-people-"));
+  const control = openControlPlane({ directory: dir });
+  const passwords: PasswordService = {
+    async hash(password) { return `test:${password}`; },
+    async verify(password, encoded) { return { valid: encoded === `test:${password}`, needsRehash: false }; },
+    close() {},
+  };
+  const identity = createIdentityService(control, { passwords });
+  t.after(() => { identity.close(); control.close(); rmSync(dir, { recursive: true, force: true }); });
+  const claim = identity.setup.issueClaim();
+  const binding = "c".repeat(64);
+  identity.setup.bindClaim(claim.token, binding);
+  const recovery = identity.setup.prepareRecovery(claim.token, binding);
+  const owner = await identity.setup.complete({
+    claimToken: claim.token, browserBinding: binding, name: "Owner", organizationName: "Local",
+    login: "owner", password: "owner test passphrase", recoverySetId: recovery.setId, recoveryAcknowledged: true,
+  });
+  const http = createIdentityHttpAdapter(identity, { origin: "http://127.0.0.1:1", localOnly: true });
+  const auth = createCanonicalAuthGateway({
+    control,
+    identity,
+    cookieName: identity.sessions.cookieName(),
+    resolvePairedDevice: () => ({
+      kind: "paired-device",
+      deviceId: "dev-phone",
+      deviceEndpointId: "ep",
+      connectionId: "full",
+      transport: "direct",
+      grants: [REMOTE_CAPABILITY.deviceFullAccess],
+      grantRevision: 1,
+      userId: owner.userId,
+    }) as never,
+  });
+  const handler = createHttpHandler({ ...baseDeps(http), auth: auth as never });
+  const server = createServer((req, res) => void handler(req, res, {
+    kind: "polyth-link",
+    connectionId: "full",
+    transport: "direct",
+  }));
+  const base = await listening(server);
+  const post = (path: string, body: unknown) => fetch(`${base}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  try {
+    // People can be read without a password, and Listed as manageable.
+    const listed = await fetch(`${base}/api/auth/accounts`);
+    assert.equal(listed.status, 200);
+    const view = await listed.json() as Record<string, any>;
+    assert.equal(view.canManage, true);
+    assert.equal(view.readOnly, true);
+    assert.equal(view.canManageInBrowser, true);
+    assert.deepEqual(view.accounts.map((account: { id: string }) => account.id), [owner.userId]);
+
+    // Changing them needs the person's password first.
+    const refused = await post("/api/auth/accounts", { login: "olena", name: "Olena", password: "member test passphrase" });
+    assert.equal(refused.status, 403);
+    assert.deepEqual(await refused.json(), { error: "reauth-required" });
+    assert.equal((await post("/api/auth/reauthenticate", { password: "wrong passphrase" })).status, 401);
+    assert.equal((await post("/api/auth/reauthenticate", { password: "owner test passphrase" })).status, 200);
+    const created = await post("/api/auth/accounts", { login: "olena", name: "Olena", password: "member test passphrase" });
+    assert.equal(created.status, 200);
+    const person = await created.json() as Record<string, any>;
+    assert.equal(person.name, "Olena");
+    assert.equal((await fetch(`${base}/api/auth/accounts`)).status, 200);
+
+    // Its own account, passkeys, sessions and tokens stay browser-only.
+    for (const [path, method] of [["/api/auth/me", "POST"], ["/api/auth/sessions", "GET"], ["/api/auth/passkeys", "GET"], ["/api/auth/cli/tokens", "POST"]] as const) {
+      const response = method === "GET" ? await fetch(`${base}${path}`) : await post(path, {});
+      assert.equal(response.status, 403, `${method} ${path}`);
+      assert.deepEqual(await response.json(), { error: "forbidden", message: "not allowed" });
+    }
   } finally {
     await close(server);
   }

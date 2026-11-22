@@ -1,9 +1,13 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
+  DesktopBugReportCapture,
+  DesktopBugReportOutcome,
+  DesktopBugReportState,
   DesktopCommand,
   DesktopInfo,
   DesktopServersResult,
   DesktopServersView,
+  DesktopServerZonesView,
   DesktopWindowPlacement,
   DesktopKeepAwakeState,
   DesktopLocalSetupResult,
@@ -15,6 +19,7 @@ import type {
   DesktopWindowAction,
   DesktopWindowState,
   PolythDesktopApi,
+  PolythDesktopBugReportApi,
   PolythDesktopServersApi,
 } from "./types.ts";
 
@@ -43,6 +48,19 @@ const servers: PolythDesktopServersApi = {
   link: (method, params) => ipcRenderer.invoke("desktop:link", method, params) as Promise<DesktopServersResult<unknown>>,
   forgetAddress: (url) => ipcRenderer.invoke("desktop:servers:forget-address", url) as Promise<DesktopServersView>,
   setRunLocalServer: (run) => ipcRenderer.invoke("desktop:servers:run-local", run === true) as Promise<DesktopServersView>,
+  zones: () => ipcRenderer.invoke("desktop:servers:zones") as Promise<DesktopServerZonesView>,
+  reportZoneProjects: (projects) => ipcRenderer.invoke("desktop:servers:zones:report", projects) as Promise<void>,
+  allowZones: () => ipcRenderer.invoke("desktop:servers:zones:allow") as Promise<DesktopServerZonesView>,
+  openZone: (key, projectId) =>
+    ipcRenderer.invoke("desktop:servers:zones:open", { key, ...(projectId ? { projectId } : {}) }) as Promise<DesktopServersResult<void>>,
+  foldZone: (key, folded) =>
+    ipcRenderer.invoke("desktop:servers:zones:fold", { key, folded: folded === true }) as Promise<DesktopServerZonesView>,
+};
+
+const bugReport: PolythDesktopBugReportApi = {
+  state: () => ipcRenderer.invoke("desktop:report:state") as Promise<DesktopBugReportState>,
+  capture: () => ipcRenderer.invoke("desktop:report:capture") as Promise<DesktopBugReportCapture>,
+  send: (draft) => ipcRenderer.invoke("desktop:report:send", draft) as Promise<DesktopBugReportOutcome>,
 };
 
 const place = placement();
@@ -99,6 +117,7 @@ const api: PolythDesktopApi = {
   onWindowState: (listener) => subscribe("desktop:window:state", listener),
   onCommand: (listener) => subscribe<DesktopCommand>("desktop:command", listener),
   onUpdateState: (listener) => subscribe("desktop:update:state", listener),
+  bugReport: Object.freeze(bugReport),
 };
 
 contextBridge.exposeInMainWorld("polythDesktop", Object.freeze(api));

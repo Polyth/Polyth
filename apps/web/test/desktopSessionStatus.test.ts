@@ -58,9 +58,13 @@ test("desktop and phone titles present normalized task transitions without movin
   assert.match(details, /prefs\.sessionActivityDetails === "tabs"/);
   assert.match(desktop, /toggleSessionStatusPopover\(headerRef\.current, "header"\)/);
   assert.match(desktop, /className="desktop-session-status-popover"/);
-  assert.match(desktop, /side=\{fromDock \? "up" : "down"\}/);
+  // The title's overview drops down; the status line opens the activity panel.
+  assert.match(desktop, /side="down"/);
+  assert.match(desktop, /const overviewOpen = sessionOverviewMode\(false, overlay\) === "full"/);
 
-  assert.match(mobile, /prompt=\{prompt\}/);
+  // The activity panel (what the status line opens) reads the latest request.
+  const panel = await readFile(new URL("../src/components/SessionActivityPanel.tsx", import.meta.url), "utf8");
+  assert.match(panel, /prompt=\{lastUserTextCached\(events\)\}/);
   assert.doesNotMatch(mobile, /promptVisible \? undefined : prompt/);
   assert.match(mobile, /const overviewTasks = tasksForIsland\(model\.tasks, model\.messages\)/);
   assert.match(mobile, /const taskProgressTitle = useTaskProgressTitle\(session\?\.id, overviewTasks\)/);
@@ -111,14 +115,18 @@ test("the desktop overview spans the chat column of the window it opens from and
   ]);
   // The opener's conversation (the status dock) first, else the chat under the header title.
   assert.match(desktop, /anchor\?\.closest\("\.focus-conversation"\) \?\? document\.querySelector\("\.main \.focus-conversation"\)/);
-  assert.match(desktop, /useOpenerColumnWidth\(overlay\.open && shellMode === "wide", overlay\.anchor\)/);
+  assert.match(desktop, /useOpenerColumnWidth\(overviewOpen && shellMode === "wide", overlay\.anchor\)/);
   assert.match(desktop, /"--session-status-column": `\$\{columnWidth\}px`/);
   assert.match(popover, /\.\.\.surfaceStyle,\s*top: position\.top,/, "anchored geometry always wins over a caller's style");
   assert.match(styles, /\.ui-popover\.desktop-session-status-surface \{ width: max\(360px, var\(--session-status-column, 0px\)\); \}/);
   assert.match(styles, /\.desktop-session-status-popover \{\s*container: session-status \/ inline-size;/);
-  assert.match(details, /@container session-activity \(min-width: 540px\) \{\s*\.session-activity-stat-grid \{ grid-template-columns: repeat\(4, minmax\(0, 1fr\)\); \}/);
-  assert.match(details, /@container session-activity \(min-width: 720px\) \{\s*\.session-activity-usage \{ grid-template-columns: minmax\(0, 1fr\) minmax\(0, 2fr\); \}/);
-  assert.doesNotMatch(details, /\.session-activity-content[^{]*\{[^}]*grid-template-columns/, "request and plan stay one column: no hole beside a long plan");
+  assert.match(details, /@container session-activity \(min-width: 540px\) \{\s*\.session-activity-blocks \{ grid-template-columns: repeat\(4, minmax\(0, 1fr\)\); \}/);
+  // A few figures share the line instead of leaving its end empty.
+  assert.match(details, /\.session-activity-blocks:is\(\[data-tiles="1"\], \[data-tiles="2"\]\) \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); \}/);
+  assert.match(details, /@container session-activity \(min-width: 900px\) \{\s*\.session-activity-blocks\[data-tiles="4"\] \{ grid-template-columns: repeat\(8, minmax\(0, 1fr\)\); \}/);
+  // Rows (the context card, the request, the plan) always fill their line:
+  // no hole beside a long plan.
+  assert.match(details, /\.session-activity-block\.is-row \{ grid-column: 1 \/ -1; \}/);
   assert.match(sharing, /@container session-status \(min-width: 560px\) \{\s*\.desktop-session-status-popover > header > \.session-sharing-line \{ flex: none;/, "the sharing line never shrinks to a glyph beside the title");
 });
 

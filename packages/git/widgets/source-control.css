@@ -695,7 +695,7 @@ body[data-desktop-low-resource="true"] .git-page .git-pane-toolbar {
 .git-page .git-file-row {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) max-content;
+  grid-template-columns: minmax(0, 1fr) max-content max-content;
   align-items: center;
   column-gap: var(--space-2);
   min-height: max(var(--control-h-sm), var(--hit-min));
@@ -783,6 +783,34 @@ body[data-desktop-low-resource="true"] .git-page .git-pane-toolbar {
   color: var(--muted);
   font-weight: 550;
   transition: opacity var(--motion-fast) var(--motion-ease);
+}
+/* The open-file affordance is the only always-visible row action: the whole
+   row opens the diff, so opening the file itself is a deliberate icon tap. */
+.git-page .git-file-open {
+  grid-column: 3;
+  display: grid;
+  place-items: center;
+}
+.git-page .git-file-open .resource-link {
+  display: grid;
+  place-items: center;
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+}
+.git-page .git-file-open .resource-link:hover {
+  background: var(--surface-overlay-hover);
+  color: var(--text);
+}
+.git-page .git-file-open .resource-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.git-page .git-file-row:has(.git-file-open) .git-file-actions {
+  inset-inline-end: calc(var(--space-1) + var(--control-h-sm) + var(--space-2));
 }
 .git-page .git-file-row .source-diffbar { min-width: 0; }
 .git-page .git-file-actions {

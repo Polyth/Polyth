@@ -5,11 +5,18 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createKnowledgeStore, type KnowledgeStore } from "@polyth/knowledge";
+import { told } from "./toolResult.ts";
 import { createMemoryRuntimeService, createMemoryService, memoryRoutes, registerMemoryTool, type ScopedMemorySource } from "../src/service.ts";
 import registerMemoryPackage from "../src/serverEntry.ts";
 import type { AgentCapabilityContribution, SpaceContext } from "@polyth/contracts";
-import { createMemoryStore } from "../../knowledge/src/memory.ts";
+import { createMemoryStore, type MemoryStore } from "../src/store.ts";
+
+/** A Space's store on disk, as the package opens it. */
+type TestStore = { memory: MemoryStore; close(): void };
+const openTestStore = (file: string, opts: { spaceId: string }): TestStore => {
+  const db = new DatabaseSync(file);
+  return { memory: createMemoryStore(db, opts.spaceId), close: () => db.close() };
+};
 
 const space = (spaceId: string, role: SpaceContext["role"] = "owner"): SpaceContext => ({
   spaceId, spaceSlug: spaceId, userId: `${spaceId}-user`, role, deployment: "local-trusted", storageDir: join(tmpdir(), spaceId),
@@ -69,14 +76,14 @@ const routeRequest = (input: { path: string; method: string; space: SpaceContext
 };
 
 test("memory routes resolve project and Space before touching the shared store", async () => {
-  const stores = new Map<string, KnowledgeStore>();
+  const stores = new Map<string, TestStore>();
   const projects = new Map<string, Set<string>>([["space-a", new Set(["project-a"])], ["space-b", new Set(["project-a"])]]);
   const contexts = new Map([["space-a", space("space-a")], ["space-b", space("space-b")]]);
   const source: ScopedMemorySource = {
     async prepareProject(ctx, projectId) {
       if (!projects.get(ctx.spaceId)?.has(projectId)) throw Object.assign(new Error("project not found"), { code: "not-found" });
       let store = stores.get(ctx.spaceId);
-      if (!store) { const file = join(mkdtempSync(join(tmpdir(), "memory-service-")), "knowledge.db"); store = createKnowledgeStore(file, { spaceId: ctx.spaceId }); stores.set(ctx.spaceId, store); }
+      if (!store) { const file = join(mkdtempSync(join(tmpdir(), "memory-service-")), "memory.db"); store = openTestStore(file, { spaceId: ctx.spaceId }); stores.set(ctx.spaceId, store); }
       return { memory: store.memory };
     },
   };
@@ -118,14 +125,14 @@ test("memory routes resolve project and Space before touching the shared store",
 });
 
 test("memory_remember invokes the shared scoped capability and returns a receipt", async () => {
-  const stores = new Map<string, KnowledgeStore>();
+  const stores = new Map<string, TestStore>();
   const contexts = new Map([["space-a", space("space-a")]]);
   const source: ScopedMemorySource = {
     async prepareProject(ctx, projectId) {
       let store = stores.get(ctx.spaceId);
       if (!store) {
-        const file = join(mkdtempSync(join(tmpdir(), "memory-tool-")), "knowledge.db");
-        store = createKnowledgeStore(file, { spaceId: ctx.spaceId });
+        const file = join(mkdtempSync(join(tmpdir(), "memory-tool-")), "memory.db");
+        store = openTestStore(file, { spaceId: ctx.spaceId });
         stores.set(ctx.spaceId, store);
       }
       return { memory: store.memory };
@@ -162,22 +169,22 @@ test("memory_remember invokes the shared scoped capability and returns a receipt
   }
   assert.equal(contributions.get("memory_feedback")!.autoApprove, undefined);
   const result = await contribution!.execute!({ title: "Remembered", body: "Use the shared memory store" }, { spaceId: "space-a", projectId: "project-a", cwd: "/tmp", sessionId: "session-a" });
-  assert.equal(JSON.parse(result.output).status, "committed");
-  assert.deepEqual(store.get(scope, JSON.parse(result.output).memoryId)?.authoredBy, { kind: "agent", sessionId: "session-a" });
+  assert.equal(told(result).status, "committed");
+  assert.deepEqual(store.get(scope, told(result).memoryId)?.authoredBy, { kind: "agent", sessionId: "session-a" });
   policy = store.updatePolicy(scope, { projectId: scope.projectId, expectedSettingsRevision: policy.settingsRevision, patch: { mode: "read-only" } });
   assert.equal(await contribution!.autoApprove!(ctx), false);
   assert.equal(await contributions.get("memory_get")!.autoApprove!(ctx), true);
   await assert.rejects(() => contribution!.execute!({ title: "Denied", body: "Read only" }, ctx), /automatic mode/);
   store.updatePolicy(scope, { projectId: scope.projectId, expectedSettingsRevision: policy.settingsRevision, patch: { mode: "off" } });
   assert.equal(await contributions.get("memory_search")!.autoApprove!(ctx), false);
-  await assert.rejects(() => contributions.get("memory_get")!.execute!({ memoryId: JSON.parse(result.output).memoryId }, ctx), /disabled by project policy/);
+  await assert.rejects(() => contributions.get("memory_get")!.execute!({ memoryId: told(result).memoryId }, ctx), /disabled by project policy/);
   for (const store of stores.values()) store.close();
 });
 
 test("memory_search agrees with admission recall and hides inactive records", async () => {
   const contexts = new Map([["space-a", space("space-a")]]);
-  const file = join(mkdtempSync(join(tmpdir(), "memory-search-")), "knowledge.db");
-  const knowledge = createKnowledgeStore(file, { spaceId: "space-a" });
+  const file = join(mkdtempSync(join(tmpdir(), "memory-search-")), "memory.db");
+  const knowledge = openTestStore(file, { spaceId: "space-a" });
   const source: ScopedMemorySource = { async prepareProject() { return { memory: knowledge.memory }; } };
   const contributions = new Map<string, AgentCapabilityContribution>();
   const registry = { register(_owner: string, value: AgentCapabilityContribution) { contributions.set((value.descriptor as { name: string }).name, value); return { dispose() {} }; } };
@@ -202,7 +209,7 @@ test("memory_search agrees with admission recall and hides inactive records", as
   create("Judgment candidate", "An unreviewed judgment candidate.", "candidate");
   create("Unrelated", "Nothing about the query.");
   const ctx = { spaceId: "space-a", projectId: "project-a", cwd: "/tmp", sessionId: "session-a" };
-  const search = async (query: string) => JSON.parse((await contributions.get("memory_search")!.execute!({ query }, ctx)).output) as { items: Array<{ id: string }>; total: number };
+  const search = async (query: string) => told(await contributions.get("memory_search")!.execute!({ query }, ctx));
 
   // A natural-language query need not match the whole phrase, exactly like recall.
   const phrase = await search("Judgment scope-check Auto-Approve harness");
@@ -214,20 +221,20 @@ test("memory_search agrees with admission recall and hides inactive records", as
   assert.deepEqual((await search("Judgment")).items.map((item) => item.id), [scopeCheck]);
   assert.equal((await search("the of and")).total, 0);
   await assert.rejects(() => contributions.get("memory_get")!.execute!({ memoryId: forgotten }, ctx), /memory record not found/);
-  const archivedRecord = JSON.parse((await contributions.get("memory_get")!.execute!({ memoryId: archived }, ctx)).output) as { lifecycle: string };
+  const archivedRecord = told(await contributions.get("memory_get")!.execute!({ memoryId: archived }, ctx));
   assert.equal(archivedRecord.lifecycle, "archived");
   knowledge.close();
 });
 
 test("runtime recall carries strict policy into every contribution", async () => {
-  const stores = new Map<string, KnowledgeStore>();
+  const stores = new Map<string, TestStore>();
   const contexts = new Map([["space-a", space("space-a")]]);
   const source: ScopedMemorySource = {
     async prepareProject(ctx) {
       let store = stores.get(ctx.spaceId);
       if (!store) {
-        const file = join(mkdtempSync(join(tmpdir(), "memory-runtime-")), "knowledge.db");
-        store = createKnowledgeStore(file, { spaceId: ctx.spaceId });
+        const file = join(mkdtempSync(join(tmpdir(), "memory-runtime-")), "memory.db");
+        store = openTestStore(file, { spaceId: ctx.spaceId });
         stores.set(ctx.spaceId, store);
       }
       return { memory: store.memory };
@@ -248,14 +255,14 @@ test("runtime recall carries strict policy into every contribution", async () =>
 });
 
 test("turn admission is fail-open when memory delivery is off", async () => {
-  const stores = new Map<string, KnowledgeStore>();
+  const stores = new Map<string, TestStore>();
   const contexts = new Map([["space-a", space("space-a")]]);
   const source: ScopedMemorySource = {
     async prepareProject(ctx) {
       let store = stores.get(ctx.spaceId);
       if (!store) {
-        const file = join(mkdtempSync(join(tmpdir(), "memory-runtime-off-")), "knowledge.db");
-        store = createKnowledgeStore(file, { spaceId: ctx.spaceId });
+        const file = join(mkdtempSync(join(tmpdir(), "memory-runtime-off-")), "memory.db");
+        store = openTestStore(file, { spaceId: ctx.spaceId });
         stores.set(ctx.spaceId, store);
       }
       return { memory: store.memory };
@@ -355,8 +362,8 @@ test("harvest recovery yields to the event loop while scanning a large session i
 });
 
 const crossProjectFixture = () => {
-  const file = join(mkdtempSync(join(tmpdir(), "memory-cross-")), "knowledge.db");
-  const knowledge = createKnowledgeStore(file, { spaceId: "space-a" });
+  const file = join(mkdtempSync(join(tmpdir(), "memory-cross-")), "memory.db");
+  const knowledge = openTestStore(file, { spaceId: "space-a" });
   const system = space("space-a");
   const person = { ...space("space-a"), userId: "person-a" };
   // person-a can open project-a and project-b; project-private belongs to someone else.
@@ -399,14 +406,16 @@ test("memory_search_projects asks first, searches only projects the person can o
   // Default policy is "ask": no auto-approval, the permission prompt is the consent.
   assert.equal(await tool.autoApprove!(ctx), false);
   assert.equal(await read.autoApprove!(ctx), false);
-  const found = JSON.parse((await tool.execute!({ query: "router" }, ctx)).output) as { items: Array<{ id: string; projectName: string }>; searchedProjects: Array<{ id: string }> };
-  assert.deepEqual(found.items.map((item) => [item.id, item.projectName]), [[beta, "Beta"]]);
+  const found = told(await tool.execute!({ query: "router" }, ctx));
+  assert.deepEqual(found.items.map((item) => item.id), [beta]);
+  assert.match(found.output, / · Beta \(project project-b\)\] /, "a hit names the project memory_get_project needs");
   assert.deepEqual(found.searchedProjects.map((item) => item.id), ["project-a", "project-b"]);
   // Naming a project the person cannot open does not widen the search.
-  const narrowed = JSON.parse((await tool.execute!({ query: "router", projectIds: ["project-private"] }, ctx)).output) as { items: unknown[] };
+  const narrowed = told(await tool.execute!({ query: "router", projectIds: ["project-private"] }, ctx));
   assert.equal(narrowed.items.length, 0);
-  const record = JSON.parse((await read.execute!({ projectId: "project-b", memoryId: beta }, ctx)).output) as { id: string; projectName: string };
-  assert.deepEqual([record.id, record.projectName], [beta, "Beta"]);
+  const record = told(await read.execute!({ projectId: "project-b", memoryId: beta }, ctx));
+  assert.equal(record.memoryId, beta);
+  assert.match(record.output, / · Beta · /);
   await assert.rejects(() => read.execute!({ projectId: "project-private", memoryId: beta }, ctx), /memory record not found/);
   // No person, no cross-project search.
   await assert.rejects(() => tool.execute!({ query: "router" }, { ...ctx, actorUserId: undefined }), /needs the person/);
@@ -430,8 +439,8 @@ test("memory_remember supersedes outdated agent records but never a person's", a
   const { knowledge, contributions, store, scopeOf, enable, ctx } = crossProjectFixture();
   enable("project-a");
   const remember = contributions.get("memory_remember")!;
-  const old = JSON.parse((await remember.execute!({ title: "Router IP", body: "The router is at 192.168.1.1." }, ctx)).output) as { memoryId: string };
-  const next = JSON.parse((await remember.execute!({ title: "Router IP", body: "The router moved to 192.168.1.254.", supersedes: [old.memoryId] }, ctx)).output) as { memoryId: string; superseded: string[] };
+  const old = told(await remember.execute!({ title: "Router IP", body: "The router is at 192.168.1.1." }, ctx));
+  const next = told(await remember.execute!({ title: "Router IP", body: "The router moved to 192.168.1.254.", supersedes: [old.memoryId] }, ctx));
   assert.deepEqual(next.superseded, [old.memoryId]);
   assert.equal(store.get(scopeOf("project-a"), old.memoryId)?.lifecycle, "superseded");
   assert.deepEqual(store.search(scopeOf("project-a"), { q: "router" }).items.map((item) => item.id), [next.memoryId]);

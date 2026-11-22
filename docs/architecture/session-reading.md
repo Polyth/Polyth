@@ -29,7 +29,13 @@ FIFO, held-for-review and durable mutation reconciliation.
 Activating a session that was dormant across a restart is recover-on-use. When
 its owned runtime authority no longer exists, wiring marks the epoch pending.
 Only a session with work to resume (a cut turn or a queued message) is
-recovered without being opened. Startup recovery (`recoverPendingWork`) wires,
+recovered without being opened. A send that has to queue behind an uncertain
+runtime starts that pass itself (`queueUntilAdmissible` calls `activate`
+after the message is in the queue): a stop that found the runtime gone leaves
+the session idle behind a blocked reconciliation barrier, and a sender nobody
+watches (a scheduled agent, a delegated worker) has no one to open the chat,
+so before this its message waited until a person did. The server's own
+resumes (`autoResume`) never start a recovery this way. Startup recovery (`recoverPendingWork`) wires,
 one at a time, every session whose log still has the turn the restart cut
 open, so its owned-epoch recovery closes that turn (`turn/abort-requested`
 `{reason:"runtime-replaced", source:"runtime-epoch"}`, then `turn/stopped`)

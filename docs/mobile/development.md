@@ -129,3 +129,15 @@ linker records the absolute build-host path in `DT_NEEDED`, the on-device
 connections. `PolythLinkRust` also fails closed when the library is unavailable
 so a packaging regression degrades to the explicit unavailable state rather
 than killing the process.
+
+## iOS native library packaging
+
+`apps/mobile/scripts/build-polyth-link-ios.sh` builds
+`libpolyth_link_uniffi.a` for device and simulator and installs it as the
+`PolythLinkCore` xcframework that `CapApp-SPM/Package.swift` points at. The App
+target must also link `libresolv.tbd`: the Rust library resolves the iOS
+interface list through `netdev`, which calls the `res_9_*` resolver API, and a
+static library carries no system-framework dependency of its own. Dropping that
+link makes `xcodebuild archive` fail with `Undefined symbols:
+_res_9_getservers` and produces no iOS build at all.
+`apps/mobile/test/iosPolythLink.test.ts` guards it.

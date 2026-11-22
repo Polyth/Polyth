@@ -27,6 +27,7 @@ import SlotHost, { SlotBoundary, type SlotContext } from "./slots/SlotHost.ts";
 import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
 import { ShellColumnAccount, ShellColumnFoot, ShellColumnHead, ShellDock } from "./ShellDock.tsx";
 import { ProjectRailTools } from "./sidebar/ProjectRailTools.tsx";
+import { OwnServerZoneHeading, ServerZonesRail, ServerZonesTree } from "./sidebar/ServerZones.tsx";
 import { useSessionMoveDropZones } from "../sessionMove.ts";
 import { projectRailMark } from "../sessionStatus.ts";
 import { SIDEBAR_RAIL_SLOT } from "../railPlacement.ts";
@@ -1502,6 +1503,9 @@ export default function Sidebar() {
                   </Menu>
                 );
               })}
+              {/* The other servers' projects scroll with this one's; they
+                  carry no arrange id, so reordering never picks them up. */}
+              <ServerZonesRail side={projectRailTooltipSide} />
             </div>
             <ProjectRailTools projectId={activeProjectId ?? null} sessionId={activeSessionId} />
             {!compact && <ShellDock column="start" group="actions" />}
@@ -1822,6 +1826,8 @@ export default function Sidebar() {
               })}
             </div>
           )}
+          {/* Beside other servers' zones, this server's projects get its name. */}
+          {query.trim() === "" && effectiveViewMode !== "rail" && registry.status === "ready" && <OwnServerZoneHeading />}
           {query.trim() === "" && (effectiveViewMode === "rail"
             ? visibleProjects.filter((candidate) => candidate.id === focusProjectId)
             : arrangedOrder(visibleProjects)).map((p) => {
@@ -1902,6 +1908,9 @@ export default function Sidebar() {
               <span>{tr("sidebar.addProject")}</span>
             </button>
           )}
+          {/* Every other server this app can open, as a zone with its
+              projects (serverZones.ts). The rail draws them as icons. */}
+          {query.trim() === "" && effectiveViewMode !== "rail" && registry.status === "ready" && <ServerZonesTree />}
         </div>
         {/* Footer widgets render only when placed; no reserved empty bar. */}
         <SlotHost

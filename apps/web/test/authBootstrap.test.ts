@@ -25,6 +25,14 @@ test('canonical installation setup never boots the workspace runtime early', () 
   assert.equal(authBootstrapPhase({ required: true, authorized: true, scope: 'ui-session', state: 'ready' }), 'ready');
 });
 
+test('a session whose password someone else set boots only the password change', () => {
+  const pending = { required: true, authorized: true, scope: 'ui-session', state: 'ready', passwordChangeRequired: true };
+  assert.equal(authBootstrapPhase(pending), 'password-change');
+  assert.equal(authBootstrapPhase({ ...pending, authorized: false, scope: 'anonymous' }), 'locked');
+  assert.throws(() => authBootstrapPhase({ ...pending, passwordChangeRequired: 'yes' }), /Invalid password change state/);
+  assert.throws(() => authBootstrapPhase({ ...pending, passwordChangeRequired: false }), /Invalid password change state/);
+});
+
 test('auth prefetch rejects unavailable or missing account authority', async () => {
   const previous = globalThis.fetch;
   try {

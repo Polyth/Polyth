@@ -197,3 +197,55 @@ test("without a way to remove checkouts the route always skips isolated sessions
   } as never);
   assert.equal(response?.eligibleCount, 0);
 });
+
+test("a project id narrows counting and cleanup to that project and its private rooms", async () => {
+  const rows: SessionProjection[] = [
+    { id: "in-p", projectId: "p", title: "p", status: "idle", createdAt: 1, updatedAt: now - 40 * DAY },
+    { id: "in-room", projectId: "room", title: "room", status: "idle", createdAt: 1, updatedAt: now - 40 * DAY },
+    { id: "in-q", projectId: "q", title: "q", status: "idle", createdAt: 1, updatedAt: now - 40 * DAY },
+    { id: "archived-q", projectId: "q", title: "aq", status: "archived", createdAt: 1, updatedAt: now - 40 * DAY },
+  ];
+  const archivedIds: string[] = [];
+  const deleted: string[] = [];
+  const scoped = {
+    sessions: {
+      list: async () => rows,
+      archive: async (id: string) => { archivedIds.push(id); },
+      delete: async (id: string) => { deleted.push(id); },
+    } as SessionService,
+    projects: {
+      list: async () => [
+        { id: "p", path: "/p", name: "p" },
+        { id: "room", path: "/p", name: "room", parentProjectId: "p" },
+        { id: "q", path: "/q", name: "q" },
+      ],
+    },
+  };
+  const route = sessionRetentionRoutes(() => scoped as unknown as SpaceServices);
+  let status = 0;
+  let response: unknown;
+  const request = (method: "GET" | "POST", url: string, value: Record<string, unknown> = {}) => route({
+    space: fakeSpaceContext(),
+    path: "/api/session-retention",
+    method,
+    url: new URL(`http://localhost${url}`),
+    body: async () => value,
+    json: (code: number, body: unknown) => { status = code; response = body; },
+  } as never);
+
+  await request("GET", "/api/session-retention?days=30&projectId=p");
+  assert.equal((response as { eligibleCount: number }).eligibleCount, 2);
+  await request("GET", "/api/session-retention?days=30&projectId=unknown");
+  assert.equal((response as { eligibleCount: number }).eligibleCount, 0);
+
+  await request("POST", "/api/session-retention", { days: 30, projectId: "p" });
+  assert.deepEqual(archivedIds.sort(), ["in-p", "in-room"]);
+
+  await request("POST", "/api/session-retention", { target: "archives", all: true, projectId: "p" });
+  assert.deepEqual(deleted, []);
+  await request("POST", "/api/session-retention", { target: "archives", all: true, projectId: "q" });
+  assert.deepEqual(deleted, ["archived-q"]);
+
+  await request("POST", "/api/session-retention", { days: 30, projectId: 7 });
+  assert.equal(status, 400);
+});

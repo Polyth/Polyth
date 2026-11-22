@@ -1856,6 +1856,12 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
      target); the grid's column gap keeps the title clear of it. */
   --session-menu-size: 28px;
   --session-menu-slot: calc(2px + var(--session-menu-size));
+  /* Centre of the last trailing mark (a 14px identity icon ending on the
+     trailing inset). Hover controls — the ⋯ trigger and the Shift quick
+     buttons — centre their last glyph here so they stand in the same column
+     as the row's status icons. */
+  --session-trailing-axis: calc(var(--nav-trailing-inset) + (var(--icon-sm) - 2px) / 2);
+  --session-quick-size: 26px;
 }
 /* Under a worktree heading the state column shares the heading's +/− axis. */
 .session-worktree-group { --nav-indent-session: var(--nav-worktree-row-indent, var(--nav-indent-worktree)); }
@@ -2406,9 +2412,9 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
    hover or keyboard focus; touch and drawer layouts only for the open or
    keyboard-focused row (rules near the end of the cascade). Whenever it is
    shown it takes its own trailing slot in place of the meta column, so it
-   never paints over the title or the subagent disclosure. Its glyph centre
-   matches the project row's ⋯. Opacity — not display — keeps it in the tab
-   order. */
+   never paints over the title or the subagent disclosure. On fine pointers
+   its glyph centres on the status-icon column (--session-trailing-axis).
+   Opacity — not display — keeps it in the tab order. */
 .session-menu-trigger {
   position: absolute;
   z-index: 3;
@@ -2430,6 +2436,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 }
 .session-menu-trigger svg { width: 16px; height: 16px; }
 @media (hover: hover) and (pointer: fine) {
+  .session-menu-trigger { inset-inline-end: calc(var(--session-trailing-axis) - var(--session-menu-size) / 2); }
   .session-row:hover .session-menu-trigger,
   .session-row:has(:focus-visible) .session-menu-trigger,
   .session-row.menu-open .session-menu-trigger {
@@ -6210,10 +6217,25 @@ html[data-density="compact"] .set-row { padding: 6px 0; }
 }
 .users-self-card .user-avatar.is-large { width: 52px; height: 52px; }
 .user-row-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
-.user-row-name { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-1); min-width: 0; font-size: var(--font-body); }
-.user-row-name strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+/* One name line in a list row: a long name gives way (ellipsis) and its
+   status badges keep their place beside it, so rows keep one rhythm on a
+   320px phone instead of dropping a badge onto a line of its own. */
+.user-row-name { display: flex; align-items: center; gap: var(--space-1) var(--space-2); min-width: 0; font-size: var(--font-body); }
+.user-row-name strong { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.user-row-name > .ui-badge { flex: none; }
+/* On the narrowest phones a name matters more than one line: its badges move
+   under it rather than cutting it to a few letters. Your own card is a heading
+   and always wraps. */
+.users-list { container: users-list / inline-size; }
+@container users-list (max-width: 340px) {
+  .user-row-name { flex-wrap: wrap; }
+}
+.users-self-card .user-row-name { flex-wrap: wrap; }
+.users-self-card .user-row-name strong { white-space: normal; overflow-wrap: anywhere; }
+/* The summary (login · role · limits) wraps to a second line before it cuts. */
 .user-row-meta {
-  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+  min-width: 0; overflow: hidden; overflow-wrap: anywhere;
   font-size: var(--font-meta); line-height: var(--font-meta-lh); color: var(--muted);
 }
 .user-row-badges { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: 2px; }
@@ -6222,7 +6244,9 @@ html[data-density="compact"] .set-row { padding: 6px 0; }
 .user-detail-head { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-3); }
 .user-detail-back { margin-inline-start: calc(var(--space-2) * -1); }
 .user-detail-identity { display: flex; align-items: center; gap: var(--space-3); min-width: 0; width: 100%; }
-.user-detail-identity .user-row-name strong { font-size: var(--font-heading); font-weight: 650; line-height: 1.25; letter-spacing: -.015em; }
+/* A page's own heading wraps a long name rather than cutting it. */
+.user-detail-identity .user-row-name { flex-wrap: wrap; }
+.user-detail-identity .user-row-name strong { font-size: var(--font-heading); font-weight: 650; line-height: 1.25; letter-spacing: -.015em; white-space: normal; overflow-wrap: anywhere; }
 /* Own account: long ids and lists of keys/devices on the shared list surface. */
 .account-detail-id { display: inline-block; max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 .settings-section-body > .account-detail-list { margin-block: var(--space-1) var(--space-3); }
@@ -14735,19 +14759,18 @@ width: var(--tap);
 }
 /* No pointer or trackpad has to acquire a 7px/12px/32px target. */
 .sidebar-resize { inset-inline-end: -6px; width: 12px; }
-/* The strip's gutters: the wider one faces the workspace (or a window), the
-   narrow one the window edge, where the frame itself already gives the icons
-   air. A strip that floats as a card of its own (the tablet cluster, floating
-   columns, a look's island) splits the same width evenly, as its frame
-   closes on both sides. Badges clear either edge; touch input expands a
-   transparent hit area, not the strip. */
+/* The strip's gutters. Centered by default: an icon sits dead-centre of the
+   rail, whatever paints its frame. Looks/states that need a different total
+   air (the tablet cluster, floating columns, a look's island) override
+   --rail-strip-gutter-start/end with symmetric values. Badges clear either
+   edge; touch input expands a transparent hit area, not the strip. */
 .rail-icon-col.plugin-strip {
   box-sizing: border-box;
   width: var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-3) + 1px));
   min-width: var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-3) + 1px));
   gap: var(--space-2);
   padding-block: var(--space-2);
-  padding-inline: var(--rail-strip-gutter-start, var(--space-2)) var(--rail-strip-gutter-end, var(--space-1));
+  padding-inline: var(--rail-strip-gutter-start, calc(var(--space-3) / 2)) var(--rail-strip-gutter-end, calc(var(--space-3) / 2));
 }
 .rail-icon-col.plugin-strip .strip-btn,
 .rail-icon-col.plugin-strip .capability-launcher {
@@ -14926,7 +14949,8 @@ button[aria-busy="true"] { position: relative; }
     position: absolute;
     z-index: 3;
     top: 50%;
-    right: 4px;
+    /* The ✕ centres on the status column, like the ⋯ it replaces. */
+    inset-inline-end: calc(var(--session-trailing-axis) - var(--session-quick-size) / 2);
     transform: translateY(-50%);
     display: flex;
     gap: var(--space-1);
@@ -14939,9 +14963,9 @@ button[aria-busy="true"] { position: relative; }
     pointer-events: auto;
   }
   .session-row.shift-quick .session-quick > .session-quick-btn {
-    width: 26px;
-    min-width: 26px;
-    height: 26px;
+    width: var(--session-quick-size);
+    min-width: var(--session-quick-size);
+    height: var(--session-quick-size);
     display: inline-grid;
     place-items: center;
     color: var(--text-dim);
@@ -14956,7 +14980,7 @@ button[aria-busy="true"] { position: relative; }
   /* The two quick buttons claim their footprint like the ⋯ slot does. */
   .session-row.shift-quick:hover .session-row-body,
   .session-row.shift-quick:has(.session-quick :focus-visible) .session-row-body {
-    padding-inline-end: calc(4px + 2 * 26px + var(--space-1) + 4px);
+    padding-inline-end: calc(var(--session-trailing-axis) + 1.5 * var(--session-quick-size) + var(--space-1) + 4px);
   }
 }
 @media (pointer: coarse), (max-width: 480px) {
@@ -17377,9 +17401,16 @@ color: var(--text);
   gap: var(--space-3);
   min-width: 0;
 }
+/* The track must be able to shrink: an implicit auto track sizes to the
+   toggle's min-content (a nowrap path's full width), and the toggle's
+   `width: 100%` resolves against that overflowing track — so the row spilled
+   past its container with no ellipsis, clipped mid-glyph by the viewport.
+   `minmax(0, 1fr)` keeps the toggle on the container's width and lets the
+   path ellipsize at the line's end. */
 .execution-file-change {
   min-width: 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-2);
 }
 .execution-file-toggle {
@@ -17549,7 +17580,10 @@ color: var(--text);
 }
 .execution-mcp-list-title > a { text-decoration: none; }
 .execution-mcp-list-title > a:hover { text-decoration: underline; text-underline-offset: 2px; }
-.execution-mcp-list-title small { flex: none; margin-inline-start: auto; color: var(--faint); font-size: var(--font-meta); }
+.execution-mcp-list-title small { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-inline-start: auto; color: var(--faint); font-size: var(--font-meta); }
+/* The item's title gives way last: its meta shrinks a thousand times harder
+   and ellipsizes first, so a long title never cuts mid-row while the meta
+   stays whole (the same order as the block's own summary). */
 .execution-mcp-list-detail {
   display: -webkit-box;
   overflow: hidden;
@@ -17686,11 +17720,18 @@ color: var(--text);
 }
 .execution-subagent-branch { display: grid; place-items: center; color: var(--accent); }
 .execution-subagent-branch svg { width: 18px; height: 18px; }
-.execution-subagent-detail > div { min-width: 0; display: grid; grid-template-columns: minmax(0, max-content) auto; align-items: center; gap: 2px 8px; }
-.execution-subagent-detail strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.execution-subagent-detail p { grid-column: 1 / -1; margin: 0; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.execution-subagent-detail > div { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; row-gap: 2px; }
+/* The name gives way last: the state label shrinks a thousand times harder
+   and ellipsizes first, so a long delegated title keeps the line instead of
+   cutting mid-row with the state still whole. This used to be a grid whose
+   second track (auto) could not shrink below the state's full min-content,
+   so the name's track absorbed every shortage; the wrap replaces the grid
+   rows the detail's extra lines used to span. */
+.execution-subagent-detail strong { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.execution-subagent-state { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: var(--font-meta); }
+.execution-subagent-detail p { flex: 1 1 100%; margin: 0; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .execution-subagent-meta {
-  grid-column: 1 / -1;
+  flex: 1 1 100%;
   display: flex;
   flex-wrap: wrap;
   gap: 2px 14px;
@@ -17701,13 +17742,12 @@ color: var(--text);
 .execution-subagent-meta > div { display: inline-flex; gap: 5px; min-width: 0; }
 .execution-subagent-meta dt { color: var(--faint); }
 .execution-subagent-meta dd { min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.execution-subagent-state { color: var(--muted); font-size: var(--font-meta); }
 .execution-subagent-state.running { color: var(--accent); }
 .execution-subagent-state.failed { color: var(--red); }
 .execution-subagent-detail > button { min-height: var(--control-h); display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .execution-subagent-detail > button:disabled { opacity: .65; cursor: wait; }
 .execution-subagent-detail > button svg { width: 12px; height: 12px; }
-.execution-subagent-disclosure { grid-column: 1 / -1; margin-top: var(--space-1); border-top: 1px solid var(--border-soft); padding-top: var(--space-2); }
+.execution-subagent-disclosure { flex: 1 1 100%; margin-top: var(--space-1); border-top: 1px solid var(--border-soft); padding-top: var(--space-2); }
 .execution-subagent-disclosure summary { cursor: pointer; color: var(--text-dim); font-size: var(--font-meta); font-weight: 600; list-style: none; }
 .execution-subagent-disclosure summary::-webkit-details-marker { display: none; }
 .execution-subagent-disclosure summary::before { content: "▸"; display: inline-block; margin-right: var(--space-2); color: var(--accent); transition: transform var(--motion-fast) var(--motion-ease); }
@@ -19531,9 +19571,23 @@ html:not(.light)[data-background]:not([data-background="none"]):not([data-backgr
   padding: var(--space-1) var(--activity-bleed);
   border-radius: var(--radius-control);
 }
-.activity-group .ui-run-summary-copy strong { flex: none; overflow: visible; color: var(--text-dim); font-weight: 500; }
-/* The title never truncates; the counts give way first. */
-.activity-group .ui-run-summary-copy small { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.activity-group .ui-run-summary-copy strong {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The title gives way last: the counts shrink a thousand times harder, and
+   only once they are spent does the title ellipsize — at the row's end, never
+   under the chevron. The title used to be `flex: none` with `overflow:
+   visible`, so a long one ran past the row edge and clipped mid-glyph at the
+   summary's own `overflow: hidden` on a narrow screen. A look whose summary
+   is a pill that hugs its words (chip, Air) sizes to content, so nothing
+   shrinks there and nothing changes. */
+.activity-group .ui-run-summary-copy small { flex: 0 1000 auto; min-width: 0; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
 .activity-group .ui-run-summary-chevron { color: var(--faint); transition: color var(--motion-fast) var(--motion-ease); }
 @media (hover: hover) {
   .activity-group > .ui-run-summary:hover:where(:not(:disabled)) :is(.ui-run-summary-copy strong, .ui-run-summary-chevron) { color: var(--text); }
@@ -19663,12 +19717,18 @@ html:not(.light)[data-background]:not([data-background="none"]):not([data-backgr
   gap: var(--space-2);
   overflow: hidden;
 }
-/* The step's name is the anchor of the line and never gives way to the
-   preview: WebKit still shrank a weighted `0 1 auto` name to "Sear…" on a
-   393pt phone. Only a runaway tool name is capped, so its preview keeps room. */
+/* The name is the anchor of the line and gives way last. It is not the first
+   to go: the preview shrinks far harder (weight 1000 against the name's 1), so
+   the name truncates only once the preview is spent or the name alone is
+   longer than the line. Its old `flex: none` under `max-inline-size: 60%` was
+   a cap against the ticker's own hug width — the more the name needed, the
+   wider the cap got — so a name alone on the line was cut to 60% of itself
+   with the rest of the row empty ("Session m…" for "Session messages" on
+   Chromium, which resolves that percentage against the words; WebKitGTK
+   resolved it against the line and showed the whole name). */
 .activity-group .activity-ticker-step strong {
-  flex: none;
-  max-inline-size: 60%;
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   color: var(--text);
   text-overflow: ellipsis;
@@ -20008,7 +20068,12 @@ body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="s
    the last few pixels of the range (and a transcript that does not scroll has
    no timeline, so no mask). Masking only while scrolled keeps the tail glass
    blurring the wallpaper: a masked ancestor is its backdrop root. Without
-   scroll timelines there is no overlap at all. */
+   scroll timelines there is no overlap at all.
+   The mask is geometry, not motion: it must outlive the reduced-motion and
+   low-resource switches, whose `animation: none !important` (top of this
+   file) would otherwise drop it and leave the overlap, so history showed
+   through the edited-files and status lines. Hence !important here, on the
+   timeline and range too (the shorthand resets both). */
 @supports (animation-timeline: scroll()) {
   .focus-conversation:has(> .conversation-composer-dock) {
     --timeline-dock-overlap: var(--composer-height);
@@ -20017,9 +20082,9 @@ body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="s
     margin-block-end: calc(-1 * var(--timeline-dock-overlap));
   }
   .focus-conversation:has(> .conversation-composer-dock) .timeline {
-    animation: timeline-dock-overlap-hidden linear none;
-    animation-timeline: scroll(self);
-    animation-range: 0 calc(100% - 4px);
+    animation: timeline-dock-overlap-hidden linear none !important;
+    animation-timeline: scroll(self) !important;
+    animation-range: 0 calc(100% - 4px) !important;
   }
 }
 @keyframes timeline-dock-overlap-hidden {
@@ -20040,7 +20105,7 @@ body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="s
   .focus-conversation:has(> .conversation-composer-dock) .timeline {
     --timeline-pad-bottom: calc(24px + var(--timeline-turn-sheet-space, 0px));
     scroll-padding-bottom: 24px;
-    animation: none;
+    animation: none !important;
   }
 }
 

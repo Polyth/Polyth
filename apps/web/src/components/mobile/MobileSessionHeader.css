@@ -1,5 +1,6 @@
-/* Compact session overview remains a top-origin status surface for wide
-   callers; the phone-specific full-screen variant is defined below. */
+/* The session overview the title opens (phone and compact): a top-origin
+   sheet whose full-screen geometry is defined below. The status line's
+   details are the activity panel (SessionActivityPanel.css). */
 .sheet-backdrop-top:has(> .mobile-island-sheet) {
   /* A translucent sheet over a dark scrim compounds into a flat gray panel.
      This quick surface samples the workspace directly; the canonical sheet
@@ -17,24 +18,6 @@
   animation-name: mobile-session-sheet-drop;
   animation-duration: var(--motion-surface);
   animation-timing-function: var(--motion-ease);
-}
-
-/* Details use the visible band; the body owns scrolling down to Recent. */
-.mobile-island-sheet--details.sheet-origin-top {
-  max-height: calc(var(--visual-vh, 100dvh) - var(--safe-bottom) - var(--space-2));
-}
-
-.mobile-island-sheet--details .sheet-title {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-}
-
-.mobile-island-sheet--details .sheet-head {
-  justify-content: flex-end;
-  padding: 0 var(--space-2);
 }
 
 .mobile-island-sheet.sheet-origin-top.is-closing {

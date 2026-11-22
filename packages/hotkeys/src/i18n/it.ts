@@ -7,6 +7,7 @@ export const it: HotkeysMessages = {
   "settings.shortcutspage.action.newSession": "Nuova sessione",
   "settings.shortcutspage.action.notificationCentre": "Centro notifiche",
   "settings.shortcutspage.action.palette": "Palette dei comandi",
+  "settings.shortcutspage.action.reportBug": "Segnala un bug",
   "settings.shortcutspage.action.searchFiles": "Cerca file",
   "settings.shortcutspage.action.searchSessions": "Cerca sessioni",
   "settings.shortcutspage.action.searchWorkspace": "Cerca nei contenuti dell’area di lavoro",

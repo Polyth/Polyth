@@ -132,3 +132,35 @@ test("paired principal without durable user binding is denied", async t => {
   const resolution = f.gateway.resolve(f.request(), { kind: "polyth-link", connectionId: "conn", transport: "relay" });
   assert.equal(resolution.authenticated, false);
 });
+
+test("a password an owner chose opens nothing but /api/auth until its holder replaces it", async t => {
+  const f = await fixture(t);
+  const ingress = { kind: "public-http", listenerId: "public", loopback: false, secure: true } as const;
+  const created = await f.identity.accounts.createLocal(f.owner.token, { login: "ida", name: "Ida", password: "owner chose this one" });
+  const signIn = async (password: string) => (await f.identity.credentials.login({ login: "ida", password, address: "203.0.113.9" })).token;
+  const pending = await signIn("owner chose this one");
+  const cookie = `${f.cookieName}=${pending}`;
+
+  assert.equal(f.identity.accounts.passwordChangeRequired(created.id), true);
+  assert.equal(f.gateway.resolve(f.request(cookie), ingress).authenticated, false);
+  assert.deepEqual(f.gateway.gate(f.request(cookie), ingress)?.status, 403);
+  assert.equal((f.gateway.gate(f.request(cookie), ingress)?.body as { error?: string }).error, "password-change-required");
+  // The owner who set it is not held back.
+  assert.equal(f.gateway.gate(f.request(`${f.cookieName}=${f.owner.token}`), ingress), null);
+  // A live socket of that session is dropped at its next revalidation.
+  const live = f.identity.sessions.resolve(pending)!;
+  assert.equal(f.gateway.refreshPrincipal({ kind: "ui-session", sessionId: live.id, rememberedDeviceId: live.id, userId: created.id } as AuthPrincipal), null);
+
+  await f.identity.credentials.changePassword(pending, "ida chose her own");
+  assert.equal(f.identity.accounts.passwordChangeRequired(created.id), false);
+  const own = await signIn("ida chose her own");
+  assert.equal(f.gateway.resolve(f.request(`${f.cookieName}=${own}`), ingress).authenticated, true);
+
+  // An owner reset puts the account back behind the change.
+  await f.identity.accounts.resetPassword(f.owner.token, created.id, "owner reset this one");
+  const reset = await signIn("owner reset this one");
+  assert.equal(f.gateway.resolve(f.request(`${f.cookieName}=${reset}`), ingress).authenticated, false);
+  assert.equal(f.gateway.gate(f.request(`${f.cookieName}=${reset}`), ingress)?.status, 403);
+  // The owner's own account, set at setup, never is.
+  assert.equal(f.identity.accounts.passwordChangeRequired(f.owner.userId), false);
+});

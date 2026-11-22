@@ -112,8 +112,8 @@ function useTaskProgressTitle(sessionId: string | undefined, tasks: readonly Isl
 }
 
 /** Width of the chat column in the window the overview opens from: the
- *  conversation holding the opener (the composer's status dock), else the
- *  chat under the header title. The column is the timeline's content box. */
+ *  conversation holding the opener, else the chat under the header title.
+ *  The column is the timeline's content box. */
 function useOpenerColumnWidth(open: boolean, anchor: HTMLElement | null): number | null {
   const [width, setWidth] = useState<number | null>(null);
   useLayoutEffect(() => {
@@ -138,9 +138,10 @@ function useOpenerColumnWidth(open: boolean, anchor: HTMLElement | null): number
   return width;
 }
 
-/** The centered desktop session overview. Task transitions temporarily borrow
- * the title so progress never has to jump around inside the conversation.
- * The popover can also open from the above-composer agent status dock. */
+/** The centered desktop session overview, opened from the title. Task
+ * transitions temporarily borrow the title so progress never has to jump
+ * around inside the conversation. The above-composer status line opens the
+ * activity panel instead (SessionActivityPanel.tsx). */
 export default function DesktopSessionStatus({
   showTrigger = true,
   leading,
@@ -158,7 +159,9 @@ export default function DesktopSessionStatus({
   const overlayAnchorRef = useRef<HTMLElement | null>(null);
   const overlay = useSessionStatusPopover();
   overlayAnchorRef.current = overlay.anchor ?? headerRef.current;
-  const fromDock = overlay.source === "dock";
+  // The status line above the composer opens the activity panel
+  // (SessionActivityPanel.tsx); this overview answers the title only.
+  const overviewOpen = sessionOverviewMode(false, overlay) === "full";
   const shellMode = useShellMode();
   const sessions = useStore((state) => state.sessions);
   const events = useStore((state) => state.events);
@@ -198,7 +201,7 @@ export default function DesktopSessionStatus({
   const contextNotice = contextTelemetryNotice(telemetryStatus, gauge);
   const modelName = descriptor?.name ?? activeModel?.modelID ?? null;
   const sessionIdRef = useRef(activeSessionId);
-  const columnWidth = useOpenerColumnWidth(overlay.open && shellMode === "wide", overlay.anchor);
+  const columnWidth = useOpenerColumnWidth(overviewOpen && shellMode === "wide", overlay.anchor);
 
   useEffect(() => {
     if (sessionIdRef.current === activeSessionId) return;
@@ -207,9 +210,9 @@ export default function DesktopSessionStatus({
   }, [activeSessionId]);
 
   useEffect(() => {
-    if (shellMode === "wide" || !overlay.open) return;
+    if (shellMode === "wide" || !overviewOpen) return;
     for (const item of recent) prefetchSessionTail(item.id);
-  }, [shellMode, overlay.open, recent]);
+  }, [shellMode, overviewOpen, recent]);
 
   const conversationPeople = useSessionPeople(session?.purpose === "conversation" ? session.id : null);
   const peopleTones = useMemo(
@@ -240,17 +243,12 @@ export default function DesktopSessionStatus({
   }
 
   const overview = (shellMode === "compact" || shellMode === "phone")
-    ? (overlay.open ? (
+    ? (overviewOpen ? (
       <SessionQuickAccessSheet
-        fullScreen={sessionOverviewMode(false, overlay) === "full"}
         activeSession={session}
         gauge={gauge}
         contextPercent={contextPercent}
-        contextNotice={contextNotice}
-        modelName={modelName}
-        model={model}
         sessionTitle={title}
-        prompt={prompt}
         tasks={tasks}
         requests={[]}
         recent={recent}
@@ -260,13 +258,13 @@ export default function DesktopSessionStatus({
     ) : null)
     : (
     <Popover
-      open={overlay.open}
+      open={overviewOpen}
       onClose={closeSessionStatusPopover}
       anchorRef={overlayAnchorRef}
       className="desktop-session-status-surface"
       style={columnWidth ? { "--session-status-column": `${columnWidth}px` } as CSSProperties : undefined}
       align="center"
-      side={fromDock ? "up" : "down"}
+      side="down"
       ariaLabel={tr("mobile.island.overview")}
     >
       <div className="desktop-session-status-popover">
@@ -291,8 +289,6 @@ export default function DesktopSessionStatus({
           <SessionSharingLine session={session} onOpen={closeSessionStatusPopover} />
         </header>
         <SessionActivityDetails
-          sessionTitle={title}
-          showIdentity={false}
           prompt={prompt}
           modelName={modelName}
           tasks={tasks}
@@ -339,7 +335,7 @@ export default function DesktopSessionStatus({
         type="button"
         className="desktop-session-status-trigger header-control"
         aria-label={tr("sessionStatus.sessionStatusValue", { title, status: status.label })}
-        aria-expanded={overlay.open}
+        aria-expanded={overviewOpen}
         aria-haspopup="dialog"
         title={status.label}
         onClick={() => toggleSessionStatusPopover(headerRef.current, "header")}

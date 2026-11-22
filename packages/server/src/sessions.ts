@@ -26,7 +26,7 @@ import type {
   AgentProfile, AgentRuntime, AttachmentRef, AutoAcceptSetting, CanonicalEventInput, ChildSnapshotResult, ClientMutationStatusDto, ClientSettingsDto, ContextWindowState, CreateSessionInput, DeliveryMode, ProjectPresentationSettingsDto,
   Disposable, DurableOperation, HarnessSelection, HarnessTransition, ForkDraft, ForkResult, JsonObject, ModelRef, MutationOutcome, NotificationRecord, ResumeTurnOptions,
   PersistedRuntimeBinding,
-  ModelDescriptor, PackageDescriptorDto, QueueItemDto, RateLimitRetry, RateLimitRetryHint, RuntimeEvent,
+  ModelDescriptor, PackageDescriptorDto, QueueItemDto, RateLimitRetry, RateLimitRetryHint, RuntimeBackgroundTask, RuntimeEvent,
   RuntimeEpochTransitionResult, TurnResumeCancelledData,
   ExecutionReleaseProof,
   RuntimeEpochFence,
@@ -34,7 +34,7 @@ import type {
   RuntimeEndpoint, RuntimeLifecycleNotification, RuntimeObservation, ObservationIngestionInput, ObservationIngestionResult,
   RuntimeSessionBinding, RuntimeSnapshot,
   PermissionDelegatedData, PermissionRequestData,
-  SecretRequestData, SecretResolvedData, SecureSafeKind, SecureSafeService,
+  AgentSecretRequest, SecretRequestData, SecretResolvedData, SecureSafeKind, SecureSafeService,
   RuntimeSession, SendResult, SessionDebugEndpointDto, SessionEvent, SessionFolderDto, SessionForkedData, SessionIsolation, SessionOrganizePatch, SessionProjection, SessionRef, SessionWorkspace, MemoryNarrowing,
   SessionService, SessionPersistence, SessionWorkspaceSelection, UserTurnInput, WorkspaceMutationScope, WorkspaceContext,
   Project, SessionMoveBlock, SessionMoveInput, SessionProjectMove, SessionProjectMovedData, SessionReleasedExecution,
@@ -143,6 +143,13 @@ import { buildPermissionPreview, PERMISSION_ALLOWED_SCOPES } from "./permissionP
 import { MAX_TURN_ATTACHMENTS, mergeAttachmentInputs, sanitizeAttachments } from "./attachments.ts";
 import { settleAllOrThrow } from "./settle.ts";
 import { createSpawnTelemetry, type SpawnTelemetry } from "./spawnTelemetry.ts";
+import {
+  lostBackgroundTasksText,
+  lostBackgroundTasksWakeId,
+  mergeBackgroundTasks,
+  normalizeBackgroundTasks,
+  withNativeBackgroundTasks,
+} from "./nativeBackgroundTasks.ts";
 import {
   createResumeScheduler,
   planResume,
@@ -420,6 +427,13 @@ export interface IdleSessionRuntimePolicy {
    * `minIdleMs` and `ttlMs`. Any turn moves it to the ordinary rules. */
   unusedIdleMs: number;
   sweepMs: number;
+  /** A runtime with background work that has not reported back stays this
+   *  long past the work's start before the ordinary rules apply again (Claude
+   *  Code's own background shells time out within 2 h). */
+  backgroundHoldMs: number;
+  /** How long a detached process's background work waits for that same
+   *  process to be wired again before it is declared lost. */
+  backgroundGraceMs: number;
 }
 export const DEFAULT_IDLE_SESSION_RUNTIME_POLICY: IdleSessionRuntimePolicy = {
   ttlMs: 2 * 60 * 60_000,
@@ -427,6 +441,8 @@ export const DEFAULT_IDLE_SESSION_RUNTIME_POLICY: IdleSessionRuntimePolicy = {
   minIdleMs: 15 * 60_000,
   unusedIdleMs: 3 * 60_000,
   sweepMs: 60_000,
+  backgroundHoldMs: 3 * 60 * 60_000,
+  backgroundGraceMs: 15_000,
 };
 
 export interface RuntimePool {
@@ -555,6 +571,16 @@ export interface RuntimeEpochSessionService extends RestartSafetySessionService 
     /** Bounded argument summary for the permission card and risk assessment. */
     metadata?: JsonObject;
   }): Promise<"allow" | "deny" | "permission-required">;
+  /** Show the protected Credential Vault form for one package tool call in
+   * the canonical session that owns it, and resolve once the person saves or
+   * dismisses it (or the call is cancelled, as dismissed). The value is
+   * stored by `replySecret`; this never sees it. */
+  requestAgentToolSecret(
+    sessionId: string,
+    request: AgentSecretRequest,
+    tool: { name: string; owner: string },
+    signal?: AbortSignal,
+  ): Promise<SecretResolvedData>;
   /** Complete the durable runtime epoch after Phase 4 has protocol-confirmed a
    * fresh session-reset. This never creates or hydrates a backend session. */
   transitionRuntimeEpoch(
@@ -1348,6 +1374,19 @@ export function createSessionService(deps: {
     sessionId: string;
     resolve(decision: "allow" | "deny"): void;
   }>();
+  // Credential Vault forms a package tool call is waiting on (in memory, like
+  // the approvals above: after a restart the form still saves, but no call
+  // is left to resume).
+  const pendingAgentToolSecrets = new Map<string, {
+    sessionId: string;
+    resolve(result: SecretResolvedData): void;
+  }>();
+  const settleAgentToolSecret = (sessionId: string, result: SecretResolvedData): void => {
+    const pending = pendingAgentToolSecrets.get(result.requestId);
+    if (pending?.sessionId !== sessionId) return;
+    pendingAgentToolSecrets.delete(result.requestId);
+    pending.resolve(result);
+  };
   // sessions whose turn admission is in flight (startTurn sent, turn/started
   // not yet observed) — a concurrent send must treat these as active
   const admitting = new Set<string>();
@@ -1680,13 +1719,15 @@ export function createSessionService(deps: {
         (typeof request.data.sourceSessionId !== "string" || request.data.sourceSessionId === sessionId)
         && (requestId === callId
           || request.data.tool === callId
-          || (request.data.permission === "package-tool" && request.data.tool === tool)
+          || ((request.data.permission === "package-tool" || request.data.origin === "agent-tool")
+            && request.data.tool === tool)
           || (request.type !== "permission/requested" && tool === "question"))));
 
   // Human response time is not tool execution time. Only this session's own
   // requests pause the associated tools; a mirrored child card or unrelated
-  // approval cannot shelter a runaway execution. Package approvals correlate
-  // by tool name; native approvals correlate by call ID. Resume only once.
+  // approval cannot shelter a runaway execution. Package approvals and
+  // tool-opened Credential Vault forms correlate by tool name; native
+  // approvals correlate by call ID. Resume only once.
   const syncToolWatchdogsForRequests = async (sessionId: string): Promise<void> => {
     if (serviceDisposed) return;
     const prefix = `${sessionId}\0`;
@@ -4126,9 +4167,12 @@ export function createSessionService(deps: {
   const RUNTIME_WAKES_DEFERRED_MAX = 4;
   const RUNTIME_WAKE_SESSIONS_MAX = 256;
   const deferredRuntimeWakes = new Map<string, Array<{ wakeId: string; text: string }>>();
-  const requestRuntimeWake = (sessionId: string, wakeId: string, text: string): void => {
+  const runtimeWakeOperationId = (sessionId: string, wakeId: string): string => {
     const hex = createHash("sha256").update(`runtime-wake\0${sessionId}\0${wakeId}`).digest("hex");
-    const clientOperationId = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-${(8 | (parseInt(hex[16]!, 16) & 3)).toString(16)}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-${(8 | (parseInt(hex[16]!, 16) & 3)).toString(16)}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+  };
+  const requestRuntimeWake = (sessionId: string, wakeId: string, text: string): void => {
+    const clientOperationId = runtimeWakeOperationId(sessionId, wakeId);
     void Promise.resolve()
       .then(async () => {
         if ((await store.projection(sessionId))?.resume) {
@@ -4278,6 +4322,227 @@ export function createSessionService(deps: {
       .catch((error: unknown) => {
         console.warn(`[polyth] incomplete-turn continuation for ${sessionId} was not admitted: ${error instanceof Error ? error.message : String(error)}`);
       });
+  };
+
+  // ------------------------------------------------- native background tasks
+  // A harness process can only report background work it still runs. When
+  // that process ends first (idle release, harness switch, epoch replacement,
+  // crash, server restart), the work's completion notice never comes and an
+  // agent that ended its turn to wait for it would sit idle for good. The
+  // projection keeps the last reported set durably; the idle sweep keeps such
+  // a process alive (bounded by `backgroundHoldMs`), and whatever still ends
+  // it turns the set into one hidden, idempotent wake that says the work was
+  // lost. Every path that detaches a process runs through `unwire`; a restart
+  // detaches all of them, so boot treats every recorded set as detached.
+  /** The runtime that reported each session's current set (in memory: no
+   *  process survives a server restart). */
+  const backgroundTaskReporters = new Map<string, AgentRuntime>();
+  /** Sessions whose projection carries a background-task record. */
+  const backgroundTaskSessions = new Set<string>();
+  const backgroundTaskChecks = new Map<string, ReturnType<typeof setTimeout>>();
+  const backgroundTaskDeliveries = new Set<string>();
+  const backgroundTaskRetries = new Map<string, { failures: number; notBefore: number }>();
+  const BACKGROUND_DETACHED_REASON = "its runtime was released or replaced";
+  const BACKGROUND_EXITED_REASON = "the harness process stopped";
+  const BACKGROUND_RETRY_MAX_MS = 15 * 60_000;
+
+  const trackBackgroundTasks = (projection: SessionProjection | undefined, sessionId: string): void => {
+    if (projection?.nativeBackgroundTasks) backgroundTaskSessions.add(sessionId);
+    else {
+      backgroundTaskSessions.delete(sessionId);
+      backgroundTaskRetries.delete(sessionId);
+    }
+  };
+  const scheduleBackgroundTaskCheck = (sessionId: string, delayMs: number): void => {
+    if (serviceDisposed || backgroundTaskChecks.has(sessionId)) return;
+    const timer = setTimeout(() => {
+      backgroundTaskChecks.delete(sessionId);
+      void checkBackgroundTasks(sessionId).catch((error: unknown) => {
+        console.warn(`[polyth] background task check failed for ${sessionId}`, error);
+      });
+    }, Math.max(0, delayMs));
+    timer.unref?.();
+    backgroundTaskChecks.set(sessionId, timer);
+  };
+
+  /** Applies a runtime's background-task report (replace semantics). Tasks of
+   *  a detached earlier process that this process does not run, and tasks it
+   *  says ended with it, become lost. */
+  const noteBackgroundTasks = async (sessionId: string, reported: unknown, reportedLost: unknown): Promise<void> => {
+    const runtime = sessionRuntime.get(sessionId);
+    const tasks = normalizeBackgroundTasks(reported);
+    const lostNow = normalizeBackgroundTasks(reportedLost);
+    const previousReporter = backgroundTaskReporters.get(sessionId);
+    const now = Date.now();
+    let owed = false;
+    const next = await applyProjection(sessionId, (current) => {
+      const state = current.nativeBackgroundTasks ?? {};
+      let lost = state.lost;
+      const lose = (items: readonly RuntimeBackgroundTask[], reason: string) => {
+        if (!items.length) return;
+        lost = { tasks: mergeBackgroundTasks(lost?.tasks ?? [], items), at: lost?.at ?? now, reason: lost?.reason ?? reason };
+        owed = true;
+      };
+      const detachedEarlier = state.orphanedAt !== undefined && (!previousReporter || previousReporter !== runtime);
+      if (detachedEarlier) lose((state.tasks ?? []).filter((task) => !tasks.some((live) => live.id === task.id)), BACKGROUND_DETACHED_REASON);
+      lose(lostNow.filter((task) => !tasks.some((live) => live.id === task.id)), BACKGROUND_EXITED_REASON);
+      if (!tasks.length && !lost && !current.nativeBackgroundTasks) return current;
+      return withNativeBackgroundTasks(current, {
+        ...(tasks.length ? { tasks, since: state.tasks?.length ? state.since ?? now : now } : {}),
+        ...(lost ? { lost } : {}),
+      });
+    });
+    if (runtime && tasks.length) backgroundTaskReporters.set(sessionId, runtime);
+    else if (!tasks.length) backgroundTaskReporters.delete(sessionId);
+    trackBackgroundTasks(next, sessionId);
+    if (owed) void deliverLostBackgroundTasks(sessionId);
+  };
+
+  /** The session's process is being detached: its live set is lost unless the
+   *  same process is wired again within the grace period. */
+  const detachBackgroundTasks = async (sessionId: string): Promise<void> => {
+    if (!backgroundTaskSessions.has(sessionId)) return;
+    const now = Date.now();
+    const next = await applyProjection(sessionId, (current) => {
+      const state = current.nativeBackgroundTasks;
+      if (!state?.tasks?.length || state.orphanedAt !== undefined) return current;
+      return { ...current, nativeBackgroundTasks: { ...state, orphanedAt: now } };
+    });
+    if (next?.nativeBackgroundTasks?.tasks?.length) scheduleBackgroundTaskCheck(sessionId, idlePolicy.backgroundGraceMs);
+  };
+
+  const checkBackgroundTasks = async (sessionId: string): Promise<void> => {
+    if (serviceDisposed || deps.isShuttingDown?.()) return;
+    const projection = await store.projection(sessionId);
+    const state = projection?.nativeBackgroundTasks;
+    if (!projection || !state) {
+      trackBackgroundTasks(undefined, sessionId);
+      backgroundTaskReporters.delete(sessionId);
+      return;
+    }
+    if (projection.status === "archived") {
+      // An archived session runs no further turn; restore starts afresh.
+      trackBackgroundTasks(await applyProjection(sessionId, (current) => withNativeBackgroundTasks(current, {})), sessionId);
+      backgroundTaskReporters.delete(sessionId);
+      return;
+    }
+    if (state.orphanedAt !== undefined && state.tasks?.length) {
+      const reporter = backgroundTaskReporters.get(sessionId);
+      if (reporter && sessionRuntime.get(sessionId) === reporter) {
+        // The same live process was wired again: it still owns the work.
+        await applyProjection(sessionId, (current) => {
+          const live = current.nativeBackgroundTasks;
+          if (!live?.tasks?.length || live.orphanedAt === undefined) return current;
+          const { orphanedAt: _orphanedAt, ...rest } = live;
+          return withNativeBackgroundTasks(current, rest);
+        });
+      } else {
+        const waited = Date.now() - state.orphanedAt;
+        if (waited < idlePolicy.backgroundGraceMs) {
+          scheduleBackgroundTaskCheck(sessionId, idlePolicy.backgroundGraceMs - waited);
+          return;
+        }
+        const now = Date.now();
+        trackBackgroundTasks(await applyProjection(sessionId, (current) => {
+          const live = current.nativeBackgroundTasks;
+          if (!live?.tasks?.length || live.orphanedAt === undefined) return current;
+          return withNativeBackgroundTasks(current, {
+            lost: {
+              tasks: mergeBackgroundTasks(live.lost?.tasks ?? [], live.tasks),
+              at: live.lost?.at ?? now,
+              reason: live.lost?.reason ?? BACKGROUND_DETACHED_REASON,
+            },
+          });
+        }), sessionId);
+        backgroundTaskReporters.delete(sessionId);
+      }
+    }
+    await deliverLostBackgroundTasks(sessionId);
+  };
+
+  /** One hidden send per loss, keyed by the lost tasks: a retry after a
+   *  failed or uncertain send cannot run it twice. The record is cleared only
+   *  after the send was admitted or queued, so a failure or a restart in
+   *  between retries the same wake. */
+  const deliverLostBackgroundTasks = async (sessionId: string): Promise<void> => {
+    if (serviceDisposed || deps.isShuttingDown?.() || backgroundTaskDeliveries.has(sessionId)) return;
+    const retry = backgroundTaskRetries.get(sessionId);
+    if (retry && Date.now() < retry.notBefore) return;
+    backgroundTaskDeliveries.add(sessionId);
+    try {
+      const projection = await store.projection(sessionId);
+      const lost = projection?.nativeBackgroundTasks?.lost;
+      if (!projection || !lost?.tasks.length) return;
+      if (projection.status === "archived") {
+        trackBackgroundTasks(await applyProjection(sessionId, (current) => withNativeBackgroundTasks(current, {})), sessionId);
+        return;
+      }
+      // A provider-limit wait or a person's pause owns the next turn; the
+      // sweep delivers once it is over.
+      if (projection.resume || projection.paused) return;
+      await service.send(sessionId, {
+        text: lostBackgroundTasksText(lost),
+        delivery: "normal",
+        hiddenUserMessage: true,
+        clientOperationId: runtimeWakeOperationId(sessionId, lostBackgroundTasksWakeId(lost)),
+      });
+      backgroundTaskRetries.delete(sessionId);
+      const delivered = new Set(lost.tasks.map((task) => task.id));
+      trackBackgroundTasks(await applyProjection(sessionId, (current) => {
+        const state = current.nativeBackgroundTasks;
+        if (!state?.lost) return current;
+        const remaining = state.lost.tasks.filter((task) => !delivered.has(task.id));
+        const { lost: _delivered, ...kept } = state;
+        return withNativeBackgroundTasks(current, {
+          ...kept,
+          ...(remaining.length ? { lost: { ...state.lost, tasks: remaining, at: Date.now() } } : {}),
+        });
+      }), sessionId);
+    } catch (error) {
+      const failures = (backgroundTaskRetries.get(sessionId)?.failures ?? 0) + 1;
+      backgroundTaskRetries.set(sessionId, {
+        failures,
+        notBefore: Date.now() + Math.min(BACKGROUND_RETRY_MAX_MS, 30_000 * 2 ** (failures - 1)),
+      });
+      console.warn(`[polyth] lost background work wake for ${sessionId} was not admitted: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      backgroundTaskDeliveries.delete(sessionId);
+    }
+  };
+
+  /** Safety net on the idle sweep: anything a timer missed or a failed send
+   *  left owed is retried here. */
+  const sweepBackgroundTasks = async (): Promise<void> => {
+    for (const sessionId of [...backgroundTaskSessions]) {
+      if (serviceDisposed || deps.isShuttingDown?.()) return;
+      await checkBackgroundTasks(sessionId).catch((error: unknown) => {
+        console.warn(`[polyth] background task check failed for ${sessionId}`, error);
+      });
+    }
+  };
+
+  /** Boot: no native process outlives the server that launched it, so every
+   *  recorded live set is detached work now. */
+  const rehydrateBackgroundTasks = async (): Promise<void> => {
+    let rows: SessionProjection[] = [];
+    try {
+      rows = await store.projections();
+    } catch {
+      return;
+    }
+    const now = Date.now();
+    for (const row of rows) {
+      if (!row.nativeBackgroundTasks) continue;
+      backgroundTaskSessions.add(row.id);
+      if (row.nativeBackgroundTasks.tasks?.length && row.nativeBackgroundTasks.orphanedAt === undefined) {
+        await applyProjection(row.id, (current) => {
+          const state = current.nativeBackgroundTasks;
+          if (!state?.tasks?.length || state.orphanedAt !== undefined) return current;
+          return { ...current, nativeBackgroundTasks: { ...state, orphanedAt: now } };
+        });
+      }
+      scheduleBackgroundTaskCheck(row.id, idlePolicy.backgroundGraceMs);
+    }
   };
   const clearPromptSuggestion = (sessionId: string): void => {
     promptSuggestions.delete(sessionId);
@@ -6391,7 +6656,10 @@ export function createSessionService(deps: {
           ...(turnId ? { turnId } : {}),
           ...(harnessId ? { harnessId } : {}),
           ...(ev.agentKind || currentProjection?.parentId
-            ? { agentKind: ev.agentKind ?? (currentProjection?.parentId ? "subagent" : "main") }
+            ? {
+                agentKind: ev.agentKind
+                  ?? (currentProjection?.parentId && !currentProjection?.forkOf ? "subagent" : "main"),
+              }
             : {}),
         }, { ignorable: true });
         if (sideEffects) {
@@ -6490,6 +6758,10 @@ export function createSessionService(deps: {
         const text = typeof ev.text === "string" ? ev.text.trim().slice(0, RUNTIME_WAKE_TEXT_MAX) : "";
         const wakeId = typeof ev.wakeId === "string" ? ev.wakeId : "";
         if (sideEffects && text && wakeId) requestRuntimeWake(sessionId, wakeId, text);
+        break;
+      }
+      case "runtime/background-tasks": {
+        if (sideEffects) await noteBackgroundTasks(sessionId, ev.tasks, ev.lost);
         break;
       }
       case "runtime/commands-changed": {
@@ -6705,7 +6977,7 @@ export function createSessionService(deps: {
         // is not telemetry. Replaying it would relabel an explicit abort as
         // failed when OpenCode later emits session.error.
         const event = observation.events[index]!;
-        if (event.type === "context/updated" || event.type === "runtime/commands-changed" || event.type === "runtime/prompt-suggestion" || event.type === "runtime/wake-requested" || event.type === "tool/progress") {
+        if (event.type === "context/updated" || event.type === "runtime/commands-changed" || event.type === "runtime/prompt-suggestion" || event.type === "runtime/wake-requested" || event.type === "tool/progress" || event.type === "runtime/background-tasks") {
           await onRuntimeEvent(sessionId, event, {
             persist: async () => undefined as unknown as SessionEvent,
           });
@@ -7154,6 +7426,7 @@ export function createSessionService(deps: {
     const pendingObservations = takeObservationStreamBatch(sessionId);
     await ingestStreamingRuntimeObservationBatch(sessionId, pendingObservations);
     observationStreamPending.delete(sessionId);
+    await detachBackgroundTasks(sessionId);
 
     clearRuntimeFeatureState(sessionId);
     materializationFailures.delete(sessionId);
@@ -7991,9 +8264,14 @@ export function createSessionService(deps: {
         action: "dismiss",
         ...(handle ? { handle } : {}),
       });
+      // A tool-opened form has no runtime request behind it: its tool call
+      // is the one waiting.
+      const toolOrigin = (requested.data as { origin?: unknown }).origin === "agent-tool";
       const outcome = await runResponseOperation<Record<string, never>, void>(
         operation,
-        (operationId) => rt.replySecret
+        (operationId) => toolOrigin
+          ? Promise.resolve()
+          : rt.replySecret
           ? (rt.replySecretOperation
               ? rt.replySecretOperation(sessionId, rid, result, operationId)
               : rt.replySecret(sessionId, rid, result))
@@ -8004,6 +8282,7 @@ export function createSessionService(deps: {
         { type: "secret/resolved", data: result as unknown as JsonObject, ignorable: true },
       );
       if (outcome.kind !== "confirmed") throw outcomeError(outcome);
+      if (toolOrigin) settleAgentToolSecret(sessionId, result);
     }
   };
 
@@ -10687,6 +10966,22 @@ export function createSessionService(deps: {
         && (reconciliation.state === "reconciling"
           || reconciliation.state === "blocked"
           || reconciliation.state === "unknown")) {
+        // The barrier was already closed when the tool was stopped (a
+        // reconciliation that failed or lacked evidence during the turn). The
+        // stop itself is proven, so keep the nudge for the next ready + idle
+        // settle instead of leaving the agent stopped for good. A mid-turn
+        // `unknown` spent its re-probes while the turn was open; start them
+        // again now that it is closed.
+        deferredToolTimeoutContinues.set(sessionId, {
+          text: continuation.text,
+          afterSeq: continuation.afterSeq ?? await store.latestSeq(sessionId),
+        });
+        const wired = sessionRuntime.get(sessionId);
+        if (reconciliation.state === "unknown" && wired) {
+          // Only the first deferral restarts the backoff, so it stays bounded.
+          if (continuation.afterSeq === undefined) clearReconcileRetry(sessionId);
+          scheduleReconcileRetry(sessionId, wired);
+        }
         return undefined;
       }
       const events = await store.events(sessionId);
@@ -11292,6 +11587,10 @@ export function createSessionService(deps: {
       harnessTransition: _harnessTransition, runtimeControl: _runtimeControl,
       resume: _resume, releasedExecution: _releasedExecution, paused: _paused,
       autoRetry: _autoRetry, backgroundWork: _backgroundWork, promptSuggestion: _promptSuggestion,
+      // The source's move receipt is its own: a fork was never moved, so
+      // carrying `projectMove` would publish a false move and let the
+      // startup reconciler act on a receipt that does not belong to the child.
+      projectMove: _projectMove,
       // The parent's idle recap is pinned to the parent's log (`atSeq`); the
       // fork starts a fresh one, so carrying it would show a foreign summary.
       assist: _assist,
@@ -11331,7 +11630,7 @@ export function createSessionService(deps: {
       ...forkable
     } = forkableProjection(proj);
     const projection: SessionProjection = {
-      ...forkable, id: forkId, parentId: sessionId, title,
+      ...forkable, id: forkId, parentId: sessionId, forkOf: sessionId, title,
       status: "idle",
       createdAt: now,
       updatedAt: now,
@@ -11908,7 +12207,9 @@ export function createSessionService(deps: {
     const seen = new Set([root.id]);
     for (let index = 0; index < family.length && family.length <= SESSION_MOVE_FAMILY_LIMIT; index += 1) {
       for (const child of children.get(family[index]!.id) ?? []) {
-        if (seen.has(child.id) || await sessionEventExists(child.id, "session/forked")) continue;
+        if (seen.has(child.id)) continue;
+        // A fork carries `forkOf`; a legacy fork has only its marker event.
+        if (child.forkOf || await sessionEventExists(child.id, "session/forked")) continue;
         seen.add(child.id);
         family.push(child);
       }
@@ -11935,7 +12236,7 @@ export function createSessionService(deps: {
       return { reason: "private", message: "A chat in Only me stays there. Share a note from My notes instead." };
     }
     if (root.status === "archived") return { reason: "archived", message: "Restore this chat before moving it" };
-    if (root.parentId && await store.projection(root.parentId) && !await sessionEventExists(root.id, "session/forked")) {
+    if (root.parentId && !root.forkOf && await store.projection(root.parentId) && !await sessionEventExists(root.id, "session/forked")) {
       return { reason: "delegated", message: "Move the chat that started this subagent instead" };
     }
     if (family.length > SESSION_MOVE_FAMILY_LIMIT) {
@@ -12183,6 +12484,16 @@ export function createSessionService(deps: {
     ...DEFAULT_IDLE_SESSION_RUNTIME_POLICY,
     ...deps.idleSessionRuntimes,
   };
+  /** Server-owned waits on work in a session's process tree (holdRuntime). */
+  const runtimeHolds = new Map<string, Map<string, number>>();
+  const runtimeHeld = (sessionId: string): boolean => {
+    const holds = runtimeHolds.get(sessionId);
+    if (!holds) return false;
+    const now = Date.now();
+    for (const [holdId, until] of holds) if (until <= now) holds.delete(holdId);
+    if (!holds.size) runtimeHolds.delete(sessionId);
+    return Boolean(holds.size);
+  };
   /** Why this session's runtime must stay, or undefined when it is safe-idle. */
   const idleRuntimeReleaseBlocker = async (sessionId: string): Promise<string | undefined> => {
     if (turnActive(sessionId) || admitting.has(sessionId)) return "turn";
@@ -12202,6 +12513,11 @@ export function createSessionService(deps: {
     // re-materializes the runtime lazily and the epoch transition expires stale
     // requests.
     if (projection.status === "archived") return undefined;
+    if (runtimeHeld(sessionId)) return "wait";
+    // Background work reports back only through the process that runs it.
+    const background = projection.nativeBackgroundTasks;
+    if (background?.tasks?.length && background.orphanedAt === undefined
+      && Date.now() - (background.since ?? 0) < idlePolicy.backgroundHoldMs) return "background-task";
     if (openRequestTotal(await logFacts(sessionId)) > 0) return "request";
     const queue = deps.queue ? await deps.queue.queueList(sessionId) : [];
     if (queue.some((item) => !item.heldForReview)) return "queue";
@@ -12299,6 +12615,9 @@ export function createSessionService(deps: {
     ? setInterval(() => {
         void sweepIdleSessionRuntimes().catch((error) => {
           console.warn("[polyth] idle runtime sweep failed", error);
+        });
+        void sweepBackgroundTasks().catch((error) => {
+          console.warn("[polyth] background task sweep failed", error);
         });
       }, idlePolicy.sweepMs)
     : undefined;
@@ -13047,6 +13366,8 @@ export function createSessionService(deps: {
       stopApprovalDefaults?.();
       stopApprovalDefaults = undefined;
       if (idleSweepTimer) clearInterval(idleSweepTimer);
+      for (const timer of backgroundTaskChecks.values()) clearTimeout(timer);
+      backgroundTaskChecks.clear();
       sessionJobs.dispose();
       spawnTelemetry.clear();
       for (const timer of toolWatchdogs.values()) clearTimeout(timer);
@@ -13183,6 +13504,69 @@ export function createSessionService(deps: {
         });
       });
     },
+    async requestAgentToolSecret(sessionId, request, tool, signal) {
+      if (!deps.secureSafe) {
+        throw Object.assign(new Error("Credential Vault unavailable"), { code: "unsupported" });
+      }
+      const handle = request.handle.trim();
+      const label = request.label.trim();
+      const purpose = request.purpose?.trim();
+      if (!handle || !label) {
+        throw Object.assign(new Error("handle and label are required"), { code: "invalid-input" });
+      }
+      const requestId = `vault_${randomUUID()}`;
+      const dismissed: SecretResolvedData = { requestId, action: "dismissed", handle };
+      if (signal?.aborted) return dismissed;
+      if (!await store.projection(sessionId)) {
+        throw Object.assign(new Error("session not found"), { code: "not-found" });
+      }
+      return new Promise<SecretResolvedData>((resolveResult, rejectResult) => {
+        const abort = () => {
+          if (!pendingAgentToolSecrets.delete(requestId)) return;
+          resolveResult(dismissed);
+          void withSessionLock(sessionId, async () => {
+            const facts = await logFacts(sessionId);
+            if (!facts.openSecrets.has(requestId)) return;
+            await appendAndBroadcast(sessionId, "secret/expired", { requestId }, { ignorable: true });
+            await settleAfterLastRequest(sessionId);
+          }).catch(() => undefined);
+        };
+        pendingAgentToolSecrets.set(requestId, {
+          sessionId,
+          resolve: (result) => {
+            signal?.removeEventListener("abort", abort);
+            resolveResult(result);
+          },
+        });
+        signal?.addEventListener("abort", abort, { once: true });
+        void withSessionLock(sessionId, async () => {
+          if (signal?.aborted) return;
+          const data: SecretRequestData = {
+            requestId,
+            handle,
+            label,
+            ...(purpose ? { purpose } : {}),
+            ...(request.kind ? { kind: request.kind } : {}),
+            existing: deps.secureSafe?.hasHandle(handle) ?? false,
+            origin: "agent-tool",
+            tool: tool.name,
+          };
+          await appendAndBroadcast(sessionId, "secret/requested", data as unknown as JsonObject, {
+            ignorable: true,
+            producerPlugin: tool.owner,
+          });
+          // Waiting on a person is not tool execution time.
+          await syncToolWatchdogsForRequests(sessionId);
+          const current = await store.projection(sessionId);
+          if (current?.status !== "unknown") await updateProjection(sessionId, { status: "waiting" });
+          deps.notify?.attention(sessionId, "question");
+        }).catch((error: unknown) => {
+          if (!pendingAgentToolSecrets.delete(requestId)) return;
+          signal?.removeEventListener("abort", abort);
+          rejectResult(error);
+        });
+      });
+    },
     async switchHarness(sessionId, selection, timing = "after-turn", launch) {
       return withSessionLock(sessionId, async () => {
         let projection = await store.projection(sessionId);
@@ -13284,6 +13668,21 @@ export function createSessionService(deps: {
     async restartRuntime(sessionId) {
       await assertAgentSession(sessionId);
       return withSessionLock(sessionId, () => restartRuntimeUnderLock(sessionId, "user"));
+    },
+
+    holdRuntime(sessionId, holdId, untilMs) {
+      if (!sessionId || !holdId || !Number.isFinite(untilMs)) return;
+      const until = Math.min(untilMs, Date.now() + idlePolicy.backgroundHoldMs);
+      if (until <= Date.now()) return;
+      const holds = runtimeHolds.get(sessionId) ?? new Map<string, number>();
+      holds.set(holdId, until);
+      runtimeHolds.set(sessionId, holds);
+    },
+
+    releaseRuntimeHold(sessionId, holdId) {
+      const holds = runtimeHolds.get(sessionId);
+      holds?.delete(holdId);
+      if (holds && !holds.size) runtimeHolds.delete(sessionId);
     },
 
     releaseRuntimeIfIdle(sessionId) {
@@ -14094,21 +14493,42 @@ export function createSessionService(deps: {
         if (projection.status === "unknown" && !stoppedTurnRecorded) return "session-unknown";
         return undefined;
       };
-      const queueUntilAdmissible = (reason: string): Promise<SendResult> => enqueueMessage(
-        sessionId,
-        input.text,
-        delivery === "normal" ? "queue" : delivery,
-        reason,
-        input.attachments,
-        input.command,
-        undefined,
-        input.clientOperationId,
-        clientRequestFingerprint,
-        hiddenUserMessage,
-        input.memory,
-        input.author,
-        input.displayText,
-      );
+      const queueUntilAdmissible = async (reason: string): Promise<SendResult> => {
+        const queued = await enqueueMessage(
+          sessionId,
+          input.text,
+          delivery === "normal" ? "queue" : delivery,
+          reason,
+          input.attachments,
+          input.command,
+          undefined,
+          input.clientOperationId,
+          clientRequestFingerprint,
+          hiddenUserMessage,
+          input.memory,
+          input.author,
+          input.displayText,
+        );
+        // The queue delivers once the barrier releases, and for a dormant
+        // session nothing releases it by itself: a stop that found the
+        // runtime gone leaves the session idle behind a blocked barrier, and
+        // only opening the chat used to start the replacement. A sender
+        // nobody watches (a scheduled agent, a delegated worker) has no one
+        // to open it, so its message waited until a person happened to
+        // (2026-11-18: a nightly wake sat two hours). Sending is use: start
+        // the same recover-on-use pass opening runs. It takes the session
+        // lock itself, after this send has released it. Never for the
+        // server's own resumes, which must not start a recovery of their own.
+        if (input.autoResume !== true && !deps.isShuttingDown?.()) {
+          queueMicrotask(() => {
+            void service.activate!(sessionId).catch((error: unknown) => {
+              if ((error as { code?: unknown } | null)?.code === "epoch-pending") return;
+              console.warn(`[polyth] recovery for a message queued in ${sessionId} (${reason}) did not complete`, error);
+            });
+          });
+        }
+        return queued;
+      };
       // When the session stays uncertain after in-place recovery, a new user
       // message runs the same release → epoch → fresh-leg transaction a
       // harness switch does, on the current harness. Only an owned runtime
@@ -15088,7 +15508,7 @@ export function createSessionService(deps: {
         // A fork belongs to whoever forked it, and the source's running work
         // stays with the source (`forkableProjection`).
         const projection: SessionProjection = {
-          ...forkableProjection(proj), id: forkId, parentId: sessionId, title,
+          ...forkableProjection(proj), id: forkId, parentId: sessionId, forkOf: sessionId, title,
           status: "reconciling",
           createdAt: now,
           updatedAt: now,
@@ -16766,7 +17186,9 @@ export function createSessionService(deps: {
         const data = requested.data as unknown as SecretRequestData;
         const proj = await store.projection(sessionId);
         if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
-        const rt = await ensureWired(sessionId, proj);
+        // A tool-opened form answers the waiting tool call, not the runtime.
+        const toolOrigin = data.origin === "agent-tool";
+        const rt = toolOrigin ? undefined : await ensureWired(sessionId, proj);
         const intentAction = reply.action === "save" ? "save" : "dismiss";
         const expected: JsonObject = { action: intentAction, handle: data.handle };
         const choice = await broadcastTail(sessionId, () => durable.chooseResponseIntent({
@@ -16832,7 +17254,9 @@ export function createSessionService(deps: {
 
         const outcome = await runResponseOperation<Record<string, never>, void>(
           operation,
-          (operationId) => rt.replySecret
+          (operationId) => !rt
+            ? Promise.resolve()
+            : rt.replySecret
             ? (rt.replySecretOperation
                 ? rt.replySecretOperation(sessionId, requestId, result, operationId)
                 : rt.replySecret(sessionId, requestId, result))
@@ -16847,12 +17271,13 @@ export function createSessionService(deps: {
           },
         );
         if (outcome.kind !== "confirmed") {
-          if (outcome.kind === "unknown") {
+          if (outcome.kind === "unknown" && rt) {
             await updateProjection(sessionId, { status: "unknown" });
             scheduleReconciliation(sessionId, proj, rt, "secret-outcome-unknown");
           }
           throw outcomeError(outcome);
         }
+        if (toolOrigin) settleAgentToolSecret(sessionId, result);
         await settleAfterLastRequest(sessionId);
       });
     },
@@ -17161,6 +17586,9 @@ export function createSessionService(deps: {
   // resumeAt simply resends on the next tick.
   void rehydrateResume().catch(
     (err: unknown) => console.error("[polyth] rate-limit resume rehydrate failed", err),
+  );
+  void rehydrateBackgroundTasks().catch(
+    (err: unknown) => console.error("[polyth] background task rehydrate failed", err),
   );
   void rehydrateToolWatchdogs().catch(
     (err: unknown) => console.error("[polyth] tool watchdog rehydrate failed", err),

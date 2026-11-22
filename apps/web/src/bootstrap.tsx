@@ -50,6 +50,7 @@ import { bootPackages } from "./packages/registry.ts";
 import { getLocaleSnapshot, subscribeLocale } from "./i18n/index.ts";
 import App from "./App.tsx";
 import LockScreen from "./components/LockScreen.tsx";
+import PasswordChangeScreen from "./components/PasswordChangeScreen.tsx";
 import { DesktopServerExit } from "./components/DesktopServerSwitcher.tsx";
 import SetupScreen from "./components/SetupScreen.tsx";
 import { dismissTopEscapeLayer } from "./useEscape.ts";
@@ -179,7 +180,7 @@ const bootOnce = (): void => {
   });
 };
 
-type BootstrapPhase = "checking" | "setup" | "restart" | "locked" | "ready" | "unavailable";
+type BootstrapPhase = "checking" | "setup" | "restart" | "locked" | "password-change" | "ready" | "unavailable";
 
 function Root() {
   const [phase, setPhase] = useState<BootstrapPhase>("checking");
@@ -265,6 +266,7 @@ function Root() {
   if (phase === "locked") {
     return <LockScreen key={locale} localOwner={localOwner} onUnlocked={reloadBehindVeil} />;
   }
+  if (phase === "password-change") return <PasswordChangeScreen key={locale} onChanged={reloadBehindVeil} />;
   return <App key={locale} />;
 }
 

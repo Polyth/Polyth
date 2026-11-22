@@ -28,6 +28,7 @@ import {
 } from "./index.ts";
 import { createUserCache, type UserCache, type UserLoad } from "./userCache.ts";
 import { createGithubPrWatch, type GithubPrWatch } from "./prWatch.ts";
+import { createGithubRunWaitProvider, type WaitConditionRegistryShape } from "./waitProvider.ts";
 
 export function githubRoutes(deps: Omit<Parameters<typeof hostingRoutes>[0], "provider" | "prefix" | "presentation" | "mergeStrategies"> & { github: GithubService }): RouteHandler {
   return hostingRoutes({ ...deps, provider: deps.github, prefix: "/api/github", mergeStrategies: ["squash", "merge", "rebase"], presentation: { changeRequest: "pull request", abbreviation: "PR", numberPrefix: "#", conflictEvent: "github/conflict-resolution-started" } });
@@ -171,6 +172,7 @@ export function createGithubPackage(host: ServerPackageHost, seams: GithubPackag
   let unregisterCredentials: (() => void) | undefined;
   let prWatch: GithubPrWatch | null = null;
   let toolRegistrations: Disposable[] = [];
+  let waitRegistration: Disposable | undefined;
   const users = seams.users ?? createUserCache();
   const people = host.people ? createPersonHostingAccounts(host.people, "github") : undefined;
   const isMember = (userId: string, spaceId: string) => host.people?.isMember(userId, spaceId) ?? true;
@@ -209,6 +211,16 @@ export function createGithubPackage(host: ServerPackageHost, seams: GithubPackag
       toolRegistrations = capabilities
         ? [capabilities.register("github", prWatch.skill), capabilities.register("github", prWatch.tool)]
         : [];
+      // Optional: with the wait package present, a chat can wait on a GitHub
+      // Actions run. Resolved here, lazily; absent means nothing to register.
+      waitRegistration = host.services.get(serverServiceKey<WaitConditionRegistryShape>("wait.conditions"))?.register(createGithubRunWaitProvider({
+        host,
+        remoteHosts: async (path) => [...new Set((await remotesAt(path)).map((remote) => remote.hostname.toLowerCase()))],
+        decide: (space, hosts) => {
+          const access = githubRequestAuth({ people, request: { space }, hosts, isMember });
+          return access.kind === "personal" ? { kind: "personal", auth: access.auth } : access;
+        },
+      }));
       const watchRoutes = prWatch;
       routes = async request => {
         if (!request.path.startsWith("/api/github/")) return false;
@@ -291,6 +303,8 @@ export function createGithubPackage(host: ServerPackageHost, seams: GithubPackag
       users.clear();
       unregisterCredentials?.();
       unregisterCredentials = undefined;
+      waitRegistration?.dispose();
+      waitRegistration = undefined;
       prWatch?.dispose();
       prWatch = null;
       for (const registration of toolRegistrations.toReversed()) await registration.dispose();

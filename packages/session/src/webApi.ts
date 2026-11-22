@@ -642,9 +642,20 @@ export interface ScheduleRunDto {
    *  started (descriptions are the agent's words: data, not instructions). */
   background?: { since: number; tasks: string[] };
   /** Once finished: the agent's passing lines and its waits, oldest first. */
-  timeline?: Array<{ at: number; text: string; kind?: "wait"; until?: number }>;
-  /** Once finished: what the report says only the person can do. */
-  needs?: Array<{ text: string; detail?: string; url?: string }>;
+  timeline?: Array<{ at: number; text: string; kind?: "wait" | "resume"; until?: number }>;
+  /** Once finished: what the report says only the person can do. `done`:
+   *  settled by the person, or by a later report of the agent. */
+  needs?: Array<{ text: string; detail?: string; url?: string; done?: { at: number; by: "user" | "agent" } }>;
+  /** Why a run that did not finish ended. `person`: someone stopped it;
+   *  `cut`: its turn was cut under it and its own continuations ran out;
+   *  `route`: its model refused (sign-in, quota, the model itself);
+   *  `error`: the turn failed otherwise; `approval`: a request waited too
+   *  long; `start`: it never reached its session. Absent on older records. */
+  cause?: "person" | "cut" | "route" | "error" | "approval" | "start";
+  /** How often the run continued itself after its turn was cut. */
+  resumed?: number;
+  /** A person's message in the run's session redirected it. */
+  steered?: boolean;
 }
 
 /** What the person asked for with a message: `auto` lets the agent judge. */
@@ -1972,6 +1983,11 @@ export const api = {
     jfetch<ScheduleTaskDto>(`/api/schedule/${encodeURIComponent(id)}/seen`, json("POST", at !== undefined ? { at } : {})),
   scheduleStop: (id: string) =>
     jfetch<{ stopped: number }>(`/api/schedule/${encodeURIComponent(id)}/stop`, { method: "POST" }),
+  scheduleNeedDone: (id: string, runId: string, index: number, done: boolean) =>
+    jfetch<ScheduleTaskDto>(
+      `/api/schedule/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/needs/${index}`,
+      json("POST", { done }),
+    ),
   scheduleFeedback: (id: string, runId: string, verdict: "up" | "down" | null, note?: string) =>
     jfetch<ScheduleTaskDto>(
       `/api/schedule/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/feedback`,
@@ -2140,25 +2156,32 @@ export const api = {
     jfetch<ReviewFlowStateDto>(`/api/sessions/${encodeURIComponent(sessionId)}/review-flow/${action}`, { method: "POST" }),
 
 
-  /** Isolated sessions count only with an explicit `skipIsolated: false`. */
-  sessionRetention: (days: number, target: SessionRetentionTarget = "sessions", options: { skipIsolated?: boolean } = {}) =>
+  /** Isolated sessions count only with an explicit `skipIsolated: false`. A
+   *  `projectId` narrows the count and the cleanup to that project and its
+   *  private rooms. */
+  sessionRetention: (days: number, target: SessionRetentionTarget = "sessions", options: { skipIsolated?: boolean; projectId?: string } = {}) =>
     jfetch<SessionRetentionDto>(
-      `/api/session-retention?days=${encodeURIComponent(days)}&target=${encodeURIComponent(target)}${options.skipIsolated === false ? "&skipIsolated=false" : ""}`,
+      `/api/session-retention?days=${encodeURIComponent(days)}&target=${encodeURIComponent(target)}${options.skipIsolated === false ? "&skipIsolated=false" : ""}${options.projectId ? `&projectId=${encodeURIComponent(options.projectId)}` : ""}`,
     ),
-  runSessionRetention: (days: number, action: SessionRetentionAction = "archive", options: { skipIsolated?: boolean } = {}) =>
+  runSessionRetention: (days: number, action: SessionRetentionAction = "archive", options: { skipIsolated?: boolean; projectId?: string } = {}) =>
     jfetch<SessionRetentionResultDto>(
       "/api/session-retention",
-      json("POST", { days, action, ...(options.skipIsolated === false ? { skipIsolated: false } : {}) }),
+      json("POST", {
+        days,
+        action,
+        ...(options.skipIsolated === false ? { skipIsolated: false } : {}),
+        ...(options.projectId ? { projectId: options.projectId } : {}),
+      }),
     ),
-  deleteArchivedSessions: (days: number) =>
+  deleteArchivedSessions: (days: number, options: { projectId?: string } = {}) =>
     jfetch<SessionRetentionResultDto>(
       "/api/session-retention",
-      json("POST", { target: "archives", days }),
+      json("POST", { target: "archives", days, ...(options.projectId ? { projectId: options.projectId } : {}) }),
     ),
-  deleteAllArchivedSessions: () =>
+  deleteAllArchivedSessions: (options: { projectId?: string } = {}) =>
     jfetch<SessionRetentionResultDto>(
       "/api/session-retention",
-      json("POST", { target: "archives", all: true }),
+      json("POST", { target: "archives", all: true, ...(options.projectId ? { projectId: options.projectId } : {}) }),
     ),
 
   // ---- session control ---------------------------------------------------------

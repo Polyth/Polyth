@@ -23,11 +23,11 @@
     "electron-updater": "6.8.11",
     "esbuild": "0.28.2",
     "node-pty": "^1.1.0",
-    "playwright-core": "1.65.0",
+    "playwright-core": "1.65.1",
     "typescript": "^5.9.3"
   },
   "devDependencies": {
-    "electron": "45.3.3"
+    "electron": "45.4.1"
   },
   "build": {
     "appId": "com.polyth.desktop",

@@ -179,7 +179,7 @@ test("desktop chrome keeps native macOS/Windows controls and renderer actions cl
   const desktopSource = await readFile(join(repositoryRoot, "apps/web/src/desktop.tsx"), "utf8");
   const styles = await readFile(join(repositoryRoot, "apps/web/src/styles.css"), "utf8");
 
-  assert.match(mainSource, /const chrome = desktopChromeOptions\(process\.platform, nativeTheme\.shouldUseDarkColors\)/);
+  assert.match(mainSource, /const chrome = desktopChromeOptions\(process\.platform, nativeTheme\.shouldUseDarkColors, process\.getSystemVersion\(\)\)/);
   assert.match(mainSource, /\.\.\.chrome,/);
   // The Linux button theme must not repaint the whole app through prefers-color-scheme.
   assert.doesNotMatch(mainSource, /nativeTheme\.themeSource/);

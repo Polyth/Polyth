@@ -64,19 +64,17 @@ function serverEntryPackageIds(repoRoot) {
  * The electron-builder configuration of the workstation package, derived from
  * the `build` field of apps/desktop/package.json:
  *  - artifact names carry `-workstation-`;
- *  - no Chromium and no Polyth Link binaries are packaged;
+ *  - no Polyth Link binaries are packaged;
  *  - only the web bundles and assets of workstation packages are packaged;
- *  - playwright-core is left out of the app files;
  *  - update metadata uses the `workstation` channel.
  */
 export function workstationBuildConfig(baseConfig, { packageIds }) {
   const config = structuredClone(baseConfig);
   config.artifactName = "${productName}-${version}-${os}-${arch}-workstation.${ext}";
-  config.files = [...(config.files ?? []), "!**/node_modules/playwright-core/**"];
   config.extraResources = (config.extraResources ?? [])
     .filter((entry) => {
       const to = typeof entry === "string" ? entry : entry.to ?? "";
-      return !/^chromium(\/|$)/.test(to) && !/^polyth-link(\/|$)/.test(to);
+      return !/^polyth-link(\/|$)/.test(to);
     })
     .map((entry) => {
       if (typeof entry === "string" || entry.to !== "packages") return entry;
@@ -143,7 +141,7 @@ export function assertWorkstationPackage({ appOutDir, resourcesDir, metafilePath
   const resources = resourcesDir ?? resourcesDirOf(appOutDir);
   const allowed = new Set(packageIds);
 
-  if (existsSync(join(resources, "chromium"))) problems.push("resources/chromium is packaged");
+  if (!existsSync(join(resources, "chromium"))) problems.push("resources/chromium (the bundled browser) is missing");
   const link = filesUnder(join(resources, "polyth-link"));
   if (link.length > 0) problems.push(`resources/polyth-link holds ${link.map((file) => basename(file)).join(", ")}`);
 
@@ -168,17 +166,23 @@ export function assertWorkstationPackage({ appOutDir, resourcesDir, metafilePath
     if ((output.imports ?? []).some((entry) => entry.external && /^playwright-core(\/|$)/.test(entry.path))) playwright = true;
   }
   for (const id of [...foreign].sort()) problems.push(`main bundle includes packages/${id}, which is not a workstation package`);
-  if (playwright) problems.push("main bundle includes or imports playwright-core");
+  // The browser package ships in this edition, so its driver must be bundled.
+  if (!playwright) problems.push("main bundle does not include playwright-core (the browser package)");
 
+  // The browser package ships in this edition, so its driver (playwright-core)
+  // must be inside the app archive.
+  let shippedPlaywright = false;
+  let sawArchive = false;
   for (const archive of ["app.asar", "app.asar.unpacked"]) {
     const path = join(resources, archive);
     if (!existsSync(path)) continue;
+    sawArchive = true;
     const files = statSync(path).isDirectory()
       ? filesUnder(path).map((file) => posix(relative(path, file)))
       : asarFiles(path);
-    const shipped = files.filter((file) => /(^|\/)node_modules\/playwright-core(\/|$)/.test(file));
-    if (shipped.length > 0) problems.push(`${archive} ships node_modules/playwright-core`);
+    if (files.some((file) => /(^|\/)node_modules\/playwright-core(\/|$)/.test(file))) shippedPlaywright = true;
   }
+  if (sawArchive && !shippedPlaywright) problems.push("app.asar does not ship node_modules/playwright-core (the browser package)");
 
   if (problems.length > 0) throw new Error(`Workstation package check failed:\n- ${problems.join("\n- ")}`);
 }

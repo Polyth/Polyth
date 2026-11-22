@@ -2,13 +2,13 @@
 // that offers one for sharing, and old shared notes from their private chats.
 // Everything here reads and writes the signed-in person's notes; no request can
 // name anyone else's (Spaces §14.6).
-import { Fragment, useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { Project } from "@polyth/contracts";
-import type { MemoryReceiptDto } from "@polyth/knowledge/memory-contracts";
+import type { MemoryReceiptDto } from "../src/contracts.ts";
 import type { WebNotificationInput } from "@polyth/web-sdk";
 import { memoryError, personalMemoryApi, type MemoryDto, type PersonalMemoryPage } from "../src/client.ts";
 import type { Translate } from "./i18n.ts";
-import { Btn, TextArea, TextField } from "./ui.tsx";
+import { ActionMenu, Btn, TextArea, TextField, useConfirm } from "./ui.tsx";
 
 export type Notify = (input: WebNotificationInput) => unknown;
 
@@ -46,16 +46,53 @@ function ShareText({ note, translate }: { note: MemoryDto; translate: Translate 
   );
 }
 
-function NoteList({ title, hint, notes, translate, onShare, under, onEdit, onRemove, busy }: {
+type NoteItem = PersonalMemoryPage["here"][number];
+
+/** A note's title and body, typed in place: under the section head for a new
+ *  note, where the note was for an edit. */
+function NoteEditor({ title, body, setTitle, setBody, busy, onSave, onCancel, translate, autoFocus }: {
+  title: string;
+  body: string;
+  setTitle(value: string): void;
+  setBody(value: string): void;
+  busy: boolean;
+  onSave(): void;
+  onCancel(): void;
+  translate: Translate;
+  autoFocus?: boolean;
+}) {
+  const id = useId();
+  const titleRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (autoFocus) titleRef.current?.focus(); }, []);
+  const ready = !busy && !!title.trim() && !!body.trim();
+  return (
+    <div
+      className="memory-mine-editor"
+      onKeyDown={(event) => {
+        if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); if (ready) onSave(); }
+      }}
+    >
+      <label className="memory-field"><span className="memory-field-label">{translate("memory.field.title")}</span><TextField id={`${id}-title`} inputRef={titleRef} value={title} onChange={setTitle} /></label>
+      <label className="memory-field"><span className="memory-field-label">{translate("memory.field.body")}</span><TextArea value={body} autoGrow minRows={3} maxRows={10} onChange={setBody} /></label>
+      <div className="memory-actions">
+        <Btn variant="primary" disabled={!busy && !ready} busy={busy} onClick={onSave}>{translate("memory.save")}</Btn>
+        <Btn variant="ghost" disabled={busy} onClick={onCancel}>{translate("memory.cancel")}</Btn>
+      </div>
+    </div>
+  );
+}
+
+function NoteList({ title, hint, notes, translate, onShare, openId, renderOpen, onEdit, onRemove, busy }: {
   title: string;
   hint: string;
   notes: PersonalMemoryPage["here"];
   translate: Translate;
-  onShare?: ((note: PersonalMemoryPage["here"][number]) => void) | undefined;
-  /** What opens in place under a note. */
-  under?: ((id: string) => ReactNode) | undefined;
-  onEdit(note: PersonalMemoryPage["here"][number]): void;
-  onRemove(note: PersonalMemoryPage["here"][number]): void;
+  onShare?: ((note: NoteItem) => void) | undefined;
+  /** The note shown open (being edited or offered for sharing). */
+  openId: string | null;
+  renderOpen(note: NoteItem): ReactNode;
+  onEdit(note: NoteItem): void;
+  onRemove(note: NoteItem): void;
   busy: boolean;
 }) {
   if (notes.length === 0) return null;
@@ -63,24 +100,31 @@ function NoteList({ title, hint, notes, translate, onShare, under, onEdit, onRem
     <div className="memory-mine-group">
       <h4>{title}</h4>
       <p className="memory-help">{hint}</p>
-      {notes.map((note) => {
-        const opened = under?.(note.id);
-        return <Fragment key={note.id}>
-          <div className="memory-mine-note">
-            <div className="memory-mine-note-copy">
-              <strong>{note.title}</strong>
-              {!opened && <span>{note.snippet}</span>}
-              {note.about && <small>{translate("memory.mine.about", { name: note.about })}</small>}
-            </div>
-            <div className="memory-actions">
-              {onShare && <Btn disabled={busy} onClick={() => onShare(note)}>{translate("memory.share.action")}</Btn>}
-              <Btn disabled={busy} onClick={() => onEdit(note)}>{translate("memory.mine.edit")}</Btn>
-              <Btn disabled={busy} onClick={() => onRemove(note)}>{translate("memory.mine.delete")}</Btn>
-            </div>
-          </div>
-          {opened}
-        </Fragment>;
-      })}
+      <ul className="memory-mine-list">
+        {notes.map((note) => (
+          <li key={note.id} className="memory-mine-note" data-memory-note={note.id} data-open={openId === note.id || undefined}>
+            {openId === note.id ? renderOpen(note) : (
+              <>
+                <button type="button" className="memory-mine-note-main" disabled={busy} onClick={() => onEdit(note)}>
+                  <strong>{note.title}</strong>
+                  <span>{note.snippet}</span>
+                  {note.about && <small>{translate("memory.mine.about", { name: note.about })}</small>}
+                </button>
+                <ActionMenu
+                  label={translate("memory.mine.actions", { title: note.title })}
+                  disabled={busy}
+                  entries={[
+                    { id: "edit", label: translate("memory.mine.edit"), onSelect: () => onEdit(note) },
+                    ...(onShare ? [{ id: "share", label: translate("memory.share.action"), onSelect: () => onShare(note) }] : []),
+                    "separator",
+                    { id: "delete", label: translate("memory.mine.delete"), danger: true, onSelect: () => onRemove(note) },
+                  ]}
+                />
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -94,6 +138,7 @@ export default function MyNotes({ projectId, project, translate, notify }: { pro
   const [sharing, setSharing] = useState<MemoryDto | null>(null);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
+  const confirm = useConfirm();
   const load = useCallback(async () => {
     try { setPage(await personalMemoryApi.page(projectId)); setFailed(null); }
     catch (cause) { setPage(null); setFailed(memoryError(cause, translate).kind === "forbidden" ? null : translate("memory.mine.failed")); }
@@ -135,6 +180,26 @@ export default function MyNotes({ projectId, project, translate, notify }: { pro
     setBusy(true);
     void shareNote(projectId, note, translate, notify, () => void load()).then((shared) => { setBusy(false); if (shared) closeEditor(); });
   };
+  // A note is gone for good once deleted, so the one act asks first.
+  const remove = async (note: NoteItem) => {
+    if (!await confirm(translate("memory.mine.deleteConfirm", { title: note.title }), { confirmLabel: translate("memory.mine.delete"), destructive: true })) return;
+    if (editing?.id === note.id || sharing?.id === note.id) closeEditor();
+    void run(() => personalMemoryApi.remove(projectId, note.id, note.revision));
+  };
+  const editor = (autoFocus: boolean) => (
+    <NoteEditor title={title} body={body} setTitle={setTitle} setBody={setBody} busy={busy} onSave={save} onCancel={closeEditor} translate={translate} autoFocus={autoFocus} />
+  );
+  const openId = editing?.id ?? sharing?.id ?? null;
+  const renderOpen = (note: NoteItem) => editing?.id === note.id ? editor(false) : sharing && (
+    <div className="memory-mine-sharing">
+      <strong>{note.title}</strong>
+      <ShareText note={sharing} translate={translate} />
+      <div className="memory-actions">
+        <Btn variant="primary" disabled={busy} onClick={() => share(sharing)}>{translate("memory.share.confirm")}</Btn>
+        <Btn variant="ghost" disabled={busy} onClick={closeEditor}>{translate("memory.cancel")}</Btn>
+      </div>
+    </div>
+  );
   return (
     <section className="memory-section memory-mine" aria-labelledby="memory-mine-heading">
       <div className="memory-section-head">
@@ -148,16 +213,7 @@ export default function MyNotes({ projectId, project, translate, notify }: { pro
         </div>
       </div>
       {failed && <p className="memory-help" role="alert">{failed}</p>}
-      {(adding || editing) && (
-        <div className="memory-mine-editor">
-          <label className="memory-field"><span>{translate("memory.field.title")}</span><TextField value={title} onChange={setTitle} /></label>
-          <label className="memory-field"><span>{translate("memory.field.body")}</span><TextArea value={body} rows={3} onChange={setBody} /></label>
-          <div className="memory-actions">
-            <Btn variant="primary" disabled={busy || !title.trim() || !body.trim()} onClick={save}>{translate("memory.save")}</Btn>
-            <Btn disabled={busy} onClick={closeEditor}>{translate("memory.cancel")}</Btn>
-          </div>
-        </div>
-      )}
+      {adding && !editing && editor(true)}
       {page && withOthers && page.review.length > 0 && (
         <div className="memory-mine-group">
           <h4>{translate("memory.mine.review")}</h4>
@@ -179,17 +235,10 @@ export default function MyNotes({ projectId, project, translate, notify }: { pro
             translate={translate}
             busy={busy}
             onShare={withOthers ? (note) => withWholeNote(note.id, setSharing) : undefined}
-            under={(id) => sharing?.id === id && (
-              <div className="memory-mine-sharing">
-                <ShareText note={sharing} translate={translate} />
-                <div className="memory-actions">
-                  <Btn variant="primary" disabled={busy} onClick={() => share(sharing)}>{translate("memory.share.confirm")}</Btn>
-                  <Btn disabled={busy} onClick={closeEditor}>{translate("memory.cancel")}</Btn>
-                </div>
-              </div>
-            )}
+            openId={openId}
+            renderOpen={renderOpen}
             onEdit={(note) => startEditing(note.id)}
-            onRemove={(note) => void run(() => personalMemoryApi.remove(projectId, note.id, note.revision))}
+            onRemove={(note) => void remove(note)}
           />
           <NoteList
             title={translate("memory.mine.aboutMe")}
@@ -197,8 +246,10 @@ export default function MyNotes({ projectId, project, translate, notify }: { pro
             notes={page.aboutMe}
             translate={translate}
             busy={busy}
+            openId={openId}
+            renderOpen={renderOpen}
             onEdit={(note) => startEditing(note.id)}
-            onRemove={(note) => void run(() => personalMemoryApi.remove(projectId, note.id, note.revision))}
+            onRemove={(note) => void remove(note)}
           />
         </>
       )}

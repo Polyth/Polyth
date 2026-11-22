@@ -8,7 +8,7 @@ export default defineWebPackage((host) => () => {
   const translate = host.ui.locale.translate;
   const notify: Notify = (input) => host.notifications?.show(input);
   // The page is drawn with the shell's own controls.
-  const ui: MemoryUi = { components: host.ui.components, icons: host.ui.icons };
+  const ui: MemoryUi = { components: host.ui.components, icons: host.ui.icons, ...(host.ui.confirm ? { confirm: host.ui.confirm } : {}) };
   const slots = [
     host.slots.register({
       id: "memory.chat-scope",

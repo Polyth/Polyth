@@ -11,7 +11,8 @@
 import type { JsonObject, SessionEvent, TokenUsage } from "@polyth/contracts";
 import { parseAgentReport } from "./agentReport.ts";
 import type {
-  AgentBackgroundWait, AgentRunActivity, AgentRunMoment, AgentWaitingRequest, ScheduleRunRecord, ScheduleRunSettlement,
+  AgentBackgroundWait, AgentRunActivity, AgentRunCause, AgentRunMoment, AgentWaitingRequest, ScheduleRunRecord,
+  ScheduleRunSettlement,
 } from "./index.ts";
 
 export interface RunSettlementOptions {
@@ -47,6 +48,16 @@ export interface RunSettlementOptions {
   /** The person asked to stop the run. A waiting run has no turn to abort,
    *  so it ends here. */
   stopRequested?: () => boolean;
+  /** The run's turn was cut by something other than a person (a restart, a
+   *  tool that ran too long, a failed request) and nothing continued it.
+   *  Send the continuation as attempt `attempt` (1-based) and append its
+   *  `schedule/run-resumed` marker first; resolve false when it cannot be
+   *  sent. Without it a cut run ends where it was cut. */
+  onCut?: (attempt: number, cause: AgentRunCause) => Promise<boolean>;
+  /** Continuations a run may get; 0 never continues. */
+  maxResumes?: number;
+  /** Wait before continuation n (the last value serves every later one). */
+  resumeDelaysMs?: readonly number[];
 }
 
 /** A run that waits for background work: long enough for a CI run, short
@@ -57,6 +68,21 @@ const WAITING_POLL_MS = 5_000;
  *  continued. The server continues at once after a proven abort or a runtime
  *  replacement; an unproven abort waits for reconciliation first. */
 const WATCHDOG_RESUME_MS = 15 * 60_000;
+/** A run continues itself this often after being cut, then asks the person. */
+export const DEFAULT_MAX_RESUMES = 2;
+/** Long enough for a restarting server or a lost connection to settle. */
+const DEFAULT_RESUME_DELAYS_MS: readonly number[] = [20_000, 3 * 60_000];
+/** A continuation whose turn never starts counts as cut again after this. */
+const RESUME_ADMIT_MS = 15 * 60_000;
+/** A person's interrupting message starts its own turn within this. */
+const STEER_FOLLOW_MS = 5 * 60_000;
+/** Turn errors a continuation cannot fix: the route itself refuses, or the
+ *  conversation no longer fits the model. */
+const FINAL_ERROR_CODES = new Set([
+  "auth-expired", "model-unavailable", "quota-exhausted", "context-full", "invalid-attachment", "unsupported",
+]);
+/** Stops a person (or the engine, for the person) asked for by name. */
+const APPROVAL_STOP_SOURCE = "agent-approval-timeout";
 const MOMENTS_KEPT = 20;
 const MOMENT_CHARS = 160;
 const WAIT_TASKS = 3;
@@ -149,6 +175,10 @@ function requestTitle(event: SessionEvent): string {
 }
 
 const DEFAULT_MAX_RUN_MS = 24 * 60 * 60_000;
+/** Marks a continuation the run sent itself; the turn after it is the run's. */
+export const RUN_RESUMED_EVENT = "schedule/run-resumed";
+const CUT_ERROR = "Cut off before it finished.";
+const STOPPED_ERROR = "Stopped before it finished.";
 const OPEN_REQUEST_POLL_MS = 2_000;
 
 const str = (event: SessionEvent, key: string): string | undefined => {
@@ -195,7 +225,7 @@ const defaultSleep = (ms: number, signal: AbortSignal): Promise<void> =>
   });
 
 export async function settleScheduledRun(
-  run: Pick<ScheduleRunRecord, "sessionId" | "markerSeq" | "queueId" | "startedAt">,
+  run: Pick<ScheduleRunRecord, "sessionId" | "markerSeq" | "queueId" | "startedAt"> & { runId?: string },
   opts: RunSettlementOptions,
 ): Promise<ScheduleRunSettlement> {
   const now = opts.now ?? Date.now;
@@ -211,10 +241,29 @@ export async function settleScheduledRun(
   // → waiting (background work runs) → (its wake) → admitted → …
   // → resuming (the tool watchdog cut the turn and promised to continue it)
   // → (its hidden continuation) → admitted → …
-  let phase: "queued" | "admitted" | "turn" | "waiting" | "resuming" = run.queueId ? "queued" : "admitted";
-  // The current turn's abort came from the tool watchdog, which continues it.
-  let watchdogCut = false;
+  // → steered (a person's message interrupted the turn) → (their turn) → turn → …
+  // → cut (nothing continued the turn) → (the run's own continuation and its
+  //   `schedule/run-resumed` marker) → admitted → …
+  type Phase = "queued" | "admitted" | "turn" | "waiting" | "resuming" | "steered" | "cut";
+  let phase: Phase = run.queueId ? "queued" : "admitted";
+  // `cutNow` moves the phase from inside a closure, which narrowing cannot see.
+  const at = (): Phase => phase;
+  // Who asked the current turn to stop, from its `turn/abort-requested`.
+  let abort: { reason?: string; source?: string } | undefined;
   let resumeSince = 0;
+  // Continuations: how many the run has had, why the newest cut happened and
+  // when, and whether one was asked for and its marker is still to come.
+  const maxResumes = opts.onCut ? opts.maxResumes ?? DEFAULT_MAX_RESUMES : 0;
+  const resumeDelays = opts.resumeDelaysMs ?? DEFAULT_RESUME_DELAYS_MS;
+  let resumed = 0;
+  let cutCause: AgentRunCause = "cut";
+  let cutError = "";
+  let cutSince = 0;
+  let cutAsked = false;
+  // A continuation was sent: its turn has to start.
+  let resumeSentAt = 0;
+  let steered = false;
+  let steerSince = 0;
   const waitMs = opts.backgroundWaitMs ?? DEFAULT_BACKGROUND_WAIT_MS;
   // Background work the run started (call id → description), and the wakes
   // it has had so far.
@@ -297,6 +346,8 @@ export async function settleScheduledRun(
       .map(({ seq: _seq, ...moment }) => moment);
     return {
       ...settled,
+      ...(resumed ? { resumed } : {}),
+      ...(steered ? { steered: true } : {}),
       ...(backup !== startedOn ? { backup } : {}),
       ...(summary ? { summary } : {}),
       ...(tokens ? { tokens } : {}),
@@ -310,6 +361,18 @@ export async function settleScheduledRun(
   const waitingOn = (): string[] => {
     const open = [...launched.values()].slice(-(launched.size - woken));
     return [...new Set(open.filter(Boolean))].slice(-WAIT_TASKS);
+  };
+  const resumeDelay = (): number => resumeDelays[Math.min(resumed, resumeDelays.length - 1)] ?? 0;
+  /** The turn ended under the agent: wait to continue it. False when the
+   *  run has had its continuations (or cannot have any). */
+  const cutNow = (cause: AgentRunCause, error: string, at: number, immediate = false): boolean => {
+    if (resumed >= maxResumes) return false;
+    phase = "cut";
+    cutCause = cause;
+    cutError = error;
+    cutSince = immediate ? at - resumeDelay() : at;
+    cutAsked = false;
+    return true;
   };
   while (true) {
     if (opts.signal.aborted) throw abortError();
@@ -356,9 +419,54 @@ export async function settleScheduledRun(
           phase = "admitted";
           continue;
         }
+        if (event.type === "user/message" && data?.hiddenUserMessage !== true) {
+          // The person spoke first: the run goes on with what they said.
+          steered = true;
+          steerSince = eventTime(event);
+          phase = "steered";
+          continue;
+        }
         if (event.type === "user/message" || event.type === "turn/started" || event.type === "schedule/run-started") {
-          // Someone else took the session first; the cut turn was the run's end.
-          return result({ status: "failed", error: "Stopped before it finished." });
+          // Other work took the session first; the cut turn was the run's end.
+          return result({ status: "failed", cause: "cut", error: CUT_ERROR });
+        }
+        continue;
+      }
+      if (phase === "steered") {
+        if (event.type === "turn/started") {
+          phase = "turn";
+          turnText = "";
+          abort = undefined;
+        } else if (event.type === "schedule/run-started") {
+          return result({ status: "failed", stopped: true, cause: "person", error: STOPPED_ERROR });
+        }
+        continue;
+      }
+      if (at() === "cut") {
+        const data = event.data as JsonObject | undefined;
+        if (event.type === RUN_RESUMED_EVENT && data?.runId !== undefined && data.runId === run.runId) {
+          // The continuation is on its way (this pass sent it, or an earlier
+          // one did before Polyth restarted): never send it twice.
+          resumed += 1;
+          cutAsked = false;
+          resumeSentAt = eventTime(event);
+          moments.push({ at: resumeSentAt, text: "", kind: "resume" });
+          phase = "admitted";
+          continue;
+        }
+        if (event.type === "user/message" && data?.hiddenUserMessage !== true) {
+          steered = true;
+          steerSince = eventTime(event);
+          phase = "steered";
+          continue;
+        }
+        if (event.type === "user/message" && data?.autoResume === true) {
+          // The server continued the turn itself after all.
+          phase = "admitted";
+          continue;
+        }
+        if (event.type === "turn/started" || event.type === "schedule/run-started") {
+          return result({ status: "failed", cause: cutCause, error: cutError || CUT_ERROR });
         }
         continue;
       }
@@ -372,14 +480,12 @@ export async function settleScheduledRun(
       if (event.type === "turn/started") {
         phase = "turn";
         turnText = "";
-        watchdogCut = false;
+        abort = undefined;
+        resumeSentAt = 0;
         continue;
       }
       if (phase === "turn" && event.type === "turn/abort-requested") {
-        // Only aborts the server follows with a continuation carry these
-        // sources: the tool watchdog's, and a restart's runtime replacement.
-        const source = str(event, "source");
-        watchdogCut = source === "tool-watchdog" || source === "runtime-epoch";
+        abort = { reason: str(event, "reason"), source: str(event, "source") };
         continue;
       }
       if (phase === "turn" && opts.onActivity) noteActivity(event);
@@ -432,14 +538,43 @@ export async function settleScheduledRun(
         phase = "admitted";
         continue;
       }
-      if (reason === "error") return result({ status: "failed", error: str(event, "error") ?? "The run's turn failed." });
-      if (reason === "aborted" && watchdogCut && phase === "turn") {
-        // One overlong tool call, not a stop: the server continues the turn.
-        phase = "resuming";
-        resumeSince = eventTime(event);
+      if (reason === "error") {
+        const error = str(event, "error") ?? "The run's turn failed.";
+        const code = str(event, "code");
+        const cause: AgentRunCause = routeFailed(event) || code === "model-unavailable" ? "route" : "error";
+        if (code && FINAL_ERROR_CODES.has(code)) return result({ status: "failed", cause, error });
+        // Anything else may well pass on a second try (a dropped connection,
+        // an overloaded provider): the run continues itself.
+        if (!cutNow(cause, error, eventTime(event))) return result({ status: "failed", cause, error });
         continue;
       }
-      if (reason === "aborted") return result({ status: "failed", error: "Stopped before it finished." });
+      if (reason === "aborted" && phase === "turn") {
+        const source = abort?.source;
+        if (source === "tool-watchdog" || source === "runtime-epoch") {
+          // One overlong tool call or a restart, not a stop: the server
+          // continues the turn.
+          phase = "resuming";
+          resumeSince = eventTime(event);
+          continue;
+        }
+        if (abort?.reason === "interrupt") {
+          // A person's message cut in: the turn it starts is the run's next.
+          steered = true;
+          steerSince = eventTime(event);
+          phase = "steered";
+          continue;
+        }
+        if (source === APPROVAL_STOP_SOURCE) {
+          return result({ status: "failed", cause: "approval", error: "Stopped: a request waited too long for an answer." });
+        }
+        if (abort?.reason === "user" || opts.stopRequested?.()) {
+          return result({ status: "failed", stopped: true, cause: "person", error: STOPPED_ERROR });
+        }
+        // Nobody asked for this stop: the turn was cut under the agent.
+        if (!cutNow("cut", CUT_ERROR, eventTime(event))) return result({ status: "failed", cause: "cut", error: CUT_ERROR });
+        continue;
+      }
+      if (reason === "aborted") return result({ status: "failed", cause: "cut", error: CUT_ERROR });
       return result({ status: "unknown", error: `The run's turn stopped without a confirmed result (${reason ?? "no reason"}).` });
     }
     if (opts.approvalTimeoutMs !== undefined && opts.onApprovalTimeout) {
@@ -450,23 +585,50 @@ export async function settleScheduledRun(
       }
     }
     if (phase === "waiting") {
-      if (opts.stopRequested?.()) return result({ status: "failed", error: "Stopped before it finished." });
+      if (opts.stopRequested?.()) return result({ status: "failed", stopped: true, cause: "person", error: STOPPED_ERROR });
       // Work lost with its process never wakes anyone: the run ends with
       // what its last turn said.
       // Only once caught up: a later page may hold the wake.
       if (!events.length && now() - waitSince >= waitMs) return result({ status: "ok" });
     }
     if (phase === "resuming") {
-      if (opts.stopRequested?.()) return result({ status: "failed", error: "Stopped before it finished." });
-      // The continuation never came (budget spent, session busy, send failed).
-      if (!events.length && now() - resumeSince >= WATCHDOG_RESUME_MS) {
-        return result({ status: "failed", error: "Stopped before it finished." });
+      if (opts.stopRequested?.()) return result({ status: "failed", stopped: true, cause: "person", error: STOPPED_ERROR });
+      // The server's continuation never came (budget spent, session busy,
+      // send failed): the run continues itself.
+      if (!events.length && now() - resumeSince >= WATCHDOG_RESUME_MS
+        && !cutNow("cut", CUT_ERROR, resumeSince, true)) {
+        return result({ status: "failed", cause: "cut", error: CUT_ERROR });
+      }
+    }
+    if (phase === "steered") {
+      // Their message never started a turn (it was removed, or the session
+      // stayed down): the person's stop is how the run ended.
+      if (opts.stopRequested?.() || (!events.length && now() - steerSince >= STEER_FOLLOW_MS)) {
+        return result({ status: "failed", stopped: true, cause: "person", error: STOPPED_ERROR });
+      }
+    }
+    if (phase === "admitted" && resumeSentAt && !events.length && now() - resumeSentAt >= RESUME_ADMIT_MS) {
+      // The continuation's turn never started: cut again, or the end.
+      resumeSentAt = 0;
+      if (!cutNow("cut", CUT_ERROR, now(), true)) return result({ status: "failed", cause: "cut", error: CUT_ERROR });
+    }
+    if (at() === "cut") {
+      if (opts.stopRequested?.()) return result({ status: "failed", stopped: true, cause: "person", error: STOPPED_ERROR });
+      // Only once caught up: an earlier pass may already have sent it.
+      if (!events.length && !cutAsked && now() - cutSince >= resumeDelay()) {
+        cutAsked = true;
+        const sent = await opts.onCut!(resumed + 1, cutCause).catch(() => false);
+        if (!sent) return result({ status: "failed", cause: cutCause, error: cutError || CUT_ERROR });
+        cutSince = now();
+      } else if (!events.length && cutAsked && now() - cutSince >= RESUME_ADMIT_MS) {
+        // Sent, yet its marker never showed: the end.
+        return result({ status: "failed", cause: cutCause, error: cutError || CUT_ERROR });
       }
     }
     // A person's decision should reach the agent's page soon after the click;
     // a stop of a waiting run, too.
     const pollLimit = open.size ? Math.min(maxPoll, OPEN_REQUEST_POLL_MS)
-      : phase === "waiting" ? Math.min(maxPoll, WAITING_POLL_MS) : maxPoll;
+      : at() === "waiting" || at() === "cut" || at() === "steered" ? Math.min(maxPoll, WAITING_POLL_MS) : maxPoll;
     poll = events.length ? minPoll : Math.min(pollLimit, Math.round(poll * 1.5));
     if (now() >= deadline) {
       return { status: "unknown", error: "No result was confirmed within the observation limit." };

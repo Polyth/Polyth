@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
-import type { AgentRuntime, HarnessContext, JsonObject, ModelDescriptor, ModelRef, MutationOutcome, RateLimitRetryHint, RuntimeCommandDescriptor, RuntimeEvent, RuntimeObservation, RuntimeSnapshot, TokenUsage, WorkspaceContext } from "@polyth/contracts";
+import type { AgentRuntime, HarnessContext, JsonObject, ModelDescriptor, ModelRef, MutationOutcome, RateLimitRetryHint, RuntimeBackgroundTask, RuntimeCommandDescriptor, RuntimeEvent, RuntimeObservation, RuntimeSnapshot, TokenUsage, WorkspaceContext } from "@polyth/contracts";
 import { createToolProgressThrottle, runtimeEventHasTurnContent } from "@polyth/contracts";
 import { createTodoToolTracker } from "@polyth/todos";
 import { redactSecrets } from "@polyth/plugins";
@@ -70,6 +70,20 @@ type TaskNotification = {
     skip_transcript?: boolean;
     ambient?: boolean;
 };
+/** The background-task frames of Claude Code's stream this adapter reads. */
+type BackgroundTaskFrame = {
+    uuid: string;
+    subtype: string;
+    task_id?: string;
+    description?: string;
+    task_type?: string;
+    is_backgrounded?: boolean;
+    ambient?: boolean;
+    skip_transcript?: boolean;
+    patch?: { status?: string; is_backgrounded?: boolean };
+    tasks?: Array<{ task_id?: unknown; task_type?: unknown; description?: unknown; ambient?: unknown }>;
+};
+const BACKGROUND_TASK_ENDED = new Set(["completed", "failed", "killed"]);
 /** The prompt Polyth sends for background work that settled while idle. */
 const backgroundTaskWakeText = (note: TaskNotification): string => [
     "A background task you started has finished while no turn was running.",
@@ -351,6 +365,15 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
     /** Background work settled while idle and was handed to Polyth as a wake
      *  request; the CLI's own loop for it is redundant and is stopped at once. */
     let wakeHandedOff = false;
+    /** This process's live background work that will report back (ambient
+     *  watchers excluded). Polyth keeps it durably: if the process ends first
+     *  the work can never report, and Polyth wakes the session to say so. */
+    const backgroundTasks = new Map<string, RuntimeBackgroundTask>();
+    /** The CLI sends the full set (`background_tasks_changed`); once seen it
+     *  is the only source. Older CLIs only send the start/settle edges. */
+    let backgroundLevelSeen = false;
+    const startedTasks = new Map<string, RuntimeBackgroundTask>();
+    let backgroundRevision = 0;
     /** A `/compact` Polyth asked for. It is not a turn: what the CLI streams
      *  while it summarizes is never session content. `confirm` answers the
      *  operation until Claude reports that it started compacting. */
@@ -457,6 +480,50 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
         else
             for (const cb of listeners)
                 cb(sid, event);
+    };
+    const publishBackgroundTasks = (lost?: RuntimeBackgroundTask[]) => {
+        backgroundRevision += 1;
+        emit({ type: "runtime/background-tasks", tasks: [...backgroundTasks.values()], ...(lost?.length ? { lost } : {}) }, `${authority.authorityId}:${authority.generation}:background-tasks:${backgroundRevision}`);
+    };
+    const backgroundTaskOf = (id: string, description: unknown, kind: unknown): RuntimeBackgroundTask => ({
+        id,
+        ...(typeof description === "string" && description.trim() ? { description: description.trim() } : {}),
+        ...(typeof kind === "string" && kind ? { kind } : {}),
+    });
+    const noteBackgroundTaskFrame = (frame: BackgroundTaskFrame) => {
+        const before = [...backgroundTasks.keys()].join("\0");
+        if (frame.subtype === "background_tasks_changed") {
+            backgroundLevelSeen = true;
+            backgroundTasks.clear();
+            for (const task of frame.tasks ?? []) {
+                if (typeof task.task_id !== "string" || !task.task_id || task.ambient === true) continue;
+                backgroundTasks.set(task.task_id, backgroundTaskOf(task.task_id, task.description, task.task_type));
+            }
+        }
+        else if (frame.task_id) {
+            const id = frame.task_id;
+            if (frame.subtype === "task_started") {
+                if (startedTasks.size >= 256) startedTasks.delete(startedTasks.keys().next().value!);
+                if (!frame.ambient && !frame.skip_transcript) startedTasks.set(id, backgroundTaskOf(id, frame.description, frame.task_type));
+                if (!backgroundLevelSeen && frame.is_backgrounded === true && startedTasks.has(id)) backgroundTasks.set(id, startedTasks.get(id)!);
+            }
+            else if (frame.subtype === "task_updated" && !backgroundLevelSeen) {
+                if (frame.patch?.is_backgrounded === true && startedTasks.has(id)) backgroundTasks.set(id, startedTasks.get(id)!);
+                if (frame.patch?.status && BACKGROUND_TASK_ENDED.has(frame.patch.status)) backgroundTasks.delete(id);
+            }
+            else if (frame.subtype === "task_notification") {
+                startedTasks.delete(id);
+                if (!backgroundLevelSeen) backgroundTasks.delete(id);
+            }
+        }
+        if ([...backgroundTasks.keys()].join("\0") !== before) publishBackgroundTasks();
+    };
+    /** The process is gone: none of its background work can report now. */
+    const loseBackgroundTasks = () => {
+        if (!backgroundTasks.size) return;
+        const lost = [...backgroundTasks.values()];
+        backgroundTasks.clear();
+        publishBackgroundTasks(lost);
     };
     const markAccepted = () => { if (admission) {
         const done = admission;
@@ -903,6 +970,9 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                             emit({ type: "tool/progress", callId, at }, `${callId}:progress:${at}`);
                         }
                     }
+                    if (message.type === "system" && (message.subtype === "background_tasks_changed" || message.subtype === "task_started" || message.subtype === "task_updated" || message.subtype === "task_notification")) {
+                        noteBackgroundTaskFrame(message as unknown as BackgroundTaskFrame);
+                    }
                     if (message.type === "prompt_suggestion") {
                         // Not dialogue and not turn content: a presentation
                         // hint for the composer, offered after the turn closed.
@@ -1187,6 +1257,7 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                     cb({ type: "stream-disconnected", authorityId: authority.authorityId, generation: authority.generation });
             }
             finally {
+                loseBackgroundTasks();
                 settleUnadmittedLoop();
                 resolveStreamFinished();
             }

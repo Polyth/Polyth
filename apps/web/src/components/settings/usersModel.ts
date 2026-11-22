@@ -128,7 +128,94 @@ export function roleText(role: SpaceRole): { label: string; detail: string } {
   return { label: tr(label), detail: tr(detail) };
 }
 
-/** Lowercase login suggestion from a display name ("Maria Kovalenko" → "maria"). */
+// ------------------------------------------------------------ add-user wizard
+
+/** What a new person may do, in plain words. Each preset is one Space role,
+ *  optionally under Protected mode; projects, assistants and daily limits are
+ *  fine-tuned on the person's page afterwards. */
+export type UserPreset = "teammate" | "protected" | "viewer" | "admin" | "account";
+
+export interface PresetPlan {
+  /** Space role to grant; null creates the account without Space access. */
+  role: SpaceRole | null;
+  /** Turn on Protected mode (guardrails with the default grants). */
+  guarded: boolean;
+}
+
+/** Presets offered to someone who can (or cannot) add members to the current
+ *  Space. Without membership rights only the account itself can be created,
+ *  with or without Protected mode. */
+export function presetChoices(canManageMembers: boolean): UserPreset[] {
+  return canManageMembers ? ["teammate", "protected", "viewer", "admin", "account"] : ["account", "protected"];
+}
+
+export const defaultPreset = (canManageMembers: boolean): UserPreset => canManageMembers ? "teammate" : "account";
+
+export function presetPlan(preset: UserPreset, canManageMembers: boolean): PresetPlan {
+  const role = (value: SpaceRole): SpaceRole | null => canManageMembers ? value : null;
+  switch (preset) {
+    case "teammate": return { role: role("member"), guarded: false };
+    // Protected mode caps every Space role at member anyway.
+    case "protected": return { role: role("member"), guarded: true };
+    case "viewer": return { role: role("viewer"), guarded: false };
+    case "admin": return { role: role("admin"), guarded: false };
+    case "account": return { role: null, guarded: false };
+  }
+}
+
+// Viewer and Admin keep their role names; the details speak to what the person
+// will do rather than what the role permits.
+const PRESET_KEYS = {
+  teammate: ["settings.users.preset.teammate", "settings.users.preset.teammateDetail"],
+  protected: ["settings.users.protected", "settings.users.preset.protectedDetail"],
+  viewer: ["settings.users.roleViewer", "settings.users.preset.viewerDetail"],
+  admin: ["settings.users.roleAdmin", "settings.users.preset.adminDetail"],
+  account: ["settings.users.preset.account", "settings.users.preset.accountDetail"],
+} as const satisfies Record<UserPreset, readonly [TranslationKey, TranslationKey]>;
+
+/** Preset name and one-line description in the active language. */
+export function presetText(preset: UserPreset, space: string | null): { label: string; detail: string } {
+  const [label, detail] = PRESET_KEYS[preset];
+  return {
+    label: tr(label),
+    detail: preset === "account" && !space ? tr("settings.users.preset.accountDetailNoSpace") : tr(detail, { space: space ?? "" }),
+  };
+}
+
+/** The role a preset maps to, for people who think in roles ("Member ·
+ *  Protected mode"). Null for an account without Space access. */
+export function presetRoleTag(preset: UserPreset, canManageMembers: boolean): string | null {
+  const plan = presetPlan(preset, canManageMembers);
+  const parts = [plan.role ? roleText(plan.role).label : null, plan.guarded ? tr("settings.users.protectedMode") : null].filter(Boolean);
+  const tag = parts.join(" · ");
+  // "Viewer" needs no "Viewer" beside it.
+  return tag && tag !== tr(PRESET_KEYS[preset][0]) ? tag : null;
+}
+
+/** The address to send someone, or null when this page was opened through an
+ *  address that means nothing on their device (this computer, a desktop shell). */
+export function shareableAddress(origin: string): string | null {
+  let url: URL;
+  try { url = new URL(origin); } catch { return null; }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  const host = url.hostname.toLowerCase();
+  if (host === "localhost" || host.endsWith(".localhost") || host === "0.0.0.0" || host === "[::1]" || host.startsWith("127.")) return null;
+  return url.origin;
+}
+
+/** A ready-to-send message with everything the new person needs to sign in. */
+export function invitationText({ name, login, password, address }: {
+  name: string;
+  login: string;
+  password: string;
+  address: string | null;
+}): string {
+  const first = name.trim().split(/\s+/)[0] || name.trim();
+  return address
+    ? tr("settings.users.invitationWithAddress", { name: first, login, password, address })
+    : tr("settings.users.invitation", { name: first, login, password });
+}
+
 /** Settings target that opens the signed-in person's own account:
  *  `openSettingsPage("users", { itemId: OWN_ACCOUNT_TARGET })`, or the
  *  `?settings=users/account` deep link. */
@@ -138,6 +225,7 @@ export const OWN_ACCOUNT_TARGET = "account";
 export const initials = (name: string): string =>
   name.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("") || "?";
 
+/** Lowercase login suggestion from a display name ("Maria Kovalenko" → "maria"). */
 export function suggestLogin(name: string): string {
   const first = name.trim().split(/\s+/)[0] ?? "";
   return first

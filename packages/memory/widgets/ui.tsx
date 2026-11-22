@@ -2,11 +2,11 @@
 // primitives over through `MemoryUiContext`; without it (tests, a host that
 // predates the handle) each control falls back to the plain semantic element,
 // so behaviour stays the same and only the paint differs.
-import { createContext, useContext, type ChangeEvent, type ComponentType, type KeyboardEvent, type ReactNode, type Ref } from "react";
+import { createContext, useCallback, useContext, useRef, type ChangeEvent, type ComponentType, type KeyboardEvent, type ReactNode, type Ref } from "react";
 import type { WebPackageHost } from "@polyth/web-sdk";
 
 type HostUi = WebPackageHost["ui"];
-export type MemoryUi = Pick<HostUi, "components" | "icons">;
+export type MemoryUi = Pick<HostUi, "components" | "icons"> & Partial<Pick<HostUi, "confirm">>;
 export const MemoryUiContext = createContext<MemoryUi | null>(null);
 
 type Loose = ComponentType<Record<string, unknown>>;
@@ -23,8 +23,10 @@ export function Btn({ variant = "quiet", size = "sm", icon, className, children,
   busy?: boolean;
   onClick?: () => void;
   children?: ReactNode;
+  title?: string;
   "aria-describedby"?: string | undefined;
   "aria-pressed"?: boolean;
+  "aria-keyshortcuts"?: string;
 }) {
   const ui = useContext(MemoryUiContext);
   // The variant class is a stable hook (focus moves, tests); the host paints.
@@ -35,6 +37,25 @@ export function Btn({ variant = "quiet", size = "sm", icon, className, children,
   }
   const { busy, ...native } = rest;
   return <button type="button" className={hook} {...native} disabled={native.disabled || busy}>{children}</button>;
+}
+
+/** One glyph-only action; `label` is its name and tooltip. */
+export function IconBtn({ icon, label, onClick, disabled, className }: { icon: IconName; label: string; onClick(): void; disabled?: boolean; className?: string }) {
+  const ui = useContext(MemoryUiContext);
+  if (ui) {
+    const IconButton = ui.components.IconButton as unknown as Loose;
+    return <IconButton icon={ui.icons[icon]} label={label} size="sm" variant="ghost" onClick={onClick} disabled={disabled} className={className} />;
+  }
+  return <button type="button" className={className} aria-label={label} title={label} disabled={disabled} onClick={onClick}>×</button>;
+}
+
+/** The host confirmation alert, or the browser's without a host. */
+export function useConfirm(): (message: string, options?: { title?: string; confirmLabel?: string; destructive?: boolean }) => Promise<boolean> {
+  const ui = useContext(MemoryUiContext);
+  return useCallback(async (message, options) => {
+    if (ui?.confirm) return ui.confirm(message, options);
+    return typeof window !== "undefined" && typeof window.confirm === "function" ? window.confirm(message) : false;
+  }, [ui]);
 }
 
 export interface MenuItem {
@@ -87,6 +108,51 @@ export function Choice({ label, value, options, onChange, disabled, align }: {
   );
 }
 
+/** One choice from a short known set, every option in view: one tap instead
+ *  of opening a list. A radio group with roving focus (arrows, Home, End). */
+export function Chips({ label, value, options, onChange, disabled, className }: {
+  label: string;
+  value: string;
+  options: ReadonlyArray<{ value: string; label: string }>;
+  onChange(value: string): void;
+  disabled?: boolean;
+  className?: string;
+}) {
+  const group = useRef<HTMLDivElement>(null);
+  const current = options.some((option) => option.value === value) ? value : options[0]?.value;
+  const move = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    const rtl = group.current ? getComputedStyle(group.current).direction === "rtl" : false;
+    const step = { ArrowRight: rtl ? -1 : 1, ArrowDown: 1, ArrowLeft: rtl ? 1 : -1, ArrowUp: -1 }[event.key];
+    const next = event.key === "Home" ? 0 : event.key === "End" ? options.length - 1
+      : step === undefined ? -1 : (index + step + options.length) % options.length;
+    if (next < 0) return;
+    event.preventDefault();
+    const option = options[next]!;
+    onChange(option.value);
+    group.current?.querySelectorAll<HTMLButtonElement>("button")[next]?.focus();
+  };
+  return (
+    <div ref={group} role="radiogroup" aria-label={label} aria-disabled={disabled || undefined} className={classes("memory-chips", className)}>
+      {options.map((option, index) => {
+        const checked = option.value === current;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={checked}
+            tabIndex={checked ? 0 : -1}
+            disabled={disabled}
+            className="memory-chip"
+            onClick={() => { if (!checked) onChange(option.value); }}
+            onKeyDown={(event) => move(event, index)}
+          >{option.label}</button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function Check({ checked, onChange, label, disabled, className }: {
   checked: boolean;
   onChange(checked: boolean): void;
@@ -103,24 +169,47 @@ export function Check({ checked, onChange, label, disabled, className }: {
   return <label className={hook}><input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} /> {label}</label>;
 }
 
+/** An on/off preference that applies at once: the host Switch where it has
+ *  one, else a checkbox with the same name. */
+export function Toggle({ checked, onChange, label, labelledBy, disabled }: {
+  checked: boolean;
+  onChange(checked: boolean): void;
+  label: string;
+  labelledBy?: string;
+  disabled?: boolean;
+}) {
+  const ui = useContext(MemoryUiContext);
+  const Switch = ui?.components.Switch as unknown as Loose | undefined;
+  if (Switch) return <Switch checked={checked} onChange={onChange} {...(labelledBy ? { labelledBy } : { label })} disabled={disabled} />;
+  return <Check checked={checked} onChange={onChange} disabled={disabled} label={labelledBy ? <span className="memory-sr">{label}</span> : label} />;
+}
+
 type FieldProps = {
   value: string;
   onChange(value: string): void;
   placeholder?: string;
   disabled?: boolean;
   className?: string;
+  id?: string;
   "aria-label"?: string;
+  "aria-describedby"?: string;
+  "aria-invalid"?: boolean;
 };
 
-export function TextField({ onChange, type, inputMode, onBlur, onKeyDown, ...rest }: FieldProps & {
+export function TextField({ onChange, type, inputMode, onBlur, onKeyDown, inputRef, enterKeyHint, autoComplete, ...rest }: FieldProps & {
   type?: "text" | "search" | "number";
-  inputMode?: "numeric";
+  inputMode?: "numeric" | "search";
+  enterKeyHint?: "search" | "done" | "next" | "enter";
+  autoComplete?: string;
+  inputRef?: Ref<HTMLInputElement>;
   onBlur?(): void;
   onKeyDown?(event: KeyboardEvent<HTMLInputElement>): void;
 }) {
   const ui = useContext(MemoryUiContext);
   const props = {
-    ...rest, type: type ?? "text", ...(inputMode ? { inputMode } : {}), ...(onBlur ? { onBlur } : {}), ...(onKeyDown ? { onKeyDown } : {}),
+    ...rest, type: type ?? "text",
+    ...(inputMode ? { inputMode } : {}), ...(enterKeyHint ? { enterKeyHint } : {}), ...(autoComplete ? { autoComplete } : {}),
+    ...(onBlur ? { onBlur } : {}), ...(onKeyDown ? { onKeyDown } : {}), ...(inputRef ? { ref: inputRef } : {}),
     onChange: (event: ChangeEvent<HTMLInputElement>) => onChange(event.target.value),
   };
   if (ui) {
@@ -130,17 +219,26 @@ export function TextField({ onChange, type, inputMode, onBlur, onKeyDown, ...res
   return <input {...props} />;
 }
 
-export function TextArea({ onChange, rows, maxLength, ...rest }: FieldProps & { rows?: number; maxLength?: number }) {
+export function TextArea({ onChange, rows, maxLength, autoGrow, minRows, maxRows, onKeyDown, textareaRef, ...rest }: FieldProps & {
+  rows?: number;
+  maxLength?: number;
+  /** Grow with the text between `minRows` and `maxRows`, then scroll. */
+  autoGrow?: boolean;
+  minRows?: number;
+  maxRows?: number;
+  textareaRef?: Ref<HTMLTextAreaElement>;
+  onKeyDown?(event: KeyboardEvent<HTMLTextAreaElement>): void;
+}) {
   const ui = useContext(MemoryUiContext);
   const props = {
-    ...rest, ...(rows ? { rows } : {}), ...(maxLength ? { maxLength } : {}),
+    ...rest, ...(maxLength ? { maxLength } : {}), ...(onKeyDown ? { onKeyDown } : {}), ...(textareaRef ? { ref: textareaRef } : {}),
     onChange: (event: ChangeEvent<HTMLTextAreaElement>) => onChange(event.target.value),
   };
   if (ui) {
     const Textarea = ui.components.Textarea as unknown as Loose;
-    return <Textarea {...props} />;
+    return <Textarea {...props} {...(autoGrow ? { autoGrow, minRows: minRows ?? rows ?? 2, maxRows: maxRows ?? 12 } : rows ? { rows, minRows: rows } : {})} />;
   }
-  return <textarea {...props} />;
+  return <textarea {...props} rows={minRows ?? rows ?? 2} />;
 }
 
 export interface TabEntry { id: string; label: ReactNode }
@@ -175,4 +273,11 @@ export function Glyph({ name }: { name: IconName }) {
   const ui = useContext(MemoryUiContext);
   const Icon = ui?.icons[name];
   return Icon ? <span className="memory-glyph" aria-hidden="true"><Icon /></span> : null;
+}
+
+/** A decorative busy mark (the surrounding region owns the status). */
+export function BusyMark() {
+  const ui = useContext(MemoryUiContext);
+  const Spinner = ui?.components.Spinner as unknown as Loose | undefined;
+  return Spinner ? <span className="memory-busy" aria-hidden="true"><Spinner size="sm" /></span> : <span className="memory-busy memory-busy--plain" aria-hidden="true" />;
 }

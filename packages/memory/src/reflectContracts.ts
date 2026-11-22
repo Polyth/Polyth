@@ -1,6 +1,6 @@
 /** Browser-safe Reflect DTOs and constants shared by the server routes and
  * the memory settings UI. No runtime imports. */
-import type { MemoryCategory } from "@polyth/knowledge/memory-contracts";
+import type { MemoryCategory } from "./contracts.ts";
 import type { ReflectSignal } from "./reflect.ts";
 
 export type { ReflectSignal };

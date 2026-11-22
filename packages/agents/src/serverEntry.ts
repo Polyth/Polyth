@@ -39,6 +39,9 @@ import {
   budgetExceeded,
   spendInLastDay,
   composeAgentPrompt,
+  composeResumePrompt,
+  failureWords,
+  RUN_RESUMED_EVENT,
   createScheduleService,
   DEFAULT_ROTATE_AT,
   DEFAULT_PACE,
@@ -61,6 +64,7 @@ import {
   settleScheduledRun,
   type AgentBudget,
   type AgentColor,
+  type AgentRunCause,
   type CatchUpPolicy,
   type ScheduleCadence,
   type ScheduleRunner,
@@ -834,6 +838,20 @@ export function scheduleRoutes(deps: {
       }
     }
 
+    const needMatch = path.match(/^\/api\/schedule\/([^/]+)\/runs\/([^/]+)\/needs\/(\d{1,2})$/);
+    if (needMatch && method === "POST") {
+      const task = await allowedTask(needMatch[1]!);
+      if (task === null) return true;
+      if (!task) { json(404, { error: "not-found" }); return true; }
+      const input = await body();
+      if (typeof input.done !== "boolean") {
+        json(400, { error: "invalid-input", message: "done must be true or false" });
+        return true;
+      }
+      json(200, await view(deps.schedule.setNeedDone(task.id, needMatch[2]!, Number(needMatch[3]), input.done)));
+      return true;
+    }
+
     const feedbackMatch = path.match(/^\/api\/schedule\/([^/]+)\/runs\/([^/]+)\/feedback$/);
     if (feedbackMatch && method === "POST") {
       const task = await allowedTask(feedbackMatch[1]!);
@@ -1190,6 +1208,30 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       ...(onActivity ? { onActivity } : {}),
       ...(onBackground ? { onBackground } : {}),
       ...(stopRequested ? { stopRequested } : {}),
+      ...(run.sessionId ? {
+        // The turn was cut under the agent (a restart, an overlong tool
+        // call, a failed request) and nothing continued it: the run sends
+        // its own continuation into the same session, on the route it was
+        // on. The marker goes first, so a later pass over the same events
+        // sees that it was sent and never sends it twice.
+        onCut: async (attempt: number, cause: AgentRunCause) => {
+          const sessionId = run.sessionId!;
+          const routes = scheduleExecutionRoutes(task);
+          const execution = routes[run.backup ?? 0] ?? routes[0]!;
+          const sessions = await ownerSessions(task) ?? await systemSessionsForSession(host, sessionId);
+          await systemAppendSessionEvent(host, sessionId, RUN_RESUMED_EVENT, {
+            taskId: task.id, runId: run.runId, attempt, cause,
+          }, { ignorable: true, producerPlugin: host.pluginId });
+          await sessions.send(sessionId, {
+            text: composeResumePrompt(cause, attempt),
+            // The engine's own nudge: the chat shows no message for it.
+            displayText: "",
+            ...execution,
+            ...profileOf(task),
+          }, scheduleTurnAdmission(task));
+          return true;
+        },
+      } : {}),
       ...(run.sessionId && scheduleExecutionRoutes(task).length > 1 ? {
         backup: run.backup ?? 0,
         // The provider refused or ran out mid-run: continue the same turn on
@@ -1432,12 +1474,20 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
 
   /** A finished run that met the agent's notify policy reaches the person
    *  through the host's notification centre and push. */
-  const notifyRun = (task: ScheduleTask, run: ScheduleRunRecord, reason: "report" | "tripped"): void => {
+  const notifyRun = (task: ScheduleTask, run: ScheduleRunRecord, reason: "report" | "tripped" | "failed"): void => {
     const attention = host.services.get(SESSION_ATTENTION_SERVICE);
     const sessionId = run.sessionId ?? task.lastSessionId;
     if (!attention?.notify || !sessionId) return;
     if (reason === "tripped") {
-      attention.notify(sessionId, { kind: "failed", statusText: task.tripped?.message ?? "stopped after repeated failures", key: `tripped:${run.runId}` });
+      attention.notify(sessionId, {
+        kind: "failed",
+        statusText: `stopped and will not wake until you resume it: ${failureWords(run)}`,
+        key: `tripped:${run.runId}`,
+      });
+      return;
+    }
+    if (reason === "failed") {
+      attention.notify(sessionId, { kind: "failed", statusText: `did not finish: ${failureWords(run)}`, key: `failed:${run.runId}` });
       return;
     }
     const headline = run.headline ?? "has an update";

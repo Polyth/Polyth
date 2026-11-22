@@ -295,40 +295,84 @@ test('HTTP owner account management: limits, rename and password reset need an e
   assert.equal((await member.request('/api/auth/me')).status, 401);
 });
 
-test('paired reads answer only the account views, read-only, for the account the host resolved', async t => {
+test('a paired device reads its people list, and an owner device administers them after confirming the password', async t => {
   const f = await httpFixture(t), owner = f.browser();
   await f.setup(owner);
   const created = await owner.request('/api/auth/accounts', { login: 'olena', name: 'Olena', password: 'member test passphrase' });
   const memberId = created.value.id as string;
   const ownerId = (await owner.request('/api/auth/me')).value.id as string;
-  const read = (url: string, userId: string, method = 'GET') => {
+  /** A full-access Link device: no cookie, only its grant and its account id. */
+  const device = (userId: string, deviceId = 'dev_phone') => async (url: string, body?: unknown, method = body === undefined ? 'GET' : 'POST') => {
     const headers = new Map<string, unknown>();
     const res = { statusCode: 0, body: '', setHeader(name: string, value: unknown) { headers.set(name.toLowerCase(), value); }, end(chunk: string) { this.body = chunk; } };
-    const handled = f.adapter.handlePairedRead({ method, url } as never, res as never, userId);
+    const listeners = new Map<string, (...args: never[]) => void>();
+    const req = {
+      method, url, headers: { 'content-type': 'application/json' }, socket: { remoteAddress: '127.0.0.1' },
+      on(event: string, handler: (...args: never[]) => void) { listeners.set(event, handler); },
+      once(event: string, handler: (...args: never[]) => void) { listeners.set(event, handler); },
+      off() {}, resume() {},
+    };
+    if (body !== undefined) {
+      setImmediate(() => {
+        listeners.get('data')?.(Buffer.from(JSON.stringify(body)) as never);
+        listeners.get('end')?.();
+      });
+    }
+    const handled = await f.adapter.handlePaired(req as never, res as never, { userId, deviceId });
     return { handled, status: res.statusCode, value: res.body ? JSON.parse(res.body) as Record<string, any> : null, headers };
   };
 
-  const ownerView = read('/api/auth/accounts', ownerId);
+  const phone = device(ownerId);
+  const ownerView = await phone('/api/auth/accounts');
   assert.equal(ownerView.handled, true); assert.equal(ownerView.status, 200);
   assert.equal(ownerView.headers.get('cache-control'), 'no-store');
   assert.equal(ownerView.value!.currentAccountId, ownerId);
-  assert.equal(ownerView.value!.canManage, false);
+  // An owner's device may administer people, but its own account (name,
+  // password, passkeys, tokens) still changes in a signed-in browser.
+  assert.equal(ownerView.value!.canManage, true);
   assert.equal(ownerView.value!.readOnly, true);
   assert.equal(ownerView.value!.canManageInBrowser, true);
   assert.deepEqual(ownerView.value!.accounts.map((a: { id: string }) => a.id).sort(), [ownerId, memberId].sort());
-  // Owner-only columns stay with a browser that can manage.
-  for (const account of ownerView.value!.accounts) assert.equal(account.limits, undefined);
+  for (const account of ownerView.value!.accounts) assert.equal(account.limits, null);
 
-  const memberView = read('/api/auth/accounts', memberId);
+  const memberView = await device(memberId, 'dev_member')('/api/auth/accounts');
+  assert.equal(memberView.value!.canManage, false);
   assert.equal(memberView.value!.canManageInBrowser, undefined);
   assert.deepEqual(memberView.value!.accounts.map((a: { id: string }) => a.id), [memberId]);
-  const me = read('/api/auth/me', memberId);
+  const me = await device(memberId)('/api/auth/me');
   assert.equal(me.value!.id, memberId); assert.equal(me.value!.login, 'olena'); assert.equal(me.value!.guardrails, null);
-  assert.equal(read('/api/auth/accounts', 'usr_missing').status, 404);
+  assert.equal((await device('usr_missing')('/api/auth/accounts')).status, 404);
 
-  for (const [url, method] of [['/api/auth/me', 'POST'], ['/api/auth/accounts', 'POST'], ['/api/auth/cli', 'POST'], ['/api/auth/cli/tokens', 'POST'], ['/api/auth/cli/trust', 'POST'], ['/api/auth/sessions', 'GET'], ['/api/auth/passkeys', 'GET'], ['/api/auth/accounts?x=1', 'GET']] as const) {
-    const refused = read(url, ownerId, method);
-    assert.equal(refused.handled, false, `${method} ${url}`); assert.equal(refused.status, 0);
+  // Reading an account's own administration data needs no password.
+  const limits = await phone(`/api/auth/accounts/${memberId}/limits`);
+  assert.equal(limits.status, 200); assert.equal(limits.value!.revision, 0);
+
+  // Changing people does: the request answers `reauth-required` first.
+  const refused = await phone(`/api/auth/accounts/${memberId}/profile`, { name: 'Olena K.', expectedRevision: created.value.revision });
+  assert.equal(refused.status, 403); assert.equal(refused.value!.error, 'reauth-required');
+  assert.equal((await phone('/api/auth/reauthenticate', { password: 'wrong passphrase' })).status, 401);
+  assert.equal((await phone('/api/auth/reauthenticate', { password: 'owner test passphrase' })).status, 200);
+  const renamed = await phone(`/api/auth/accounts/${memberId}/profile`, { name: 'Olena K.', expectedRevision: created.value.revision });
+  assert.equal(renamed.status, 200); assert.equal(renamed.value!.name, 'Olena K.'); assert.equal(renamed.value!.current, false);
+  const saved = await phone(`/api/auth/accounts/${memberId}/limits`, { limits: { messagesPerDay: 5 }, expectedRevision: 0 });
+  assert.equal(saved.status, 200); assert.deepEqual(saved.value!.limits, { messagesPerDay: 5 });
+
+  // Another device is not elevated by this one, and elevation lapses.
+  const other = device(ownerId, 'dev_tablet');
+  assert.equal((await other(`/api/auth/accounts/${memberId}/limits`, { limits: null, expectedRevision: 1 })).status, 403);
+  f.advance(6 * 60_000);
+  const stale = await phone(`/api/auth/accounts/${memberId}/limits`, { limits: null, expectedRevision: 1 });
+  assert.equal(stale.status, 403); assert.equal(stale.value!.error, 'reauth-required');
+
+  // The device's server-side session is not a browser sign-in.
+  assert.deepEqual((await owner.request('/api/auth/sessions')).value.sessions.map((entry: { current: boolean }) => entry.current), [true]);
+
+  // A member's device cannot confirm its way into administration.
+  assert.equal((await device(memberId, 'dev_member')('/api/auth/reauthenticate', { password: 'member test passphrase' })).status, 403);
+
+  for (const [url, method] of [['/api/auth/me', 'POST'], ['/api/auth/cli', 'POST'], ['/api/auth/cli/tokens', 'POST'], ['/api/auth/cli/trust', 'POST'], ['/api/auth/sessions', 'GET'], ['/api/auth/passkeys', 'GET'], ['/api/auth/accounts?x=1', 'GET']] as const) {
+    const unanswered = await phone(url, method === 'POST' ? {} : undefined, method);
+    assert.equal(unanswered.handled, false, `${method} ${url}`); assert.equal(unanswered.status, 0);
   }
 });
 
@@ -357,6 +401,10 @@ test('HTTP account permissions: only an elevated instance owner grants them, and
   await member.request('/api/auth/status');
   assert.equal((await member.request('/api/auth/login', { login: 'ida', password: 'member test passphrase' })).status, 200);
   assert.deepEqual((await member.request('/api/auth/me')).value.permissions, ['harnesses.manage']);
+  // The owner chose this password, so Ida replaces it before anything else.
+  assert.equal((await member.request(`/api/auth/accounts/${id}/permissions`)).status, 403);
+  assert.equal((await member.request('/api/auth/password', { password: 'ida own passphrase' })).status, 200);
+  assert.equal((await member.request('/api/auth/login', { login: 'ida', password: 'ida own passphrase' })).status, 200);
   assert.equal((await member.request(`/api/auth/accounts/${id}/permissions`)).status, 200);
   // A permitted account still cannot change permissions, its own or anyone's.
   assert.equal((await member.request(`/api/auth/accounts/${id}/permissions`, { permissions: [], expectedRevision: 1 })).status, 403);
@@ -372,6 +420,34 @@ test('HTTP account permissions: only an elevated instance owner grants them, and
 // the in-process owner session into its own window; any other browser or
 // local process on this machine reaches only a locked status, and a page
 // re-pointed at loopback (DNS rebinding) is refused on Host before any cookie.
+test('HTTP: a created account must choose its own password before anything else', async t => {
+  const f = await httpFixture(t), owner = f.browser();
+  await f.setup(owner);
+  await owner.request('/api/auth/accounts', { login: 'noa', name: 'Noa', password: 'owner chose this one' });
+  assert.equal((await owner.request('/api/auth/status')).value.passwordChangeRequired, undefined);
+
+  const member = f.browser();
+  await member.request('/api/auth/status');
+  assert.equal((await member.request('/api/auth/login', { login: 'noa', password: 'owner chose this one' })).status, 200);
+  assert.equal((await member.request('/api/auth/status')).value.passwordChangeRequired, true);
+  const me = await member.request('/api/auth/me');
+  assert.equal(me.status, 200);
+  assert.equal(me.value.passwordChangeRequired, true);
+  for (const path of ['/api/auth/sessions', '/api/auth/passkeys', '/api/auth/cli']) {
+    const denied = await member.request(path);
+    assert.equal(denied.status, 403, path);
+    assert.equal(denied.value.error, 'password-change-required', path);
+  }
+  assert.equal((await member.request('/api/auth/me', { name: 'Someone else', expectedRevision: 1 })).status, 403);
+
+  assert.equal((await member.request('/api/auth/reauthenticate', { password: 'owner chose this one' })).status, 200);
+  assert.equal((await member.request('/api/auth/password', { password: 'noa chose her own' })).status, 200);
+  assert.equal((await member.request('/api/auth/login', { login: 'noa', password: 'noa chose her own' })).status, 200);
+  assert.equal((await member.request('/api/auth/status')).value.passwordChangeRequired, undefined);
+  assert.equal((await member.request('/api/auth/me')).value.passwordChangeRequired, undefined);
+  assert.equal((await member.request('/api/auth/sessions')).status, 200);
+});
+
 test('a password-less owner: only the Desktop session opens the API; other browsers and rebound pages stay out', async t => {
   const f = await httpFixture(t);
   const owner = f.identity.setup.completeLocal({ name: 'Ida' });

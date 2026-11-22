@@ -113,7 +113,7 @@ function copyFileAs(file, name) {
 /**
  * The workstation edition (scripts/ci/workstation.mjs): the same app for a
  * managed work computer. Builds with POLYTH_DESKTOP_FLAVOR=workstation, no
- * Chromium and no Link binaries, its own electron-builder configuration file
+ * Link binaries, its own electron-builder configuration file
  * and its own output directory, so it never collides with the standard
  * targets. Its feed channel is `workstation`.
  */
@@ -592,8 +592,8 @@ function buildMac({ legacy = false, workstation = false } = {}) {
   const browserPath = (arch) => join(TMP, `playwright-mac-${arch}`);
   const hostPlatform = (arch) => arch === "arm64" ? "mac14-arm64" : "mac14";
 
-  // The workstation edition ships no Chromium; nothing to download or stage.
-  for (const arch of workstation ? [] : architectures) {
+  // Every edition ships the bundled Chromium (the browser package).
+  for (const arch of architectures) {
     run(npx, ["playwright-core", "install", "chromium"], {
       env: {
         PLAYWRIGHT_BROWSERS_PATH: browserPath(arch),
@@ -618,16 +618,14 @@ function buildMac({ legacy = false, workstation = false } = {}) {
     env: { POLYTH_MAC_MULTI_ARCH: "1", POLYTH_DESKTOP_FLAVOR: legacy ? MAC_LEGACY_FLAVOR : workstation ? WORKSTATION_FLAVOR : "" },
   });
   for (const arch of architectures) {
-    if (!workstation) {
-      run(npm, ["run", "desktop:stage-chromium"], {
-        env: {
-          PLAYWRIGHT_BROWSERS_PATH: browserPath(arch),
-          PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: hostPlatform(arch),
-          POLYTH_TARGET_PLATFORM: "darwin",
-          POLYTH_TARGET_ARCH: arch,
-        },
-      });
-    }
+    run(npm, ["run", "desktop:stage-chromium"], {
+      env: {
+        PLAYWRIGHT_BROWSERS_PATH: browserPath(arch),
+        PLAYWRIGHT_HOST_PLATFORM_OVERRIDE: hostPlatform(arch),
+        POLYTH_TARGET_PLATFORM: "darwin",
+        POLYTH_TARGET_ARCH: arch,
+      },
+    });
     run(npm, ["run", "desktop:download-opencode"], {
       env: { POLYTH_TARGET_PLATFORM: "darwin", POLYTH_TARGET_ARCH: arch },
     });
@@ -713,13 +711,11 @@ function buildWindows({ workstation = false } = {}) {
   const edition = workstation ? workstationBuild("win-workstation") : null;
   const releaseDir = join(ROOT, "apps/desktop", edition ? edition.outputDir : "release");
   releaseToolsCi();
-  if (!workstation) run(npx, ["playwright-core", "install", "chromium"], { env: { PLAYWRIGHT_BROWSERS_PATH: "0" } });
+  run(npx, ["playwright-core", "install", "chromium"], { env: { PLAYWRIGHT_BROWSERS_PATH: "0" } });
   run(npm, ["run", "build:desktop"], { env: { POLYTH_DESKTOP_FLAVOR: workstation ? WORKSTATION_FLAVOR : "" } });
-  if (!workstation) {
-    run(npm, ["run", "desktop:stage-chromium"], {
-      env: { PLAYWRIGHT_BROWSERS_PATH: "0", POLYTH_TARGET_PLATFORM: "win32", POLYTH_TARGET_ARCH: "x64" },
-    });
-  }
+  run(npm, ["run", "desktop:stage-chromium"], {
+    env: { PLAYWRIGHT_BROWSERS_PATH: "0", POLYTH_TARGET_PLATFORM: "win32", POLYTH_TARGET_ARCH: "x64" },
+  });
   run(npm, ["run", "desktop:download-opencode"], { env: { POLYTH_TARGET_PLATFORM: "win32", POLYTH_TARGET_ARCH: "x64" } });
   run(process.execPath, [
     ELECTRON_BUILDER, "--win", "nsis", "--x64", "--publish", "never",
@@ -738,13 +734,11 @@ function buildLinux({ workstation = false } = {}) {
   const edition = workstation ? workstationBuild("linux-workstation") : null;
   const releaseDir = join(ROOT, "apps/desktop", edition ? edition.outputDir : "release");
   releaseToolsCi();
-  if (!workstation) run(npx, ["playwright-core", "install", "chromium"], { env: { PLAYWRIGHT_BROWSERS_PATH: "0" } });
+  run(npx, ["playwright-core", "install", "chromium"], { env: { PLAYWRIGHT_BROWSERS_PATH: "0" } });
   run(npm, ["run", "build:desktop"], { env: { POLYTH_DESKTOP_FLAVOR: workstation ? WORKSTATION_FLAVOR : "" } });
-  if (!workstation) {
-    run(npm, ["run", "desktop:stage-chromium"], {
-      env: { PLAYWRIGHT_BROWSERS_PATH: "0", POLYTH_TARGET_PLATFORM: "linux", POLYTH_TARGET_ARCH: "x64" },
-    });
-  }
+  run(npm, ["run", "desktop:stage-chromium"], {
+    env: { PLAYWRIGHT_BROWSERS_PATH: "0", POLYTH_TARGET_PLATFORM: "linux", POLYTH_TARGET_ARCH: "x64" },
+  });
   run(npm, ["run", "desktop:download-opencode"], { env: { POLYTH_TARGET_PLATFORM: "linux", POLYTH_TARGET_ARCH: "x64" } });
   run(process.execPath, [
     ELECTRON_BUILDER, "--linux", "AppImage", "--x64", "--publish", "never",

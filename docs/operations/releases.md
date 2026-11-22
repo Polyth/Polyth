@@ -302,6 +302,21 @@ own runners; no deploy key or second repository is involved.
   downgrade; every dispatched run, skipped or not, consumes a run number.
 - **Publication.** Only a full (`all`) run publishes: draft, upload, then public prerelease, never
   marked Latest. The three newest nightlies are kept; stable releases are never pruned.
+- **Bug reports.** Nightly desktop builds send ⌘⇧B / Ctrl+Shift+B reports (screenshot,
+  build, allowlisted settings, a note) with a shared tester password to the report relay,
+  which files them as issues in the team's private reports repository and drops data and
+  screenshots after 30 days ([desktop](../dev/desktop.md#bug-reports-nightly),
+  [relay](../../packages/report-relay/README.md)). The relay accepts a published nightly
+  or an older one, never a version newer than the newest nightly. The reports repository
+  is `Polyth/nightly-reports` (private). Setting the relay up needs a fine-grained token
+  limited to that repository (Issues and Contents read/write, Metadata read), placed with
+  `sudo polyth-reports-token`, and the tester password, placed with
+  `sudo polyth-reports-password`; without both it answers every report `503`. Rotating the
+  password is running the helper again; every tester is asked at their next send. The
+  **Nightly bug triage** agent template (Agents → Templates) works through new reports
+  every night at 01:45, before the captain: it merges duplicates, ties each report to its
+  source commit through the release marker and turns real bugs into public issues written
+  without the reporter's data, or into bounded fixes.
 - **Stable.** A manual run with `channel` `stable` (set `ref` to `master`) builds
   the same way and publishes `vX.Y.N` (marked **Latest**, never pruned), sharing the
   build-number sequence, so every channel's build is
@@ -443,7 +458,7 @@ Create it from **Agents → Templates → Nightly release captain** (or start em
 `node scripts/ci/release-notes.mjs` writes each release's body (and `title=Polyth X.Y.N · <Channel>` to `$GITHUB_OUTPUT`); the publish job fetches the source with full blob-less history for it.
 
 - **Range**: from the previous release of the channel (nightly → nightly; stable → stable; retired `-beta` releases are never a base; a channel's first release → the newest older release of any channel) up to the built commit. Each body ends with a hidden `<!-- polyth-release: channel=… source=<sha> -->` marker, which gives the next release its exact range. Without a usable marker it falls back to the previous release's publication date, then to the newest 50 commits.
-- **Sections**: ✨ New, 🚀 Improvements, 🐛 Fixes and a collapsed 🧰 Under the hood, from a leading bracketed type (`[Feature]`, `[Fix]`, `[Improvement]`, `[Performance]`, `[Docs]`, `[Chore]`… — this repository's own title style, stripped from the shown title), else the conventional-commit type (`feat`, `fix`, `perf`, `docs`, `ci`…), else the subject's leading verb (`Add`, `Fix`/`Stop`/`Keep`, `Document`/`Type`…, Ukrainian `Додай`/`Виправ…` too), else Improvements. A commit that touches only docs, tests, `.agents`, `.github`, Markdown or a lockfile (`package-lock.json`, `Cargo.lock`) is Under the hood. Each entry carries the first sentence of the commit body. Merge, WIP and `fixup!` commits and repeated subjects are dropped.
+- **Sections**: ✨ New, 🚀 Improvements, 🐛 Fixes and a collapsed 🧰 Under the hood, from a leading bracketed type (`[Feature]`, `[Fix]`, `[Improvement]`, `[Performance]`, `[Docs]`, `[Chore]`… — this repository's own title style, stripped from the shown title), else the conventional-commit type (`feat`, `fix`, `perf`, `docs`, `ci`…), else the subject's leading verb (`Add`, `Fix`/`Stop`/`Keep`, `Document`/`Type`…, Ukrainian `Додай`/`Виправ…` too), else Improvements. A commit that touches only docs, tests, `.agents`, `.github`, Markdown or a lockfile (`package-lock.json`, `Cargo.lock`) is Under the hood. Each entry carries the first sentence of the commit body's first prose paragraph; a squash-merged body's leading bullet list of commit subjects (the pull request's commit titles) and heading lines are navigation, not prose, so they are skipped, and an entry whose body has no prose paragraph carries no summary. A sentence longer than 220 characters is cut at a word boundary and ends in `…`, and a cut that would land on a connector word (`…, so…`, `… and…`) drops it too. Merge, WIP and `fixup!` commits and repeated subjects are dropped.
 - **Contributors**: every human author and `Co-authored-by` trailer, merged by email or exact name through the repository `.mailmap`, counted once per commit, most active first. A `users.noreply.github.com` address becomes an @-mention. Bot identities and AI agents (Claude, Cursor, Codex, OpenCode, Gemini, Copilot…) are skipped, including any trailer naming a model or harness, so a release credits people only. Add new contributor addresses to `.mailmap` to merge identities or get an @-mention.
 
 The builder only sees **pushed** source: `devel` for nightlies, `master` for stable runs. Push the source changes before relying on a new builder workflow: an older source has no `update-feed.mjs`, so its publish job fails.

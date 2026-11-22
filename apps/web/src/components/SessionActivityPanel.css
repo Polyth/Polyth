@@ -1,0 +1,131 @@
+/* The agent activity panel (SessionActivityPanel.tsx). Its material is the
+   canonical glass dock (.ui-glass-dock: Quiet Glass, the glass-off and
+   low-resource fallbacks, every interface look); this file owns only its
+   place above the composer and its inner layout. Geometry (left, width,
+   bottom, max-height) is written inline from the status line it stands on. */
+.session-activity-layer {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-popover);
+  pointer-events: none;
+}
+
+/* Everything above the status line: a press there closes the panel and goes
+   no further. The composer below the line is never covered. */
+.session-activity-scrim {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-start: 0;
+  height: var(--session-activity-line-top, 0px);
+  pointer-events: auto;
+  background: transparent;
+}
+
+/* Phone and tablet: the conversation above the line steps back a little, so
+   the panel, the line and the composer read as one piece. */
+@media (max-width: 960px) {
+  .session-activity-scrim {
+    background: color-mix(in srgb, var(--scrim) 22%, transparent);
+    /* It thins out towards the line instead of cutting across the screen. */
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - var(--space-6)), transparent);
+    mask-image: linear-gradient(to bottom, #000 calc(100% - var(--space-6)), transparent);
+  }
+}
+
+.session-activity-layer[data-state="closing"] :is(.session-activity-scrim, .session-activity-panel) { pointer-events: none; }
+/* Closed mid-arrangement, the blocks hold still while the panel folds. */
+.session-activity-layer[data-state="closing"] .session-activity-block { animation-play-state: paused; }
+
+.session-activity-panel {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  pointer-events: auto;
+  outline: none;
+}
+/* A sheet, not a dock: the glass dock's radius belongs to small floating
+   layers and runs half again rounder than the composer under the panel in the
+   classic style. The sheet radius is the composer's caliber and concentric
+   with the card tiles over the gutter (card + --space-3). */
+.session-activity-layer > .session-activity-panel { border-radius: var(--radius-sheet); }
+/* Focus lands on the panel itself only so assistive technology starts
+   inside it; its controls draw their own focus. */
+.session-activity-panel:focus { outline: none; }
+
+.session-activity-panel-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Title, then the sharing line under it; Close (Done while the blocks are
+   arranged) stays at the title's first line. */
+.session-activity-panel-head {
+  flex: none;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: var(--space-1);
+  padding: var(--space-3) var(--space-2) var(--space-2) var(--space-3);
+}
+
+.session-activity-title {
+  grid-column: 1;
+  display: -webkit-box;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding-block: calc((var(--control-h) - 1.25em) / 2) 0;
+  overflow: hidden;
+  font-size: var(--font-heading);
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: -.015em;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.session-activity-panel-actions {
+  grid-column: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: var(--control-h);
+}
+
+/* Entering or leaving the edit mode swaps Close and Done: the one that
+   arrives pops in (not on the panel's first open). */
+.session-activity-panel-head[data-switched] > .session-activity-panel-actions > * {
+  animation: session-activity-head-in var(--motion-normal) cubic-bezier(.3, 1.4, .6, 1) both;
+}
+@keyframes session-activity-head-in {
+  from { opacity: 0; scale: .7; }
+  to { opacity: 1; scale: 1; }
+}
+
+.session-activity-panel-head > .session-sharing-line {
+  grid-column: 1 / -1;
+  min-height: var(--control-h-sm);
+  margin-block-start: var(--space-1);
+}
+.session-activity-panel-head > .session-sharing-line > .ui-btn { margin-inline-start: auto; }
+
+/* The body scrolls; the head stays. */
+.session-activity-panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  padding-block-end: var(--space-1);
+}
+
+@media (pointer: coarse) {
+  .session-activity-panel-head { padding-inline-end: var(--space-1); }
+}

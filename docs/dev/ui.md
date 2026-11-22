@@ -350,7 +350,27 @@ the word (focus changes are not reported for it), so the sent text and the
 submit-time clear see the final draft. A composition the browser drops without
 `compositionend` (Chromium does so when script writes `value`) is closed by the
 next non-composition `input` or by blur, never left to ignore later typing.
-Enter during a composition still never sends. Text the platform writes without
+Enter during a composition still never sends.
+
+The composer keeps its editor focused through a tap on its controls
+(`data-keep-keyboard`), so nothing else ends the composition before a tap is
+released, and iOS gives a tap within 66px of a word still being composed to its
+text interaction even when the tap lands outside the field (WebKit
+`isNearMarkedText`). The rail sits one row under the end of the message, so
+with the last word still marked Send did nothing until a new line committed
+the word and moved it away. Two rules close that. A touch or pen that lands on
+any composer control outside a text field first calls `finishComposition()`
+(`commitComposingWordOnPress`, a capture handler on the composer root), so the
+word is ordinary text before the platform decides what the tap was. Send
+itself cancels `touchstart` and `touchend` through a listener that is not
+passive (`ownPrimaryTouch`; React's touch listeners are passive, and cancelling
+`pointerdown` does not withhold a touch from native gestures): the press is
+the page's, the release sends, and no click follows. A new control that must
+work beside the end of a draft acts on `click` and relies on the first rule;
+only a control that already acts on `pointerup` may cancel the touch.
+`composerSendTouchTarget.test.ts` covers both with a real touch and a CDP IME
+composition; the iOS classification itself is read from WebKit source and is
+not device-verified. Text the platform writes without
 any `input` event (dictation and some phone keyboards have) is committed at the
 field's next caret move, key release or focus, so Send's enabled state cannot
 stay behind a draft the field visibly holds.
@@ -625,6 +645,35 @@ on long-press, so it is their only route to the project menu (New
 conversation, Project settings…, Repositories…, Memory). New chat is a row
 action (and a toolbar or rail-header control); New conversation lives only in
 the menu.
+
+#### Server zones in the navigator
+
+In Polyth Desktop the navigator also lists the other servers the app can open
+(this computer, servers paired through Link, servers saved by address), each as
+a **zone**: a quiet heading (`--font-meta`, weight 600, `--muted`, the server's
+mark in the glyph column) over its projects as 34px rows on the navigator's own
+axes. While other zones are on show, the projects of the server on screen get
+the same heading with that server's name, so the list reads as one sequence of
+zones. A zone's projects are the ones that server listed the last time it was
+open ([desktop.md](desktop.md#server-zones)); nothing in the row says "live".
+
+- A project row moves the window to that server at that project. The clicked
+  row holds the hover wash and every zone row is disabled until the page
+  unloads.
+- The heading folds its zone; the chevron shows on hover and focus, and stays
+  while folded. A zone shows six projects, then *Show N more*.
+- A server not opened here yet shows one muted row, *Open it to see its
+  projects*; a revoked pairing shows *Access revoked. Pair again.*, which opens
+  the server list.
+- On another server's page the zones appear only after the person allowed that
+  server; before that there is one muted row, *Show my other servers here*,
+  and the app asks.
+- The project icon rail draws each zone after this server's icons: a hairline,
+  the server's mark (opens the server) and up to six project icons, whose
+  tooltips name project and server. Zone icons carry no arrange id.
+- Zones hide while the navigator is searching. They are absent in a browser
+  tab, in the phone layout (the phone apps, and a desktop window narrowed to it)
+  and in the workstation edition.
 
 Archived sessions are not listed inline in the navigator. When a project has any
 archived session (a loaded row, or one bounded `archived=true` summary probe), a
@@ -1642,7 +1691,7 @@ what cannot be defaulted:
   "Choose another server" (`DesktopServerExit`), since they show no shell. Settings →
   Users → your account offers "Set a password…" (`SecureAccountDialog`:
   password → recovery codes → Protect account); "Add user" opens the same
-  dialog first, then the add-user form.
+  dialog first, then the add-user flow (§3.6).
 - **A claim never strands the flow.** Desktop requests its claim only when the
   person continues, and replaces a claim the server refuses once with
   `requestSetupClaim({ fresh: true })`. A claim that expired while the codes
@@ -1666,6 +1715,66 @@ what cannot be defaulted:
 Mounted coverage is in `apps/web/test/setupScreen.test.ts` (with the real
 desktop claim broker, and the usage step); source guards are in
 `setupRecoveryUi.test.ts` and `authBootstrap.test.ts`.
+
+### 3.6 Settings → Users: adding and managing people
+
+The page serves an owner who has never heard of a Space role as well as one
+who adds people every week, so every step has a plain-language default and
+every default is one Enter away (`UsersPage.tsx`, `AddUserWizard.tsx`,
+`UsersGuide.tsx`, `UserDetail.tsx`; copy and presets in `usersModel.ts`;
+feature CSS in `settings/UsersPage.css`, list and detail rules in
+`styles.css`).
+
+- **Guide.** While the owner is alone, "How adding people works" (four steps
+  and, folded, what each role and Protected mode can do) *is* the People empty
+  state and carries Add user. Once anyone else is listed it leaves the page and
+  opens on demand from "How it works" beside Add user (`aria-expanded`). On a
+  phone both buttons drop under the section hint as one row, Add user filling it.
+- **Add user** is a three-step dialog in the new-project flow's grammar: step
+  label and X, title, hint, a progress hairline along the head's bottom edge
+  (half, full, then green), one scroll region and a pinned footer with the way
+  back first and the one primary last. On a desktop all steps share one
+  `min(600px, …)` frame; a phone gets the shell's bottom sheet, 16px gutters,
+  a split footer clearing the home indicator. A phone opens on the title (no
+  keyboard), a fine pointer on the Name field; each later step focuses its
+  title, step 2 its chosen option.
+  1. *Who*: Name, Login (follows the name until edited) and a **temporary
+     password already generated** and visible (`generatePassphrase`), with
+     copy and regenerate. The `settings.users.invite.notice` slot renders here.
+  2. *What they can do*: one preset in a radio well — Teammate (member),
+     Protected (member + Protected mode), Viewer, Admin, Account only — each
+     with its role as a quiet tag for people who think in roles. Owner is never
+     a preset. Without the right to add members only Account only and Protected
+     (account + guardrails) are offered. Create user runs
+     `createAccount` → guardrails (when Protected) → `grantSpaceMember`, in that
+     order: if Protected mode can't be set, no Space access is granted and the
+     done step says so.
+  3. *Done*: the login, the temporary password (shown for the last time),
+     the access and — when the page was opened through an address another
+     device can reach (`shareableAddress`: not loopback, not a desktop shell) —
+     the address, each with its own copy button; "Copy invitation" (and
+     "Share…" where `navigator.share` exists) produces a ready message that
+     ends the password without a full stop. At first sign-in the person must
+     choose their own password (`passwordChangeRequired`,
+     `PasswordChangeScreen.tsx`). Done returns to the list; "Fine-tune access"
+     opens the person's page.
+- **A person's page** keeps its header (back to All users, avatar, name,
+  status) above three tabs: *Access* (role in the current Space, Protected
+  mode), *Limits* (projects, assistants and their permissions, daily limits)
+  and *Account* (name, login, sign-in pause, password, private data, disable).
+  Limits and Protected mode are one draft across two tabs: their save bar sits
+  outside the tabs and appears only while there is something to save or a
+  result to report ("Saved" folds away after ~2.4s). On a phone the tabs share
+  the strip evenly and a stacked Select reads as a field (soft edge under the
+  borderless appearance).
+- **List rows** keep one name line: a long name ellipsizes beside its status
+  badges (Paused, Disabled, Managed, Protected); limits read as words in the
+  summary, which wraps to two lines before it cuts. Lists narrower than 340px
+  (`users-list` container) and your own card wrap the name instead.
+
+Mounted coverage is in `apps/web/test/addUserWizard.test.ts` and
+`usersPairedDevice.test.ts`; source and CSS guards in `usersSettings.test.ts`;
+presets, addresses and invitation copy in `usersModel.test.ts`.
 
 ## 4. The seams in detail
 
@@ -2122,7 +2231,10 @@ The command palette
   (an `agent.spawn` subagent, a workflow unit) is listed only inside its
   listed parent's disclosure, pinned parents included, and never takes a row
   or a page slot of its own (`isNavigatorRoot`, `apps/web/src/sessionTree.ts`).
-  A child whose parent has not loaded is withheld while
+  A fork carries `parentId` for lineage plus `forkOf`, and `forkOf` makes it a
+  chat of its own: its own navigator row, never a subagent row, never rolled
+  into the source's subagent counts or notifications. A child whose parent
+  has not loaded is withheld while
   `apps/web/src/sessionParents.ts` reads the parent once; it stands alone only
   when the parent is archived, filtered out or gone. Opening a child unfolds
   its ancestors and keeps its top ancestor in view. Search lists matching
@@ -3068,7 +3180,9 @@ the queue is re-read (`departedQueueIds`, `launchingId` in
 `queue/dispatched`) or a failed promotion brings the row back from the next
 read. A row that the server queued because the session's runtime could not be
 recovered (`delivery/fallback-queued` with `runtime-recovery-unavailable`,
-`reconciliation-blocked`/`-unknown`, `session-epoch-pending`/`-unknown`) does
+`reconciliation-blocked`/`-unknown`, `session-epoch-pending`/`-unknown`) is
+first retried by the send itself, which starts the same recover-on-use pass
+opening the chat runs; when that does not succeed the row does
 not drain by itself, so the list leads with a status row that says so and
 offers Resume, which promotes the oldest waiting row and retries the recovery
 (`queueStalledOnRecovery`). Reasons that clear alone (a running turn, a pending
@@ -3327,7 +3441,9 @@ carries the steps of an open block, warming toward the accent while the turn
 runs. Steps are separated by rhythm alone (34 px rows,
 `--hit-min` on touch). A finished step shows its duration but no tick, since
 the block's own mark says done; failures and running steps keep their glyph.
-The summary title (weight 500) never truncates; its counts give way first.
+The summary title (weight 500) gives way last: its counts shrink first,
+and only a title longer than the row ellipsizes — at the row's end,
+never under the chevron.
 A step's name never truncates either: on phones the name and its target share
 one text line, and only the line's end truncates, so the target gives way
 before the name instead of the two columns splitting the shortage
@@ -3338,6 +3454,23 @@ edges, the thread hangs from the mark's centre (`--activity-thread-x`), and step
 start on the title column. A look that draws a rule or a pill on the summary (Line,
 Air) sets `--activity-bleed: 0px` so its edge stands on the frame instead of resetting
 the summary's padding. `chatFrameGeometry.test.ts` measures this in every look.
+
+**One line, one truncation point.** Every one-line row in the transcript —
+the block summary (title and counts), a step (name and target), the live line,
+a task row (text and kind), and the detail rows an opened call shows (a changed
+file's path, an MCP result's title and meta, a delegated agent's name and
+state, its trail, a search hit, a thinking line) — truncates the same way:
+the row's primary words give way last (whatever pairs with them shrinks a
+thousand times harder), and the ellipsis lands at the end of the line, never
+a clip mid-row with the rest of the row still empty and never past the row's
+edge. Percentage caps and rigid siblings that would take the line away from
+the primary are the defect class here: a cap inside a shrink-to-fit box
+(`max-inline-size: 60%` on the ticker's name) resolved against the words it
+capped; a summary title with `flex: none; overflow: visible` ran past the row
+and clipped mid-glyph; a grid track that sizes to a nowrap row's min-content
+(`.execution-file-change` before `minmax(0, 1fr)`) let the whole row spill.
+`chatFrameGeometry.test.ts` sweeps the phone-width rows against their real
+containers.
 An open summary pins to the top while its steps scroll. It does so only where
 `container-type: scroll-state` exists, and it takes the readable glass only
 while `scroll-state(stuck: top)` holds. Elsewhere it stays in flow rather than
@@ -3351,8 +3484,14 @@ and Stop follows it.
 working turn (nothing follows it yet), its summary line names the step in
 progress — the step's glyph, its name and quiet preview, exactly as the folded
 step reads (`ActivityTicker.tsx`, `activityTicker.ts`). On a narrow line only
-the preview gives way; the name stays whole (a runaway tool name is capped at
-60% of the line). Each new step takes
+the preview gives way: the name stays whole while the line has room for it,
+and truncates (at its end, with the ellipsis) only once the preview is spent
+or the name alone is longer than the line. No percentage cap may stand on that
+name — inside the shrink-to-fit ticker it resolves against the words it caps,
+so `max-inline-size: 60%` cut a lone name to 60% of itself beside an empty
+row (Chromium; WebKitGTK read the same rule against the line).
+`chatFrameGeometry.test.ts` measures a live line with and without a preview at
+phone widths. Each new step takes
 the line's place in it: the old words rise away as the new ones rise in, in one
 grid cell, transform and opacity only, so the block never adds, removes or
 resizes a row while it works (the leaving words are out of flow, so a look whose
@@ -3451,7 +3590,12 @@ spans the composer's full width. A line reads `--composer-stack-row` tall; on to
 that opens something keeps its full target by reaching up into the timeline's
 bottom space (`--composer-stack-reach`). Their inks follow the wallpaper wash
 ([styles](styles.md), "Wallpaper wash"), so they keep 4.5:1 on any preset theme and
-wallpaper.
+wallpaper. The transcript reaches under the dock by `--composer-height` (so a tail
+card's shadow is not cut) and a scroll-driven mask hides that overlap whenever the
+reader is away from the tail, so history never shows through these plateless lines.
+The mask is geometry, not motion: it holds under the system's Reduce motion and
+Desktop's Reduce animations and low-resource mode, whose blanket `animation: none`
+must not drop it (`apps/web/test/composerPendingStack.test.ts`).
 
 The status (`AgentStatusDock`, also used for the spawn status and on the Agents
 page) reads mark · action, then the files tally and the elapsed time. The mark (the
@@ -3622,7 +3766,8 @@ own, rows drop the chevron (the row itself opens the chat) and a running row
 leaves the model out so its action and time stay readable. The agent's own
 logo wears its harness profile's color, as the composer's model chip does.
 The island is text on the canvas in every look, on the pending stack's grid. State
-comes from the canonical child projections (`parentId`) rolled up through
+comes from the canonical child projections (`parentId`, minus `forkOf` forks,
+which are chats of their own) rolled up through
 grandchildren (`apps/web/src/subagentActivity.ts`), the same source as the
 navigator's disclosure pill. Pinned in `apps/web/test/subagentBranch.test.ts`.
 
@@ -3643,36 +3788,92 @@ render; the raw call stays behind "View raw result". Native todo tools and
 `polyth_todo` share the `@polyth/todos` normalizer and the same checklist.
 
 **Session activity details:** the Chat settings row `chat.activityDetails`
-controls the reusable details surface opened from the agent activity dock and
-session status. `tabs` (the default) exposes Usage & cost and Plan & review as
-keyboard-accessible tabs with horizontal swipe switching only on tab content;
-`all` renders
-both panels together and lets the containing popover or sheet own vertical
-scrolling. The dock opens details on wide, compact, and phone layouts; the
-header opens the full session overview on compact and phone layouts.
-The details sheet gives the session title the full content width, with up to two
-lines at the largest size that fits between the title and label type roles.
-It refits when its width, title, UI font, or text preferences change; titles
-that still exceed two lines at the readable floor are clamped. The sheet keeps
-its accessible overview name and close target, without repeating overview,
-activity-detail, or status labels beside the title. Its height follows the
-visible viewport with a bottom safe-area reserve, and the body scrolls to
-Recent when needed.
+controls the reusable details surface (`SessionActivityDetails.tsx`). `tabs`
+(the default) exposes Usage and Plan as keyboard-accessible tabs with
+horizontal swipe switching only on tab content, and opens again on the tab
+that was open last; the Plan tab carries the plan's `done/total`. `all` renders
+every block in one view and lets the containing surface own vertical scrolling.
 
-Figures (context, usage) keep their tiles. The latest request and the task plan
-read as text, aligned with the tiles' copy. The plan's steps hang from the same
-`--borderless-edge` thread as chat activity, and the step in progress lights
-its stretch in accent. A failure is told by its mark, not by red words.
+**Agent activity panel** (`SessionActivityPanel.tsx`): the status line above the
+composer (`AgentStatusDock`, `aria-expanded`) opens the details on every shell.
+The conversation owns the panel (its host sits in the chat's composer dock), so
+it opens whether or not the header carries the session title, and it stays open
+when the line itself leaves as the turn ends (standing where the line was, on
+the composer). It stands on the status line
+(the line's own top, not its touch reach) with `--space-2` between them, never
+over the composer, is as wide as the composer card and tops out under the
+conversation's chrome (the phone's floating islands, the desktop header). Its
+material is the canonical glass dock (`.ui-glass-dock`), so glass-off,
+low-resource and every interface look apply, but its corner is the sheet's
+(`--radius-sheet`): the dock radius is for small floating layers and in the
+classic style runs half again rounder than the composer under the panel, while
+the sheet radius matches the composer and stays concentric with the card tiles
+over the `--space-3` gutter, at every Rounding value. It grows out of the line and folds
+back into it: Web Animations clip the panel to a strip lying exactly on the line
+and unfold it upwards (`--motion-window` / `--motion-window-ease`), and the close
+folds it back (`--motion-window-exit` / `--motion-window-exit-ease`); the
+content fades in after the shape and out before it. A change of mind mid-flight
+plays the running motion back from where it is. Reduced motion opens and closes
+it in place. It is non-modal: focus moves into it and returns to the line, a
+press outside closes it (the composer still takes its press; a press above the
+line goes no further, and on phone and tablet that area steps back under a
+light scrim that thins out towards the line), and Escape or Android Back close
+it through the shared Escape stack. The header title opens the session overview
+instead (`sessionOverviewMode`: a popover opened from the line closes it).
 
-On wide desktop the overview popover is as wide as the chat column of the
-window it opens from: the conversation holding the opener (the status dock),
-else the chat under the header title. `DesktopSessionStatus` measures the
-timeline's content box into `--session-status-column`; 360px is the floor and
-the width with no chat on screen. Sections reflow by container width, never
-the viewport: from 540px the figures go four across, from 720px the context
-card stands beside them, and from 560px the sharing line joins the title row.
-The request and the plan stay one column, so a short request never leaves a
-hole beside a long plan.
+The panel's head is the title (up to two lines at the largest size that fits
+between the title and label type roles, refitting on width, title, font and
+text-preference changes), Close (Done while the blocks are arranged) and the
+sharing line. There is no edit button. Recent sessions and other chats'
+requests belong to the overview the title opens, not to this run's details.
+
+Blocks are the person's to arrange (`sessionActivityLayout.ts`, per browser,
+`polyth.sessionActivityLayout.v1`; never session history), the iOS Home Screen
+way, like the phone Workspace ("Phone Workspace editor"): holding any block
+still for `ARRANGE_ACTIVATE_MS` (420 ms, any pointer; a move past the slop is
+a scroll) sinks it slightly while the hold builds (`data-arrange-pressing`,
+`scale`), then turns editing on and lifts it under the finger, so the same
+press drags it (`workspaceArrange.ts` `activate`); holding an empty spot between
+the blocks turns editing on without lifting anything. Keyboard users reach a
+visually hidden *Arrange blocks* button after the blocks (focus lands on the
+first block), and arrow keys and Home/End move a focused block. While editing
+every block jiggles with a stable per-block phase (`rotate` only, a row less
+than a tile; `transform` stays free for the engine's glides and the lifted
+copy), takes no taps and is drawn as a card (the request and the plan get one
+behind their text); figures this agent does not report show as "—" so the
+order is complete; a still touch lifts a block, a vertical swipe scrolls. The
+held block's slot travels as a faint hole, and the copy rises (scale and a
+deep shadow; a row rises less) and flies home when set down. A dock floats
+over the bottom edge (sticky, nearly opaque rather than blurred) with the hint
+and *Reset to default* (disabled while the order is the default); the head's
+Close pops into Done. The surface keeps its size meanwhile: the scroller's
+height is pinned when the mode starts and released when it ends, and the
+tile columns are counted from what shows outside editing, so neither the
+panel's edge nor any block resizes; what no longer fits scrolls. Done, Escape
+(before it can close the panel), a tap beside the blocks or closing the panel
+ends the mode, with a tap of haptic feedback; the figures only editing shows
+fade where they stood while the rest glide together. The order is one list for
+both tabs: arranging one tab keeps the other tab's blocks in their places. A
+block the stored record predates joins right after its default predecessor.
+Standing alone (the desktop session overview), the details put Done in their
+dock.
+
+Figures keep their tiles: the context card (a row: label, used/limit, a pill
+with the percent, the level-tinted meter, the model) and two tiles to a line.
+Outside the edit mode a figure the agent does not report is not a tile of "—":
+one line after the figures names them (`Not reported: Tokens · Cost …`). The
+latest request and the task plan read as text, aligned with the tiles' copy; the
+plan's steps hang from the same `--borderless-edge` thread as chat activity, the
+step in progress lights its stretch in accent, and a failure is told by its
+mark, not by red words. With no plan the Plan tab says so. Blocks reflow by
+container width, never the viewport: from 540px figures go four across (fewer
+when fewer show, so a line never ends empty) and from 900px a full set goes
+eight across; rows always fill their line.
+
+On wide desktop the title's overview popover is as wide as the chat column of
+the window it opens from. `DesktopSessionStatus` measures the timeline's
+content box into `--session-status-column`; 360px is the floor and the width
+with no chat on screen; from 560px the sharing line joins the title row.
 
 The surface reads the live render model for context, token usage, separate cache
 reads/writes, cost, session duration, and task-plan
@@ -4487,6 +4688,52 @@ that opens the navigator). Rules, pinned by `apps/web/test/packagePages.test.ts`
   chat row current.
 - `host.store.getSnapshot().activePage` reports the open page; disposing a
   package's registration closes its open page.
+
+#### What waits for the person on an agent's page
+
+An agent's page opens on its conversation, and above the conversation it
+lists what waits for the person, once, whatever report asked for it
+(`packages/agents/widgets/AgentAttention.tsx`; the model is
+`agentAttention` in `widgets/agentFailure.ts`, DOM-free and tested in
+`packages/agents/test/agentAttention.test.ts`). Nothing waits: nothing is
+drawn. Most urgent first:
+
+- **Why it no longer wakes.** A failure streak or the daily limit stopped
+  the agent: the line says so, names how its last run ended, and carries
+  Resume (the limit lifts by itself and has no action). The header's status
+  stays the one word "Stopped"; the explanation and its action sit together.
+- **What stopped its newest run that only the person can clear.** A refused
+  model route (the provider's own message, with Harness settings for the
+  route that served the run) or an approval that waited past its timeout.
+  Only the newest finished run speaks; a later run that finished, or one in
+  progress, clears it. A run that was merely cut is not listed: it continues
+  itself.
+- **What its reports asked for.** Every open `Needs you` request across the
+  journal (`openNeeds`): the newest wording, since when, a web link when the
+  report gave one, and Done. Done settles the request wherever it was asked;
+  the agent closes one itself with a `Resolved:` line.
+
+The list shows three lines (two on a phone) and folds the rest behind
+"N more". It is type on the page with a label, never a card or a banner, and
+all lines share one grid so dates and actions keep their columns; on a narrow
+page the action sits beside the words and the date under them.
+
+Under a report, `Needs you` is only the record of what that report asked
+("Asked you", settled ones struck through): the to-do lives above, never in
+two places. Requests that wait inside a run in progress (approvals,
+questions) are answered at the composer's dock, not here.
+
+A run that did not finish never reads "The run failed" with its first
+passing line presented as a report. Its headline says what happened
+(`failureTitle`: cut off, the model refused, could not start, stopped on an
+unanswered request, stopped by you; a record kept before causes existed says
+only "Stopped before it finished"), the line under it why (`failureDetail`;
+a provider's JSON error is reduced to its message and source by
+`plainError`), then "Where it was" with the agent's last words and its step
+count, and, on the newest run of an agent that will wake again, when it
+starts from what this run left. Only the row's mark is red; the words stay
+in the page's ink. A report reached after a continuation or after the
+person redirected the run says so beside its time.
 
 #### Split sessions view (two chats side by side)
 
@@ -5727,6 +5974,11 @@ its revealed chats.
   use it for action failures instead of inventing a second phrasing. It strips
   JSON envelopes and proxy/gateway HTML bodies (`errorBodyText`) so raw markup
   never reaches an error surface.
+- `host.errors.recent?()` — the tab's last ten error notices (kind `error`
+  only), oldest first, as `{ time, text }`: the notice's copyable report
+  (`UiErrorAction.report`, set by `copyErrorAction`) or else its words. Only
+  for a report the person reviews before sending (the nightly bug-report sheet);
+  never send it anywhere silently.
 - `host.errors.show(message, action?, { kind? })` — the host's one transient
   error (`setUiError(message, action, dedupeKey?, kind?)`). It is drawn as a
   notification of the stack below (`kind` `error` by default; `warning`/`info`

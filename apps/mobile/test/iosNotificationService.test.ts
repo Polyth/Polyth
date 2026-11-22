@@ -154,7 +154,11 @@ test("a project of an unknown shape is refused, not guessed", async () => {
 test("the entitlements keep the app's own keychain group first", async () => {
   const app = await readFile(join(iosApp, "App/App.entitlements"), "utf8");
   const groups = [...app.matchAll(/<string>(\$\(AppIdentifierPrefix\)[^<]+)<\/string>/g)].map((m) => m[1]);
-  assert.deepEqual(groups, ["$(AppIdentifierPrefix)com.polyth.mobile", "$(AppIdentifierPrefix)com.polyth.mobile.push-content"]);
+  assert.deepEqual(groups, [
+    "$(AppIdentifierPrefix)com.polyth.mobile",
+    "$(AppIdentifierPrefix)com.polyth.mobile.push-content",
+    "$(AppIdentifierPrefix)com.polyth.mobile.live-activity",
+  ]);
   const extension = await readFile(join(iosApp, "NotificationService/NotificationService.entitlements"), "utf8");
   assert.match(extension, /\$\(AppIdentifierPrefix\)com\.polyth\.mobile\.push-content/);
   for (const plist of ["App/Info.plist", "NotificationService/Info.plist"]) {

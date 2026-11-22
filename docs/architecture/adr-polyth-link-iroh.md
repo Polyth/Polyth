@@ -1,7 +1,7 @@
 # Why Polyth Link uses Iroh
 
 Polyth Link needs a stable endpoint identity, authenticated peers, NAT
-traversal, and a direct path with encrypted relay fallback. Iroh 1.1.0
+traversal, and a direct path with encrypted relay fallback. Iroh 1.5.0
 already provides those properties on QUIC, with official bindings for
 Node, Swift, and Kotlin.
 
@@ -12,7 +12,7 @@ blocks terminal input behind file transfer.
 
 Polyth Link therefore:
 
-- pins `iroh = "=1.1.0"`;
+- pins `iroh = "=1.5.0"`;
 - uses Iroh EndpointIds as host and device identities;
 - does not add a second encryption layer;
 - does not implement a parallel WSS relay protocol in v1;

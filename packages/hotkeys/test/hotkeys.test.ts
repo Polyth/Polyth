@@ -33,6 +33,8 @@ test("defaults match the current shell bindings", () => {
   assert.equal(DEFAULT_KEYMAP.viewTerminal, "mod+`");
   assert.equal(DEFAULT_KEYMAP.dictate, "mod+shift+d");
   assert.equal(DEFAULT_KEYMAP.voiceMode, "mod+shift+h");
+  assert.equal(DEFAULT_KEYMAP.reportBug, "mod+shift+b");
+  assert.equal(matchAction(DEFAULT_KEYMAP, ev("B", { meta: true, shift: true })), "reportBug");
   assert.ok(HOTKEY_ACTIONS.every((action) => action.pluginName.length > 0));
 });
 

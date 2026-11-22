@@ -8,9 +8,11 @@ import { dirname, join } from "node:path";
 import type {
   AgentCapabilityContribution,
   AgentCapabilityDescriptor,
+  AgentSecretRequest,
   AgentToolAuthorizationGrant,
   JsonObject,
   RouteHandler,
+  SecretResolvedData,
   SpaceStorage,
   ToolExecutor,
 } from "@polyth/contracts";
@@ -266,6 +268,14 @@ export function createAgentToolBridge(opts: {
   outputCache?: SessionOutputCache;
   /** The person the session acts for when the call runs (its `actor`). */
   actorOf?: (sessionId: string) => Promise<string | undefined>;
+  /** Opens the protected Credential Vault form in the owning session and
+   *  waits for the person; see `ToolExecutionContext.requestSecret`. */
+  requestSecret?: (
+    sessionId: string,
+    request: AgentSecretRequest,
+    tool: { name: string; owner: string },
+    signal: AbortSignal,
+  ) => Promise<SecretResolvedData>;
 }): AgentToolBridge {
   const grants = new Map<string, AgentToolGrant>();
   const grantFor = (token: string | undefined): AgentToolGrant | undefined => {
@@ -362,6 +372,10 @@ export function createAgentToolBridge(opts: {
         cwd: liveGrant.cwd,
         spaceId: liveGrant.spaceId,
         ...(actorUserId ? { actorUserId } : {}),
+        // Only a call a canonical session owns can show that session a form.
+        ...(sessionId && opts.requestSecret
+          ? { requestSecret: (request: AgentSecretRequest) => opts.requestSecret!(sessionId, request, { name: liveDescriptor.name, owner: liveDescriptor.owner }, signal) }
+          : {}),
       });
       return { status: 200, body: pageToolOutput(opts.outputCache, sessionId, liveDescriptor, result) };
     } catch (error) {

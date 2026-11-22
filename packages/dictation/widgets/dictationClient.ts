@@ -240,6 +240,9 @@ export async function startStreamingDictation(opts: {
       onEnded() {
         fail(new DictationError("mic_denied", tr("dictation.error.microphoneLost")));
       },
+      onStalled() {
+        fail(new DictationError("audio_format_error", tr("dictation.error.noAudio")));
+      },
     });
   } catch (error) {
     active = false;

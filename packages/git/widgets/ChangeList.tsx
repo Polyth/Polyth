@@ -7,6 +7,7 @@ import type { ResourceRef, WebResourceLinkProps, WebUiComponent } from "@polyth/
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import {
   ChevronRightIcon,
+  FileIcon,
   FolderIcon,
   FolderOpenIcon,
   Icon as UiIcon,
@@ -33,6 +34,7 @@ export function fileStatKey(file: GitFileEntry): string {
 }
 
 interface RowHandlers {
+  /** The always-visible open-file icon needs the host link component. */
   selected: { path: string; staged: boolean } | null;
   busy: boolean;
   fileStats: Record<string, DiffLineStats>;
@@ -80,26 +82,22 @@ export function GitFileRow({ file, selected, busy, stats, lineStats = "numbers",
   const statusChip = fileStatusChip(file);
   return (
     <div className={`git-file-row ${selected ? "selected" : ""}`} data-tree={depth === undefined ? undefined : "true"} style={style}>
-      {ResourceLink && resource ? (
-        <div className="git-file-main" role="button" tabIndex={0} draggable={Boolean(onDragStart)} onDragStart={onDragStart} aria-current={selected ? "true" : undefined} onClick={onOpen} onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(); }
-        }} title={title}>
-          {statusChip}
-          <span className="git-file-identity">
-            <ResourceLink resource={resource} mode="compact">{identity.name}</ResourceLink>
-            {directory && <span className="git-file-directory">{directory}</span>}
-          </span>
-        </div>
-      ) : (
-        <button type="button" className="git-file-main" draggable={Boolean(onDragStart)} onDragStart={onDragStart} aria-current={selected ? "true" : undefined} onClick={onOpen} title={title}>
-          {statusChip}
-          <span className="git-file-identity">
-            <span className="git-file-name">{identity.name}</span>
-            {directory && <span className="git-file-directory">{directory}</span>}
-          </span>
-        </button>
-      )}
+      <button type="button" className="git-file-main" draggable={Boolean(onDragStart)} onDragStart={onDragStart} aria-current={selected ? "true" : undefined} onClick={onOpen} title={title}>
+        {statusChip}
+        <span className="git-file-identity">
+          <span className="git-file-name">{identity.name}</span>
+          {directory && <span className="git-file-directory">{directory}</span>}
+        </span>
+      </button>
       {stats && <LineStats stats={stats} mode={lineStats} />}
+      {ResourceLink && resource && (
+        <span className="git-file-open">
+          <ResourceLink resource={resource} mode="compact">
+            <UiIcon icon={FileIcon} size="sm" aria-hidden="true" />
+            <span className="sr-only">{`${tr("resourcelink.openFile")} · ${file.path}`}</span>
+          </ResourceLink>
+        </span>
+      )}
       <span className="git-file-actions">
         {onDiscard && !file.staged && (
           <IconButton

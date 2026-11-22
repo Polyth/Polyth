@@ -12,7 +12,7 @@ import { fmtDuration } from "../format.ts";
 import { tr } from "../i18n/index.ts";
 import { liveActionOf } from "../liveAction.ts";
 import type { resolveSessionActivity } from "../sessionActivity.ts";
-import { toggleSessionStatusPopover } from "../sessionStatusPopover.ts";
+import { toggleSessionStatusPopover, useSessionStatusPopover } from "../sessionStatusPopover.ts";
 import type { RenderModel } from "../reduce.ts";
 import { useSpaces } from "../spaces.ts";
 import { useStore } from "../store.ts";
@@ -34,6 +34,7 @@ export default function AgentLiveStatusDock({ activity, model, files, additions,
   const projectId = useStore((state) => state.activeProjectId);
   const harnessColors = useHarnessColors(projectId ?? undefined, useSpaces().activeSpaceId ?? "");
   const [now, setNow] = useState(() => Date.now());
+  const details = useSessionStatusPopover();
 
   useEffect(() => {
     setNow(Date.now());
@@ -79,6 +80,7 @@ export default function AgentLiveStatusDock({ activity, model, files, additions,
         {...(deletions !== undefined ? { deletions } : {})}
         {...(diffLabel !== undefined ? { diffLabel } : {})}
         label={tr("pendingchangesbar.openActiveRunDetailsValue", { action })}
+        expanded={details.open && details.source === "dock"}
         onClick={(event) => toggleSessionStatusPopover(event.currentTarget, "dock")}
       />
     </SubagentBranchIsland>

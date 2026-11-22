@@ -314,7 +314,7 @@ function firstListedLaneSession(profileId: string): string | null {
   if (projectId === null) return null;
   const candidates = state.sessions
     .filter((session) => session.projectId === projectId
-      && !session.parentId
+      && (!session.parentId || session.forkOf)
       && session.status !== "archived"
       && laneOfSession(session.id) === profileId)
     .sort(compareSessionNavigation);

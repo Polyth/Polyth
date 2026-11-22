@@ -60,6 +60,7 @@ import {
   SaveBar,
   Section,
   Seg,
+  SettingsTabs,
   Toggle,
   type SaveStatusState,
 } from "./parts.tsx";
@@ -98,6 +99,8 @@ import { isReauthCancelled, type WithReauth } from "./ownerReauth.tsx";
 import { formatNumber, getLocale, tr } from "../../i18n/index.ts";
 
 type AccessChoice = SpaceRole | "none";
+/** Who they are to the Space, what they can use, and their sign-in. */
+type DetailTab = "access" | "limits" | "account";
 
 const EXTRA_CHOICES = extraGrantChoices(GUARDRAIL_GRANTABLE, GUARDRAIL_DEFAULT_GRANTS);
 const SAFE_EXTRAS = EXTRA_CHOICES.filter((capability) => !isRiskyGrant(capability));
@@ -155,8 +158,15 @@ export default function UserDetail({ account, name, spaceAccess, withReauth, onB
   const [nameDraft, setNameDraft] = useState(name);
   const [loginDraft, setLoginDraft] = useState(account.login ?? "");
   const [passwordOpen, setPasswordOpen] = useState(false);
+  const [tab, setTab] = useState<DetailTab>("access");
 
   useEffect(() => { setNameDraft(name); }, [name]);
+  // "Saved" is a moment, not a state: the bar folds away once it has been read.
+  useEffect(() => {
+    if (saveStatus !== "saved") return;
+    const timer = setTimeout(() => setSaveStatus("idle"), 2400);
+    return () => clearTimeout(timer);
+  }, [saveStatus]);
   useEffect(() => { setLoginDraft(account.login ?? ""); }, [account.login]);
 
   const load = useCallback(async () => {
@@ -447,401 +457,427 @@ export default function UserDetail({ account, name, spaceAccess, withReauth, onB
         <Notice tone={notice.tone} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}</Notice>
       )}
 
-      <Section title={tr("settings.users.profile")}>
-        {account.managed ? (
-          <ReadonlyRow label={tr("settings.users.name")} value={name} hint={tr("settings.users.nameManagedHint")} />
-        ) : (
-          <Row label={tr("settings.users.name")} hint={tr("settings.users.nameHint")}>
-            <span className="user-detail-inline">
-              <TextInput
-                uiSize="sm"
-                value={nameDraft}
-                maxLength={ACCOUNT_NAME_MAX}
-                aria-label={tr("settings.users.name")}
-                disabled={busy || isDisabled}
-                onChange={(event) => setNameDraft(event.target.value)}
-                onKeyDown={(event) => { if (isImeComposing(event)) return; if (event.key === "Enter") void rename(); }}
-              />
-              {nameDraft.trim() !== name && nameDraft.trim() && (
-                <Button size="sm" variant="quiet" disabled={busy} onClick={() => void rename()}>{tr("common.rename")}</Button>
-              )}
-            </span>
-          </Row>
-        )}
-        {account.login && (account.managed ? (
-          <ReadonlyRow label={tr("settings.users.login")} value={`@${account.login}`} mono />
-        ) : (
-          <Row label={tr("settings.users.login")} hint={tr(loginInvalid ? "settings.users.loginInvalid" : "settings.users.loginChangeHint")}>
-            <span className="user-detail-inline">
-              <TextInput
-                uiSize="sm"
-                value={loginDraft}
-                maxLength={ACCOUNT_LOGIN_MAX}
-                autoComplete="off"
-                autoCapitalize="off"
-                spellCheck={false}
-                aria-label={tr("settings.users.login")}
-                aria-invalid={loginInvalid || undefined}
-                disabled={busy || isDisabled}
-                onChange={(event) => setLoginDraft(event.target.value)}
-                onKeyDown={(event) => { if (isImeComposing(event)) return; if (event.key === "Enter") void changeLogin(); }}
-              />
-              {loginChanged && (
-                <Button size="sm" variant="quiet" disabled={busy || loginInvalid} onClick={() => void changeLogin()}>{tr("common.save")}</Button>
-              )}
-            </span>
-          </Row>
-        ))}
-        {isDisabled ? (
-          <ReadonlyRow label={tr("settings.users.signIn")} value={<Badge tone="danger">{tr("settings.users.disabled")}</Badge>} hint={tr("settings.users.signInDisabledHint")} />
-        ) : !account.managed ? (
-          <Row
-            label={tr("settings.users.canSignIn")}
-            hint={isSuspended
-              ? tr("settings.users.signInPausedHint")
-              : tr("settings.users.signInHint")}
-          >
-            <Toggle on={!isSuspended} disabled={busy} label={tr("settings.users.canSignIn")} onChange={(on) => void changeSignIn(on)} />
-          </Row>
-        ) : null}
-      </Section>
-
-      <Section
-        title={spaceAccess ? tr("settings.users.accessTo", { space: spaceAccess.name }) : tr("settings.users.spaceAccess")}
-        hint={spaceAccess ? tr("settings.users.spaceAccessHint") : tr("settings.users.spaceUnavailable")}
+      <SettingsTabs
+        label={tr("settings.users.tabsLabel", { name })}
+        value={tab}
+        onChange={(id) => setTab(id as DetailTab)}
+        tabs={[
+          { id: "access", label: tr("settings.users.tabAccess") },
+          { id: "limits", label: tr("settings.users.tabLimits") },
+          { id: "account", label: tr("settings.users.tabAccount") },
+        ]}
       >
-        {spaceAccess && (
-          <Row
-            label={tr("settings.users.role")}
-            hint={accessValue === "none" ? tr("settings.users.noAccessDetail") : roleText(accessValue).detail}
-          >
-            {canEditMembership ? (
-              <Select
-                label={tr("settings.users.roleFor", { name })}
-                ariaLabel={tr("settings.users.roleFor", { name })}
-                value={accessValue}
-                disabled={busy}
-                options={[
-                  { value: "none", label: tr("settings.users.noAccess"), detail: tr("settings.users.noAccessDetail") },
-                  ...(["viewer", "member", "admin", "owner"] as const)
-                    .filter((role) => role !== "owner" || spaceAccess.role === "owner")
-                    .map((role) => ({ value: role, ...roleText(role) })),
-                ]}
-                onChange={(value) => { if (value === "none" || isSpaceRole(value)) void changeAccess(value); }}
-              />
-            ) : (
-              <Badge tone={accessValue === "none" ? "neutral" : "info"}>
-                {accessValue === "none" ? tr("settings.users.noAccess") : roleText(accessValue).label}
-              </Badge>
-            )}
-          </Row>
-        )}
-        {guardDto?.guardrails && (accessValue === "admin" || accessValue === "owner") && (
-          <p className="user-detail-note">{tr("settings.users.protectedAdminNote")}</p>
-        )}
-      </Section>
-
-      {!limitsDraft || !guardDraft ? (
-        <EmptyState compact busy title={tr("settings.users.loadingLimits")} />
-      ) : (
-        <>
-          <Section
-            title={tr("settings.users.projects")}
-            hint={tr("settings.users.projectsHint")}
-          >
-            <Row label={tr("settings.users.canUse")}>
-              <Seg
-                label={tr("settings.users.projectsScopeLabel")}
-                value={limitsDraft.projectScope}
-                disabled={busy}
-                options={[["all", tr("settings.users.allProjects")], ["selected", tr("settings.users.onlySelected")]]}
-                onChange={(projectScope) => updateLimits({ projectScope })}
-              />
-            </Row>
-            {limitsDraft.projectScope === "selected" && (
-              projects === null ? (
-                <EmptyState compact busy title={tr("settings.users.loadingProjects")} />
-              ) : projects.length === 0 && otherProjectIds.length === 0 ? (
-                <EmptyState compact icon="folder" title={tr("settings.users.noProjects")} body={tr("settings.users.noProjectsBody")} />
-              ) : (
-                <div className="user-detail-choices">
-                  <CheckGroup
-                    label={tr("settings.users.allowedProjects")}
-                    columns={2}
-                    disabled={busy}
-                    value={limitsDraft.projects.filter((id) => projects.some((project) => project.id === id))}
-                    options={projects.map((project) => ({ id: project.id, label: project.name, description: project.path }))}
-                    onChange={(next) => updateLimits({ projects: [...next, ...otherProjectIds] })}
-                  />
-                  {otherProjectIds.length > 0 && (
-                    <p className="user-detail-note">
-                      {tr(
-                        new Intl.PluralRules(getLocale()).select(otherProjectIds.length) === "one"
-                          ? "settings.users.otherSpaceProjectsOne"
-                          : "settings.users.otherSpaceProjectsOther",
-                        { count: otherProjectIds.length },
-                      )}{" "}
-                      <Button size="sm" variant="ghost" disabled={busy} onClick={() => updateLimits({ projects: limitsDraft.projects.filter((id) => !otherProjectIds.includes(id)) })}>
-                        {tr("common.remove")}
-                      </Button>
-                    </p>
+        {tab === "access" && (
+          <>
+            <Section
+              title={spaceAccess ? tr("settings.users.accessTo", { space: spaceAccess.name }) : tr("settings.users.spaceAccess")}
+              hint={spaceAccess ? tr("settings.users.spaceAccessHint") : tr("settings.users.spaceUnavailable")}
+            >
+              {spaceAccess && (
+                <Row
+                  label={tr("settings.users.role")}
+                  hint={accessValue === "none" ? tr("settings.users.noAccessDetail") : roleText(accessValue).detail}
+                >
+                  {canEditMembership ? (
+                    <Select
+                      label={tr("settings.users.roleFor", { name })}
+                      ariaLabel={tr("settings.users.roleFor", { name })}
+                      value={accessValue}
+                      disabled={busy}
+                      options={[
+                        { value: "none", label: tr("settings.users.noAccess"), detail: tr("settings.users.noAccessDetail") },
+                        ...(["viewer", "member", "admin", "owner"] as const)
+                          .filter((role) => role !== "owner" || spaceAccess.role === "owner")
+                          .map((role) => ({ value: role, ...roleText(role) })),
+                      ]}
+                      onChange={(value) => { if (value === "none" || isSpaceRole(value)) void changeAccess(value); }}
+                    />
+                  ) : (
+                    <Badge tone={accessValue === "none" ? "neutral" : "info"}>
+                      {accessValue === "none" ? tr("settings.users.noAccess") : roleText(accessValue).label}
+                    </Badge>
                   )}
-                  <p className="user-detail-note">{tr("settings.users.projectsLockedNote")}</p>
-                </div>
-              )
-            )}
-          </Section>
-
-          <Section title={tr("settings.users.assistants")} hint={tr("settings.users.assistantsHint")}>
-            {permissionsDto && (
-              <Row
-                label={tr("settings.users.canManageAssistants")}
-                hint={guardDto?.guardrails
-                  ? tr("settings.users.notInProtectedMode")
-                  : tr("settings.users.canManageAssistantsHint")}
-              >
-                <Toggle
-                  on={canManageHarnesses && !guardDto?.guardrails}
-                  disabled={busy || isDisabled || !!guardDto?.guardrails}
-                  label={tr("settings.users.canManageAssistants")}
-                  onChange={(on) => void changeHarnessManagement(on)}
-                />
-              </Row>
-            )}
-            {permissionsDto && (
-              <Row
-                label={tr("settings.users.canAddOwnHarness")}
-                hint={guardDto?.guardrails
-                  ? tr("settings.users.notInProtectedMode")
-                  : canManageHarnesses
-                    ? tr("settings.users.includedWithManage")
-                    : tr("settings.users.canAddOwnHarnessHint")}
-              >
-                <Toggle
-                  on={(canAddOwnHarnesses || canManageHarnesses) && !guardDto?.guardrails}
-                  disabled={busy || isDisabled || !!guardDto?.guardrails || canManageHarnesses}
-                  label={tr("settings.users.canAddOwnHarness")}
-                  onChange={(on) => void changeOwnHarnessAccounts(on)}
-                />
-              </Row>
-            )}
-            <Row label={tr("settings.users.canUse")}>
-              <Seg
-                label={tr("settings.users.assistantsScopeLabel")}
-                value={limitsDraft.harnessScope}
-                disabled={busy}
-                options={[["all", tr("settings.users.allAssistants")], ["selected", tr("settings.users.onlySelected")]]}
-                onChange={(harnessScope) => updateLimits({ harnessScope })}
-              />
-            </Row>
-            {limitsDraft.harnessScope === "selected" && (
-              harnesses === null ? (
-                <EmptyState compact busy title={tr("settings.users.loadingAssistants")} />
-              ) : harnessChoices.length === 0 ? (
-                <EmptyState compact icon="terminal" title={tr("settings.users.noAssistants")} body={tr("settings.users.noAssistantsBody")} />
-              ) : (
-                <div className="user-detail-choices">
-                  <ul className="user-choice-list" aria-label={tr("settings.users.allowedAssistants")}>
-                    {harnessChoices.map((harness) => {
-                      const index = limitsDraft.harnesses.indexOf(harness.id);
-                      return (
-                        <li key={harness.id} className="user-choice">
-                          <Checkbox
-                            checked={index >= 0}
-                            disabled={busy}
-                            label={harness.name}
-                            onChange={(on) => updateLimits({ harnesses: toggleId(limitsDraft.harnesses, harness.id, on) })}
-                          />
-                          {index === 0 && <Badge tone="accent">{tr("settings.users.default")}</Badge>}
-                          {index > 0 && (
-                            <Button size="sm" variant="ghost" disabled={busy} onClick={() => updateLimits({ harnesses: makeFirst(limitsDraft.harnesses, harness.id) })}>
-                              {tr("settings.users.makeDefault")}
-                            </Button>
-                          )}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                  <p className="user-detail-note">{tr("settings.users.assistantsDefaultNote")}</p>
-                </div>
-              )
-            )}
-          </Section>
-
-          <Section title={tr("settings.users.dailyLimits")} hint={tr("settings.users.dailyLimitsHint")}>
-            <LimitRow
-              label={tr("settings.users.messagesPerDay")}
-              toggleLabel={tr("settings.users.limitMessages")}
-              hint={limitsDto ? usageLine(limitsDto.usage, limitsDto.limits?.messagesPerDay ?? null, "message", "messages") : undefined}
-              value={limitsDraft.messagesPerDay}
-              fallback={DEFAULT_MESSAGES_PER_DAY}
-              disabled={busy}
-              onChange={(messagesPerDay) => updateLimits({ messagesPerDay })}
-            />
-            <LimitRow
-              label={tr("settings.users.chatsPerDay")}
-              toggleLabel={tr("settings.users.limitChats")}
-              hint={limitsDto ? usageLine(limitsDto.usage, limitsDto.limits?.chatsPerDay ?? null, "chat", "chats") : undefined}
-              value={limitsDraft.chatsPerDay}
-              fallback={DEFAULT_CHATS_PER_DAY}
-              disabled={busy}
-              onChange={(chatsPerDay) => updateLimits({ chatsPerDay })}
-            />
-            {limitsDto && !limitsDto.limits && (
-              <p className="user-detail-note">{tr("settings.users.usageCountedNote")}</p>
-            )}
-          </Section>
-
-          <Section title={tr("settings.users.protectedMode")} hint={tr("settings.users.protectedModeHint")}>
-            <Row label={tr("settings.users.protectedMode")} hint={guardDraft.enabled ? tr("settings.users.protectedOn") : tr("settings.users.protectedOff")}>
-              <Toggle on={guardDraft.enabled} disabled={busy} label={tr("settings.users.protectedMode")} onChange={(enabled) => updateGuard({ enabled })} />
-            </Row>
-            {guardDraft.enabled && (
-              <>
-                <Row label={tr("settings.users.agentActions")} hint={approvalsHint[guardDraft.approvals]}>
-                  <Seg
-                    label={tr("settings.users.whoApproves")}
-                    value={guardDraft.approvals}
-                    disabled={busy}
-                    options={[["none", tr("settings.users.approvalsNone")], ["once", tr("settings.users.approvalsOnce")]]}
-                    onChange={(approvals) => updateGuard({ approvals })}
-                  />
                 </Row>
-                <Row
-                  label={tr("settings.users.models")}
-                  layout="stacked"
-                  hint={guardDraft.models.length === 0
-                    ? tr("settings.users.modelsNoneHint")
-                    : tr("settings.users.modelsHint")}
-                >
-                  <div className="user-detail-choices">
-                    {guardDraft.models.length > 0 && (
-                      <ol className="user-choice-list">
-                        {guardDraft.models.map((model, index) => (
-                          <li key={`${model.harnessId}/${model.providerID}/${model.modelID}`} className="user-choice">
-                            <span className="user-choice-name">{modelName(model)}</span>
-                            {index === 0 && <Badge tone="accent">{tr("settings.users.default")}</Badge>}
-                            {limitsDraft.harnessScope === "selected" && !limitsDraft.harnesses.includes(model.harnessId) && (
-                              <Badge tone="warning">{tr("settings.users.assistantNotAllowed")}</Badge>
-                            )}
-                            {index > 0 && (
-                              <Button size="sm" variant="ghost" disabled={busy} onClick={() => updateGuard({ models: makeDefaultModel(guardDraft.models, model) })}>{tr("settings.users.makeDefault")}</Button>
-                            )}
-                            <Button size="sm" variant="ghost" disabled={busy} onClick={() => updateGuard({ models: removeModel(guardDraft.models, model) })}>{tr("common.remove")}</Button>
-                          </li>
-                        ))}
-                      </ol>
-                    )}
-                    {catalog !== null && catalog.length === 0 ? (
-                      <Notice tone="warning">{tr("settings.users.modelsLoadFailed")}</Notice>
-                    ) : (
-                      <fieldset className="user-model-picker" disabled={busy} aria-label={tr("settings.users.allowedModels")}>
-                        <ModelPicker
-                          models={pickableModels}
-                          selection={guardDraft.models}
-                          emptyLabel={tr("settings.users.addModel")}
-                          catalogLoading={catalog === null}
-                          onPick={() => updateGuard({ models: [] })}
-                          onToggle={(picked) => {
-                            if (!picked.harnessId) return;
-                            const ref: HarnessModelRef = { harnessId: picked.harnessId, providerID: picked.providerID, modelID: picked.modelID };
-                            updateGuard({
-                              models: guardDraft.models.some((entry) => sameModel(entry, ref))
-                                ? removeModel(guardDraft.models, ref)
-                                : addModel(guardDraft.models, ref),
-                            });
-                          }}
+              )}
+              {guardDto?.guardrails && (accessValue === "admin" || accessValue === "owner") && (
+                <p className="user-detail-note">{tr("settings.users.protectedAdminNote")}</p>
+              )}
+            </Section>
+            {!guardDraft || !limitsDraft ? (
+              <EmptyState compact busy title={tr("settings.users.loadingLimits")} />
+            ) : (
+              <Section title={tr("settings.users.protectedMode")} hint={tr("settings.users.protectedModeHint")}>
+                <Row label={tr("settings.users.protectedMode")} hint={guardDraft.enabled ? tr("settings.users.protectedOn") : tr("settings.users.protectedOff")}>
+                  <Toggle on={guardDraft.enabled} disabled={busy} label={tr("settings.users.protectedMode")} onChange={(enabled) => updateGuard({ enabled })} />
+                </Row>
+                {guardDraft.enabled && (
+                  <>
+                    <Row label={tr("settings.users.agentActions")} hint={approvalsHint[guardDraft.approvals]}>
+                      <Seg
+                        label={tr("settings.users.whoApproves")}
+                        value={guardDraft.approvals}
+                        disabled={busy}
+                        options={[["none", tr("settings.users.approvalsNone")], ["once", tr("settings.users.approvalsOnce")]]}
+                        onChange={(approvals) => updateGuard({ approvals })}
+                      />
+                    </Row>
+                    <Row
+                      label={tr("settings.users.models")}
+                      layout="stacked"
+                      hint={guardDraft.models.length === 0
+                        ? tr("settings.users.modelsNoneHint")
+                        : tr("settings.users.modelsHint")}
+                    >
+                      <div className="user-detail-choices">
+                        {guardDraft.models.length > 0 && (
+                          <ol className="user-choice-list">
+                            {guardDraft.models.map((model, index) => (
+                              <li key={`${model.harnessId}/${model.providerID}/${model.modelID}`} className="user-choice">
+                                <span className="user-choice-name">{modelName(model)}</span>
+                                {index === 0 && <Badge tone="accent">{tr("settings.users.default")}</Badge>}
+                                {limitsDraft.harnessScope === "selected" && !limitsDraft.harnesses.includes(model.harnessId) && (
+                                  <Badge tone="warning">{tr("settings.users.assistantNotAllowed")}</Badge>
+                                )}
+                                {index > 0 && (
+                                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => updateGuard({ models: makeDefaultModel(guardDraft.models, model) })}>{tr("settings.users.makeDefault")}</Button>
+                                )}
+                                <Button size="sm" variant="ghost" disabled={busy} onClick={() => updateGuard({ models: removeModel(guardDraft.models, model) })}>{tr("common.remove")}</Button>
+                              </li>
+                            ))}
+                          </ol>
+                        )}
+                        {catalog !== null && catalog.length === 0 ? (
+                          <Notice tone="warning">{tr("settings.users.modelsLoadFailed")}</Notice>
+                        ) : (
+                          <fieldset className="user-model-picker" disabled={busy} aria-label={tr("settings.users.allowedModels")}>
+                            <ModelPicker
+                              models={pickableModels}
+                              selection={guardDraft.models}
+                              emptyLabel={tr("settings.users.addModel")}
+                              catalogLoading={catalog === null}
+                              onPick={() => updateGuard({ models: [] })}
+                              onToggle={(picked) => {
+                                if (!picked.harnessId) return;
+                                const ref: HarnessModelRef = { harnessId: picked.harnessId, providerID: picked.providerID, modelID: picked.modelID };
+                                updateGuard({
+                                  models: guardDraft.models.some((entry) => sameModel(entry, ref))
+                                    ? removeModel(guardDraft.models, ref)
+                                    : addModel(guardDraft.models, ref),
+                                });
+                              }}
+                            />
+                          </fieldset>
+                        )}
+                      </div>
+                    </Row>
+                    <Row
+                      label={tr("settings.users.alsoAllowed")}
+                      layout="stacked"
+                      hint={tr("settings.users.alsoAllowedHint")}
+                    >
+                      <div className="user-detail-choices">
+                        <CheckGroup
+                          label={tr("settings.users.extraPermissions")}
+                          columns={2}
+                          disabled={busy}
+                          value={guardDraft.extra.filter((capability) => SAFE_EXTRAS.includes(capability))}
+                          options={SAFE_EXTRAS.map((capability) => {
+                            const text = grantLabel(capability);
+                            return { id: capability, label: text.label, ...(text.detail ? { description: text.detail } : {}) };
+                          })}
+                          onChange={(next) => updateGuard({ extra: [...next, ...guardDraft.extra.filter(isRiskyGrant)] })}
                         />
-                      </fieldset>
-                    )}
-                  </div>
-                </Row>
-                <Row
-                  label={tr("settings.users.alsoAllowed")}
-                  layout="stacked"
-                  hint={tr("settings.users.alsoAllowedHint")}
-                >
+                        {RISKY_EXTRAS.length > 0 && (
+                          <details className="guardrails-advanced" open={guardDraft.extra.some(isRiskyGrant) || undefined}>
+                            <summary>{tr("settings.users.advancedPermissions")}</summary>
+                            {RISKY_EXTRAS.map((capability) => {
+                              const text = grantLabel(capability);
+                              return (
+                                <Checkbox
+                                  key={capability}
+                                  checked={guardDraft.extra.includes(capability)}
+                                  disabled={busy}
+                                  label={<>{text.label} <Badge tone="warning">{tr("settings.users.risky")}</Badge></>}
+                                  {...(text.detail ? { description: text.detail } : {})}
+                                  onChange={(on) => updateGuard({ extra: toggleExtra(guardDraft.extra, capability, on) })}
+                                />
+                              );
+                            })}
+                          </details>
+                        )}
+                      </div>
+                    </Row>
+                  </>
+                )}
+              </Section>
+            )}
+          </>
+        )}
+
+        {tab === "limits" && (!limitsDraft || !guardDraft ? (
+          <EmptyState compact busy title={tr("settings.users.loadingLimits")} />
+        ) : (
+          <>
+            <Section
+              title={tr("settings.users.projects")}
+              hint={tr("settings.users.projectsHint")}
+            >
+              <Row label={tr("settings.users.canUse")}>
+                <Seg
+                  label={tr("settings.users.projectsScopeLabel")}
+                  value={limitsDraft.projectScope}
+                  disabled={busy}
+                  options={[["all", tr("settings.users.allProjects")], ["selected", tr("settings.users.onlySelected")]]}
+                  onChange={(projectScope) => updateLimits({ projectScope })}
+                />
+              </Row>
+              {limitsDraft.projectScope === "selected" && (
+                projects === null ? (
+                  <EmptyState compact busy title={tr("settings.users.loadingProjects")} />
+                ) : projects.length === 0 && otherProjectIds.length === 0 ? (
+                  <EmptyState compact icon="folder" title={tr("settings.users.noProjects")} body={tr("settings.users.noProjectsBody")} />
+                ) : (
                   <div className="user-detail-choices">
                     <CheckGroup
-                      label={tr("settings.users.extraPermissions")}
+                      label={tr("settings.users.allowedProjects")}
                       columns={2}
                       disabled={busy}
-                      value={guardDraft.extra.filter((capability) => SAFE_EXTRAS.includes(capability))}
-                      options={SAFE_EXTRAS.map((capability) => {
-                        const text = grantLabel(capability);
-                        return { id: capability, label: text.label, ...(text.detail ? { description: text.detail } : {}) };
-                      })}
-                      onChange={(next) => updateGuard({ extra: [...next, ...guardDraft.extra.filter(isRiskyGrant)] })}
+                      value={limitsDraft.projects.filter((id) => projects.some((project) => project.id === id))}
+                      options={projects.map((project) => ({ id: project.id, label: project.name, description: project.path }))}
+                      onChange={(next) => updateLimits({ projects: [...next, ...otherProjectIds] })}
                     />
-                    {RISKY_EXTRAS.length > 0 && (
-                      <details className="guardrails-advanced" open={guardDraft.extra.some(isRiskyGrant) || undefined}>
-                        <summary>{tr("settings.users.advancedPermissions")}</summary>
-                        {RISKY_EXTRAS.map((capability) => {
-                          const text = grantLabel(capability);
-                          return (
-                            <Checkbox
-                              key={capability}
-                              checked={guardDraft.extra.includes(capability)}
-                              disabled={busy}
-                              label={<>{text.label} <Badge tone="warning">{tr("settings.users.risky")}</Badge></>}
-                              {...(text.detail ? { description: text.detail } : {})}
-                              onChange={(on) => updateGuard({ extra: toggleExtra(guardDraft.extra, capability, on) })}
-                            />
-                          );
-                        })}
-                      </details>
+                    {otherProjectIds.length > 0 && (
+                      <p className="user-detail-note">
+                        {tr(
+                          new Intl.PluralRules(getLocale()).select(otherProjectIds.length) === "one"
+                            ? "settings.users.otherSpaceProjectsOne"
+                            : "settings.users.otherSpaceProjectsOther",
+                          { count: otherProjectIds.length },
+                        )}{" "}
+                        <Button size="sm" variant="ghost" disabled={busy} onClick={() => updateLimits({ projects: limitsDraft.projects.filter((id) => !otherProjectIds.includes(id)) })}>
+                          {tr("common.remove")}
+                        </Button>
+                      </p>
                     )}
+                    <p className="user-detail-note">{tr("settings.users.projectsLockedNote")}</p>
                   </div>
+                )
+              )}
+            </Section>
+
+            <Section title={tr("settings.users.assistants")} hint={tr("settings.users.assistantsHint")}>
+              {permissionsDto && (
+                <Row
+                  label={tr("settings.users.canManageAssistants")}
+                  hint={guardDto?.guardrails
+                    ? tr("settings.users.notInProtectedMode")
+                    : tr("settings.users.canManageAssistantsHint")}
+                >
+                  <Toggle
+                    on={canManageHarnesses && !guardDto?.guardrails}
+                    disabled={busy || isDisabled || !!guardDto?.guardrails}
+                    label={tr("settings.users.canManageAssistants")}
+                    onChange={(on) => void changeHarnessManagement(on)}
+                  />
                 </Row>
-              </>
+              )}
+              {permissionsDto && (
+                <Row
+                  label={tr("settings.users.canAddOwnHarness")}
+                  hint={guardDto?.guardrails
+                    ? tr("settings.users.notInProtectedMode")
+                    : canManageHarnesses
+                      ? tr("settings.users.includedWithManage")
+                      : tr("settings.users.canAddOwnHarnessHint")}
+                >
+                  <Toggle
+                    on={(canAddOwnHarnesses || canManageHarnesses) && !guardDto?.guardrails}
+                    disabled={busy || isDisabled || !!guardDto?.guardrails || canManageHarnesses}
+                    label={tr("settings.users.canAddOwnHarness")}
+                    onChange={(on) => void changeOwnHarnessAccounts(on)}
+                  />
+                </Row>
+              )}
+              <Row label={tr("settings.users.canUse")}>
+                <Seg
+                  label={tr("settings.users.assistantsScopeLabel")}
+                  value={limitsDraft.harnessScope}
+                  disabled={busy}
+                  options={[["all", tr("settings.users.allAssistants")], ["selected", tr("settings.users.onlySelected")]]}
+                  onChange={(harnessScope) => updateLimits({ harnessScope })}
+                />
+              </Row>
+              {limitsDraft.harnessScope === "selected" && (
+                harnesses === null ? (
+                  <EmptyState compact busy title={tr("settings.users.loadingAssistants")} />
+                ) : harnessChoices.length === 0 ? (
+                  <EmptyState compact icon="terminal" title={tr("settings.users.noAssistants")} body={tr("settings.users.noAssistantsBody")} />
+                ) : (
+                  <div className="user-detail-choices">
+                    <ul className="user-choice-list" aria-label={tr("settings.users.allowedAssistants")}>
+                      {harnessChoices.map((harness) => {
+                        const index = limitsDraft.harnesses.indexOf(harness.id);
+                        return (
+                          <li key={harness.id} className="user-choice">
+                            <Checkbox
+                              checked={index >= 0}
+                              disabled={busy}
+                              label={harness.name}
+                              onChange={(on) => updateLimits({ harnesses: toggleId(limitsDraft.harnesses, harness.id, on) })}
+                            />
+                            {index === 0 && <Badge tone="accent">{tr("settings.users.default")}</Badge>}
+                            {index > 0 && (
+                              <Button size="sm" variant="ghost" disabled={busy} onClick={() => updateLimits({ harnesses: makeFirst(limitsDraft.harnesses, harness.id) })}>
+                                {tr("settings.users.makeDefault")}
+                              </Button>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    <p className="user-detail-note">{tr("settings.users.assistantsDefaultNote")}</p>
+                  </div>
+                )
+              )}
+            </Section>
+
+            <Section title={tr("settings.users.dailyLimits")} hint={tr("settings.users.dailyLimitsHint")}>
+              <LimitRow
+                label={tr("settings.users.messagesPerDay")}
+                toggleLabel={tr("settings.users.limitMessages")}
+                hint={limitsDto ? usageLine(limitsDto.usage, limitsDto.limits?.messagesPerDay ?? null, "message", "messages") : undefined}
+                value={limitsDraft.messagesPerDay}
+                fallback={DEFAULT_MESSAGES_PER_DAY}
+                disabled={busy}
+                onChange={(messagesPerDay) => updateLimits({ messagesPerDay })}
+              />
+              <LimitRow
+                label={tr("settings.users.chatsPerDay")}
+                toggleLabel={tr("settings.users.limitChats")}
+                hint={limitsDto ? usageLine(limitsDto.usage, limitsDto.limits?.chatsPerDay ?? null, "chat", "chats") : undefined}
+                value={limitsDraft.chatsPerDay}
+                fallback={DEFAULT_CHATS_PER_DAY}
+                disabled={busy}
+                onChange={(chatsPerDay) => updateLimits({ chatsPerDay })}
+              />
+              {limitsDto && !limitsDto.limits && (
+                <p className="user-detail-note">{tr("settings.users.usageCountedNote")}</p>
+              )}
+            </Section>
+          </>
+        ))}
+
+        {tab === "account" && (
+          <>
+            <Section title={tr("settings.users.profile")}>
+              {account.managed ? (
+                <ReadonlyRow label={tr("settings.users.name")} value={name} hint={tr("settings.users.nameManagedHint")} />
+              ) : (
+                <Row label={tr("settings.users.name")} hint={tr("settings.users.nameHint")}>
+                  <span className="user-detail-inline">
+                    <TextInput
+                      uiSize="sm"
+                      value={nameDraft}
+                      maxLength={ACCOUNT_NAME_MAX}
+                      aria-label={tr("settings.users.name")}
+                      disabled={busy || isDisabled}
+                      onChange={(event) => setNameDraft(event.target.value)}
+                      onKeyDown={(event) => { if (isImeComposing(event)) return; if (event.key === "Enter") void rename(); }}
+                    />
+                    {nameDraft.trim() !== name && nameDraft.trim() && (
+                      <Button size="sm" variant="quiet" disabled={busy} onClick={() => void rename()}>{tr("common.rename")}</Button>
+                    )}
+                  </span>
+                </Row>
+              )}
+              {account.login && (account.managed ? (
+                <ReadonlyRow label={tr("settings.users.login")} value={`@${account.login}`} mono />
+              ) : (
+                <Row label={tr("settings.users.login")} hint={tr(loginInvalid ? "settings.users.loginInvalid" : "settings.users.loginChangeHint")}>
+                  <span className="user-detail-inline">
+                    <TextInput
+                      uiSize="sm"
+                      value={loginDraft}
+                      maxLength={ACCOUNT_LOGIN_MAX}
+                      autoComplete="off"
+                      autoCapitalize="off"
+                      spellCheck={false}
+                      aria-label={tr("settings.users.login")}
+                      aria-invalid={loginInvalid || undefined}
+                      disabled={busy || isDisabled}
+                      onChange={(event) => setLoginDraft(event.target.value)}
+                      onKeyDown={(event) => { if (isImeComposing(event)) return; if (event.key === "Enter") void changeLogin(); }}
+                    />
+                    {loginChanged && (
+                      <Button size="sm" variant="quiet" disabled={busy || loginInvalid} onClick={() => void changeLogin()}>{tr("common.save")}</Button>
+                    )}
+                  </span>
+                </Row>
+              ))}
+              {isDisabled ? (
+                <ReadonlyRow label={tr("settings.users.signIn")} value={<Badge tone="danger">{tr("settings.users.disabled")}</Badge>} hint={tr("settings.users.signInDisabledHint")} />
+              ) : !account.managed ? (
+                <Row
+                  label={tr("settings.users.canSignIn")}
+                  hint={isSuspended
+                    ? tr("settings.users.signInPausedHint")
+                    : tr("settings.users.signInHint")}
+                >
+                  <Toggle on={!isSuspended} disabled={busy} label={tr("settings.users.canSignIn")} onChange={(on) => void changeSignIn(on)} />
+                </Row>
+              ) : null}
+            </Section>
+
+            {!account.managed && !isDisabled && account.login && (
+              <Section title={tr("settings.users.password")}>
+                <Row label={tr("settings.users.setNewPassword")} hint={tr("settings.users.setNewPasswordHint", { name })}>
+                  <Button size="sm" variant="quiet" disabled={busy} onClick={() => setPasswordOpen(true)}>{tr("settings.users.setPasswordEllipsis")}</Button>
+                </Row>
+              </Section>
             )}
-          </Section>
 
-          <div className="user-detail-savebar">
-            {problem && dirty && <Notice tone="warning">{problem}</Notice>}
-            <SaveBar
-              dirty={dirty}
-              saving={saveStatus === "saving"}
-              status={saveStatus}
-              {...(saveError ? { error: saveError } : {})}
-              saveLabel={tr("settings.pages.saveChanges")}
-              onSave={() => void saveRestrictions()}
-              onDiscard={discard}
-            />
-          </div>
-        </>
-      )}
+            {!account.managed && !isDisabled && (
+              <Section title={tr("settings.users.disableAccount")} tone="danger">
+                <Row label={tr("settings.users.disablePermanently")} hint={tr("settings.users.disablePermanentlyHint")}>
+                  <Button size="sm" variant="danger" disabled={busy} onClick={() => void disable()}>{tr("settings.users.disableAccount")}</Button>
+                </Row>
+              </Section>
+            )}
 
-      {!account.managed && !isDisabled && account.login && (
-        <Section title={tr("settings.users.password")}>
-          <Row label={tr("settings.users.setNewPassword")} hint={tr("settings.users.setNewPasswordHint", { name })}>
-            <Button size="sm" variant="quiet" disabled={busy} onClick={() => setPasswordOpen(true)}>{tr("settings.users.setPasswordEllipsis")}</Button>
-          </Row>
-        </Section>
-      )}
+            {privateBytes !== null && !account.current && (
+              <Section title={tr("settings.users.privateData")}>
+                <Row label={tr("settings.users.privateDataSize")} hint={tr("settings.users.privateDataSizeHint", { name })}>
+                  <span>{formatPrivateSize(privateBytes)}</span>
+                </Row>
+              </Section>
+            )}
 
-      {!account.managed && !isDisabled && (
-        <Section title={tr("settings.users.disableAccount")} tone="danger">
-          <Row label={tr("settings.users.disablePermanently")} hint={tr("settings.users.disablePermanentlyHint")}>
-            <Button size="sm" variant="danger" disabled={busy} onClick={() => void disable()}>{tr("settings.users.disableAccount")}</Button>
-          </Row>
-        </Section>
-      )}
+            {account.status === "disabled" && (
+              <Section title={tr("settings.users.privateDataErase")} tone="danger">
+                <Row label={tr("settings.users.privateDataErase")} hint={tr("settings.users.privateDataHint", { name })}>
+                  <Button size="sm" variant="danger" disabled={busy} onClick={() => void erasePrivate()}>{tr("settings.users.privateDataErase")}</Button>
+                </Row>
+              </Section>
+            )}
+          </>
+        )}
+      </SettingsTabs>
 
-      {privateBytes !== null && !account.current && (
-        <Section title={tr("settings.users.privateData")}>
-          <Row label={tr("settings.users.privateDataSize")} hint={tr("settings.users.privateDataSizeHint", { name })}>
-            <span>{formatPrivateSize(privateBytes)}</span>
-          </Row>
-        </Section>
-      )}
-
-      {account.status === "disabled" && (
-        <Section title={tr("settings.users.privateDataErase")} tone="danger">
-          <Row label={tr("settings.users.privateDataErase")} hint={tr("settings.users.privateDataHint", { name })}>
-            <Button size="sm" variant="danger" disabled={busy} onClick={() => void erasePrivate()}>{tr("settings.users.privateDataErase")}</Button>
-          </Row>
-        </Section>
+      {/* Drafts span the Access and Limits tabs; their save follows you to any
+          tab and shows only while there is something to save or report. */}
+      {limitsDraft && guardDraft && (dirty || saveStatus !== "idle") && (
+        <div className="user-detail-savebar">
+          {problem && dirty && <Notice tone="warning">{problem}</Notice>}
+          <SaveBar
+            dirty={dirty}
+            saving={saveStatus === "saving"}
+            status={saveStatus}
+            {...(saveError ? { error: saveError } : {})}
+            saveLabel={tr("settings.pages.saveChanges")}
+            onSave={() => void saveRestrictions()}
+            onDiscard={discard}
+          />
+        </div>
       )}
 
       {passwordOpen && (

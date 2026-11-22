@@ -20,6 +20,9 @@ export interface AgentNeed {
   detail?: string;
   /** Where to do it (http/https only). */
   url?: string;
+  /** Settled: the person marked it done, or a later report of the agent
+   *  said it no longer waits (`Resolved:`). */
+  done?: { at: number; by: "user" | "agent" };
 }
 
 export interface AgentReport {
@@ -32,6 +35,8 @@ export interface AgentReport {
   remember: string[];
   /** What waits for the person, in the order written. */
   needs: AgentNeed[];
+  /** Earlier requests the agent says no longer wait, in the order written. */
+  resolved: string[];
 }
 
 export const HEADLINE_LIMIT = 160;
@@ -50,6 +55,8 @@ const DECOR = "[\\s>*_`~-]*";
 const REPORT_LINE = new RegExp(`^${DECOR}report${DECOR}:${DECOR}(quiet|update|alert)\\b${DECOR}(?:[—–:|·-]+\\s*)?(.*)$`, "i");
 const REMEMBER_LINE = new RegExp(`^${DECOR}remember${DECOR}:${DECOR}(.+)$`, "i");
 const NEEDS_LINE = new RegExp(`^${DECOR}needs[ \\t]+you${DECOR}:${DECOR}(.+)$`, "i");
+const RESOLVED_LINE = new RegExp(`^${DECOR}resolved${DECOR}:${DECOR}(.+)$`, "i");
+export const RESOLVED_PER_RUN = 6;
 const FENCE = /^\s*(```|~~~)/;
 const LINK = /<?\bhttps?:\/\/[^\s<>()]+>?/i;
 
@@ -102,6 +109,7 @@ export function parseAgentReport(text: string | undefined): AgentReport {
   const protocolAt = new Set<number>();
   const remember: string[] = [];
   const needs: AgentNeed[] = [];
+  const resolved: string[] = [];
   lines.forEach((line, index) => {
     if (FENCE.test(line)) {
       fenced = !fenced;
@@ -129,6 +137,14 @@ export function parseAgentReport(text: string | undefined): AgentReport {
       protocolAt.add(index);
       const value = parseNeed(need[1]!);
       if (value && needs.length < NEEDS_PER_RUN && !needs.some((known) => known.text === value.text)) needs.push(value);
+      return;
+    }
+    const settled = RESOLVED_LINE.exec(line);
+    if (settled) {
+      protocolAt.add(index);
+      // Only the request's own words: a reason after a dash is commentary.
+      const value = clean(settled[1]!.split(/\s+[—–]\s+/)[0] ?? "", NEED_TEXT_LIMIT);
+      if (value && resolved.length < RESOLVED_PER_RUN && !resolved.includes(value)) resolved.push(value);
     }
   });
   const body = lines
@@ -142,7 +158,68 @@ export function parseAgentReport(text: string | undefined): AgentReport {
     body,
     remember,
     needs,
+    resolved,
   };
+}
+
+const needWords = (text: string): string => text.replace(/[*_`"'“”‘’.]+/g, "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+
+/** Whether two requests ask for the same thing: the same words, or one
+ *  opening with the other's (an agent rarely repeats itself to the letter). */
+export function sameNeed(a: string, b: string): boolean {
+  const left = needWords(a);
+  const right = needWords(b);
+  if (!left || !right) return false;
+  if (left === right) return true;
+  const [short, long] = left.length <= right.length ? [left, right] : [right, left];
+  return short.length >= 12 && long.startsWith(short);
+}
+
+/** A request still waiting for the person, with where it was first asked. */
+export interface OpenNeed extends AgentNeed {
+  runId: string;
+  /** Its position among that run's needs. */
+  index: number;
+  /** When it was first asked (the oldest report that asked the same). */
+  since: number;
+}
+
+export const OPEN_NEEDS_SHOWN = 6;
+/** A request nobody settled in this long is history, not a to-do. */
+export const OPEN_NEED_MAX_AGE_MS = 30 * 24 * 60 * 60_000;
+
+interface NeedSource {
+  runId: string;
+  status: string;
+  startedAt: number;
+  finishedAt?: number;
+  needs?: AgentNeed[];
+}
+
+/** What still waits for the person across an agent's reports, newest first.
+ *  A request asked again in a later report is one request (its newest
+ *  wording, its first date); one settled anywhere is settled. */
+export function openNeeds(history: readonly NeedSource[] | undefined, now: number, limit = OPEN_NEEDS_SHOWN): OpenNeed[] {
+  const open: OpenNeed[] = [];
+  const settled: string[] = [];
+  for (const run of history ?? []) {
+    if (run.status !== "ok" || !run.needs?.length) continue;
+    const at = run.finishedAt ?? run.startedAt;
+    run.needs.forEach((need, index) => {
+      if (need.done) {
+        settled.push(need.text);
+        return;
+      }
+      const known = open.find((item) => sameNeed(item.text, need.text));
+      // History runs newest first: an older report that asked the same only
+      // moves the date back.
+      if (known) known.since = Math.min(known.since, at);
+      else open.push({ ...need, runId: run.runId, index, since: at });
+    });
+  }
+  return open
+    .filter((need) => !settled.some((text) => sameNeed(text, need.text)) && now - need.since <= OPEN_NEED_MAX_AGE_MS)
+    .slice(0, limit);
 }
 
 /** The text before a code block it opens and never closes: the opening half
@@ -213,11 +290,12 @@ export const REPORT_INSTRUCTIONS = [
   "- quiet: nothing new that deserves the user's time; the run is filed silently.",
   "- update: a result worth reading.",
   "- alert: something needs the user's attention soon.",
-  "For anything only the user can do (a decision, a review, a sign-in), add a line \"Needs you: <what> — <why or what to do> — <link>\" (the link is optional). It is shown as a to-do under your report.",
+  "For anything only the user can do (a decision, a review, a sign-in), add a line \"Needs you: <what> — <why or what to do> — <link>\" (the link is optional). It stays on your page as the user's to-do until they mark it done or you close it, so ask once, name the exact action, and never use it for something you can do yourself.",
+  "When a request you made earlier no longer waits (the user did it, or it stopped mattering), close it with a line \"Resolved: <the same words>\".",
   "If you start background work and end your turn to wait for it, leave out the Report line until the final message: a message without it while that work runs is not your report.",
   "For anything later runs should know (a preference, a decision, a state to track), add a line \"Remember: <note>\". Keep notes short; they go into your notebook.",
 ].join("\n");
 
 /** The same protocol, as a reminder in a continuing session. */
 export const REPORT_REMINDER =
-  "Finish with \"Report: quiet|update|alert — <headline>\" (shown above your message: do not restate it there; only in your final message, not while background work you wait for runs); add \"Remember: <note>\" lines for anything later runs should know and \"Needs you: <what> — <why> — <link>\" lines for what only the user can do.";
+  "Finish with \"Report: quiet|update|alert — <headline>\" (shown above your message: do not restate it there; only in your final message, not while background work you wait for runs); add \"Remember: <note>\" lines for anything later runs should know, \"Needs you: <what> — <why> — <link>\" lines for what only the user can do, and \"Resolved: <the same words>\" for an earlier request that no longer waits.";

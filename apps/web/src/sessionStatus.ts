@@ -152,7 +152,7 @@ export function projectRailMark(sessions: readonly SessionProjection[], now = Da
     const kind = resolveSessionStatus(session, now).kind;
     if (kind === "needs-approval" || kind === "needs-reply" || kind === "reconciling" || kind === "unknown") return "attention";
     if (kind === "working") working = true;
-    else if (kind === "unread" && !session.parentId) result = true;
+    else if (kind === "unread" && (!session.parentId || session.forkOf)) result = true;
   }
   return result ? "result" : working ? "working" : null;
 }

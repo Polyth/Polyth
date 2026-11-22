@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { createMemoryStore, type MemoryScope } from "../src/memory.ts";
+import { createMemoryStore, type MemoryScope } from "../src/store.ts";
 
 const scope: MemoryScope = { spaceId: "space-a", projectId: "project-a", principalId: "user-a" };
 

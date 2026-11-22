@@ -44,13 +44,13 @@ function pump(): void {
 
 /** Read the parents of `children` that are neither loaded nor already read. */
 export function requestSessionParents(
-  children: readonly Pick<SessionProjection, "parentId">[],
+  children: readonly Pick<SessionProjection, "parentId" | "forkOf">[],
   loaded: ReadonlySet<string>,
 ): void {
   let added = false;
   for (const child of children) {
     const id = child.parentId;
-    if (!id || loaded.has(id) || settled.has(id) || inFlight.has(id) || queued.has(id)) continue;
+    if (!id || child.forkOf || loaded.has(id) || settled.has(id) || inFlight.has(id) || queued.has(id)) continue;
     queued.add(id);
     added = true;
   }
@@ -60,7 +60,7 @@ export function requestSessionParents(
 /** Whether a child's parent may still arrive: it is not loaded and has not
  *  been read yet. Reads the missing parents of `children` as a side effect. */
 export function useSessionParentPending(
-  children: readonly Pick<SessionProjection, "parentId">[],
+  children: readonly Pick<SessionProjection, "parentId" | "forkOf">[],
 ): (parentId: string) => boolean {
   const tick = useSyncExternalStore(subscribe, () => version);
   const sessions = useStore((state) => state.sessions);

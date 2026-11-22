@@ -364,6 +364,49 @@ test("the nightly release captain template is nightly, activatable, and charters
   await view.unmount();
 });
 
+test("the nightly bug triage template is nightly, triages private reports and keeps reporters out of public", async () => {
+  resetRegistry();
+  seedProject("ag-bug", "Bugs");
+  activateProject("ag-bug");
+  const server = fakeServer();
+  const page = agentsPage();
+  const view = await mounted(page.element);
+  await act(async () => { await delay(30); });
+
+  assert.ok(buttonNamed(view.container, /Nightly bug triage/), "the empty home offers the template next to the captain");
+  await act(async () => { buttonNamed(view.container, /Nightly bug triage/)!.click(); await delay(20); });
+  const name = view.container.querySelector<HTMLInputElement>(".agent-section[data-section=identity] input");
+  assert.equal(name?.value, "Nightly bug triage", "the template fills the form");
+  assert.equal(buttonNamed(view.container, "Activate")?.disabled, false,
+    "the template draft is activatable without editing anything");
+
+  await act(async () => { buttonNamed(view.container, "Activate")!.click(); await delay(30); });
+  const created = server.writes.find((write) => write.url === "/api/schedule")!;
+  assert.equal(created.body.title, "Nightly bug triage");
+  assert.equal(created.body.enabled, true);
+  assert.deepEqual(created.body.target, { mode: "dedicated-session" }, "it keeps one rolling triage conversation");
+  assert.equal(created.body.manualOnly, false, "it wakes on a schedule, not only by hand");
+  const cadence = created.body.cadence as { kind: string; expression: string; timeZone: string };
+  assert.equal(cadence.kind, "cron");
+  assert.equal(cadence.expression, "45 1 * * 0,1,2,3,4,5,6",
+    "it runs an hour before the night's release captain, every night");
+  assert.equal(created.body.catchUp, "once", "a night missed while the host was down still runs");
+  assert.equal(created.body.overlapPolicy, "skip");
+  assert.deepEqual(created.body.budget, { runsPerDay: 2 }, "the nightly triage plus one manual retry");
+  assert.equal(created.body.pauseAfterFailures, 2);
+  assert.deepEqual(created.body.approvals, { timeoutMinutes: 20, onTimeout: "reject" },
+    "an unanswered request at night is declined so the run still reports by morning");
+  assert.equal(created.body.notify, "updates", "every nightly triage report reaches the person");
+  const charter = String(created.body.prompt);
+  assert.match(charter, /Polyth\/nightly-reports/, "the charter names the private reports repository");
+  assert.match(charter, /Duplicate of #N/, "it merges duplicates instead of filing one issue per report");
+  assert.match(charter, /<!-- polyth-release: channel=nightly source=<sha> -->/,
+    "it resolves a report's version to its source commit");
+  assert.match(charter, /agent\.spawn/, "a bounded fix may go to a Polyth subagent");
+  assert.match(charter, /never @mention a reporter/i, "privacy is absolute: no reporter is mentioned publicly");
+  await view.unmount();
+});
+
 test("drafting from a description pre-fills the form, and missing fields explain why Activate is off", async () => {
   resetRegistry();
   seedProject("ag-draft", "Drafts");

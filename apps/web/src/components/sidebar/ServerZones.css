@@ -1,0 +1,181 @@
+/* Server zones in the navigator (ServerZones.tsx): the other Polyth servers
+   the desktop app can open, each a quiet heading with its projects. They sit
+   on the navigator's own axes — glyph column, then the text axis — so a zone
+   reads as more of the same list, one step quieter than the projects that are
+   here. No boxes: the heading and the spacing are the boundary. */
+.server-zones {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.server-zone-head {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 28px;
+  padding-inline: var(--nav-indent-project) 4px;
+}
+/* The heading of the server on screen, above its own projects. */
+.server-zone-head--own { margin-bottom: 2px; }
+
+.server-zone-title {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: var(--font-meta-lh);
+}
+/* The mark fills the glyph column, so the name starts on the text axis. */
+.server-zone-title > .ui-icon:first-child,
+.server-zone-ask > .ui-icon {
+  flex: none;
+  margin-inline-end: calc(var(--nav-text-inset) - var(--nav-glyph-inset) - var(--icon-sm));
+}
+.server-zone-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.server-zone-toggle {
+  flex: 1;
+  min-height: 28px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  text-align: start;
+  cursor: pointer;
+}
+.server-zone-toggle:focus-visible { outline-offset: -2px; }
+.server-zone-chevron {
+  flex: none;
+  margin-inline-start: var(--space-1);
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--motion-ease), rotate var(--motion-fast) var(--motion-ease);
+}
+/* A folded zone keeps its chevron: it is the only sign there is more. */
+.server-zone[data-folded] .server-zone-chevron { opacity: 1; rotate: -90deg; }
+[dir="rtl"] .server-zone[data-folded] .server-zone-chevron { rotate: 90deg; }
+.server-zone-toggle:focus-visible .server-zone-chevron { opacity: 1; }
+@media (hover: hover) {
+  .server-zone-toggle:hover { color: var(--text); }
+  .server-zone-toggle:hover .server-zone-chevron { opacity: 1; }
+}
+@media (hover: none) {
+  .server-zone-chevron { opacity: 1; }
+}
+.server-zone[data-unavailable] .server-zone-title { color: var(--faint); }
+
+.server-zone-projects {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.server-zone-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  margin: 0;
+  padding: 0 4px 0 var(--nav-indent-project);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: var(--nav-session-size);
+  text-align: start;
+  cursor: pointer;
+}
+.server-zone-row:focus-visible { outline-offset: -2px; }
+.server-zone-row:disabled { cursor: default; }
+/* The row the window is leaving for. */
+.server-zone-row[aria-busy="true"] { background: var(--elevated); color: var(--text); }
+@media (hover: hover) {
+  .server-zone-row:hover:where(:not(:disabled)) { background: var(--elevated); color: var(--text); }
+}
+@media (pointer: coarse) {
+  .server-zone-row { min-height: var(--hit-min); }
+  .server-zone-toggle,
+  .server-zone-head { min-height: 36px; }
+}
+.server-zone-row > .project-glyph {
+  width: calc(var(--nav-text-inset) - var(--nav-glyph-inset));
+  height: 24px;
+  justify-items: start;
+  /* An emoji or letter icon follows the row's text, not a project title's. */
+  font-size: var(--nav-session-size);
+}
+.server-zone-row-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Rows that are not projects: "Show 4 more", the way into a server not seen
+   yet, and the row that asks. They start on the text axis. */
+.server-zone-row--quiet {
+  padding-inline-start: var(--nav-text-inset);
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+.server-zone-ask { padding-inline-start: var(--nav-indent-project); }
+
+/* The project icon rail: a hairline and the server's mark, then its icons. */
+.server-zone-rail {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--rail-gap, var(--space-1));
+}
+.server-zone-rail > .ui-tooltip-host {
+  display: block;
+  flex: none;
+}
+.server-zone-rail-mark {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: var(--rail-project-item);
+  height: 24px;
+  margin-top: var(--space-2);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+}
+.server-zone-rail-mark::before {
+  content: "";
+  position: absolute;
+  top: calc(-1 * var(--space-1));
+  left: 50%;
+  width: 22px;
+  height: 1px;
+  translate: -50% 0;
+  background: var(--surface-divider);
+}
+.server-zone-rail-mark:disabled,
+.server-zone-rail-item:disabled { cursor: default; }
+@media (hover: hover) {
+  .server-zone-rail-mark:hover:where(:not(:disabled)) { color: var(--text); }
+}
+/* The rail tooltip's second line is a folder path for a project here, set in
+   mono and left to right. For a zone it is the server's name: plain text. */
+.sidebar-project-rail-tooltip-copy > .server-zone-rail-tooltip-server {
+  direction: inherit;
+  font-family: inherit;
+}

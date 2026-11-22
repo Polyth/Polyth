@@ -154,6 +154,7 @@ test("an inactive window's Linux buttons fall flat to a quiet glyph and come bac
 
 test("macOS takes the traffic lights' real extent from the window", async () => {
   assert.equal(macCaptionInset({ x: 18, y: 19, width: 54, height: 14 }), 86, "100 % zoom keeps the old 86 px");
+  assert.equal(macCaptionInset({ x: 18, y: 17, width: 68, height: 18 }), 100, "macOS 26: the larger lights reach 86 px, the zone follows");
   assert.equal(macCaptionInset({ x: 22.5, y: 23.75, width: 67.5, height: 17.5 }), 104, "80 % zoom: the lights cover more CSS px");
   assert.equal(macCaptionInset(null), null);
   assert.equal(macCaptionInset({ x: Number.NaN, y: 0, width: 54, height: 14 }), null);

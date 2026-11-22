@@ -27,6 +27,16 @@ test('a password-less first run provisions the same owner, organization and Spac
   assert.throws(() => f.identity.setup.issueClaim(), { code: 'setup-completed' });
 });
 
+test('a password-less owner has nothing a paired device could confirm', async t => {
+  const f = fixture(t);
+  const owner = f.identity.setup.completeLocal({ name: 'Ida' });
+  await assert.rejects(
+    f.identity.pairedDevice.confirm({ userId: owner.userId, deviceId: 'dev_phone', password: 'a long enough passphrase' }),
+    { code: 'invalid-credentials' },
+  );
+  assert.equal(f.control.all('SELECT * FROM auth_sessions').length, 0, 'no device session is minted');
+});
+
 test('a password-less first run ends every half-finished browser setup', async t => {
   const f = fixture(t), p = prepared(f);
   f.identity.setup.completeLocal({ name: 'Ida' });

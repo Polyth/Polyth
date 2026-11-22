@@ -20,9 +20,10 @@ export interface IdentityHttpHandler {
   handle(req: IncomingMessage, res: ServerResponse): Promise<boolean>;
   /** The auth status to embed in the HTML shell (see httpCore `shellStatus`). */
   shellStatus?(req: IncomingMessage, res: ServerResponse): Record<string, unknown> | null;
-  /** Read-only account views (`GET /api/auth/accounts`, `/api/auth/me`) for
-   *  an account this gateway authenticated: a full-access paired device. */
-  handlePairedRead?(req: IncomingMessage, res: ServerResponse, userId: string): boolean;
+  /** Identity for an account this gateway authenticated: a full-access paired
+   *  device. Reads its people list; its owner's device also administers them
+   *  after confirming the password (see `@polyth/identity` http.ts). */
+  handlePaired?(req: IncomingMessage, res: ServerResponse, caller: { userId: string; deviceId: string }): Promise<boolean>;
 }
 
 export interface HttpDeps extends CoreHttpDeps {
@@ -83,14 +84,16 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
     ...coreDeps,
     ...(identityHttp.shellStatus ? { shellStatus: identityHttp.shellStatus.bind(identityHttp) } : {}),
   });
-  /** The account of a Link device its owner granted full access; undefined
-   *  for every other caller. Resolved per request, so a revoked or downgraded
-   *  device (or a guarded account) loses it on the next call. */
-  const pairedFullAccessUser = (req: IncomingMessage, ingress: RequestIngress): string | undefined => {
+  /** The account and device of a Link device its owner granted full access;
+   *  undefined for every other caller. Resolved per request, so a revoked or
+   *  downgraded device (or a guarded account) loses it on the next call. */
+  const pairedFullAccessCaller = (req: IncomingMessage, ingress: RequestIngress): { userId: string; deviceId: string } | undefined => {
     const auth = deps.auth;
     if (ingress.kind !== "polyth-link" || !auth?.userIdForPrincipal) return undefined;
     const { principal, authenticated } = auth.resolve(authRequestOf(req), ingress);
-    return authenticated && principalHasFullAccess(principal) ? auth.userIdForPrincipal(principal) : undefined;
+    if (!authenticated || !principalHasFullAccess(principal)) return undefined;
+    const userId = auth.userIdForPrincipal(principal);
+    return userId && principal.kind === "paired-device" ? { userId, deviceId: principal.deviceId } : undefined;
   };
 
   return async (req, res, ingress: RequestIngress) => {
@@ -137,10 +140,11 @@ export function createHttpHandler(deps: HttpDeps): HttpHandler {
     }
     try {
       if (ingress.kind !== "public-http") {
-        // A device its owner trusts like this computer may read its own
-        // account (Settings → Users). Changes still need browser identity.
-        const userId = pairedFullAccessUser(req, ingress);
-        if (userId && identityHttp.handlePairedRead?.(req, res, userId)) return;
+        // A device its owner trusts like this computer may read and, for an
+        // owner of a credential-backed installation, administer its people.
+        // Every account change still needs the owner's password first.
+        const paired = pairedFullAccessCaller(req, ingress);
+        if (paired && await identityHttp.handlePaired?.(req, res, paired)) return;
         writeJson(res, 403, { error: "forbidden", message: "not allowed" });
         return;
       }

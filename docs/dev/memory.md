@@ -13,22 +13,67 @@ import and clear). Tabs stay mounted, so a draft in one survives a look at
 another. A record is one row: tapping it opens the editor, and its ⋯ menu holds
 mark reviewed, pin, lock, archive and forget. A row names only what sets the
 record apart (category, a lifecycle other than active, pinned, locked, a
-freshness other than current or unknown). Passing results go to the host
-notification stack; errors stay on the page. The page is drawn with the host's
-controls, handed to the package through `MemoryUiContext`
-(`packages/memory/widgets/ui.tsx`), and is laid out by container queries on
-`.pkg-memory`, phone first.
+freshness other than current or unknown) and ends with its age. Passing results
+go to the host notification stack; errors stay on the page. The page is drawn
+with the host's controls (and confirms through `host.ui.confirm`), handed to the
+package through `MemoryUiContext` (`packages/memory/widgets/ui.tsx`), and is
+laid out by container queries on `.pkg-memory`, phone first.
+
+**List.** The search matches every typed word in title, body, tags or aliases,
+in any order and any case (Cyrillic included: both sides go through the same
+Unicode fold, `memory_fold`, because SQLite's `LIKE` folds ASCII only), marks
+the matches in the rows, and its snippet starts near the first match. Escape in
+a search with text clears it before the dialog may close. The lifecycle filter
+is one row of chips. The list shows 20 rows and **Show more** adds the next 20;
+a refresh after a change keeps every row that was on screen.
+
+**Editor** (`MemoryEditor.tsx`). A tapped row opens at once with what the row
+already knows; the whole record (read ahead on hover, focus or press) fills in
+and the fields stay read-only until it does. The list stays mounted underneath,
+so Back returns to the same scroll position, search and row. The title wraps and
+grows; category is a chip group; the body grows with its text and shows its size
+once past half of the 8 KiB limit; tags, aliases, paths and sources are chip
+fields (Enter or a comma adds, Backspace takes the last back), with the last
+three behind **More details**. Save is enabled only for a changed, valid draft;
+Ctrl/⌘+Enter saves and Escape steps back to the list (asking before dropping a
+draft) instead of closing the dialog. A save sends values that were already on
+the record in their original form, so a session source stays a session source
+and a module stays a module; only typed-in values become manual sources or
+paths. The editor's ⋯ menu offers the row's actions while the draft is clean and
+re-reads the record after one. Every manual save is user locked.
+
+**My notes** rows open their editor in place; their ⋯ menu holds Edit, Share…
+and Delete, and Delete asks first.
 
 Selection is a mode entered from the toolbar's ⋯ menu (**Select records**):
 rows gain checkboxes and a bar offers Archive and Forget.
-Visible-page selection is limited to one page; **Select all filtered** may select
+**Select all shown** selects the rows on screen; **Select all filtered** may select
 and act on at most 50 matching records. The filter is captured when selection is
 made, and changing it clears the selection. Each bulk archive or forget uses the
 record revision as a CAS check and reports successful and failed records
 individually; a partial result is never presented as a full success.
 
-Automatic recall runs during session admission when policy mode is `auto`. The
-bounded target is at most 6 records and 6 KiB, with a hard cap of 8 records.
+Automatic recall runs during session admission when policy mode is `auto`. It
+adds a `<polyth-project-memory>` block of at most 6 notes (hard cap 8) inside
+the project's byte budget (6 KiB at most). Each note is one entry: `[id]` and
+the title, then the whole note when title and body fit in 480 bytes, otherwise
+its opening (up to 200 characters, cut at a sentence or word) and the full
+size, as in `… (1.5K in all)`. The agent reads the rest with `memory_get`. The
+`id` is the first 8 characters of the record id, or the full id when those 8
+would name two records the chat can reach; every memory tool accepts either.
+A personal note carries `· personal`, a note about someone `· about <name>`.
+
+A note is recalled only when it is about the request. The query is built from
+the prompt's words that tell notes apart: a word found in more than a tenth of
+the Space's active notes (and in more than 20 of them) is left out, like the
+stop words. A ranked note then needs a query word in its title, tags or
+aliases, or two different ones in its body, or one that at most 3 notes contain
+at all; and it must rank at least half as well as the best such note. So "ok"
+or "continue" recalls nothing. A pinned note that matches is never filtered
+out, and pinned notes are what a prompt with no telling word recalls. On a copy of a
+real 938-note memory this took the block from about 6 KiB on every turn to
+0–2.6 KiB.
+
 The session persists the prepared contribution before runtime delivery and
 rechecks the policy generation and settings revision fence before sending it
 to a provider. Turning delivery `off` stops future recall and fences pending
@@ -54,18 +99,26 @@ management page's record filter is a separate whole-phrase substring match over
 every lifecycle. When full-text search is unavailable, recall and search both
 fall back to a bounded per-word match, never a whole-phrase one.
 
-Matching is lexical; there are no embeddings. A query word of four or five
+Matching is lexical; there are no embeddings. Apostrophes inside a word are
+dropped on both sides, so `пам'ять`, `пам’ять` and `памʼять` are one word. A
+query word of four or five
 letters also matches by its first four letters, a longer one by all but its
 last three letters (at least five), so inflected Ukrainian and English forms
 meet (`гастриту` → `гастрит`, `symptoms` → `symptom`); shorter words, numbers
 and paths match exactly. Ranking weights a hit in the
 title four times and in tags or aliases twice a hit in the body. Agent search
-(not admission recall, where a whole prompt would match too much) also adds
-substring hits from a trigram index for words of four or more characters
-(`palace` finds `MemPalace`). SQLite triggers keep that index in step with
-every write, including writes by an older server; a store that predates it is
-indexed once on open, and an SQLite without the trigram tokenizer keeps word
-and stem matching only.
+(not admission recall, where a whole prompt would match too much) also finds
+words of four or more characters inside longer ones (`palace` finds
+`MemPalace`). There is no index for that: when the word index returns fewer
+hits than were asked for, the store scans the newest 5,000 active notes the
+chat can reach.
+
+What a memory tool returns is plain lines, not record JSON: `memory_search`
+and `memory_search_projects` give `[id] title` and an excerpt that starts near
+the first matched word (a cross-project hit also names its project and project
+id); `memory_get` gives one header line (`id`, revision, category, tags, last
+update, labels) and the note; `memory_remember` gives `saved <id>`. Full ids,
+counts and statuses go to the host in the result's `metadata`.
 
 `memory_remember` takes optional `supersedes` ids: after saving the new record
 it moves those records to `superseded`, which drops them from recall and search
@@ -171,7 +224,43 @@ oversized files and remote projects. Assistant/tool output, imported history,
 delegated child sessions and pasted code never count. See
 [`packages/memory/README.md`](../../packages/memory/README.md).
 
-The feature package owns the UI and routes; Knowledge owns the canonical
-Space-scoped store and browser-safe DTOs. See the [architecture package map](architecture.md)
-and [Space tenancy model](../architecture/spaces-and-tenancy.md) for the
-ownership and storage boundaries.
+## Storage
+
+The memory package owns its data: one SQLite database per Space,
+`<space>/packages/memory/memory.db` (`src/spaceStore.ts`, `src/store.ts`), and
+the browser-safe DTOs in `src/contracts.ts` (`@polyth/memory/contracts`). It
+holds the records, one word index (FTS5, contentless: the index only, no
+second copy of the text, and only active records), earlier revisions of edited
+records (the current state is the record itself), policies, tombstones and
+harvest cursors. Settled harvest jobs are deleted when the store opens.
+
+Memory used to live in the Knowledge package's database
+(`<space>/packages/knowledge/knowledge.db`, tables `memory_*`). The first time
+a Space's store opens, `src/legacyImport.ts` moves it:
+
+1. Every record is copied with its id, revision, dates, layer, owner and
+   provenance, then read back and compared column by column. Records already in
+   the new store are skipped by id, never overwritten. Earlier revisions,
+   policies, cursors, idempotency receipts, tombstones and live harvest jobs
+   come along; settled and denied jobs do not (harvesting resumes from the
+   cursors). Knowledge items of kind `memory`, which is how memory was kept
+   before it had tables, are copied in the same pass.
+2. The copy commits only when every old record is present in the new store.
+   A record that cannot be copied stops the move, rolls it back and leaves the
+   old tables whole; memory is then unavailable for that Space and the cause is
+   logged at start.
+3. After the commit the old `memory_*` tables, their indexes and triggers are
+   dropped and the old database is compacted. Knowledge's own rows stay.
+
+The package opens every Space that has a project when it is enabled, so every
+Space on a server moves at the first start of this version, without anyone
+opening Memory. A start that is interrupted repeats the move safely. An older
+server started afterwards finds no memory tables in `knowledge.db` and shows an
+empty memory; the notes are in `memory.db`.
+
+On a copy of a real Space (938 notes, 1.45 MB of text) the old tables took
+20.6 MB and the new database takes 4.4 MB; the move ran in 0.35 s.
+
+See the [architecture package map](architecture.md) and
+[Space tenancy model](../architecture/spaces-and-tenancy.md) for the ownership
+and storage boundaries.

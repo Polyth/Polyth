@@ -11,6 +11,7 @@ async function openClaudeRuntime(failWorkspaceApply = false) {
     let input!: AsyncIterator<any>;
     let push: (message: any) => void = () => {};
     let closed = false;
+    let endStream = () => {};
     let nativeTitle = "";
     const receipts: Record<string, string> = {};
     const applyCalls: unknown[] = [];
@@ -22,6 +23,7 @@ async function openClaudeRuntime(failWorkspaceApply = false) {
             const pending: any[] = [];
             let wake: (() => void) | undefined;
             push = (message) => { pending.push(message); wake?.(); };
+            endStream = () => { closed = true; wake?.(); };
             return {
                 async *[Symbol.asyncIterator]() {
                     while (!closed) {
@@ -64,6 +66,8 @@ async function openClaudeRuntime(failWorkspaceApply = false) {
         push: (message: any) => push(message),
         applyCalls,
         interrupts: () => interrupts,
+        /** The CLI process ends on its own. */
+        endStream: () => endStream(),
         setNativeTitle: (title: string) => { nativeTitle = title; },
     };
 }
@@ -330,6 +334,44 @@ test("Claude keeps reporting content for a turn whose admission is still pending
     const stopped = events.findLast((event) => event.type === "turn/stopped");
     assert.deepEqual(stopped, { type: "turn/stopped", turnId: "turn-1", reason: "completed" });
     await runtime.dispose();
+});
+
+test("Claude reports its live background work to Polyth, and loses it with the process", async () => {
+    const { events, push, endStream } = await openClaudeRuntime();
+    const reports = () => events.filter((event) => event.type === "runtime/background-tasks");
+    push({ type: "system", subtype: "background_tasks_changed", uuid: "level-1", tasks: [
+        { task_id: "b66", task_type: "local_bash", description: "Wait for release runs" },
+        { task_id: "w1", task_type: "monitor", description: "watch", ambient: true },
+    ] });
+    await flush();
+    assert.deepEqual(reports().map((event) => event.type === "runtime/background-tasks" ? event.tasks : []), [
+        [{ id: "b66", description: "Wait for release runs", kind: "local_bash" }],
+    ], "ambient watchers are not work that reports back");
+    // The same set again (a re-initialize snapshot) is no change.
+    push({ type: "system", subtype: "background_tasks_changed", uuid: "level-2", tasks: [{ task_id: "b66", task_type: "local_bash", description: "Wait for release runs" }] });
+    // Once the level is known the edges are not a second source.
+    push({ type: "system", subtype: "task_notification", uuid: "note-x", task_id: "b66", status: "completed", output_file: "/tmp/b66", summary: "done" });
+    await flush();
+    assert.equal(reports().length, 1);
+
+    endStream();
+    await flush();
+    const last = reports().at(-1)!;
+    assert.ok(last.type === "runtime/background-tasks");
+    assert.deepEqual(last.tasks, []);
+    assert.deepEqual(last.lost, [{ id: "b66", description: "Wait for release runs", kind: "local_bash" }]);
+});
+
+test("an older Claude Code without the background level is tracked from task edges", async () => {
+    const { events, push } = await openClaudeRuntime();
+    const reports = () => events.flatMap((event) => event.type === "runtime/background-tasks" ? [event.tasks.map((task) => task.id)] : []);
+    push({ type: "system", subtype: "task_started", uuid: "s-1", task_id: "fg", task_type: "local_bash", description: "foreground", is_backgrounded: false });
+    push({ type: "system", subtype: "task_started", uuid: "s-2", task_id: "bg", task_type: "local_bash", description: "tests", is_backgrounded: true });
+    push({ type: "system", subtype: "task_updated", uuid: "u-1", task_id: "fg", patch: { is_backgrounded: true } });
+    push({ type: "system", subtype: "task_notification", uuid: "n-1", task_id: "bg", status: "completed", output_file: "/tmp/bg", summary: "done" });
+    push({ type: "system", subtype: "task_updated", uuid: "u-2", task_id: "fg", patch: { status: "killed" } });
+    await flush();
+    assert.deepEqual(reports(), [["bg"], ["bg", "fg"], ["fg"], []]);
 });
 
 test("Claude hands background work that settles while idle to Polyth as a wake request", async () => {

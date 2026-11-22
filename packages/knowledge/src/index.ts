@@ -1,4 +1,4 @@
-// Project knowledge: notes, plans, and (dark-by-default) agent memory.
+// Project knowledge: notes, specs and plans. Agent memory lives in @polyth/memory.
 // Server-owned, project-scoped, revisioned, searchable. node:sqlite (WAL).
 // Attach-to-chat is a SESSION concern: the caller appends knowledge/attached
 // with the exact revision+body to the event log before any model/UI use —
@@ -7,7 +7,6 @@ import { DatabaseSync } from "node:sqlite";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { createMemoryStore, type MemoryStore } from "./memory.ts";
 
 export type KnowledgeKind = "note" | "spec" | "plan" | "memory";
 
@@ -57,8 +56,6 @@ export interface KnowledgeQuery {
 }
 
 export interface KnowledgeStore {
-  /** Shared project-memory store; it uses this knowledge DB and Space scope. */
-  memory: MemoryStore;
   list(query: KnowledgeQuery): Promise<{ items: KnowledgeListItem[]; total: number }>;
   get(id: string): Promise<KnowledgeItem | undefined>;
   create(input: KnowledgeCreateInput): Promise<KnowledgeItem>;
@@ -163,13 +160,11 @@ export function createKnowledgeStore(file: string, opts: { now?: () => number; s
     updated_at INTEGER NOT NULL
   )`);
   db.exec("CREATE INDEX IF NOT EXISTS idx_knowledge_project ON knowledge(project_id, kind, updated_at)");
-  const memory = createMemoryStore(db, opts.spaceId, now);
 
   const rowOf = (id: string): Row | undefined =>
     db.prepare("SELECT * FROM knowledge WHERE id = ?").get(id) as unknown as Row | undefined;
 
   return {
-    memory,
     async list(query: KnowledgeQuery) {
       if (!query.projectId) throw err("invalid-input", "projectId is required");
       const limit = Math.max(1, Math.min(query.limit ?? 50, 200));
@@ -247,11 +242,9 @@ export function createKnowledgeStore(file: string, opts: { now?: () => number; s
     },
 
     close() {
-      memory.close();
       db.close();
     },
   };
 }
 
 export * from "./tracks.ts";
-export * from "./memory.ts";

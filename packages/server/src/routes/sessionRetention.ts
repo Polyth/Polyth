@@ -15,7 +15,7 @@ export function sessionRetentionRoutes(
     if (method !== "GET" && method !== "POST") return false;
     // Retention sweeps only the caller's own Space — bulk archive/purge must
     // never reach across tenants.
-    const { sessions } = spaces(rc.space);
+    const { sessions, projects } = spaces(rc.space);
     const input = method === "POST" ? await body() : undefined;
     const target = method === "GET"
       ? url.searchParams.get("target") ?? "sessions"
@@ -31,7 +31,23 @@ export function sessionRetentionRoutes(
     const skipIsolated = !releaseCheckouts || (method === "GET"
       ? url.searchParams.get("skipIsolated") !== "false"
       : input?.skipIsolated !== false);
-    const rows = await sessions.list();
+    // Cleanup is chosen per project: a project id narrows everything below to
+    // that project and its private rooms. Both lists are the caller's own
+    // Space, so a foreign id simply matches nothing.
+    const rawProjectId = method === "GET" ? url.searchParams.get("projectId") : input?.projectId;
+    if (rawProjectId !== undefined && rawProjectId !== null && (typeof rawProjectId !== "string" || !rawProjectId)) {
+      json(400, { error: "invalid-input", message: "projectId must be a project id" });
+      return true;
+    }
+    const projectId = typeof rawProjectId === "string" ? rawProjectId : undefined;
+    let rows = await sessions.list();
+    if (projectId !== undefined) {
+      const scope = new Set([projectId]);
+      for (const project of await projects.list()) {
+        if (project.parentProjectId === projectId) scope.add(project.id);
+      }
+      rows = rows.filter((row) => scope.has(row.projectId));
+    }
     const summary = target === "archives"
       ? archivedSessionRetentionSummary(rows, requestedDays)
       : sessionRetentionSummary(rows, requestedDays, undefined, { skipIsolated });

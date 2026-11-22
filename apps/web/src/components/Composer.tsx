@@ -256,7 +256,7 @@ import {
   updateDraftExecutionConfig,
   writeDraftExecutionConfig,
 } from "../executionDraft.ts";
-import { useViewportMetrics } from "../mobileViewport.ts";
+import { FOCUS_TAKING_ENTRY, useViewportMetrics } from "../mobileViewport.ts";
 import { getLocale, tr } from "../i18n/index.ts";
 import SessionContextBar, {
   type ContextChoice,
@@ -3587,9 +3587,31 @@ function ComposerBody({
   // gap between them, however busy the page was meanwhile. Send refuses
   // panning in CSS, since a pan cancels the press and used to leave a held
   // message neither sent nor kept.
-  const primaryActivationRef = useRef<{ touch: boolean; keyboard: boolean; staleTouchClick: boolean; down: { x: number; y: number } | null }>(
-    { touch: false, keyboard: false, staleTouchClick: false, down: null },
+  const primaryActivationRef = useRef<{ touch: boolean; keyboard: boolean; staleTouchClick: boolean; ownedTouch: boolean; down: { x: number; y: number } | null }>(
+    { touch: false, keyboard: false, staleTouchClick: false, ownedTouch: false, down: null },
   );
+  // A touch that begins on Send belongs to the page. iOS gives a tap within
+  // 66px of a word the keyboard is still composing to its text interaction,
+  // even when the tap lands outside the field (WebKit `isNearMarkedText`), and
+  // Send sits right under the end of the message: with the last word still
+  // marked, the press never became a send. Cancelling `touchstart` is what
+  // withholds a touch from the platform's own gestures, and only a listener
+  // that is not passive may do it (React's are passive). The cancelled touch
+  // has no click: the release sends, and `ownedTouch` says none is coming.
+  const ownPrimaryTouch = useCallback((button: HTMLButtonElement | null) => {
+    if (!button) return;
+    const own = (event: TouchEvent) => {
+      if (!event.cancelable) return;
+      event.preventDefault();
+      if (event.type === "touchstart") primaryActivationRef.current.ownedTouch = true;
+    };
+    button.addEventListener("touchstart", own, { passive: false });
+    button.addEventListener("touchend", own, { passive: false });
+    return () => {
+      button.removeEventListener("touchstart", own);
+      button.removeEventListener("touchend", own);
+    };
+  }, []);
   const canParkRef = useRef<() => boolean>(() => false);
   // People mode sends a person message, never a draft chat: holding Send there
   // must not announce a saved draft while the message goes out to people. The
@@ -3670,16 +3692,34 @@ function ComposerBody({
     if (holdPress.abandon(timeStamp) === "draft") keepHeldDraft();
     else dropHoldCue();
   }, [holdPress, keepHeldDraft, dropHoldCue]);
+  // A finger that lands on a composer control ends the word the keyboard is
+  // still composing. The composer keeps its editor focused through such a tap
+  // (`data-keep-keyboard`), so the word would stay marked under the finger,
+  // and iOS takes a tap that close to marked text for the text, not for the
+  // control: the rail sits one row below the end of the message. Committed as
+  // the finger lands, the word is ordinary text by the time the platform
+  // decides what the tap was. Touches inside the field are the keyboard's.
+  const commitComposingWordOnPress = useCallback((event: PointerEvent<HTMLElement>) => {
+    if (event.pointerType !== "touch" && event.pointerType !== "pen") return;
+    const input = inputRef.current;
+    if (!input?.isComposing()) return;
+    const target = event.target as Element | null;
+    if (target?.closest?.(FOCUS_TAKING_ENTRY)) return;
+    input.finishComposition();
+  }, []);
   const onPrimaryPointerDown = useCallback((event: PointerEvent<HTMLButtonElement>) => {
     const activation = primaryActivationRef.current;
     if (event.pointerType !== "touch" && event.pointerType !== "pen") {
       activation.touch = false;
+      activation.ownedTouch = false;
       activation.keyboard = false;
       activation.staleTouchClick = false;
       if (event.button === 0) startHold(event);
       return;
     }
     activation.touch = true;
+    // Set again by this touch's own `touchstart`, which follows `pointerdown`.
+    activation.ownedTouch = false;
     activation.keyboard = false;
     activation.staleTouchClick = false;
     activation.down = { x: event.clientX, y: event.clientY };
@@ -3689,8 +3729,15 @@ function ComposerBody({
   const onPrimaryPointerUp = useCallback((event: PointerEvent<HTMLButtonElement>) => {
     const held = settleHold(event.timeStamp);
     if (event.pointerType !== "touch" && event.pointerType !== "pen") return;
-    const down = primaryActivationRef.current.down;
-    primaryActivationRef.current.down = null;
+    const activation = primaryActivationRef.current;
+    const down = activation.down;
+    activation.down = null;
+    // No click follows a touch the page took for itself, so nothing is left
+    // to consume: forget it, or it would swallow the next pointerless click.
+    if (activation.ownedTouch) {
+      activation.ownedTouch = false;
+      activation.touch = false;
+    }
     if (held) return;
     // A finger that slid off Send before lifting changed its mind. A touch is
     // captured by the button it began on, so the event's target cannot tell;
@@ -3714,6 +3761,7 @@ function ComposerBody({
   const onPrimaryPointerCancel = useCallback((event: PointerEvent<HTMLButtonElement>) => {
     abandonHold(event.timeStamp);
     primaryActivationRef.current.touch = false;
+    primaryActivationRef.current.ownedTouch = false;
     primaryActivationRef.current.down = null;
   }, [abandonHold]);
   const onPrimaryKeyDown = useCallback((event: KeyboardEvent<HTMLButtonElement>) => {
@@ -4806,6 +4854,7 @@ function ComposerBody({
         <div className="composer-send-split">
           <button
             className={`send composer-delivery${queueEdit ? "" : " composer-running-send"}`}
+            ref={ownPrimaryTouch}
             onPointerDown={onPrimaryPointerDown}
             onPointerUp={onPrimaryPointerUp}
             onPointerCancel={onPrimaryPointerCancel}
@@ -4868,7 +4917,7 @@ function ComposerBody({
         </button>
       )
             ) : (
-      <button className="send" onPointerDown={onPrimaryPointerDown} onPointerUp={onPrimaryPointerUp}
+      <button className="send" onPointerDown={onPrimaryPointerDown} onPointerUp={onPrimaryPointerUp} ref={ownPrimaryTouch}
         onPointerCancel={onPrimaryPointerCancel} onPointerLeave={onPrimaryPointerLeave}
         onContextMenu={(event) => event.preventDefault()} onKeyDown={onPrimaryKeyDown} onClick={onPrimaryClick}
         data-parked={parked || undefined}
@@ -5052,6 +5101,7 @@ function ComposerBody({
       // A touch on any composer control, or on a picker it opens, acts on the
       // first tap and leaves the software keyboard open (mobileViewport.ts).
       data-keep-keyboard=""
+      onPointerDownCapture={commitComposingWordOnPress}
       // The band the keyboard leaves, for the long-draft editor cap
       // (mobileViewport.css): here it restyles only the composer, where the
       // root frame variables restyle the whole app and arrive only once a

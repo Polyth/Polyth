@@ -632,8 +632,8 @@ export function applyUiSettings(s: UiSettings = settings): void {
   b.style?.setProperty("--rail-strip-width-top", "calc(var(--rail-icon-size-top) + var(--space-2))");
   b.style?.setProperty("--rail-icon-size-right", rightRail.box);
   b.style?.setProperty("--rail-icon-glyph-right", rightRail.glyph);
-  // Tile + the gutters (--space-2 at the start, toward the workspace, and
-  // --space-1 at the window edge) + the 1px seam hairline a docked pane adds.
+  // Tile + the symmetric gutters (half of --space-3 per side, so the icon
+  // sits centred in the rail) + the 1px seam hairline a docked pane adds.
   b.style?.setProperty("--rail-strip-width-right", "calc(var(--rail-icon-size-right) + var(--space-3) + 1px)");
   // Every radius token derives from the one scale in tokens.css. Tokens are
   // declared on :root, so their var(--corner-radius-scale) resolves there too —

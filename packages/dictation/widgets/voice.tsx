@@ -991,6 +991,12 @@ function MicButton() {
         },
         // A lost microphone ends the recording; what was said is still sent.
         onEnded: () => { if (current()) live.current.release(); },
+        // A live microphone that delivers nothing must not sit at a silent 0:00.
+        onStalled: () => {
+          if (!current()) return;
+          if ((recorderRef.current?.elapsedMs() ?? 0) > 0) live.current.release();
+          else fail(new Error(tr("dictation.error.noAudio")));
+        },
       });
       if (!current()) {
         recorder.cancel();

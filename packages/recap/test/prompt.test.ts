@@ -12,6 +12,10 @@ test("prompt helpers keep rewrites and next-action suggestions bounded", () => {
   assert.match(next, /Assistant: I found the missing await/);
   assert.equal(sanitizeNextActionReply("\`\`\`\nSuggestion: Add a regression test.\n\`\`\`"), "Add a regression test.");
   assert.equal(sanitizeNextActionReply(`"${"x".repeat(900)}"`).length, 800);
+  for (const placeholder of ["(empty)", "<empty string>", "[Empty]", "\"\"", "None.", "N/A", "*No suggestion*", "Suggestion: (empty)"]) {
+    assert.equal(sanitizeNextActionReply(placeholder), "", placeholder);
+  }
+  assert.equal(sanitizeNextActionReply("Empty the cache and rerun the import."), "Empty the cache and rerun the import.");
 
   const improved = buildPromptImprovementPrompt("  fix retry  ");
   assert.match(improved, /USER PROMPT:\nfix retry$/);

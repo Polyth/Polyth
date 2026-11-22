@@ -33,10 +33,10 @@ export interface AccountChoice {
 export interface AccountState {
   currentAccountId: string;
   canManage: boolean;
-  /** A full-access paired device's answer: it can read accounts, while
-   *  account changes need a browser signed in to the server. */
+  /** A full-access paired device's own account (name, password, passkeys,
+   *  command-line tokens) still changes only in a browser signed in here. */
   readOnly: boolean;
-  /** With `readOnly`: this account is an owner who manages people there. */
+  /** With `readOnly`: this account is an owner who administers this instance. */
   canManageInBrowser: boolean;
   accounts: AccountChoice[];
 }

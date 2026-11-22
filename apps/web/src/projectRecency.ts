@@ -15,7 +15,7 @@ export const PROJECT_RECENCY_HALF_LIFE_MS = 7 * DAY_MS;
 /** Chats older than this no longer affect the order. */
 export const PROJECT_RECENCY_WINDOW_MS = 30 * DAY_MS;
 
-type RecencySession = Pick<SessionProjection, "id" | "projectId" | "parentId" | "lastTurnAt" | "createdAt">;
+type RecencySession = Pick<SessionProjection, "id" | "projectId" | "parentId" | "forkOf" | "lastTurnAt" | "createdAt">;
 
 /** Each top-level chat adds a weight that halves every half-life, so many
  *  chats this week outrank a few today and a busy month long ago fades out.
@@ -27,7 +27,7 @@ export function projectRecencyScores(
   const scores = new Map<string, { score: number; latest: number }>();
   const seen = new Set<string>();
   for (const session of sessions) {
-    if (session.parentId || !session.projectId || seen.has(session.id)) continue;
+    if ((session.parentId && !session.forkOf) || !session.projectId || seen.has(session.id)) continue;
     seen.add(session.id);
     const at = session.lastTurnAt ?? session.createdAt;
     const age = Math.max(0, now - at);

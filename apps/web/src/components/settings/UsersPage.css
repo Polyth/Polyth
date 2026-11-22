@@ -1,0 +1,281 @@
+/* Settings → Users: the add-user flow, the guide and the People actions. The
+   list, the account card and the detail view keep their rules in styles.css.
+   Only tokens here: this file is not rescaled by the build's font plugin. */
+
+/* ---- People section actions ------------------------------------------------
+   "How it works" and Add user share the section head. On a phone they drop
+   under the hint as one row, Add user filling it, so the hint keeps its full
+   width and the primary action sits where a thumb reaches it. */
+.users-people-actions { display: flex; align-items: center; gap: var(--space-1); min-width: 0; }
+.users-guide-toggle.ui-btn--ghost { color: var(--text-dim); }
+.users-guide-toggle[aria-expanded="true"] { color: var(--accent-text); }
+
+@media (max-width: 700px) {
+  .users-page [data-settings-item="users.manage"] > .settings-section-head > .settings-section-action { flex: 1 1 100%; }
+  .users-people-actions { flex: 1 1 auto; gap: var(--space-2); }
+  .users-people-actions > .users-add-button { flex: 1 1 auto; }
+}
+
+/* ---- Guide -------------------------------------------------------------------
+   Four steps and the roles behind them. While the owner is alone it is the
+   page's empty state, warmed by the same faint accent light as the new-project
+   flow; opened on demand it is a plain card. */
+.users-guide {
+  display: grid; gap: var(--space-4); min-width: 0;
+  margin-top: var(--space-3); padding: var(--space-4);
+  border: 1px solid var(--border-soft); border-radius: var(--radius-card);
+  background: var(--elevated);
+}
+.users-guide[data-variant="empty"] {
+  background:
+    radial-gradient(90% 70% at 0% 0%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 70%),
+    var(--elevated);
+}
+.users-guide + .users-page-filter,
+.users-guide + .users-list { margin-top: var(--space-3); }
+.users-guide-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-width: 0; }
+/* The close glyph lines up with the card's content edge, not its own padding. */
+.users-guide-head > .ui-icon-btn { margin-block: calc(var(--space-1) * -1); margin-inline-end: calc(var(--space-2) * -1); }
+.users-guide-title {
+  margin: 0; color: var(--text);
+  font-size: var(--font-label); font-weight: 650; line-height: 1.3;
+}
+.users-guide-steps {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  gap: var(--space-4) var(--space-5);
+  margin: 0; padding: 0; list-style: none;
+}
+.users-guide-step { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: var(--space-3); min-width: 0; }
+.users-guide-step-mark {
+  display: grid; place-items: center; flex: none;
+  width: var(--control-h-sm); height: var(--control-h-sm);
+  border-radius: var(--radius-control);
+  background: var(--accent-wash); color: var(--accent-text);
+}
+.users-guide-step-copy { display: grid; gap: 2px; min-width: 0; padding-top: 1px; }
+.users-guide-step-copy strong { color: var(--text); font-size: var(--font-label); font-weight: 600; line-height: 1.3; }
+.users-guide-step-copy span { color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); text-wrap: pretty; }
+
+.users-guide-roles { min-width: 0; border-top: 1px solid var(--hair); padding-top: var(--space-3); }
+.users-guide-roles > summary {
+  display: flex; align-items: center; gap: var(--space-2);
+  width: fit-content; min-height: max(var(--control-h-sm), var(--hit-min));
+  color: var(--accent-text); font-size: var(--font-label); font-weight: 500;
+  cursor: pointer; list-style: none;
+}
+.users-guide-roles > summary::-webkit-details-marker { display: none; }
+.users-guide-roles > summary::after {
+  content: ""; width: 6px; height: 6px; margin-top: -3px;
+  border-inline-end: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform var(--motion-fast) var(--motion-ease);
+}
+.users-guide-roles[open] > summary::after { margin-top: 3px; transform: rotate(-135deg); }
+.users-guide-roles > summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: var(--radius-control); }
+.users-guide-roles dl { display: grid; gap: var(--space-2); margin: var(--space-2) 0 0; }
+.users-guide-role {
+  display: grid; grid-template-columns: minmax(7rem, 9rem) minmax(0, 1fr); gap: var(--space-3);
+  font-size: var(--font-meta); line-height: var(--font-meta-lh);
+}
+.users-guide-role dt { color: var(--text); font-weight: 600; }
+.users-guide-role dd { margin: 0; color: var(--muted); }
+.users-guide-foot { display: flex; }
+
+@media (max-width: 700px) {
+  .users-guide { gap: var(--space-4); padding: var(--space-4) var(--space-4) var(--space-4); }
+  .users-guide-role { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .users-guide-foot > .ui-btn { flex: 1 1 auto; }
+}
+
+/* ---- Add-user flow -------------------------------------------------------------
+   One head (step label + X, title, hint, a progress hairline), one scroll
+   region and one pinned footer, the grammar of the new-project flow. On a
+   desktop all three steps share one frame so Continue never re-centres the
+   window; a phone shows the shell's bottom sheet. */
+.user-wizard.dialog-panel {
+  position: relative; isolation: isolate;
+  width: min(544px, calc(100vw - 48px));
+  gap: 0; overflow: hidden;
+}
+@media (min-width: 701px) {
+  .user-wizard.dialog-panel { height: min(600px, calc(100dvh - 96px)); max-height: min(86vh, 100%); }
+}
+.user-wizard.dialog-panel::before {
+  position: absolute; z-index: 0; inset: 0;
+  background: radial-gradient(75% 42% at 0% 0%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 72%);
+  content: ""; pointer-events: none;
+}
+.user-wizard.dialog-panel > * { position: relative; z-index: 1; }
+
+.user-wizard-head {
+  position: relative; display: grid; flex: none; min-width: 0;
+  padding: var(--space-5) var(--space-5) var(--space-4);
+}
+.user-wizard-head-top {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+  min-height: var(--control-h-sm);
+}
+/* The X's painted glyph, not its box, meets the content edge. */
+.user-wizard-head-top > .ui-icon-btn { margin-inline-end: calc(var(--space-2) * -1); }
+.user-wizard-step {
+  min-width: 0; color: var(--accent-text);
+  font-size: var(--font-meta); line-height: var(--font-meta-lh); font-weight: 650; letter-spacing: .01em;
+}
+.user-wizard-done-mark {
+  display: grid; place-items: center;
+  width: var(--control-h-sm); height: var(--control-h-sm);
+  border-radius: var(--radius-circle);
+  background: var(--green-wash); color: var(--green);
+}
+.user-wizard-title {
+  margin: var(--space-2) 0 0; color: var(--text);
+  font-size: var(--font-heading); font-weight: 650; line-height: 1.25; letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+/* Focus lands on the title only so a phone opens without a keyboard and a
+   reader hears the step; it is not a control and wears no ring. */
+.user-wizard-title:is(:focus, :focus-visible) { outline: none; box-shadow: none; }
+.user-wizard-hint {
+  max-width: 62ch; margin: var(--space-1) 0 0; color: var(--muted);
+  font-size: var(--font-meta); line-height: var(--font-meta-lh); overflow-wrap: anywhere;
+}
+/* Progress rides the head's bottom hairline: half, full, then done in green. */
+.user-wizard-progress { position: absolute; inset-inline: 0; bottom: 0; height: 2px; background: var(--hair); overflow: hidden; }
+.user-wizard-progress > span {
+  display: block; height: 100%; background: var(--accent);
+  transition: inline-size var(--motion-surface) var(--motion-ease), background-color var(--motion-normal) var(--motion-ease);
+}
+.user-wizard-head[data-step="done"] .user-wizard-progress > span { background: var(--green); }
+
+.user-wizard-form { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; margin: 0; }
+.user-wizard-body {
+  display: flex; flex: 1 1 auto; flex-direction: column; gap: var(--space-4);
+  min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  padding: var(--space-5) var(--space-5) var(--space-5);
+}
+/* Children keep their content height: a well that clips its rounded corners
+   (overflow: hidden) would otherwise be squeezed by the short sheet and its
+   rows would paint over each other instead of the body scrolling. */
+.user-wizard-body > * { flex: none; }
+.user-wizard-body > .settings-field { margin: 0; }
+.user-wizard-foot {
+  display: flex; flex: none; align-items: center; justify-content: flex-end; gap: var(--space-2);
+  padding: var(--space-3) var(--space-5) var(--space-4);
+  border-top: 1px solid var(--hair);
+}
+/* The way back (Cancel, Back, Fine-tune) leads; the one primary ends the row. */
+.user-wizard-foot > .ui-btn:first-child { margin-inline-end: auto; }
+
+/* Presets: one soft well of radio rows, the selected row carrying the only
+   accent besides the primary button (the setup screen's usage choice). */
+.user-wizard-presets {
+  display: grid; min-width: 0; overflow: hidden;
+  border: 1px solid var(--hair); border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--sunken) 42%, var(--input-bg));
+}
+.user-wizard-preset {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-3);
+  min-height: max(60px, var(--hit-min)); padding: var(--space-3) var(--space-3) var(--space-3) var(--space-3);
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--motion-ease);
+}
+.user-wizard-preset + .user-wizard-preset { box-shadow: inset 0 1px 0 var(--hair); }
+@media (hover: hover) {
+  .user-wizard-preset:hover:not([data-selected]) { background: var(--surface-overlay-hover); }
+}
+.user-wizard-preset[data-selected] { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.user-wizard-preset:has(input:focus-visible) { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.user-wizard-preset:has(input:disabled) { cursor: default; }
+.user-wizard-preset:first-child { border-start-start-radius: inherit; border-start-end-radius: inherit; }
+.user-wizard-preset:last-child { border-end-start-radius: inherit; border-end-end-radius: inherit; }
+.user-wizard-preset-icon {
+  display: grid; place-items: center;
+  width: var(--control-h-sm); height: var(--control-h-sm);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--text) 6%, transparent); color: var(--muted);
+  transition: color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease);
+}
+.user-wizard-preset[data-selected] .user-wizard-preset-icon { background: var(--accent-wash); color: var(--accent-text); }
+.user-wizard-preset-text { display: grid; gap: 2px; min-width: 0; }
+.user-wizard-preset-title {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-2);
+  color: var(--text); font-size: var(--font-label); font-weight: 550; line-height: 1.3;
+}
+/* The role behind the plain name, for people who think in roles. */
+.user-wizard-preset-tag { color: var(--faint); font-size: var(--font-meta); font-weight: 450; }
+.user-wizard-preset-detail { color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); text-wrap: pretty; }
+.user-wizard-radio {
+  display: grid; place-items: center;
+  width: 20px; height: 20px; border-radius: var(--radius-circle);
+  border: 1.5px solid color-mix(in srgb, var(--text) 30%, transparent);
+  color: var(--accent-ink);
+  transition: background var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease);
+}
+.user-wizard-preset[data-selected] .user-wizard-radio { background: var(--accent); border-color: var(--accent); }
+.user-wizard-radio .ui-icon { width: 13px; height: 13px; stroke-width: 2.5; }
+
+/* Done: the sign-in details in one well, each with its own copy button. */
+.user-wizard-credentials {
+  display: grid; min-width: 0; margin: 0; overflow: hidden;
+  border: 1px solid var(--hair); border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--sunken) 42%, var(--input-bg));
+}
+.user-wizard-credential {
+  display: grid; grid-template-columns: minmax(6.5rem, 32%) minmax(0, 1fr); align-items: center; gap: var(--space-3);
+  min-height: max(48px, var(--hit-min));
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-4);
+}
+.user-wizard-credential + .user-wizard-credential { box-shadow: inset 0 1px 0 var(--hair); }
+.user-wizard-credential dt { min-width: 0; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.user-wizard-credential dd {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
+  min-width: 0; min-height: var(--control-h-sm); margin: 0;
+}
+.user-wizard-credential-value {
+  min-width: 0; color: var(--text);
+  font-size: var(--font-label); line-height: 1.35; overflow-wrap: anywhere;
+}
+.user-wizard-credential-value.is-mono { font-family: var(--mono); font-size: var(--font-code); letter-spacing: .02em; }
+.user-wizard-credential .ui-icon-btn { flex: none; }
+.user-wizard-credential .ui-icon-btn.is-copied { color: var(--green); }
+.user-wizard-share { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.user-wizard-note { margin: 0; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+
+/* Phone: the shell's bottom sheet. 16px gutters shared by head, body and
+   footer; the footer's buttons split its row and clear the home indicator. */
+@container dialog-panel (max-width: 480px) {
+  .user-wizard-head { padding: var(--space-4) var(--space-4) var(--space-3); }
+  .user-wizard-body { gap: var(--space-4); padding: var(--space-4); }
+  .user-wizard-foot { flex-wrap: wrap; padding: var(--space-3) var(--space-4) max(var(--space-3), var(--safe-bottom)); }
+  /* Even halves for short labels; a long translation takes the room it needs
+     and, past the row, puts the primary on a line of its own, never clipped. */
+  .user-wizard-foot > .ui-btn { flex: 1 1 0; min-width: max-content; }
+  .user-wizard-foot > .ui-btn:first-child { margin-inline-end: 0; }
+  .user-wizard-preset { gap: var(--space-3); padding-inline: var(--space-3); }
+  .user-wizard-credential {
+    grid-template-columns: minmax(0, 1fr); gap: 0;
+    padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  }
+  .user-wizard-share > .ui-btn { flex: 1 1 auto; }
+}
+
+/* ---- A person's page on a phone -------------------------------------------------
+   The three tabs share the strip evenly instead of huddling at its start, and
+   a stacked Select reads as the same field as the name and login inputs on
+   the same page (under the default borderless appearance its chip would
+   otherwise sit on the page as bare text). */
+@media (max-width: 700px) {
+  .user-detail .settings-tabs-strip.ui-tabs { display: flex; width: 100%; }
+  .user-detail .settings-tabs-strip .ui-tab { flex: 1 1 0; min-width: 0; justify-content: center; }
+  .user-detail .set-row-control > .picker-select { width: 100%; }
+  .user-detail .set-row-control > .picker-select > .picker-chip {
+    justify-content: space-between;
+    min-height: max(var(--control-h), var(--hit-min));
+    padding-inline: var(--control-pad-x);
+    border-color: var(--control-border);
+    background: var(--input-bg);
+  }
+  /* Borderless appearance strips border colours; the field keeps a soft edge
+     the way the lock-screen fields do. */
+  body[data-hide-borders="true"] .user-detail .set-row-control > .picker-select > .picker-chip { box-shadow: inset 0 0 0 1px var(--borderless-edge); }
+}

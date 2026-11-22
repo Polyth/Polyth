@@ -28,6 +28,9 @@ import { agentName } from "./agentActions.ts";
 import { useNow } from "./agentClock.ts";
 import { optimistic } from "./agentsStore.ts";
 import AgentComposer, { type AgentMessage, type DroppedFiles } from "./AgentComposer.tsx";
+import AgentAttention from "./AgentAttention.tsx";
+import { failureDetail, failureTitle, runCause } from "./agentFailure.ts";
+import { formatWake } from "./agentTime.ts";
 import {
   bareDay, carries, conversationDays, dayItems, queues,
   type ConversationDay, type ConversationItem, type ConversationThread, type PendingMessage, type ThreadOpening,
@@ -143,9 +146,8 @@ const webLink = (url: string | undefined): string | undefined =>
 
 function headlineOf(run: ScheduleRunDto): string {
   if (run.headline) return run.headline;
-  if (run.stopped && run.status !== "ok") return tr("agents.stoppedByYou");
-  // The error itself reads as a detail under the plain words.
-  if (run.status === "failed") return tr("agents.runFailedTitle");
+  // What happened, in plain words; the error itself reads as a detail under them.
+  if (run.status === "failed") return failureTitle(run);
   if (run.status === "unknown") return tr("agents.runUnknown");
   const first = run.summary?.split("\n").find((line) => line.trim())?.replace(/^#+\s*/, "").trim();
   return first || tr("agents.runOk");
@@ -273,23 +275,27 @@ export function reportLead(body: string): { lead: string; rest: string } {
 /** What only the person can do, from the report's "Needs you" lines: the
  *  words lead, the way to do it sits at the row's end. */
 function Needs({ needs }: { needs: NonNullable<ScheduleRunDto["needs"]> }) {
+  // What still waits is listed once, above the conversation, with the way to
+  // do it. Here the report only keeps the record of what it asked, and of
+  // what became of it.
   return (
-    <section className="agent-needs" aria-label={tr("agents.needsYou")}>
-      <h4 className="agent-needs-label">{tr("agents.needsYou")}</h4>
+    <section className="agent-needs" aria-label={tr("agents.askedYou")}>
+      <h4 className="agent-needs-label">{tr("agents.askedYou")}</h4>
       <ul className="agent-needs-list">
         {needs.map((need, index) => {
           const url = webLink(need.url);
           return (
-            <li key={`${index}-${need.text}`} className="agent-need">
+            <li key={`${index}-${need.text}`} className="agent-need" data-done={need.done ? need.done.by : undefined}>
               <span className="agent-need-words">
-                <span className="agent-need-text">{need.text}</span>
-                {need.detail && <span className="agent-need-detail">{need.detail}</span>}
+                <span className="agent-need-text">
+                  {url ? <a href={url} target="_blank" rel="noopener noreferrer">{need.text}</a> : need.text}
+                </span>
+                {need.done && (
+                  <span className="agent-need-state">
+                    {need.done.by === "agent" ? tr("agents.need.closedByAgent") : tr("agents.need.done")}
+                  </span>
+                )}
               </span>
-              {url && (
-                <a className="ui-btn ui-btn--quiet ui-btn--sm agent-need-open" href={url} target="_blank" rel="noopener noreferrer">
-                  {/\/pull\/\d+/.test(url) ? tr("agents.openPr") : tr("agents.openLink")}
-                </a>
-              )}
             </li>
           );
         })}
@@ -309,7 +315,9 @@ function Timeline({ moments }: { moments: NonNullable<ScheduleRunDto["timeline"]
           <li key={`${moment.at}-${index}`} data-kind={moment.kind}>
             <time dateTime={new Date(moment.at).toISOString()}>{timeOf(moment.at)}</time>
             <span className="agent-steps-text">
-              {moment.kind === "wait" ? (
+              {moment.kind === "resume" ? (
+                <span className="agent-steps-wait">{tr("agents.steps.resumed")}</span>
+              ) : moment.kind === "wait" ? (
                 <>
                   <span className="agent-steps-wait">
                     {moment.until
@@ -407,7 +415,20 @@ function Report({ task, run, compact, latest, dated, onFeedback, onOpenSession }
     wake ? <span key="wake" className="agent-report-wake">{wake}</span> : null,
     run.late ? <span key="late" className="agent-report-wake">{tr("agents.lateRun")}</span> : null,
     run.backup ? <span key="backup" className="agent-report-wake">{tr("agents.ranOnBackupValue", { count: run.backup })}</span> : null,
+    // It got here on its own after a cut, or by the person's word in its session.
+    run.resumed && run.status === "ok" ? <span key="resumed" className="agent-report-wake">{tr("agents.run.resumedValue", { count: run.resumed })}</span> : null,
+    run.steered ? <span key="steered" className="agent-report-wake">{tr("agents.run.steered")}</span> : null,
   ].filter(Boolean);
+  // A run that did not finish has no report: its last words are where it
+  // was, said as that; why it ended comes first, and what happens next last.
+  const failed = run.status === "failed";
+  const why = failed ? failureDetail(run) : "";
+  const reached = failed ? plainWords(lead || shownBody.split("\n").find((line) => line.trim()) || "") : "";
+  const cause = runCause(run);
+  const retries = failed && latest && cause !== "person" && cause !== "route" && cause !== "approval"
+    && !task.tripped && task.enabled && !task.manualOnly && typeof task.nextRunAt === "number"
+    ? tr("agents.fail.nextWakeValue", { when: formatWake(task.nextRunAt) })
+    : "";
   // One link: the rest of the report (how it went, its notes last), or the notes alone.
   const hasMore = !!rest || moments.length > 1 || notes.length > 0;
   const moreLabel = more.open ? tr("agents.showLess")
@@ -438,7 +459,19 @@ function Report({ task, run, compact, latest, dated, onFeedback, onOpenSession }
           {(run.events?.length ?? 0) > 3 && <li>{tr("agents.moreEventsValue", { count: run.events!.length - 3 })}</li>}
         </ul>
       ) : null}
-      {lead && markdown(lead, "lead", readOn)}
+      {failed ? (
+        <>
+          {why && <p className="agent-report-error">{why}</p>}
+          {reached && (
+            <p className="agent-report-reached">
+              <span className="agent-report-reached-label">{tr("agents.fail.reached")}</span>
+              <span className="agent-report-reached-words">{reached}</span>
+              {run.steps ? <span className="agent-report-reached-steps">{tr("agents.fail.stepsValue", { count: run.steps })}</span> : null}
+            </p>
+          )}
+          {retries && <p className="agent-report-next">{retries}</p>}
+        </>
+      ) : lead && markdown(lead, "lead", readOn)}
       {hasMore && more.present && (
         <div ref={more.region} id={restId} className="agent-fold agent-report-rest">
           {rest && markdown(rest, "full")}
@@ -451,7 +484,7 @@ function Report({ task, run, compact, latest, dated, onFeedback, onOpenSession }
           )}
         </div>
       )}
-      {run.error && signal !== "stopped" && <p className="agent-report-error">{run.error}</p>}
+      {run.error && !failed && signal !== "stopped" && <p className="agent-report-error">{run.error}</p>}
       {(hasMore || session || tools) && (
         <footer className="agent-report-foot" data-link={hasMore || !!session || undefined}>
           {hasMore && (
@@ -1099,6 +1132,7 @@ export default function AgentConversation({ host, agent, live, onReview, onRun, 
         if (files.length) setDropped((current) => ({ batch: (current?.batch ?? 0) + 1, agentId: agent.id, files }));
       }}
     >
+      <AgentAttention agent={agent} {...(host ? { host } : {})} {...(openSession ? { onOpenSession: openSession } : {})} />
       <div
         ref={scroller}
         className="agent-feed"

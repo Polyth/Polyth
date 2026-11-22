@@ -1,6 +1,8 @@
 export interface SessionTreeItem {
   id: string;
   parentId?: string;
+  /** A forked chat: `parentId` is lineage only, never delegated nesting. */
+  forkOf?: string;
 }
 
 export interface SessionTreeNode<T extends SessionTreeItem> {
@@ -13,29 +15,31 @@ export interface SessionTreeNode<T extends SessionTreeItem> {
  * subagent, a workflow unit) is reached through its parent: while the parent
  * is listed the child rides inside its disclosure and never takes a root slot
  * — a workflow parent runs no turn of its own, so its units would otherwise
- * outrank it and show as separate chats. A child whose parent has not loaded
- * yet is withheld while that parent may still arrive (`parentPending`). Only
- * a child whose parent is known not to be listed (archived, filtered out,
- * gone) stands on its own.
+ * outrank it and show as separate chats. A fork is a chat of its own, not
+ * delegated work, so it always stands on its own row. A child whose parent
+ * has not loaded yet is withheld while that parent may still arrive
+ * (`parentPending`). Only a child whose parent is known not to be listed
+ * (archived, filtered out, gone) stands on its own.
  */
 export function isNavigatorRoot(
   item: SessionTreeItem,
   listedIds: ReadonlySet<string>,
   parentPending: (parentId: string) => boolean,
 ): boolean {
-  if (!item.parentId) return true;
+  if (!item.parentId || item.forkOf) return true;
   if (listedIds.has(item.parentId)) return false;
   return !parentPending(item.parentId);
 }
 
-/** Listed children per parent id, in the caller's order. */
+/** Listed children per parent id, in the caller's order. Forks are chats of
+ * their own, never a parent's subagent row. */
 export function childrenByParent<T extends SessionTreeItem>(
   items: readonly T[],
 ): Map<string, T[]> {
   const ids = new Set(items.map((item) => item.id));
   const byParent = new Map<string, T[]>();
   for (const item of items) {
-    if (!item.parentId || !ids.has(item.parentId) || item.parentId === item.id) continue;
+    if (!item.parentId || item.forkOf || !ids.has(item.parentId) || item.parentId === item.id) continue;
     byParent.set(item.parentId, [...(byParent.get(item.parentId) ?? []), item]);
   }
   return byParent;
@@ -48,11 +52,14 @@ export function listedAncestors<T extends SessionTreeItem>(
 ): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
-  let parentId = id ? byId.get(id)?.parentId : undefined;
+  let item = id ? byId.get(id) : undefined;
+  let parentId = item && !item.forkOf ? item.parentId : undefined;
+  item = undefined;
   while (parentId && byId.has(parentId) && !seen.has(parentId)) {
     seen.add(parentId);
     out.push(parentId);
-    parentId = byId.get(parentId)?.parentId;
+    item = byId.get(parentId)!;
+    parentId = item.forkOf ? undefined : item.parentId;
   }
   return out;
 }
@@ -74,14 +81,15 @@ export function includeSessionTreeContext<T extends SessionTreeItem>(
   while (changed) {
     changed = false;
     if (options.ancestors !== false) for (const id of [...included]) {
-      const parentId = byId.get(id)?.parentId;
-      if (parentId && byId.has(parentId) && !included.has(parentId)) {
+      const item = byId.get(id);
+      const parentId = item?.parentId;
+      if (parentId && !item?.forkOf && byId.has(parentId) && !included.has(parentId)) {
         included.add(parentId);
         changed = true;
       }
     }
     for (const item of items) {
-      if (item.parentId && included.has(item.parentId) && !included.has(item.id)) {
+      if (item.parentId && !item.forkOf && included.has(item.parentId) && !included.has(item.id)) {
         included.add(item.id);
         changed = true;
       }
@@ -98,11 +106,11 @@ export function buildSessionTree<T extends SessionTreeItem>(
   const ids = new Set(items.map((item) => item.id));
   const byParent = new Map<string, T[]>();
   for (const item of items) {
-    if (!item.parentId || !ids.has(item.parentId)) continue;
+    if (!item.parentId || item.forkOf || !ids.has(item.parentId)) continue;
     byParent.set(item.parentId, [...(byParent.get(item.parentId) ?? []), item]);
   }
 
-  const roots = items.filter((item) => !item.parentId || !ids.has(item.parentId));
+  const roots = items.filter((item) => !item.parentId || item.forkOf || !ids.has(item.parentId));
   const rendered = new Set<string>();
   const build = (item: T, ancestors: ReadonlySet<string>): SessionTreeNode<T> => {
     rendered.add(item.id);

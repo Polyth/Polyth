@@ -14,7 +14,13 @@ test("desktop stages an exact installed Playwright Chromium and packages it as a
   };
   const script = await readFile(join(desktopDir, "stage-chromium.mjs"), "utf8");
   const main = await readFile(join(desktopDir, "src", "main.ts"), "utf8");
-  assert.equal(pkg.dependencies["playwright-core"], "1.65.0");
+  // Exact pin, equal to the version the lockfile installs (Dependabot moves both together).
+  const lock = JSON.parse(await readFile(join(desktopDir, "..", "..", "package-lock.json"), "utf8")) as {
+    packages: Record<string, { version?: string }>;
+  };
+  const installed = lock.packages["apps/desktop/node_modules/playwright-core"] ?? lock.packages["node_modules/playwright-core"];
+  assert.match(pkg.dependencies["playwright-core"], /^\d+\.\d+\.\d+$/);
+  assert.equal(pkg.dependencies["playwright-core"], installed?.version);
   assert.match(pkg.scripts["stage:chromium"] ?? "", /stage-chromium\.mjs/);
   assert.match(pkg.scripts.dist ?? "", /stage:chromium/);
   assert.deepEqual(

@@ -43,10 +43,33 @@ const stepRow = (name: string, target = "") => `
       <span class="tool-chevron"><svg></svg></span>
     </button>
   </div></div>`;
+// The live line of a working block: an MCP tool's name and, when the call has
+// one, its quiet preview (ActivityTicker.tsx).
+const tickerCopy = (label: string, preview = "") => `<span class="activity-ticker" data-ticker-entry="live"><span class="activity-ticker-line"><span class="activity-ticker-step live"><span class="activity-ticker-glyph"><svg width="14" height="14"></svg></span><strong>${label}</strong>${preview ? `<span class="activity-ticker-preview">${preview}</span>` : ""}</span></span></span>`;
 const step = stepRow("Shell");
 // A step's target is far longer than its name: the name must keep its words
 // and the target must be what truncates.
 const longTargetStep = stepRow("Read", "Read · .agents/skills/polyth-agent-beta/SKILL.md");
+
+// Detail rows inside an opened tool call, as ExecutionRow renders them. Each
+// pairs a primary with something that must give way before it.
+const detailCard = `
+<div class="tool-card execution-row detail-rows"><div class="execution-details tool-body">
+  <section class="execution-detail-section execution-file-changes"><article class="execution-file-change">
+    <button class="execution-file-toggle"><span class="execution-file-path"><span class="muted">apps/web/old-name.tsx → </span>apps/web/src/components/SessionActivityDetails.tsx</span><span class="execution-diff-stat"><span class="positive">+12</span><span class="negative">−4</span></span><span class="tool-chevron"><svg width="16" height="16"></svg></span></button>
+  </article></section>
+  <section class="execution-mcp-list"><ul><li>
+    <span class="execution-mcp-list-title"><span>Fix truncated step names in the mobile activity ticker rows</span><small>3 comments · open · assigned</small></span>
+    <span class="execution-mcp-list-detail">The cap resolves against the words it caps.</span>
+  </li></ul></section>
+  <section class="execution-detail-section execution-subagent-detail">
+    <span class="execution-subagent-branch"><svg width="18" height="18"></svg></span>
+    <div><strong>Delegated worker: sweep every transcript row for truncation</strong><span class="execution-subagent-state running">Waiting for model response</span><p>Measuring rows at phone width</p></div>
+    <button>Open child session</button>
+  </section>
+</div></div>`;
+// A block summary whose title alone is longer than the row.
+const longSummary = summary("completed", "<strong>Edited SessionActivityDetails and every transcript row that truncates</strong><small>4 steps · 1m</small>");
 
 const conversation = (rail: string) => `
 <div class="app mode-chat view-session"><div class="app-shell">
@@ -63,6 +86,14 @@ const conversation = (rail: string) => `
           ${summary("active", "<strong>Shell</strong>")}
           <span class="activity-live-stop"><button class="ui-btn ui-btn--danger ui-btn--sm execution-stop"><span class="ui-btn-label">Stop</span></button></span>
         </section>
+        <section class="msg assistant activity-group current live-alone">
+          ${summary("active", tickerCopy("Session messages"))}
+        </section>
+        <section class="msg assistant activity-group current live-with-preview">
+          ${summary("active", tickerCopy("Session messages", "e9210f5f"))}
+        </section>
+        <section class="msg assistant activity-group folded long-title">${longSummary}</section>
+        ${detailCard}
       </div>
       <div class="prompt-bookmark"><button class="ui-icon-btn prompt-bookmark-toggle"></button></div>
     </div>
@@ -152,6 +183,27 @@ const measureStepLine = (page: Page) => page.evaluate(() => {
   };
 });
 
+/** A live line's name as the reader sees it: how much of the word survives,
+ *  and where it ends against the room the row gives it. */
+const measureTickerLine = (page: Page, block: string) => page.evaluate((selector) => {
+  const section = document.querySelector(`.${selector}`)!;
+  const copy = section.querySelector<HTMLElement>(".ui-run-summary-copy")!;
+  const name = section.querySelector<HTMLElement>(".activity-ticker-step strong")!;
+  const preview = section.querySelector<HTMLElement>(".activity-ticker-preview");
+  const chevron = section.querySelector<HTMLElement>(".ui-run-summary-chevron")!;
+  const range = document.createRange();
+  range.selectNodeContents(name);
+  return {
+    room: copy.getBoundingClientRect().right,
+    nameRight: range.getBoundingClientRect().right,
+    nameWidth: range.getBoundingClientRect().width,
+    nameClipped: name.scrollWidth > name.clientWidth + 1,
+    nameNeeds: name.scrollWidth,
+    previewClipped: preview ? preview.scrollWidth > preview.clientWidth + 1 : false,
+    chevronLeft: chevron.getBoundingClientRect().left,
+  };
+}, block);
+
 const near = (actual: number, expected: number, what: string, tolerance = 0.6) =>
   assert.ok(Math.abs(actual - expected) <= tolerance, `${what}: ${actual} vs ${expected}`);
 
@@ -194,6 +246,73 @@ for (const viewport of VIEWPORTS) {
       assert.ok(line.name.width > 0, `the step's name keeps its glyphs: ${line.name.width}`);
       assert.ok(line.name.right <= line.main.right + 0.5, `the name is not cut off: ${line.name.right} vs ${line.main.right}`);
       assert.ok(line.overflows, "the target, not the name, takes the truncation");
+      await page.context().close();
+    });
+
+    // Reported: a live block whose tool was "Session messages" read "Session
+    // m…" beside a chevron with 160pt of the row unused. The name alone on the
+    // line was capped at 60% of the ticker's own shrink-to-fit width.
+    test(`${name}: a live line keeps its step's name whole`, { skip: !CHROME || viewport.width > 430 }, async () => {
+      const page = await fixture(look, viewport, CLOSED_WINDOW);
+      const alone = await measureTickerLine(page, "live-alone");
+      assert.ok(!alone.nameClipped, `a name alone on the line is not trimmed to 60% of itself: ${alone.nameWidth} of ${alone.nameNeeds}`);
+      assert.ok(alone.nameRight <= alone.chevronLeft, `the name ends before the chevron: ${alone.nameRight} vs ${alone.chevronLeft}`);
+      const paired = await measureTickerLine(page, "live-with-preview");
+      assert.ok(!paired.nameClipped, `the name stays whole beside a preview: ${paired.nameWidth} of ${paired.nameNeeds}`);
+      assert.ok(paired.nameRight <= paired.chevronLeft, `the line ends before the chevron: ${paired.nameRight} vs ${paired.chevronLeft}`);
+      await page.context().close();
+    });
+
+    // Every transcript row truncates the same way: the row's primary words
+    // keep the line, whatever pairs with them gives way first, and any
+    // ellipsis lands at the end of the line — never a clip mid-row with the
+    // rest of the row still empty, and never past the row's edge.
+    test(`${name}: every transcript row truncates at the end of its line`, { skip: !CHROME || viewport.width > 430 }, async () => {
+      const page = await fixture(look, viewport, CLOSED_WINDOW);
+      const rows = await page.evaluate(() => {
+        const primary = (el: HTMLElement | null) => {
+          if (!el) return null;
+          const box = el.getBoundingClientRect();
+          return { right: box.right, clipped: el.scrollWidth > el.clientWidth + 1 };
+        };
+        const block = document.querySelector(".long-title")!.getBoundingClientRect();
+        const title = primary(document.querySelector<HTMLHTMLElement>(".long-title .ui-run-summary-copy strong"));
+        const chevron = document.querySelector(".long-title .ui-run-summary-chevron")!.getBoundingClientRect().left;
+        const card = document.querySelector(".detail-rows")!.getBoundingClientRect();
+        const path = primary(document.querySelector<HTMLHTMLElement>(".detail-rows .execution-file-path"));
+        const diffStat = document.querySelector(".detail-rows .execution-diff-stat")!.getBoundingClientRect().left;
+        const mcpTitle = primary(document.querySelector<HTMLHTMLElement>(".detail-rows .execution-mcp-list-title > span"));
+        const mcpMeta = document.querySelector<HTMLHTMLElement>(".detail-rows .execution-mcp-list-title small")!.getBoundingClientRect().left;
+        const name = primary(document.querySelector<HTMLHTMLElement>(".detail-rows .execution-subagent-detail strong"));
+        const state = document.querySelector<HTMLHTMLElement>(".detail-rows .execution-subagent-state")!.getBoundingClientRect().left;
+        return {
+          block: { left: block.left, right: block.right },
+          title, chevron,
+          path, diffStat,
+          mcpTitle, mcpMeta,
+          name, state,
+          card: { right: card.right },
+        };
+      });
+      // A summary title longer than the row: the counts are spent, then the
+      // title ellipsizes — inside the row, reaching the chevron's column.
+      assert.ok(rows.title, "the long summary title is present");
+      assert.ok(rows.title!.right <= rows.chevron + 1, `the summary title never runs under the chevron: ${rows.title!.right} vs ${rows.chevron}`);
+      assert.ok(rows.title!.right >= rows.chevron - 48, `the summary title reaches the end of the line: ${rows.title!.right} vs ${rows.chevron}`);
+      // A changed file: the path ellipsizes inside the card, before the stats.
+      assert.ok(rows.path, "the changed-file path is present");
+      assert.ok(rows.path!.right <= rows.card.right + 1, `the path stays inside the card: ${rows.path!.right} vs ${rows.card.right}`);
+      assert.ok(rows.path!.right >= rows.diffStat - 80, `the path reaches the end of its line: ${rows.path!.right} vs ${rows.diffStat}`);
+      // An MCP result: the title keeps the line, its meta gives way first.
+      assert.ok(rows.mcpTitle, "the MCP item title is present");
+      assert.ok(rows.mcpTitle!.right <= rows.card.right + 1, `the MCP title stays inside the card: ${rows.mcpTitle!.right} vs ${rows.card.right}`);
+      assert.ok(rows.mcpTitle!.right >= rows.card.right - 48, `the MCP title reaches the end of the line: ${rows.mcpTitle!.right} vs ${rows.card.right}`);
+      assert.ok(rows.mcpTitle!.right >= rows.mcpMeta - 12, `the MCP title keeps its line to its meta (minus the gap): ${rows.mcpTitle!.right} vs ${rows.mcpMeta}`);
+      // A delegated agent: the name keeps the line, the state gives way first.
+      assert.ok(rows.name, "the subagent name is present");
+      assert.ok(rows.name!.right <= rows.card.right + 1, `the subagent name stays inside the card: ${rows.name!.right} vs ${rows.card.right}`);
+      assert.ok(rows.name!.right >= rows.card.right - 48, `the subagent name reaches the end of the line: ${rows.name!.right} vs ${rows.card.right}`);
+      assert.ok(rows.name!.right >= rows.state - 12, `the subagent name keeps its line to its state (minus the gap): ${rows.name!.right} vs ${rows.state}`);
       await page.context().close();
     });
 

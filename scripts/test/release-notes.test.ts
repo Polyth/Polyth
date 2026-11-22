@@ -71,10 +71,21 @@ test("commits group by conventional type, leading verb and touched paths", () =>
 
 test("the summary is the body's first sentence without trailers", () => {
   assert.equal(commitSummary("Swipes track the finger. Menus animate out.\n\nMore.\n\nCo-Authored-By: Claude <noreply@anthropic.com>"), "Swipes track the finger.");
+  // A squash-merged branch opens its body with the pull request's commit list;
+  // the repeated subjects and their tags never reach the public notes.
+  assert.equal(
+    commitSummary("* [Feature] Nightly bug reports\n* [Fix] Escape backslashes\n\nNightly builds open a report sheet on Cmd+Shift+B.\n\n- packages/bug-report: the sheet."),
+    "Nightly builds open a report sheet on Cmd+Shift+B.",
+  );
+  assert.equal(commitSummary("- one item\n- another item"), "");
   assert.equal(commitSummary("Co-Authored-By: Claude <noreply@anthropic.com>"), "");
   assert.equal(commitSummary("Started by session 9fdb0279; narrowed here."), "");
   const long = commitSummary(`${"word ".repeat(80)}end.`);
   assert.ok(long.length <= 221 && long.endsWith("…"), long);
+  // A cut that would land on a connector word drops it, so the note never ends in ", so…".
+  const dangling = commitSummary(`${"A squash-merged pull request starts its commit body with the branch's own titles, so ".repeat(3)}end.`);
+  assert.ok(dangling.endsWith("…"), dangling);
+  assert.ok(!/[\s,](?:and|or|but|so|because|which|that|with|for|to|the|its)$/.test(dangling.slice(0, -1)), dangling);
 });
 
 test("contributors merge identities and skip bots and AI agents", () => {
@@ -94,6 +105,30 @@ test("contributors merge identities and skip bots and AI agents", () => {
     { name: "Ada", login: null, commits: 1 },
     { name: "Grace Hopper", login: null, commits: 1 },
   ]);
+});
+
+test("a summary inside <sub> stays plain text", () => {
+  const notes = renderReleaseNotes({
+    channel: "nightly",
+    version: "1.2.366-nightly",
+    commits: [{
+      // A fictional package: naming a real removable one here would trip
+      // scripts/test/packageRemovability.test.ts.
+      subject: "Notes: own per-Space store",
+      body: "Notes move into `notes.db` under <space>/packages/example-notes.\n",
+      files: ["packages/example-notes/src/store.ts"],
+      author: { name: "Max", email: "max@polyth.app" },
+      coAuthors: [],
+    }],
+    basis: "recent",
+    source: "0".repeat(40),
+    repository: "o/r",
+    date: new Date("2026-11-19T08:00:00Z"),
+  });
+  // The sub line is HTML, not Markdown: a backslash escape would render literally,
+  // and a raw `<space>` would open a tag.
+  assert.match(notes, /<br><sub>Notes move into notes\.db under &lt;space&gt;\/packages\/example-notes\.<\/sub>/);
+  assert.doesNotMatch(notes, /\\`/);
 });
 
 test("notes are collected from the marked source range and rendered by section", () => {

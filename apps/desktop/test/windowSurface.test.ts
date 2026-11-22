@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   blockedFromLocalServer,
   channelAllowed,
+  clipboardReadAccess,
   HUB_ORIGIN,
   hubUrl,
   linkRequest,
@@ -85,11 +86,37 @@ test("only the server list holds connection authority", () => {
   assert.equal(channelAllowed("hub", "desktop:session:renew"), false);
 });
 
+test("a bug report comes from this computer's page or another server's, never the server list", () => {
+  for (const channel of ["desktop:report:state", "desktop:report:capture", "desktop:report:send"]) {
+    assert.equal(channelAllowed("local", channel), true, channel);
+    assert.equal(channelAllowed("remote", channel), true, channel);
+    assert.equal(channelAllowed("hub", channel), false, channel);
+    assert.equal(channelAllowed(null, channel), false, channel);
+  }
+});
+
 test("this computer's page keeps what it always had, and an unknown page gets nothing", () => {
   for (const channel of ["desktop:path:reveal", "desktop:setup:claim", "desktop:session:confirm", "desktop:data:open", "desktop:servers:menu"]) {
     assert.equal(channelAllowed("local", channel), true, channel);
     assert.equal(channelAllowed(null, channel), false, channel);
   }
+});
+
+test("this computer's page reads the clipboard; another server's page asks; nothing else may", () => {
+  const local = "http://127.0.0.1:4400/projects/a";
+  const remote = "https://polyth.example.com/";
+  assert.equal(clipboardReadAccess(local, local, true, origins), "allow");
+  assert.equal(clipboardReadAccess(local, undefined, true, origins), "allow");
+  assert.equal(clipboardReadAccess(remote, remote, true, origins), "ask");
+  assert.equal(clipboardReadAccess("http://127.0.0.1:41234/", "http://127.0.0.1:41234/x", true, origins), "ask");
+  // A frame inside the page never reads it, even one on the page's own origin.
+  assert.equal(clipboardReadAccess(local, local, false, origins), "deny");
+  assert.equal(clipboardReadAccess(local, "https://evil.example/", false, origins), "deny");
+  // A request whose frame is not the page's own origin is refused.
+  assert.equal(clipboardReadAccess(local, "https://polyth.example.com/", true, origins), "deny");
+  assert.equal(clipboardReadAccess(`${HUB_ORIGIN}/index.html`, `${HUB_ORIGIN}/index.html`, true, origins), "deny");
+  assert.equal(clipboardReadAccess("https://unknown.example/", "https://unknown.example/", true, origins), "deny");
+  assert.equal(clipboardReadAccess("not a url", "not a url", true, origins), "deny");
 });
 
 test("a page navigates inside its origin; only the list hands the window to a server", () => {
@@ -170,4 +197,17 @@ test("another server's page keeps its own requests, and the window can still com
   // With no server of its own there is nothing to protect.
   assert.equal(blockedFromLocalServer({ url: "http://127.0.0.1:4400/api", resourceType: "xhr" }, page, { local: null, remote: new Set([page]) }), false);
   assert.equal(blockedFromLocalServer({ url: "not a url", resourceType: "xhr" }, page, origins), false);
+});
+
+test("server zones: a page lists its own projects and asks for the others; only another server needs permission", () => {
+  for (const channel of ["desktop:servers:zones", "desktop:servers:zones:report", "desktop:servers:zones:open", "desktop:servers:zones:fold"]) {
+    assert.equal(channelAllowed("local", channel), true, channel);
+    assert.equal(channelAllowed("remote", channel), true, channel);
+    // The list shows servers itself and has no navigator.
+    assert.equal(channelAllowed("hub", channel), false, channel);
+    assert.equal(channelAllowed(null, channel), false, channel);
+  }
+  assert.equal(channelAllowed("remote", "desktop:servers:zones:allow"), true);
+  assert.equal(channelAllowed("local", "desktop:servers:zones:allow"), false);
+  assert.equal(channelAllowed("hub", "desktop:servers:zones:allow"), false);
 });

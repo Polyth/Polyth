@@ -57,9 +57,10 @@ Paired-device access is default-deny unless the owner explicitly grants that dev
   For unrelated tasks, do not enumerate handles, inspect Vault metadata, or
   discuss the capability.
 - Never ask a user to paste a password, token or private key into chat or a
-  normal tool argument. To save one, emit the Secure Safe question metadata
-  (`secureSafe`, `handle`, `label`, `purpose`, `kind`); the user enters the
-  value in the protected UI and the agent receives only the handle/outcome.
+  normal tool argument. To save one, call `polyth_credential_vault_request`
+  (`handle`, `label`, `purpose`, `kind`; harnesses without it may emit the
+  Secure Safe question metadata instead); the user enters the value in the
+  protected UI and the agent receives only the handle/outcome.
 - Read only the handle manifest and `envRef` metadata. Use a handle/reference
   on a supported execution boundary. The current broker is the local bounded
   composer-shell (`SessionService.runShell` → `@polyth/terminal.run`): the

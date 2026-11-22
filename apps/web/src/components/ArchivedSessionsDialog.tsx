@@ -382,7 +382,7 @@ export default function ArchivedSessionsDialog() {
               </span>
             )}
             {model && <span className="archived-sessions-model"><span className="archived-sessions-model-dot" style={{ background: model.color }} />{model.label}</span>}
-            {session.parentId && <span className="archived-sessions-tag">{tr("archivedsessions.subagent")}</span>}
+            {session.parentId && !session.forkOf && <span className="archived-sessions-tag">{tr("archivedsessions.subagent")}</span>}
             <span className="archived-sessions-created">{tr("archivedsessions.createdOn", { date: dayFormat(session.createdAt) })}</span>
           </span>
           {match && (

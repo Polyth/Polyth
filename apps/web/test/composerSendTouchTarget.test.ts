@@ -85,13 +85,26 @@ async function fixture(): Promise<string> {
       // that request is the send. A kept draft creates the session alone.
       window.__sends = 0;
       window.__drafts = 0;
+      window.__sentBody = "";
       window.fetch = async (url, init) => {
         if (init && init.method === "POST" && String(url).endsWith("/api/sessions")) {
-          if (String(init.body ?? "").includes('"firstTurn"')) window.__sends += 1;
-          else window.__drafts += 1;
+          if (String(init.body ?? "").includes('"firstTurn"')) {
+            window.__sends += 1;
+            window.__sentBody = String(init.body);
+          } else window.__drafts += 1;
         }
         return new Response("{}", { status: 404 });
       };
+      // What became of a touch on Send once the page's own handlers had run:
+      // whether it was withheld from the platform, and whether a click followed.
+      window.__touchStarts = [];
+      window.__sendClicks = 0;
+      window.addEventListener("touchstart", (event) => {
+        if (event.target.closest?.("button.send")) window.__touchStarts.push(event.defaultPrevented);
+      });
+      window.addEventListener("click", (event) => {
+        if (event.target.closest?.("button.send")) window.__sendClicks += 1;
+      }, true);
       // A heavy page: the main thread stays busy right after Send's own
       // pointerdown handler, so the lift waits in the queue behind it.
       window.__busyAfterDown = 0;
@@ -123,7 +136,14 @@ after(async () => {
   await browser?.close();
 });
 
-type Probe = { __sends: number; __drafts: number; __busyAfterDown: number };
+type Probe = {
+  __sends: number;
+  __drafts: number;
+  __busyAfterDown: number;
+  __sentBody: string;
+  __touchStarts: boolean[];
+  __sendClicks: number;
+};
 type PressOutcome = "send" | "draft" | "nothing";
 type Press = {
   dx?: number;
@@ -308,4 +328,60 @@ test("touch on Send: a full hold (800 ms) on a page busy for 700 ms keeps a draf
   const result = await press("hello", { holdMs: 800, busyMs: 700 });
   assert.equal(result.outcome, "draft", "a hold that lasted keeps the draft however busy the page was");
   assert.equal(result.sends, 0, "and sends nothing");
+});
+
+// A touch that begins on Send is the page's. Left to the platform, iOS takes a
+// tap within 66px of a word the keyboard is still composing for the text even
+// when it lands outside the field (WebKit `isNearMarkedText`), and Send sits
+// one row under the end of the message. Only a cancelled `touchstart` withholds
+// a touch from the platform's own gestures; cancelling `pointerdown` does not.
+test("a touch on Send is withheld from the platform's own gestures and sends without a click", { skip: !CHROME }, async () => {
+  const result = await press("hello");
+  assert.equal(result.sends, 1, `the release sends once (sent ${result.sends})`);
+  assert.ok(page);
+  const probe = await page.evaluate(() => {
+    const { __touchStarts: touchStarts, __sendClicks: clicks } = window as unknown as Probe;
+    return { touchStarts, clicks };
+  });
+  assert.deepEqual(probe.touchStarts, [true], "Send cancelled its touchstart");
+  assert.equal(probe.clicks, 0, "no click follows a touch the page took, so none is left to consume");
+});
+
+// The word under the finger must not still be marked when the platform decides
+// what the tap was: the composer keeps its editor focused through a tap on its
+// controls, so nothing else would end the composition before the release.
+test("a finger landing on Send commits the word the keyboard is still composing", { skip: !CHROME }, async () => {
+  assert.ok(page && cdp);
+  await page.goto(`${ORIGIN}/`);
+  const editor = page.locator(".composer textarea[data-composer-input]");
+  await editor.waitFor();
+  await editor.focus();
+  await page.keyboard.type("hello ");
+  await cdp.send("Input.imeSetComposition", { text: "world", selectionStart: 5, selectionEnd: 5 });
+  await page.waitForTimeout(350);
+  await page.evaluate(() => { for (const animation of document.getAnimations()) if (animation.playState !== "finished") animation.finish(); });
+  await page.waitForTimeout(50);
+  const composing = () => page!.evaluate(() => {
+    const field = document.querySelector<HTMLTextAreaElement>("textarea[data-composer-input]")!;
+    return { open: field.classList.contains("is-composing"), value: field.value, focused: document.activeElement === field };
+  });
+  assert.deepEqual(await composing(), { open: true, value: "hello world", focused: true }, "the last word is still being composed");
+  const send = await page.evaluate(() => {
+    const button = document.querySelector<HTMLButtonElement>(".mobile-composer-primary button.send")!;
+    if (button.disabled) throw new Error("Send is disabled over a composing draft");
+    const rect = button.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  });
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [send] });
+  await page.waitForTimeout(40);
+  assert.deepEqual(await composing(), { open: false, value: "hello world", focused: true },
+    "the word is committed while the finger is still down, and the field keeps focus");
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await page.waitForTimeout(400);
+  const sent = await page.evaluate(() => {
+    const { __sends: sends, __sentBody: body } = window as unknown as Probe;
+    return { sends, body };
+  });
+  assert.equal(sent.sends, 1, `the release sends once (sent ${sent.sends})`);
+  assert.ok(sent.body.includes("hello world"), "the sent message carries the composed word");
 });

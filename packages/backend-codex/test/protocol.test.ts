@@ -1148,3 +1148,58 @@ test("Codex maps command output deltas to a throttled ephemeral tool/progress, o
     assert.deepEqual(calls, ["cmd-1", "cmd-2"], "one per call per window");
     await rt.dispose();
 });
+const backgroundHarness = async () => {
+    const f = fakeRpc();
+    f.handle(async () => ({ thread: { id: "native" } }));
+    const rt = await createCodexRuntime(context, f.rpc);
+    const events: RuntimeEvent[] = [];
+    rt.onEvent((_sid, event) => events.push(event));
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    const command = (id: string, status: string, extra: JsonObject = {}) => ({ type: "commandExecution", id, command: "npm run dev\n  --watch", source: "agent", status, ...extra });
+    const tasks = () => events.filter((event) => event.type === "runtime/background-tasks");
+    const wakes = () => events.filter((event) => event.type === "runtime/wake-requested");
+    return { f, rt, events, command, tasks, wakes };
+};
+test("Codex publishes a command still open at turn/completed and wakes once when it finishes while idle", async () => {
+    const { f, rt, command, tasks, wakes } = await backgroundHarness();
+    f.emit("turn/started", { threadId: "native", turn: { id: "t1" } });
+    f.emit("item/started", { threadId: "native", turn: "t1", item: command("c1", "inProgress") });
+    f.emit("turn/completed", { threadId: "native", turn: { id: "t1", status: "completed" } });
+    assert.equal(tasks().length, 1);
+    assert.deepEqual((tasks()[0] as { tasks: unknown }).tasks, [{ id: "c1", description: "npm run dev --watch", kind: "command" }]);
+    f.emit("item/completed", { threadId: "native", item: command("c1", "completed", { exitCode: 0, aggregatedOutput: "x".repeat(2500) + "done" }) });
+    assert.equal(tasks().length, 2);
+    assert.deepEqual((tasks()[1] as { tasks: unknown }).tasks, []);
+    assert.equal(wakes().length, 1);
+    const wake = wakes()[0] as { wakeId: string; reason: string; text: string };
+    assert.equal(wake.wakeId, "codex-background:c1");
+    assert.equal(wake.reason, "background-task");
+    assert.match(wake.text, /finished while no turn was running/);
+    assert.match(wake.text, /Command: npm run dev --watch/);
+    assert.match(wake.text, /Exit code: 0/);
+    assert.match(wake.text, /Read its result and continue your task\.$/);
+    assert.ok(wake.text.includes("x".repeat(1996) + "done") && !wake.text.includes("x".repeat(1997) + "done"));
+    await rt.dispose();
+});
+test("Codex never publishes a command that completed inside its turn", async () => {
+    const { f, rt, command, tasks, wakes } = await backgroundHarness();
+    f.emit("turn/started", { threadId: "native", turn: { id: "t1" } });
+    f.emit("item/started", { threadId: "native", item: command("c1", "inProgress") });
+    f.emit("item/completed", { threadId: "native", item: command("c1", "completed", { exitCode: 0 }) });
+    f.emit("turn/completed", { threadId: "native", turn: { id: "t1", status: "completed" } });
+    assert.equal(tasks().length, 0);
+    assert.equal(wakes().length, 0);
+    await rt.dispose();
+});
+test("Codex reports background commands as lost once when the connection closes", async () => {
+    const { f, rt, command, tasks } = await backgroundHarness();
+    f.emit("turn/started", { threadId: "native", turn: { id: "t1" } });
+    f.emit("item/started", { threadId: "native", item: command("c1", "inProgress") });
+    f.emit("turn/completed", { threadId: "native", turn: { id: "t1", status: "completed" } });
+    f.disconnect();
+    await rt.dispose();
+    const published = tasks() as { tasks: unknown[]; lost?: { id: string }[] }[];
+    assert.equal(published.length, 2);
+    assert.deepEqual(published[1]!.tasks, []);
+    assert.deepEqual(published[1]!.lost?.map((task) => task.id), ["c1"]);
+});

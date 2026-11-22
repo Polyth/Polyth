@@ -123,19 +123,44 @@ export function releaseMarker(channel, source) {
   return `<!-- polyth-release: channel=${channel} source=${source} -->`;
 }
 
+/**
+ * A squash-merged branch starts its body with the pull request's bullet list,
+ * whose items repeat the commit subjects (`* [Feature] …`). Those lines are
+ * navigation, not prose, so they never become the public summary.
+ */
+const BODY_NAVIGATION = /^\s*(?:[-*+]\s+)?\[[A-Za-z][A-Za-z0-9 _-]{0,24}\]\s/;
+
+/** Trailing words that leave a truncated summary dangling (`…, so…`, `… and…`). */
+const DANGLING_CONNECTOR = /\s+(?:and|or|but|so|because|which|that|while|when|where|with|without|for|to|of|in|on|at|by|from|as|if|than|then|into|over|under|after|before|the|a|an|its|their|our|his|her|this|these|those|is|are|was|were|be|been|will|would|can|could|may|might|must|should|has|have|had)$/i;
+
+/** A paragraph made only of list items reads as a table of contents, not a sentence. */
+function firstProseParagraph(text) {
+  const paragraphs = text.split(/\n\s*\n/);
+  const prose = paragraphs.find((paragraph) =>
+    paragraph.split(/\r?\n/).some((line) => line.trim() && !/^\s*(?:[-*+]|\d+[.)])\s/.test(line)),
+  );
+  return (prose ?? "").replace(/\s+/g, " ").trim();
+}
+
 /** Commit message body without trailers and with the first paragraph's first sentence as the summary. */
 export function commitSummary(body) {
   const text = (body ?? "")
     .split(/\r?\n/)
     .filter((line) => !/^[A-Za-z-]+:\s+\S.*<[^>]+>\s*$/.test(line) && !/^(signed-off-by|change-id):/i.test(line))
+    .filter((line) => !BODY_NAVIGATION.test(line) && !/^\s*#{1,6}\s+\S/.test(line))
     .join("\n")
     .trim();
-  const paragraph = text.split(/\n\s*\n/)[0]?.replace(/\s+/g, " ").trim() ?? "";
+  const paragraph = firstProseParagraph(text);
   if (!paragraph || /^started by session\b/i.test(paragraph)) return "";
   const sentence = /^(.+?[.!?])(\s|$)/.exec(paragraph)?.[1] ?? paragraph;
   if (sentence.length <= SUMMARY_LIMIT) return sentence;
   const cut = sentence.slice(0, SUMMARY_LIMIT);
-  return `${cut.slice(0, Math.max(cut.lastIndexOf(" "), SUMMARY_LIMIT - 40)).replace(/[,;:\s]+$/, "")}…`;
+  let summary = cut.slice(0, Math.max(cut.lastIndexOf(" "), SUMMARY_LIMIT - 40)).replace(/[,;:\s]+$/, "");
+  // A cut that lands after "so" or "and" ends in a dangling fragment; drop the connector too.
+  for (let match = DANGLING_CONNECTOR.exec(summary); match; match = DANGLING_CONNECTOR.exec(summary)) {
+    summary = summary.slice(0, match.index).replace(/[,;:\s]+$/, "");
+  }
+  return `${summary}…`;
 }
 
 /** { section, title } for a commit: conventional type, then leading verb, then the paths it touched. */
@@ -284,6 +309,15 @@ function escapeMarkdown(text) {
   return text.replace(/([\\`*_<>[\]|])/g, "\\$1");
 }
 
+/**
+ * The summary lives inside an HTML `<sub>`, where Markdown is not parsed: a
+ * backslash escape would show up literally. Escape only what HTML reads, and
+ * drop inline-code backticks so `` `memory.db` `` reads as plain text.
+ */
+function escapeHtml(text) {
+  return text.replace(/`/g, "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 function formatDate(date) {
   return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Kyiv" }).format(date);
 }
@@ -328,7 +362,7 @@ export function renderReleaseNotes({ channel, version, commits, base, basis, sou
     if (entries.length === 0) continue;
     const shown = entries.slice(0, SECTION_LIMIT);
     const body = shown.flatMap((entry) => entry.summary && !section.collapsed
-      ? [`- **${escapeMarkdown(entry.title)}**`, `  <br><sub>${escapeMarkdown(entry.summary)}</sub>`]
+      ? [`- **${escapeMarkdown(entry.title)}**`, `  <br><sub>${escapeHtml(entry.summary)}</sub>`]
       : [`- ${section.collapsed ? escapeMarkdown(entry.title) : `**${escapeMarkdown(entry.title)}**`}`]);
     if (entries.length > shown.length) body.push(`- …and ${entries.length - shown.length} more`);
     if (section.collapsed) {

@@ -3,6 +3,13 @@ import assert from "node:assert/strict";
 import {
   accountErrorText,
   buildLimits,
+  defaultPreset,
+  invitationText,
+  presetChoices,
+  presetPlan,
+  presetRoleTag,
+  presetText,
+  shareableAddress,
   generatePassphrase,
   limitsChanged,
   limitsDraftFrom,
@@ -68,4 +75,55 @@ test("errors become one human sentence", () => {
   assert.equal(accountErrorText(Object.assign(new Error("invalid credentials"), { code: "invalid-credentials" })), "That password isn't right. Try again.");
   assert.equal(accountErrorText(Object.assign(new Error("Login name is already in use"), { code: "conflict" })), "That login is already taken. Choose another.");
   assert.equal(accountErrorText(new Error("guardrails changed")), "Guardrails changed.");
+});
+
+test("presets map to one Space role, Protected mode on top of member", () => {
+  assert.deepEqual(presetChoices(true), ["teammate", "protected", "viewer", "admin", "account"]);
+  assert.equal(defaultPreset(true), "teammate");
+  assert.deepEqual(presetPlan("teammate", true), { role: "member", guarded: false });
+  assert.deepEqual(presetPlan("protected", true), { role: "member", guarded: true });
+  assert.deepEqual(presetPlan("viewer", true), { role: "viewer", guarded: false });
+  assert.deepEqual(presetPlan("admin", true), { role: "admin", guarded: false });
+  assert.deepEqual(presetPlan("account", true), { role: null, guarded: false });
+  // Owner is never a one-click preset: ownership changes stay on the person's page.
+  assert.equal(presetChoices(true).some((preset) => presetPlan(preset, true).role === "owner"), false);
+});
+
+test("without membership rights a preset can create the account only", () => {
+  assert.deepEqual(presetChoices(false), ["account", "protected"]);
+  assert.equal(defaultPreset(false), "account");
+  assert.deepEqual(presetPlan("protected", false), { role: null, guarded: true });
+  assert.deepEqual(presetPlan("admin", false), { role: null, guarded: false });
+});
+
+test("preset copy names the role behind it only when it adds something", () => {
+  assert.equal(presetText("teammate", "Home").label, "Teammate");
+  assert.match(presetText("account", "Home").detail, /can’t open Home yet/);
+  assert.doesNotMatch(presetText("account", null).detail, /\{space\}/);
+  assert.equal(presetRoleTag("teammate", true), "Member");
+  assert.equal(presetRoleTag("protected", true), "Member · Protected mode");
+  assert.equal(presetRoleTag("viewer", true), null);
+  assert.equal(presetRoleTag("admin", true), null);
+  assert.equal(presetRoleTag("account", true), null);
+  assert.equal(presetRoleTag("protected", false), "Protected mode");
+});
+
+test("only an address another device can open goes into an invitation", () => {
+  assert.equal(shareableAddress("https://polyth.example.org"), "https://polyth.example.org");
+  assert.equal(shareableAddress("http://192.168.1.20:4096"), "http://192.168.1.20:4096");
+  for (const local of ["http://localhost:4096", "http://127.0.0.1:4096", "http://[::1]:4096", "http://app.localhost", "http://0.0.0.0:80", "file://", "polyth://app", "app://-"]) {
+    assert.equal(shareableAddress(local), null, local);
+  }
+  assert.equal(shareableAddress("not a url"), null);
+});
+
+test("the invitation greets by first name and carries the sign-in without a trailing dot on the password", () => {
+  const withAddress = invitationText({ name: "Iryna Petrenko", login: "iryna", password: "abcd-efgh-jkmn-pqrs", address: "https://polyth.example.org" });
+  assert.match(withAddress, /^Hi Iryna!/);
+  assert.match(withAddress, /Open https:\/\/polyth\.example\.org/);
+  assert.match(withAddress, /login iryna/);
+  assert.match(withAddress, /abcd-efgh-jkmn-pqrs\n/);
+  assert.match(withAddress, /choose your own password/);
+  const without = invitationText({ name: "Oleh", login: "oleh", password: "x".repeat(8), address: null });
+  assert.doesNotMatch(without, /Open /);
 });

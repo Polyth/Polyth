@@ -43,7 +43,7 @@ import { motionDurationMs } from "../motionPresence.ts";
 import { buildModel, type PendingPermission, type RenderModel } from "../reduce.ts";
 import { childrenByParent } from "../sessionTree.ts";
 import { resolveSessionStatus, type SessionRowStatus } from "../sessionStatus.ts";
-import { toggleSessionStatusPopover } from "../sessionStatusPopover.ts";
+import { toggleSessionStatusPopover, useSessionStatusPopover } from "../sessionStatusPopover.ts";
 import { friendlyError } from "../settings.ts";
 import { useSpaces } from "../spaces.ts";
 import { setUiError, useStore } from "../store.ts";
@@ -663,6 +663,7 @@ export function SubagentBranchIsland({ children }: { children: ReactElement }) {
 export default function SubagentActivityDock() {
   const branch = useContext(BranchContext);
   const models = useStore((state) => state.models);
+  const details = useSessionStatusPopover();
   if (!branch) return null;
   const ref = branch.parent?.model;
   const presentation = ref
@@ -685,6 +686,7 @@ export default function SubagentActivityDock() {
         model={presentation.name}
         status={status}
         label={`${presentation.name}: ${status}`}
+        expanded={details.open && details.source === "dock"}
         onClick={(event) => toggleSessionStatusPopover(event.currentTarget, "dock")}
       />
     </SubagentBranchIsland>

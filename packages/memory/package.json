@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./client": "./src/client.ts",
+    "./contracts": "./src/contracts.ts",
     "./i18n": "./src/i18n/index.ts",
     "./i18n/*": "./src/i18n/*.ts",
     "./memory-service": "./src/service.ts",

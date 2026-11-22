@@ -289,7 +289,7 @@ test("header overview keeps its full-screen exit frame and the Tools button stil
   }
 });
 
-test("dock-opened overview keeps its compact exit frame instead of flipping to full screen", async () => {
+test("the status line opens the activity panel, not the phone overview", async () => {
   seed();
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -298,13 +298,7 @@ test("dock-opened overview keeps its compact exit frame instead of flipping to f
   try {
     await act(async () => { root.render(createElement(MobileSessionHeader)); });
     await act(async () => { openSessionStatusPopover(null, "dock"); });
-    assert.ok(sheet() && !sheet()!.classList.contains("is-closing"), "the dock opens the overview");
-    assert.ok(!sheet()!.classList.contains("mobile-island-sheet--full-screen"), "the dock opens the compact sheet");
-
-    await act(async () => { closeSessionStatusPopover(); });
-    assert.ok(sheet()?.classList.contains("is-closing"), "the exit frame stays mounted");
-    assert.ok(!sheet()!.classList.contains("mobile-island-sheet--full-screen"), "closing does not flip to the full-screen variant");
-    await waitFor(() => sheet() === null, "the overview unmounts once its exit finishes");
+    assert.equal(sheet(), null, "the header's overview stays closed: the panel above the composer shows the details");
     assert.deepEqual(thrown(), []);
   } finally {
     closeSessionStatusPopover();
