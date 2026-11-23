@@ -13,6 +13,7 @@ export const ptBR: GitMessages = {
   "gitview.conflictSideShortened": "Alteração longa encurtada.",
   "gitview.noConflictsNow": "Nenhum conflito com {branch} agora",
   "gitview.noConflictsNowDetail": "{branch} ou este workspace mudou desde a última tentativa de integração.",
+  "gitview.localOverlapDetail": "Alterações não confirmadas em {branch} ({count} arquivos) interromperam a última integração. Resolva com IA para combiná-las com este trabalho ou faça o commit delas em {branch} primeiro.",
   "gitview.conflictAddedByBoth": "{branch} e esta sessão adicionaram este arquivo.",
   "gitview.conflictDeletedInTarget": "{branch} não tem mais este arquivo (excluído ou renomeado), e esta sessão o alterou.",
   "gitview.conflictDeletedInSource": "Esta sessão excluiu ou renomeou este arquivo, e {branch} o alterou.",

@@ -126,6 +126,12 @@ export function ConflictReviewPanel({ sessionId, conflictKey, requestedPath, wra
         ? <div role="status" className="git-branch-review-loading"><span>{tr("gitview.conflictsLoading")}</span><DiffSkeleton /></div>
         : error
           ? <div className="source-inline-status error" role="alert">{error}</div>
+          : preview && files.length === 0 && preview.localOverlap?.length
+            ? <EmptyState
+                variant="compact"
+                title={tr("landing.targetOverlap", { branch })}
+                description={tr("gitview.localOverlapDetail", { branch, count: String(preview.localOverlap.length) })}
+              />
           : preview && files.length === 0
             ? <EmptyState
                 variant="compact"

@@ -13,6 +13,7 @@ export const ar: GitMessages = {
   "gitview.conflictSideShortened": "تم اختصار التغيير الطويل.",
   "gitview.noConflictsNow": "لا توجد تعارضات مع {branch} حاليًا",
   "gitview.noConflictsNowDetail": "تغيّر {branch} أو مساحة العمل هذه منذ آخر محاولة دمج.",
+  "gitview.localOverlapDetail": "أوقفت تغييرات غير مُثبتة في {branch} ({count} ملفات) آخر عملية دمج. استخدم الحل بالذكاء الاصطناعي لدمجها مع هذا العمل، أو ثبّتها أولًا في {branch}.",
   "gitview.conflictAddedByBoth": "أضاف كل من {branch} وهذه الجلسة هذا الملف.",
   "gitview.conflictDeletedInTarget": "لم يعد هذا الملف موجودًا في {branch} (حُذف أو أُعيدت تسميته)، وقد غيّرته هذه الجلسة.",
   "gitview.conflictDeletedInSource": "حذفت هذه الجلسة هذا الملف أو أعادت تسميته، وقد غيّره {branch}.",

@@ -490,7 +490,8 @@ starts Node or OpenCode. See `docs/mobile/architecture.md`.
   proof as a delete: an execution not confirmed as ended, a user outside the tree,
   an unproven owner or a merge that has not settled (`merging`, `publishing`,
   `corrupt`, which hold the tree) keep the checkout, and the next pass retries.
-  Left on purpose: `refs/polyth/isolation-repair/*` (they back up the target
+  Left on purpose: `refs/polyth/isolation-repair/*` and
+  `refs/polyth/isolation-repair-retired/*` (they back up the target
   checkout's work, not the session's), a checkout whose branch was renamed (how a
   preserved checkout leaves Polyth), and files the providers own, such as Claude
   Code's `~/.claude/projects/<cwd>` transcripts, which that CLI prunes itself. The

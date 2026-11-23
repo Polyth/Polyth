@@ -13,6 +13,7 @@ export const zhCN: GitMessages = {
   "gitview.conflictSideShortened": "较长的更改已截断。",
   "gitview.noConflictsNow": "目前与 {branch} 没有冲突",
   "gitview.noConflictsNowDetail": "自上次集成尝试以来，{branch} 或此工作区已发生变化。",
+  "gitview.localOverlapDetail": "{branch} 中未提交的更改（{count} 个文件）阻止了上次集成。使用 AI 解决以将其与此工作合并，或先在 {branch} 中提交它们。",
   "gitview.conflictAddedByBoth": "{branch} 和此会话都添加了此文件。",
   "gitview.conflictDeletedInTarget": "{branch} 中已没有此文件（已删除或重命名），而此会话修改了它。",
   "gitview.conflictDeletedInSource": "此会话删除或重命名了此文件，而 {branch} 修改了它。",

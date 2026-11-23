@@ -85,6 +85,9 @@ const MAX_PUBLISH_RETRIES = 8;
 const SNAPSHOT_MESSAGE = "polyth: snapshot isolated workspace";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const REPAIR_REF_PREFIX = "refs/polyth/isolation-repair/";
+/** Backups of receipts the target outgrew before they were applied: kept,
+ *  like every repair backup, but off the session's single repair ref. */
+const RETIRED_REPAIR_REF_PREFIX = "refs/polyth/isolation-repair-retired/";
 const RECEIPT_REF_PREFIX = "refs/polyth/isolation/";
 const MAX_REPAIR_FILES = 200;
 const USER_OPS = {
@@ -223,6 +226,10 @@ export type IsolationExistingSessions = Pick<IsolationSessionApi, "snapshot" | "
 export interface IsolationConflictPreview extends GitMergeConflicts {
   targetBranch: string;
   recorded: string[];
+  /** Uncommitted paths in the target checkout that stopped the last
+   *  integration and still wait for an AI repair. A branch-to-branch preview
+   *  cannot see them, so they are not merge conflicts and not in `files`. */
+  localOverlap?: string[];
 }
 
 /** Core's proof that nothing still executes in a checkout about to go. `sharer`:
@@ -961,7 +968,17 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
     if (isolation.dismissedRevision && isolation.dismissedRevision === revision) {
       return { eligible: false, hasChanges: true, targetBranch, targetDirty: target.dirty, revision, reason: "dismissed", ...switched };
     }
-    if (isolation.targetRepair && !isolation.targetRepair.applied) {
+    // An unapplied receipt only ever records the overlap that stopped an
+    // integration, so its conflict is that overlap. Once the target moved the
+    // receipt can no longer be applied: the next integration sets it aside and
+    // checks again, so the work reads as ready instead of as a conflict
+    // nothing can resolve. (Changed local work alone is found by the actions,
+    // which hash the target checkout; a status read does not.)
+    const unappliedRepair = isolation.targetRepair && !isolation.targetRepair.applied ? isolation.targetRepair : null;
+    if (unappliedRepair && inspectedTarget && inspectedTarget.liveHead !== unappliedRepair.targetHead) {
+      return { eligible: true, hasChanges: true, targetBranch, targetDirty: target.dirty, revision, ...switched };
+    }
+    if (unappliedRepair) {
       return {
         eligible: false,
         hasChanges: true,
@@ -1019,6 +1036,9 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
     suggestion: IsolationSuggestionDto | null,
   ): IsolationState => {
     if (suggestion?.reason === "target-overlap") return "conflict";
+    // The conflict was an unapplied receipt the target outgrew (suggestionFor).
+    if (isolation.state === "conflict" && isolation.targetRepair && !isolation.targetRepair.applied
+      && suggestion?.eligible) return "merge-ready";
     if (isolation.state === "merge-ready" && suggestion?.reason === "no-changes") return "active";
     if (
       (isolation.state === "active" || isolation.state === "merge-ready" || isolation.state === "conflict")
@@ -1171,6 +1191,64 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
       throw err("conflict", `${isolation.targetBranch} local changes changed since the AI repair was prepared; nothing was overwritten`);
     }
     return target;
+  };
+
+  /** An unapplied receipt answers one target head and one set of local
+   *  changes. Once either moved, applyTargetRepair refuses it for good, so the
+   *  session would stay in a conflict nothing can resolve. `headOnly` is the
+   *  cheap check for status reads; actions also compare the local changes. */
+  const targetRepairStale = async (
+    isolation: SessionIsolation,
+    repair: IsolationTargetRepair,
+    headOnly = false,
+  ): Promise<boolean> => {
+    if (repair.applied) return false;
+    const target = await inspectTarget(isolation);
+    if (target.liveHead !== repair.targetHead) return true;
+    if (headOnly) return false;
+    return await git.workingFingerprint(target.path) !== repair.targetFingerprint;
+  };
+
+  /** Set aside an unapplied receipt the target outgrew. Such a receipt reached
+   *  neither the target nor the isolated branch (applying it is what records
+   *  `applied`), so only the record and its backup ref hold it. The backup is
+   *  kept, moved to a retired ref, because repair backups are never released
+   *  automatically; the session's own ref is freed for the next capture. The
+   *  next integration checks the overlap against the current target again.
+   *  Call under the session lock; returns the isolation as persisted. */
+  const setAsideStaleTargetRepair = async (
+    sessionId: string,
+    isolation: SessionIsolation,
+  ): Promise<SessionIsolation> => {
+    const repair = isolation.targetRepair;
+    if (!repair || repair.applied) return isolation;
+    // An unreadable target proves nothing; the caller's own checks report it.
+    if (!await targetRepairStale(isolation, repair).catch(() => false)) return isolation;
+    // A receipt whose snapshot already reached the branch was applied without
+    // the flag being written; that is applyTargetRepair's case, not this one.
+    const head = await git.revParse(isolation.worktreePath, "HEAD").catch(() => null);
+    if (head && await git.isAncestor(isolation.worktreePath, repair.snapshotSha, head).catch(() => false)) return isolation;
+    const ref = repairRef(sessionId);
+    const anchored = await git.readRef(isolation.targetPath, ref);
+    if (anchored === repair.snapshotSha) {
+      const retired = `${RETIRED_REPAIR_REF_PREFIX}${sessionId}/${repair.snapshotSha}`;
+      const kept = await git.readRef(isolation.targetPath, retired) === repair.snapshotSha
+        || await git.updateRef(isolation.targetPath, retired, repair.snapshotSha, "0".repeat(repair.snapshotSha.length));
+      if (!kept || !await git.deleteRef(isolation.targetPath, ref, repair.snapshotSha)) {
+        throw err("conflict", "the outdated AI repair backup changed while it was being set aside; try again");
+      }
+    }
+    const next = isolation.state === "conflict"
+      ? transitionIsolation(withoutTargetRepair(isolation), { phase: "merge-ready" })
+      : withoutTargetRepair(isolation);
+    await persist(sessionId, next);
+    isolationLog("target-repair-stale", {
+      sessionId,
+      targetBranch: isolation.targetBranch,
+      preparedHead: repair.targetHead,
+      snapshotSha: repair.snapshotSha,
+    });
+    return next;
   };
 
   const sourceRequiresPreservation = async (
@@ -3297,7 +3375,7 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
             && !conflict && suggestion?.reason !== "target-overlap" && !delegated,
           canKeep: !blocked && sourceReady && USER_OPS.keep.has(isolation.state),
           canResolve: !blocked && sourceReady
-            && (isolation.state === "conflict" || suggestion?.reason === "target-overlap"),
+            && (effectiveState === "conflict" || suggestion?.reason === "target-overlap"),
           canDiscard: !blocked && destinationReady && !delegated
             && (effectiveState === "missing" || (sourceReady && USER_OPS.discard.has(effectiveState))),
           canRecover: false,
@@ -3322,6 +3400,20 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
       const target = await git.revParse(isolation.targetPath, isolation.targetBranch);
       const snapshot = await git.snapshotCommit(isolation.worktreePath, `${SNAPSHOT_MESSAGE} (${sessionId.slice(0, 8)})`);
       const preview = await git.mergeConflicts(isolation.worktreePath, { target, source: snapshot.sha });
+      const repair = isolation.targetRepair;
+      // An unapplied receipt's paths are local target work, not merge
+      // conflicts: they are reported apart, and not at all once the target
+      // moved past the receipt (the next integration sets it aside).
+      if (repair && !repair.applied) {
+        const current = repair.targetHead === target;
+        return {
+          ...preview,
+          files: preview.files.filter((file) => file.kind !== "deleted-in-target" && file.kind !== "deleted-in-source"),
+          targetBranch: isolation.targetBranch,
+          recorded: [],
+          ...(current ? { localOverlap: repair.files } : {}),
+        };
+      }
       const recorded = isolation.conflict?.files ?? [];
       const reported = new Set(recorded);
       // The preview does not follow renames, so a path one side renamed reads
@@ -3408,6 +3500,9 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
         if (options.push && isManagedBranch(localBranchName(isolation.targetBranch))) {
           throw unpublished(err("invalid-input", "a delegated isolation merges into its parent's workspace, which is not pushed"));
         }
+        // A receipt the target outgrew cannot be applied any more; integrating
+        // again re-checks the overlap against the current target instead.
+        isolation = await setAsideStaleTargetRepair(sessionId, isolation);
         if (options.target) {
           await assertOwnedSource(sessionId, isolation);
           const target = await checkoutFor(session, isolation, options.target);
@@ -3585,7 +3680,8 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
           throw err("not-found", "the isolated workspace is no longer available");
         }
         await assertOwnedSource(sessionId, isolation);
-        return (await retargetAtRest(session, isolation, await checkoutFor(session, isolation, target))).session;
+        const current = await setAsideStaleTargetRepair(sessionId, isolation);
+        return (await retargetAtRest(session, current, await checkoutFor(session, current, target))).session;
       });
     },
 
@@ -3659,6 +3755,15 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
           throw err("not-found", "the isolated workspace is no longer available");
         }
         await assertOwnedSource(sessionId, isolation);
+        if (isolation.targetRepair && !isolation.targetRepair.applied
+          && !(await setAsideStaleTargetRepair(sessionId, isolation)).targetRepair) {
+          // Nothing an agent could reconcile is left: the overlap it described
+          // is gone or different. The session is back to ready to integrate.
+          throw err(
+            "conflict",
+            `${isolation.targetBranch} changed since the AI repair was prepared, so that repair was set aside and nothing was overwritten. Integrate again to check ${isolation.targetBranch} as it is now.`,
+          );
+        }
         let targetHead = isolation.baseCommit;
         try { targetHead = await git.revParse(isolation.targetPath, isolation.targetBranch); } catch { /* keep base */ }
         let files = isolation.conflict?.files ?? [];

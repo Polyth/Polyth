@@ -236,6 +236,16 @@ cleanup fail closed. After the record is
 released, `refs/polyth/isolation/<session>` is deleted. AI repair backups
 (`refs/polyth/isolation-repair/<session>`) hold the user's target-checkout work
 and are never deleted automatically, neither on release nor at startup.
+A receipt not yet applied to the isolated branch answers one target head and
+one set of local changes. Once the target branch moves (or that local work
+changes) it can never be applied, so the next Integrate, Resolve or retarget
+sets it aside instead of stranding the session in an unresolvable conflict:
+its backup moves to `refs/polyth/isolation-repair-retired/<session>/<sha>`,
+the session returns to ready, and Integrate checks the overlap against the
+current target again. Status already reads such a session as ready once the
+target head moved. The paths an unapplied receipt lists are the target's
+uncommitted work, not merge conflicts: the Conflicts view and the landing bar
+report them as local changes in the target, never as conflicting files.
 Startup recovery drops leftover receipts only for locally known sessions
 without isolation whose commit is reachable from a branch. It also drops a
 "planned" creation receipt (`<git-common-dir>/polyth/creation-receipts`) older

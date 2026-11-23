@@ -13,6 +13,7 @@ export const pt: GitMessages = {
   "gitview.conflictSideShortened": "Alteração longa encurtada.",
   "gitview.noConflictsNow": "Sem conflitos com {branch} neste momento",
   "gitview.noConflictsNowDetail": "{branch} ou este workspace mudou desde a última tentativa de integração.",
+  "gitview.localOverlapDetail": "Alterações não confirmadas em {branch} ({count} ficheiros) pararam a última integração. Resolva com IA para as combinar com este trabalho, ou faça primeiro o commit delas em {branch}.",
   "gitview.conflictAddedByBoth": "{branch} e esta sessão adicionaram este ficheiro.",
   "gitview.conflictDeletedInTarget": "{branch} já não contém este ficheiro (eliminado ou com o nome alterado), e esta sessão alterou-o.",
   "gitview.conflictDeletedInSource": "Esta sessão eliminou este ficheiro ou mudou-lhe o nome, e {branch} alterou-o.",

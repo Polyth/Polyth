@@ -1014,6 +1014,82 @@ test("AI repair refuses to overwrite target edits made after the receipt", async
   await assert.rejects(() => isolation.resolveWithAgent(created.id), /local changes changed|nothing was overwritten/);
   assert.equal(sent, 0);
   assert.equal(readFileSync(join(root, "README.md"), "utf8"), "newer parent work\n");
+  // The outgrown receipt no longer pins the session: the next integration
+  // can capture the current local work under the same ref.
+  assert.equal((await sessions.snapshot(created.id)).isolation?.targetRepair, undefined);
+  await assert.rejects(() => isolation.mergeBack(created.id), /overlap this integration/);
+  const recaptured = (await sessions.snapshot(created.id)).isolation!.targetRepair!;
+  assert.equal(runGit(root, "show", `${recaptured.snapshotSha}:README.md`), "newer parent work");
+});
+
+test("an unapplied AI repair the target branch outgrew is set aside instead of stranding the session", async () => {
+  const root = repo();
+  const { isolation, sessions } = harness(root);
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const source = (await sessions.snapshot(created.id)).isolation!.worktreePath;
+  writeFileSync(join(source, "README.md"), "isolated\n");
+  writeFileSync(join(root, "README.md"), "parent work\n");
+  runGit(root, "add", "README.md");
+  await assert.rejects(() => isolation.mergeBack(created.id), /overlap this integration/);
+  const backupSha = (await sessions.snapshot(created.id)).isolation!.targetRepair!.snapshotSha;
+
+  // Local target work is not a merge conflict: the preview reports it apart.
+  const fresh = await isolation.conflictPreview(created.id);
+  assert.deepEqual(fresh.files, []);
+  assert.deepEqual(fresh.recorded, []);
+  assert.deepEqual(fresh.localOverlap, ["README.md"]);
+
+  // The target branch moves on (here: a commit beside the local work).
+  writeFileSync(join(root, "other.txt"), "landed meanwhile\n");
+  runGit(root, "add", "other.txt");
+  runGit(root, "commit", "-qm", "unrelated target commit", "--", "other.txt");
+
+  const status = await isolation.getStatus(created.id);
+  assert.equal(status.suggestion?.eligible, true);
+  assert.equal(status.effectiveState, "merge-ready");
+  assert.equal(status.actions?.canMerge, true);
+  assert.equal(status.actions?.canResolve, false);
+  assert.equal((await isolation.conflictPreview(created.id)).localOverlap, undefined);
+
+  let sent = 0;
+  sessions.sendImpl = async () => { sent += 1; return {}; };
+  await assert.rejects(() => isolation.resolveWithAgent(created.id), /set aside and nothing was overwritten/);
+  assert.equal(sent, 0);
+  const setAside = (await sessions.snapshot(created.id)).isolation!;
+  assert.equal(setAside.state, "merge-ready");
+  assert.equal(setAside.targetRepair, undefined);
+  assert.equal(setAside.conflict, undefined);
+  // The backup is kept, off the session's own repair ref.
+  assert.equal(await git.readRef(root, `refs/polyth/isolation-repair/${created.id}`), null);
+  assert.equal(await git.readRef(root, `refs/polyth/isolation-repair-retired/${created.id}/${backupSha}`), backupSha);
+  assert.equal(readFileSync(join(root, "README.md"), "utf8"), "parent work\n");
+
+  // With the local work gone, integrating simply succeeds.
+  runGit(root, "reset", "-q", "--hard");
+  const merged = await isolation.mergeBack(created.id);
+  assert.equal(merged.ok, true);
+  assert.equal(readFileSync(join(root, "README.md"), "utf8"), "isolated\n");
+  assert.equal(readFileSync(join(root, "other.txt"), "utf8"), "landed meanwhile\n");
+});
+
+test("merge-back sets an outgrown unapplied AI repair aside and integrates", async () => {
+  const root = repo();
+  const { isolation, sessions } = harness(root);
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const source = (await sessions.snapshot(created.id)).isolation!.worktreePath;
+  writeFileSync(join(source, "README.md"), "isolated\n");
+  writeFileSync(join(root, "README.md"), "parent work\n");
+  runGit(root, "add", "README.md");
+  await assert.rejects(() => isolation.mergeBack(created.id), /overlap this integration/);
+  runGit(root, "reset", "-q", "--hard");
+  writeFileSync(join(root, "other.txt"), "landed meanwhile\n");
+  runGit(root, "add", "other.txt");
+  runGit(root, "commit", "-qm", "unrelated target commit");
+
+  const merged = await isolation.mergeBack(created.id);
+  assert.equal(merged.ok, true);
+  assert.equal(readFileSync(join(root, "README.md"), "utf8"), "isolated\n");
+  assert.equal((await git.status(root)).clean, true);
 });
 
 test("non-overlapping target edits to the same file are carried through merge-back", async () => {

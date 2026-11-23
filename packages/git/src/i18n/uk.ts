@@ -13,6 +13,7 @@ export const uk: GitMessages = {
   "gitview.conflictSideShortened": "Довгу зміну скорочено.",
   "gitview.noConflictsNow": "Зараз немає конфліктів із гілкою {branch}",
   "gitview.noConflictsNowDetail": "{branch} або цей робочий простір змінилися після останньої спроби інтеграції.",
+  "gitview.localOverlapDetail": "Незакомічені зміни в {branch} (файлів: {count}) зупинили останню інтеграцію. Розв’яжіть з ШІ, щоб поєднати їх із цією роботою, або спершу закомітьте їх у {branch}.",
   "gitview.conflictAddedByBoth": "І {branch}, і ця сесія додали цей файл.",
   "gitview.conflictDeletedInTarget": "У {branch} цього файлу вже немає (видалено або перейменовано), а ця сесія його змінила.",
   "gitview.conflictDeletedInSource": "Ця сесія видалила або перейменувала цей файл, а в {branch} його змінено.",

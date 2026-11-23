@@ -13,6 +13,7 @@ export const bg: GitMessages = {
   "gitview.conflictSideShortened": "Дългата промяна е съкратена.",
   "gitview.noConflictsNow": "В момента няма конфликти с {branch}",
   "gitview.noConflictsNowDetail": "{branch} или това работно пространство се промени след последния опит за интеграция.",
+  "gitview.localOverlapDetail": "Непотвърдени промени в {branch} ({count} файла) спряха последната интеграция. Разрешете с ИИ, за да ги съчетаете с тази работа, или първо ги потвърдете в {branch}.",
   "gitview.conflictAddedByBoth": "И {branch}, и тази сесия са добавили този файл.",
   "gitview.conflictDeletedInTarget": "В {branch} вече няма такъв файл (изтрит или преименуван), а тази сесия го е променила.",
   "gitview.conflictDeletedInSource": "Тази сесия е изтрила или преименувала този файл, а в {branch} той е променен.",

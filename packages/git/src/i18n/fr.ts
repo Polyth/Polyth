@@ -13,6 +13,7 @@ export const fr: GitMessages = {
   "gitview.conflictSideShortened": "Longue modification abrégée.",
   "gitview.noConflictsNow": "Aucun conflit avec {branch} pour l’instant",
   "gitview.noConflictsNowDetail": "{branch} ou cet espace de travail a changé depuis la dernière tentative d’intégration.",
+  "gitview.localOverlapDetail": "Des modifications non validées dans {branch} ({count} fichiers) ont arrêté la dernière intégration. Résolvez avec l’IA pour les combiner à ce travail, ou validez-les d’abord dans {branch}.",
   "gitview.conflictAddedByBoth": "{branch} et cette session ont tous deux ajouté ce fichier.",
   "gitview.conflictDeletedInTarget": "{branch} n’a plus ce fichier (supprimé ou renommé), et cette session l’a modifié.",
   "gitview.conflictDeletedInSource": "Cette session a supprimé ou renommé ce fichier, et {branch} l’a modifié.",

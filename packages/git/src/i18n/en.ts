@@ -15,6 +15,7 @@ export const en = {
   "gitview.conflictSideShortened": "Long change shortened.",
   "gitview.noConflictsNow": "Nothing conflicts with {branch} now",
   "gitview.noConflictsNowDetail": "{branch} or this workspace changed since the last integration attempt.",
+  "gitview.localOverlapDetail": "Uncommitted changes in {branch} ({count} files) stopped the last integration. Resolve with AI to combine them with this work, or commit them in {branch} first.",
   "gitview.conflictAddedByBoth": "Both {branch} and this session added this file.",
   "gitview.conflictDeletedInTarget": "{branch} no longer has this file (deleted or renamed), and this session changed it.",
   "gitview.conflictDeletedInSource": "This session deleted or renamed this file, and {branch} changed it.",
