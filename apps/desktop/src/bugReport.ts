@@ -33,18 +33,20 @@ const SEND_TIMEOUT_MS = 30_000;
 const JPEG_QUALITIES = [80, 70, 60, 50] as const;
 
 /** Where reports go, or null when this build sends none. Only nightly builds
- *  of the standard edition report; `POLYTH_BUG_REPORT=1` turns it on for a
- *  development build (the relay still refuses an unpublished version).
- *  `POLYTH_BUG_REPORT_ORIGIN` points at another relay, `off` turns it off. */
+ *  report; `POLYTH_BUG_REPORT=1` turns it on for a development build of the
+ *  standard edition (the relay still refuses an unpublished version). A stable
+ *  workstation build never reports, whatever the environment says
+ *  (docs/security/workstation-edition.md). `POLYTH_BUG_REPORT_ORIGIN` points
+ *  at another relay, `off` turns it off. */
 export function bugReportOrigin(input: {
   version: string;
   edition: PolythEdition;
   env: Readonly<Record<string, string | undefined>>;
 }): string | null {
-  if (input.edition === "workstation") return null;
   const raw = input.env.POLYTH_BUG_REPORT_ORIGIN?.trim();
   if (raw === "off") return null;
-  if (!input.version.endsWith("-nightly") && input.env.POLYTH_BUG_REPORT !== "1") return null;
+  const nightly = input.version.endsWith("-nightly");
+  if (!nightly && (input.edition === "workstation" || input.env.POLYTH_BUG_REPORT !== "1")) return null;
   if (!raw) return DEFAULT_BUG_REPORT_ORIGIN;
   try {
     const url = new URL(raw);

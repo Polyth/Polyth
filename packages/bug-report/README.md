@@ -26,6 +26,7 @@ password rules: [docs/dev/desktop.md#bug-reports-nightly](../../docs/dev/desktop
 - `src/serverEntry.ts` and `src/sender.ts` are the server sender for browsers:
   `GET /api/bug-report/state` and `POST /api/bug-report/send`, the tester password kept
   on the server, the outbox and the daily install id. They are on only on a nightly server
-  of the standard edition that is not hosted multi-tenant.
+  of the standard edition that is not hosted multi-tenant. The package also ships in
+  the workstation edition, where only the desktop shell sends (nightly builds only).
 
 Tests: `node --experimental-strip-types --test packages/bug-report/test/*.test.ts`.
