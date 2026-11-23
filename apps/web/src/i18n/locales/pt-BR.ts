@@ -1272,7 +1272,6 @@ export const ptBR: AppMessages = {
   "railsurfaces.unknown": "Desconhecido",
   "railsurfaces.usage": "Uso",
   "railsurfaces.valueContextEstimate": "{percent}% de estimativa de contexto",
-  "reduce.action": "ação",
   "reduce.title": "título",
   "runtimeRecovery.borrowedDetail": "Continuar inicia um novo contexto de execução. Solicitações anteriores inacabadas não são enviadas de novo.",
   "runtimeRecovery.borrowedTitle": "O ambiente de execução mudou. O Polyth não pode mais provar que esta é a mesma sessão do backend.",

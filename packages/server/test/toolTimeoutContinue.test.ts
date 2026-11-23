@@ -166,6 +166,65 @@ test("a package tool can wait for human approval beyond the execution limit and 
   assert.equal((await h.store.events(id)).some(event => event.type === "tool/error" && event.data.callId === "peer"), true);
 });
 
+test("an MCP-qualified Polyth tool still waits for its package approval", async (t) => {
+  const h = harness({ continueLimit: 0 });
+  t.after(() => { h.sessions.dispose(); return h.store.close(); });
+  const { id } = await h.sessions.create({ projectId: "p1", title: "Claude peer approval" });
+  await h.sessions.send(id, { text: "read the peer findings" });
+  h.emit(id, { type: "tool/started", callId: "peer", tool: "mcp__polyth-agent-tools__polyth_peer", input: {} });
+  const controller = new AbortController();
+  t.after(() => controller.abort());
+  void h.sessions.requestAgentToolPermission({
+    spaceId: "space-a", projectId: "p1", sessionId: id, cwd: h.dir,
+    toolId: "harness-runtime.peer-observations", toolName: "polyth_peer", owner: "harness-runtime",
+    signal: controller.signal,
+  });
+  await waitFor(async () => (await h.store.events(id)).some(event => event.type === "permission/requested"));
+  await flush(100);
+  assert.deepEqual(h.aborted, [], "the harness's MCP prefix does not hide the person's wait");
+});
+
+test("a Credential Vault form pauses the harness-named request call", async () => {
+  // 2026-11-23: Claude reports `mcp__polyth-agent-tools__polyth_credential_vault_request`
+  // while the form records the bare tool name; the watchdog stopped the call
+  // after ten minutes, expired the form and the person's save then failed.
+  for (const tool of [
+    "mcp__polyth-agent-tools__polyth_credential_vault_request",
+    "polyth-agent-tools_polyth_credential_vault_request",
+    "mcp_polyth-agent-tools_polyth_credential_vault_request",
+    "polyth-agent-tools-polyth_credential_vault_request",
+  ]) {
+    const h = harness({ continueLimit: 0 });
+    try {
+      const { id } = await h.sessions.create({ projectId: "p1", title: "Vault form" });
+      await h.sessions.send(id, { text: "store the deploy token" });
+      await h.store.append(id, "secret/requested", {
+        requestId: "vault_1", handle: "DEPLOY", label: "Deploy token", existing: false,
+        origin: "agent-tool", tool: "polyth_credential_vault_request", owner: "secure-safe",
+      });
+      h.emit(id, { type: "tool/started", callId: "vault", tool, input: {} });
+      await flush(100);
+      assert.deepEqual(h.aborted, [], `${tool} waits for the person`);
+    } finally {
+      h.sessions.dispose();
+      await h.store.close();
+    }
+  }
+});
+
+test("another MCP server's same-named tool does not borrow a vault wait", async (t) => {
+  const h = harness({ continueLimit: 0 });
+  t.after(() => { h.sessions.dispose(); return h.store.close(); });
+  const { id } = await h.sessions.create({ projectId: "p1", title: "Foreign server" });
+  await h.sessions.send(id, { text: "store the deploy token" });
+  await h.store.append(id, "secret/requested", {
+    requestId: "vault_1", handle: "DEPLOY", label: "Deploy token", existing: false,
+    origin: "agent-tool", tool: "polyth_credential_vault_request", owner: "secure-safe",
+  });
+  h.emit(id, { type: "tool/started", callId: "foreign", tool: "mcp__other-server__polyth_credential_vault_request", input: {} });
+  await waitFor(() => h.aborted.length === 1);
+});
+
 test("native permission waits pause only their matching calls until answered", async (t) => {
   const h = harness({ continueLimit: 0 });
   t.after(() => { h.sessions.dispose(); return h.store.close(); });

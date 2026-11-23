@@ -1272,7 +1272,6 @@ export const bg: AppMessages = {
   "railsurfaces.unknown": "Неизвестен",
   "railsurfaces.usage": "Употреба",
   "railsurfaces.valueContextEstimate": "{percent}% оценка на контекста",
-  "reduce.action": "действие",
   "reduce.title": "заглавие",
   "runtimeRecovery.borrowedDetail": "Продължаването стартира нов контекст на изпълнение. По-ранните незавършени заявки не се изпращат отново.",
   "runtimeRecovery.borrowedTitle": "Средата за изпълнение се промени. Polyth вече не може да докаже, че това е същата бекенд сесия.",

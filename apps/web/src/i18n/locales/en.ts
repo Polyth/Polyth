@@ -1275,7 +1275,6 @@ export const en = {
   "railsurfaces.unknown": "Unknown",
   "railsurfaces.usage": "Usage",
   "railsurfaces.valueContextEstimate": "{percent}% context estimate",
-  "reduce.action": "action",
   "reduce.title": "title",
   "runtimeRecovery.borrowedDetail": "Continuing starts a fresh runtime context. Earlier unfinished requests are not sent again.",
   "runtimeRecovery.borrowedTitle": "Runtime changed. Polyth can no longer prove that this is the same backend session.",

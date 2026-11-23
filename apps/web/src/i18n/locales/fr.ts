@@ -1272,7 +1272,6 @@ export const fr: AppMessages = {
   "railsurfaces.unknown": "Inconnu",
   "railsurfaces.usage": "Utilisation",
   "railsurfaces.valueContextEstimate": "{percent} % d'estimation du contexte",
-  "reduce.action": "action",
   "reduce.title": "titre",
   "runtimeRecovery.borrowedDetail": "Continuer démarre un nouveau contexte d’exécution. Les requêtes inachevées précédentes ne sont pas renvoyées.",
   "runtimeRecovery.borrowedTitle": "Environnement d’exécution modifié. Polyth ne peut plus prouver qu’il s’agit de la même session backend.",

@@ -1694,12 +1694,15 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       }
       break;
     }
-    case "secret/resolved": {
+    case "secret/resolved":
+    case "secret/expired": {
+      // An expired form (its tool call ended) is closed, not saved: the card
+      // leaves instead of accepting a value the server can no longer store.
       const requestId = str(d, "requestId") ?? "";
       const secret = model.secrets.find((item) => item.requestId === requestId);
       if (secret) {
         secret.status = "resolved";
-        const action = str(d, tr("reduce.action"));
+        const action = ev.type === "secret/resolved" ? str(d, "action") : undefined;
         if (action === "saved" || action === "dismissed") secret.action = action;
       }
       break;

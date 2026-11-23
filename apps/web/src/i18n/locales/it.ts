@@ -1272,7 +1272,6 @@ export const it: AppMessages = {
   "railsurfaces.unknown": "Sconosciuto",
   "railsurfaces.usage": "Utilizzo",
   "railsurfaces.valueContextEstimate": "{percent} % stima del contesto",
-  "reduce.action": "azione",
   "reduce.title": "titolo",
   "runtimeRecovery.borrowedDetail": "Continuare avvia un nuovo contesto di esecuzione. Le richieste precedenti non completate non vengono reinviate.",
   "runtimeRecovery.borrowedTitle": "Runtime cambiato. Polyth non può più dimostrare che questa sia la stessa sessione backend.",

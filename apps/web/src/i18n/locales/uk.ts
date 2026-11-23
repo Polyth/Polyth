@@ -1272,7 +1272,6 @@ export const uk: AppMessages = {
   "railsurfaces.unknown": "Невідомо",
   "railsurfaces.usage": "Використання",
   "railsurfaces.valueContextEstimate": "Оцінка контексту: {percent}%",
-  "reduce.action": "дія",
   "reduce.title": "назва",
   "runtimeRecovery.borrowedDetail": "Продовження починає новий контекст виконання. Попередні незавершені запити не надсилаються знову.",
   "runtimeRecovery.borrowedTitle": "Середовище виконання змінилося. Polyth більше не може підтвердити, що це та сама сесія бекенду.",

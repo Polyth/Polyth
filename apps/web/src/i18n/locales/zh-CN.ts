@@ -1272,7 +1272,6 @@ export const zhCN: AppMessages = {
   "railsurfaces.unknown": "未知",
   "railsurfaces.usage": "用量",
   "railsurfaces.valueContextEstimate": "{percent}% 上下文估计",
-  "reduce.action": "操作",
   "reduce.title": "标题",
   "runtimeRecovery.borrowedDetail": "继续将使用全新的运行时上下文。先前未完成的请求不会再次发送。",
   "runtimeRecovery.borrowedTitle": "运行时已更改。Polyth 无法再证明这是同一个后端会话。",

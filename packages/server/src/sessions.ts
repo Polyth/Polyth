@@ -1595,6 +1595,15 @@ export function createSessionService(deps: {
       if (key.startsWith(`${sessionId}\0`)) toolQuietNoticed.delete(key);
     }
   };
+  /** Package tools open their approvals and Credential Vault forms under the
+   *  bare tool name, while each harness reports the running call as published
+   *  by the Polyth agent-tools MCP server (Claude/Codex
+   *  `mcp__polyth-agent-tools__…`, OpenCode `polyth-agent-tools_…`, Antigravity
+   *  `mcp_polyth-agent-tools_…`, Copilot `polyth-agent-tools-…`). Only that
+   *  server's prefix is removed: another server's same-named tool stays
+   *  distinct and cannot borrow a person's wait. */
+  const polythAgentToolName = (tool: string): string =>
+    tool.replace(/^(?:mcp__?)?polyth-agent-tools(?:__|_|-)/, "");
   type ActiveTool = { tool: string; input: JsonObject; startedAt: number };
   /** One replay step: a turn boundary ends every call still running. */
   const foldActiveTool = (active: Map<string, ActiveTool>, event: SessionEvent): void => {
@@ -1720,7 +1729,8 @@ export function createSessionService(deps: {
         && (requestId === callId
           || request.data.tool === callId
           || ((request.data.permission === "package-tool" || request.data.origin === "agent-tool")
-            && request.data.tool === tool)
+            && typeof request.data.tool === "string"
+            && polythAgentToolName(tool) === request.data.tool)
           || (request.type !== "permission/requested" && tool === "question"))));
 
   // Human response time is not tool execution time. Only this session's own

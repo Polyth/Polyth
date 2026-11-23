@@ -1272,7 +1272,6 @@ export const ar: AppMessages = {
   "railsurfaces.unknown": "مجهول",
   "railsurfaces.usage": "الاستخدام",
   "railsurfaces.valueContextEstimate": "{percent} % تقدير السياق",
-  "reduce.action": "إجراء",
   "reduce.title": "عنوان",
   "runtimeRecovery.borrowedDetail": "المتابعة تبدأ سياق تشغيل جديدًا. لن تُرسل الطلبات غير المكتملة السابقة مرة أخرى.",
   "runtimeRecovery.borrowedTitle": "تغيرت بيئة التشغيل. لم يعد بإمكان Polyth إثبات أن هذه هي نفس جلسة الخلفية.",

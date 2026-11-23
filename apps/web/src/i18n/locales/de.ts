@@ -1272,7 +1272,6 @@ export const de: AppMessages = {
   "railsurfaces.unknown": "Unbekannt",
   "railsurfaces.usage": "Nutzung",
   "railsurfaces.valueContextEstimate": "{percent} % Kontextschätzung",
-  "reduce.action": "Aktion",
   "reduce.title": "Titel",
   "runtimeRecovery.borrowedDetail": "Weiter geht es mit einem neuen Laufzeitkontext. Frühere unvollendete Anfragen werden nicht erneut gesendet.",
   "runtimeRecovery.borrowedTitle": "Laufzeit geändert. Polyth kann nicht mehr belegen, dass dies dieselbe Backend-Sitzung ist.",

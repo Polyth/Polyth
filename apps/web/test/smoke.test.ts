@@ -747,6 +747,18 @@ test("secret/requested adds a pending credential handle and secret/resolved clea
   assert.equal(model.secrets.filter((secret) => secret.status === "pending").length, 0);
 });
 
+test("secret/expired closes the credential form instead of leaving a dead card", () => {
+  // 2026-11-23: an expired form stayed pending, so the person typed the
+  // token into it and the save could only fail.
+  const model = buildModel([
+    ev("secret/requested", { requestId: "secret-2", handle: "deploy-token", label: "Deployment token" }),
+    ev("secret/expired", { requestId: "secret-2" }),
+  ]);
+  assert.equal(model.secrets[0]?.status, "resolved");
+  assert.equal(model.secrets[0]?.action, undefined);
+  assert.equal(model.secrets.filter((secret) => secret.status === "pending").length, 0);
+});
+
 test("replayed seq is deduped per (sessionId, seq)", () => {
   const d = createSeqDedupe();
   assert.equal(d.has("s1", 3), false);
