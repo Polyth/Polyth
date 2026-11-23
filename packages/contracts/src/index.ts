@@ -7146,6 +7146,29 @@ export interface ReleaseDownloadsDto {
   update?: { version: string; command: string } | null;
 }
 
+/** `GET`/`PUT /api/system/auto-update`: a packaged server that installs its
+ *  own new releases (npm or Homebrew) and restarts through its service once no
+ *  chat is working. Absent (404) on older servers. */
+export interface ServerAutoUpdateDto {
+  /** The package manager this server updates through; null when it cannot. */
+  install: "npm" | "homebrew" | null;
+  /** Why this server cannot update itself, when it cannot. */
+  unavailable: string | null;
+  enabled: boolean;
+  /** The caller may turn it on or off (the instance owner). */
+  canChange: boolean;
+  /** `waiting`: a newer release is ready to install or restart into once no
+   *  chat is working. */
+  phase: "off" | "idle" | "checking" | "waiting" | "installing" | "restarting";
+  /** The newer release the last check found. */
+  available: string | null;
+  /** Chats working now, while `phase` is `waiting`. */
+  busy: number;
+  checkedAt: number | null;
+  /** The last update attempt, kept across the restart it caused. */
+  last: { at: number; from: string; to: string; ok: boolean; message: string } | null;
+}
+
 const RELEASE_VERSION = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;
 
 /** Polyth release order: numbers first, then a stable release above its own
