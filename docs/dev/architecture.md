@@ -211,7 +211,9 @@ starts Node or OpenCode. See `docs/mobile/architecture.md`.
     restart. A `firing` record re-sends with the same client operation id.
   - `pid` and `file` waits hold the chat's runtime through
     `SessionService.holdRuntime`, because the process lives in that runtime's
-    process tree.
+    process tree. A package reaches it only through the governed host: the
+    hold is applied after the session is admitted to its own Space, holds and
+    releases keep their call order, and a refused session gets no hold.
   - An always-on instruction tells every agent never to end a turn promising
     to wait without one.
 
