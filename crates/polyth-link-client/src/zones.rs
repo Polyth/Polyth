@@ -28,6 +28,10 @@ const MAX_NAME_CHARS: usize = 120;
 const MAX_ICON_BYTES: usize = 4096;
 const MAX_ID_CHARS: usize = 128;
 
+/// What the page of a sender may see: its own server, and the other servers as
+/// `(connection id, zone)` once the person allowed that sender.
+type VisibleZones = (Value, Option<Vec<(String, Value)>>);
+
 /// One record per server: `{id, key?, allowed?, folded?, projects?, reportedAt?}`.
 fn zones_path(data_dir: &Path) -> PathBuf {
     data_dir.join("zones.json")
@@ -210,10 +214,7 @@ fn servers(data_dir: &Path) -> Result<Vec<Server>, LinkError> {
 /// What the page of `sender` may see: the server on screen, and the other
 /// servers as `(connection id, zone)`. `None` until `sender` is allowed: it
 /// then learns only that there is something to ask for, never a name.
-fn visible(
-    data_dir: &Path,
-    sender: &str,
-) -> Result<(Value, Option<Vec<(String, Value)>>), LinkError> {
+fn visible(data_dir: &Path, sender: &str) -> Result<VisibleZones, LinkError> {
     let servers = servers(data_dir)?;
     let own = servers
         .iter()
