@@ -52,7 +52,10 @@ fn flag(records: &[Value], id: &str, key: &str) -> bool {
 }
 
 /// A server's record, made when there is none yet.
-fn slot<'a>(records: &'a mut Vec<Value>, id: &str) -> Result<&'a mut Map<String, Value>, LinkError> {
+fn slot<'a>(
+    records: &'a mut Vec<Value>,
+    id: &str,
+) -> Result<&'a mut Map<String, Value>, LinkError> {
     let index = match records
         .iter()
         .position(|item| item.get("id").and_then(Value::as_str) == Some(id))
@@ -87,7 +90,11 @@ fn keyed_records(data_dir: &Path, servers: &[&Server]) -> Result<Vec<Value>, Lin
     let mut changed = false;
     for server in servers {
         let object = slot(&mut records, &server.id)?;
-        if object.get("key").and_then(Value::as_str).is_some_and(|key| !key.is_empty()) {
+        if object
+            .get("key")
+            .and_then(Value::as_str)
+            .is_some_and(|key| !key.is_empty())
+        {
             continue;
         }
         let mut bytes = [0u8; 16];
@@ -203,7 +210,10 @@ fn servers(data_dir: &Path) -> Result<Vec<Server>, LinkError> {
 /// What the page of `sender` may see: the server on screen, and the other
 /// servers as `(connection id, zone)`. `None` until `sender` is allowed: it
 /// then learns only that there is something to ask for, never a name.
-fn visible(data_dir: &Path, sender: &str) -> Result<(Value, Option<Vec<(String, Value)>>), LinkError> {
+fn visible(
+    data_dir: &Path,
+    sender: &str,
+) -> Result<(Value, Option<Vec<(String, Value)>>), LinkError> {
     let servers = servers(data_dir)?;
     let own = servers
         .iter()
@@ -260,7 +270,11 @@ fn view(data_dir: &Path, sender: &str) -> Result<Value, LinkError> {
 }
 
 /// The zone of `key` as `sender`'s page shows it, with its server's id.
-fn visible_zone(data_dir: &Path, sender: &str, key: Option<&Value>) -> Result<(String, Value), LinkError> {
+fn visible_zone(
+    data_dir: &Path,
+    sender: &str,
+    key: Option<&Value>,
+) -> Result<(String, Value), LinkError> {
     let key = key
         .and_then(Value::as_str)
         .filter(|key| !key.is_empty())
@@ -379,7 +393,13 @@ mod tests {
     #[test]
     fn a_page_reads_the_other_servers_only_once_its_server_was_allowed() {
         let dir = tempdir().unwrap();
-        pair(dir.path(), &[("home-endpoint", "Home", "active"), ("team", "Team", "active")]);
+        pair(
+            dir.path(),
+            &[
+                ("home-endpoint", "Home", "active"),
+                ("team", "Team", "active"),
+            ],
+        );
         call(dir.path(), "zones.report", json!({ "connectionId": "home-endpoint", "projects": [{ "id": "p1", "name": "Site" }] })).unwrap();
 
         let asked = call(dir.path(), "zones.view", json!({ "connectionId": "team" })).unwrap();
@@ -391,7 +411,12 @@ mod tests {
         // and a connection id is never a key.
         for method in ["zones.open", "zones.fold"] {
             assert_eq!(
-                call(dir.path(), method, json!({ "connectionId": "team", "key": "home-endpoint" })).unwrap_err(),
+                call(
+                    dir.path(),
+                    method,
+                    json!({ "connectionId": "team", "key": "home-endpoint" })
+                )
+                .unwrap_err(),
                 LinkError::Forbidden
             );
         }
@@ -404,16 +429,30 @@ mod tests {
         assert!(!granted.to_string().contains("home-endpoint"));
         assert_eq!(granted["zones"][0]["key"].as_str().unwrap().len(), 32);
         assert_eq!(key(dir.path(), "team", "Home"), granted["zones"][0]["key"]);
-        assert_eq!(granted["zones"][0]["projects"], json!([{ "id": "p1", "name": "Site" }]));
+        assert_eq!(
+            granted["zones"][0]["projects"],
+            json!([{ "id": "p1", "name": "Site" }])
+        );
         assert_eq!(granted["zones"][0]["reportedAt"], 1_000);
         // The permission is that server's alone.
-        assert_eq!(call(dir.path(), "zones.view", json!({ "connectionId": "home-endpoint" })).unwrap()["access"], "ask");
+        assert_eq!(
+            call(
+                dir.path(),
+                "zones.view",
+                json!({ "connectionId": "home-endpoint" })
+            )
+            .unwrap()["access"],
+            "ask"
+        );
     }
 
     #[test]
     fn a_reported_list_is_bounded_and_keeps_only_what_a_row_draws() {
         let dir = tempdir().unwrap();
-        pair(dir.path(), &[("home", "Home", "active"), ("team", "Team", "active")]);
+        pair(
+            dir.path(),
+            &[("home", "Home", "active"), ("team", "Team", "active")],
+        );
         let mut projects = vec![
             json!({ "id": "ok", "name": "  Web \n site ", "icon": "🌿", "color": "#0af", "path": "/srv/secret" }),
             json!({ "id": "ok", "name": "Twice" }),
@@ -424,30 +463,62 @@ mod tests {
             json!({ "id": "plain", "name": "Plain", "icon": "a\nb", "color": "red" }),
             json!("text"),
         ];
-        projects.extend((0..500).map(|index| json!({ "id": format!("n{index}"), "name": "x".repeat(300) })));
-        call(dir.path(), "zones.report", json!({ "connectionId": "home", "projects": projects })).unwrap();
+        projects.extend(
+            (0..500).map(|index| json!({ "id": format!("n{index}"), "name": "x".repeat(300) })),
+        );
+        call(
+            dir.path(),
+            "zones.report",
+            json!({ "connectionId": "home", "projects": projects }),
+        )
+        .unwrap();
         call(dir.path(), "zones.allow", json!({ "connectionId": "team" })).unwrap();
         let view = call(dir.path(), "zones.view", json!({ "connectionId": "team" })).unwrap();
         let listed = view["zones"][0]["projects"].as_array().unwrap();
-        assert_eq!(listed[0], json!({ "id": "ok", "name": "Web site", "icon": "🌿", "color": "#0af" }));
+        assert_eq!(
+            listed[0],
+            json!({ "id": "ok", "name": "Web site", "icon": "🌿", "color": "#0af" })
+        );
         assert_eq!(listed[1], json!({ "id": "plain", "name": "Plain" }));
         assert!(listed.len() <= MAX_PROJECTS);
-        assert_eq!(listed[2]["name"].as_str().unwrap().chars().count(), MAX_NAME_CHARS);
+        assert_eq!(
+            listed[2]["name"].as_str().unwrap().chars().count(),
+            MAX_NAME_CHARS
+        );
         assert!(!view.to_string().contains("secret"));
     }
 
     #[test]
     fn a_click_goes_only_to_a_listed_project_of_a_visible_zone() {
         let dir = tempdir().unwrap();
-        pair(dir.path(), &[("home", "Home", "active"), ("team", "Team", "active"), ("old", "Old", "revoked")]);
-        call(dir.path(), "zones.report", json!({ "connectionId": "home", "projects": [{ "id": "p1", "name": "Site" }] })).unwrap();
+        pair(
+            dir.path(),
+            &[
+                ("home", "Home", "active"),
+                ("team", "Team", "active"),
+                ("old", "Old", "revoked"),
+            ],
+        );
+        call(
+            dir.path(),
+            "zones.report",
+            json!({ "connectionId": "home", "projects": [{ "id": "p1", "name": "Site" }] }),
+        )
+        .unwrap();
         call(dir.path(), "zones.allow", json!({ "connectionId": "team" })).unwrap();
         let open = |key: &str, project: Value| {
-            call(dir.path(), "zones.open", json!({ "connectionId": "team", "key": key, "projectId": project }))
+            call(
+                dir.path(),
+                "zones.open",
+                json!({ "connectionId": "team", "key": key, "projectId": project }),
+            )
         };
         let home = key(dir.path(), "team", "Home");
         let old = key(dir.path(), "team", "Old");
-        assert_eq!(open(&home, json!("p1")).unwrap(), json!({ "connectionId": "home", "available": true }));
+        assert_eq!(
+            open(&home, json!("p1")).unwrap(),
+            json!({ "connectionId": "home", "available": true })
+        );
         assert_eq!(open(&home, Value::Null).unwrap()["connectionId"], "home");
         assert_eq!(open(&old, Value::Null).unwrap()["available"], false);
         assert_eq!(open(&home, json!("p2")).unwrap_err(), LinkError::Forbidden);
@@ -458,7 +529,12 @@ mod tests {
         }
         // A page of a server this app does not know speaks for nobody.
         assert_eq!(
-            call(dir.path(), "zones.report", json!({ "connectionId": "ghost", "projects": [] })).unwrap_err(),
+            call(
+                dir.path(),
+                "zones.report",
+                json!({ "connectionId": "ghost", "projects": [] })
+            )
+            .unwrap_err(),
             LinkError::DeviceUnknown
         );
     }
@@ -466,23 +542,55 @@ mod tests {
     #[test]
     fn zones_keep_their_order_fold_and_forget() {
         let dir = tempdir().unwrap();
-        pair(dir.path(), &[("c", "beta", "active"), ("b", "Alpha", "active"), ("a", "Here", "active"), ("d", "Draft", "prepared")]);
+        pair(
+            dir.path(),
+            &[
+                ("c", "beta", "active"),
+                ("b", "Alpha", "active"),
+                ("a", "Here", "active"),
+                ("d", "Draft", "prepared"),
+            ],
+        );
         // Alone, a server has nothing to ask for.
         let solo = tempdir().unwrap();
         pair(solo.path(), &[("a", "Here", "active")]);
-        assert_eq!(call(solo.path(), "zones.view", json!({ "connectionId": "a" })).unwrap()["access"], "granted");
+        assert_eq!(
+            call(solo.path(), "zones.view", json!({ "connectionId": "a" })).unwrap()["access"],
+            "granted"
+        );
 
         call(dir.path(), "zones.allow", json!({ "connectionId": "a" })).unwrap();
         let beta = key(dir.path(), "a", "beta");
-        let folded = call(dir.path(), "zones.fold", json!({ "connectionId": "a", "key": beta, "folded": true })).unwrap();
-        let labels: Vec<&str> = folded["zones"].as_array().unwrap().iter().map(|zone| zone["label"].as_str().unwrap()).collect();
+        let folded = call(
+            dir.path(),
+            "zones.fold",
+            json!({ "connectionId": "a", "key": beta, "folded": true }),
+        )
+        .unwrap();
+        let labels: Vec<&str> = folded["zones"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|zone| zone["label"].as_str().unwrap())
+            .collect();
         assert_eq!(labels, ["Alpha", "beta"]);
         assert_eq!(folded["zones"][1]["folded"], true);
         assert_eq!(folded["zones"][0]["reportedAt"], Value::Null);
 
-        call(dir.path(), "zones.report", json!({ "connectionId": "c", "projects": [{ "id": "p", "name": "P" }] })).unwrap();
+        call(
+            dir.path(),
+            "zones.report",
+            json!({ "connectionId": "c", "projects": [{ "id": "p", "name": "P" }] }),
+        )
+        .unwrap();
         let before = std::fs::read(zones_path(dir.path())).unwrap();
-        handle(dir.path(), "zones.report", &json!({ "connectionId": "c", "projects": [{ "id": "p", "name": "P" }] }), 9_000).unwrap();
+        handle(
+            dir.path(),
+            "zones.report",
+            &json!({ "connectionId": "c", "projects": [{ "id": "p", "name": "P" }] }),
+            9_000,
+        )
+        .unwrap();
         assert_eq!(std::fs::read(zones_path(dir.path())).unwrap(), before);
 
         for id in ["a", "b", "c"] {
@@ -492,6 +600,9 @@ mod tests {
         assert_eq!(text, "[]");
         // A damaged file costs the snapshots, not the connections.
         std::fs::write(zones_path(dir.path()), "{").unwrap();
-        assert_eq!(call(dir.path(), "zones.view", json!({ "connectionId": "a" })).unwrap()["access"], "ask");
+        assert_eq!(
+            call(dir.path(), "zones.view", json!({ "connectionId": "a" })).unwrap()["access"],
+            "ask"
+        );
     }
 }
