@@ -78,6 +78,7 @@ export const en = {
   "terminalview.swipeUpFor": "Swipe up for {key}",
   "terminalview.terminalTabName": "Terminal tab name",
   "terminalview.terminalValue": "Terminal {title}",
+  "terminalview.runInTerminalHint": "Type this command into the terminal; press Enter to run it",
   "terminalview.title": "Terminal",
   "terminalview.textInput": "Text input",
   "terminalview.textInputPlaceholder": "Type a command, Enter sends it",

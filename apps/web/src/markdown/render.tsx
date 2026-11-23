@@ -26,6 +26,7 @@ import {
 } from "../components/ui/index.ts";
 import { highlight, escapeCodeHtml } from "../highlight.ts";
 import { codeBlockOverflow } from "./codeBlock.ts";
+import { CodeBlockActions } from "./codeBlockActions.ts";
 import { renderFence, useMarkdownFenceRenderer } from "./fenceRenderers.ts";
 import { useConversationReply } from "./conversationReplies.ts";
 
@@ -241,13 +242,17 @@ function MdCodeFrame({
   children,
   className,
   headerAction,
+  live = false,
 }: {
   lang?: string;
   text: string;
   children: ReactNode;
   className?: string;
   headerAction?: ReactNode;
+  /** The block is still growing: package header actions wait for it. */
+  live?: boolean;
 }) {
+  const docSessionId = useContext(DocContext).resourceContext?.sessionId;
   const bodyRef = useRef<HTMLDivElement>(null);
   const [collapsible, setCollapsible] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -301,6 +306,14 @@ function MdCodeFrame({
           <span className="md-code-block-lang">{displayLang}</span>
           <div className="md-code-block-actions">
             {headerAction}
+            {displayLang && !live && (
+              <CodeBlockActions
+                lang={displayLang}
+                text={text}
+                streaming={false}
+                {...(docSessionId ? { sessionId: docSessionId } : {})}
+              />
+            )}
             <CopyButton text={text} />
           </div>
         </div>
@@ -368,6 +381,7 @@ function PlainCodeBlock({ lang, text, closed = true }: { lang: string; text: str
         lang={lang}
         text={text}
         className="json-block"
+        live={live}
         headerAction={
           <Button
             size="sm"
@@ -387,7 +401,7 @@ function PlainCodeBlock({ lang, text, closed = true }: { lang: string; text: str
     );
   }
   return (
-    <MdCodeFrame lang={lang} text={text}>
+    <MdCodeFrame lang={lang} text={text} live={live}>
       <HighlightedPre lang={lang} text={text} live={live} />
     </MdCodeFrame>
   );

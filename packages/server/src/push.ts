@@ -682,6 +682,15 @@ export function createPushNotifier(deps: {
   /** A package reports this top-level session's turns itself (see
    *  `ServerSessionAttention.claimTurnNotifications`). */
   claimed?(sessionId: string): boolean;
+  /** The durable wake/observe watches whose SOURCE is this session. Read at
+   *  the instant the turn stops (before the watch coordinator can consume a
+   *  `once` watch) so a delegating parent that will be woken by the child's
+   *  end is not also pushed about it. Resolved lazily; absent = none. */
+  watches?(sourceSessionId: string): Promise<ReadonlyArray<{
+    targetSessionId: string;
+    delivery: "observe" | "wake";
+    events?: readonly string[];
+  }>>;
   /** One bounded keyset page of ONE session's events (never a full replay),
    *  used only to put the concrete content in the body. `beforeSeq` walks the
    *  pages backwards (see the store's `events` keyset contract). Any failure
@@ -781,6 +790,9 @@ export function createPushNotifier(deps: {
     },
     turnStopped(sessionId, reason) {
       if (reason === "aborted") return;
+      // Started synchronously, before the watch coordinator's own kick can
+      // consume a one-shot watch for this stop.
+      const watching = deps.watches?.(sessionId).catch(() => []);
       fire((async () => {
         const proj = await deps.projection(sessionId);
         if (!proj) return;
@@ -790,6 +802,18 @@ export function createPushNotifier(deps: {
           // payload is published (NTF-01); a missing/mismatched parent stays
           // silent rather than creating a row with an unverified target.
           if (!parent || parent.projectId !== proj.projectId) return;
+          // The parent acts on this end itself: its own turn is running or
+          // pending, or it holds a wake watch on this child for this outcome.
+          // Its turn completion is then the single notification. An idle
+          // parent nobody will wake still needs the person to know, and so
+          // does one that cannot act (failed, finished, unknown, waiting on
+          // the person): only a live turn counts as "acting".
+          if (parent.status === "working" || parent.status === "reconciling" || parent.status === "epoch-pending") return;
+          const outcome = reason === "error" ? "error" : "completed";
+          const woken = (await watching ?? []).some((w) =>
+            w.targetSessionId === proj.parentId && w.delivery === "wake"
+            && (!w.events || w.events.includes(outcome) || (outcome === "completed" && w.events.length === 0)));
+          if (woken) return;
           let content = "";
           if (!parent.spaceId || !proj.spaceId || parent.spaceId === proj.spaceId) {
             const detail = reason === "error" ? await errorExcerpt(sessionId, 140) : await replyExcerpt(sessionId, 140);

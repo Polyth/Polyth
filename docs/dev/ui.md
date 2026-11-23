@@ -2445,6 +2445,10 @@ host draws headings and rows. When every chat in a list has the empty key (no
 marker, no agent…), that lone group draws no heading. A stored package grouping waits for its package
 to register and reads as None meanwhile. Chat markers add "Marker".
 
+`session.code.actions` adds a button to a completed code fence's header (see
+*Code frame* in the markdown section); it is rendered by the host with
+`CodeBlockActionSlotContext`.
+
 `session.selection.actions` adds an action to a transcript selection, beside
 Quote and Copy in the floating toolbar and the touch dock. It is data only
 (`meta.selectionAction`, `SelectionActionSlotMeta`): the host draws the button,
@@ -3759,11 +3763,23 @@ A row waiting for a person shows its ask in amber with **Allow** /
 **Deny**, the zone's only primary: they answer the child's request mirrored
 into the parent's log (`sourceSessionId`; the server forwards the answer), the
 same reply the permission card sends; the ask leaves at the click and a failed
-reply brings it back. A high-risk request, a guarded account, a question or a
-nested subagent's wait offer **Review** instead, which opens that child chat:
-nothing risky is allowed from one line. Past four rows the list ends in *+n
+reply brings it back. A high-risk request, a guarded account or a nested
+subagent's wait offer **Review** instead, which opens that child chat: nothing
+risky is allowed from one line. A child's question is mirrored the same way
+(`question/asked` with `sourceSessionId`; `replyQuestion` forwards the answer
+to the child, and the mirror counts as a blocking request on the parent because
+only a person can answer it, unlike a delegated permission mirror). Its row
+shows the question's first line and **Answer**: for a single question it scrolls
+to and focuses the mirrored card in this chat's timeline (the existing question
+UI), for several it opens the child. Past four rows the list ends in *+n
 more*, which shows the rest. The action and run time never push the model
 out: the action gives way first.
+
+A quiet tally ends the agent's own line (the same line, no head row and no bulk
+control): *n done* and *n failed* for the children of this chat (never forks)
+that settled since the person's latest message began, not lifetime totals.
+*n failed* opens the first failed subagent. It shows with the island, so a chat
+that never delegated shows nothing (`subagentTally.ts`).
 
 Motion, only after the list's first paint and none under reduced motion: a
 state change swaps the mark (it grows in) and the control set (fades in) in
@@ -6255,7 +6271,16 @@ click everywhere else.
   without a language has nothing to label, so it draws no header — the copy
   control floats in the frame's top-right corner (`.md-code-block-float`) and
   the code starts at the body's own padding, instead of under an empty 29px
-  band. The floating control reserves the first line's end (`pre`
+  band. Packages add header actions through `session.code.actions`
+  (`CodeBlockActionSlotContext` / `CodeBlockActionSlotMeta` in
+  `@polyth/web-sdk`: `sessionId?`, `lang`, `text`, `streaming`;
+  `meta.codeAction.languages` limits the fence languages). The host mounts them
+  (`markdown/codeBlockActions.ts`) before Copy only for a completed block with
+  a language, never while it streams; contributions render a `Button`
+  `size="sm" variant="ghost"`. Terminal contributes *Run in Terminal* for a
+  single-command shell block (`sh`, `bash`, `zsh`, `shell`, `console` with its
+  `$`/`>` prompts stripped, PowerShell): it opens the chat's terminal and types
+  the command without Enter, so the person confirms. The floating control reserves the first line's end (`pre`
   `padding-inline-end`), so a long line scrolls rather than passing beneath it.
   While a message streams, a still-open fence is not re-tokenized per delta: it
   renders the last highlighted snapshot plus the escaped new tail in the same

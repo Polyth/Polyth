@@ -76,6 +76,7 @@ export const bg: TerminalMessages = {
   "terminalview.swipeUpFor": "Плъзнете нагоре за {key}",
   "terminalview.terminalTabName": "Име на раздела на терминала",
   "terminalview.terminalValue": "Терминал {title}",
+  "terminalview.runInTerminalHint": "Въведи командата в терминала; Enter я изпълнява",
   "terminalview.title": "Терминал",
   "terminalview.textInput": "Поле за текст",
   "terminalview.textInputPlaceholder": "Въведете команда, Enter я изпраща",

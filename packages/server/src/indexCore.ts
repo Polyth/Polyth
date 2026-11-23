@@ -2550,6 +2550,7 @@ export async function boot(opts: BootOptions = {}) {
       maxBytes: 128 * 1024,
       ...(beforeSeq !== undefined ? { beforeSeq } : {}),
     }),
+    watches: (sourceSessionId) => store.sessionWatches({ sourceSessionId }),
     claimed: (sessionId) => {
       for (const owns of turnNotificationClaims) {
         try {

@@ -520,8 +520,11 @@ starts Node or OpenCode. See `docs/mobile/architecture.md`.
   endpoint URL is a bearer capability) and a bounded, redacted response body;
   other rejections (403 VAPID mismatch, 413, 429) keep the subscription. `createPushNotifier` bridges the session service's
   notify seam to templated payloads (same allowlisted bounded semantics as the
-  in-page notifier): subagent completions attribute to the parent session,
-  aborted turns stay silent, and auto-accepted permissions never reach the seam.
+  in-page notifier): subagent completions attribute to the parent session
+  but stay silent while the parent will act on them itself (its own status is
+  not idle, or it holds a `wake` watch on that child for that outcome, read
+  from `watches(source)` the instant the turn stops); an idle, unwatched parent
+  still gets the push so the person knows. Aborted turns stay silent, and auto-accepted permissions never reach the seam.
   The body says what happened when the durable events show it — a plain-text
   excerpt of the turn's final reply, the error, the first question, or the
   requested command/path first (`Run: npm test`) — read from bounded keyset
@@ -1247,7 +1250,7 @@ agent is deciding and keeps Deny/Allow. `push.ts` registers the root-scope servi
 `composer.trailing`, the headless `composer.suggestion` (next-prompt sources),
 `contextRail.tabs`, `settings.pages`,
 `commandPalette.commands`, `workspace.main.tabs`, `workspace.right.tabs`,
-`session.timeline.before/after`, `session.message.actions`,
+`session.timeline.before/after`, `session.message.actions`, `session.code.actions`,
 `sidebar.project.actions`, `sidebar.session.actions`, `sidebar.sessions.bulk.actions`, `sidebar.project.leading`,
 the widget placement slots (`workspace.header/left/main/right/bottom/floating`,
 `widget.catalog`, `widget.settings`), and the fine-grained toolbar areas

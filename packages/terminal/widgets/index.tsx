@@ -1,8 +1,10 @@
 import "./styles.css";
-import { defineWebPackage } from "@polyth/web-sdk";
+import { defineWebPackage, type CodeBlockActionSlotContext, type CodeBlockActionSlotMeta } from "@polyth/web-sdk";
 import { withSurfaceContent } from "@polyth/web-sdk/surface-content";
 import TerminalView from "./TerminalView.tsx";
 import TerminalSettingsPage from "./TerminalSettingsPage.tsx";
+import RunInTerminalAction from "./RunInTerminalAction.tsx";
+import { SHELL_FENCE_LANGUAGES } from "./typeIntoTerminal.ts";
 
 export default defineWebPackage((host) => () => {
   const t = host.ui.locale.translate;
@@ -18,6 +20,13 @@ export default defineWebPackage((host) => () => {
       settingsItems: [
         { id: "terminal.shell", pageId: "terminal", label: t("terminalsettings.shell"), keywords: ["terminal", "shell", "bash", "zsh", "fish", "powershell", "login shell"], focusTarget: "terminal.shell" },
       ],
+    }),
+    host.slots.register({
+      slot: "session.code.actions",
+      id: "terminal.run-in-terminal",
+      order: 10,
+      render: (context) => <RunInTerminalAction host={host} context={context as unknown as CodeBlockActionSlotContext} />,
+      meta: { codeAction: { languages: SHELL_FENCE_LANGUAGES } satisfies CodeBlockActionSlotMeta },
     }),
     host.surfaces.register({ id: "terminal", title: t("terminalview.title"), description: t("terminalview.surfaceDescription"), capabilityId: "terminal", order: 3, component: TerminalView, presentation: withSurfaceContent({ kind: "workspace", defaultRatio: 0.6, minWidth: 380, minHeight: 200, preferredMaxWidth: 760, keepAlive: true, escape: "content", dock: "bottom", dockOptions: ["bottom", "side"] }, "workspace") }),
     host.capabilities.register({ id: "terminal", label: t("terminalview.title"), plainDescription: t("terminalview.surfaceDescription"), keywords: ["terminal", "shell", "console"], standardTier: "more", standardRank: 4, defaultRails: { general: "top", engineering: "top", operations: "top" }, open: () => { host.navigation.openWorkspacePane("terminal"); }, available: () => true }),

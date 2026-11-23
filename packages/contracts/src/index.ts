@@ -6807,6 +6807,11 @@ export const UI_SLOTS = [
   // toolbar and the touch dock. Data only: `meta.selectionAction`
   // (SelectionActionSlotMeta in @polyth/web-sdk); the host draws the buttons.
   "session.selection.actions",
+  // Actions in a rendered code fence's header, beside Copy. Context:
+  // CodeBlockActionSlotContext (@polyth/web-sdk): sessionId?, lang, text,
+  // streaming. Mounted only for completed blocks; `meta.codeAction.languages`
+  // (CodeBlockActionSlotMeta) limits it to those fence languages.
+  "session.code.actions",
   "sidebar.project.actions", "sidebar.session.actions",
   // Package actions for the sessions selected in the navigator, rendered as
   // menu items in the selection bar's menu. Context: sessionIds (string[]),

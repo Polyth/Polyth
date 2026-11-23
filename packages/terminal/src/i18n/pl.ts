@@ -76,6 +76,7 @@ export const pl: TerminalMessages = {
   "terminalview.swipeUpFor": "Przesuń w górę: {key}",
   "terminalview.terminalTabName": "Nazwa zakładki terminala",
   "terminalview.terminalValue": "Terminal {title}",
+  "terminalview.runInTerminalHint": "Wpisz polecenie w terminalu; Enter je uruchomi",
   "terminalview.title": "Terminal",
   "terminalview.textInput": "Pole tekstowe",
   "terminalview.textInputPlaceholder": "Wpisz polecenie, Enter je wysyła",

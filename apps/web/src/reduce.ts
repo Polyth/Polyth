@@ -297,6 +297,8 @@ export interface PendingQuestion {
   questions: JsonObject[];
   status: "pending" | "answered" | "rejected";
   answers?: JsonObject;
+  /** Set on a parent's mirror of a subagent's question: the child that asked. */
+  sourceSessionId?: string;
   time: number;
 }
 
@@ -1636,6 +1638,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           questions,
           status: "pending",
           time: ev.time,
+          ...(str(d, "sourceSessionId") && str(d, "sourceSessionId") !== ev.sessionId ? { sourceSessionId: str(d, "sourceSessionId") } : {}),
         });
         const sourceSessionId = str(d, "sourceSessionId");
         model.messages.push({

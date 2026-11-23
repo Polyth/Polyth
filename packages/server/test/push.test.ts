@@ -309,7 +309,7 @@ test("buildPushPayload carries the stable key + projectId and derives the tag fr
 test("notifier supplies stable keys, durable attention counts, and the trusted projectId", async () => {
   const sent: PushPayload[] = [];
   const projections = new Map<string, SessionProjection>([
-    ["root", { id: "root", projectId: "p", title: "Root task", status: "working", createdAt: 1, updatedAt: 1 } as SessionProjection],
+    ["root", { id: "root", projectId: "p", title: "Root task", status: "idle", createdAt: 1, updatedAt: 1 } as SessionProjection],
     ["child", { id: "child", projectId: "p", parentId: "root", title: "Child task", status: "working", createdAt: 1, updatedAt: 1 } as SessionProjection],
     ["stray", { id: "stray", projectId: "other", parentId: "root", title: "Stray", status: "working", createdAt: 1, updatedAt: 1 } as SessionProjection],
     ["orphan", { id: "orphan", projectId: "p", parentId: "gone", title: "Orphan", status: "working", createdAt: 1, updatedAt: 1 } as SessionProjection],
@@ -350,7 +350,7 @@ test("notifier supplies stable keys, durable attention counts, and the trusted p
 test("notifier: attention pushes, aborts stay silent, subagents attribute to parent", async () => {
   const sent: PushPayload[] = [];
   const projections = new Map<string, SessionProjection>([
-    ["root", { id: "root", projectId: "p", title: "Root task", status: "working", createdAt: 1, updatedAt: 1 } as SessionProjection],
+    ["root", { id: "root", projectId: "p", title: "Root task", status: "idle", createdAt: 1, updatedAt: 1 } as SessionProjection],
     ["child", { id: "child", projectId: "p", parentId: "root", title: "Child task", status: "working", createdAt: 1, updatedAt: 1 } as SessionProjection],
   ]);
   const notifier = createPushNotifier({
@@ -378,6 +378,53 @@ test("notifier: attention pushes, aborts stay silent, subagents attribute to par
     ["subagent", "root"],
   ]);
   assert.equal(sent[2]!.body, "Root task — delegated agent failed");
+});
+
+test("notifier: a child's end is quiet when the parent will act on it, loud when nobody will", async () => {
+  const sent: PushPayload[] = [];
+  const mk = (id: string, status: string, parentId?: string) => [id, {
+    id, projectId: "p", title: id, status, ...(parentId ? { parentId } : {}), createdAt: 1, updatedAt: 1,
+  } as SessionProjection] as const;
+  const projections = new Map<string, SessionProjection>([
+    mk("busy", "working"), mk("idle", "idle"), mk("watcher", "idle"), mk("observer", "idle"),
+    mk("broken", "failed"), mk("asking", "waiting"), mk("c-broken", "idle", "broken"), mk("c-asking", "idle", "asking"),
+    mk("c-busy", "idle", "busy"), mk("c-idle", "idle", "idle"), mk("c-fail", "idle", "idle"),
+    mk("c-watched", "idle", "watcher"), mk("c-watched-fail", "idle", "watcher"),
+    mk("c-observed", "idle", "observer"),
+  ]);
+  const watches: Record<string, Array<{ targetSessionId: string; delivery: "observe" | "wake"; events?: string[] }>> = {
+    "c-watched": [{ targetSessionId: "watcher", delivery: "wake", events: ["completed", "error", "aborted"] }],
+    "c-watched-fail": [{ targetSessionId: "watcher", delivery: "wake", events: ["completed"] }], // does not hear errors
+    "c-observed": [{ targetSessionId: "observer", delivery: "observe" }],
+  };
+  const notifier = createPushNotifier({
+    send: async (p) => { sent.push(p); },
+    projection: async (id) => projections.get(id),
+    watches: async (id) => watches[id] ?? [],
+  });
+  const settle = () => new Promise((r) => setTimeout(r, 10));
+  for (const [id, reason] of [
+    ["c-busy", "completed"], // parent is working: its own turn is the notification
+    ["c-watched", "completed"], // wake watch: the parent is woken
+    ["c-watched", "error"],
+    ["c-idle", "completed"], // idle parent, nobody wakes it: tell the person
+    ["c-fail", "error"],
+    ["c-watched-fail", "error"], // watch does not cover failures: tell the person
+    ["c-observed", "completed"], // observe-only watch does not wake
+    ["c-broken", "completed"], // failed parent cannot act: tell the person
+    ["c-asking", "completed"], // parent waits on the person, not on a turn
+  ] as const) {
+    notifier.turnStopped(id, reason);
+    await settle();
+  }
+  assert.deepEqual(sent.map((p) => p.key), [
+    "c-idle:subagent:idle",
+    "c-fail:subagent:failed",
+    "c-watched-fail:subagent:failed",
+    "c-observed:subagent:idle",
+    "c-broken:subagent:idle",
+    "c-asking:subagent:idle",
+  ]);
 });
 
 test("notifier: a package that claims a session's turns reports them itself", async () => {
@@ -548,7 +595,7 @@ test("notifier puts the concrete content in the body and falls back to status te
   const sent: PushPayload[] = [];
   const base = { projectId: "p", status: "working", createdAt: 1, updatedAt: 1 };
   const projections = new Map<string, SessionProjection>([
-    ["root", { id: "root", title: "Root task", ...base } as SessionProjection],
+    ["root", { id: "root", title: "Root task", ...base, status: "idle" } as SessionProjection],
     ["child", { id: "child", parentId: "root", title: "Child task", ...base } as SessionProjection],
     ["quiet", { id: "quiet", title: "Quiet", ...base } as SessionProjection],
   ]);

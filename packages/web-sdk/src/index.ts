@@ -177,6 +177,29 @@ export interface SelectionActionSlotMeta {
   run: (context: SelectionActionContext) => void | Promise<void>;
 }
 
+/** `meta.codeAction` on a `session.code.actions` contribution. The host mounts
+ *  the contribution's `render` in the header of a completed code fence, beside
+ *  Copy, with `CodeBlockActionSlotContext`. Without `languages` it mounts for
+ *  every fence that has a language. */
+export interface CodeBlockActionSlotMeta {
+  /** Lower-case fence languages the action applies to (`"sh"`, `"bash"`…). */
+  languages?: readonly string[];
+}
+
+/** Context the host gives every `session.code.actions` contribution. Render a
+ *  small ghost `Button` (size "sm"), or nothing when the action does not apply.
+ *  `sessionId` is absent when the block is shown outside a chat. The host never
+ *  mounts the slot while the block is still streaming; `streaming` is always
+ *  false for a mounted contribution. */
+export interface CodeBlockActionSlotContext {
+  sessionId?: string;
+  /** Fence language, trimmed and lower-cased. */
+  lang: string;
+  /** The block's code, without the fence lines. */
+  text: string;
+  streaming: boolean;
+}
+
 /** Package status choice in the Settings → Packages toolbar. */
 export type PackagesPageStatus = "all" | "enabled" | "disabled";
 

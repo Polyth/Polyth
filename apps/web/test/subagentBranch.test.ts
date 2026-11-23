@@ -394,3 +394,41 @@ test("a subagent that ends folds away at its place instead of vanishing", async 
     await view.unmount();
   }
 });
+
+test("a quiet tally on the agent's line counts this episode's settled children; failed opens the first failed one", async () => {
+  const sessions = [
+    ...fixtures(),
+    session({ id: "p-f", parentId: "p", title: "Broken helper", status: "failed", createdAt: now - 15_000 }),
+    session({ id: "p-old", parentId: "p", title: "Last week", updatedAt: now - 900_000, createdAt: now - 900_000 }),
+    session({ id: "p-fork", parentId: "p", forkOf: "p", title: "A fork", updatedAt: now - 1_000 }),
+  ];
+  seed(sessions);
+  // The person's latest message began the episode 100 s ago.
+  const model = buildModel([event("p", "user/message", { text: "go" })].map((e) => ({ ...e, time: now - 100_000 })));
+  const view = await mount(createElement(SubagentBranchScope, { sessionId: "p", model }, createElement(SubagentActivityDock)));
+  try {
+    const tally = view.container.querySelector<HTMLElement>(".subagent-island-line > .subagent-island-tally");
+    assert.ok(tally, "the tally sits on the agent's own line, not in a head row");
+    assert.equal(text(tally), "1 done1 failed", "p-d done, p-f failed; the old child and the fork do not count");
+    assert.equal(view.container.querySelector(".subagent-branch-head"), null);
+  } finally {
+    await view.unmount();
+  }
+});
+
+test("a child's mirrored question is an ask row on the lead: a single one is answered on the parent's card", async () => {
+  seed();
+  const asked = event("p", "question/asked", {
+    requestId: "q1", questions: [{ question: "Which database?", header: "DB", options: [{ label: "pg" }] }], sourceSessionId: "p-a",
+  });
+  const model = buildModel([asked]);
+  assert.equal(model.questions[0]!.sourceSessionId, "p-a");
+  const view = await mount(createElement(SubagentBranchScope, { sessionId: "p", model }, createElement(SubagentActivityDock)));
+  try {
+    const first = view.container.querySelector<HTMLElement>(".subagent-branch-item")!;
+    assert.equal(text(first.querySelector(".subagent-branch-ask")), "Which database?");
+    assert.ok(button(first, "Answer: Data migration"));
+  } finally {
+    await view.unmount();
+  }
+});
