@@ -63,8 +63,9 @@ Flags
   --force            do not wait for agent turns; SIGKILL a server that has not
                      drained in 30 s. Interrupts running turns.
   --skip-canary      skip the isolated boot test of the working tree
-  --full             restart the whole supervisor unit (use after changing
-                     scripts/supervisor*.ts, the unit environment or Node)
+  --full             restart the whole supervisor unit, recreating it from the
+                     deployment settings (use after changing scripts/supervisor*.ts,
+                     restart.env or Node)
   -h, --help         show this help
 
 Progress  journalctl --user -fu polyth-restart -o cat
@@ -169,6 +170,7 @@ export const DEPLOYMENT_KEYS = [
   "POLYTH_TRUSTED_PROXIES",
   "POLYTH_DEBUG_AGENT_ACCESS",
   "POLYTH_WEB_BUILD_FRESHNESS",
+  "POLYTH_RELEASE_CHANNEL",
 ] as const;
 
 /** `KEY=VALUE` lines of a deployment file; blank lines and `#` comments are
@@ -463,8 +465,20 @@ async function waitForIdle(maxWaitMs: number): Promise<number> {
 
 // ---- 4. restart ------------------------------------------------------------
 
-function restartSupervisorUnit(): void {
-  const loaded = unitProperty("LoadState") === "loaded";
+/** `recreate` (`--full`) replaces a transient unit — the kind this script
+ *  creates — so it starts with the current deployment settings:
+ *  `systemctl restart` would keep the environment it was created with. */
+function restartSupervisorUnit(recreate = false): void {
+  let loaded = unitProperty("LoadState") === "loaded";
+  if (loaded && recreate && unitProperty("Transient") === "yes") {
+    log(`stopping ${supervisorUnit} to recreate it with the current deployment settings`);
+    const stopped = systemctl("stop", supervisorUnit);
+    if (stopped.status !== 0) fail(`systemctl stop failed: ${stopped.stderr.trim()}`);
+    // A unit that ended failed stays loaded until its failure is cleared.
+    systemctl("reset-failed", supervisorUnit);
+    loaded = unitProperty("LoadState") === "loaded";
+    if (loaded) fail(`${supervisorUnit} is still loaded after it stopped — journalctl --user -u ${supervisorUnit} -n 80`);
+  }
   const running = unitProperty("ActiveState") === "active";
   if (loaded) {
     log(`${running ? "restarting" : "starting"} ${supervisorUnit}`);
@@ -545,7 +559,7 @@ async function restartServer(options: RestartOptions): Promise<void> {
   let viaUnit: boolean;
   if (before === undefined || options.full || unitProperty("ActiveState") !== "active") {
     viaUnit = true;
-    restartSupervisorUnit();
+    restartSupervisorUnit(options.full);
   } else {
     viaUnit = false;
     let heldBy: string[] = [];

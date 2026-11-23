@@ -664,7 +664,8 @@ or network call for it.
 - **From a browser.** A page opened in a browser has no desktop shell, so the Polyth
   server that served it sends instead (`@polyth/bug-report` server routes
   `GET /api/bug-report/state` and `POST /api/bug-report/send`, `src/sender.ts`). It is on
-  when the server's version is `X.Y.N-nightly` (or `POLYTH_BUG_REPORT=1`), the edition is
+  when the server's version is `X.Y.N-nightly` (a checkout reports one with
+  `POLYTH_RELEASE_CHANNEL=nightly`, `packages/server/src/version.ts`; or `POLYTH_BUG_REPORT=1`), the edition is
   standard and the deployment is not `multi-tenant-sandboxed`; `POLYTH_BUG_REPORT_ORIGIN`
   works as for the desktop. A desktop window keeps using its shell when the shell reports,
   and falls back to the server when it does not (a stable app showing a nightly server).

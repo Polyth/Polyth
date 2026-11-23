@@ -104,12 +104,14 @@ test("deployment file lines become unit settings; comments and unknown keys are 
     "HOST=0.0.0.0",
     "export POLYTH_PUBLIC_ORIGIN=\"https://polyth.example.com\"",
     "POLYTH_TRUSTED_PROXIES='10.0.0.5, 10.0.0.6'",
+    "POLYTH_RELEASE_CHANNEL=nightly",
     "PATH=/tmp/evil",
     "not a setting",
   ].join("\n")), {
     HOST: "0.0.0.0",
     POLYTH_PUBLIC_ORIGIN: "https://polyth.example.com",
     POLYTH_TRUSTED_PROXIES: "10.0.0.5, 10.0.0.6",
+    POLYTH_RELEASE_CHANNEL: "nightly",
   });
   assert.deepEqual(parseDeploymentEnv(""), {});
 });
