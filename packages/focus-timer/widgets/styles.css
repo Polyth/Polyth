@@ -1,0 +1,794 @@
+/* Focus timer (packages/focus-timer). Every rule is scoped under a
+   .focus-timer* root. The window floats over the chat column (positioned by
+   TimerWindow.tsx), wears the phase colour through --ft-tone and inherits the
+   theme's glass, type, density and motion preferences. */
+
+/* ---- phase colours ------------------------------------------------------- */
+:is(.focus-timer, .focus-timer-edge, .focus-timer-chip-widget, .focus-timer-chip, .focus-timer-segment, .focus-timer-mark) {
+  --ft-tone: var(--accent);
+}
+:is(.focus-timer, .focus-timer-edge, .focus-timer-chip-widget, .focus-timer-chip, .focus-timer-segment, .focus-timer-mark)[data-tone="short"] { --ft-tone: var(--green); }
+:is(.focus-timer, .focus-timer-edge, .focus-timer-chip-widget, .focus-timer-chip, .focus-timer-segment, .focus-timer-mark)[data-tone="long"] { --ft-tone: var(--blue); }
+:is(.focus-timer, .focus-timer-edge, .focus-timer-chip-widget, .focus-timer-chip, .focus-timer-segment, .focus-timer-mark)[data-tone="countdown"] { --ft-tone: var(--purple); }
+.focus-timer-mark[data-phase="short"] { --ft-tone: var(--green); }
+.focus-timer-mark[data-phase="long"] { --ft-tone: var(--blue); }
+.focus-timer-mark[data-phase="countdown"] { --ft-tone: var(--purple); }
+
+/* ---- the window ---------------------------------------------------------- */
+.focus-timer {
+  position: fixed;
+  z-index: calc(var(--z-shell) + 10);
+  box-sizing: border-box;
+  border: 1px solid var(--contour, var(--material-glass-border));
+  background: var(--material-glass-strong);
+  background-clip: padding-box;
+  box-shadow: var(--material-glass-highlight), var(--material-glass-shadow, var(--shadow-md));
+  color: var(--text);
+  font-family: var(--ui-font-family);
+  font-size: var(--font-label);
+  isolation: isolate;
+  user-select: none;
+  -webkit-user-select: none;
+  animation: focus-timer-in var(--motion-surface) var(--motion-ease) both;
+  transition:
+    background-color var(--motion-normal) var(--motion-ease),
+    box-shadow var(--motion-normal) var(--motion-ease);
+}
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .focus-timer {
+    /* A floor under the theme's readable glass: the timer floats over moving
+       chat text, so it stays legible on every style and on phones. */
+    background: radial-gradient(140% 140% at 50% 0%,
+      color-mix(in srgb, var(--material-glass-strong) max(var(--material-glass-readable-fill), 88%), transparent) 0%,
+      color-mix(in srgb, var(--material-glass-strong) max(var(--material-glass-readable-edge), 80%), transparent) 100%);
+    -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
+    backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
+  }
+}
+@keyframes focus-timer-in {
+  from { opacity: 0; transform: translate3d(0, 6px, 0) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+.focus-timer[data-dragging="true"] {
+  cursor: grabbing;
+  box-shadow: var(--material-glass-highlight), var(--shadow-lg);
+  transition: none;
+}
+.focus-timer :focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Colour: a quiet tint of the phase while it runs… (a layer over the glass,
+   so it works with and without backdrop blur) */
+.focus-timer[data-color]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--ft-tone) 13%, transparent), transparent 70%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--motion-normal) var(--motion-ease);
+}
+.focus-timer[data-color][data-status="running"] {
+  border-color: color-mix(in srgb, var(--ft-tone) 34%, var(--contour, var(--material-glass-border)));
+}
+.focus-timer[data-color][data-status="running"]::before { opacity: 1; }
+/* …and filled with it when time is up, until the person sees it. */
+.focus-timer[data-color][data-done] {
+  border-color: color-mix(in srgb, var(--ft-tone) 60%, transparent);
+}
+.focus-timer[data-color][data-done]::before {
+  opacity: 1;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ft-tone) 34%, transparent), color-mix(in srgb, var(--ft-tone) 18%, transparent));
+}
+/* Flash: the window pulses a few times in the phase colour. */
+.focus-timer[data-flash][data-done] {
+  animation: focus-timer-pulse 1.1s var(--motion-ease) 6;
+}
+@keyframes focus-timer-pulse {
+  0%, 100% { box-shadow: var(--material-glass-highlight), var(--shadow-md), 0 0 0 0 color-mix(in srgb, var(--ft-tone) 0%, transparent); }
+  45% { box-shadow: var(--material-glass-highlight), var(--shadow-md), 0 0 0 6px color-mix(in srgb, var(--ft-tone) 45%, transparent), 0 0 28px 6px color-mix(in srgb, var(--ft-tone) 40%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* A steady ring instead of a pulse. */
+  .focus-timer[data-flash][data-done] {
+    animation: none;
+    box-shadow: var(--material-glass-highlight), var(--shadow-md), 0 0 0 3px color-mix(in srgb, var(--ft-tone) 55%, transparent);
+  }
+}
+
+/* ---- card ---------------------------------------------------------------- */
+.focus-timer-card {
+  display: flex;
+  flex-direction: column;
+  inline-size: 280px;
+  max-inline-size: calc(100vw - 2 * var(--space-3));
+  border-radius: min(var(--radius-dock), 28px);
+  overflow: hidden;
+}
+.focus-timer-card[data-view="settings"] { inline-size: 312px; }
+.focus-timer-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-block-size: 40px;
+  padding: var(--space-1) var(--space-1) 0 var(--space-3);
+  cursor: grab;
+  touch-action: none;
+}
+.focus-timer[data-dragging="true"] .focus-timer-head { cursor: grabbing; }
+.focus-timer-head-meta {
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-inline-size: 0;
+}
+.focus-timer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-inline-size: 140px;
+  margin-block-end: 2px;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: var(--font-meta-lh);
+  white-space: nowrap;
+}
+.focus-timer-chip-label {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.focus-timer-chip-dot {
+  inline-size: 7px;
+  block-size: 7px;
+  flex: none;
+  border-radius: var(--radius-circle, 50%);
+  background: var(--ft-tone);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ft-tone) 18%, transparent);
+}
+.focus-timer[data-status="running"] .focus-timer-chip-label {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.focus-timer-chip-dot {
+  animation: focus-timer-breathe 2.4s ease-in-out infinite;
+}
+@keyframes focus-timer-breathe {
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--ft-tone) 8%, transparent); }
+}
+.focus-timer-today {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.focus-timer-today svg { color: var(--green); }
+.focus-timer-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-inline-start: auto;
+  color: var(--muted);
+}
+.focus-timer-back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-block-size: max(30px, var(--hit-min));
+  margin-inline-start: calc(-1 * var(--space-2));
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-round);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-meta);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Quiet glyph buttons: tools and the control row's sides. */
+.focus-timer-icon-btn {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  inline-size: 30px;
+  block-size: 30px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-round);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+.focus-timer-icon-btn::after {
+  content: "";
+  position: absolute;
+  inset: 50% auto auto 50%;
+  inline-size: max(100%, var(--hit-min));
+  block-size: max(100%, var(--hit-min));
+  transform: translate(-50%, -50%);
+}
+.focus-timer-icon-btn:disabled {
+  color: var(--control-disabled-ink);
+  background: transparent;
+  cursor: default;
+}
+@media (hover: hover) {
+  .focus-timer-icon-btn:where(:not(:disabled)):hover,
+  .focus-timer-back:where(:not(:disabled)):hover {
+    background: var(--surface-overlay-hover);
+    color: var(--text);
+  }
+}
+
+/* ---- dial ---------------------------------------------------------------- */
+.focus-timer-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-3) var(--space-3);
+}
+.focus-timer-dial {
+  position: relative;
+  display: grid;
+  place-items: center;
+  inline-size: 176px;
+  block-size: 176px;
+}
+.focus-timer-dial-svg { display: block; overflow: visible; }
+.focus-timer-track { stroke: color-mix(in srgb, var(--text) 9%, transparent); }
+.focus-timer-arc {
+  stroke: var(--ft-tone);
+  stroke-linecap: round;
+  transition: stroke-dashoffset 1s linear, stroke var(--motion-normal) var(--motion-ease);
+}
+.focus-timer[data-status="idle"] .focus-timer-arc,
+.focus-timer[data-dragging="true"] .focus-timer-arc { transition: stroke var(--motion-normal) var(--motion-ease); }
+.focus-timer-head-dot {
+  fill: var(--ft-tone);
+  stroke: var(--elevated);
+  stroke-width: 2;
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--ft-tone) 60%, transparent));
+}
+.focus-timer-face {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  pointer-events: none;
+}
+.focus-timer-time {
+  color: var(--text);
+  /* The one display number of the window: a hero step of the menu caliber. */
+  font-size: calc(var(--font-label) * 2.6);
+  font-weight: 300;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+.focus-timer[data-status="paused"] .focus-timer-time { color: var(--text-dim); }
+.focus-timer-status {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--font-meta-lh);
+}
+.focus-timer-rounds {
+  display: inline-flex;
+  gap: 5px;
+  margin-block-start: var(--space-1);
+}
+.focus-timer-round {
+  inline-size: 6px;
+  block-size: 6px;
+  border-radius: var(--radius-circle, 50%);
+  background: color-mix(in srgb, var(--text) 16%, transparent);
+  transition: background-color var(--motion-normal) var(--motion-ease), inline-size var(--motion-normal) var(--motion-ease);
+}
+.focus-timer-round[data-state="done"] { background: var(--ft-tone); }
+.focus-timer-round[data-state="live"],
+.focus-timer-round[data-state="next"] {
+  inline-size: 14px;
+  border-radius: var(--radius-round);
+  background: color-mix(in srgb, var(--ft-tone) 45%, transparent);
+}
+.focus-timer-round[data-state="live"] { background: var(--ft-tone); }
+
+/* ---- time-up notice ------------------------------------------------------ */
+.focus-timer-done {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  inline-size: 100%;
+  box-sizing: border-box;
+  padding: var(--space-2) var(--space-1) var(--space-2) var(--space-3);
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--ft-tone) 16%, transparent);
+  animation: focus-timer-in var(--motion-surface) var(--motion-ease) both;
+}
+.focus-timer-done-text {
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+  flex: 1;
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.focus-timer-done-text strong { color: var(--text); font-weight: 650; }
+.focus-timer-done-text span { color: var(--text-dim); }
+.focus-timer-done-dismiss {
+  align-self: flex-start;
+  inline-size: 26px;
+  block-size: 26px;
+  color: var(--text-dim);
+}
+
+/* ---- controls ------------------------------------------------------------ */
+.focus-timer-controls {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  justify-items: center;
+  inline-size: 100%;
+}
+.focus-timer-side { inline-size: 40px; block-size: 40px; color: var(--text-dim); }
+.focus-timer-plus {
+  font-size: var(--font-meta);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.focus-timer-play {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  inline-size: 56px;
+  block-size: 56px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-circle, 50%);
+  background: var(--ft-tone);
+  color: var(--accent-ink);
+  box-shadow: 0 6px 18px -6px color-mix(in srgb, var(--ft-tone) 70%, transparent), var(--inset-hi);
+  cursor: pointer;
+  transition: transform var(--motion-fast) var(--motion-ease), box-shadow var(--motion-normal) var(--motion-ease), background-color var(--motion-normal) var(--motion-ease);
+}
+.focus-timer-play svg { transform: translateX(1px); }
+.focus-timer[data-status="running"] .focus-timer-play svg { transform: none; }
+.focus-timer-play:where(:not(:disabled)):active { transform: scale(0.95); }
+@media (hover: hover) {
+  .focus-timer-play:where(:not(:disabled)):hover {
+    background: color-mix(in srgb, var(--ft-tone) 86%, var(--text));
+    box-shadow: 0 8px 22px -6px color-mix(in srgb, var(--ft-tone) 80%, transparent), var(--inset-hi);
+  }
+}
+/* A finished segment waits on the button that starts the next one. */
+.focus-timer[data-done][data-status="idle"] .focus-timer-play {
+  animation: focus-timer-invite 1.6s ease-in-out infinite;
+}
+@keyframes focus-timer-invite {
+  50% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--ft-tone) 18%, transparent), 0 6px 18px -6px color-mix(in srgb, var(--ft-tone) 70%, transparent); }
+}
+
+/* ---- phase segments ------------------------------------------------------ */
+.focus-timer-segments {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(36px, auto);
+  gap: 2px;
+  inline-size: 100%;
+  box-sizing: border-box;
+  padding: 3px;
+  border-radius: var(--radius-round);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+.focus-timer-segment {
+  display: inline-grid;
+  place-items: center;
+  min-inline-size: 0;
+  min-block-size: max(28px, var(--hit-min));
+  padding: 0 6px;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-round);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--font-meta);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+.focus-timer-segment[aria-selected="true"] {
+  background-color: var(--elevated);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+}
+/* The chosen phase carries its colour as a short bar under the label. */
+.focus-timer-segment[aria-selected="true"] {
+  background-image: linear-gradient(var(--ft-tone), var(--ft-tone));
+  background-size: 14px 2px;
+  background-position: 50% calc(100% - 3px);
+  background-repeat: no-repeat;
+}
+.focus-timer-segment[data-tone="countdown"][aria-selected="true"] { color: var(--ft-tone); }
+@media (hover: hover) {
+  .focus-timer-segment:where(:not(:disabled)):not([aria-selected="true"]):hover { color: var(--text); background: var(--surface-overlay-hover); }
+  .focus-timer-segment[aria-selected="true"]:where(:not(:disabled)):hover { background-color: var(--raised); }
+}
+
+/* ---- countdown presets --------------------------------------------------- */
+.focus-timer-presets {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  inline-size: 100%;
+}
+.focus-timer-preset {
+  min-block-size: max(28px, var(--hit-min));
+  padding: 0 var(--space-2);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-round);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+.focus-timer-preset[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--ft-tone) 55%, transparent);
+  background: color-mix(in srgb, var(--ft-tone) 14%, transparent);
+  color: var(--text);
+}
+.focus-timer-preset:disabled {
+  border-color: var(--control-disabled-border);
+  background: var(--control-disabled-bg);
+  color: var(--control-disabled-ink);
+  cursor: default;
+}
+@media (hover: hover) {
+  .focus-timer-preset:where(:not(:disabled)):not([aria-pressed="true"]):hover { background: var(--surface-overlay-hover); color: var(--text); }
+  .focus-timer-preset[aria-pressed="true"]:where(:not(:disabled)):hover { background: color-mix(in srgb, var(--ft-tone) 20%, transparent); }
+}
+.focus-timer-custom {
+  display: flex;
+  gap: 6px;
+  inline-size: 100%;
+}
+.focus-timer-custom-input,
+.focus-timer-step-input {
+  box-sizing: border-box;
+  min-inline-size: 0;
+  border: 1px solid var(--control-border);
+  background: var(--input-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-input);
+  font-variant-numeric: tabular-nums;
+  -moz-appearance: textfield;
+  appearance: textfield;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.focus-timer-custom-input::-webkit-inner-spin-button,
+.focus-timer-custom-input::-webkit-outer-spin-button,
+.focus-timer-step-input::-webkit-inner-spin-button,
+.focus-timer-step-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.focus-timer-custom-input {
+  flex: 1;
+  min-block-size: max(30px, var(--hit-min));
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-round);
+}
+.focus-timer-custom-input::placeholder { color: var(--faint); }
+
+/* ---- pill ---------------------------------------------------------------- */
+.focus-timer-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-round);
+  cursor: grab;
+  touch-action: none;
+}
+.focus-timer-pill-face {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-block-size: max(32px, var(--hit-min));
+  padding: 0 var(--space-2) 0 3px;
+  border: 0;
+  border-radius: var(--radius-round);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: inherit;
+}
+.focus-timer-pill-dial { display: inline-grid; place-items: center; }
+.focus-timer-pill-time {
+  font-size: var(--font-label);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.focus-timer[data-status="paused"] .focus-timer-pill-time { color: var(--text-dim); }
+.focus-timer-pill-play {
+  background: var(--ft-tone);
+  color: var(--accent-ink);
+}
+.focus-timer-pill-play svg { transform: translateX(0.5px); }
+@media (hover: hover) {
+  .focus-timer-pill-face:where(:not(:disabled)):hover { background: var(--surface-overlay-hover); }
+  .focus-timer-pill-play:where(:not(:disabled)):hover { background: color-mix(in srgb, var(--ft-tone) 86%, var(--text)); color: var(--accent-ink); }
+}
+.focus-timer-pill .focus-timer-arc { transition-duration: 1s, var(--motion-normal); }
+
+/* ---- screen edge flash --------------------------------------------------- */
+.focus-timer-edge {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-shell) + 9);
+  pointer-events: none;
+  box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--ft-tone) 80%, transparent), inset 0 0 60px 8px color-mix(in srgb, var(--ft-tone) 30%, transparent);
+  opacity: 0;
+  animation: focus-timer-edge 1.4s ease-in-out 3;
+}
+@keyframes focus-timer-edge {
+  0%, 100% { opacity: 0; }
+  40% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .focus-timer-edge { animation: none; opacity: 0.85; }
+}
+
+/* ---- settings ------------------------------------------------------------ */
+.focus-timer-settings-scroll {
+  max-block-size: min(460px, calc(var(--visual-vh, 100vh) * 0.62));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 var(--space-3) var(--space-3);
+  user-select: text;
+  -webkit-user-select: text;
+}
+.focus-timer-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  color: var(--text);
+  font-family: var(--ui-font-family);
+}
+.focus-timer-settings[data-variant="page"] {
+  --ft-tone: var(--accent);
+  max-inline-size: 560px;
+}
+.focus-timer-section-title {
+  margin: 0 0 var(--space-1);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: var(--font-meta-lh);
+}
+.focus-timer-section-body {
+  display: flex;
+  flex-direction: column;
+}
+.focus-timer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-block-size: 36px;
+  padding-block: 2px;
+}
+.focus-timer-row + .focus-timer-row,
+.focus-timer-sound + .focus-timer-row,
+.focus-timer-row + .focus-timer-sound { box-shadow: inset 0 1px 0 var(--hair); }
+.focus-timer-row[data-disabled] .focus-timer-row-label { color: var(--muted); }
+.focus-timer-row-text {
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+}
+.focus-timer-row-label {
+  color: var(--text);
+  font-size: var(--font-label);
+  line-height: 1.3;
+}
+.focus-timer-row-hint {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.focus-timer-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  padding: 2px;
+  border-radius: var(--radius-round);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+.focus-timer-step {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  inline-size: 26px;
+  block-size: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-round);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  cursor: pointer;
+}
+.focus-timer-step::after {
+  content: "";
+  position: absolute;
+  inset: 50% auto auto 50%;
+  inline-size: max(100%, var(--hit-min));
+  block-size: max(100%, var(--hit-min));
+  transform: translate(-50%, -50%);
+}
+.focus-timer-step:disabled { color: var(--control-disabled-ink); cursor: default; }
+@media (hover: hover) {
+  .focus-timer-step:where(:not(:disabled)):hover { background: var(--elevated); color: var(--text); }
+}
+.focus-timer-step-input {
+  inline-size: 3ch;
+  block-size: 26px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: center;
+  font-size: max(var(--font-label), var(--font-input));
+  font-weight: 600;
+}
+.focus-timer-step-unit {
+  min-inline-size: 2ch;
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+.focus-timer-sound {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-block: var(--space-2) var(--space-1);
+}
+.focus-timer-sound-choice {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+.focus-timer-sound-option {
+  min-block-size: max(30px, var(--hit-min));
+  padding: 0 var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-meta);
+  cursor: pointer;
+}
+.focus-timer-sound-option[aria-checked="true"] {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  background: var(--accent-wash);
+  color: var(--text);
+  font-weight: 600;
+}
+@media (hover: hover) {
+  .focus-timer-sound-option:where(:not(:disabled)):not([aria-checked="true"]):hover { background: var(--surface-overlay-hover); color: var(--text); }
+  .focus-timer-sound-option[aria-checked="true"]:where(:not(:disabled)):hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+}
+.focus-timer-volume { gap: var(--space-2); justify-content: flex-start; min-block-size: 32px; }
+.focus-timer-preview { background: color-mix(in srgb, var(--text) 6%, transparent); }
+.focus-timer-range {
+  --ft-fill: 50%;
+  flex: 1;
+  min-inline-size: 0;
+  block-size: max(20px, var(--hit-min));
+  margin: 0;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+}
+.focus-timer-range::-webkit-slider-runnable-track {
+  block-size: 4px;
+  border-radius: var(--radius-round);
+  background: linear-gradient(to right, var(--accent) var(--ft-fill), color-mix(in srgb, var(--text) 14%, transparent) var(--ft-fill));
+}
+.focus-timer-range::-moz-range-track {
+  block-size: 4px;
+  border-radius: var(--radius-round);
+  background: color-mix(in srgb, var(--text) 14%, transparent);
+}
+.focus-timer-range::-moz-range-progress {
+  block-size: 4px;
+  border-radius: var(--radius-round);
+  background: var(--accent);
+}
+.focus-timer-range::-webkit-slider-thumb {
+  inline-size: 16px;
+  block-size: 16px;
+  margin-block-start: -6px;
+  border: 0;
+  border-radius: var(--radius-circle, 50%);
+  background: var(--elevated);
+  box-shadow: 0 0 0 1px var(--control-border), var(--shadow-sm);
+  -webkit-appearance: none;
+  appearance: none;
+}
+.focus-timer-range::-moz-range-thumb {
+  inline-size: 16px;
+  block-size: 16px;
+  border: 0;
+  border-radius: var(--radius-circle, 50%);
+  background: var(--elevated);
+  box-shadow: 0 0 0 1px var(--control-border), var(--shadow-sm);
+}
+.focus-timer-settings-foot { display: flex; }
+
+/* ---- rail mark and chip -------------------------------------------------- */
+.focus-timer-mark-fill { opacity: 0.85; }
+.focus-timer-mark[data-active] .focus-timer-mark-fill { color: var(--ft-tone); }
+.focus-timer-mark-dot { fill: var(--ft-tone); }
+.focus-timer-chip-widget {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-block-size: max(26px, var(--hit-min));
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-round);
+  background: color-mix(in srgb, var(--ft-tone) 12%, transparent);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-meta);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.focus-timer-chip-widget[data-status="paused"] { color: var(--text-dim); }
+.focus-timer-chip-widget[data-done] { background: color-mix(in srgb, var(--ft-tone) 26%, transparent); }
+@media (hover: hover) {
+  .focus-timer-chip-widget:where(:not(:disabled)):hover { background: color-mix(in srgb, var(--ft-tone) 20%, transparent); }
+}
+
+/* Measures the phone shell's floating title band (TimerWindow.tsx). */
+.focus-timer-probe {
+  position: fixed;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  inline-size: 0;
+  block-size: calc(var(--safe-top) + var(--mobile-session-header-height) + var(--space-2));
+  visibility: hidden;
+  pointer-events: none;
+}

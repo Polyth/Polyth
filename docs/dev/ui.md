@@ -2106,9 +2106,12 @@ host.slots.register({
   renders the same `SessionBackButton` or nothing; `Header.tsx` also mounts `app.header.center`;
   `StatusBar.tsx` mounts `app.statusbar.leading/trailing` while the opt-in
   status bar is on (§4.10); `App.tsx` mounts `app.layers` once over the whole
-  shell for package-owned floating layers (voice mode, or a renderless
-  controller such as custom-action's result notifier): a contribution renders
-  nothing until it has something to show, portals and positions itself, and
+  shell for package-owned floating layers (voice mode, the focus timer's
+  window, or a renderless controller such as custom-action's result notifier):
+  a contribution renders nothing until it has something to show, portals and
+  positions itself (a window the person summons, like the focus timer, stays
+  until they hide it, sits under `--z-overlay` and keeps clear of the launcher
+  strip and the phone's floating title), and
   stays transient — never a second notice system (passing messages go through
   `host.notifications`, §4.8); the
   composer's `ModelPicker` (`@polyth/models/model-picker`) mounts
