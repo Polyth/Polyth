@@ -56,6 +56,8 @@ interface Tab {
   sessionId?: string;
   repositoryId?: string;
   workspace?: TerminalInfo["workspace"];
+  /** `harness-setup` for a harness install/sign-in terminal. */
+  purpose?: string;
 }
 
 function wsUrl(id: string): string {
@@ -420,6 +422,7 @@ export default function TerminalView({
           ...(t.sessionId ? { sessionId: t.sessionId } : {}),
           ...(t.repositoryId ? { repositoryId: t.repositoryId } : {}),
           ...(t.workspace ? { workspace: t.workspace } : {}),
+          ...(t.purpose ? { purpose: t.purpose } : {}),
           customTitle: Boolean(t.title && t.title !== generatedTerminalTitle(t) && t.title !== (t.cwd.split(/[\\/]/).pop() || "")),
           ...(t.exitCode !== undefined ? { exitCode: t.exitCode } : {}),
         }));
@@ -480,6 +483,7 @@ export default function TerminalView({
           ...(typeof detail.sessionId === "string" ? { sessionId: detail.sessionId } : {}),
           ...(typeof detail.repositoryId === "string" ? { repositoryId: detail.repositoryId } : {}),
           ...(detail.workspace ? { workspace: detail.workspace } : {}),
+          ...(machineWide ? { purpose: "harness-setup" } : {}),
         }]);
       setActive(terminalId);
       getEmu(terminalId);
@@ -660,6 +664,7 @@ export default function TerminalView({
           onSelectSession={setActive}
           onNewSession={() => void spawn().catch(() => {})}
           onCloseSession={() => void closeTab(tab.id)}
+          linkActions={tab.purpose === "harness-setup"}
         />
       )}
     </div>

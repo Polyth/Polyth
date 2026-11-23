@@ -38,6 +38,29 @@ export function detectLinks(text: string): LinkRange[] {
 }
 
 /**
+ * Links of one soft-wrapped run of rows, split back into each row: every
+ * piece is a text range inside that row's own text and carries the whole URL,
+ * so a URL broken by the right margin opens whole from any of its rows.
+ * `rows` are the run's row texts in order, each but the last padded to its
+ * full width (a row's trailing blanks are part of the line, not a join).
+ */
+export function detectWrappedLinks(rows: readonly string[]): LinkRange[][] {
+  const out: LinkRange[][] = rows.map(() => []);
+  const found = detectLinks(rows.join(""));
+  let offset = 0;
+  for (let r = 0; r < rows.length; r++) {
+    const rowEnd = offset + rows[r]!.length;
+    for (const link of found) {
+      const start = Math.max(link.start, offset);
+      const end = Math.min(link.end, rowEnd);
+      if (end > start) out[r]!.push({ start: start - offset, end: end - offset, url: link.url });
+    }
+    offset = rowEnd;
+  }
+  return out;
+}
+
+/**
  * Every distinct URL in a buffer, newest first (Termux "Select URL").
  * Soft-wrapped rows are joined first so a URL broken by the right margin is
  * found whole; `wrapped(i)` says row i continues on row i + 1.

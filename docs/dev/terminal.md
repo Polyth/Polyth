@@ -86,6 +86,15 @@ first opens it — the terminal menu does not appear. Right-click keeps the
 terminal menu, and `http(s)`, `file`, `ftp` and `mailto` are the schemes that
 open.
 
+A printed URL broken by the right margin is detected on its whole soft-wrapped
+run (`detectWrappedLinks`, at most 64 rows), so every row of it is a link to
+the full URL rather than the first row opening a truncated one.
+
+A harness install/sign-in terminal (`purpose: "harness-setup"`) shows a link
+bar above the output while its program runs: the newest printed `http(s)` URL
+with **Open link** and **Copy link**, so a sign-in URL never has to be selected
+by hand.
+
 ## Touch selection
 
 Touch selects through the terminal's own cell selection, as Termux does, not

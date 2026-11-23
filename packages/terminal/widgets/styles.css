@@ -293,6 +293,28 @@ color: var(--muted); font-size: var(--font-meta); min-width: 32px; text-align: c
 .term-search button[aria-pressed="true"] {
 color: var(--accent); background: var(--accent-wash);
 }
+/* Sign-in terminals: the newest printed URL as one-click Open / Copy, so a
+   sign-in link wrapped across rows never has to be selected by hand. */
+.term-link-bar {
+display: flex; align-items: center; gap: var(--space-2); min-width: 0; flex: none;
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--surface-divider); background: var(--elevated);
+  font-size: var(--font-meta);
+}
+.term-link-bar-label {
+flex: none; color: var(--text); font-weight: 600;
+}
+.term-link-bar-url {
+flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  color: var(--muted); font-family: var(--mono);
+}
+.term-link-bar > button {
+flex: none;
+}
+@container terminal-workspace (max-width: 480px) {
+.term-link-bar-url { display: none; }
+.term-link-bar-label { flex: 1; }
+}
 .term-exit-note {
 position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 3;
   border: 1px solid var(--border); border-radius: var(--radius-round); background: var(--elevated);
