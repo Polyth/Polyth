@@ -118,8 +118,24 @@ async function everyProjectSession(host: ServerPackageHost, label: string): Prom
 
 function packageSessions(host: ServerPackageHost): SessionService {
   const raw = host.sessions;
+  // Runtime holds are fire-and-forget `void` calls, but admitting the session
+  // is asynchronous. One chain keeps a hold and its release in call order, and
+  // a refused session (foreign, deleted, shared deployment) simply gets no hold
+  // instead of an unhandled rejection.
+  let runtimeHolds: Promise<void> = Promise.resolve();
   return new Proxy(raw, {
     get(target, property, receiver) {
+      if (property === "holdRuntime" || property === "releaseRuntimeHold") {
+        const value = Reflect.get(target, property, receiver);
+        if (typeof value !== "function") return value;
+        return (sessionId: string, ...rest: unknown[]): void => {
+          runtimeHolds = runtimeHolds.then(async () => {
+            const scoped = await systemSessionsForSession(host, sessionId);
+            const method = Reflect.get(scoped, property) as ((...args: unknown[]) => unknown) | undefined;
+            method?.call(scoped, sessionId, ...rest);
+          }).catch(() => undefined);
+        };
+      }
       if (property === "create") {
         return async (input: Parameters<SessionService["create"]>[0]) =>
           (await systemSessionsForProject(host, input.projectId)).create(input);

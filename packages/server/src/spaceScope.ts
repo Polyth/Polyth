@@ -302,6 +302,15 @@ function scopeSessions(
   assign("pause", bySession(base.pause));
   assign("continuePaused", bySession(base.continuePaused));
   assign("keepToolRunning", bySession(base.keepToolRunning));
+  // Runtime holds are synchronous and in memory: guard, then delegate as is.
+  if (base.holdRuntime) {
+    const hold = base.holdRuntime.bind(base);
+    scoped.holdRuntime = (sessionId, holdId, untilMs) => hold(g(sessionId), holdId, untilMs);
+  }
+  if (base.releaseRuntimeHold) {
+    const release = base.releaseRuntimeHold.bind(base);
+    scoped.releaseRuntimeHold = (sessionId, holdId) => release(g(sessionId), holdId);
+  }
   assign("cancelResume", bySession(base.cancelResume));
   assign("setResumeCompact", bySession(base.setResumeCompact));
   assign("resumeNow", bySession(base.resumeNow));

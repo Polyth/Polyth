@@ -230,6 +230,60 @@ test("package host authority fails closed instead of exposing new raw methods", 
   assert.deepEqual(rawCalls, ["project.ensurePackageWorkspace:test-package"]);
 });
 
+test("package runtime holds reach the session's own Space service, in call order", async () => {
+  const foreign = { ...projection, id: "ses_foreign", projectId: "prj_foreign", spaceId: "spc_foreign" };
+  const calls: string[] = [];
+  const rawCalls: string[] = [];
+  let resolveProjection: (() => void) | undefined;
+  const slowFirst = new Promise<void>((resolve) => { resolveProjection = resolve; });
+  let projectionReads = 0;
+  const host = {
+    pluginId: "wait", deployment: "local-trusted",
+    sessions: {
+      holdRuntime() { rawCalls.push("hold"); },
+      releaseRuntimeHold() { rawCalls.push("release"); },
+    },
+    store: {
+      async projection(id: string) {
+        // The first admission is slow, so an unordered release would win.
+        if (projectionReads++ === 0) await slowFirst;
+        return id === projection.id ? projection : id === foreign.id ? foreign : undefined;
+      },
+    },
+    projects: { async get(id: string) {
+      return { id, spaceId: id === projection.projectId ? projection.spaceId : foreign.spaceId };
+    } },
+    systemSpaceContext(spaceId: string) { return { spaceId, userId: RUNTIME_SYSTEM_PRINCIPAL_ID, deployment: "local-trusted", storageDir: `/tmp/spaces/${spaceId}` }; },
+    forSpace(ctx: SpaceContext) {
+      const assertOwn = (id: string) => {
+        if (ctx.spaceId !== projection.spaceId || id !== projection.id) throw Object.assign(new Error("not found"), { code: "not-found" });
+      };
+      return { sessions: {
+        holdRuntime(id: string, holdId: string, until: number) { assertOwn(id); calls.push(`hold:${id}:${holdId}:${until}`); },
+        releaseRuntimeHold(id: string, holdId: string) { assertOwn(id); calls.push(`release:${id}:${holdId}`); },
+      } };
+    },
+  } as unknown as ServerPackageHost;
+  const sessions = governPackageHost(host).sessions;
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    assert.equal(sessions.holdRuntime?.(projection.id, "w1", 50), undefined);
+    sessions.releaseRuntimeHold?.(projection.id, "w1");
+    sessions.holdRuntime?.(foreign.id, "w2", 50);
+    sessions.holdRuntime?.("ses_missing", "w3", 50);
+    sessions.holdRuntime?.(projection.id, "w4", 60);
+    resolveProjection?.();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+  }
+  assert.deepEqual(calls, ["hold:ses_one:w1:50", "release:ses_one:w1", "hold:ses_one:w4:60"]);
+  assert.deepEqual(rawCalls, []);
+  assert.deepEqual(unhandled, []);
+});
+
 test("package store forwards profile management methods to the underlying store", async () => {
   const profileCalls: string[] = [];
   const fakeProfile = { id: "prof_1", name: "Prof", providerID: "p", modelID: "m", features: {}, revision: 1, createdAt: 1, updatedAt: 1 };
