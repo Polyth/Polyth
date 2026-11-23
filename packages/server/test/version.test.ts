@@ -3,15 +3,15 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkoutVersion, serverVersion, UNKNOWN_VERSION } from "../src/version.ts";
+import { checkoutChannelVersion, checkoutVersion, serverVersion, UNKNOWN_VERSION } from "../src/version.ts";
 
 const repositoryRoot = join(import.meta.dirname, "..", "..", "..");
 const rootVersion = (JSON.parse(readFileSync(join(repositoryRoot, "package.json"), "utf8")) as { version: string }).version;
 
 test("a checkout reports its root package.json version", () => {
   assert.equal(checkoutVersion(), rootVersion);
-  assert.equal(serverVersion(), rootVersion);
-  assert.equal(serverVersion("  "), rootVersion, "a blank host version does not hide the checkout's");
+  assert.equal(serverVersion(undefined, {}), rootVersion);
+  assert.equal(serverVersion("  ", {}), rootVersion, "a blank host version does not hide the checkout's");
 });
 
 test("a host's release version wins, and a bundle without one is not mistaken for a checkout", (t) => {
@@ -24,4 +24,16 @@ test("a host's release version wins, and a bundle without one is not mistaken fo
   mkdirSync(bundleDist, { recursive: true });
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "polyth", version: "9.9.9" }));
   assert.equal(checkoutVersion(bundleDist), UNKNOWN_VERSION);
+});
+
+test("POLYTH_RELEASE_CHANNEL=nightly marks a checkout nightly, never a host's release", () => {
+  const nightly = { POLYTH_RELEASE_CHANNEL: "nightly" };
+  assert.equal(serverVersion(undefined, nightly), checkoutChannelVersion(rootVersion, "nightly"));
+  assert.equal(checkoutChannelVersion("1.2.0", "nightly"), "1.2.0-nightly");
+  assert.equal(checkoutChannelVersion("1.2.0", " nightly "), "1.2.0-nightly");
+  assert.equal(checkoutChannelVersion("1.2.0", "stable"), "1.2.0");
+  assert.equal(checkoutChannelVersion("1.2.0", undefined), "1.2.0");
+  assert.equal(checkoutChannelVersion("1.2.0-nightly", "nightly"), "1.2.0-nightly", "no double suffix");
+  assert.equal(checkoutChannelVersion(UNKNOWN_VERSION, "nightly"), UNKNOWN_VERSION, "an unknown version is not made a nightly");
+  assert.equal(serverVersion("1.2.365", nightly), "1.2.365", "a host's release version names its own channel");
 });
