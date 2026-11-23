@@ -34,7 +34,6 @@ export default function SecureAccountDialog({ reason, onClose, onSecured }: {
 }) {
   const [stage, setStage] = useState<Stage>("password");
   const [password, setPassword] = useState("");
-  const [visible, setVisible] = useState(false);
   const [recovery, setRecovery] = useState<{ setId: string; codes: string[] } | null>(null);
   const [saved, setSaved] = useState(false);
   const [renewed, setRenewed] = useState(false);
@@ -165,19 +164,16 @@ export default function SecureAccountDialog({ reason, onClose, onSecured }: {
             {...(tooShort ? { error: tr("settings.users.passwordTooShort", { count: MIN_PASSWORD_LENGTH }) } : {})}
           >
             {(field) => (
-              <span className="users-passphrase">
-                <TextInput
-                  {...field}
-                  type={visible ? "text" : "password"}
-                  value={password}
-                  autoComplete="new-password"
-                  spellCheck={false}
-                  disabled={busy}
-                  invalid={tooShort}
-                  onChange={(event) => { setPassword(event.target.value); setError(null); }}
-                />
-                <Button size="sm" variant="quiet" disabled={busy} onClick={() => setVisible(!visible)}>{visible ? tr("settings.account.hide") : tr("settings.account.show")}</Button>
-              </span>
+              <TextInput
+                {...field}
+                type="password"
+                value={password}
+                autoComplete="new-password"
+                spellCheck={false}
+                disabled={busy}
+                invalid={tooShort}
+                onChange={(event) => { setPassword(event.target.value); setError(null); }}
+              />
             )}
           </FormField>
           {error && <Notice tone="error" role="alert">{error}</Notice>}

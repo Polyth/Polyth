@@ -785,11 +785,10 @@ function TokenField({ ui, entryId, tokenHelpUrl, token, showToken, optional, onT
         {tokenHelpUrl ? <ExternalLink href={tokenHelpUrl}>{s.detailToken}</ExternalLink> : null}
       </div>
       <div className="icat-token-row">
-        <TextInput id={id} type={showToken ? "text" : "password"} value={token} placeholder={optional ? s.detailTokenOptional : s.detailTokenPlaceholder}
+        <TextInput id={id} type="password" revealed={showToken} onRevealedChange={onToggleToken} value={token} placeholder={optional ? s.detailTokenOptional : s.detailTokenPlaceholder}
           autoComplete="off" autoCapitalize="none" spellCheck={false} enterKeyHint="go"
           onChange={(event) => onTokenChange(event.target.value)}
           onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); onSubmit(); } }} />
-        <Button variant="ghost" aria-pressed={showToken} onClick={onToggleToken}>{showToken ? s.detailTokenHide : s.detailTokenShow}</Button>
       </div>
       <p className="icat-hint">{s.detailTokenVault}</p>
     </div>

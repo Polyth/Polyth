@@ -5236,14 +5236,6 @@ body[data-hide-borders="true"] .lock-card .ui-checkbox input:checked + .ui-check
 }
 /* The recovery heading takes focus only so assistive tech announces it. */
 .setup-step > h1:focus { outline: none; }
-.setup-password { position: relative; }
-.setup-password .ui-input { padding-inline-end: calc(var(--control-h-sm) + var(--space-2)); }
-.setup-password .ui-icon-btn {
-  position: absolute;
-  inset-block: 0;
-  inset-inline-end: 4px;
-  margin-block: auto;
-}
 .setup-signin {
   margin: var(--space-3) 0 0;
   color: var(--muted);
@@ -18586,6 +18578,16 @@ body .ui-btn .ui-spinner {
 .ui-textarea:disabled { opacity: 0.55; }
 .ui-input--invalid,
 .ui-textarea.ui-input--invalid { border-color: color-mix(in srgb, var(--red) 55%, var(--border)); }
+/* Password field: the eye button sits inside the field's end edge. */
+.ui-input-reveal { position: relative; display: block; width: 100%; min-width: 0; }
+.ui-input-reveal > .ui-input { padding-inline-end: calc(var(--control-h-sm) + var(--space-2)); }
+.ui-input-reveal > .ui-input::-ms-reveal { display: none; }
+.ui-input-reveal > .ui-icon-btn {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 4px;
+  margin-block: auto;
+}
 /* Field well: one field around an icon, a bare input and trailing controls.
    The owner styles the well; platform styles and Looks paint it as their
    field, never the input inside it (docs/dev/styles.md, "Field wells"). A

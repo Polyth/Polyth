@@ -1124,11 +1124,15 @@ export interface WebMenuProps {
   renderContent?: (context: { close: () => void; sheet: boolean }) => ReactNode;
 }
 /** The host `TextInput`: every native input attribute (id, ref, aria-*,
- *  enterKeyHint, autoCapitalize…) plus the shared invalid state and size. */
+ *  enterKeyHint, autoCapitalize…) plus the shared invalid state and size.
+ *  `type="password"` always carries a show/hide eye button. */
 export interface WebInputProps extends Omit<ComponentPropsWithRef<"input">, "size"> {
   /** Visual + accessible invalid state (sets aria-invalid). */
   invalid?: boolean;
   uiSize?: "sm" | "md";
+  /** Password fields only: controls the eye button from outside. */
+  revealed?: boolean;
+  onRevealedChange?: (revealed: boolean) => void;
 }
 export interface WebEmptyStateProps { title: string; description?: string; actionLabel?: string; onAction?: () => void; variant?: "page" | "panel" | "compact"; }
 
