@@ -629,11 +629,13 @@ xvfb-run -a node apps/desktop/test/appimage-profile.mjs \
 
 ## Bug reports (nightly)
 
-Nightly builds of the standard edition (`X.Y.N-nightly`; `bugReportOrigin` in
+Nightly builds of both editions (`X.Y.N-nightly`; `bugReportOrigin` in
 `src/bugReport.ts`) send bug reports to the team's private GitHub repository through
 the report relay ([`packages/report-relay`](../../packages/report-relay/README.md),
-`https://reports.polyth.app`). Stable and workstation builds have no hotkey, menu item
-or network call for it.
+`https://reports.polyth.app`); the report's `app.edition` says which. Stable builds
+have no hotkey, menu item or network call for it, and a stable workstation build
+ignores `POLYTH_BUG_REPORT=1` ([workstation network behaviour](../security/workstation-edition.md#network-behaviour)).
+In the workstation edition only the shell sends: the server route stays off there.
 
 - **Opening.** ⌘⇧B / Ctrl+Shift+B (`reportBug` in `@polyth/hotkeys`, remappable),
   **Help → Report a Bug…** (a `report-bug` desktop command), or the command palette all

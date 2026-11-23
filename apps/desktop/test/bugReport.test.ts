@@ -19,12 +19,16 @@ const NIGHTLY = "1.2.357-nightly";
 // A JPEG-looking buffer (FF D8 FF E0 …).
 const jpegOf = (bytes: number) => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(Math.max(0, bytes - 4), 1)]);
 
-test("only nightly standard builds report, to an https or loopback relay", () => {
+test("only nightly builds report, to an https or loopback relay", () => {
   const env = {};
   assert.equal(bugReportOrigin({ version: NIGHTLY, edition: "standard", env }), "https://reports.polyth.app");
   assert.equal(bugReportOrigin({ version: "1.2.357", edition: "standard", env }), null);
   assert.equal(bugReportOrigin({ version: "1.2.357", edition: "standard", env: { POLYTH_BUG_REPORT: "1" } }), "https://reports.polyth.app");
-  assert.equal(bugReportOrigin({ version: NIGHTLY, edition: "workstation", env }), null);
+  // A nightly workstation build reports; a stable one never does, not even with the dev switch.
+  assert.equal(bugReportOrigin({ version: NIGHTLY, edition: "workstation", env }), "https://reports.polyth.app");
+  assert.equal(bugReportOrigin({ version: NIGHTLY, edition: "workstation", env: { POLYTH_BUG_REPORT_ORIGIN: "off" } }), null);
+  assert.equal(bugReportOrigin({ version: "1.2.357", edition: "workstation", env }), null);
+  assert.equal(bugReportOrigin({ version: "1.2.357", edition: "workstation", env: { POLYTH_BUG_REPORT: "1" } }), null);
   assert.equal(bugReportOrigin({ version: NIGHTLY, edition: "standard", env: { POLYTH_BUG_REPORT_ORIGIN: "off" } }), null);
   assert.equal(bugReportOrigin({ version: NIGHTLY, edition: "standard", env: { POLYTH_BUG_REPORT_ORIGIN: "http://reports.example" } }), null);
   assert.equal(bugReportOrigin({ version: NIGHTLY, edition: "standard", env: { POLYTH_BUG_REPORT_ORIGIN: "https://u:p@reports.example" } }), null);

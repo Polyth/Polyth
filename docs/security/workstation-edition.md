@@ -5,7 +5,8 @@ computer. It is a local shell for the coding-agent CLIs the person already uses
 (Claude Code, Codex, Cursor, OpenCode, Pi, Antigravity, DeepSeek, GitHub Copilot,
 Command Code).
 It has no remote access of any kind, and the app makes no network connection of
-its own apart from checking for its own updates.
+its own apart from checking for its own updates and, in a `-nightly` build only,
+sending a bug report the person chose to send.
 
 This page is the owner's statement of what the edition does. The reviewer's
 checklist at the end says how to confirm each claim on an installed copy.
@@ -44,10 +45,12 @@ when a switch that publishes it or skips the owner's sign-in is set
 |---|---|---|---|
 | `api.github.com`, `github.com` and GitHub's release-asset hosts | 12 s after launch, then every 6 hours | Checks the stable workstation feed (`workstation*.yml`) for an update; downloads one only when the person agrees | Tray menu or Settings: *Update automatically* |
 | GitHub / GitLab APIs | Only after the person connects their own account in Settings | Pull requests, issues, repository state | Don't connect an account |
+| `reports.polyth.app` (the report relay) | `-nightly` builds only, when the person sends a report with Ctrl+Shift+B / ⌘⇧B or **Help → Report a Bug…**; a report the relay could not take is retried every 15 minutes and at the next start | Sends the report the sheet showed: a screenshot of the Polyth window (it can be switched off), the build, OS, enabled packages, allowlisted settings, recent error notices and the note. Never paths, server addresses, names, chat text outside the screenshot or tokens | Don't send one; or start the app with `POLYTH_BUG_REPORT_ORIGIN=off` |
 
-Nothing else. In particular the app does not contact a Polyth service: there is
-no telemetry, analytics or crash reporting in any Polyth build, and this edition
-also sends no push notifications (no relay, no APNs), does not fetch the
+Nothing else. A stable workstation build has no report hotkey, menu item or
+relay connection at all. The app does not contact a Polyth service on its own:
+there is no telemetry, analytics or automatic crash reporting in any Polyth build,
+and this edition also sends no push notifications (no relay, no APNs), does not fetch the
 `models.dev` model catalog, does not check npm for harness updates in the
 background, and does not download harness installers or a Node runtime.
 
@@ -117,6 +120,7 @@ is always present.
 - bookmarks
 - browser
 - btw
+- bug-report
 - chat-blocks
 - commands
 - conversation-tools
@@ -196,8 +200,8 @@ is always present.
    macOS/Linux, `Get-NetTCPConnection -OwningProcess <pid>` and
    `Get-NetUDPEndpoint -OwningProcess <pid>` on Windows): one listener on
    `127.0.0.1`, no UDP.
-4. With *Update automatically* off, the app process opens no outbound
-   connection; the harness CLIs it starts are separate processes with their own
+4. With *Update automatically* off and no bug report sent (a stable build
+   cannot send one), the app process opens no outbound connection; the harness CLIs it starts are separate processes with their own
    connections, and so is the embedded Chromium, whose connections are only
    the pages opened in it.
 5. The SBOM lists every third-party package bundled into the app's main process.
