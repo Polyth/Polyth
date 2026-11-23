@@ -25,11 +25,9 @@ import {
   CopiedIcon,
   CopyIcon,
   DownloadIcon,
-  HideIcon,
   Icon,
   IconButton,
   Notice,
-  ShowIcon,
   Spinner,
   TextInput,
 } from "./ui/index.ts";
@@ -160,7 +158,6 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
   const [claimInput, setClaimInput] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
   const [recovery, setRecovery] = useState<RecoveryState | null>(null);
   const [recoverySaved, setRecoverySaved] = useState(false);
   const [codesRenewed, setCodesRenewed] = useState(false);
@@ -620,26 +617,17 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
                 </div>
                 <div className="lock-field">
                   <label className="lock-field-label" htmlFor="setup-password">{tr("setup.account.passwordLabel")}</label>
-                  <div className="setup-password">
-                    <TextInput
-                      id="setup-password"
-                      type={showPassword ? "text" : "password"}
-                      value={password}
-                      autoComplete="new-password"
-                      autoCapitalize="off"
-                      spellCheck={false}
-                      disabled={busy}
-                      aria-describedby="setup-password-hint"
-                      onChange={(event) => { setPassword(event.target.value); setProblem(null); }}
-                    />
-                    <IconButton
-                      icon={showPassword ? HideIcon : ShowIcon}
-                      size="md"
-                      label={showPassword ? tr("setup.account.hidePassword") : tr("setup.account.showPassword")}
-                      disabled={busy}
-                      onClick={() => setShowPassword((shown) => !shown)}
-                    />
-                  </div>
+                  <TextInput
+                    id="setup-password"
+                    type="password"
+                    value={password}
+                    autoComplete="new-password"
+                    autoCapitalize="off"
+                    spellCheck={false}
+                    disabled={busy}
+                    aria-describedby="setup-password-hint"
+                    onChange={(event) => { setPassword(event.target.value); setProblem(null); }}
+                  />
                   <small id="setup-password-hint" className={`lock-field-hint${passwordReady ? " is-met" : ""}`}>
                     {passwordReady && <Icon icon={CheckIcon} size="sm" />}
                     {tr("setup.account.passwordHint", { count: MIN_PASSWORD_LENGTH })}

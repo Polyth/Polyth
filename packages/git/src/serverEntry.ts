@@ -1223,15 +1223,16 @@ export async function latestEventOfType(
   }
 }
 
-/** A `{ branch, path }` naming a checked-out branch and its checkout. */
-function checkoutTarget(raw: unknown): { branch: string; path: string } {
+/** A `{ branch, path? }` naming a checked-out branch and its checkout, or
+ *  (without `path`) a local branch checked out nowhere. */
+function checkoutTarget(raw: unknown): { branch: string; path?: string } {
   const target = raw as { branch?: unknown; path?: unknown } | null;
   if (!target || typeof target !== "object"
     || typeof target.branch !== "string" || !target.branch.trim()
-    || typeof target.path !== "string" || !target.path.trim()) {
-    throw Object.assign(new Error("target needs a branch and the path of its checkout"), { code: "invalid-input" });
+    || (target.path !== undefined && (typeof target.path !== "string" || !target.path.trim()))) {
+    throw Object.assign(new Error("target needs a branch, and the path of its checkout when it has one"), { code: "invalid-input" });
   }
-  return { branch: target.branch, path: target.path };
+  return typeof target.path === "string" ? { branch: target.branch, path: target.path } : { branch: target.branch };
 }
 
 /** A `start` sent with a create. Only "is it an object" is decided here; the
@@ -1727,6 +1728,9 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
           return service?.preserve(input)
             ?? Promise.resolve({ copied: [], skipped: [], missing: [], notIgnored: [] });
         },
+        // Integrating into a branch checked out nowhere opened a checkout:
+        // open surfaces refetch the project's worktrees.
+        checkoutOpened: async (projectId) => { host.broadcast.worktreesChanged?.(projectId); },
         closeWorkspaceProcesses: async (cwd) => {
           const terminals = host.services.get<{ closeByCwd(path: string): Promise<void> }>(
             serverServiceKey("terminal"),

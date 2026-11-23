@@ -20,6 +20,7 @@ import {
   type IpcMainInvokeEvent,
   type MenuItemConstructorOptions,
   type Rectangle,
+  type WebContents,
 } from "electron";
 import { execFile } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -112,6 +113,7 @@ import {
 import { readLinuxSystemControls } from "./linuxButtonLayout.ts";
 import { stagedChromiumExecutable } from "./chromiumResource.ts";
 import { keepAwakeWanted } from "./keepAwake.ts";
+import { createDesktopNativeWebViews, type DesktopNativeWebViews } from "./nativeWebViews.ts";
 import {
   blockedFromLocalServer,
   channelAllowed,
@@ -204,6 +206,8 @@ let settings: DesktopSettings;
 let baseUrl = "";
 const desktopSetupClaims = createDesktopSetupClaimBroker(() => requireDesktopSetupLifecycle().issueSetupClaim());
 let dataDir = "";
+/** Real Chromium pages behind the browser, hosted here for the in-process server. */
+let nativeWebViews: DesktopNativeWebViews | null = null;
 let logPath = "";
 let settingsPath = "";
 let windowStatePath = "";
@@ -1380,18 +1384,28 @@ const installApplicationMenu = (): void => {
 /** Electron renders no context menu of its own. Pages that draw a custom
  *  menu call preventDefault(), which suppresses this event; everywhere else
  *  text fields, selections, links, and spelling get the native menu. */
-const showContextMenu = (window: BrowserWindow, params: ContextMenuParams): void => {
+interface ContextMenuTarget {
+  /** The page the menu is for: the window's own, or a browser page it shows. */
+  contents: WebContents;
+  /** Where that page sits in the window (its params are page coordinates). */
+  origin: { x: number; y: number };
+  /** A browser page: offer Back, Forward and Reload as a browser does. */
+  page: boolean;
+}
+
+const showContextMenu = (window: BrowserWindow, params: ContextMenuParams, target?: ContextMenuTarget): void => {
   const items: MenuItemConstructorOptions[] = [];
   const { editFlags } = params;
+  const contents = target?.contents ?? window.webContents;
   if (params.isEditable && params.misspelledWord) {
     const suggestions = params.dictionarySuggestions.slice(0, 5);
     for (const suggestion of suggestions) {
-      items.push({ label: suggestion, click: () => window.webContents.replaceMisspelling(suggestion) });
+      items.push({ label: suggestion, click: () => contents.replaceMisspelling(suggestion) });
     }
     if (suggestions.length === 0) items.push({ label: "No spelling suggestions", enabled: false });
     items.push({
       label: "Add to Dictionary",
-      click: () => window.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord),
+      click: () => contents.session.addWordToSpellCheckerDictionary(params.misspelledWord),
     });
     items.push({ type: "separator" });
   }
@@ -1417,9 +1431,19 @@ const showContextMenu = (window: BrowserWindow, params: ContextMenuParams): void
   } else if (params.selectionText.trim()) {
     items.push({ role: "copy", enabled: editFlags.canCopy });
   }
+  if (target?.page && !params.isEditable) {
+    const history = contents.navigationHistory;
+    if (items.length > 0) items.push({ type: "separator" });
+    items.push(
+      { label: "Back", enabled: history.canGoBack(), click: () => history.goBack() },
+      { label: "Forward", enabled: history.canGoForward(), click: () => history.goForward() },
+      { label: "Reload", click: () => contents.reload() },
+    );
+  }
   while (items.at(-1)?.type === "separator") items.pop();
   if (items.length === 0) return;
-  Menu.buildFromTemplate(items).popup({ window, x: params.x, y: params.y });
+  const origin = target?.origin ?? { x: 0, y: 0 };
+  Menu.buildFromTemplate(items).popup({ window, x: origin.x + params.x, y: origin.y + params.y });
 };
 
 const safeExternalUrl = (raw: string): boolean => {
@@ -1490,7 +1514,13 @@ const createWindow = async (startUrl = firstWindowUrl()): Promise<void> => {
     event.preventDefault();
     if (safeExternalUrl(url)) void shell.openExternal(url);
   });
+  // A new page in the window knows nothing of the browser pages the old one
+  // placed: they wait parked until it places them again.
+  window.webContents.on("did-start-navigation", (details) => {
+    if (details.isMainFrame && !details.isSameDocument) nativeWebViews?.parkFrom(window);
+  });
   window.webContents.on("render-process-gone", (_event, details) => {
+    nativeWebViews?.parkFrom(window);
     log(`Renderer stopped: ${details.reason} (${details.exitCode})`);
     resetAgentActivity();
   });
@@ -1524,6 +1554,7 @@ const createWindow = async (startUrl = firstWindowUrl()): Promise<void> => {
   window.on("close", (event) => {
     if (!quitting && settings.closeToTray) { event.preventDefault(); window.hide(); broadcastWindowState(); log("Window hidden to tray"); }
   });
+  window.on("close", () => nativeWebViews?.parkFrom(window));
   window.on("closed", () => { if (mainWindow === window) mainWindow = null; rebuildTrayMenu(); });
   window.once("ready-to-show", () => {
     if (!settings.startMinimized && !backgroundStart) revealWindow(window);
@@ -1815,6 +1846,11 @@ const installIpc = (): void => {
     await openServerList({ open: servers.active.id, resume: true, ...(next ? { next } : {}) });
   });
   trustedHandle("desktop:servers:state", serversView);
+  trustedHandle("desktop:webviews:place", (event, id: unknown, rect: unknown): void => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window || !nativeWebViews) throw new Error("no browser pages here");
+    nativeWebViews.place(window, id, rect);
+  });
   trustedHandle("desktop:report:state", () => bugReports?.state() ?? { available: false, needsPassword: true, queued: 0 });
   trustedHandle("desktop:report:capture", async () => {
     if (!bugReports?.state().available) throw new Error("Bug reports are off on this build");
@@ -2054,6 +2090,18 @@ const configureUpdater = async (): Promise<void> => {
   refreshAutomaticUpdateSchedule();
 };
 
+const nativeWebViewHost = (): DesktopNativeWebViews => {
+  nativeWebViews ??= createDesktopNativeWebViews({
+    dataDir,
+    log,
+    onContextMenu: (window, contents, params, bounds) => {
+      if (!mainWindow || window !== mainWindow) return;
+      showContextMenu(window, params, { contents, origin: bounds, page: true });
+    },
+  });
+  return nativeWebViews;
+};
+
 const startServer = async (preferredPort?: number): Promise<void> => {
   serverStopped = false;
   const binary = opencodePath();
@@ -2099,6 +2147,7 @@ const startServer = async (preferredPort?: number): Promise<void> => {
     port, hostname: "127.0.0.1", dataDir, webDist, webPackagesDir: webPackagesPath(), serverPackages: desktopServerPackages,
     version: app.getVersion(),
     desktopOwnerChannel: true,
+    nativeWebViews: nativeWebViewHost(),
     onEventLoopStall: (stall) => {
       log(`Event loop blocked for ${(stall.blockedMs / 1000).toFixed(1)}s (rss ${Math.round(process.memoryUsage().rss / 1_048_576)} MB)`);
     },

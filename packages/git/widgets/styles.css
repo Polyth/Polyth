@@ -622,6 +622,291 @@
 .isolation-card-overflow {
   flex: none;
 }
+/* Destination picker: where the work goes. A quiet inset well hanging under
+   the title; collapsed it is one row ("Destination  main  Change ⌄"), open it
+   grows the same well with the list, so nothing floats over the transcript.
+   The card's own morph (isolationCardMotion.ts) animates the height. */
+.isolation-target {
+  --isolation-target-pad: var(--space-3);
+  margin-inline-start: var(--isolation-card-indent);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 6%, transparent);
+  min-width: 0;
+}
+.isolation-target-toggle {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  margin: 0;
+  padding: 0 var(--space-2) 0 var(--isolation-target-pad);
+  border: 0;
+  border-radius: inherit;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-meta);
+  text-align: start;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.isolation-target-toggle:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.isolation-target-toggle:focus-visible,
+.isolation-target-row:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.isolation-target-label {
+  flex: none;
+  color: var(--text-dim);
+}
+.isolation-target-value {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+.isolation-target-branch {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 550;
+}
+/* The branch is what the row says; its hint gives way first when space runs
+   short, and the branch keeps at least a few characters. */
+.isolation-target-value .isolation-target-branch {
+  flex: 0 1 auto;
+  min-width: min(6em, 100%);
+}
+.isolation-target-hint {
+  flex: 0 1000 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.isolation-target-change {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px var(--space-1) 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  font-weight: 500;
+}
+.isolation-target-chevron {
+  transition: transform var(--motion-surface) var(--isolation-ease);
+}
+.isolation-target[data-open] .isolation-target-chevron {
+  transform: rotate(180deg);
+}
+@media (hover: hover) {
+  .isolation-target-toggle:hover:where(:not(:disabled)) .isolation-target-change {
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+  }
+  .isolation-target-row:hover:where(:not(:disabled)) {
+    background: var(--surface-overlay-hover);
+  }
+}
+.isolation-target-toggle:active:where(:not(:disabled)) .isolation-target-change {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.isolation-target-panel {
+  display: flex;
+  flex-direction: column;
+  border-block-start: 1px solid color-mix(in srgb, var(--text) 7%, transparent);
+}
+.isolation-target-filter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-2) var(--space-2) 0;
+  padding: 0 var(--space-2);
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  border-radius: var(--radius-sm);
+  background: var(--input-bg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 10%, transparent);
+  color: var(--muted);
+}
+.isolation-target-filter:focus-within {
+  box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.isolation-target-filter-input {
+  appearance: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  /* The field's own floor: focusing never zooms mobile Safari. */
+  font-size: var(--font-input);
+}
+@media (pointer: fine) {
+  .isolation-target-filter-input { font-size: var(--font-meta); }
+}
+.isolation-target-filter-input::placeholder {
+  color: var(--muted);
+}
+.isolation-target-filter-input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}
+/* About seven rows, then the list scrolls inside the well; the scroll never
+   chains into the transcript behind it. */
+.isolation-target-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-height: min(18rem, 46vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-1) var(--space-1) var(--space-2);
+  scrollbar-width: thin;
+}
+.isolation-target-group {
+  display: flex;
+  flex-direction: column;
+}
+.isolation-target-heading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  column-gap: var(--space-2);
+  padding: var(--space-2) var(--space-2) var(--space-1);
+  color: var(--muted);
+  font-size: calc(var(--font-meta) * 0.92);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.isolation-target-heading-hint {
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.isolation-target-row {
+  appearance: none;
+  display: grid;
+  grid-template-columns: var(--icon-sm) minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--space-2);
+  width: 100%;
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-meta);
+  text-align: start;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.isolation-target-row:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.isolation-target-row:active:where(:not(:disabled)) {
+  background: var(--surface-overlay-strong);
+}
+.isolation-target-row[aria-checked="true"] {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.isolation-target-mark {
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+}
+.isolation-target-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.isolation-target-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.isolation-target-row .isolation-target-branch {
+  font-weight: 450;
+}
+.isolation-target-row[aria-checked="true"] .isolation-target-branch {
+  font-weight: 600;
+}
+.isolation-target-tag {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--text-dim);
+  font-size: calc(var(--font-meta) * 0.92);
+  line-height: 1.6;
+  white-space: nowrap;
+}
+/* Paths are long and differ at the end: truncate from the start. */
+.isolation-target-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  /* Physical, like the conflict file list: rtl here only moves the ellipsis. */
+  text-align: left;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: calc(var(--font-meta) * 0.92);
+  line-height: 1.45;
+}
+.isolation-target-path bdi {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+/* A narrow card keeps the branch whole instead of a clipped hint; the open
+   list's "Other branches" heading says a checkout opens first. */
+@container isolation-card (max-width: 460px) {
+  .isolation-target-value .isolation-target-hint:not(:only-child) {
+    display: none;
+  }
+}
+/* A wide card has room for the checkout path on the branch's own line, so
+   each choice is one line and more of them fit before the list scrolls. */
+@container isolation-card (min-width: 560px) {
+  .isolation-target-text {
+    flex-direction: row;
+    align-items: baseline;
+    gap: var(--space-3);
+  }
+  .isolation-target-name {
+    flex: 0 1 auto;
+  }
+  .isolation-target-path {
+    flex: 1 1 0;
+    min-width: 6em;
+    text-align: right;
+  }
+}
+.isolation-target-empty {
+  margin: 0;
+  padding: var(--space-3) var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  text-align: center;
+}
 .isolation-lock {
   display: inline-flex;
   align-items: center;

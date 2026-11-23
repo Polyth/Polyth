@@ -23,7 +23,7 @@ import WidgetCanvas from "../../widgets/WidgetCanvas.tsx";
 import { useWorkspaceContentMode } from "../../widgets/workspaceMode.ts";
 import SlotHost from "../slots/SlotHost.ts";
 import { Icon } from "../../icons.tsx";
-import { resolveSessionActivity } from "../../sessionActivity.ts";
+import { admittedPromptAwaitingTurn, resolveSessionActivity } from "../../sessionActivity.ts";
 import StarterPicker, { StarterGlyph } from "../mobile/StarterPicker.tsx";
 import { openPackageWindow, useWindowPackages } from "../../starterPackages.ts";
 import { requestComposerInsert } from "../../composerInsert.ts";
@@ -626,7 +626,14 @@ function ChatSessionSurface() {
   // Both the startup dock and the package live dock consume one resolver so a
   // stale turn during a harness epoch handoff cannot make two status surfaces
   // visible or re-display the previous runtime's model.
-  const activity = resolveSessionActivity(sessionRecord, model.turn, pendingSends);
+  const newestExchange = model.messages.findLast((message) =>
+    !message.undone && (message.kind === "user" || message.kind === "assistant"));
+  const activity = resolveSessionActivity(
+    sessionRecord,
+    model.turn,
+    pendingSends,
+    admittedPromptAwaitingTurn(newestExchange, model.turn, sessionRecord?.status),
+  );
   const working = activity.working;
   const awaitingTurn = activity.awaitingTurn;
   const widgets = useWidgetCatalog();

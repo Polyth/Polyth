@@ -12,6 +12,7 @@ import type { DictationMessageKey } from "@polyth/dictation/i18n";
 import type { DockerMessageKey } from "@polyth/docker/i18n";
 import type { EditorMessageKey } from "@polyth/editor/i18n";
 import type { FilesMessageKey } from "@polyth/files/i18n";
+import type { FocusTimerMessageKey } from "@polyth/focus-timer/i18n";
 import type { FusionMessageKey } from "@polyth/fusion/i18n";
 import type { GitMessageKey } from "@polyth/git/i18n";
 import type { GithubMessageKey } from "@polyth/github/i18n";
@@ -53,6 +54,7 @@ import { en as p_dictation } from "@polyth/dictation/i18n/en";
 import { en as p_docker } from "@polyth/docker/i18n/en";
 import { en as p_editor } from "@polyth/editor/i18n/en";
 import { en as p_files } from "@polyth/files/i18n/en";
+import { en as p_focus_timer } from "@polyth/focus-timer/i18n/en";
 import { en as p_fusion } from "@polyth/fusion/i18n/en";
 import { en as p_git } from "@polyth/git/i18n/en";
 import { en as p_github } from "@polyth/github/i18n/en";
@@ -95,6 +97,7 @@ export type PackageMessageKey =
   | DockerMessageKey
   | EditorMessageKey
   | FilesMessageKey
+  | FocusTimerMessageKey
   | FusionMessageKey
   | GitMessageKey
   | GithubMessageKey
@@ -137,6 +140,7 @@ export const packageEnCatalogs: ReadonlyArray<Record<string, string>> = [
   p_docker,
   p_editor,
   p_files,
+  p_focus_timer,
   p_fusion,
   p_git,
   p_github,

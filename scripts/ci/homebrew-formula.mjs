@@ -67,7 +67,9 @@ ${block("on_linux")}
         polyth server setup-claim
       Then start it now and at login:
         brew services start polyth
-      Update with \`brew upgrade polyth\`; \`polyth update\` leaves a Homebrew install to Homebrew.
+      Update with \`brew upgrade polyth\`, or turn on Settings → About →
+      Update automatically: the server then runs \`brew upgrade polyth\` itself
+      and \`brew services\` restarts it into the new release.
     EOS
   end
 

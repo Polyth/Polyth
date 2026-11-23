@@ -570,3 +570,66 @@ test("a server that keeps no ledger leaves the alerts to this device's ledger", 
   assert.deepEqual(saves, []);
   controller.dispose();
 });
+
+test("the cache notice offers keep-warm periods, starts one in place and stays quiet while a chat is kept warm", async () => {
+  const h = harness({ cache: true, cacheLeadMinutes: 1, turn: false, low: false, pace: false, exhausted: false, restored: false });
+  const cacheEvents = [{
+    id: "u1", sessionId: "s1", seq: 1, type: "usage/recorded", time: NOW - 270_000, v: 1,
+    data: { turnId: "t1", model: { providerID: "anthropic", modelID: "claude-sonnet-5-5" }, tokens: { input: 10, output: 20, cacheRead: 60_000, cacheWrite: 4_000 } },
+  } as SessionEvent];
+  const started: Array<[string, number]> = [];
+  let active = false;
+  let failStart = false;
+  const deps: UsageAlertsDeps = {
+    ...h.deps,
+    sessions: { ...h.deps.sessions, events: (id) => id === "s1" ? cacheEvents : [] },
+    keepWarm: {
+      status: async (sessionId) => ({ sessionId, active }),
+      start: async (sessionId, minutes) => {
+        if (failStart) throw new Error("409");
+        started.push([sessionId, minutes]);
+        return { sessionId, active: true, until: NOW + minutes * 60_000, sent: 0 };
+      },
+    },
+  };
+  const controller = createUsageAlerts(deps);
+  const cacheNotices = () => h.shown.filter((input) => input.id === "cache:s1");
+  let turn = 0;
+  const fireWatch = async () => {
+    turn += 1;
+    h.emit({ type: "turn/stopped", sessionId: "s1", data: { turnId: `t${turn}`, reason: "completed" } });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await settle();
+  };
+
+  await fireWatch();
+  const notice = cacheNotices()[0];
+  assert.ok(notice, "the cache notice shows");
+  assert.equal(notice.kind, "hint");
+  assert.deepEqual(notice.actions?.map((action) => action.label), ["Keep warm 15 min", "Keep warm 30 min", "Keep warm 1 hr"]);
+  assert.ok(notice.actions?.every((action) => action.keepOpen), "the card stays to answer in place");
+
+  await notice.actions![1]!.run();
+  assert.deepEqual(started, [["s1", 30]]);
+  const answer = cacheNotices().at(-1)!;
+  assert.equal(answer.kind, "success");
+  assert.match(answer.title, /^Keeping the cache warm until /);
+  assert.equal(answer.actions, undefined);
+
+  failStart = true;
+  await notice.actions![0]!.run();
+  assert.equal(cacheNotices().at(-1)!.kind, "error", "a refused start says so");
+
+  // Kept warm already (from here or the context card): the next lapse stays quiet.
+  active = true;
+  const before = cacheNotices().length;
+  await fireWatch();
+  assert.equal(cacheNotices().length, before);
+
+  // A chat on another screen still offers to open it, after the keep-warm periods.
+  active = false;
+  h.setVisibleSession("s2");
+  await fireWatch();
+  assert.deepEqual(cacheNotices().at(-1)!.actions?.map((action) => action.label), ["Keep warm 15 min", "Keep warm 30 min", "Keep warm 1 hr", "Open chat"]);
+  controller.dispose();
+});

@@ -177,6 +177,29 @@ export interface SelectionActionSlotMeta {
   run: (context: SelectionActionContext) => void | Promise<void>;
 }
 
+/** `meta.codeAction` on a `session.code.actions` contribution. The host mounts
+ *  the contribution's `render` in the header of a completed code fence, beside
+ *  Copy, with `CodeBlockActionSlotContext`. Without `languages` it mounts for
+ *  every fence that has a language. */
+export interface CodeBlockActionSlotMeta {
+  /** Lower-case fence languages the action applies to (`"sh"`, `"bash"`…). */
+  languages?: readonly string[];
+}
+
+/** Context the host gives every `session.code.actions` contribution. Render a
+ *  small ghost `Button` (size "sm"), or nothing when the action does not apply.
+ *  `sessionId` is absent when the block is shown outside a chat. The host never
+ *  mounts the slot while the block is still streaming; `streaming` is always
+ *  false for a mounted contribution. */
+export interface CodeBlockActionSlotContext {
+  sessionId?: string;
+  /** Fence language, trimmed and lower-cased. */
+  lang: string;
+  /** The block's code, without the fence lines. */
+  text: string;
+  streaming: boolean;
+}
+
 /** Package status choice in the Settings → Packages toolbar. */
 export type PackagesPageStatus = "all" | "enabled" | "disabled";
 
@@ -204,6 +227,15 @@ export interface PackagesPageSlotContext {
   packagesCategory: string | null;
   reportPackageMatches(owner: string, matches: PackagesPageMatches): void;
   setPackageDetailOpen(owner: string, open: boolean): void;
+  /** A package source an install link handed over
+   *  (`/?settings=packages&install=<source>`, for example from the package
+   *  catalog), waiting for the library to open its installer with the link
+   *  prefilled. Nothing installs until the person confirms there. Older hosts
+   *  omit it. */
+  packagesInstallRequest?: string | null;
+  /** The contribution that opened the installer for the request clears it, so
+   *  it opens once. */
+  clearPackagesInstallRequest?(): void;
 }
 
 export interface WidgetRenderContext extends Record<string, unknown> {
@@ -1092,11 +1124,15 @@ export interface WebMenuProps {
   renderContent?: (context: { close: () => void; sheet: boolean }) => ReactNode;
 }
 /** The host `TextInput`: every native input attribute (id, ref, aria-*,
- *  enterKeyHint, autoCapitalize…) plus the shared invalid state and size. */
+ *  enterKeyHint, autoCapitalize…) plus the shared invalid state and size.
+ *  `type="password"` always carries a show/hide eye button. */
 export interface WebInputProps extends Omit<ComponentPropsWithRef<"input">, "size"> {
   /** Visual + accessible invalid state (sets aria-invalid). */
   invalid?: boolean;
   uiSize?: "sm" | "md";
+  /** Password fields only: controls the eye button from outside. */
+  revealed?: boolean;
+  onRevealedChange?: (revealed: boolean) => void;
 }
 export interface WebEmptyStateProps { title: string; description?: string; actionLabel?: string; onAction?: () => void; variant?: "page" | "panel" | "compact"; }
 

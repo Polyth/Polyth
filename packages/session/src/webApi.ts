@@ -40,6 +40,7 @@ import type {
   ProviderAuthView,
   SystemInfoDto,
   ReleaseDownloadsDto,
+  ServerAutoUpdateDto,
   TrackCreateInput,
   TrackDto,
   Project,
@@ -118,6 +119,8 @@ export interface BrowserSessionDto {
   agentPaused?: boolean;
   controller?: "user" | "agent";
   viewportMode?: "responsive" | "preset" | "custom";
+  /** A live page the local Polyth Desktop window can show (contracts' BrowserSessionDto). */
+  nativeViewId?: string;
 }
 
 /** User navigation can intentionally pause for an origin approval. */
@@ -1309,6 +1312,10 @@ export const api = {
   systemInfo: () => jfetch<SystemInfoDto>("/api/system/info"),
   /** Latest published installers; disabled when no release repository is configured. */
   releaseDownloads: () => jfetch<ReleaseDownloadsDto>("/api/system/releases"),
+  /** Automatic updates of a packaged server; 404 on servers older than it. */
+  serverAutoUpdate: () => jfetch<ServerAutoUpdateDto>("/api/system/auto-update"),
+  setServerAutoUpdate: (enabled: boolean) =>
+    pendingMutation(jfetch<ServerAutoUpdateDto>("/api/system/auto-update", json("PUT", { enabled }))),
   mcpList: () => jfetch<McpServerDto[]>("/api/mcp/servers").catch((): McpServerDto[] => []),
   mcpCreate: (input: { name: string; transport: McpTransport; secrets?: Record<string, string>; enabled?: boolean }) =>
     pendingMutation(jfetch<McpServerDto>("/api/mcp/servers", json("POST", input))),

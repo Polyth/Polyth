@@ -42,6 +42,7 @@ export default function ComposerFocusDialog({
         initialText={initialText}
         rows={16}
         className="composer-focus-editor"
+        quoteMirror
         ariaLabel={tr("composerfocusdialog.messageDraft")}
         onTextChange={onCommit}
         onKeyIntercept={(e, composing) => {

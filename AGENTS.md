@@ -62,9 +62,13 @@ Paired-device access is default-deny unless the owner explicitly grants that dev
   Secure Safe question metadata instead); the user enters the value in the
   protected UI and the agent receives only the handle/outcome.
 - Read only the handle manifest and `envRef` metadata. Use a handle/reference
-  on a supported execution boundary. The current broker is the local bounded
-  composer-shell (`SessionService.runShell` → `@polyth/terminal.run`): the
-  server resolves matching `POLYTH_SAFE_*` refs into that one child
+  on a supported execution boundary. The one broker is a local bounded run
+  (`@polyth/terminal.run`), reached two ways: the person's composer shell
+  (`!` / `SessionService.runShell`) and, for agents, the package tool
+  `polyth_credential_vault_run`. Each agent call needs the turn's own person
+  to approve its card (command, handle names, purpose, cwd); Auto-approve,
+  Full access, Judgment, delegated approval and a card "always" never answer
+  it. The server resolves matching `POLYTH_SAFE_*` refs into that one child
   environment — the signed-in person's own entries first, then the Space's,
   never another member's — redacts known values from captured output, and
   audits only handles. Interactive terminals, remote hosts, browser sign-in and provider
@@ -135,7 +139,7 @@ Treat Dependabot, `npm audit` and `cargo` advisories as defects: upgrade, pin a 
 
 ## Execution and completion
 
-Use [verified command ownership](docs/agents/commands.md) and [risk-based verification](docs/agents/verification.md). Every visible UI change is confirmed with a before/after screenshot that is shown to the user ([screenshot confirmation](docs/agents/verification.md#screenshot-confirmation-for-visual-changes)); tests or source review do not replace it. CI exists; root lint/typecheck scripts were absent at the audit baseline—inspect current `package.json`, do not invent commands. Type stripping is explicit for Node tests. A web build is not a native-device test.
+Use [verified command ownership](docs/agents/commands.md) and [risk-based verification](docs/agents/verification.md). Every visible UI change is confirmed with a before/after screenshot that is shown to the user ([screenshot confirmation](docs/agents/verification.md#screenshot-confirmation-for-visual-changes)); tests or source review do not replace it. A pull request with a visible change carries those screenshots: after opening it run `node scripts/pr-screenshots.mjs`, and before `agent.merge` of an isolated child with UI changes, `node scripts/pr-screenshots.mjs adopt <child-worktree>` ([screenshots in pull requests](docs/agents/verification.md#screenshots-in-pull-requests); CI enforces it). CI exists; root lint/typecheck scripts were absent at the audit baseline—inspect current `package.json`, do not invent commands. Type stripping is explicit for Node tests. A web build is not a native-device test.
 
 Do not install dependencies, publish, sign, push, migrate live data, run paid provider turns, kill an existing server or change credentials without task authorization. Test servers need isolated data and ports; no hardcoded private host is required. Do not disable security or weaken/exclude tests to manufacture green results.
 

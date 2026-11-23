@@ -2,6 +2,7 @@
 // go through here. If no Composer is mounted (no open session), inserts queue
 // and drain when one mounts — the @ click never gets lost.
 export const COMPOSER_INSERT = "polyth:composer-insert";
+export const COMPOSER_QUOTE = "polyth:composer-quote";
 export const COMPOSER_REPLACE = "polyth:composer-replace";
 export const COMPOSER_COMPARE_REPLACE = "polyth:composer-compare-replace";
 export const COMPOSER_DICTATION = "polyth:composer-dictation";
@@ -54,6 +55,37 @@ export function requestComposerInsert(text: string): boolean {
   }
   queueInsert(text);
   return false;
+}
+
+/**
+ * Quote into the composer as a reply: the quote goes in as its own block after
+ * the draft, the field takes focus and the caret waits on the line under it.
+ * Focus happens inside the caller's gesture, so a phone raises its keyboard.
+ * With no Composer mounted the quote queues like any insert (unfocused).
+ * Returns true when consumed immediately.
+ */
+export function requestComposerQuote(quote: string): boolean {
+  if (!quote) return false;
+  if (typeof window !== "undefined") {
+    const consumed = !window.dispatchEvent(
+      new CustomEvent(COMPOSER_QUOTE, { detail: quote, cancelable: true }),
+    );
+    if (consumed) return true;
+  }
+  queueInsert(quote);
+  return false;
+}
+
+/** Join an insert onto the draft. A Markdown quote must start its own line
+ *  (after a blank one, so it does not run into a paragraph); anything else
+ *  joins the draft with a space, as file mentions and starters always have. */
+export function joinComposerInsert(draft: string, insert: string): string {
+  if (!draft) return insert;
+  if (!/^[ \t]*>/.test(insert)) return `${draft} ${insert}`;
+  const base = draft.replace(/[ \t]+$/, "");
+  if (!base) return insert;
+  if (base.endsWith("\n\n")) return base + insert;
+  return `${base}${base.endsWith("\n") ? "\n" : "\n\n"}${insert}`;
 }
 
 /**

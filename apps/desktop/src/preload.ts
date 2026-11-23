@@ -16,6 +16,7 @@ import type {
   DesktopCaptionGeometry,
   DesktopTitleBarAppearance,
   DesktopUpdateState,
+  DesktopWebViewRect,
   DesktopWindowAction,
   DesktopWindowState,
   PolythDesktopApi,
@@ -118,6 +119,10 @@ const api: PolythDesktopApi = {
   onCommand: (listener) => subscribe<DesktopCommand>("desktop:command", listener),
   onUpdateState: (listener) => subscribe("desktop:update:state", listener),
   bugReport: Object.freeze(bugReport),
+  webViews: Object.freeze({
+    place: (id: string, rect: DesktopWebViewRect | null) =>
+      ipcRenderer.invoke("desktop:webviews:place", id, rect) as Promise<void>,
+  }),
 };
 
 contextBridge.exposeInMainWorld("polythDesktop", Object.freeze(api));

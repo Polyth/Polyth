@@ -39,6 +39,7 @@ export const de: SecureSafeMessages = {
   "settings.securesafepage.orProjectConfiguration": "oder Projektkonfiguration.",
   "settings.securesafepage.purpose": "Zweck",
   "settings.securesafepage.saveFailed": "Diese Anmeldedaten konnten nicht gespeichert werden. Der Wert wurde gelöscht; geben Sie ihn zum erneuten Versuch erneut ein.",
+  "settings.securesafepage.handleTaken": "Zugangsdaten mit dem Namen „{handle}“ gibt es bereits. Bearbeiten Sie sie in der Liste, um den Wert zu ersetzen.",
   "settings.securesafepage.savedHandles": "Gespeicherte Zugangsdaten",
   "settings.securesafepage.savedHandlesCount": "{count} gespeichert",
   "settings.securesafepage.secureSafe": "Credential Vault",

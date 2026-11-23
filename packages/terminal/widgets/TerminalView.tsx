@@ -3,7 +3,7 @@
 // that lives OUTSIDE React state — WS frames feed it directly and TermPane
 // subscribes for coalesced repaints. Replay frames rebuild the emulator from
 // scratch so reconnects never duplicate output.
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import type { TerminalInfo } from "@polyth/contracts";
 import { resolveWorkspaceContext, workspaceExecutionPath } from "@polyth/contracts/workspace";
 import type { SurfaceComponentProps } from "@polyth/web-sdk";
@@ -23,6 +23,7 @@ import { measureTerminalGrid } from "./terminal/measurement.ts";
 import { useTouchPrefs } from "./terminal/touchPrefs.ts";
 import EmptyState, { ProjectRequiredEmpty } from "../../../apps/web/src/components/EmptyState.tsx";
 import TermPane from "./TermPane.tsx";
+import { hasTypeRequest, subscribeTypeRequests, takeTypeRequest, typeRequestVersion } from "./typeIntoTerminal.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import {
   AddIcon,
@@ -55,6 +56,8 @@ interface Tab {
   sessionId?: string;
   repositoryId?: string;
   workspace?: TerminalInfo["workspace"];
+  /** `harness-setup` for a harness install/sign-in terminal. */
+  purpose?: string;
 }
 
 function wsUrl(id: string): string {
@@ -310,6 +313,28 @@ export default function TerminalView({
     };
   };
 
+  // "Run in terminal" on a code fence: the command is TYPED into the active
+  // shell (never with Enter) once one is attached, spawning one when the pane
+  // opened with none.
+  useSyncExternalStore(subscribeTypeRequests, typeRequestVersion);
+  const typeSpawned = useRef(false);
+  useEffect(() => {
+    if (!hasTypeRequest(sessionId) || !listLoaded) return;
+    const target = tabs.find((tab) => tab.id === active && tab.running);
+    if (target) {
+      const request = takeTypeRequest(sessionId!);
+      if (request) sendTo(target.id, request.text);
+      typeSpawned.current = false;
+      return;
+    }
+    // While the one-click auto-spawn is still armed it opens the shell itself.
+    if (tabs.length === 0 && visible && !autoSpawnArmed.current && !typeSpawned.current) {
+      typeSpawned.current = true;
+      void spawn().catch(() => { typeSpawned.current = false; });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabs, active, listLoaded, sessionId, typeRequestVersion()]);
+
   const spawn = async (cmd?: string) => {
     if (!projectId || workspaceInvalid) return;
     // The first shell has no TermPane yet. Measure its reserved viewport now,
@@ -397,6 +422,7 @@ export default function TerminalView({
           ...(t.sessionId ? { sessionId: t.sessionId } : {}),
           ...(t.repositoryId ? { repositoryId: t.repositoryId } : {}),
           ...(t.workspace ? { workspace: t.workspace } : {}),
+          ...(t.purpose ? { purpose: t.purpose } : {}),
           customTitle: Boolean(t.title && t.title !== generatedTerminalTitle(t) && t.title !== (t.cwd.split(/[\\/]/).pop() || "")),
           ...(t.exitCode !== undefined ? { exitCode: t.exitCode } : {}),
         }));
@@ -457,6 +483,7 @@ export default function TerminalView({
           ...(typeof detail.sessionId === "string" ? { sessionId: detail.sessionId } : {}),
           ...(typeof detail.repositoryId === "string" ? { repositoryId: detail.repositoryId } : {}),
           ...(detail.workspace ? { workspace: detail.workspace } : {}),
+          ...(machineWide ? { purpose: "harness-setup" } : {}),
         }]);
       setActive(terminalId);
       getEmu(terminalId);
@@ -637,6 +664,7 @@ export default function TerminalView({
           onSelectSession={setActive}
           onNewSession={() => void spawn().catch(() => {})}
           onCloseSession={() => void closeTab(tab.id)}
+          linkActions={tab.purpose === "harness-setup"}
         />
       )}
     </div>

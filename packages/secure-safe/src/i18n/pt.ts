@@ -39,6 +39,7 @@ export const pt: SecureSafeMessages = {
   "settings.securesafepage.orProjectConfiguration": "ou configuração do projeto.",
   "settings.securesafepage.purpose": "Finalidade",
   "settings.securesafepage.saveFailed": "Não foi possível guardar esta credencial. O valor foi limpo; introduza-o novamente para tentar.",
+  "settings.securesafepage.handleTaken": "Já existe uma credencial chamada “{handle}”. Edite-a na lista para substituir o valor.",
   "settings.securesafepage.savedHandles": "Credenciais guardadas",
   "settings.securesafepage.savedHandlesCount": "{count} guardadas",
   "settings.securesafepage.secureSafe": "Credential Vault",

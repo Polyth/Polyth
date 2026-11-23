@@ -65,6 +65,7 @@ export const bg: PluginsMessages = {
   "pluginbridge.pluginWidgetValue": "Уиджет на плъгин: {title}",
   "pluginmodules.pluginValueUiEntryMustExportA": "Записът в интерфейса на плъгин „{pluginId}“ трябва да експортира карта с компоненти на модули",
   "packages.plugins.linkHint": "Връзка към https .zip, хранилище в GitHub, GitLab или Codeberg, zip:https://…, file:папка или локален път до .zip.",
+  "packages.plugins.linkedSourceNotice": "Отворено от връзка. Инсталирайте само пакети, на които имате доверие: Polyth показва какво иска пакетът, преди да се стартира.",
   "packages.plugins.dropArchive": "Плъзнете .zip на пакета",
   "packages.plugins.dropArchiveHint": "Плъзнете .zip тук или изберете файл · до {size}",
   "packages.plugins.chooseFile": "Избор на файл",

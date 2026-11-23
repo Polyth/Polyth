@@ -28,4 +28,10 @@ export const it: BugReportMessages = {
   "bugreport.invalid": "Non è stato possibile preparare la segnalazione. Copia i dettagli e avvisa il team.",
   "bugreport.unavailable": "Le segnalazioni di bug sono disattivate in questa build.",
   "bugreport.openFailed": "Impossibile avviare una segnalazione di bug.",
+  "bugreport.screenshotBrowser": "Includi questo screenshot",
+  "bugreport.attachHint": "Ancora nessuno screenshot. Incollane uno con Ctrl+V (⌘V su Mac) o allega un’immagine.",
+  "bugreport.attach": "Allega screenshot",
+  "bugreport.replace": "Sostituisci screenshot",
+  "bugreport.attachFailed": "Impossibile leggere questa immagine. Prova un altro file.",
+  "bugreport.passwordHintServer": "Richiesta una sola volta. Questo server Polyth la conserva per chiunque invii segnalazioni da qui.",
 };

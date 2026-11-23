@@ -1,0 +1,36 @@
+name: PR screenshots
+
+# A pull request that changes visible UI must show it: screenshots in its body
+# (node scripts/pr-screenshots.mjs) or a `No visible change: <reason>` line.
+# Editing the description reruns the check.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-screenshots-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  screenshots:
+    name: PR screenshots
+    if: ${{ vars.CI_DISABLED != '1' && vars.CI_DISABLED != 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check screenshots for visible changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: node scripts/ci/check-pr-screenshots.mjs "$BASE_SHA" "$HEAD_SHA"

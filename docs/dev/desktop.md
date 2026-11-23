@@ -315,6 +315,15 @@ installs ship no OpenCode: its harness reports "not installed" with an install a
 on Settings → Harnesses, and the Providers & Models tour opens on a step that links
 there.
 
+The in-app browser's pages are not that Chromium when the server runs inside the app:
+`nativeWebViews.ts` hosts each tab as a sandboxed `WebContentsView` (a hidden parking
+window while nobody looks, the main window over the browser stage when the local page
+places it through `desktop:webviews:place`) and hands the in-process server a DevTools
+Protocol session per page through `BootOptions.nativeWebViews`. Only the `local`
+surface may place pages; the rules (profile confinement, schemes, user agent, place
+rectangles) live in `nativeWebViewPolicy.ts` and its test. See
+[browser](browser.md) (*Native Desktop pages*) for the behavior.
+
 Controlled browser packaging uses the same explicit resource boundary. Before creating
 a desktop artifact, `npm --workspace @polyth/desktop run stage:chromium` copies the
 already-installed Chromium selected by the pinned `playwright-core` into
@@ -629,11 +638,13 @@ xvfb-run -a node apps/desktop/test/appimage-profile.mjs \
 
 ## Bug reports (nightly)
 
-Nightly builds of the standard edition (`X.Y.N-nightly`; `bugReportOrigin` in
+Nightly builds of both editions (`X.Y.N-nightly`; `bugReportOrigin` in
 `src/bugReport.ts`) send bug reports to the team's private GitHub repository through
 the report relay ([`packages/report-relay`](../../packages/report-relay/README.md),
-`https://reports.polyth.app`). Stable and workstation builds have no hotkey, menu item
-or network call for it.
+`https://reports.polyth.app`); the report's `app.edition` says which. Stable builds
+have no hotkey, menu item or network call for it, and a stable workstation build
+ignores `POLYTH_BUG_REPORT=1` ([workstation network behaviour](../security/workstation-edition.md#network-behaviour)).
+In the workstation edition only the shell sends: the server route stays off there.
 
 - **Opening.** ⌘⇧B / Ctrl+Shift+B (`reportBug` in `@polyth/hotkeys`, remappable),
   **Help → Report a Bug…** (a `report-bug` desktop command), or the command palette all
@@ -661,7 +672,34 @@ or network call for it.
   password unverified so the queued report can go later; a `401` at that point forgets
   it and the sheet asks again. It travels only in the
   `Authorization` header and is printable ASCII without spaces (`isTesterPassword`).
-- **Limits and outbox.** One report a minute and ten a day leave a computer. A relay that
+- **From a browser.** A page opened in a browser has no desktop shell, so the Polyth
+  server that served it sends instead (`@polyth/bug-report` server routes
+  `GET /api/bug-report/state` and `POST /api/bug-report/send`, `src/sender.ts`). It is on
+  when the server's version is `X.Y.N-nightly` (a checkout reports one with
+  `POLYTH_RELEASE_CHANNEL=nightly`, `packages/server/src/version.ts`; or `POLYTH_BUG_REPORT=1`), the edition is
+  standard and the deployment is not `multi-tenant-sandboxed`; `POLYTH_BUG_REPORT_ORIGIN`
+  works as for the desktop. A desktop window keeps using its shell when the shell reports,
+  and falls back to the server when it does not (a stable app showing a nightly server).
+  - *Screenshot:* in desktop Chromium the page asks for this tab with
+    `getDisplayMedia({ preferCurrentTab })` straight from the key press or click, takes
+    one frame and stops the capture; a window or a whole screen picked instead is
+    dropped. Elsewhere (Safari, Firefox, phones), or when the person declines, the sheet
+    takes a pasted (Ctrl/⌘+V) or attached image. The page downscales and re-encodes it to
+    the same JPEG limits.
+  - *What goes:* the browser variant of `app` (`client: "browser"`, the server's version
+    and OS, the browser's OS family and `Name major` such as `Safari 18`, never the raw
+    user agent) and only `ui.*` settings. The relay labels it `client:browser`.
+  - *Password and outbox:* the server keeps one tester password for everyone who reports
+    from it (`state.json`, mode 0600, in the package data folder). It is kept only after
+    the relay accepts it, or while a queued report needs it and none is kept yet (an
+    unverified one never replaces a kept one), and a `401` forgets it. The
+    outbox (`outbox/`, the same 10 reports for 7 days, retried every 15 minutes) and the
+    daily install id belong to the server.
+  - *Access:* the routes follow the normal sign-in; paired devices reach them only with
+    full access.
+- **Limits and outbox.** A computer sends as many reports as the tester needs; neither the
+  shell nor the relay caps them per computer or address (the relay keeps only its
+  service-wide daily budget and the failed-password lockout). A relay that
   cannot be reached, or answers `429`/`503`, leaves the report in
   `<userData>/desktop/bug-reports/` (at most 10, each dropped after 7 days); it goes at
   the next start or every 15 minutes. `POLYTH_BUG_REPORT_ORIGIN` points at another relay
@@ -673,7 +711,9 @@ or network call for it.
   unpackaged Electron run on Linux under Xvfb against a local relay with a fake GitHub
   (shortcut, capture, send, rate limit, wrong password, offline queue and delivery; no
   keyring on that host). Not yet: a packaged nightly, a keychain-sealed password, and the
-  relay against real GitHub.
+  relay against real GitHub. Browser reports: unit tests for the server sender, its
+  routes and the browser facts, and a render of the sheet in browser mode; not yet a live
+  `getDisplayMedia` capture or a send from a deployed nightly server.
 
 ## Security boundary
 

@@ -2606,6 +2606,9 @@ export interface IsolationSuggestionDto {
     | "corrupt"
     | "destination-unavailable"
     | "merging";
+  /** Set when the agent checked out a branch of its own in the session's
+   *  checkout (the work integrates from it as usual): that branch's name. */
+  checkedOutBranch?: string;
 }
 
 /** A delegated agent session working in its own managed checkout. The checkout
@@ -2642,6 +2645,12 @@ export interface IsolationStatusDto {
    *  repository. Listed only while there is work to integrate and the target
    *  can still be chosen; older servers omit it. */
   targets?: IsolationTargetDto[];
+  /** Local branches checked out nowhere that the work can be integrated into
+   *  too (`IsolationMergeInput.target` without `path`): Polyth first opens an
+   *  ordinary linked checkout of the chosen branch, and the session returns
+   *  there. Sorted by name, at most `ISOLATION_BRANCH_TARGETS_MAX`; listed
+   *  under the same conditions as `targets`. Older servers omit it. */
+  branches?: string[];
   actions?: {
     canReview: boolean;
     canMerge: boolean;
@@ -2651,7 +2660,7 @@ export interface IsolationStatusDto {
     canRecover: boolean;
     canAbandon: boolean;
     /** The work can be integrated into a branch from `targets` other than the
-     *  recorded one (`IsolationMergeInput.target`). */
+     *  recorded one, or into one of `branches` (`IsolationMergeInput.target`). */
     canChooseTarget?: boolean;
   };
 }
@@ -2674,7 +2683,9 @@ export interface IsolationTargetDto {
  *  remote (else `origin`) with the acting person's account; a refused push
  *  never undoes the merge (`IsolationMergeResultDto.pushed`). */
 export interface IsolationMergeInput {
-  target?: { branch: string; path: string };
+  /** Without `path`, `branch` is one of the status's `branches`: a checkout
+   *  of it is opened first. */
+  target?: { branch: string; path?: string };
   push?: boolean;
 }
 
@@ -2683,8 +2694,12 @@ export interface IsolationMergeInput {
  *  `targets`; the change is recorded as an `isolation/retargeted` event. */
 export interface IsolationRetargetInput {
   branch: string;
-  path: string;
+  /** Omitted for one of the status's `branches` (a checkout is opened). */
+  path?: string;
 }
+
+/** Cap on `IsolationStatusDto.branches`. */
+export const ISOLATION_BRANCH_TARGETS_MAX = 200;
 
 /** The push a merge ran after publishing (`IsolationMergeInput.push`). */
 export type IsolationTargetPushDto =
@@ -3299,7 +3314,9 @@ export interface SessionService {
   summaries?(input: SessionSummaryQuery): Promise<SessionSummaryPage>;
   /** Read-only troubleshooting state. Does not attach or wake a runtime. */
   debug?(sessionId: string): Promise<SessionDebugDto>;
-  replyPermission(sessionId: string, requestId: string, reply: "once" | "always" | "reject", scope?: "session" | "project"): Promise<void>;
+  /** `person` is the signed-in person answering; a Credential Vault run card
+   *  accepts only the turn's own person. */
+  replyPermission(sessionId: string, requestId: string, reply: "once" | "always" | "reject", scope?: "session" | "project", person?: SessionPersonScope): Promise<void>;
   /** A person hands one open subagent permission request to its parent
    *  session's agent. Accepts the child or the parent's mirrored card,
    *  records the delegation durably and wakes the parent with the redacted
@@ -6792,6 +6809,11 @@ export const UI_SLOTS = [
   // toolbar and the touch dock. Data only: `meta.selectionAction`
   // (SelectionActionSlotMeta in @polyth/web-sdk); the host draws the buttons.
   "session.selection.actions",
+  // Actions in a rendered code fence's header, beside Copy. Context:
+  // CodeBlockActionSlotContext (@polyth/web-sdk): sessionId?, lang, text,
+  // streaming. Mounted only for completed blocks; `meta.codeAction.languages`
+  // (CodeBlockActionSlotMeta) limits it to those fence languages.
+  "session.code.actions",
   "sidebar.project.actions", "sidebar.session.actions",
   // Package actions for the sessions selected in the navigator, rendered as
   // menu items in the selection bar's menu. Context: sessionIds (string[]),
@@ -7124,6 +7146,29 @@ export interface ReleaseDownloadsDto {
    *  it, for how it was installed (`polyth update`, Homebrew, Docker, a
    *  checkout). Absent from older servers. */
   update?: { version: string; command: string } | null;
+}
+
+/** `GET`/`PUT /api/system/auto-update`: a packaged server that installs its
+ *  own new releases (npm or Homebrew) and restarts through its service once no
+ *  chat is working. Absent (404) on older servers. */
+export interface ServerAutoUpdateDto {
+  /** The package manager this server updates through; null when it cannot. */
+  install: "npm" | "homebrew" | null;
+  /** Why this server cannot update itself, when it cannot. */
+  unavailable: string | null;
+  enabled: boolean;
+  /** The caller may turn it on or off (the instance owner). */
+  canChange: boolean;
+  /** `waiting`: a newer release is ready to install or restart into once no
+   *  chat is working. */
+  phase: "off" | "idle" | "checking" | "waiting" | "installing" | "restarting";
+  /** The newer release the last check found. */
+  available: string | null;
+  /** Chats working now, while `phase` is `waiting`. */
+  busy: number;
+  checkedAt: number | null;
+  /** The last update attempt, kept across the restart it caused. */
+  last: { at: number; from: string; to: string; ok: boolean; message: string } | null;
 }
 
 const RELEASE_VERSION = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;
@@ -7792,6 +7837,10 @@ export interface BrowserSessionDto {
   controller?: "user" | "agent";
   /** How the current viewport was chosen. */
   viewportMode?: BrowserViewportMode;
+  /** Set when the page is a native view the local Polyth Desktop window can
+   *  show live in place of frames (`polythDesktop.webViews`). Opaque; it
+   *  grants nothing off that machine. */
+  nativeViewId?: string;
 }
 
 /** Manual-only browser profile tabs: no agent observation or extraction. */

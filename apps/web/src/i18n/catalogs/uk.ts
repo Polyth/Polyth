@@ -13,6 +13,7 @@ import { uk as p_dictation } from "@polyth/dictation/i18n/uk";
 import { uk as p_docker } from "@polyth/docker/i18n/uk";
 import { uk as p_editor } from "@polyth/editor/i18n/uk";
 import { uk as p_files } from "@polyth/files/i18n/uk";
+import { uk as p_focus_timer } from "@polyth/focus-timer/i18n/uk";
 import { uk as p_fusion } from "@polyth/fusion/i18n/uk";
 import { uk as p_git } from "@polyth/git/i18n/uk";
 import { uk as p_github } from "@polyth/github/i18n/uk";
@@ -55,6 +56,7 @@ const parts: Array<Record<string, string>> = [app,
   p_docker,
   p_editor,
   p_files,
+  p_focus_timer,
   p_fusion,
   p_git,
   p_github,

@@ -22,6 +22,7 @@ import {
   unrestoredCompactionSeq,
 } from "@polyth/session";
 import { SessionOutputCache } from "@polyth/session/output-cache";
+import { VAULT_RUN_SERVICE, VAULT_RUN_TOOL_ID, vaultRunApprovalMetadata, type VaultRunService } from "@polyth/credential-vault";
 import {
   CAP,
   HARNESS_PERSON_DEFAULTS_SERVICE,
@@ -63,6 +64,8 @@ import {
   SERVER_OPENCODE_RUNTIME_POLICY,
   PairedSocketRegistry,
   SERVER_APPLICATION_SURFACE,
+  SERVER_NATIVE_WEB_VIEWS,
+  type NativeWebViewHost,
   SERVER_SESSION_TITLE_GENERATOR,
   SERVER_SESSION_WATCHES,
   SERVER_MODEL_FAVORITES,
@@ -170,6 +173,7 @@ import { createPersonalMcpReprovisioner, type PersonalMcpReprovisioner } from ".
 import { assertRemoteOpenCodeUsable, type RemoteOpenCodeAccessDeps } from "./remoteOpenCodeAccess.ts";
 import { canonicalSecurity, isSourceEntrypoint } from "./runtimeSecurity.ts";
 import { serverVersion, updateCommand } from "./version.ts";
+import { createServerAutoUpdater, EXIT_FOR_UPDATE, serverAutoUpdateRoutes, type ServerSelfUpdater } from "./serverAutoUpdate.ts";
 import { snapshotBeforeMigrations } from "./preMigrationSnapshot.ts";
 import { oneShot } from "./oneshot.ts";
 import {
@@ -242,6 +246,12 @@ export interface BootOptions {
    *  the packaged server passes `polyth update` or Homebrew's command; without
    *  it a container or a checkout is assumed (version.ts). */
   updateCommand?: string;
+  /** A packaged install that can install its own releases (npm, Homebrew)
+   *  and is restarted by a service when it exits (serverAutoUpdate.ts). */
+  selfUpdate?: ServerSelfUpdater;
+  /** Why this host cannot update itself, shown in Settings → About when
+   *  `selfUpdate` is absent. */
+  selfUpdateUnavailable?: string;
   opencode?: Partial<OpenCodeAdapterOptions>;
   /** Workspace packages/ directory scanned for polyth.serverEntry markers. */
   packagesDir?: string;
@@ -263,6 +273,9 @@ export interface BootOptions {
   /** Told about each event-loop stall as well. A packaged desktop app has no
    *  console, so without this its log never shows why the window froze. */
   onEventLoopStall?: (stall: EventLoopStall) => void;
+  /** Polyth Desktop only: real Chromium pages hosted by the app beside this
+   *  in-process server, published to packages as `SERVER_NATIVE_WEB_VIEWS`. */
+  nativeWebViews?: NativeWebViewHost;
 }
 
 /** Keep protocol identity behind the runtime pool's stable facade, including
@@ -876,6 +889,7 @@ export async function boot(opts: BootOptions = {}) {
     localhostAuthOptional,
     canonicalOrigin: opts.canonicalOrigin ?? null,
   }));
+  if (opts.nativeWebViews) services.provide(SERVER_NATIVE_WEB_VIEWS, opts.nativeWebViews);
   const harnesses = createHarnessRegistry();
   services.provide(serverServiceKey("harnesses"), harnesses);
   const capabilityContributions = createCapabilityContributionRegistry();
@@ -2264,7 +2278,11 @@ export async function boot(opts: BootOptions = {}) {
         storage = undefined;
       }
       const permissionRequester = requestAgentToolPermission;
-      const summary = input ? summarizeToolInput(input) : undefined;
+      const summary = input
+        ? tool.id === VAULT_RUN_TOOL_ID
+          ? vaultRunApprovalMetadata(input, grant.cwd)
+          : summarizeToolInput(input)
+        : undefined;
       return authorizePackageToolAfterPermissions({
         tool,
         grant: {
@@ -2550,6 +2568,7 @@ export async function boot(opts: BootOptions = {}) {
       maxBytes: 128 * 1024,
       ...(beforeSeq !== undefined ? { beforeSeq } : {}),
     }),
+    watches: (sourceSessionId) => store.sessionWatches({ sourceSessionId }),
     claimed: (sessionId) => {
       for (const owns of turnNotificationClaims) {
         try {
@@ -2858,6 +2877,7 @@ export async function boot(opts: BootOptions = {}) {
     markPersonalContext: async (sessionId) => { await lazySessions.markPersonalContext?.(sessionId); },
     storageDir: dataDir,
     deployment: spaceGateway.deployment,
+    version,
     spaceStorage: (ctx) => createSpaceStorage(ctx.storageDir),
     routes: routeRegistry,
     root,
@@ -3273,6 +3293,11 @@ export async function boot(opts: BootOptions = {}) {
   requestAgentToolPermission = sessions.requestAgentToolPermission.bind(sessions);
   requestAgentToolSecret = sessions.requestAgentToolSecret.bind(sessions);
   resolveAgentToolSession = sessions.resolveAgentToolSession.bind(sessions);
+  // The agent Vault tool executes through the same canonical session service
+  // (and the same bounded helper as the composer shell), never in-package.
+  provideService(VAULT_RUN_SERVICE, {
+    run: (input) => sessions.runVaultCommand(input),
+  } satisfies VaultRunService);
   sessionsImpl = sessions;
   // A chat that stops being private drops its owner's personal MCP servers
   // from a live runtime (§14.6) through the safe idle-release path.
@@ -3568,6 +3593,31 @@ export async function boot(opts: BootOptions = {}) {
         })));
     return { failed: failed + packages.reduce<number>((sum, one) => sum + one, 0) };
   };
+  // A restart interrupts a chat that is working or waiting on its person; a
+  // question left unanswered for half a day does not hold updates forever.
+  const STALE_WAIT_MS = 12 * 60 * 60_000;
+  const serverAutoUpdate = createServerAutoUpdater({
+    file: join(dataDir, "server-auto-update.json"),
+    version,
+    ...(opts.selfUpdate ? { updater: opts.selfUpdate } : {}),
+    unavailable: opts.selfUpdateUnavailable
+      ?? "Automatic updates are for a packaged server installed with npm or Homebrew and run by its service.",
+    busy: async () => {
+      const at = Date.now();
+      return (await store.projections()).filter((projection) =>
+        projection.status === "working" || projection.status === "reconciling"
+        || (projection.status === "waiting" && at - projection.updatedAt < STALE_WAIT_MS)).length;
+    },
+    restart: () => {
+      void shutdown().then(
+        () => process.exit(EXIT_FOR_UPDATE),
+        (error: unknown) => {
+          console.error("[polyth] shutdown before the update restart failed", error);
+          process.exit(EXIT_FOR_UPDATE);
+        },
+      );
+    },
+  });
   const staticCoreRoutes: RouteHandler[] = [
     async (request) => agentTools.route(request),
     authRoutes(auth, {
@@ -3689,6 +3739,7 @@ export async function boot(opts: BootOptions = {}) {
     browseRoutes(dataDir),
     iconifyRoutes(),
     releasesRoutes({ serverVersion: version, updateCommand: updateCommand(opts.updateCommand) }),
+    serverAutoUpdateRoutes(serverAutoUpdate),
     async (request) => {
       if (request.path.startsWith("/api/mcp/") || request.path.startsWith("/api/plugins")) return false;
       return settingsRoute(request);
@@ -3796,10 +3847,13 @@ export async function boot(opts: BootOptions = {}) {
     console.error("[polyth] session watch recovery failed", error);
   });
 
+  serverAutoUpdate.start();
+
   let shutdownPromise: Promise<void> | undefined;
   const shutdown = (): Promise<void> => {
     if (shutdownPromise) return shutdownPromise;
     beginShutdown();
+    serverAutoUpdate.stop();
     // Long-poll readers return their (empty) page now instead of holding the
     // HTTP drain open for their full wait.
     eventWaiters.close();

@@ -65,6 +65,7 @@ export const ptBR: PluginsMessages = {
   "pluginbridge.pluginWidgetValue": "Widget do plugin: {title}",
   "pluginmodules.pluginValueUiEntryMustExportA": "O plugin \" {pluginId} \" deve exportar um mapa de componentes de módulos.",
   "packages.plugins.linkHint": "Aceita um link .zip https ou um repositório no GitHub, GitLab ou Codeberg.",
+  "packages.plugins.linkedSourceNotice": "Aberto a partir de um link. Instale apenas pacotes em que você confia: o Polyth mostra o que um pacote pede antes de ser executado.",
   "packages.plugins.dropArchive": "Solte um .zip do pacote",
   "packages.plugins.dropArchiveHint": "Arraste um .zip aqui ou escolha um arquivo · até {size}",
   "packages.plugins.chooseFile": "Escolher arquivo",

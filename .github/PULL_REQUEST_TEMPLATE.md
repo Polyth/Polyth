@@ -13,6 +13,6 @@ Pull requests target `devel`. `master` only receives promotions from devel
 
 - [ ] Tests and type checks for the touched packages
 - [ ] Owning documentation updated when behavior, configuration or a contract moved
-- [ ] Before/after screenshots for a visible UI change
+- [ ] Before/after screenshots for a visible UI change (`node scripts/pr-screenshots.mjs` adds them from `.scratch/`; otherwise a line `No visible change: <reason>`)
 - [ ] No new dependency, or the reason for it is stated above
 - [ ] Every commit is signed off (`git commit -s`, see CONTRIBUTING.md)

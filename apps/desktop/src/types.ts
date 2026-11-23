@@ -196,8 +196,6 @@ export type DesktopBugReportOutcome =
   | { result: "queued" }
   /** Ask for the tester password (again). */
   | { result: "password" }
-  /** This computer sent too many reports for now. */
-  | { result: "rate" }
   /** This build is not a published nightly. */
   | { result: "version" }
   | { result: "invalid" }
@@ -352,4 +350,16 @@ export interface PolythDesktopApi {
   /** Nightly bug reports. Absent from older shells; `state().available` is
    *  false on builds that send none. */
   bugReport?: PolythDesktopBugReportApi;
+  /** Browser pages this computer hosts, shown live in place of frames. Absent
+   *  from older shells; only this computer's own server window may place. */
+  webViews?: PolythDesktopWebViewsApi;
+}
+
+/** A place in the window, in CSS px of the page asking. */
+export interface DesktopWebViewRect { x: number; y: number; width: number; height: number }
+
+export interface PolythDesktopWebViewsApi {
+  /** Show the page `id` (a browser session's `nativeViewId`) at `rect`, or
+   *  stop showing it with `null`. Rejects for unknown ids. */
+  place(id: string, rect: DesktopWebViewRect | null): Promise<void>;
 }

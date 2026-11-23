@@ -48,7 +48,7 @@ import {
   TextInput,
 } from "../ui/index.ts";
 import { isImeComposing } from "../input/editorCore.ts";
-import { BackIcon, CopyIcon, HideIcon, RefreshIcon, ShowIcon } from "../ui/icons.ts";
+import { BackIcon, CopyIcon, RefreshIcon } from "../ui/icons.ts";
 import {
   CheckGroup,
   EmptyState,
@@ -1038,7 +1038,9 @@ export function PassphraseField({ value, visible, copied, disabled, label = tr("
         <span className="users-passphrase">
           <TextInput
             {...field}
-            type={visible ? "text" : "password"}
+            type="password"
+            revealed={visible}
+            onRevealedChange={onToggleVisible}
             value={value}
             autoComplete="new-password"
             spellCheck={false}
@@ -1046,7 +1048,6 @@ export function PassphraseField({ value, visible, copied, disabled, label = tr("
             invalid={tooShort}
             onChange={(event) => onChange(event.target.value)}
           />
-          <IconButton icon={visible ? HideIcon : ShowIcon} label={visible ? tr("setup.account.hidePassword") : tr("setup.account.showPassword")} disabled={disabled} onClick={onToggleVisible} />
           <IconButton
             icon={CopyIcon}
             label={tr("settings.users.copyPassword")}

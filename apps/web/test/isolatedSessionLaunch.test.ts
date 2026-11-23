@@ -103,3 +103,32 @@ test("a person who moved elsewhere keeps their place, and an uncertain outcome o
   assert.equal(state.activeSessionId, "iso-other");
   assert.equal(state.uiErrorAction, null, "an uncertain create may exist; no reopen offer");
 });
+
+test("New chat during a slow start opens a fresh chat; the start finishes in the background", async () => {
+  seedChat("iso-prev", "iso-s");
+  const reply = deferred<string>();
+  let activate: ((id: string) => boolean) | undefined;
+  const launching = launchIsolatedSession(
+    { projectId: "iso-s", options: { targetBranch: "main" } },
+    (_projectId, options) => { activate = options?.activate; return reply.promise; },
+  );
+  assert.equal(store.isActiveSessionSpawning(store.getState()), true);
+  store.startFreshSession("iso-s");
+  const fresh = store.getState();
+  assert.equal(fresh.activeSessionId, null);
+  assert.equal(fresh.sessionSpawn, null, "the new chat surface no longer belongs to the start");
+  assert.equal(store.isActiveSessionSpawning(fresh), false, "no 'Spawning agent…' over the new chat");
+  assert.equal(activate?.("iso-bg"), false, "the started chat is listed, not pulled into view");
+  reply.resolve("iso-bg");
+  assert.equal(await launching, "iso-bg");
+  assert.equal(store.getState().activeSessionId, null, "the person stays on their new chat");
+});
+
+test("a start that already has its chat id keeps it when New chat is pressed", () => {
+  store.activateProject("iso-t");
+  const spawn = store.beginSessionSpawn("iso-t");
+  store.bindSessionSpawn(spawn, "iso-bound");
+  store.startFreshSession("iso-t");
+  assert.equal(store.getState().sessionSpawn?.sessionId, "iso-bound", "the chat's own startup dock survives");
+  store.finishSessionSpawn(spawn);
+});

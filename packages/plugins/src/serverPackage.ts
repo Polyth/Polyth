@@ -976,6 +976,9 @@ export interface ServerPackageHost extends TrustedServerPluginHost {
    *  `allowsTenantPackagesInControlPlane`, and `allowsInteractiveProviderAuth`
    *  in @polyth/contracts. */
   deployment: DeploymentProfile;
+  /** The version this server reports in `/api/health` (`X.Y.Z`,
+   *  `X.Y.N-nightly`). Absent on hosts older than this field. */
+  version?: string;
   projects: ProjectService;
   /** Canonical session service. The reference is stable, but the service is
    *  composed AFTER package load — capture it in closures freely, never invoke

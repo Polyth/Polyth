@@ -25,6 +25,9 @@ Before editing anything, answer four questions:
    VisuallyHidden, …), `components/a11y/` (Dialog, Menu, roving, live
    regions), `components/EmptyState.tsx`, `CopyButton.tsx`. Also search the
    package's own `widgets/` tree — the component you need may already exist.
+   A `TextInput` with `type="password"` already carries the show/hide eye
+   (`revealed`/`onRevealedChange` drive it from outside); never add a second
+   reveal button beside it.
 4. **Classify the change.** Host-level primitive change → host work.
    Feature-level behavior change → package work. If the fix "belongs" to the
    other layer, fix it there; do not patch around it.

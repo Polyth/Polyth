@@ -361,16 +361,25 @@ with the last word still marked Send did nothing until a new line committed
 the word and moved it away. Two rules close that. A touch or pen that lands on
 any composer control outside a text field first calls `finishComposition()`
 (`commitComposingWordOnPress`, a capture handler on the composer root), so the
-word is ordinary text before the platform decides what the tap was. Send
-itself cancels `touchstart` and `touchend` through a listener that is not
-passive (`ownPrimaryTouch`; React's touch listeners are passive, and cancelling
-`pointerdown` does not withhold a touch from native gestures): the press is
-the page's, the release sends, and no click follows. A new control that must
-work beside the end of a draft acts on `click` and relies on the first rule;
-only a control that already acts on `pointerup` may cancel the touch.
-`composerSendTouchTarget.test.ts` covers both with a real touch and a CDP IME
-composition; the iOS classification itself is read from WebKit source and is
-not device-verified. Text the platform writes without
+word is ordinary text before the platform decides what the tap was. Send is
+the exception to that rule: it cancels `touchstart` and `touchend` through a
+listener that is not passive (`ownPrimaryTouch`; React's touch listeners are
+passive, and cancelling `pointerdown` does not withhold a touch from native
+gestures), so the press is the page's, the release sends, no click follows,
+and `send()` commits the word itself. Send does not refocus the field
+mid-touch, because `finishComposition()` blurs and refocuses it, which
+restarts the iOS input session under a finger that is still down. A Send touch
+also never waits on Send's own `pointerup` alone (`watchTouchEnd`): the end of
+the same touch anywhere on the page (`pointerup`/`pointercancel` for its
+pointer, `touchend`/`touchcancel` for its touch) settles the press a task
+later if Send's handler has not. On the iPhone app (2026-11-22) Send was seen left on its hold check with the message unsent, which only an armed
+press whose end never reached Send can produce. A new control that must work
+beside the end of a draft acts on `click` and relies on the first rule; only a
+control that already acts on `pointerup` may cancel the touch.
+`composerSendTouchTarget.test.ts` covers these with real touches, a lift
+withheld from Send or from the page, and a CDP IME composition. The iOS
+classification is read from WebKit source, and which of these causes the
+lost lift on the device is not device-verified. Text the platform writes without
 any `input` event (dictation and some phone keyboards have) is committed at the
 field's next caret move, key release or focus, so Send's enabled state cannot
 stay behind a draft the field visibly holds.
@@ -648,14 +657,17 @@ the menu.
 
 #### Server zones in the navigator
 
-In Polyth Desktop the navigator also lists the other servers the app can open
-(this computer, servers paired through Link, servers saved by address), each as
-a **zone**: a quiet heading (`--font-meta`, weight 600, `--muted`, the server's
+In Polyth Desktop and the phone apps the navigator also lists the other servers
+the app can open (on Desktop this computer, servers paired through Link and
+servers saved by address; on a phone the other paired servers), each as a
+**zone**: a quiet heading (`--font-meta`, weight 600, `--muted`, the server's
 mark in the glyph column) over its projects as 34px rows on the navigator's own
 axes. While other zones are on show, the projects of the server on screen get
 the same heading with that server's name, so the list reads as one sequence of
 zones. A zone's projects are the ones that server listed the last time it was
-open ([desktop.md](desktop.md#server-zones)); nothing in the row says "live".
+open ([desktop.md](desktop.md#server-zones),
+[phone apps](../mobile/polyth-link.md#server-zones)); nothing in the row says
+"live".
 
 - A project row moves the window to that server at that project. The clicked
   row holds the hover wash and every zone row is disabled until the page
@@ -671,9 +683,16 @@ open ([desktop.md](desktop.md#server-zones)); nothing in the row says "live".
 - The project icon rail draws each zone after this server's icons: a hairline,
   the server's mark (opens the server) and up to six project icons, whose
   tooltips name project and server. Zone icons carry no arrange id.
-- Zones hide while the navigator is searching. They are absent in a browser
-  tab, in the phone layout (the phone apps, and a desktop window narrowed to it)
-  and in the workstation edition.
+- The phone Navigator (the phone apps, and a desktop window narrowed to the
+  phone layout) lists the zones under *Add project* on its own axes: the
+  server's mark and a project's tile in the lead column, names on the title
+  axis, rows at the 44px tap floor. A zone's projects stay one step quieter
+  than the ones that are here (session-size names, regular weight). The server
+  on screen gets no heading there: the Navigator's title already names the
+  place.
+- Zones hide while the navigator is searching, and on a phone while rows are
+  being selected. They are absent in a browser tab and in the workstation
+  edition.
 
 Archived sessions are not listed inline in the navigator. When a project has any
 archived session (a loaded row, or one bounded `archived=true` summary probe), a
@@ -2097,9 +2116,12 @@ host.slots.register({
   renders the same `SessionBackButton` or nothing; `Header.tsx` also mounts `app.header.center`;
   `StatusBar.tsx` mounts `app.statusbar.leading/trailing` while the opt-in
   status bar is on (§4.10); `App.tsx` mounts `app.layers` once over the whole
-  shell for package-owned floating layers (voice mode, or a renderless
-  controller such as custom-action's result notifier): a contribution renders
-  nothing until it has something to show, portals and positions itself, and
+  shell for package-owned floating layers (voice mode, the focus timer's
+  window, or a renderless controller such as custom-action's result notifier):
+  a contribution renders nothing until it has something to show, portals and
+  positions itself (a window the person summons, like the focus timer, stays
+  until they hide it, sits under `--z-overlay` and keeps clear of the launcher
+  strip and the phone's floating title), and
   stays transient — never a second notice system (passing messages go through
   `host.notifications`, §4.8); the
   composer's `ModelPicker` (`@polyth/models/model-picker`) mounts
@@ -2433,6 +2455,10 @@ host draws headings and rows. When every chat in a list has the empty key (no
 marker, no agent…), that lone group draws no heading. A stored package grouping waits for its package
 to register and reads as None meanwhile. Chat markers add "Marker".
 
+`session.code.actions` adds a button to a completed code fence's header (see
+*Code frame* in the markdown section); it is rendered by the host with
+`CodeBlockActionSlotContext`.
+
 `session.selection.actions` adds an action to a transcript selection, beside
 Quote and Copy in the floating toolbar and the touch dock. It is data only
 (`meta.selectionAction`, `SelectionActionSlotMeta`): the host draws the button,
@@ -2570,6 +2596,15 @@ A fork's copied log ends with `session/forked`, and a `session-starting` row
 before that marker is the source's, never the child's: Fork and edit on a
 started chat's first prompt copies the row but not its admission, which left
 the child on "Spawning agent…" with the prompt stuck under its history.
+A `runtime/epoch-replaced` ends the start the same way: after a harness switch
+or restart while the chat spawned, a row still waiting is an ordinary queue
+row (it runs on the new runtime, or shows held for review with its controls).
+Once the prompt is admitted, its `user/message` retires the echo, but the
+projection reads `working` only from `turn/started`. Until that turn starts or
+ends, the startup dock stays on an `idle` or `reconciling` chat whose newest
+exchange is that prompt (`admittedPromptAwaitingTurn` in
+`apps/web/src/sessionActivity.ts`). Without it a cold harness left 15 s and
+more with no activity anywhere.
 The projection status is no guide while it does (`reconciling`, then `idle`
 until the prompt is admitted), so `sessionStartingFromServer` reads the row and
 only excludes `failed` and `archived`; tying it to `reconciling` flashed the
@@ -2586,7 +2621,11 @@ completion even if the user opens another chat or project meanwhile. Only a
 changed connection, account or Space (`persistenceScopeIsCurrent`) aborts it;
 the captured project/session name the target, not the current view. The new
 chat is focused only while the user still watches its spawn surface; otherwise
-it is listed and keeps working in the background. Send-pending holds are per
+it is listed and keeps working in the background. New chat counts as leaving:
+while a start has no chat id yet it owns the id-less new-chat surface, so
+`startNewSession` releases that unbound `sessionSpawn` and the surface becomes a
+fresh, usable new chat instead of staying on "Spawning agent…" (a spawn already
+bound to its chat id is kept for that chat's startup dock). Send-pending holds are per
 surface, so the chat the user moved to stays sendable; the new-chat surface's
 hold stays with the composer that sent, so a fresh new chat in the same project
 does not wait for the earlier creation. Pinned by
@@ -3743,11 +3782,23 @@ A row waiting for a person shows its ask in amber with **Allow** /
 **Deny**, the zone's only primary: they answer the child's request mirrored
 into the parent's log (`sourceSessionId`; the server forwards the answer), the
 same reply the permission card sends; the ask leaves at the click and a failed
-reply brings it back. A high-risk request, a guarded account, a question or a
-nested subagent's wait offer **Review** instead, which opens that child chat:
-nothing risky is allowed from one line. Past four rows the list ends in *+n
+reply brings it back. A high-risk request, a guarded account or a nested
+subagent's wait offer **Review** instead, which opens that child chat: nothing
+risky is allowed from one line. A child's question is mirrored the same way
+(`question/asked` with `sourceSessionId`; `replyQuestion` forwards the answer
+to the child, and the mirror counts as a blocking request on the parent because
+only a person can answer it, unlike a delegated permission mirror). Its row
+shows the question's first line and **Answer**: for a single question it scrolls
+to and focuses the mirrored card in this chat's timeline (the existing question
+UI), for several it opens the child. Past four rows the list ends in *+n
 more*, which shows the rest. The action and run time never push the model
 out: the action gives way first.
+
+A quiet tally ends the agent's own line (the same line, no head row and no bulk
+control): *n done* and *n failed* for the children of this chat (never forks)
+that settled since the person's latest message began, not lifetime totals.
+*n failed* opens the first failed subagent. It shows with the island, so a chat
+that never delegated shows nothing (`subagentTally.ts`).
 
 Motion, only after the list's first paint and none under reduced motion: a
 state change swaps the mark (it grows in) and the control set (fades in) in
@@ -5484,11 +5535,19 @@ projects. A fresh install starts in Tree (`SIDEBAR_VIEW_MODE_DEFAULT`,
 registry with no project, or only the lone Personal project — presents the
 tree whatever was saved, so the left edge is never an empty strip; the layout
 menu then leaves out the Project rail choice until a project exists. Clicking a
-project in the phone navigator, desktop tree, or Project
-rail only toggles its sessions; it never activates the project, changes the
-current session, or closes the navigator. The rail's browsed project is local
-presentation state, independent of the active workspace. Opening a session or
-using an explicit project action still navigates normally.
+project in the phone navigator, desktop tree, compact drawer rail, or a
+collapsed Project rail only toggles its sessions; it never activates the
+project, changes the current session, or closes the navigator. In the wide
+expanded Project rail the first click on another project only browses it; a
+second click on the browsed project (its icon or its header row) enters it:
+from the New chat page it opens New chat in that project, and from another
+project's chat it opens that project's latest top-level chat
+(`latestProjectSession`, `Sidebar.tsx`; New chat when it has none). Inside the
+project already, the second click does nothing, and it never collapses the
+sessions column. A double-click's second click does not act again. The rail's
+browsed project is local presentation state, independent of the active
+workspace. Opening a session or using an explicit project action still
+navigates normally.
 Phone project headers are one vertically centred line: the name truncates and
 the status pills keep their own width beside it, expanded or collapsed, so the
 name never moves. Pills run most urgent first (running, waiting, failed,
@@ -5638,9 +5697,8 @@ while keeping Tree selected; expanding restores the project tree. Choosing Tree
 from the sidebar actions also restores it. Collapsing an explicitly selected
 Project rail hides only the sessions column while keeping the project icons
 visible, then expands back to Project rail. An older collapsed rail without a
-saved return mode restores Tree once when expanded. Clicking the focused
-project's icon in an expanded rail also hides the sessions column, after the
-double-click window so a double-click cannot trigger it.
+saved return mode restores Tree once when expanded. Only the rail's collapse
+toggle hides the sessions column; clicking the focused project's icon does not.
 A project icon carries one corner mark from `projectRailMark`
 (`sessionStatus.ts`): amber when any chat needs a person (question, approval,
 waiting), the accent colour when a finished top-level chat has a reply the
@@ -6239,7 +6297,16 @@ click everywhere else.
   without a language has nothing to label, so it draws no header — the copy
   control floats in the frame's top-right corner (`.md-code-block-float`) and
   the code starts at the body's own padding, instead of under an empty 29px
-  band. The floating control reserves the first line's end (`pre`
+  band. Packages add header actions through `session.code.actions`
+  (`CodeBlockActionSlotContext` / `CodeBlockActionSlotMeta` in
+  `@polyth/web-sdk`: `sessionId?`, `lang`, `text`, `streaming`;
+  `meta.codeAction.languages` limits the fence languages). The host mounts them
+  (`markdown/codeBlockActions.ts`) before Copy only for a completed block with
+  a language, never while it streams; contributions render a `Button`
+  `size="sm" variant="ghost"`. Terminal contributes *Run in Terminal* for a
+  single-command shell block (`sh`, `bash`, `zsh`, `shell`, `console` with its
+  `$`/`>` prompts stripped, PowerShell): it opens the chat's terminal and types
+  the command without Enter, so the person confirms. The floating control reserves the first line's end (`pre`
   `padding-inline-end`), so a long line scrolls rather than passing beneath it.
   While a message streams, a still-open fence is not re-tokenized per delta: it
   renders the last highlighted snapshot plus the escaped new tail in the same

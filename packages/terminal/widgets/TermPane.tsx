@@ -22,7 +22,7 @@ import {
 } from "./terminal/emulator.ts";
 import { cellColorCss } from "./terminal/palette.ts";
 import { encodeMouseEvent, encodePaste, keyEventToBytes } from "./terminal/keymap.ts";
-import { collectUrls, detectLinks } from "./terminal/linkify.ts";
+import { collectUrls, detectLinks, detectWrappedLinks, type LinkRange } from "./terminal/linkify.ts";
 import { searchBuffer, type TermMatch } from "./terminal/search.ts";
 import { measureTerminalGrid } from "./terminal/measurement.ts";
 import {
@@ -47,7 +47,10 @@ import {
   Button,
   ChevronDownIcon,
   ChevronUpIcon,
+  CheckIcon,
   CloseIcon,
+  CopyIcon,
+  ExternalLinkIcon,
   IconButton,
   KeyboardIcon,
   Menu,
@@ -118,10 +121,15 @@ interface TermRowProps {
   sel: Range | null;
   matches: RowMatch[] | undefined;
   currentMatch: number;
+  /** Links of a soft-wrapped run this row belongs to (whole URLs); omitted
+   *  for a row that stands alone, which detects its own. */
+  links?: readonly LinkRange[];
+  /** Identity of `links` for the row memo. */
+  linksKey?: string;
 }
 
 /** Group the line's cells into style runs and render spans + overlays. */
-function renderRow(line: TermLine, cellW: number): React.ReactNode {
+function renderRow(line: TermLine, cellW: number, links?: readonly LinkRange[]): React.ReactNode {
   const cells = line.chars;
   const n = cells.length;
   // trailing default-blank cells render as nothing
@@ -131,7 +139,7 @@ function renderRow(line: TermLine, cellW: number): React.ReactNode {
   if (last < 0) return null;
 
   const info = lineInfo(line);
-  const detected = detectLinks(info.text);
+  const detected = links ?? detectLinks(info.text);
   // per-cell implicit link index (-1 none), from text ranges via the col map
   let linkCol: Int16Array | null = null;
   if (detected.length > 0) {
@@ -217,9 +225,21 @@ function renderRow(line: TermLine, cellW: number): React.ReactNode {
   return out;
 }
 
+/** A row's text for joining a soft-wrapped run: a row that continues on the
+ *  next keeps its trailing blanks, so text on either side stays apart. */
+function runRowText(line: TermLine): string {
+  const info = lineInfo(line);
+  if (!line.wrapped) return info.text;
+  return info.text.padEnd(info.map ? info.map.length - 1 : line.chars.join("").length, " ");
+}
+
+/** Longest soft-wrapped run joined for link detection (a long URL in a narrow pane). */
+const MAX_LINK_RUN_ROWS = 64;
+
 const TermRow = memo(function TermRow(props: TermRowProps) {
-  const { line, top, cellW, cellH, sel, matches, currentMatch } = props;
-  const content = useMemo(() => renderRow(line, cellW), [line, props.rev, cellW]);
+  const { line, top, cellW, cellH, sel, matches, currentMatch, links, linksKey } = props;
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- linksKey stands for links
+  const content = useMemo(() => renderRow(line, cellW, links), [line, props.rev, cellW, linksKey]);
   return (
     <div className="term-row" style={{ top, height: cellH }}>
       {sel && (
@@ -242,7 +262,8 @@ const TermRow = memo(function TermRow(props: TermRowProps) {
   a.line === b.line && a.rev === b.rev && a.top === b.top
   && a.cellW === b.cellW && a.cellH === b.cellH
   && a.sel?.start === b.sel?.start && a.sel?.end === b.sel?.end
-  && a.matches === b.matches && a.currentMatch === b.currentMatch,
+  && a.matches === b.matches && a.currentMatch === b.currentMatch
+  && a.linksKey === b.linksKey,
 );
 
 // ------------------------------------------------------------------- pane
@@ -264,6 +285,9 @@ export interface TermPaneProps {
   onSelectSession?: (id: string) => void;
   onNewSession?: () => void;
   onCloseSession?: () => void;
+  /** Offer the newest URL printed while the program runs as "Open link" /
+   *  "Copy link" above the output (harness sign-in terminals). */
+  linkActions?: boolean;
 }
 
 export interface TouchSession { id: string; title: string; running: boolean }
@@ -744,12 +768,27 @@ export default function TermPane(props: TermPaneProps) {
     void copyText(text);
   };
 
+  const bufferUrls = (limit?: number): string[] => collectUrls(
+    (row) => { const line = emu.line(row); return line ? runRowText(line) : ""; },
+    (row) => emu.line(row)?.wrapped ?? false,
+    emu.bufferLength(),
+    limit,
+  );
+
   const showUrls = () => {
-    setUrls(collectUrls(
-      (row) => emu.rowInfo(row).text,
-      (row) => emu.line(row)?.wrapped ?? false,
-      emu.bufferLength(),
-    ));
+    setUrls(bufferUrls());
+  };
+
+  const [linkCopied, setLinkCopied] = useState(false);
+  const linkCopiedTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(linkCopiedTimerRef.current), []);
+  const copyLink = (url: string) => {
+    void copyText(url).then((ok) => {
+      if (!ok) return;
+      setLinkCopied(true);
+      clearTimeout(linkCopiedTimerRef.current);
+      linkCopiedTimerRef.current = setTimeout(() => setLinkCopied(false), 1500);
+    });
   };
 
   const currentFontSize = (): number => {
@@ -1465,10 +1504,29 @@ export default function TermPane(props: TermPaneProps) {
   const start = Math.max(0, firstRow - OVERSCAN);
   const end = Math.min(totalRows, firstRow + visibleCount + OVERSCAN);
 
+  // A URL broken by the right margin is found on its whole soft-wrapped run,
+  // so every row of it carries (and Ctrl/Cmd+click opens) the full URL.
+  const runLinks = new Map<number, LinkRange[]>();
+  const rowLinks = (i: number, line: TermLine): LinkRange[] | undefined => {
+    if (!line.wrapped && !emu.line(i - 1)?.wrapped) return undefined;
+    const cached = runLinks.get(i);
+    if (cached) return cached;
+    let first = i;
+    while (first > 0 && i - first < MAX_LINK_RUN_ROWS && emu.line(first - 1)?.wrapped) first--;
+    let last = i;
+    while (last - first < MAX_LINK_RUN_ROWS && emu.line(last)?.wrapped && emu.line(last + 1)) last++;
+    const texts: string[] = [];
+    for (let r = first; r <= last; r++) texts.push(runRowText(emu.line(r)!));
+    const perRow = detectWrappedLinks(texts);
+    perRow.forEach((links, k) => runLinks.set(first + k, links));
+    return runLinks.get(i);
+  };
+
   const rowsOut: React.ReactNode[] = [];
   for (let i = start; i < end; i++) {
     const line = emu.line(i);
     if (!line) continue;
+    const links = rowLinks(i, line);
     rowsOut.push(
       <TermRow
         key={i}
@@ -1480,9 +1538,15 @@ export default function TermPane(props: TermPaneProps) {
         sel={selRangeForRow(selection, i, emu.cols())}
         matches={matchesByRow.get(i)}
         currentMatch={current}
+        links={links}
+        linksKey={links?.map((link) => `${link.start}:${link.end}:${link.url}`).join(" ")}
       />,
     );
   }
+
+  const linkUrl = props.linkActions && running
+    ? bufferUrls(8).find((url) => /^https?:\/\//i.test(url))
+    : undefined;
 
   const cursorRow = sbLen + cursor.y;
   const showCursor = cursor.visible && running && cursorRow >= start && cursorRow < end;
@@ -1617,6 +1681,25 @@ export default function TermPane(props: TermPaneProps) {
             label={tr("terminalview.closeSearch")}
             onClick={closeSearch}
           />
+        </div>
+      )}
+
+      {linkUrl && (
+        <div className="term-link-bar" role="group" aria-label={tr("terminalview.signInLink")}>
+          <span className="term-link-bar-label">{tr("terminalview.signInLink")}</span>
+          <span className="term-link-bar-url" title={linkUrl}>{linkUrl}</span>
+          <Button
+            size="sm"
+            variant="primary"
+            iconStart={ExternalLinkIcon}
+            onClick={() => window.open(linkUrl, "_blank", "noopener,noreferrer")}
+          >{tr("terminalview.openLink")}</Button>
+          <Button
+            size="sm"
+            variant="quiet"
+            iconStart={linkCopied ? CheckIcon : CopyIcon}
+            onClick={() => copyLink(linkUrl)}
+          >{linkCopied ? tr("terminalview.copied") : tr("terminalview.copyLink")}</Button>
         </div>
       )}
 

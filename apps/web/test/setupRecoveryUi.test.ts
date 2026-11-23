@@ -54,7 +54,9 @@ test("setup asks only for visibly labelled name and password fields", async () =
   }
   assert.match(source, /const DEFAULT_ORGANIZATION = "Personal";/);
   assert.match(source, /organizationName: DEFAULT_ORGANIZATION,/);
-  assert.match(source, /setup\.account\.showPassword/);
+  // The reveal control is the one every password TextInput carries.
+  assert.match(source, /id="setup-password"\s+type="password"/);
+  assert.match(await read("../src/components/ui/TextInput.tsx"), /setup\.account\.showPassword/);
   assert.match(source, /lock-field-hint/);
 });
 

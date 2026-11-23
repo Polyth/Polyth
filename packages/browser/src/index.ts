@@ -47,6 +47,7 @@ export {
 } from "./policy.ts";
 export { redactObservationText, redactUrl, type RedactOptions } from "./redact.ts";
 export { createChromiumDriver, findChromiumExecutable, CHROMIUM_CANDIDATE_PATHS } from "./chromium.ts";
+export { createNativeDriver } from "./nativeDriver.ts";
 export { createBrowserArtifactStore, type BrowserArtifactStore, BROWSER_ARTIFACT_TTL_MS, BROWSER_ARTIFACT_MAX_FILES } from "./artifacts.ts";
 export { captureBrowserContext } from "./context.ts";
 export type {
@@ -129,6 +130,9 @@ export interface BrowserCreateInput {
    * agent turn acts for (Spaces §14.6). Absent = server work. A person's
    * browser may hold their hand-entered sign-ins, so nobody else uses it. */
   ownerUserId?: string;
+  /** The owner's persistent browser storage, for engines that keep sign-ins
+   * (the native Desktop driver). Absent: storage dies with the page. */
+  profileDir?: string;
 }
 
 export interface BrowserObserveOptions {
@@ -162,6 +166,9 @@ export interface BrowserServiceOptions {
   append?: (sessionId: string, type: string, data: JsonObject) => Promise<unknown>;
   /** Controlled Browser defaults to denying private-network destinations unless listed. */
   privateNetwork?: UrlPolicyOptions["privateNetwork"];
+  /** Where a person's browser keeps its sign-ins, for an engine that keeps
+   * them (`driver.native`). Undefined: that browser keeps nothing. */
+  profileDirFor?: (owner: { projectId: string; ownerUserId: string }) => Promise<string | undefined>;
   /** Production controlled browser may permit public HTTP(S) after gateway authorization. */
   allowPublicOrigins?: boolean;
 }
@@ -566,9 +573,14 @@ export function createBrowserService(opts: BrowserServiceOptions): BrowserServic
       };
       let page: DriverPage;
       try {
+        const profileDir = input.profileDir
+          ?? (driver.native && input.ownerUserId && opts.profileDirFor
+            ? await opts.profileDirFor({ projectId: input.projectId, ownerUserId: input.ownerUserId })
+            : undefined);
         page = await driver.open({
         ...viewport,
         colorScheme: dto.colorScheme,
+        ...(profileDir ? { profileDir } : {}),
         guardNavigation: async (url) => {
           let decision = await checkUrl(url, policyOpts(id));
           if (!decision.ok && decision.code === "approval-required") {
@@ -619,7 +631,15 @@ export function createBrowserService(opts: BrowserServiceOptions): BrowserServic
         ...(input.ownerUserId ? { ownerUserId: input.ownerUserId } : {}),
       };
       s.lifetimeTimer.unref?.();
-      s.disposeDriverEvents = page.onEvent((ev: DriverPageEvent) => {
+      if (page.nativeViewId) dto.nativeViewId = page.nativeViewId;
+      // A window showing the live page decides its size, as a browser window
+      // does: the session reports what the page really has.
+      const disposeNativeShown = page.onNativeShown?.((state) => {
+        if (!state.shown || !state.width || !state.height) return;
+        s.dto.viewport = { ...s.dto.viewport, width: state.width, height: state.height };
+        s.dto.viewportMode = "responsive";
+      }) ?? (() => {});
+      const disposePageEvents = page.onEvent((ev: DriverPageEvent) => {
         // A main-frame navigation commits before goto() resolves. Sync first so
         // a viewer that reads the session on this event sees the new page,
         // not the one it is leaving (user, agent and chat-link navigations).
@@ -645,6 +665,7 @@ export function createBrowserService(opts: BrowserServiceOptions): BrowserServic
           ...(ev.level !== undefined ? { level: ev.level } : {}),
         });
       });
+      s.disposeDriverEvents = () => { disposePageEvents(); disposeNativeShown(); };
       if (page.onFrame) {
         s.disposeDriverFrames = page.onFrame((frame) => {
           if (!s.viewerVisible || !shouldEmitScreencastFrame(s.pacing)) return;

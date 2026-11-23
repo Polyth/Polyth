@@ -67,6 +67,7 @@ export const en = {
   "pluginbridge.pluginWidgetValue": "Plugin widget: {title}",
   "pluginmodules.pluginValueUiEntryMustExportA": "plugin \"{pluginId}\" UI entry must export a modules component map",
   "packages.plugins.linkHint": "An https .zip link, a GitHub, GitLab or Codeberg repository, zip:https://…, file:folder, or a local .zip path.",
+  "packages.plugins.linkedSourceNotice": "Opened from a link. Install only packages you trust: Polyth shows what a package asks for before it can run.",
   "packages.plugins.dropArchive": "Drop a package .zip",
   "packages.plugins.dropArchiveHint": "Drag a .zip here or choose a file · up to {size}",
   "packages.plugins.chooseFile": "Choose file",

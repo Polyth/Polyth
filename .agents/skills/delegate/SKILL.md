@@ -71,6 +71,7 @@ Pass `watchCaller: true` so you are woken once when the child settles. Children 
 - Parallel writers get `isolation: "isolated"` with non-overlapping write sets; commit your own overlapping edits before merging.
 - Read the actual diff and run the owning check on the **integrated** result — a green child branch is not integrated success.
 - Bring every isolated child home with `agent.merge` (`agent.resolve` for conflicts; `agent.discard` only to drop work on purpose). Never finish with unmerged isolated work.
+- A child that changes visible UI returns its `.scratch/` screenshot paths. Before its `agent.merge`, look at them and run `node scripts/pr-screenshots.mjs adopt <child-worktree>`: the child's workspace and gitignored `.scratch/` go away with the merge, and the adopted copies are what your pull request attaches ([screenshots in pull requests](../../../docs/agents/verification.md#screenshots-in-pull-requests)).
 - To keep an existing shared child apart after the fact, `session.isolate` it while it is at rest; it then owes an `agent.merge` like any isolated child.
 - Clean up a child that produced no assistant/tool/request evidence and no delivered prompt, per the canonical cleanup rule; preserve and report any child with real evidence or uncertainty.
 

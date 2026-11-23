@@ -1014,6 +1014,82 @@ test("AI repair refuses to overwrite target edits made after the receipt", async
   await assert.rejects(() => isolation.resolveWithAgent(created.id), /local changes changed|nothing was overwritten/);
   assert.equal(sent, 0);
   assert.equal(readFileSync(join(root, "README.md"), "utf8"), "newer parent work\n");
+  // The outgrown receipt no longer pins the session: the next integration
+  // can capture the current local work under the same ref.
+  assert.equal((await sessions.snapshot(created.id)).isolation?.targetRepair, undefined);
+  await assert.rejects(() => isolation.mergeBack(created.id), /overlap this integration/);
+  const recaptured = (await sessions.snapshot(created.id)).isolation!.targetRepair!;
+  assert.equal(runGit(root, "show", `${recaptured.snapshotSha}:README.md`), "newer parent work");
+});
+
+test("an unapplied AI repair the target branch outgrew is set aside instead of stranding the session", async () => {
+  const root = repo();
+  const { isolation, sessions } = harness(root);
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const source = (await sessions.snapshot(created.id)).isolation!.worktreePath;
+  writeFileSync(join(source, "README.md"), "isolated\n");
+  writeFileSync(join(root, "README.md"), "parent work\n");
+  runGit(root, "add", "README.md");
+  await assert.rejects(() => isolation.mergeBack(created.id), /overlap this integration/);
+  const backupSha = (await sessions.snapshot(created.id)).isolation!.targetRepair!.snapshotSha;
+
+  // Local target work is not a merge conflict: the preview reports it apart.
+  const fresh = await isolation.conflictPreview(created.id);
+  assert.deepEqual(fresh.files, []);
+  assert.deepEqual(fresh.recorded, []);
+  assert.deepEqual(fresh.localOverlap, ["README.md"]);
+
+  // The target branch moves on (here: a commit beside the local work).
+  writeFileSync(join(root, "other.txt"), "landed meanwhile\n");
+  runGit(root, "add", "other.txt");
+  runGit(root, "commit", "-qm", "unrelated target commit", "--", "other.txt");
+
+  const status = await isolation.getStatus(created.id);
+  assert.equal(status.suggestion?.eligible, true);
+  assert.equal(status.effectiveState, "merge-ready");
+  assert.equal(status.actions?.canMerge, true);
+  assert.equal(status.actions?.canResolve, false);
+  assert.equal((await isolation.conflictPreview(created.id)).localOverlap, undefined);
+
+  let sent = 0;
+  sessions.sendImpl = async () => { sent += 1; return {}; };
+  await assert.rejects(() => isolation.resolveWithAgent(created.id), /set aside and nothing was overwritten/);
+  assert.equal(sent, 0);
+  const setAside = (await sessions.snapshot(created.id)).isolation!;
+  assert.equal(setAside.state, "merge-ready");
+  assert.equal(setAside.targetRepair, undefined);
+  assert.equal(setAside.conflict, undefined);
+  // The backup is kept, off the session's own repair ref.
+  assert.equal(await git.readRef(root, `refs/polyth/isolation-repair/${created.id}`), null);
+  assert.equal(await git.readRef(root, `refs/polyth/isolation-repair-retired/${created.id}/${backupSha}`), backupSha);
+  assert.equal(readFileSync(join(root, "README.md"), "utf8"), "parent work\n");
+
+  // With the local work gone, integrating simply succeeds.
+  runGit(root, "reset", "-q", "--hard");
+  const merged = await isolation.mergeBack(created.id);
+  assert.equal(merged.ok, true);
+  assert.equal(readFileSync(join(root, "README.md"), "utf8"), "isolated\n");
+  assert.equal(readFileSync(join(root, "other.txt"), "utf8"), "landed meanwhile\n");
+});
+
+test("merge-back sets an outgrown unapplied AI repair aside and integrates", async () => {
+  const root = repo();
+  const { isolation, sessions } = harness(root);
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const source = (await sessions.snapshot(created.id)).isolation!.worktreePath;
+  writeFileSync(join(source, "README.md"), "isolated\n");
+  writeFileSync(join(root, "README.md"), "parent work\n");
+  runGit(root, "add", "README.md");
+  await assert.rejects(() => isolation.mergeBack(created.id), /overlap this integration/);
+  runGit(root, "reset", "-q", "--hard");
+  writeFileSync(join(root, "other.txt"), "landed meanwhile\n");
+  runGit(root, "add", "other.txt");
+  runGit(root, "commit", "-qm", "unrelated target commit");
+
+  const merged = await isolation.mergeBack(created.id);
+  assert.equal(merged.ok, true);
+  assert.equal(readFileSync(join(root, "README.md"), "utf8"), "isolated\n");
+  assert.equal((await git.status(root)).clean, true);
 });
 
 test("non-overlapping target edits to the same file are carried through merge-back", async () => {
@@ -1254,6 +1330,52 @@ test("publication recovery rejects an origin path replaced by another repository
   assert.deepEqual((await sessions.snapshot(created.id)).isolation, publishing);
   assert.equal(existsSync(source.worktreePath), true);
   assert.equal(existsSync(join(featurePath, "private-source.txt")), false);
+});
+
+test("an agent's own branch in its isolated workspace merges like the session branch and is kept", async () => {
+  const root = repo();
+  const { isolation, sessions } = harness(root);
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const wt = (await sessions.snapshot(created.id)).isolation!.worktreePath;
+  runGit(wt, "checkout", "-q", "-b", "fix/pull-request");
+  writeFileSync(join(wt, "feature.ts"), "export const n = 1;\n");
+  runGit(wt, "add", "feature.ts");
+  runGit(wt, "commit", "-qm", "feature");
+  writeFileSync(join(wt, "later.ts"), "export const m = 2;\n");
+
+  const status = await isolation.getStatus(created.id);
+  assert.notEqual(status.effectiveState, "unowned");
+  assert.equal(status.suggestion?.checkedOutBranch, "fix/pull-request");
+  assert.equal(status.actions?.canMerge, true);
+  assert.equal(status.actions?.canDiscard, true);
+
+  const merged = await isolation.mergeBack(created.id);
+  assert.equal(merged.finalized, true);
+  assert.equal(readFileSync(join(root, "feature.ts"), "utf8"), "export const n = 1;\n");
+  assert.equal(readFileSync(join(root, "later.ts"), "utf8"), "export const m = 2;\n");
+  assert.equal(existsSync(wt), false);
+  // The agent's branch is its work, kept like any branch it made; the
+  // session's own branch, wholly contained in it, is gone.
+  const branches = (await git.branches(root)).branches.map((item) => item.name);
+  assert.ok(branches.includes("fix/pull-request"));
+  assert.equal(branches.some((name) => name.startsWith(MANAGED_BRANCH_PREFIX)), false);
+});
+
+test("discarding a workspace on the agent's own branch keeps that branch", async () => {
+  const root = repo();
+  const { isolation, sessions } = harness(root);
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const wt = (await sessions.snapshot(created.id)).isolation!.worktreePath;
+  runGit(wt, "checkout", "-q", "-b", "fix/pull-request");
+  writeFileSync(join(wt, "feature.ts"), "export const n = 1;\n");
+  runGit(wt, "add", "feature.ts");
+  runGit(wt, "commit", "-qm", "feature");
+  const tip = runGit(wt, "rev-parse", "HEAD");
+
+  await isolation.discard(created.id);
+  assert.equal(existsSync(wt), false);
+  assert.equal(runGit(root, "rev-parse", "refs/heads/fix/pull-request"), tip);
+  assert.equal(existsSync(join(root, "feature.ts")), false);
 });
 
 test("status fails closed without persisting when Git ownership cannot be read", async () => {
@@ -1732,6 +1854,48 @@ test("a switched origin checkout is offered as a target and merging there retarg
   await assertBoundTo(await sessions.snapshot(created.id), root, root, "other");
 });
 
+test("a branch checked out nowhere is offered and merging there opens an ordinary checkout of it", async () => {
+  const root = repo();
+  dirs.push(`${resolve(root)}-worktrees`);
+  runGit(root, "branch", "release");
+  runGit(root, "branch", "polyth-preserved/000000000000-abcd1234");
+  const { isolation, sessions } = harness(root);
+  const other = await isolation.createIsolatedSession({ projectId: "p1" });
+  const otherPath = (await sessions.snapshot(other.id)).isolation!.worktreePath;
+  runGit(otherPath, "checkout", "-q", "-b", "fix/other-chat");
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const worktreePath = (await sessions.snapshot(created.id)).isolation!.worktreePath;
+  writeFileSync(join(worktreePath, "released.txt"), "x\n");
+  sessions.events.push(completedTurn(created.id));
+
+  const status = await isolation.getStatus(created.id);
+  assert.equal(status.actions?.canChooseTarget, true);
+  // Managed, preserved and already checked-out branches are not offered, and
+  // another chat's isolated checkout is no target even on an ordinary branch.
+  assert.deepEqual(status.branches, ["release"]);
+  assert.deepEqual(status.targets?.map(({ branch }) => branch), ["main"]);
+  await assert.rejects(
+    () => isolation.mergeBack(created.id, { target: { branch: "fix/other-chat" } }),
+    /another chat's isolated workspace/,
+  );
+  await assert.rejects(
+    () => isolation.mergeBack(created.id, { target: { branch: "polyth-preserved/000000000000-abcd1234" } }),
+    /cannot be a merge target/,
+  );
+  await assert.rejects(() => isolation.mergeBack(created.id, { target: { branch: "no-such-branch" } }), /no local branch/);
+  assert.equal(runGit(root, "worktree", "list", "--porcelain").split("\n").filter((line) => line.startsWith("worktree ")).length, 3);
+
+  const merged = await isolation.mergeBack(created.id, { target: { branch: "release" } });
+  assert.equal(merged.targetBranch, "release");
+  assert.equal(merged.finalized, true);
+  const checkout = (await git.worktrees.list(root)).find((item) => item.branch === "release");
+  assert.ok(checkout, "release has a checkout of its own");
+  assert.equal(readFileSync(join(checkout.path, "released.txt"), "utf8"), "x\n");
+  assert.equal(existsSync(join(root, "released.txt")), false);
+  assert.equal(runGit(root, "rev-parse", "release"), merged.commit);
+  await assertBoundTo(await sessions.snapshot(created.id), root, checkout.path, "release");
+});
+
 test("a retarget interrupted after its marker write keeps the checkout owned", async () => {
   const root = repo();
   runGit(root, "branch", "feature");
@@ -2121,7 +2285,7 @@ test("session deletion refuses an isolation path whose ownership changed", async
   const created = await isolation.createIsolatedSession({ projectId: "p1" });
   const current = await sessions.snapshot(created.id);
   const worktreePath = current.isolation!.worktreePath;
-  runGit(worktreePath, "branch", "-m", "user-preserved");
+  rmSync(join(await git.gitDir(worktreePath), "polyth-managed.json"));
   let releases = 0;
 
   await assert.rejects(
@@ -2131,6 +2295,24 @@ test("session deletion refuses an isolation path whose ownership changed", async
 
   assert.equal(releases, 0);
   assert.equal(existsSync(worktreePath), true, "an unowned path is never removed");
+});
+
+test("session deletion removes a checkout on a branch of its own but keeps that branch", async () => {
+  const root = repo();
+  const { isolation, sessions } = harness(root);
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const current = await sessions.snapshot(created.id);
+  const worktreePath = current.isolation!.worktreePath;
+  runGit(worktreePath, "branch", "-m", "user-preserved");
+  writeFileSync(join(worktreePath, "kept.ts"), "x\n");
+  runGit(worktreePath, "add", "kept.ts");
+  runGit(worktreePath, "commit", "-qm", "kept");
+  const tip = runGit(worktreePath, "rev-parse", "HEAD");
+
+  await isolation.cleanupForSessionDelete(current, async () => {});
+
+  assert.equal(existsSync(worktreePath), false);
+  assert.equal(runGit(root, "rev-parse", "refs/heads/user-preserved"), tip);
 });
 
 test("session deletion cleanup completes from the caller's locked projection without a governed re-read", async () => {

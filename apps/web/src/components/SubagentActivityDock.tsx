@@ -40,8 +40,9 @@ import { Icon } from "../icons.tsx";
 import { continuePausedSession, openSession, pauseSession } from "../init.ts";
 import { currentActionOf } from "../liveAction.ts";
 import { motionDurationMs } from "../motionPresence.ts";
-import { buildModel, type PendingPermission, type RenderModel } from "../reduce.ts";
+import { buildModel, type PendingPermission, type PendingQuestion, type RenderModel } from "../reduce.ts";
 import { childrenByParent } from "../sessionTree.ts";
+import { subagentTally, type SubagentTally } from "../subagentTally.ts";
 import { resolveSessionStatus, type SessionRowStatus } from "../sessionStatus.ts";
 import { toggleSessionStatusPopover, useSessionStatusPopover } from "../sessionStatusPopover.ts";
 import { friendlyError } from "../settings.ts";
@@ -78,6 +79,8 @@ type BranchAsk =
   | { kind: "permission"; request: PendingPermission; text: string; decide: boolean }
   /** A question, or a permission whose mirror is not in the parent's log. */
   | { kind: "reply"; text: string }
+  /** A single mirrored question: answered on the parent's own question card. */
+  | { kind: "question"; request: PendingQuestion; text: string; inline: boolean }
   /** Something below it waits; the row only knows that. */
   | { kind: "nested"; text: string };
 
@@ -113,6 +116,8 @@ interface BranchState {
   parent: SessionProjection | undefined;
   rows: BranchRow[];
   activity: SubagentActivity;
+  /** Done / failed children of the current episode. */
+  tally: SubagentTally;
   tone: BranchRowState;
   showAll: boolean;
   setShowAll: (value: boolean) => void;
@@ -269,6 +274,7 @@ export function SubagentBranchScope({ sessionId, model, children }: {
 
   const mirrored = model.permissions.filter((request) => request.status === "pending" && request.sourceSessionId !== undefined);
   const pending = mirrored.filter((request) => !answered.has(request.requestId));
+  const mirroredQuestions = model.questions.filter((q) => q.status === "pending" && q.sourceSessionId !== undefined);
   // A child decided here whose mirror is not resolved yet still shows the
   // shield in its projection; it waits for nobody now.
   const deciding = new Set(mirrored.filter((request) => answered.has(request.requestId)).map((request) => request.sourceSessionId));
@@ -307,6 +313,11 @@ export function SubagentBranchScope({ sessionId, model, children }: {
             // allowed blind from one line.
             decide: mayAllow && request.preview?.risk !== "high" && !request.manual,
           };
+        } else if (mirroredQuestions.some((q) => q.sourceSessionId === child.id)) {
+          const q = mirroredQuestions.find((candidate) => candidate.sourceSessionId === child.id)!;
+          const first = q.questions[0] as { question?: unknown; header?: unknown } | undefined;
+          const text = [first?.question, first?.header].find((v): v is string => typeof v === "string" && v.trim() !== "")?.trim();
+          ask = { kind: "question", request: q, text: text ?? status.label, inline: q.questions.length === 1 };
         } else if (status.kind === "needs-approval" || status.kind === "needs-reply") {
           ask = { kind: "reply", text: status.label };
         } else {
@@ -375,12 +386,14 @@ export function SubagentBranchScope({ sessionId, model, children }: {
     });
   }, []);
 
+  const tally = subagentTally(childSessions, model, (child) => subtreeActivityState(child, tree) !== undefined || child.paused !== undefined);
   const value: BranchState | null = sessionId && tone ? {
     sessionId,
     parent,
     rows,
     // The branch counts the subagents it shows: the active ones.
     activity: { ...activity, total: rows.length },
+    tally,
     tone,
     showAll,
     setShowAll,
@@ -439,6 +452,18 @@ function AskActions({ row, branch }: { row: BranchRow; branch: BranchState }) {
       </span>
     );
   }
+  if (ask.kind === "question") {
+    return (
+      <span className="subagent-branch-actions subagent-branch-actions--ask">
+        <Button
+          variant="primary"
+          size="sm"
+          aria-label={`${tr("subagentdock.answer")}: ${row.title}`}
+          onClick={() => answerQuestion(row.child.id, ask)}
+        >{tr("subagentdock.answer")}</Button>
+      </span>
+    );
+  }
   return (
     <span className="subagent-branch-actions subagent-branch-actions--ask">
       <Button
@@ -494,6 +519,18 @@ function RowActions({ row, branch }: { row: BranchRow; branch: BranchState }) {
       <span className="subagent-branch-go" aria-hidden="true"><Icon.chevronRight /></span>
     </span>
   );
+}
+
+/** A single question is answered on its mirrored card in this chat's own
+ *  timeline (the server forwards the answer to the child); several, or a card
+ *  that is not on screen, open the child instead. */
+function answerQuestion(childId: string, ask: Extract<BranchAsk, { kind: "question" }>): void {
+  const card = ask.inline
+    ? document.querySelector<HTMLElement>(`[data-msg-id="question-${CSS.escape(ask.request.requestId)}"]`)
+    : null;
+  if (!card) { openChild(childId); return; }
+  card.scrollIntoView({ block: "center", behavior: "auto" });
+  card.querySelector<HTMLElement>("button, input, textarea")?.focus({ preventScroll: true });
 }
 
 function openChild(id: string): void {
@@ -639,6 +676,22 @@ function BranchList({ branch }: { branch: BranchState }) {
   );
 }
 
+/** "2 done · 1 failed" at the end of the agent's line: quiet, current episode
+ *  only; the failed count opens the first failed subagent. */
+function BranchTally({ tally }: { tally: SubagentTally }) {
+  if (tally.done === 0 && tally.failed === 0) return null;
+  return (
+    <span className="subagent-island-tally">
+      {tally.done > 0 && <span>{tr("subagentdock.tallyDone", { count: tally.done })}</span>}
+      {tally.failed > 0 && (
+        <button type="button" className="subagent-island-tally-failed" onClick={() => tally.firstFailedId && openChild(tally.firstFailedId)}>
+          {tr("subagentdock.tallyFailed", { count: tally.failed })}
+        </button>
+      )}
+    </span>
+  );
+}
+
 /**
  * Hangs the open chat's active subagents from a status line. Outside a
  * SubagentBranchScope (the dock placed elsewhere) or with no active subagent
@@ -653,7 +706,10 @@ export function SubagentBranchIsland({ children }: { children: ReactElement }) {
       data-tone={branch.tone}
       aria-label={tr("sidebar.sessionlist.subagentsTitle")}
     >
-      <div className="subagent-island-line">{children}</div>
+      <div className="subagent-island-line">
+        {children}
+        <BranchTally tally={branch.tally} />
+      </div>
       <BranchList branch={branch} />
     </section>
   );

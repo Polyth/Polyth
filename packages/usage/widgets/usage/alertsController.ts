@@ -1,7 +1,9 @@
 // Runs the usage notifications for one browser tab. It reads only what Usage
 // already has — the Limits snapshot (`GET /api/usage/limits`, no provider
 // request), the session events the host delivers and the projections — and
-// shows passing notices through `host.notifications`. It never sends a turn.
+// shows passing notices through `host.notifications`. It never sends a turn;
+// the cache notice's keep-warm actions ask the server's keep-warm controller,
+// which sends the hidden keep-alives.
 //
 // Only a visible tab evaluates, so two open tabs normally do not both alert,
 // and the ledger keeps a reload, another tab or a later visit from repeating an
@@ -16,10 +18,12 @@
 import type { SessionEvent, SessionProjection, TokenUsage, UsageRecordedData } from "@polyth/contracts";
 import type { WebNotificationAction, WebNotificationInput } from "@polyth/web-sdk";
 import { fmtCost } from "../../../../apps/web/src/format.ts";
-import { tr } from "../../../../apps/web/src/i18n/index.ts";
+import { formatDate, tr } from "../../../../apps/web/src/i18n/index.ts";
 import { sessionCacheHealth } from "../../src/analytics/cacheHealth.ts";
 import { collectSessionObservations } from "../../src/analytics/collect.ts";
+import { KEEP_WARM_NOTICE_PERIODS, type KeepWarmStatus } from "../../src/keepWarm.ts";
 import { currentLimitSources } from "../../src/limitSources.ts";
+import { cacheDuration } from "./cacheWarmth.ts";
 import {
   addTurnUsage,
   cacheAlert,
@@ -82,6 +86,12 @@ export interface UsageAlertsDeps {
   openLimits(): void;
   openSettings(): void;
   openSession(sessionId: string): void;
+  /** The server's keep-warm controller. Without it the cache notice offers no
+   * keep-warm actions and warns even for a chat already kept warm. */
+  keepWarm?: {
+    status(sessionId: string): Promise<KeepWarmStatus>;
+    start(sessionId: string, minutes: number): Promise<KeepWarmStatus>;
+  };
   loadLimits(): Promise<UsageLimitsResponse>;
   refreshLimitSource(providerId: string): Promise<UsageLimitsResponse>;
   cachedLimits(): UsageLimitsResponse | null;
@@ -466,16 +476,29 @@ export function createUsageAlerts(deps: UsageAlertsDeps): UsageAlertsController 
       const oldest = cacheWatches.keys().next().value;
       if (oldest) unwatchCache(oldest);
     }
-    const timer = setTimeout(() => {
-      cacheWatches.delete(session.id);
+    // Still worth a notice: alerts on, the chat idle and its cache the one this watch saw, not yet lapsed.
+    const stillDue = () => {
       const alertPrefs = prefs.alerts();
       const current = deps.sessions.get(session.id);
-      if (disposed || !alertPrefs.enabled || !alertPrefs.cache || alertsPaused(alertPrefs, now()) || !visible()) return;
-      if (!current || current.status === "working") return;
+      if (disposed || !alertPrefs.enabled || !alertPrefs.cache || alertsPaused(alertPrefs, now()) || !visible()) return null;
+      if (!current || current.status === "working") return null;
       const fresh = sessionCacheHealth(collectSessionObservations(current, deps.sessions.events(current.id)));
       // A newer response restarted the cache: its own watch covers it.
-      if (!fresh || fresh.lastActivityAt !== health.lastActivityAt || fresh.ttlMs === null) return;
-      if (now() >= fresh.lastActivityAt + fresh.ttlMs) return;
+      if (!fresh || fresh.lastActivityAt !== health.lastActivityAt || fresh.ttlMs === null) return null;
+      if (now() >= fresh.lastActivityAt + fresh.ttlMs) return null;
+      return { current, fresh };
+    };
+    const fire = async () => {
+      cacheWatches.delete(session.id);
+      if (!stillDue()) return;
+      if (deps.keepWarm) {
+        // A chat already kept warm gets its keep-alive before the cache lapses.
+        const status = await deps.keepWarm.status(session.id).catch(() => null);
+        if (status?.active) return;
+      }
+      const due = stillDue();
+      if (!due) return;
+      const { current, fresh } = due;
       const notice = cacheAlert(fresh, current.title, now());
       const onScreen = deps.visibleSessionId() === current.id;
       deps.notifications.show({
@@ -483,11 +506,43 @@ export function createUsageAlerts(deps: UsageAlertsDeps): UsageAlertsController 
         kind: "hint",
         title: notice.title,
         body: notice.body,
-        ...(onScreen ? {} : { actions: [{ label: tr("usage.notiOpenChat"), run: () => deps.openSession(current.id) }] }),
+        actions: [
+          ...keepWarmActions(current.id),
+          ...(onScreen ? [] : [{ label: tr("usage.notiOpenChat"), run: () => deps.openSession(current.id) }]),
+        ],
         data: { "usage-alert": "cache" },
       });
-    }, Math.max(0, at - now()));
+    };
+    const timer = setTimeout(() => { void fire().catch(() => undefined); }, Math.max(0, at - now()));
     cacheWatches.set(session.id, { timer, lastActivityAt: health.lastActivityAt });
+  }
+
+  /** "Keep warm 15 min / 30 min / 1 hour" on the cache notice; each answers in place. */
+  function keepWarmActions(sessionId: string): WebNotificationAction[] {
+    const keepWarm = deps.keepWarm;
+    if (!keepWarm) return [];
+    const id = `cache:${sessionId}`;
+    const start = async (minutes: number) => {
+      try {
+        const status = await keepWarm.start(sessionId, minutes);
+        deps.notifications.show({
+          id,
+          kind: "success",
+          title: tr("usage.notiKeepWarmTitle", {
+            time: formatDate(status.until ?? now() + minutes * 60_000, { hour: "2-digit", minute: "2-digit" }),
+          }),
+          body: tr("usage.notiKeepWarmBody"),
+          data: { "usage-alert": "cache" },
+        });
+      } catch {
+        deps.notifications.show({ id, kind: "error", title: tr("usage.keepWarmError"), data: { "usage-alert": "cache" } });
+      }
+    };
+    return KEEP_WARM_NOTICE_PERIODS.map((minutes) => ({
+      label: tr("usage.notiKeepWarmFor", { duration: cacheDuration(minutes * 60_000) }),
+      keepOpen: true,
+      run: () => start(minutes),
+    }));
   }
 
   const onEvent = (event: SessionEvent) => {
@@ -530,6 +585,10 @@ export function createUsageAlerts(deps: UsageAlertsDeps): UsageAlertsController 
         title: sample.title,
         body: sample.body,
         ...(rule === "summary" ? { duration: ALERT_DURATION_MS[alertPrefs.turnDuration] } : {}),
+        // The sample shows the keep-warm choices the real notice offers; they only close it.
+        ...(rule === "cache" && deps.keepWarm
+          ? { actions: KEEP_WARM_NOTICE_PERIODS.map((minutes) => ({ label: tr("usage.notiKeepWarmFor", { duration: cacheDuration(minutes * 60_000) }), run: () => undefined })) }
+          : {}),
         data: { "usage-alert": rule, "usage-alert-preview": "true" },
       });
       return;

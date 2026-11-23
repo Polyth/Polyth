@@ -70,9 +70,10 @@ import {
 } from "@polyth/contracts";
 import { chatMentionCandidates, mentionedChatsBlock, sessionMentionCandidates, sessionAudience, sessionOutsiders, sessionShareApprover, sharingRootId, steerPeopleLine, turnPeopleBlock } from "./sessionSharing.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
+import { guardrailsForUser } from "./accountGuardrails.ts";
 import type { ProjectService } from "@polyth/contracts";
 import { compactionDue, compactionDueForNextModel, effectiveCompactionPreference, parseCompactionPreference, type CompactionPreference } from "@polyth/contracts/compaction-policy";
-import { extractSecureSafeEnvRefs } from "@polyth/credential-vault";
+import { extractSecureSafeEnvRefs, secureSafeEnvRef, VAULT_RUN_TOOL_ID } from "@polyth/credential-vault";
 import { redactSecrets } from "@polyth/plugins";
 import type { SessionStartStep, WorkspaceCheckpointService, WorkspaceCheckpointTurn, WorkspaceRestoreInput } from "@polyth/plugins";
 import type { RewindFilesOutcome, RewindFilesPreview, RewindFilesUnavailableReason, RewindRestorePreview, WorkspaceCheckpointData } from "@polyth/contracts";
@@ -581,6 +582,22 @@ export interface RuntimeEpochSessionService extends RestartSafetySessionService 
     tool: { name: string; owner: string },
     signal?: AbortSignal,
   ): Promise<SecretResolvedData>;
+  /** Run one bounded local command for the agent Vault tool. The person's
+   *  approval card is the consent; this only executes, and never appends a
+   *  composer-shell event (the harness's tool call is the history record). */
+  runVaultCommand(input: {
+    sessionId: string;
+    command: string;
+    purpose: string;
+    actorUserId?: string;
+    timeoutMs: number;
+  }): Promise<{
+    output: string;
+    exitCode: number | null;
+    timedOut: boolean;
+    truncated: boolean;
+    handles: readonly string[];
+  }>;
   /** Complete the durable runtime epoch after Phase 4 has protocol-confirmed a
    * fresh session-reset. This never creates or hydrates a backend session. */
   transitionRuntimeEpoch(
@@ -1595,6 +1612,15 @@ export function createSessionService(deps: {
       if (key.startsWith(`${sessionId}\0`)) toolQuietNoticed.delete(key);
     }
   };
+  /** Package tools open their approvals and Credential Vault forms under the
+   *  bare tool name, while each harness reports the running call as published
+   *  by the Polyth agent-tools MCP server (Claude/Codex
+   *  `mcp__polyth-agent-tools__…`, OpenCode `polyth-agent-tools_…`, Antigravity
+   *  `mcp_polyth-agent-tools_…`, Copilot `polyth-agent-tools-…`). Only that
+   *  server's prefix is removed: another server's same-named tool stays
+   *  distinct and cannot borrow a person's wait. */
+  const polythAgentToolName = (tool: string): string =>
+    tool.replace(/^(?:mcp__?)?polyth-agent-tools(?:__|_|-)/, "");
   type ActiveTool = { tool: string; input: JsonObject; startedAt: number };
   /** One replay step: a turn boundary ends every call still running. */
   const foldActiveTool = (active: Map<string, ActiveTool>, event: SessionEvent): void => {
@@ -1720,7 +1746,8 @@ export function createSessionService(deps: {
         && (requestId === callId
           || request.data.tool === callId
           || ((request.data.permission === "package-tool" || request.data.origin === "agent-tool")
-            && request.data.tool === tool)
+            && typeof request.data.tool === "string"
+            && polythAgentToolName(tool) === request.data.tool)
           || (request.type !== "permission/requested" && tool === "question"))));
 
   // Human response time is not tool execution time. Only this session's own
@@ -4051,6 +4078,34 @@ export function createSessionService(deps: {
     metadata?: JsonObject;
   };
 
+  /** The Vault run executes a command with a stored secret. Only a person's
+   *  own explicit allow rule may answer it: Auto-Approve, Full access,
+   *  Judgment and a delegated (subagent) approval all fail closed here. */
+  const vaultRunPermission = (request: PermissionDecisionInput): boolean =>
+    request.permission === "package-tool" && request.patterns.includes(VAULT_RUN_TOOL_ID);
+
+  /** The card names handles, not env refs, when the acting person's or the
+   *  Space's entries resolve them. Unknown refs stay as their bounded names. */
+  const vaultRunMetadata = (
+    projection: SessionProjection,
+    metadata: JsonObject,
+  ): JsonObject => {
+    const refs = Array.isArray(metadata.handles)
+      ? metadata.handles.filter((ref): ref is string => typeof ref === "string")
+      : [];
+    let entries: Array<{ handle: string }> = [];
+    try {
+      entries = deps.secureSafe?.listFor?.(projection.actor?.userId) ?? deps.secureSafe?.list() ?? [];
+    } catch {
+      entries = [];
+    }
+    return {
+      ...metadata,
+      handles: refs.map((ref) =>
+        entries.find((entry) => secureSafeEnvRef(entry.handle) === ref)?.handle ?? ref),
+    };
+  };
+
   /** The same assessment labels the preview and gates Auto-Approve, so a card
    *  always shows why Auto-Approve left it for a person. */
   const permissionRisk = async (sessionId: string, request: PermissionDecisionInput, projection?: SessionProjection) =>
@@ -4084,6 +4139,8 @@ export function createSessionService(deps: {
     );
     if (verdict === "deny") return { reply: "reject", auto: false };
     if (verdict === "allow") return { reply: "once", auto: false };
+    // Every Vault run needs a person on the card; no policy level answers it.
+    if (vaultRunPermission(request)) return null;
     // A Space with a guarded member never auto-answers, Full access included.
     if (deps.guardedSpace?.(projection?.spaceId)) return null;
     if (isSessionPlanPermission(request)) return { reply: "once", auto: true };
@@ -8051,6 +8108,74 @@ export function createSessionService(deps: {
     return closing;
   };
 
+  type BoundedShellRun = {
+    output: string;
+    exitCode: number | null;
+    timedOut: boolean;
+    truncated: boolean;
+    handles: readonly string[];
+  };
+
+  /** The one bounded local execution used by the person's composer shell and
+   *  the agent's Credential Vault run tool: resolve only the env refs the
+   *  command names, run once, and redact every known value from the captured
+   *  output. Audit stays in the resolver (handle names only). */
+  const runBoundedShellCommand = async (input: {
+    proj: SessionProjection;
+    project: NonNullable<Awaited<ReturnType<typeof projects.get>>>;
+    command: string;
+    actorUserId?: string;
+    timeoutMs?: number;
+    maxOutputBytes?: number;
+  }): Promise<BoundedShellRun> => {
+    if (!deps.shell) throw Object.assign(new Error("composer shell unavailable"), { code: "unsupported" });
+    const envRefs = extractSecureSafeEnvRefs(input.command);
+    if (envRefs.length > 0 && input.project.remote) {
+      throw Object.assign(
+        new Error("Credential Vault env refs are supported only by local bounded shell runs"),
+        { code: "unsupported" },
+      );
+    }
+    let secureEnv: Readonly<Record<string, string>> | undefined;
+    let handles: readonly string[] = [];
+    if (envRefs.length > 0) {
+      const resolver = deps.secureSafe?.resolveExecutionEnv;
+      if (!resolver) {
+        throw Object.assign(
+          new Error("Credential Vault execution resolver is unavailable"),
+          { code: "unsupported" },
+        );
+      }
+      // The person who approved/runs it resolves their own entries first;
+      // without one (legacy approval reply, system work) only the Space's.
+      const resolved = resolver.call(deps.secureSafe, {
+        projectId: input.proj.projectId,
+        envRefs,
+        ...(input.actorUserId ? { actorUserId: input.actorUserId } : {}),
+      });
+      secureEnv = resolved.env;
+      handles = resolved.handles;
+    }
+    const result = await deps.shell.run({
+      projectId: input.proj.projectId,
+      cwd: await executionCwd(input.proj, input.project),
+      cmd: input.command,
+      ...(secureEnv ? { secureEnv } : {}),
+    }, { timeoutMs: input.timeoutMs ?? 120_000, maxOutputBytes: input.maxOutputBytes ?? 64 * 1_024 });
+    const suffix = result.timedOut
+      ? "\n[command timed out]"
+      : result.truncated
+        ? "\n[earlier output truncated]"
+        : "";
+    return {
+      output: deps.secureSafe?.redact?.(`${result.output}${suffix}`) ?? `${result.output}${suffix}`,
+      exitCode: result.exitCode,
+      timedOut: result.timedOut,
+      truncated: result.truncated,
+      handles,
+    };
+  };
+
   const finishShell = async (
     sessionId: string,
     proj: SessionProjection,
@@ -8079,46 +8204,11 @@ export function createSessionService(deps: {
     const project = await projects.get(proj.projectId);
     if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
     try {
-      const envRefs = extractSecureSafeEnvRefs(command);
-      if (envRefs.length > 0 && project.remote) {
-        throw Object.assign(
-          new Error("Credential Vault env refs are supported only by local bounded shell runs"),
-          { code: "unsupported" },
-        );
-      }
-      let secureEnv: Readonly<Record<string, string>> | undefined;
-      if (envRefs.length > 0) {
-        const resolver = deps.secureSafe?.resolveExecutionEnv;
-        if (!resolver) {
-          throw Object.assign(
-            new Error("Credential Vault execution resolver is unavailable"),
-            { code: "unsupported" },
-          );
-        }
-        // The person who runs it resolves their own entries first; without
-        // one (a legacy approval reply) only the Space's resolve.
-        secureEnv = resolver.call(deps.secureSafe, {
-          projectId: proj.projectId,
-          envRefs,
-          ...(actorUserId ? { actorUserId } : {}),
-        }).env;
-      }
-      const result = await deps.shell.run({
-        projectId: proj.projectId,
-        cwd: await executionCwd(proj, project),
-        cmd: command,
-        ...(secureEnv ? { secureEnv } : {}),
-      }, { timeoutMs: 120_000, maxOutputBytes: 64 * 1_024 });
-      const suffix = result.timedOut
-        ? "\n[command timed out]"
-        : result.truncated
-          ? "\n[earlier output truncated]"
-          : "";
-      const output = deps.secureSafe?.redact?.(`${result.output}${suffix}`) ?? `${result.output}${suffix}`;
+      const result = await runBoundedShellCommand({ proj, project, command, ...(actorUserId ? { actorUserId } : {}) });
       await appendAndBroadcast(sessionId, "tool/result", {
         callId,
         tool: "shell",
-        output,
+        output: result.output,
         title: `!${command}`,
         input: { command },
         metadata: {
@@ -13429,11 +13519,16 @@ export function createSessionService(deps: {
       if (input.signal?.aborted) return "deny";
       const projection = await activeAgentToolSession(input);
       if (!projection) return "permission-required";
+      const metadata = input.metadata
+        ? input.toolId === VAULT_RUN_TOOL_ID
+          ? vaultRunMetadata(projection, input.metadata)
+          : input.metadata
+        : undefined;
       const request: PermissionDecisionInput = {
         permission: "package-tool",
         patterns: [input.toolId],
         tool: input.toolName,
-        ...(input.metadata ? { metadata: input.metadata } : {}),
+        ...(metadata ? { metadata } : {}),
       };
       let scopeOutcome: ScopeCheckOutcome | undefined;
       const automatic = await automaticPermissionResolution(projection.id, request, { onOutcome: (outcome) => { scopeOutcome = outcome; } });
@@ -13481,7 +13576,12 @@ export function createSessionService(deps: {
               ...request,
               workspaceRoots: await permissionWorkspaceRoots(await store.projection(projection.id)),
             }), scopeOutcome) as unknown as JsonObject,
-            allowedScopes: [...PERMISSION_ALLOWED_SCOPES],
+            // A Vault run is answered once, by a person: no policy level
+            // answers it, so `manual` keeps clients from hiding the card as
+            // if Auto-Approve/Full access would.
+            ...(vaultRunPermission(request)
+              ? { allowedScopes: ["once"], manual: true }
+              : { allowedScopes: [...PERMISSION_ALLOWED_SCOPES] }),
           }, { ignorable: true, producerPlugin: input.owner });
           await syncToolWatchdogsForRequests(projection.id);
           const current = await store.projection(projection.id);
@@ -13491,7 +13591,7 @@ export function createSessionService(deps: {
           deps.notify?.attention(projection.id, "permission", requestId);
           // Policy re-checked above under the session lock: no automatic answer.
           deps.notify?.permissionWaiting?.(projection.id, requestId);
-          if (projection.parentId) {
+          if (projection.parentId && input.toolId !== VAULT_RUN_TOOL_ID) {
             await appendAndBroadcast(projection.parentId, "permission/requested", {
               ...event.data,
               sourceSessionId: projection.id,
@@ -15701,6 +15801,46 @@ export function createSessionService(deps: {
       return context.service.previewRestore(context.input);
     },
 
+    async runVaultCommand(input) {
+      // Validate under the session lock, but run outside it: the command may
+      // take minutes, and Stop/abort and the turn's own events need the lock.
+      // ponytail: Stop does not kill the command; it ends at its own timeout.
+      const { proj, project, cmd } = await withSessionLock(input.sessionId, async () => {
+        if (agentBetaEnabled()) {
+          throw Object.assign(new Error(AGENT_BETA_READ_ONLY_MESSAGE), { code: "forbidden" });
+        }
+        const proj = await store.projection(input.sessionId);
+        if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+        assertIsolationExecutable(proj);
+        if (!deps.shell) throw Object.assign(new Error("composer shell unavailable"), { code: "unsupported" });
+        // A guarded account has no shell access on any boundary (the session
+        // facade refuses runShell the same way).
+        if (input.actorUserId && guardrailsForUser(input.actorUserId)) {
+          throw Object.assign(new Error("Shell commands are not available for this account"), { code: "forbidden" });
+        }
+        const cmd = input.command.trim();
+        if (!cmd || cmd.length > 8_000 || cmd.includes("\0")) {
+          throw Object.assign(new Error("shell command required (\u22648000 chars)"), { code: "invalid-input" });
+        }
+        if (extractSecureSafeEnvRefs(cmd).length === 0) {
+          throw Object.assign(new Error("no Vault env refs; run it in your own shell"), { code: "invalid-input" });
+        }
+        if (permissions.evaluate("shell", [cmd], proj.projectId, proj.id) === "deny") {
+          throw Object.assign(new Error("Command denied by the shell permission policy."), { code: "forbidden" });
+        }
+        const project = await projects.get(proj.projectId);
+        if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
+        return { proj, project, cmd };
+      });
+      return runBoundedShellCommand({
+        proj,
+        project,
+        command: cmd,
+        ...(input.actorUserId ? { actorUserId: input.actorUserId } : {}),
+        timeoutMs: input.timeoutMs,
+      });
+    },
+
     async runShell(sessionId, command, person) {
       return withSessionLock(sessionId, async () => {
         if (agentBetaEnabled()) {
@@ -17067,11 +17207,26 @@ export function createSessionService(deps: {
       };
     },
 
-    async replyPermission(sessionId, requestId, reply, scope) {
+    async replyPermission(sessionId, requestId, reply, scope, person) {
       await withSessionLock(sessionId, async () => {
         const forwarded = (await logFacts(sessionId)).openPermissions.get(requestId)?.data as
-          { sourceSessionId?: unknown } | undefined;
+          { sourceSessionId?: unknown; patterns?: unknown } | undefined;
         const target = typeof forwarded?.sourceSessionId === "string" ? forwarded.sourceSessionId : sessionId;
+        const vaultRun = Array.isArray(forwarded?.patterns)
+          && (forwarded.patterns as unknown[]).includes(VAULT_RUN_TOOL_ID);
+        if (vaultRun && target !== sessionId) {
+          throw Object.assign(new Error("a Credential Vault run stays with a person to approve"), { code: "forbidden" });
+        }
+        if (vaultRun && reply !== "reject") {
+          // The run resolves the turn person's own entries, so only that
+          // person may approve it in a shared chat. A card click never saves a
+          // standing rule for it: "always" would allow every future command.
+          const actor = (await store.projection(target))?.actor?.userId;
+          if (actor && person && person.userId !== actor) {
+            throw Object.assign(new Error("only the person whose turn it is can approve a Credential Vault run"), { code: "forbidden" });
+          }
+          reply = "once";
+        }
         await replyPermissionCore(target, requestId, reply, scope);
         if (target !== sessionId) await settleAfterLastRequest(sessionId);
       });
@@ -17107,6 +17262,11 @@ export function createSessionService(deps: {
         }
         if (requested.producerPlugin === "composer-shell") {
           throw Object.assign(new Error("a command you ran yourself cannot be delegated"), { code: "invalid-input" });
+        }
+        if (Array.isArray((requested.data as { patterns?: unknown }).patterns)
+          && ((requested.data as { patterns: unknown[] }).patterns).includes(VAULT_RUN_TOOL_ID)) {
+          // A Vault run is approved by a person, never by a subagent's parent.
+          throw Object.assign(new Error("a Credential Vault run stays with a person to approve"), { code: "forbidden" });
         }
         const record = childFacts.delegatedPermissions.get(requestId)
           ?? { delegateSessionId: child.parentId, operationId: randomUUID() };
@@ -17149,6 +17309,11 @@ export function createSessionService(deps: {
           throw Object.assign(new Error("only the parent agent can answer a subagent's delegated request"), { code: "forbidden" });
         }
         const facts = await logFacts(sessionId);
+        const delegated = facts.openPermissions.get(requestId);
+        if (delegated && Array.isArray((delegated.data as { patterns?: unknown }).patterns)
+          && ((delegated.data as { patterns: unknown[] }).patterns).includes(VAULT_RUN_TOOL_ID)) {
+          throw Object.assign(new Error("a Credential Vault run stays with a person to approve"), { code: "forbidden" });
+        }
         // Without a person's delegation the request stays theirs to approve.
         // A resolved request falls through to the ordinary conflict answer.
         if (facts.openPermissions.has(requestId)

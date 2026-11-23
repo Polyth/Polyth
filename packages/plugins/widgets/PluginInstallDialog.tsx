@@ -25,19 +25,24 @@ const hasFiles = (event: DragEvent<HTMLElement>) => [...(event.dataTransfer?.typ
  *  submissions are blocked while one is in flight. */
 export function PluginInstallDialog({
   initialFile = null,
+  initialSource = null,
   onClose,
   onInstallSource,
   onInstallArchive,
 }: {
   /** A ZIP the person already dropped on the page. */
   initialFile?: File | null;
+  /** A source from an install link: opens on the link tab, prefilled, with a
+   *  note that the link came from elsewhere. */
+  initialSource?: string | null;
   onClose: () => void;
   onInstallSource: (source: string, options: SourceInstallOptions) => Promise<unknown>;
   onInstallArchive: (archive: string, filename: string) => Promise<unknown>;
 }) {
   const tabsId = useId();
-  const [mode, setMode] = useState<InstallMode>("file");
-  const [source, setSource] = useState("");
+  const [mode, setMode] = useState<InstallMode>(initialSource ? "link" : "file");
+  const [source, setSource] = useState(initialSource ?? "");
+  const fromLink = Boolean(initialSource) && source === initialSource;
   const [file, setFile] = useState<File | null>(initialFile);
   const [dragging, setDragging] = useState(false);
   const [localError, setLocalError] = useState("");
@@ -182,6 +187,9 @@ export function PluginInstallDialog({
             </label>
           ) : (
             <div className="plugin-install-link">
+              {fromLink && (
+                <p className="plugin-install-linked" role="note">{tr("packages.plugins.linkedSourceNotice")}</p>
+              )}
               <FormField label={tr("packages.plugins.linkLabel")} hint={tr("packages.plugins.linkHint")}>
                 {(field) => (
                   <TextInput

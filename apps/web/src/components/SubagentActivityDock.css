@@ -47,6 +47,24 @@
   display: flex;
   align-items: center;
 }
+/* The quiet tally of the episode, at the end of the agent's line. */
+.subagent-island-tally {
+  flex: none;
+  display: inline-flex;
+  gap: 0.6em;
+  padding-inline-end: var(--composer-stack-end);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  white-space: nowrap;
+}
+.subagent-island-tally-failed {
+  all: unset;
+  cursor: pointer;
+  color: var(--red);
+}
+.subagent-island-tally-failed:hover { text-decoration: underline; }
+.subagent-island-tally-failed:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: var(--radius-control); }
+
 .subagent-island .subagent-island-line > .agent-status-dock {
   flex: 1 1 auto;
   width: auto;
@@ -101,7 +119,7 @@
   min-width: 0;
   display: flex;
   align-items: baseline;
-  gap: var(--space-2);
+  gap: 0.6em;
   overflow: hidden;
   color: var(--muted);
   white-space: nowrap;
@@ -227,7 +245,7 @@
   min-height: max(40px, var(--hit-min));
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: 0.6em;
   margin-inline: calc(var(--branch-inset) - var(--space-2)) var(--space-1);
   padding-inline: var(--space-2) 0;
   border-radius: var(--radius-control);

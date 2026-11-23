@@ -78,7 +78,7 @@ test("without errors only the same install re-sending the same words dedups", as
   const base = fixture();
   t.after(base.cleanup);
   const github = new FakeGitHub();
-  const relay = relayFor(base, github, { limits: { perSourceMinute: 100, perInstallDay: 100 } });
+  const relay = relayFor(base, github);
   const install = "c".repeat(32);
 
   assert.deepEqual(await send(relay, report({ install, text: "The window froze" })), { result: "created", issue: 100 });

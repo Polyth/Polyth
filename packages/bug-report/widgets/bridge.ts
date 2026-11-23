@@ -1,6 +1,8 @@
-// The desktop shell's report API (`window.polythDesktop.bugReport`, defined
-// in apps/desktop/src/types.ts). A local structural type: the package never
-// imports the host's bridge module, and an older shell simply lacks it.
+// Where a report goes: the desktop shell's report API
+// (`window.polythDesktop.bugReport`, defined in apps/desktop/src/types.ts) or,
+// for a page opened in a browser, this package's server routes
+// (serverBridge.ts). A local structural type: the package never imports the
+// host's bridge module, and an older shell simply lacks it.
 import type {
   BugReportApp,
   BugReportError,
@@ -20,8 +22,9 @@ export interface ReportCapture {
   screenshot: { dataUrl: string; width: number; height: number; bytes: number } | null;
   base: { app: BugReportApp; install: string; settings: Record<string, BugReportSettingValue> };
   needsPassword: boolean;
-  /** Absent from older shells: the generic hint is shown then. */
-  passwordStorage?: "keychain" | "session";
+  /** Absent from older shells: the generic hint is shown then. "server": the
+   *  Polyth server keeps it for everyone who reports from it. */
+  passwordStorage?: "keychain" | "session" | "server";
 }
 
 export interface ReportDraft {
@@ -43,6 +46,10 @@ export interface ReportBridge {
   state(): Promise<ReportState>;
   capture(): Promise<ReportCapture>;
   send(draft: ReportDraft): Promise<ReportOutcome>;
+  /** A pasted or attached image becomes the capture's screenshot (encoded as
+   *  it will be sent), or null when it cannot be read. Absent on the desktop
+   *  shell, which always captures the window itself. */
+  attach?(captureId: string, file: Blob): Promise<ReportCapture["screenshot"]>;
 }
 
 const isFunction = (value: unknown): value is (...args: never[]) => unknown => typeof value === "function";

@@ -6,7 +6,12 @@ import type {
   SecureSafeService,
   ToolExecutionContext,
 } from "@polyth/contracts";
-import { secureSafeEnvRef } from "./index.ts";
+import {
+  extractSecureSafeEnvRefs,
+  secureSafeEnvRef,
+  VAULT_RUN_TOOL_ID,
+  type VaultRunService,
+} from "./index.ts";
 
 /** List only the metadata visible to the active Space/project: the acting
  *  person's own entries (which resolve first) and the Space's. */
@@ -66,6 +71,104 @@ export function createCredentialVaultListAgentTool(
       return {
         output: JSON.stringify({ handles }),
         metadata: { count: handles.length },
+      };
+    },
+  };
+}
+
+const runText = (value: unknown, field: string, max: number): string => {
+  if (typeof value !== "string" || !value.trim()) {
+    throw Object.assign(new Error(`${field} is required`), { code: "invalid-input" });
+  }
+  const text = value.trim();
+  if (text.length > max) {
+    throw Object.assign(new Error(`${field} must be at most ${max} characters`), { code: "invalid-input" });
+  }
+  return text;
+};
+
+/** Run one bounded local command with Credential Vault refs resolved for the
+ *  person who approved its card. Every call asks a person; the agent gets only
+ *  the redacted output, exit status and flags, never a value or the env. */
+export function createCredentialVaultRunAgentTool(
+  resolveRunner: () => VaultRunService | undefined,
+): AgentCapabilityContribution {
+  return {
+    descriptor: {
+      id: VAULT_RUN_TOOL_ID,
+      kind: "tool",
+      owner: "secure-safe",
+      scope: "project",
+      revision: "1",
+      name: "polyth_credential_vault_run",
+      description: "Run one bounded local command with stored Credential Vault secrets resolved by the server. The command must reference a POLYTH_SAFE_* env ref. Every call asks the person for approval, and only the redacted output, exit code and timeout/truncation flags come back to you; you never receive the value or the environment.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["command", "purpose"],
+        properties: {
+          command: {
+            type: "string",
+            description: "Bounded local command (≤8000 chars) that contains at least one POLYTH_SAFE_* Credential Vault env ref.",
+          },
+          purpose: { type: "string", description: "One line on what this run is for; shown on the approval card." },
+          timeoutSeconds: {
+            type: "integer",
+            minimum: 10,
+            maximum: 600,
+            description: "Command timeout in seconds (default 120).",
+          },
+        },
+      },
+      // Credentialed and mutating: never auto-approved by trust alone.
+      trust: "credentialed",
+      mutating: true,
+    },
+    async execute(input: JsonObject, context: ToolExecutionContext) {
+      const command = runText(input.command, "command", 8_000);
+      if (command.includes("\0")) {
+        throw Object.assign(new Error("command must not contain NUL"), { code: "invalid-input" });
+      }
+      const purpose = runText(input.purpose, "purpose", 200);
+      const timeoutSeconds = input.timeoutSeconds === undefined ? 120 : input.timeoutSeconds;
+      if (typeof timeoutSeconds !== "number" || !Number.isInteger(timeoutSeconds)
+        || timeoutSeconds < 10 || timeoutSeconds > 600) {
+        throw Object.assign(new Error("timeoutSeconds must be an integer between 10 and 600"), { code: "invalid-input" });
+      }
+      if (extractSecureSafeEnvRefs(command).length === 0) {
+        throw Object.assign(new Error("no Vault env refs; run it in your own shell"), { code: "invalid-input" });
+      }
+      if (!context.sessionId) {
+        throw Object.assign(new Error("A canonical Polyth session is required for a Credential Vault run"), {
+          code: "unavailable",
+        });
+      }
+      const runner = resolveRunner();
+      if (!runner) {
+        throw Object.assign(new Error("The Credential Vault run boundary is unavailable for this call"), {
+          code: "unavailable",
+        });
+      }
+      const result = await runner.run({
+        sessionId: context.sessionId,
+        projectId: context.projectId,
+        command,
+        purpose,
+        ...(context.actorUserId ? { actorUserId: context.actorUserId } : {}),
+        timeoutMs: timeoutSeconds * 1_000,
+      });
+      return {
+        output: JSON.stringify({
+          output: result.output,
+          exitCode: result.exitCode,
+          timedOut: result.timedOut,
+          truncated: result.truncated,
+        }),
+        metadata: {
+          exitCode: result.exitCode,
+          timedOut: result.timedOut,
+          truncated: result.truncated,
+        },
       };
     },
   };
@@ -146,7 +249,7 @@ export function createCredentialVaultRequestAgentTool(): AgentCapabilityContribu
             status: "saved",
             handle: result.handle ?? handle,
             envRef,
-            next: `Use $${envRef} in a local composer-shell command (! / runShell); for Browser sign-in use polyth_browser_fill_from_vault. You never receive the value.`,
+            next: `Use $${envRef} with polyth_credential_vault_run (the person approves the card); for Browser sign-in use polyth_browser_fill_from_vault. You never receive the value.`,
           }
         : {
             status: "dismissed",

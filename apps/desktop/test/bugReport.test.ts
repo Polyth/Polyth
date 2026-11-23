@@ -19,12 +19,16 @@ const NIGHTLY = "1.2.357-nightly";
 // A JPEG-looking buffer (FF D8 FF E0 …).
 const jpegOf = (bytes: number) => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(Math.max(0, bytes - 4), 1)]);
 
-test("only nightly standard builds report, to an https or loopback relay", () => {
+test("only nightly builds report, to an https or loopback relay", () => {
   const env = {};
   assert.equal(bugReportOrigin({ version: NIGHTLY, edition: "standard", env }), "https://reports.polyth.app");
   assert.equal(bugReportOrigin({ version: "1.2.357", edition: "standard", env }), null);
   assert.equal(bugReportOrigin({ version: "1.2.357", edition: "standard", env: { POLYTH_BUG_REPORT: "1" } }), "https://reports.polyth.app");
-  assert.equal(bugReportOrigin({ version: NIGHTLY, edition: "workstation", env }), null);
+  // A nightly workstation build reports; a stable one never does, not even with the dev switch.
+  assert.equal(bugReportOrigin({ version: NIGHTLY, edition: "workstation", env }), "https://reports.polyth.app");
+  assert.equal(bugReportOrigin({ version: NIGHTLY, edition: "workstation", env: { POLYTH_BUG_REPORT_ORIGIN: "off" } }), null);
+  assert.equal(bugReportOrigin({ version: "1.2.357", edition: "workstation", env }), null);
+  assert.equal(bugReportOrigin({ version: "1.2.357", edition: "workstation", env: { POLYTH_BUG_REPORT: "1" } }), null);
   assert.equal(bugReportOrigin({ version: NIGHTLY, edition: "standard", env: { POLYTH_BUG_REPORT_ORIGIN: "off" } }), null);
   assert.equal(bugReportOrigin({ version: NIGHTLY, edition: "standard", env: { POLYTH_BUG_REPORT_ORIGIN: "http://reports.example" } }), null);
   assert.equal(bugReportOrigin({ version: NIGHTLY, edition: "standard", env: { POLYTH_BUG_REPORT_ORIGIN: "https://u:p@reports.example" } }), null);
@@ -195,19 +199,14 @@ test("without OS encryption the password lasts only this run", async (t) => {
   assert.equal(next.state().needsPassword, true);
 });
 
-test("one report a minute and ten a day leave this computer", async (t) => {
+test("this computer does not cap how many reports it sends", async (t) => {
   const h = harness(t);
-  for (let index = 0; index < 10; index += 1) {
+  for (let index = 0; index < 15; index += 1) {
     h.reply(200, { result: "created", issue: index + 1 });
-    assert.equal((await h.client.send(draft({ password: "p" }))).result, "created", `report ${index}`);
-    assert.deepEqual(await h.client.send(draft()), { result: "rate" }, "a second one within the minute");
-    h.advance(61_000);
+    assert.equal((await h.client.send(draft({ password: "p" }))).result, "created", `report ${index}, same minute`);
   }
-  assert.deepEqual(await h.client.send(draft()), { result: "rate" }, "the eleventh of the day");
-  assert.equal(h.calls.length, 10);
-  h.advance(24 * 60 * 60_000);
-  h.reply(200, { result: "created", issue: 11 });
-  assert.equal((await h.client.send(draft())).result, "created");
+  assert.equal(h.calls.length, 15);
+  assert.ok(!readFileSync(join(h.dir, "bug-report.json"), "utf8").includes("sent"), "no send log is kept");
 });
 
 test("an unreachable or busy relay keeps the report and sends it later", async (t) => {

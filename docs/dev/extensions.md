@@ -426,6 +426,26 @@ The currently supported sources are:
 - `file:<relative>` against the configured trusted plugin directory, or an explicitly enabled `path:`/`dir:` development path.
 - An archive uploaded through the Settings page (base64 in the JSON body, ≤ 16 MB, zip signature verified before extraction).
 
+### Install links
+
+The package catalog (packages.polyth.app, built from the `polyth-site`
+repository) opens a person's own Polyth with one of two links. Both only
+navigate; neither installs or enables anything by itself:
+
+- `/?settings=packages&package=<id>` opens Settings → Packages, clears its
+  filters, and brings that built-in package's row into view with its switch
+  focused. An id this Polyth does not have shows a notice instead.
+- `/?settings=packages&install=<source>` opens Add package on the link tab,
+  with the source prefilled and a note that it came from a link. The person
+  presses Install; review of grants and connections follows as usual.
+
+`packagesLinkFromSearch` (`apps/web/src/router.ts`) bounds the values: the id is
+a lowercase slug, and the source is at most 2048 characters with no whitespace
+or control characters. The installer still decides which sources it accepts.
+Boot strips both parameters from the address. The page hands the source to its
+`settings.packages.content` contributions as `packagesInstallRequest`, and the
+library clears it with `clearPackagesInstallRequest` once its dialog is open.
+
 The installer and managed library are on the `packages` Settings page alongside
 built-in package controls. Repository installation and updates first fetch the
 public HTTPS archive. Only HTTP 404 permits authenticated acquisition; other

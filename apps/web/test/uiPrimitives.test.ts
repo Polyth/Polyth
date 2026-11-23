@@ -203,6 +203,26 @@ test("Button: variants, sizes, busy state", async () => {
   assert.match(styles, /body\[data-hide-borders="true"\] \.ui-btn \.ui-spinner \{[\s\S]*?border-top-color: currentColor !important;/);
 });
 
+test("TextInput: every password field carries a show/hide eye", async () => {
+  const plain = await mount(createElement(ui.TextInput, { type: "text" }));
+  try {
+    assert.equal(plain.container.querySelector("button"), null, "only password fields get the eye");
+  } finally { await plain.unmount(); }
+
+  const view = await mount(createElement(ui.TextInput, { type: "password", defaultValue: "secret" }));
+  try {
+    const input = view.container.querySelector("input")!;
+    const eye = view.container.querySelector("button")!;
+    assert.equal(input.getAttribute("type"), "password");
+    assert.equal(eye.getAttribute("type"), "button", "the eye never submits the form");
+    await act(async () => { eye.click(); });
+    assert.equal(view.container.querySelector("input"), input, "revealing keeps the same input (focus, caret)");
+    assert.equal(input.getAttribute("type"), "text");
+    await act(async () => { eye.click(); });
+    assert.equal(input.getAttribute("type"), "password");
+  } finally { await view.unmount(); }
+});
+
 test("AgentStatusDock is a passive live status unless a details action exists", async () => {
   const passive = await mount(createElement(ui.AgentStatusDock, {
     icon: createElement("span", null, "A"),

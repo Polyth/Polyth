@@ -211,7 +211,9 @@ starts Node or OpenCode. See `docs/mobile/architecture.md`.
     restart. A `firing` record re-sends with the same client operation id.
   - `pid` and `file` waits hold the chat's runtime through
     `SessionService.holdRuntime`, because the process lives in that runtime's
-    process tree.
+    process tree. A package reaches it only through the governed host: the
+    hold is applied after the session is admitted to its own Space, holds and
+    releases keep their call order, and a refused session gets no hold.
   - An always-on instruction tells every agent never to end a turn promising
     to wait without one.
 
@@ -488,7 +490,8 @@ starts Node or OpenCode. See `docs/mobile/architecture.md`.
   proof as a delete: an execution not confirmed as ended, a user outside the tree,
   an unproven owner or a merge that has not settled (`merging`, `publishing`,
   `corrupt`, which hold the tree) keep the checkout, and the next pass retries.
-  Left on purpose: `refs/polyth/isolation-repair/*` (they back up the target
+  Left on purpose: `refs/polyth/isolation-repair/*` and
+  `refs/polyth/isolation-repair-retired/*` (they back up the target
   checkout's work, not the session's), a checkout whose branch was renamed (how a
   preserved checkout leaves Polyth), and files the providers own, such as Claude
   Code's `~/.claude/projects/<cwd>` transcripts, which that CLI prunes itself. The
@@ -518,8 +521,11 @@ starts Node or OpenCode. See `docs/mobile/architecture.md`.
   endpoint URL is a bearer capability) and a bounded, redacted response body;
   other rejections (403 VAPID mismatch, 413, 429) keep the subscription. `createPushNotifier` bridges the session service's
   notify seam to templated payloads (same allowlisted bounded semantics as the
-  in-page notifier): subagent completions attribute to the parent session,
-  aborted turns stay silent, and auto-accepted permissions never reach the seam.
+  in-page notifier): subagent completions attribute to the parent session
+  but stay silent while the parent will act on them itself (its own status is
+  not idle, or it holds a `wake` watch on that child for that outcome, read
+  from `watches(source)` the instant the turn stops); an idle, unwatched parent
+  still gets the push so the person knows. Aborted turns stay silent, and auto-accepted permissions never reach the seam.
   The body says what happened when the durable events show it — a plain-text
   excerpt of the turn's final reply, the error, the first question, or the
   requested command/path first (`Run: npm test`) — read from bounded keyset
@@ -1189,7 +1195,9 @@ and user aborts remain recoverable.
   parent chat) and asks first when the level it would get is Full access,
   read from the server's `AutoAcceptDto.inherited`. `reduce.ts` marks
   policy-resolved permissions `auto` so the timeline can label them, and
-  legacy composer-shell confirmations `manual`. It tags tool items produced by
+  legacy composer-shell confirmations `manual`, as well as any request whose
+  event carries `manual: true` (the server stamps it on a Credential Vault run,
+  which no policy level answers, so Full access never hides its card). It tags tool items produced by
   `composer-shell` (`ToolMsg.composerShell`); `groupActivity` keeps them out of
   agent activity blocks like a prompt, and the timeline renders them as an open
   terminal row (`ComposerShellRow`) with the command, output and exit state. While auto-accept is on, the store
@@ -1245,7 +1253,7 @@ agent is deciding and keeps Deny/Allow. `push.ts` registers the root-scope servi
 `composer.trailing`, the headless `composer.suggestion` (next-prompt sources),
 `contextRail.tabs`, `settings.pages`,
 `commandPalette.commands`, `workspace.main.tabs`, `workspace.right.tabs`,
-`session.timeline.before/after`, `session.message.actions`,
+`session.timeline.before/after`, `session.message.actions`, `session.code.actions`,
 `sidebar.project.actions`, `sidebar.session.actions`, `sidebar.sessions.bulk.actions`, `sidebar.project.leading`,
 the widget placement slots (`workspace.header/left/main/right/bottom/floating`,
 `widget.catalog`, `widget.settings`), and the fine-grained toolbar areas

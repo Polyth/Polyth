@@ -3,12 +3,15 @@
 // any number of teams from one list.
 //
 // Only the server on screen has a page. This page lists its own projects to
-// the desktop main process, which keeps the last list per server and hands the
-// other servers' lists back (apps/desktop/src/serverZones.ts). The rows are a
-// snapshot from each server's last visit; a click moves the window there.
-// Outside the desktop app, and in shells older than zones, nothing installs.
+// the app around it, which keeps the last list per server and hands the other
+// servers' lists back: the desktop main process (apps/desktop/src/
+// serverZones.ts) or, in the phone apps, the Link plugin (crates/
+// polyth-link-client/src/zones.rs). The rows are a snapshot from each server's
+// last visit; a click moves the window there. In a browser tab, and in shells
+// older than zones, nothing installs.
 import { useSyncExternalStore } from "react";
 import { rootProjects, type Project } from "@polyth/contracts";
+import { mobileServerZones } from "@polyth/mobile/runtime";
 import type {
   DesktopServerInfo,
   DesktopServerZone,
@@ -60,7 +63,18 @@ export interface ServerZonesStore {
   dispose(): void;
 }
 
-type ZonesApi = Pick<PolythDesktopApi, "getInfo"> & { servers?: PolythDesktopApi["servers"] };
+/** What the store asks of the app around the page: Polyth Desktop's bridge
+ *  as it is, or the phone apps' Link plugin behind the same names. */
+export interface ZonesApi {
+  getInfo(): Promise<{ server?: DesktopServerInfo }>;
+  servers?: {
+    zones?(): Promise<DesktopServerZonesView>;
+    reportZoneProjects?(projects: DesktopServerZoneProject[]): Promise<unknown>;
+    allowZones?(): Promise<DesktopServerZonesView>;
+    openZone?(key: string, projectId?: string): Promise<unknown>;
+    foldZone?(key: string, folded: boolean): Promise<DesktopServerZonesView>;
+  };
+}
 
 export function createServerZonesStore(
   api: ZonesApi,
@@ -154,13 +168,33 @@ export function createServerZonesStore(
 let installed: ServerZonesStore | null = null;
 const idle = (): (() => void) => () => {};
 
+type RegistrySource = { get: () => ProjectRegistryState; subscribe: (listener: () => void) => () => void };
+
 /** Called once by the desktop integration, on a server's own page only. */
-export function installServerZones(
-  api: PolythDesktopApi,
-  registry: { get: () => ProjectRegistryState; subscribe: (listener: () => void) => () => void },
-): () => void {
+export function installServerZones(api: PolythDesktopApi, registry: RegistrySource): () => void {
   // The server list has no navigator; a shell with no `surface` predates zones.
   if ((api.surface !== "local" && api.surface !== "remote") || !api.servers?.zones) return idle();
+  return install(api, registry);
+}
+
+/** The phone apps: the page of a paired server, through the Link plugin. */
+export function installMobileServerZones(registry: RegistrySource): () => void {
+  const native = mobileServerZones();
+  if (!native) return idle();
+  return install({
+    // The Navigator's title already names the server on screen.
+    getInfo: async () => ({}),
+    servers: {
+      zones: native.zones,
+      reportZoneProjects: native.report,
+      allowZones: native.allow,
+      openZone: native.open,
+      foldZone: native.fold,
+    },
+  }, registry);
+}
+
+function install(api: ZonesApi, registry: RegistrySource): () => void {
   const store = createServerZonesStore(api);
   installed = store;
   store.noteRegistry(registry.get());

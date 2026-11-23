@@ -2294,6 +2294,16 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   padding-inline: var(--nav-indent-session, var(--nav-glyph-inset)) var(--nav-glyph-inset);
 }
 .repository-filter::-webkit-scrollbar { display: none; }
+/* Desktop rhythm (the phone has its own in MobileNavigator.css): the chips
+   label the list below, so they sit nearer the header block above than the
+   scroller's padding would put them and keep air before the first chat row.
+   A caption (Pinned, a date) below brings its own air. */
+.sidebar .side-scroll > .sidebar-focused-sessions:first-child > .session-org > .repository-filter:first-child {
+  margin-block-start: calc(var(--space-1) * -1.5);
+}
+.sidebar .repository-filter + .session-project-sessions > .session-date-group:first-child > :first-child:not(.session-date-divider) {
+  margin-block-start: var(--space-1);
+}
 .repository-filter-chip {
   flex: 0 0 auto;
   display: inline-flex;
@@ -5226,14 +5236,6 @@ body[data-hide-borders="true"] .lock-card .ui-checkbox input:checked + .ui-check
 }
 /* The recovery heading takes focus only so assistive tech announces it. */
 .setup-step > h1:focus { outline: none; }
-.setup-password { position: relative; }
-.setup-password .ui-input { padding-inline-end: calc(var(--control-h-sm) + var(--space-2)); }
-.setup-password .ui-icon-btn {
-  position: absolute;
-  inset-block: 0;
-  inset-inline-end: 4px;
-  margin-block: auto;
-}
 .setup-signin {
   margin: var(--space-3) 0 0;
   color: var(--muted);
@@ -6928,6 +6930,79 @@ button.queue-fold:focus-visible { outline: 2px solid var(--focus-ring); outline-
 }
 .md-quote > :first-child { margin-block-start: 0; }
 .md-quote > :last-child { margin-block-end: 0; }
+/* The composer draws a draft's quotes like `.md-quote` (quoteMirror.ts): a
+   layer under the field repeats its text line for line, and while the draft
+   holds a quote the field's glyphs go transparent (the caret keeps its ink).
+   Lines keep the field's exact line boxes; the band reaches a little into the
+   field's inline padding. */
+.quote-mirror {
+  position: absolute;
+  margin: 0;
+  border: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.quote-mirror[hidden] { display: none; }
+/* No z-index: the layer precedes the field, so DOM order stacks the field on
+   top without lifting it over the composer's other positioned children. */
+textarea[data-quote-mirror] {
+  position: relative;
+  -webkit-text-fill-color: transparent;
+}
+textarea[data-quote-mirror]::selection {
+  -webkit-text-fill-color: transparent;
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+/* Bar and fill are pseudo-elements under the line's text (the line is its own
+   stacking context), so a run's ends can reach into a blank line beside the
+   quote: that line then reads as the band's padding plus the gap before the
+   reply, the way `.md-quote` sits in the transcript. */
+.quote-mirror-quote {
+  --md-quote-bar: color-mix(in srgb, var(--accent) 78%, transparent);
+  --md-quote-fill: color-mix(in srgb, var(--text) 5%, transparent);
+  --quote-mirror-reach: var(--space-2);
+  --quote-mirror-start: 0px;
+  --quote-mirror-end: 0px;
+  position: relative;
+  z-index: 0;
+  margin-inline: calc(var(--space-2) * -1);
+  padding-inline: var(--space-2);
+  color: var(--text-dim);
+}
+.quote-mirror-quote:is([data-reach="start"], [data-reach="both"]) { --quote-mirror-start: var(--quote-mirror-reach); }
+.quote-mirror-quote:is([data-reach="end"], [data-reach="both"]) { --quote-mirror-end: var(--quote-mirror-reach); }
+.quote-mirror-quote::before,
+.quote-mirror-quote::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset-block: calc(var(--quote-mirror-start) * -1) calc(var(--quote-mirror-end) * -1);
+}
+.quote-mirror-quote::after {
+  inset-inline: 0;
+  background: var(--md-quote-fill);
+}
+.quote-mirror-quote::before {
+  z-index: 0;
+  inset-inline-start: 0;
+  inline-size: 3px;
+  background: var(--md-quote-bar);
+}
+.quote-mirror-quote:is([data-edge="first"], [data-edge="only"])::after {
+  border-start-start-radius: calc(3px * var(--corner-radius-scale));
+  border-start-end-radius: var(--radius-control);
+}
+.quote-mirror-quote:is([data-edge="last"], [data-edge="only"])::after {
+  border-end-start-radius: calc(3px * var(--corner-radius-scale));
+  border-end-end-radius: var(--radius-control);
+}
+.quote-mirror-quote:is([data-edge="first"], [data-edge="only"])::before { border-start-start-radius: calc(1.5px * var(--corner-radius-scale)); }
+.quote-mirror-quote:is([data-edge="last"], [data-edge="only"])::before { border-end-start-radius: calc(1.5px * var(--corner-radius-scale)); }
+/* The `>` marks keep their width so every later glyph stays aligned. */
+.quote-mirror-mark { color: transparent; }
 .md-hr {
   border: 0;
   block-size: 1px;
@@ -8442,6 +8517,7 @@ body[data-glass="clear"] .prompt-nav-panel { --prompt-nav-panel-blur: 22px; }
 .settings-result-hint { color: var(--muted); font-size: var(--font-meta); }
 .settings-result-page { color: var(--accent); font-size: var(--font-meta); text-transform: uppercase; letter-spacing: 0.04em; }
 .settings-row.flash,
+.settings-list-row.flash,
 .settings-section.flash { animation: settings-flash 1.6s ease-out; }
 @keyframes settings-flash {
   0%, 40% { background: rgba(var(--accent-rgb), 0.18); }
@@ -18502,6 +18578,16 @@ body .ui-btn .ui-spinner {
 .ui-textarea:disabled { opacity: 0.55; }
 .ui-input--invalid,
 .ui-textarea.ui-input--invalid { border-color: color-mix(in srgb, var(--red) 55%, var(--border)); }
+/* Password field: the eye button sits inside the field's end edge. */
+.ui-input-reveal { position: relative; display: block; width: 100%; min-width: 0; }
+.ui-input-reveal > .ui-input { padding-inline-end: calc(var(--control-h-sm) + var(--space-2)); }
+.ui-input-reveal > .ui-input::-ms-reveal { display: none; }
+.ui-input-reveal > .ui-icon-btn {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 4px;
+  margin-block: auto;
+}
 /* Field well: one field around an icon, a bare input and trailing controls.
    The owner styles the well; platform styles and Looks paint it as their
    field, never the input inside it (docs/dev/styles.md, "Field wells"). A
@@ -20377,6 +20463,14 @@ body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="s
   :is(.mobile-float-navigation, .mobile-float-actions) > .ui-icon-btn,
   .mobile-session-title-island .mobile-session-selector {
     transition: color var(--motion-normal) var(--motion-ease);
+  }
+  /* No platform press plate either. WebKit's tap highlight (the global accent
+     wash on every button) is painted over the button box plus its 44px
+     `::after` touch box with the button's corner, not the island's: a plate
+     that missed the pill's outline on ✎/⧉/☰/⋯ and Back. */
+  :is(.mobile-float-navigation, .mobile-float-actions) :is(button, [role="button"]),
+  .mobile-session-title-island .mobile-session-selector {
+    -webkit-tap-highlight-color: transparent;
   }
   :is(.mobile-float-navigation, .mobile-float-actions) > .ui-icon-btn:is(:active, [aria-expanded="true"]):not(:disabled),
   .mobile-session-title-island .mobile-session-selector:active:where(:not(:disabled, [data-conversation])) {

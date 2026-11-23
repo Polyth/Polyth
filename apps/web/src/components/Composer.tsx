@@ -90,10 +90,12 @@ import {
   COMPOSER_SUBMIT,
   type ComposerSubmitRequest,
   COMPOSER_INSERT,
+  COMPOSER_QUOTE,
   COMPOSER_REPLACE,
   COMPOSER_COMPARE_REPLACE,
   drainComposerReplacement,
   drainInserts,
+  joinComposerInsert,
   requestComposerReplace,
   requestComposerCompareReplace,
   type ComposerCompareReplace,
@@ -2476,8 +2478,22 @@ function ComposerBody({
       if (!h) return;
       draftRevisionRef.current += 1;
       const visible = sessionIdRef.current === null ? stripRecoveryContextBlocks(detail) : detail;
-      const cur = h.getText();
-      h.replaceText(cur ? `${cur} ${visible}` : visible);
+      h.replaceText(joinComposerInsert(h.getText(), visible));
+    };
+    // "Quote in reply" from a transcript selection: the quote lands as its
+    // own block, then the field takes focus with the caret on the line under
+    // it (replaceText puts the caret at the end). This runs inside the
+    // selection surface's click, so a phone raises its keyboard. A composer
+    // that is not on screen still takes the text, as with any insert, but
+    // leaves focus where it is.
+    const quote = (detail: string) => {
+      insert(detail);
+      const h = inputRef.current;
+      const el = h?.element();
+      if (!h || !el || el.getClientRects().length === 0) return;
+      followDictationRef.current = true;
+      h.focus();
+      el.scrollTop = el.scrollHeight;
     };
     // Live dictation writes straight into the draft so spoken words are visible
     // as they land. The transcript is cumulative, so each update rewrites the
@@ -2543,7 +2559,14 @@ function ComposerBody({
       e.preventDefault();
       replaceText(detail.text);
     };
+    const quoteHandler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (typeof detail !== "string") return;
+      e.preventDefault();
+      quote(detail);
+    };
     window.addEventListener(COMPOSER_INSERT, handler);
+    window.addEventListener(COMPOSER_QUOTE, quoteHandler);
     window.addEventListener(COMPOSER_REPLACE, replace);
     window.addEventListener(COMPOSER_COMPARE_REPLACE, compareReplace);
     // A hands-free voice turn sends the draft exactly like the Send control.
@@ -2560,6 +2583,7 @@ function ComposerBody({
     return () => {
       window.removeEventListener(COMPOSER_SUBMIT, submit);
       window.removeEventListener(COMPOSER_INSERT, handler);
+      window.removeEventListener(COMPOSER_QUOTE, quoteHandler);
       window.removeEventListener(COMPOSER_REPLACE, replace);
       window.removeEventListener(COMPOSER_COMPARE_REPLACE, compareReplace);
       window.removeEventListener(COMPOSER_DICTATION, dictation);
@@ -3590,6 +3614,8 @@ function ComposerBody({
   const primaryActivationRef = useRef<{ touch: boolean; keyboard: boolean; staleTouchClick: boolean; ownedTouch: boolean; down: { x: number; y: number } | null }>(
     { touch: false, keyboard: false, staleTouchClick: false, ownedTouch: false, down: null },
   );
+  // The identifier of the touch Send owns, so that only its end settles it.
+  const ownedTouchIdRef = useRef<number | null>(null);
   // A touch that begins on Send belongs to the page. iOS gives a tap within
   // 66px of a word the keyboard is still composing to its text interaction,
   // even when the tap lands outside the field (WebKit `isNearMarkedText`), and
@@ -3603,7 +3629,10 @@ function ComposerBody({
     const own = (event: TouchEvent) => {
       if (!event.cancelable) return;
       event.preventDefault();
-      if (event.type === "touchstart") primaryActivationRef.current.ownedTouch = true;
+      if (event.type === "touchstart") {
+        primaryActivationRef.current.ownedTouch = true;
+        ownedTouchIdRef.current = event.changedTouches[0]?.identifier ?? null;
+      }
     };
     button.addEventListener("touchstart", own, { passive: false });
     button.addEventListener("touchend", own, { passive: false });
@@ -3705,8 +3734,107 @@ function ComposerBody({
     if (!input?.isComposing()) return;
     const target = event.target as Element | null;
     if (target?.closest?.(FOCUS_TAKING_ENTRY)) return;
+    // Send owns its whole touch (`ownPrimaryTouch`) and ends the composition
+    // itself when it sends. Ending it here moves focus off the field and back
+    // in the middle of the touch, and on iOS that restarts the keyboard's input
+    // session under a finger that is still down. On the iPhone app a Send was
+    // seen left on its check with the message unsent, which only a press whose
+    // end never reached Send can do; this mid-touch refocus is the suspect.
+    if (target?.closest?.(".send")) return;
     input.finishComposition();
   }, []);
+  // A touch press on Send ends where the page hears it end. Send's own
+  // pointerup is the usual place; when that never comes, the end of the same
+  // touch anywhere on the page settles it instead (pointerup/pointercancel
+  // for its pointer, touchend/touchcancel), a task later so that Send's own
+  // handler, when it does run, always goes first. Without this a lost lift
+  // left the press armed: Send stuck on its check, the message neither sent
+  // nor kept, until another key did it.
+  const touchEndWatchRef = useRef<(() => void) | null>(null);
+  const stopTouchEndWatch = useCallback(() => {
+    const stop = touchEndWatchRef.current;
+    touchEndWatchRef.current = null;
+    stop?.();
+  }, []);
+  useEffect(() => stopTouchEndWatch, [stopTouchEndWatch]);
+  const finishTouchPress = useCallback((control: HTMLButtonElement, timeStamp: number, x: number, y: number) => {
+    stopTouchEndWatch();
+    const held = settleHold(timeStamp);
+    const activation = primaryActivationRef.current;
+    const down = activation.down;
+    activation.down = null;
+    // No click follows a touch the page took for itself, so nothing is left
+    // to consume: forget it, or it would swallow the next pointerless click.
+    if (activation.ownedTouch) {
+      activation.ownedTouch = false;
+      activation.touch = false;
+    }
+    if (held) return;
+    // A finger that slid off Send before lifting changed its mind. A touch is
+    // captured by the button it began on, so the event's target cannot tell;
+    // the page is hit-tested where the finger lifted instead.
+    const under = control.ownerDocument.elementFromPoint?.(x, y) ?? null;
+    if (releaseSends({
+      down,
+      up: { x, y },
+      rect: control.getBoundingClientRect(),
+      overControl: under ? control.contains(under) : null,
+    })) sendRef.current?.();
+  }, [stopTouchEndWatch, settleHold]);
+  const cancelTouchPress = useCallback((timeStamp: number) => {
+    stopTouchEndWatch();
+    abandonHold(timeStamp);
+    primaryActivationRef.current.touch = false;
+    primaryActivationRef.current.ownedTouch = false;
+    primaryActivationRef.current.down = null;
+  }, [stopTouchEndWatch, abandonHold]);
+  const touchPressEndsRef = useRef({ finish: finishTouchPress, cancel: cancelTouchPress });
+  touchPressEndsRef.current = { finish: finishTouchPress, cancel: cancelTouchPress };
+  const watchTouchEnd = useCallback((control: HTMLButtonElement, pointerId: number) => {
+    stopTouchEndWatch();
+    ownedTouchIdRef.current = null;
+    const win = control.ownerDocument.defaultView;
+    if (!win) return;
+    let timer: number | null = null;
+    const later = (run: () => void) => {
+      if (timer !== null) return;
+      timer = win.setTimeout(() => {
+        timer = null;
+        if (touchEndWatchRef.current === stop) run();
+      }, 0);
+    };
+    const onPointer = (event: globalThis.PointerEvent) => {
+      if (event.pointerId !== pointerId) return;
+      const { type, timeStamp, clientX, clientY } = event;
+      later(() => type === "pointerup"
+        ? touchPressEndsRef.current.finish(control, timeStamp, clientX, clientY)
+        : touchPressEndsRef.current.cancel(timeStamp));
+    };
+    const onTouch = (event: TouchEvent) => {
+      const id = ownedTouchIdRef.current;
+      const touch = Array.from(event.changedTouches).find((item) => id === null || item.identifier === id);
+      if (!touch) return;
+      const { type, timeStamp } = event;
+      const { clientX, clientY } = touch;
+      later(() => type === "touchend"
+        ? touchPressEndsRef.current.finish(control, timeStamp, clientX, clientY)
+        : touchPressEndsRef.current.cancel(timeStamp));
+    };
+    const options = { capture: true, passive: true } as const;
+    const stop = () => {
+      if (timer !== null) win.clearTimeout(timer);
+      timer = null;
+      win.removeEventListener("pointerup", onPointer, options);
+      win.removeEventListener("pointercancel", onPointer, options);
+      win.removeEventListener("touchend", onTouch, options);
+      win.removeEventListener("touchcancel", onTouch, options);
+    };
+    win.addEventListener("pointerup", onPointer, options);
+    win.addEventListener("pointercancel", onPointer, options);
+    win.addEventListener("touchend", onTouch, options);
+    win.addEventListener("touchcancel", onTouch, options);
+    touchEndWatchRef.current = stop;
+  }, [stopTouchEndWatch]);
   const onPrimaryPointerDown = useCallback((event: PointerEvent<HTMLButtonElement>) => {
     const activation = primaryActivationRef.current;
     if (event.pointerType !== "touch" && event.pointerType !== "pen") {
@@ -3724,33 +3852,16 @@ function ComposerBody({
     activation.staleTouchClick = false;
     activation.down = { x: event.clientX, y: event.clientY };
     event.preventDefault();
+    watchTouchEnd(event.currentTarget, event.pointerId);
     startHold(event);
-  }, [startHold]);
+  }, [startHold, watchTouchEnd]);
   const onPrimaryPointerUp = useCallback((event: PointerEvent<HTMLButtonElement>) => {
-    const held = settleHold(event.timeStamp);
-    if (event.pointerType !== "touch" && event.pointerType !== "pen") return;
-    const activation = primaryActivationRef.current;
-    const down = activation.down;
-    activation.down = null;
-    // No click follows a touch the page took for itself, so nothing is left
-    // to consume: forget it, or it would swallow the next pointerless click.
-    if (activation.ownedTouch) {
-      activation.ownedTouch = false;
-      activation.touch = false;
+    if (event.pointerType === "touch" || event.pointerType === "pen") {
+      finishTouchPress(event.currentTarget, event.timeStamp, event.clientX, event.clientY);
+      return;
     }
-    if (held) return;
-    // A finger that slid off Send before lifting changed its mind. A touch is
-    // captured by the button it began on, so the event's target cannot tell;
-    // the page is hit-tested where the finger lifted instead.
-    const control = event.currentTarget;
-    const under = control.ownerDocument.elementFromPoint?.(event.clientX, event.clientY) ?? null;
-    if (releaseSends({
-      down,
-      up: { x: event.clientX, y: event.clientY },
-      rect: control.getBoundingClientRect(),
-      overControl: under ? control.contains(under) : null,
-    })) send();
-  }, [settleHold, send]);
+    settleHold(event.timeStamp);
+  }, [finishTouchPress, settleHold]);
   // Leaving ends a hold; the browser taking the touch for a pan ends the
   // gesture. No click follows a cancelled touch, so nothing is left to
   // consume: forget it, or it would swallow the next pointerless click
@@ -3759,11 +3870,8 @@ function ComposerBody({
     abandonHold(event.timeStamp);
   }, [abandonHold]);
   const onPrimaryPointerCancel = useCallback((event: PointerEvent<HTMLButtonElement>) => {
-    abandonHold(event.timeStamp);
-    primaryActivationRef.current.touch = false;
-    primaryActivationRef.current.ownedTouch = false;
-    primaryActivationRef.current.down = null;
-  }, [abandonHold]);
+    cancelTouchPress(event.timeStamp);
+  }, [cancelTouchPress]);
   const onPrimaryKeyDown = useCallback((event: KeyboardEvent<HTMLButtonElement>) => {
     if (event.key !== "Enter" && event.key !== " ") return;
     const activation = primaryActivationRef.current;
@@ -5321,6 +5429,7 @@ function ComposerBody({
           initialText={text}
           rows={3}
           className="composer-editor"
+          quoteMirror
           ariaLabel={tr("composer.message")}
           placeholder={activeMode
             ? modeText(activeMode.placeholder) || activeModeLabel

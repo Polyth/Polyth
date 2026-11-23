@@ -8,7 +8,8 @@ import { applyRemoteClientSettings, initSettingsSync } from "./settingsSync.ts";
 import { loadSpaces } from "./spaces.ts";
 import { displaySessionTitle, isPlaceholderTitle, modelToMarkdown } from "./format.ts";
 import { friendlyError } from "./settings.ts";
-import { formatAppUrl, parseAppUrl, settingsPageFromSearch } from "./router.ts";
+import { formatAppUrl, PACKAGES_LINK_PARAMS, packagesLinkFromSearch, parseAppUrl, settingsPageFromSearch } from "./router.ts";
+import { requestPackageInstall } from "./packages/installRequest.ts";
 import * as store from "./store.ts";
 import { successFeedback, warningFeedback } from "./haptics.ts";
 import { resolveActiveProjectId, shouldRefreshProjectsOnSyncOpen } from "./projectRegistry.ts";
@@ -847,6 +848,7 @@ export function subscribeSyncScope(client: SyncScopeClient): () => void {
 
 /** When init() started its boot reads (performance.now() clock). */
 let bootReadsAt: number | null = null;
+let bootSettingsSearch: string | null = null;
 let firstScreen: Promise<void> | null = null;
 
 /** Settles once the first screen is restored — from the remembered navigator
@@ -859,6 +861,9 @@ export function firstScreenRestored(): Promise<void> {
 
 export function init(): Promise<void> {
   bootReadsAt ??= typeof performance !== "undefined" ? performance.now() : Date.now();
+  // Boot canonicalizes the address bar (syncUrl) before the plugin bridge is
+  // ready, which drops the query; keep a `?settings=` link for startSync.
+  bootSettingsSearch ??= typeof location !== "undefined" ? location.search : "";
   // A capability dragged out of a window (a Custom actions tile) turns the
   // icon rails into drop targets; the host owns that bridge, not the package.
   if (!externalCapabilityDragInstalled) {
@@ -1443,11 +1448,20 @@ function startSync(): void {
     window.dispatchEvent(new Event(CONNECTION_RESTORED_EVENT));
   });
   void initPluginBridge(sync).then(() => {
-    const page = settingsPageFromSearch(location.search);
+    // One-shot: the link captured at boot, read once even if sync restarts.
+    const bootSearch = bootSettingsSearch ?? location.search;
+    bootSettingsSearch = "";
+    const page = settingsPageFromSearch(bootSearch);
     if (!page) return;
-    store.openSettingsPage(page);
+    // Install links from the package catalog: land on one package's row, or
+    // open Add package with the source prefilled. Neither installs anything.
+    const packagesLink = packagesLinkFromSearch(bootSearch);
+    if (packagesLink?.installSource) requestPackageInstall(packagesLink.installSource);
+    if (packagesLink?.packageId) store.openSettingsPage("packages", { itemId: packagesLink.packageId });
+    else store.openSettingsPage(page);
     const url = new URL(location.href);
     url.searchParams.delete("settings");
+    for (const param of PACKAGES_LINK_PARAMS) url.searchParams.delete(param);
     const search = url.searchParams.toString();
     history.replaceState(history.state, "", `${url.pathname}${search ? `?${search}` : ""}${url.hash}`);
   }).catch((error) => {

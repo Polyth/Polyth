@@ -39,6 +39,7 @@ export const zhCN: SecureSafeMessages = {
   "settings.securesafepage.orProjectConfiguration": "或项目配置。",
   "settings.securesafepage.purpose": "目的",
   "settings.securesafepage.saveFailed": "无法保存此凭据。该值已清除；请重新输入后重试。",
+  "settings.securesafepage.handleTaken": "名为“{handle}”的凭据已存在。请在列表中编辑它以替换其值。",
   "settings.securesafepage.savedHandles": "已保存的凭据",
   "settings.securesafepage.savedHandlesCount": "已保存 {count} 个",
   "settings.securesafepage.secureSafe": "Credential Vault",

@@ -12,6 +12,8 @@ export const KEEP_ALIVE_PROMPT =
 
 /** Periods the context card offers, in minutes. */
 export const KEEP_WARM_PERIODS = [30, 60, 120, 240, 480] as const;
+/** Shorter periods the cache-expiry notice offers, in minutes. */
+export const KEEP_WARM_NOTICE_PERIODS = [15, 30, 60] as const;
 export const KEEP_WARM_MAX_MINUTES = 480;
 
 const SECOND = 1_000;

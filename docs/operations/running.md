@@ -131,6 +131,44 @@ with the command for this install: `polyth update`, Homebrew's
 `brew upgrade polyth && brew services restart polyth`, `docker compose pull` in a
 container, or the checkout's `git pull` sequence.
 
+### Automatic updates (npm and Homebrew)
+
+Settings → About → **Update automatically** lets the instance owner have an npm or
+Homebrew install update itself (off by default; other accounts see the state, and
+release-archive, Docker and checkout servers do not show the row). The server owns
+it (`packages/server/src/serverAutoUpdate.ts`, drivers in
+`apps/server/src/selfUpdate.ts`, setting in `<data>/server-auto-update.json`):
+
+1. Every six hours it asks for the newest release of its channel: npm reads
+   `npm view polyth@latest` (`@nightly` for a nightly install), Homebrew reads the
+   latest stable GitHub release of `POLYTH_UPDATE_REPOSITORY` (default
+   `Polyth/Polyth`), because the tap carries stable releases only.
+2. A newer release waits until no chat is `working`, `reconciling` or `waiting` on
+   its person (a question unanswered for 12 hours no longer holds it).
+3. The package manager installs it: `npm install [--global | --prefix <p>]
+   polyth@<version>` with the npm beside the server's Node, or `brew update` +
+   `brew upgrade polyth` with the Homebrew the keg lives in and
+   `HOMEBREW_NO_INSTALL_CLEANUP=1`, so the running server's keg stays until the
+   restart. The new tree must answer `polyth --version` with the new version; an npm
+   install that does not is put back to the running version.
+4. Once no chat is working again, the server writes the attempt down, shuts down
+   gracefully and exits with code 75. Its service starts the new release:
+   systemd `Restart=on-failure` (`polyth service install`, or `brew services` on
+   Linux) or launchd keep-alive on an unsuccessful exit (`polyth service install`,
+   `brew services`). The next boot reports *Updated from X to Y*, or that it came
+   back on the old version.
+
+The row is disabled with the reason when nothing would restart the server: the
+process must run in Polyth's own systemd unit (`polyth.service`,
+`homebrew.polyth.service`, read from `/proc/self/cgroup`) or launchd job
+(`app.polyth.server`, `homebrew.mxcl.polyth`); set `POLYTH_SUPERVISED=1` for another
+supervisor that restarts on a non-zero exit. It is also disabled when the server's
+account cannot write the npm install, or when it runs as root under Homebrew. A
+failed release is retried after a day; a Homebrew tap that does not offer the new
+version yet is asked again at the next check. There is no automatic rollback after
+the restart: a release that does not start needs `polyth update --version <old>`
+(npm) or the previous keg (Homebrew), and the pre-migration copies below.
+
 Every server, however it was installed, copies a canonical database before it
 migrates its schema: the control plane (`control-plane/control.sqlite`) and the
 session history (`sessions.db`) go to

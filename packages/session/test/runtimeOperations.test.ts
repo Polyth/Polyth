@@ -755,6 +755,104 @@ test("owned epoch fences executing operations so a late confirm cannot land", as
   }
 });
 
+test("a harness switch requeues a reserved prompt that never reached the old runtime; a lost runtime holds it", async () => {
+  const { dir, path } = fresh("polyth-epoch-switch-requeue-");
+  const store = createStore(path);
+  try {
+    // The prompt is the chat's first, reserved by the queue while the old
+    // harness was still spawning; the person switched harness before it was
+    // claimed. Same setup twice: once as that switch, once as a lost runtime.
+    const replaceWithReservedPrompt = async (sessionId: string, switched: boolean) => {
+      const oldBinding = epochBinding(`${sessionId}-old`, "owned:old");
+      await store.upsertProjection({
+        ...epochProjection(sessionId, oldBinding),
+        status: "idle",
+        ...(switched ? {
+          harnessTransition: {
+            id: `${sessionId}-switch`,
+            selection: { mode: "pinned" as const, harnessId: "copilot" },
+            targetHarnessId: "copilot",
+            timing: "stop-now" as const,
+            phase: "released" as const,
+            released: {
+              authorityId: oldBinding.authorityId,
+              generation: oldBinding.generation,
+              backendSessionId: oldBinding.backendSessionId,
+            },
+          },
+        } : {}),
+      });
+      const queued = await store.enqueue(sessionId, "first prompt", "queue");
+      const reserved = await store.reserveQueueHead({ sessionId });
+      assert.equal(reserved.kind, "reserved");
+      const reset = await store.prepareOperation({
+        sessionId,
+        mutationKind: "session-reset",
+        intentEvent: { type: "session/reset-intended", data: { reason: "runtime-epoch" }, ignorable: true },
+      });
+      await store.claimOperation(reset.operation.operationId);
+      await store.settleOperation(reset.operation.operationId, { kind: "confirmed", receipt: `${sessionId}-new` });
+      const result = await store.transitionRuntimeEpoch({
+        sessionId,
+        expectedBinding: oldBinding,
+        replacementBinding: {
+          ...oldBinding,
+          backendSessionId: `${sessionId}-new`,
+          authorityId: "owned:new",
+          generation: 1,
+          epoch: 1,
+          historyBaseline: "empty",
+        },
+        resetOperationId: reset.operation.operationId,
+        reason: switched ? "harness-switch" : "owned runtime was lost",
+        fence: switched
+          ? {
+            mode: "session-released",
+            authorityId: oldBinding.authorityId,
+            generation: oldBinding.generation,
+            backendSessionId: oldBinding.backendSessionId,
+          }
+          : { mode: "destroyed", authorityId: oldBinding.authorityId, generation: oldBinding.generation },
+        ...(switched ? {
+          harness: {
+            transitionId: `${sessionId}-switch`,
+            selection: { mode: "pinned" as const, harnessId: "copilot" },
+            leg: {
+              id: `${sessionId}-switch`,
+              harnessId: "copilot",
+              nativeSessionId: `${sessionId}-new`,
+              startedAt: 1,
+              canonicalThroughSeq: 0,
+              bootstrap: "continuity" as const,
+            },
+          },
+        } : {}),
+      });
+      if (reserved.kind !== "reserved") throw new Error("unreachable");
+      assert.equal((await store.operation(reserved.reservation.operation.operationId))?.state, "rejected");
+      return { queued: queued.item, result };
+    };
+
+    const switched = await replaceWithReservedPrompt("session-switched", true);
+    assert.deepEqual(switched.result.heldQueueItems, []);
+    assert.deepEqual(
+      (await store.queueList("session-switched")).map((item) => ({ id: item.id, held: item.heldForReview ?? false })),
+      [{ id: switched.queued.id, held: false }],
+    );
+    // The same row, unreserved, is what the next dispatch sends.
+    const next = await store.reserveQueueHead({ sessionId: "session-switched" });
+    assert.equal(next.kind, "reserved");
+    if (next.kind === "reserved") assert.equal(next.reservation.queueItem.id, switched.queued.id);
+
+    const lost = await replaceWithReservedPrompt("session-lost", false);
+    assert.deepEqual(lost.result.heldQueueItems.map((item) => item.id), [lost.queued.id]);
+    assert.equal((await store.reserveQueueHead({ sessionId: "session-lost" })).kind, "held");
+  } finally {
+    await store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("borrowed epoch interrupts executing operations without fencing them", async () => {
   const { dir, path } = fresh("polyth-epoch-executing-borrowed-");
   const store = createStore(path);

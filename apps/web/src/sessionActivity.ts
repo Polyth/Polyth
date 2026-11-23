@@ -38,6 +38,25 @@ function pinnedHarnessId(selection: HarnessSelection | undefined): string | unde
 }
 
 /**
+ * The server admitted the newest prompt (its `user/message` retired the local
+ * echo) but the runtime has not started its turn yet. The projection reads
+ * `working` only from `turn/started`, so on a cold harness this gap lasted 15 s
+ * and more with no activity at all: no echo, no dock, an idle-looking chat.
+ * Only an idle or reconciling session qualifies; a failed, unknown or
+ * epoch-pending one owes no turn, and a started or ended turn answers it.
+ */
+export function admittedPromptAwaitingTurn(
+  newest: { kind: string; time: number } | undefined,
+  turn: { startedAt?: number; stoppedAt?: number } | null | undefined,
+  status: SessionProjection["status"] | undefined,
+): boolean {
+  if (newest?.kind !== "user") return false;
+  if (status !== "idle" && status !== "reconciling") return false;
+  return (turn?.startedAt ?? Number.NEGATIVE_INFINITY) < newest.time
+    && (turn?.stoppedAt ?? Number.NEGATIVE_INFINITY) < newest.time;
+}
+
+/**
  * Resolve the one activity owner for a session.
  *
  * The event reducer and projection stream are intentionally separate. During a
@@ -50,6 +69,8 @@ export function resolveSessionActivity(
   session: SessionActivitySession | null | undefined,
   turn: SessionActivityTurn | null | undefined,
   pendingSends: readonly PendingActivitySend[],
+  /** See `admittedPromptAwaitingTurn`. */
+  admittedAwaitingTurn = false,
 ): SessionActivityState {
   const pendingSend = pendingSends.at(-1);
   const transition = session?.harnessTransition;
@@ -66,7 +87,7 @@ export function resolveSessionActivity(
     && sameIdentityOrUnknown(session?.resolvedHarnessId, turn.harnessId);
   const projectionWorking = session?.status === "working" && !runtimeHandoff;
   const working = projectionWorking || currentTurnWorking;
-  const awaitingTurn = pendingSend !== undefined && !working;
+  const awaitingTurn = (pendingSend !== undefined || admittedAwaitingTurn) && !working;
 
   const pendingHarnessId = pinnedHarnessId(pendingSend?.harness);
   const pendingSwitchTarget = pendingSend && transition ? transition.targetHarnessId : undefined;

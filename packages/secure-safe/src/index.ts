@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWriteSync, collapseRepeatedPackageNamespace, isPackageOpaqueKey, legacyOpaqueOwner, packageOpaqueKey } from "@polyth/plugins";
 import type {
+  JsonObject,
   SecureSafeCreateInput,
   SecureSafeCredentialUseRequest,
   SecureSafeEntryDto,
@@ -111,6 +112,36 @@ function load<T>(path: string, fallback: T): T {
   }
 }
 
+/** Canonical capability id: auto-approval, Judgment and delegated answers
+ *  must all leave this one to a person. */
+export const VAULT_RUN_TOOL_ID = "secure-safe.credential-vault-run";
+/** Host service implementing the bounded run for this tool. */
+export const VAULT_RUN_SERVICE = "credential-vault.run";
+
+export interface VaultRunRequest {
+  sessionId: string;
+  projectId: string;
+  command: string;
+  purpose: string;
+  actorUserId?: string;
+  timeoutMs: number;
+}
+
+export interface VaultRunResult {
+  /** Already redacted by the server for every known value. */
+  output: string;
+  exitCode: number | null;
+  timedOut: boolean;
+  truncated: boolean;
+  /** Handle names only, for audit metadata. */
+  handles: readonly string[];
+}
+
+/** Server-owned bounded execution with resolved Vault env refs. */
+export interface VaultRunService {
+  run(input: VaultRunRequest): Promise<VaultRunResult>;
+}
+
 export const secureSafeEnvRef = (handle: string): string =>
   `POLYTH_SAFE_${handle.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`;
 
@@ -123,6 +154,14 @@ export function extractSecureSafeEnvRefs(text: string): string[] {
   const pattern = /\b(POLYTH_SAFE_[A-Z][A-Z0-9_]*)\b/g;
   for (const match of text.matchAll(pattern)) refs.add(match[1]!);
   return [...refs];
+}
+
+/** Bounded argument summary for the approval card: the command, the refs it
+ *  names (never a value), the stated purpose and the working directory. */
+export function vaultRunApprovalMetadata(input: JsonObject, cwd: string): JsonObject {
+  const command = typeof input.command === "string" ? input.command.trim() : "";
+  const purpose = typeof input.purpose === "string" ? input.purpose.trim() : "";
+  return { command, handles: extractSecureSafeEnvRefs(command), purpose, cwd };
 }
 
 const requiredText = (value: unknown, field: string, max: number): string => {

@@ -8,7 +8,7 @@ import {
   overlaySessionProjection, setSidebarOpen, setUiError, startFreshSession, workspaceProjectId,
 } from "../store.ts";
 import {
-  refreshSessions, removeProject, renameProject,
+  openSession, refreshSessions, removeProject, renameProject,
 } from "../init.ts";
 import { friendlyError } from "../settings.ts";
 import { useSessionSummaryPages } from "../useSessionSummaryPages.ts";
@@ -97,11 +97,22 @@ import { ARRANGE_LIST_LIFT_MS, useArrange, type ArrangeItem } from "../workspace
 /** Grace period an untouched peek keeps after the pointer leaves the sidebar. */
 export const PEEK_LEAVE_MS = 5000;
 
-/**
- * Clicking the focused project icon collapses the sessions column. Waiting out
- * the double-click window lets its second click cancel that collapse instead.
- */
-export const RAIL_COLLAPSE_CLICK_DELAY_MS = 300;
+/** A project's latest top-level chat, the one a second rail click opens. */
+export function latestProjectSession(
+  sessions: readonly SessionProjection[],
+  projects: readonly Project[],
+  projectId: string,
+): SessionProjection | null {
+  let latest: SessionProjection | null = null;
+  let latestAt = -Infinity;
+  for (const session of sessions) {
+    if (session.status === "archived" || (session.parentId && !session.forkOf)) continue;
+    if (rootProjectId(projects, session.projectId) !== projectId) continue;
+    const at = session.lastTurnAt ?? session.createdAt;
+    if (at > latestAt) { latest = session; latestAt = at; }
+  }
+  return latest;
+}
 
 /**
  * Narrowest sessions column that still fits the full "Search sessions…"
@@ -560,19 +571,12 @@ export default function Sidebar() {
   // both the rail and the peek.
   const [peek, setPeek] = useState<{ projectId: string; pinned: boolean } | null>(null);
   const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const railCollapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stopLeave = () => {
     if (leaveTimer.current !== null) clearTimeout(leaveTimer.current);
     leaveTimer.current = null;
   };
-  // A press anywhere in the sidebar cancels this pending collapse: it must not
-  // fire under the person's next action (see the nav pointerdown capture).
-  const cancelRailCollapse = () => {
-    if (railCollapseTimer.current !== null) clearTimeout(railCollapseTimer.current);
-    railCollapseTimer.current = null;
-  };
   const closePeek = () => { stopLeave(); setPeek(null); };
-  useEffect(() => () => { stopLeave(); cancelRailCollapse(); }, []);
+  useEffect(() => () => { stopLeave(); }, []);
   useEffect(() => { if (!railCollapsed) closePeek(); }, [railCollapsed]);
   // The sessions column leaves (or returns) with the navigator's width
   // transition: for its length the column keeps its own width in flow and the
@@ -623,9 +627,23 @@ export default function Sidebar() {
   useEscape(peek !== null && railCollapsed, closePeek);
   // The peek previews the hovered project without stealing the active one.
   const focusProjectId = soloPersonal?.id ?? (railCollapsed ? peek?.projectId : null) ?? railProjectId;
+  /** A second click on the browsed project enters it: the New chat page moves
+   *  to that project, and a chat open in another project gives way to this
+   *  project's latest chat (its New chat when it has none). Inside the
+   *  project already, it does nothing; it never collapses the navigator. */
+  const enterRailProject = (projectId: string) => {
+    if (projectId === activeProjectId) return;
+    const target = projects.find((candidate) => candidate.id === projectId);
+    if (!target) return;
+    const latest = activeSessionId === null ? null : latestProjectSession(sessions, registry.projects, projectId);
+    if (latest) {
+      void openSession(latest.id);
+      return;
+    }
+    startFreshSession(target.id, newChatOptions(target));
+  };
   const toggleRailProject = (projectId: string, clickCount: number) => {
-    cancelRailCollapse();
-    // A double-click's second click only cancels the pending collapse.
+    // A double-click's second click does not act again.
     if (clickCount > 1) return;
     if (railCollapsed) {
       stopLeave();
@@ -634,15 +652,8 @@ export default function Sidebar() {
         ? null
         : { projectId, pinned: true });
     } else if (railProjectId === projectId) {
-      if (!compact && !projectsOnly) {
-        const collapse = () => setSidebarLayout({ collapsed: true, restoreViewMode: "rail" });
-        // Keyboard activation (detail 0) cannot be part of a double-click.
-        if (clickCount === 0) collapse();
-        else railCollapseTimer.current = setTimeout(() => {
-          railCollapseTimer.current = null;
-          collapse();
-        }, RAIL_COLLAPSE_CLICK_DELAY_MS);
-      } else setRailProjectId(null);
+      if (!compact && !projectsOnly) enterRailProject(projectId);
+      else setRailProjectId(null);
     } else {
       setRailProjectId(projectId);
     }
@@ -1366,7 +1377,6 @@ export default function Sidebar() {
         onTransitionEnd={(event) => {
           if (event.target === event.currentTarget && event.propertyName === "width") setRailMotion(null);
         }}
-        onPointerDownCapture={() => cancelRailCollapse()}
         {...(railCollapsed ? { onPointerEnter: stopLeave, onPointerLeave: schedulePeekClose } : {})}
         {...sessionMoveDrops.handlers}
       >
@@ -1402,7 +1412,6 @@ export default function Sidebar() {
                   : tr("contextrail.collapseValue", { value: railSessionsLabel })}
                 aria-expanded={!collapsed}
                 onClick={() => {
-                  cancelRailCollapse();
                   closePeek();
                   if (collapsed && !layout.collapsed) {
                     releaseAutomaticSidebarRail();

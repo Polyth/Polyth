@@ -23,6 +23,7 @@ register("./tsxHooks.mjs", import.meta.url);
 const { buildModel } = await import("../src/reduce.ts");
 const { startingQueuePrompts, sessionStartingFromServer } = await import("../src/sessionStart.ts");
 const { retiredPendingSends, upsertSession, upsertSessions, getState } = await import("../src/store.ts");
+const queueList = await import("../src/components/QueuedMessageList.tsx");
 
 let seq = 0;
 const ev = (type: string, data: unknown): SessionEvent =>
@@ -69,6 +70,23 @@ test("a fork cut before the started prompt's admission does not inherit its star
   const forked = [...starting(), ev("session/forked", { fromSessionId: "src", sourceAtSeq: 4, copiedThroughSeq: 3 })];
   assert.deepEqual(startingQueuePrompts(forked, "s1"), [], "no stuck prompt row under the history");
   assert.equal(sessionStartingFromServer("idle", forked), false, "no endless Spawning agent…");
+});
+
+test("a harness switch while the chat spawns ends its start: the waiting prompt is a queue row", () => {
+  // The person switched harness before the first prompt was admitted: the
+  // runtime was replaced and the row never left the queue (it runs on the new
+  // harness, or it was held for review). Read as a start it showed under the
+  // history with "Spawning agent…" on an idle chat, for good.
+  const { startingQueueIds } = queueList;
+  const switched = [
+    ...starting(),
+    ev("harness/switch-requested", { targetHarnessId: "copilot", timing: "stop-now" }),
+    ev("runtime/epoch-replaced", { old: { epoch: 0 }, new: { epoch: 1 } }),
+    ev("harness/switched", { from: "claude", to: "copilot" }),
+  ];
+  assert.deepEqual(startingQueuePrompts(switched, "s1"), [], "no prompt row under the history");
+  assert.equal(sessionStartingFromServer("idle", switched), false, "no Spawning agent… on an idle chat");
+  assert.equal(startingQueueIds(switched).has("q1"), false, "the queue list shows the row, with its controls");
 });
 
 test("the submit-frame echo hands over to the queued prompt, and a failed start retires it", () => {

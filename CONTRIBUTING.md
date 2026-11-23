@@ -115,7 +115,9 @@ manifest no longer declares `"maturity": "in-progress"` (see
    agreed before you invest in it.
 2. Keep pull requests focused and target `devel`. Describe the behavior
    change, the checks you ran and their results, and anything you could not
-   verify.
+   verify. A visible UI change shows before/after screenshots in the
+   description (`node scripts/pr-screenshots.mjs` attaches the ones under
+   `.scratch/`; a check asks for them).
 3. Update the owning documentation in the same change when behavior,
    configuration or a public contract moves.
 4. Temporary notes, plans and reports belong in the pull request, not in the

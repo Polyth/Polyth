@@ -652,6 +652,11 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "scanPairingQr", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "presentServerMenu", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "consumeServerChoice", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "serverZones", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "reportZoneProjects", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "allowServerZones", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "foldServerZone", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "openServerZone", returnType: CAPPluginReturnPromise),
     ]
 
     private let queue = DispatchQueue(label: "com.polyth.mobile.polyth-link", qos: .userInitiated)
@@ -671,6 +676,8 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
     /** Main thread only. The server picked from the server menu, for the hub to open. */
     private var pendingServerChoice: (connectionID: String, at: Date)?
     private var serverMenuOpen = false
+    /** Main thread only. The question of `allowServerZones` is on screen. */
+    private var zonePromptOpen = false
     private let serverChoiceLifetime: TimeInterval = 60
 
     override public func load() {
@@ -1234,6 +1241,112 @@ final class PolythLinkPlugin: CAPPlugin, CAPBridgedPlugin {
                 return
             }
             call.resolve(["connectionId": choice.connectionID])
+        }
+    }
+
+    /**
+     * Server zones: the other paired servers with the projects each listed on
+     * its last visit, for the navigator of the one on screen. The rules are
+     * the shared client's (crates/polyth-link-client/src/zones.rs). Only the
+     * page of the proxy this app opened may call, and it speaks for that
+     * server alone: the sender is the connection behind that proxy, never a
+     * value the page sends.
+     */
+    private func zoneSender(_ call: CAPPluginCall) -> String? {
+        guard loopbackContent(), let sender = UserDefaults.standard.string(forKey: lastConnectionKey) else {
+            call.reject("forbidden", "forbidden")
+            return nil
+        }
+        return sender
+    }
+
+    private func zones(_ call: CAPPluginCall, _ method: String, _ extra: [String: Any] = [:]) {
+        guard let sender = zoneSender(call) else { return }
+        var params = extra
+        params["connectionId"] = sender
+        queue.async {
+            do { call.resolve(try self.object(self.invoke(method, params))) } catch { self.reject(call, error) }
+        }
+    }
+
+    @objc func serverZones(_ call: CAPPluginCall) {
+        zones(call, "zones.view")
+    }
+
+    @objc func reportZoneProjects(_ call: CAPPluginCall) {
+        zones(call, "zones.report", ["projects": call.getArray("projects") ?? []])
+    }
+
+    @objc func foldServerZone(_ call: CAPPluginCall) {
+        zones(call, "zones.fold", ["key": call.getString("key") ?? "", "folded": call.getBool("folded") ?? false])
+    }
+
+    /**
+     * The open server's page asks to list the person's other servers. The app
+     * asks, naming that server itself; the page supplies no word of the
+     * question and learns nothing unless the answer is Allow.
+     */
+    @objc func allowServerZones(_ call: CAPPluginCall) {
+        guard let sender = zoneSender(call) else { return }
+        let params: [String: Any] = ["connectionId": sender]
+        queue.async {
+            let view: [String: Any]
+            do { view = try self.object(self.invoke("zones.view", params)) } catch { self.reject(call, error); return }
+            guard view["access"] as? String == "ask" else { call.resolve(view); return }
+            let name = (view["current"] as? [String: Any])?["label"] as? String ?? "Polyth"
+            DispatchQueue.main.async {
+                guard !self.zonePromptOpen else { call.reject("busy", "busy"); return }
+                // The page may have changed while the list was read.
+                guard self.loopbackContent(),
+                      UserDefaults.standard.string(forKey: self.lastConnectionKey) == sender,
+                      var presenter = self.bridge?.viewController else {
+                    call.reject("forbidden", "forbidden")
+                    return
+                }
+                while let next = presenter.presentedViewController { presenter = next }
+                self.zonePromptOpen = true
+                let alert = UIAlertController(
+                    title: "Show your other servers in \(name)?",
+                    message: "Its navigator will list the other servers you connected, with their projects, so you can move between them. That server will see their names.",
+                    preferredStyle: .alert
+                )
+                alert.addAction(UIAlertAction(title: "Don’t Allow", style: .cancel) { _ in
+                    self.zonePromptOpen = false
+                    call.resolve(view)
+                })
+                alert.addAction(UIAlertAction(title: "Allow", style: .default) { _ in
+                    self.zonePromptOpen = false
+                    self.queue.async {
+                        do { call.resolve(try self.object(self.invoke("zones.allow", params))) } catch { self.reject(call, error) }
+                    }
+                })
+                presenter.present(alert, animated: true)
+            }
+        }
+    }
+
+    /**
+     * A tap on a zone. The shared client accepts only a zone this page may
+     * see and a project that zone listed; the server is then held for the
+     * bundled hub, as a pick from the server menu is. A revoked pairing holds
+     * nothing: the hub's server list says so.
+     */
+    @objc func openServerZone(_ call: CAPPluginCall) {
+        guard let sender = zoneSender(call) else { return }
+        var params: [String: Any] = ["connectionId": sender, "key": call.getString("key") ?? ""]
+        if let project = call.getString("projectId") { params["projectId"] = project }
+        queue.async {
+            let target: [String: Any]
+            do { target = try self.object(self.invoke("zones.open", params)) } catch { self.reject(call, error); return }
+            let available = target["available"] as? Bool ?? false
+            DispatchQueue.main.async {
+                if available, let id = target["connectionId"] as? String, !id.isEmpty {
+                    self.pendingServerChoice = (id, Date())
+                } else {
+                    self.pendingServerChoice = nil
+                }
+                call.resolve(["available": available])
+            }
         }
     }
 

@@ -123,6 +123,74 @@ test("origin mismatch and another session's worktree cannot satisfy ownership", 
   assert.equal((await managed.inspectOwned(root, { ...ref, targetPath: root, targetBranch: "main", baseCommit: wt.head })).status, "owned");
 });
 
+test("an agent's own branch in its checkout stays owned; removal keeps that branch", async (t) => {
+  const root = repo(t);
+  const managed = createManagedWorktrees(git);
+  const sessionId = randomUUID();
+  const wt = await managed.create({ root, sessionId, targetPath: root, targetBranch: "main" });
+  const ref = { sessionId, worktreePath: wt.path, worktreeBranch: wt.branch, targetPath: root, targetBranch: "main" };
+  run(wt.path, "checkout", "-q", "-b", "fix/pull-request");
+  writeFileSync(join(wt.path, "work"), "work\n");
+  run(wt.path, "add", "work");
+  run(wt.path, "commit", "-qm", "work");
+  const inspected = await managed.inspectOwned(root, ref);
+  assert.equal(inspected.status, "owned");
+  assert.equal(inspected.status === "owned" && inspected.worktree.branch, "fix/pull-request");
+  // Another session's marker is still another session's, whatever is checked out.
+  assert.deepEqual(await managed.inspectOwned(root, { ...ref, sessionId: randomUUID() }), { status: "unowned", reason: "branch-unmanaged" });
+
+  const tip = run(wt.path, "rev-parse", "HEAD");
+  assert.equal((await managed.removeOwned(root, ref)).status, "removed");
+  assert.equal(existsSync(wt.path), false);
+  assert.equal(run(root, "rev-parse", "refs/heads/fix/pull-request"), tip);
+  assert.equal(await git.readRef(root, `refs/heads/${wt.branch}`), null);
+});
+
+test("the session branch with work the agent's branch lacks survives removal", async (t) => {
+  const root = repo(t);
+  const managed = createManagedWorktrees(git);
+  const sessionId = randomUUID();
+  const wt = await managed.create({ root, sessionId, targetPath: root, targetBranch: "main" });
+  const ref = { sessionId, worktreePath: wt.path, worktreeBranch: wt.branch };
+  writeFileSync(join(wt.path, "own"), "own\n");
+  run(wt.path, "add", "own");
+  run(wt.path, "commit", "-qm", "own");
+  const ownTip = run(wt.path, "rev-parse", "HEAD");
+  run(wt.path, "checkout", "-q", "-b", "fix/elsewhere", "main");
+  assert.equal((await managed.removeOwned(root, ref)).status, "removed");
+  assert.equal(await git.readRef(root, `refs/heads/${wt.branch}`), ownTip);
+  assert.ok(await git.readRef(root, "refs/heads/fix/elsewhere"));
+});
+
+test("a checkout on the target, another managed or a preserved branch is not adopted", async (t) => {
+  const root = repo(t);
+  const managed = createManagedWorktrees(git);
+  const sessionId = randomUUID();
+  const wt = await managed.create({ root, sessionId, targetPath: root, targetBranch: "main" });
+  const ref = { sessionId, worktreePath: wt.path, worktreeBranch: wt.branch };
+  for (const branch of ["polyth/isolate/000000000000", "polyth-preserved/000000000000-abcd1234"]) {
+    run(wt.path, "checkout", "-q", "-b", branch);
+    assert.deepEqual(await managed.inspectOwned(root, ref), { status: "unowned", reason: "branch-mismatch" });
+    assert.equal((await managed.removeOwned(root, ref)).status, "unowned");
+  }
+  run(wt.path, "checkout", "-q", "--ignore-other-worktrees", "main");
+  assert.deepEqual(await managed.inspectOwned(root, ref), { status: "unowned", reason: "branch-mismatch" });
+  assert.equal(existsSync(wt.path), true);
+});
+
+test("relinquishing a checkout on the agent's branch drops the marker first and names that branch", async (t) => {
+  const root = repo(t);
+  const managed = createManagedWorktrees(git);
+  const sessionId = randomUUID();
+  const wt = await managed.create({ root, sessionId, targetPath: root, targetBranch: "main" });
+  const ref = { sessionId, worktreePath: wt.path, worktreeBranch: wt.branch };
+  run(wt.path, "checkout", "-q", "-b", "fix/pull-request");
+  assert.deepEqual(await managed.relinquishOwned(root, ref), { branch: "fix/pull-request" });
+  assert.deepEqual(await managed.inspectOwned(root, ref), { status: "unowned", reason: "marker-missing" });
+  assert.equal(await git.readRef(root, `refs/heads/${wt.branch}`), null);
+  assert.equal(existsSync(wt.path), true);
+});
+
 test("an isolate rebased onto a rewritten target branch stays owned", async (t) => {
   const root = repo(t);
   const managed = createManagedWorktrees(git);

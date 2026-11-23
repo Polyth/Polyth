@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { encodeMouseEvent, encodePaste, keyEventToBytes, type KeyLike } from "../widgets/terminal/keymap.ts";
-import { detectLinks } from "../widgets/terminal/linkify.ts";
+import { detectLinks, detectWrappedLinks } from "../widgets/terminal/linkify.ts";
 import { searchBuffer } from "../widgets/terminal/search.ts";
 import { cellColorCss, xterm256Hex } from "../widgets/terminal/palette.ts";
 import { createTerminalEmulator, packRgb } from "../widgets/terminal/emulator.ts";
@@ -154,6 +154,21 @@ test("linkify finds URLs and trims trailing prose punctuation", () => {
     "mailto:dev@example.dev",
     "ftp://files.example.dev/a",
   ]);
+});
+
+test("linkify: a URL wrapped across rows is the whole URL on every row", () => {
+  const url = "https://claude.com/cai/oauth/authorize?code=true&client_id=abc";
+  const rows = ["visit: https://claude.com/cai/oa", "uth/authorize?code=true&client_", "id=abc then go"];
+  const perRow = detectWrappedLinks(rows);
+  assert.deepEqual(perRow, [
+    [{ start: 7, end: 32, url }],
+    [{ start: 0, end: 31, url }],
+    [{ start: 0, end: 6, url }],
+  ]);
+  // a row's trailing blanks keep words on either side of the wrap apart
+  const apart = detectWrappedLinks(["see https://example.dev/x   ", "and more"]);
+  assert.deepEqual(apart[0], [{ start: 4, end: 25, url: "https://example.dev/x" }]);
+  assert.deepEqual(apart[1], []);
 });
 
 test("search finds matches across scrollback with case and regex options", () => {

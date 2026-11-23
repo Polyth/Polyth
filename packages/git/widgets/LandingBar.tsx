@@ -238,11 +238,13 @@ export function useLanding({ host, projectId, sessionId, repositoryId, uncommitt
     // finish, so the bar only waits; work they left at rest is stranded.
     if (delegatedRunning || subagentsRunning) return { tone: "neutral", text: tr("landing.waitDelegated") };
     if (delegatedPending) return { tone: "warn", text: tr("isolation.delegatedPending") };
+    // The paths an AI repair waits on are the target's uncommitted work, not
+    // merge conflicts; counting them as conflicts contradicts the preview.
+    if (suggestion?.reason === "target-overlap") return { tone: "warn", text: tr("landing.targetOverlap", { branch: shownBranch }) };
     if (conflict) {
       const count = live.conflict?.files.length ?? 0;
       return { tone: "danger", text: count ? conflictText(shownBranch, count) : tr("isolation.conflictDetail", { branch: shownBranch }) };
     }
-    if (suggestion?.reason === "target-overlap") return { tone: "warn", text: tr("landing.targetOverlap", { branch: shownBranch }) };
     if (originSwitched) {
       return { tone: "neutral", text: tr("isolation.originSwitchedDetail", { path: originSwitched.path, current: originSwitched.branch, branch: recorded.branch }) };
     }

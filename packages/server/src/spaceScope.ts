@@ -290,7 +290,7 @@ function scopeSessions(
     ...(base.replayPage ? { replayPage: (sessionId: string, afterSeq: number, highWater?: number) => guarded(() => base.replayPage!(g(sessionId), afterSeq, highWater)) } : {}),
     ...(base.activate ? { activate: (sessionId: string, options?: SessionActivateOptions) => guarded(() => base.activate!(g(sessionId), options)) } : {}),
     replyPermission: (sessionId, requestId, reply, scope) =>
-      guarded(() => base.replyPermission(g(sessionId), requestId, reply, scope)),
+      guarded(() => base.replyPermission(g(sessionId), requestId, reply, scope, personScope)),
     replyQuestion: (sessionId, requestId, answers) =>
       guarded(() => base.replyQuestion(g(sessionId), requestId, answers)),
   };
@@ -302,6 +302,15 @@ function scopeSessions(
   assign("pause", bySession(base.pause));
   assign("continuePaused", bySession(base.continuePaused));
   assign("keepToolRunning", bySession(base.keepToolRunning));
+  // Runtime holds are synchronous and in memory: guard, then delegate as is.
+  if (base.holdRuntime) {
+    const hold = base.holdRuntime.bind(base);
+    scoped.holdRuntime = (sessionId, holdId, untilMs) => hold(g(sessionId), holdId, untilMs);
+  }
+  if (base.releaseRuntimeHold) {
+    const release = base.releaseRuntimeHold.bind(base);
+    scoped.releaseRuntimeHold = (sessionId, holdId) => release(g(sessionId), holdId);
+  }
   assign("cancelResume", bySession(base.cancelResume));
   assign("setResumeCompact", bySession(base.setResumeCompact));
   assign("resumeNow", bySession(base.resumeNow));

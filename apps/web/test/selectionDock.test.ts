@@ -59,7 +59,7 @@ register("./tsxHooks.mjs", import.meta.url);
 const { act, createElement, useRef } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const store = await import("../src/store.ts");
-const { COMPOSER_INSERT } = await import("../src/composerInsert.ts");
+const { COMPOSER_QUOTE } = await import("../src/composerInsert.ts");
 const { default: SelectionMenu } = await import("../src/components/SelectionMenu.tsx");
 const { registerSlot } = await import("../src/slots.ts");
 
@@ -163,7 +163,7 @@ test("Quote inserts a markdown quote, clears the selection, and the dock exits b
   const view = await mount();
   const inserts: string[] = [];
   const onInsert = (e: Event) => { inserts.push(String((e as CustomEvent).detail)); };
-  window.addEventListener(COMPOSER_INSERT, onInsert);
+  window.addEventListener(COMPOSER_QUOTE, onInsert);
   try {
     await act(async () => { pointer("pointerdown", document.getElementById("line")!, { pointerType: "touch" }); });
     await act(async () => { select(0, 6); });
@@ -175,7 +175,7 @@ test("Quote inserts a markdown quote, clears the selection, and the dock exits b
     await sleep(PAST_EXIT_MS);
     assert.equal(dock(), null);
   } finally {
-    window.removeEventListener(COMPOSER_INSERT, onInsert);
+    window.removeEventListener(COMPOSER_QUOTE, onInsert);
     await view.unmount();
   }
 });

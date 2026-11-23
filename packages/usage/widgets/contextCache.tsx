@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { sessionFetch } from "@polyth/session/web-api";
 import { useStore } from "../../../apps/web/src/store.ts";
 import { formatDate, tr } from "../../../apps/web/src/i18n/index.ts";
 import { Button } from "../../../apps/web/src/components/ui/index.ts";
 import { estimateKeepAlives, KEEP_WARM_PERIODS, type KeepWarmStatus } from "../src/keepWarm.ts";
 import { useSessionCache } from "./cacheUsage.ts";
 import { cacheDuration } from "./usage/cacheWarmth.ts";
+import { loadKeepWarm, setKeepWarm } from "./usage/keepWarmClient.ts";
 
 const STATUS_POLL_MS = 15_000;
 
@@ -25,7 +25,7 @@ function useKeepWarm(sessionId: string | null) {
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(async (signal?: AbortSignal) => {
     if (!sessionId) return;
-    const next = await sessionFetch<KeepWarmStatus>(`/api/usage/keep-warm?sessionId=${encodeURIComponent(sessionId)}`, signal ? { signal } : undefined);
+    const next = await loadKeepWarm(sessionId, signal);
     if (!signal?.aborted) setStatus(next);
   }, [sessionId]);
   useEffect(() => {
@@ -45,11 +45,7 @@ function useKeepWarm(sessionId: string | null) {
     setBusy(true);
     setError(null);
     try {
-      setStatus(await sessionFetch<KeepWarmStatus>("/api/usage/keep-warm", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, minutes }),
-      }));
+      setStatus(await setKeepWarm(sessionId, minutes));
     } catch {
       setError(tr("usage.keepWarmError"));
       void load().catch(() => {});

@@ -55,6 +55,16 @@
   min-width: 0;
 }
 
+/* In a browser: attach or replace the screenshot. The file input is the
+   picker the button opens; it is never shown. */
+.bug-report-sheet__attach {
+  display: flex;
+  justify-self: start;
+}
+.bug-report-sheet__file {
+  display: none;
+}
+
 /* The capture as it will be sent: whole, never cropped. */
 .bug-report-sheet__image {
   display: block;

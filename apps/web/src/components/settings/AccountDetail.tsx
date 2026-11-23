@@ -417,7 +417,6 @@ export default function AccountDetail({ account, name, spaceAccess, withReauth, 
 function ChangePasswordDialog({ accountId, onClose }: { accountId: string; onClose: () => void }) {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
-  const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const tooShort = next.length > 0 && [...next].length < MIN_PASSWORD_LENGTH;
@@ -463,19 +462,16 @@ function ChangePasswordDialog({ accountId, onClose }: { accountId: string; onClo
           {...(tooShort ? { error: tr("settings.users.passwordTooShort", { count: MIN_PASSWORD_LENGTH }) } : {})}
         >
           {(field) => (
-            <span className="users-passphrase">
-              <TextInput
-                {...field}
-                type={visible ? "text" : "password"}
-                value={next}
-                autoComplete="new-password"
-                spellCheck={false}
-                disabled={busy}
-                invalid={tooShort}
-                onChange={(event) => setNext(event.target.value)}
-              />
-              <Button size="sm" variant="quiet" disabled={busy} onClick={() => setVisible(!visible)}>{visible ? tr("settings.account.hide") : tr("settings.account.show")}</Button>
-            </span>
+            <TextInput
+              {...field}
+              type="password"
+              value={next}
+              autoComplete="new-password"
+              spellCheck={false}
+              disabled={busy}
+              invalid={tooShort}
+              onChange={(event) => setNext(event.target.value)}
+            />
           )}
         </FormField>
         {error && <Notice tone="error" role="alert">{error}</Notice>}

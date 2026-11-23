@@ -807,7 +807,125 @@ test("a switched origin checkout stays the calm ready card and integrates into i
   }
 });
 
-test("other checked-out branches wait one level down in the overflow, not on the card", async () => {
+function destinationToggle(container: ParentNode) {
+  return container.querySelector<HTMLButtonElement>(".isolation-target-toggle");
+}
+function destinationRow(container: ParentNode, branch: string) {
+  return [...container.querySelectorAll<HTMLButtonElement>('[role="radio"]')]
+    .find((row) => row.querySelector(".isolation-target-branch")?.textContent === branch);
+}
+const otherBranches = [
+  "chore/deps", "devel", "feat/a", "feat/b", "feat/c", "fix/a", "fix/b", "hotfix/1", "perf/x", "spike/y",
+];
+
+test("the destination picker is a collapsed row that opens into both groups of branches", async () => {
+  const originalStatus = api.isolationStatus;
+  const isolation: SessionIsolation = { ...base, state: "merge-ready" };
+  api.isolationStatus = async () => ({
+    isolation, effectiveState: isolation.state,
+    suggestion: { ...readySuggestion, checkedOutBranch: "agent/own" },
+    targets: [
+      { branch: "main", path: "/repo", origin: true, current: true },
+      { branch: "feature", path: "/repo-feature", origin: false, current: false },
+    ],
+    branches: ["agent/own", ...otherBranches],
+    actions: { ...chooseActions, canMerge: true },
+  });
+  const mounted = await mount(projection("destination-collapsed", isolation));
+  try {
+    const toggle = destinationToggle(mounted.container);
+    assert.ok(toggle, "the card names where the work goes");
+    assert.equal(toggle.getAttribute("aria-expanded"), "false", "collapsed by default");
+    assert.ok(toggle.textContent?.includes("main"));
+    const panelId = toggle.getAttribute("aria-controls");
+    assert.ok(panelId);
+    assert.equal(mounted.container.querySelector('[role="radio"]'), null, "no list while collapsed");
+    // Two-plus-one shape is kept: the overflow no longer carries branches.
+    assert.deepEqual(
+      [...mounted.container.querySelectorAll(".isolation-card-actions > button")].map((button) => button.textContent),
+      [tr("isolation.reviewChanges"), tr("isolation.commitAndPush"), tr("isolation.integrateInto", { branch: "main" })],
+    );
+    const more = named(mounted.container, tr("common.more"));
+    await act(async () => { more!.click(); await wait(); });
+    assert.equal(menuRow(tr("isolation.integrateElsewhere")), undefined, "the old overflow submenu is gone");
+    await act(async () => { more!.click(); await wait(); });
+
+    await act(async () => { toggle.click(); await wait(); });
+    assert.equal(toggle.getAttribute("aria-expanded"), "true");
+    assert.ok(mounted.container.querySelector(`[id="${panelId}"]`), "aria-controls names the open panel");
+    const headings = [...mounted.container.querySelectorAll(".isolation-target-heading")].map((heading) => heading.firstChild?.textContent);
+    assert.deepEqual(headings, [tr("isolation.targetsCheckedOut"), tr("isolation.targetsOther")]);
+    const rows = [...mounted.container.querySelectorAll('[role="radio"]')]
+      .map((row) => row.querySelector(".isolation-target-branch")?.textContent);
+    assert.deepEqual(rows, ["main", "feature", ...otherBranches], "checked-out branches first, then the rest");
+    assert.equal(destinationRow(mounted.container, "agent/own"), undefined, "the agent's own branch is never a destination");
+    assert.equal(destinationRow(mounted.container, "main")?.getAttribute("aria-checked"), "true");
+    assert.ok(destinationRow(mounted.container, "main")?.textContent?.includes(tr("isolation.targetOrigin")), "the original checkout is marked");
+    assert.ok(destinationRow(mounted.container, "feature")?.textContent?.includes("/repo-feature"));
+    // Twelve choices: a filter narrows them.
+    const filter = mounted.container.querySelector<HTMLInputElement>(".isolation-target-filter input");
+    assert.ok(filter, "a long list gets a filter field");
+    await act(async () => {
+      const setValue = Object.getOwnPropertyDescriptor(dom.HTMLInputElement.prototype, "value")!.set!;
+      setValue.call(filter, "FEAT/");
+      filter.dispatchEvent(new dom.Event("input", { bubbles: true }) as unknown as Event);
+      await wait();
+    });
+    assert.deepEqual(
+      [...mounted.container.querySelectorAll('[role="radio"]')].map((row) => row.querySelector(".isolation-target-branch")?.textContent),
+      ["feat/a", "feat/b", "feat/c"],
+    );
+  } finally {
+    await mounted.close();
+    api.isolationStatus = originalStatus;
+  }
+});
+
+test("picking a branch checked out nowhere relabels the primary and integrates without a path", async () => {
+  const originalStatus = api.isolationStatus;
+  const originalMerge = api.isolationMerge;
+  const isolation: SessionIsolation = { ...base, state: "merge-ready" };
+  api.isolationStatus = async () => ({
+    isolation, effectiveState: isolation.state, suggestion: readySuggestion,
+    targets: [
+      { branch: "main", path: "/repo", origin: true, current: true },
+      { branch: "feature", path: "/repo-feature", origin: false, current: false },
+    ],
+    branches: ["devel", "release"],
+    actions: { ...chooseActions, canMerge: true },
+  });
+  const calls: unknown[] = [];
+  api.isolationMerge = (async (id: string, input?: unknown) => {
+    calls.push(input);
+    return { ok: true, commit: "c", targetBranch: "devel", finalized: true, session: projection(id, isolation) };
+  }) as typeof api.isolationMerge;
+  const mounted = await mount(projection("destination-pathless", isolation));
+  try {
+    const toggle = destinationToggle(mounted.container)!;
+    await act(async () => { toggle.click(); await wait(); });
+    assert.equal(mounted.container.querySelector(".isolation-target-filter"), null, "a short list needs no filter");
+    const devel = destinationRow(mounted.container, "devel");
+    assert.ok(devel && !devel.disabled);
+    await act(async () => { devel.click(); await wait(); });
+    assert.deepEqual(calls, [], "picking only chooses; it never integrates by itself");
+    assert.equal(toggle.getAttribute("aria-expanded"), "false", "the list folds back into its row");
+    assert.ok(toggle.textContent?.includes("devel"));
+    assert.ok(toggle.textContent?.includes(tr("isolation.targetOpensCheckout")));
+    const integrate = named(mounted.container, tr("isolation.integrateInto", { branch: "devel" }));
+    assert.ok(integrate && integrate.classList.contains("isolation-card-primary"));
+    assert.equal(named(mounted.container, tr("isolation.integrateInto", { branch: "main" })), undefined);
+    await act(async () => { integrate.click(); await wait(); });
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0], { target: { branch: "devel" } });
+    assert.equal("path" in ((calls[0] as { target: object }).target), false, "no path: the server opens a checkout");
+  } finally {
+    await mounted.close();
+    api.isolationStatus = originalStatus;
+    api.isolationMerge = originalMerge;
+  }
+});
+
+test("picking another checked-out branch integrates there with its checkout path", async () => {
   const originalStatus = api.isolationStatus;
   const originalMerge = api.isolationMerge;
   const isolation: SessionIsolation = { ...base, state: "merge-ready" };
@@ -824,23 +942,21 @@ test("other checked-out branches wait one level down in the overflow, not on the
     calls.push(input);
     return { ok: true, commit: "c", targetBranch: "feature", finalized: true, session: projection(id, isolation) };
   }) as typeof api.isolationMerge;
-  const mounted = await mount(projection("choose-target", isolation));
+  const mounted = await mount(projection("destination-checked-out", isolation));
   try {
-    assert.deepEqual(
-      [...mounted.container.querySelectorAll(".isolation-card-actions > button")].map((button) => button.textContent),
-      [tr("isolation.reviewChanges"), tr("isolation.commitAndPush"), tr("isolation.integrateInto", { branch: "main" })],
-    );
-    const more = named(mounted.container, tr("common.more"));
-    assert.ok(more);
-    await act(async () => { more.click(); await wait(); });
-    const elsewhere = menuRow(tr("isolation.integrateElsewhere"));
-    assert.ok(elsewhere, "the overflow leads to the other branches");
-    assert.equal(menuRow("main"), undefined, "the recorded target is the card's own button");
-    await act(async () => { elsewhere.click(); await wait(); });
-    const feature = menuRow("feature");
-    assert.ok(feature && !feature.disabled);
-    assert.ok(feature.textContent?.includes("/repo-feature"), "each branch names the checkout it is open in");
-    await act(async () => { feature.click(); await wait(); });
+    await act(async () => { destinationToggle(mounted.container)!.click(); await wait(); });
+    // Arrow keys move the choice like any radio group.
+    const main = destinationRow(mounted.container, "main")!;
+    main.focus();
+    await act(async () => {
+      main.dispatchEvent(new dom.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }) as unknown as Event);
+      await wait();
+    });
+    assert.equal(destinationRow(mounted.container, "feature")?.getAttribute("aria-checked"), "true");
+    await act(async () => { destinationRow(mounted.container, "feature")!.click(); await wait(); });
+    const integrate = named(mounted.container, tr("isolation.integrateInto", { branch: "feature" }));
+    assert.ok(integrate);
+    await act(async () => { integrate.click(); await wait(); });
     assert.deepEqual(calls, [{ target: { branch: "feature", path: "/repo-feature" } }]);
   } finally {
     await mounted.close();
@@ -849,27 +965,39 @@ test("other checked-out branches wait one level down in the overflow, not on the
   }
 });
 
-test("with no default target left, choosing a branch is the card's own primary action", async () => {
+test("with no default target left, the destination list opens on its own", async () => {
   const originalStatus = api.isolationStatus;
+  const originalMerge = api.isolationMerge;
   const isolation: SessionIsolation = { ...base, state: "merge-ready" };
   api.isolationStatus = async () => ({
     isolation, effectiveState: isolation.state, suggestion: switchedSuggestion,
     targets: [{ branch: "feature", path: "/repo-feature", origin: false, current: false }],
+    branches: ["devel"],
     actions: chooseActions,
   });
+  const calls: unknown[] = [];
+  api.isolationMerge = (async (id: string, input?: unknown) => {
+    calls.push(input);
+    return { ok: true, commit: "c", targetBranch: "feature", finalized: true, session: projection(id, isolation) };
+  }) as typeof api.isolationMerge;
   const mounted = await mount(projection("stranded-choose", isolation));
   try {
     const text = mounted.container.textContent ?? "";
     assert.ok(text.includes(tr("isolation.cantReturnYet", { branch: "main" })));
     assert.ok(text.includes(tr("isolation.restoreOriginOrChoose", { path: "/repo", branch: "main" })));
-    const choose = named(mounted.container, tr("isolation.integrateElsewhere"));
-    assert.ok(choose && !choose.disabled);
-    assert.ok(choose.classList.contains("isolation-card-primary"));
-    await act(async () => { choose.click(); await wait(); });
-    assert.ok(menuRow("feature"));
+    const toggle = destinationToggle(mounted.container);
+    assert.equal(toggle?.getAttribute("aria-expanded"), "true", "choosing is the card's way forward");
+    assert.ok(toggle?.textContent?.includes(tr("isolation.chooseDestination")));
+    assert.equal(mounted.container.querySelector(".isolation-card-primary"), null, "nothing to integrate into until a branch is chosen");
+    await act(async () => { destinationRow(mounted.container, "feature")!.click(); await wait(); });
+    const integrate = named(mounted.container, tr("isolation.integrateInto", { branch: "feature" }));
+    assert.ok(integrate && integrate.classList.contains("isolation-card-primary"));
+    await act(async () => { integrate.click(); await wait(); });
+    assert.deepEqual(calls, [{ target: { branch: "feature", path: "/repo-feature" } }]);
   } finally {
     await mounted.close();
     api.isolationStatus = originalStatus;
+    api.isolationMerge = originalMerge;
   }
 });
 

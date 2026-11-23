@@ -22,9 +22,11 @@ import {
   configureSecureSafePersonRouting,
   configureSecureSafeSpaceRouting,
   createSecureSafeService,
+  VAULT_RUN_SERVICE,
+  type VaultRunService,
 } from "./index.ts";
 import { SECURE_SAFE_PACKAGE_ID, secureSafeSkill } from "./agentSkill.ts";
-import { createCredentialVaultListAgentTool, createCredentialVaultRequestAgentTool } from "./agentTool.ts";
+import { createCredentialVaultListAgentTool, createCredentialVaultRequestAgentTool, createCredentialVaultRunAgentTool } from "./agentTool.ts";
 
 const kind = (value: unknown): SecureSafeKind => {
   if (value === "env" || value === "token" || value === "password") return value;
@@ -264,6 +266,14 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         // Opens the protected form in the session that owns the call; the
         // host stores the value, the agent gets only the handle.
         capabilities.register(SECURE_SAFE_PACKAGE_ID, createCredentialVaultRequestAgentTool()),
+        // Runs one bounded local command with resolved refs after a person
+        // approves its card. The execution itself stays in the host's
+        // canonical session service; this package only supplies the tool.
+        capabilities.register(
+          SECURE_SAFE_PACKAGE_ID,
+          createCredentialVaultRunAgentTool(() =>
+            host.services.get(serverServiceKey<VaultRunService>(VAULT_RUN_SERVICE))),
+        ),
       ];
     },
     async onDisable() {

@@ -22,6 +22,15 @@ export {
 } from "./trustedServerEntry.ts";
 export { discoverServerPackages } from "./projectCompositionDiscovery.ts";
 export {
+  SERVER_NATIVE_WEB_VIEWS,
+  type NativeWebView,
+  type NativeWebViewCdp,
+  type NativeWebViewCreateOptions,
+  type NativeWebViewGoneReason,
+  type NativeWebViewHost,
+  type NativeWebViewRequest,
+} from "./nativeWebViews.ts";
+export {
   createServerServiceRegistry,
   bindPackageServices,
   INFRASTRUCTURE_PACKAGE_DIRS,

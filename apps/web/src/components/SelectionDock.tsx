@@ -204,10 +204,13 @@ export default function SelectionDock({ container }: {
     }, HOLD_RELEASE_MS);
   };
 
+  // Clear the selection first: the quote then focuses the composer (inside
+  // this tap, so the keyboard rises), and nothing afterwards takes it back.
   const quote = () => {
     tapFeedback();
-    quoteSelectionInComposer(textRef.current);
+    const text = textRef.current;
     finish();
+    quoteSelectionInComposer(text);
   };
 
   const newSession = () => {

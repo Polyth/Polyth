@@ -382,6 +382,15 @@ async fn dispatch(
             }
             Ok(json!({ "ok": true, "hostLabel": shown }))
         }
+        // Server zones (zones.rs): files only, no connection is touched.
+        method if method.starts_with("zones.") => {
+            let (data_dir, metadata_lock) = {
+                let guard = state.lock().await;
+                (guard.data_dir.clone(), guard.metadata_lock.clone())
+            };
+            let _metadata = metadata_lock.lock().await;
+            zones::handle(&data_dir, method, &params, now_ms()).map_err(|error| error.code())
+        }
         "connect" => connect_existing(state, params, ExistingConnectionMode::Active).await,
         "disconnect" => {
             let id = params
@@ -411,6 +420,7 @@ async fn dispatch(
             {
                 let _metadata = metadata_lock.lock().await;
                 forget_metadata(&data_dir, id).map_err(|error| error.code())?;
+                zones::forget(&data_dir, id);
             }
             let _ = std::fs::remove_dir_all(data_dir.join("hosts").join(id));
             Ok(json!({ "ok": true }))

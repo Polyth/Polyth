@@ -2421,7 +2421,15 @@ export function createStore(dbPath: string): Store {
           ...(rejected.message ? { message: rejected.message } : {}),
         });
         if (input.fence && rejected.mutationKind === "turn-submit") {
-          const held = holdEpochTurnForReview(rejected);
+          // A harness switch or restart the session asked for replaces a
+          // runtime with proven release. A queued prompt it had reserved but
+          // never claimed did not reach that runtime, so it goes back to the
+          // queue and runs on the new one, as the person who switched meant.
+          // A switch during a chat's start lands here: the first prompt
+          // waits on the queue while the old harness spawns. Any other epoch
+          // (a destroyed or lost runtime) still holds the prompt for review.
+          const requeued = input.harness !== undefined && releaseEpochQueueReservation(rejected);
+          const held = requeued ? undefined : holdEpochTurnForReview(rejected);
           if (held) heldQueueItems.push(held);
         }
       }
@@ -3443,6 +3451,17 @@ export function createStore(dbPath: string): Store {
 
   function queueReservation(operationId: string): Promise<QueueReservation | undefined> {
     return Promise.resolve(queueReservationInDatabase(operationId));
+  }
+
+  /** Put a never-claimed queue reservation back on the queue as an ordinary
+   *  row, keeping its id and position. False when the operation reserved no
+   *  queue row (a direct send), which has no queue place to return to. */
+  function releaseEpochQueueReservation(operation: DurableOperation): boolean {
+    const changed = prep(
+      `UPDATE session_queue SET reservation_operation_id = NULL
+       WHERE reservation_operation_id = ? AND session_id = ? AND held_for_review = 0`,
+    ).run(operation.operationId, operation.sessionId);
+    return Number(changed.changes) === 1;
   }
 
   function holdEpochTurnForReview(

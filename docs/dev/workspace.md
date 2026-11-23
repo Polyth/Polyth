@@ -236,6 +236,16 @@ cleanup fail closed. After the record is
 released, `refs/polyth/isolation/<session>` is deleted. AI repair backups
 (`refs/polyth/isolation-repair/<session>`) hold the user's target-checkout work
 and are never deleted automatically, neither on release nor at startup.
+A receipt not yet applied to the isolated branch answers one target head and
+one set of local changes. Once the target branch moves (or that local work
+changes) it can never be applied, so the next Integrate, Resolve or retarget
+sets it aside instead of stranding the session in an unresolvable conflict:
+its backup moves to `refs/polyth/isolation-repair-retired/<session>/<sha>`,
+the session returns to ready, and Integrate checks the overlap against the
+current target again. Status already reads such a session as ready once the
+target head moved. The paths an unapplied receipt lists are the target's
+uncommitted work, not merge conflicts: the Conflicts view and the landing bar
+report them as local changes in the target, never as conflicting files.
 Startup recovery drops leftover receipts only for locally known sessions
 without isolation whose commit is reachable from a branch. It also drops a
 "planned" creation receipt (`<git-common-dir>/polyth/creation-receipts`) older
@@ -277,12 +287,25 @@ as owned when it meets the target branch at a commit the old base does not
 contain. A branch reset back to history at or before the base, or one sharing
 no history with the target, stays `unowned` with reason `base-mismatch`.
 
+An agent may check out a branch of its own in its isolate (for example one to
+open a pull request from), as in an ordinary checkout. The marker, not the
+checked-out branch, proves the checkout is the session's, so it stays owned:
+"Changes are ready", merge, discard, push and delete work as usual, and the merge
+snapshots whatever is checked out. Status reports that branch as
+`suggestion.checkedOutBranch`, and Push defaults to it. Removing the checkout
+keeps the agent's branch like any branch it made; the session's managed branch
+goes only when the agent's branch contains it (or the session is leaving).
+Another managed branch, a `polyth-preserved/` branch or the merge target checked
+out in the isolate still fails closed (`branch-mismatch`). Relinquishing such a
+checkout drops the marker before renaming the managed branch, because the agent's
+branch, not the rename, is what the checkout stands on.
+
 A session that is leaving (deleted, or cleaned up by Settings → Sessions → Cleanup
 when "Skip isolated sessions" is off) proves ownership by its marker, branch name
 and path alone (`sessionLeaving`): an agent's rebase past the recorded base, a
 retarget that did not finish or a checkout left detached mid-rebase no longer
-strand it. A renamed branch still refuses, since that is how a preserved checkout
-leaves Polyth. The cleanup's archive action removes the same resources as a delete
+strand it. A checkout whose marker is gone (how a relinquished checkout leaves
+Polyth) or that sits on a `polyth-preserved/` branch still refuses. The cleanup's archive action removes the same resources as a delete
 but keeps the sessions: `releaseArchivedCheckouts` walks an archived tree deepest
 first, carries the media its chats show to the target checkout, then moves every
 session off the removed checkouts as metadata. It refuses a session not at rest in
@@ -379,10 +402,13 @@ only for an idle chat its owner manages and only when `actions.canMerge` is true
 **Choosing another target.** While the work rests in `active`, `merge-ready` or
 `conflict` with changes and no pending delegated work, `getStatus` lists
 `targets`: every ordinary local branch checked out in a checkout of the same
-repository (managed `polyth/*` branches and the isolated checkout itself
-excluded), each with its `path`, whether it is the recorded `origin` checkout
-and whether it is the `current` target. `actions.canChooseTarget` is true when
-one of them is not the current target. `POST /api/isolation/:sessionId/merge`
+repository (managed `polyth/*` branches, the isolated checkout itself and any
+other chat's isolated checkout excluded), each with its `path`, whether it is
+the recorded `origin` checkout and whether it is the `current` target. It also
+lists `branches`: ordinary local branches checked out nowhere (not managed, not
+`polyth-preserved/`), sorted, at most `ISOLATION_BRANCH_TARGETS_MAX`.
+`actions.canChooseTarget` is true when one of them is not the current target or
+`branches` is not empty. `POST /api/isolation/:sessionId/merge`
 with `{ target: { branch, path } }` retargets under the session lock, then runs
 the ordinary merge-back. The branch must be checked out at exactly that path
 and must not be managed. It is refused for a nested (delegated) isolation and
@@ -391,10 +417,16 @@ against that branch. Retargeting rewrites the checkout's ownership marker
 first (keeping the old target as `retargetedFrom`, which ownership also
 accepts), then persists `targetBranch`/`originPath` as `active`, dropping an
 old conflict or Keep-isolated dismissal. A later conflict is recorded against
-the new branch. A branch that is not checked out anywhere cannot be chosen:
-publication syncs a checkout and the session returns to it.
+the new branch. Publication syncs a checkout and the session returns to it, so
+a target without `path` (one of `branches`) first gets an ordinary linked
+checkout of that branch (`git worktree add`, the same placement as a chat
+started on a branch), and the merge then retargets to it. The branch must be an
+existing local branch with something the work lacks; a branch already checked
+out goes through that checkout instead. Nothing is opened for a refusal (nested
+isolation, a recorded AI repair, a managed or preserved branch), and the
+opened checkout stays an ordinary worktree after the merge.
 
-`POST /api/isolation/:sessionId/retarget` with `{ branch, path }`
+`POST /api/isolation/:sessionId/retarget` with `{ branch, path? }`
 (`IsolationRetargetInput`) makes the same choice without integrating, under
 the same rules (the session at rest in `active`, `merge-ready` or `conflict`,
 so no publication intent exists yet; choosing the current target is a no-op).
@@ -426,16 +458,23 @@ With no default target the primary is **Choose a branch**; a recorded
 conflict makes it **Review conflicts**.
 
 The isolation card keeps its two-plus-one shape (Review / Commit and push over
-one full-width primary). Other targets are an alternative, so they sit one
-level down in its overflow: **… → Integrate into another branch ›** lists each
-branch with the checkout it is open in, and picking one integrates there. When
-the recorded origin checkout has since switched branches (the
-destination-unavailable case), that is a way forward, not a warning: the card
-stays the calm "Changes ready" card, notes "{path} is on {current} now, not
-{branch}" and its primary becomes **Integrate into {current}**. Only when no
-default target is left (the origin checkout is gone or on no ordinary branch)
-does the card warn "Can't return to {branch} yet", and **Integrate into another
-branch ▾** becomes its primary action.
+one full-width primary). Where the work goes is a quiet **Destination {branch} ·
+Change** row under the title, collapsed by default. Expanding it lists
+"Checked out" branches first (the recorded target, the origin checkout marked
+"Started here", each with its path), then "Other branches" from
+`status.branches` ("A checkout opens first"); a filter appears above eight
+choices. The rows are a radio group (arrows, Home/End, Escape). Picking a row
+only chooses it and folds the list; the primary then reads **Integrate into
+{branch}** and is the only control that integrates, calling `merge` with
+`target` (no `path` for a branch checked out nowhere). On a conflict card,
+choosing another branch replaces Resolve with that primary, since the conflict
+belongs to the recorded target. When the recorded origin checkout has since
+switched branches (the destination-unavailable case), that is a way forward,
+not a warning: the card stays the calm "Changes ready" card, notes "{path} is
+on {current} now, not {branch}" and that branch is the default choice. Only
+when no default target is left (the origin checkout is gone or on no ordinary
+branch) does the card warn "Can't return to {branch} yet"; the destination list
+then opens by itself and no primary shows until a branch is picked.
 
 A merge that conflicts records `state: "conflict"` with
 `conflict: { message, files, at }`, where `at` (ms) is when the attempt found

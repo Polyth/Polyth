@@ -65,6 +65,7 @@ export const de: PluginsMessages = {
   "pluginbridge.pluginWidgetValue": "Plugin-Widget: {title}",
   "pluginmodules.pluginValueUiEntryMustExportA": "Der UI-Eintrag für das Plugin \" {pluginId} \" muss eine Modulkomponenten-Map exportieren.",
   "packages.plugins.linkHint": "Akzeptiert einen https-.zip-Link oder ein Repository auf GitHub, GitLab oder Codeberg.",
+  "packages.plugins.linkedSourceNotice": "Über einen Link geöffnet. Installieren Sie nur Pakete, denen Sie vertrauen: Polyth zeigt, was ein Paket verlangt, bevor es läuft.",
   "packages.plugins.dropArchive": "Paket-.zip ablegen",
   "packages.plugins.dropArchiveHint": ".zip hierher ziehen oder Datei wählen · bis {size}",
   "packages.plugins.chooseFile": "Datei wählen",

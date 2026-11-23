@@ -35,6 +35,7 @@ import { BrowserContextPreview } from "./BrowserContextPreview.tsx";
 import { readerParagraphs } from "./messageLinks.ts";
 import ReaderView, { type ReaderState } from "./ReaderView.tsx";
 import { takePendingNavigation } from "./openInBrowser.ts";
+import { NATIVE_PAGE_UNDER, useNativePage } from "./nativePage.ts";
 import { pinTabColorScheme, tabColorSchemePinned, useAppAppearance } from "./appAppearance.ts";
 import { BROWSER_RESYNC_INTERVAL_MS, changesBrowserTabs, subscribeBrowserSessionEvents, subscribeBrowserTabUpdates } from "./browserSignals.ts";
 import { useStore, workspacePresentationKey, workspaceProjectId } from "../../../apps/web/src/store.ts";
@@ -242,6 +243,9 @@ function BrowserTabView({ projectId, activeSessionId, initialBrowser, tabs, rest
   const [contextMode, setContextMode] = useState<ContextMode>("off");
   const [contextPickerOpen, setContextPickerOpen] = useState(false);
   const [viewportMode, setViewportMode] = useState<ViewportUiMode>("responsive");
+  /** The person picked a device or a size here: they want that page size,
+   * which only the frames can show. */
+  const [userSized, setUserSized] = useState(false);
   const [pendingContext, setPendingContext] = useState<BrowserContext | null>(null);
   const [selectionPoint, setSelectionPoint] = useState<{ x: number; y: number } | null>(null);
   const [highlight, setHighlight] = useState<NormRect | null>(null);
@@ -282,6 +286,8 @@ function BrowserTabView({ projectId, activeSessionId, initialBrowser, tabs, rest
   const paneResizeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const viewportRef = useRef(browser?.viewport);
   const visibleRef = useRef(visible);
+  const shotRef = useRef<HTMLDivElement | null>(null);
+  const nativeLiveRef = useRef(false);
   const approvalDescriptionId = useId();
   const frameStatusId = useId();
   const drawerId = useId();
@@ -340,6 +346,14 @@ function BrowserTabView({ projectId, activeSessionId, initialBrowser, tabs, rest
   const frameViewport = pendingContext?.viewport ?? browser?.viewport;
   frameFrozenRef.current = frameFrozen;
   highlightAddedRef.current = highlightAdded;
+  // Polyth Desktop: the live page itself, in place of its frames, whenever
+  // nothing of ours needs the picture (context capture, a reader, a device size).
+  const nativeLive = useNativePage(
+    browser?.nativeViewId,
+    shotRef,
+    !!browser && browser.status === "ready" && visible && !frameFrozen && !reader && !approval && !userSized,
+  );
+  nativeLiveRef.current = nativeLive;
   useEffect(() => { remoteFocusRef.current = remoteFocus; }, [remoteFocus]);
 
   const discardContext = (context: BrowserContext | null) => {
@@ -411,7 +425,7 @@ function BrowserTabView({ projectId, activeSessionId, initialBrowser, tabs, rest
           type: "browser/subscribe",
           browserSessionId: browser.id,
           afterRevision: revisionRef.current,
-          visible: visibleRef.current && !frameFrozenRef.current,
+          visible: visibleRef.current && !frameFrozenRef.current && !nativeLiveRef.current,
         }));
       };
       ws.onmessage = (m) => {
@@ -515,9 +529,9 @@ function BrowserTabView({ projectId, activeSessionId, initialBrowser, tabs, rest
       type: "browser/subscribe",
       browserSessionId: browser.id,
       afterRevision: revisionRef.current,
-      visible: visible && !frameFrozen,
+      visible: visible && !frameFrozen && !nativeLive,
     }));
-  }, [visible, browser?.id, frameFrozen]);
+  }, [visible, browser?.id, frameFrozen, nativeLive]);
 
   useEffect(() => {
     if (browser?.viewport) {
@@ -1133,6 +1147,7 @@ function BrowserTabView({ projectId, activeSessionId, initialBrowser, tabs, rest
 
   const commitViewportMode = (mode: ViewportUiMode) => {
     setViewportMode(mode);
+    setUserSized(mode !== "responsive");
     followPaneRef.current = mode === "responsive";
     if (browser?.id) rememberViewportMode(browser.id, mode);
   };
@@ -1180,7 +1195,7 @@ function BrowserTabView({ projectId, activeSessionId, initialBrowser, tabs, rest
     const live = !!browser && browser.status !== "closed";
     if (!stage || !live) return;
     const schedule = () => {
-      if (!followPaneRef.current || frameFrozenRef.current) return;
+      if (!followPaneRef.current || frameFrozenRef.current || nativeLiveRef.current) return;
       if (paneResizeTimer.current) clearTimeout(paneResizeTimer.current);
       paneResizeTimer.current = setTimeout(() => {
         if (frameFrozenRef.current) return;
@@ -1769,10 +1784,10 @@ function BrowserTabView({ projectId, activeSessionId, initialBrowser, tabs, rest
                 <div className="browser-frame-wrap">
                   <div
                     ref={stageRef}
-                    className={`browser-frame-stage${contextMode !== "off" ? " is-selecting" : ""}`}
+                    className={`browser-frame-stage${contextMode !== "off" ? " is-selecting" : ""}${nativeLive ? " is-native" : ""}`}
                     onWheel={onFrameWheel}
                   >
-                    <div className="browser-frame-shot">
+                    <div ref={shotRef} className="browser-frame-shot" {...{ [NATIVE_PAGE_UNDER]: "" }}>
                       <img
                         ref={imgRef}
                         src={frame.src}

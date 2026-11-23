@@ -65,6 +65,7 @@ export const zhCN: PluginsMessages = {
   "pluginbridge.pluginWidgetValue": "插件小部件：{title}",
   "pluginmodules.pluginValueUiEntryMustExportA": "插件“{pluginId}”的 UI 条目必须导出模块组件映射",
   "packages.plugins.linkHint": "https .zip 链接、GitHub、GitLab 或 Codeberg 仓库、zip:https://…、file:文件夹，或本地 .zip 路径。",
+  "packages.plugins.linkedSourceNotice": "通过链接打开。只安装你信任的包：Polyth 会在包运行前显示它请求的权限。",
   "packages.plugins.dropArchive": "拖入包 .zip",
   "packages.plugins.dropArchiveHint": "将 .zip 拖到此处或选择文件 · 最大 {size}",
   "packages.plugins.chooseFile": "选择文件",

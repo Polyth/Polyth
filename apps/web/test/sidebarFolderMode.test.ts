@@ -91,7 +91,7 @@ const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const store = await import("../src/store.ts");
 const { getSidebarViewMode, parseSidebarViewMode, setSidebarViewMode, VIEW_MODE_KEY, DATE_GROUPS_KEY, getShowDateGroups, parseShowDateGroups, setShowDateGroups, getGroupingMode, getSessionSortMode, setSessionSortMode } = await import("../src/sidebarPrefs.ts");
-const { default: Sidebar, PEEK_LEAVE_MS, RAIL_COLLAPSE_CLICK_DELAY_MS } = await import("../src/components/Sidebar.tsx");
+const { default: Sidebar, PEEK_LEAVE_MS, latestProjectSession } = await import("../src/components/Sidebar.tsx");
 const { default: MobileNavigator } = await import("../src/components/mobile/MobileNavigator.tsx");
 const { default: SessionList } = await import("../src/components/sidebar/SessionList.tsx");
 const { getSidebarLayout, setSidebarLayout, SIDEBAR_RAIL_WIDTH } = await import("../src/sidebarLayout.ts");
@@ -141,7 +141,9 @@ for (const presentation of ["phone", "tree", "rail", "collapsed rail", "compact 
       const button = container.querySelector<HTMLButtonElement>(selector)!;
       assert.ok(button);
       assert.equal(button.getAttribute("aria-expanded"), "false");
-      for (const expanded of [true, false, true]) {
+      // A wide rail's second click enters the project (covered below), so
+      // only its first click browses here.
+      for (const expanded of presentation === "rail" ? [true] : [true, false, true]) {
         await act(async () => { click(button); });
         assert.equal(button.getAttribute("aria-expanded"), String(expanded));
         assert.equal(store.getState().activeProjectId, "alpha", "browsing another project preserves the workspace");
@@ -543,9 +545,8 @@ test("tree mode nests sessions under project worktrees", async () => {
     const sessionIntent = store.getState().newSessionIntent;
     await act(async () => { click(focused!.querySelector(".project-card")!); });
     const railToggle = container.querySelector<HTMLElement>(".sidebar-rail-toggle")!;
-    assert.equal(railToggle.getAttribute("aria-expanded"), "false", "clicking the open project hides its sessions");
+    assert.equal(railToggle.getAttribute("aria-expanded"), "true", "clicking the open project keeps its sessions");
     assert.equal(store.getState().newSessionIntent, sessionIntent, "clicking the open project does not start a session");
-    await act(async () => { click(railToggle); });
 
     const betaRail = rail.querySelector<HTMLElement>('[aria-label="beta"]');
     assert.ok(betaRail);
@@ -1262,11 +1263,11 @@ test("compact drawers offer the project rail, its customize pencil and the layou
 // boot restoration, whose session fetch the shared mock answers with an empty
 // page — harmless here, but it must not disturb the exact-count assertions
 // above.
-test("double-clicking a project icon does not collapse the sessions column", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+test("a second click on a rail project enters it instead of collapsing the sessions", async () => {
   const ticket = store.beginProjectListRequest();
   store.publishProjectList(ticket, [project("alpha"), project("beta")]);
   store.activateProject("alpha");
+  store.activateSession(null);
   store.setSessions("alpha", sessionsByProject.alpha!);
   store.setSessions("beta", sessionsByProject.beta!);
   setSidebarViewMode("rail");
@@ -1275,53 +1276,70 @@ test("double-clicking a project icon does not collapse the sessions column", asy
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
-  const doubleClick = async (element: Element) => {
+  const press = async (element: Element, detail = 1) => {
     await act(async () => {
-      element.dispatchEvent(new MouseEventCtor("click", { bubbles: true, detail: 1 }));
+      element.dispatchEvent(new MouseEventCtor("click", { bubbles: true, detail }));
     });
-    await act(async () => {
-      element.dispatchEvent(new MouseEventCtor("click", { bubbles: true, detail: 2 }));
-    });
-    await act(async () => { t.mock.timers.tick(RAIL_COLLAPSE_CLICK_DELAY_MS); });
   };
+  const railItem = (id: string) => container.querySelector<HTMLElement>(`.sidebar-project-rail-item[aria-label="${id}"]`)!;
+  const realFetch = globalThis.fetch;
   try {
     await act(async () => { root.render(createElement(Sidebar)); });
 
-    // The focused project's icon would collapse on a lone click, not on a double-click.
-    const alphaRail = container.querySelector<HTMLElement>('.sidebar-project-rail-item[aria-label="alpha"]')!;
-    await doubleClick(alphaRail);
-    assert.equal(getSidebarLayout().collapsed, false, "the focused project's double-click keeps the sessions open");
+    // The focused project's icon on its own New chat page does nothing.
+    await press(railItem("alpha"));
+    assert.equal(getSidebarLayout().collapsed, false, "a second click never collapses the sessions");
     assert.equal(container.querySelector(".sidebar--rail-collapsed"), null);
-    assert.equal(alphaRail.getAttribute("aria-expanded"), "true");
+    assert.equal(store.getState().activeProjectId, "alpha");
 
-    // The first click of a double-click on another project browses it; the second does not collapse.
-    const betaRail = container.querySelector<HTMLElement>('.sidebar-project-rail-item[aria-label="beta"]')!;
-    await doubleClick(betaRail);
-    assert.equal(getSidebarLayout().collapsed, false, "double-clicking another project keeps its sessions open");
-    assert.equal(container.querySelector(".sidebar--rail-collapsed"), null);
-    assert.equal(betaRail.getAttribute("aria-expanded"), "true");
+    // On the New chat page, the first click browses another project and the
+    // second moves the New chat page there.
+    await press(railItem("beta"));
+    assert.equal(store.getState().activeProjectId, "alpha", "the first click only browses");
     assert.match(container.querySelector(".sidebar-focused-sessions")?.textContent ?? "", /Beta session/);
+    await press(railItem("beta"));
+    assert.equal(store.getState().activeProjectId, "beta", "the second click opens New chat in the project");
+    assert.equal(store.getState().activeSessionId, null);
+    assert.equal(container.querySelector(".sidebar--rail-collapsed"), null);
 
-    // Any press elsewhere in the sidebar cancels a pending collapse.
-    await act(async () => {
-      betaRail.dispatchEvent(new MouseEventCtor("click", { bubbles: true, detail: 1 }));
-    });
-    await act(async () => { pointer(container.querySelector(".sidebar-main")!, "pointerdown"); });
-    await act(async () => { t.mock.timers.tick(RAIL_COLLAPSE_CLICK_DELAY_MS); });
-    assert.equal(container.querySelector(".sidebar--rail-collapsed"), null, "another press cancels the pending collapse");
+    // A double-click only browses: its second click does not act again.
+    await press(railItem("alpha"));
+    await press(railItem("alpha"), 2);
+    assert.equal(store.getState().activeProjectId, "beta", "a double-click does not enter the project");
+    assert.equal(railItem("alpha").getAttribute("aria-expanded"), "true");
 
-    // A deliberate single click still collapses after the double-click window.
-    await act(async () => {
-      betaRail.dispatchEvent(new MouseEventCtor("click", { bubbles: true, detail: 1 }));
-    });
-    await act(async () => { t.mock.timers.tick(RAIL_COLLAPSE_CLICK_DELAY_MS - 1); });
-    assert.equal(container.querySelector(".sidebar--rail-collapsed"), null, "the collapse waits out the double-click window");
-    await act(async () => { t.mock.timers.tick(1); });
-    assert.ok(container.querySelector(".sidebar--rail-collapsed"), "a single click still collapses the sessions");
+    // With another project's chat open, the second click opens the project's
+    // latest chat.
+    // A first open's reads never answer here: only its start is observed.
+    await act(async () => { store.activateSession("b1"); });
+    globalThis.fetch = (() => new Promise(() => {})) as typeof fetch;
+    await press(railItem("alpha"));
+    // A chat cached by an earlier open lands at once; a first open is loading.
+    const opened = store.getState().openingSessionId ?? store.getState().activeSessionId;
+    assert.ok(opened === "a1" || opened === "a2", "the project's latest chat opens");
+    assert.equal(getSidebarLayout().collapsed, false);
+    assert.equal(container.querySelector(".sidebar--rail-collapsed"), null);
   } finally {
+    globalThis.fetch = realFetch;
+    store.setOpeningSession(null);
+    store.activateSession(null);
     setSidebarLayout({ collapsed: false });
     await act(async () => { root.unmount(); });
     container.remove();
-    t.mock.timers.reset();
   }
+});
+
+test("latestProjectSession picks the project's newest top-level chat", () => {
+  const projects = [project("alpha"), { ...project("room"), parentProjectId: "alpha" }];
+  const base = { status: "idle", updatedAt: 1 } as const;
+  const sessions: SessionProjection[] = [
+    { ...base, id: "old", projectId: "alpha", title: "", createdAt: 1, lastTurnAt: 2 },
+    { ...base, id: "room-chat", projectId: "room", title: "", createdAt: 1, lastTurnAt: 5 },
+    { ...base, id: "child", projectId: "alpha", title: "", createdAt: 1, lastTurnAt: 9, parentId: "old" },
+    { ...base, id: "gone", projectId: "alpha", title: "", createdAt: 1, lastTurnAt: 9, status: "archived" },
+    { ...base, id: "other", projectId: "beta", title: "", createdAt: 1, lastTurnAt: 9 },
+  ];
+  assert.equal(latestProjectSession(sessions, projects, "alpha")?.id, "room-chat");
+  assert.equal(latestProjectSession(sessions, projects, "beta")?.id, "other");
+  assert.equal(latestProjectSession(sessions, projects, "gamma"), null);
 });

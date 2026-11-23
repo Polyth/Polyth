@@ -15,7 +15,7 @@ import {
   BUG_REPORT_VERSION,
   isTesterPassword,
   parseBugReport,
-  type BugReportApp,
+  type BugReportDesktopApp,
   type BugReportPayload,
   type BugReportSettingValue,
 } from "@polyth/contracts/bug-report";
@@ -25,9 +25,6 @@ import type { DesktopBugReportCapture, DesktopBugReportOutcome, DesktopBugReport
 
 export const DEFAULT_BUG_REPORT_ORIGIN = "https://reports.polyth.app";
 const MINUTE = 60_000;
-const DAY = 86_400_000;
-/** Client-side limits, before the relay's own: one a minute, ten a day. */
-export const CLIENT_LIMITS = Object.freeze({ perMinute: 1, perDay: 10 });
 /** Reports kept waiting for the relay at most; the oldest goes first. */
 const OUTBOX_MAX = 10;
 const OUTBOX_RETRY_MS = 15 * MINUTE;
@@ -36,18 +33,20 @@ const SEND_TIMEOUT_MS = 30_000;
 const JPEG_QUALITIES = [80, 70, 60, 50] as const;
 
 /** Where reports go, or null when this build sends none. Only nightly builds
- *  of the standard edition report; `POLYTH_BUG_REPORT=1` turns it on for a
- *  development build (the relay still refuses an unpublished version).
- *  `POLYTH_BUG_REPORT_ORIGIN` points at another relay, `off` turns it off. */
+ *  report; `POLYTH_BUG_REPORT=1` turns it on for a development build of the
+ *  standard edition (the relay still refuses an unpublished version). A stable
+ *  workstation build never reports, whatever the environment says
+ *  (docs/security/workstation-edition.md). `POLYTH_BUG_REPORT_ORIGIN` points
+ *  at another relay, `off` turns it off. */
 export function bugReportOrigin(input: {
   version: string;
   edition: PolythEdition;
   env: Readonly<Record<string, string | undefined>>;
 }): string | null {
-  if (input.edition === "workstation") return null;
   const raw = input.env.POLYTH_BUG_REPORT_ORIGIN?.trim();
   if (raw === "off") return null;
-  if (!input.version.endsWith("-nightly") && input.env.POLYTH_BUG_REPORT !== "1") return null;
+  const nightly = input.version.endsWith("-nightly");
+  if (!nightly && (input.edition === "workstation" || input.env.POLYTH_BUG_REPORT !== "1")) return null;
   if (!raw) return DEFAULT_BUG_REPORT_ORIGIN;
   try {
     const url = new URL(raw);
@@ -104,15 +103,13 @@ interface StoreFile {
   secret: string;
   /** The tester password as the OS encryption returned it (base64). */
   password?: string;
-  /** Times of the reports this computer sent or queued (last day). */
-  sent: number[];
 }
 
 export interface BugReportClientOptions {
   /** `<userData>/desktop`: the store file and the outbox live here. */
   dir: string;
   origin: string | null;
-  app: Omit<BugReportApp, "channel" | "locale">;
+  app: Omit<BugReportDesktopApp, "channel" | "locale">;
   locale: () => string;
   /** What the desktop adds to the settings: `desktop.*` keys. */
   desktopSettings: () => Record<string, BugReportSettingValue>;
@@ -156,11 +153,10 @@ export function createBugReportClient(options: BugReportClientOptions): BugRepor
         return {
           secret: raw.secret,
           ...(typeof raw.password === "string" && raw.password ? { password: raw.password } : {}),
-          sent: Array.isArray(raw.sent) ? raw.sent.filter((time): time is number => typeof time === "number" && Number.isFinite(time)) : [],
         };
       }
     } catch { /* first run, or an unreadable file: start again */ }
-    return { secret: randomBytes(32).toString("hex"), sent: [] };
+    return { secret: randomBytes(32).toString("hex") };
   }
 
   function writeStore(): void {
@@ -188,21 +184,6 @@ export function createBugReportClient(options: BugReportClientOptions): BugRepor
       delete store.password;
       writeStore();
     }
-  }
-
-  function recentSends(at: number): number[] {
-    return store.sent.filter((time) => at - time < DAY && time <= at + MINUTE);
-  }
-
-  function limited(at: number): boolean {
-    const recent = recentSends(at);
-    return recent.length >= CLIENT_LIMITS.perDay
-      || recent.filter((time) => at - time < MINUTE).length >= CLIENT_LIMITS.perMinute;
-  }
-
-  function countSend(at: number): void {
-    store.sent = [...recentSends(at), at];
-    writeStore();
   }
 
   function outboxFiles(): string[] {
@@ -297,7 +278,7 @@ export function createBugReportClient(options: BugReportClientOptions): BugRepor
     };
   }
 
-  function appInfo(): BugReportApp {
+  function appInfo(): BugReportDesktopApp {
     return {
       ...options.app,
       channel: options.app.version.endsWith("-nightly") ? "nightly" : "stable",
@@ -347,7 +328,6 @@ export function createBugReportClient(options: BugReportClientOptions): BugRepor
       const secret = typed || password;
       if (!secret) return { result: "password" };
       const at = now();
-      if (limited(at)) return { result: "rate" };
       const held = liveCapture(at);
       const wantsScreenshot = typeof draft.captureId === "string" && draft.captureId !== "";
       if (wantsScreenshot && (!held || held.id !== draft.captureId)) return { result: "invalid" };
@@ -381,14 +361,12 @@ export function createBugReportClient(options: BugReportClientOptions): BugRepor
       if (answer.result === "retry") {
         // Unverified, but the queued report needs it to go later.
         if (typed && typed !== password) rememberPassword(typed);
-        countSend(at);
         enqueue(report);
         if (held?.id === draft.captureId) capture = null;
         return { result: "queued" };
       }
       if (answer.result === "created" || answer.result === "added") {
         if (typed && typed !== password) rememberPassword(typed);
-        countSend(at);
         if (held?.id === draft.captureId) capture = null;
         void flushOutbox();
       }

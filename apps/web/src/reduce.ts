@@ -269,8 +269,9 @@ export interface PendingPermission {
   reply?: "once" | "always" | "reject";
   /** Resolved by the session's auto-accept policy, not a human click. */
   auto?: boolean;
-  /** A composer-shell confirmation for the user's own command. No automatic
-   *  policy answers it, Full access included. */
+  /** No automatic policy answers it, Full access included: a composer-shell
+   *  confirmation for the user's own command, or a request the server marked
+   *  `manual` (a Credential Vault run). */
   manual?: boolean;
   time: number;
   /** Server-generated, secret-redacted preview (old events lack it).
@@ -297,6 +298,8 @@ export interface PendingQuestion {
   questions: JsonObject[];
   status: "pending" | "answered" | "rejected";
   answers?: JsonObject;
+  /** Set on a parent's mirror of a subagent's question: the child that asked. */
+  sourceSessionId?: string;
   time: number;
 }
 
@@ -1596,7 +1599,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           tool: str(d, "tool"),
           status: "pending",
           time: ev.time,
-          ...(ev.producerPlugin === "composer-shell" ? { manual: true } : {}),
+          ...(ev.producerPlugin === "composer-shell" || d.manual === true ? { manual: true } : {}),
           ...(preview ? { preview } : {}),
           ...(scopes.length > 0 ? { allowedScopes: scopes } : {}),
           ...(str(d, "sourceSessionId") ? { sourceSessionId: str(d, "sourceSessionId") } : {}),
@@ -1636,6 +1639,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           questions,
           status: "pending",
           time: ev.time,
+          ...(str(d, "sourceSessionId") && str(d, "sourceSessionId") !== ev.sessionId ? { sourceSessionId: str(d, "sourceSessionId") } : {}),
         });
         const sourceSessionId = str(d, "sourceSessionId");
         model.messages.push({
@@ -1691,12 +1695,15 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       }
       break;
     }
-    case "secret/resolved": {
+    case "secret/resolved":
+    case "secret/expired": {
+      // An expired form (its tool call ended) is closed, not saved: the card
+      // leaves instead of accepting a value the server can no longer store.
       const requestId = str(d, "requestId") ?? "";
       const secret = model.secrets.find((item) => item.requestId === requestId);
       if (secret) {
         secret.status = "resolved";
-        const action = str(d, tr("reduce.action"));
+        const action = ev.type === "secret/resolved" ? str(d, "action") : undefined;
         if (action === "saved" || action === "dismissed") secret.action = action;
       }
       break;

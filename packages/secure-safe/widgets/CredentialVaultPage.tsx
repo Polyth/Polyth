@@ -90,8 +90,15 @@ export default function CredentialVaultPage() {
       }
       resetForm();
       await refresh();
-    } catch {
-      setError(tr("settings.securesafepage.saveFailed"));
+    } catch (cause) {
+      if ((cause as { code?: string } | null)?.code === "conflict") {
+        // The short name is taken (for example a chat request already saved
+        // it): say so and show the existing entry instead of a bare failure.
+        setError(tr("settings.securesafepage.handleTaken", { handle: handle.trim() }));
+        void refresh();
+      } else {
+        setError(tr("settings.securesafepage.saveFailed"));
+      }
     } finally {
       setBusy(false);
     }

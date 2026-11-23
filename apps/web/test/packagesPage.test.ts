@@ -23,7 +23,7 @@ const PACKAGES: Fixture[] = [
   { id: "files", name: "Files", description: "Workspace files", core: true, enabled: true, category: "workspace" },
 ];
 
-async function mountPage(options: { failPatch?: (id: string) => boolean } = {}) {
+async function mountPage(options: { failPatch?: (id: string) => boolean; props?: Record<string, unknown> } = {}) {
   const dom = new Window();
   Object.assign(globalThis, {
     window: dom,
@@ -62,7 +62,7 @@ async function mountPage(options: { failPatch?: (id: string) => boolean } = {}) 
   const container = dom.document.createElement("div");
   dom.document.body.appendChild(container);
   const root = createRoot(container as unknown as HTMLElement);
-  await act(async () => { root.render(createElement(PackagesPage)); });
+  await act(async () => { root.render(createElement(PackagesPage, options.props ?? null)); });
   const rows = () => [...container.querySelectorAll(".package-row")].map((row) => row.getAttribute("data-package-id"));
   const click = async (element: object | null | undefined) => {
     assert.ok(element, "expected a clickable element");
@@ -257,6 +257,57 @@ test("contributions list under the page toolbar, count toward it and can take th
     assert.equal(page.rows().length, 4);
   } finally {
     remove();
+    await page.cleanup();
+  }
+});
+
+test("an install link for one package lands on its row and focuses its switch", async () => {
+  const page = await mountPage({ props: { targetPackageId: "terraform" } });
+  try {
+    await page.settle();
+    await page.settle();
+    const row = page.container.querySelector('.package-row[data-package-id="terraform"]')!;
+    assert.ok(row.classList.contains("flash"), "the linked row flashes");
+    assert.equal(page.dom.document.activeElement, row.querySelector('[role="switch"]'));
+    assert.equal(page.patches.length, 0, "landing on a package must not turn it on");
+  } finally {
+    await page.cleanup();
+  }
+});
+
+test("an install link for a package this Polyth lacks says so", async () => {
+  const page = await mountPage({ props: { targetPackageId: "weather" } });
+  try {
+    await page.settle();
+    assert.match(page.container.textContent!, /This Polyth has no package “weather”/);
+  } finally {
+    await page.cleanup();
+  }
+});
+
+test("an install link's source reaches the package library once", async () => {
+  const { requestPackageInstall, pendingPackageInstall } = await import("../src/packages/installRequest.ts");
+  const source = "https://github.com/acme/polyth-weather/tree/v1.2.0";
+  const seen: Array<string | null | undefined> = [];
+  let clear: (() => void) | undefined;
+  const { registerSlot } = await import("../src/slots.ts");
+  const removeLibrary = registerSlot("settings.packages.content", "test.installer", (context) => {
+    seen.push(context.packagesInstallRequest as string | null | undefined);
+    clear = context.clearPackagesInstallRequest as (() => void) | undefined;
+    return null;
+  });
+  const page = await mountPage();
+  try {
+    await page.settle();
+    assert.equal(seen.at(-1), null);
+    // A link that arrives while the page is open reaches it too.
+    await page.act(async () => { requestPackageInstall(source); });
+    assert.equal(seen.at(-1), source);
+    await page.act(async () => { clear?.(); });
+    assert.equal(seen.at(-1), null);
+    assert.equal(pendingPackageInstall(), null);
+  } finally {
+    removeLibrary();
     await page.cleanup();
   }
 });

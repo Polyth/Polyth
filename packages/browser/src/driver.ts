@@ -74,6 +74,11 @@ export interface DriverPage {
   current(): DriverNav;
   onEvent(cb: (ev: DriverPageEvent) => void): () => void;
   close(): Promise<void>;
+  /** Native Desktop pages only: the view id the local window places live. */
+  readonly nativeViewId?: string;
+  /** Native Desktop pages only: a window started or stopped showing the live
+   * page, and the page size it gave (CSS px), when known. */
+  onNativeShown?(cb: (state: { shown: boolean; width?: number; height?: number }) => void): () => void;
 }
 
 export interface DriverFrame {
@@ -92,10 +97,15 @@ export interface DriverOpenOptions {
   guardNavigation: (url: string) => Promise<void>;
   /** Called for every HTTP(S) subresource and WebSocket egress. */
   guardNetworkEgress?: (url: string) => Promise<void>;
+  /** Persistent storage for drivers that keep sign-ins (the native Desktop
+   * driver). Engines without persistence ignore it. */
+  profileDir?: string;
 }
 
 export interface BrowserDriver {
   engine: "chromium" | "fake";
+  /** True for the native Desktop driver: pages are real views of this app. */
+  readonly native?: boolean;
   open(opts: DriverOpenOptions): Promise<DriverPage>;
   /** Release the shared browser process after all page contexts are closed. */
   close(): Promise<void>;

@@ -1,5 +1,6 @@
 package com.polyth.mobile;
 
+import android.app.AlertDialog;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.res.AssetManager;
@@ -77,6 +78,8 @@ public final class PolythLinkPlugin extends Plugin {
     private String pendingServerChoice;
     private long pendingServerChoiceAt;
     private PolythServerMenu serverMenu;
+    /** Main thread only. The question of {@link #allowServerZones} is on screen. */
+    private boolean zonePromptOpen;
 
     private static final class LinkFailure extends Exception {
         final String code;
@@ -556,6 +559,127 @@ public final class PolythLinkPlugin extends Plugin {
                 return;
             }
             call.resolve(new JSObject().put("connectionId", choice));
+        });
+    }
+
+    /**
+     * Server zones: the other paired servers with the projects each listed on
+     * its last visit, for the navigator of the one on screen. The rules are
+     * the shared client's (crates/polyth-link-client/src/zones.rs). Only the
+     * page of the proxy this app opened may call, and it speaks for that
+     * server alone: the sender is the connection behind that proxy, never a
+     * value the page sends.
+     */
+    private String zoneSender(PluginCall call) {
+        String sender = loopbackContent() ? statePrefs.getString(LAST_CONNECTION, null) : null;
+        if (sender == null) call.reject("forbidden", "forbidden");
+        return sender;
+    }
+
+    private void zones(PluginCall call, String method, JSObject params) {
+        String sender = zoneSender(call);
+        if (sender == null) return;
+        params.put("connectionId", sender);
+        executor.execute(() -> {
+            try { call.resolve(JSObject.fromJSONObject(invokeObject(method, params, null))); }
+            catch (Exception error) { reject(call, error); }
+        });
+    }
+
+    @PluginMethod
+    public void serverZones(PluginCall call) {
+        zones(call, "zones.view", new JSObject());
+    }
+
+    @PluginMethod
+    public void reportZoneProjects(PluginCall call) {
+        zones(call, "zones.report", new JSObject().put("projects", call.getArray("projects", new JSArray())));
+    }
+
+    @PluginMethod
+    public void foldServerZone(PluginCall call) {
+        zones(call, "zones.fold", new JSObject()
+            .put("key", call.getString("key", ""))
+            .put("folded", Boolean.TRUE.equals(call.getBoolean("folded", false))));
+    }
+
+    /**
+     * The open server's page asks to list the person's other servers. The app
+     * asks, naming that server itself; the page supplies no word of the
+     * question and learns nothing unless the answer is Allow.
+     */
+    @PluginMethod
+    public void allowServerZones(PluginCall call) {
+        String sender = zoneSender(call);
+        if (sender == null) return;
+        executor.execute(() -> {
+            JSObject view;
+            String name;
+            try {
+                JSONObject raw = invokeObject("zones.view", new JSObject().put("connectionId", sender), null);
+                view = JSObject.fromJSONObject(raw);
+                if (!"ask".equals(raw.optString("access", ""))) { call.resolve(view); return; }
+                JSONObject current = raw.optJSONObject("current");
+                name = current == null ? "Polyth" : current.optString("label", "Polyth");
+            } catch (Exception error) { reject(call, error); return; }
+            getActivity().runOnUiThread(() -> {
+                if (zonePromptOpen) { call.reject("busy", "busy"); return; }
+                // The page may have changed while the list was read.
+                if (!loopbackContent() || !sender.equals(statePrefs.getString(LAST_CONNECTION, null))) {
+                    call.reject("forbidden", "forbidden");
+                    return;
+                }
+                zonePromptOpen = true;
+                new AlertDialog.Builder(getActivity())
+                    .setTitle("Show your other servers in " + name + "?")
+                    .setMessage("Its navigator will list the other servers you connected, with their projects, so you can move between them. That server will see their names.")
+                    .setNegativeButton("Don\u2019t allow", (dialog, which) -> dialog.cancel())
+                    .setPositiveButton("Allow", (dialog, which) -> {
+                        zonePromptOpen = false;
+                        executor.execute(() -> {
+                            try {
+                                call.resolve(JSObject.fromJSONObject(
+                                    invokeObject("zones.allow", new JSObject().put("connectionId", sender), null)));
+                            } catch (Exception error) { reject(call, error); }
+                        });
+                    })
+                    .setOnCancelListener(dialog -> {
+                        zonePromptOpen = false;
+                        call.resolve(view);
+                    })
+                    .show();
+            });
+        });
+    }
+
+    /**
+     * A tap on a zone. The shared client accepts only a zone this page may
+     * see and a project that zone listed; the server is then held for the
+     * bundled hub, as a pick from the server menu is. A revoked pairing holds
+     * nothing: the hub's server list says so.
+     */
+    @PluginMethod
+    public void openServerZone(PluginCall call) {
+        String sender = zoneSender(call);
+        if (sender == null) return;
+        JSObject params = new JSObject().put("connectionId", sender).put("key", call.getString("key", ""));
+        String project = call.getString("projectId");
+        if (project != null) params.put("projectId", project);
+        executor.execute(() -> {
+            JSONObject target;
+            try { target = invokeObject("zones.open", params, null); }
+            catch (Exception error) { reject(call, error); return; }
+            boolean available = target.optBoolean("available", false);
+            String id = target.optString("connectionId", "");
+            getActivity().runOnUiThread(() -> {
+                if (available && !id.isEmpty()) {
+                    pendingServerChoice = id;
+                    pendingServerChoiceAt = System.currentTimeMillis();
+                } else {
+                    pendingServerChoice = null;
+                }
+                call.resolve(new JSObject().put("available", available));
+            });
         });
     }
 

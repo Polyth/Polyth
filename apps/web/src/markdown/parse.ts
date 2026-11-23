@@ -300,6 +300,33 @@ function parseList(lines: string[], from: number): { block: Block; next: number 
   };
 }
 
+/** Which lines of `text` (split on "\n") `parseMarkdown` reads as quote
+ *  lines: a line whose first non-blank character is `>`, outside a code
+ *  fence or a display-math block (those keep `>` as literal text). The
+ *  composer's quote layer uses it, so a draft shows a quote exactly where the
+ *  transcript will. Keep it in step with the block loop below. */
+export function quoteLineMask(text: string): boolean[] {
+  const lines = text.split("\n");
+  const mask = lines.map(() => false);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const fence = FENCE_RE.exec(line);
+    if (fence) {
+      const run = fence[2]!;
+      for (i += 1; i < lines.length && !closesFence(lines[i]!, run); i++);
+      continue;
+    }
+    const tex = TEX_OPEN_RE.test(line);
+    if (MATH_FENCE_RE.test(line) || tex) {
+      const close = tex ? TEX_CLOSE_RE : MATH_FENCE_RE;
+      for (i += 1; i < lines.length && !close.test(lines[i]!); i++);
+      continue;
+    }
+    if (line.trimStart().startsWith(">")) mask[i] = true;
+  }
+  return mask;
+}
+
 export function parseMarkdown(text: string): Block[] {
   const lines = text.split("\n");
   const out: Block[] = [];

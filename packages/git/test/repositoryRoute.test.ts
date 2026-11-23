@@ -252,15 +252,21 @@ test("isolation retarget and merge routes forward a validated target and push fl
   await post("/api/isolation/s1/retarget", { branch: "devel", path: "/repo" });
   await post("/api/isolation/s1/merge", { push: true });
   await post("/api/isolation/s1/merge", { target: { branch: "devel", path: "/repo" } });
+  // A branch checked out nowhere goes without a path; the service opens it.
+  await post("/api/isolation/s1/retarget", { branch: "release" });
+  await post("/api/isolation/s1/merge", { target: { branch: "release" } });
   assert.deepEqual(calls, [
     { op: "retarget", sessionId: "s1", input: { branch: "devel", path: "/repo" } },
     { op: "merge", sessionId: "s1", input: { push: true } },
     { op: "merge", sessionId: "s1", input: { target: { branch: "devel", path: "/repo" } } },
+    { op: "retarget", sessionId: "s1", input: { branch: "release" } },
+    { op: "merge", sessionId: "s1", input: { target: { branch: "release" } } },
   ]);
-  await assert.rejects(() => post("/api/isolation/s1/retarget", { branch: "devel" }), { code: "invalid-input" });
+  await assert.rejects(() => post("/api/isolation/s1/retarget", { branch: "devel", path: " " }), { code: "invalid-input" });
+  await assert.rejects(() => post("/api/isolation/s1/retarget", { branch: "devel", path: 7 }), { code: "invalid-input" });
   await assert.rejects(() => post("/api/isolation/s1/retarget", { branch: " ", path: "/repo" }), { code: "invalid-input" });
   await assert.rejects(() => post("/api/isolation/s1/merge", { push: "yes" }), { code: "invalid-input" });
-  assert.equal(calls.length, 3, "a malformed request never reaches the service");
+  assert.equal(calls.length, 5, "a malformed request never reaches the service");
 });
 
 test("only the instance owner (as a Space admin) rewrites the Git identity of the shared checkout", async () => {

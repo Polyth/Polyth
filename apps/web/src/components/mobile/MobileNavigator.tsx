@@ -37,6 +37,7 @@ import { projectSessionStatusCounts } from "../../mobileIsland.ts";
 import { Icon } from "../../icons.tsx";
 import { isImeComposing } from "../input/editorCore.ts";
 import ProjectGlyph from "../ProjectGlyph.tsx";
+import { ServerZonesTree } from "../sidebar/ServerZones.tsx";
 import { soloPersonalProject } from "../../personalProject.ts";
 import { chatReadByOthers, offersPrivateRoom, privateRoomOf, rootProjectId, rootProjects, startPrivateChat } from "../../privateRoom.ts";
 import PrivateRoomGroup, { useRoomChatsListed } from "../PrivateRoomGroup.tsx";
@@ -2051,6 +2052,9 @@ export default function MobileNavigator() {
               <span className="mobile-nav-add-project-label">{tr("sidebar.addProject")}</span>
             </button>
           )}
+          {/* The other paired servers, each a zone with the projects it
+              listed on its last visit (serverZones.ts). */}
+          {!searchMode && !selectMode && registry.status === "ready" && <ServerZonesTree />}
         </div>
         </RowSelection.Provider>
       </nav>

@@ -51,6 +51,7 @@ import type {
   Project,
   ProjectDefaults,
   ReleaseDownloadsDto,
+  ServerAutoUpdateDto,
   SystemInfoDto,
 } from "@polyth/contracts";
 import type { SettingsNavigationTarget } from "@polyth/web-sdk";
@@ -2335,6 +2336,22 @@ export function McpPage({ embedded = false }: { embedded?: boolean }) {
   );
 }
 
+/** What automatic updates are doing, or did last, for the About row. */
+function autoUpdateHint(state: ServerAutoUpdateDto): string {
+  if (state.unavailable) return state.unavailable;
+  const version = state.available ?? "";
+  const now = state.phase === "waiting" && version
+    ? tr("settings.pages.autoUpdateWaiting", { version, count: String(state.busy) })
+    : state.phase === "installing" && version ? tr("settings.pages.autoUpdateInstalling", { version })
+    : state.phase === "restarting" && version ? tr("settings.pages.autoUpdateRestarting", { version })
+    : state.last
+      ? state.last.ok
+        ? tr("settings.pages.autoUpdateDone", { from: state.last.from, to: state.last.to })
+        : tr("settings.pages.autoUpdateFailed", { to: state.last.to, message: state.last.message })
+      : tr("settings.pages.autoUpdateServerHint", { manager: state.install === "homebrew" ? "Homebrew" : "npm" });
+  return state.canChange ? now : `${now} ${tr("settings.pages.autoUpdateOwnerOnly")}`;
+}
+
 export function AboutPage() {
   const [info, setInfo] = useState<SystemInfoDto | null>(null);
   const [err, setErr] = useState("");
@@ -2348,6 +2365,24 @@ export function AboutPage() {
     if (desktop) return;
     void api.releaseDownloads().then(setRelease).catch(() => setRelease(null));
   }, [desktop]);
+  const [autoUpdate, setAutoUpdate] = useState<ServerAutoUpdateDto | null>(null);
+  const [autoUpdateSaving, setAutoUpdateSaving] = useState(false);
+  const [autoUpdateError, setAutoUpdateError] = useState("");
+  const autoUpdateBusy = autoUpdate?.phase === "waiting" || autoUpdate?.phase === "installing" || autoUpdate?.phase === "restarting";
+  useEffect(() => {
+    let live = true;
+    const read = () => void api.serverAutoUpdate().then((next) => { if (live) setAutoUpdate(next); }, () => {});
+    read();
+    // Follows an update in progress; the server it restarts answers again.
+    const timer = autoUpdateBusy ? window.setInterval(read, 15_000) : undefined;
+    return () => { live = false; if (timer !== undefined) window.clearInterval(timer); };
+  }, [autoUpdateBusy]);
+  const changeAutoUpdate = (enabled: boolean) => {
+    setAutoUpdateSaving(true);
+    setAutoUpdateError("");
+    void api.setServerAutoUpdate(enabled).then(setAutoUpdate, (e: unknown) => setAutoUpdateError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setAutoUpdateSaving(false));
+  };
   const [copyBlocked, setCopyBlocked] = useState(false);
   const copy = (label: string, value: string) => {
     setCopyBlocked(false);
@@ -2375,6 +2410,20 @@ export function AboutPage() {
           <Row label={tr("settings.pages.updateServer")} hint={tr("settings.pages.updateServerHint")}>
             <span className="mono">{release.update.command}</span>
             {copyButton("update", release.update.command)}
+          </Row>
+        )}
+        {autoUpdate?.install && (
+          <Row
+            label={tr("settings.pages.autoUpdateServer")}
+            hint={autoUpdateError || autoUpdateHint(autoUpdate)}
+            disabled={!autoUpdate.canChange}
+          >
+            <Toggle
+              on={autoUpdate.enabled}
+              onChange={changeAutoUpdate}
+              disabled={!autoUpdate.canChange || autoUpdateSaving}
+              label={tr("settings.pages.autoUpdateServer")}
+            />
           </Row>
         )}
         {release?.release && release.release.downloads.length > 0 && (

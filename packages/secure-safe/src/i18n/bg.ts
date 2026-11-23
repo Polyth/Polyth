@@ -39,6 +39,7 @@ export const bg: SecureSafeMessages = {
   "settings.securesafepage.orProjectConfiguration": ", или конфигурация на проекта.",
   "settings.securesafepage.purpose": "Цел",
   "settings.securesafepage.saveFailed": "Идентификационните данни не могат да бъдат запазени. Стойността е изчистена; въведете я отново.",
+  "settings.securesafepage.handleTaken": "Вече има идентификационни данни с име „{handle}“. Използвайте „Редактиране“ в списъка, за да замените стойността.",
   "settings.securesafepage.savedHandles": "Запазени идентификационни данни (",
   "settings.securesafepage.savedHandlesCount": "Запазени: {count}",
   "settings.securesafepage.secureSafe": "Credential Vault",

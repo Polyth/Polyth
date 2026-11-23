@@ -7,6 +7,23 @@ milestones are named after what shipped.
 
 ---
 
+## Unreleased — focus timer
+
+### Added
+
+- Focus timer package: a floating pomodoro and countdown timer beside the chat,
+  opened from the stopwatch on the right rail or the command palette. Focus, short
+  and long breaks in rounds, or a plain countdown with quick lengths; drag it
+  anywhere in the chat column or fold it to a pill. When time is up it can play a
+  sound, flash the window and the screen's edge, fill with the phase colour and send
+  a system notification while Polyth is in the background — each one a setting.
+  Settings follow the account; the running timer stays on its device and only one
+  tab rings. See [packages/focus-timer](packages/focus-timer/README.md).
+- Focus timer labels and interval count: press the phase name on the dial to give
+  it your own label (shown on the dial and in the time-up notices) and set how many
+  focus intervals make a cycle; the interval dots open the same editor. Settings
+  has a Labels section for every phase and the plain timer.
+
 ## Unreleased — nightly bug reports
 
 ### Added

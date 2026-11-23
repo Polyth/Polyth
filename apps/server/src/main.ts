@@ -8,6 +8,7 @@ import { boot } from "@polyth/server";
 import { serverDataDir } from "@polyth/cli/target";
 import { installKind } from "@polyth/cli/update";
 import { bundleLayout, bundleTarget, platformPackageName } from "./layout.ts";
+import { selfUpdater } from "./selfUpdate.ts";
 import { serverAppPackages } from "./serverPackages.ts";
 
 const layout = bundleLayout(resolve(import.meta.dirname, ".."));
@@ -48,10 +49,14 @@ const kind = installKind({ bundle: layout.root, docker: existsSync("/.dockerenv"
 const updateCommand = kind.kind === "homebrew"
   ? "brew upgrade polyth && brew services restart polyth"
   : kind.kind === "docker" ? undefined : "polyth update";
+// Settings → About → Automatic updates (npm and Homebrew installs).
+const self = selfUpdater(kind);
 
 await boot({
   version: build.version,
   ...(updateCommand ? { updateCommand } : {}),
+  ...(self.updater ? { selfUpdate: self.updater } : {}),
+  ...(self.unavailable ? { selfUpdateUnavailable: self.unavailable } : {}),
   dataDir: resolve(process.env.POLYTH_DATA_DIR?.trim() || serverDataDir()),
   webDist: join(resources, "web"),
   webPackagesDir: join(resources, "packages"),

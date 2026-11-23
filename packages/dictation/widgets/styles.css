@@ -169,7 +169,7 @@ body[data-dictate="false"] .mic-control .mic-btn {
   min-width: 0;
 }
 
-.pkg-dictation .voice-key > .ui-input { flex: 1 1 auto; min-width: 0; }
+.pkg-dictation .voice-key > :is(.ui-input, .ui-input-reveal) { flex: 1 1 auto; min-width: 0; }
 
 .pkg-dictation .picker-select .picker-chip-text { flex: 1; overflow: hidden; text-align: start; text-overflow: ellipsis; white-space: nowrap; }
 

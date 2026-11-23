@@ -1,5 +1,6 @@
 /**
- * Nightly bug reports: the one wire shape the desktop shell sends to the
+ * Nightly bug reports: the one wire shape the desktop shell — or, for a page
+ * opened in a browser, the Polyth server that served it — sends to the
  * report relay (`packages/report-relay`, `POST /v1/report`) and the relay
  * accepts. Every object is exact — an unknown field rejects the report — so a
  * client can never smuggle extra data past the allowlist it shows the person
@@ -22,7 +23,7 @@ export const BUG_REPORT_LIMITS = Object.freeze({
   errorChars: 1_200,
   /** Decoded JPEG bytes. */
   screenshotBytes: 1_500_000,
-  /** Longest screenshot edge in pixels; the desktop shell downscales to it. */
+  /** Longest screenshot edge in pixels; the sender downscales to it. */
   screenshotEdge: 1_600,
   /** Whole request body: the base64 screenshot plus the JSON around it. */
   bodyBytes: 2_200_000,
@@ -32,8 +33,11 @@ export const BUG_REPORT_LIMITS = Object.freeze({
 
 export type BugReportChannel = "nightly" | "stable";
 export type BugReportPlatform = "darwin" | "win32" | "linux";
+/** The browser's operating system as the page can tell it. */
+export type BugReportBrowserPlatform = BugReportPlatform | "android" | "ios" | "unknown";
 
-export interface BugReportApp {
+/** A report from the desktop shell (every shell up to 1.2.370 sends this). */
+export interface BugReportDesktopApp {
   /** `X.Y.Z` or `X.Y.N-nightly`. */
   version: string;
   channel: BugReportChannel;
@@ -48,6 +52,29 @@ export interface BugReportApp {
   /** UI language tag (`uk`, `en-US`). */
   locale: string;
 }
+
+/** A report from a page opened in a browser, sent by its Polyth server. */
+export interface BugReportBrowserApp {
+  client: "browser";
+  /** The server's version: `X.Y.Z` or `X.Y.N-nightly`. */
+  version: string;
+  channel: BugReportChannel;
+  edition: "standard";
+  /** The browser's operating system. */
+  platform: BugReportBrowserPlatform;
+  /** Browser name and major version (`Chrome 131`, `Safari 18`), or "". */
+  browser: string;
+  /** The server's operating system and CPU architecture. */
+  serverPlatform: BugReportPlatform;
+  serverArch: string;
+  /** UI language tag (`uk`, `en-US`). */
+  locale: string;
+}
+
+export type BugReportApp = BugReportDesktopApp | BugReportBrowserApp;
+
+export const isBrowserReportApp = (app: BugReportApp): app is BugReportBrowserApp =>
+  (app as Partial<BugReportBrowserApp>).client === "browser";
 
 export interface BugReportWeb {
   /** The web bundle's build id, or "" when the window is not the web app. */
@@ -120,6 +147,7 @@ const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f
 const INSTALL = /^[0-9a-f]{32}$/;
 const ARCH = /^[a-z0-9_]{1,16}$/;
 const DOTTED = /^[0-9][0-9.]{0,31}$/;
+const BROWSER = /^(?:|[A-Za-z][A-Za-z ]{0,30}(?: [0-9]{1,4})?)$/;
 const LOCALE = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,3}$/;
 const BUILD = /^[A-Za-z0-9._-]{0,64}$/;
 const VIEW = /^[A-Za-z0-9._:-]{0,64}$/;
@@ -164,17 +192,31 @@ const isoWithin = (value: unknown, now: number, pastMs: number): value is string
 };
 
 const DAY = 86_400_000;
-/** A report waits in the desktop outbox for at most this long. */
+/** A report waits in an outbox (desktop or server) for at most this long. */
 export const BUG_REPORT_MAX_AGE_MS = 7 * DAY;
 
+const channelOf = (version: string): BugReportChannel => version.endsWith("-nightly") ? "nightly" : "stable";
+const isPlatform = (value: unknown): value is BugReportPlatform => value === "darwin" || value === "win32" || value === "linux";
+
+function parseBrowserApp(value: Plain): BugReportBrowserApp | null {
+  if (!exactKeys(value, ["client", "version", "channel", "edition", "platform", "browser", "serverPlatform", "serverArch", "locale"])) return null;
+  const { version, channel, edition, platform, browser, serverPlatform, serverArch, locale } = value;
+  if (!line(version, 24, VERSION) || channel !== channelOf(version) || edition !== "standard") return null;
+  if (!(isPlatform(platform) || platform === "android" || platform === "ios" || platform === "unknown")) return null;
+  if (!line(browser, 40, BROWSER) || !isPlatform(serverPlatform) || !line(serverArch, 16, ARCH)) return null;
+  if (!line(locale, 35, LOCALE)) return null;
+  return { client: "browser", version, channel: channelOf(version), edition, platform, browser, serverPlatform, serverArch, locale };
+}
+
 function parseApp(value: unknown): BugReportApp | null {
+  if (isPlain(value) && value.client === "browser") return parseBrowserApp(value);
   if (!isPlain(value) || !exactKeys(value, ["version", "channel", "edition", "platform", "arch", "osVersion", "electron", "chromium", "packaged", "locale"])) return null;
   const { version, channel, edition, platform, arch, osVersion, electron, chromium, packaged, locale } = value;
   if (!line(version, 24, VERSION)) return null;
-  const expected: BugReportChannel = version.endsWith("-nightly") ? "nightly" : "stable";
+  const expected = channelOf(version);
   if (channel !== expected) return null;
   if (edition !== "standard" && edition !== "workstation") return null;
-  if (platform !== "darwin" && platform !== "win32" && platform !== "linux") return null;
+  if (!isPlatform(platform)) return null;
   if (!line(arch, 16, ARCH) || !line(osVersion, 64) || !line(electron, 32, DOTTED) || !line(chromium, 32, DOTTED)) return null;
   if (typeof packaged !== "boolean" || !line(locale, 35, LOCALE)) return null;
   return { version, channel: expected, edition, platform, arch, osVersion, electron, chromium, packaged, locale };
