@@ -8,7 +8,15 @@
 // corner); the settings are the person's and travel through the host's
 // account preference (`package.focus-timer`, see index.tsx).
 import { DEFAULT_ANCHOR, parseAnchor, type Anchor } from "../src/placement.ts";
-import { DEFAULT_SETTINGS, parseSettings, sameSettings, type FocusTimerSettings } from "../src/settings.ts";
+import {
+  DEFAULT_SETTINGS,
+  labelKey,
+  normalizeLabel,
+  parseSettings,
+  sameSettings,
+  type FocusTimerSettings,
+  type LabelTone,
+} from "../src/settings.ts";
 import {
   acknowledge,
   addTime,
@@ -91,6 +99,8 @@ export interface TimerController {
   readSettings(): FocusTimerSettings;
   writeSettings(value: unknown): void;
   updateSettings(patch: Partial<FocusTimerSettings>): void;
+  /** Name a phase or the countdown; "" restores the built-in name. */
+  setLabel(tone: LabelTone, label: string): void;
   subscribeSettings(listener: () => void): () => void;
   // lifecycle
   /** Re-read the clock now (tab became visible, window regained focus). */
@@ -287,6 +297,11 @@ export function createTimerController(deps: ControllerDeps): TimerController {
     },
     updateSettings(patch) {
       controller.writeSettings({ ...settings, ...patch });
+    },
+    setLabel(tone, label) {
+      const patch: Partial<FocusTimerSettings> = {};
+      patch[labelKey(tone)] = normalizeLabel(label);
+      controller.updateSettings(patch);
     },
     subscribeSettings(listener) {
       settingsListeners.add(listener);

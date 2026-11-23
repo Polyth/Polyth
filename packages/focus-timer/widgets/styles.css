@@ -4,12 +4,12 @@
    theme's glass, type, density and motion preferences. */
 
 /* ---- phase colours ------------------------------------------------------- */
-:is(.focus-timer, .focus-timer-edge, .focus-timer-chip-widget, .focus-timer-chip, .focus-timer-segment, .focus-timer-mark) {
+:is(.focus-timer, .focus-timer-edge, .focus-timer-chip-widget, .focus-timer-chip, .focus-timer-segment, .focus-timer-mark, .focus-timer-edit, .focus-timer-label-field) {
   --ft-tone: var(--accent);
 }
-:is(.focus-timer, .focus-timer-edge, .focus-timer-chip-widget, .focus-timer-chip, .focus-timer-segment, .focus-timer-mark)[data-tone="short"] { --ft-tone: var(--green); }
-:is(.focus-timer, .focus-timer-edge, .focus-timer-chip-widget, .focus-timer-chip, .focus-timer-segment, .focus-timer-mark)[data-tone="long"] { --ft-tone: var(--blue); }
-:is(.focus-timer, .focus-timer-edge, .focus-timer-chip-widget, .focus-timer-chip, .focus-timer-segment, .focus-timer-mark)[data-tone="countdown"] { --ft-tone: var(--purple); }
+:is(.focus-timer, .focus-timer-edge, .focus-timer-chip-widget, .focus-timer-chip, .focus-timer-segment, .focus-timer-mark, .focus-timer-edit, .focus-timer-label-field)[data-tone="short"] { --ft-tone: var(--green); }
+:is(.focus-timer, .focus-timer-edge, .focus-timer-chip-widget, .focus-timer-chip, .focus-timer-segment, .focus-timer-mark, .focus-timer-edit, .focus-timer-label-field)[data-tone="long"] { --ft-tone: var(--blue); }
+:is(.focus-timer, .focus-timer-edge, .focus-timer-chip-widget, .focus-timer-chip, .focus-timer-segment, .focus-timer-mark, .focus-timer-edit, .focus-timer-label-field)[data-tone="countdown"] { --ft-tone: var(--purple); }
 .focus-timer-mark[data-phase="short"] { --ft-tone: var(--green); }
 .focus-timer-mark[data-phase="long"] { --ft-tone: var(--blue); }
 .focus-timer-mark[data-phase="countdown"] { --ft-tone: var(--purple); }
@@ -127,22 +127,52 @@
   gap: var(--space-2);
   min-inline-size: 0;
 }
+/* The phase's name on the dial; a press edits it (the quick editor). */
 .focus-timer-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-inline-size: 140px;
+  max-inline-size: 150px;
   margin-block-end: 2px;
+  padding: 2px 6px 2px 8px;
+  border: 0;
+  border-radius: var(--radius-round);
+  background: transparent;
   color: var(--text-dim);
+  font-family: inherit;
   font-size: var(--font-meta);
   font-weight: 600;
   line-height: var(--font-meta-lh);
   white-space: nowrap;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
 }
+.focus-timer-chip[data-custom] { color: var(--text); }
 .focus-timer-chip-label {
   min-inline-size: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* A quiet pencil keeps the label centred (it balances the dot) and says the
+   name can change; it comes up on hover and while editing. */
+.focus-timer-chip-pencil {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  color: var(--muted);
+  opacity: 0.6;
+  transition: opacity var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+.focus-timer-chip[aria-expanded="true"] .focus-timer-chip-pencil { opacity: 1; color: var(--ft-tone); }
+.focus-timer-chip[aria-expanded="true"],
+.focus-timer-rounds[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--ft-tone) 14%, transparent);
+}
+@media (hover: hover) {
+  .focus-timer-chip:hover,
+  .focus-timer-rounds:hover { background: var(--surface-overlay-hover); color: var(--text); }
+  .focus-timer-chip:hover .focus-timer-chip-pencil { opacity: 1; color: var(--text-dim); }
 }
 .focus-timer-chip-dot {
   inline-size: 7px;
@@ -293,10 +323,19 @@
   font-variant-numeric: tabular-nums;
   line-height: var(--font-meta-lh);
 }
+/* The cycle's intervals; a press edits how many there are. */
 .focus-timer-rounds {
   display: inline-flex;
+  align-items: center;
   gap: 5px;
-  margin-block-start: var(--space-1);
+  margin-block-start: 0;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-round);
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: background-color var(--motion-fast) var(--motion-ease);
 }
 .focus-timer-round {
   inline-size: 6px;
@@ -313,6 +352,87 @@
   background: color-mix(in srgb, var(--ft-tone) 45%, transparent);
 }
 .focus-timer-round[data-state="live"] { background: var(--ft-tone); }
+
+/* ---- quick editor (label and intervals) ---------------------------------- */
+.focus-timer-edit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  inline-size: 100%;
+  box-sizing: border-box;
+  padding: var(--space-2) var(--space-2) var(--space-1) var(--space-3);
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  box-shadow: inset 0 0 0 1px var(--hair);
+  animation: focus-timer-in var(--motion-surface) var(--motion-ease) both;
+}
+.focus-timer-edit-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-block-end: -2px;
+}
+.focus-timer-edit-caption {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: var(--font-meta-lh);
+}
+.focus-timer-edit-done {
+  min-block-size: max(26px, var(--hit-min));
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-round);
+  background: transparent;
+  color: var(--ft-tone);
+  font: inherit;
+  font-size: var(--font-meta);
+  font-weight: 650;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .focus-timer-edit-done:hover { background: color-mix(in srgb, var(--ft-tone) 12%, transparent); }
+}
+.focus-timer-edit .focus-timer-label-field { margin-inline-end: var(--space-1); }
+.focus-timer-edit .focus-timer-row { min-block-size: 34px; padding-block: 0; }
+/* A label field: the phase's dot, the name, a clear button. */
+.focus-timer-label-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-inline-size: 0;
+  min-block-size: max(32px, var(--hit-min));
+  box-sizing: border-box;
+  padding-inline: var(--space-3) 3px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-round);
+  background: var(--input-bg);
+  transition: border-color var(--motion-fast) var(--motion-ease);
+}
+.focus-timer-label-field:focus-within {
+  border-color: color-mix(in srgb, var(--ft-tone) 65%, var(--control-border));
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.focus-timer-label-field .focus-timer-chip-dot { animation: none; }
+.focus-timer-label-input {
+  flex: 1;
+  min-inline-size: 0;
+  block-size: 30px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-input);
+  user-select: text;
+  -webkit-user-select: text;
+}
+.focus-timer-label-input:focus,
+.focus-timer .focus-timer-label-input:focus-visible { outline: none; }
+.focus-timer-label-input::placeholder { color: var(--faint); }
+.focus-timer-label-clear { flex: none; color: var(--muted); }
 
 /* ---- time-up notice ------------------------------------------------------ */
 .focus-timer-done {
@@ -593,9 +713,20 @@
   font-weight: 600;
   line-height: var(--font-meta-lh);
 }
+.focus-timer-section-hint {
+  margin: -2px 0 var(--space-1);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
 .focus-timer-section-body {
   display: flex;
   flex-direction: column;
+}
+.focus-timer-label-row { padding-block: 3px; }
+.focus-timer-label-row .focus-timer-label-field {
+  flex: 0 1 62%;
+  max-inline-size: 260px;
 }
 .focus-timer-row {
   display: flex;

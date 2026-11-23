@@ -6,6 +6,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -15,6 +16,7 @@ import {
 } from "react";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { anchorAt, clampPosition, placeCard, type Insets, type Rect } from "../src/placement.ts";
+import { customLabel } from "../src/settings.ts";
 import {
   COUNTDOWN_PRESETS,
   formatClock,
@@ -23,22 +25,17 @@ import {
   type FocusPhase,
   type TimerState,
 } from "../src/timerModel.ts";
+import { finishedCopy } from "./alerts.ts";
 import type { TimerController, TimerSnapshot } from "./controller.ts";
 import { CheckGlyph, CompactGlyph, PauseGlyph, PlayGlyph, ResetGlyph, SkipGlyph, TimerMark } from "./glyphs.tsx";
+import { phaseLabel, toneOf, type Tone } from "./labels.ts";
 import { unlockAudio } from "./sound.ts";
 import { timerController, timerHost, useNow, useTimer } from "./runtime.ts";
-import TimerSettings from "./TimerSettings.tsx";
+import TimerSettings, { LabelField, Stepper } from "./TimerSettings.tsx";
 
-type Tone = FocusPhase | "countdown";
-
-export function toneOf(timer: Pick<TimerState, "mode" | "phase">): Tone {
-  return timer.mode === "countdown" ? "countdown" : timer.phase;
-}
-
-export function phaseLabel(tone: Tone): string {
-  if (tone === "countdown") return tr("focustimer.countdown");
-  return tr(`focustimer.phase.${tone}`);
-}
+/** The quick editor under the dial: which part was asked for and the label
+ *  it edits (kept, so a segment ending mid-edit does not swap the field). */
+type Editing = { focus: "label" | "rounds"; tone: Tone };
 
 const GAP = 12;
 const INSETS: Insets = { start: GAP, top: GAP, end: GAP, bottom: GAP };
@@ -123,9 +120,26 @@ function Dial({ fraction, size, stroke }: { fraction: number; size: number; stro
   );
 }
 
-function RoundDots({ done, total, running, phase }: { done: number; total: number; running: boolean; phase: FocusPhase }) {
+/** The cycle's focus intervals as dots; a press opens the quick editor on
+ *  their count. */
+function RoundDots({ done, total, running, phase, expanded, onPress }: {
+  done: number;
+  total: number;
+  running: boolean;
+  phase: FocusPhase;
+  expanded: boolean;
+  onPress: () => void;
+}) {
+  const where = tr("focustimer.round", { current: Math.min(total, done + (phase === "focus" ? 1 : 0)) || 1, total });
   return (
-    <span className="focus-timer-rounds" aria-label={tr("focustimer.round", { current: Math.min(total, done + (phase === "focus" ? 1 : 0)) || 1, total })} role="img">
+    <button
+      type="button"
+      className="focus-timer-rounds"
+      aria-label={`${where}. ${tr("focustimer.action.editRounds")}`}
+      aria-expanded={expanded}
+      title={tr("focustimer.action.editRounds")}
+      onClick={onPress}
+    >
       {Array.from({ length: total }, (_, index) => (
         <span
           key={index}
@@ -133,32 +147,50 @@ function RoundDots({ done, total, running, phase }: { done: number; total: numbe
           data-state={index < done ? "done" : index === done && phase === "focus" ? (running ? "live" : "next") : "todo"}
         />
       ))}
-    </span>
+    </button>
   );
 }
 
-function doneCopy(snapshot: TimerSnapshot): { title: string; body: string } | null {
-  const finished = snapshot.timer.finished;
-  if (!finished) return null;
+/** Under the dial: the shown phase's label and, for pomodoro, how many focus
+ *  intervals make a cycle. Both apply at once; the dots and chip above are
+ *  the preview. */
+function QuickEditor({ editing, snapshot, controller, onClose }: {
+  editing: Editing;
+  snapshot: TimerSnapshot;
+  controller: TimerController;
+  onClose: () => void;
+}) {
+  const id = useId();
   const { settings, timer } = snapshot;
-  const running = timer.status === "running";
-  if (finished.mode === "countdown") {
-    return {
-      title: tr("focustimer.done.countdown"),
-      body: tr("focustimer.done.countdownBody", { minutes: timer.countdownMin }),
-    };
-  }
-  const nextMinutes = timer.phase === "focus" ? settings.focusMin : timer.phase === "short" ? settings.shortMin : settings.longMin;
-  if (finished.phase === "focus") {
-    return {
-      title: tr("focustimer.done.focus"),
-      body: tr(running ? "focustimer.done.breakStarted" : "focustimer.done.nextBreak", { minutes: nextMinutes }),
-    };
-  }
-  return {
-    title: tr(finished.phase === "long" ? "focustimer.done.long" : "focustimer.done.short"),
-    body: tr(running ? "focustimer.done.focusStarted" : "focustimer.done.nextFocus", { minutes: nextMinutes }),
-  };
+  return (
+    <div className="focus-timer-edit" data-tone={editing.tone} role="group" aria-labelledby={`${id}-caption`}>
+      <div className="focus-timer-edit-head">
+        <label className="focus-timer-edit-caption" id={`${id}-caption`} htmlFor={`${id}-label`}>
+          {tr("focustimer.edit.label")}
+        </label>
+        <button type="button" className="focus-timer-edit-done" onClick={onClose}>{tr("focustimer.edit.done")}</button>
+      </div>
+      <LabelField
+        id={`${id}-label`}
+        tone={editing.tone}
+        value={customLabel(settings, editing.tone)}
+        autoFocus={editing.focus === "label"}
+        onCommit={(label) => controller.setLabel(editing.tone, label)}
+        onDone={onClose}
+        onCancel={onClose}
+      />
+      {timer.mode === "pomodoro" && (
+        <Stepper
+          settingKey="rounds"
+          value={settings.rounds}
+          label={tr("focustimer.edit.rounds")}
+          unit=""
+          autoFocus={editing.focus === "rounds"}
+          onChange={(rounds) => controller.updateSettings({ rounds })}
+        />
+      )}
+    </div>
+  );
 }
 
 function useDrag(
@@ -225,13 +257,33 @@ function TimerCard({ snapshot, controller }: { snapshot: TimerSnapshot; controll
   const cardRef = useRef<HTMLElement | null>(null);
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
   const [live, setLive] = useState<{ left: number; top: number } | null>(null);
+  const chipRef = useRef<HTMLButtonElement | null>(null);
+  const [editing, setEditing] = useState<Editing | null>(null);
   const tone = toneOf(timer);
+  const label = phaseLabel(tone, settings);
   const left = remainingMs(timer, now);
   const fraction = progressOf(timer, now);
   const running = timer.status === "running";
-  const done = doneCopy(snapshot);
+  const done = timer.finished ? finishedCopy(timer.finished, snapshot) : null;
   const fresh = Boolean(timer.finished && !timer.finished.stale);
   const compact = prefs.compact && view === "timer";
+
+  // Folding, hiding or opening settings closes the quick editor.
+  useEffect(() => {
+    if (compact || view !== "timer") setEditing(null);
+  }, [compact, view]);
+
+  const toggleEditor = (focus: Editing["focus"]) => {
+    setEditing((current) => current?.focus === focus ? null : { focus, tone });
+  };
+
+  const closeEditor = () => {
+    const card = cardRef.current;
+    const hadFocus = Boolean(card?.querySelector(".focus-timer-edit")?.contains(document.activeElement));
+    setEditing(null);
+    // Focus returns to the label it came from instead of falling to the page.
+    if (hadFocus) requestAnimationFrame(() => chipRef.current?.focus({ preventScroll: true }));
+  };
 
   const place = useCallback(() => {
     const card = cardRef.current;
@@ -242,7 +294,7 @@ function TimerCard({ snapshot, controller }: { snapshot: TimerSnapshot; controll
 
   useLayoutEffect(() => {
     place();
-  }, [place, compact, view, Boolean(done)]);
+  }, [place, compact, view, Boolean(done), Boolean(editing)]);
 
   useEffect(() => {
     const card = cardRef.current;
@@ -278,7 +330,8 @@ function TimerCard({ snapshot, controller }: { snapshot: TimerSnapshot; controll
   const onKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
     const target = event.target as HTMLElement;
     if (event.key === "Escape") {
-      if (view === "settings") controller.setView("timer");
+      if (editing) closeEditor();
+      else if (view === "settings") controller.setView("timer");
       else if (timer.finished) controller.acknowledge();
       else controller.setCompact(true);
       event.stopPropagation();
@@ -326,7 +379,7 @@ function TimerCard({ snapshot, controller }: { snapshot: TimerSnapshot; controll
           className="focus-timer-pill-face"
           data-drag=""
           title={tr("focustimer.action.expand")}
-          aria-label={`${phaseLabel(tone)} ${formatClock(left)}. ${tr("focustimer.action.expand")}`}
+          aria-label={`${label} ${formatClock(left)}. ${tr("focustimer.action.expand")}`}
           onClick={() => {
             if (takeSuppressedClick()) return;
             controller.acknowledge();
@@ -353,6 +406,7 @@ function TimerCard({ snapshot, controller }: { snapshot: TimerSnapshot; controll
   const SettingsIcon = icons?.SettingsIcon;
   const CloseIcon = icons?.CloseIcon;
   const BackIcon = icons?.ChevronLeftIcon;
+  const EditIcon = icons?.EditIcon;
 
   return (
     <section
@@ -417,18 +471,40 @@ function TimerCard({ snapshot, controller }: { snapshot: TimerSnapshot; controll
           <div className="focus-timer-dial">
             <Dial fraction={fraction} size={176} stroke={6} />
             <div className="focus-timer-face">
-              <span className="focus-timer-chip" data-tone={tone}>
+              <button
+                ref={chipRef}
+                type="button"
+                className="focus-timer-chip"
+                data-tone={tone}
+                data-custom={customLabel(settings, tone) ? true : undefined}
+                aria-label={`${label}. ${tr("focustimer.action.editLabel")}`}
+                aria-expanded={editing?.focus === "label"}
+                title={tr("focustimer.action.editLabel")}
+                onClick={() => toggleEditor("label")}
+              >
                 <span className="focus-timer-chip-dot" aria-hidden="true" />
-                <span className="focus-timer-chip-label">{phaseLabel(tone)}</span>
-              </span>
+                <span className="focus-timer-chip-label">{label}</span>
+                <span className="focus-timer-chip-pencil" aria-hidden="true">
+                  {EditIcon ? <EditIcon size={11} aria-hidden /> : "✎"}
+                </span>
+              </button>
               <span className="focus-timer-time" aria-hidden="true">{formatClock(left)}</span>
               <span className="focus-timer-status">{status}</span>
               {timer.mode === "pomodoro" && (
-                <RoundDots done={timer.cycleDone} total={settings.rounds} running={running} phase={timer.phase} />
+                <RoundDots
+                  done={timer.cycleDone}
+                  total={settings.rounds}
+                  running={running}
+                  phase={timer.phase}
+                  expanded={editing?.focus === "rounds"}
+                  onPress={() => toggleEditor("rounds")}
+                />
               )}
             </div>
           </div>
-          <span className="sr-only" role="timer" aria-live="off">{`${phaseLabel(tone)} ${formatClock(left)}`}</span>
+          <span className="sr-only" role="timer" aria-live="off">{`${label} ${formatClock(left)}`}</span>
+
+          {editing && <QuickEditor editing={editing} snapshot={snapshot} controller={controller} onClose={closeEditor} />}
 
           {done && (
             <div className="focus-timer-done" role="status">

@@ -5,6 +5,7 @@
 // window's own flash and colour come from the shared state (TimerWindow.tsx).
 import type { WebPackageHost } from "@polyth/web-sdk";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
+import { customLabel } from "../src/settings.ts";
 import type { FinishedSegment } from "../src/timerModel.ts";
 import type { TimerController, TimerEffects, TimerSnapshot } from "./controller.ts";
 import { playSound } from "./sound.ts";
@@ -35,7 +36,15 @@ export async function requestSystemPermission(): Promise<SystemPermission> {
   }
 }
 
+/** What the time-up banner, toast and system notification say. A segment
+ *  the person named is announced by its name. */
 export function finishedCopy(finished: FinishedSegment, snapshot: TimerSnapshot): { title: string; body: string; next: string | null } {
+  const copy = builtInCopy(finished, snapshot);
+  const label = customLabel(snapshot.settings, finished.mode === "countdown" ? "countdown" : finished.phase);
+  return label ? { ...copy, title: tr("focustimer.done.labelled", { label }) } : copy;
+}
+
+function builtInCopy(finished: FinishedSegment, snapshot: TimerSnapshot): { title: string; body: string; next: string | null } {
   const { settings, timer } = snapshot;
   if (finished.mode === "countdown") {
     return {

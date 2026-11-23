@@ -4,8 +4,8 @@
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { formatClock, progress, remainingMs } from "../src/timerModel.ts";
 import { TimerMark } from "./glyphs.tsx";
+import { phaseLabel, toneOf } from "./labels.ts";
 import { timerController, useNow, useTimer } from "./runtime.ts";
-import { phaseLabel, toneOf } from "./TimerWindow.tsx";
 
 type MarkProps = { size?: number; strokeWidth?: number; "aria-hidden"?: boolean };
 
@@ -33,7 +33,7 @@ export function TimerChip() {
   const now = useNow(timer?.status === "running" ? timer.endsAt : null);
   if (!timer || (timer.status === "idle" && !timer.finished)) return null;
   const tone = toneOf(timer);
-  const label = `${phaseLabel(tone)} ${formatClock(remainingMs(timer, now))}`;
+  const label = `${phaseLabel(tone, snapshot?.settings)} ${formatClock(remainingMs(timer, now))}`;
   return (
     <button
       type="button"

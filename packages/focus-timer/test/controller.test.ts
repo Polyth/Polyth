@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { MINUTE, STALE_FINISH_MS } from "../src/timerModel.ts";
+import { finishedCopy } from "../widgets/alerts.ts";
 import { AUTO_ACK_MS, createTimerController, STATE_KEY, WINDOW_KEY, type ControllerDeps, type TimerController } from "../widgets/controller.ts";
 
 const T0 = new Date(2026, 10, 23, 9, 0, 0).getTime();
@@ -133,6 +134,61 @@ test("settings come from the account preference and reach an idle timer", () => 
   // Writing the same value again is not a change.
   tab.controller.writeSettings(tab.controller.readSettings());
   assert.equal(notified, 1);
+});
+
+test("a label is saved tidy to the account preference and an empty one restores the built-in name", () => {
+  const world = new World();
+  const tab = world.tab();
+  let notified = 0;
+  tab.controller.subscribeSettings(() => { notified += 1; });
+  tab.controller.setLabel("focus", "  Landing   page\n");
+  assert.equal(tab.controller.readSettings().focusLabel, "Landing page");
+  assert.equal(notified, 1);
+  // The same label again is not a change; other phases keep theirs.
+  tab.controller.setLabel("focus", "Landing page");
+  assert.equal(notified, 1);
+  assert.equal(tab.controller.readSettings().shortLabel, "");
+  tab.controller.setLabel("focus", "");
+  assert.equal(tab.controller.readSettings().focusLabel, "");
+  assert.equal(notified, 2);
+});
+
+test("time-up notices announce a labelled segment by its label", () => {
+  const world = new World();
+  const tab = world.tab();
+  tab.controller.setLabel("countdown", "Tea");
+  tab.controller.setCountdown(3, true);
+  world.advance(3 * MINUTE + 50);
+  const snapshot = tab.controller.getSnapshot();
+  assert.ok(snapshot.timer.finished);
+  assert.match(finishedCopy(snapshot.timer.finished, snapshot).title, /Tea/);
+  tab.controller.setLabel("countdown", "");
+  const plain = tab.controller.getSnapshot();
+  assert.doesNotMatch(finishedCopy(snapshot.timer.finished, plain).title, /Tea/);
+});
+
+test("changing the number of intervals mid-cycle keeps the cycle consistent", () => {
+  const world = new World();
+  const tab = world.tab();
+  tab.controller.updateSettings({ rounds: 4 });
+  for (let round = 0; round < 3; round += 1) {
+    tab.controller.start();
+    world.advance(25 * MINUTE + 50);
+    if (round < 2) {
+      tab.controller.skip(); // skip the break straight back to focus
+    }
+  }
+  assert.equal(tab.controller.getSnapshot().timer.cycleDone, 3);
+  // Fewer intervals than already done: the count clamps and the next focus closes the cycle.
+  tab.controller.updateSettings({ rounds: 2 });
+  assert.equal(tab.controller.getSnapshot().timer.cycleDone, 2);
+  tab.controller.skip();
+  tab.controller.start();
+  world.advance(25 * MINUTE + 50);
+  assert.equal(tab.controller.getSnapshot().timer.phase, "long");
+  // More intervals: the cycle grows, nothing done is lost.
+  tab.controller.updateSettings({ rounds: 6 });
+  assert.equal(tab.controller.getSnapshot().timer.cycleDone, 2);
 });
 
 test("the window's visibility, shape and place persist on this device", () => {

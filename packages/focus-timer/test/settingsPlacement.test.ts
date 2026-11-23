@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { anchorAt, clampPosition, DEFAULT_ANCHOR, parseAnchor, placeCard, SNAP_PX, type Insets, type Rect } from "../src/placement.ts";
-import { DEFAULT_SETTINGS, parseSettings, sameSettings } from "../src/settings.ts";
+import { customLabel, DEFAULT_SETTINGS, LABEL_MAX, normalizeLabel, parseSettings, sameSettings } from "../src/settings.ts";
 
 test("settings fall back to defaults and clamp every number", () => {
   assert.deepEqual(parseSettings(null), DEFAULT_SETTINGS);
@@ -28,6 +28,26 @@ test("settings fall back to defaults and clamp every number", () => {
   assert.equal(parsed.flash, false);
   assert.ok(sameSettings(parseSettings(DEFAULT_SETTINGS), DEFAULT_SETTINGS));
   assert.ok(!sameSettings(parsed, DEFAULT_SETTINGS));
+});
+
+test("labels are one tidy line, capped by characters, and empty means the built-in name", () => {
+  assert.equal(normalizeLabel("  Звіт \n для\tклієнта  "), "Звіт для клієнта");
+  assert.equal(normalizeLabel("a\u0000b\u2028c"), "a b c");
+  assert.equal(normalizeLabel(42), "");
+  assert.equal(normalizeLabel("   "), "");
+  // An emoji counts as one character and is never cut in half.
+  const long = "🍅".repeat(LABEL_MAX + 5);
+  assert.equal(Array.from(normalizeLabel(long)).length, LABEL_MAX);
+  assert.equal(normalizeLabel(long), "🍅".repeat(LABEL_MAX));
+
+  const parsed = parseSettings({ focusLabel: "  Design  ", countdownLabel: "Tea", shortLabel: 7, longLabel: null });
+  assert.equal(customLabel(parsed, "focus"), "Design");
+  assert.equal(customLabel(parsed, "countdown"), "Tea");
+  assert.equal(customLabel(parsed, "short"), "");
+  assert.equal(customLabel(parsed, "long"), "");
+  // Older stored settings without labels keep the built-in names.
+  assert.equal(parseSettings({ focusMin: 30 }).focusLabel, "");
+  assert.ok(!sameSettings(parsed, DEFAULT_SETTINGS), "a label alone is a change worth saving");
 });
 
 const frame: Rect = { left: 300, top: 50, width: 900, height: 700 };

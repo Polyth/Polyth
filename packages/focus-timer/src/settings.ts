@@ -1,11 +1,19 @@
-// What the person chose for the focus timer: segment lengths, the cycle and
-// how a finished segment announces itself. Account-wide (the web entry
+// What the person chose for the focus timer: segment lengths, the cycle, their
+// own names for the phases and how a finished segment announces itself.
+// Account-wide (the web entry
 // registers it as the `package.focus-timer` UI preference), so it follows the
 // person to every device. Parsing clamps every field, so a hand-edited or
 // older value can never stall the timer.
 
 export const SOUND_IDS = ["chime", "bell", "digital", "soft"] as const;
 export type SoundId = (typeof SOUND_IDS)[number];
+
+/** What a label can name: each pomodoro phase and the plain countdown. */
+export const LABEL_TONES = ["focus", "short", "long", "countdown"] as const;
+export type LabelTone = (typeof LABEL_TONES)[number];
+export type LabelKey = `${LabelTone}Label`;
+/** Longest label, in characters (code points, so an emoji is one). */
+export const LABEL_MAX = 40;
 
 export interface FocusTimerSettings {
   /** Minutes of one focus segment. */
@@ -34,6 +42,13 @@ export interface FocusTimerSettings {
   color: boolean;
   /** A system notification while Polyth is in the background. */
   system: boolean;
+  /** The person's own name for each phase and the countdown, shown on the
+   *  dial and in the time-up notices instead of the built-in one. Empty keeps
+   *  the built-in name. */
+  focusLabel: string;
+  shortLabel: string;
+  longLabel: string;
+  countdownLabel: string;
 }
 
 export const DEFAULT_SETTINGS: Readonly<FocusTimerSettings> = Object.freeze({
@@ -50,7 +65,28 @@ export const DEFAULT_SETTINGS: Readonly<FocusTimerSettings> = Object.freeze({
   flash: true,
   color: true,
   system: false,
+  focusLabel: "",
+  shortLabel: "",
+  longLabel: "",
+  countdownLabel: "",
 });
+
+export function labelKey(tone: LabelTone): LabelKey {
+  return `${tone}Label`;
+}
+
+/** One line, no control characters, at most LABEL_MAX characters. */
+export function normalizeLabel(value: unknown): string {
+  if (typeof value !== "string") return "";
+  // eslint-disable-next-line no-control-regex
+  const line = value.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, " ").replace(/\s+/g, " ").trim();
+  return Array.from(line).slice(0, LABEL_MAX).join("").trim();
+}
+
+/** The person's label for `tone`, or "" for the built-in name. */
+export function customLabel(settings: Pick<FocusTimerSettings, LabelKey>, tone: LabelTone): string {
+  return settings[labelKey(tone)];
+}
 
 export const LIMITS = Object.freeze({
   focusMin: { min: 1, max: 180 },
@@ -92,6 +128,10 @@ export function parseSettings(raw: unknown): FocusTimerSettings {
     flash: bool(value.flash, DEFAULT_SETTINGS.flash),
     color: bool(value.color, DEFAULT_SETTINGS.color),
     system: bool(value.system, DEFAULT_SETTINGS.system),
+    focusLabel: normalizeLabel(value.focusLabel),
+    shortLabel: normalizeLabel(value.shortLabel),
+    longLabel: normalizeLabel(value.longLabel),
+    countdownLabel: normalizeLabel(value.countdownLabel),
   };
 }
 

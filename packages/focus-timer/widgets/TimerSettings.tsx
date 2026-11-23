@@ -1,15 +1,124 @@
-// The timer's settings: lengths, flow and how time-up announces itself. One
-// component for both places it appears: inside the floating window
-// (`variant="window"`) and as the package's page in Settings.
-import { useEffect, useId, useState, type CSSProperties, type ReactNode } from "react";
+// The timer's settings: lengths, labels, flow and how time-up announces
+// itself. One component for both places it appears: inside the floating
+// window (`variant="window"`) and as the package's page in Settings. The
+// window's quick editor (TimerWindow.tsx) reuses `LabelField` and `Stepper`.
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
-import { clampSetting, LIMITS, SOUND_IDS, type FocusTimerSettings } from "../src/settings.ts";
+import {
+  clampSetting,
+  customLabel,
+  LABEL_MAX,
+  LABEL_TONES,
+  LIMITS,
+  normalizeLabel,
+  SOUND_IDS,
+  type FocusTimerSettings,
+  type LabelTone,
+} from "../src/settings.ts";
 import { requestSystemPermission, systemPermission, type SystemPermission } from "./alerts.ts";
 import { SpeakerGlyph } from "./glyphs.tsx";
+import { builtInLabel } from "./labels.ts";
 import { timerController, timerHost, useTimer } from "./runtime.ts";
 import { playSound } from "./sound.ts";
 
 type NumericKey = keyof typeof LIMITS;
+
+const finePointer = (): boolean => typeof matchMedia === "function" && matchMedia("(pointer: fine)").matches;
+
+/** A one-line label for a phase. The draft is the field's own until Enter or
+ *  leaving the field saves it (so typing never writes the account preference
+ *  per key); Escape puts the saved label back. Empty means the built-in name,
+ *  which the field shows as its placeholder. */
+export function LabelField({ id, tone, value, onCommit, autoFocus, onDone, onCancel }: {
+  id?: string;
+  tone: LabelTone;
+  value: string;
+  onCommit: (label: string) => void;
+  autoFocus?: boolean;
+  /** Enter was pressed (after saving). */
+  onDone?: () => void;
+  /** Escape was pressed (after restoring); without it the field just blurs. */
+  onCancel?: () => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  const input = useRef<HTMLInputElement | null>(null);
+  const editing = useRef(false);
+  const cancelled = useRef(false);
+  useEffect(() => {
+    if (!editing.current) setDraft(value);
+  }, [value]);
+  useEffect(() => {
+    if (!autoFocus) return;
+    input.current?.focus({ preventScroll: true });
+    input.current?.select();
+  }, [autoFocus]);
+  const commit = (raw: string) => {
+    const next = normalizeLabel(raw);
+    setDraft(next);
+    if (next !== value) onCommit(next);
+  };
+  const CloseIcon = timerHost()?.ui.iconSet?.CloseIcon;
+  return (
+    <span className="focus-timer-label-field" data-tone={tone}>
+      <span className="focus-timer-chip-dot" aria-hidden="true" />
+      <input
+        ref={input}
+        id={id}
+        className="focus-timer-label-input"
+        type="text"
+        enterKeyHint="done"
+        autoComplete="off"
+        spellCheck={false}
+        maxLength={LABEL_MAX}
+        value={draft}
+        placeholder={builtInLabel(tone)}
+        onChange={(event) => setDraft(event.target.value)}
+        onFocus={() => {
+          editing.current = true;
+          cancelled.current = false;
+        }}
+        onBlur={() => {
+          editing.current = false;
+          if (cancelled.current) {
+            cancelled.current = false;
+            return;
+          }
+          commit(draft);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            commit(draft);
+            onDone?.();
+          } else if (event.key === "Escape") {
+            event.stopPropagation();
+            cancelled.current = true;
+            setDraft(value);
+            if (onCancel) onCancel();
+            else event.currentTarget.blur();
+          }
+        }}
+      />
+      {draft ? (
+        <button
+          type="button"
+          className="focus-timer-step focus-timer-label-clear"
+          aria-label={tr("focustimer.edit.clear", { name: builtInLabel(tone) })}
+          title={tr("focustimer.edit.clear", { name: builtInLabel(tone) })}
+          // Keep the field focused: a blur would save the old draft first.
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={() => {
+            setDraft("");
+            if (value) onCommit("");
+            input.current?.focus({ preventScroll: true });
+          }}
+        >
+          {CloseIcon ? <CloseIcon size={13} aria-hidden /> : "×"}
+        </button>
+      ) : null}
+    </span>
+  );
+}
 
 function Toggle({ checked, onChange, label, hint, disabled }: {
   checked: boolean;
@@ -35,16 +144,22 @@ function Toggle({ checked, onChange, label, hint, disabled }: {
   );
 }
 
-function Stepper({ settingKey, value, label, unit, onChange }: {
+export function Stepper({ settingKey, value, label, unit, onChange, autoFocus }: {
   settingKey: NumericKey;
   value: number;
   label: string;
   unit: string;
   onChange: (value: number) => void;
+  /** Focus the number on mount (fine pointers only: a phone keeps its keyboard down). */
+  autoFocus?: boolean;
 }) {
   const id = useId();
   const [draft, setDraft] = useState(String(value));
+  const field = useRef<HTMLInputElement | null>(null);
   useEffect(() => setDraft(String(value)), [value]);
+  useEffect(() => {
+    if (autoFocus && finePointer()) field.current?.focus({ preventScroll: true });
+  }, [autoFocus]);
   const { min, max } = LIMITS[settingKey];
   const commit = (next: number) => {
     const clamped = clampSetting(settingKey, next);
@@ -61,6 +176,7 @@ function Stepper({ settingKey, value, label, unit, onChange }: {
           {MinusIcon ? <MinusIcon size={14} aria-hidden /> : "−"}
         </button>
         <input
+          ref={field}
           id={id}
           className="focus-timer-step-input"
           type="number"
@@ -83,13 +199,24 @@ function Stepper({ settingKey, value, label, unit, onChange }: {
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function Section({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
   const id = useId();
   return (
-    <section className="focus-timer-section" aria-labelledby={id}>
+    <section className="focus-timer-section" aria-labelledby={id} aria-describedby={hint ? `${id}-hint` : undefined}>
       <h3 className="focus-timer-section-title" id={id}>{title}</h3>
+      {hint ? <p className="focus-timer-section-hint" id={`${id}-hint`}>{hint}</p> : null}
       <div className="focus-timer-section-body">{children}</div>
     </section>
+  );
+}
+
+function LabelRow({ tone, settings }: { tone: LabelTone; settings: FocusTimerSettings }) {
+  const id = useId();
+  return (
+    <div className="focus-timer-row focus-timer-label-row">
+      <label className="focus-timer-row-label" htmlFor={id}>{builtInLabel(tone)}</label>
+      <LabelField id={id} tone={tone} value={customLabel(settings, tone)} onCommit={(label) => timerController()?.setLabel(tone, label)} />
+    </div>
   );
 }
 
@@ -116,6 +243,10 @@ export default function TimerSettings({ variant }: { variant: "window" | "page" 
         <Stepper settingKey="shortMin" value={settings.shortMin} label={tr("focustimer.settings.short")} unit={min} onChange={(shortMin) => update({ shortMin })} />
         <Stepper settingKey="longMin" value={settings.longMin} label={tr("focustimer.settings.long")} unit={min} onChange={(longMin) => update({ longMin })} />
         <Stepper settingKey="rounds" value={settings.rounds} label={tr("focustimer.settings.rounds")} unit="" onChange={(rounds) => update({ rounds })} />
+      </Section>
+
+      <Section title={tr("focustimer.settings.labels")} hint={tr("focustimer.settings.labelsHint")}>
+        {LABEL_TONES.map((tone) => <LabelRow key={tone} tone={tone} settings={settings} />)}
       </Section>
 
       <Section title={tr("focustimer.settings.flow")}>
