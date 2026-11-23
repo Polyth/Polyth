@@ -361,16 +361,25 @@ with the last word still marked Send did nothing until a new line committed
 the word and moved it away. Two rules close that. A touch or pen that lands on
 any composer control outside a text field first calls `finishComposition()`
 (`commitComposingWordOnPress`, a capture handler on the composer root), so the
-word is ordinary text before the platform decides what the tap was. Send
-itself cancels `touchstart` and `touchend` through a listener that is not
-passive (`ownPrimaryTouch`; React's touch listeners are passive, and cancelling
-`pointerdown` does not withhold a touch from native gestures): the press is
-the page's, the release sends, and no click follows. A new control that must
-work beside the end of a draft acts on `click` and relies on the first rule;
-only a control that already acts on `pointerup` may cancel the touch.
-`composerSendTouchTarget.test.ts` covers both with a real touch and a CDP IME
-composition; the iOS classification itself is read from WebKit source and is
-not device-verified. Text the platform writes without
+word is ordinary text before the platform decides what the tap was. Send is
+the exception to that rule: it cancels `touchstart` and `touchend` through a
+listener that is not passive (`ownPrimaryTouch`; React's touch listeners are
+passive, and cancelling `pointerdown` does not withhold a touch from native
+gestures), so the press is the page's, the release sends, no click follows,
+and `send()` commits the word itself. Send does not refocus the field
+mid-touch, because `finishComposition()` blurs and refocuses it, which
+restarts the iOS input session under a finger that is still down. A Send touch
+also never waits on Send's own `pointerup` alone (`watchTouchEnd`): the end of
+the same touch anywhere on the page (`pointerup`/`pointercancel` for its
+pointer, `touchend`/`touchcancel` for its touch) settles the press a task
+later if Send's handler has not. On the iPhone app (2026-11-22) Send was seen left on its hold check with the message unsent, which only an armed
+press whose end never reached Send can produce. A new control that must work
+beside the end of a draft acts on `click` and relies on the first rule; only a
+control that already acts on `pointerup` may cancel the touch.
+`composerSendTouchTarget.test.ts` covers these with real touches, a lift
+withheld from Send or from the page, and a CDP IME composition. The iOS
+classification is read from WebKit source, and which of these causes the
+lost lift on the device is not device-verified. Text the platform writes without
 any `input` event (dictation and some phone keyboards have) is committed at the
 field's next caret move, key release or focus, so Send's enabled state cannot
 stay behind a draft the field visibly holds.

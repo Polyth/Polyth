@@ -105,6 +105,17 @@ async function fixture(): Promise<string> {
       window.addEventListener("click", (event) => {
         if (event.target.closest?.("button.send")) window.__sendClicks += 1;
       }, true);
+      // A lift that never reaches Send (seen on the iPhone app: Send left on
+      // its check, the message unsent). "send": Send's own pointerup handler
+      // never hears it, the page still does. "page": no pointerup at all,
+      // only the touch's touchend arrives.
+      window.__lostLift = "";
+      window.addEventListener("pointerup", (event) => {
+        if (window.__lostLift === "page" && event.target.closest?.("button.send")) event.stopImmediatePropagation();
+      }, true);
+      document.addEventListener("pointerup", (event) => {
+        if (window.__lostLift === "send" && event.target.closest?.("button.send")) event.stopPropagation();
+      }, true);
       // A heavy page: the main thread stays busy right after Send's own
       // pointerdown handler, so the lift waits in the queue behind it.
       window.__busyAfterDown = 0;
@@ -143,6 +154,7 @@ type Probe = {
   __sentBody: string;
   __touchStarts: boolean[];
   __sendClicks: number;
+  __lostLift: "" | "send" | "page";
 };
 type PressOutcome = "send" | "draft" | "nothing";
 type Press = {
@@ -153,11 +165,15 @@ type Press = {
   drift?: { dx: number; dy: number };
   /** Keep the page busy this long right after Send's pointerdown. */
   busyMs?: number;
+  /** Withhold the lift from Send's own handler, or from the page entirely. */
+  lostLift?: "send" | "page";
 };
 type PressResult = {
   sends: number;
   outcome: PressOutcome;
   parked: boolean;
+  /** Send still shows its check once the press is over. */
+  checked: boolean;
   overSend: boolean;
   size: number;
 };
@@ -188,7 +204,7 @@ async function draft(text: string): Promise<{ x: number; y: number; size: number
 /** One real finger: down, an optional slide or drift, up. Returns how many sends it made and the classified outcome. */
 async function press(
   text: string,
-  { dx = 0, dy = 0, holdMs, slide, drift, busyMs = 0 }: Press = {},
+  { dx = 0, dy = 0, holdMs, slide, drift, busyMs = 0, lostLift }: Press = {},
 ): Promise<PressResult> {
   assert.ok(page && cdp);
   const send = await draft(text);
@@ -204,7 +220,10 @@ async function press(
     return Boolean(under?.closest(".mobile-composer-primary button.send"));
   }, [endX, endY]);
 
-  await page.evaluate((ms) => { (window as unknown as Probe).__busyAfterDown = ms; }, busyMs);
+  await page.evaluate(([ms, lost]) => {
+    (window as unknown as Probe).__busyAfterDown = ms as number;
+    (window as unknown as Probe).__lostLift = lost as Probe["__lostLift"];
+  }, [busyMs, lostLift ?? ""] as const);
   const started = Date.now();
   if (busyMs) {
     // A digitizer stamps each touch when it happens. CDP runs Input commands
@@ -249,10 +268,12 @@ async function result(size: number, overSend: boolean): Promise<PressResult> {
   const probe = await page.evaluate(() => {
     const { __sends: sends, __drafts: drafts } = window as unknown as Probe;
     (window as unknown as Probe).__busyAfterDown = 0;
-    return { sends, drafts };
+    (window as unknown as Probe).__lostLift = "";
+    const checked = Boolean(document.querySelector(".mobile-composer-primary button.send[data-parked]"));
+    return { sends, drafts, checked };
   });
   const outcome: PressOutcome = probe.drafts >= 1 ? "draft" : probe.sends >= 1 ? "send" : "nothing";
-  return { sends: probe.sends, outcome, parked: probe.drafts >= 1, overSend, size };
+  return { sends: probe.sends, outcome, parked: probe.drafts >= 1, checked: probe.checked, overSend, size };
 }
 
 test("a tap anywhere in Send's touch box sends exactly once", { skip: !CHROME }, async () => {
@@ -301,6 +322,29 @@ test("touch on Send: hold 300 ms with no drift sends", { skip: !CHROME }, async 
   assert.equal(result.outcome, "send", "300 ms hold without drift sends");
 });
 
+// A lift that never reaches Send must not leave the press armed. On the iPhone
+// app Send was seen left on its check with the message unsent, which only a
+// press whose end Send never heard can do. The end of the same touch anywhere
+// on the page settles it instead.
+test("touch on Send: a tap whose lift Send's own handler never hears still sends once", { skip: !CHROME }, async () => {
+  const result = await press("hello", { holdMs: 60, lostLift: "send" });
+  assert.equal(result.outcome, "send", "the lift heard by the page sends");
+  assert.equal(result.sends, 1, `exactly once (sent ${result.sends})`);
+  assert.equal(result.checked, false, "Send is not left on its check");
+});
+
+test("touch on Send: a tap that ends with touchend alone still sends once", { skip: !CHROME }, async () => {
+  const result = await press("hello", { holdMs: 60, lostLift: "page" });
+  assert.equal(result.outcome, "send", "the touch's own end sends");
+  assert.equal(result.sends, 1, `exactly once (sent ${result.sends})`);
+  assert.equal(result.checked, false, "Send is not left on its check");
+});
+
+test("touch on Send: a full hold that ends with touchend alone keeps a draft", { skip: !CHROME }, async () => {
+  const result = await press("hello", { holdMs: 800, lostLift: "page" });
+  assert.equal(result.outcome, "draft", "the hold keeps its draft");
+});
+
 test("touch on Send: hold 800 ms keeps a draft", { skip: !CHROME }, async () => {
   const result = await press("hello", { holdMs: 800 });
   assert.notEqual(result.outcome, "nothing", "800 ms hold must not end as nothing");
@@ -347,10 +391,11 @@ test("a touch on Send is withheld from the platform's own gestures and sends wit
   assert.equal(probe.clicks, 0, "no click follows a touch the page took, so none is left to consume");
 });
 
-// The word under the finger must not still be marked when the platform decides
-// what the tap was: the composer keeps its editor focused through a tap on its
-// controls, so nothing else would end the composition before the release.
-test("a finger landing on Send commits the word the keyboard is still composing", { skip: !CHROME }, async () => {
+// Send owns its whole touch, so the word the keyboard is still composing is
+// left alone under the finger: ending it there moves focus off the field and
+// back mid-touch, which restarts the iOS keyboard's input session under a
+// finger still down. The send itself commits the word.
+test("a tap on Send sends the word the keyboard is still composing without refocusing mid-touch", { skip: !CHROME }, async () => {
   assert.ok(page && cdp);
   await page.goto(`${ORIGIN}/`);
   const editor = page.locator(".composer textarea[data-composer-input]");
@@ -374,8 +419,8 @@ test("a finger landing on Send commits the word the keyboard is still composing"
   });
   await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [send] });
   await page.waitForTimeout(40);
-  assert.deepEqual(await composing(), { open: false, value: "hello world", focused: true },
-    "the word is committed while the finger is still down, and the field keeps focus");
+  assert.deepEqual(await composing(), { open: true, value: "hello world", focused: true },
+    "the word stays as the keyboard left it while the finger is still down");
   await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   await page.waitForTimeout(400);
   const sent = await page.evaluate(() => {

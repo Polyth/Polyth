@@ -147,13 +147,15 @@ test("mobile primary touch activation survives keyboard dismissal without a dupl
   );
   assert.match(
     composer,
-    /activation\.touch = true;[\s\S]*?event\.preventDefault\(\);\n    startHold\(event\);/,
-    "touch pointerdown keeps focus on the editor and arms the save-as-draft hold",
+    /activation\.touch = true;[\s\S]*?event\.preventDefault\(\);\n    watchTouchEnd\(event\.currentTarget, event\.pointerId\);\n    startHold\(event\);/,
+    "touch pointerdown keeps focus on the editor, watches for the touch's end anywhere, and arms the save-as-draft hold",
   );
-  const pointerUp = composer.slice(composer.indexOf("const onPrimaryPointerUp"), composer.indexOf("const onPrimaryPointerCancel"));
+  // A touch release is settled in one place, whether Send's own pointerup or
+  // the touch's end elsewhere on the page reached it (`watchTouchEnd`).
+  const touchRelease = composer.slice(composer.indexOf("const finishTouchPress"), composer.indexOf("const cancelTouchPress"));
   // What counts as "on Send" is composer/sendRelease.ts, measured with real
   // touches in composerSendTouchTarget.test.ts.
-  assert.match(pointerUp, /if \(held\) return;[\s\S]*?if \(releaseSends\(\{[\s\S]*?\}\)\) send\(\);/,
+  assert.match(touchRelease, /if \(held\) return;[\s\S]*?if \(releaseSends\(\{[\s\S]*?\}\)\) sendRef\.current\?\.\(\);/,
     "a touch released on Send before the hold completes sends; one slid off does not");
   const pointerDown = composer.slice(composer.indexOf("const onPrimaryPointerDown"), composer.indexOf("const onPrimaryKeyDown"));
   assert.doesNotMatch(pointerDown, /\.blur\(\)/, "Send keeps the software keyboard open for the next message");

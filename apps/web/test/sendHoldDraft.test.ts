@@ -178,8 +178,11 @@ test("a released ring fades where it stood, and the next press starts it over", 
 test("every Send release is settled from its own stamp before anything else", () => {
   const composer = read("components/Composer.tsx");
   const up = composer.slice(composer.indexOf("const onPrimaryPointerUp = useCallback"), composer.indexOf("const onPrimaryPointerLeave"));
-  assert.match(up, /const held = settleHold\(event\.timeStamp\);\n\s*if \(event\.pointerType !== "touch"/,
-    "mouse and touch releases are both settled before anything else");
+  assert.match(up, /finishTouchPress\(event\.currentTarget, event\.timeStamp, event\.clientX, event\.clientY\);\n\s*return;\n\s*\}\n\s*settleHold\(event\.timeStamp\);/,
+    "a mouse release is settled from its own stamp; a touch release goes to the one touch settler with its stamp");
+  const touch = composer.slice(composer.indexOf("const finishTouchPress = useCallback"), composer.indexOf("const cancelTouchPress"));
+  assert.match(touch, /stopTouchEndWatch\(\);\n\s*const held = settleHold\(timeStamp\);/,
+    "a touch release is settled from its own stamp before anything else");
   assert.doesNotMatch(composer, /performance\.now\(\) - hold/, "no handler-time measurement decides a press");
 });
 
