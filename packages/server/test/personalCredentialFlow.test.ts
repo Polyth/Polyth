@@ -70,14 +70,14 @@ function fakeVault(name: string, calls: string[]) {
   return { vault, saved, requests };
 }
 
-function makeService(t: test.TestContext, opts: { personal?: boolean } = {}) {
+function makeService(t: test.TestContext, opts: { personal?: boolean; remote?: boolean; shellVerdict?: "allow" | "deny" } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "polyth-personal-flow-"));
   const store = createStore(join(dir, "s.db"));
   t.after(async () => {
     await store.close();
     rmSync(dir, { recursive: true, force: true });
   });
-  const project: Project = { id: "p1", path: dir, name: "p", createdAt: 1 };
+  const project: Project = { id: "p1", path: dir, name: "p", createdAt: 1, ...(opts.remote ? { remote: true } : {}) };
   const projects: ProjectService = {
     list: async () => [project],
     get: async (id) => (id === "p1" ? project : undefined),
@@ -85,7 +85,7 @@ function makeService(t: test.TestContext, opts: { personal?: boolean } = {}) {
     create: async () => project,
     remove: async () => {},
   };
-  const permissions = { evaluate: () => "allow", addRule: () => {}, rules: () => [] } as unknown as PermissionService;
+  const permissions = { evaluate: () => opts.shellVerdict ?? "allow", addRule: () => {}, rules: () => [] } as unknown as PermissionService;
   const broadcast: Broadcaster = { event: () => {}, projection: () => {} };
   const calls: string[] = [];
   const space = fakeVault("space", calls);
@@ -209,4 +209,76 @@ test("the Space facade passes the signed-in person and picks the save partition 
     (error: { code?: string }) => error.code === "forbidden",
   );
   assert.equal(replies.length, 4);
+});
+
+test("the agent Vault run uses the same bounded helper, resolves for the actor and appends no composer events", async (t) => {
+  const { sessions, store, space, shellRuns } = makeService(t);
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  const result = await sessions.runVaultCommand({
+    sessionId: id,
+    command: "deploy --token $POLYTH_SAFE_DEPLOY",
+    purpose: "Publish the release",
+    actorUserId: "alice",
+    timeoutMs: 90_000,
+  });
+  assert.deepEqual(space.requests.map((request) => request.actorUserId), ["alice"]);
+  assert.equal(shellRuns[0]?.secureEnv?.POLYTH_SAFE_DEPLOY, "synthetic-shell-value");
+  assert.equal(result.output, "printed [redacted]\n");
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.timedOut, false);
+  assert.equal(result.truncated, false);
+  assert.deepEqual(result.handles, ["deploy"]);
+  // The harness tool call is the history record: no composer-shell events.
+  assert.equal((await store.events(id)).filter((event) => event.producerPlugin === "composer-shell").length, 0);
+  assert.doesNotMatch(JSON.stringify(result), /synthetic-shell-value/);
+});
+
+test("the agent Vault run refuses no refs, a remote project and an explicit shell deny", async (t) => {
+  const local = makeService(t);
+  const { id } = await local.sessions.create({ projectId: "p1", title: "T" });
+  await assert.rejects(
+    local.sessions.runVaultCommand({ sessionId: id, command: "echo hello", purpose: "x", timeoutMs: 60_000 }),
+    (error: { code?: string }) => error.code === "invalid-input",
+  );
+  assert.equal(local.shellRuns.length, 0);
+
+  const remote = makeService(t, { remote: true });
+  const remoteSession = await remote.sessions.create({ projectId: "p1", title: "R" });
+  await assert.rejects(
+    remote.sessions.runVaultCommand({
+      sessionId: remoteSession.id,
+      command: "deploy $POLYTH_SAFE_DEPLOY",
+      purpose: "x",
+      timeoutMs: 60_000,
+    }),
+    (error: { code?: string }) => error.code === "unsupported",
+  );
+  assert.equal(remote.shellRuns.length, 0);
+
+  const denied = makeService(t, { shellVerdict: "deny" });
+  const deniedSession = await denied.sessions.create({ projectId: "p1", title: "D" });
+  await assert.rejects(
+    denied.sessions.runVaultCommand({
+      sessionId: deniedSession.id,
+      command: "deploy $POLYTH_SAFE_DEPLOY",
+      purpose: "x",
+      timeoutMs: 60_000,
+    }),
+    (error: { code?: string }) => error.code === "forbidden",
+  );
+  assert.equal(denied.shellRuns.length, 0);
+});
+
+test("composer shell still runs through the same helper without a permission card", async (t) => {
+  const { sessions, store, space, shellRuns } = makeService(t);
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await sessions.runShell!(id, "deploy --token $POLYTH_SAFE_DEPLOY", { userId: "alice" });
+  assert.deepEqual(space.requests.map((request) => request.actorUserId), ["alice"]);
+  assert.equal(shellRuns[0]?.secureEnv?.POLYTH_SAFE_DEPLOY, "synthetic-shell-value");
+  const events = await store.events(id);
+  assert.equal(events.some((event) => event.type === "permission/requested"), false);
+  assert.deepEqual(events.slice(-2).map((event) => [event.type, event.producerPlugin]), [
+    ["tool/call", "composer-shell"],
+    ["tool/result", "composer-shell"],
+  ]);
 });

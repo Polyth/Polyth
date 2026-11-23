@@ -12,6 +12,7 @@ import { createStore } from "@polyth/session";
 import type { AgentRuntime, Project, ProjectService, RuntimeEvent } from "@polyth/contracts";
 import { createApprovalDefaultsService, createAutoAcceptStore, type ApprovalDefaultsService, type PermissionRule, type PermissionScopeCheck, type PermissionService } from "@polyth/permissions";
 import { createSessionService, GUARDED_SPACE_AUTO_APPROVE_MESSAGE, type Broadcaster } from "../src/sessions.ts";
+import { VAULT_RUN_TOOL_ID } from "@polyth/credential-vault";
 
 type Emit = (sessionId: string, ev: RuntimeEvent) => void;
 
@@ -1337,4 +1338,128 @@ test("the Judgment second opinion can only leave an automatic answer for a perso
   assert.equal((await preview("per_test"))?.scopeCheck, undefined);
   assert.equal(attention.length, 2);
   assert.equal((await store.projection(id))?.status, "waiting");
+});
+
+test("a Credential Vault run is never auto-answered by Auto-Approve, Full access or Judgment", async () => {
+  let judged = 0;
+  const { sessions, store } = harness({
+    permission: "ask",
+    permissionScopeCheck: {
+      review: async () => { judged += 1; return { hold: false, reason: "allowed" }; },
+    } as unknown as PermissionScopeCheck,
+  });
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await sessions.autoAcceptSet!(id, "all");
+  await sessions.send(id, { text: "use the vault" });
+  await flush();
+  const grant = {
+    spaceId: "space-a",
+    projectId: "p1",
+    cwd: (await store.projection(id))?.runtimeBinding?.location.directory ?? "",
+    harnessId: "opencode",
+  };
+  const pending = sessions.requestAgentToolPermission({
+    ...grant,
+    toolId: VAULT_RUN_TOOL_ID,
+    toolName: "polyth_credential_vault_run",
+    owner: "secure-safe",
+    metadata: {
+      command: "deploy $POLYTH_SAFE_DEPLOY",
+      handles: ["POLYTH_SAFE_DEPLOY"],
+      purpose: "Publish",
+      cwd: grant.cwd,
+    },
+  });
+  await flush();
+  const request = (await store.events(id)).find((event) => event.type === "permission/requested"
+    && (event.data as { permission?: string }).permission === "package-tool");
+  assert.ok(request, "the run waits for a person even with Full access");
+  assert.equal(judged, 0, "Judgment never answers a Vault run");
+  const card = request.data as { preview: { lines: string[] } };
+  assert.ok(card.preview.lines.some((line) => line.includes("deploy $POLYTH_SAFE_DEPLOY")));
+  await sessions.replyPermission(id, (request.data as { requestId: string }).requestId, "reject");
+  assert.equal(await pending, "deny");
+});
+
+test("a person's explicit allow rule still answers a Credential Vault run", async () => {
+  const { sessions, store } = harness({ permission: "allow" });
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await sessions.send(id, { text: "use the vault" });
+  await flush();
+  const decision = await sessions.requestAgentToolPermission({
+    spaceId: "space-a",
+    projectId: "p1",
+    cwd: (await store.projection(id))?.runtimeBinding?.location.directory ?? "",
+    harnessId: "opencode",
+    toolId: VAULT_RUN_TOOL_ID,
+    toolName: "polyth_credential_vault_run",
+    owner: "secure-safe",
+  });
+  assert.equal(decision, "allow");
+  assert.equal((await store.events(id)).some((event) => event.type === "permission/requested"), false);
+});
+
+test("a Credential Vault run can never be delegated to a subagent's parent", async (t) => {
+  const { dir, sessions, store, fake } = harness();
+  t.after(async () => { await sessions.dispose(); await store.close(); rmSync(dir, { recursive: true, force: true }); });
+  const { id: parent } = await sessions.create({ projectId: "p1", title: "Parent" });
+  const { id: child } = await sessions.create({ projectId: "p1", title: "Worker", parentId: parent });
+  fake.emit(child, {
+    type: "permission/requested",
+    requestId: "per_vault",
+    permission: "package-tool",
+    patterns: [VAULT_RUN_TOOL_ID],
+  });
+  await flush();
+  await assert.rejects(
+    sessions.delegatePermission!(parent, "per_vault"),
+    { code: "forbidden" },
+  );
+  await assert.rejects(
+    sessions.replyDelegatedPermission!(parent, child, "per_vault", "once"),
+    { code: "forbidden" },
+  );
+});
+
+test("only the turn's own person approves a Credential Vault run, and never for always", async () => {
+  const { sessions, store } = harness({ permission: "ask" });
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await store.patchProjection!(id, (current) => ({ ...current, actor: { userId: "ann" } }));
+  await sessions.send(id, { text: "use the vault" });
+  await flush();
+  const cwd = (await store.projection(id))?.runtimeBinding?.location.directory ?? "";
+  const ask = () => sessions.requestAgentToolPermission({
+    spaceId: "space-a",
+    projectId: "p1",
+    cwd,
+    harnessId: "opencode",
+    toolId: VAULT_RUN_TOOL_ID,
+    toolName: "polyth_credential_vault_run",
+    owner: "secure-safe",
+  });
+  const openRequest = async (): Promise<string> => {
+    await flush();
+    const events = await store.events(id);
+    const replied = new Set(events.filter((event) => event.type === "permission/resolved")
+      .map((event) => (event.data as { requestId: string }).requestId));
+    const open = events.filter((event) => event.type === "permission/requested"
+      && !replied.has((event.data as { requestId: string }).requestId));
+    assert.equal(open.length, 1, "one Vault run card is open");
+    return (open[0]!.data as { requestId: string }).requestId;
+  };
+
+  const first = ask();
+  const requestId = await openRequest();
+  await assert.rejects(
+    sessions.replyPermission(id, requestId, "once", undefined, { userId: "bea" }),
+    { code: "forbidden" },
+  );
+  await sessions.replyPermission(id, requestId, "always", undefined, { userId: "ann" });
+  assert.equal(await first, "allow");
+
+  // "always" saved no standing rule: the next run asks again.
+  const second = ask();
+  const next = await openRequest();
+  await sessions.replyPermission(id, next, "reject", undefined, { userId: "ann" });
+  assert.equal(await second, "deny");
 });

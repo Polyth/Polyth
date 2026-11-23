@@ -123,12 +123,12 @@ export function guardedSessionService(base: SessionService, guardrails: AccountG
       ? autoAcceptSet(sessionId, setting)
       : Promise.reject(forbidden("Auto-Approve is not available for this account"));
   }
-  guarded.replyPermission = (sessionId, requestId, reply, scope) => {
+  guarded.replyPermission = (sessionId, requestId, reply, scope, person) => {
     if (reply === "always") return Promise.reject(forbidden("Only single approvals are available for this account"));
     if (reply === "once" && guardrails.approvals !== "once") {
       return Promise.reject(forbidden("Someone else in this Space must approve this action"));
     }
-    return base.replyPermission(sessionId, requestId, reply, scope);
+    return base.replyPermission(sessionId, requestId, reply, scope, person);
   };
   if (base.delegatePermission) {
     const delegatePermission = base.delegatePermission.bind(base);

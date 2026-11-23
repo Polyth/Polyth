@@ -3314,7 +3314,9 @@ export interface SessionService {
   summaries?(input: SessionSummaryQuery): Promise<SessionSummaryPage>;
   /** Read-only troubleshooting state. Does not attach or wake a runtime. */
   debug?(sessionId: string): Promise<SessionDebugDto>;
-  replyPermission(sessionId: string, requestId: string, reply: "once" | "always" | "reject", scope?: "session" | "project"): Promise<void>;
+  /** `person` is the signed-in person answering; a Credential Vault run card
+   *  accepts only the turn's own person. */
+  replyPermission(sessionId: string, requestId: string, reply: "once" | "always" | "reject", scope?: "session" | "project", person?: SessionPersonScope): Promise<void>;
   /** A person hands one open subagent permission request to its parent
    *  session's agent. Accepts the child or the parent's mirrored card,
    *  records the delegation durably and wakes the parent with the redacted

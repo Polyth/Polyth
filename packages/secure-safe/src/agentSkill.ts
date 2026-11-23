@@ -12,7 +12,7 @@ export const secureSafeSkill: AgentCapabilityContribution = {
     kind: "skill",
     owner: SECURE_SAFE_PACKAGE_ID,
     scope: "deployment",
-    revision: "3",
+    revision: "4",
     name: "polyth-secure-safe",
     title: "Polyth Credential Vault",
     description: "Use when a task needs a credential (API key, token, password) or a stored handle; never handle secret values in chat. polyth_credential_vault_request shows the user a protected form for the value while agents use opaque handles.",
@@ -24,7 +24,7 @@ Sensitive data: yes, using Credential Vault to store a credential needs a secret
 
 How to discover and reuse a credential:
 - When the current task needs a handle, call polyth_credential_vault_list once for the current Space/project. Do not search AGENTS.md, the root data directory, project files, or generic HTTP routes for handles.
-- If the handle exists, use its handle or envRef only at the supported local composer-shell boundary (! / runShell). For Browser sign-in, use the dedicated polyth_browser_fill_from_vault tool; it keeps the value server-side.
+- If the handle exists, use it at the supported server boundary: call polyth_credential_vault_run with a command containing its POLYTH_SAFE_* env ref. For Browser sign-in, use the dedicated polyth_browser_fill_from_vault tool; it keeps the value server-side. "!" / runShell is the person's own path, not an agent tool.
 - If no suitable handle exists, ask for it with polyth_credential_vault_request (below). Prepare the handle, label, purpose, and kind yourself; never ask the user to fill in those metadata fields.
 
 How to ask the user for a secret:
@@ -35,7 +35,9 @@ How to ask the user for a secret:
 - If the user dismisses the request, report that the credential was not stored. Do not ask them to paste it, and do not fall back to plaintext.
 
 How to use a stored credential:
-- Reference the handle or envRef in a local composer-shell command (! / runShell). The server resolves matching POLYTH_SAFE_* refs for that one local bounded run and redacts the captured output. You never receive the value. Interactive terminals, remote shells, browser sign-in and provider runtimes do not resolve env refs; Browser sign-in uses the dedicated Vault-fill tool instead.
+- As an agent, call polyth_credential_vault_run with { "command": "deploy --token $POLYTH_SAFE_DEPLOY", "purpose": "Publish the release", "timeoutSeconds": 120 }. The command must contain at least one POLYTH_SAFE_* ref. Every call opens an approval card naming the command, its handles and the working directory; nothing runs until the person approves. The server resolves matching refs for that one local bounded run and returns only the redacted output, exit code, timeout and truncation flags. You never receive the value or the environment.
+- "!" / runShell is the person's own path: they type the command and their send is the consent. Do not tell them to run it for you, and do not use your own shell for a ref, because it does not resolve there.
+- Interactive terminals, remote projects, browser sign-in and provider runtimes do not resolve env refs; Browser sign-in uses the dedicated Vault-fill tool instead.
 - Handles are global by default; project-scoped handles belong to one project. Do not copy a value between scopes.
 - An entry is either the acting person's own (listed with partition "personal"; only they see, change and resolve it) or the Space's. A handle resolves to the person's own entry first, then the Space's; another member's entries are never reachable, and work no person started uses Space entries only. A saved request goes to the person's own credentials unless a Space admin picks the Space in the form.
 - Do not create secrets on the user's behalf. Creating, rotating, or removing an entry is a user/UI action, except the Credential Vault request flow above (the user still types the value).

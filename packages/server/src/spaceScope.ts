@@ -290,7 +290,7 @@ function scopeSessions(
     ...(base.replayPage ? { replayPage: (sessionId: string, afterSeq: number, highWater?: number) => guarded(() => base.replayPage!(g(sessionId), afterSeq, highWater)) } : {}),
     ...(base.activate ? { activate: (sessionId: string, options?: SessionActivateOptions) => guarded(() => base.activate!(g(sessionId), options)) } : {}),
     replyPermission: (sessionId, requestId, reply, scope) =>
-      guarded(() => base.replyPermission(g(sessionId), requestId, reply, scope)),
+      guarded(() => base.replyPermission(g(sessionId), requestId, reply, scope, personScope)),
     replyQuestion: (sessionId, requestId, answers) =>
       guarded(() => base.replyQuestion(g(sessionId), requestId, answers)),
   };

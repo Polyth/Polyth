@@ -22,6 +22,7 @@ import {
   unrestoredCompactionSeq,
 } from "@polyth/session";
 import { SessionOutputCache } from "@polyth/session/output-cache";
+import { VAULT_RUN_SERVICE, VAULT_RUN_TOOL_ID, vaultRunApprovalMetadata, type VaultRunService } from "@polyth/credential-vault";
 import {
   CAP,
   HARNESS_PERSON_DEFAULTS_SERVICE,
@@ -2271,7 +2272,11 @@ export async function boot(opts: BootOptions = {}) {
         storage = undefined;
       }
       const permissionRequester = requestAgentToolPermission;
-      const summary = input ? summarizeToolInput(input) : undefined;
+      const summary = input
+        ? tool.id === VAULT_RUN_TOOL_ID
+          ? vaultRunApprovalMetadata(input, grant.cwd)
+          : summarizeToolInput(input)
+        : undefined;
       return authorizePackageToolAfterPermissions({
         tool,
         grant: {
@@ -3282,6 +3287,11 @@ export async function boot(opts: BootOptions = {}) {
   requestAgentToolPermission = sessions.requestAgentToolPermission.bind(sessions);
   requestAgentToolSecret = sessions.requestAgentToolSecret.bind(sessions);
   resolveAgentToolSession = sessions.resolveAgentToolSession.bind(sessions);
+  // The agent Vault tool executes through the same canonical session service
+  // (and the same bounded helper as the composer shell), never in-package.
+  provideService(VAULT_RUN_SERVICE, {
+    run: (input) => sessions.runVaultCommand(input),
+  } satisfies VaultRunService);
   sessionsImpl = sessions;
   // A chat that stops being private drops its owner's personal MCP servers
   // from a live runtime (§14.6) through the safe idle-release path.

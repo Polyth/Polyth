@@ -62,9 +62,13 @@ Paired-device access is default-deny unless the owner explicitly grants that dev
   Secure Safe question metadata instead); the user enters the value in the
   protected UI and the agent receives only the handle/outcome.
 - Read only the handle manifest and `envRef` metadata. Use a handle/reference
-  on a supported execution boundary. The current broker is the local bounded
-  composer-shell (`SessionService.runShell` → `@polyth/terminal.run`): the
-  server resolves matching `POLYTH_SAFE_*` refs into that one child
+  on a supported execution boundary. The one broker is a local bounded run
+  (`@polyth/terminal.run`), reached two ways: the person's composer shell
+  (`!` / `SessionService.runShell`) and, for agents, the package tool
+  `polyth_credential_vault_run`. Each agent call needs the turn's own person
+  to approve its card (command, handle names, purpose, cwd); Auto-approve,
+  Full access, Judgment, delegated approval and a card "always" never answer
+  it. The server resolves matching `POLYTH_SAFE_*` refs into that one child
   environment — the signed-in person's own entries first, then the Space's,
   never another member's — redacts known values from captured output, and
   audits only handles. Interactive terminals, remote hosts, browser sign-in and provider

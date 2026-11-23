@@ -9,8 +9,8 @@ import {
   type ServerPackageHost,
 } from "@polyth/plugins";
 import { SECURE_SAFE_PACKAGE_ID, secureSafeSkill } from "../src/agentSkill.ts";
-import { secureSafeBehaviorSection } from "../src/index.ts";
-import { createCredentialVaultListAgentTool, createCredentialVaultRequestAgentTool } from "../src/agentTool.ts";
+import { secureSafeBehaviorSection, vaultRunApprovalMetadata } from "../src/index.ts";
+import { createCredentialVaultListAgentTool, createCredentialVaultRequestAgentTool, createCredentialVaultRunAgentTool } from "../src/agentTool.ts";
 import registerPackage from "../src/serverEntry.ts";
 
 const SKILL_ID = `${SECURE_SAFE_PACKAGE_ID}.skill.polyth-secure-safe`;
@@ -67,6 +67,11 @@ test("Credential Vault package contributes an inherited deployment skill", async
   assert.ok(requestTool, "Credential Vault request tool must be registered");
   assert.equal(requestTool?.descriptor.kind, "tool");
   assert.equal(requestTool?.descriptor.scope, "project");
+  const runTool = registry.contribution("secure-safe.credential-vault-run");
+  assert.ok(runTool, "Credential Vault run tool must be registered");
+  assert.equal(runTool?.descriptor.kind, "tool");
+  assert.equal(runTool?.descriptor.scope, "project");
+  assert.equal(runTool?.descriptor.kind === "tool" ? runTool.descriptor.trust : undefined, "credentialed");
   assert.equal(registry.resolve(context({ spaceId: "spc_b", projectId: "project-b" }))
     .some((row) => row.id === SKILL_ID), true);
 
@@ -171,4 +176,96 @@ test("Credential Vault request tool validates input and never falls back without
     (error: { code?: string }) => error.code === "invalid-input");
   await assert.rejects(tool.execute!({ handle: "OK", label: "x" }, toolContext),
     (error: { code?: string }) => error.code === "unavailable");
+});
+
+test("Credential Vault run tool refuses commands without an env ref and never runs them", async () => {
+  const tool = createCredentialVaultRunAgentTool(() => ({
+    run: async () => {
+      throw new Error("must not run");
+    },
+  }));
+  await assert.rejects(
+    tool.execute!({ command: "echo hello", purpose: "read something" }, toolContext),
+    (error: { code?: string; message?: string }) =>
+      error.code === "invalid-input" && /no Vault env refs/.test(error.message ?? ""),
+  );
+  await assert.rejects(
+    tool.execute!({ command: "echo $POLYTH_SAFE_KEY", purpose: "x", timeoutSeconds: 5 }, toolContext),
+    (error: { code?: string }) => error.code === "invalid-input",
+  );
+  await assert.rejects(
+    tool.execute!({ command: "echo $POLYTH_SAFE_KEY\0", purpose: "x" }, toolContext),
+    (error: { code?: string }) => error.code === "invalid-input",
+  );
+  await assert.rejects(
+    tool.execute!({ command: "echo $POLYTH_SAFE_KEY" }, toolContext),
+    (error: { code?: string }) => error.code === "invalid-input",
+  );
+});
+
+test("Credential Vault run tool returns only redacted output, status flags and handle names", async () => {
+  const asked: Array<Record<string, unknown>> = [];
+  const tool = createCredentialVaultRunAgentTool(() => ({
+    run: async (input) => {
+      asked.push(input as unknown as Record<string, unknown>);
+      return {
+        output: "deploy [redacted]\n",
+        exitCode: 0,
+        timedOut: false,
+        truncated: false,
+        handles: ["DEPLOY_KEY"],
+      };
+    },
+  }));
+  const result = await tool.execute!(
+    { command: "deploy --token $POLYTH_SAFE_DEPLOY_KEY", purpose: "Publish", timeoutSeconds: 30 },
+    { ...toolContext, actorUserId: "alice" },
+  );
+  assert.deepEqual(asked, [{
+    sessionId: "session-a",
+    projectId: "project-a",
+    command: "deploy --token $POLYTH_SAFE_DEPLOY_KEY",
+    purpose: "Publish",
+    actorUserId: "alice",
+    timeoutMs: 30_000,
+  }]);
+  assert.deepEqual(JSON.parse(result!.output), {
+    output: "deploy [redacted]\n",
+    exitCode: 0,
+    timedOut: false,
+    truncated: false,
+  });
+  assert.doesNotMatch(result!.output, /DEPLOY_KEY|secret|value/);
+  assert.equal(tool.descriptor.kind === "tool" ? tool.descriptor.trust : undefined, "credentialed");
+  assert.equal(tool.descriptor.kind === "tool" ? tool.descriptor.mutating : undefined, true);
+});
+
+test("Credential Vault run approval metadata carries the command, refs, purpose and cwd", () => {
+  assert.deepEqual(
+    vaultRunApprovalMetadata(
+      { command: "deploy $POLYTH_SAFE_A $POLYTH_SAFE_B", purpose: "Ship" },
+      "/work/project",
+    ),
+    {
+      command: "deploy $POLYTH_SAFE_A $POLYTH_SAFE_B",
+      handles: ["POLYTH_SAFE_A", "POLYTH_SAFE_B"],
+      purpose: "Ship",
+      cwd: "/work/project",
+    },
+  );
+});
+
+test("Credential Vault run tool fails closed without a runner or a canonical session", async () => {
+  const tool = createCredentialVaultRunAgentTool(() => undefined);
+  await assert.rejects(
+    tool.execute!({ command: "echo $POLYTH_SAFE_KEY", purpose: "x" }, toolContext),
+    (error: { code?: string }) => error.code === "unavailable",
+  );
+  const missingSession = createCredentialVaultRunAgentTool(() => ({
+    run: async () => ({ output: "", exitCode: 0, timedOut: false, truncated: false, handles: [] }),
+  }));
+  await assert.rejects(
+    missingSession.execute!({ command: "echo $POLYTH_SAFE_KEY", purpose: "x" }, { ...toolContext, sessionId: "" }),
+    (error: { code?: string }) => error.code === "unavailable",
+  );
 });
