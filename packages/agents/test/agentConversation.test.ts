@@ -490,6 +490,8 @@ test("a wake script's note says what woke the agent; it never speaks as the pers
   await act(async () => { await delay(30); });
   assert.equal(view.container.querySelectorAll(".agent-you").length, 0);
   assert.equal(view.container.querySelector(".agent-report-wake-note")?.textContent, "Wake script: db-2 disk at 93%");
+  // The raw event lines are the run's prompt: they stay in its session.
+  assert.ok(!view.container.textContent?.includes("Monitoring: memory-high"), "no raw event line in the report");
   await view.unmount();
 });
 

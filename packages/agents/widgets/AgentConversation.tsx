@@ -448,15 +448,19 @@ function Report({ task, run, compact, latest, dated, onFeedback, onOpenSession }
   const openRun = session
     ? (event: MouseEvent<HTMLElement>) => { if (plainClick(event)) onOpenSession!(session); }
     : undefined;
+  // The raw event lines are the agent's prompt, not its report: a run with a
+  // session keeps them there (Open session). Only a run that never got one
+  // (a dropped or skipped wake) shows them, as the one trace of what came in.
+  const events = session ? [] : run.events ?? [];
   const details = (
     <>
-      {run.note || run.events?.length ? (
+      {run.note || events.length ? (
         <ul className="agent-report-events">
           {/* The wake script's words, which may quote event data: what woke
               the agent, never the person speaking. */}
           {run.note && <li className="agent-report-wake-note" title={run.note}>{tr("agents.wakeNoteValue", { note: run.note })}</li>}
-          {(run.events ?? []).slice(0, 3).map((line, index) => <li key={index}>{line}</li>)}
-          {(run.events?.length ?? 0) > 3 && <li>{tr("agents.moreEventsValue", { count: run.events!.length - 3 })}</li>}
+          {events.slice(0, 3).map((line, index) => <li key={index}>{line}</li>)}
+          {events.length > 3 && <li>{tr("agents.moreEventsValue", { count: events.length - 3 })}</li>}
         </ul>
       ) : null}
       {failed ? (
