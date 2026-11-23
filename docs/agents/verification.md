@@ -23,6 +23,17 @@ Every change a person can see (layout, spacing, alignment, type, colour, icons, 
 - Name what the screenshot covers and what it does not (synthetic fixture vs live app, browser vs native device). A browser screenshot is not device verification.
 - Screenshots and capture scripts live under `/.scratch/<task-slug>/` and are never committed; durable expectations go into a geometry/interaction test instead.
 - Show them in the reply with a ```` ```ui ```` `media` block whose image paths are **relative to the session's working checkout** (`.scratch/<task-slug>/after.png`). Chat refuses absolute paths and `..`, and a path into a different worktree does not resolve. The files must outlive the turn: the scratch cleanup before completion skips screenshots the reply links to.
+- Name before/after captures `before*.png` / `after*.png` (`before-phone.png` ↔ `after-phone.png`, `menu-before.png` ↔ `menu-after.png`): the pull request section pairs them side by side.
+
+## Screenshots in pull requests
+
+A pull request that changes what a person can see carries the screenshots that confirmed it. This holds for every agent and harness, for a pull request opened by hand or automatically, and for an isolated branch on its way into its parent.
+
+- **Opening a pull request:** open it (`gh pr create …`), then run `node scripts/pr-screenshots.mjs` in the same checkout. It takes the images under `.scratch/` (or `--dir .scratch/<task-slug>`, or the files named), commits them to the orphan `pr-assets` branch of the pull request's remote through a private index — the working tree, index and current branch stay untouched, and the branch is never merged — and writes a *Screenshots* section into the pull request body, before/after pairs side by side. A rerun replaces the section. `--dry-run` lists what would be published; `--print` publishes and prints the section for a body you write yourself; `--pr <n>` targets another pull request.
+- **Delegated isolated children:** a child's `.scratch/` is gitignored, so `agent.merge` does not carry it and the child's workspace is removed afterwards. Before merging a child that changed visible UI, the parent looks at the child's screenshots and runs `node scripts/pr-screenshots.mjs adopt <child-worktree>`, which copies them into `.scratch/from-<child>/` of the parent's checkout; the parent's pull request then attaches them with the parent's own. The child reports its screenshot paths in its final result.
+- **Privacy:** the repository is public and `pr-assets` history is permanent. Publish only captures of synthetic fixture or isolated test data. A screenshot of a live instance that shows people, chats, projects, host names or home paths is not published; recapture it from a fixture (see the screenshot rigs) or leave it out and ask. The script lists every file before pushing; look at each one.
+- **No visible change:** when a pull request touches UI files without changing what anyone sees (a rename, a test-only refactor), say so in its body with a line `No visible change: <reason>`.
+- **Enforced:** `.github/workflows/pr-screenshots.yml` (`scripts/ci/check-pr-screenshots.mjs`) fails a pull request that changes web CSS, TSX, HTML or SVG under `apps/` or `packages/` outside tests while its body has neither an image nor that line. Editing the body reruns it; promotions from `devel` to `master` are not checked.
 
 ## Bounded local verification
 
