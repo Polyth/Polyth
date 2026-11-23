@@ -119,6 +119,8 @@ export interface BrowserSessionDto {
   agentPaused?: boolean;
   controller?: "user" | "agent";
   viewportMode?: "responsive" | "preset" | "custom";
+  /** A live page the local Polyth Desktop window can show (contracts' BrowserSessionDto). */
+  nativeViewId?: string;
 }
 
 /** User navigation can intentionally pause for an origin approval. */

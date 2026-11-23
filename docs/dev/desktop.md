@@ -315,6 +315,15 @@ installs ship no OpenCode: its harness reports "not installed" with an install a
 on Settings → Harnesses, and the Providers & Models tour opens on a step that links
 there.
 
+The in-app browser's pages are not that Chromium when the server runs inside the app:
+`nativeWebViews.ts` hosts each tab as a sandboxed `WebContentsView` (a hidden parking
+window while nobody looks, the main window over the browser stage when the local page
+places it through `desktop:webviews:place`) and hands the in-process server a DevTools
+Protocol session per page through `BootOptions.nativeWebViews`. Only the `local`
+surface may place pages; the rules (profile confinement, schemes, user agent, place
+rectangles) live in `nativeWebViewPolicy.ts` and its test. See
+[browser](browser.md) (*Native Desktop pages*) for the behavior.
+
 Controlled browser packaging uses the same explicit resource boundary. Before creating
 a desktop artifact, `npm --workspace @polyth/desktop run stage:chromium` copies the
 already-installed Chromium selected by the pinned `playwright-core` into

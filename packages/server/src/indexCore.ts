@@ -64,6 +64,8 @@ import {
   SERVER_OPENCODE_RUNTIME_POLICY,
   PairedSocketRegistry,
   SERVER_APPLICATION_SURFACE,
+  SERVER_NATIVE_WEB_VIEWS,
+  type NativeWebViewHost,
   SERVER_SESSION_TITLE_GENERATOR,
   SERVER_SESSION_WATCHES,
   SERVER_MODEL_FAVORITES,
@@ -271,6 +273,9 @@ export interface BootOptions {
   /** Told about each event-loop stall as well. A packaged desktop app has no
    *  console, so without this its log never shows why the window froze. */
   onEventLoopStall?: (stall: EventLoopStall) => void;
+  /** Polyth Desktop only: real Chromium pages hosted by the app beside this
+   *  in-process server, published to packages as `SERVER_NATIVE_WEB_VIEWS`. */
+  nativeWebViews?: NativeWebViewHost;
 }
 
 /** Keep protocol identity behind the runtime pool's stable facade, including
@@ -884,6 +889,7 @@ export async function boot(opts: BootOptions = {}) {
     localhostAuthOptional,
     canonicalOrigin: opts.canonicalOrigin ?? null,
   }));
+  if (opts.nativeWebViews) services.provide(SERVER_NATIVE_WEB_VIEWS, opts.nativeWebViews);
   const harnesses = createHarnessRegistry();
   services.provide(serverServiceKey("harnesses"), harnesses);
   const capabilityContributions = createCapabilityContributionRegistry();

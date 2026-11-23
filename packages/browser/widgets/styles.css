@@ -238,6 +238,13 @@
   background: var(--material-glass); box-shadow: var(--shadow-sm);
   pointer-events: auto;
 }
+/* Polyth Desktop shows the live page over the frame picture, above this
+   document: the controls step out of the page into a strip under it. */
+.browser-frame-stage.is-native .browser-frame-hud {
+  position: static; flex: none; align-self: flex-end;
+  margin: var(--space-2) var(--space-3);
+  box-shadow: none;
+}
 .browser-frame-hud-status {
   min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px;
   color: var(--muted); font-size: var(--font-meta); font-weight: 650; white-space: nowrap;

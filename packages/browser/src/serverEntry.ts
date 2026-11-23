@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type {
@@ -15,8 +16,10 @@ import type {
 import { REMOTE_CAPABILITY } from "@polyth/contracts";
 import {
   SERVER_APPLICATION_SURFACE,
+  SERVER_NATIVE_WEB_VIEWS,
   SPACE_SECURE_SAFE,
   serverServiceKey,
+  type NativeWebViewCreateOptions,
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
@@ -44,6 +47,7 @@ import {
   type BrowserVaultFillBroker,
 } from "./vaultFill.ts";
 import { readBrowserAgentAutoApprove, writeBrowserAgentAutoApprove } from "./agentToolSettings.ts";
+import { createNativeDriver } from "./nativeDriver.ts";
 import { originOf } from "./policy.ts";
 import { isBrowserArtifactId } from "./artifacts.ts";
 import {
@@ -627,12 +631,20 @@ export interface BrowserArtifactService {
 }
 
 export default async function registerPackage(host: ServerPackageHost): Promise<ServerPackage> {
-  const chromiumPath = process.env.POLYTH_FAKE_BROWSER === "1" ? null : await findChromiumExecutable();
-  const driver = process.env.POLYTH_FAKE_BROWSER === "1"
+  const fake = process.env.POLYTH_FAKE_BROWSER === "1";
+  const chromiumPath = fake ? null : await findChromiumExecutable();
+  // Polyth Desktop hosts real pages beside this server: the person works in
+  // the live page, not in a picture of it. POLYTH_BROWSER_ENGINE=playwright
+  // keeps the headless engine there. Presence is a composition-root fact;
+  // the host itself is resolved on each page open.
+  const native = !fake && process.env.POLYTH_BROWSER_ENGINE !== "playwright" && Boolean(host.services.get(SERVER_NATIVE_WEB_VIEWS));
+  const driver = fake
     ? createFakeDriver(demoWeb())
-    : chromiumPath
-      ? createChromiumDriver(chromiumPath)
-      : null;
+    : native
+      ? createNativeDriver({ create: (options: NativeWebViewCreateOptions) => host.services.require(SERVER_NATIVE_WEB_VIEWS).create(options) })
+      : chromiumPath
+        ? createChromiumDriver(chromiumPath)
+        : null;
   const profileDriver = process.env.POLYTH_FAKE_BROWSER === "1"
     ? createFakeProfileDriver()
     : await createProfileChromiumDriver(chromiumPath ?? undefined);
@@ -658,6 +670,15 @@ export default async function registerPackage(host: ServerPackageHost): Promise<
       return [...(surface?.controlledBrowserSelfOrigins() ?? [])];
     },
     append: (sessionId, type, data) => host.events.append(sessionId, type, data, { ignorable: true, producerPlugin: "browser" }),
+    // One profile per person per Space, in that Space's storage: a person's
+    // sign-ins never reach another Space or another member.
+    profileDirFor: async ({ projectId, ownerUserId }) => {
+      const project = await host.projects.get(projectId).catch(() => undefined);
+      const storage = project?.spaceId ? storageForSpace(project.spaceId) : undefined;
+      if (!storage) return undefined;
+      const person = createHash("sha256").update(ownerUserId).digest("hex").slice(0, 32);
+      return join(storage.packageDir("browser"), "profiles", person);
+    },
   });
   host.services.provide(serverServiceKey<BrowserService>("browser"), browser);
   host.services.provide(serverServiceKey<ProfileRegistry>("browser.profiles"), profiles);

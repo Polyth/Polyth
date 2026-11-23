@@ -7837,6 +7837,10 @@ export interface BrowserSessionDto {
   controller?: "user" | "agent";
   /** How the current viewport was chosen. */
   viewportMode?: BrowserViewportMode;
+  /** Set when the page is a native view the local Polyth Desktop window can
+   *  show live in place of frames (`polythDesktop.webViews`). Opaque; it
+   *  grants nothing off that machine. */
+  nativeViewId?: string;
 }
 
 /** Manual-only browser profile tabs: no agent observation or extraction. */
