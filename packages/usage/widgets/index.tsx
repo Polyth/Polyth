@@ -30,6 +30,7 @@ import {
 } from "./usage/alertsPrefs.ts";
 import { startUsageAlerts } from "./usage/alertsController.ts";
 import { loadAlertLedgers, saveAlertLedgers } from "./usage/alertLedgerClient.ts";
+import { loadKeepWarm, setKeepWarm } from "./usage/keepWarmClient.ts";
 import { requestUsageView } from "./usage/viewRequest.ts";
 import { queryFor, viewerTimezone } from "./usage/UsageDashboard.tsx";
 import { ensureUsageIdentity, prefetchUsageStats } from "./usage/usageStatsClient.ts";
@@ -94,6 +95,7 @@ export default defineWebPackage((host) => () => {
         },
         openSettings: () => host.navigation.openSettingsPage("usage", { itemId: "usage.limits.sources" }),
         openSession: (sessionId) => void host.conversation.openSession(sessionId).catch(() => undefined),
+        keepWarm: { status: (sessionId) => loadKeepWarm(sessionId), start: setKeepWarm },
         loadLimits: () => loadUsageLimits(),
         refreshLimitSource: (providerId) => refreshUsageLimitSource(providerId),
         cachedLimits: cachedUsageLimits,
