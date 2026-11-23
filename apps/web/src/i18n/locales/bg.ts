@@ -1430,6 +1430,7 @@ export const bg: AppMessages = {
   "settings.packagespage.workflowDescription": "Оркестриране на многоагентни DAG конвейери.",
   "settings.packagespage.allCategories": "Всички категории",
   "settings.packagespage.alwaysOn": "Винаги включено",
+  "settings.packagespage.linkedPackageMissing": "В този Polyth няма пакет „{id}“. Може да е нужна по-нова версия на Polyth.",
   "settings.packagespage.inProgress": "В процес на разработка",
   "settings.packagespage.inProgressNotice": "В процес на разработка: пакетът е незавършен (алфа) и слабо тестван. Очаквайте грешки и недоработки.",
   "settings.packagespage.beta": "Бета",

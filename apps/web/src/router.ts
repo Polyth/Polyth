@@ -32,6 +32,32 @@ export function settingsPageFromSearch(search = ""): string | null {
   return page;
 }
 
+/** Install links into Settings → Packages, as the package catalog
+ *  (packages.polyth.app) builds them:
+ *  - `?settings=packages&package=<id>` lands on one package's row;
+ *  - `?settings=packages&install=<source>` opens Add package with the link
+ *    prefilled.
+ *  Both only navigate: the person still turns the package on, or reviews and
+ *  confirms the install. Values are bounded here; the installer decides which
+ *  sources it accepts. */
+export interface PackagesLink {
+  packageId?: string;
+  installSource?: string;
+}
+export const PACKAGES_LINK_PARAMS = ["package", "install"] as const;
+const MAX_INSTALL_SOURCE = 2048;
+
+export function packagesLinkFromSearch(search = ""): PackagesLink | null {
+  const params = new URLSearchParams(search.startsWith("?") || search.length === 0 ? search : `?${search}`);
+  if (params.get("settings") !== "packages") return null;
+  const packageId = params.get("package") ?? "";
+  if (/^[a-z0-9][a-z0-9-]{0,63}$/.test(packageId)) return { packageId };
+  const source = (params.get("install") ?? "").trim();
+  // eslint-disable-next-line no-control-regex
+  if (source && source.length <= MAX_INSTALL_SOURCE && !/[\u0000-\u001f\u007f\s]/.test(source)) return { installSource: source };
+  return null;
+}
+
 /** Canonical URL for the current selection ("/" when nothing is active). */
 export function formatAppUrl(projectId: string | null, sessionId: string | null): string {
   if (!projectId) return sessionId ? `/?session=${encodeURIComponent(sessionId)}` : "/";

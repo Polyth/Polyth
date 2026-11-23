@@ -3,6 +3,7 @@ import type { PackageDescriptorDto } from "@polyth/contracts";
 import type { PackagesPageMatches, PackagesPageSlotContext } from "@polyth/web-sdk";
 import { api } from "@polyth/session/web-api";
 import { bootPackages, subscribePackages } from "../../packages/registry.ts";
+import { clearPackageInstall, PACKAGES_INSTALL_REQUEST_EVENT, pendingPackageInstall } from "../../packages/installRequest.ts";
 import { deletePackageSessions, findPackageSessions, hidePackageSessions, refreshLoadedProjectSessions, type PackageSessionOwner } from "../../packages/packageSessions.ts";
 import SlotHost, { useSlotVersion } from "../slots/SlotHost.ts";
 import { listSlots } from "../../slots.ts";
@@ -201,7 +202,10 @@ function PackageRow({
   );
 }
 
-export default function PackagesPage() {
+export default function PackagesPage({ targetPackageId }: {
+  /** An install link for one package (`?settings=packages&package=<id>`) lands on its row. */
+  targetPackageId?: string;
+} = {}) {
   const [packages, setPackages] = useState<PackageDescriptorDto[] | null>(null);
   const [loadError, setLoadError] = useState<unknown>(null);
   const [error, setError] = useState("");
@@ -295,13 +299,60 @@ export default function PackagesPage() {
     }
   }, [detailOpen]);
 
+  // An install link (`?settings=packages&install=<source>`) waits here until
+  // the package library opens its installer with the source and clears it.
+  const [installRequest, setInstallRequest] = useState<string | null>(() => pendingPackageInstall());
+  useEffect(() => {
+    const sync = () => setInstallRequest(pendingPackageInstall());
+    window.addEventListener(PACKAGES_INSTALL_REQUEST_EVENT, sync);
+    return () => window.removeEventListener(PACKAGES_INSTALL_REQUEST_EVENT, sync);
+  }, []);
+  const clearInstallRequest = useCallback(() => {
+    clearPackageInstall();
+    setInstallRequest(null);
+  }, []);
+
+  // A link to one package clears the filters so its row is listed, then
+  // brings the row into view, flashes it and focuses its switch. A package
+  // this Polyth does not have says so instead of landing nowhere.
+  const [missingTarget, setMissingTarget] = useState<string | null>(null);
+  const landedTarget = useRef<string | null>(null);
+  useEffect(() => {
+    if (!targetPackageId || !packages || landedTarget.current === targetPackageId) return;
+    landedTarget.current = targetPackageId;
+    if (!packages.some((item) => item.id === targetPackageId)) {
+      setMissingTarget(targetPackageId);
+      return;
+    }
+    setMissingTarget(null);
+    setFilter(EMPTY_FILTER);
+    let second = 0;
+    const first = requestAnimationFrame(() => {
+      second = requestAnimationFrame(() => {
+        const row = [...(rootRef.current?.querySelectorAll<HTMLElement>("[data-package-id]") ?? [])]
+          .find((candidate) => candidate.dataset.packageId === targetPackageId);
+        if (!row) return;
+        row.scrollIntoView({ block: "center" });
+        row.classList.add("flash");
+        window.setTimeout(() => row.classList.remove("flash"), 1600);
+        row.querySelector<HTMLElement>('[role="switch"], input[type="checkbox"]')?.focus({ preventScroll: true });
+      });
+    });
+    return () => {
+      cancelAnimationFrame(first);
+      cancelAnimationFrame(second);
+    };
+  }, [targetPackageId, packages]);
+
   const slotContext = useMemo<PackagesPageSlotContext>(() => ({
     packagesQuery: filter.query,
     packagesStatus: filter.status,
     packagesCategory: filter.category,
     reportPackageMatches,
     setPackageDetailOpen,
-  }), [filter, reportPackageMatches, setPackageDetailOpen]);
+    packagesInstallRequest: installRequest,
+    clearPackagesInstallRequest: clearInstallRequest,
+  }), [filter, reportPackageMatches, setPackageDetailOpen, installRequest, clearInstallRequest]);
 
   // The toolbar sticks to the top of the pane; once content scrolls under it
   // the bar lifts off the page with a soft edge.
@@ -568,6 +619,11 @@ export default function PackagesPage() {
       {packages && !detailOpen && (
         <div className="packages-list">
           {error && <ErrorState compact error={error} />}
+          {missingTarget && (
+            <Notice tone="warning" role="status">
+              {tr("settings.packagespage.linkedPackageMissing", { id: missingTarget })}
+            </Notice>
+          )}
           {filtered && counts[filter.status] === 0 && (
             <EmptyState
               compact

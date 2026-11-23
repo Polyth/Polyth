@@ -65,6 +65,7 @@ export const ar: PluginsMessages = {
   "pluginbridge.pluginWidgetValue": "عنصر واجهة مستخدم المكون الإضافي: {title}",
   "pluginmodules.pluginValueUiEntryMustExportA": "يجب أن يُصدّر إدخال واجهة المستخدم الخاص بالمكوّن الإضافي \" {pluginId} \" خريطة مكونات الوحدات النمطية",
   "packages.plugins.linkHint": "يقبل رابط .zip عبر https أو مستودعًا على GitHub أو GitLab أو Codeberg.",
+  "packages.plugins.linkedSourceNotice": "فُتح من رابط. ثبّت الحزم التي تثق بها فقط: يعرض Polyth ما تطلبه الحزمة قبل أن تعمل.",
   "packages.plugins.dropArchive": "أفلِت ملف .zip للحزمة",
   "packages.plugins.dropArchiveHint": "اسحب ملف .zip هنا أو اختر ملفًا · حتى {size}",
   "packages.plugins.chooseFile": "اختر ملفًا",

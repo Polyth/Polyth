@@ -1433,6 +1433,7 @@ export const en = {
   "settings.packagespage.workflowDescription": "Orchestrate multi-agent DAG pipelines.",
   "settings.packagespage.allCategories": "All categories",
   "settings.packagespage.alwaysOn": "Always on",
+  "settings.packagespage.linkedPackageMissing": "This Polyth has no package “{id}”. It may need a newer version of Polyth.",
   "settings.packagespage.inProgress": "In progress",
   "settings.packagespage.inProgressNotice": "In progress: this package is unfinished (alpha) and not well tested. Expect rough edges and breakage.",
   "settings.packagespage.beta": "Beta",

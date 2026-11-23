@@ -1,7 +1,7 @@
 // Session URL parse/format: /p/:projectId/s/:sessionId plus ?session= for agents.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { formatAppUrl, parseAppUrl, settingsPageFromSearch } from "../src/router.ts";
+import { formatAppUrl, PACKAGES_LINK_PARAMS, packagesLinkFromSearch, parseAppUrl, settingsPageFromSearch } from "../src/router.ts";
 
 test("parseAppUrl reads project and session from the path", () => {
   assert.deepEqual(parseAppUrl("/p/prj_1/s/ses_2"), { projectId: "prj_1", sessionId: "ses_2" });
@@ -38,6 +38,27 @@ test("settingsPageFromSearch reads a safe settings deep-link", () => {
   assert.equal(settingsPageFromSearch("?settings=/evil"), null);
   assert.equal(settingsPageFromSearch("?settings=harnesses/opencode/roles/extra"), null);
   assert.equal(settingsPageFromSearch(""), null);
+});
+
+test("packagesLinkFromSearch reads catalog install links", () => {
+  assert.deepEqual(packagesLinkFromSearch("?settings=packages&package=github"), { packageId: "github" });
+  const source = "https://github.com/acme/polyth-weather/tree/v1.2.0";
+  assert.deepEqual(
+    packagesLinkFromSearch(`?settings=packages&install=${encodeURIComponent(source)}`),
+    { installSource: source },
+  );
+  // Only on the Packages page, and a package id wins over an install source.
+  assert.equal(packagesLinkFromSearch("?settings=plugins&package=github"), null);
+  assert.equal(packagesLinkFromSearch("?package=github"), null);
+  assert.deepEqual(packagesLinkFromSearch(`?settings=packages&package=git&install=${source}`), { packageId: "git" });
+  // Bounded values: no odd ids, whitespace, control characters or huge sources.
+  assert.equal(packagesLinkFromSearch("?settings=packages&package=../evil"), null);
+  assert.equal(packagesLinkFromSearch("?settings=packages&package=Git"), null);
+  assert.equal(packagesLinkFromSearch(`?settings=packages&install=${encodeURIComponent("a b")}`), null);
+  assert.equal(packagesLinkFromSearch(`?settings=packages&install=${encodeURIComponent("x\u0000")}`), null);
+  assert.equal(packagesLinkFromSearch(`?settings=packages&install=${"a".repeat(2049)}`), null);
+  assert.equal(packagesLinkFromSearch("?settings=packages"), null);
+  assert.deepEqual(PACKAGES_LINK_PARAMS, ["package", "install"]);
 });
 
 test("formatAppUrl builds canonical urls", () => {

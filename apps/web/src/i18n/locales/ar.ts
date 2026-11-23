@@ -1430,6 +1430,7 @@ export const ar: AppMessages = {
   "settings.packagespage.workflowDescription": "تنسيق خطوط أنابيب DAG متعددة الوكلاء.",
   "settings.packagespage.allCategories": "كل الفئات",
   "settings.packagespage.alwaysOn": "مفعّلة دائمًا",
+  "settings.packagespage.linkedPackageMissing": "لا تحتوي نسخة Polyth هذه على الحزمة «{id}». قد تحتاج إلى إصدار أحدث من Polyth.",
   "settings.packagespage.inProgress": "قيد التطوير",
   "settings.packagespage.inProgressNotice": "قيد التطوير: هذه الحزمة غير مكتملة (ألفا) ولم تُختبر جيدًا. توقّع أخطاء ونواقص.",
   "settings.packagespage.beta": "تجريبي",

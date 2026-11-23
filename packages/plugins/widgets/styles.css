@@ -737,6 +737,16 @@ body .plugin-install-dialog .plugin-install.is-dragging .plugin-drop {
   gap: var(--space-3);
 }
 
+.plugin-install-dialog .plugin-install-linked {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  border: 1px solid var(--border-soft);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
 .plugin-install-dialog .plugin-install-resolved {
   margin: 0;
   padding: var(--space-2) var(--space-3);

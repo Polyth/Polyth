@@ -65,6 +65,7 @@ export const it: PluginsMessages = {
   "pluginbridge.pluginWidgetValue": "Widget plugin: {title}",
   "pluginmodules.pluginValueUiEntryMustExportA": "Il plugin \" {pluginId} \" La voce dell'interfaccia utente deve esportare una mappa dei componenti dei moduli",
   "packages.plugins.linkHint": "Accetta un link .zip https o un repository su GitHub, GitLab o Codeberg.",
+  "packages.plugins.linkedSourceNotice": "Aperto da un link. Installa solo pacchetti di cui ti fidi: Polyth mostra cosa chiede un pacchetto prima che venga eseguito.",
   "packages.plugins.dropArchive": "Trascina lo .zip del pacchetto",
   "packages.plugins.dropArchiveHint": "Trascina qui un .zip o scegli un file · fino a {size}",
   "packages.plugins.chooseFile": "Scegli file",

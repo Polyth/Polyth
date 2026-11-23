@@ -1430,6 +1430,7 @@ export const de: AppMessages = {
   "settings.packagespage.workflowDescription": "Multi-Agent-DAG-Pipelines orchestrieren.",
   "settings.packagespage.allCategories": "Alle Kategorien",
   "settings.packagespage.alwaysOn": "Immer an",
+  "settings.packagespage.linkedPackageMissing": "Dieses Polyth hat kein Paket „{id}“. Möglicherweise ist eine neuere Polyth-Version nötig.",
   "settings.packagespage.inProgress": "In Arbeit",
   "settings.packagespage.inProgressNotice": "In Arbeit: Dieses Paket ist unfertig (Alpha) und noch wenig getestet. Rechnen Sie mit Ecken, Kanten und Fehlern.",
   "settings.packagespage.beta": "Beta",

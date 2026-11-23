@@ -1430,6 +1430,7 @@ export const uk: AppMessages = {
   "settings.packagespage.workflowDescription": "Оркестрування багатоагентних конвеєрів DAG.",
   "settings.packagespage.allCategories": "Усі категорії",
   "settings.packagespage.alwaysOn": "Завжди ввімкнено",
+  "settings.packagespage.linkedPackageMissing": "У цьому Polyth немає пакета «{id}». Можливо, потрібна новіша версія Polyth.",
   "settings.packagespage.inProgress": "У розробці",
   "settings.packagespage.inProgressNotice": "У розробці: пакет незавершений (альфа) і недостатньо протестований. Можливі збої та недоліки.",
   "settings.packagespage.beta": "Бета",

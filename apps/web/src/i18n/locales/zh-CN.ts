@@ -1430,6 +1430,7 @@ export const zhCN: AppMessages = {
   "settings.packagespage.workflowDescription": "编排多代理 DAG 流水线。",
   "settings.packagespage.allCategories": "全部类别",
   "settings.packagespage.alwaysOn": "始终开启",
+  "settings.packagespage.linkedPackageMissing": "此 Polyth 没有“{id}”包。可能需要更新版本的 Polyth。",
   "settings.packagespage.inProgress": "开发中",
   "settings.packagespage.inProgressNotice": "开发中：此软件包尚未完成（Alpha），未经充分测试，可能存在问题或无法正常工作。",
   "settings.packagespage.beta": "测试版",

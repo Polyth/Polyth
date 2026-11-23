@@ -1430,6 +1430,7 @@ export const pl: AppMessages = {
   "settings.packagespage.workflowDescription": "Orkiestruj potoki DAG z wieloma agentami.",
   "settings.packagespage.allCategories": "Wszystkie kategorie",
   "settings.packagespage.alwaysOn": "Zawsze włączone",
+  "settings.packagespage.linkedPackageMissing": "Ten Polyth nie ma pakietu „{id}”. Może być potrzebna nowsza wersja Polyth.",
   "settings.packagespage.inProgress": "W trakcie prac",
   "settings.packagespage.inProgressNotice": "W trakcie prac: ten pakiet jest niedokończony (alfa) i słabo przetestowany. Spodziewaj się błędów i niedoróbek.",
   "settings.packagespage.beta": "Beta",

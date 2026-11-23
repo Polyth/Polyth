@@ -8515,6 +8515,7 @@ body[data-glass="clear"] .prompt-nav-panel { --prompt-nav-panel-blur: 22px; }
 .settings-result-hint { color: var(--muted); font-size: var(--font-meta); }
 .settings-result-page { color: var(--accent); font-size: var(--font-meta); text-transform: uppercase; letter-spacing: 0.04em; }
 .settings-row.flash,
+.settings-list-row.flash,
 .settings-section.flash { animation: settings-flash 1.6s ease-out; }
 @keyframes settings-flash {
   0%, 40% { background: rgba(var(--accent-rgb), 0.18); }

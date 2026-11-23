@@ -20,5 +20,11 @@ export function readPackagesContext(raw: Readonly<Record<string, unknown>>): Pac
     setPackageDetailOpen: typeof raw.setPackageDetailOpen === "function"
       ? raw.setPackageDetailOpen as (owner: string, open: boolean) => void
       : noop,
+    packagesInstallRequest: typeof raw.packagesInstallRequest === "string" && raw.packagesInstallRequest.length > 0
+      ? raw.packagesInstallRequest
+      : null,
+    clearPackagesInstallRequest: typeof raw.clearPackagesInstallRequest === "function"
+      ? raw.clearPackagesInstallRequest as () => void
+      : noop,
   };
 }

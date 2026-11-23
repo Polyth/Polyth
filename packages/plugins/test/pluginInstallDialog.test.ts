@@ -123,3 +123,53 @@ test("PluginInstallDialog does not install on composing Enter", async () => {
   }
 });
 
+
+test("a source from an install link opens prefilled with a note and waits for Install", async () => {
+  const dom = new Window();
+  Object.assign(globalThis, {
+    window: dom,
+    document: dom.document,
+    IS_REACT_ACT_ENVIRONMENT: true,
+    requestAnimationFrame: (callback: (time: number) => void) => setTimeout(() => callback(Date.now()), 0),
+    cancelAnimationFrame: (handle: ReturnType<typeof setTimeout>) => clearTimeout(handle),
+  });
+  const { act, createElement } = await import("react");
+  const { createRoot } = await import("react-dom/client");
+  const { PluginInstallDialog } = await import("../widgets/PluginInstallDialog.tsx");
+  const container = dom.document.createElement("div");
+  dom.document.body.appendChild(container);
+  const root = createRoot(container as unknown as HTMLElement);
+  const source = "https://github.com/example-org/polyth-weather/tree/v1.2.0";
+  const installs: string[] = [];
+  try {
+    await act(async () => {
+      root.render(createElement(PluginInstallDialog, {
+        initialSource: source,
+        onClose: () => {},
+        onInstallSource: async (value: string) => { installs.push(value); },
+        onInstallArchive: async () => { throw new Error("unexpected ZIP submission"); },
+      }));
+    });
+    const doc = dom.document;
+    const input = doc.querySelector<HTMLInputElement>(".plugin-install-link input")!;
+    assert.equal(input.value, source, "the link tab opens with the source");
+    assert.match(doc.querySelector(".plugin-install-linked")!.textContent!, /Opened from a link/);
+    assert.equal(installs.length, 0, "opening the dialog installs nothing");
+    // Editing the source drops the "from a link" note: it is no longer that link.
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(dom.HTMLInputElement.prototype, "value")!.set!.call(input, "https://github.com/example-org/other");
+      input.dispatchEvent(new dom.Event("input", { bubbles: true }));
+    });
+    assert.equal(doc.querySelector(".plugin-install-linked"), null);
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(dom.HTMLInputElement.prototype, "value")!.set!.call(input, source);
+      input.dispatchEvent(new dom.Event("input", { bubbles: true }));
+    });
+    const install = [...doc.querySelectorAll<HTMLButtonElement>(".ui-dialog-foot button")].at(-1)!;
+    await act(async () => { install.click(); });
+    assert.deepEqual(installs, [source]);
+  } finally {
+    await act(async () => { root.unmount(); });
+    await dom.happyDOM.close();
+  }
+});

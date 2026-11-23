@@ -20,11 +20,14 @@ const hasFiles = (event: DragEvent<HTMLElement>) => [...(event.dataTransfer?.typ
 export function ManagedPluginsSection({ context = {} }: { context?: Readonly<Record<string, unknown>> }) {
   const page = readPackagesContext(context);
   const { packagesQuery: query, packagesStatus: status, packagesCategory: category, reportPackageMatches, setPackageDetailOpen } = page;
+  const { packagesInstallRequest: installRequest, clearPackagesInstallRequest: clearInstallRequest } = page;
   const library = usePluginLibrary();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tab, setTab] = useState<PluginDetailTab>("overview");
   const [installOpen, setInstallOpen] = useState(false);
   const [droppedFile, setDroppedFile] = useState<File | null>(null);
+  // A source an install link handed over (the package catalog's Install).
+  const [linkedSource, setLinkedSource] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const returnFocusTo = useRef<string | null>(null);
@@ -73,7 +76,18 @@ export function ManagedPluginsSection({ context = {} }: { context?: Readonly<Rec
   const closeInstaller = () => {
     setInstallOpen(false);
     setDroppedFile(null);
+    setLinkedSource(null);
   };
+  // The link opens Add package on the link tab, prefilled; the person still
+  // reads the source and presses Install, and review follows as usual.
+  useEffect(() => {
+    if (!installRequest) return;
+    clearInstallRequest?.();
+    setSelectedId(null);
+    setDroppedFile(null);
+    setLinkedSource(installRequest);
+    setInstallOpen(true);
+  }, [installRequest, clearInstallRequest]);
   const openInstaller = (file: File | null = null) => {
     setDroppedFile(file);
     setInstallOpen(true);
@@ -118,7 +132,9 @@ export function ManagedPluginsSection({ context = {} }: { context?: Readonly<Rec
 
   const installer = installOpen && (
     <PluginInstallDialog
+      key={linkedSource ?? "installer"}
       initialFile={droppedFile}
+      initialSource={linkedSource}
       onClose={closeInstaller}
       onInstallSource={installSource}
       onInstallArchive={installArchive}

@@ -204,6 +204,15 @@ export interface PackagesPageSlotContext {
   packagesCategory: string | null;
   reportPackageMatches(owner: string, matches: PackagesPageMatches): void;
   setPackageDetailOpen(owner: string, open: boolean): void;
+  /** A package source an install link handed over
+   *  (`/?settings=packages&install=<source>`, for example from the package
+   *  catalog), waiting for the library to open its installer with the link
+   *  prefilled. Nothing installs until the person confirms there. Older hosts
+   *  omit it. */
+  packagesInstallRequest?: string | null;
+  /** The contribution that opened the installer for the request clears it, so
+   *  it opens once. */
+  clearPackagesInstallRequest?(): void;
 }
 
 export interface WidgetRenderContext extends Record<string, unknown> {

@@ -65,6 +65,7 @@ export const uk: PluginsMessages = {
   "pluginbridge.pluginWidgetValue": "Віджет плагіна: {title}",
   "pluginmodules.pluginValueUiEntryMustExportA": "Точка входу інтерфейсу плагіна «{pluginId}» має експортувати карту компонентів modules",
   "packages.plugins.linkHint": "Посилання https на .zip, репозиторій GitHub, GitLab чи Codeberg, zip:https://…, file:folder або шлях до локального .zip.",
+  "packages.plugins.linkedSourceNotice": "Відкрито за посиланням. Встановлюйте лише пакети, яким довіряєте: Polyth покаже, чого просить пакет, перш ніж він запрацює.",
   "packages.plugins.dropArchive": "Перетягніть сюди .zip пакета",
   "packages.plugins.dropArchiveHint": "Перетягніть .zip сюди або виберіть файл · до {size}",
   "packages.plugins.chooseFile": "Вибрати файл",

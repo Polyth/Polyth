@@ -65,6 +65,7 @@ export const pl: PluginsMessages = {
   "pluginbridge.pluginWidgetValue": "Widżet wtyczki: {title}",
   "pluginmodules.pluginValueUiEntryMustExportA": "Wpis interfejsu użytkownika wtyczki „{pluginId}” musi eksportować mapę komponentów modułów",
   "packages.plugins.linkHint": "Link https do pliku .zip lub repozytorium GitHub, GitLab albo Codeberg, zip:https://…, file:folder lub lokalna ścieżka do .zip.",
+  "packages.plugins.linkedSourceNotice": "Otwarto z linku. Instaluj tylko zaufane pakiety: Polyth pokaże, o co prosi pakiet, zanim zacznie działać.",
   "packages.plugins.dropArchive": "Upuść .zip pakietu",
   "packages.plugins.dropArchiveHint": "Przeciągnij .zip tutaj albo wybierz plik · do {size}",
   "packages.plugins.chooseFile": "Wybierz plik",
