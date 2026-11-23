@@ -5535,11 +5535,19 @@ projects. A fresh install starts in Tree (`SIDEBAR_VIEW_MODE_DEFAULT`,
 registry with no project, or only the lone Personal project — presents the
 tree whatever was saved, so the left edge is never an empty strip; the layout
 menu then leaves out the Project rail choice until a project exists. Clicking a
-project in the phone navigator, desktop tree, or Project
-rail only toggles its sessions; it never activates the project, changes the
-current session, or closes the navigator. The rail's browsed project is local
-presentation state, independent of the active workspace. Opening a session or
-using an explicit project action still navigates normally.
+project in the phone navigator, desktop tree, compact drawer rail, or a
+collapsed Project rail only toggles its sessions; it never activates the
+project, changes the current session, or closes the navigator. In the wide
+expanded Project rail the first click on another project only browses it; a
+second click on the browsed project (its icon or its header row) enters it:
+from the New chat page it opens New chat in that project, and from another
+project's chat it opens that project's latest top-level chat
+(`latestProjectSession`, `Sidebar.tsx`; New chat when it has none). Inside the
+project already, the second click does nothing, and it never collapses the
+sessions column. A double-click's second click does not act again. The rail's
+browsed project is local presentation state, independent of the active
+workspace. Opening a session or using an explicit project action still
+navigates normally.
 Phone project headers are one vertically centred line: the name truncates and
 the status pills keep their own width beside it, expanded or collapsed, so the
 name never moves. Pills run most urgent first (running, waiting, failed,
@@ -5689,9 +5697,8 @@ while keeping Tree selected; expanding restores the project tree. Choosing Tree
 from the sidebar actions also restores it. Collapsing an explicitly selected
 Project rail hides only the sessions column while keeping the project icons
 visible, then expands back to Project rail. An older collapsed rail without a
-saved return mode restores Tree once when expanded. Clicking the focused
-project's icon in an expanded rail also hides the sessions column, after the
-double-click window so a double-click cannot trigger it.
+saved return mode restores Tree once when expanded. Only the rail's collapse
+toggle hides the sessions column; clicking the focused project's icon does not.
 A project icon carries one corner mark from `projectRailMark`
 (`sessionStatus.ts`): amber when any chat needs a person (question, approval,
 waiting), the accent colour when a finished top-level chat has a reply the
