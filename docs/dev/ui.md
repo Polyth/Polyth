@@ -2586,6 +2586,15 @@ A fork's copied log ends with `session/forked`, and a `session-starting` row
 before that marker is the source's, never the child's: Fork and edit on a
 started chat's first prompt copies the row but not its admission, which left
 the child on "Spawning agent…" with the prompt stuck under its history.
+A `runtime/epoch-replaced` ends the start the same way: after a harness switch
+or restart while the chat spawned, a row still waiting is an ordinary queue
+row (it runs on the new runtime, or shows held for review with its controls).
+Once the prompt is admitted, its `user/message` retires the echo, but the
+projection reads `working` only from `turn/started`. Until that turn starts or
+ends, the startup dock stays on an `idle` or `reconciling` chat whose newest
+exchange is that prompt (`admittedPromptAwaitingTurn` in
+`apps/web/src/sessionActivity.ts`). Without it a cold harness left 15 s and
+more with no activity anywhere.
 The projection status is no guide while it does (`reconciling`, then `idle`
 until the prompt is admitted), so `sessionStartingFromServer` reads the row and
 only excludes `failed` and `archived`; tying it to `reconciling` flashed the

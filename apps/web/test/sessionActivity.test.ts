@@ -113,3 +113,24 @@ test("after-turn switches keep the currently running harness until it finishes",
   assert.deepEqual(activity.model, oldModel);
   assert.equal(activity.harnessId, "openai");
 });
+
+test("an admitted prompt keeps the startup dock until its turn starts or ends", async () => {
+  const { admittedPromptAwaitingTurn } = await import("../src/sessionActivity.ts");
+  const prompt = { kind: "user", time: 100 };
+  // The echo retired on user/message; the cold runtime has not started yet.
+  const waiting = admittedPromptAwaitingTurn(prompt, { startedAt: 10, stoppedAt: 50 }, "idle");
+  assert.equal(waiting, true);
+  const activity = resolveSessionActivity(session(), turn(), [], waiting);
+  assert.equal(activity.awaitingTurn, true, "the dock stays, with no local echo left");
+  assert.equal(activity.working, false);
+  assert.equal(admittedPromptAwaitingTurn(prompt, undefined, "reconciling"), true, "a new chat's first prompt");
+  // The turn started, or ended (a failure before work), or the chat cannot run one.
+  assert.equal(admittedPromptAwaitingTurn(prompt, { startedAt: 100 }, "idle"), false);
+  assert.equal(admittedPromptAwaitingTurn(prompt, { stoppedAt: 120 }, "idle"), false);
+  for (const status of ["failed", "unknown", "epoch-pending", "archived", "waiting"] as const) {
+    assert.equal(admittedPromptAwaitingTurn(prompt, undefined, status), false, status);
+  }
+  // The newest exchange is the answer: nothing is owed.
+  assert.equal(admittedPromptAwaitingTurn({ kind: "assistant", time: 200 }, undefined, "idle"), false);
+  assert.equal(resolveSessionActivity(session(), turn(), [], false).awaitingTurn, false);
+});

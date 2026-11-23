@@ -135,11 +135,18 @@ export function departedQueueIds(events: readonly Pick<SessionEvent, "type" | "d
  *  copy between that prompt's queue row and its admission, so the copy holds
  *  a start that never finishes in the child: "Spawning agent…" for good and
  *  the prompt stuck under the history. Rows before the marker are the
- *  source's; the child's queue starts empty. */
+ *  source's; the child's queue starts empty.
+ *
+ *  A runtime replacement (`runtime/epoch-replaced`: a harness switch or
+ *  restart while the chat was still spawning) ends that start too. A row
+ *  still waiting then is an ordinary queue row: it runs on the new runtime,
+ *  or it was held for review and needs the person. Read as a start it showed
+ *  "Spawning agent…" on an idle chat and the prompt under the history, with
+ *  no way to send or drop it. */
 export function startingQueueIds(events: readonly Pick<SessionEvent, "type" | "data">[]): Set<string> {
   const ids = new Set<string>();
   for (const event of events) {
-    if (event.type === "session/forked") ids.clear();
+    if (event.type === "session/forked" || event.type === "runtime/epoch-replaced") ids.clear();
     if (event.type !== "delivery/fallback-queued") continue;
     const data = event.data as { queueId?: unknown; reason?: unknown } | null | undefined;
     if (data?.reason === SESSION_STARTING_QUEUE_REASON && typeof data.queueId === "string") ids.add(data.queueId);
