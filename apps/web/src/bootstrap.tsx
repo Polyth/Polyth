@@ -28,7 +28,9 @@ import {
   setOverlay,
   setRailPlugin,
   setSidebarOpen,
+  subscribeStore,
 } from "./store.ts";
+import { installMobileServerZones } from "./serverZones.ts";
 import { getShellMode } from "./responsiveShell.ts";
 import {
   getMobileWorkspaceNavigationSnapshot,
@@ -106,6 +108,9 @@ installCapabilityWidgets();
 installNotificationCentre();
 installRuntimeEpochBanner();
 installDesktopIntegration();
+// The phone apps list the other paired servers in the navigator, as Polyth
+// Desktop does; nothing installs anywhere else.
+installMobileServerZones({ get: () => getState().projectRegistry, subscribe: subscribeStore });
 installNativeMobileIntegration({
   handleBack: () => {
     const current = getState();

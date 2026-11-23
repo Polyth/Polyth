@@ -4,7 +4,16 @@ import { Preferences } from "@capacitor/preferences";
 import { consumeNativePendingUrl, nativeNavigationAvailable } from "./nativeNavigation.ts";
 import { consumeNativePushOpen, type NativePushOpen } from "./nativePush.ts";
 import { coverPageForLeave } from "./launch.ts";
-import { consumeNativeServerChoice, presentNativeServerMenu, type ServerMenuAnchor } from "./nativePolythLink.ts";
+import {
+  consumeNativeServerChoice,
+  nativeServerZones,
+  presentNativeServerMenu,
+  type ServerMenuAnchor,
+  type ServerZoneProject,
+  type ServerZonesView,
+} from "./nativePolythLink.ts";
+
+export type { ServerZone, ServerZoneProject, ServerZonesView } from "./nativePolythLink.ts";
 
 const HOSTS_KEY = "polyth.mobile.hosts.v1";
 const PENDING_DEEP_LINK_KEY = "polyth.mobile.pending-deep-link.v1";
@@ -322,6 +331,45 @@ export async function chooseMobileServer(anchor?: ServerMenuAnchor): Promise<voi
   if (action === "current" || action === "cancel") return;
   await returnToMobileConnectionHub(undefined, action === "add" ? { addServer: true } : { selectServer: true });
 }
+
+/** What the shell's zones store asks of the phone app. */
+export interface MobileServerZones {
+  zones(): Promise<ServerZonesView>;
+  report(projects: ServerZoneProject[]): Promise<unknown>;
+  allow(): Promise<ServerZonesView>;
+  fold(key: string, folded: boolean): Promise<ServerZonesView>;
+  open(key: string, projectId?: string): Promise<void>;
+}
+
+/**
+ * Server zones: the other paired servers with the projects each listed on its
+ * last visit, for the navigator of the open one. The native plugin answers
+ * only the page of the proxy it opened and files a list under that server; the
+ * page names no server. Null anywhere else (a browser, the hub, a development
+ * host), where there is nothing to list.
+ */
+export function mobileServerZones(): MobileServerZones | null {
+  const native = isNativeMobile() && isPolythLinkLoopbackOrigin(location.origin) ? nativeServerZones() : null;
+  if (!native) return null;
+  return {
+    zones: () => native.serverZones(),
+    report: (projects) => native.reportZoneProjects({ projects }),
+    allow: () => native.allowServerZones(),
+    fold: (key, folded) => native.foldServerZone({ key, folded }),
+    open: async (key, projectId) => {
+      // The app holds the server it agreed to; the hub opens it at the
+      // project, as it opens a pick from the server menu. A revoked pairing
+      // lands on the hub's server list instead.
+      const { available } = await native.openServerZone(projectId === undefined ? { key } : { key, projectId });
+      await returnToMobileConnectionHub(zoneProjectPath(available, projectId), { selectServer: true });
+    },
+  };
+}
+
+/** Where the hub opens a zone's server: at the tapped project, while the
+ *  pairing stands. */
+export const zoneProjectPath = (available: boolean | undefined, projectId?: string): string | undefined =>
+  available === true && projectId !== undefined ? `/p/${encodeURIComponent(projectId)}` : undefined;
 
 export function navigateToMobileHost(host: string, deepLinkPath = "/"): void {
   location.replace(`${normalizePolythHost(host)}${deepLinkPath.startsWith("/") ? deepLinkPath : `/${deepLinkPath}`}`);

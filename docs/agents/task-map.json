@@ -298,6 +298,7 @@
       ],
       "testHints": [
         "apps/mobile/test/runtime.test.ts",
+        "apps/mobile/test/serverZones.test.ts",
         "apps/mobile/test/connectionUi.test.ts",
         "apps/web/test/mobileViewportLayers.test.ts",
         "apps/web/test/mobileViewportFrame.test.ts",

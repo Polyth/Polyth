@@ -657,14 +657,17 @@ the menu.
 
 #### Server zones in the navigator
 
-In Polyth Desktop the navigator also lists the other servers the app can open
-(this computer, servers paired through Link, servers saved by address), each as
-a **zone**: a quiet heading (`--font-meta`, weight 600, `--muted`, the server's
+In Polyth Desktop and the phone apps the navigator also lists the other servers
+the app can open (on Desktop this computer, servers paired through Link and
+servers saved by address; on a phone the other paired servers), each as a
+**zone**: a quiet heading (`--font-meta`, weight 600, `--muted`, the server's
 mark in the glyph column) over its projects as 34px rows on the navigator's own
 axes. While other zones are on show, the projects of the server on screen get
 the same heading with that server's name, so the list reads as one sequence of
 zones. A zone's projects are the ones that server listed the last time it was
-open ([desktop.md](desktop.md#server-zones)); nothing in the row says "live".
+open ([desktop.md](desktop.md#server-zones),
+[phone apps](../mobile/polyth-link.md#server-zones)); nothing in the row says
+"live".
 
 - A project row moves the window to that server at that project. The clicked
   row holds the hover wash and every zone row is disabled until the page
@@ -680,9 +683,16 @@ open ([desktop.md](desktop.md#server-zones)); nothing in the row says "live".
 - The project icon rail draws each zone after this server's icons: a hairline,
   the server's mark (opens the server) and up to six project icons, whose
   tooltips name project and server. Zone icons carry no arrange id.
-- Zones hide while the navigator is searching. They are absent in a browser
-  tab, in the phone layout (the phone apps, and a desktop window narrowed to it)
-  and in the workstation edition.
+- The phone Navigator (the phone apps, and a desktop window narrowed to the
+  phone layout) lists the zones under *Add project* on its own axes: the
+  server's mark and a project's tile in the lead column, names on the title
+  axis, rows at the 44px tap floor. A zone's projects stay one step quieter
+  than the ones that are here (session-size names, regular weight). The server
+  on screen gets no heading there: the Navigator's title already names the
+  place.
+- Zones hide while the navigator is searching, and on a phone while rows are
+  being selected. They are absent in a browser tab and in the workstation
+  edition.
 
 Archived sessions are not listed inline in the navigator. When a project has any
 archived session (a loaded row, or one bounded `archived=true` summary probe), a

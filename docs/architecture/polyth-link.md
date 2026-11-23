@@ -87,7 +87,11 @@ or unauthenticated share link.
     one exception, `presentServerMenu`, is accepted from the loopback page of
     the proxy the app opened: the native side draws the server list itself and
     returns only the kind of choice, so connection metadata still never reaches
-    loopback JavaScript (`docs/mobile/polyth-link.md`).
+    loopback JavaScript (`docs/mobile/polyth-link.md`). The server-zone methods
+    are accepted from that same page and speak for its server alone; they give
+    it the names of the other paired servers and of their projects only after
+    the person allowed that server in a native prompt, and never a connection
+    id (`docs/mobile/polyth-link.md#server-zones`).
 9. **Local numeric pairing.** Nearby discovery supplies only a pinned bootstrap
    hint. The six-digit code is authenticated with OPAQUE using the fixed
    `argon2id-v1-m65536-t3-p1` profile, a 120-second lifetime, and bounded

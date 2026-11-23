@@ -2073,3 +2073,47 @@ html[dir="rtl"] .mobile-navigator {
   --nav-select-end: calc(var(--nav-unit) * (3 - var(--nav-action-stroke) / 2));
   --nav-lens-end: calc(var(--nav-unit) * (4 - var(--nav-action-stroke) / 2));
 }
+
+/* Server zones (sidebar/ServerZones.tsx) on the Navigator's own axes: a
+   server's mark and a project's tile sit in the lead column and names start
+   on the title axis, like the projects above. A zone's projects stay one step
+   quieter than the ones that are here: session-size names, regular weight. */
+.mobile-navigator .server-zones {
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.mobile-navigator .server-zone-head,
+.mobile-navigator .server-zone-row {
+  padding-inline: var(--nav-row-inset) 0;
+}
+
+.mobile-navigator .server-zone-row {
+  gap: var(--nav-lead-gap);
+  min-height: var(--tap);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-navigator .server-zone-row:active:where(:not(:disabled)) {
+  background-color: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+.mobile-navigator .server-zone-title > .ui-icon:first-child,
+.mobile-navigator .server-zone-ask > .ui-icon {
+  margin-inline: calc((var(--nav-lead-col) - var(--icon-sm)) / 2) calc((var(--nav-lead-col) - var(--icon-sm)) / 2 + var(--nav-lead-gap));
+}
+
+.mobile-navigator .server-zone-row > .project-glyph {
+  width: var(--nav-project-mark);
+  height: var(--nav-project-mark);
+  justify-items: center;
+}
+
+.mobile-navigator .server-zone-row--quiet {
+  padding-inline-start: var(--nav-title-start);
+}
+
+.mobile-navigator .server-zone-ask {
+  gap: 0;
+  padding-inline-start: var(--nav-row-inset);
+}

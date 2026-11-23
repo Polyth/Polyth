@@ -5,7 +5,9 @@ import {
   isPolythLinkLoopbackOrigin,
   mobileConnectionHubUrl,
   mobileDeepLinkPath,
+  mobileServerZones,
   normalizePolythHost,
+  zoneProjectPath,
 } from "../src/runtime.ts";
 
 test("normalizes a Polyth host without retaining paths or credentials", () => {
@@ -68,4 +70,19 @@ test("hub bounces carry either a server choice or a resume, never both", () => {
   // "Add server" from the native server menu is a server choice too.
   assert.equal(mobileConnectionHubUrl(origin, { addServer: true }), `${origin}?selectServer=1&addServer=1`);
   assert.equal(mobileConnectionHubUrl(origin, { addServer: true, resume: true }), `${origin}?selectServer=1&addServer=1`);
+});
+
+test("a zone opens its server at the tapped project only while the pairing stands", () => {
+  assert.equal(zoneProjectPath(true, "p1"), "/p/p1");
+  // The id travels as one path segment, the form the hub accepts.
+  assert.equal(zoneProjectPath(true, "мій проєкт"), `/p/${encodeURIComponent("мій проєкт")}`);
+  assert.equal(mobileDeepLinkPath(`https://polyth.example.test${zoneProjectPath(true, "a&b=c")}`), "/p/a%26b%3Dc");
+  assert.equal(zoneProjectPath(true), undefined);
+  // A revoked pairing lands on the server list, at no path.
+  assert.equal(zoneProjectPath(false, "p1"), undefined);
+  assert.equal(zoneProjectPath(undefined, "p1"), undefined);
+});
+
+test("zones have nothing to ask outside the phone app", () => {
+  assert.equal(mobileServerZones(), null);
 });

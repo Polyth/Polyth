@@ -45,6 +45,54 @@ the menu cannot show (an older app build, a development host, the command
 palette), the call falls back to the hub's server list (`chooseMobileServer` in
 `apps/mobile/src/runtime.ts`).
 
+### Server zones
+
+The phone Navigator also lists the other paired servers as **zones** with their
+projects, and a tap on a project moves the app to that server at that project
+(UI in [ui.md](../dev/ui.md#server-zones-in-the-navigator); the same idea as
+[Polyth Desktop](../dev/desktop.md#server-zones)). A phone can be paired with any
+number of servers.
+
+- **No connection is kept for a zone.** Only the open server has a page and a
+  Link session. Its page lists its own projects while it is open
+  (`PolythLink.reportZoneProjects`: id, name, icon and colour of the root
+  projects of its current Space, never a path), and the Link client keeps the
+  last list per server in `zones.json` beside `connections.json`. A zone is a
+  snapshot from that server's last visit; a server not opened since the app
+  learned zones is a heading with one row that opens it.
+- **The rules live in the shared Link client**
+  (`crates/polyth-link-client/src/zones.rs`, methods `zones.view`,
+  `zones.report`, `zones.allow`, `zones.fold`, `zones.open`), so iOS and Android
+  cannot drift. The native plugins only decide who is asking and draw the
+  question.
+- **A page speaks only for its own server.** The five plugin methods
+  (`serverZones`, `reportZoneProjects`, `allowServerZones`, `foldServerZone`,
+  `openServerZone`) answer only the page of the proxy the app opened, and the
+  sender is the connection behind that proxy, never a value from the call. A
+  list is validated and bounded (200 projects, names of 120 characters, icons
+  of 4 KiB).
+- **A server sees the others only after the person allowed it.** Until then
+  the page gets `access: "ask"` and no name, and the Navigator shows one row,
+  *Show my other servers here*. `allowServerZones` raises a native alert that
+  names the server in the app's own words; only **Allow** records the
+  permission, per server. An allowed page gets each zone's name, its projects
+  and a random key for it, never a connection id.
+- **A tap goes only where a zone leads.** `zones.open` accepts a zone the
+  sender may see and a project that zone listed. The native side then holds
+  that server for the hub exactly as a pick from the server menu
+  (`consumeServerChoice`), and the page returns to the hub with
+  `?selectServer=1` and `/p/<id>` as the pending path (`mobileServerZones` in
+  `apps/mobile/src/runtime.ts`). A revoked pairing holds nothing: the hub shows
+  its server list.
+- Zones are ordered by name so they stay put. Forgetting a server drops its
+  list, its fold and its permission. Servers reached by address (the developer
+  path) have no zones.
+
+Evidence: the client rules and the shell's store are unit-tested, the native
+methods are covered by source assertions (`apps/mobile/test/serverZones.test.ts`),
+and the Navigator was rendered in a browser with a stand-in for the plugin.
+Nothing here has run on a device yet.
+
 The Connection Hub remains the recovery and server-management surface. It shows
 trusted servers, reconnect/switch state, revoke or identity failures, and
 pair-another-server actions. Forgetting a connection removes that native trust

@@ -35,6 +35,52 @@ interface PolythLinkCapacitorPlugin {
   presentServerMenu(options: ServerMenuAnchor): Promise<{ action?: string }>;
   /** Bundled hub only: the server picked from that menu, once. */
   consumeServerChoice(): Promise<{ connectionId?: string }>;
+  /** Server zones: answered only on the page of the proxy this app opened,
+   *  for that server alone (crates/polyth-link-client/src/zones.rs). */
+  serverZones(): Promise<ServerZonesView>;
+  reportZoneProjects(options: { projects: ServerZoneProject[] }): Promise<unknown>;
+  /** The app asks the person; the answer is the view either way. */
+  allowServerZones(): Promise<ServerZonesView>;
+  foldServerZone(options: { key: string; folded: boolean }): Promise<ServerZonesView>;
+  /** Holds the zone's server for the hub, like a pick from the server menu. */
+  openServerZone(options: { key: string; projectId?: string }): Promise<{ available?: boolean }>;
+}
+
+/** A project as another server's zone lists it: what its row draws. */
+export interface ServerZoneProject {
+  id: string;
+  name: string;
+  icon?: string;
+  color?: string;
+}
+
+/** Another paired server, with the projects its own page listed when it was
+ *  last open. */
+export interface ServerZone {
+  key: string;
+  kind: "link";
+  label: string;
+  /** False once the pairing was revoked: opening leads to the server list. */
+  available: boolean;
+  folded: boolean;
+  projects: ServerZoneProject[];
+  reportedAt: number | null;
+}
+
+export interface ServerZonesView {
+  /** "ask": the person has not let this server list their other servers. */
+  access: "granted" | "ask";
+  zones: ServerZone[];
+  /** The server on screen, by the name this device shows for it. */
+  current?: { kind: "link"; label: string };
+}
+
+/** The plugin's zone methods, or null where it is absent. */
+export function nativeServerZones(): Pick<
+  PolythLinkCapacitorPlugin,
+  "serverZones" | "reportZoneProjects" | "allowServerZones" | "foldServerZone" | "openServerZone"
+> | null {
+  return nativePairingScannerAvailable() ? NativePolythLink : null;
 }
 
 /** The menu's trigger in CSS pixels, relative to the viewport. */

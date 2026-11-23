@@ -8,7 +8,13 @@ import type {
   PolythDesktopApi,
 } from "../src/desktopBridge.ts";
 import type { ProjectRegistryState } from "../src/projectRegistry.ts";
-import { createServerZonesStore, installServerZones, zoneProjectsOf, zoneRows } from "../src/serverZones.ts";
+import {
+  createServerZonesStore,
+  installMobileServerZones,
+  installServerZones,
+  zoneProjectsOf,
+  zoneRows,
+} from "../src/serverZones.ts";
 
 const project = (id: string, more: Partial<Project> = {}): Project =>
   ({ id, path: `/home/someone/${id}`, name: id.toUpperCase(), createdAt: 1, ...more }) as Project;
@@ -176,6 +182,8 @@ test("nothing installs on the server list, in a browser tab or in a shell older 
   ]) {
     assert.doesNotThrow(() => installServerZones(api as unknown as PolythDesktopApi, registry)());
   }
+  // The phone apps install through the Link plugin, which a browser lacks.
+  assert.doesNotThrow(() => installMobileServerZones(registry)());
 });
 
 test("a disposed store publishes nothing and sends nothing", async () => {
