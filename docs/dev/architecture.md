@@ -1195,7 +1195,9 @@ and user aborts remain recoverable.
   parent chat) and asks first when the level it would get is Full access,
   read from the server's `AutoAcceptDto.inherited`. `reduce.ts` marks
   policy-resolved permissions `auto` so the timeline can label them, and
-  legacy composer-shell confirmations `manual`. It tags tool items produced by
+  legacy composer-shell confirmations `manual`, as well as any request whose
+  event carries `manual: true` (the server stamps it on a Credential Vault run,
+  which no policy level answers, so Full access never hides its card). It tags tool items produced by
   `composer-shell` (`ToolMsg.composerShell`); `groupActivity` keeps them out of
   agent activity blocks like a prompt, and the timeline renders them as an open
   terminal row (`ComposerShellRow`) with the command, output and exit state. While auto-accept is on, the store

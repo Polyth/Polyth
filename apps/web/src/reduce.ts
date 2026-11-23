@@ -269,8 +269,9 @@ export interface PendingPermission {
   reply?: "once" | "always" | "reject";
   /** Resolved by the session's auto-accept policy, not a human click. */
   auto?: boolean;
-  /** A composer-shell confirmation for the user's own command. No automatic
-   *  policy answers it, Full access included. */
+  /** No automatic policy answers it, Full access included: a composer-shell
+   *  confirmation for the user's own command, or a request the server marked
+   *  `manual` (a Credential Vault run). */
   manual?: boolean;
   time: number;
   /** Server-generated, secret-redacted preview (old events lack it).
@@ -1598,7 +1599,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           tool: str(d, "tool"),
           status: "pending",
           time: ev.time,
-          ...(ev.producerPlugin === "composer-shell" ? { manual: true } : {}),
+          ...(ev.producerPlugin === "composer-shell" || d.manual === true ? { manual: true } : {}),
           ...(preview ? { preview } : {}),
           ...(scopes.length > 0 ? { allowedScopes: scopes } : {}),
           ...(str(d, "sourceSessionId") ? { sourceSessionId: str(d, "sourceSessionId") } : {}),

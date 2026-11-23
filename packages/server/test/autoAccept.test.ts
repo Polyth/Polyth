@@ -1375,8 +1375,12 @@ test("a Credential Vault run is never auto-answered by Auto-Approve, Full access
     && (event.data as { permission?: string }).permission === "package-tool");
   assert.ok(request, "the run waits for a person even with Full access");
   assert.equal(judged, 0, "Judgment never answers a Vault run");
-  const card = request.data as { preview: { lines: string[] } };
+  const card = request.data as { preview: { lines: string[] }; manual?: boolean; allowedScopes?: string[] };
   assert.ok(card.preview.lines.some((line) => line.includes("deploy $POLYTH_SAFE_DEPLOY")));
+  // Clients hide requests their auto-accept flags would answer; `manual`
+  // keeps this card (and the waiting status) visible under Full access.
+  assert.equal(card.manual, true);
+  assert.deepEqual(card.allowedScopes, ["once"]);
   await sessions.replyPermission(id, (request.data as { requestId: string }).requestId, "reject");
   assert.equal(await pending, "deny");
 });

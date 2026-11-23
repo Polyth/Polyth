@@ -65,16 +65,26 @@ test("requests the policy holds for a person stay visible while Auto-Approve is 
     requested(1, "routine", { permission: "bash", patterns: ["npm test"], preview: { title: "bash", lines: ["npm test"], risk: "medium" } }),
     requested(2, "held", { permission: "bash", patterns: ["git push --force"], preview: { title: "bash", lines: ["git push --force"], risk: "high", reasons: ["history-rewrite"] } }),
     requested(3, "shell", { permission: "shell", patterns: ["ls"], tool: "shell" }, "composer-shell"),
+    // A Credential Vault run: the server marks it `manual` because no policy
+    // answers it. Without the mark Full access hid the card and the row spun.
+    requested(4, "vault", {
+      permission: "package-tool",
+      patterns: ["secure-safe.credential-vault-run"],
+      tool: "polyth_credential_vault_run",
+      manual: true,
+      preview: { title: "package-tool", lines: ["deploy $POLYTH_SAFE_DEPLOY"], risk: "medium" },
+    }, "secure-safe"),
   ]);
   const visible = (flags: { autoAccept?: boolean; autoAcceptAll?: boolean }) =>
     modelForAutoAccept(model, flags).permissions.map((permission) => permission.requestId);
 
-  assert.deepEqual(visible({ autoAccept: false }), ["routine", "held", "shell"]);
+  assert.deepEqual(visible({ autoAccept: false }), ["routine", "held", "shell", "vault"]);
   // Routine Auto-Approve never answers the high-risk request, and no policy
-  // answers a composer-shell confirmation.
-  assert.deepEqual(visible({ autoAccept: true }), ["held", "shell"]);
-  assert.deepEqual(visible({ autoAccept: true, autoAcceptAll: true }), ["shell"]);
+  // answers a composer-shell confirmation or a server-marked manual request.
+  assert.deepEqual(visible({ autoAccept: true }), ["held", "shell", "vault"]);
+  assert.deepEqual(visible({ autoAccept: true, autoAcceptAll: true }), ["shell", "vault"]);
   assert.equal(model.permissions.find((permission) => permission.requestId === "shell")?.manual, true);
+  assert.equal(model.permissions.find((permission) => permission.requestId === "vault")?.manual, true);
 });
 
 test("a parent's Full access never hides a workflow node's mirrored request", () => {

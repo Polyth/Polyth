@@ -13576,7 +13576,12 @@ export function createSessionService(deps: {
               ...request,
               workspaceRoots: await permissionWorkspaceRoots(await store.projection(projection.id)),
             }), scopeOutcome) as unknown as JsonObject,
-            allowedScopes: [...PERMISSION_ALLOWED_SCOPES],
+            // A Vault run is answered once, by a person: no policy level
+            // answers it, so `manual` keeps clients from hiding the card as
+            // if Auto-Approve/Full access would.
+            ...(vaultRunPermission(request)
+              ? { allowedScopes: ["once"], manual: true }
+              : { allowedScopes: [...PERMISSION_ALLOWED_SCOPES] }),
           }, { ignorable: true, producerPlugin: input.owner });
           await syncToolWatchdogsForRequests(projection.id);
           const current = await store.projection(projection.id);
