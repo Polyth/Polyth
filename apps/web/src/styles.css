@@ -2294,6 +2294,16 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   padding-inline: var(--nav-indent-session, var(--nav-glyph-inset)) var(--nav-glyph-inset);
 }
 .repository-filter::-webkit-scrollbar { display: none; }
+/* Desktop rhythm (the phone has its own in MobileNavigator.css): the chips
+   label the list below, so they sit nearer the header block above than the
+   scroller's padding would put them and keep air before the first chat row.
+   A caption (Pinned, a date) below brings its own air. */
+.sidebar .side-scroll > .sidebar-focused-sessions:first-child > .session-org > .repository-filter:first-child {
+  margin-block-start: calc(var(--space-1) * -1.5);
+}
+.sidebar .repository-filter + .session-project-sessions > .session-date-group:first-child > :first-child:not(.session-date-divider) {
+  margin-block-start: var(--space-1);
+}
 .repository-filter-chip {
   flex: 0 0 auto;
   display: inline-flex;
