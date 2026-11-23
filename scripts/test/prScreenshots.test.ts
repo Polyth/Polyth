@@ -141,6 +141,7 @@ test("the CI check asks visible UI changes for screenshots or a reason", () => {
 
   const template = "## What changes\n\n<!-- ![x](https://a.test/x.png) -->\n- [ ] Before/after screenshots for a visible UI change\n";
   assert.equal(bodyHasScreenshot(template), false);
+  assert.equal(bodyHasScreenshot("<!<!-- x -->-- ![x](https://a.test/x.png) -->"), false);
   assert.match(checkPullRequest({ body: template, files }) ?? "", /node scripts\/pr-screenshots\.mjs/);
 
   assert.equal(bodyHasScreenshot("![after](https://github.com/O/R/blob/c/p.png?raw=true)"), true);
