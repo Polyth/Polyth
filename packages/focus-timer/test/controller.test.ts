@@ -31,7 +31,7 @@ class World {
       },
       clearTimer: (handle) => { this.timers.delete(handle as number); },
       effects: {
-        ring: (finished) => { record.rings.push(`${finished.mode}:${finished.phase}`); },
+        ring: (finished) => { record.rings.push(`${finished.mode}:${finished.step?.preset ?? finished.step?.name ?? "-"}`); },
         silence: () => { record.silences += 1; },
       },
     };
@@ -63,7 +63,7 @@ test("a running focus rings once at its end and the break waits", () => {
   world.advance(2000);
   assert.deepEqual(tab.rings, ["pomodoro:focus"]);
   const snapshot = tab.controller.getSnapshot();
-  assert.equal(snapshot.timer.phase, "short");
+  assert.equal(snapshot.timer.step, 1);
   assert.equal(snapshot.timer.status, "idle");
   assert.ok(snapshot.timer.finished);
 });
@@ -80,8 +80,8 @@ test("with two tabs open only the first to notice rings; the other follows the s
   assert.equal(first.rings.length + second.rings.length, 1);
   second.controller.storageChanged(STATE_KEY);
   first.controller.storageChanged(STATE_KEY);
-  assert.equal(first.controller.getSnapshot().timer.phase, "short");
-  assert.equal(second.controller.getSnapshot().timer.phase, "short");
+  assert.equal(first.controller.getSnapshot().timer.step, 1);
+  assert.equal(second.controller.getSnapshot().timer.step, 1);
 });
 
 test("a segment that ended long before the tab opened does not ring", () => {
@@ -93,7 +93,7 @@ test("a segment that ended long before the tab opened does not ring", () => {
   const later = world.tab();
   assert.deepEqual(later.rings, []);
   const timer = later.controller.getSnapshot().timer;
-  assert.equal(timer.phase, "short");
+  assert.equal(timer.step, 1);
   assert.equal(timer.finished?.stale, true);
 });
 
@@ -126,69 +126,118 @@ test("settings come from the account preference and reach an idle timer", () => 
   const tab = world.tab();
   let notified = 0;
   tab.controller.subscribeSettings(() => { notified += 1; });
-  tab.controller.writeSettings({ focusMin: 50, soundId: "bell" });
+  tab.controller.writeSettings({ focusMin: 50, soundId: "bell" }); // an older saved shape
   assert.equal(notified, 1);
-  assert.equal(tab.controller.readSettings().focusMin, 50);
   assert.equal(tab.controller.readSettings().soundId, "bell");
+  assert.equal(tab.controller.readSettings().cycleId, "c-legacy");
   assert.equal(tab.controller.getSnapshot().timer.remainingMs, 50 * MINUTE);
   // Writing the same value again is not a change.
   tab.controller.writeSettings(tab.controller.readSettings());
   assert.equal(notified, 1);
 });
 
-test("a label is saved tidy to the account preference and an empty one restores the built-in name", () => {
+test("changing a ready-made cycle saves the person's own copy and keeps the timer on its step", () => {
   const world = new World();
   const tab = world.tab();
-  let notified = 0;
-  tab.controller.subscribeSettings(() => { notified += 1; });
-  tab.controller.setLabel("focus", "  Landing   page\n");
-  assert.equal(tab.controller.readSettings().focusLabel, "Landing page");
-  assert.equal(notified, 1);
-  // The same label again is not a change; other phases keep theirs.
-  tab.controller.setLabel("focus", "Landing page");
-  assert.equal(notified, 1);
-  assert.equal(tab.controller.readSettings().shortLabel, "");
-  tab.controller.setLabel("focus", "");
-  assert.equal(tab.controller.readSettings().focusLabel, "");
-  assert.equal(notified, 2);
+  tab.controller.start();
+  world.advance(25 * MINUTE + 50); // focus → short break (step 1)
+  tab.controller.start();
+  tab.controller.updateStep("builtin:pomodoro", 1, { name: "  Stretch\n", minutes: 7 });
+  const settings = tab.controller.readSettings();
+  assert.equal(settings.cycles.length, 1);
+  const copy = settings.cycles[0]!;
+  assert.equal(settings.cycleId, copy.id);
+  assert.equal(copy.preset, "pomodoro");
+  assert.equal(copy.steps[1]!.name, "Stretch");
+  assert.equal(copy.steps[1]!.minutes, 7);
+  const timer = tab.controller.getSnapshot().timer;
+  assert.equal(timer.cycleId, copy.id);
+  assert.equal(timer.step, 1);
+  assert.equal(timer.status, "running", "an edit never stops the running segment");
+  // Further edits change the copy in place.
+  tab.controller.renameCycle(copy.id, "Mine");
+  assert.equal(tab.controller.readSettings().cycles.length, 1);
+  assert.equal(tab.controller.readSettings().cycles[0]!.name, "Mine");
 });
 
-test("time-up notices announce a labelled segment by its label", () => {
+test("moving and removing steps keeps the timer on the step it was on", () => {
   const world = new World();
   const tab = world.tab();
-  tab.controller.setLabel("countdown", "Tea");
+  const id = tab.controller.createCycle("builtin:52-17");
+  assert.ok(id);
+  tab.controller.addStep(id); // 52 focus, 17 break, 25 focus
+  tab.controller.selectStep(1);
+  tab.controller.moveStep(id, 1, 2);
+  assert.equal(tab.controller.getSnapshot().timer.step, 2);
+  assert.deepEqual(tab.controller.readSettings().cycles[0]!.steps.map((item) => item.minutes), [52, 25, 17]);
+  tab.controller.removeStep(id, 0);
+  assert.equal(tab.controller.getSnapshot().timer.step, 1);
+  assert.equal(tab.controller.getSnapshot().timer.remainingMs, 17 * MINUTE);
+  tab.controller.duplicateStep(id, 1);
+  assert.deepEqual(tab.controller.readSettings().cycles[0]!.steps.map((item) => item.minutes), [25, 17, 17]);
+});
+
+test("choosing or deleting cycles: a new choice starts at its first step, stopped", () => {
+  const world = new World();
+  const tab = world.tab();
+  const id = tab.controller.createCycle();
+  assert.ok(id);
+  assert.equal(tab.controller.readSettings().cycleId, id);
+  const created = tab.controller.readSettings().cycles[0]!;
+  assert.deepEqual(created.steps.map((item) => [item.minutes, item.kind]), [[25, "focus"], [5, "break"]]);
+  tab.controller.start();
+  world.advance(5 * MINUTE);
+  tab.controller.selectCycle("builtin:90-20");
+  let timer = tab.controller.getSnapshot().timer;
+  assert.equal(timer.status, "idle");
+  assert.equal(timer.step, 0);
+  assert.equal(timer.remainingMs, 90 * MINUTE);
+  // Deleting the running own cycle falls back to the classic one.
+  tab.controller.selectCycle(id);
+  tab.controller.start();
+  tab.controller.deleteCycle(id);
+  timer = tab.controller.getSnapshot().timer;
+  assert.equal(tab.controller.readSettings().cycles.length, 0);
+  assert.equal(tab.controller.readSettings().cycleId, "builtin:pomodoro");
+  assert.equal(timer.status, "idle");
+  assert.equal(timer.remainingMs, 25 * MINUTE);
+  // Ready-made cycles cannot be deleted.
+  tab.controller.deleteCycle("builtin:pomodoro");
+  assert.equal(tab.controller.readSettings().cycleId, "builtin:pomodoro");
+});
+
+test("time-up notices name the step that ended and the one that comes next", () => {
+  const world = new World();
+  const tab = world.tab();
+  tab.controller.selectCycle("builtin:sit-stand");
+  const id = tab.controller.readSettings().cycleId;
+  tab.controller.updateStep(id, 0, { name: "Desk down" });
+  const own = tab.controller.readSettings().cycleId;
+  tab.controller.updateStep(own, 1, { name: "Desk up" });
+  tab.controller.start();
+  world.advance(40 * MINUTE + 50);
+  const snapshot = tab.controller.getSnapshot();
+  assert.ok(snapshot.timer.finished);
+  const copy = finishedCopy(snapshot.timer.finished, snapshot);
+  assert.match(copy.title, /Desk down/);
+  assert.match(copy.body, /Desk up/);
+  assert.match(copy.body, /20/);
+  assert.match(copy.next ?? "", /Desk up/);
+});
+
+test("the countdown's name is saved tidy and announced when time is up", () => {
+  const world = new World();
+  const tab = world.tab();
+  tab.controller.setCountdownLabel("  Tea \n");
+  assert.equal(tab.controller.readSettings().countdownLabel, "Tea");
   tab.controller.setCountdown(3, true);
   world.advance(3 * MINUTE + 50);
   const snapshot = tab.controller.getSnapshot();
   assert.ok(snapshot.timer.finished);
   assert.match(finishedCopy(snapshot.timer.finished, snapshot).title, /Tea/);
-  tab.controller.setLabel("countdown", "");
+  tab.controller.setCountdownLabel("");
   const plain = tab.controller.getSnapshot();
   assert.doesNotMatch(finishedCopy(snapshot.timer.finished, plain).title, /Tea/);
-});
-
-test("changing the number of intervals mid-cycle keeps the cycle consistent", () => {
-  const world = new World();
-  const tab = world.tab();
-  tab.controller.updateSettings({ rounds: 4 });
-  for (let round = 0; round < 3; round += 1) {
-    tab.controller.start();
-    world.advance(25 * MINUTE + 50);
-    if (round < 2) {
-      tab.controller.skip(); // skip the break straight back to focus
-    }
-  }
-  assert.equal(tab.controller.getSnapshot().timer.cycleDone, 3);
-  // Fewer intervals than already done: the count clamps and the next focus closes the cycle.
-  tab.controller.updateSettings({ rounds: 2 });
-  assert.equal(tab.controller.getSnapshot().timer.cycleDone, 2);
-  tab.controller.skip();
-  tab.controller.start();
-  world.advance(25 * MINUTE + 50);
-  assert.equal(tab.controller.getSnapshot().timer.phase, "long");
-  // More intervals: the cycle grows, nothing done is lost.
-  tab.controller.updateSettings({ rounds: 6 });
-  assert.equal(tab.controller.getSnapshot().timer.cycleDone, 2);
 });
 
 test("the window's visibility, shape and place persist on this device", () => {

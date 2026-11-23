@@ -19,6 +19,10 @@ milestones are named after what shipped.
   a system notification while Polyth is in the background — each one a setting.
   Settings follow the account; the running timer stays on its device and only one
   tab rings. See [packages/focus-timer](packages/focus-timer/README.md).
+- Focus timer labels and interval count: press the phase name on the dial to give
+  it your own label (shown on the dial and in the time-up notices) and set how many
+  focus intervals make a cycle; the interval dots open the same editor. Settings
+  has a Labels section for every phase and the plain timer.
 
 ## Unreleased — nightly bug reports
 

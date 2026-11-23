@@ -39,6 +39,7 @@ export const pl: SecureSafeMessages = {
   "settings.securesafepage.orProjectConfiguration": "lub konfiguracji projektu.",
   "settings.securesafepage.purpose": "Przeznaczenie",
   "settings.securesafepage.saveFailed": "Nie można zapisać tego poświadczenia. Wartość została wyczyszczona; wprowadź ją ponownie, aby spróbować.",
+  "settings.securesafepage.handleTaken": "Poświadczenie o nazwie „{handle}” już istnieje. Edytuj je na liście, aby zastąpić wartość.",
   "settings.securesafepage.savedHandles": "Zapisane poświadczenia",
   "settings.securesafepage.savedHandlesCount": "Zapisano: {count}",
   "settings.securesafepage.secureSafe": "Credential Vault",

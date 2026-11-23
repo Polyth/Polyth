@@ -16,26 +16,28 @@ import {
 } from "react";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { anchorAt, clampPosition, placeCard, type Insets, type Rect } from "../src/placement.ts";
-import { customLabel } from "../src/settings.ts";
+import { STEP_MINUTES, type CycleSet } from "../src/cycles.ts";
+import { activeCycle } from "../src/settings.ts";
 import {
   COUNTDOWN_PRESETS,
+  currentStep,
   formatClock,
   progress as progressOf,
   remainingMs,
-  type FocusPhase,
   type TimerState,
 } from "../src/timerModel.ts";
 import { finishedCopy } from "./alerts.ts";
 import type { TimerController, TimerSnapshot } from "./controller.ts";
 import { CheckGlyph, CompactGlyph, PauseGlyph, PlayGlyph, ResetGlyph, SkipGlyph, TimerMark } from "./glyphs.tsx";
-import { phaseLabel, toneOf, type Tone } from "./labels.ts";
+import { countdownLabel, cycleLabel, segmentLabel, stepLabel, toneOf } from "./labels.ts";
 import { unlockAudio } from "./sound.ts";
 import { timerController, timerHost, useNow, useTimer } from "./runtime.ts";
-import TimerSettings, { LabelField, Stepper } from "./TimerSettings.tsx";
+import TimerSettings, { CyclePicker, LabelField, Stepper } from "./TimerSettings.tsx";
 
-/** The quick editor under the dial: which part was asked for and the label
- *  it edits (kept, so a segment ending mid-edit does not swap the field). */
-type Editing = { focus: "label" | "rounds"; tone: Tone };
+/** The quick editor under the dial: the step's name and length (`step`, or
+ *  the countdown's name) or the cycle and its steps. The step index is kept,
+ *  so a segment ending mid-edit does not swap the field. */
+type Editing = { focus: "step"; step: number | null } | { focus: "cycle" };
 
 const GAP = 12;
 const INSETS: Insets = { start: GAP, top: GAP, end: GAP, bottom: GAP };
@@ -120,40 +122,41 @@ function Dial({ fraction, size, stroke }: { fraction: number; size: number; stro
   );
 }
 
-/** The cycle's focus intervals as dots; a press opens the quick editor on
- *  their count. */
-function RoundDots({ done, total, running, phase, expanded, onPress }: {
-  done: number;
-  total: number;
+/** The cycle's steps as dots in their colours; a press opens the cycle
+ *  editor (pick a cycle, jump to a step). */
+function StepDots({ cycle, step, running, expanded, onPress }: {
+  cycle: CycleSet;
+  step: number;
   running: boolean;
-  phase: FocusPhase;
   expanded: boolean;
   onPress: () => void;
 }) {
-  const where = tr("focustimer.round", { current: Math.min(total, done + (phase === "focus" ? 1 : 0)) || 1, total });
+  const where = tr("focustimer.step.position", { current: step + 1, total: cycle.steps.length });
   return (
     <button
       type="button"
       className="focus-timer-rounds"
-      aria-label={`${where}. ${tr("focustimer.action.editRounds")}`}
+      aria-label={`${where}. ${tr("focustimer.action.cycle")}`}
       aria-expanded={expanded}
-      title={tr("focustimer.action.editRounds")}
+      title={tr("focustimer.action.cycle")}
       onClick={onPress}
     >
-      {Array.from({ length: total }, (_, index) => (
+      {cycle.steps.map((item, index) => (
         <span
           key={index}
           className="focus-timer-round"
-          data-state={index < done ? "done" : index === done && phase === "focus" ? (running ? "live" : "next") : "todo"}
+          data-tone={item.color}
+          data-kind={item.kind}
+          data-state={index < step ? "done" : index === step ? (running ? "live" : "next") : "todo"}
         />
       ))}
     </button>
   );
 }
 
-/** Under the dial: the shown phase's label and, for pomodoro, how many focus
- *  intervals make a cycle. Both apply at once; the dots and chip above are
- *  the preview. */
+/** Under the dial. For a step: its name and length (a ready-made cycle
+ *  becomes the person's own copy on the first change). For the countdown:
+ *  its name. For the cycle: which one runs and a jump to any step. */
 function QuickEditor({ editing, snapshot, controller, onClose }: {
   editing: Editing;
   snapshot: TimerSnapshot;
@@ -162,33 +165,94 @@ function QuickEditor({ editing, snapshot, controller, onClose }: {
 }) {
   const id = useId();
   const { settings, timer } = snapshot;
-  return (
-    <div className="focus-timer-edit" data-tone={editing.tone} role="group" aria-labelledby={`${id}-caption`}>
-      <div className="focus-timer-edit-head">
-        <label className="focus-timer-edit-caption" id={`${id}-caption`} htmlFor={`${id}-label`}>
-          {tr("focustimer.edit.label")}
-        </label>
-        <button type="button" className="focus-timer-edit-done" onClick={onClose}>{tr("focustimer.edit.done")}</button>
+  const cycle = activeCycle(settings);
+  const head = (caption: string, htmlFor?: string) => (
+    <div className="focus-timer-edit-head">
+      {htmlFor ? (
+        <label className="focus-timer-edit-caption" id={`${id}-caption`} htmlFor={htmlFor}>{caption}</label>
+      ) : (
+        <span className="focus-timer-edit-caption" id={`${id}-caption`}>{caption}</span>
+      )}
+      <button type="button" className="focus-timer-edit-done" onClick={onClose}>{tr("focustimer.edit.done")}</button>
+    </div>
+  );
+
+  if (editing.focus === "cycle") {
+    return (
+      <div className="focus-timer-edit" data-tone={toneOf(timer, settings)} role="group" aria-labelledby={`${id}-caption`}>
+        {head(tr("focustimer.mode.cycle"))}
+        <CyclePicker settings={settings} controller={controller} className="focus-timer-cycle-select" />
+        <ol className="focus-timer-jump" aria-label={tr("focustimer.settings.steps")}>
+          {cycle.steps.map((item, index) => {
+            const here = timer.mode === "pomodoro" && index === Math.min(timer.step, cycle.steps.length - 1);
+            return (
+              <li key={index}>
+                <button
+                  type="button"
+                  className="focus-timer-jump-step"
+                  data-tone={item.color}
+                  aria-current={here ? "step" : undefined}
+                  onClick={() => {
+                    unlockAudio();
+                    controller.selectStep(index);
+                  }}
+                >
+                  <span className="focus-timer-chip-dot" aria-hidden="true" />
+                  <span className="focus-timer-jump-name">{stepLabel(item)}</span>
+                  <span className="focus-timer-jump-min">{tr("focustimer.minutes", { count: item.minutes })}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+        <button type="button" className="focus-timer-edit-more" onClick={() => controller.setView("settings")}>
+          {tr("focustimer.action.editCycle")}
+        </button>
       </div>
+    );
+  }
+
+  if (editing.step === null) {
+    return (
+      <div className="focus-timer-edit" data-tone="countdown" role="group" aria-labelledby={`${id}-caption`}>
+        {head(tr("focustimer.edit.label"), `${id}-label`)}
+        <LabelField
+          id={`${id}-label`}
+          tone="countdown"
+          value={settings.countdownLabel}
+          placeholder={tr("focustimer.countdown")}
+          autoFocus
+          onCommit={(label) => controller.setCountdownLabel(label)}
+          onDone={onClose}
+          onCancel={onClose}
+        />
+      </div>
+    );
+  }
+
+  const index = Math.min(editing.step, cycle.steps.length - 1);
+  const step = cycle.steps[index]!;
+  return (
+    <div className="focus-timer-edit" data-tone={step.color} role="group" aria-labelledby={`${id}-caption`}>
+      {head(tr("focustimer.edit.label"), `${id}-label`)}
       <LabelField
         id={`${id}-label`}
-        tone={editing.tone}
-        value={customLabel(settings, editing.tone)}
-        autoFocus={editing.focus === "label"}
-        onCommit={(label) => controller.setLabel(editing.tone, label)}
+        tone={step.color}
+        value={step.name}
+        placeholder={stepLabel({ ...step, name: "" })}
+        autoFocus
+        onCommit={(name) => controller.updateStep(settings.cycleId, index, { name })}
         onDone={onClose}
         onCancel={onClose}
       />
-      {timer.mode === "pomodoro" && (
-        <Stepper
-          settingKey="rounds"
-          value={settings.rounds}
-          label={tr("focustimer.edit.rounds")}
-          unit=""
-          autoFocus={editing.focus === "rounds"}
-          onChange={(rounds) => controller.updateSettings({ rounds })}
-        />
-      )}
+      <Stepper
+        min={STEP_MINUTES.min}
+        max={STEP_MINUTES.max}
+        value={step.minutes}
+        label={tr("focustimer.edit.minutes")}
+        unit={tr("focustimer.settings.minUnit")}
+        onChange={(minutes) => controller.updateStep(settings.cycleId, index, { minutes })}
+      />
     </div>
   );
 }
@@ -259,8 +323,10 @@ function TimerCard({ snapshot, controller }: { snapshot: TimerSnapshot; controll
   const [live, setLive] = useState<{ left: number; top: number } | null>(null);
   const chipRef = useRef<HTMLButtonElement | null>(null);
   const [editing, setEditing] = useState<Editing | null>(null);
-  const tone = toneOf(timer);
-  const label = phaseLabel(tone, settings);
+  const tone = toneOf(timer, settings);
+  const label = segmentLabel(timer, settings);
+  const cycle = activeCycle(settings);
+  const step = currentStep(timer, settings);
   const left = remainingMs(timer, now);
   const fraction = progressOf(timer, now);
   const running = timer.status === "running";
@@ -274,7 +340,9 @@ function TimerCard({ snapshot, controller }: { snapshot: TimerSnapshot; controll
   }, [compact, view]);
 
   const toggleEditor = (focus: Editing["focus"]) => {
-    setEditing((current) => current?.focus === focus ? null : { focus, tone });
+    setEditing((current) => current?.focus === focus
+      ? null
+      : focus === "cycle" ? { focus } : { focus, step: timer.mode === "countdown" ? null : timer.step });
   };
 
   const closeEditor = () => {
@@ -350,8 +418,8 @@ function TimerCard({ snapshot, controller }: { snapshot: TimerSnapshot; controll
     ? tr("focustimer.action.pause")
     : timer.status === "paused"
       ? tr("focustimer.action.resume")
-      : timer.finished && timer.mode === "pomodoro"
-        ? tr(timer.phase === "focus" ? "focustimer.action.startFocus" : "focustimer.action.startBreak")
+      : timer.finished && step
+        ? tr("focustimer.action.startStep", { name: stepLabel(step) })
         : tr("focustimer.action.start");
   const status = running
     ? tr("focustimer.endsAt", { time: clockTime(timer.endsAt ?? now) })
@@ -476,11 +544,11 @@ function TimerCard({ snapshot, controller }: { snapshot: TimerSnapshot; controll
                 type="button"
                 className="focus-timer-chip"
                 data-tone={tone}
-                data-custom={customLabel(settings, tone) ? true : undefined}
-                aria-label={`${label}. ${tr("focustimer.action.editLabel")}`}
-                aria-expanded={editing?.focus === "label"}
-                title={tr("focustimer.action.editLabel")}
-                onClick={() => toggleEditor("label")}
+                data-custom={(step ? step.name : settings.countdownLabel) ? true : undefined}
+                aria-label={`${label}. ${tr("focustimer.action.editStep")}`}
+                aria-expanded={editing?.focus === "step"}
+                title={tr("focustimer.action.editStep")}
+                onClick={() => toggleEditor("step")}
               >
                 <span className="focus-timer-chip-dot" aria-hidden="true" />
                 <span className="focus-timer-chip-label">{label}</span>
@@ -491,13 +559,12 @@ function TimerCard({ snapshot, controller }: { snapshot: TimerSnapshot; controll
               <span className="focus-timer-time" aria-hidden="true">{formatClock(left)}</span>
               <span className="focus-timer-status">{status}</span>
               {timer.mode === "pomodoro" && (
-                <RoundDots
-                  done={timer.cycleDone}
-                  total={settings.rounds}
+                <StepDots
+                  cycle={cycle}
+                  step={Math.min(timer.step, cycle.steps.length - 1)}
                   running={running}
-                  phase={timer.phase}
-                  expanded={editing?.focus === "rounds"}
-                  onPress={() => toggleEditor("rounds")}
+                  expanded={editing?.focus === "cycle"}
+                  onPress={() => toggleEditor("cycle")}
                 />
               )}
             </div>
@@ -548,37 +615,34 @@ function TimerCard({ snapshot, controller }: { snapshot: TimerSnapshot; controll
             )}
           </div>
 
-          <div className="focus-timer-segments" role="tablist" aria-label={tr("focustimer.phase.label")}>
-            {(["focus", "short", "long", "countdown"] as const).map((item) => {
-              const selected = item === tone;
-              const label = item === "focus" ? tr("focustimer.phase.focusTab")
-                : item === "short" ? tr("focustimer.phase.shortTab")
-                  : item === "long" ? tr("focustimer.phase.longTab")
-                    : tr("focustimer.mode.countdown");
-              const full = item === "focus" ? tr("focustimer.phase.focus")
-                : item === "short" ? tr("focustimer.phase.short")
-                  : item === "long" ? tr("focustimer.phase.long")
-                    : tr("focustimer.mode.countdown");
-              return (
-                <button
-                  key={item}
-                  type="button"
-                  role="tab"
-                  aria-selected={selected}
-                  aria-label={item === "countdown" ? full : undefined}
-                  className="focus-timer-segment"
-                  data-tone={item}
-                  title={full}
-                  onClick={() => {
-                    if (selected) return;
-                    if (item === "countdown") controller.selectMode("countdown");
-                    else controller.selectPhase(item);
-                  }}
-                >
-                  {item === "countdown" ? <TimerMark size={16} /> : label}
-                </button>
-              );
-            })}
+          <div className="focus-timer-segments" role="tablist" aria-label={tr("focustimer.title")}>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={timer.mode === "pomodoro"}
+              className="focus-timer-segment focus-timer-segment-cycle"
+              data-tone={timer.mode === "pomodoro" ? tone : cycle.steps[0]!.color}
+              title={`${tr("focustimer.mode.cycle")}: ${cycleLabel(cycle)}`}
+              onClick={() => {
+                if (timer.mode !== "pomodoro") controller.selectMode("pomodoro");
+              }}
+            >
+              <span className="focus-timer-segment-text">{cycleLabel(cycle)}</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={timer.mode === "countdown"}
+              aria-label={countdownLabel(settings)}
+              className="focus-timer-segment"
+              data-tone="countdown"
+              title={countdownLabel(settings)}
+              onClick={() => {
+                if (timer.mode !== "countdown") controller.selectMode("countdown");
+              }}
+            >
+              <TimerMark size={16} />
+            </button>
           </div>
 
           {timer.mode === "countdown" && <CountdownPresets timer={timer} controller={controller} />}
@@ -657,7 +721,7 @@ function EdgeFlash({ snapshot }: { snapshot: TimerSnapshot }) {
   }, [finished?.segmentId, finished?.stale, snapshot.settings.flash]);
   if (!finished || visible !== finished.segmentId) return null;
   // The colour of what comes next: a green edge says "break time".
-  return <div className="focus-timer-edge" data-tone={toneOf(snapshot.timer)} aria-hidden="true" />;
+  return <div className="focus-timer-edge" data-tone={toneOf(snapshot.timer, snapshot.settings)} aria-hidden="true" />;
 }
 
 export default function TimerLayer() {

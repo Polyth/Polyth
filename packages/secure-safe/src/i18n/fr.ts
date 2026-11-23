@@ -39,6 +39,7 @@ export const fr: SecureSafeMessages = {
   "settings.securesafepage.orProjectConfiguration": ", ou configuration du projet.",
   "settings.securesafepage.purpose": "But",
   "settings.securesafepage.saveFailed": "Impossible d’enregistrer cet identifiant. La valeur a été effacée ; saisissez-la à nouveau pour réessayer.",
+  "settings.securesafepage.handleTaken": "Un identifiant nommé « {handle} » existe déjà. Modifiez-le dans la liste pour remplacer sa valeur.",
   "settings.securesafepage.savedHandles": "Poignées enregistrées (",
   "settings.securesafepage.savedHandlesCount": "Handles enregistrés ({count})",
   "settings.securesafepage.secureSafe": "Credential Vault",

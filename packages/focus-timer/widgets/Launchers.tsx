@@ -4,7 +4,7 @@
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { formatClock, progress, remainingMs } from "../src/timerModel.ts";
 import { TimerMark } from "./glyphs.tsx";
-import { phaseLabel, toneOf } from "./labels.ts";
+import { segmentLabel, toneOf } from "./labels.ts";
 import { timerController, useNow, useTimer } from "./runtime.ts";
 
 type MarkProps = { size?: number; strokeWidth?: number; "aria-hidden"?: boolean };
@@ -13,7 +13,7 @@ export function RailMark({ size = 18, strokeWidth = 1.75 }: MarkProps) {
   const snapshot = useTimer();
   const timer = snapshot?.timer;
   const now = useNow(timer?.status === "running" ? timer.endsAt : null);
-  if (!timer) return <TimerMark size={size} strokeWidth={strokeWidth} />;
+  if (!timer || !snapshot) return <TimerMark size={size} strokeWidth={strokeWidth} />;
   const active = timer.status !== "idle";
   return (
     <TimerMark
@@ -21,7 +21,7 @@ export function RailMark({ size = 18, strokeWidth = 1.75 }: MarkProps) {
       strokeWidth={strokeWidth}
       progress={active ? progress(timer, now) : null}
       done={Boolean(timer.finished && !timer.finished.stale)}
-      phase={toneOf(timer)}
+      phase={toneOf(timer, snapshot.settings)}
     />
   );
 }
@@ -31,9 +31,9 @@ export function TimerChip() {
   const snapshot = useTimer();
   const timer = snapshot?.timer;
   const now = useNow(timer?.status === "running" ? timer.endsAt : null);
-  if (!timer || (timer.status === "idle" && !timer.finished)) return null;
-  const tone = toneOf(timer);
-  const label = `${phaseLabel(tone, snapshot?.settings)} ${formatClock(remainingMs(timer, now))}`;
+  if (!timer || !snapshot || (timer.status === "idle" && !timer.finished)) return null;
+  const tone = toneOf(timer, snapshot.settings);
+  const label = `${segmentLabel(timer, snapshot.settings)} ${formatClock(remainingMs(timer, now))}`;
   return (
     <button
       type="button"

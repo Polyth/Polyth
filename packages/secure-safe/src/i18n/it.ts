@@ -39,6 +39,7 @@ export const it: SecureSafeMessages = {
   "settings.securesafepage.orProjectConfiguration": ", o configurazione del progetto.",
   "settings.securesafepage.purpose": "Scopo",
   "settings.securesafepage.saveFailed": "Impossibile salvare questa credenziale. Il valore è stato cancellato; inseriscilo di nuovo per riprovare.",
+  "settings.securesafepage.handleTaken": "Esiste già una credenziale chiamata “{handle}”. Modificala nell’elenco per sostituirne il valore.",
   "settings.securesafepage.savedHandles": "Credenziali salvate",
   "settings.securesafepage.savedHandlesCount": "Handle salvati ({count})",
   "settings.securesafepage.secureSafe": "Credential Vault",

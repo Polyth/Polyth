@@ -3,16 +3,39 @@
    TimerWindow.tsx), wears the phase colour through --ft-tone and inherits the
    theme's glass, type, density and motion preferences. */
 
-/* ---- phase colours ------------------------------------------------------- */
-:is(.focus-timer, .focus-timer-edge, .focus-timer-chip-widget, .focus-timer-chip, .focus-timer-segment, .focus-timer-mark, .focus-timer-edit, .focus-timer-label-field) {
-  --ft-tone: var(--accent);
+/* ---- step colours ------------------------------------------------------- */
+/* A cycle step wears one of these (src/cycles.ts STEP_COLORS; the menu
+   swatches mirror them in widgets/labels.ts); the countdown is purple. Each
+   maps to a theme colour token, so every theme tints them. */
+:is(.focus-timer, .focus-timer-edge, .focus-timer-chip-widget, .focus-timer-chip, .focus-timer-segment, .focus-timer-mark, .focus-timer-edit, .focus-timer-label-field, .focus-timer-round, .focus-timer-step-row, .focus-timer-jump-step, .focus-timer-settings) {
+  --ft-color-accent: var(--accent);
+  --ft-color-red: var(--red);
+  --ft-color-amber: var(--amber);
+  --ft-color-green: var(--green);
+  --ft-color-teal: color-mix(in srgb, var(--green) 50%, var(--blue));
+  --ft-color-blue: var(--blue);
+  --ft-color-purple: var(--purple);
+  --ft-color-pink: color-mix(in srgb, var(--red) 55%, var(--purple));
 }
-:is(.focus-timer, .focus-timer-edge, .focus-timer-chip-widget, .focus-timer-chip, .focus-timer-segment, .focus-timer-mark, .focus-timer-edit, .focus-timer-label-field)[data-tone="short"] { --ft-tone: var(--green); }
-:is(.focus-timer, .focus-timer-edge, .focus-timer-chip-widget, .focus-timer-chip, .focus-timer-segment, .focus-timer-mark, .focus-timer-edit, .focus-timer-label-field)[data-tone="long"] { --ft-tone: var(--blue); }
-:is(.focus-timer, .focus-timer-edge, .focus-timer-chip-widget, .focus-timer-chip, .focus-timer-segment, .focus-timer-mark, .focus-timer-edit, .focus-timer-label-field)[data-tone="countdown"] { --ft-tone: var(--purple); }
-.focus-timer-mark[data-phase="short"] { --ft-tone: var(--green); }
-.focus-timer-mark[data-phase="long"] { --ft-tone: var(--blue); }
-.focus-timer-mark[data-phase="countdown"] { --ft-tone: var(--purple); }
+:is(.focus-timer, .focus-timer-edge, .focus-timer-chip-widget, .focus-timer-chip, .focus-timer-segment, .focus-timer-mark, .focus-timer-edit, .focus-timer-label-field, .focus-timer-round, .focus-timer-step-row, .focus-timer-jump-step) {
+  --ft-tone: var(--ft-color-accent);
+}
+:is(.focus-timer, .focus-timer-edge, .focus-timer-chip-widget, .focus-timer-chip, .focus-timer-segment, .focus-timer-mark, .focus-timer-edit, .focus-timer-label-field, .focus-timer-round, .focus-timer-step-row, .focus-timer-jump-step)[data-tone="red"] { --ft-tone: var(--ft-color-red); }
+:is(.focus-timer, .focus-timer-edge, .focus-timer-chip-widget, .focus-timer-chip, .focus-timer-segment, .focus-timer-mark, .focus-timer-edit, .focus-timer-label-field, .focus-timer-round, .focus-timer-step-row, .focus-timer-jump-step)[data-tone="amber"] { --ft-tone: var(--ft-color-amber); }
+:is(.focus-timer, .focus-timer-edge, .focus-timer-chip-widget, .focus-timer-chip, .focus-timer-segment, .focus-timer-mark, .focus-timer-edit, .focus-timer-label-field, .focus-timer-round, .focus-timer-step-row, .focus-timer-jump-step)[data-tone="green"] { --ft-tone: var(--ft-color-green); }
+:is(.focus-timer, .focus-timer-edge, .focus-timer-chip-widget, .focus-timer-chip, .focus-timer-segment, .focus-timer-mark, .focus-timer-edit, .focus-timer-label-field, .focus-timer-round, .focus-timer-step-row, .focus-timer-jump-step)[data-tone="teal"] { --ft-tone: var(--ft-color-teal); }
+:is(.focus-timer, .focus-timer-edge, .focus-timer-chip-widget, .focus-timer-chip, .focus-timer-segment, .focus-timer-mark, .focus-timer-edit, .focus-timer-label-field, .focus-timer-round, .focus-timer-step-row, .focus-timer-jump-step)[data-tone="blue"] { --ft-tone: var(--ft-color-blue); }
+:is(.focus-timer, .focus-timer-edge, .focus-timer-chip-widget, .focus-timer-chip, .focus-timer-segment, .focus-timer-mark, .focus-timer-edit, .focus-timer-label-field, .focus-timer-round, .focus-timer-step-row, .focus-timer-jump-step)[data-tone="purple"] { --ft-tone: var(--ft-color-purple); }
+:is(.focus-timer, .focus-timer-edge, .focus-timer-chip-widget, .focus-timer-chip, .focus-timer-segment, .focus-timer-mark, .focus-timer-edit, .focus-timer-label-field, .focus-timer-round, .focus-timer-step-row, .focus-timer-jump-step)[data-tone="pink"] { --ft-tone: var(--ft-color-pink); }
+:is(.focus-timer, .focus-timer-edge, .focus-timer-chip-widget, .focus-timer-chip, .focus-timer-segment, .focus-timer-mark, .focus-timer-edit, .focus-timer-label-field, .focus-timer-round, .focus-timer-step-row, .focus-timer-jump-step)[data-tone="countdown"] { --ft-tone: var(--ft-color-purple); }
+.focus-timer-mark[data-phase="red"] { --ft-tone: var(--ft-color-red); }
+.focus-timer-mark[data-phase="amber"] { --ft-tone: var(--ft-color-amber); }
+.focus-timer-mark[data-phase="green"] { --ft-tone: var(--ft-color-green); }
+.focus-timer-mark[data-phase="teal"] { --ft-tone: var(--ft-color-teal); }
+.focus-timer-mark[data-phase="blue"] { --ft-tone: var(--ft-color-blue); }
+.focus-timer-mark[data-phase="purple"] { --ft-tone: var(--ft-color-purple); }
+.focus-timer-mark[data-phase="pink"] { --ft-tone: var(--ft-color-pink); }
+.focus-timer-mark[data-phase="countdown"] { --ft-tone: var(--ft-color-purple); }
 
 /* ---- the window ---------------------------------------------------------- */
 .focus-timer {
@@ -341,26 +364,29 @@
   inline-size: 6px;
   block-size: 6px;
   border-radius: var(--radius-circle, 50%);
-  background: color-mix(in srgb, var(--text) 16%, transparent);
+  background: color-mix(in srgb, var(--ft-tone) 26%, color-mix(in srgb, var(--text) 10%, transparent));
   transition: background-color var(--motion-normal) var(--motion-ease), inline-size var(--motion-normal) var(--motion-ease);
 }
+/* Breaks read as the quieter, smaller beats of the cycle. */
+.focus-timer-round[data-kind="break"] { inline-size: 4px; block-size: 4px; }
 .focus-timer-round[data-state="done"] { background: var(--ft-tone); }
 .focus-timer-round[data-state="live"],
 .focus-timer-round[data-state="next"] {
   inline-size: 14px;
+  block-size: 6px;
   border-radius: var(--radius-round);
   background: color-mix(in srgb, var(--ft-tone) 45%, transparent);
 }
 .focus-timer-round[data-state="live"] { background: var(--ft-tone); }
 
-/* ---- quick editor (label and intervals) ---------------------------------- */
+/* ---- quick editor (step and cycle) -------------------------------------- */
 .focus-timer-edit {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
   inline-size: 100%;
   box-sizing: border-box;
-  padding: var(--space-2) var(--space-2) var(--space-1) var(--space-3);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
   border-radius: var(--radius-card);
   background: color-mix(in srgb, var(--text) 5%, transparent);
   box-shadow: inset 0 0 0 1px var(--hair);
@@ -395,7 +421,10 @@
   .focus-timer-edit-done:hover { background: color-mix(in srgb, var(--ft-tone) 12%, transparent); }
 }
 .focus-timer-edit .focus-timer-label-field { margin-inline-end: var(--space-1); }
+/* A long caption ("Інтервалів у циклі") wraps beside the stepper instead of
+   pushing it out of the card. */
 .focus-timer-edit .focus-timer-row { min-block-size: 34px; padding-block: 0; }
+.focus-timer-edit .focus-timer-row-label { line-height: 1.25; }
 /* A label field: the phase's dot, the name, a clear button. */
 .focus-timer-label-field {
   display: flex;
@@ -429,8 +458,10 @@
   user-select: text;
   -webkit-user-select: text;
 }
+/* The field wrapper carries the focus ring; the input inside must not add the
+   shell's own `:focus-visible` ring and wash as a second box. */
 .focus-timer-label-input:focus,
-.focus-timer .focus-timer-label-input:focus-visible { outline: none; }
+.focus-timer .focus-timer-label-input:focus-visible { outline: none; box-shadow: none; }
 .focus-timer-label-input::placeholder { color: var(--faint); }
 .focus-timer-label-clear { flex: none; color: var(--muted); }
 
@@ -512,7 +543,7 @@
 /* ---- phase segments ------------------------------------------------------ */
 .focus-timer-segments {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(36px, auto);
+  grid-template-columns: minmax(0, 1fr) minmax(44px, auto);
   gap: 2px;
   inline-size: 100%;
   box-sizing: border-box;
@@ -552,6 +583,8 @@
   background-repeat: no-repeat;
 }
 .focus-timer-segment[data-tone="countdown"][aria-selected="true"] { color: var(--ft-tone); }
+.focus-timer-segment-cycle { display: block; text-align: center; }
+.focus-timer-segment-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (hover: hover) {
   .focus-timer-segment:where(:not(:disabled)):not([aria-selected="true"]):hover { color: var(--text); background: var(--surface-overlay-hover); }
   .focus-timer-segment[aria-selected="true"]:where(:not(:disabled)):hover { background-color: var(--raised); }
@@ -724,6 +757,125 @@
   flex-direction: column;
 }
 .focus-timer-label-row { padding-block: 3px; }
+
+/* ---- cycle editor -------------------------------------------------------- */
+.focus-timer-cycle-pick {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-block-size: 36px;
+}
+.focus-timer-cycle-select { flex: 1; min-inline-size: 0; }
+.focus-timer-native-select {
+  min-block-size: max(32px, var(--hit-min));
+  padding-inline: var(--space-2);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-control, 8px);
+  background: var(--input-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-input);
+}
+.focus-timer-step-more { flex: none; color: var(--muted); }
+.focus-timer-cycle-note {
+  margin: 2px 0 var(--space-1);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.focus-timer-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.focus-timer-step-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-inline-size: 0;
+}
+.focus-timer-step-row .focus-timer-label-field { flex: 1; min-inline-size: 0; }
+.focus-timer-step-row .focus-timer-step-input { inline-size: 3.2ch; }
+.focus-timer-add-step {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 6px;
+  min-block-size: max(30px, var(--hit-min));
+  margin-block-start: var(--space-1);
+  padding: 0 var(--space-3) 0 var(--space-2);
+  border: 1px dashed var(--control-border);
+  border-radius: var(--radius-round);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-meta);
+  font-weight: 600;
+  cursor: pointer;
+}
+.focus-timer-add-step:disabled { color: var(--control-disabled-ink); cursor: default; }
+@media (hover: hover) {
+  .focus-timer-add-step:where(:not(:disabled)):hover { border-style: solid; background: var(--surface-overlay-hover); color: var(--text); }
+}
+
+/* The window's cycle editor: jump to any step. */
+.focus-timer-jump {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-block-size: 188px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+}
+.focus-timer-jump-step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  inline-size: 100%;
+  min-block-size: max(30px, var(--hit-min));
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-round);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-meta);
+  text-align: start;
+  cursor: pointer;
+}
+.focus-timer-jump-step .focus-timer-chip-dot { animation: none; }
+.focus-timer-jump-name { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.focus-timer-jump-min { color: var(--muted); font-variant-numeric: tabular-nums; }
+.focus-timer-jump-step[aria-current="step"] {
+  background: color-mix(in srgb, var(--ft-tone) 14%, transparent);
+  color: var(--text);
+  font-weight: 600;
+}
+@media (hover: hover) {
+  .focus-timer-jump-step:not([aria-current="step"]):hover { background: var(--surface-overlay-hover); color: var(--text); }
+}
+.focus-timer-edit-more {
+  align-self: flex-start;
+  min-block-size: max(26px, var(--hit-min));
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-round);
+  background: transparent;
+  color: var(--ft-tone);
+  font: inherit;
+  font-size: var(--font-meta);
+  font-weight: 650;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .focus-timer-edit-more:hover { background: color-mix(in srgb, var(--ft-tone) 12%, transparent); }
+}
 .focus-timer-label-row .focus-timer-label-field {
   flex: 0 1 62%;
   max-inline-size: 260px;

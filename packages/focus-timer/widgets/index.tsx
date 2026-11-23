@@ -3,6 +3,7 @@ import { createElement } from "react";
 import { defineWebPackage, type WidgetDefinition } from "@polyth/web-sdk";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { FOCUS_TIMER_CAPABILITY_ID, FOCUS_TIMER_PREFERENCE_ID } from "../src/index.ts";
+import { currentStep, firstFocusStep } from "../src/timerModel.ts";
 import { createTimerEffects } from "./alerts.ts";
 import { createTimerController } from "./controller.ts";
 import { RailMark, TimerChip } from "./Launchers.tsx";
@@ -133,10 +134,12 @@ export default defineWebPackage((host) => () => {
             icon: "clock",
             run: () => {
               unlockAudio();
-              const { timer } = active.getSnapshot();
-              // A focus already under way keeps its time; anything else starts one.
-              const inFocus = timer.mode === "pomodoro" && timer.phase === "focus" && timer.status !== "idle";
-              if (!inFocus) active.selectPhase("focus");
+              const { timer, settings } = active.getSnapshot();
+              // A focus step already under way keeps its time; an idle one
+              // starts; on a break or the countdown, the cycle's first focus step.
+              const onFocus = currentStep(timer, settings)?.kind === "focus";
+              const inFocus = onFocus && timer.status !== "idle";
+              if (!inFocus) active.selectStep(onFocus ? timer.step : firstFocusStep(settings));
               if (timer.status !== "running" || !inFocus) active.start();
               active.show();
             },

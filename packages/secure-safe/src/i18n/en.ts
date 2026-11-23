@@ -42,6 +42,7 @@ export const en = {
   "settings.securesafepage.orProjectConfiguration": ", or project configuration.",
   "settings.securesafepage.purpose": "Purpose",
   "settings.securesafepage.saveFailed": "Could not save this credential. The value was cleared; enter it again to retry.",
+  "settings.securesafepage.handleTaken": "A credential named “{handle}” already exists. Use Edit on it in the list to replace its value.",
   "settings.securesafepage.savedHandles": "Saved credentials",
   "settings.securesafepage.savedHandlesCount": "{count} saved",
   "settings.securesafepage.secureSafe": "Credential Vault",

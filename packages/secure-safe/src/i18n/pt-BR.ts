@@ -39,6 +39,7 @@ export const ptBR: SecureSafeMessages = {
   "settings.securesafepage.orProjectConfiguration": "ou configuração do projeto.",
   "settings.securesafepage.purpose": "Propósito",
   "settings.securesafepage.saveFailed": "Não foi possível salvar esta credencial. O valor foi apagado; insira-o novamente para tentar.",
+  "settings.securesafepage.handleTaken": "Já existe uma credencial chamada “{handle}”. Edite-a na lista para substituir o valor.",
   "settings.securesafepage.savedHandles": "Credenciais salvas",
   "settings.securesafepage.savedHandlesCount": "{count} salvas",
   "settings.securesafepage.secureSafe": "Credential Vault",

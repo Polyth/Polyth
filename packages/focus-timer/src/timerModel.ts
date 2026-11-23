@@ -2,14 +2,13 @@
 // is the wall clock (`endsAt`), never a counted tick, so a throttled
 // background tab, a sleeping laptop or a reload still lands on the right
 // second. Nothing here touches the DOM, storage or audio.
-import { DEFAULT_SETTINGS, type FocusTimerSettings } from "./settings.ts";
+import { MAX_STEPS, type CycleStep } from "./cycles.ts";
+import { activeCycle, DEFAULT_SETTINGS, type FocusTimerSettings } from "./settings.ts";
 
-export type FocusPhase = "focus" | "short" | "long";
-/** `pomodoro` cycles focus and breaks; `countdown` is one plain timer. */
+/** `pomodoro` runs the active cycle's steps; `countdown` is one plain timer. */
 export type TimerMode = "pomodoro" | "countdown";
 export type TimerStatus = "idle" | "running" | "paused";
 
-export const PHASES: readonly FocusPhase[] = ["focus", "short", "long"];
 export const MINUTE = 60_000;
 /** The longest segment, including time added while it runs. */
 export const MAX_SEGMENT_MS = 12 * 60 * MINUTE;
@@ -22,7 +21,9 @@ export const COUNTDOWN_PRESETS: readonly number[] = [1, 5, 10, 15, 30, 45, 60, 9
 export interface FinishedSegment {
   segmentId: string;
   mode: TimerMode;
-  phase: FocusPhase;
+  /** The cycle step that ran out (a copy, so a later edit does not rename
+   *  the notice); null for the countdown. */
+  step: CycleStep | null;
   /** Wall-clock end of the segment. */
   at: number;
   /** Ran out long ago: shown, never rung. */
@@ -30,10 +31,12 @@ export interface FinishedSegment {
 }
 
 export interface TimerState {
-  version: 1;
+  version: 2;
   mode: TimerMode;
-  /** The pomodoro phase; kept while the countdown is shown. */
-  phase: FocusPhase;
+  /** The cycle the step index belongs to. */
+  cycleId: string;
+  /** Index of the current step in that cycle; kept while the countdown is shown. */
+  step: number;
   status: TimerStatus;
   /** Length of the current segment. */
   durationMs: number;
@@ -41,8 +44,6 @@ export interface TimerState {
   endsAt: number | null;
   /** What is left while idle or paused. */
   remainingMs: number;
-  /** Focus segments finished in the current cycle. */
-  cycleDone: number;
   /** Focus finished today (local day), for the window's quiet tally. */
   today: { day: string; count: number; focusMs: number };
   /** Id of the started segment: alerts and other tabs key on it. */
@@ -59,26 +60,32 @@ export function localDay(now: number): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-export function phaseMs(settings: FocusTimerSettings, phase: FocusPhase): number {
-  const minutes = phase === "focus" ? settings.focusMin : phase === "short" ? settings.shortMin : settings.longMin;
-  return minutes * MINUTE;
+/** The step at `index` of the running cycle (clamped into it). */
+export function stepAt(settings: Pick<FocusTimerSettings, "cycles" | "cycleId">, index: number): CycleStep {
+  const steps = activeCycle(settings).steps;
+  return steps[Math.min(Math.max(0, index), steps.length - 1)]!;
 }
 
-function segmentMs(state: Pick<TimerState, "mode" | "phase" | "countdownMin">, settings: FocusTimerSettings): number {
-  return state.mode === "countdown" ? state.countdownMin * MINUTE : phaseMs(settings, state.phase);
+/** The step the timer is on, or null while the countdown is shown. */
+export function currentStep(state: Pick<TimerState, "mode" | "step">, settings: FocusTimerSettings): CycleStep | null {
+  return state.mode === "countdown" ? null : stepAt(settings, state.step);
+}
+
+function segmentMs(state: Pick<TimerState, "mode" | "step" | "countdownMin">, settings: FocusTimerSettings): number {
+  return state.mode === "countdown" ? state.countdownMin * MINUTE : stepAt(settings, state.step).minutes * MINUTE;
 }
 
 export function initialState(settings: FocusTimerSettings = DEFAULT_SETTINGS, now = Date.now()): TimerState {
-  const durationMs = phaseMs(settings, "focus");
+  const durationMs = stepAt(settings, 0).minutes * MINUTE;
   return {
-    version: 1,
+    version: 2,
     mode: "pomodoro",
-    phase: "focus",
+    cycleId: settings.cycleId,
+    step: 0,
     status: "idle",
     durationMs,
     endsAt: null,
     remainingMs: durationMs,
-    cycleDone: 0,
     today: { day: localDay(now), count: 0, focusMs: 0 },
     segmentId: null,
     finished: null,
@@ -95,13 +102,6 @@ export function remainingMs(state: TimerState, now: number): number {
 export function progress(state: TimerState, now: number): number {
   if (state.durationMs <= 0) return 0;
   return Math.min(1, Math.max(0, 1 - remainingMs(state, now) / state.durationMs));
-}
-
-/** The phase that follows `phase`, given how many focus segments the cycle
- *  has finished once this one counts. */
-export function nextPhase(phase: FocusPhase, cycleDone: number, rounds: number): FocusPhase {
-  if (phase !== "focus") return "focus";
-  return cycleDone >= rounds ? "long" : "short";
 }
 
 /** Same day, or a fresh tally for a new one. */
@@ -138,8 +138,16 @@ export function reset(state: TimerState, settings: FocusTimerSettings): TimerSta
   return { ...state, status: "idle", durationMs, remainingMs: durationMs, endsAt: null, segmentId: null, finished: null };
 }
 
-export function selectPhase(state: TimerState, settings: FocusTimerSettings, phase: FocusPhase): TimerState {
-  return reset({ ...state, mode: "pomodoro", phase }, settings);
+/** Go to step `index` of the running cycle, stopped at its full length. */
+export function selectStep(state: TimerState, settings: FocusTimerSettings, index: number): TimerState {
+  const count = activeCycle(settings).steps.length;
+  const step = Math.min(Math.max(0, Math.round(index)), count - 1);
+  return reset({ ...state, mode: "pomodoro", cycleId: settings.cycleId, step }, settings);
+}
+
+/** The first focus step of the running cycle (or its first step). */
+export function firstFocusStep(settings: FocusTimerSettings): number {
+  return Math.max(0, activeCycle(settings).steps.findIndex((item) => item.kind === "focus"));
 }
 
 export function selectMode(state: TimerState, settings: FocusTimerSettings, mode: TimerMode): TimerState {
@@ -177,9 +185,10 @@ export function addTime(state: TimerState, deltaMs: number, now: number): TimerS
   return { ...state, durationMs, remainingMs: nextLeft };
 }
 
-/** Move to the phase after this one. `completed` counts a focus segment
- *  toward the cycle and the day; a skipped one does not. `autoStart` follows
- *  the person's auto-start choices for the next phase. */
+/** Move to the step after this one (after the last, back to the first).
+ *  `completed` counts a finished focus step toward the day; a skipped one
+ *  does not. `autoStart` follows the person's auto-start choices for the
+ *  next step's kind. */
 export function advance(
   state: TimerState,
   settings: FocusTimerSettings,
@@ -189,21 +198,17 @@ export function advance(
 ): TimerState {
   let next = rollDay(state, now);
   if (next.mode === "countdown") return reset(next, settings);
-  let cycleDone = next.cycleDone;
-  // Completed or skipped, this focus held the same place in the cycle, so the
-  // break that follows is the same; only a completed one is counted.
-  const phase = nextPhase(next.phase, next.cycleDone + 1, settings.rounds);
-  if (next.phase === "focus" && completed) {
-    cycleDone = Math.min(settings.rounds, cycleDone + 1);
+  const steps = activeCycle(settings).steps;
+  const index = Math.min(Math.max(0, next.step), steps.length - 1);
+  if (completed && steps[index]!.kind === "focus") {
     next = {
       ...next,
       today: { day: next.today.day, count: next.today.count + 1, focusMs: next.today.focusMs + next.durationMs },
     };
   }
-  // A long break closes the cycle; the next focus starts a new one.
-  if (next.phase === "long") cycleDone = 0;
-  const ready = reset({ ...next, phase, cycleDone }, settings);
-  const run = autoStart && (phase === "focus" ? settings.autoStartFocus : settings.autoStartBreaks);
+  const following = (index + 1) % steps.length;
+  const ready = reset({ ...next, cycleId: settings.cycleId, step: following }, settings);
+  const run = autoStart && (steps[following]!.kind === "focus" ? settings.autoStartFocus : settings.autoStartBreaks);
   return run ? start(ready, now) : ready;
 }
 
@@ -228,7 +233,7 @@ export function tick(state: TimerState, settings: FocusTimerSettings, now: numbe
   const finished: FinishedSegment = {
     segmentId: state.segmentId ?? `${state.endsAt}`,
     mode: state.mode,
-    phase: state.phase,
+    step: currentStep(state, settings),
     at: state.endsAt,
     stale: now - state.endsAt > STALE_FINISH_MS,
   };
@@ -243,13 +248,20 @@ export function acknowledge(state: TimerState): TimerState {
   return state.finished ? { ...state, finished: null } : state;
 }
 
-/** Settings changed: an untouched idle segment takes the new length. */
+/** Settings changed: keep the step index inside the cycle, start a newly
+ *  chosen cycle from its first step when nothing runs, and give an untouched
+ *  idle segment the new length. */
 export function applySettings(state: TimerState, settings: FocusTimerSettings): TimerState {
-  const cycleDone = Math.min(state.cycleDone, settings.rounds);
-  if (state.status !== "idle") return cycleDone === state.cycleDone ? state : { ...state, cycleDone };
-  const durationMs = segmentMs(state, settings);
-  if (durationMs === state.durationMs && state.remainingMs === durationMs && cycleDone === state.cycleDone) return state;
-  return { ...state, cycleDone, durationMs, remainingMs: durationMs };
+  const count = activeCycle(settings).steps.length;
+  const sameCycle = state.cycleId === settings.cycleId;
+  const restart = !sameCycle && (state.status === "idle" || state.mode === "countdown");
+  const step = restart ? 0 : Math.min(state.step, count - 1);
+  const moved = step !== state.step || !sameCycle;
+  const placed = moved ? { ...state, cycleId: settings.cycleId, step } : state;
+  if (state.status !== "idle") return placed;
+  const durationMs = segmentMs(placed, settings);
+  if (durationMs === placed.durationMs && placed.remainingMs === durationMs) return placed;
+  return { ...placed, durationMs, remainingMs: durationMs };
 }
 
 /** `mm:ss`, or `h:mm:ss` from an hour. Rounds up, so a fresh 25-minute
@@ -270,45 +282,73 @@ const STATUSES: readonly TimerStatus[] = ["idle", "running", "paused"];
 const finite = (value: unknown, fallback: number, min: number, max: number): number =>
   typeof value === "number" && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
 
-/** Read a stored state, repairing what it can and starting fresh otherwise. */
+const record = (raw: unknown): Record<string, unknown> | null =>
+  raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : null;
+
+/** Where a version 1 state (focus, short and long phases with a count of
+ *  finished focus rounds) stands in the classic cycle those phases became. */
+function legacyStep(value: Record<string, unknown>, settings: FocusTimerSettings): number {
+  const done = Math.round(finite(value.cycleDone, 0, 0, MAX_STEPS));
+  const last = activeCycle(settings).steps.length - 1;
+  if (value.phase === "long") return last;
+  if (value.phase === "short") return Math.min(last, Math.max(0, done * 2 - 1));
+  return Math.min(last, done * 2);
+}
+
+function parseStepCopy(raw: unknown): CycleStep | null {
+  const value = record(raw);
+  if (!value || typeof value.minutes !== "number" || (value.kind !== "focus" && value.kind !== "break")) return null;
+  return {
+    name: typeof value.name === "string" ? value.name : "",
+    ...(typeof value.preset === "string" ? { preset: value.preset as CycleStep["preset"] } : {}),
+    minutes: value.minutes,
+    kind: value.kind,
+    color: typeof value.color === "string" ? value.color as CycleStep["color"] : "accent",
+  };
+}
+
+/** Read a stored state, repairing what it can and starting fresh otherwise.
+ *  A version 1 state (fixed phases) moves onto the matching step. */
 export function parseState(raw: unknown, settings: FocusTimerSettings, now: number): TimerState {
   const fresh = initialState(settings, now);
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return fresh;
-  const value = raw as Record<string, unknown>;
-  if (value.version !== 1) return fresh;
+  const value = record(raw);
+  if (!value || (value.version !== 1 && value.version !== 2)) return fresh;
+  const legacy = value.version === 1;
   const mode = MODES.includes(value.mode as TimerMode) ? value.mode as TimerMode : "pomodoro";
-  const phase = PHASES.includes(value.phase as FocusPhase) ? value.phase as FocusPhase : "focus";
+  const cycleId = !legacy && typeof value.cycleId === "string" ? value.cycleId : settings.cycleId;
+  // The step is checked against the cycle when the settings arrive
+  // (applySettings): the saved cycle may be longer than the default one.
+  const step = legacy ? legacyStep(value, settings) : Math.round(finite(value.step, 0, 0, MAX_STEPS - 1));
   let status = STATUSES.includes(value.status as TimerStatus) ? value.status as TimerStatus : "idle";
   const countdownMin = Math.round(finite(value.countdownMin, 5, 1, MAX_SEGMENT_MS / MINUTE));
-  const durationMs = finite(value.durationMs, segmentMs({ mode, phase, countdownMin }, settings), 1000, MAX_SEGMENT_MS);
+  const durationMs = finite(value.durationMs, segmentMs({ mode, step, countdownMin }, settings), 1000, MAX_SEGMENT_MS);
   const endsAt = typeof value.endsAt === "number" && Number.isFinite(value.endsAt) ? value.endsAt : null;
   if (status === "running" && endsAt === null) status = "paused";
   const remaining = finite(value.remainingMs, durationMs, 0, durationMs);
-  const todayRaw = value.today && typeof value.today === "object" ? value.today as Record<string, unknown> : {};
+  const todayRaw = record(value.today) ?? {};
   const today = typeof todayRaw.day === "string"
     ? { day: todayRaw.day, count: Math.round(finite(todayRaw.count, 0, 0, 10_000)), focusMs: finite(todayRaw.focusMs, 0, 0, 86_400_000) }
     : fresh.today;
-  const finishedRaw = value.finished && typeof value.finished === "object" ? value.finished as Record<string, unknown> : null;
+  const finishedRaw = legacy ? null : record(value.finished);
   const finished: FinishedSegment | null = finishedRaw && typeof finishedRaw.segmentId === "string"
-    && MODES.includes(finishedRaw.mode as TimerMode) && PHASES.includes(finishedRaw.phase as FocusPhase)
-    && typeof finishedRaw.at === "number"
+    && MODES.includes(finishedRaw.mode as TimerMode) && typeof finishedRaw.at === "number"
     ? {
       segmentId: finishedRaw.segmentId,
       mode: finishedRaw.mode as TimerMode,
-      phase: finishedRaw.phase as FocusPhase,
+      step: parseStepCopy(finishedRaw.step),
       at: finishedRaw.at,
       stale: finishedRaw.stale === true,
     }
     : null;
   return rollDay({
-    version: 1,
+    version: 2,
     mode,
-    phase,
+    cycleId,
+    step,
     status,
     durationMs,
     endsAt: status === "running" ? endsAt : null,
     remainingMs: remaining,
-    cycleDone: Math.round(finite(value.cycleDone, 0, 0, settings.rounds)),
     today,
     segmentId: typeof value.segmentId === "string" ? value.segmentId : null,
     finished,

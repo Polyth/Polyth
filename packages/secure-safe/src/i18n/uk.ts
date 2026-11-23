@@ -40,6 +40,7 @@ export const uk: SecureSafeMessages = {
   "settings.securesafepage.orProjectConfiguration": "або конфігурацію проєкту.",
   "settings.securesafepage.purpose": "Призначення",
   "settings.securesafepage.saveFailed": "Не вдалося зберегти ці облікові дані. Значення очищено; введіть його ще раз, щоб повторити спробу.",
+  "settings.securesafepage.handleTaken": "Облікові дані з назвою «{handle}» уже є. Щоб замінити значення, натисніть «Редагувати» біля них у списку.",
   "settings.securesafepage.savedHandles": "Збережені облікові дані",
   "settings.securesafepage.savedHandlesCount": "Збережено: {count}",
   "settings.securesafepage.secureSafe": "Credential Vault",

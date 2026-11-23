@@ -39,6 +39,7 @@ export const ar: SecureSafeMessages = {
   "settings.securesafepage.orProjectConfiguration": "أو تكوين المشروع.",
   "settings.securesafepage.purpose": "الغرض",
   "settings.securesafepage.saveFailed": "تعذر حفظ بيانات الاعتماد. تم مسح القيمة؛ أدخلها مرة أخرى لإعادة المحاولة.",
+  "settings.securesafepage.handleTaken": "توجد بالفعل بيانات اعتماد باسم “{handle}”. حرّرها في القائمة لاستبدال قيمتها.",
   "settings.securesafepage.savedHandles": "بيانات الاعتماد المحفوظة",
   "settings.securesafepage.savedHandlesCount": "المحفوظ: {count}",
   "settings.securesafepage.secureSafe": "Credential Vault",

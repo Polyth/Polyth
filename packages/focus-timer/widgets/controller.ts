@@ -9,13 +9,26 @@
 // account preference (`package.focus-timer`, see index.tsx).
 import { DEFAULT_ANCHOR, parseAnchor, type Anchor } from "../src/placement.ts";
 import {
+  findCycle,
+  insertStep,
+  isBuiltinCycle,
+  moveStep,
+  newCycleId,
+  newStep,
+  removeStep,
+  sameCycle,
+  updateStep,
+  MAX_CYCLES,
+  type CycleEdit,
+  type CycleSet,
+  type CycleStep,
+} from "../src/cycles.ts";
+import {
   DEFAULT_SETTINGS,
-  labelKey,
   normalizeLabel,
   parseSettings,
   sameSettings,
   type FocusTimerSettings,
-  type LabelTone,
 } from "../src/settings.ts";
 import {
   acknowledge,
@@ -24,14 +37,13 @@ import {
   parseState,
   reset,
   selectMode,
-  selectPhase,
+  selectStep,
   setCountdown,
   skip,
   start,
   tick,
   toggle,
   type FinishedSegment,
-  type FocusPhase,
   type TimerMode,
   type TimerState,
 } from "../src/timerModel.ts";
@@ -84,7 +96,8 @@ export interface TimerController {
   reset(): void;
   skip(): void;
   addMinutes(minutes: number): void;
-  selectPhase(phase: FocusPhase): void;
+  /** Go to step `index` of the running cycle. */
+  selectStep(index: number): void;
   selectMode(mode: TimerMode): void;
   setCountdown(minutes: number, run?: boolean): void;
   acknowledge(): void;
@@ -99,8 +112,25 @@ export interface TimerController {
   readSettings(): FocusTimerSettings;
   writeSettings(value: unknown): void;
   updateSettings(patch: Partial<FocusTimerSettings>): void;
-  /** Name a phase or the countdown; "" restores the built-in name. */
-  setLabel(tone: LabelTone, label: string): void;
+  /** Name the countdown; "" restores the built-in name. */
+  setCountdownLabel(label: string): void;
+  // cycles
+  /** Run cycle `id` from its first step (whatever was running stops). */
+  selectCycle(id: string): void;
+  /** A new own cycle, a copy of `fromId` when given, chosen at once.
+   *  Returns its id, or null at the MAX_CYCLES limit. */
+  createCycle(fromId?: string): string | null;
+  /** Delete one of the person's own cycles. */
+  deleteCycle(id: string): void;
+  renameCycle(id: string, name: string): void;
+  /** Change one step; `index` is in cycle `id`. A built-in cycle is never
+   *  changed: the first edit makes the person's own copy and runs it. */
+  updateStep(id: string, index: number, patch: Partial<CycleStep>): void;
+  /** Add a step after `after` (at the end without it). */
+  addStep(id: string, after?: number): void;
+  removeStep(id: string, index: number): void;
+  moveStep(id: string, from: number, to: number): void;
+  duplicateStep(id: string, index: number): void;
   subscribeSettings(listener: () => void): () => void;
   // lifecycle
   /** Re-read the clock now (tab became visible, window regained focus). */
@@ -225,6 +255,37 @@ export function createTimerController(deps: ControllerDeps): TimerController {
 
   const now = () => deps.now();
 
+  /** Run another cycle (chosen, or the running one was deleted): it starts
+   *  at its first step, stopped, and whatever was running stops. */
+  function switchCycle(value: FocusTimerSettings): void {
+    const next = parseSettings(value);
+    deps.effects.silence();
+    timer = { ...acknowledge(timer), status: "idle", endsAt: null, segmentId: null, mode: "pomodoro", cycleId: next.cycleId, step: 0 };
+    controller.writeSettings(next);
+    commit(reset(timer, settings));
+  }
+
+  /** Apply `change` to cycle `id`. A built-in cycle becomes the person's own
+   *  copy first. When the cycle runs, the timer keeps its step: an index the
+   *  edit moved follows it. */
+  function edit(id: string, change: (cycle: CycleSet) => CycleEdit): void {
+    const builtin = isBuiltinCycle(id);
+    const source = builtin ? findCycle([], id) : settings.cycles.find((cycle) => cycle.id === id);
+    if (!source || source.id !== id) return;
+    const result = change(source);
+    if (sameCycle(result.cycle, source)) return;
+    if (builtin && settings.cycles.length >= MAX_CYCLES) return;
+    const cycle: CycleSet = builtin ? { ...result.cycle, id: newCycleId(settings.cycles), name: "" } : result.cycle;
+    const cycles = builtin ? [...settings.cycles, cycle] : settings.cycles.map((item) => item.id === id ? cycle : item);
+    const running = settings.cycleId === id;
+    if (running) {
+      const step = result.map ? result.map(timer.step) : timer.step;
+      timer = { ...timer, cycleId: cycle.id, step };
+    }
+    controller.writeSettings({ ...settings, cycles, cycleId: running ? cycle.id : settings.cycleId });
+    if (running) commit(timer);
+  }
+
   const controller: TimerController = {
     getSnapshot: () => snapshot,
     subscribe(listener) {
@@ -237,7 +298,7 @@ export function createTimerController(deps: ControllerDeps): TimerController {
     reset: () => commit(reset(timer, settings), { silence: true }),
     skip: () => commit(skip(timer, settings, now()), { silence: true }),
     addMinutes: (minutes) => commit(addTime(acknowledge(timer), minutes * 60_000, now()), { silence: true }),
-    selectPhase: (phase) => commit(selectPhase(timer, settings, phase), { silence: true }),
+    selectStep: (index) => commit(selectStep(acknowledge(timer), settings, index), { silence: true }),
     selectMode: (mode) => commit(selectMode(acknowledge(timer), settings, mode), { silence: true }),
     setCountdown: (minutes, run = false) => commit(setCountdown(timer, minutes, now(), run), { silence: true }),
     acknowledge: () => {
@@ -298,11 +359,42 @@ export function createTimerController(deps: ControllerDeps): TimerController {
     updateSettings(patch) {
       controller.writeSettings({ ...settings, ...patch });
     },
-    setLabel(tone, label) {
-      const patch: Partial<FocusTimerSettings> = {};
-      patch[labelKey(tone)] = normalizeLabel(label);
-      controller.updateSettings(patch);
+    setCountdownLabel(label) {
+      controller.updateSettings({ countdownLabel: normalizeLabel(label) });
     },
+
+    selectCycle(id) {
+      if (id === settings.cycleId) return;
+      switchCycle({ ...settings, cycleId: id });
+    },
+    createCycle(fromId) {
+      if (settings.cycles.length >= MAX_CYCLES) return null;
+      const source = fromId ? findCycle(settings.cycles, fromId) : null;
+      const cycle: CycleSet = source
+        ? { id: newCycleId(settings.cycles), name: isBuiltinCycle(source.id) ? "" : source.name, steps: source.steps.map((item) => ({ ...item })) }
+        : { id: newCycleId(settings.cycles), name: "", steps: [newStep(undefined), newStep(newStep(undefined))] };
+      if (source?.preset) cycle.preset = source.preset;
+      controller.updateSettings({ cycles: [...settings.cycles, cycle] });
+      controller.selectCycle(cycle.id);
+      return cycle.id;
+    },
+    deleteCycle(id) {
+      if (isBuiltinCycle(id) || !settings.cycles.some((cycle) => cycle.id === id)) return;
+      const cycles = settings.cycles.filter((cycle) => cycle.id !== id);
+      if (settings.cycleId === id) switchCycle({ ...settings, cycles, cycleId: DEFAULT_SETTINGS.cycleId });
+      else controller.updateSettings({ cycles });
+    },
+    renameCycle(id, name) {
+      edit(id, (cycle) => ({ cycle: { ...cycle, name: normalizeLabel(name) } }));
+    },
+    updateStep: (id, index, patch) => edit(id, (cycle) => updateStep(cycle, index, patch)),
+    addStep: (id, after) => edit(id, (cycle) => {
+      const where = after === undefined ? cycle.steps.length - 1 : after;
+      return insertStep(cycle, where + 1, newStep(cycle.steps[where]));
+    }),
+    removeStep: (id, index) => edit(id, (cycle) => removeStep(cycle, index)),
+    moveStep: (id, from, to) => edit(id, (cycle) => moveStep(cycle, from, to)),
+    duplicateStep: (id, index) => edit(id, (cycle) => cycle.steps[index] ? insertStep(cycle, index + 1, { ...cycle.steps[index] }) : { cycle }),
     subscribeSettings(listener) {
       settingsListeners.add(listener);
       return () => { settingsListeners.delete(listener); };

@@ -5,9 +5,9 @@
 // window's own flash and colour come from the shared state (TimerWindow.tsx).
 import type { WebPackageHost } from "@polyth/web-sdk";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
-import { customLabel } from "../src/settings.ts";
-import type { FinishedSegment } from "../src/timerModel.ts";
+import { currentStep, type FinishedSegment } from "../src/timerModel.ts";
 import type { TimerController, TimerEffects, TimerSnapshot } from "./controller.ts";
+import { stepLabel } from "./labels.ts";
 import { playSound } from "./sound.ts";
 
 export type SystemPermission = "granted" | "denied" | "default" | "unsupported";
@@ -36,36 +36,26 @@ export async function requestSystemPermission(): Promise<SystemPermission> {
   }
 }
 
-/** What the time-up banner, toast and system notification say. A segment
- *  the person named is announced by its name. */
+/** What the time-up banner, toast and system notification say: the step
+ *  that ended by name, and the one that comes next. */
 export function finishedCopy(finished: FinishedSegment, snapshot: TimerSnapshot): { title: string; body: string; next: string | null } {
-  const copy = builtInCopy(finished, snapshot);
-  const label = customLabel(snapshot.settings, finished.mode === "countdown" ? "countdown" : finished.phase);
-  return label ? { ...copy, title: tr("focustimer.done.labelled", { label }) } : copy;
-}
-
-function builtInCopy(finished: FinishedSegment, snapshot: TimerSnapshot): { title: string; body: string; next: string | null } {
   const { settings, timer } = snapshot;
-  if (finished.mode === "countdown") {
+  if (finished.mode === "countdown" || !finished.step) {
+    const label = settings.countdownLabel;
     return {
-      title: tr("focustimer.done.countdown"),
+      title: label ? tr("focustimer.done.labelled", { label }) : tr("focustimer.done.countdown"),
       body: tr("focustimer.done.countdownBody", { minutes: timer.countdownMin }),
       next: null,
     };
   }
   const running = timer.status === "running";
-  if (finished.phase === "focus") {
-    const minutes = timer.phase === "long" ? settings.longMin : settings.shortMin;
-    return {
-      title: tr("focustimer.done.focus"),
-      body: tr(running ? "focustimer.done.breakStarted" : "focustimer.done.nextBreak", { minutes }),
-      next: running ? null : tr("focustimer.action.startBreak"),
-    };
-  }
+  const upcoming = currentStep(timer, settings);
+  const name = upcoming ? stepLabel(upcoming) : "";
+  const minutes = upcoming?.minutes ?? Math.round(timer.durationMs / 60_000);
   return {
-    title: tr(finished.phase === "long" ? "focustimer.done.long" : "focustimer.done.short"),
-    body: tr(running ? "focustimer.done.focusStarted" : "focustimer.done.nextFocus", { minutes: settings.focusMin }),
-    next: running ? null : tr("focustimer.action.startFocus"),
+    title: tr("focustimer.done.labelled", { label: stepLabel(finished.step) }),
+    body: tr(running ? "focustimer.done.stepStarted" : "focustimer.done.nextStep", { name, minutes }),
+    next: running ? null : tr("focustimer.action.startStep", { name }),
   };
 }
 
