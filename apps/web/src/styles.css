@@ -9485,7 +9485,8 @@ button.theme-accent-swatch, .theme-accent-swatch {
   cursor: pointer;
 }
 @media (hover: hover) {
-  button.theme-accent-swatch:hover:where(:not(:disabled)) { background: var(--theme-accent-swatch); transform: scale(1.1); }
+  button.theme-accent-swatch:hover:where(:not(:disabled)) { transform: scale(1.1); }
+  button.theme-accent-swatch:not(.is-custom):hover:where(:not(:disabled)) { background: var(--theme-accent-swatch); }
   button.theme-accent-swatch.is-scheme:hover:where(:not(:disabled)) {
     background: radial-gradient(circle, var(--theme-accent-swatch) 0 52%, color-mix(in srgb, var(--text) 26%, transparent) 56%);
   }
@@ -9505,7 +9506,104 @@ button.theme-accent-swatch.is-scheme[aria-pressed="true"] { outline-color: color
   background: radial-gradient(circle, var(--theme-accent-swatch) 0 52%, transparent 56%),
     conic-gradient(#ff3b30, #ffcc00, #34c759, #00c7be, #007aff, #af52de, #ff2d55, #ff3b30);
 }
-.theme-accent-swatch.is-custom:has(> input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-accent-swatch.is-custom:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Custom accent picker (AccentColorPicker.tsx): edits preview live, only
+   Select saves. The button wears the accent the colour will be drawn as. */
+.accent-picker { display: grid; gap: 10px; width: 236px; padding: 10px; }
+.accent-picker-field {
+  position: relative;
+  height: 148px;
+  border-radius: var(--radius-control);
+  background: linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, var(--accent-picker-hue));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 12%, transparent);
+  cursor: crosshair;
+  touch-action: none;
+}
+.accent-picker-field:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.accent-picker-thumb {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  background: var(--accent-picker-color);
+  box-shadow: 0 0 0 2px #fff, 0 0 0 3px rgba(0, 0, 0, .35), 0 1px 4px rgba(0, 0, 0, .3);
+  pointer-events: none;
+}
+.accent-picker-row { display: flex; align-items: center; gap: 8px; }
+.accent-picker-dropper {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.accent-picker-dropper svg { width: 16px; height: 16px; }
+@media (hover: hover) {
+  .accent-picker-dropper:hover:where(:not(:disabled)) { background: color-mix(in srgb, var(--text) 8%, transparent); }
+}
+.accent-picker-preview {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent-picker-color);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 16%, transparent);
+}
+.accent-picker-hue {
+  flex: 1;
+  min-width: 0;
+  height: 12px;
+  margin: 0;
+  border-radius: 6px;
+  background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+.accent-picker-hue::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent-picker-hue);
+  box-shadow: 0 0 0 2px #fff, 0 0 0 3px rgba(0, 0, 0, .35);
+  appearance: none;
+  -webkit-appearance: none;
+}
+.accent-picker-hue::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent-picker-hue);
+  box-shadow: 0 0 0 2px #fff, 0 0 0 3px rgba(0, 0, 0, .35);
+}
+.accent-picker-hue:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.accent-picker-rgb { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.accent-picker-rgb label { display: grid; gap: 4px; justify-items: center; color: var(--muted); font-size: 11px; }
+.accent-picker-rgb input.ui-input { width: 100%; min-width: 0; text-align: center; font-variant-numeric: tabular-nums; }
+.accent-picker-select {
+  height: var(--control-h);
+  padding: 0 var(--control-pad-x);
+  border: 0;
+  border-radius: var(--radius-control);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .08);
+}
+.accent-picker-select:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+@media (hover: hover) {
+  .accent-picker-select:hover:where(:not(:disabled)) { filter: brightness(1.06); }
+}
+.accent-picker-select:active:where(:not(:disabled)) { filter: brightness(.94); }
 @media (pointer: coarse) {
   .theme-accent-swatches { gap: var(--space-3); }
   button.theme-accent-swatch, .theme-accent-swatch { width: 32px; height: 32px; }

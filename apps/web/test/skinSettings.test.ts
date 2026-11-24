@@ -232,9 +232,70 @@ test("style, colour scheme and accent are separate choices in Appearance", async
     await page.click(page.host.querySelector("button.theme-accent-swatch.is-scheme") as unknown as HTMLButtonElement);
     assert.equal(getState().settings.accentColor, "");
     assert.equal(html.style.getPropertyValue("--accent"), resolveTheme("midnight", "light").tokens.accent);
-    // The custom colour well is labelled and keyboard reachable.
-    const well = page.host.querySelector(".theme-accent-swatch.is-custom input[type=color]");
-    assert.equal(well?.getAttribute("aria-label"), tr("settings.pages.accentCustom"));
+    // The custom colour is a labelled button that opens Polyth's own picker.
+    const custom = page.host.querySelector("button.theme-accent-swatch.is-custom") as unknown as HTMLButtonElement;
+    assert.ok(present(custom));
+    assert.equal(custom.getAttribute("aria-label"), tr("settings.pages.accentCustom"));
+    assert.equal(present(page.host.querySelector("input[type=color]")), false, "no native colour well");
+  } finally {
+    await page.unmount();
+    updateSettings({ theme: DEFAULT_SETTINGS.theme, themeStyle: DEFAULT_SETTINGS.themeStyle, accentColor: "" });
+  }
+});
+
+test("a custom accent previews while edited and is saved by the picker's Select button", async () => {
+  const html = dom.document.documentElement;
+  updateSettings({ theme: "midnight", themeStyle: "macos", accentColor: "", appearanceMode: "light" });
+  const page = await mount();
+  const custom = () => page.host.querySelector("button.theme-accent-swatch.is-custom") as unknown as HTMLButtonElement;
+  const picker = () => dom.document.querySelector(".accent-picker");
+  const select = () => dom.document.querySelector(".accent-picker-select") as unknown as HTMLButtonElement;
+  const typeChannel = async (label: Parameters<typeof tr>[0], value: string) => {
+    const field = dom.document.querySelector(`.accent-picker-rgb input[aria-label="${tr(label)}"]`)!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(dom.HTMLInputElement.prototype, "value")!.set!.call(field, value);
+      field.dispatchEvent(new dom.Event("input", { bubbles: true }));
+    });
+  };
+  const settle = async () => {
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 150)); });
+    await page.flush();
+  };
+  const ochre = "#c7871a";
+  try {
+    const schemeAccent = html.style.getPropertyValue("--accent");
+    await page.click(custom());
+    assert.equal(custom().getAttribute("aria-expanded"), "true");
+    assert.ok(present(picker()));
+    await typeChannel("settings.pages.accentRed", "199");
+    await typeChannel("settings.pages.accentGreen", "135");
+    await typeChannel("settings.pages.accentBlue", "26");
+    await settle();
+    const drawn = accentRoles(ochre, "light", "macos");
+    assert.equal(html.style.getPropertyValue("--accent"), drawn.accent, "the edit previews live");
+    assert.equal(getState().settings.accentColor, "", "an edit alone saves nothing");
+    // Select sits below the RGB fields and wears the accent it will apply.
+    assert.equal(select().textContent, tr("settings.pages.accentPickerSelect"));
+    assert.equal(select().previousElementSibling?.className, "accent-picker-rgb");
+    assert.equal(select().style.color, drawn.accentInk);
+    await page.click(select());
+    await settle();
+    assert.equal(getState().settings.accentColor, ochre);
+    assert.equal(html.style.getPropertyValue("--accent"), drawn.accent);
+    assert.equal(present(picker()), false, "Select closes the picker");
+    assert.match(custom().className, /is-set/);
+
+    // Closing without Select restores the saved accent.
+    await page.click(custom());
+    await typeChannel("settings.pages.accentRed", "10");
+    await settle();
+    assert.notEqual(html.style.getPropertyValue("--accent"), drawn.accent);
+    await page.click(custom());
+    await settle();
+    assert.equal(present(picker()), false);
+    assert.equal(getState().settings.accentColor, ochre);
+    assert.equal(html.style.getPropertyValue("--accent"), drawn.accent);
+    assert.notEqual(schemeAccent, drawn.accent);
   } finally {
     await page.unmount();
     updateSettings({ theme: DEFAULT_SETTINGS.theme, themeStyle: DEFAULT_SETTINGS.themeStyle, accentColor: "" });

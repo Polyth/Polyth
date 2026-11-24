@@ -144,6 +144,7 @@ const Paperclip = createIcon("paperclip", nodes.Paperclip);
 const Pause = createIcon("pause", nodes.Pause);
 const Pencil = createIcon("pencil", nodes.Pencil);
 const Pin = createIcon("pin", nodes.Pin);
+const Pipette = createIcon("pipette", nodes.Pipette);
 const Play = createIcon("play", nodes.Play);
 const Plug = createIcon("plug", nodes.Plug);
 const Plus = createIcon("plus", nodes.Plus);
@@ -323,6 +324,7 @@ export {
   Scan as ScanIcon,
   Target as TargetIcon,
   Pin as PinIcon,
+  Pipette as PipetteIcon,
   Bookmark as BookmarkIcon,
   Star as FavoriteIcon,
   Send as SendIcon,
