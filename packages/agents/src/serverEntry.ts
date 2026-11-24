@@ -869,6 +869,28 @@ export function scheduleRoutes(deps: {
       return true;
     }
 
+    // Requests set aside for the agent's next wake: the owner's, like a message.
+    const wakeMatch = path.match(/^\/api\/schedule\/([^/]+)\/next-wake(?:\/([^/]+))?$/);
+    if (wakeMatch && ((method === "POST" && !wakeMatch[2]) || (method === "DELETE" && wakeMatch[2]))) {
+      const task = await allowedTask(wakeMatch[1]!);
+      if (task === null) return true;
+      if (!task) { json(404, { error: "not-found" }); return true; }
+      try {
+        if (method === "POST") {
+          const input = await body().catch(() => ({} as Record<string, unknown>));
+          json(200, await view(deps.schedule.setAsideForNextWake(task.id, typeof input.text === "string" ? input.text : "")));
+        } else {
+          json(200, await view(deps.schedule.dropWakeNote(task.id, wakeMatch[2]!)));
+        }
+      } catch (error) {
+        const code = (error as { code?: unknown })?.code;
+        const status = code === "invalid-input" ? 400 : code === "not-found" ? 404 : undefined;
+        if (!status) throw error;
+        json(status, { error: code, message: error instanceof Error ? error.message : String(error) });
+      }
+      return true;
+    }
+
     const match = path.match(/^\/api\/schedule\/([^/]+)(?:\/(pause|resume|run|runs|seen|stop))?$/);
     if (!match) return false;
     const id = match[1]!;

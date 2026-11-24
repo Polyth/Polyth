@@ -178,6 +178,11 @@ export interface ScheduleRunRecord {
   headline?: string;
   /** Notes this run added to the notebook. */
   remembered?: string[];
+  /** What was set aside for this wake and the run's prompt carried. They
+   *  left `ScheduleTask.nextWake` once the run started. */
+  carried?: AgentWakeNote[];
+  /** `Next wake:` lines this run (a conversation with the person) set aside. */
+  setAside?: string[];
   /** The person's verdict on this run's report. */
   feedback?: AgentRunFeedback;
   /** The person stopped this run: not a failure of the agent. */
@@ -288,6 +293,23 @@ export interface AgentQueuedMessage {
    *  (`RunStart.thread`); absent = a new one. */
   sessionId?: string;
 }
+
+/** Something to do at the agent's next wake rather than now. The person sets
+ *  it with their message, or the agent does with a `Next wake:` line when the
+ *  person asked for it in a conversation. The next wake that is not a
+ *  conversation with the person carries it, once. */
+export interface AgentWakeNote {
+  id: string;
+  text: string;
+  at: number;
+  by: "user" | "agent";
+  /** The run whose report set it aside (`by: "agent"`). */
+  runId?: string;
+}
+
+/** How many requests may wait for the next wake, and how long one may be. */
+export const NEXT_WAKE_LIMIT = 8;
+export const NEXT_WAKE_TEXT_LIMIT = AGENT_INPUT_LIMIT;
 
 export interface AgentRunFeedback {
   verdict: "up" | "down";
@@ -488,6 +510,8 @@ export interface ScheduleTask {
    *  Saved, so a restart sends it later; never dispatched while it is here,
    *  since the save that records its run removes it. */
   queuedStart?: RunStart;
+  /** Requests set aside for the next wake, oldest first. */
+  nextWake?: AgentWakeNote[];
 }
 
 export interface ScheduleTaskInput {
@@ -929,6 +953,11 @@ export interface ScheduleService {
   markSeen(id: string, at?: number): ScheduleTask;
   /** Record (or with `null` clear) the person's verdict on one run's report. */
   setFeedback(id: string, runId: string, feedback: { verdict: "up" | "down"; note?: string } | null): ScheduleTask;
+  /** The person sets something aside for the agent's next wake (no run
+   *  starts now). Refuses empty text and a full list (invalid-input). */
+  setAsideForNextWake(id: string, text: string): ScheduleTask;
+  /** The person takes back a request waiting for the next wake. */
+  dropWakeNote(id: string, noteId: string): ScheduleTask;
   /** The person settles (or reopens) what a report said only they can do. */
   setNeedDone(id: string, runId: string, index: number, done: boolean): ScheduleTask;
   /** The person stops the runs in progress: marks them and returns their
@@ -1621,6 +1650,26 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
     rec.remembered = added;
   };
 
+  /** `Next wake:` lines of a conversation with the person: only a run that
+   *  carries the person's words relays what they asked for later (a
+   *  scheduled run's lines are ignored). A report read again replaces what
+   *  the same run set aside before. */
+  const setAside = (task: ScheduleTask, rec: ScheduleRunRecord, lines: string[]): void => {
+    if (!rec.input && !rec.attachments?.length) return;
+    const others = (task.nextWake ?? []).filter((note) => note.runId !== rec.runId);
+    const added: AgentWakeNote[] = [];
+    for (const text of lines) {
+      if (others.length + added.length >= NEXT_WAKE_LIMIT) break;
+      if ([...others, ...added].some((note) => sameNeed(note.text, text))) continue;
+      added.push({ id: randomUUID(), text, at: now(), by: "agent", runId: rec.runId });
+    }
+    const next = [...others, ...added];
+    if (next.length) task.nextWake = next;
+    else delete task.nextWake;
+    if (added.length) rec.setAside = added.map((note) => note.text);
+    else delete rec.setAside;
+  };
+
   /** A run's final message, as its record keeps it. The report line and
    *  notes are protocol, not prose: they are kept apart. */
   const applyReport = (task: ScheduleTask, rec: ScheduleRunRecord, text: string, ok: boolean): void => {
@@ -1637,6 +1686,7 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
     else delete rec.needs;
     if (ok) {
       remember(task, rec, report.remember);
+      setAside(task, rec, report.nextWake);
       // What the agent says no longer waits is settled wherever it was asked.
       for (const words of report.resolved) {
         for (const run of task.history ?? []) {
@@ -1878,6 +1928,13 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
       ...(thread ? { thread } : {}),
       ...(events?.length ? { events } : {}),
     };
+    // Requests set aside for the next wake: the next wake that is not a
+    // conversation with the person carries them; such a conversation is only
+    // told they wait. They leave the list once the run is admitted.
+    const waitingNotes = task.nextWake ?? [];
+    const carried = waitingNotes.length && carriesNextWake(task, start) ? waitingNotes : [];
+    if (carried.length) wake.nextWake = carried;
+    else if (waitingNotes.length && personal(start)) wake.setAside = waitingNotes;
     // Feedback the prompt is about to carry; marked heard once it is admitted.
     const feedbackRuns = pendingFeedback(task.history).map((run) => run.runId);
     if (dequeued) {
@@ -1892,6 +1949,13 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
         const outcome = await admit(executableTask, runId, wake);
         for (const run of task.history ?? []) {
           if (run.feedback && feedbackRuns.includes(run.runId)) run.feedback.delivered = true;
+        }
+        if (carried.length) {
+          const ids = new Set(carried.map((note) => note.id));
+          const left = (task.nextWake ?? []).filter((note) => !ids.has(note.id));
+          if (left.length) task.nextWake = left;
+          else delete task.nextWake;
+          rec.carried = carried;
         }
         if (outcome?.notebookRev !== undefined) task.notebookSentRev = outcome.notebookRev;
         if (outcome?.sessionId) {
@@ -1947,6 +2011,17 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
   /** The person's message: their words and/or files. Only they fill `input`
    *  and `attachments` (an event script's words are its `note`). */
   const personal = (start: RunStart): boolean => Boolean(start.input || start.attachments?.length);
+
+  /** Whether a run is the "next wake" requests wait for: any wake that is
+   *  not a conversation with the person (they would be done in the middle of
+   *  one, and the person's chat would use them up). A heartbeat is a routine
+   *  check between the agent's runs, so it carries them only for an agent
+   *  with no scheduled run ahead. */
+  const carriesNextWake = (task: ScheduleTask, start: RunStart): boolean => {
+    if (personal(start)) return false;
+    if (start.trigger !== "heartbeat") return true;
+    return !(task.enabled && !task.manualOnly && typeof task.nextRunAt === "number");
+  };
 
   /** Run `op` after every earlier one for the same task has finished. */
   const serially = <T>(taskId: string, op: () => Promise<T>): Promise<T> => {
@@ -2505,6 +2580,30 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
         const note = typeof feedback.note === "string" ? feedback.note.replace(/\s+/g, " ").trim().slice(0, FEEDBACK_NOTE_LIMIT) : "";
         run.feedback = { verdict: feedback.verdict, ...(note ? { note } : {}), at: now() };
       }
+      t.updatedAt = now();
+      save();
+      return t;
+    },
+    setAsideForNextWake(id, text) {
+      const t = mustGet(id);
+      const words = typeof text === "string" ? text.trim().slice(0, NEXT_WAKE_TEXT_LIMIT).trimEnd() : "";
+      if (!words) throw err("say what to do at the next wake");
+      const notes = t.nextWake ?? [];
+      if (notes.length >= NEXT_WAKE_LIMIT) {
+        throw err(`at most ${NEXT_WAKE_LIMIT} requests can wait for the next wake`);
+      }
+      t.nextWake = [...notes, { id: randomUUID(), text: words, at: now(), by: "user" }];
+      t.updatedAt = now();
+      save();
+      return t;
+    },
+    dropWakeNote(id, noteId) {
+      const t = mustGet(id);
+      const notes = t.nextWake ?? [];
+      if (!notes.some((note) => note.id === noteId)) throw err("request not found", "not-found");
+      const left = notes.filter((note) => note.id !== noteId);
+      if (left.length) t.nextWake = left;
+      else delete t.nextWake;
       t.updatedAt = now();
       save();
       return t;

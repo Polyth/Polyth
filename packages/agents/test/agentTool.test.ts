@@ -102,11 +102,19 @@ test("a schedule, updates and wakes go through the owner only", async (t) => {
   await call({ action: "run", agentId: id, message: "What should I cook?" });
   assert.deepEqual(woken, [{ id, input: "What should I cook?" }]);
 
+  // Kept for the next wake: nothing runs now, and `get` shows what waits.
+  assert.match((await call({ action: "next-wake", agentId: id, message: "Plan Sunday's dinner too" })).output, /its next wake carries it once/);
+  assert.equal(woken.length, 1);
+  assert.deepEqual(service.get(id)?.nextWake?.map((note) => [note.text, note.by]), [["Plan Sunday's dinner too", "user"]]);
+  assert.match((await call({ action: "get", agentId: id })).output, /For the next wake:\n- Plan Sunday's dinner too/);
+  await assert.rejects(call({ action: "next-wake", agentId: id }), /needs a message/);
+
   // Another member neither reads, changes nor wakes it; they learn only that it is not theirs to see.
   const bob = { actorUserId: "usr_bob" };
   await assert.rejects(call({ action: "get", agentId: id }, bob), { code: "not-found" });
   await assert.rejects(call({ action: "update", agentId: id, name: "Hijack" }, bob), { code: "not-found" });
   await assert.rejects(call({ action: "run", agentId: id }, bob), { code: "not-found" });
+  await assert.rejects(call({ action: "next-wake", agentId: id, message: "hijack" }, bob), { code: "not-found" });
   assert.match((await call({ action: "list" }, bob)).output, /No Polyth Agents/);
 });
 

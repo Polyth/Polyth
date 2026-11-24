@@ -623,6 +623,10 @@ export interface ScheduleRunDto {
   headline?: string;
   /** Notes this run added to the notebook. */
   remembered?: string[];
+  /** What was set aside for this wake and the run carried. */
+  carried?: AgentWakeNoteDto[];
+  /** What this conversation with the person set aside for the next wake. */
+  setAside?: string[];
   /** The person's verdict on this run's report. */
   feedback?: { verdict: "up" | "down"; note?: string; at: number; delivered?: boolean };
   /** The person stopped this run. */
@@ -659,6 +663,17 @@ export interface ScheduleRunDto {
   resumed?: number;
   /** A person's message in the run's session redirected it. */
   steered?: boolean;
+}
+
+/** Something to do at the agent's next wake rather than now: set by the
+ *  person, or by the agent relaying what the person asked in a conversation.
+ *  The next wake that is not a conversation with the person carries it once. */
+export interface AgentWakeNoteDto {
+  id: string;
+  text: string;
+  at: number;
+  by: "user" | "agent";
+  runId?: string;
 }
 
 /** What the person asked for with a message: `auto` lets the agent judge. */
@@ -889,6 +904,8 @@ export interface ScheduleTaskDto extends AgentFieldsDto {
   followUp?: AgentFollowUpDto;
   /** Owner view only: the person's messages waiting for the run in progress. */
   queued?: AgentQueuedMessageDto[];
+  /** Owner view only: requests set aside for the next wake, oldest first. */
+  nextWake?: AgentWakeNoteDto[];
 }
 export interface ScheduleLoopErrorDto {
   path: string;
@@ -1969,6 +1986,14 @@ export const api = {
         ...(options?.attachments?.length ? { attachments: options.attachments } : {}),
       })
       : { method: "POST" }),
+  /** Set something aside for the agent's next wake; no run starts now. */
+  scheduleNextWake: (id: string, text: string) =>
+    jfetch<ScheduleTaskDto>(`/api/schedule/${encodeURIComponent(id)}/next-wake`, json("POST", { text })),
+  scheduleNextWakeDrop: (id: string, noteId: string) =>
+    jfetch<ScheduleTaskDto>(
+      `/api/schedule/${encodeURIComponent(id)}/next-wake/${encodeURIComponent(noteId)}`,
+      { method: "DELETE" },
+    ),
   scheduleContext: (id: string) => jfetch<AgentContextDto>(`/api/schedule/${encodeURIComponent(id)}/context`),
   scheduleContextAction: (id: string, action: "new-session" | "compact") =>
     jfetch<unknown>(`/api/schedule/${encodeURIComponent(id)}/context`, json("POST", { action })),

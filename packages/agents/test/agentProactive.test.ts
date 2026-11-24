@@ -78,7 +78,7 @@ test("the last Report line sets the signal and headline; Remember lines become n
   assert.match(report.body, /inside a code sample/, "fenced protocol text is content");
   assert.doesNotMatch(report.body, /3 commits landed/);
 
-  assert.deepEqual(parseAgentReport("Report: quiet"), { signal: "quiet", body: "", remember: [], needs: [], resolved: [] });
+  assert.deepEqual(parseAgentReport("Report: quiet"), { signal: "quiet", body: "", remember: [], needs: [], resolved: [], nextWake: [] });
   assert.equal(parseAgentReport("All good.").signal, undefined);
 });
 
@@ -368,7 +368,8 @@ test("a new session's prompt still starts with the charter", () => {
   };
   const text = composeAgentPrompt(task, { trigger: "heartbeat", at: 1 }, { continuing: false });
   assert.ok(text.startsWith("You review merged pull requests.\n\n---\nWake: heartbeat check"));
-  assert.ok(text.trimEnd().endsWith("Keep notes short; they go into your notebook."));
+  assert.ok(text.trimEnd().endsWith("Polyth hands it to your next wake once."));
+  assert.ok(text.includes("Keep notes short; they go into your notebook."));
 });
 
 test("a message sent while the agent works waits for the run instead of being dropped", async (t) => {

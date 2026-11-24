@@ -12,7 +12,7 @@ export const AGENTS_TOOL_ID = "agents.tool";
 export const AGENTS_SKILL_ID = "agents.skill";
 export const AGENTS_TOOL_NAME = "polyth_agents";
 
-const ACTIONS = ["list", "get", "create", "update", "run"] as const;
+const ACTIONS = ["list", "get", "create", "update", "run", "next-wake"] as const;
 type Action = typeof ACTIONS[number];
 const COLORS: readonly AgentColor[] = ["neutral", "blue", "green", "amber", "purple", "red"];
 const NOTIFY: readonly AgentNotifyPolicy[] = ["alerts", "updates", "off"];
@@ -37,9 +37,9 @@ const inputSchema: JsonObject = {
     action: {
       type: "string",
       enum: [...ACTIONS],
-      description: "list: the Polyth Agents of this project. get: one agent in full. create: a new agent. update: change an agent you own. run: wake an agent now, optionally with a message.",
+      description: "list: the Polyth Agents of this project. get: one agent in full. create: a new agent. update: change an agent you own. run: wake an agent now, optionally with a message. next-wake: keep a message for the agent's next wake; nothing runs now.",
     },
-    agentId: { type: "string", description: "Agent id for get/update/run." },
+    agentId: { type: "string", description: "Agent id for get/update/run/next-wake." },
     projectId: { type: "string", description: "Project of the agent. Defaults to this chat's project." },
     name: { type: "string", description: "create/update: the agent's display name, e.g. \"Otto\"." },
     charter: {
@@ -80,7 +80,7 @@ const inputSchema: JsonObject = {
     notebook: { type: "string", description: "create/update: the agent's notebook — facts it should start from and keep up to date (preferences, constraints, what it already knows)." },
     notify: { type: "string", enum: [...NOTIFY], description: "create/update: when a finished run notifies the person (default alerts)." },
     enabled: { type: "boolean", description: "create/update: false keeps the agent paused (create default true)." },
-    message: { type: "string", description: "run: text the agent receives from the person on this wake." },
+    message: { type: "string", description: "run: text the agent receives from the person on this wake. next-wake: what the agent should do at its next wake, complete and self-contained." },
   },
 };
 
@@ -98,7 +98,7 @@ export const agentsSkill: AgentCapabilityContribution = {
 When the user asks to create, make or set up an agent "in Polyth" (any language, for example "створи агента в Політі", "агент Політу"), or describes a persistent assistant or persona with a name, make a Polyth Agent with ${AGENTS_TOOL_NAME} action "create". This is not a delegated child session (agent.spawn), not a harness agent file (.opencode/agents, .claude/agents) and not a persona written into AGENTS.md; do not substitute those.
 Before creating: call ${AGENTS_TOOL_NAME} action "list" so you do not duplicate an agent of the same name (update it instead). Write the charter to the agent in the second person from everything the user said — its name, role, character and tone, what it watches, how and when it asks questions, what it suggests, its boundaries — and keep the user's language. Put facts it should start from (preferences, constraints, known context from memory or this chat) in the notebook, not the charter. Choose a fitting icon and colour.
 When to wake: use the schedule or heartbeat the user asked for. A proactive companion that checks in "sometimes" or "if we have not talked for a while" fits a heartbeat with daytime active hours (for example every 240 minutes, 09:00–21:00) in the user's time zone; ask for the time zone if you cannot tell it. With no timing at all, create it on demand only and say how to add a schedule later. Keep rolling memory unless the user wants every run to start fresh.
-After creating, report the agent's name and id and that it is on the Agents page; wake it with action "run" only when the user asks. Change an existing agent with action "update" (only the fields to change). Agents defined by a repository file (.agents/agents/*.md) are changed by editing that file.`,
+After creating, report the agent's name and id and that it is on the Agents page; wake it with action "run" only when the user asks. When the user wants an agent to do something at its next wake (next run, next time) rather than now, use action "next-wake" with that request as the message: it waits on the agent's page and its next wake that is not a conversation carries it once. Change an existing agent with action "update" (only the fields to change). Agents defined by a repository file (.agents/agents/*.md) are changed by editing that file.`,
   },
 };
 
@@ -220,6 +220,7 @@ export function createAgentsTool(deps: AgentsToolDeps): AgentCapabilityContribut
           summary(task),
           `Charter:\n${task.prompt}`,
           task.notebook ? `Notebook:\n${task.notebook}` : "Notebook: empty",
+          ...(task.nextWake?.length ? [`For the next wake:\n${task.nextWake.map((note) => `- ${note.text}`).join("\n")}`] : []),
           `Memory: ${(task.target?.mode ?? "new-session-per-run") === "dedicated-session" ? "rolling" : "fresh"} · notify: ${task.notify ?? "alerts"}`,
         ].join("\n\n"),
       };
@@ -267,6 +268,13 @@ export function createAgentsTool(deps: AgentsToolDeps): AgentCapabilityContribut
     }
 
     const message = text(input.message);
+    if (action === "next-wake") {
+      if (!message) throw invalid("next-wake needs a message");
+      const kept = deps.service.setAsideForNextWake(task.id, message);
+      const when = kept.enabled && !kept.manualOnly && typeof kept.nextRunAt === "number"
+        ? `its next scheduled wake (${new Date(kept.nextRunAt).toISOString()})` : "its next wake";
+      return { output: `Kept for “${kept.title}” (${kept.id}): ${when} carries it once. It waits on the agent's page, where the person can take it back.`, metadata: { agentId: kept.id } };
+    }
     const woken = await deps.service.runNow(task.id, message ? { input: message } : undefined);
     return { output: `Woke “${woken.title}” (${woken.id}); its run appears on the Agents page.`, metadata: { agentId: woken.id } };
   };

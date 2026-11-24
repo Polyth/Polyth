@@ -37,6 +37,9 @@ export interface AgentReport {
   needs: AgentNeed[];
   /** Earlier requests the agent says no longer wait, in the order written. */
   resolved: string[];
+  /** What the person asked to have done at the agent's next wake rather than
+   *  now, in the order written (`Next wake:` lines). */
+  nextWake: string[];
 }
 
 export const HEADLINE_LIMIT = 160;
@@ -57,6 +60,9 @@ const REMEMBER_LINE = new RegExp(`^${DECOR}remember${DECOR}:${DECOR}(.+)$`, "i")
 const NEEDS_LINE = new RegExp(`^${DECOR}needs[ \\t]+you${DECOR}:${DECOR}(.+)$`, "i");
 const RESOLVED_LINE = new RegExp(`^${DECOR}resolved${DECOR}:${DECOR}(.+)$`, "i");
 export const RESOLVED_PER_RUN = 6;
+const NEXT_WAKE_LINE = new RegExp(`^${DECOR}next[ \\t]+wake${DECOR}:${DECOR}(.+)$`, "i");
+export const NEXT_WAKE_LINE_LIMIT = 500;
+export const NEXT_WAKE_PER_RUN = 3;
 const FENCE = /^\s*(```|~~~)/;
 const LINK = /<?\bhttps?:\/\/[^\s<>()]+>?/i;
 
@@ -110,6 +116,7 @@ export function parseAgentReport(text: string | undefined): AgentReport {
   const remember: string[] = [];
   const needs: AgentNeed[] = [];
   const resolved: string[] = [];
+  const nextWake: string[] = [];
   lines.forEach((line, index) => {
     if (FENCE.test(line)) {
       fenced = !fenced;
@@ -145,6 +152,13 @@ export function parseAgentReport(text: string | undefined): AgentReport {
       // Only the request's own words: a reason after a dash is commentary.
       const value = clean(settled[1]!.split(/\s+[—–]\s+/)[0] ?? "", NEED_TEXT_LIMIT);
       if (value && resolved.length < RESOLVED_PER_RUN && !resolved.includes(value)) resolved.push(value);
+      return;
+    }
+    const later = NEXT_WAKE_LINE.exec(line);
+    if (later) {
+      protocolAt.add(index);
+      const value = clean(later[1]!, NEXT_WAKE_LINE_LIMIT);
+      if (value && nextWake.length < NEXT_WAKE_PER_RUN && !nextWake.includes(value)) nextWake.push(value);
     }
   });
   const body = lines
@@ -159,6 +173,7 @@ export function parseAgentReport(text: string | undefined): AgentReport {
     remember,
     needs,
     resolved,
+    nextWake,
   };
 }
 
@@ -282,6 +297,13 @@ export function appendToNotebook(
   return { notebook: text, added };
 }
 
+/** How the person's "do this next time" reaches the next wake: the server
+ *  keeps the line and hands it to the next run that is not a conversation
+ *  with the person, once. Only a run that carries the person's words may set
+ *  one. */
+export const NEXT_WAKE_INSTRUCTION =
+  "When the user asks for something to be done at your next wake (next run, next time) rather than now, do not do it in this run: add a line \"Next wake: <what to do, complete and in your own words>\" and say it is set aside. Polyth hands it to your next wake once.";
+
 /** The protocol, as the agent reads it at the end of a new session's prompt. */
 export const REPORT_INSTRUCTIONS = [
   "Finish your final message with one line:",
@@ -294,8 +316,9 @@ export const REPORT_INSTRUCTIONS = [
   "When a request you made earlier no longer waits (the user did it, or it stopped mattering), close it with a line \"Resolved: <the same words>\".",
   "If you start background work and end your turn to wait for it, leave out the Report line until the final message: a message without it while that work runs is not your report.",
   "For anything later runs should know (a preference, a decision, a state to track), add a line \"Remember: <note>\". Keep notes short; they go into your notebook.",
+  NEXT_WAKE_INSTRUCTION,
 ].join("\n");
 
 /** The same protocol, as a reminder in a continuing session. */
 export const REPORT_REMINDER =
-  "Finish with \"Report: quiet|update|alert — <headline>\" (shown above your message: do not restate it there; only in your final message, not while background work you wait for runs); add \"Remember: <note>\" lines for anything later runs should know, \"Needs you: <what> — <why> — <link>\" lines for what only the user can do, and \"Resolved: <the same words>\" for an earlier request that no longer waits.";
+  "Finish with \"Report: quiet|update|alert — <headline>\" (shown above your message: do not restate it there; only in your final message, not while background work you wait for runs); add \"Remember: <note>\" lines for anything later runs should know, \"Needs you: <what> — <why> — <link>\" lines for what only the user can do, and \"Resolved: <the same words>\" for an earlier request that no longer waits; when the user asks for something at your next wake rather than now, do not do it now: add \"Next wake: <what to do>\".";
