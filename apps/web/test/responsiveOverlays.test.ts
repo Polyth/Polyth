@@ -1123,15 +1123,15 @@ test("multi-repository scope shares one context row and folds to a count on phon
   await page.setViewportSize({ width: 390, height: 720 });
 });
 
-test("model picker keeps one height across sparse, dense, filtered, and empty harness catalogs", { skip: !CHROME }, async () => {
+test("model picker hugs short catalogs, caps long ones, and its open floor keeps search and headers still", { skip: !CHROME }, async () => {
   assert.ok(page);
   const css = `${await read("../src/styles.css")}\n${await read("../../../packages/models/widgets/provider-logo-styles.css")}\n${await read("../../../packages/models/widgets/model-picker-styles.css")}`;
   const pop = (
     id: string,
     renderedRows: number,
-    options: { empty?: boolean; header?: string; maxHeight?: number; query?: boolean } = {},
+    options: { empty?: boolean; header?: string; maxHeight?: number; query?: boolean; floor?: number } = {},
   ) => `
-    <div class="ui-popover model-pop" id="${id}" style="width:360px${options.maxHeight ? `;max-height:${options.maxHeight}px` : ""}">
+    <div class="ui-popover model-pop" id="${id}" style="width:360px${options.maxHeight ? `;max-height:${options.maxHeight}px` : ""}${options.floor ? `;height:${options.floor}px` : ""}">
       <div class="model-picker-shell">
         <div class="model-picker-bar" id="${id}-bar">
           <div class="model-picker-header">${options.header ?? "<span>Harness header</span>"}</div>
@@ -1153,13 +1153,15 @@ test("model picker keeps one height across sparse, dense, filtered, and empty ha
   }, selector);
 
   await page.setViewportSize({ width: 1440, height: 720 });
-  await page.setContent(`<style>${css}</style><div style="display:flex;gap:20px;align-items:flex-start">${pop("sparse", 2)}${pop("dense", 8)}</div>`);
+  await page.setContent(`<style>${css}</style><div style="display:flex;gap:20px;align-items:flex-start">${pop("sparse", 2)}${pop("dense", 40)}</div>`);
   const sparsePop = await rect("#sparse");
   const densePop = await rect("#dense");
   const sparse = await rect("#sparse-list");
   const dense = await rect("#dense-list");
-  assert.equal(sparsePop.height, densePop.height, "switching between sparse and dense harnesses keeps the surface height");
-  assert.equal(sparse.height, dense.height, "catalog content changes only the list's overflow, not its geometry");
+  assert.ok(sparsePop.height < 200, `a two-model catalog leaves no empty well (${sparsePop.height}px)`);
+  assert.ok(sparse.scroll <= sparse.client + 1, "a short catalog fits without scrolling");
+  assert.ok(Math.abs(densePop.height - Math.min(560, 720 * 0.72)) < 1, `a long catalog stops at the cap (${densePop.height}px)`);
+  assert.ok(dense.scroll > dense.client + 1, "and its list owns the overflow");
   const lastRow = await rect("#sparse-list .model-picker-row:last-child");
   assert.ok(lastRow.bottom <= sparse.bottom + 0.5, "both rows are fully visible when the viewport has room");
   const header = await rect("#sparse .model-picker-header");
@@ -1168,10 +1170,10 @@ test("model picker keeps one height across sparse, dense, filtered, and empty ha
   assert.ok(field.top >= sparse.bottom - 0.5, "the search field sits below the list, nearest the composer trigger");
   assert.ok(field.bottom <= sparsePop.bottom + 0.5, "and inside the surface");
 
-  // Harness controls and transition/error notices may make the header taller,
-  // but the outer surface remains fixed and gives the list the remaining room.
+  // Harness controls and transition/error notices may make the header taller;
+  // a capped surface stays put and gives the list the remaining room.
   const statusHeader = `<div><div>Codex · Claude · OpenCode</div><p style="margin:8px 0">Switching runtime…</p><div role="alert">Runtime unavailable. Retry.</div></div>`;
-  await page.setContent(`<style>${css}</style><div style="display:flex;gap:20px;align-items:flex-start">${pop("plain-header", 8)}${pop("status-header", 8, { header: statusHeader })}</div>`);
+  await page.setContent(`<style>${css}</style><div style="display:flex;gap:20px;align-items:flex-start">${pop("plain-header", 40)}${pop("status-header", 40, { header: statusHeader })}</div>`);
   const plainHeaderPop = await rect("#plain-header");
   const statusHeaderPop = await rect("#status-header");
   const plainHeaderList = await rect("#plain-header-list");
@@ -1183,8 +1185,11 @@ test("model picker keeps one height across sparse, dense, filtered, and empty ha
   assert.ok(statusHeaderRect.bottom <= statusHeaderList.top + 0.5 && statusSearch.height > 0, "multi-line harness status does not overlap the list");
 
   // Typing a query (which brings the clear button) and filtering rows out
-  // must not move the search input, the harness header or resize the list.
-  await page.setContent(`<style>${css}</style><div style="display:flex;gap:20px;align-items:flex-start">${pop("full", 8, { query: true })}${pop("filtered", 2, { query: true })}${pop("closed", 8)}</div>`);
+  // must not move the search input, the harness header or resize the list:
+  // ModelPicker pins the tallest height reached while open (the floor).
+  await page.setContent(`<style>${css}</style>${pop("measure", 8)}`);
+  const openFloor = (await rect("#measure")).height;
+  await page.setContent(`<style>${css}</style><div style="display:flex;gap:20px;align-items:flex-start">${pop("full", 8, { query: true, floor: openFloor })}${pop("filtered", 2, { query: true, floor: openFloor })}${pop("closed", 8, { floor: openFloor })}</div>`);
   assert.equal((await rect("#full-list")).top, (await rect("#closed-list")).top, "a query does not jump the list");
   assert.equal((await rect("#full-search")).top, (await rect("#closed-search")).top, "the clear button does not move the field");
   assert.equal((await rect("#full .model-picker-header")).height, (await rect("#closed .model-picker-header")).height, "the harness header stays while searching");
@@ -1202,12 +1207,12 @@ test("model picker keeps one height across sparse, dense, filtered, and empty ha
   const tops = await page.evaluate(() => [...document.querySelectorAll("#many .ui-tab")].map((tab) => Math.round(tab.getBoundingClientRect().top)));
   assert.equal(new Set(tops).size, 1, `harness tabs stay on one row (${tops.join(",")})`);
 
-  // An empty catalog keeps its message visible.
-  await page.setContent(`<style>${css}</style>${pop("empty", 0, { empty: true })}`);
+  // An empty catalog keeps its message visible, also under an open floor.
+  await page.setContent(`<style>${css}</style>${pop("empty", 0, { empty: true })}${pop("empty-floor", 0, { empty: true, floor: openFloor })}`);
   const emptyList = await rect("#empty-list");
   const emptyMsg = await rect("#empty-list .palette-empty");
   assert.ok(emptyList.height >= emptyMsg.height, "the empty message is not clipped");
-  assert.equal((await rect("#empty")).height, densePop.height, "an empty or loading harness keeps the same surface height");
+  assert.equal((await rect("#empty-floor")).height, openFloor, "an empty or loading harness keeps the surface height reached while open");
 
   // Short viewport: the surface caps and the list scrolls rather than pushing chrome out.
   await page.setViewportSize({ width: 1440, height: 300 });
@@ -1238,7 +1243,7 @@ test("model picker keeps one height across sparse, dense, filtered, and empty ha
     ],
   });
   try {
-    await mobilePage.setContent(`<style>${css}</style><div style="display:flex;gap:20px;align-items:flex-start">${pop("mobile-sparse", 2)}${pop("mobile-dense", 8)}</div>`);
+    await mobilePage.setContent(`<style>${css}</style><div style="display:flex;gap:20px;align-items:flex-start">${pop("mobile-sparse", 2)}${pop("mobile-dense", 40)}</div>`);
     const mobileGeometry = await mobilePage.evaluate(() => {
       const sparse = document.querySelector<HTMLElement>("#mobile-sparse")!;
       const dense = document.querySelector<HTMLElement>("#mobile-dense")!;
@@ -1252,10 +1257,10 @@ test("model picker keeps one height across sparse, dense, filtered, and empty ha
         scaledRadius,
       };
     });
-    assert.ok(Math.abs(mobileGeometry.sparseHeight - 720 * 0.52) < 1,
-      `phone picker uses the compact visual-viewport height (${mobileGeometry.sparseHeight}px)`);
-    assert.equal(mobileGeometry.denseHeight, mobileGeometry.sparseHeight,
-      "phone harness catalogs keep the same outer height");
+    assert.ok(Math.abs(mobileGeometry.denseHeight - 720 * 0.52) < 1,
+      `a long phone catalog stops at the compact visual-viewport cap (${mobileGeometry.denseHeight}px)`);
+    assert.ok(mobileGeometry.sparseHeight < mobileGeometry.denseHeight - 40,
+      `a short phone catalog hugs its rows (${mobileGeometry.sparseHeight}px)`);
     assert.equal(mobileGeometry.defaultRadius, "12px", "phone picker uses the surface radius token");
     assert.equal(mobileGeometry.scaledRadius, "6px", "phone picker follows the selected rounding scale");
 

@@ -24,6 +24,8 @@ import { harnessDisplayName, harnessProfileName, harnessTint as tint } from "./p
 export { HarnessSettings };
 
 const api = createApiTransport();
+/** Up to this many runnable harnesses, picker tabs show names beside logos. */
+const NAMED_HARNESS_TABS_MAX = 3;
 
 /** Fills `{token}` placeholders of a message with elements (a logo beside a
  *  name) while the translator keeps word order: the message is translated
@@ -206,16 +208,22 @@ export function HarnessTabs({
   const activeTab = requestedTab && visibleRows.some((row) => row.identity.id === requestedTab)
     ? requestedTab
     : "";
-  const tabs = visibleRows.map((row) => ({
-    id: row.identity.id,
-    label: <Tooltip content={harnessProfileName(row.identity)}>
-      <span className="pkg-harnesses-tab-mark" data-tinted={row.identity.color || row.identity.accountLabel ? "true" : undefined} style={tint(row.identity)}>
-        <ProviderLogo providerID={row.identity.id} providerName={row.identity.defaultName ?? row.identity.name} size="compact" />
-        <span className="sr-only">{harnessProfileName(row.identity)}</span>
-      </span>
-    </Tooltip>,
-    disabled: activeTab !== row.identity.id && busy,
-  }));
+  // A logo alone does not say what the strip is: a lone harness read as an
+  // unlabeled button that did nothing. While a few harnesses share the row each
+  // tab names its harness; a crowded row falls back to logos with tooltips.
+  const namedTabs = visibleRows.length <= NAMED_HARNESS_TABS_MAX;
+  const tabs = visibleRows.map((row) => {
+    const name = harnessProfileName(row.identity);
+    const mark = <span className="pkg-harnesses-tab-mark" data-tinted={row.identity.color || row.identity.accountLabel ? "true" : undefined} style={tint(row.identity)}>
+      <ProviderLogo providerID={row.identity.id} providerName={row.identity.defaultName ?? row.identity.name} size="compact" />
+      <span className={namedTabs ? "pkg-harnesses-tab-name" : "sr-only"}>{name}</span>
+    </span>;
+    return {
+      id: row.identity.id,
+      label: namedTabs ? mark : <Tooltip content={name}>{mark}</Tooltip>,
+      disabled: activeTab !== row.identity.id && busy,
+    };
+  });
   // A session or pin can still point at a harness that became unusable. Its
   // tab is gone, so keep the recovery path without naming the hidden harness:
   // the next turn can move to any visible tab, and Settings can finish setup.

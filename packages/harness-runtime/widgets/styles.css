@@ -4,6 +4,8 @@
 .pkg-harnesses-picker-tabs-head .pkg-harnesses-tablist { flex: 1 1 auto; min-width: 0; flex-wrap: wrap; overflow: visible; }
 .pkg-harnesses-tablist .ui-tab { display: inline-flex; align-items: center; justify-content: center; flex: 1 1 0; min-width: max(var(--control-h-sm), var(--hit-min)); padding-inline: var(--space-1); }
 .pkg-harnesses-tablist .ui-tab > span { display: inline-flex; }
+.pkg-harnesses-tab-mark { align-items: center; gap: var(--space-1); min-width: 0; }
+.pkg-harnesses-tab-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .pkg-harnesses small { color: var(--muted); font-size: var(--font-meta); font-weight: 400; }
 

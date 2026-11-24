@@ -643,6 +643,10 @@ test("only enabled usable harnesses are rendered in the picker", async () => {
       "enabled but setup-incomplete or unauthorized harnesses are hidden, not merely disabled; disabled providers stay hidden");
     assert.equal(container.querySelector('[role="tab"][id$="-cursor"]'), null,
       "an unusable harness must not be visible in the picker");
+    const lone = container.querySelector<HTMLElement>('[role="tab"]');
+    assert.equal(lone?.querySelector(".pkg-harnesses-tab-name")?.textContent, "Codex",
+      "a lone harness tab names its harness instead of showing an unlabeled logo");
+    assert.equal(lone?.querySelector(".sr-only"), null, "the visible name is the accessible name");
   } finally {
     await act(async () => { root.unmount(); });
     container.remove();

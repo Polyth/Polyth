@@ -485,7 +485,7 @@ test("model picker shell keeps fixed geometry while details open beside it", asy
     assert.ok(document.body.querySelector(".model-picker-shell"), "catalog stays inside the shell");
     assert.ok(document.body.querySelector("#model-pop-listbox"), "listbox stays in the shell");
     assert.equal(document.body.querySelector(".model-details-panel"), null, "details stay closed initially");
-    assert.match(styles, /\.model-pop\s*\{[^}]*height:\s*min\(560px,\s*72vh\)/s, "popover height is pinned");
+    assert.match(styles, /\.model-pop\s*\{[^}]*height:\s*auto;[^}]*max-height:\s*min\(560px,\s*72vh\)/s, "popover hugs its catalog up to the cap");
     assert.doesNotMatch(styles, /\.model-pop\s*\{[^}]*min-height:/s, "collision bounds may shrink the preferred height on short viewports");
 
     const row = document.body.querySelector<HTMLElement>(".model-picker-row");
@@ -849,7 +849,9 @@ test("every harness catalog uses the same compact popover surface on desktop and
   assert.match(source, /model-pop-search-input/);
   assert.doesNotMatch(source, /sheetSize="tall"/);
   assert.doesNotMatch(styles, /\.model-pop--compact/);
-  assert.match(styles, /\.model-pop\s*\{[^}]*height:\s*min\(560px,\s*72vh\)/s);
+  assert.match(styles, /\.model-pop\s*\{[^}]*height:\s*auto;[^}]*max-height:\s*min\(560px,\s*72vh\)/s);
+  assert.match(source, /popHeightFloorRef\.current = Math\.max\(popHeightFloorRef\.current, natural, switchable\)/,
+    "while open the surface keeps the tallest height it reached instead of shrinking");
   assert.match(styles, /\.model-pop-search-input\s*\{[^}]*min-height:\s*var\(--control-h-sm\);/s);
   assert.match(styles, /\.model-provider-head strong\s*\{[^}]*font-size:\s*max\(var\(--font-label\),\s*1rem\);/s);
   assert.match(
@@ -862,13 +864,8 @@ test("every harness catalog uses the same compact popover surface on desktop and
     "phone opening waits for keyboard geometry only when needed");
   assert.match(
     styles,
-    /@media \(pointer: coarse\) \{[\s\S]*?\.model-pop\s*\{[\s\S]*?height:\s*min\(560px,\s*calc\(var\(--visual-vh,\s*100dvh\)\s*\*\s*0\.52\)\);[\s\S]*?max-height:\s*min\(560px,\s*calc\(var\(--visual-vh,\s*100dvh\)\s*\*\s*0\.52\)\);[\s\S]*?border-radius:\s*var\(--radius-surface\);/s,
-    "phone picker keeps a fixed compact size and uses the user-scaled surface radius",
-  );
-  assert.doesNotMatch(
-    styles,
-    /@media \(pointer: coarse\) \{[\s\S]*?\.model-pop\s*\{[^}]*height:\s*auto/s,
-    "phone catalog changes cannot switch the popover back to content-sized geometry",
+    /@media \(pointer: coarse\) \{[\s\S]*?\.model-pop\s*\{[\s\S]*?height:\s*auto;[\s\S]*?max-height:\s*min\(560px,\s*calc\(var\(--visual-vh,\s*100dvh\)\s*\*\s*0\.52\)\);[\s\S]*?border-radius:\s*var\(--radius-surface\);/s,
+    "phone picker hugs its catalog up to the compact cap and uses the user-scaled surface radius",
   );
   const hook = await read("../src/components/ui/useAnchoredPosition.ts");
   const popover = await read("../src/components/ui/Popover.tsx");
@@ -1372,5 +1369,68 @@ test("the keyboard-active row starts on the selected model, also after a harness
   } finally {
     await act(async () => { root.unmount(); });
     container.remove();
+  }
+});
+
+test("a picker with harness tabs opens tall enough for the largest switchable catalog, so a switch never resizes it", async () => {
+  const { act, createElement } = await import("react");
+  const { createRoot } = await import("react-dom/client");
+  const { default: ModelPicker } = await import("../../../packages/models/widgets/ModelPicker.tsx");
+  // happy-dom has no layout: give rows a 34px pitch, the surface 60px of
+  // chrome around the list, and the list the scroll height of its rows.
+  const proto = window.HTMLElement.prototype as unknown as HTMLElement;
+  const saved = (["offsetHeight", "clientHeight", "scrollHeight"] as const)
+    .map((key) => [key, Object.getOwnPropertyDescriptor(proto, key) ?? Object.getOwnPropertyDescriptor(window.Element.prototype, key)] as const);
+  const popHeight = (el: HTMLElement) => parseFloat(el.style.height) || 100;
+  Object.defineProperty(proto, "offsetHeight", { configurable: true, get(this: HTMLElement) {
+    if (this.matches(".model-picker-row, .model-provider-head")) return 34;
+    if (this.matches(".model-pop")) return popHeight(this);
+    return 0;
+  } });
+  Object.defineProperty(proto, "clientHeight", { configurable: true, get(this: HTMLElement) {
+    const pop = this.closest<HTMLElement>(".model-pop");
+    return this.matches(".model-picker-list") && pop ? popHeight(pop) - 60 : 0;
+  } });
+  Object.defineProperty(proto, "scrollHeight", { configurable: true, get(this: HTMLElement) {
+    return this.matches(".model-picker-list") ? this.querySelectorAll(".model-picker-row, .model-provider-head").length * 34 : 0;
+  } });
+  const flat = (harnessId: string, count: number) => Array.from({ length: count }, (_, index) => ({
+    harnessId, providerID: harnessId, modelID: `${harnessId}-${index}`, name: `${harnessId} ${index + 1}`,
+  })) as ModelDescriptor[];
+  const claude = flat("claude", 2);
+  const codex = flat("codex", 6);
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const height = () => document.body.querySelector<HTMLElement>(".model-pop")!.style.height;
+  const render = (harnessId: string, models: ModelDescriptor[], others: ModelDescriptor[], header: boolean) =>
+    act(async () => {
+      root.render(createElement(ModelPicker, {
+        models,
+        harnessId,
+        otherHarnesses: [{ harnessId: others[0]!.harnessId!, name: others[0]!.harnessId!, models: others }],
+        header: header ? createElement("div", { className: "tabs" }, "tabs") : undefined,
+        onPick: () => {},
+      }));
+    });
+  try {
+    await render("claude", claude, codex, true);
+    await act(async () => { container.querySelector<HTMLButtonElement>(".model-picker-trigger")!.click(); });
+    assert.equal(height(), `${60 + 6 * 34}px`, "opens at the six-model catalog's height, not its own two rows");
+    await render("codex", codex, claude, true);
+    assert.equal(height(), `${60 + 6 * 34}px`, "switching to the larger harness keeps the size");
+    await render("claude", claude, codex, true);
+    assert.equal(height(), `${60 + 6 * 34}px`, "switching back keeps it too");
+    await act(async () => { container.querySelector<HTMLButtonElement>(".model-picker-trigger")!.click(); });
+    await render("claude", claude, codex, false);
+    await act(async () => { container.querySelector<HTMLButtonElement>(".model-picker-trigger")!.click(); });
+    assert.equal(height(), `${60 + 2 * 34}px`, "without harness tabs there is no switch, so it fits its own catalog");
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+    for (const [key, descriptor] of saved) {
+      if (descriptor) Object.defineProperty(proto, key, descriptor);
+      else delete (proto as unknown as Record<string, unknown>)[key];
+    }
   }
 });
