@@ -3921,6 +3921,14 @@ or clamped text — then remaining request fields in words. Transport fields
 render; the raw call stays behind "View raw result". Native todo tools and
 `polyth_todo` share the `@polyth/todos` normalizer and the same checklist.
 
+**Code Mode rows:** OpenCode's Code Mode runs one JavaScript script
+(`execute` with `code`) that calls tools as `tools.<namespace>["tool"](…)`.
+`classifyTool` reads it as a Code row, not a shell: the preview lists the
+tools the script calls (`codeModeToolCalls`) or its first line, and the
+expanded row shows the script as highlighted code under "Script". ACP's
+`execute` kind carries `command` and stays a shell row
+(`apps/web/src/execution.ts`, pinned in `apps/web/test/executionUi.test.ts`).
+
 **Session activity details:** the Chat settings row `chat.activityDetails`
 controls the reusable details surface (`SessionActivityDetails.tsx`). `tabs`
 (the default) exposes Usage and Plan as keyboard-accessible tabs with

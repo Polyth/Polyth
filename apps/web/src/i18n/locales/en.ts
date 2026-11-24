@@ -4392,6 +4392,8 @@ export const en = {
   "execution.copyContents": "Copy contents",
   "execution.contentsOf": "Contents of {path}",
   "execution.contentsOfFile": "Contents of file",
+  "execution.script": "Script",
+  "execution.copyScript": "Copy script",
   "execution.linesAddedOne": "{count} line added",
   "execution.linesAddedOther": "{count} lines added",
   "execution.linesRemovedOne": "{count} line removed",

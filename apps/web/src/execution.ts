@@ -46,6 +46,8 @@ export interface ExecutionPresentation {
   files?: FileDiff[];
   /** Human projection of an MCP call (Polyth agent tools or another server). */
   mcp?: McpCallView;
+  /** JavaScript of an OpenCode Code Mode `execute` call. */
+  code?: string;
 }
 
 export interface ExecutionPathParts {
@@ -228,6 +230,26 @@ function looseMcpCall(tool: string, input: JsonObject): McpCall {
   return rest.length && server ? { server, tool: rest.join("."), args: input } : { server: name || "mcp", tool: name, args: input };
 }
 
+/** OpenCode's Code Mode runs one JavaScript script (`execute {code}`) that
+ *  calls tools as `tools.<namespace>["tool-name"](input)`. ACP's `execute`
+ *  kind is a shell command instead and carries `command`. */
+function codeModeScript(tool: string, input: JsonObject): string | undefined {
+  if (tool.toLowerCase() !== "execute" || firstString(input, ["command", "cmd"])) return undefined;
+  return typeof input.code === "string" && input.code.trim() ? input.code : undefined;
+}
+
+/** The tools a Code Mode script calls, in first-call order. */
+export function codeModeToolCalls(code: string): string[] {
+  const names: string[] = [];
+  const call = /\btools((?:\s*\??\.\s*[A-Za-z_$][\w$]*|\s*(?:\?\.)?\s*\[\s*(?:"[^"\n]*"|'[^'\n]*'|`[^`\n]*`)\s*\])+)\s*(?:\?\.)?\s*\(/g;
+  for (const match of code.matchAll(call)) {
+    const last = /(?:\.\s*([A-Za-z_$][\w$]*)|\[\s*["'`]([^"'`\n]*)["'`]\s*\])\s*$/.exec(match[1] ?? "");
+    const name = last?.[1] ?? last?.[2];
+    if (name && !names.includes(name)) names.push(name);
+  }
+  return names;
+}
+
 function classifyMcpCall(call: McpCall): ExecutionKind {
   const tool = call.tool.toLowerCase();
   if (isPolythMcpCall(call)) {
@@ -253,6 +275,8 @@ export function classifyTool(rawTool: string, rawInput: JsonObject): ExecutionKi
   );
   const action = firstString(input, ["action"]);
   if (value === "polyth" && action === "agent.spawn") return "subagent";
+  // A Code Mode script calls tools; it is not a shell command.
+  if (codeModeScript(value, input)) return "tool";
   // `execute` is ACP's standard kind for a shell call (Copilot, DeepSeek, …).
   const shell = /^(bash|shell|shell_command|run_shell|exec|execute|terminal)$/.test(value);
   const command = firstString(input, ["command", "cmd"]);
@@ -526,7 +550,8 @@ export function executionPresentation(
   const effective = effectiveToolCall(message.tool, message.input);
   const { tool, input } = effective;
   const kind = classifyTool(tool, input);
-  let label = displayLabel(kind, tool);
+  const script = kind === "tool" ? codeModeScript(tool, input) : undefined;
+  let label = script ? "Code" : displayLabel(kind, tool);
   let mcp: McpCallView | undefined;
   const path = firstString(input, [
     "filePath", "file_path", "path", "file", "target", "destination",
@@ -587,6 +612,11 @@ export function executionPresentation(
         ?? "Delegated task",
       86,
     );
+  } else if (script) {
+    // The calls say what the script did; a script without one shows its
+    // first line.
+    const calls = codeModeToolCalls(script);
+    preview = endTruncate(calls.length ? calls.join(" · ") : script.trim().split(/\r?\n/)[0] ?? "", 86);
   } else if (isNativeTodoTool(tool)) {
     label = "Plan";
     const items = nativeTodoItems(tool, input);
@@ -610,6 +640,7 @@ export function executionPresentation(
     ...(stats ? { stats } : {}),
     ...(files.length > 0 ? { files } : {}),
     ...(mcp ? { mcp } : {}),
+    ...(script ? { code: script } : {}),
   };
 }
 

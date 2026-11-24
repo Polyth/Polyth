@@ -4389,6 +4389,8 @@ export const zhCN: AppMessages = {
   "execution.copyContents": "复制内容",
   "execution.contentsOf": "{path} 的内容",
   "execution.contentsOfFile": "文件内容",
+  "execution.script": "脚本",
+  "execution.copyScript": "复制脚本",
   "execution.linesAddedOne": "新增 {count} 行",
   "execution.linesAddedOther": "新增 {count} 行",
   "execution.linesRemovedOne": "删除 {count} 行",

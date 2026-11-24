@@ -4389,6 +4389,8 @@ export const uk: AppMessages = {
   "execution.copyContents": "Копіювати вміст",
   "execution.contentsOf": "Вміст {path}",
   "execution.contentsOfFile": "Вміст файлу",
+  "execution.script": "Скрипт",
+  "execution.copyScript": "Копіювати скрипт",
   "execution.linesAddedOne": "Додано {count} рядок",
   "execution.linesAddedOther": "Додано рядків: {count}",
   "execution.linesRemovedOne": "вилучено {count} рядок",

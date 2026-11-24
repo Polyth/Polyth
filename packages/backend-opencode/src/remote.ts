@@ -41,7 +41,7 @@ import {
   OPENCODE_V2_DELEGATION_PLUGIN_FILENAME,
   OPENCODE_V2_DELEGATION_PLUGIN_SOURCE,
 } from "./delegation.ts";
-import { OPENCODE_MCP_TIMEOUT_MS, type OpenCodeLaunchOverlay } from "./provisioner.ts";
+import { OPENCODE_MCP_TIMEOUT_MS, openCodeV2Mcp, type OpenCodeLaunchOverlay } from "./provisioner.ts";
 import { mergeRemoteConfigContent, portableOpenCodeConfig } from "./remoteConfig.ts";
 import type { PreparedRemoteOpenCodeRuntime } from "./remoteStorage.ts";
 import {
@@ -187,8 +187,9 @@ const remoteAgentToolsLaunch = (
 const remoteAgentToolsConfig = (
   launch: RemoteAgentToolsLaunch,
   remotePort: number,
-): string => JSON.stringify({
-  mcp: {
+  modern: boolean,
+): string => {
+  const mcp = {
     [launch.name]: {
       type: "remote",
       url: `http://127.0.0.1:${remotePort}${launch.path}`,
@@ -196,8 +197,10 @@ const remoteAgentToolsConfig = (
       enabled: true,
       timeout: OPENCODE_MCP_TIMEOUT_MS,
     },
-  },
-});
+  };
+  // The same V2 rules as a local launch: startup budget only, no Code Mode.
+  return JSON.stringify({ mcp: modern ? openCodeV2Mcp(mcp, launch.name) : mcp });
+};
 
 const capabilityOverlayOf = (
   options: Pick<RemoteOpenCodeOptions, "capabilityOverlay">,
@@ -876,7 +879,7 @@ const createRemoteOpenCodeRuntimeInner = async (
       const baseConfigContent = mergeRemoteConfigContent(
         localConfig,
         agentTools && reverse
-          ? remoteAgentToolsConfig(agentTools, reverse.remotePort)
+          ? remoteAgentToolsConfig(agentTools, reverse.remotePort, modern)
           : undefined,
       );
       const delegationPluginPath = modern

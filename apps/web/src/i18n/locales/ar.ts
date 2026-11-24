@@ -4389,6 +4389,8 @@ export const ar: AppMessages = {
   "execution.copyContents": "نسخ المحتوى",
   "execution.contentsOf": "محتوى {path}",
   "execution.contentsOfFile": "محتوى الملف",
+  "execution.script": "البرنامج النصي",
+  "execution.copyScript": "نسخ البرنامج النصي",
   "execution.linesAddedOne": "الأسطر المضافة: {count}",
   "execution.linesAddedOther": "الأسطر المضافة: {count}",
   "execution.linesRemovedOne": "الأسطر المحذوفة: {count}",

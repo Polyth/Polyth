@@ -4389,6 +4389,8 @@ export const ptBR: AppMessages = {
   "execution.copyContents": "Copiar conteúdo",
   "execution.contentsOf": "Conteúdo de {path}",
   "execution.contentsOfFile": "Conteúdo do arquivo",
+  "execution.script": "Script",
+  "execution.copyScript": "Copiar script",
   "execution.linesAddedOne": "{count} linha adicionada",
   "execution.linesAddedOther": "{count} linhas adicionadas",
   "execution.linesRemovedOne": "{count} linha removida",

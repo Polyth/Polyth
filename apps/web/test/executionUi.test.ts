@@ -7,6 +7,8 @@ import { Window } from "happy-dom";
 import {
   classifyTool,
   cleanShellCommand,
+  codeModeToolCalls,
+  describeToolActivity,
   compactUrl,
   executionGroupLabel,
   executionPathParts,
@@ -199,6 +201,26 @@ test("ACP tool kinds read as what the call did, not as the kind's name", () => {
   const other = executionPresentation(tool({ tool: "other", input: { skill: "review", description: "Using skill: review" } }));
   assert.equal(other.label, "Tool");
   assert.equal(other.preview, "Using skill: review");
+});
+
+const codeModeScript = [
+  'const todo = await tools["polyth-agent-tools"].polyth_todo({ items: [] });',
+  'const markers = await tools.polyth_agent_tools?.["polyth_session_markers"]({ action: "list" });',
+  'await tools["polyth-agent-tools"].polyth_todo({ items: [] });',
+  "return { todo, markers };",
+].join("\n");
+
+test("an OpenCode Code Mode script reads as Code with the tools it calls, not as a shell", () => {
+  // OpenCode's `execute {code}` runs JavaScript; ACP's `execute` above carries a command.
+  const script = executionPresentation(tool({ tool: "execute", input: { code: codeModeScript }, output: "{}" }));
+  assert.equal(script.kind, "tool");
+  assert.equal(script.label, "Code");
+  assert.equal(script.preview, "polyth_todo · polyth_session_markers");
+  assert.equal(script.code, codeModeScript);
+  assert.equal(script.command, undefined);
+  assert.deepEqual(codeModeToolCalls("const r = await fetch(url);\nreturn r.status;"), []);
+  assert.equal(executionPresentation(tool({ tool: "execute", input: { code: "const r = await fetch(url);\nreturn r.status;" } })).preview, "const r = await fetch(url);");
+  assert.equal(describeToolActivity("execute", { code: codeModeScript }).kind, "tool");
 });
 
 test("shell-backed tests use human summaries across harness command shapes", () => {
@@ -666,6 +688,28 @@ test("browser activity rows expose readable summaries and retain command details
     await act(async () => disclosure.click());
     assert.ok(container.querySelector(".execution-details")?.textContent?.includes("polyth-browser.mjs"));
     assert.ok(container.querySelector('button[aria-label="View execution details"]'), "browser helper commands keep raw details behind the terminal action");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test("a Code Mode row shows its script as code, not as a shell command", async () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(createElement(ExecutionRow, { message: tool({ tool: "execute", input: { code: codeModeScript }, output: "{}", metadata: {} }) })));
+    assert.equal(container.querySelector(".execution-row")?.getAttribute("data-execution-kind"), "tool");
+    assert.equal(container.querySelector(".tool-name")?.textContent, "Code");
+    assert.equal(container.querySelector(".tool-preview")?.classList.contains("command"), false);
+    await act(async () => container.querySelector<HTMLButtonElement>(".execution-summary")!.click());
+    assert.equal(container.querySelector(".execution-terminal") === null, true, "a script is not a terminal command");
+    const lines = [...container.querySelectorAll(".execution-code-line")].map((line) => line.textContent ?? "");
+    assert.equal(lines.length, 4);
+    assert.match(lines[1]!, /polyth_session_markers/);
+    assert.equal(container.querySelector('[role="group"]')?.getAttribute("aria-label"), "Script");
+    assert.equal([...container.querySelectorAll(".execution-input dt")].some((term) => term.textContent === "code"), false, "the script is not repeated as a one-line field");
   } finally {
     await act(async () => root.unmount());
     container.remove();

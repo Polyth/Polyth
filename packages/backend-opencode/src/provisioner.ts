@@ -102,6 +102,64 @@ export function peekOpenCodeLaunchOverlay(input: {
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
+/** Capability whose MCP server carries Polyth's own agent tools. */
+const AGENT_TOOLS_CAPABILITY_ID = "polyth.agent-tools";
+
+/** The overlay is staged in the V1 form (`mcp.<name>`, `enabled`, numeric
+ *  `timeout`), which 1.x requires and released V2 also reads. V2 normalizes a
+ *  V1 numeric `timeout` into its startup, catalog AND execution limits
+ *  (2.3.0), so the startup budget then also failed every tool call still
+ *  running, or still waiting for a person's approval, at 30 s. A V2 launch
+ *  therefore stages typed servers in V2's own `mcp.servers` form: the V1
+ *  budget covers startup and discovery only, execution keeps OpenCode's own
+ *  limit. */
+const v2McpServer = (entry: Record<string, unknown>, directTools: boolean): Record<string, unknown> => {
+  const { enabled, timeout, ...fields } = entry;
+  return {
+    ...fields,
+    ...(typeof enabled === "boolean" ? { disabled: !enabled } : {}),
+    ...(typeof timeout === "number" ? { timeout: { startup: timeout, catalog: timeout } } : {}),
+    // V2 hides an MCP server's tools behind Code Mode's `execute`/`search` by
+    // default. Polyth's instructions name its agent tools directly and the
+    // feed draws a card per call, so that one server stays direct; other MCP
+    // servers keep OpenCode's default.
+    ...(directTools ? { codemode: false } : {}),
+  };
+};
+
+const v2McpConfig = (
+  extraMcp: Record<string, unknown>,
+  baseMcp: Record<string, unknown>,
+  directToolsName: string | undefined,
+): Record<string, unknown> => {
+  const baseServers = isPlainObject(baseMcp.servers) ? baseMcp.servers : {};
+  const merged: Record<string, unknown> = { ...baseMcp };
+  const servers: Record<string, unknown> = { ...baseServers };
+  for (const [name, value] of Object.entries(extraMcp)) {
+    if (isPlainObject(value) && (value.type === "local" || value.type === "remote")) {
+      // A staged server replaces a same-named V1 entry from the base document.
+      delete merged[name];
+      servers[name] = v2McpServer(value, name === directToolsName);
+    } else if (isPlainObject(value) && name in baseServers) {
+      // An `enabled`-only mask is not a valid V2 server on its own; it can
+      // only switch off the base document's same-named server.
+      const { enabled, ...fields } = value;
+      servers[name] = { ...(baseServers[name] as Record<string, unknown>), ...fields, ...(typeof enabled === "boolean" ? { disabled: !enabled } : {}) };
+    } else {
+      merged[name] = value;
+    }
+  }
+  if (Object.keys(servers).length) merged.servers = servers;
+  return merged;
+};
+
+/** V1-form staged MCP entries in V2's own form; `directToolsName` names the
+ *  server whose tools stay outside Code Mode. */
+export const openCodeV2Mcp = (
+  mcp: Record<string, unknown>,
+  directToolsName: string | undefined,
+): Record<string, unknown> => v2McpConfig(mcp, {}, directToolsName);
+
 export function applyOpenCodeLaunchOverlay(
   env: NodeJS.ProcessEnv,
   overlay: OpenCodeLaunchOverlay | undefined,
@@ -109,8 +167,8 @@ export function applyOpenCodeLaunchOverlay(
 ): NodeJS.ProcessEnv {
   if (!overlay) return { ...env };
   const next: NodeJS.ProcessEnv = { ...env, ...overlay.env };
-  // V2 normalizes the V1 config form itself. Keep one immutable overlay.
   const { configPath, configContent } = overlay;
+  const directToolsName = overlay.mcpNames?.[AGENT_TOOLS_CAPABILITY_ID];
   if (configPath) {
     if (env.OPENCODE_CONFIG && resolve(env.OPENCODE_CONFIG) !== configPath) {
       throw new Error("Native Polyth skills require a private OPENCODE_CONFIG; an existing custom config cannot be relocated safely");
@@ -120,7 +178,14 @@ export function applyOpenCodeLaunchOverlay(
   if (!configContent.trim()) return next;
   const existing = env.OPENCODE_CONFIG_CONTENT?.trim();
   if (!existing) {
-    next.OPENCODE_CONFIG_CONTENT = configContent;
+    if (profile !== "v2") {
+      next.OPENCODE_CONFIG_CONTENT = configContent;
+      return next;
+    }
+    const generated = JSON.parse(stripJsonc(configContent)) as Record<string, unknown>;
+    next.OPENCODE_CONFIG_CONTENT = JSON.stringify(isPlainObject(generated.mcp)
+      ? { ...generated, mcp: openCodeV2Mcp(generated.mcp, directToolsName) }
+      : generated);
     return next;
   }
   let base: Record<string, unknown>;
@@ -145,12 +210,8 @@ export function applyOpenCodeLaunchOverlay(
       ...baseSkills, ...extraSkills,
       paths: [...new Set([...(Array.isArray(baseSkills.paths) ? baseSkills.paths : []), ...(Array.isArray(extraSkills.paths) ? extraSkills.paths : [])])],
     } } : {}),
-    ...(profile === "v2" && isPlainObject(baseMcp.servers)
-      ? { mcp: { ...baseMcp, servers: { ...baseMcp.servers, ...Object.fromEntries(Object.entries(extraMcp).map(([name, value]) => {
-        const entry = value as Record<string, unknown>;
-        const { enabled, ...fields } = entry;
-        return [name, { ...fields, ...(typeof enabled === "boolean" ? { disabled: !enabled } : {}) }];
-      })) } } }
+    ...(profile === "v2"
+      ? Object.keys(extraMcp).length ? { mcp: v2McpConfig(extraMcp, baseMcp, directToolsName) } : {}
       : Object.keys(baseMcp).length || Object.keys(extraMcp).length ? { mcp: { ...baseMcp, ...extraMcp } } : {}),
   });
   return next;
@@ -280,9 +341,11 @@ const overlayMcpEntry = (
   };
 };
 
-/** OpenCode gives an MCP server 5 s by default to connect and list its
+/** OpenCode 1.x gives an MCP server 5 s by default to connect and list its
  *  tools, then silently drops it. A healthy Polyth bridge on a loaded host can
- *  take longer, so staged servers get the budget Claude Code uses (30 s). */
+ *  take longer, so staged servers get the budget Claude Code uses (30 s). It
+ *  is a startup/discovery budget, never a tool-call limit: a V2 launch maps it
+ *  to `timeout.startup`/`timeout.catalog` only (see `v2McpServer`). */
 export const OPENCODE_MCP_TIMEOUT_MS = 30_000;
 
 export function polythSkillId(owner: string, name: string): string {

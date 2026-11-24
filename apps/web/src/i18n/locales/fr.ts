@@ -4389,6 +4389,8 @@ export const fr: AppMessages = {
   "execution.copyContents": "Copier le contenu",
   "execution.contentsOf": "Contenu de {path}",
   "execution.contentsOfFile": "Contenu du fichier",
+  "execution.script": "Script",
+  "execution.copyScript": "Copier le script",
   "execution.linesAddedOne": "{count} ligne ajoutée",
   "execution.linesAddedOther": "{count} lignes ajoutées",
   "execution.linesRemovedOne": "{count} ligne supprimée",

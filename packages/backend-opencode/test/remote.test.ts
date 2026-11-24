@@ -763,15 +763,20 @@ test("remote v2 launch frames the password and private tool config as separate s
   assert.equal(password, "remote-v2-tools-password");
   assert.equal(trailing, "");
   const config = JSON.parse(rawConfig!) as {
-    mcp: Record<string, { headers: Record<string, string> }>;
+    mcp: { servers: Record<string, { headers: Record<string, string>; timeout?: unknown; codemode?: boolean }> };
     permissions?: Array<{ action?: string; resource?: string; effect?: string }>;
     plugins?: unknown[];
   };
-  assert.equal(config.mcp["polyth-agent-tools"]?.headers.Authorization, `Bearer ${token}`);
+  t.after(() => runtime.dispose());
+  const bridge = config.mcp.servers["polyth-agent-tools"];
+  assert.equal(bridge?.headers.Authorization, `Bearer ${token}`);
+  // V2 would turn a V1 numeric timeout into a 30 s limit on every tool call,
+  // and its default Code Mode would hide Polyth's tools behind `execute`.
+  assert.deepEqual(bridge?.timeout, { startup: 30_000, catalog: 30_000 });
+  assert.equal(bridge?.codemode, false);
   assert.deepEqual(config.permissions?.at(-1), { action: "subagent", resource: "*", effect: "deny" });
   assert.match(String(config.plugins?.at(-1) ?? ""), new RegExp(`${OPENCODE_V2_DELEGATION_PLUGIN_FILENAME}$`));
   assert.doesNotMatch(fake.serveStartCommands[0]!, /remote-v2-tools-password|Bearer ab/);
-  await runtime.dispose();
 });
 
 test("installRemoteOpenCode runs the fixed vendor installer on the remote host", async () => {

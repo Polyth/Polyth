@@ -915,6 +915,23 @@ after merging its private home configuration. They report staging before launch,
 and only native absence/disabled readback can confirm negative intent where that
 readback exists. User-owned provider files are not rewritten.
 
+OpenCode 1.x receives the staged servers in its V1 form (`mcp.<name>`,
+`enabled`, numeric `timeout`); a V2 launch gets V2's own `mcp.servers` form
+(`openCodeV2Mcp`, `packages/backend-opencode/src/provisioner.ts`; the SSH
+reverse-loopback bridge uses the same function). V2 turns a V1 numeric
+`timeout` into its startup, catalog *and* execution limits, so the 30 s
+startup budget used to end every tool call at 30 s, an approval card still
+waiting for a person included. V2 therefore gets only `timeout.startup` and
+`timeout.catalog`; execution keeps OpenCode's own limit (12 h in 2.3.0). V2
+also hides an MCP server's tools behind Code Mode (`execute`/`search`) by
+default. `polyth-agent-tools` is staged with `codemode: false`, so the model
+sees Polyth's tools under the names its instructions use and the timeline
+draws a card per call. Other MCP servers keep OpenCode's default. Known gap,
+read from the 2.3.0 binary (`opencode debug config`): V2 drops an
+`enabled`-only entry ("omitted enabled-only legacy MCP entry"). On V2 the
+disabled mask therefore switches off only a same-named server of an existing
+`OPENCODE_CONFIG_CONTENT`, not one in the person's own OpenCode files.
+
 The deterministic cross-harness check is
 `packages/backend-acp/test/hostProjectMcpHarnesses.test.ts`; protocol and isolation
 checks are `packages/server/test/mcpProbe.test.ts` and

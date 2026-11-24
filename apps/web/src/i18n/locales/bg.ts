@@ -4389,6 +4389,8 @@ export const bg: AppMessages = {
   "execution.copyContents": "Копиране на съдържанието",
   "execution.contentsOf": "Съдържание на {path}",
   "execution.contentsOfFile": "Съдържание на файла",
+  "execution.script": "Скрипт",
+  "execution.copyScript": "Копиране на скрипта",
   "execution.linesAddedOne": "{count} добавен ред",
   "execution.linesAddedOther": "{count} добавени реда",
   "execution.linesRemovedOne": "{count} премахнат ред",
