@@ -13,7 +13,9 @@ register("./tsxHooks.mjs", import.meta.url);
 
 const { SyncClient } = await import("../src/sync.ts");
 const progress = await import("../src/toolProgress.ts");
-const { toolPulseState, ToolPulseLine, ToolPulseInline, TOOL_SILENCE_HINT_MS } = await import("../src/components/ToolPulse.tsx");
+const { toolPulseState, ToolPulseLine, ToolPulseInline, ToolKeepRunning, TOOL_SILENCE_HINT_MS } = await import("../src/components/ToolPulse.tsx");
+const { toolAwaiting } = await import("../src/toolAwaiting.ts");
+const { applyEvents } = await import("../src/store.ts");
 const { default: TurnIncompleteNotice, continueIncompleteTurn, CONTINUE_PROMPT } = await import("../src/components/TurnIncompleteNotice.tsx");
 const { buildModel } = await import("../src/reduce.ts");
 const { messageMarkdown } = await import("../src/utils.ts");
@@ -258,6 +260,56 @@ test("Keep running beside the block's Stop: a collapsed or single-call block has
   assert.ok(slot.indexOf("<ToolKeepRunning") > 0 && slot.indexOf("<ToolKeepRunning") < slot.indexOf('className="execution-stop"'),
     "the block's live slot carries Keep running, before Stop so Stop never moves");
   progress.clearToolProgress();
+});
+
+test("a call waiting on a person's card: the same correlation the server's watchdog pause uses", () => {
+  const vault = "mcp__polyth-agent-tools__polyth_credential_vault_run";
+  const base = [
+    ev(1, "turn/started", { turnId: "t1" }, "sa"),
+    ev(2, "tool/started", { callId: "c1", tool: vault, input: {} }, "sa"),
+    ev(3, "tool/started", { callId: "c2", tool: "bash", input: {} }, "sa"),
+    ev(4, "permission/requested", { requestId: "pkg_1", permission: "package-tool", patterns: ["secure-safe.credential-vault-run"], tool: "polyth_credential_vault_run" }, "sa"),
+  ];
+  // Package approvals correlate by the agent tool's name, MCP prefix stripped.
+  assert.equal(toolAwaiting(base, "sa", "c1"), "approval");
+  assert.equal(toolAwaiting(base, "sa", "c2"), null, "an unrelated call keeps its countdown");
+  // Answered or expired: the watchdog runs again, so does the countdown.
+  assert.equal(toolAwaiting([...base, ev(5, "permission/resolved", { requestId: "pkg_1", reply: "once" }, "sa")], "sa", "c1"), null);
+  assert.equal(toolAwaiting([...base, ev(5, "permission/expired", { requestId: "pkg_1" }, "sa")], "sa", "c1"), null);
+  // A parent's mirror of a child's card shelters nothing here.
+  const mirrored = [base[0]!, base[1]!, ev(4, "permission/requested", { ...(base[3]!.data as object), sourceSessionId: "child" }, "sa")];
+  assert.equal(toolAwaiting(mirrored, "sa", "c1"), null);
+  // A card of an earlier turn does not belong to this turn's call.
+  assert.equal(toolAwaiting([...base, ev(5, "turn/stopped", { turnId: "t1" }, "sa"), ev(6, "turn/started", { turnId: "t2" }, "sa"), ev(7, "tool/started", { callId: "c1", tool: vault, input: {} }, "sa")], "sa", "c1"), null);
+  // Native approvals correlate by call id; questions and Vault forms ask for an answer.
+  assert.equal(toolAwaiting([base[0]!, base[2]!, ev(4, "permission/requested", { requestId: "c2", permission: "bash", patterns: [] }, "sa")], "sa", "c2"), "approval");
+  assert.equal(toolAwaiting([base[0]!, ev(2, "tool/started", { callId: "q1", tool: "question", input: {} }, "sa"), ev(3, "question/asked", { requestId: "r1", questions: [] }, "sa")], "sa", "q1"), "answer");
+  assert.equal(toolAwaiting([base[0]!, ev(2, "tool/started", { callId: "v1", tool: "mcp__polyth-agent-tools__polyth_credential_vault_request", input: {} }, "sa"), ev(3, "secret/requested", { requestId: "vault_1", handle: "H", label: "L", origin: "agent-tool", tool: "polyth_credential_vault_request" }, "sa")], "sa", "v1"), "answer");
+});
+
+test("waiting on a person: no auto-stop countdown, no Keep running, the wait said in place", () => {
+  progress.clearToolProgress();
+  const now = Date.now();
+  const startedAt = now - 38 * 60_000;
+  applyEvents([
+    ev(1, "turn/started", { turnId: "t1" }, "sw", startedAt),
+    ev(2, "tool/started", { callId: "cv", tool: "polyth_credential_vault_run", input: {} }, "sw", startedAt),
+    ev(3, "permission/requested", { requestId: "pkg_w", permission: "package-tool", patterns: [], tool: "polyth_credential_vault_run" }, "sw", startedAt),
+  ]);
+  const props = { sessionId: "sw", callId: "cv", startedAt };
+  const inline = renderToStaticMarkup(createElement(ToolPulseInline, props));
+  assert.match(inline, />38m<.*>waiting for approval</);
+  assert.doesNotMatch(inline, /auto-stop|tool-pulse--stopping/);
+  const line = renderToStaticMarkup(createElement(ToolPulseLine, props));
+  assert.match(line, /Waiting for approval · Polyth won(&#x27;|')t stop it while it waits/);
+  assert.doesNotMatch(line, /Keep running|stops it in/);
+  assert.equal(renderToStaticMarkup(createElement(ToolKeepRunning, { ...props, onKept: () => {} })), "");
+  // Near the hard ceiling too: the server holds that clock while it waits.
+  const late = { ...props, startedAt: now - 55 * 60_000 };
+  assert.doesNotMatch(renderToStaticMarkup(createElement(ToolPulseInline, late)), /auto-stop/);
+  // Answered: the ordinary countdown returns.
+  applyEvents([ev(4, "permission/resolved", { requestId: "pkg_w", reply: "once" }, "sw", now)]);
+  assert.match(renderToStaticMarkup(createElement(ToolPulseInline, props)), /auto-stop in/);
 });
 
 test("tool/keep-running marks the running call; old or unknown calls are ignored", () => {

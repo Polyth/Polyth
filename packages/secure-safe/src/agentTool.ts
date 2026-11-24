@@ -88,7 +88,8 @@ const runText = (value: unknown, field: string, max: number): string => {
 };
 
 /** Run one bounded local command with Credential Vault refs resolved for the
- *  person who approved its card. Every call asks a person; the agent gets only
+ *  session's person. Each key's Vault approval level decides whether a call
+ *  needs that person's card; the agent gets only
  *  the redacted output, exit status and flags, never a value or the env. */
 export function createCredentialVaultRunAgentTool(
   resolveRunner: () => VaultRunService | undefined,
@@ -101,7 +102,7 @@ export function createCredentialVaultRunAgentTool(
       scope: "project",
       revision: "1",
       name: "polyth_credential_vault_run",
-      description: "Run one bounded local command with stored Credential Vault secrets resolved by the server. The command must reference a POLYTH_SAFE_* env ref. Every call asks the person for approval, and only the redacted output, exit code and timeout/truncation flags come back to you; you never receive the value or the environment.",
+      description: "Run one bounded local command with stored Credential Vault secrets resolved by the server. The command must reference a POLYTH_SAFE_* env ref. Whether a call asks the person depends on the level they gave each key in the Vault (fully safe, safe under Auto-Approve, Full access only, or always ask); the strictest key wins. Only the redacted output, exit code and timeout/truncation flags come back to you; you never receive the value or the environment.",
       inputSchema: {
         type: "object",
         additionalProperties: false,

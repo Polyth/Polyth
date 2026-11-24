@@ -3,6 +3,7 @@ import type {
   AgentCapabilityContributionRegistry,
   Disposable,
   RouteHandler,
+  SecureSafeApproval,
   SecureSafeKind,
   SecureSafePatchInput,
   SecureSafeScope,
@@ -35,6 +36,13 @@ const kind = (value: unknown): SecureSafeKind => {
   });
 };
 
+const approval = (value: unknown): SecureSafeApproval => {
+  if (value === "safe" || value === "auto" || value === "full" || value === "always") return value;
+  throw Object.assign(new Error("approval must be safe, auto, full, or always"), {
+    code: "invalid-input",
+  });
+};
+
 const scope = (value: unknown): SecureSafeScope => {
   if (value === "global" || value === "project") return value;
   throw Object.assign(new Error("scope must be global or project"), {
@@ -57,6 +65,7 @@ const createInput = (input: Record<string, unknown>) => ({
   ...(input.purpose !== undefined ? { purpose: String(input.purpose) } : {}),
   ...(input.kind !== undefined ? { kind: kind(input.kind) } : {}),
   ...(input.scope !== undefined ? { scope: scope(input.scope) } : {}),
+  ...(input.approval !== undefined ? { approval: approval(input.approval) } : {}),
   ...(input.projectId !== undefined
     ? { projectId: String(input.projectId) }
     : {}),
@@ -69,6 +78,7 @@ const patchInput = (input: Record<string, unknown>): SecureSafePatchInput => ({
   ...(input.purpose !== undefined ? { purpose: String(input.purpose) } : {}),
   ...(input.kind !== undefined ? { kind: kind(input.kind) } : {}),
   ...(input.scope !== undefined ? { scope: scope(input.scope) } : {}),
+  ...(input.approval !== undefined ? { approval: approval(input.approval) } : {}),
   ...(input.projectId !== undefined
     ? { projectId: input.projectId === null ? null : String(input.projectId) }
     : {}),

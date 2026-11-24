@@ -65,10 +65,12 @@ Paired-device access is default-deny unless the owner explicitly grants that dev
   on a supported execution boundary. The one broker is a local bounded run
   (`@polyth/terminal.run`), reached two ways: the person's composer shell
   (`!` / `SessionService.runShell`) and, for agents, the package tool
-  `polyth_credential_vault_run`. Each agent call needs the turn's own person
-  to approve its card (command, handle names, purpose, cwd); Auto-approve,
-  Full access, Judgment, delegated approval and a card "always" never answer
-  it. The server resolves matching `POLYTH_SAFE_*` refs into that one child
+  `polyth_credential_vault_run`. Whether an agent call needs the turn's own
+  person to approve its card (command, handle names, purpose, cwd) is set per
+  key in the Vault: fully safe (never asks), safe under Auto-approve, Full
+  access only (the default) or always ask (even Full access and allow rules
+  ask); the strictest key named wins, and an unknown key asks. Judgment,
+  delegated approval and a card "always" never answer it. The server resolves matching `POLYTH_SAFE_*` refs into that one child
   environment — the signed-in person's own entries first, then the Space's,
   never another member's — redacts known values from captured output, and
   audits only handles. Interactive terminals, remote hosts, browser sign-in and provider

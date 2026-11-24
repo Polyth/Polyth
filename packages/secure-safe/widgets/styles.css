@@ -148,6 +148,13 @@
   grid-column: 1 / -1;
 }
 
+.pkg-credential-vault .credential-vault-approval {
+  display: block;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+
 .pkg-credential-vault .credential-vault-handle,
 .pkg-credential-vault .credential-vault-purpose {
   display: block;

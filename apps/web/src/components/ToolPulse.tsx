@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { api } from "@polyth/session/web-api";
 import { fmtDuration } from "../format.ts";
 import { tr } from "../i18n/index.ts";
+import { getState, subscribeStore } from "../store.ts";
+import { toolAwaiting, type ToolAwaiting } from "../toolAwaiting.ts";
 import { useToolLastOutputAt } from "../toolProgress.ts";
 import { Button } from "./ui/index.ts";
 import "./ToolPulse.css";
@@ -29,11 +31,14 @@ export interface ToolPulseState {
   kept: boolean;
   /** Close to the hard ceiling (from 50 minutes after the start). */
   nearCeiling: boolean;
+  /** A person's card for this call is open: the server stops neither clock
+   *  while it waits, so no countdown and no Keep running. */
+  awaiting?: ToolAwaiting;
 }
 
 /** Pure reading of one running call. `lastOutputAt` is this client's receipt
  *  time of the newest `tool/progress` frame. */
-export function toolPulseState(now: number, startedAt: number, lastOutputAt?: number, kept = false): ToolPulseState {
+export function toolPulseState(now: number, startedAt: number, lastOutputAt?: number, kept = false, awaiting: ToolAwaiting | null = null): ToolPulseState {
   const elapsedMs = Math.max(0, now - startedAt);
   const lastOutputAgoMs = lastOutputAt === undefined ? undefined : Math.max(0, now - lastOutputAt);
   const quietMs = lastOutputAgoMs ?? elapsedMs;
@@ -41,10 +46,17 @@ export function toolPulseState(now: number, startedAt: number, lastOutputAt?: nu
     elapsedMs,
     ...(lastOutputAgoMs === undefined ? {} : { lastOutputAgoMs }),
     quietMs,
-    nearStop: !kept && quietMs >= TOOL_SILENCE_HINT_MS,
+    nearStop: !awaiting && !kept && quietMs >= TOOL_SILENCE_HINT_MS,
     kept,
-    nearCeiling: elapsedMs >= TOOL_HARD_HINT_MS,
+    nearCeiling: !awaiting && elapsedMs >= TOOL_HARD_HINT_MS,
+    ...(awaiting ? { awaiting } : {}),
   };
+}
+
+/** What this call waits for from a person, from the session's cached events. */
+function useToolAwaiting(sessionId: string | null | undefined, callId: string): ToolAwaiting | null {
+  const read = () => toolAwaiting(sessionId ? getState().events[sessionId] : undefined, sessionId, callId);
+  return useSyncExternalStore(subscribeStore, read, read);
 }
 
 function useNow(active: boolean): number {
@@ -61,9 +73,13 @@ function useNow(active: boolean): number {
 /** Live state of a running call, ticking once a second while `running`. */
 export function useToolPulse(sessionId: string | null | undefined, callId: string, startedAt: number, running: boolean, kept = false): ToolPulseState | null {
   const lastOutputAt = useToolLastOutputAt(sessionId, callId);
+  const awaiting = useToolAwaiting(sessionId, callId);
   const now = useNow(running);
-  return running ? toolPulseState(now, startedAt, lastOutputAt, kept) : null;
+  return running ? toolPulseState(now, startedAt, lastOutputAt, kept, awaiting) : null;
 }
+
+const awaitingInline = (awaiting: ToolAwaiting) =>
+  tr(awaiting === "approval" ? "execution.pulseAwaitingApproval" : "execution.pulseAwaitingAnswer");
 
 const lastOutputText = (ms: number) => tr("execution.pulseLastOutput", { ago: fmtDuration(ms) });
 const lastOutputLine = (ms: number) => tr("execution.pulseLastOutputLine", { ago: fmtDuration(ms) });
@@ -107,7 +123,17 @@ export function ToolPulseLine({ sessionId, callId, startedAt, kept = false, kept
   const pulse = useToolPulse(sessionId, callId, startedAt, true, kept);
   const lineRef = useRef<HTMLDivElement>(null);
   const { keep, busy, failed } = useKeepRunning(sessionId, callId, kept, () => lineRef.current?.focus());
-  if (!pulse || (pulse.lastOutputAgoMs === undefined && !pulse.nearStop && !pulse.kept && !pulse.nearCeiling)) return null;
+  if (!pulse || (pulse.lastOutputAgoMs === undefined && !pulse.nearStop && !pulse.kept && !pulse.nearCeiling && !pulse.awaiting)) return null;
+  if (pulse.awaiting) {
+    // The open card above is the action; the server holds both clocks.
+    return (
+      <div className="tool-pulse">
+        <span className="tool-pulse-text" role="status">
+          {tr(pulse.awaiting === "approval" ? "execution.pulseAwaitingApprovalLine" : "execution.pulseAwaitingAnswerLine")}
+        </span>
+      </div>
+    );
+  }
   if (pulse.nearCeiling) {
     return (
       <div className="tool-pulse tool-pulse--stopping" ref={lineRef} tabIndex={-1}>
@@ -190,7 +216,9 @@ export function ToolPulseInline({ sessionId, callId, startedAt, kept = false, ke
       title={pulse.nearStop ? tr("execution.pulseStopHint") : undefined}
     >
       <span className="tool-pulse-part">{fmtDuration(pulse.elapsedMs)}</span>
-      {pulse.nearCeiling
+      {pulse.awaiting
+        ? <span className="tool-pulse-part">{awaitingInline(pulse.awaiting)}</span>
+        : pulse.nearCeiling
         ? <span className="tool-pulse-part tool-pulse-stop">{tr("execution.pulseStopsIn", { duration: ceilingIn(pulse) })}</span>
         : pulse.kept
         ? <span className="tool-pulse-part">{tr(keptBy === "judge" ? "execution.pulseKeptByJudgeInline" : "execution.pulseKeptInline")}</span>

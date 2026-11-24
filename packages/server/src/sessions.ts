@@ -67,6 +67,8 @@ import {
   SESSION_START_FAILED_EVENT,
   SESSION_STARTING_QUEUE_REASON,
   normalizeSessionOrigin,
+  DEFAULT_SECURE_SAFE_APPROVAL,
+  type SecureSafeApproval,
 } from "@polyth/contracts";
 import { chatMentionCandidates, mentionedChatsBlock, sessionMentionCandidates, sessionAudience, sessionOutsiders, sessionShareApprover, sharingRootId, steerPeopleLine, turnPeopleBlock } from "./sessionSharing.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
@@ -4078,11 +4080,37 @@ export function createSessionService(deps: {
     metadata?: JsonObject;
   };
 
-  /** The Vault run executes a command with a stored secret. Only a person's
-   *  own explicit allow rule may answer it: Auto-Approve, Full access,
-   *  Judgment and a delegated (subagent) approval all fail closed here. */
+  /** The Vault run executes a command with stored secrets. Each key carries
+   *  the person's own approval level (set in the Vault); the command takes
+   *  the strictest of its keys. A delegated (subagent) approval fails closed. */
   const vaultRunPermission = (request: PermissionDecisionInput): boolean =>
     request.permission === "package-tool" && request.patterns.includes(VAULT_RUN_TOOL_ID);
+
+  const VAULT_APPROVAL_RANK: Record<SecureSafeApproval, number> = { safe: 0, auto: 1, full: 2, always: 3 };
+  /** The strictest level among the keys the command names, as the acting
+   *  person resolves them (their own entries first, then the Space's). No
+   *  key, or one the Vault does not know, asks every time. */
+  const vaultRunApproval = (request: PermissionDecisionInput, projection: SessionProjection | null | undefined): SecureSafeApproval => {
+    const names = Array.isArray(request.metadata?.handles)
+      ? request.metadata.handles.filter((name): name is string => typeof name === "string" && name.length > 0)
+      : [];
+    if (names.length === 0) return "always";
+    let entries: Array<{ handle: string; approval?: SecureSafeApproval }> = [];
+    try {
+      entries = deps.secureSafe?.listFor?.(projection?.actor?.userId) ?? deps.secureSafe?.list() ?? [];
+    } catch {
+      return "always";
+    }
+    let strictest: SecureSafeApproval = "safe";
+    for (const name of names) {
+      const entry = entries.find((candidate) => candidate.handle === name || secureSafeEnvRef(candidate.handle) === name);
+      const stored = entry?.approval ?? DEFAULT_SECURE_SAFE_APPROVAL;
+      // An unknown key, or a level this server does not know, asks.
+      const level: SecureSafeApproval = entry && Object.hasOwn(VAULT_APPROVAL_RANK, stored) ? stored : "always";
+      if (VAULT_APPROVAL_RANK[level] > VAULT_APPROVAL_RANK[strictest]) strictest = level;
+    }
+    return strictest;
+  };
 
   /** The card names handles, not env refs, when the acting person's or the
    *  Space's entries resolve them. Unknown refs stay as their bounded names. */
@@ -4138,15 +4166,22 @@ export function createSessionService(deps: {
       sessionId,
     );
     if (verdict === "deny") return { reply: "reject", auto: false };
+    // A key marked "always ask" overrides allow rules and every level.
+    const vaultApproval = vaultRunPermission(request) ? vaultRunApproval(request, projection) : undefined;
+    if (vaultApproval === "always") return null;
     if (verdict === "allow") return { reply: "once", auto: false };
-    // Every Vault run needs a person on the card; no policy level answers it.
-    if (vaultRunPermission(request)) return null;
     // A Space with a guarded member never auto-answers, Full access included.
     if (deps.guardedSpace?.(projection?.spaceId)) return null;
     if (isSessionPlanPermission(request)) return { reply: "once", auto: true };
+    // Keys the person marked fully safe need nobody, at any level.
+    if (vaultApproval === "safe") return { reply: "once", auto: true };
     const level = await effectiveAutoAcceptLevel(sessionId);
     if (level === "off") return null;
-    const automatic = level === "all" || autoApproveMayAnswer(await permissionRisk(sessionId, request, projection));
+    // "auto" keys follow Auto-Approve without its risk assessment (the person
+    // judged the key); "full" keys wait for Full access.
+    if (vaultApproval === "full" && level !== "all") return null;
+    const automatic = level === "all" || vaultApproval === "auto"
+      || autoApproveMayAnswer(await permissionRisk(sessionId, request, projection));
     if (!automatic) return null;
     // Judgment may only take this automatic answer away, never grant one.
     return scopeCheckMayAnswer(true, await permissionScopeOutcome(sessionId, request, level, projection, scope))
@@ -13576,11 +13611,12 @@ export function createSessionService(deps: {
               ...request,
               workspaceRoots: await permissionWorkspaceRoots(await store.projection(projection.id)),
             }), scopeOutcome) as unknown as JsonObject,
-            // A Vault run is answered once, by a person: no policy level
-            // answers it, so `manual` keeps clients from hiding the card as
-            // if Auto-Approve/Full access would.
+            // A Vault run card is answered once. It reaches a person only
+            // when its keys' levels left it, so `manual` keeps clients from
+            // hiding it as if their auto-accept flags would answer it. The
+            // keys travel with it, so a later policy change can re-judge it.
             ...(vaultRunPermission(request)
-              ? { allowedScopes: ["once"], manual: true }
+              ? { allowedScopes: ["once"], manual: true, ...(metadata ? { metadata } : {}) }
               : { allowedScopes: [...PERMISSION_ALLOWED_SCOPES] }),
           }, { ignorable: true, producerPlugin: input.owner });
           await syncToolWatchdogsForRequests(projection.id);

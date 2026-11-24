@@ -7563,6 +7563,15 @@ export type SecureSafeKind = "env" | "token" | "password";
 export type SecureSafeScope = "global" | "project";
 
 /** Public metadata only. Secret values never cross this contract boundary. */
+/** When an agent's run of a command that uses this key skips the person's
+ *  card. `safe`: always; `auto`: under Auto-Approve or Full access; `full`:
+ *  only under Full access (the default); `always`: never, every use asks,
+ *  even under Full access or an allow rule. A command naming several keys
+ *  takes the strictest. */
+export type SecureSafeApproval = "safe" | "auto" | "full" | "always";
+export const SECURE_SAFE_APPROVALS: readonly SecureSafeApproval[] = ["safe", "auto", "full", "always"];
+export const DEFAULT_SECURE_SAFE_APPROVAL: SecureSafeApproval = "full";
+
 export interface SecureSafeEntryDto {
   id: string;
   handle: string;
@@ -7570,6 +7579,8 @@ export interface SecureSafeEntryDto {
   purpose: string;
   kind: SecureSafeKind;
   scope: SecureSafeScope;
+  /** Absent on entries saved before levels existed: `full`. */
+  approval?: SecureSafeApproval;
   projectId?: string;
   revision: number;
   createdAt: number;
@@ -7628,6 +7639,7 @@ export interface SecureSafeCreateInput {
   purpose?: string;
   kind?: SecureSafeKind;
   scope?: SecureSafeScope;
+  approval?: SecureSafeApproval;
   projectId?: string;
   value: string;
 }
@@ -7638,6 +7650,7 @@ export interface SecureSafePatchInput {
   purpose?: string;
   kind?: SecureSafeKind;
   scope?: SecureSafeScope;
+  approval?: SecureSafeApproval;
   projectId?: string | null;
   /** Missing or blank retains the current write-only value. */
   value?: string;

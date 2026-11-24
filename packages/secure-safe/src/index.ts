@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWriteSync, collapseRepeatedPackageNamespace, isPackageOpaqueKey, legacyOpaqueOwner, packageOpaqueKey } from "@polyth/plugins";
+import { DEFAULT_SECURE_SAFE_APPROVAL } from "@polyth/contracts";
 import type {
   JsonObject,
   SecureSafeCreateInput,
@@ -10,6 +11,7 @@ import type {
   SecureSafeEntryDto,
   SecureSafeExecutionEnv,
   SecureSafeExecutionRequest,
+  SecureSafeApproval,
   SecureSafeKind,
   SecureSafeManifest,
   SecureSafePartition,
@@ -186,6 +188,9 @@ const validKind = (value: unknown): value is SecureSafeKind =>
 const validScope = (value: unknown): value is SecureSafeScope =>
   value === "global" || value === "project";
 
+const validApproval = (value: unknown): value is SecureSafeApproval =>
+  value === "safe" || value === "auto" || value === "full" || value === "always";
+
 function normalizeHandle(value: unknown): string {
   const handle = requiredText(value, "handle", 64);
   if (!/^[A-Za-z][A-Za-z0-9_.-]*$/.test(handle)) {
@@ -321,6 +326,8 @@ export function createSecureSafeService(opts: SecureSafeOptions): SecureSafeServ
     const scope = input.scope ?? "global";
     if (!validKind(kind)) throw error("invalid-input", "kind must be env, token, or password");
     if (!validScope(scope)) throw error("invalid-input", "scope must be global or project");
+    const approval = input.approval ?? DEFAULT_SECURE_SAFE_APPROVAL;
+    if (!validApproval(approval)) throw error("invalid-input", "approval must be safe, auto, full, or always");
     const projectId = scope === "project" ? requiredText(input.projectId, "projectId", 200) : undefined;
     if (typeof input.value !== "string" || !input.value.trim()) {
       throw error("invalid-input", "value is required");
@@ -334,6 +341,7 @@ export function createSecureSafeService(opts: SecureSafeOptions): SecureSafeServ
       purpose,
       kind,
       scope,
+      approval,
       ...(projectId ? { projectId } : {}),
       revision: 1,
       createdAt: now,
@@ -356,6 +364,8 @@ export function createSecureSafeService(opts: SecureSafeOptions): SecureSafeServ
     const scope = patch.scope ?? row.scope;
     if (!validKind(kind)) throw error("invalid-input", "kind must be env, token, or password");
     if (!validScope(scope)) throw error("invalid-input", "scope must be global or project");
+    const approval = patch.approval ?? row.approval ?? DEFAULT_SECURE_SAFE_APPROVAL;
+    if (!validApproval(approval)) throw error("invalid-input", "approval must be safe, auto, full, or always");
     const requestedProject = patch.projectId === null ? undefined : patch.projectId;
     const projectId = scope === "project"
       ? requiredText(requestedProject ?? row.projectId, "projectId", 200)
@@ -366,6 +376,7 @@ export function createSecureSafeService(opts: SecureSafeOptions): SecureSafeServ
     row.purpose = purpose;
     row.kind = kind;
     row.scope = scope;
+    row.approval = approval;
     if (projectId) row.projectId = projectId;
     else delete row.projectId;
     if (typeof patch.value === "string" && patch.value.trim()) secrets[id] = patch.value;

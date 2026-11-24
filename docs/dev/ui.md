@@ -1123,6 +1123,13 @@ Host-owned (`apps/web`), not a package seam.
   after the start (`TOOL_HARD_HINT_MS`) every call, kept or not, reads "Polyth
   stops it in 5m: commands run at most 60 minutes" with no button, because the
   server's hard ceiling (`TOOL_HARD_STOP_MS`) applies regardless.
+  While a person's card for the call is open (an approval, a question or a
+  Credential Vault form of this session, correlated as the server's
+  `toolAwaitingRequest` does; `apps/web/src/toolAwaiting.ts`), the server
+  pauses both clocks, so the call shows neither countdown nor Keep running:
+  the tail reads `waiting for approval` / `waiting for an answer`, and the
+  expanded line "Waiting for approval · Polyth won't stop it while it waits".
+  Once the card is answered or expires, the ordinary pulse returns.
   The policy sentence ("Polyth stops a command after 10
   minutes with no output.") is the tooltip. The countdown uses the strong ink
   at weight 500, with no colour signal. The pulse uses the summary row's text
