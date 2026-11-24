@@ -5538,15 +5538,16 @@ menu then leaves out the Project rail choice until a project exists. Clicking a
 project in the phone navigator, desktop tree, compact drawer rail, or a
 collapsed Project rail only toggles its sessions; it never activates the
 project, changes the current session, or closes the navigator. In the wide
-expanded Project rail the first click on another project only browses it; a
-second click on the browsed project (its icon or its header row) enters it:
-from the New chat page it opens New chat in that project, and from another
-project's chat it opens that project's latest top-level chat
+expanded Project rail one click on a project (its icon or its header row)
+enters it at once, so the main area and the active (white) mark follow the
+click: from the New chat page it opens New chat in that project, and from
+another project's chat it opens that project's latest top-level chat
 (`latestProjectSession`, `Sidebar.tsx`; New chat when it has none). Inside the
-project already, the second click does nothing, and it never collapses the
-sessions column. A double-click's second click does not act again. The rail's
+project already, the click does nothing, and it never collapses the sessions
+column. A double-click's second click does not act again. The rail's
 browsed project is local presentation state, independent of the active
-workspace. Opening a session or using an explicit project action still
+workspace; only the compact drawer rail and a collapsed rail's peek browse
+without entering. Opening a session or using an explicit project action still
 navigates normally.
 Phone project headers are one vertically centred line: the name truncates and
 the status pills keep their own width beside it, expanded or collapsed, so the

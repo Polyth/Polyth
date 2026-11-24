@@ -97,7 +97,8 @@ import { ARRANGE_LIST_LIFT_MS, useArrange, type ArrangeItem } from "../workspace
 /** Grace period an untouched peek keeps after the pointer leaves the sidebar. */
 export const PEEK_LEAVE_MS = 5000;
 
-/** A project's latest top-level chat, the one a second rail click opens. */
+/** A project's latest top-level chat, the one a rail click opens from a chat
+ *  in another project. */
 export function latestProjectSession(
   sessions: readonly SessionProjection[],
   projects: readonly Project[],
@@ -627,10 +628,10 @@ export default function Sidebar() {
   useEscape(peek !== null && railCollapsed, closePeek);
   // The peek previews the hovered project without stealing the active one.
   const focusProjectId = soloPersonal?.id ?? (railCollapsed ? peek?.projectId : null) ?? railProjectId;
-  /** A second click on the browsed project enters it: the New chat page moves
-   *  to that project, and a chat open in another project gives way to this
-   *  project's latest chat (its New chat when it has none). Inside the
-   *  project already, it does nothing; it never collapses the navigator. */
+  /** Entering a rail project: the New chat page moves to that project, and a
+   *  chat open in another project gives way to this project's latest chat
+   *  (its New chat when it has none). Inside the project already, it does
+   *  nothing; it never collapses the navigator. */
   const enterRailProject = (projectId: string) => {
     if (projectId === activeProjectId) return;
     const target = projects.find((candidate) => candidate.id === projectId);
@@ -651,9 +652,13 @@ export default function Sidebar() {
       setPeek((current) => current?.projectId === projectId && current.pinned
         ? null
         : { projectId, pinned: true });
+    } else if (!compact && !projectsOnly) {
+      // The wide expanded rail enters the project on the first click, so the
+      // main area and the active mark never lag the column behind them.
+      setRailProjectId(projectId);
+      enterRailProject(projectId);
     } else if (railProjectId === projectId) {
-      if (!compact && !projectsOnly) enterRailProject(projectId);
-      else setRailProjectId(null);
+      setRailProjectId(null);
     } else {
       setRailProjectId(projectId);
     }
