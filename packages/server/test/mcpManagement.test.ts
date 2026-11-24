@@ -83,6 +83,22 @@ test("inherited overrides retain credentials internally and inventories stay pro
   assert.equal(mcp.list(a, "p-b")[0]!.status, "starting");
 });
 
+test("a failed tool check reaches the operator log as a warning; a passing one stays quiet", async (t) => {
+  const { a, base } = setup(t);
+  const warnings: string[] = [];
+  t.mock.method(console, "warn", (...args: unknown[]) => { warnings.push(args.map(String).join(" ")); });
+  let next: McpInspectionDto = { ok: false, message: "spawn mcp-server ENOENT", checkedAt: 1, tools: [] };
+  const mcp = createMcpConfigService({ ...base, inspect: async () => next });
+  const row = await mcp.create(a, { name: "broken", transport: http, secrets: { Authorization: "synthetic-test-secret" } }, "p-a");
+  assert.equal((await mcp.test(a, row.id, "p-a")).ok, false);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0]!, new RegExp(`MCP server ${row.id} \\(project\\) failed its tool check: spawn mcp-server ENOENT`));
+  assert.doesNotMatch(warnings[0]!, /synthetic-test-secret/);
+  next = inspection("ok");
+  assert.equal((await mcp.test(a, row.id, "p-a")).ok, true);
+  assert.equal(warnings.length, 1);
+});
+
 test("a single protocol check is shared and a stale result never overwrites edited configuration", async (t) => {
   const { a, base } = setup(t);
   let finish!: (result: McpInspectionDto) => void;

@@ -476,6 +476,13 @@ export function createMcpConfigService(opts: {
     if (!owner || !personal) throw err("not-found", "mcp server not found");
     return { row: personal, owner };
   };
+  /** A server that could not start or answer is otherwise visible only as
+   *  its row's error, so the operator's log gets a warning too. The probe
+   *  has already redacted known secrets and bounded the message. */
+  const warnFailedCheck = (scope: string, id: string, result: McpInspectionDto): McpInspectionDto => {
+    if (!result.ok) console.warn(`[polyth] MCP server ${id} (${scope}) failed its tool check: ${result.message}`);
+    return result;
+  };
   const probePersonal = async (
     owner: { people: PeopleHost; userId: string },
     id: string,
@@ -490,10 +497,10 @@ export function createMcpConfigService(opts: {
     const operation = (async () => {
       const result: McpInspectionDto = target.remote
         ? { ok: false, checkedAt: Date.now(), tools: [], message: "MCP tool inspection is currently available for local projects" }
-        : await (opts.inspect ?? inspectMcpServer)({
+        : warnFailedCheck("personal", row.id, await (opts.inspect ?? inspectMcpServer)({
           transport: row.transport, secrets: personalSecrets(owner.people, owner.userId, row), cwd: target.cwd, networkPolicy,
           authorityFile: personalStorage(owner.people, owner.userId).path(`runtime/mcp-probes/${target.projectId ?? "person"}/${row.id}.json`),
-        });
+        }));
       const servers = structuredClone(loadPersonal(owner.people, owner.userId));
       const stored = requirePersonal(servers, id);
       if (stored.revision !== row.revision) throw err("conflict", "MCP configuration changed during the tool check; check the current version");
@@ -751,10 +758,10 @@ export function createMcpConfigService(opts: {
         const project = projectId ? await opts.projectForProbe?.(space, projectId) : undefined;
         const secrets = retainReferencedSecrets(row.transport, load(space).secrets[row.id] ?? {});
         const storage = createSpaceStorage(space.storageDir);
-        const result = project?.remote ? { ok: false, checkedAt: Date.now(), tools: [], message: "MCP tool inspection is currently available for local projects" } : await (opts.inspect ?? inspectMcpServer)({
+        const result = project?.remote ? { ok: false, checkedAt: Date.now(), tools: [], message: "MCP tool inspection is currently available for local projects" } : warnFailedCheck(projectId ? "project" : "space", row.id, await (opts.inspect ?? inspectMcpServer)({
           transport: row.transport, secrets, cwd: project?.path, networkPolicy,
           authorityFile: storage.path(`runtime/mcp-probes/${projectId ?? "space"}/${row.id}.json`),
-        });
+        }));
         assertScope(space, projectId, true);
         const current = effectiveRow(space, id, projectId);
         if (current.revision !== row.revision) throw err("conflict", "MCP configuration changed during the tool check; check the current version");

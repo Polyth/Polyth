@@ -14245,6 +14245,15 @@ export function createSessionService(deps: {
       let proj = await store.projection(sessionId);
       if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
       assertHasAgent(proj);
+      // An archived session runs no further turn. The composer blocks behind
+      // an explicit restore; agents, API clients and old shells reach here
+      // directly, and a turn admitted now would run under a projection that
+      // stays `archived`. Refuse every delivery mode; restore unarchives.
+      if (proj.status === "archived") {
+        throw Object.assign(new Error("unavailable while the session is archived; restore it first"), {
+          code: "conflict", component: "validation", mutationOutcome: "not-started",
+        });
+      }
       // A started chat whose runtime could not be created provisions again
       // with a fresh create; this send then queues behind it and is admitted.
       if (proj.status === "failed" && !proj.backendSessionId && !startAdmitting.has(sessionId)
