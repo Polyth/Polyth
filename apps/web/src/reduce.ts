@@ -623,6 +623,19 @@ export function contextTokensUsed(model: Partial<Pick<RenderModel, "contextUsage
   return tokens;
 }
 
+/** The model an answer's footer names: what was recorded for the answer, then
+ *  for its turn. The session's current selection only labels an answer still
+ *  in flight; a settled answer without a record stays unrecorded (the footer
+ *  then says "Auto") so a later model switch cannot re-label it. */
+export function answerModelRef(
+  m: Pick<AssistantMsg, "model">,
+  turn: Pick<TurnState, "model"> | null | undefined,
+  sessionModel: ModelRef | undefined,
+  inFlight: boolean,
+): ModelRef | undefined {
+  return m.model ?? turn?.model ?? (inFlight ? sessionModel : undefined);
+}
+
 export interface ContextIdentity { model?: ModelRef; harnessId?: string }
 const sameContextModel = (a: ModelRef, b: ModelRef): boolean =>
   a.providerID === b.providerID && a.modelID === b.modelID && a.variant === b.variant;
@@ -1810,6 +1823,15 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         model.totals.cacheWrite += t.cacheWrite ?? 0;
         const usageModel = (obj(d, "model") as ModelRef | undefined) ?? model.turn?.model;
         const usageHarness = str(d, "harnessId") ?? model.turn?.harnessId;
+        // Auto may report no model at turn start; the concrete one arriving
+        // with the turn's usage belongs to that turn's answers.
+        const reportedModel = obj(d, "model") as ModelRef | undefined;
+        if (reportedModel && model.turn && !model.turn.model) {
+          model.turn.model = reportedModel;
+          for (const msg of model.messages) {
+            if (msg.kind === "assistant" && !msg.model && msg.turnStartedAt === model.turn.startedAt) msg.model = reportedModel;
+          }
+        }
         // Overwrite (not accumulate): each request re-sends the whole
         // conversation, so the newest sample already reflects the full live
         // context. Summing would double-count history every turn. A sample

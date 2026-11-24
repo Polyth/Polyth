@@ -17,7 +17,7 @@ import {
   type ActionAnnounceAnchor,
 } from "../messageActions.ts";
 import type { ResponseActionId } from "../messageActionLayout.ts";
-import type { AssistantMsg, RenderModel } from "../reduce.ts";
+import { answerModelRef, type AssistantMsg, type RenderModel } from "../reduce.ts";
 import { applyEventWithPendingSend, endPendingSend, setUiError, useStore } from "../store.ts";
 import { useTimelineProjectId, useTimelineSessionId } from "../timelineSession.ts";
 import { beginRegenerateMotion, cancelRewindMotion } from "../rewindMotion.ts";
@@ -76,7 +76,10 @@ export default function ChatResponseFooter({
   turn,
   segmentStartedAt,
   regeneratePrompt,
+  inFlight = false,
 }: {
+  /** The answer belongs to the working turn: the live selection may label it. */
+  inFlight?: boolean;
   m: AssistantMsg;
   announce?: (text: string, anchor?: ActionAnnounceAnchor) => void;
   turn?: RenderModel["turn"];
@@ -119,7 +122,10 @@ export default function ChatResponseFooter({
     if (!prefs.showAnswerQuickActions) setMetadataOpen(false);
   }, [prefs.showAnswerQuickActions]);
 
-  const modelRef = turn?.model ?? m.model ?? sessionModel;
+  // A finalized answer keeps the model recorded for it (its message, then its
+  // turn). The session's current selection only labels an answer still in
+  // flight; otherwise a later model switch would re-label every older answer.
+  const modelRef = answerModelRef(m, turn, sessionModel, inFlight);
   const harnessId = m.harnessId ?? turn?.harnessId ?? sessionHarnessId;
   const presentation = resolveModelPresentation(modelRef, models, harnessId);
   const descriptor = presentation.descriptor;

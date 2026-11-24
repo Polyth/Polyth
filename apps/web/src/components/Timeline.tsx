@@ -552,6 +552,7 @@ function AssistantView({
           m={m}
           announce={announce}
           turn={turn}
+          inFlight={live}
           segmentStartedAt={segmentStartedAt}
           regeneratePrompt={regeneratePrompt}
         />
