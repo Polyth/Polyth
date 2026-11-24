@@ -194,7 +194,8 @@ that server, so treat it as untrusted code in this window.
   over there.
 - On a nightly build it may open the bug-report sheet (`desktop:report:*`, see
   [Bug reports](#bug-reports-nightly)): the capture is its own window, and the main
-  process holds the tester password, which no page ever reads back.
+  process holds the report credential (a group token or the legacy tester password),
+  which no page ever reads back.
 
 Known limit: two servers opened by address on one host name (two tunnels on
 `127.0.0.1`) share a cookie jar, as they would in any browser, so each receives the
@@ -699,8 +700,11 @@ In the workstation edition only the shell sends: the server route stays off ther
   - *What goes:* the browser variant of `app` (`client: "browser"`, the server's version
     and OS, the browser's OS family and `Name major` such as `Safari 18`, never the raw
     user agent) and only `ui.*` settings. The relay labels it `client:browser`.
-  - *Password and outbox:* the server keeps one tester password for everyone who reports
-    from it (`state.json`, mode 0600, in the package data folder). It is kept only after
+  - *Credential and outbox:* the server keeps one report credential for everyone who
+    reports from it (`state.json`, mode 0600, in the package data folder) — the legacy
+    tester password or, preferably, this server's group token (`<keyId>.<secret>`, see
+    [the relay](../../packages/report-relay/README.md#authentication)): the same field,
+    the same 1–200 printable characters. It is kept only after
     the relay accepts it, or while a queued report needs it and none is kept yet (an
     unverified one never replaces a kept one), and a `401` forgets it. The
     outbox (`outbox/`, the same 10 reports for 7 days, retried every 15 minutes) and the

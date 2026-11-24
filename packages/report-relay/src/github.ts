@@ -32,9 +32,15 @@ const BRANCH_README = [
   "the parsed report without screenshot data and `screenshot.jpg` is the",
   "screenshot, when the person attached one.",
   "",
+  "`stats/YYYY-MM-DD.md` is the relay's activity snapshot per tester group:",
+  "reports, new issues, comments, install-days and the fingerprints that more",
+  "than one group has reported. It carries counts and group slugs only, never a",
+  "person, a device, an install id or a report's text.",
+  "",
   "Report data and screenshots are kept for 30 days: the relay rewrites this",
-  "branch daily and drops whole date folders older than that, and it closes",
-  "the matching open issues. Issues labelled `keep` or `triaged` stay open.",
+  "branch daily and drops whole `reports/` date folders older than that, and it",
+  "closes the matching open issues. Issues labelled `keep` or `triaged` stay",
+  "open. `stats/` is the long-term record and is never pruned.",
   "",
 ].join("\n");
 

@@ -6,16 +6,22 @@ import {
 
 import { githubFromDir, type GithubConfig } from "./config.ts";
 import {
-  commentBody, fingerprintOf, issueBody, issueLabels, issueTitle, type FormatContext,
+  commentBody, fingerprintOf, issueBody, issueLabels, issueTitle, type FormatContext, type ReportGroup,
 } from "./format.ts";
 import { GitHubClient } from "./github.ts";
 import { passwordFromDir, verifyPassword, type ScryptRecord } from "./password.ts";
 import { ReleaseCache } from "./releases.ts";
 import { ReportState } from "./state.ts";
+import { ReportStats, type RenderedStats } from "./stats.ts";
+import {
+  authenticate as authenticateToken, DEFAULT_DAY_CAP, DEFAULT_GROUP, tokenSetFromDir,
+  type ReportIdentity, type TokenRecord,
+} from "./tokens.ts";
 import type { RelayGitHub, RelayLogger } from "./types.ts";
 
 export * from "./types.ts";
 export { GitHubClient } from "./github.ts";
+export { groupName } from "./format.ts";
 
 const DAY = 86_400_000;
 const MINUTE = 60_000;
@@ -28,12 +34,15 @@ const MAX_FAILURE_KEYS = 20_000;
 const MAX_PASSWORD_HEADER = 512;
 
 /** No per-address or per-computer cap: a tester sends as many reports as they
- *  need. The service-wide daily cap bounds what a leaked password can file. */
+ *  need. The service-wide daily cap bounds what a leaked password can file, and
+ *  each group token carries its own smaller cap. */
 export interface ReportRelayLimits {
   /** Issues and comments filed per day, the whole service. */
   globalDay: number;
   /** Failed password attempts per source address per 10 minutes. */
   passwordFailures: number;
+  /** A token's daily cap when its `tokens.json` entry names none. */
+  tokenDay: number;
 }
 
 export interface ReportRelayOptions {
@@ -56,6 +65,12 @@ export interface ReportRelayOptions {
   retentionDays?: number;
   pruneIntervalMs?: number;
   pruneAtStart?: boolean;
+  /** Test seam: group tokens without a `tokens.json` file. */
+  tokens?: ReadonlyMap<string, TokenRecord>;
+  /** Days the published `stats/YYYY-MM-DD.md` window covers. */
+  statsWindowDays?: number;
+  /** Test seam: publish no stats artifact at all. */
+  statsUpload?: boolean;
 }
 
 /** One rate window per key: a fixed window that starts at a key's first
@@ -149,12 +164,15 @@ export class ReportRelay {
   private readonly logger: RelayLogger;
   private readonly limits: ReportRelayLimits;
   private readonly password: () => ScryptRecord | null;
+  private readonly tokens: () => ReadonlyMap<string, TokenRecord>;
   private readonly githubConfig: () => GithubConfig | undefined;
   private readonly createGithub: (config: GithubConfig) => RelayGitHub;
   private readonly state: ReportState | null;
+  private readonly stats: ReportStats | null;
   private readonly releases: ReleaseCache;
   private readonly fetchFn: typeof fetch;
   private readonly globalDay = new RateWindow(DAY);
+  private readonly tokenDay = new RateWindow(DAY);
   private readonly failures = new FailureWindow();
   private readonly retentionDays: number;
   private client: RelayGitHub | null = null;
@@ -169,9 +187,11 @@ export class ReportRelay {
     this.limits = {
       globalDay: positive(options.limits?.globalDay, 200),
       passwordFailures: positive(options.limits?.passwordFailures, 10),
+      tokenDay: positive(options.limits?.tokenDay, DEFAULT_DAY_CAP),
     };
     this.retentionDays = positive(options.retentionDays, RETENTION_DAYS);
     this.password = passwordFromDir(options.keysDir ?? "/keys");
+    this.tokens = options.tokens ? () => options.tokens! : tokenSetFromDir(options.keysDir ?? "/keys");
     this.githubConfig = githubFromDir(options.keysDir ?? "/keys");
     this.createGithub = options.createGithub ?? ((config) => new GitHubClient({
       ...config,
@@ -180,6 +200,7 @@ export class ReportRelay {
       logger: this.logger,
     }));
     this.state = options.dataDir ? new ReportState(join(options.dataDir, "state.json"), this.now) : null;
+    this.stats = options.dataDir ? new ReportStats(join(options.dataDir, "stats.json"), this.now) : null;
     this.releases = new ReleaseCache({
       repo: options.releasesRepo ?? "Polyth/Polyth",
       fetchFn: this.fetchFn,
@@ -220,7 +241,26 @@ export class ReportRelay {
       } catch { /* the client logged the operation and status */ }
     }
     try { this.state?.prune(this.now()); } catch { /* best effort */ }
+    await this.publishStats(target);
     return { closed };
+  }
+
+  /** Publishes today's `stats/YYYY-MM-DD.md` when its content changed. Counters
+   *  only: group slugs, counts and issue numbers, never a person or an install.
+   *  A failed upload is simply retried by the next pass. */
+  private async publishStats(target: { client: RelayGitHub; repo: string; branch: string } | null): Promise<void> {
+    if (!target || !this.stats || this.options.statsUpload === false) return;
+    let rendered: RenderedStats;
+    try { rendered = this.stats.render(this.now(), this.options.statsWindowDays ?? 7); } catch { return; }
+    if (rendered.empty || !this.stats.needsUpload(rendered)) return;
+    try {
+      await target.client.uploadFile({
+        path: `stats/${rendered.date}.md`,
+        content: Buffer.from(rendered.markdown, "utf8").toString("base64"),
+        message: `Report activity ${rendered.date}`,
+      });
+      this.stats.markUploaded(rendered);
+    } catch { /* the client logged the operation and status */ }
   }
 
   /** One `POST /v1/report`: `raw` is the exact request body, `authorization`
@@ -229,10 +269,11 @@ export class ReportRelay {
     const now = this.now();
     if (this.options.off) return { result: "unavailable" };
     if (this.failures.count(sourceIp, now) > this.limits.passwordFailures) return { result: "rate" };
-    const record = this.password();
-    if (!record) return { result: "unavailable" };
-    const presented = bearer(authorization);
-    if (!presented || !verifyPassword(record, presented)) {
+    const tokens = this.tokens();
+    const legacy = this.password();
+    if (tokens.size === 0 && !legacy) return { result: "unavailable" };
+    const identity = this.authenticate(authorization, tokens, legacy);
+    if (!identity) {
       this.failures.record(sourceIp, now);
       return { result: "password" };
     }
@@ -254,19 +295,51 @@ export class ReportRelay {
 
     const target = this.githubTarget();
     if (!target) return { result: "unavailable" };
+    // The group's own cap first: a cohort that exhausted its day must not eat
+    // the service-wide budget as well.
+    if (!this.tokenDay.take(`token:${identity.keyId}`, identity.dayCap, now)) return { result: "rate" };
     if (!this.globalDay.take("global", this.limits.globalDay, now)) return { result: "rate" };
 
     const fingerprint = fingerprintOf(payload);
     try {
-      const filed = await this.file(target, payload, fingerprint);
+      const filed = await this.file(target, payload, fingerprint, identity);
       this.state?.rememberReport(payload.reportId, { issue: filed.issue, result: filed.result, at: now });
       this.state?.rememberFingerprint(fingerprint, filed.issue, now);
+      this.stats?.record({
+        at: now,
+        group: identity.group,
+        install: payload.install,
+        fingerprint,
+        issue: filed.issue,
+        result: filed.result,
+        screenshot: payload.screenshot !== null,
+        lowSignal: !payload.text.trim() && payload.errors.length === 0,
+        platform: payload.app.platform,
+        version: payload.app.version,
+      });
       return { result: filed.result, issue: filed.issue };
     } catch {
       // The client logged the failing GitHub operation; the client gets no
       // GitHub error text and no partial success.
       return { result: "unavailable" };
     }
+  }
+
+  /** The group the bearer proves. `<keyId>.<secret>` is a group token; a value
+   *  without a dot is the legacy single tester password, which becomes the
+   *  `default` group. A legacy password that contains a dot therefore stops
+   *  working once `tokens.json` exists: it would cost one scrypt per token
+   *  guess otherwise. */
+  private authenticate(
+    authorization: string | undefined,
+    tokens: ReadonlyMap<string, TokenRecord>,
+    legacy: ScryptRecord | null,
+  ): ReportIdentity | null {
+    const presented = bearer(authorization);
+    if (!presented) return null;
+    if (presented.includes(".")) return authenticateToken(tokens, presented);
+    if (!legacy || !verifyPassword(legacy, presented)) return null;
+    return { keyId: DEFAULT_GROUP, group: DEFAULT_GROUP, label: "Default", dayCap: this.limits.tokenDay };
   }
 
   /** The client plus the repository and branch its attachments live on. A
@@ -291,6 +364,7 @@ export class ReportRelay {
     target: { client: RelayGitHub; repo: string; branch: string },
     report: BugReportPayload,
     fingerprint: string,
+    identity: ReportIdentity,
   ): Promise<{ result: "created" | "added"; issue: number }> {
     const github = target.client;
     const date = report.createdAt.slice(0, 10);
@@ -302,6 +376,10 @@ export class ReportRelay {
     let open = false;
     if (known) open = (await github.issueState(known.issue)) === "open";
 
+    const group: ReportGroup = { id: identity.group, label: identity.label, keyId: identity.keyId };
+    const seen = new Set<string>(this.stats?.groupsFor(fingerprint) ?? []);
+    seen.add(group.id);
+
     const context: FormatContext = {
       repo: target.repo,
       branch: target.branch,
@@ -309,6 +387,8 @@ export class ReportRelay {
       reportJsonPath,
       ...(screenshotPath ? { screenshotPath } : {}),
       ...(known ? { previousIssue: known.issue } : {}),
+      group,
+      seenInGroups: [...seen].sort(),
     };
 
     const withoutData = {
@@ -328,7 +408,7 @@ export class ReportRelay {
       await github.comment({ issue: known.issue, body: commentBody(report, context) });
       return { result: "added", issue: known.issue };
     }
-    const issue = await github.createIssue({ title: issueTitle(report), body: issueBody(report, context), labels: issueLabels(report) });
+    const issue = await github.createIssue({ title: issueTitle(report), body: issueBody(report, context), labels: issueLabels(report, group) });
     return { result: "created", issue: issue.number };
   }
 }

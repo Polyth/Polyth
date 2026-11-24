@@ -303,8 +303,8 @@ own runners; no deploy key or second repository is involved.
 - **Publication.** Only a full (`all`) run publishes: draft, upload, then public prerelease, never
   marked Latest. The three newest nightlies are kept; stable releases are never pruned.
 - **Bug reports.** Nightly desktop builds send ⌘⇧B / Ctrl+Shift+B reports (screenshot,
-  build, allowlisted settings, a note) with a shared tester password to the report relay,
-  which files them as issues in the team's private reports repository and drops data and
+  build, allowlisted settings, a note) with a tester password or a group token to the report
+  relay, which files them as issues in the team's private reports repository and drops data and
   screenshots after 30 days ([desktop](../dev/desktop.md#bug-reports-nightly),
   [relay](../../packages/report-relay/README.md)). The relay accepts a published nightly
   or an older one, never a version newer than the newest nightly. The reports repository
@@ -312,7 +312,10 @@ own runners; no deploy key or second repository is involved.
   limited to that repository (Issues and Contents read/write, Metadata read), placed with
   `sudo polyth-reports-token`, and the tester password, placed with
   `sudo polyth-reports-password`; without both it answers every report `503`. Rotating the
-  password is running the helper again; every tester is asked at their next send. The
+  password is running the helper again; every tester is asked at their next send. A group
+  token (`polyth-report-relay token --group <slug>`, entry in `tokens.json`, same root-owned
+  helper path) attributes every report to that group through the `group:<slug>` label and the
+  `stats/YYYY-MM-DD.md` file the relay publishes on the attachments branch. The
   **Nightly bug triage** agent template (Agents → Templates) works through new reports
   every night at 01:45, before the captain: it merges duplicates, ties each report to its
   source commit through the release marker and turns real bugs into public issues written

@@ -53,7 +53,7 @@ test("the same error fingerprint under an open issue becomes a comment", async (
   assert.equal(github.issues.length, 1);
   assert.equal(github.comments.length, 1);
   assert.equal(github.comments[0]!.issue, 100);
-  assert.match(github.comments[0]!.body, /<!-- polyth-report fp=[0-9a-f]{16} id=[0-9a-f-]{36} -->/);
+  assert.match(github.comments[0]!.body, /<!-- polyth-report fp=[0-9a-f]{16} id=[0-9a-f-]{36} group=default key=default -->/);
   assert.match(github.comments[0]!.body, /E_FREEZE|Settings and packages/);
   assert.equal(github.uploads.length, 2, "one report.json per report, no screenshot");
   relay.close();
@@ -109,7 +109,7 @@ test("state is a JSON file with the report and fingerprint maps", async (t) => {
   assert.equal(state.reports["aaaabbbb-1111-4222-8333-444444444444"]!.issue, 100);
   assert.equal(state.reports["aaaabbbb-1111-4222-8333-444444444444"]!.result, "created");
   assert.equal(Object.values(state.fingerprints)[0]!.issue, 100);
-  assert.deepEqual(readdirSync(base.data), ["state.json"], "the temporary file was renamed into place");
+  assert.deepEqual(readdirSync(base.data), ["state.json", "stats.json"], "the temporary files were renamed into place");
 });
 
 test("a corrupt state file is set aside and the relay starts empty", async (t) => {

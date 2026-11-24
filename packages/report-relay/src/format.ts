@@ -19,6 +19,18 @@ export interface FormatContext {
   reportJsonPath: string;
   screenshotPath?: string;
   previousIssue?: number;
+  /** The group the authenticating token belongs to. Never taken from the
+   *  report body, which a client controls. */
+  group: ReportGroup;
+  /** Every group that already filed this fingerprint, oldest first. */
+  seenInGroups?: string[];
+}
+
+/** The group a token proved: a cohort, not a person. */
+export interface ReportGroup {
+  id: string;
+  label: string;
+  keyId: string;
 }
 
 /** `<platform> <arch>` for a desktop report, `<platform> <browser>` (`ios
@@ -76,8 +88,8 @@ export function issueTitle(report: BugReportPayload): string {
   return `[${report.app.version}] ${description} · ${neutralize(where(report))}`;
 }
 
-export function issueLabels(report: BugReportPayload): string[] {
-  const labels = ["nightly-report", `v${report.app.version}`, `platform:${report.app.platform}`];
+export function issueLabels(report: BugReportPayload, group: ReportGroup): string[] {
+  const labels = ["nightly-report", `v${report.app.version}`, `platform:${report.app.platform}`, `group:${group.id}`];
   if (isBrowserReportApp(report.app)) labels.push("client:browser");
   if (report.screenshot) labels.push("has-screenshot");
   if (!report.text.trim() && report.errors.length === 0) labels.push("low-signal");
@@ -91,12 +103,16 @@ const fileUrl = (context: FormatContext, path: string): string =>
 const cell = (value: string): string =>
   neutralize(value).replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\r?\n|\r/g, " ");
 
+/** `qa-eu · QA EU`, or just the id when the label adds nothing. */
+export const groupName = (group: ReportGroup): string =>
+  group.label && group.label !== group.id ? `${group.id} · ${group.label}` : group.id;
+
 function details(report: BugReportPayload): string {
   const bag = JSON.stringify({ settings: report.settings, packages: report.packages, errors: report.errors }, null, 2);
   return `<details><summary>Settings and packages</summary>\n\n\`\`\`\`json\n${fenced(bag)}\n\`\`\`\`\n\n</details>`;
 }
 
-function table(report: BugReportPayload): string {
+function table(report: BugReportPayload, context: FormatContext): string {
   const viewport = report.web.viewport;
   const app = report.app;
   const client: Array<[string, string]> = isBrowserReportApp(app)
@@ -116,6 +132,7 @@ function table(report: BugReportPayload): string {
     ["Version", app.version],
     ["Channel", app.channel],
     ["Edition", app.edition],
+    ["Group", groupName(context.group)],
     ...client,
     ["Web build", report.web.build || "—"],
     ["Server version", report.web.serverVersion || "—"],
@@ -132,7 +149,7 @@ const image = (context: FormatContext): string | null =>
   context.screenshotPath ? `![screenshot](${fileUrl(context, context.screenshotPath)})` : null;
 
 const marker = (report: BugReportPayload, context: FormatContext): string =>
-  `<!-- polyth-report fp=${context.fingerprint} id=${report.reportId} -->`;
+  `<!-- polyth-report fp=${context.fingerprint} id=${report.reportId} group=${context.group.id} key=${context.group.keyId} -->`;
 
 const release = (report: BugReportPayload): string => `Release: https://github.com/${RELEASE_REPO}/releases/tag/v${report.app.version}`;
 
@@ -142,7 +159,7 @@ export function issueBody(report: BugReportPayload, context: FormatContext): str
   if (text) parts.push(quoted(text));
   const screenshot = image(context);
   if (screenshot) parts.push(screenshot);
-  parts.push(table(report));
+  parts.push(table(report, context));
   parts.push(details(report));
   parts.push(`Report data: [report.json](${fileUrl(context, context.reportJsonPath)})`);
   if (context.previousIssue !== undefined) parts.push(`Previous report issue: ${context.previousIssue}.`);
@@ -160,6 +177,9 @@ export function commentBody(report: BugReportPayload, context: FormatContext): s
   if (screenshot) parts.push(screenshot);
   const os = isBrowserReportApp(report.app) ? "browser" : report.app.osVersion;
   parts.push(`**${report.app.version}** · ${cell(where(report))} · ${cell(os)} · ${cell(report.web.view || "—")}`);
+  parts.push(`Group: ${cell(groupName(context.group))}`);
+  const seen = context.seenInGroups ?? [];
+  if (seen.length > 1) parts.push(`Seen in groups: ${cell(seen.join(", "))}`);
   parts.push(details(report));
   parts.push(`Report data: [report.json](${fileUrl(context, context.reportJsonPath)})`);
   parts.push(marker(report, context));
