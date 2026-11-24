@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { rowsForReader } from "../src/sessionSharing.ts";
+import { canonicalSessionService } from "../src/sessionResourceAuthority.ts";
 import { sharingFixture as fixture } from "./support/sharingFixture.ts";
 
 test("a person's new chat is private; server work and the Space policy keep the old audience", async t => {
@@ -221,7 +222,8 @@ test("privacy comes from the chat's real audience, and a chat can't be shared on
   assert.equal(f.sharing.state(f.ctx("usr_member"), chat.id).readers?.length, 1, "the owner, not the reader");
   await f.sharing.update(f.ctx("usr_owner"), chat.id, { visibility: "private" });
 
-  // The agent has read personal notes: narrowing stays possible, widening doesn't.
+  // The agent has read personal notes: narrowing stays possible, widening asks
+  // the person to confirm what others will see (Spaces §14.6).
   f.projections.set(chat.id, { ...f.projections.get(chat.id)!, personalContext: true });
   await assert.rejects(
     f.sharing.update(f.ctx("usr_owner"), chat.id, { visibility: "space" }),
@@ -231,8 +233,104 @@ test("privacy comes from the chat's real audience, and a chat can't be shared on
     f.sharing.update(f.ctx("usr_owner"), chat.id, { visibility: "restricted", grants: [{ userId: "usr_member", access: "view" }] }),
     (error: { reason?: string }) => error.reason === "personal-context",
   );
-  await f.sharing.update(f.ctx("usr_owner"), chat.id, { visibility: "private" });
+  assert.equal((await f.sharing.mentionAccess(f.ctx("usr_owner"), chat.id)).action, "none",
+    "while it is still private a mention opens nothing");
+  // Closing it needs no confirmation.
+  await f.sharing.update(f.ctx("usr_owner"), chat.id, { visibility: "private", grants: [] });
+  const confirmed = await f.sharing.update(f.ctx("usr_owner"), chat.id, {
+    visibility: "restricted",
+    grants: [{ userId: "usr_member", access: "collaborate" }],
+    acknowledgePersonalContext: true,
+  });
+  assert.equal(confirmed.visibility, "restricted");
+  assert.deepEqual(confirmed.grants, [{ userId: "usr_member", name: "Marta", access: "collaborate" }]);
+  const reader = await f.sessionsFor(f.ctx("usr_member")).snapshot(chat.id);
+  assert.equal(reader.personalContext, true, "the mark stays: the agent still saw those notes");
+  assert.equal((await f.sharing.mentionAccess(f.ctx("usr_owner"), chat.id)).action, "none",
+    "a mention never opens a chat whose notes were read, however wide it already is");
+  // Widening further is a new disclosure to new people, so it asks again:
+  // one person becomes everyone in the Space only with a fresh confirmation.
+  await assert.rejects(
+    f.sharing.update(f.ctx("usr_owner"), chat.id, { visibility: "space" }),
+    (error: { code?: string; reason?: string }) => error.code === "conflict" && error.reason === "personal-context",
+  );
+  await assert.rejects(
+    f.sharing.update(f.ctx("usr_owner"), chat.id, {
+      grants: [{ userId: "usr_member", access: "collaborate" }, { userId: "usr_other", access: "view" }],
+    }),
+    (error: { reason?: string }) => error.reason === "personal-context",
+    "adding a person to a shared chat asks too",
+  );
+  assert.equal((await f.sharing.update(f.ctx("usr_owner"), chat.id, { visibility: "space", acknowledgePersonalContext: true })).visibility, "space");
+  // Narrowing never asks.
+  assert.equal((await f.sharing.update(f.ctx("usr_owner"), chat.id, { visibility: "restricted" })).visibility, "restricted");
   assert.equal(sharingRootId(chat.id), chat.id);
+});
+
+test("a chat can be created already shared, under the same rules as later sharing", async t => {
+  const f = fixture(t);
+  const owner = f.sessionsFor(f.ctx("usr_owner"));
+  const chat = await owner.create({
+    projectId: "prj_one",
+    sharing: { visibility: "restricted", grants: [{ userId: "usr_member", access: "collaborate" }] },
+  });
+  assert.equal(f.security.resources.resource(chat.id)?.visibility, "restricted");
+  assert.equal((await f.sessionsFor(f.ctx("usr_member")).snapshot(chat.id)).sharing?.access, "collaborate");
+  await assert.rejects(f.sessionsFor(f.ctx("usr_other")).snapshot(chat.id), { code: "not-found" });
+  assert.deepEqual(f.sharing.state(f.ctx("usr_owner"), chat.id).grants, [
+    { userId: "usr_member", name: "Marta", access: "collaborate" },
+  ]);
+  // Its create's projection reached nobody but the owner, so the people it was
+  // created for are told through the sharing service's own side effects.
+  assert.deepEqual(f.changed.at(-1)?.map((row) => row.id), [chat.id]);
+  assert.deepEqual([...(f.changedReaders.at(-1)?.get(chat.id) ?? [])], ["usr_owner"]);
+  const listed = await f.sessionsFor(f.ctx("usr_member")).list("prj_one");
+  assert.deepEqual(listed.map((row) => row.id), [chat.id], "it is readable from the start, not only after a later change");
+
+  // Nothing is created when the audience itself is refused.
+  const before = f.projections.size;
+  for (const sharing of [
+    { visibility: "restricted" as const, grants: [] },
+    { visibility: "restricted" as const, grants: [{ userId: "usr_owner", access: "view" as const }] },
+    { visibility: "restricted" as const, grants: [{ userId: "usr_outside", access: "view" as const }] },
+    { visibility: "restricted" as const, grants: [
+      { userId: "usr_member", access: "view" as const },
+      { userId: "usr_member", access: "manage" as const },
+    ] },
+    { visibility: "restricted" as const, grants: [{ userId: "usr_member", access: "nonsense" as never }] },
+  ]) {
+    await assert.rejects(owner.create({ projectId: "prj_one", sharing }), { code: "invalid-input" });
+  }
+  assert.equal(f.projections.size, before);
+  await assert.rejects(f.sessionsFor(f.ctx("usr_viewer")).create({ projectId: "prj_one", sharing: { visibility: "space" } }), { code: "forbidden" });
+  await assert.rejects(f.sessionsFor(f.system()).create({ projectId: "prj_one", sharing: { visibility: "space" } }), { code: "forbidden" });
+
+  // The Space policy governs creation exactly as it governs a later change.
+  f.sharing.setPolicy(f.ctx("usr_admin"), { allowSpaceVisibility: false });
+  await assert.rejects(owner.create({ projectId: "prj_one", sharing: { visibility: "space" } }), { code: "forbidden" });
+  f.sharing.setPolicy(f.ctx("usr_admin"), { membersMayShare: false });
+  await assert.rejects(
+    owner.create({ projectId: "prj_one", sharing: { visibility: "restricted", grants: [{ userId: "usr_member", access: "view" }] } }),
+    { code: "forbidden" },
+  );
+  assert.equal(f.projections.size, before);
+  // A first turn could be admitted before the audience applies, so a start
+  // refuses a creation-time audience instead of guessing.
+  const withStart = canonicalSessionService(
+    f.ctx("usr_owner"),
+    { ...f.base, start: async () => { throw new Error("start must not be reached"); } } as typeof f.base,
+    f.projectsFor("spc_home"),
+    f.sharing,
+  );
+  await assert.rejects(
+    withStart.start!({
+      projectId: "prj_one",
+      clientOperationId: "op-shared-start",
+      start: { firstTurn: { text: "hi" } },
+      sharing: { visibility: "space" },
+    }),
+    { code: "invalid-input" },
+  );
 });
 
 test("a subagent answers for the chat it follows, so what it reads marks that chat", async t => {

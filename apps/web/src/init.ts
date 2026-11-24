@@ -16,7 +16,7 @@ import { resolveActiveProjectId, shouldRefreshProjectsOnSyncOpen } from "./proje
 import { claimPersonalProjectAttempt } from "./personalProject.ts";
 import { projectIsolationLevel } from "@polyth/contracts";
 import { CONNECTION_RESTORED_EVENT, setConnectionGate } from "@polyth/contracts/transport-retry";
-import type { AttachmentRef, HarnessSelection, JsonObject, ManagedProjectInput, ModelRef, Project, ProjectCloneInput, ProjectDefaults, ProjectPatch, ResumeTurnOptions, SessionDeleteOptions, SessionEvent, SessionProjection, SessionStartRequest, StartSessionResult, StartWorktreeSessionInput } from "@polyth/contracts";
+import type { AttachmentRef, HarnessSelection, JsonObject, ManagedProjectInput, ModelRef, Project, ProjectCloneInput, ProjectDefaults, ProjectPatch, ResumeTurnOptions, SessionDeleteOptions, SessionCreationSharing, SessionEvent, SessionProjection, SessionStartRequest, StartSessionResult, StartWorktreeSessionInput } from "@polyth/contracts";
 import { suggestWorktreeBranch, temporaryWorktreeBranch } from "./worktreeSessions.ts";
 import { installPushDeepLinks, reconcilePushSubscription, registerServiceWorker } from "./push.ts";
 import { alertPersonMessage, installNotify } from "./notify.ts";
@@ -2154,6 +2154,10 @@ export interface CreateSessionOptions {
    *  harness (Spaces §13): send no harness, model or agent and fill no
    *  project/session defaults, so the server pins the chat to it. */
   personDefaultHarnessId?: string;
+  /** Who can open the chat from the moment it exists (Spaces §14.3). Applied
+   *  before its first turn, so its agent knows others are here and never
+   *  reaches the creator's personal notes. A chat with a `start` refuses it. */
+  sharing?: SessionCreationSharing;
 }
 
 export interface IsolatedSessionOptions {
@@ -2174,6 +2178,8 @@ export interface IsolatedSessionOptions {
    *  isolation service, which can't see a person default, so the harness is
    *  named instead (no model or agent: the harness's own default applies). */
   personDefaultHarnessId?: string;
+  /** As for `createSession`. */
+  sharing?: SessionCreationSharing;
 }
 
 /** A create that follows the person default carries no route of its own. */
@@ -2235,6 +2241,7 @@ export async function startIsolatedSessionWithStart(
       ...(input.sourceSessionId ? { sourceSessionId: input.sourceSessionId } : {}),
       ...(input.repositoryIds ? { repositoryIds: input.repositoryIds } : {}),
       ...(input.purpose ? { purpose: input.purpose } : {}),
+      ...(input.sharing ? { sharing: input.sharing } : {}),
       ...(start ? { start } : {}),
     };
     // Keyed like createSession: a lost response resolves to the session (and
@@ -2365,6 +2372,7 @@ export async function createSessionWithStart(projectId: string, opts: CreateSess
       ...(opts.agent ? { agent: opts.agent } : {}),
       ...(opts.purpose ? { purpose: opts.purpose } : {}),
       ...(personDefaultHarnessId ? { personDefaultHarnessId } : {}),
+      ...(opts.sharing ? { sharing: opts.sharing } : {}),
       ...(start ? { start } : {}),
       precache,
       ...(activate ? { activate } : {}),
@@ -2382,6 +2390,7 @@ export async function createSessionWithStart(projectId: string, opts: CreateSess
         ...(model ? { model } : {}),
         ...(agent ? { agent } : {}),
         ...(worktreePath ? { worktreePath } : {}),
+        ...(opts.sharing ? { sharing: opts.sharing } : {}),
         ...(start ? { start } : {}),
         clientOperationId,
       }),

@@ -4959,6 +4959,24 @@ body[data-desktop-low-resource="true"] :is(.sync-catch-up, .sync-catch-up[data-s
 .alert-dialog-body { display: flex; flex-direction: column; gap: var(--space-3); }
 .alert-dialog-body p { margin: 0; color: var(--text-dim); line-height: 1.5; white-space: pre-line; }
 .alert-dialog-body input { width: 100%; }
+/* A confirmation gate (e.g. a chat that read personal notes moving where more
+   people can open it): a real control, so it reads as one. */
+.alert-acknowledge {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay);
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.alert-acknowledge[aria-checked="true"] .ui-checkbox-box {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+}
 /* Anchored confirmation. Phone widths show dialogs as bottom sheets; a
    confirmation asked from a control on screen (confirmAlert's `origin`, e.g.
    Delete in a session row's menu) is a card over that control instead, placed

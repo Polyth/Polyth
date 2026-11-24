@@ -70,6 +70,7 @@ import { useEscape } from "../useEscape.ts";
 import { announce } from "./a11y/live.tsx";
 import ProjectAppearanceDialog from "./ProjectAppearanceDialog.tsx";
 import ConversationCreateDialog from "./ConversationCreateDialog.tsx";
+import SharedChatDialog from "./SharedChatDialog.tsx";
 import SpaceSwitcher from "./SpaceSwitcher.tsx";
 import DesktopServerSwitcher from "./DesktopServerSwitcher.tsx";
 import { tr } from "../i18n/index.ts";
@@ -418,6 +419,7 @@ export default function Sidebar() {
   const [projectMenuSource, setProjectMenuSource] = useState<"card" | "rail" | null>(null);
   const [appearanceProjectId, setAppearanceProjectId] = useState<string | null>(null);
   const [conversationProjectId, setConversationProjectId] = useState<string | null>(null);
+  const [sharedChatProjectId, setSharedChatProjectId] = useState<string | null>(null);
   const [projectSettingsPage, setProjectSettingsPage] = useState<"menu" | `contribution:${string}`>("menu");
   useEffect(() => subscribeProjectSettingsNavigation((request) => {
     const { contributionId } = request;
@@ -1185,6 +1187,16 @@ export default function Sidebar() {
       id: "conversation",
       label: tr("conversation.new"),
       onSelect: () => setConversationProjectId(p.id),
+    },
+    {
+      // Starts shared: the agent never reaches the creator's personal notes,
+      // which sharing an existing chat can only ask about afterwards (§14.6).
+      id: "shared-chat",
+      label: tr("sharing.newSharedChat"),
+      onSelect: () => {
+        if (p.id !== activeProjectId) activateProject(p.id);
+        setSharedChatProjectId(p.id);
+      },
     },
     ...(offersPrivateRoom(p) ? [{
       id: "private-chat",
@@ -1969,6 +1981,13 @@ export default function Sidebar() {
           open
           projectId={conversationProjectId}
           onClose={() => setConversationProjectId(null)}
+        />
+      )}
+      {sharedChatProjectId && (
+        <SharedChatDialog
+          open
+          projectId={sharedChatProjectId}
+          onClose={() => setSharedChatProjectId(null)}
         />
       )}
     </>

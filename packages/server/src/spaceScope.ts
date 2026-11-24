@@ -35,8 +35,9 @@ import { canonicalSecurity } from "./runtimeSecurity.ts";
 const notFound = (): Error =>
   Object.assign(new Error("session not found"), { code: "not-found" });
 
-/** The part of the sharing service a person message needs. */
-export type SessionPeopleOpener = Pick<SessionSharingService, "addPeople">;
+/** The part of the sharing service a person message and a new chat's
+ *  creation-time audience need. */
+export type SessionPeopleOpener = Pick<SessionSharingService, "addPeople" | "creationAudience" | "applyCreationAudience">;
 
 /** Everything the guard needs from the durable store. */
 export interface SpaceOwnershipSource {
@@ -521,7 +522,7 @@ export function createSpaceServices(deps: {
 }): (ctx: SpaceContext) => SpaceServices {
   return (ctx) => {
     const projects = canonicalProjectService(ctx, deps.registry);
-    const canonicalSessions = canonicalSessionService(ctx, deps.sessions(), projects);
+    const canonicalSessions = canonicalSessionService(ctx, deps.sessions(), projects, deps.sharing?.());
     const sessions = accessControlledSessionService(ctx, canonicalSessions);
     return {
       ctx,

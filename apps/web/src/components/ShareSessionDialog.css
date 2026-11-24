@@ -69,6 +69,27 @@
 .session-sharing-access { flex: 0 1 auto; min-width: 0; max-width: 60%; }
 .session-sharing-add { align-self: flex-start; margin-inline-start: var(--space-3); }
 
+/* Opening a chat the agent already read personal notes in: the person's own
+   confirmation, one row of its own between the people and the footer. */
+.session-sharing-confirm {
+  width: auto;
+  margin: 0 var(--space-3);
+  padding: var(--space-3);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay);
+  align-items: flex-start;
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.session-sharing-confirm[aria-checked="true"] .ui-checkbox-box {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
 .session-sharing-empty,
 .session-sharing-note {
   margin: 0;

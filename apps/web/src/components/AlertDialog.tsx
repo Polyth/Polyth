@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { placeAnchoredAlert, resolveAlert, useAlert, type AlertOrigin } from "../alerts.ts";
-import { Button, Dialog, TextInput } from "./ui/index.ts";
+import { Button, CheckIcon, Dialog, Icon, TextInput } from "./ui/index.ts";
 import { tr } from "../i18n/index.ts";
 import { isImeComposing } from "./input/editorCore.ts";
 
@@ -56,7 +56,12 @@ export default function AlertDialog() {
   const descriptionId = useId();
   const bodyRef = useRef<HTMLDivElement>(null);
   const [value, setValue] = useState("");
-  useEffect(() => { setValue(alert?.kind === "prompt" ? alert.initialValue ?? "" : ""); }, [alert]);
+  const [acknowledged, setAcknowledged] = useState(false);
+  useEffect(() => {
+    setValue(alert?.kind === "prompt" ? alert.initialValue ?? "" : "");
+    setAcknowledged(false);
+  }, [alert]);
+  const acknowledge = alert?.kind === "confirm" ? alert.acknowledge : undefined;
   const origin = alert?.kind === "confirm" ? alert.origin : undefined;
   useAnchoredPlacement(origin, bodyRef);
   if (!alert) return null;
@@ -68,7 +73,7 @@ export default function AlertDialog() {
       size="sm"
       className={origin ? "alert-dialog is-anchored" : "alert-dialog"}
       {...(origin ? { backdropClassName: "alert-anchored-backdrop" } : {})}
-      initialFocus={alert.kind === "prompt" ? "input" : "button.alert-confirm"}
+      initialFocus={alert.kind === "prompt" ? "input" : acknowledge ? "button.alert-acknowledge" : "button.alert-confirm"}
       {...(alert.kind === "confirm" && alert.keepKeyboard ? { keepKeyboard: true } : {})}
       ariaDescribedBy={descriptionId}
       footer={(
@@ -78,6 +83,7 @@ export default function AlertDialog() {
             size="sm"
             variant={alert.kind === "confirm" && alert.destructive ? "danger" : "primary"}
             className="alert-confirm"
+            disabled={Boolean(acknowledge) && !acknowledged}
             onClick={() => resolveAlert(alert.kind === "confirm" ? true : value)}
           >
             {alert.confirmLabel}
@@ -87,6 +93,26 @@ export default function AlertDialog() {
     >
       <div ref={bodyRef} className="alert-dialog-body">
         <p id={descriptionId}>{alert.message}</p>
+        {/* A button with checkbox semantics, not a native input: a dialog or
+            sheet can swallow a label's activation, and this gate must always
+            answer a click. */}
+        {acknowledge && (
+          <button
+            type="button"
+            role="checkbox"
+            aria-checked={acknowledged}
+            className="ui-checkbox alert-acknowledge"
+            onClick={() => setAcknowledged((current) => !current)}
+          >
+            <span className="ui-checkbox-box" aria-hidden="true">
+              {acknowledged && <Icon icon={CheckIcon} size="sm" />}
+            </span>
+            <span className="ui-checkbox-text">
+              <span className="ui-checkbox-label">{acknowledge.label}</span>
+              {acknowledge.description && <span className="ui-checkbox-desc">{acknowledge.description}</span>}
+            </span>
+          </button>
+        )}
         {alert.kind === "prompt" && (
           <TextInput
             type={alert.secret ? "password" : "text"}

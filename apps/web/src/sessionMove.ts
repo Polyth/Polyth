@@ -52,6 +52,7 @@ const BLOCKED: Readonly<Record<SessionMoveBlockReason, TranslationKey>> = {
   isolated: "sessionMove.blocked.isolated",
   "other-machine": "sessionMove.blocked.otherMachine",
   "package-owned": "sessionMove.blocked.packageOwned",
+  "personal-context": "sessionMove.blocked.personalContext",
   private: "sessionMove.blocked.private",
   queued: "sessionMove.blocked.queued",
   "too-large": "sessionMove.blocked.tooLarge",
@@ -83,17 +84,25 @@ export async function requestSessionMove(session: Pick<SessionProjection, "id" |
   const input = { projectId: target.id, expectedProjectId: session.projectId };
   try {
     const preview = await api.previewSessionMove(session.id, input);
-    if (preview.blocked) {
+    // Every other refusal stays a refusal. "Personal notes already read" is the
+    // person's own call, so it is asked for instead (Spaces §14.6).
+    const personalNotes = preview.blocked?.reason === "personal-context";
+    if (preview.blocked && !personalNotes) {
       setUiError(tr(BLOCKED[preview.blocked.reason]) || preview.blocked.message);
       return false;
     }
-    const confirmed = await confirmAlert(sessionMoveMessage(title, from, to, preview), {
-      title: tr("sessionMove.confirmTitle", { project: to }),
-      confirmLabel: tr("sessionMove.confirmAction"),
-      destructive: false,
-    });
+    const confirmed = await confirmAlert(
+      personalNotes ? `${sessionMoveMessage(title, from, to, preview)}\n\n${tr("sessionMove.personalNotes")}` : sessionMoveMessage(title, from, to, preview),
+      {
+        title: tr("sessionMove.confirmTitle", { project: to }),
+        confirmLabel: tr("sessionMove.confirmAction"),
+        destructive: false,
+        // The message already says what changes; the checkbox is the decision.
+        ...(personalNotes ? { acknowledge: { label: tr("sessionMove.personalNotesConfirm") } } : {}),
+      },
+    );
     if (!confirmed) return false;
-    const result = await api.moveSession(session.id, input);
+    const result = await api.moveSession(session.id, personalNotes ? { ...input, acknowledgePersonalContext: true } : input);
     upsertSession(result.session);
     announce(tr("sessionMove.moved", { project: to }));
     return true;

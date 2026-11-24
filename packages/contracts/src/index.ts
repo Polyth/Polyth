@@ -1575,7 +1575,22 @@ export interface CreateSessionInput {
   isolation?: SessionIsolation;
   /** Existing OpenCode session to adopt rather than create. Internal adapter seam. */
   backendSessionId?: string;
+  /** The audience a person chose for this chat before it existed (Spaces
+   *  §14.3), applied under their sharing rights before anyone reads it, so the
+   *  agent knows from its first turn that others are here and never reaches
+   *  that person's personal notes. A plain create only: `SessionStartRequest`
+   *  refuses it, since its first turn could be admitted before the change. */
+  sharing?: SessionCreationSharing;
 }
+
+/** How a new chat is shared from the moment it exists. */
+export interface SessionCreationSharing {
+  /** `private` is the default and needs no entry here. */
+  visibility: "restricted" | "space";
+  /** People given access by name, each at most the creator's `maxGrant`. */
+  grants?: readonly { userId: string; access: SessionAccessLevel }[];
+}
+
 export interface SessionRef { id: string }
 /** What a new chat does once it exists. Sent with its create so the server
  *  owns the whole start: no later client request is needed, and a client that
@@ -1908,6 +1923,12 @@ export interface SessionMentionOutsidersDto {
 export interface NewChatPeopleDto extends SessionMentionOutsidersDto {
   /** Those the chat reaches as soon as it exists, by the Space's default audience. */
   inside: SessionMentionCandidateDto[];
+  /** Audiences the owner-to-be may pick when the chat is created, as their
+   *  sharing rights and the Space policy allow (never `private`, the default). */
+  visibilities: SessionVisibility[];
+  /** The owner-to-be has personal MCP servers, so a chat that starts shared
+   *  runs without them (Spaces §14.6). */
+  hasPersonalMcpServers?: true;
 }
 
 /** Package-free purpose of a people-first session: no runtime, no agent;
@@ -2063,6 +2084,10 @@ export interface SessionSharingUpdate {
   visibility?: SessionVisibility;
   grants?: Array<{ userId: string; access: SessionAccessLevel }>;
   expectedRevision?: number;
+  /** The person confirmed that opening this chat lets others read what the
+   *  agent already saw of their personal notes (`personalContext`). Without
+   *  it, widening such a chat is refused; narrowing never needs it. */
+  acknowledgePersonalContext?: boolean;
 }
 
 /** A Space's sharing policy, set by its admins (`GET/PUT /api/sharing/policy`). */
@@ -2561,6 +2586,9 @@ export interface CreateIsolatedSessionInput {
   sourceSessionId?: string;
   /** Local branch that is currently checked out; merge-back returns to that workspace. */
   targetBranch?: string;
+  /** As `CreateSessionInput.sharing`: the audience chosen before the chat
+   *  existed (Spaces §14.3). Refused together with a `start`. */
+  sharing?: SessionCreationSharing;
 }
 
 /** `POST /api/worktrees/sessions`: start a chat in a linked worktree the
@@ -2830,6 +2858,7 @@ export type SessionMoveBlockReason =
   | "isolated"
   | "other-machine"
   | "package-owned"
+  | "personal-context"
   | "private"
   | "queued"
   | "too-large"
@@ -2845,6 +2874,11 @@ export interface SessionMoveInput {
   projectId: string;
   /** Refuses the move when the chat has meanwhile left this project. */
   expectedProjectId?: string;
+  /** The person confirmed that moving this chat where more people can open it
+   *  shows them what its agent already saw of their personal notes. Required
+   *  for any move that adds a reader to such a chat; never for a move that
+   *  does not widen it (Spaces §14.6). */
+  acknowledgePersonalContext?: boolean;
 }
 
 /** What a move would do, without doing it. */

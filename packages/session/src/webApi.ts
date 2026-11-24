@@ -86,6 +86,7 @@ import type {
   WorkflowRetryInputDto,
   WorkspaceLabel,
   CreateIsolatedSessionInput,
+  SessionCreationSharing,
   SessionStartRequest,
   StartSessionResult,
   StartWorktreeSessionInput,
@@ -1139,7 +1140,7 @@ export const api = {
     jfetch<SessionProjection>(`/api/sessions/${encodeURIComponent(sessionId)}/workspace`, json("PUT", selection)),
   /** `clientOperationId` makes the create idempotent: a resend with the same
    *  key returns the session the first request made instead of a second one. */
-  createSession: (input: { projectId: string; repositoryIds?: readonly string[]; harness?: HarnessSelection; title?: string; purpose?: string; model?: ModelRef; agent?: string; worktreePath?: string; clientOperationId?: string; start?: SessionStartRequest }) =>
+  createSession: (input: { projectId: string; repositoryIds?: readonly string[]; harness?: HarnessSelection; title?: string; purpose?: string; model?: ModelRef; agent?: string; worktreePath?: string; clientOperationId?: string; start?: SessionStartRequest; sharing?: SessionCreationSharing }) =>
     jfetch<StartSessionResult>("/api/sessions", json("POST", input)),
   /** Outcome of one keyed create whose response was lost. Servers without
    *  idempotent create answer 404, which callers must treat as unresolvable. */

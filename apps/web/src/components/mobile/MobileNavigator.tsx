@@ -46,6 +46,7 @@ import { ChatSearchMessagesRow } from "../ChatSearchMessagesRow.tsx";
 import PrivateRoomGroup, { useRoomChatsListed } from "../PrivateRoomGroup.tsx";
 import ProjectAppearanceDialog from "../ProjectAppearanceDialog.tsx";
 import ConversationCreateDialog from "../ConversationCreateDialog.tsx";
+import SharedChatDialog from "../SharedChatDialog.tsx";
 import { getLocale, tr } from "../../i18n/index.ts";
 import { friendlyError } from "../../settings.ts";
 import { useSessionSummaryPages } from "../../useSessionSummaryPages.ts";
@@ -1102,6 +1103,7 @@ export default function MobileNavigator() {
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [appearanceProjectId, setAppearanceProjectId] = useState<string | null>(null);
   const [conversationProjectId, setConversationProjectId] = useState<string | null>(null);
+  const [sharedChatProjectId, setSharedChatProjectId] = useState<string | null>(null);
   // The project-name field while one is open. A project menu closing hands
   // focus back here instead of to its ⋮, which would blur the field it just
   // opened and save the unchanged name at once.
@@ -1805,6 +1807,13 @@ export default function MobileNavigator() {
                 label: tr("conversation.new"),
                 onSelect: () => setConversationProjectId(project.id),
               },
+              {
+                // Shared from its first message, so the agent never reaches
+                // the creator's personal notes (Spaces §14.6).
+                id: "shared-chat",
+                label: tr("sharing.newSharedChat"),
+                onSelect: () => setSharedChatProjectId(project.id),
+              },
               ...(offersPrivateRoom(project) ? [{
                 id: "private-chat",
                 label: tr("privateRoom.newChat"),
@@ -2073,6 +2082,13 @@ export default function MobileNavigator() {
           open
           projectId={conversationProjectId}
           onClose={() => setConversationProjectId(null)}
+        />
+      )}
+      {sharedChatProjectId && (
+        <SharedChatDialog
+          open
+          projectId={sharedChatProjectId}
+          onClose={() => setSharedChatProjectId(null)}
         />
       )}
     </>

@@ -633,8 +633,14 @@ Both ways end at the same `requestSessionMove`: it asks for the server's preview
 first, words a refusal from its stable reason, and otherwise confirms with
 `confirmAlert`, which says what can't be seen from the navigator: subagents coming
 along, files staying behind, the agent carrying on in the other folder, and who gains
-or loses the chat. The offer (`canMoveSession`) hides what the server would refuse
-anyway; the server still decides.
+or loses the chat. A chat whose agent read the person's personal notes is not refused
+when the move would add readers: `blocked.reason === "personal-context"` turns the
+same confirmation into the person's choice — the reason and the warning in the
+message, plus a checkbox (`confirmAlert`'s `acknowledge`, a `role="checkbox"` button
+because a dialog can swallow a native label's activation) that the confirm button
+waits for. Only a confirmed move sends `acknowledgePersonalContext: true`. A move that
+adds nobody asks nothing. The offer (`canMoveSession`) hides what the server would
+refuse anyway; the server still decides.
 
 The moved chat stays open if it was open, and the workspace follows it
 (`followActiveSessionTo`, on this device and any other), unless the person has already
@@ -838,9 +844,28 @@ stays the authority and refuses anything the UI should not have offered.
   rights it is a read-only "Who has access" view; a delegated subagent only
   explains that it follows its parent and opens the parent's dialog. A name
   wraps to a second line before it truncates.
+- **Personal notes already read**: a chat whose agent read the owner's
+  personal notes (`projection.personalContext`) still says so, but widening it
+  is the person's choice: a wider audience, an added person or a raised level
+  shows a checkbox ("I understand — open this chat to others") and Save stays
+  disabled until it is ticked, sending `acknowledgePersonalContext`. The web
+  mirrors the server's `widens` (audience order, new grant, higher level), so
+  one specific person becoming the whole Space asks again. Narrowing never
+  asks. The server refuses without it (§14.6). A chat in Only me stays private
+  and only explains that.
+- **New shared chat** (`SharedChatDialog.tsx`, from the project menu on
+  desktop and phone): the same audience choice and people list as the share
+  dialog, for a chat that does not exist yet. It reads
+  `GET /api/sharing/new-chat` (people, access levels, allowed audiences, and
+  whether this person may share at all), then creates the chat with
+  `CreateSessionInput.sharing` and opens it ready to type. Because the
+  audience exists before its first message, its agent works with those people
+  from the start and never reaches the creator's personal notes. Nothing is
+  created when the audience is refused.
 - **Entry points**: "Share…" (or "Who has access" below manage) in the
   desktop row menu, the phone recent-row menu and the session overview lines
-  (desktop status popover, phone overview sheet).
+  (desktop status popover, phone overview sheet); "New shared chat" beside
+  "New conversation" and "New chat in Only me" in the project menu.
 - **Navigator marker**: a quiet `SharedIcon` (Lucide `Users`) on a row only
   when `sharing.shared`; its label names the owner of someone else's chat,
   otherwise says whether the Space or specific people can open it. Private

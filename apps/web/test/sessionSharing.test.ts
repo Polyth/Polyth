@@ -67,6 +67,7 @@ const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const store = await import("../src/store.ts");
 const { default: ShareSessionDialog } = await import("../src/components/ShareSessionDialog.tsx");
+const { default: SharedChatDialog } = await import("../src/components/SharedChatDialog.tsx");
 const { default: SessionList } = await import("../src/components/sidebar/SessionList.tsx");
 const { default: Composer } = await import("../src/components/Composer.tsx");
 const { default: SharingPolicySection } = await import("../src/components/settings/SharingPolicySection.tsx");
@@ -174,6 +175,122 @@ test("an owner with personal MCP servers is told sharing starts the agent withou
     assert.match(document.querySelector("[data-sharing-mcp-detached]")?.textContent ?? "", /personal MCP servers/);
   } finally {
     await view.unmount();
+  }
+});
+
+test("a chat whose agent read personal notes opens only after the person confirms", async () => {
+  calls.length = 0;
+  route("GET", "/api/sessions/s1/sharing", () => ({ status: 200, body: sharingDto() }));
+  route("PUT", "/api/sessions/s1/sharing", () => ({ status: 200, body: sharingDto({ visibility: "restricted", revision: 4 }) }));
+  openShare({ visibility: "private", access: "manage", shared: false });
+  // The projection says the agent already saw this person's notes.
+  store.setSessions("p1", [session({
+    id: "s1",
+    personalContext: true,
+    sharing: { visibility: "private", access: "manage", shared: false },
+  })]);
+  const view = await mount(createElement(ShareSessionDialog));
+  try {
+    assert.match(bodyText(), /personal notes/, "the chat says so before anything is changed");
+    assert.equal(document.querySelector(".session-sharing-confirm"), null, "nothing to confirm while it stays private");
+    await click([...document.querySelectorAll('[role="radio"]')].find((radio) => /Specific people/.test(radio.textContent ?? "")));
+    const confirm = document.querySelector<HTMLElement>(".session-sharing-confirm[role=\"checkbox\"]");
+    assert.ok(confirm, "opening it asks for a confirmation");
+    assert.equal(confirm.getAttribute("aria-checked"), "false");
+    assert.equal(buttonByText("Save")?.disabled, true, "and Save waits for it");
+    await click(confirm);
+    assert.equal(confirm.getAttribute("aria-checked"), "true");
+    assert.equal(buttonByText("Save")?.disabled, false);
+    await click(buttonByText("Save"));
+    const put = calls.find((call) => call.method === "PUT");
+    assert.deepEqual(put?.body, {
+      visibility: "restricted",
+      grants: [],
+      expectedRevision: 3,
+      acknowledgePersonalContext: true,
+    });
+  } finally {
+    await view.unmount();
+  }
+});
+
+test("a chat with personal notes asks again before it reaches more people than agreed", async () => {
+  calls.length = 0;
+  route("GET", "/api/sessions/s1/sharing", () => ({ status: 200, body: sharingDto({
+    visibility: "restricted",
+    grants: [{ userId: "u-ana", name: "Ana", access: "collaborate" }],
+  }) }));
+  route("PUT", "/api/sessions/s1/sharing", () => ({ status: 200, body: sharingDto({ visibility: "space", revision: 5 }) }));
+  openShare({ visibility: "restricted", access: "manage", shared: true, named: true });
+  store.setSessions("p1", [session({
+    id: "s1",
+    personalContext: true,
+    sharing: { visibility: "restricted", access: "manage", shared: true, named: true },
+  })]);
+  const view = await mount(createElement(ShareSessionDialog));
+  try {
+    // A chat one person can read widening to the whole Space is a new
+    // disclosure, so it asks again (Spaces §14.6).
+    assert.equal(document.querySelector(".session-sharing-confirm"), null, "nothing to confirm while nothing changes");
+    await click([...document.querySelectorAll('[role="radio"]')].find((radio) => /Everyone in this Space/.test(radio.textContent ?? "")));
+    const confirm = document.querySelector<HTMLElement>(".session-sharing-confirm[role=\"checkbox\"]");
+    assert.ok(confirm, "a wider audience asks for a confirmation, even from one specific person");
+    assert.equal(buttonByText("Save")?.disabled, true);
+    await click(confirm);
+    await click(buttonByText("Save"));
+    const put = calls.find((call) => call.method === "PUT");
+    assert.deepEqual(put?.body, {
+      visibility: "space",
+      // The person who was here by name keeps their level above the audience.
+      grants: [{ userId: "u-ana", access: "collaborate" }],
+      expectedRevision: 3,
+      acknowledgePersonalContext: true,
+    });
+  } finally {
+    await view.unmount();
+  }
+});
+
+test("new shared chat offers the audience and people, and creates the chat already shared", async () => {
+  calls.length = 0;
+  route("GET", "/api/sharing/new-chat?projectId=p1", () => ({
+    status: 200,
+    body: {
+      people: [{ userId: "u-bo", name: "Bo" }],
+      inside: [{ userId: "u-ana", name: "Ana", access: "view" }],
+      action: "share",
+      levels: ["view", "collaborate", "manage"],
+      visibilities: ["restricted", "space"],
+      hasPersonalMcpServers: true,
+    },
+  }));
+  route("POST", "/api/sessions", () => ({ status: 200, body: { id: "s9" } }));
+  route("GET", "/api/sessions/s9", () => ({ status: 200, body: session({ id: "s9", projectId: "p1" }) }));
+  store.activateProject("p1");
+  const view = await mount(createElement(SharedChatDialog, { open: true, projectId: "p1", onClose: () => {} }));
+  try {
+    const radios = [...document.querySelectorAll<HTMLElement>('[role="radio"]')].map((radio) => radio.textContent ?? "");
+    assert.equal(radios.length, 2, "both allowed audiences are offered");
+    assert.match(bodyText(), /Ana/, "people already inside the project can still be chosen");
+    assert.match(bodyText(), /personal MCP servers/, "the owner is told the agent starts without them");
+    await click([...document.querySelectorAll('[role="checkbox"]')].find((node) => (node.textContent ?? "").includes("Ana")));
+    await click([...document.querySelectorAll('[role="checkbox"]')].find((node) => (node.textContent ?? "").includes("Bo")));
+    const primary = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => /Start the chat/.test(button.textContent ?? ""));
+    assert.equal(primary?.disabled, false);
+    await click(primary);
+    const post = calls.find((call) => call.method === "POST" && call.url === "/api/sessions");
+    const body = post?.body as { projectId?: string; sharing?: unknown; clientOperationId?: unknown };
+    assert.equal(body.projectId, "p1");
+    assert.deepEqual(body.sharing, {
+      visibility: "restricted",
+      grants: [{ userId: "u-ana", access: "collaborate" }, { userId: "u-bo", access: "collaborate" }],
+    });
+    assert.equal(typeof body.clientOperationId, "string", "the create is keyed, so a resend never makes a second chat");
+  } finally {
+    await view.unmount();
+    await settle();
+    store.activateSession(null);
+    store.setSessions("p1", []);
   }
 });
 

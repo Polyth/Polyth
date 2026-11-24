@@ -102,9 +102,14 @@ export function orgRoutes(deps: {
         json(400, { error: "invalid-input", message: "expectedProjectId must be a string" });
         return true;
       }
+      if (b.acknowledgePersonalContext !== undefined && typeof b.acknowledgePersonalContext !== "boolean") {
+        json(400, { error: "invalid-input", message: "acknowledgePersonalContext must be a boolean" });
+        return true;
+      }
       const input = {
         projectId: b.projectId,
         ...(typeof b.expectedProjectId === "string" ? { expectedProjectId: b.expectedProjectId } : {}),
+        ...(b.acknowledgePersonalContext === true ? { acknowledgePersonalContext: true } : {}),
       };
       json(200, b.dryRun === true
         ? await sessions.previewMoveToProject(m[1]!, input)

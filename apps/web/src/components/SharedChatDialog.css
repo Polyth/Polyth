@@ -1,0 +1,8 @@
+/* A chat that is shared from its first message: the share dialog's audience
+   choice, then an inline people list and the access each chosen person gets. */
+.shared-chat-create .shared-chat-audiences {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-inline: calc(var(--space-3) * -1);
+}

@@ -2608,6 +2608,7 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
         ...(input.title ? { title: input.title } : {}),
         ...(input.model ? { model: input.model } : {}),
         ...(input.agent ? { agent: input.agent } : {}),
+        ...(input.sharing ? { sharing: input.sharing } : {}),
         worktreePath: execution.path,
         workspace,
         // Keep the scalar projection bound to the canonical execution

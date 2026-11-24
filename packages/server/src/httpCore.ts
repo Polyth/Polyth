@@ -21,6 +21,7 @@ import {
   type ResumeTurnOptions,
   type RouteHandler,
   type RouteRequest,
+  type SessionCreationSharing,
   type SessionStartRequest,
 } from "@polyth/contracts";
 import type { ProjectService } from "@polyth/contracts";
@@ -153,6 +154,26 @@ const repositoryIdsInput = (value: unknown, field = "repositoryIds"): readonly s
     throw Object.assign(new Error(`${field} must be a non-empty array of up to 128 ids`), { code: "invalid-input" });
   }
   return value.map((id) => (id as string).trim());
+};
+
+/** The audience a person picked before the chat existed (Spaces §14.3). The
+ *  sharing service owns the rules; this only rejects malformed input. */
+const sessionCreationSharingInput = (value: unknown): SessionCreationSharing | undefined => {
+  if (value === undefined || value === null) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw Object.assign(new Error("sharing must be an object"), { code: "invalid-input" });
+  }
+  const raw = value as { visibility?: unknown; grants?: unknown };
+  if (raw.visibility !== "restricted" && raw.visibility !== "space") {
+    throw Object.assign(new Error("sharing.visibility must be restricted or space"), { code: "invalid-input" });
+  }
+  if (raw.grants !== undefined && !Array.isArray(raw.grants)) {
+    throw Object.assign(new Error("sharing.grants must be an array"), { code: "invalid-input" });
+  }
+  return {
+    visibility: raw.visibility,
+    ...(Array.isArray(raw.grants) ? { grants: raw.grants as SessionCreationSharing["grants"] } : {}),
+  };
 };
 
 const memoryNarrowingInput = (value: unknown): MemoryNarrowing | undefined => {
@@ -919,6 +940,7 @@ async function dispatchHttp(
           ...(b.model ? { model: b.model as { providerID: string; modelID: string } } : {}),
           ...(b.agent ? { agent: String(b.agent) } : {}),
           ...(b.worktreePath ? { worktreePath: String(b.worktreePath) } : {}),
+          ...(b.sharing !== undefined ? { sharing: sessionCreationSharingInput(b.sharing)! } : {}),
         };
         const recordRecipient = (sessionId: string) => recordNotificationRecipient(deps.notificationRecipients
           ? () => deps.notificationRecipients!.created(sessionId, space().ctx)

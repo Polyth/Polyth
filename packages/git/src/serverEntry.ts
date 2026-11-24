@@ -1296,6 +1296,9 @@ export function isolationRoutes(deps: {
         ...(typeof input.agent === "string" ? { agent: input.agent } : {}),
         ...(typeof input.sourceSessionId === "string" ? { sourceSessionId: input.sourceSessionId } : {}),
         ...(typeof input.targetBranch === "string" ? { targetBranch: input.targetBranch } : {}),
+        // An audience chosen before the chat exists; the session authority
+        // checks it under the person's own sharing rights.
+        ...(input.sharing && typeof input.sharing === "object" ? { sharing: input.sharing as CreateIsolatedSessionInput["sharing"] } : {}),
         // Its shape is validated by the session service's `start`.
         ...(startRequestInput(input.start) ? { start: startRequestInput(input.start)! } : {}),
         ...(requestedOperationId ? { clientOperationId: accountScopedClientOperationId(requestedOperationId, space.userId) } : {}),
