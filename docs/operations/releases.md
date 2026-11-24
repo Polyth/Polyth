@@ -316,7 +316,10 @@ own runners; no deploy key or second repository is involved.
   **Nightly bug triage** agent template (Agents → Templates) works through new reports
   every night at 01:45, before the captain: it merges duplicates, ties each report to its
   source commit through the release marker and turns real bugs into public issues written
-  without the reporter's data, or into bounded fixes.
+  without the reporter's data, or into bounded fixes. Each fix runs in a visible chat of its
+  own in the project (`session.create` with `standalone: true`, then isolated), never in a
+  hidden subagent of the agent's session, and the person merges it from that chat's
+  isolation card.
 - **Stable.** A manual run with `channel` `stable` (set `ref` to `master`) builds
   the same way and publishes `vX.Y.N` (marked **Latest**, never pruned), sharing the
   build-number sequence, so every channel's build is

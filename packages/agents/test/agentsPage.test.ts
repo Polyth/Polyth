@@ -402,7 +402,11 @@ test("the nightly bug triage template is nightly, triages private reports and ke
   assert.match(charter, /Duplicate of #N/, "it merges duplicates instead of filing one issue per report");
   assert.match(charter, /<!-- polyth-release: channel=nightly source=<sha> -->/,
     "it resolves a report's version to its source commit");
-  assert.match(charter, /agent\.spawn/, "a bounded fix may go to a Polyth subagent");
+  assert.match(charter, /session\.create with standalone=true/,
+    "a bounded fix goes to a visible chat the person can watch and steer");
+  assert.match(charter, /never a subagent/, "a fix is never hidden as the agent's sub-session");
+  assert.match(charter, /Never use agent\.spawn for this work/);
+  assert.match(charter, /merges it from that chat's isolation card/, "the person, not the agent, merges a fix");
   assert.match(charter, /never @mention a reporter/i, "privacy is absolute: no reporter is mentioned publicly");
   await view.unmount();
 });

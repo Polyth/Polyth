@@ -69,6 +69,7 @@ const DESCRIPTION =
   + "Polyth owns delegation: never use a harness-native Agent, Task, task, agent, invoke_subagent, or equivalent spawn surface. Use agent.spawn instead. "
   + "Before agent.spawn, call agent.models once: a few lines ranking the user's favorite and most-used harness/model pairs, named as each harness's live model catalog lists them, with live quota headroom; pass the chosen row's harnessId and model to agent.spawn exactly. "
   + "agent.spawn always creates a canonical child Session of the calling Session, so every delegated worker has a durable parentId and appears as a Polyth sub-session. "
+  + "session.create in your own project also files the new chat under you as a sub-session; pass parameters.standalone=true when the person asked for chats they can see and steer themselves: it becomes a chat of its own in the project's session list, with no parent. "
   + "Choose each child's workspace with parameters.isolation: shared (default) runs it in your checkout, where it sees your uncommitted files; isolated gives it its own git worktree branched from your last commit, so parallel or risky edits cannot collide. "
   + "Isolated work reaches your checkout only through agent.merge (agent.resolve for conflicts, agent.discard to drop it on purpose); merge or discard every isolated child before you finish. "
   + "Inside the current project, session orchestration is autonomous: spawn, create, inspect, debug, message, cancel, archive, fork, and switch harnesses without a Polyth orchestration approval on every call. "
@@ -100,7 +101,7 @@ export const polythSessionsSkill = {
     kind: "skill" as const,
     owner: "harness-runtime",
     scope: "deployment" as const,
-    revision: "8",
+    revision: "9",
     name: "polyth-sessions",
     title: "Polyth sessions",
     description: "Orchestrate Polyth sessions and delegated subagents in any project.",
@@ -181,6 +182,10 @@ const inputSchema: JsonObject = {
           type: "string",
           enum: ["shared", "isolated"],
           description: "agent.spawn workspace. shared (default): the child works in your checkout. isolated: its own git worktree from your last commit; merge it back with agent.merge.",
+        },
+        standalone: {
+          type: "boolean",
+          description: "session.create only: make the chat one of the project's own, listed for the person to see and steer, instead of a sub-session of yours. Use it when the person wants visible sessions rather than subagents; you can still session.send, session.watch and session.isolate it.",
         },
         force: {
           type: "boolean",
@@ -366,7 +371,7 @@ export function registerPolythSessionControl(
     kind: "tool" as const,
     owner: "harness-runtime",
     scope: "project" as const,
-    revision: "9",
+    revision: "10",
     name: "polyth",
     description: DESCRIPTION,
     inputSchema,
@@ -413,6 +418,12 @@ export function registerPolythSessionControl(
       };
       if (parameters.isolation !== undefined && action !== "agent.spawn") {
         return invalid("isolation applies only to agent.spawn");
+      }
+      if (parameters.standalone !== undefined && action !== "session.create") {
+        return invalid("standalone applies only to session.create; agent.spawn always creates your sub-session");
+      }
+      if (parameters.standalone !== undefined && typeof parameters.standalone !== "boolean") {
+        return invalid("standalone must be a boolean");
       }
 
       if (action === "agent.models") {
@@ -539,9 +550,12 @@ export function registerPolythSessionControl(
         if (mode === "isolated" && requestedWorktreePath) {
           return invalid("worktreePath cannot be combined with isolation=isolated: an isolated agent gets its own worktree");
         }
+        // A standalone chat has no parent, so lists show it as a chat of its
+        // own rather than nesting it under the caller (whose own session may
+        // not be listed at all, as an agent's is not).
         const parentId = action === "agent.spawn"
           ? ctx.sessionId!
-          : targetProjectId === ctx.projectId && ctx.sessionId ? ctx.sessionId : undefined;
+          : parameters.standalone !== true && targetProjectId === ctx.projectId && ctx.sessionId ? ctx.sessionId : undefined;
         let delegated: ServerDelegatedSessionCreated | undefined;
         if (mode === "isolated") {
           const isolation = isolationService();

@@ -341,6 +341,22 @@ test("polyth tool can discover projects and autonomously orchestrate canonical c
     harness: { mode: "pinned", harnessId: "codex" },
   });
 
+  // A standalone chat in the caller's own project is listed on its own, not
+  // filed under the caller as a sub-session.
+  await execute!({
+    action: "session.create",
+    parameters: { title: "Fix: visible to the person", standalone: true },
+  }, toolContext);
+  assert.deepEqual(createdInputs.at(-1), { projectId: "p1", title: "Fix: visible to the person" });
+  await assert.rejects(
+    () => execute!({ action: "agent.spawn", parameters: { title: "Hidden", standalone: true } }, toolContext),
+    /standalone applies only to session.create/,
+  );
+  await assert.rejects(
+    () => execute!({ action: "session.create", parameters: { title: "Odd", standalone: "yes" } }, toolContext),
+    /standalone must be a boolean/,
+  );
+
   const externalList = JSON.parse((await execute!({
     action: "session.list",
     parameters: { projectId: "p2" },
