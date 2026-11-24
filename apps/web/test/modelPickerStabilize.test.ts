@@ -852,6 +852,8 @@ test("every harness catalog uses the same compact popover surface on desktop and
   assert.match(styles, /\.model-pop\s*\{[^}]*height:\s*auto;[^}]*max-height:\s*min\(560px,\s*72vh\)/s);
   assert.match(source, /popHeightFloorRef\.current = Math\.max\(popHeightFloorRef\.current, natural, switchable\)/,
     "while open the surface keeps the tallest height it reached instead of shrinking");
+  assert.match(source, /popHeightFloorRef\.current = Math\.min\(popHeightFloorRef\.current, cap\)/,
+    "the pinned height is clamped to the CSS cap, which the popover's inline max-height overrides");
   assert.match(styles, /\.model-pop-search-input\s*\{[^}]*min-height:\s*var\(--control-h-sm\);/s);
   assert.match(styles, /\.model-provider-head strong\s*\{[^}]*font-size:\s*max\(var\(--font-label\),\s*1rem\);/s);
   assert.match(
@@ -1425,6 +1427,30 @@ test("a picker with harness tabs opens tall enough for the largest switchable ca
     await render("claude", claude, codex, false);
     await act(async () => { container.querySelector<HTMLButtonElement>(".model-picker-trigger")!.click(); });
     assert.equal(height(), `${60 + 2 * 34}px`, "without harness tabs there is no switch, so it fits its own catalog");
+    await act(async () => { container.querySelector<HTMLButtonElement>(".model-picker-trigger")!.click(); });
+    // 40 models in four collapsed providers show four headings, not 44 rows.
+    const grouped = Array.from({ length: 40 }, (_, index) => ({
+      harnessId: "opencode", providerID: `p${index % 4}`, modelID: `m${index}`, name: `Model ${index}`,
+    })) as ModelDescriptor[];
+    await render("claude", claude, grouped, true);
+    await act(async () => { container.querySelector<HTMLButtonElement>(".model-picker-trigger")!.click(); });
+    assert.equal(height(), `${60 + 4 * 34}px`, "collapsed providers reserve only their headings");
+    await act(async () => { container.querySelector<HTMLButtonElement>(".model-picker-trigger")!.click(); });
+    // The popover's inline max-height is the free room; the CSS cap still wins.
+    const realStyle = window.getComputedStyle;
+    window.getComputedStyle = ((el: Element) => {
+      const style = realStyle(el);
+      return el instanceof window.HTMLElement && el.matches(".model-pop") && !el.style.maxHeight
+        ? new Proxy(style, { get: (target, key) => key === "maxHeight" ? "200px" : Reflect.get(target, key) })
+        : style;
+    }) as typeof window.getComputedStyle;
+    try {
+      await render("claude", claude, codex, true);
+      await act(async () => { container.querySelector<HTMLButtonElement>(".model-picker-trigger")!.click(); });
+      assert.equal(height(), "200px", "a reserved height never exceeds the CSS cap");
+    } finally {
+      window.getComputedStyle = realStyle;
+    }
   } finally {
     await act(async () => { root.unmount(); });
     container.remove();

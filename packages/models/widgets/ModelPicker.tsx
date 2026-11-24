@@ -33,6 +33,7 @@ import { resolveModelContextLimit } from "@polyth/contracts/model-context";
 import { chatOverflowsModel } from "./chatFit.ts";
 import { hiddenModelMatcher, isFavorite, modelKey, orderProviders, providerPreferenceKey } from "@polyth/models";
 import {
+  getLastHarnessModels,
   reorderModelFavorites,
   noteModelUsed,
   reorderModelProviders,
@@ -363,24 +364,42 @@ export default function ModelPicker({
   const touchTriggerActivationRef = useRef(false);
   const popHeightFloorRef = useRef(0);
   // Rows the largest *other* catalog reachable from the header's harness tabs
-  // would list fully expanded (provider headings included). Only a picker with
-  // a header can switch harness in place, so only it reserves that height.
+  // shows right after a switch: favorites, recents, provider headings and the
+  // rows of providers that open expanded (remembered open, or holding the
+  // model the switch selects), as the list below renders them. Only a picker
+  // with a header can switch harness in place, so only it reserves that height.
   const switchableRowCount = useMemo(() => {
     if (!header || multi || !otherHarnesses?.length) return 0;
     const ownHarnessId = harnessId ?? unanimousHarnessId(models);
+    const lastModels = getLastHarnessModels();
+    const expandedKeys = new Set(prefs.expandedProviders);
     let most = 0;
     for (const group of otherHarnesses) {
       if (group.harnessId === ownHarnessId) continue;
       const shown = pickerCatalogModels(group.models, group.harnessId)
         .filter((model) => !isHidden(model, group.harnessId));
-      const headings = flatModelCatalog(shown, group.harnessId)
-        ? 0
-        : new Set(shown.map((model) => model.providerID)).size;
-      most = Math.max(most, shown.length + headings + (emptyLabel ? 1 : 0));
+      let rows = shown.length;
+      if (!flatModelCatalog(shown, group.harnessId)) {
+        const last = lastModels[group.harnessId];
+        const providerRows = new Map<string, number>();
+        rows = 0;
+        for (const model of shown) {
+          const key = modelKey(model);
+          if (isFavorite(prefs, key) || prefs.recents.includes(key)) rows += 1;
+          else providerRows.set(model.providerID, (providerRows.get(model.providerID) ?? 0) + 1);
+          if (!providerRows.has(model.providerID)) providerRows.set(model.providerID, 0);
+        }
+        for (const [providerID, count] of providerRows) {
+          const open = expandedKeys.has(providerPreferenceKey(group.harnessId, providerID))
+            || last?.providerID === providerID;
+          rows += 1 + (open ? count : 0);
+        }
+      }
+      most = Math.max(most, Math.min(rows, MAX_RENDERED_MODELS) + (emptyLabel ? 1 : 0));
     }
     return most;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [Boolean(header), multi, otherHarnesses, harnessId, models, isHidden, emptyLabel]);
+  }, [Boolean(header), multi, otherHarnesses, harnessId, models, isHidden, emptyLabel, prefs]);
 
   useEffect(() => () => {
     openRequestRef.current += 1;
@@ -397,10 +416,15 @@ export default function ModelPicker({
     }
     const pop = pickerShellRef.current?.closest<HTMLElement>(".model-pop");
     if (!pop) return;
+    // The popover's inline max-height is only the room beside the trigger and
+    // overrides the CSS cap, so read the cap with it lifted for a moment.
+    const room = pop.style.maxHeight;
+    pop.style.maxHeight = "";
+    const cap = parseFloat(window.getComputedStyle(pop).maxHeight) || Infinity;
+    pop.style.maxHeight = room;
     if (phone && detail) {
       // Phone details replace the list inside the surface: give them the cap.
-      const cap = getComputedStyle(pop).maxHeight;
-      if (cap && cap !== "none") pop.style.height = cap;
+      if (cap < Infinity) pop.style.height = `${cap}px`;
       return;
     }
     const list = listRef.current;
@@ -424,6 +448,7 @@ export default function ModelPicker({
       }
     }
     popHeightFloorRef.current = Math.max(popHeightFloorRef.current, natural, switchable);
+    popHeightFloorRef.current = Math.min(popHeightFloorRef.current, cap);
     if (popHeightFloorRef.current > 0) pop.style.height = `${popHeightFloorRef.current}px`;
   });
 
