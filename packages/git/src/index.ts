@@ -261,7 +261,8 @@ export interface GitService {
   discard(root: string, paths: string[]): Promise<void>;
   commit(root: string, message: string): Promise<{ sha: string }>;
   branches(root: string): Promise<GitBranches>;
-  createBranch(root: string, name: string, from?: string): Promise<void>;
+  /** With `checkout`, one atomic `git switch -c`: nothing is created if the switch is refused. */
+  createBranch(root: string, name: string, from?: string, options?: { checkout?: boolean }): Promise<void>;
   renameBranch(root: string, from: string, to: string): Promise<void>;
   checkout(root: string, name: string): Promise<void>;
   log(root: string, limit?: number): Promise<GitCommit[]>;
@@ -588,6 +589,44 @@ export const shortErr = (stderr: string): string => {
   if (message.length >= 200) message = `${message.slice(0, 197)}…`;
   return message;
 };
+
+/** A git refusal that happens before anything changes, as a typed error the
+ *  routes can answer with `mutationOutcome:"not-started"`. `null` for stderr we
+ *  do not recognise: that stays an ordinary `git-failed`. */
+export type GitRefusalCode = "branch-in-use" | "worktree-dirty" | "branch-exists" | "branch-not-found" | "invalid-branch-name";
+export interface GitRefusal extends Error {
+  code: GitRefusalCode;
+  branch?: string;
+  worktreePath?: string;
+  count?: number;
+  files?: string[];
+}
+const REFUSAL_FILE_LIMIT = 5;
+export function classifyGitRefusal(stderr: string, context: { branch?: string } = {}): GitRefusal | null {
+  const text = String(stderr ?? "");
+  const make = (code: GitRefusalCode, message: string, extra: Partial<GitRefusal> = {}): GitRefusal =>
+    Object.assign(new Error(message), { code, cause: stderr, ...extra }) as GitRefusal;
+  const inUse = /'([^']+)' is already (?:used by worktree|checked out) at '([^']+)'/.exec(text);
+  if (inUse) return make("branch-in-use", shortErr(text), { branch: inUse[1]!, worktreePath: inUse[2]! });
+  const dirty = /Your local changes to the following files would be overwritten by (?:checkout|merge|switch)/.exec(text);
+  if (dirty) {
+    const after = text.slice(dirty.index).split("\n").slice(1);
+    const files: string[] = [];
+    for (const line of after) {
+      if (!/^[\t ]+\S/.test(line)) break;
+      files.push(line.trim());
+    }
+    return make("worktree-dirty", shortErr(text), { count: files.length, files: files.slice(0, REFUSAL_FILE_LIMIT) });
+  }
+  const exists = /(?:a branch named '([^']+)' already exists|branch '([^']+)' already exists)/i.exec(text);
+  if (exists) return make("branch-exists", shortErr(text), { branch: exists[1] ?? exists[2] ?? context.branch ?? "" });
+  if (/invalid reference|is not a valid branch name|not a valid ref/i.test(text)) {
+    return make("invalid-branch-name", shortErr(text), { branch: context.branch ?? "" });
+  }
+  const missing = /pathspec '([^']+)' did not match|invalid reference: (\S+)|fatal: '([^']+)' is not a commit/.exec(text);
+  if (missing) return make("branch-not-found", shortErr(text), { branch: missing[1] ?? missing[2] ?? missing[3] ?? context.branch ?? "" });
+  return null;
+}
 
 const pushRejection = (failure: Error & { cause?: unknown }): boolean => {
   const text = `${failure.message} ${String(failure.cause ?? "")}`;
@@ -1035,6 +1074,19 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
         child.stdin?.end(opts.input);
       }
     });
+
+  const validBranchName = async (root: string, name: string): Promise<boolean> =>
+    !!name.trim() && !name.startsWith("-") && (await run(root, ["check-ref-format", "--branch", name], true)).code === 0;
+
+  /** Run a ref-changing command; a recognised pre-effect refusal is rethrown typed. */
+  const refusable = async (root: string, args: string[], context: { branch?: string }): Promise<void> => {
+    try {
+      await run(root, args);
+    } catch (error) {
+      const stderr = String((error as { cause?: unknown }).cause ?? (error as Error).message ?? "");
+      throw classifyGitRefusal(stderr, context) ?? error;
+    }
+  };
 
   const hashDirtyTree = async (root: string): Promise<string> => {
     const porcelain = (await run(root, ["status", "--porcelain=v1", "-unormal", "-z"], true)).stdout;
@@ -1663,8 +1715,15 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
       return { current, branches };
     },
 
-    async createBranch(root, name, from) {
-      await run(root, from ? ["branch", name, from] : ["branch", name]);
+    async createBranch(root, name, from, options) {
+      if (!await validBranchName(root, name)) {
+        throw Object.assign(new Error(`'${name}' is not a valid branch name`), { code: "invalid-branch-name", branch: name });
+      }
+      if (from?.startsWith("-")) throw Object.assign(new Error("invalid start point"), { code: "invalid-input" });
+      const args = options?.checkout
+        ? ["switch", "-c", name, ...(from ? [from] : [])]
+        : (from ? ["branch", name, from] : ["branch", name]);
+      await refusable(root, args, { branch: name });
     },
 
     async renameBranch(root, from, to) {
@@ -1672,7 +1731,7 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
     },
 
     async checkout(root, name) {
-      await run(root, ["checkout", name]);
+      await refusable(root, ["checkout", name], { branch: name });
     },
 
     async log(root, limit = 20) {

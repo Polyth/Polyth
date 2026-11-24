@@ -3387,7 +3387,8 @@ export interface SessionService {
   /** Record a verified in-place branch rename without resetting the runtime:
    * the checkout path and execution authority are unchanged. */
   renameWorktreeBranch?(sessionId: string, input: {
-    worktreePath: string;
+    /** The linked checkout; absent for a chat on the project's own checkout. */
+    worktreePath?: string;
     from: string;
     to: string;
   }): Promise<SessionProjection>;
@@ -6849,6 +6850,11 @@ export const UI_SLOTS = [
   // (CodeBlockActionSlotMeta) limits it to those fence languages.
   "session.code.actions",
   "sidebar.project.actions", "sidebar.session.actions",
+  // A chat dropped on another checkout of its own project in the navigator.
+  // The host mounts it only while that drop waits for its confirmation, which
+  // the contribution renders. Context: sessionId, projectId, target
+  // ({ worktreePath } | { main: true }), onClose().
+  "session.checkout.move",
   // Package actions for the sessions selected in the navigator, rendered as
   // menu items in the selection bar's menu. Context: sessionIds (string[]),
   // closeMenu(), done() — ends the selection and refreshes the lists — and

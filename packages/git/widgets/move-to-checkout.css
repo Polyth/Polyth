@@ -1,0 +1,14 @@
+.git-move-body { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+.git-move-route { margin: 0; font-size: var(--font-meta); line-height: var(--font-meta-lh); font-family: var(--mono); overflow-wrap: anywhere; }
+.git-move-meta { margin: 0; font-size: var(--font-meta); line-height: var(--font-meta-lh); color: var(--muted); }
+.git-move-group { display: flex; flex-direction: column; border: 1px solid var(--border-soft); border-radius: var(--radius-card); overflow: hidden; }
+.git-move-group-title { padding: var(--space-2) var(--space-3); font-size: var(--font-meta); line-height: var(--font-meta-lh); color: var(--muted); }
+.git-move-radio { display: flex; gap: var(--space-2); align-items: flex-start; padding: var(--space-2) var(--space-3); border-top: 1px solid var(--border-soft); cursor: pointer; }
+.git-move-radio[data-checked="true"] { background: var(--surface-overlay); }
+.git-move-radio.is-disabled { opacity: 0.6; cursor: not-allowed; }
+.git-move-radio:focus-within { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.git-move-radio-copy { display: flex; flex-direction: column; gap: var(--space-1, 4px); min-width: 0; flex: 1; }
+.git-move-radio-hint { font-size: var(--font-meta); line-height: var(--font-meta-lh); color: var(--muted); }
+.git-move-last { display: flex; flex-direction: column; gap: var(--space-2); }
+.git-move-error { color: var(--red); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.git-move-spacer { flex: 1; }

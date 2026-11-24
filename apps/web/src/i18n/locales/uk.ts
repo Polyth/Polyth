@@ -2311,6 +2311,7 @@ export const uk: AppMessages = {
   "sidebar.sessionlist.newSession": "Нова сесія",
   "sidebar.sessionlist.draft": "Чернетка",
   "sidebar.sessionlist.newSessionInValue": "Нова сесія в {label}",
+  "sidebar.sessionlist.moveToMainCheckout": "Перенести в основну теку · {branch}",
   "sidebar.sessionlist.noMatchingSessions": "Немає відповідних сесій.",
   "sidebar.sessionlist.noChatsYet": "Чатів поки немає.",
   "sidebar.sessionlist.noSessions": "Немає сесій",

@@ -2311,6 +2311,7 @@ export const pt: AppMessages = {
   "sidebar.sessionlist.newSession": "Nova sessão",
   "sidebar.sessionlist.draft": "Rascunho",
   "sidebar.sessionlist.newSessionInValue": "Nova sessão em {label}",
+  "sidebar.sessionlist.moveToMainCheckout": "Mover para o checkout principal · {branch}",
   "sidebar.sessionlist.noMatchingSessions": "Nenhuma sessão correspondente.",
   "sidebar.sessionlist.noChatsYet": "Ainda não há chats.",
   "sidebar.sessionlist.noSessions": "Sem sessões",

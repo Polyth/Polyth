@@ -2,24 +2,40 @@
 // `git worktree add`, a shell removes one, another app prunes. Rather than
 // watch every registered repository or poll on a timer, ride along on the Git
 // interactions the UI already makes and compare a cheap fingerprint.
-import { stat } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 /** Git keeps one administrative directory per linked worktree under the
  *  repository's git dir, so that parent directory's mtime moves whenever a
- *  worktree is added, removed or pruned. One stat, no process spawn.
+ *  worktree is added, removed or pruned. A few stats, no process spawn.
  *
  *  `none` covers both "no linked worktrees yet" and "this path is itself a
  *  linked worktree" (whose `.git` is a file). Callers must therefore always
  *  fingerprint a project's main checkout, never a session's worktree, or the
  *  value would flap between a real reading and `none`. */
 export async function worktreeTopologyFingerprint(root: string): Promise<string> {
+  const gitDir = join(root, ".git");
+  let parts: string[];
   try {
-    const st = await stat(join(root, ".git", "worktrees"));
-    return String(st.mtimeMs);
+    parts = [String((await stat(join(gitDir, "worktrees"))).mtimeMs)];
   } catch {
     return "none";
   }
+  // `git checkout` inside a linked worktree rewrites that worktree's own
+  // `HEAD` file, which does not move the parent directory's mtime; the
+  // navigator's branch label must follow, so those files are part of the
+  // reading (stat only, no process). The main checkout's HEAD joins them once
+  // linked worktrees exist, so `none` keeps meaning "nothing linked".
+  const mtimeOf = async (path: string): Promise<string> => {
+    try { return String((await stat(path)).mtimeMs); } catch { return "-"; }
+  };
+  parts.push(await mtimeOf(join(gitDir, "HEAD")));
+  try {
+    for (const id of (await readdir(join(gitDir, "worktrees"))).sort()) {
+      parts.push(`${id}:${await mtimeOf(join(gitDir, "worktrees", id, "HEAD"))}`);
+    }
+  } catch { /* removed while reading: the next reading differs anyway */ }
+  return parts.join("|");
 }
 
 export interface WorktreeTopologyWatch {

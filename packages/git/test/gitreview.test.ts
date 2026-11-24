@@ -57,9 +57,12 @@ test("git prefs parse, persist, and split diffs align replacement runs", () => {
     layout: "unified", ignoreWhitespace: false, wrap: false, phoneWrap: true, changesView: "tree",
     density: "compact", lineStats: "numbers", logGraph: true, dateStyle: "relative",
     pushAfterIntegrate: true,
+    branchCreateMode: "switch",
   });
   assert.equal(parseGitPrefs(JSON.stringify({ pushAfterIntegrate: false })).pushAfterIntegrate, false);
   assert.equal(parseGitPrefs(JSON.stringify({ pushAfterIntegrate: "no" })).pushAfterIntegrate, true);
+  assert.equal(parseGitPrefs(JSON.stringify({ branchCreateMode: "only" })).branchCreateMode, "only");
+  assert.equal(parseGitPrefs(JSON.stringify({ branchCreateMode: "x" })).branchCreateMode, "switch");
   setGitPrefs({ layout: "split", ignoreWhitespace: true, wrap: true, changesView: "flat" });
   assert.deepEqual(parseGitPrefs(values.get(GIT_PREFS_KEY) ?? null), getGitPrefs());
   setGitRepositorySelection("project-repos", "session-a", "repo-b");

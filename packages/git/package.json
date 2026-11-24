@@ -14,7 +14,8 @@
     "./stack-client": "./src/stackClient.ts",
     "./acting": "./src/actingPerson.ts",
     "./person-accounts": "./src/personHostingAccounts.ts",
-    "./hunks": "./src/hunks.ts"
+    "./hunks": "./src/hunks.ts",
+    "./checkout-move": "./src/sessionCheckoutMove.ts"
   },
   "polyth": {
     "editions": ["workstation"],

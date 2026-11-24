@@ -2311,6 +2311,7 @@ export const bg: AppMessages = {
   "sidebar.sessionlist.newSession": "Нова сесия",
   "sidebar.sessionlist.draft": "Чернова",
   "sidebar.sessionlist.newSessionInValue": "Нова сесия в {label}",
+  "sidebar.sessionlist.moveToMainCheckout": "Премести в основния checkout · {branch}",
   "sidebar.sessionlist.noMatchingSessions": "Няма съответстващи сесии.",
   "sidebar.sessionlist.noChatsYet": "Все още няма чатове.",
   "sidebar.sessionlist.noSessions": "Няма сесии",

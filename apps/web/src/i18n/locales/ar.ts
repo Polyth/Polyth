@@ -2311,6 +2311,7 @@ export const ar: AppMessages = {
   "sidebar.sessionlist.newSession": "جلسة جديدة",
   "sidebar.sessionlist.draft": "مسودة",
   "sidebar.sessionlist.newSessionInValue": "جلسة جديدة في {label}",
+  "sidebar.sessionlist.moveToMainCheckout": "نقل إلى نسخة العمل الرئيسية · {branch}",
   "sidebar.sessionlist.noMatchingSessions": "لا توجد جلسات مطابقة.",
   "sidebar.sessionlist.noChatsYet": "لا توجد محادثات بعد.",
   "sidebar.sessionlist.noSessions": "لا توجد جلسات",

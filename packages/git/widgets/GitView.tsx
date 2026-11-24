@@ -44,7 +44,7 @@ import RepoStackPanel from "./RepoStackPanel.tsx";
 import LandingBar from "./LandingBar.tsx";
 import GitPhoneView, { PhoneBasePicker, PhoneFileFoot, PhoneFileRow, type PhonePage } from "./GitPhoneView.tsx";
 import type { CommitPicks } from "./phoneOverview.ts";
-import { gitRefusalOf, openGitRefusal, reportGitError, type GitRefusal } from "./gitRefusal.ts";
+import { gitRefusalOf, openGitRefusal, reportGitError, type GitRefusal, type GitRefusalContext } from "./gitRefusal.ts";
 import { ChangeSection, fileStatKey, type ChangeGroup } from "./ChangeList.tsx";
 import { CommitFiles, DiffContent, DiffSkeleton, HunkBlock, parseCommitPrelude } from "./DiffViewer.tsx";
 import { DiffCommentsProvider, LineCommentEditor } from "./DiffComments.tsx";
@@ -249,6 +249,10 @@ const logViewEntries = (prefs: GitPrefs): MenuEntry[] => [
 ];
 
 /** Account-wide list display choices. Diff layout stays per repository. */
+/** Browser-safe comparison form of a checkout path (no `node:path` here). */
+const normalizeCheckoutPath = (path: string): string => path.replace(/[\\/]+$/, "");
+const worktreeFolder = (path: string): string => normalizeCheckoutPath(path).split(/[\\/]/).pop() || path;
+
 function ViewOptionsMenu({ prefs, log = false }: { prefs: GitPrefs; log?: boolean }) {
   const entries: MenuEntry[] = log ? logViewEntries(prefs) : [
     { heading: tr("gitview.showChangesAs") },
@@ -1082,6 +1086,13 @@ export default function GitView({
     return () => window.clearTimeout(timer);
   }, [remoteStatus]);
 
+  const refusalContext: GitRefusalContext = {
+    ...(projectId ? { projectId } : {}),
+    openSession: (id) => { void openSession(id); },
+    startChatIn: (project, worktreePath) => openWorktreeSessionDialog(project, worktreePath),
+    reviewChanges: () => setTab("changes"),
+  };
+
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true);
     try {
@@ -1093,7 +1104,7 @@ export default function GitView({
         if (selected && !nextSelected) setMobileDetail(false);
       }
     } catch (cause) {
-      reportGitError(tr("gitview.couldntUpdateTheRepository"), cause);
+      reportGitError(tr("gitview.couldntUpdateTheRepository"), cause, refusalContext);
     } finally {
       setBusy(false);
     }
@@ -1786,6 +1797,18 @@ export default function GitView({
         </div>
   );
 
+  /** Create the typed branch; `checkout` also switches this checkout to it in one Git call.
+   *  Whichever button was used becomes the remembered default. */
+  const createBranch = (checkout: boolean) => {
+    if (busy || !newBranch.trim()) return;
+    setGitPrefs({ branchCreateMode: checkout ? "switch" : "only" });
+    void run(async () => {
+      await api.gitBranch(projectId, newBranch.trim(), undefined, sessionId ?? undefined, repositoryId, checkout);
+      setNewBranch("");
+      setShowBranchForm(false);
+    });
+  };
+
   const renderBranches = () => (
         <div className="git-resource-page">
           {!phone && <div className="git-resource-head">
@@ -1817,16 +1840,12 @@ export default function GitView({
           {showBranchForm && (
             <form className="source-inline-form" onSubmit={(event) => {
               event.preventDefault();
-              if (busy || !newBranch.trim()) return;
-              void run(async () => {
-                await api.gitBranch(projectId, newBranch.trim(), undefined, sessionId ?? undefined, repositoryId);
-                setNewBranch("");
-                setShowBranchForm(false);
-              });
+              createBranch(prefs.branchCreateMode === "switch");
             }}>
               <UiIcon icon={BranchIcon} size="sm" />
               <TextInput id="git-new-branch" uiSize="sm" className="mono" autoFocus aria-label={tr("gitview.createABranch")} value={newBranch} placeholder={tr("gitview.branchNamePlaceholder")} onChange={(event) => setNewBranch(event.target.value)} />
-              <Button size="sm" variant="primary" type="submit" disabled={busy || !newBranch.trim()}>{tr("gitview.createBranch")}</Button>
+              <Button size="sm" variant="primary" type="submit" disabled={busy || !newBranch.trim()}>{prefs.branchCreateMode === "switch" ? tr("gitview.createAndSwitch") : tr("gitview.createOnly")}</Button>
+              <Button size="sm" variant="ghost" disabled={busy || !newBranch.trim()} onClick={() => createBranch(prefs.branchCreateMode !== "switch")}>{prefs.branchCreateMode === "switch" ? tr("gitview.createOnly") : tr("gitview.createAndSwitch")}</Button>
               <Button size="sm" variant="ghost" onClick={() => setShowBranchForm(false)}>{tr("common.cancel")}</Button>
             </form>
           )}
@@ -1900,14 +1919,25 @@ export default function GitView({
                         {!loadError && rows.length === 0 && <div className="git-group-empty">{emptyText}</div>}
                         {shown.map((branch) => {
                           const slash = remote && branch.remote ? branch.remote.length + 1 : 0;
+                          const elsewhere = remote ? undefined : trees.find((tree) => tree.branch === branch.name);
+                          const openElsewhere = () => {
+                            if (!elsewhere) return;
+                            const here = normalizeCheckoutPath(elsewhere.path);
+                            const chat = getState().sessions
+                              .filter((candidate) => candidate.projectId === projectId && candidate.status !== "archived"
+                                && (candidate.worktreePath ? normalizeCheckoutPath(candidate.worktreePath) === here : elsewhere.isMain))
+                              .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0];
+                            if (chat) void openSession(chat.id); else openWorktreeSessionDialog(projectId, elsewhere.path);
+                          };
                           return (
-                            <button type="button" key={branch.name} className="git-branch-row" disabled={busy} title={branch.name} onClick={() => void run(() => api.gitCheckout(projectId, branch.name, sessionId ?? undefined, repositoryId))}>
+                            <button type="button" key={branch.name} className="git-branch-row" disabled={busy} title={branch.name} onClick={() => elsewhere ? openElsewhere() : void run(() => api.gitCheckout(projectId, branch.name, sessionId ?? undefined, repositoryId))}>
                               <UiIcon icon={BranchIcon} size="sm" />
                               <span className="mono git-branch-row-name">
                                 {slash > 0 && <span className="git-branch-row-remote">{branch.name.slice(0, slash)}</span>}
                                 {branch.name.slice(slash)}
                               </span>
-                              <span className="git-branch-row-action">{tr("gitview.checkout")}</span>
+                              {elsewhere && <span className="git-branch-row-remote">{tr("gitview.inWorktree", { worktree: worktreeFolder(elsewhere.path) })}</span>}
+                              <span className="git-branch-row-action">{elsewhere ? tr("gitview.open") : tr("gitview.checkout")}</span>
                             </button>
                           );
                         })}

@@ -28,7 +28,7 @@ import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
 import { ShellColumnAccount, ShellColumnFoot, ShellColumnHead, ShellDock } from "./ShellDock.tsx";
 import { ProjectRailTools } from "./sidebar/ProjectRailTools.tsx";
 import { OwnServerZoneHeading, ServerZonesRail, ServerZonesTree } from "./sidebar/ServerZones.tsx";
-import { useSessionMoveDropZones } from "../sessionMove.ts";
+import { checkoutTargetKey, closePendingCheckoutMove, usePendingCheckoutMove, useSessionMoveDropZones } from "../sessionMove.ts";
 import { projectRailMark } from "../sessionStatus.ts";
 import { SIDEBAR_RAIL_SLOT } from "../railPlacement.ts";
 import { useSidebarExpanded } from "../sidebarPresentation.ts";
@@ -382,6 +382,7 @@ export default function Sidebar() {
   const registry = useStore((s) => s.projectRegistry);
   const projects = rootProjects(registry.projects) as typeof registry.projects;
   const sessionMoveDrops = useSessionMoveDropZones();
+  const pendingCheckoutMove = usePendingCheckoutMove();
   // Only the personal project: chats list flat, with no project row or rail
   // icon, until the person adds a real project.
   const soloPersonal = registry.status === "ready" ? soloPersonalProject(projects) : null;
@@ -1408,6 +1409,15 @@ export default function Sidebar() {
         {...sessionMoveDrops.handlers}
       >
         <h2 className="sr-only">{tr("sidebar.projectsAndSessions")}</h2>
+        {/* A chat dropped on another checkout of its project: the Git package
+            confirms (branch, leaving an emptied worktree) and moves it. */}
+        {pendingCheckoutMove && (
+          <SlotHost
+            key={`${pendingCheckoutMove.sessionId}\n${checkoutTargetKey(pendingCheckoutMove.target)}`}
+            slot="session.checkout.move"
+            context={{ ...pendingCheckoutMove, onClose: closePendingCheckoutMove }}
+          />
+        )}
         {fullyCollapsed && (
           <div className="sidebar-collapsed-rail">
             <IconButton

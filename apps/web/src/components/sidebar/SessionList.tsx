@@ -63,7 +63,7 @@ import { useShiftArmed } from "../../useShiftArmed.ts";
 import { useShellMode } from "../../responsiveShell.ts";
 import { openSessionInSplit } from "../../sessionSplit.ts";
 import { setDragSession } from "../../dnd.ts";
-import { beginSessionMoveDrag, canMoveSession, endSessionMoveDrag } from "../../sessionMove.ts";
+import { beginSessionMoveDrag, canMoveSession, canMoveSessionAnywhere, endSessionMoveDrag, useCheckoutDropOver, useDraggedSession } from "../../sessionMove.ts";
 import { useInlineRename } from "../input/inlineRename.ts";
 import { useLaneSessions } from "../../workbench/profileNavigation.ts";
 import { childrenByParent, isNavigatorRoot, listedAncestors } from "../../sessionTree.ts";
@@ -164,12 +164,16 @@ interface RowProps {
   /** A subset session's repositories (absent for a whole-project session);
    *  `active` is the chip the list is narrowed to, if any. */
   repositoryMark?: { repositories: FilterRepository[]; active?: string };
+  /** The project has another checkout (a linked worktree or its main one) the
+   *  chat could be dragged to. */
+  otherCheckouts?: boolean;
 }
 
 function SessionRow({
   s, activeSessionId, labels, eventsTitle, opening, selectMode, selected,
   onToggleSelect, onChanged, onOpen, onTogglePin,
   projectName, branch, workspacePath, contextLabel, pinnedWorktreeLabel, shiftQuick, subagents, repositoryMark,
+  otherCheckouts = false,
 }: RowProps) {
   const statusId = useId();
   const repositoryMarkId = useId();
@@ -395,7 +399,9 @@ function SessionRow({
   // Rename, archive, delete and sharing changes need manage access; a chat
   // shared with less offers only what the reader may do.
   const manage = canManageSession(s);
-  const movable = canMoveSession(s, getState().projectRegistry.projects);
+  const projects = getState().projectRegistry.projects;
+  // To another project, or to another checkout of this one.
+  const movable = canMoveSession(s, projects) || (otherCheckouts && canMoveSessionAnywhere(s, projects));
   // Moving works from the open chat's row too, which can't open beside itself.
   const moveDraggable = movable && !selectMode && rowDragPointer;
   // A conversation is shared by nature; its lead mark already says so.
@@ -929,6 +935,17 @@ export default function SessionList({
   };
   const matchingActive = projectSessions.filter((s) => s.status !== "archived" && matchesFilters(s));
   const mainWorktree = worktrees.find((worktree) => worktree.isMain);
+  const linkedWorktrees = worktrees.filter((worktree) => !worktree.isMain && !isManagedIsolationBranch(worktree.branch)).length;
+  // A chat of this project dragged from a worktree may land on the main
+  // checkout even when no chat lives there yet: the drop strip shows mid-drag.
+  const draggedSession = useDraggedSession();
+  const checkoutDropOver = useCheckoutDropOver(projectId);
+  const mainDropOffered = !!draggedSession && draggedSession.projectId === projectId && !!draggedSession.worktreePath;
+  const checkoutDropProps = (key: string) => ({
+    "data-session-drop-checkout": key,
+    "data-session-drop-checkout-project": projectId,
+    "data-session-drop-over": checkoutDropOver === key ? "true" : undefined,
+  });
   const worktreeKey = (session: SessionProjection): string =>
     !session.worktreePath || session.worktreePath === mainWorktree?.path || isIsolatedSession(session)
       ? SESSION_MAIN_WORKTREE_KEY
@@ -1104,6 +1121,7 @@ export default function SessionList({
         shiftQuick={shiftQuick}
         subagents={subagents}
         repositoryMark={markedRepositories ? { repositories: markedRepositories, active: activeRepository } : undefined}
+        otherCheckouts={linkedWorktrees > 0}
       />
     );
   };
@@ -1279,6 +1297,14 @@ export default function SessionList({
           ))}
         </div>
       )}
+      {mainDropOffered && (
+        <div className="session-checkout-drop" {...checkoutDropProps("main")}>
+          <Icon.branch />
+          <span>{tr("sidebar.sessionlist.moveToMainCheckout", {
+            branch: mainWorktree?.branch || tr("sidebar.sessionlist.mainWorktree"),
+          })}</span>
+        </div>
+      )}
       {(mainSessions.length > 0 || pages.hasMore) && (
         <div className="session-project-sessions session-worktree-sessions">
           {sessionTree(mainSessions)}
@@ -1291,7 +1317,11 @@ export default function SessionList({
           || group.sessions.some(isIsolatedSession);
         return (
           <div key={group.key} className="session-worktree-group" data-worktree={group.key}>
-            <div className="session-worktree-head">
+            <div
+              className="session-worktree-head"
+              // A chat dragged here moves into this worktree (the Git package confirms).
+              {...(group.worktree && !group.worktree.isMain && !managedIsolation ? checkoutDropProps(group.key) : {})}
+            >
               <button
                 className="session-worktree-toggle"
                 aria-expanded={!isCollapsed}

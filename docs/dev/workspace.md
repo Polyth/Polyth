@@ -865,6 +865,42 @@ folder that has `.git` from being reported as *not a Git repository*, `gh` or
 machine where the tool is installed but absent from `PATH`. A harness child
 launched by Polyth also receives the resolved Git and OpenSSH directories.
 
+### Branch changes and checkout moves
+
+`POST /api/git/branch` creates a branch; with `checkout: true` it runs one
+`git switch -c <name> [from]`, so nothing is left half-made, and the Branches page's
+form offers *Create and switch* (default, remembered in `gitPrefs`) and *Create
+only*. Names are checked with `git check-ref-format --branch` first.
+`/api/git/checkout` and a branch-with-checkout refuse with `session-busy` while any
+chat in that checkout has a turn running (no chat is exempt: the request does not
+prove which chat calls). Git's own refusals become typed, not-started errors
+(`classifyGitRefusal`, `packages/git/src/index.ts`): `branch-in-use` (with the
+worktree, only one Git lists for that repository, and the caller's chats in it),
+`worktree-dirty`, `branch-exists`, `branch-not-found`, `invalid-branch-name`. They
+are in `REFUSED` (`packages/server/src/errorDiagnostics.ts`), so the client shows
+Git's reason and an action (*Open* that worktree, *Review changes*) instead of
+"didn't get a confirmation"; the branch list marks a branch checked out in another
+worktree and offers *Open* rather than *Checkout*. After a successful switch the
+server announces the project's worktree topology and moves every live chat's
+`branch` in that checkout along (`renameWorktreeBranch`, no runtime release). The
+topology fingerprint (`worktreeTopology.ts`) stats each `.git/worktrees/*/HEAD` and
+the main `HEAD`, so a checkout in any linked worktree renames its Navigator heading.
+
+`POST /api/git/session-checkout/preview` and `/api/git/session-checkout`
+(`sessionCheckoutMoveServer.ts`, DTOs at `@polyth/git/checkout-move`) move a chat
+to another checkout of its own project: a listed linked worktree or the main
+checkout, never a client path. The chat resolves through the caller's scope
+(foreign Space and missing are the same `not-found`); preview needs `view`, the
+move `manage`. A running or queued chat, an isolated one, a delegated child, a
+chat with a running child or an unmerged isolated child, and a multi-repository
+project are refused. Order: rebind the workspace (`rebindWorkspace`, which releases
+the native leg; the next turn starts in the new folder), then optionally remove
+the emptied source worktree (`force: false`, re-checked clean and unused; its
+branch is deleted only when Polyth owns it and the target already contains it),
+then optionally switch or create the target's branch. A later step's failure is
+reported (`branchError`, `removeError`) with the chat still moved; nothing is
+rolled back by force.
+
 Untracked branch-review content and statistics require Linux kernel directory
 handles. Each parent is pinned without following symlinks before Git reads a
 leaf; concurrent directory swaps cannot redirect the read. Other hosts report

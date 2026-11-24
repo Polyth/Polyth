@@ -647,6 +647,23 @@ The moved chat stays open if it was open, and the workspace follows it
 gone to another project. The transcript gets a seal, *Moved from A to B*, from the
 names recorded in the event. Mechanics: [architecture](architecture.md#moving-a-chat-to-another-project).
 
+### Moving a chat to another checkout of its project
+
+The same drag onto a worktree's heading in the chat's own project, or onto the
+*Move to the main checkout* strip that appears above the main chats while a chat
+from a worktree is dragged, moves it between checkouts. Those zones carry
+`data-session-drop-checkout` (the worktree path or `main`) and
+`data-session-drop-checkout-project`, are asked before the project row around
+them, and never accept the checkout the chat already works in; another project's
+checkout is that project, a project move as above. A row is draggable for this
+when the project has a linked worktree (`canMoveSessionAnywhere`). The host only
+records the drop (`usePendingCheckoutMove`) and mounts the
+`session.checkout.move` slot; the Git package's contribution renders the
+confirmation (target branch: keep, the chat's own, another, or a new one; and,
+when the chat was the worktree's last, an unchecked *Remove this worktree*), asks
+the server and words its answer. The package's ⋯ item *Move to checkout…* is the
+keyboard and touch way. Server mechanics: [workspace](workspace.md#branch-changes-and-checkout-moves).
+
 The project row's highlight is the whole row — its glyph and title together
 with the new-chat and ⋮ controls beside them — painted by
 `.project-card-shell::before`, not by the card button: the card occupies only

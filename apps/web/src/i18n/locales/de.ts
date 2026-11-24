@@ -2311,6 +2311,7 @@ export const de: AppMessages = {
   "sidebar.sessionlist.newSession": "Neue Sitzung",
   "sidebar.sessionlist.draft": "Entwurf",
   "sidebar.sessionlist.newSessionInValue": "Neue Sitzung in {label}",
+  "sidebar.sessionlist.moveToMainCheckout": "In den Haupt-Checkout verschieben · {branch}",
   "sidebar.sessionlist.noMatchingSessions": "Keine passenden Sitzungen gefunden.",
   "sidebar.sessionlist.noChatsYet": "Noch keine Chats.",
   "sidebar.sessionlist.noSessions": "Keine Sitzungen",

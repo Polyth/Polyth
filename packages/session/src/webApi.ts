@@ -320,9 +320,11 @@ export async function sessionFetch<T>(path: string, init?: RequestInit): Promise
     let field: string | undefined;
     let changes: number | undefined;
     let sessionId: string | undefined;
+    let refusal: Record<string, unknown> | undefined;
     let diagnostics = {};
     try {
-      const parsed = JSON.parse(body) as { error?: unknown; message?: unknown; details?: unknown; field?: unknown; changes?: unknown; sessionId?: unknown };
+      const parsed = JSON.parse(body) as { error?: unknown; message?: unknown; details?: unknown; field?: unknown; changes?: unknown; sessionId?: unknown; refusal?: unknown };
+      if (parsed.refusal && typeof parsed.refusal === "object") refusal = parsed.refusal as Record<string, unknown>;
       diagnostics = readErrorDiagnostics(parsed);
       if (typeof parsed.error === "string") code = parsed.error;
       if (typeof parsed.message === "string") message = parsed.message;
@@ -358,6 +360,7 @@ export async function sessionFetch<T>(path: string, init?: RequestInit): Promise
         ...(field !== undefined ? { field } : {}),
         ...(changes !== undefined ? { changes } : {}),
         ...(sessionId !== undefined ? { sessionId } : {}),
+        ...(refusal !== undefined ? { refusal } : {}),
       },
     );
   }
@@ -393,6 +396,12 @@ const emptyOnNotFound = <T>(request: Promise<T>, empty: T): Promise<T> =>
   request.catch((error) => httpStatusOf(error) === 404 || errorCodeOf(error) === "not-found"
     ? empty
     : Promise.reject(error));
+
+/** The typed details of a refused Git branch change (`branch-in-use`, `worktree-dirty`, …). */
+export const errorRefusalOf = (err: unknown): Record<string, unknown> => {
+  const refusal = (err as { refusal?: unknown })?.refusal;
+  return refusal && typeof refusal === "object" ? refusal as Record<string, unknown> : {};
+};
 
 /** Dirty-worktree refusal may include a porcelain change count for the confirm copy. */
 export const errorChangesOf = (err: unknown): number =>
@@ -1594,8 +1603,8 @@ export const api = {
       jfetch<GitBranches>(`/api/git/branches?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}${repositoryId ? `&repositoryId=${encodeURIComponent(repositoryId)}` : ""}`),
       { current: "", branches: [] },
     ),
-  gitBranch: (projectId: string, name: string, from?: string, sessionId?: string, repositoryId?: string) =>
-    jfetch<{ ok: true }>(`/api/git/branch`, json("POST", { projectId, name, from, ...(sessionId ? { sessionId } : {}), ...(repositoryId ? { repositoryId } : {}) })),
+  gitBranch: (projectId: string, name: string, from?: string, sessionId?: string, repositoryId?: string, checkout?: boolean) =>
+    jfetch<{ ok: true; branch?: string }>(`/api/git/branch`, json("POST", { projectId, name, from, ...(checkout ? { checkout: true } : {}), ...(sessionId ? { sessionId } : {}), ...(repositoryId ? { repositoryId } : {}) })),
   gitCheckout: (projectId: string, name: string, sessionId?: string, repositoryId?: string) =>
     jfetch<{ ok: true }>(`/api/git/checkout`, json("POST", { projectId, name, ...(sessionId ? { sessionId } : {}), ...(repositoryId ? { repositoryId } : {}) })),
   gitLog: (projectId: string, limit = 20, sessionId?: string, repositoryId?: string) =>

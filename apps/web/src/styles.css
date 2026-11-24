@@ -1416,6 +1416,27 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   box-shadow: inset 0 0 0 1px var(--accent-line);
 }
 .project-card-shell[data-session-drop-over="true"] { border-radius: var(--radius-card); }
+/* The same, for another checkout of the chat's own project: a worktree's
+   heading, or the main-checkout strip that appears only mid-drag. */
+.session-worktree-head[data-session-drop-over="true"],
+.session-checkout-drop[data-session-drop-over="true"] {
+  background: var(--accent-wash);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+  border-radius: var(--radius-control);
+}
+.session-checkout-drop {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: var(--nav-row-branch);
+  margin: 2px 0;
+  padding: 0 6px 0 var(--nav-worktree-row-indent, var(--nav-indent-worktree));
+  border: 1px dashed var(--accent-line);
+  border-radius: var(--radius-control);
+  color: var(--text-muted);
+  font-size: var(--font-meta);
+}
+.session-checkout-drop > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Moving projects in the tree (workspaceArrange.ts): a press on a project's
    row lifts a copy of the row; the project's own place stays behind as a
    quiet well, its sessions folded, and travels through the list. */

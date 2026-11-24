@@ -16299,7 +16299,11 @@ export function createSessionService(deps: {
       return withSessionLock(sessionId, async () => {
         const current = await store.projection(sessionId);
         if (!current) throw Object.assign(new Error("session not found"), { code: "not-found" });
-        if (!current.worktreePath || resolve(current.worktreePath) !== resolve(input.worktreePath)) {
+        // An absent `worktreePath` names a chat on the project's own checkout.
+        const sameCheckout = input.worktreePath === undefined
+          ? !current.worktreePath
+          : !!current.worktreePath && resolve(current.worktreePath) === resolve(input.worktreePath);
+        if (!sameCheckout) {
           throw Object.assign(new Error("session worktree changed before branch rename"), { code: "conflict" });
         }
         if (current.branch === input.to) return current;
@@ -16310,7 +16314,7 @@ export function createSessionService(deps: {
           throw Object.assign(new Error("renamed branch is invalid"), { code: "invalid-input" });
         }
         await appendAndBroadcast(sessionId, "session/worktree-branch-renamed", {
-          worktreePath: current.worktreePath,
+          ...(current.worktreePath ? { worktreePath: current.worktreePath } : {}),
           from: input.from,
           to: input.to,
         }, { ignorable: true, producerPlugin: "git" });

@@ -106,3 +106,85 @@ test("a drop asks the server first, and only for the chat this drag started with
   assert.match(asked[0]!, /"dryRun":true/, "the move itself waits for the confirmation");
   assert.match(asked[0]!, /"expectedProjectId":"one"/);
 });
+
+// ---- another checkout of the chat's own project ----
+const { closePendingCheckoutMove, usePendingCheckoutMove, useCheckoutDropOver } = await import("../src/sessionMove.ts");
+let pending: ReturnType<typeof usePendingCheckoutMove> = null;
+let overInOne: string | null = null;
+function CheckoutHarness() {
+  pending = usePendingCheckoutMove();
+  overInOne = useCheckoutDropOver("one");
+  return null;
+}
+const checkoutHost = dom.document.createElement("div");
+await act(async () => { createRoot(checkoutHost as unknown as Element).render(createElement(CheckoutHarness)); });
+
+/** A checkout row nested inside its project's row, as in the navigator tree. */
+const checkoutZone = (projectId: string, key: string): Element => {
+  const projectRow = dom.document.createElement("div");
+  projectRow.setAttribute("data-session-drop-project", projectId);
+  const head = dom.document.createElement("div");
+  head.setAttribute("data-session-drop-checkout", key);
+  head.setAttribute("data-session-drop-checkout-project", projectId);
+  const label = dom.document.createElement("span");
+  head.appendChild(label);
+  projectRow.appendChild(head);
+  return label as unknown as Element;
+};
+const beginWith = (carried: SessionProjection) => act(async () => {
+  beginSessionMoveDrag({ setData() {}, getData: () => "" } as unknown as DataTransfer, carried);
+});
+
+test("another checkout of the chat's own project accepts it, never the one it works in", async () => {
+  const inWorktree = { ...session, worktreePath: "/work/one-wt-a" };
+  await beginWith(inWorktree);
+  const toMain = drag(checkoutZone("one", "main"), [SESSION_MOVE_MIME]);
+  await act(async () => { zones.handlers.onDragOver(toMain.event); });
+  assert.equal(toMain.prevented(), true);
+  assert.equal(overInOne, "main");
+  assert.equal(zones.overProjectId, null, "the project row under it does not light up");
+
+  const toOther = drag(checkoutZone("one", "/work/one-wt-b"), [SESSION_MOVE_MIME]);
+  await act(async () => { zones.handlers.onDragOver(toOther.event); });
+  assert.equal(toOther.prevented(), true);
+  assert.equal(overInOne, "/work/one-wt-b");
+
+  const here = drag(checkoutZone("one", "/work/one-wt-a"), [SESSION_MOVE_MIME]);
+  await act(async () => { zones.handlers.onDragOver(here.event); });
+  assert.equal(here.prevented(), false, "the checkout it already works in");
+  assert.equal(overInOne, null);
+
+  // Another project's checkout is that project: a project move, as before.
+  for (const key of ["main", "/work/two-wt"]) {
+    const elsewhere = drag(checkoutZone("two", key), [SESSION_MOVE_MIME]);
+    await act(async () => { zones.handlers.onDragOver(elsewhere.event); });
+    assert.equal(zones.overProjectId, "two", key);
+    assert.equal(overInOne, null, key);
+  }
+  await act(async () => { endSessionMoveDrag(); });
+
+  // A chat on the main checkout can't be dropped on the main checkout.
+  await beginWith(session);
+  const same = drag(checkoutZone("one", "main"), [SESSION_MOVE_MIME]);
+  await act(async () => { zones.handlers.onDragOver(same.event); });
+  assert.equal(same.prevented(), false);
+  await act(async () => { endSessionMoveDrag(); });
+});
+
+test("a checkout drop asks nothing itself: it hands the confirmation to the Git package", async () => {
+  await beginWith({ ...session, worktreePath: "/work/one-wt-a" });
+  asked.length = 0;
+  const forged = drag(checkoutZone("one", "main"), [SESSION_MOVE_MIME], "someone-elses-chat");
+  await act(async () => { zones.handlers.onDrop(forged.event); });
+  assert.equal(pending, null, "a payload naming another chat does nothing");
+
+  await beginWith({ ...session, worktreePath: "/work/one-wt-a" });
+  const real = drag(checkoutZone("one", "main"), [SESSION_MOVE_MIME]);
+  await act(async () => { zones.handlers.onDrop(real.event); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.equal(real.prevented(), true);
+  assert.deepEqual(pending, { sessionId: "s1", projectId: "one", target: { main: true } });
+  assert.deepEqual(asked, [], "the slot's dialog asks the server, not the drop");
+  assert.equal(overInOne, null);
+  await act(async () => { closePendingCheckoutMove(); });
+  assert.equal(pending, null);
+});

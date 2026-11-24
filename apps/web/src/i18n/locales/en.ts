@@ -2314,6 +2314,7 @@ export const en = {
   "sidebar.sessionlist.newSession": "New session",
   "sidebar.sessionlist.draft": "Draft",
   "sidebar.sessionlist.newSessionInValue": "New session in {label}",
+  "sidebar.sessionlist.moveToMainCheckout": "Move to the main checkout · {branch}",
   "sidebar.sessionlist.noMatchingSessions": "No matching sessions.",
   "sidebar.sessionlist.noChatsYet": "No chats yet.",
   "sidebar.sessionlist.noSessions": "No sessions",

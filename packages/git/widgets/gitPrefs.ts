@@ -25,6 +25,8 @@ export interface GitPrefs {
   dateStyle: "relative" | "absolute";
   /** An isolated chat's landing also pushes the branch it integrated into. */
   pushAfterIntegrate: boolean;
+  /** What the New branch form's primary button does: create and switch to it, or only create. */
+  branchCreateMode: "switch" | "only";
 }
 
 export type GitTabId = "changes" | "log" | "branches" | "stashes";
@@ -55,6 +57,7 @@ export const GIT_PREFS_DEFAULTS: GitPrefs = {
   logGraph: true,
   dateStyle: "relative",
   pushAfterIntegrate: true,
+  branchCreateMode: "switch",
 };
 
 const legacyScopedPrefsKey = (scope: string): string => `${GIT_PREFS_KEY}:${encodeURIComponent(scope)}`;
@@ -91,6 +94,7 @@ export function parseGitPrefOverrides(raw: string | null): Partial<GitPrefs> {
   if (typeof data.logGraph === "boolean") out.logGraph = data.logGraph;
   if (data.dateStyle === "relative" || data.dateStyle === "absolute") out.dateStyle = data.dateStyle;
   if (typeof data.pushAfterIntegrate === "boolean") out.pushAfterIntegrate = data.pushAfterIntegrate;
+  if (data.branchCreateMode === "switch" || data.branchCreateMode === "only") out.branchCreateMode = data.branchCreateMode;
   return out;
 }
 

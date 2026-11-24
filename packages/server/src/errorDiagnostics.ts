@@ -7,6 +7,8 @@ import { EDITION_UNAVAILABLE_CODE } from "@polyth/contracts/edition";
 // after an earlier step already wrote.
 const REFUSED = new Set([
   "not-found", "conflict", "draft-conflict", "history-mismatch", "catalog-changed", "worktree-dirty",
+  // Git refused a branch change before touching anything (packages/git classifyGitRefusal).
+  "branch-in-use", "branch-exists", "branch-not-found", "invalid-branch-name", "session-busy",
   "payload-too-large", "unsupported", "capability-unsupported",
   "runtime-unavailable", "backend-not-ready", "discovery-unavailable", "memory-required",
   // The runtime fence refuses before any effect: a retry is safe.

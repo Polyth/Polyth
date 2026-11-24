@@ -2311,6 +2311,7 @@ export const zhCN: AppMessages = {
   "sidebar.sessionlist.newSession": "新建会话",
   "sidebar.sessionlist.draft": "草稿",
   "sidebar.sessionlist.newSessionInValue": "在 {label} 中新建会话",
+  "sidebar.sessionlist.moveToMainCheckout": "移到主检出 · {branch}",
   "sidebar.sessionlist.noMatchingSessions": "没有匹配的会话。",
   "sidebar.sessionlist.noChatsYet": "还没有聊天。",
   "sidebar.sessionlist.noSessions": "无会话",

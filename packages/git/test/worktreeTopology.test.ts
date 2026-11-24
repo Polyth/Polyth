@@ -171,3 +171,40 @@ test("a failed worktree listing surfaces as an error, not as an empty topology",
   assert.equal(result.status, 0, "no success payload was produced");
   assert.notDeepEqual(result.body, []);
 });
+
+// ---- a checkout inside a linked worktree moves the fingerprint ---------------
+
+test("checking out another branch inside a linked worktree changes the fingerprint", async () => {
+  const dir = repo();
+  const linked = `${dir}-lw`;
+  dirs.push(linked);
+  execFileSync("git", ["worktree", "add", "-b", "lw", linked, "main"], { cwd: dir, stdio: "pipe" });
+  execFileSync("git", ["branch", "other"], { cwd: dir, stdio: "pipe" });
+  const before = await worktreeTopologyFingerprint(dir);
+  await new Promise((done) => setTimeout(done, 20));
+  execFileSync("git", ["checkout", "-q", "other"], { cwd: linked, stdio: "pipe" });
+  assert.notEqual(await worktreeTopologyFingerprint(dir), before, "the worktree's own HEAD is part of the reading");
+});
+
+test("a checkout route announces the topology and moves each chat's branch label", async () => {
+  const { branchRouteHarness } = await import("./routeHarness.ts");
+  const dir = repo();
+  const linked = `${dir}-lr`;
+  dirs.push(linked);
+  execFileSync("git", ["worktree", "add", "-b", "lr", linked, "main"], { cwd: dir, stdio: "pipe" });
+  execFileSync("git", ["branch", "other"], { cwd: dir, stdio: "pipe" });
+  const sessions = [
+    { id: "wt", projectId: "p1", status: "idle", spaceId: "sp1", worktreePath: linked, branch: "lr" },
+    { id: "main", projectId: "p1", status: "idle", spaceId: "sp1", branch: "main" },
+    { id: "gone", projectId: "p1", status: "archived", spaceId: "sp1", worktreePath: linked, branch: "lr" },
+    { id: "foreign", projectId: "p1", status: "idle", spaceId: "sp-other", worktreePath: linked, branch: "lr" },
+  ];
+  const h = branchRouteHarness(dir, sessions);
+  const result = await h.post("/api/git/checkout", { projectId: "p1", name: "other", sessionId: "wt" });
+  assert.equal(result.status, 200);
+  assert.deepEqual(h.changed, ["p1"]);
+  assert.deepEqual(h.renamed.map((entry) => entry.id), ["wt"], "only live chats of this Space in that checkout");
+  assert.deepEqual(h.renamed[0]!.input, { worktreePath: linked, from: "lr", to: "other" });
+  assert.equal(sessions[0]!.branch, "other");
+  assert.equal(sessions[1]!.branch, "main", "the main checkout did not move");
+});
