@@ -276,3 +276,32 @@ test("a package viewer keeps its own position, overlay, aside and controls", asy
     container.remove();
   }
 });
+
+// A gallery tile's title is the picture's caption in the chat; the viewer
+// repeats it under the shown item, follows paging, and shows nothing for an
+// item without one.
+test("the viewer shows the shown item's caption and follows paging", async () => {
+  const container = doc.createElement("div");
+  doc.body.appendChild(container);
+  const root = createRoot(container);
+  const captions = ["After a small crash", "", "Third"];
+  const caption = () => doc.querySelector(".attachment-preview-caption")?.textContent ?? null;
+  try {
+    await act(async () => {
+      root.render(createElement(AttachmentPreview, {
+        attachments,
+        start: 0,
+        onClose: () => {},
+        caption: (_attachment: unknown, index: number) => captions[index] || null,
+      }));
+    });
+    assert.equal(caption(), "After a small crash");
+    await act(async () => { doc.querySelector<HTMLButtonElement>(".attachment-preview-nav--next")!.click(); });
+    assert.equal(caption(), null, "an item without a caption shows no caption");
+    await act(async () => { doc.querySelector<HTMLButtonElement>(".attachment-preview-nav--next")!.click(); });
+    assert.equal(caption(), "Third");
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});

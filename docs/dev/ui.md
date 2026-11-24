@@ -6432,7 +6432,10 @@ is an adapter over the shared full-screen viewer
 (`components/AttachmentPreview.tsx`), which attachments, tool images and chat
 block pictures also use: close button, pinch / click / wheel / button zoom for
 images, and for several items a counter, arrows, swipe, arrow keys and a
-thumbnail strip.
+thumbnail strip. A picture with a visible title in the chat (a ```ui media tile,
+a card image) passes it as `MarkdownImage.caption`; the viewer repeats it in
+full on a glass island under the stage (AttachmentPreview `caption`), so text
+the tile truncated is readable once the picture is open.
 
 ## 7. Disposal, lifecycle, and failure isolation
 

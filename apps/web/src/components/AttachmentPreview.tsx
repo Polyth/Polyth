@@ -201,6 +201,8 @@ export interface AttachmentPreviewProps {
   asideLabel?: string;
   /** Package controls in a row under the stage. */
   actions?: ReactNode;
+  /** Text shown under the item (a gallery tile's title); null for none. */
+  caption?: (attachment: AttachmentRef, index: number) => ReactNode;
   /** Suspend zoom, paging and pull-to-dismiss (the person draws on the overlay). */
   gesturesDisabled?: boolean;
   className?: string;
@@ -219,6 +221,7 @@ export default function AttachmentPreview({
   aside,
   asideLabel,
   actions,
+  caption,
   gesturesDisabled = false,
   className,
 }: AttachmentPreviewProps) {
@@ -357,6 +360,7 @@ export default function AttachmentPreview({
   if (!attachment) return null;
   const kind = previewKind(attachment);
   const overlay = renderOverlay && kind === "image" ? renderOverlay(attachment, index) : undefined;
+  const captionContent = caption?.(attachment, index);
   const previous = () => go(index - 1, "prev");
   const next = () => go(index + 1, "next");
 
@@ -397,6 +401,9 @@ export default function AttachmentPreview({
           </div>
         </div>
 
+        {captionContent != null && captionContent !== "" && (
+          <p key={`caption-${index}`} className="attachment-preview-caption">{captionContent}</p>
+        )}
         {aside && <aside className="attachment-preview-aside" aria-label={asideLabel}>{aside}</aside>}
         {actions && <div className="attachment-preview-actions">{actions}</div>}
 

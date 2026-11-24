@@ -161,7 +161,7 @@ export function useBlockGallery(images: ReadonlyArray<{ src: string | null; titl
   const gallery: ReactNode = at !== null && viewable.length > 0
     ? (
       <ImageLightbox
-        images={viewable.map((image): MarkdownImage => ({ src: image.src, alt: image.title }))}
+        images={viewable.map((image): MarkdownImage => ({ src: image.src, alt: image.title, caption: image.title }))}
         start={at}
         onClose={() => setAt(null)}
       />

@@ -277,7 +277,7 @@
    from where the finger let go (a "page" ghost) while the next one rides in
    from the other edge in the same time. A pull-down lifts the dim and the
    chrome with the finger, and a release dismisses from there. */
-.attachment-preview-dialog[data-media-dragging] :is(.attachment-preview-bar, .attachment-preview-nav, .attachment-preview-strip) {
+.attachment-preview-dialog[data-media-dragging] :is(.attachment-preview-bar, .attachment-preview-nav, .attachment-preview-strip, .attachment-preview-caption) {
   opacity: max(0, calc(1 - var(--preview-drag, 0) * 4));
 }
 .attachment-preview-slide[data-swiped][data-direction="next"] {

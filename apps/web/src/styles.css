@@ -7449,6 +7449,35 @@ img.attachment-preview-media[data-zoom-settling] { transition: transform var(--m
 .attachment-preview-frame[data-zoom-settling] { transition: transform var(--motion-surface) var(--motion-ease); }
 .attachment-preview-content[data-gestures-off] :is(.attachment-preview-frame, img.attachment-preview-media) { cursor: default; }
 
+/* Caption: the tile's title the reader saw in the chat, in full, on one glass
+   island under the stage. Long text scrolls inside a three-line band. */
+.attachment-preview-caption {
+  flex: none; position: relative; z-index: 2; align-self: center;
+  box-sizing: border-box;
+  max-width: min(720px, calc(100% - 2 * var(--space-4) - var(--safe-left) - var(--safe-right)));
+  max-height: calc(3lh + 2 * var(--space-2));
+  margin: var(--space-2) 0 0; padding: var(--space-2) var(--space-4);
+  overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y;
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-island);
+  background: var(--material-glass-strong);
+  color: var(--text);
+  box-shadow: var(--material-glass-highlight), var(--shadow-md);
+  font-size: var(--font-body); line-height: 1.45; text-align: center;
+  overflow-wrap: anywhere; white-space: pre-line;
+  animation: fade var(--motion-fast) var(--motion-ease);
+}
+.attachment-preview-dialog:not(:has(.attachment-preview-strip, .attachment-preview-actions)) .attachment-preview-caption {
+  margin-bottom: calc(var(--space-4) + var(--safe-bottom));
+}
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .attachment-preview-caption {
+    background: color-mix(in srgb, var(--material-glass-strong) var(--material-glass-readable-fill), transparent);
+    -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
+    backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
+  }
+}
+
 /* Package controls: a centred row of glass islands under the stage. */
 .attachment-preview-actions {
   flex: none; position: relative; z-index: 2;
@@ -7472,14 +7501,15 @@ img.attachment-preview-media[data-zoom-settling] { transition: transform var(--m
   --preview-aside: clamp(260px, 30vw, 360px);
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--preview-aside);
-  grid-template-rows: minmax(0, 1fr) auto auto;
+  grid-template-rows: minmax(0, 1fr) auto auto auto;
 }
 .attachment-preview-content[data-aside] > .attachment-preview-stage { grid-column: 1; grid-row: 1; }
-.attachment-preview-content[data-aside] > .attachment-preview-actions { grid-column: 1; grid-row: 2; }
-.attachment-preview-content[data-aside] > .attachment-preview-strip { grid-column: 1; grid-row: 3; justify-self: center; }
+.attachment-preview-content[data-aside] > .attachment-preview-caption { grid-column: 1; grid-row: 2; justify-self: center; }
+.attachment-preview-content[data-aside] > .attachment-preview-actions { grid-column: 1; grid-row: 3; }
+.attachment-preview-content[data-aside] > .attachment-preview-strip { grid-column: 1; grid-row: 4; justify-self: center; }
 .attachment-preview-aside {
   position: relative; z-index: 2;
-  grid-column: 2; grid-row: 1 / span 3;
+  grid-column: 2; grid-row: 1 / span 4;
   min-height: 0; overflow: auto; overscroll-behavior: contain; touch-action: pan-y;
   margin: calc(var(--control-h-lg) + var(--space-5) + var(--safe-top)) calc(var(--space-4) + var(--safe-right)) calc(var(--space-4) + var(--safe-bottom)) 0;
   padding: var(--space-4);
@@ -7636,13 +7666,13 @@ img.attachment-preview-media[data-zoom-settling] { transition: transform var(--m
   .attachment-preview-media { border-radius: var(--radius-control); }
   .attachment-preview-doc { width: 100%; }
   /* The aside stacks under the controls and scrolls inside a bounded band. */
-  .attachment-preview-content[data-aside] { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto auto auto; }
+  .attachment-preview-content[data-aside] { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto auto auto auto; }
   .attachment-preview-content[data-aside] > .attachment-preview-aside {
-    grid-column: 1; grid-row: 3;
+    grid-column: 1; grid-row: 4;
     max-height: 38dvh;
     margin: var(--space-2) calc(var(--space-3) + var(--safe-right)) 0 calc(var(--space-3) + var(--safe-left));
   }
-  .attachment-preview-content[data-aside] > .attachment-preview-strip { grid-row: 4; }
+  .attachment-preview-content[data-aside] > .attachment-preview-strip { grid-row: 5; }
   .attachment-preview-dialog:not(:has(.attachment-preview-strip)) .attachment-preview-aside { margin-bottom: calc(var(--space-3) + var(--safe-bottom)); }
 }
 

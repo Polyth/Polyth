@@ -4,7 +4,9 @@
 import { tr } from "../i18n/index.ts";
 import AttachmentPreview from "../components/AttachmentPreview.tsx";
 
-export interface MarkdownImage { src: string; alt: string }
+/** `caption` is text the reader already saw beside the picture (a tile's
+ *  title); the viewer repeats it in full under the image. */
+export interface MarkdownImage { src: string; alt: string; caption?: string }
 
 export default function ImageLightbox({ images, start, onClose }: {
   images: MarkdownImage[];
@@ -19,5 +21,13 @@ export default function ImageLightbox({ images, start, onClose }: {
     kind: "image" as const,
     url: img.src,
   }));
-  return <AttachmentPreview attachments={attachments} start={start} onClose={onClose} />;
+  const hasCaptions = images.some((img) => img.caption?.trim());
+  return (
+    <AttachmentPreview
+      attachments={attachments}
+      start={start}
+      onClose={onClose}
+      caption={hasCaptions ? (_attachment, i) => images[i]?.caption?.trim() || null : undefined}
+    />
+  );
 }
