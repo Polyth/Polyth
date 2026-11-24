@@ -16,6 +16,9 @@ password rules: [docs/dev/desktop.md#bug-reports-nightly](../../docs/dev/desktop
   never imports the host's bridge module. `widgets/serverBridge.ts` implements the same
   interface for a browser: the tab capture, `attach` for a pasted or attached image, and
   the calls to the server routes.
+- `widgets/ScreenshotEditor.tsx` marks up the screenshot (crop, pen, box, arrow, six
+  colours, undo) over the unmarked original; `src/annotate.ts` holds the marks'
+  geometry and drawing, and `bridge.annotate` swaps in the marked JPEG.
 - `src/browserClient.ts` turns the user agent into the OS family and `Name major`, and
   decides whether this tab alone can be captured.
 - `src/snapshot.ts` builds the page's part of a report: allowlisted `ui.*` settings

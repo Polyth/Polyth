@@ -27,7 +27,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { boot } from "@polyth/server";
-import { bugReportOrigin, createBugReportClient, encodeScreenshot, type BugReportClient } from "./bugReport.ts";
+import { bugReportOrigin, createBugReportClient, encodeScreenshot, MARKED_SCREENSHOT_MAX_BYTES, type BugReportClient } from "./bugReport.ts";
 import { cliLauncherPlan, installCliLauncher, openPathFromArgv } from "./cliInstall.ts";
 import { setLinuxAutostartEnabled } from "./linuxAutostart.ts";
 import { validateAbsoluteLocalPath } from "./localPath.ts";
@@ -1855,6 +1855,19 @@ const installIpc = (): void => {
   trustedHandle("desktop:report:capture", async () => {
     if (!bugReports?.state().available) throw new Error("Bug reports are off on this build");
     return bugReports.capture(await captureForBugReport());
+  });
+  // The sheet's marked-up screenshot: decoded here and re-encoded to the
+  // wire's limits, so the renderer cannot put anything but a sized JPEG in a report.
+  trustedHandle("desktop:report:annotate", (_event, captureId: unknown, jpeg: unknown) => {
+    if (!bugReports || typeof captureId !== "string" || !(jpeg instanceof Uint8Array)) return null;
+    if (jpeg.byteLength === 0 || jpeg.byteLength > MARKED_SCREENSHOT_MAX_BYTES) return null;
+    try {
+      const image = nativeImage.createFromBuffer(Buffer.from(jpeg.buffer, jpeg.byteOffset, jpeg.byteLength));
+      return image.isEmpty() ? null : bugReports.annotate(captureId, encodeScreenshot(image));
+    } catch (error) {
+      log("Could not read the marked-up bug report screenshot", error);
+      return null;
+    }
   });
   trustedHandle("desktop:report:send", async (_event, draft: unknown) =>
     bugReports ? bugReports.send(draft) : { result: "unavailable" as const });

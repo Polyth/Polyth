@@ -657,6 +657,16 @@ In the workstation edition only the shell sends: the server route stays off ther
 - **The sheet** shows the screenshot (with a switch), the tab's last error notices
   (`errors.recent()` on the web host, home folders replaced by `~`), an optional note
   and GitHub username, and the exact JSON that goes, minus the image bytes.
+- **Marking up.** **Mark up** (or a click on the thumbnail) grows the same dialog into
+  an editor (`widgets/ScreenshotEditor.tsx`): crop, pen, box and arrow in six colours,
+  with undo (⌘Z / Ctrl+Z). Marks live in the screenshot's own pixels over the unmarked
+  original (`src/annotate.ts`), so reopening the editor changes them; the last crop
+  drawn is the one in force. **Done** burns them into a JPEG and hands it to the bridge
+  (`annotate`): in the desktop shell `desktop:report:annotate` decodes it with
+  `nativeImage`, refuses anything over 8 MB or not an image, re-encodes it with
+  `encodeScreenshot` and replaces the held capture; in a browser it goes the way an
+  attached image does. A shell without `annotate` gets no editor rather than send the
+  unmarked image.
 - **What goes** is the shared wire shape (`@polyth/contracts/bug-report`, exact fields;
   the relay rejects anything else): build and OS, the web build and server version, the
   view name (never a session or project id), viewport, allowlisted `ui.*` settings from

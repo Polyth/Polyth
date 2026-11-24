@@ -50,6 +50,11 @@ export interface ReportBridge {
    *  it will be sent), or null when it cannot be read. Absent on the desktop
    *  shell, which always captures the window itself. */
   attach?(captureId: string, file: Blob): Promise<ReportCapture["screenshot"]>;
+  /** The screenshot with the person's marks drawn in (a JPEG) replaces the
+   *  capture's screenshot, re-encoded to the wire's limits; null when it
+   *  cannot be read. Absent from desktop shells older than marking up: the
+   *  sheet then offers no editor rather than send an unmarked image. */
+  annotate?(captureId: string, jpeg: Uint8Array): Promise<ReportCapture["screenshot"]>;
 }
 
 const isFunction = (value: unknown): value is (...args: never[]) => unknown => typeof value === "function";

@@ -9,7 +9,9 @@ import type { BugReportError, BugReportPackage, BugReportSettingValue, BugReport
 import { BUG_REPORT_LIMITS } from "@polyth/contracts/bug-report";
 import type { BugReportMessageKey } from "../src/i18n/en.ts";
 import { contactName } from "../src/snapshot.ts";
+import type { Mark } from "../src/annotate.ts";
 import type { ReportBridge, ReportCapture, ReportDraft, ReportOutcome } from "./bridge.ts";
+import { ScreenshotEditor, composeMarked, type MarkImage } from "./ScreenshotEditor.tsx";
 
 export interface PageReport {
   web: BugReportWeb;
@@ -33,6 +35,7 @@ const kb = (bytes: number) => `${Math.max(1, Math.round(bytes / 1024))} KB`;
 export function ReportSheet({ host, bridge, capture, page, onClose }: ReportSheetProps) {
   const t = (key: BugReportMessageKey, values?: Record<string, string | number>) => host.ui.locale.translate(key, values);
   const { Button, Checkbox, Notice, Textarea, TextInput } = host.ui.components;
+  const EditIcon = host.ui.iconSet?.EditIcon;
   const Dialog = host.ui.components.Dialog;
   const [text, setText] = useState("");
   const [contact, setContact] = useState("");
@@ -45,6 +48,14 @@ export function ReportSheet({ host, bridge, capture, page, onClose }: ReportShee
   const [attachFailed, setAttachFailed] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const canAttach = typeof bridge.attach === "function";
+  // Marks are drawn over the unmarked original, so reopening the editor moves
+  // them instead of drawing over burnt-in ones; `shot` is what goes.
+  const [original, setOriginal] = useState<MarkImage | null>(capture.screenshot);
+  const [marks, setMarks] = useState<Mark[]>([]);
+  const [editing, setEditing] = useState<Mark[] | null>(null);
+  const [applying, setApplying] = useState(false);
+  const [markFailed, setMarkFailed] = useState(false);
+  const canMark = typeof bridge.annotate === "function" && shot !== null && original !== null;
   const [withErrors, setWithErrors] = useState(page.errors.length > 0);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<Problem>(null);
@@ -76,7 +87,7 @@ export function ReportSheet({ host, bridge, capture, page, onClose }: ReportShee
       : null,
   }, null, 2), [capture, page, shot, withErrors, withScreenshot, text, contact]);
 
-  const canSend = !busy && !attaching && (!needsPassword || password.trim() !== "");
+  const canSend = !busy && !attaching && editing === null && (!needsPassword || password.trim() !== "");
 
   const attach = async (file: Blob) => {
     if (!bridge.attach) return;
@@ -86,6 +97,8 @@ export function ReportSheet({ host, bridge, capture, page, onClose }: ReportShee
       const next = await bridge.attach(capture.captureId, file);
       if (next) {
         setShot(next);
+        setOriginal(next);
+        setMarks([]);
         setWithScreenshot(true);
       } else {
         setAttachFailed(true);
@@ -104,6 +117,46 @@ export function ReportSheet({ host, bridge, capture, page, onClose }: ReportShee
     if (!image) return;
     event.preventDefault();
     void attach(image);
+  };
+
+  const openEditor = () => {
+    if (!canMark) return;
+    setMarkFailed(false);
+    setEditing(marks);
+  };
+
+  const closeEditor = () => {
+    if (applying) return;
+    setEditing(null);
+    setMarkFailed(false);
+  };
+
+  // Burn the marks in and hand the image to the bridge, which re-encodes it
+  // to the wire's limits; the preview then shows exactly what goes.
+  const applyMarks = async () => {
+    if (editing === null || !original || !bridge.annotate) return;
+    if (editing === marks) {
+      setEditing(null);
+      return;
+    }
+    setApplying(true);
+    setMarkFailed(false);
+    try {
+      const jpeg = await composeMarked(original, editing);
+      const next = jpeg ? await bridge.annotate(capture.captureId, jpeg) : null;
+      if (!next) {
+        setMarkFailed(true);
+        return;
+      }
+      setShot(next);
+      setMarks(editing);
+      setWithScreenshot(true);
+      setEditing(null);
+    } catch {
+      setMarkFailed(true);
+    } finally {
+      setApplying(false);
+    }
   };
 
   const finish = (outcome: ReportOutcome) => {
@@ -160,6 +213,13 @@ export function ReportSheet({ host, bridge, capture, page, onClose }: ReportShee
     </>
   );
 
+  const editorFooter = (
+    <>
+      <Button variant="quiet" disabled={applying} onClick={closeEditor}>{t("bugreport.cancel")}</Button>
+      <Button variant="primary" busy={applying} onClick={() => void applyMarks()}>{t("bugreport.markDone")}</Button>
+    </>
+  );
+
   const body = (
     <form className="bug-report-sheet" onSubmit={(event) => { event.preventDefault(); void submit(); }} onKeyDown={onKeyDown} onPaste={onPaste}>
       <p className="bug-report-sheet__intro">{t("bugreport.intro")}</p>
@@ -178,24 +238,33 @@ export function ReportSheet({ host, bridge, capture, page, onClose }: ReportShee
       </label>
       <div className="bug-report-sheet__attachments">
         {shot ? (
-          <img
-            className="bug-report-sheet__image"
-            data-included={withScreenshot ? "true" : "false"}
-            src={shot.dataUrl}
-            width={shot.width}
-            height={shot.height}
-            alt={t("bugreport.screenshotAlt")}
-          />
+          <div className="bug-report-sheet__shot">
+            <img
+              className="bug-report-sheet__image"
+              data-included={withScreenshot ? "true" : "false"}
+              src={shot.dataUrl}
+              width={shot.width}
+              height={shot.height}
+              alt={t("bugreport.screenshotAlt")}
+            />
+            {/* The whole thumbnail opens the editor; the labelled button below is its keyboard twin. */}
+            {canMark && <button type="button" className="bug-report-sheet__shot-open" tabIndex={-1} aria-hidden="true" onClick={openEditor} />}
+          </div>
         ) : null}
         <div className="bug-report-sheet__toggles">
           {shot
             ? <Checkbox checked={withScreenshot} onChange={setWithScreenshot} label={t(canAttach ? "bugreport.screenshotBrowser" : "bugreport.screenshot")} />
             : <p className="bug-report-sheet__note">{t(canAttach ? "bugreport.attachHint" : "bugreport.screenshotMissing")}</p>}
-          {canAttach && (
+          {(canAttach || canMark) && (
             <div className="bug-report-sheet__attach">
-              <Button size="sm" busy={attaching} onClick={() => fileRef.current?.click()}>
+              {canMark && (
+                <Button size="sm" {...(EditIcon ? { iconStart: EditIcon } : {})} onClick={openEditor}>
+                  {t(marks.length > 0 ? "bugreport.markEdit" : "bugreport.markUp")}
+                </Button>
+              )}
+              {canAttach && <Button size="sm" busy={attaching} onClick={() => fileRef.current?.click()}>
                 {t(shot ? "bugreport.replace" : "bugreport.attach")}
-              </Button>
+              </Button>}
               <input
                 ref={fileRef}
                 className="bug-report-sheet__file"
@@ -262,6 +331,29 @@ export function ReportSheet({ host, bridge, capture, page, onClose }: ReportShee
       {problem && !Notice && <p className="bug-report-sheet__error" role="alert">{t(`bugreport.${problem}`)}</p>}
     </form>
   );
+
+  if (editing !== null && original) {
+    const editor = (
+      <div className="bug-report-editor-body">
+        <ScreenshotEditor host={host} t={t} image={original} marks={editing} onMarksChange={setEditing} />
+        {markFailed && <p className="bug-report-sheet__error" role="alert">{t("bugreport.markFailed")}</p>}
+      </div>
+    );
+    if (Dialog) {
+      return (
+        <Dialog title={t("bugreport.markTitle")} onClose={closeEditor} size="full" className="bug-report-dialog bug-report-dialog--editor" footer={editorFooter}>
+          {editor}
+        </Dialog>
+      );
+    }
+    const Legacy = host.ui.Dialog;
+    return (
+      <Legacy title={t("bugreport.markTitle")} onClose={closeEditor} size="full" className="bug-report-dialog bug-report-dialog--editor">
+        {editor}
+        <div className="bug-report-sheet__actions">{editorFooter}</div>
+      </Legacy>
+    );
+  }
 
   if (Dialog) {
     return (

@@ -279,6 +279,25 @@ test("the screenshot goes only with the capture it was shown for", async (t) => 
   assert.ok(second.captureId);
 });
 
+test("a marked-up screenshot replaces only its own capture's", async (t) => {
+  const h = harness(t);
+  const capture = h.client.capture({ jpeg: jpegOf(64), width: 1600, height: 1000 });
+  const marked = { jpeg: jpegOf(96), width: 800, height: 500 };
+  assert.equal(h.client.annotate("another", marked), null);
+  assert.equal(h.client.annotate(capture.captureId, null), null, "bytes that did not decode change nothing");
+  assert.deepEqual(h.client.annotate(capture.captureId, marked), {
+    dataUrl: `data:image/jpeg;base64,${marked.jpeg.toString("base64")}`, width: 800, height: 500, bytes: 96,
+  });
+  h.reply(200, { result: "created", issue: 6 });
+  await h.client.send(draft({ password: "p", captureId: capture.captureId }));
+  const body = h.calls.at(-1)!.body as { screenshot: { data: string; width: number; height: number } };
+  assert.equal(body.screenshot.width, 800);
+  assert.equal(body.screenshot.height, 500);
+  assert.equal(Buffer.from(body.screenshot.data, "base64").length, 96);
+  // Sent: the capture is gone, so a late mark-up is refused.
+  assert.equal(h.client.annotate(capture.captureId, marked), null);
+});
+
 test("a malformed draft is refused before anything is sent", async (t) => {
   const h = harness(t);
   assert.deepEqual(await h.client.send(null), { result: "invalid" });

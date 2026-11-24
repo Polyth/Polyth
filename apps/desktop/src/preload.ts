@@ -62,6 +62,8 @@ const bugReport: PolythDesktopBugReportApi = {
   state: () => ipcRenderer.invoke("desktop:report:state") as Promise<DesktopBugReportState>,
   capture: () => ipcRenderer.invoke("desktop:report:capture") as Promise<DesktopBugReportCapture>,
   send: (draft) => ipcRenderer.invoke("desktop:report:send", draft) as Promise<DesktopBugReportOutcome>,
+  annotate: (captureId, jpeg) =>
+    ipcRenderer.invoke("desktop:report:annotate", captureId, jpeg) as Promise<DesktopBugReportCapture["screenshot"]>,
 };
 
 const place = placement();

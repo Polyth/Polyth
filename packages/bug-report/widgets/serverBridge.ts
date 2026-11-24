@@ -134,6 +134,12 @@ const newId = () => (typeof crypto !== "undefined" && typeof crypto.randomUUID =
 export function serverReportBridge(api: ApiTransport): ReportBridge {
   let held: { id: string; shot: Shot | null; client: BrowserClient } | null = null;
   const state = () => api.get<ServerState>("/api/bug-report/state");
+  const attach = async (captureId: string, file: Blob) => {
+    if (!held || held.id !== captureId) return null;
+    const shot = await encodeFile(file);
+    if (shot && held?.id === captureId) held.shot = shot;
+    return shot;
+  };
 
   return {
     async state() {
@@ -172,12 +178,11 @@ export function serverReportBridge(api: ApiTransport): ReportBridge {
       };
     },
 
-    async attach(captureId: string, file: Blob) {
-      if (!held || held.id !== captureId) return null;
-      const shot = await encodeFile(file);
-      if (shot) held.shot = shot;
-      return shot;
-    },
+    attach,
+
+    // Marks come burnt into a JPEG; it goes the same way as an attached image.
+    annotate: (captureId: string, jpeg: Uint8Array) =>
+      attach(captureId, new Blob([jpeg as Uint8Array<ArrayBuffer>], { type: "image/jpeg" })),
 
     async send(draft: ReportDraft): Promise<ReportOutcome> {
       const shot = held && draft.captureId === held.id ? held.shot : null;

@@ -207,6 +207,10 @@ export interface PolythDesktopBugReportApi {
   /** Screenshot this window now; call before showing the report sheet. */
   capture(): Promise<DesktopBugReportCapture>;
   send(draft: DesktopBugReportDraft): Promise<DesktopBugReportOutcome>;
+  /** The screenshot with the person's marks drawn in (a JPEG) replaces the
+   *  capture's; the shell re-encodes it to the wire's limits. Null when the
+   *  capture is gone or the bytes are not an image. */
+  annotate(captureId: string, jpeg: Uint8Array): Promise<DesktopBugReportCapture["screenshot"]>;
 }
 
 export interface DesktopSetupClaim {

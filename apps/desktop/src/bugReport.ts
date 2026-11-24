@@ -73,6 +73,10 @@ export interface CapturedImage {
   toJPEG(quality: number): Buffer;
 }
 
+/** A marked-up screenshot from the sheet is at most the wire's 1600 px at
+ *  high JPEG quality; anything far larger is refused before it is decoded. */
+export const MARKED_SCREENSHOT_MAX_BYTES = 8_000_000;
+
 export interface EncodedScreenshot {
   jpeg: Buffer;
   width: number;
@@ -125,6 +129,9 @@ export interface BugReportClientOptions {
 export interface BugReportClient {
   state(): DesktopBugReportState;
   capture(screenshot: EncodedScreenshot | null): DesktopBugReportCapture;
+  /** The person's marked-up screenshot (already re-encoded by main) replaces
+   *  the held capture's; null when that capture is gone or nothing decoded. */
+  annotate(captureId: unknown, screenshot: EncodedScreenshot | null): DesktopBugReportCapture["screenshot"];
   send(draft: unknown): Promise<DesktopBugReportOutcome>;
   flushOutbox(): Promise<void>;
   dispose(): void;
@@ -286,6 +293,15 @@ export function createBugReportClient(options: BugReportClientOptions): BugRepor
     };
   }
 
+  const screenshotView = (screenshot: EncodedScreenshot | null): DesktopBugReportCapture["screenshot"] => screenshot
+    ? {
+      dataUrl: `data:image/jpeg;base64,${screenshot.jpeg.toString("base64")}`,
+      width: screenshot.width,
+      height: screenshot.height,
+      bytes: screenshot.jpeg.length,
+    }
+    : null;
+
   function liveCapture(at: number) {
     if (capture && at - capture.at > CAPTURE_TTL_MS) capture = null;
     return capture;
@@ -305,18 +321,18 @@ export function createBugReportClient(options: BugReportClientOptions): BugRepor
       capture = { id: randomUUID(), screenshot, at };
       return {
         captureId: capture.id,
-        screenshot: screenshot
-          ? {
-            dataUrl: `data:image/jpeg;base64,${screenshot.jpeg.toString("base64")}`,
-            width: screenshot.width,
-            height: screenshot.height,
-            bytes: screenshot.jpeg.length,
-          }
-          : null,
+        screenshot: screenshotView(screenshot),
         base: base(at),
         needsPassword: password === null,
         passwordStorage: options.encrypt("probe") === null ? "session" : "keychain",
       };
+    },
+
+    annotate(captureId, screenshot) {
+      const held = liveCapture(now());
+      if (!screenshot || !held || typeof captureId !== "string" || held.id !== captureId) return null;
+      held.screenshot = screenshot;
+      return screenshotView(screenshot);
     },
 
     async send(draft) {
