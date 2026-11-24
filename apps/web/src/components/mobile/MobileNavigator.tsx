@@ -40,6 +40,9 @@ import ProjectGlyph from "../ProjectGlyph.tsx";
 import { ServerZonesTree } from "../sidebar/ServerZones.tsx";
 import { soloPersonalProject } from "../../personalProject.ts";
 import { chatReadByOthers, offersPrivateRoom, privateRoomOf, rootProjectId, rootProjects, startPrivateChat } from "../../privateRoom.ts";
+import { searchTerms } from "@polyth/session/search-text";
+import { projectMatchesSearch, sessionMatchesSearch, useChatSearchHits } from "../../chatSearchHits.ts";
+import { ChatSearchMessagesRow } from "../ChatSearchMessagesRow.tsx";
 import PrivateRoomGroup, { useRoomChatsListed } from "../PrivateRoomGroup.tsx";
 import ProjectAppearanceDialog from "../ProjectAppearanceDialog.tsx";
 import ConversationCreateDialog from "../ConversationCreateDialog.tsx";
@@ -1333,8 +1336,11 @@ export default function MobileNavigator() {
     });
   }, [dateFilter, frequentProjects, projectOrder, projectSessions, projects, sort]);
 
+  const searchTermList = useMemo(() => searchTerms(query), [query]);
+  // The same query asks the one chat search for chats that match only in
+  // their messages; the list offers them as one row into that search.
+  const chatHits = useChatSearchHits(query);
   const visibleProjects = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase();
     return orderedProjects.filter((project) => {
       const room = privateRoomOf(registry.projects, project.id);
       const list = [...projectSessions.get(project.id) ?? [], ...(room ? projectSessions.get(room.id) ?? [] : [])];
@@ -1342,11 +1348,11 @@ export default function MobileNavigator() {
       if (sessionDateFilterActive(dateFilter) && dated.length === 0) return false;
       const hasAttention = dated.some((session) => statusPriority(session) <= 1 || (session.attention?.unread ?? 0) > 0);
       if (attentionOnly && !hasAttention) return false;
-      if (!needle) return true;
-      if (`${project.name} ${project.path}`.toLocaleLowerCase().includes(needle)) return true;
-      return dated.some((session) => `${session.title} ${session.branch ?? ""} ${session.worktreePath ?? ""}`.toLocaleLowerCase().includes(needle));
+      if (!searchTermList.length) return true;
+      if (projectMatchesSearch(project, searchTermList)) return true;
+      return dated.some((session) => sessionMatchesSearch(session, searchTermList));
     });
-  }, [attentionOnly, dateFilter, orderedProjects, projectSessions, query, registry.projects]);
+  }, [attentionOnly, dateFilter, orderedProjects, projectSessions, searchTermList, registry.projects]);
 
   // Projects move by direct manipulation (workspaceArrange.ts, the engine the
   // Workspace editor uses): a still press lifts a project's row, the copy
@@ -1669,11 +1675,11 @@ export default function MobileNavigator() {
           {visibleProjects.length === 0 && (
             <div className="mobile-nav-empty">{tr("sidebar.noMatchingSessions")}</div>
           )}
+          {searchMode && query.trim() !== "" && <ChatSearchMessagesRow hits={chatHits} className="mobile-nav-messages-row" />}
           {shownProjects.map((project) => {
             const roomSessions = projectSessions.get(privateRoomOf(registry.projects, project.id)?.id ?? "") ?? [];
             // A search reaches the private chats; otherwise they keep to their row.
             const all = [...projectSessions.get(project.id) ?? [], ...(searchMode ? roomSessions : [])];
-            const needle = query.trim().toLocaleLowerCase();
             // A repository chip narrows this project's own chats; a delegated
             // child follows its parent, and the project's status pills still
             // count every chat, so work under another chip is never hidden.
@@ -1689,9 +1695,9 @@ export default function MobileNavigator() {
             };
             const datedAll = all.filter((session) => sessionMatchesDateFilter(session, dateFilter));
             const dated = activeRepository ? datedAll.filter(inRepository) : datedAll;
-            const projectMatches = `${project.name} ${project.path}`.toLocaleLowerCase().includes(needle);
-            const matchingAll = needle && !projectMatches
-              ? datedAll.filter((session) => `${session.title} ${session.branch ?? ""} ${session.worktreePath ?? ""}`.toLocaleLowerCase().includes(needle))
+            const projectMatches = projectMatchesSearch(project, searchTermList);
+            const matchingAll = searchTermList.length && !projectMatches
+              ? datedAll.filter((session) => sessionMatchesSearch(session, searchTermList))
               : datedAll;
             const matching = activeRepository ? matchingAll.filter(inRepository) : matchingAll;
             const pinned = matching.filter((session) => session.pinned !== undefined);

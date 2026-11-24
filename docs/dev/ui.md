@@ -655,6 +655,40 @@ conversation, Project settings…, Repositories…, Memory). New chat is a row
 action (and a toolbar or rail-header control); New conversation lives only in
 the menu.
 
+#### Finding chats
+
+There is one chat search, and every place that finds chats uses it with the
+same text rule (`@polyth/session/search-text`): Unicode case, diacritic and
+apostrophe folding; every typed word must occur somewhere among the fields, in
+any order; a word also matches by a conservative stem («пошуків» → «пошук»,
+at least four letters kept); a `"quoted phrase"` stays one exact term. The
+entry points differ only in what they open with:
+
+- **Mod+Shift+O** (`SessionSearch`, overlay `search`) is the full search:
+  titles, branches, labels and message text across projects, archived chats
+  included, facets `is:` / `from:`. `openSessionSearch({ query, projectId })`
+  opens it with a query already typed; server hits on chats the client has not
+  paged in still show.
+- **Mod+K** lists up to six chats from that search (message-only hits show
+  their excerpt) and ends with *All chats and messages for “…”*, which opens
+  the full search with the same query. A chat row shows its title and either
+  project · branch or the matching excerpt; pin, rename and archive live in
+  the row's ⋯ menu (Tab, or the inward arrow at the end of the query, opens it
+  for the active row; Escape returns to the field). Projects, commands and
+  files keep their own palette sources.
+- **The sidebar and phone navigator field** stays a filter of the list it
+  shows (title, branch, worktree; project name/path). The same query asks the
+  chat search in the background: projects holding a server title/branch hit
+  stay visible, and a *Found in messages: N* row
+  (`ChatSearchMessagesRow`) opens the full search for chats that match only in
+  their messages.
+- **The archive view** filters one project's archived chats with the same
+  engine (summaries `query` + transcript hits) because it is a management view
+  with restore/delete selection.
+
+Find in conversation (Mod+F), workspace file search (Mod+Shift+F) and
+previous prompts (Ctrl/Cmd+↑) are separate intents, not chat search.
+
 #### Server zones in the navigator
 
 In Polyth Desktop and the phone apps the navigator also lists the other servers
@@ -700,8 +734,8 @@ quiet `Archived` entry under its session list — and `Archived sessions` in the
 phone project menu — opens the per-project archive view
 (`ArchivedSessionsDialog`, overlay `archived-sessions`; dialog on desktop,
 tall sheet on phones). It pages `/api/sessions/summaries?archived=true`
-(server-side title/branch/path `query`) and merges archived transcript hits
-from session search. Archive-date presets (today / past week / past month /
+(server-side title/branch/path `query`, the shared chat-search text rule) and
+merges archived transcript hits from session search. Archive-date presets (today / past week / past month /
 older) and the branch filter apply to loaded rows, using `updatedAt` as the
 archive time, the same clock archive retention uses; paging continues on scroll
 and stops early once a recency window is satisfied. Rows open read-only, and

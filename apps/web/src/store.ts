@@ -617,6 +617,9 @@ export interface AppState {
   worktreeSessionRequest: WorktreeSessionRequest | null;
   /** Project whose archive the "archived-sessions" overlay shows. */
   archivedSessionsProjectId: string | null;
+  /** What the "search" overlay opens with: a typed query carried over from
+   *  the palette, the sidebar or an archive, and the project it narrows to. */
+  sessionSearchSeed: SessionSearchSeed | null;
   /** Chat whose audience the "session-sharing" overlay shows. */
   sharingSessionId: string | null;
   /** Chat the "session-move" overlay picks a project for. */
@@ -679,6 +682,7 @@ let state: AppState = {
   overlay: null,
   worktreeSessionRequest: null,
   archivedSessionsProjectId: null,
+  sessionSearchSeed: null,
   sharingSessionId: null,
   movingSessionId: null,
   newSessionIntent: null,
@@ -1249,6 +1253,7 @@ export function setOverlay(overlay: Overlay): void {
     ...(overlay === "palette" ? { paletteMode: "all" as PaletteMode } : {}),
     ...(overlay !== "worktree-session" ? { worktreeSessionRequest: null } : {}),
     ...(overlay !== "archived-sessions" ? { archivedSessionsProjectId: null } : {}),
+    sessionSearchSeed: null,
     ...(overlay !== "session-sharing" ? { sharingSessionId: null } : {}),
     ...(overlay !== "session-move" ? { movingSessionId: null } : {}),
   });
@@ -1258,6 +1263,15 @@ export function openSessionSharing(sessionId: string): void {
 }
 export function openSessionMove(sessionId: string): void {
   set({ overlay: "session-move", movingSessionId: sessionId, worktreeSessionRequest: null, archivedSessionsProjectId: null, sharingSessionId: null });
+}
+export interface SessionSearchSeed {
+  query: string;
+  /** Narrow to this project; absent searches every project. */
+  projectId?: string;
+}
+/** Open the one chat search with a query already typed (and a project scope). */
+export function openSessionSearch(seed: SessionSearchSeed): void {
+  set({ overlay: "search", sessionSearchSeed: seed, worktreeSessionRequest: null, archivedSessionsProjectId: null, sharingSessionId: null, movingSessionId: null });
 }
 export function openArchivedSessions(projectId: string): void {
   set({ overlay: "archived-sessions", archivedSessionsProjectId: projectId, worktreeSessionRequest: null });

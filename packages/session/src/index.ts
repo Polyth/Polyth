@@ -77,6 +77,7 @@ import {
   workStateFromEvents,
 } from "./recovery.ts";
 import { effectiveHistory, recoveredUserText } from "./history.ts";
+import { matchesSearchTerms, searchExcerpt, searchTermStem, searchTerms } from "./searchText.ts";
 import { polythCompactionForEpoch } from "./compaction.ts";
 import { PACKAGE_CONTEXT_OPEN } from "./packageContext.ts";
 import {
@@ -117,6 +118,13 @@ export interface MessageSearchHit {
   ranges: Array<[number, number]>;
   /** FTS5 bm25 rank (lower is better) for cross-session ordering. */
   rank: number;
+  /**
+   * How a broadened search found it: `chat` — the words are spread over this
+   * chat's messages rather than all in this one; `substring` — a word occurs
+   * inside a longer one (`search` in `SessionSearch`). Absent: every word is
+   * in this message.
+   */
+  via?: "chat" | "substring";
 }
 
 export interface MessageSearchOptions {
@@ -127,27 +135,30 @@ export interface MessageSearchOptions {
   /** Only sessions of one project; implies a projection join. */
   projectId?: string;
   role?: "user" | "assistant";
+  /**
+   * When the all-words-in-one-message pass finds fewer than `sessions`
+   * chats, also find chats whose messages hold the words between them, then
+   * words inside longer words among the newest `scanMessages` messages.
+   */
+  broaden?: { sessions: number; scanMessages: number };
+}
+
+/** One folded term as an FTS5 expression: a phrase, or a prefix that also accepts its stem. */
+function ftsTermExpression(term: string): string {
+  if (term.includes(" ")) return `"${term}"`;
+  const stem = searchTermStem(term);
+  return stem ? `("${term}"* OR "${stem}"*)` : `"${term}"*`;
 }
 
 /**
- * Turn free text into an FTS5 MATCH expression: every whitespace-separated
- * term becomes a quoted prefix token (implicit AND); a `"quoted phrase"` is
- * kept as one phrase. Nothing the user types can reach FTS5 operator syntax.
+ * Turn free text into an FTS5 MATCH expression with the shared search-term
+ * rules: every word becomes a quoted prefix (joined by AND) that also accepts
+ * its stem, so «пошуків» finds «пошук»; a `"quoted phrase"` stays one
+ * phrase. Nothing the user types can reach FTS5 operator syntax.
  */
 export function toFtsMatchQuery(raw: string): string {
-  const parts: string[] = [];
-  const re = /"([^"]*)"|(\S+)/g;
-  for (const m of raw.matchAll(re)) {
-    if (m[1] !== undefined) {
-      const phrase = m[1].trim().replace(/"/g, "");
-      if (phrase) parts.push(`"${phrase.replace(/\s+/g, " ")}"`);
-      continue;
-    }
-    const term = (m[2] ?? "").replace(/"/g, "");
-    if (!term) continue;
-    parts.push(`"${term}"*`);
-  }
-  return parts.join(" ");
+  // Explicit AND: FTS5 accepts implicit AND only between bare phrases.
+  return searchTerms(raw).map(ftsTermExpression).join(" AND ");
 }
 
 const SNIPPET_MAX_CHARS = 160;
@@ -783,6 +794,13 @@ export function createStore(dbPath: string): Store {
   };
   sqliteExec("PRAGMA journal_mode = WAL");
   sqliteExec("PRAGMA synchronous = NORMAL");
+  // The shared chat-search rule inside SQL: SQLite's own lower() folds ASCII
+  // only, so «Пошук» never found «пошук». `terms` is a JSON array of folded
+  // search terms; every one must occur in `text` (exactly or by its stem).
+  raw.function("polyth_search_match", { deterministic: true }, (text: unknown, terms: unknown) => {
+    if (typeof text !== "string" || typeof terms !== "string") return 0;
+    try { return matchesSearchTerms([text], JSON.parse(terms) as string[]) ? 1 : 0; } catch { return 0; }
+  });
   // Transaction control statements are compiled once per connection: every
   // appended event runs BEGIN IMMEDIATE + COMMIT. Created before migrations
   // (which run inside transaction()); cleared in close().
@@ -3095,7 +3113,15 @@ export function createStore(dbPath: string): Store {
       conditions.push("(CAST(json_extract(data, '$.updatedAt') AS INTEGER), session_id) < (?, ?)");
       args.push(input.cursor.updatedAt, input.cursor.id);
     }
-    if (input.query) { conditions.push("instr(lower(COALESCE(json_extract(data, '$.title'), '') || ' ' || COALESCE(json_extract(data, '$.branch'), '') || ' ' || COALESCE(json_extract(data, '$.worktreePath'), '')), lower(?)) > 0"); args.push(input.query.slice(0, 200)); }
+    if (input.query) {
+      // Every word somewhere in title, branch or worktree path, folded with
+      // the same rule as the client-side filter and the session search.
+      const terms = searchTerms(input.query.slice(0, 200));
+      if (terms.length) {
+        conditions.push("polyth_search_match(COALESCE(json_extract(data, '$.title'), '') || char(10) || COALESCE(json_extract(data, '$.branch'), '') || char(10) || COALESCE(json_extract(data, '$.worktreePath'), ''), ?) = 1");
+        args.push(JSON.stringify(terms));
+      }
+    }
     if (input.archived !== undefined) { conditions.push("(json_extract(data, '$.status') = 'archived') = ?"); args.push(input.archived ? 1 : 0); }
     if (input.fromTime !== undefined) { conditions.push("COALESCE(json_extract(data, '$.lastTurnAt'), json_extract(data, '$.createdAt')) >= ?"); args.push(input.fromTime); }
     if (input.toTime !== undefined) { conditions.push("COALESCE(json_extract(data, '$.lastTurnAt'), json_extract(data, '$.createdAt')) <= ?"); args.push(input.toTime); }
@@ -4959,47 +4985,106 @@ export function createStore(dbPath: string): Store {
   }
 
   async function searchMessages(opts: MessageSearchOptions): Promise<MessageSearchHit[]> {
-    const match = toFtsMatchQuery(opts.q);
-    if (!match) return [];
+    const terms = searchTerms(opts.q);
+    if (!terms.length) return [];
     const limit = Math.max(1, Math.min(opts.limit ?? 50, 500));
     const scoped = opts.spaceId !== undefined || opts.projectId !== undefined;
-    const where: string[] = ["events_fts MATCH ?"];
-    const args: Array<string | number> = [match];
-    if (opts.role) { where.push("f.role = ?"); args.push(opts.role); }
-    if (opts.spaceId !== undefined) { where.push("p.space_id = ?"); args.push(opts.spaceId); }
-    if (opts.projectId !== undefined) { where.push("p.project_id = ?"); args.push(opts.projectId); }
-    args.push(limit);
+    const scopeJoin = scoped ? "JOIN projections p ON p.session_id = f.session_id" : "";
+    const scopeWhere: string[] = [];
+    const scopeArgs: Array<string | number> = [];
+    if (opts.role) { scopeWhere.push("f.role = ?"); scopeArgs.push(opts.role); }
+    if (opts.spaceId !== undefined) { scopeWhere.push("p.space_id = ?"); scopeArgs.push(opts.spaceId); }
+    if (opts.projectId !== undefined) { scopeWhere.push("p.project_id = ?"); scopeArgs.push(opts.projectId); }
+    type FtsRow = { session_id: string; seq: number; role: string; time: number; marked: string; rank: number };
+    // A malformed MATCH can only come from a tokenizer edge case; an empty
+    // result is the honest answer rather than a 500 for one keystroke.
+    const ftsAll = <T,>(sql: string, args: Array<string | number>): T[] => {
+      try {
+        return prep(sql).all(...args) as T[];
+      } catch (error) {
+        if (error instanceof Error && /fts5/i.test(error.message)) return [];
+        throw error;
+      }
+    };
     // The MATCH drives the plan; the PK join only decorates the bounded hit
     // set with its durable time (the FTS mirror carries no mutable columns).
-    const sql = `SELECT f.session_id, f.seq, f.role, e.time,
-        snippet(events_fts, 0, '${SNIPPET_OPEN}', '${SNIPPET_CLOSE}', '…', 16) AS marked,
-        bm25(events_fts) AS rank
-      FROM events_fts f
-      JOIN events e ON e.session_id = f.session_id AND e.seq = f.seq
-      ${scoped ? "JOIN projections p ON p.session_id = f.session_id" : ""}
-      WHERE ${where.join(" AND ")}
-      ORDER BY rank LIMIT ?`;
-    let rows: Array<{ session_id: string; seq: number; role: string; time: number; marked: string; rank: number }>;
-    try {
-      rows = prep(sql).all(...args) as typeof rows;
-    } catch (error) {
-      // A malformed MATCH can only come from a tokenizer edge case; an empty
-      // result is the honest answer rather than a 500 for one keystroke.
-      if (error instanceof Error && /fts5/i.test(error.message)) return [];
-      throw error;
+    const rankedHits = (match: string, extraWhere: string[], extraArgs: Array<string | number>, max: number, via?: "chat"): MessageSearchHit[] =>
+      ftsAll<FtsRow>(`SELECT f.session_id, f.seq, f.role, e.time,
+          snippet(events_fts, 0, '${SNIPPET_OPEN}', '${SNIPPET_CLOSE}', '…', 16) AS marked,
+          bm25(events_fts) AS rank
+        FROM events_fts f
+        JOIN events e ON e.session_id = f.session_id AND e.seq = f.seq
+        ${scopeJoin}
+        WHERE ${["events_fts MATCH ?", ...scopeWhere, ...extraWhere].join(" AND ")}
+        ORDER BY rank LIMIT ?`, [match, ...scopeArgs, ...extraArgs, max]).map((r) => {
+        const { snippet, ranges } = decodeSnippet(String(r.marked ?? ""));
+        return {
+          sessionId: r.session_id,
+          seq: Number(r.seq),
+          role: r.role === "user" ? "user" : "assistant",
+          time: Number(r.time),
+          snippet,
+          ranges,
+          rank: Number(r.rank),
+          ...(via ? { via } : {}),
+        };
+      });
+    const hits = rankedHits(terms.map(ftsTermExpression).join(" AND "), [], [], limit);
+    const broaden = opts.broaden;
+    if (!broaden) return hits;
+    const found = new Set(hits.map((h) => h.sessionId));
+    const wanted = Math.max(1, Math.min(broaden.sessions, 200));
+
+    // Chats that hold every word between their messages ("deploy" in one,
+    // "rollback" in another). One bounded id set per word, intersected.
+    if (found.size < wanted && terms.length > 1 && terms.every((t) => [...t].length >= 2)) {
+      let common: Set<string> | undefined;
+      for (const term of terms) {
+        const ids = new Set(ftsAll<{ id: string }>(`SELECT DISTINCT f.session_id AS id FROM events_fts f ${scopeJoin}
+          WHERE ${["events_fts MATCH ?", ...scopeWhere].join(" AND ")} LIMIT 5000`, [ftsTermExpression(term), ...scopeArgs]).map((r) => r.id));
+        common = common ? new Set([...common].filter((id) => ids.has(id))) : ids;
+        if (!common.size) break;
+      }
+      const ids = [...(common ?? [])].filter((id) => !found.has(id)).slice(0, wanted - found.size);
+      if (ids.length) {
+        const spread = rankedHits(terms.map(ftsTermExpression).join(" OR "), [`f.session_id IN (${ids.map(() => "?").join(",")})`], ids, ids.length * 3, "chat");
+        for (const hit of spread) { hits.push(hit); found.add(hit.sessionId); }
+      }
     }
-    return rows.map((r) => {
-      const { snippet, ranges } = decodeSnippet(String(r.marked ?? ""));
-      return {
-        sessionId: r.session_id,
-        seq: Number(r.seq),
-        role: r.role === "user" ? "user" : "assistant",
-        time: Number(r.time),
-        snippet,
-        ranges,
-        rank: Number(r.rank),
-      };
-    });
+
+    // A word inside a longer one (`search` in `SessionSearch`, `auth` in
+    // `oauth`) — the word index cannot see it. Bounded to the newest messages
+    // and only run while the index came up short.
+    const scan = Math.max(0, Math.min(broaden.scanMessages, 20_000));
+    if (found.size < wanted && scan > 0 && terms.some((t) => [...t].length >= 3)) {
+      const seen = new Set(hits.map((h) => `${h.sessionId}\u0000${h.seq}`));
+      const rows = prep(`SELECT f.session_id, f.seq, f.role, f.text, e.time
+        FROM events_fts f
+        JOIN events e ON e.session_id = f.session_id AND e.seq = f.seq
+        ${scopeJoin}
+        WHERE ${["f.rowid > (SELECT COALESCE(MAX(rowid), 0) FROM events_fts) - ?", ...scopeWhere].join(" AND ")}
+        ORDER BY f.rowid DESC`).all(scan, ...scopeArgs) as Array<{ session_id: string; seq: number; role: string; text: string; time: number }>;
+      let added = 0;
+      for (const r of rows) {
+        if (found.size >= wanted || added >= limit) break;
+        const text = String(r.text ?? "");
+        if (seen.has(`${r.session_id}\u0000${r.seq}`) || !matchesSearchTerms([text], terms)) continue;
+        const { snippet, ranges } = searchExcerpt(text, terms, SNIPPET_MAX_CHARS);
+        hits.push({
+          sessionId: r.session_id,
+          seq: Number(r.seq),
+          role: r.role === "user" ? "user" : "assistant",
+          time: Number(r.time),
+          snippet,
+          ranges,
+          rank: 0,
+          via: "substring",
+        });
+        found.add(r.session_id);
+        added += 1;
+      }
+    }
+    return hits;
   }
 
   async function searchEventText(q: string, limit = 50): Promise<SearchHit[]> {

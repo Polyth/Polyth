@@ -4,7 +4,7 @@ import type { ShellMode } from "./responsiveShell.ts";
 
 export type PaletteEntry =
   | { kind: "cmd"; id: string; cmd: PaletteCommand }
-  | { kind: "workspace"; id: string; item: WorkspaceSearchItemDto }
+  | { kind: "workspace"; id: string; item: WorkspaceSearchItemDto; excerpt?: { text: string; ranges: Array<[number, number]> } }
   | { kind: "file"; id: string; hit: FileSearchHitDto }
   | { kind: "session-search"; id: "session-search" };
 

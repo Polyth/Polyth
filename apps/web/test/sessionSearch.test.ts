@@ -126,8 +126,12 @@ test("typing shows instant local matches, then merges ranked message hits with h
   const messageRows = rows().filter((r) => r.classList.contains("session-search-row--message"));
   assert.equal(messageRows.length, 3);
   assert.equal(messageRows[0]!.querySelector(".session-search-mark")!.textContent, "login");
-  assert.equal(messageRows[0]!.querySelector(".session-search-role")!.textContent, "Agent");
-  assert.equal(messageRows[1]!.querySelector(".session-search-role")!.textContent, "You");
+  // The speaker label is read with its excerpt (": " is screen-reader only);
+  // the row no longer replaces both with a generic aria-label.
+  assert.equal(messageRows[0]!.querySelector(".session-search-role")!.textContent, "Agent: ");
+  assert.equal(messageRows[1]!.querySelector(".session-search-role")!.textContent, "You: ");
+  assert.equal(messageRows[0]!.hasAttribute("aria-label"), false);
+  assert.equal(messageRows[0]!.querySelector(".session-search-role")!.getAttribute("aria-hidden"), null);
   assert.ok(document.querySelector(".session-search-more")!.textContent!.includes("3"), "hidden hit count = 5 - 2 shown");
   const summary = document.querySelector(".session-search-summary")!.textContent!;
   assert.ok(summary.includes("3 chats") && summary.includes("6 messages"), summary);
@@ -179,5 +183,33 @@ test("is:archived narrows recent and search results to archived chats", async ()
   await type("is:archived");
   assert.deepEqual(titles(), ["Archived notes"]);
   assert.equal(searchCalls.filter((c) => c.q === "").length, 0);
+  await view.unmount();
+});
+
+test("a seeded open starts with the carried query and project, and words match across title and branch", async () => {
+  searchCalls = [];
+  searchResults = [];
+  store.openSessionSearch({ query: "redirect deploy", projectId: "p1" });
+  const view = await mount(SessionSearch);
+  assert.equal(input().value, "redirect deploy");
+  // "deploy" is in the title, "redirect" only in the branch: one chat holds both.
+  assert.deepEqual(titles(), ["Deploy pipeline"]);
+  await settle(200);
+  assert.deepEqual(searchCalls.map((c) => [c.q, c.opts.projectId]), [["redirect deploy", "p1"]]);
+  await view.unmount();
+  store.setOverlay(null);
+  assert.equal(store.getState().sessionSearchSeed, null, "closing drops the seed");
+});
+
+test("a server hit on a chat this client has not paged in still shows", async () => {
+  searchCalls = [];
+  searchResults = [{
+    sessionId: "s-unloaded", projectId: "p1", title: "Пошук у старому чаті", status: "idle", updatedAt: 1, messageHits: 1,
+    matches: [{ field: "message", snippet: "знайдений пошук", ranges: [[10, 15]], seq: 9, role: "user", time: Date.now() - 1000 }],
+  }];
+  const view = await mount(SessionSearch);
+  await type("пошуків");
+  await settle(200);
+  assert.deepEqual(titles(), ["Пошук у старому чаті"]);
   await view.unmount();
 });

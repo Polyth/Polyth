@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Project, SessionProjection, WorkspaceLabel } from "@polyth/contracts";
-import { matchWorkspaces, parseArchivedFilter, foldText } from "../src/search.ts";
+import { foldSearchText as foldText } from "@polyth/session/search-text";
+import { matchWorkspaces, parseArchivedFilter } from "../src/search.ts";
 
 const project = (id: string, name: string, path = `/repos/${name}`): Project => ({
   id, name, path, createdAt: 1000,

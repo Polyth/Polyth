@@ -212,6 +212,9 @@ export interface SessionSearchMatch {
   seq?: number;
   role?: "user" | "assistant";
   time?: number;
+  /** Broadened message hit: `chat` — the words are spread over the chat's
+   *  messages; `substring` — a word occurs inside a longer word. */
+  via?: "chat" | "substring";
 }
 
 export interface SessionSearchResult {

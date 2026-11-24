@@ -71,6 +71,8 @@ import { useSessionParentPending } from "../../sessionParents.ts";
 import { sessionActivityState, subagentActivity, subagentActivityTone, type SubagentActivity } from "../../subagentActivity.ts";
 import { SubagentCount, subagentActivityLabel } from "./SubagentCount.tsx";
 import { RepositoryFilterChips, RepositoryMark, repositoryMarkLabel } from "./RepositoryFilter.tsx";
+import { searchTerms } from "@polyth/session/search-text";
+import { sessionMatchesSearch } from "../../chatSearchHits.ts";
 import {
   filterRepositoriesOf, sessionMatchesRepositoryFilter, sessionRepositoryMark, useRepositoryFilter,
   type FilterRepository,
@@ -911,12 +913,9 @@ export default function SessionList({
     () => new Map(projectSessions.map((session) => [session.id, session])),
     [projectSessions],
   );
-  const needle = query.trim().toLowerCase();
+  const terms = useMemo(() => searchTerms(query), [query]);
   const matchesFilters = (session: SessionProjection) => {
-    if (
-      needle
-      && !`${session.title} ${session.branch ?? ""} ${session.worktreePath ?? ""}`.toLowerCase().includes(needle)
-    ) return false;
+    if (terms.length && !sessionMatchesSearch(session, terms)) return false;
     if (activeRepository && !sessionMatchesRepositoryFilter(session, activeRepository, projectRepositoryIds, projectSessionsById)) return false;
     if (!sessionMatchesDateFilter(session, dateFilter)) return false;
     if (!attentionOnly) return true;
@@ -1261,7 +1260,7 @@ export default function SessionList({
         context={{
           projectId,
           activeSessionId: currentSessionId,
-          query: needle,
+          query: query.trim().toLowerCase(),
           attentionOnly,
           placement: "project",
           // As a chat row does, an opened row closes the compact drawer.

@@ -1,14 +1,18 @@
-// Unified palette: commands, projects, sessions, and files in one box.
+// Unified palette: commands, projects, chats, and files in one box.
 // Mod+P opens file-focused mode; `is:archived` reveals archived sessions.
+// Chats come from the one chat search (titles, branches, labels and message
+// text, every project); its last row opens that search with the same query.
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { commandHint, filterPalette, listCommands } from "../commands.ts";
-import { api, type FileSearchHitDto, type WorkspaceSearchItemDto } from "@polyth/session/web-api";
-import { activateProject, openEditorFile, setOverlay, setUiError, useStore } from "../store.ts";
+import { api, type FileSearchHitDto, type SessionSearchResult, type WorkspaceSearchItemDto } from "@polyth/session/web-api";
+import { searchHighlightRanges, searchTerms } from "@polyth/session/search-text";
+import { activateProject, openEditorFile, openSessionSearch, setOverlay, setUiError, useStore } from "../store.ts";
 import { openSession, refreshSessions } from "../init.ts";
 import { tr } from "../i18n/index.ts";
 import { useShellMode } from "../responsiveShell.ts";
-import { commandIcon, Button, ChatIcon, CloseIcon, FileIcon, FolderIcon, Icon, IconButton, ResponsiveOverlay, SearchIcon, Spinner, TextInput, type LucideIcon } from "./ui/index.ts";
+import { commandIcon, ArchiveIcon, ChatIcon, CloseIcon, EditIcon, FileIcon, FolderIcon, Icon, IconButton, Menu, MoreIcon, PinIcon, ResponsiveOverlay, SearchIcon, Spinner, TextInput, type LucideIcon, type MenuEntry } from "./ui/index.ts";
 import { highlightRuns, orderEntries, rankCommands, type PaletteEntry } from "../paletteOrdering.ts";
+import { segmentHighlights } from "../sessionSearchQuery.ts";
 import { isImeComposing } from "./input/editorCore.ts";
 import { promptAlert } from "../alerts.ts";
 import {
@@ -21,11 +25,13 @@ import { friendlyError } from "../settings.ts";
 import { compactResourcePath } from "@polyth/web-sdk";
 import { resolveWorkspaceContext } from "@polyth/contracts/workspace";
 
-type SessionPaletteVerb = "archive" | "pin" | "rename";
+// Chat verbs live in the row's overflow menu (⋯), so the row itself gives its
+// whole width to the chat's title and second line.
+type SessionPaletteVerb = "pin" | "rename" | "archive";
 const SESSION_PALETTE_VERBS: readonly SessionPaletteVerb[] = [
-  "archive",
   "pin",
   "rename",
+  "archive",
 ];
 
 /** Fixed-width leading slot so labels align whether or not a row has a glyph. */
@@ -38,6 +44,54 @@ function Highlight({ text, query }: { text: string; query: string }) {
   const runs = highlightRuns(text, query);
   if (runs.length === 1 && !runs[0]!.match) return <>{text}</>;
   return <>{runs.map((run, n) => run.match ? <mark key={n}>{run.text}</mark> : <Fragment key={n}>{run.text}</Fragment>)}</>;
+}
+
+/** Text with the shared chat-search highlights (every word, or its stem). */
+function TermHighlight({ text, ranges }: { text: string; ranges: ReadonlyArray<readonly [number, number]> }) {
+  if (!ranges.length) return <>{text}</>;
+  return <>{segmentHighlights(text, ranges).map((seg, n) => seg.hit ? <mark key={n}>{seg.text}</mark> : <Fragment key={n}>{seg.text}</Fragment>)}</>;
+}
+
+/** How many chats the palette shows before "All chats and messages…". */
+const PALETTE_CHAT_LIMIT = 6;
+
+/** A chat search result as a palette row: metadata hits show project · branch
+ *  (the matched branch, else the chat's known branch), message-only hits show
+ *  the matching excerpt. */
+export function chatPaletteEntry(
+  result: SessionSearchResult,
+  projectName: string | undefined,
+  knownBranch?: string,
+): Extract<PaletteEntry, { kind: "workspace" }> {
+  const message = result.matches.some((m) => m.field !== "message")
+    ? undefined
+    : result.matches.find((m) => m.field === "message");
+  const branch = result.matches.find((m) => m.field === "branch")?.snippet ?? knownBranch;
+  return {
+    kind: "workspace",
+    id: `session:${result.sessionId}`,
+    item: {
+      kind: "session",
+      id: result.sessionId,
+      projectId: result.projectId,
+      title: result.title || tr("format.untitledSession2"),
+      subtitle: [projectName, branch].filter(Boolean).join(" · "),
+      status: result.status,
+      ...(result.status === "archived" ? { archived: true } : {}),
+      updatedAt: result.updatedAt,
+    },
+    ...(message ? { excerpt: { text: message.snippet, ranges: message.ranges ?? [] } } : {}),
+  };
+}
+
+/** The arrow that points at a row's trailing actions (→, or ← in RTL). */
+function inwardArrow(el: Element): "ArrowRight" | "ArrowLeft" {
+  return el.ownerDocument.documentElement.dir === "rtl" ? "ArrowLeft" : "ArrowRight";
+}
+
+/** The inward arrow opens actions only once it can no longer move the caret. */
+function caretAtEnd(el: HTMLInputElement): boolean {
+  return el.selectionStart === el.selectionEnd && (el.selectionEnd ?? el.value.length) >= el.value.length;
 }
 
 /** Pull an `is:archived` token out of the raw query. */
@@ -54,9 +108,12 @@ export default function CommandPalette() {
   const [loading, setLoading] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const navigatedBy = useRef<"key" | "pointer">("key");
-  const [sessionActionIndex, setSessionActionIndex] = useState<number | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  // The chat row whose actions menu is open (by entry id), if any.
+  const [menuFor, setMenuFor] = useState<string | null>(null);
   const [fileResults, setFileResults] = useState<{ scope: string; hits: FileSearchHitDto[] }>({ scope: "", hits: [] });
   const [workspaces, setWorkspaces] = useState<WorkspaceSearchItemDto[]>([]);
+  const [chats, setChats] = useState<SessionSearchResult[]>([]);
   const seq = useRef(0);
   const shellMode = useShellMode();
   const phone = shellMode === "phone";
@@ -64,7 +121,8 @@ export default function CommandPalette() {
   // File search resolves against the active session's worktree (P0).
   const sessionId = useStore((s) => s.activeSessionId);
   const sessions = useStore((s) => s.sessions);
-  const project = useStore((s) => s.projectRegistry.projects.find((candidate) => candidate.id === projectId));
+  const projects = useStore((s) => s.projectRegistry.projects);
+  const project = projects.find((candidate) => candidate.id === projectId);
   const session = sessions.find((candidate) => candidate.id === sessionId);
   const repositories = useMemo(() => {
     if (!project || (sessionId && !session)) return [];
@@ -83,7 +141,7 @@ export default function CommandPalette() {
   );
   useEffect(() => {
     setActiveId(null);
-    setSessionActionIndex(null);
+    setMenuFor(null);
     navigatedBy.current = "key";
     if (listRef.current) listRef.current.scrollTop = 0;
   }, [q]);
@@ -94,8 +152,11 @@ export default function CommandPalette() {
     const wantFiles = !!projectId && text.length >= (filesMode ? 1 : 2);
     // `is:archived` alone lists recent archived sessions (server-bounded).
     const wantWorkspaces = !filesMode && (archived || text.length >= 2);
+    // Chats (not archived-only listings) come from the one chat search.
+    const wantChats = !filesMode && !archived && text.length >= 2;
     setFileResults({ scope: fileScope, hits: [] });
     if (!wantWorkspaces) setWorkspaces([]);
+    if (!wantChats) setChats([]);
     setLoading(wantFiles || wantWorkspaces);
     if (!wantFiles && !wantWorkspaces) return;
     const h = setTimeout(() => {
@@ -112,9 +173,16 @@ export default function CommandPalette() {
       }
       if (wantWorkspaces) {
         pending.push(api.searchWorkspaces(text, 10, archived).then((items) => {
-          if (mySeq === seq.current) setWorkspaces(items);
+          if (mySeq === seq.current) setWorkspaces(wantChats ? items.filter((item) => item.kind === "project") : items);
         }, () => {
           if (mySeq === seq.current) setWorkspaces([]);
+        }));
+      }
+      if (wantChats) {
+        pending.push(api.searchSessions(text, { limit: PALETTE_CHAT_LIMIT }).then((results) => {
+          if (mySeq === seq.current) setChats(results);
+        }, () => {
+          if (mySeq === seq.current) setChats([]);
         }));
       }
       void Promise.allSettled(pending).then(() => {
@@ -124,6 +192,9 @@ export default function CommandPalette() {
     return () => { clearTimeout(h); seq.current++; };
   }, [text, archived, filesMode, projectId, sessionId, fileScope, repositories]);
 
+  const projectName = useMemo(() => new Map(projects.map((p) => [p.id, p.name] as const)), [projects]);
+  const sessionBranch = useMemo(() => new Map(sessions.flatMap((s) => s.branch ? [[s.id, s.branch] as const] : [])), [sessions]);
+  const terms = useMemo(() => searchTerms(text), [text]);
   const entries = useMemo<PaletteEntry[]>(
     () => orderEntries([
       ...cmds.map((c): PaletteEntry => ({ kind: "cmd", id: c.id, cmd: c })),
@@ -132,12 +203,15 @@ export default function CommandPalette() {
         id: `${w.kind}:${w.id}`,
         item: w,
       })),
-      ...(phone && !filesMode
+      ...chats.map((chat) => chatPaletteEntry(chat, projectName.get(chat.projectId), sessionBranch.get(chat.sessionId))),
+      // Every typed query can continue in the full chat search; the phone
+      // keeps the row on an empty query too, as its way into that search.
+      ...(!filesMode && (phone || text.length >= 2)
         ? [{ kind: "session-search" as const, id: "session-search" as const }]
         : []),
       ...files.map((f): PaletteEntry => ({ kind: "file", id: JSON.stringify(["file", f.repositoryId, f.path]), hit: f })),
     ], shellMode),
-    [cmds, workspaces, files, filesMode, phone, shellMode],
+    [cmds, workspaces, chats, projectName, sessionBranch, files, filesMode, phone, text, shellMode],
   );
   const found = activeId === null ? -1 : entries.findIndex((entry) => entry.id === activeId);
   const i = Math.max(found, 0);
@@ -145,10 +219,10 @@ export default function CommandPalette() {
   const selectedSession = selected?.kind === "workspace" && selected.item.kind === "session"
     ? selected
     : null;
-  // Session verbs belong to one row; drop them when that row goes away.
+  // A row's actions menu closes when that row leaves the list.
   useEffect(() => {
-    if (found < 0) setSessionActionIndex(null);
-  }, [found]);
+    if (menuFor !== null && !entries.some((entry) => entry.id === menuFor)) setMenuFor(null);
+  }, [entries, menuFor]);
   // Keyboard travel keeps the active row visible; pointer travel never
   // scrolls, so the list cannot slide under a resting cursor.
   useLayoutEffect(() => {
@@ -160,12 +234,11 @@ export default function CommandPalette() {
     navigatedBy.current = by;
     if (!entry || entry.id === selected?.id) return;
     setActiveId(entry.id);
-    setSessionActionIndex(null);
   };
 
   const run = (entry: PaletteEntry, permanent = false) => {
     if (entry.kind === "session-search") {
-      setOverlay("search");
+      openSessionSearch({ query: archived ? `${text} is:archived`.trim() : text });
       return;
     }
     setOverlay(null);
@@ -227,6 +300,19 @@ export default function CommandPalette() {
       setUiError(friendlyError(tr("common.error"), error));
     }
   };
+  const sessionMenuEntries = (entry: Extract<PaletteEntry, { kind: "workspace" }>): MenuEntry[] => {
+    const pinned = sessionTarget(entry).pinned;
+    return SESSION_PALETTE_VERBS.map((verb) => ({
+      id: verb,
+      label: verb === "archive"
+        ? tr("common.archive")
+        : verb === "pin"
+          ? pinned ? tr("sidebar.sessionlist.unpin") : tr("sidebar.sessionlist.pinToTop")
+          : tr("common.rename"),
+      icon: verb === "archive" ? ArchiveIcon : verb === "pin" ? PinIcon : EditIcon,
+      onSelect: () => void runSessionVerb(entry, verb),
+    }));
+  };
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (isImeComposing(e)) return; // IME safety
     const count = Math.max(entries.length, 1);
@@ -240,25 +326,15 @@ export default function CommandPalette() {
       e.preventDefault();
       const step = e.key === "PageDown" ? 8 : -8;
       select(Math.min(Math.max(i + step, 0), entries.length - 1), "key");
-    } else if ((e.key === "Tab" || e.key === "ArrowRight") && selectedSession) {
+    } else if (selectedSession && (e.key === "Tab" || (e.key === inwardArrow(e.currentTarget) && caretAtEnd(e.currentTarget)))) {
+      // Tab (or the inward arrow at the end of the text) opens the active
+      // chat's actions menu; focus moves into it, Escape returns to the field.
       e.preventDefault();
-      setSessionActionIndex((current) => {
-        const direction = e.key === "Tab" && e.shiftKey ? -1 : 1;
-        return current === null
-          ? (direction > 0 ? 0 : SESSION_PALETTE_VERBS.length - 1)
-          : (current + direction + SESSION_PALETTE_VERBS.length)
-            % SESSION_PALETTE_VERBS.length;
-      });
+      navigatedBy.current = "key";
+      setMenuFor(selectedSession.id);
     } else if (e.key === "Enter" && selected) {
       e.preventDefault();
-      if (selectedSession && sessionActionIndex !== null) {
-        void runSessionVerb(
-          selectedSession,
-          SESSION_PALETTE_VERBS[sessionActionIndex]!,
-        );
-      } else {
-        run(selected, e.metaKey || e.ctrlKey);
-      }
+      run(selected, e.metaKey || e.ctrlKey);
     }
   };
   // Escape first clears a typed query, then closes. Runs in the capture phase
@@ -317,22 +393,24 @@ export default function CommandPalette() {
         <>
           <RowIcon glyph={entry.item.kind === "project" ? FolderIcon : ChatIcon} />
           <span className="palette-col">
-            <span className="palette-label">
-              <Highlight text={entry.item.title} query={text} />
-              {entry.item.archived && <span className="palette-status archived"> {tr("commandpalette.archived")}</span>}
+            <span className="palette-title-line">
+              <span className="palette-label">
+                <TermHighlight text={entry.item.title} ranges={searchHighlightRanges(entry.item.title, terms)} />
+              </span>
+              {entry.item.archived && <span className="palette-status archived"><span className="sr-only">, </span>{tr("commandpalette.archived")}</span>}
             </span>
-            {entry.item.subtitle && <span className="palette-sub">{entry.item.subtitle}</span>}
+            {entry.excerpt
+              ? <span className="palette-sub palette-excerpt"><TermHighlight text={entry.excerpt.text} ranges={entry.excerpt.ranges} /></span>
+              : entry.item.subtitle && <span className="palette-sub">{entry.item.subtitle}</span>}
           </span>
-          <span className="palette-meta">
-            {entry.item.kind === "project" ? tr("commandpalette.switchProject") : tr("commandpalette.openSession")}
-          </span>
+          {entry.item.kind === "project" && <span className="palette-meta">{tr("commandpalette.switchProject")}</span>}
         </>
       )}
       {entry.kind === "session-search" && (
         <>
           <RowIcon glyph={SearchIcon} />
-          <span className="palette-label">{tr("commandpalette.searchInsideConversations")}</span>
-          <span className="palette-meta">{tr("shell.searchSessions")}</span>
+          <span className="palette-label">{text ? tr("commandpalette.allChatResults", { query: text }) : tr("commandpalette.searchInsideConversations")}</span>
+          {!phone && <span className="palette-meta">{tr("shell.searchSessions")}</span>}
         </>
       )}
       {entry.kind === "file" && (
@@ -384,6 +462,7 @@ export default function CommandPalette() {
         <div className="palette-field">
           <Icon icon={SearchIcon} className="palette-field-icon" />
           <TextInput
+            ref={inputRef}
             className="palette-input"
             value={q}
             role="combobox"
@@ -439,32 +518,27 @@ export default function CommandPalette() {
                 <button className="palette-session-main" tabIndex={-1} onClick={() => run(entry)}>
                   {contentOf(entry)}
                 </button>
-                <span className="palette-session-actions" aria-label={tr("mobile.sessionmenu.sessionActions")}>
-                  {SESSION_PALETTE_VERBS.map((verb, actionIndex) => {
-                    const target = sessionTarget(entry);
-                    const label = verb === "archive"
-                      ? tr("common.archive")
-                      : verb === "pin"
-                        ? target.pinned
-                          ? tr("sidebar.sessionlist.unpin")
-                          : tr("sidebar.sessionlist.pinToTop")
-                        : tr("common.rename");
-                    return (
-                      <Button
-                        key={verb}
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        className={`palette-session-action${n === i && sessionActionIndex === actionIndex ? " active" : ""}`}
-                        aria-label={`${label}: ${entry.item.title}`}
-                        tabIndex={-1}
-                        onClick={() => void runSessionVerb(entry, verb)}
-                      >
-                        {label}
-                      </Button>
-                    );
-                  })}
-                </span>
+                <Menu
+                  label={`${tr("mobile.sessionmenu.sessionActions")}: ${entry.item.title}`}
+                  title={entry.item.title}
+                  entries={sessionMenuEntries(entry)}
+                  align="end"
+                  className="palette-session-menu"
+                  open={menuFor === entry.id}
+                  onOpenChange={(open) => setMenuFor(open ? entry.id : null)}
+                  {...(phone ? {} : { returnFocusRef: inputRef })}
+                >
+                  {(trigger) => (
+                    <IconButton
+                      {...trigger}
+                      icon={MoreIcon}
+                      size="sm"
+                      className="palette-session-more"
+                      label={`${tr("mobile.sessionmenu.sessionActions")}: ${entry.item.title}`}
+                      tabIndex={-1}
+                    />
+                  )}
+                </Menu>
               </div>
             ) : (
               <button

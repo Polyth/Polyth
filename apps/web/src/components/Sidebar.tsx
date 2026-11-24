@@ -92,6 +92,9 @@ import { offersPrivateRoom, privateRoomOf, rootProjectId, rootProjects, startPri
 import PrivateRoomGroup, { useRoomChatsListed } from "./PrivateRoomGroup.tsx";
 import { useShellDirection } from "../shellDirection.ts";
 import { listProjectSettings, subscribeProjectSettingsNavigation } from "../projectSettings.ts";
+import { searchTerms } from "@polyth/session/search-text";
+import { metadataHitProjectIds, projectMatchesSearch, sessionMatchesSearch, useChatSearchHits } from "../chatSearchHits.ts";
+import { ChatSearchMessagesRow } from "./ChatSearchMessagesRow.tsx";
 import { ARRANGE_LIST_LIFT_MS, useArrange, type ArrangeItem } from "../workspaceArrange.ts";
 
 /** Grace period an untouched peek keeps after the pointer leaves the sidebar. */
@@ -476,19 +479,26 @@ export default function Sidebar() {
     });
   };
   const orderedProjects = useOrderedProjects(projects, latestProjectActivity);
+  const searchTermList = useMemo(() => searchTerms(query), [query]);
+  // The same query asks the one chat search what this list cannot show:
+  // chats not paged in yet, and chats that match only in their messages.
+  const chatHits = useChatSearchHits(query);
+  const serverHitProjects = useMemo(() => {
+    const ids = metadataHitProjectIds(chatHits.results);
+    return new Set([...ids].map((id) => rootProjectId(registry.projects, id)));
+  }, [chatHits.results, registry.projects]);
   const visibleProjects = useMemo(() => {
-    const needle = query.trim().toLowerCase();
     return orderedProjects.filter((candidate) => {
       const candidates = sessions.filter((session) =>
         rootProjectId(registry.projects, session.projectId) === candidate.id && sessionMatchesDateFilter(session, dateFilter));
       if (sessionDateFilterActive(dateFilter) && candidates.length === 0) return false;
       if (attentionOnly && !sessionsNeedAttention(candidates)) return false;
-      if (!needle) return true;
-      if (`${candidate.name} ${candidate.path}`.toLowerCase().includes(needle)) return true;
-      return candidates.some((session) =>
-        `${session.title} ${session.branch ?? ""} ${session.worktreePath ?? ""}`.toLowerCase().includes(needle));
+      if (!searchTermList.length) return true;
+      if (projectMatchesSearch(candidate, searchTermList)) return true;
+      if (serverHitProjects.has(candidate.id)) return true;
+      return candidates.some((session) => sessionMatchesSearch(session, searchTermList));
     });
-  }, [attentionOnly, dateFilter, orderedProjects, query, registry.projects, sessions]);
+  }, [attentionOnly, dateFilter, orderedProjects, searchTermList, serverHitProjects, registry.projects, sessions]);
   // Below the compact seam (COMPACT_MAX_WIDTH) the sidebar is a modal
   // drawer — every portrait tablet and small window included. It never opens by
   // itself when the viewport shrinks — wide visibility is not a persisted
@@ -1811,14 +1821,14 @@ export default function Sidebar() {
           {registry.status === "ready" && projects.length > 0 && visibleProjects.length === 0 && (
             <div className="empty side-projects-status" role="status">{tr("sidebar.noMatchingSessions")}</div>
           )}
+          {query.trim() !== "" && <ChatSearchMessagesRow hits={chatHits} className="sidebar-messages-row" />}
           {query.trim() !== "" && (
             <div className="sidebar-search-results" aria-label={tr("sidebar.sessionSearchResults")}>
               {visibleProjects.map((p) => {
-                const needle = query.trim().toLowerCase();
-                const projectMatches = `${p.name} ${p.path}`.toLowerCase().includes(needle);
+                const projectMatches = projectMatchesSearch(p, searchTermList);
                 const room = privateRoomOf(registry.projects, p.id);
                 const roomMatches = room && sessions.some((session) => session.projectId === room.id
-                  && (projectMatches || `${session.title} ${session.branch ?? ""} ${session.worktreePath ?? ""}`.toLowerCase().includes(needle)));
+                  && (projectMatches || sessionMatchesSearch(session, searchTermList)));
                 const results = (projectId: string, name: string) => (
                   <SessionList
                     key={projectId}
@@ -1876,8 +1886,7 @@ export default function Sidebar() {
                 </div>
               );
             }
-            const projectQuery = query.trim()
-              && `${p.name} ${p.path}`.toLowerCase().includes(query.trim().toLowerCase())
+            const projectQuery = searchTermList.length && projectMatchesSearch(p, searchTermList)
               ? ""
               : query;
             const card = renderProjectCard(p);

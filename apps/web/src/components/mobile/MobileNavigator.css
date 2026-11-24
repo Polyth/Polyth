@@ -799,6 +799,13 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
   display: none;
 }
 
+/* Phone: a full tap-height row on the screen gutter. */
+.chat-search-messages-row.mobile-nav-messages-row {
+  min-block-size: var(--tap);
+  padding-inline: var(--screen-gutter);
+  font-size: var(--font-body);
+}
+
 .mobile-nav-empty {
   padding: var(--space-6) var(--space-4);
   color: var(--muted);

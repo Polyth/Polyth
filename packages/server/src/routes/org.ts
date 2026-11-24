@@ -5,10 +5,13 @@ import { isSessionAccessLevel } from "@polyth/contracts";
 import type { Store } from "@polyth/session";
 import type { RouteHandler } from "../http.ts";
 import type { SpaceServicesFor } from "../spaceScope.ts";
-import { foldText, matchWorkspaces } from "../search.ts";
+import { matchWorkspaces } from "../search.ts";
+import { matchesSearchTerms, searchHighlightRanges, searchTerms, textHasTerm } from "@polyth/session/search-text";
 
 /** Per-session cap on transcript snippets returned by `/api/search/sessions`. */
 const MESSAGE_MATCHES_PER_SESSION = 4;
+/** Newest messages a short search page scans for words inside longer words. */
+const SUBSTRING_SCAN_MESSAGES = 4000;
 
 const shareEntries = (raw: unknown): PersonMessageShare[] => (Array.isArray(raw) ? raw : []).flatMap((entry) => {
   const { userId, access } = (entry ?? {}) as { userId?: unknown; access?: unknown };
@@ -28,10 +31,13 @@ interface SessionSearchResultDto {
     seq?: number;
     role?: "user" | "assistant";
     time?: number;
+    via?: "chat" | "substring";
   }>;
   /** Total transcript hits in the ranked page, including ones beyond the cap. */
   messageHits: number;
   rank: number;
+  /** 0 metadata, 1 every word in one message, 2 words spread over the chat, 3 word inside a longer word. */
+  tier: number;
 }
 
 export function orgRoutes(deps: {
@@ -343,15 +349,24 @@ export function orgRoutes(deps: {
       const role = roleParam === "user" || roleParam === "assistant" ? roleParam : undefined;
       const limit = Math.max(1, Math.min(Number(url.searchParams.get("limit") ?? 30) || 30, 100));
       if (!q) { json(200, []); return true; }
-      const needle = foldText(q);
-      const terms = needle.split(/\s+/).filter(Boolean);
+      const terms = searchTerms(q);
+      if (!terms.length) { json(200, []); return true; }
       const [projections, labels, textHits] = await Promise.all([
         sessions.list(projectId),
         store.labelList(spaceId),
         // Scoped in SQL to the Space (and project) so a narrow scope still
         // receives a full page of its own hits, then intersected with the
-        // gateway-scoped projection list before anything is returned.
-        store.searchMessages({ q, limit: limit * 4, spaceId, ...(projectId ? { projectId } : {}), ...(role ? { role } : {}) }),
+        // gateway-scoped projection list before anything is returned. A
+        // short page broadens to words spread over a chat and to words
+        // inside longer words among the newest messages.
+        store.searchMessages({
+          q,
+          limit: limit * 4,
+          spaceId,
+          ...(projectId ? { projectId } : {}),
+          ...(role ? { role } : {}),
+          broaden: { sessions: limit, scanMessages: SUBSTRING_SCAN_MESSAGES },
+        }),
       ]);
       const labelName = new Map(labels.map((l) => [l.id, l.name] as const));
       const bySession = new Map<string, SessionSearchResultDto>();
@@ -367,24 +382,24 @@ export function orgRoutes(deps: {
             matches: [],
             messageHits: 0,
             rank: Number.POSITIVE_INFINITY,
+            tier: 4,
           }));
         }
         return e;
       };
-      const includesAll = (text: string | undefined) => {
-        if (!text) return false;
-        const folded = foldText(text);
-        return terms.every((t) => folded.includes(t));
-      };
-      // Metadata matches are not FTS hits; every typed term must appear.
+      // Metadata: every typed word somewhere in the title, branch or label
+      // names (the shared rule, so the sidebar and palette agree with it);
+      // each field holding one of the words is reported for highlighting.
       for (const p of projections) {
         if (role) break; // role-filtered searches are message-only
-        if (includesAll(p.title)) entry(p).matches.push({ field: "title", snippet: p.title.slice(0, 120) });
-        if (includesAll(p.branch)) entry(p).matches.push({ field: "branch", snippet: p.branch! });
-        for (const lid of p.labelIds ?? []) {
-          const name = labelName.get(lid);
-          if (includesAll(name)) entry(p).matches.push({ field: "label", snippet: name! });
-        }
+        const names = (p.labelIds ?? []).map((lid) => labelName.get(lid)).filter((n): n is string => !!n);
+        if (!matchesSearchTerms([p.title, p.branch, ...names], terms)) continue;
+        const e = entry(p);
+        e.tier = 0;
+        const hit = (text: string | undefined) => !!text && terms.some((t) => textHasTerm(text, t));
+        if (hit(p.title)) { const snippet = p.title.slice(0, 120); e.matches.push({ field: "title", snippet, ranges: searchHighlightRanges(snippet, terms) }); }
+        if (hit(p.branch)) e.matches.push({ field: "branch", snippet: p.branch!, ranges: searchHighlightRanges(p.branch!, terms) });
+        for (const name of names) if (hit(name)) e.matches.push({ field: "label", snippet: name, ranges: searchHighlightRanges(name, terms) });
       }
       const projIndex = new Map(projections.map((p) => [p.id, p] as const));
       for (const hit of textHits) {
@@ -392,7 +407,9 @@ export function orgRoutes(deps: {
         if (!p) continue;
         const e = entry(p);
         e.messageHits += 1;
-        e.rank = Math.min(e.rank, hit.rank);
+        const tier = hit.via === "substring" ? 3 : hit.via === "chat" ? 2 : 1;
+        if (tier < e.tier) { e.tier = tier; e.rank = hit.rank; }
+        else if (tier === e.tier) e.rank = Math.min(e.rank, hit.rank);
         if (e.matches.filter((m) => m.field === "message").length < MESSAGE_MATCHES_PER_SESSION) {
           e.matches.push({
             field: "message",
@@ -401,23 +418,23 @@ export function orgRoutes(deps: {
             seq: hit.seq,
             role: hit.role,
             time: hit.time,
+            ...(hit.via ? { via: hit.via } : {}),
           });
         }
       }
       // Metadata hits lead (a title match is the strongest intent signal),
-      // then message hits by relevance, recency breaking ties.
+      // then chats with every word in one message by relevance, then chats
+      // that hold the words between messages, then words inside longer
+      // words; recency breaks ties and orders the metadata and substring tiers.
       const results = [...bySession.values()]
         .filter((e) => e.matches.length > 0)
         .sort((a, b) => {
-          const am = a.matches.some((m) => m.field !== "message") ? 0 : 1;
-          const bm = b.matches.some((m) => m.field !== "message") ? 0 : 1;
-          if (am !== bm) return am - bm;
-          if (am === 0) return b.updatedAt - a.updatedAt;
-          if (a.rank !== b.rank) return a.rank - b.rank;
+          if (a.tier !== b.tier) return a.tier - b.tier;
+          if ((a.tier === 1 || a.tier === 2) && a.rank !== b.rank) return a.rank - b.rank;
           return b.updatedAt - a.updatedAt;
         })
         .slice(0, limit)
-        .map(({ rank: _rank, ...rest }) => rest);
+        .map(({ rank: _rank, tier: _tier, ...rest }) => rest);
       json(200, results);
       return true;
     }

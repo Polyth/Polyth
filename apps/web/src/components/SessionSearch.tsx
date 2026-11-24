@@ -19,7 +19,9 @@ import { useShellMode } from "../responsiveShell.ts";
 import {
   SESSION_SEARCH_FACETS,
   highlightRanges,
+  matchesSearchTerms,
   matchesSessionSearchFacets,
+  searchTerms,
   parseSessionSearchQuery,
   segmentHighlights,
   toggleSessionSearchFacet,
@@ -63,20 +65,24 @@ export default function SessionSearch() {
   const sessions = useStore((s) => s.sessions);
   const events = useStore((s) => s.events);
   const projects = useStore((s) => s.projectRegistry.projects);
-  const activeProjectId = useStore((s) => s.activeProjectId);
-  const [q, setQ] = useState("");
+  const storeProjectId = useStore((s) => s.activeProjectId);
+  // A query carried over from the palette, the sidebar or an archive; read
+  // once, so later store changes never retype what the person is editing.
+  const [seed] = useState(() => getState().sessionSearchSeed);
+  const activeProjectId = seed?.projectId ?? storeProjectId;
+  const [q, setQ] = useState(() => seed?.query ?? "");
   const [cursor, setCursor] = useState(0);
   const [remote, setRemote] = useState<SessionSearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchFailed, setSearchFailed] = useState(false);
   const [tookMs, setTookMs] = useState<number | null>(null);
   const [retry, setRetry] = useState(0);
-  const [allProjects, setAllProjects] = useState(!activeProjectId);
+  const [allProjects, setAllProjects] = useState(() => (seed ? !seed.projectId : !activeProjectId));
   const searchSequence = useRef(0);
   const listRef = useRef<HTMLDivElement>(null);
   const phone = useShellMode() === "phone";
   const query = useMemo(() => parseSessionSearchQuery(q), [q]);
-  const terms = useMemo(() => query.text.split(" ").filter(Boolean), [query.text]);
+  const terms = useMemo(() => searchTerms(query.text), [query.text]);
   const scopeProjectId = allProjects ? undefined : activeProjectId ?? undefined;
 
   // Debounced, abortable server search; a stale response can never win.
@@ -140,8 +146,7 @@ export default function SessionSearch() {
       const local = query.role ? [] : sessions.filter((s) => {
         if (!inScope(s)) return false;
         const title = deriveSessionTitle(s.title, firstUserText(events[s.id]) ?? draftTitleSource(s));
-        return highlightRanges(title, terms).length === terms.length
-          || highlightRanges(s.branch ?? "", terms).length === terms.length
+        return matchesSearchTerms([title, s.branch], terms)
           || s.id.toLowerCase().startsWith(query.text.toLowerCase());
       }).sort((a, b) => recency(b) - recency(a) || a.id.localeCompare(b.id));
       const localIds = new Set(local.map((s) => s.id));
@@ -151,8 +156,17 @@ export default function SessionSearch() {
       });
       for (const r of remote) {
         if (localIds.has(r.sessionId)) continue;
-        const session = byId.get(r.sessionId);
-        if (!session || !inScope(session)) continue;
+        // A hit on a chat this client has not paged in yet still shows,
+        // from the server's own row: search must find what the list hides.
+        const session = byId.get(r.sessionId) ?? {
+          id: r.sessionId,
+          projectId: r.projectId,
+          title: r.title,
+          status: r.status as SessionProjection["status"],
+          createdAt: r.updatedAt,
+          updatedAt: r.updatedAt,
+        };
+        if (!inScope(session)) continue;
         sessionRows.push({ session, matches: r.matches, messageHits: r.messageHits });
       }
     }
@@ -294,6 +308,7 @@ export default function SessionSearch() {
       } : {})}
       sheetFooter={footer}
       dialogFooter={footer}
+      dialogHideHeader
     >
       {!phone && (
         <div className="session-search-field">
@@ -385,14 +400,19 @@ export default function SessionSearch() {
               className={`session-search-row session-search-row--message${selected ? " active" : ""}`}
               role="option"
               aria-selected={selected}
-              aria-label={tr("sessionsearch.openMessage")}
+              title={tr("sessionsearch.openMessage")}
               onClick={() => activate(entry)}
               onMouseMove={() => { if (cursor !== n) setCursor(n); }}
             >
-              <span className={`session-search-role session-search-role--${match.role ?? "assistant"}`} aria-hidden="true">
-                {match.role === "user" ? tr("sessionsearch.you") : tr("sessionsearch.agent")}
+              {/* The speaker leads the excerpt inline, so the text starts right
+                  after it instead of after a fixed column. */}
+              <span className="session-search-snippet">
+                <span className={`session-search-role session-search-role--${match.role ?? "assistant"}`}>
+                  {match.role === "user" ? tr("sessionsearch.you") : tr("sessionsearch.agent")}
+                  <span className="sr-only">: </span>
+                </span>
+                <Highlighted text={match.snippet} ranges={match.ranges ?? []} />
               </span>
-              <span className="session-search-snippet"><Highlighted text={match.snippet} ranges={match.ranges ?? []} /></span>
               {typeof match.time === "number" && <time className="session-search-time">{ago(match.time)}</time>}
             </button>
           );

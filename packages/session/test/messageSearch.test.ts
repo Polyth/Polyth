@@ -20,10 +20,11 @@ const proj = (over: Partial<SessionProjection> & { id: string }): SessionProject
   ...over,
 });
 
-test("toFtsMatchQuery quotes every term as a prefix and neutralises operator syntax", () => {
-  assert.equal(toFtsMatchQuery("search workspace"), '"search"* "workspace"*');
-  assert.equal(toFtsMatchQuery('  "exact phrase"  tail '), '"exact phrase" "tail"*');
-  assert.equal(toFtsMatchQuery('a"b OR NEAR(x) col:y -z'), '"ab"* "OR"* "NEAR(x)"* "col:y"* "-z"*');
+test("toFtsMatchQuery quotes every term as a prefix (or its stem) and neutralises operator syntax", () => {
+  assert.equal(toFtsMatchQuery("search workspace"), '("search"* OR "searc"*) AND ("workspace"* OR "worksp"*)');
+  assert.equal(toFtsMatchQuery('  "exact phrase"  tail '), '"exact phrase" AND "tail"*');
+  assert.equal(toFtsMatchQuery('a"b OR NEAR(x) col:y -z'), '"ab"* AND "or"* AND "near(x)"* AND "col:y"* AND "-z"*');
+  assert.equal(toFtsMatchQuery("Пошуків"), '("пошуків"* OR "пошук"*)');
   assert.equal(toFtsMatchQuery("   "), "");
 });
 
@@ -140,5 +141,55 @@ test("the v20 migration backfills existing logs and later appends stay indexed",
   await store.append("new", "assistant/message", { text: "fresh treasure" });
   const after = await store.searchMessages({ q: "treasure" });
   assert.deepEqual(after.map((h) => h.sessionId).sort(), ["new", "old"]);
+  await store.close();
+});
+
+test("searchMessages finds Ukrainian inflections through the stem", async () => {
+  const store = createStore(freshPath());
+  await store.upsertProjection(proj({ id: "uk" }));
+  await store.append("uk", "user/message", { text: "Зроби один пошук для всіх чатів" });
+  const hits = await store.searchMessages({ q: "пошуків чат", spaceId: "space-a" });
+  assert.deepEqual(hits.map((h) => h.sessionId), ["uk"]);
+  await store.close();
+});
+
+test("broaden finds chats whose messages hold the words between them, after one-message hits", async () => {
+  const store = createStore(freshPath());
+  await store.upsertProjection(proj({ id: "together" }));
+  await store.upsertProjection(proj({ id: "spread" }));
+  await store.upsertProjection(proj({ id: "half" }));
+  await store.upsertProjection(proj({ id: "foreign", spaceId: "space-b" }));
+  await store.append("together", "user/message", { text: "deploy then rollback" });
+  await store.append("spread", "user/message", { text: "time to deploy" });
+  await store.append("spread", "assistant/message", { text: "rollback is ready" });
+  await store.append("half", "user/message", { text: "deploy only" });
+  await store.append("foreign", "user/message", { text: "deploy" });
+  await store.append("foreign", "assistant/message", { text: "rollback" });
+
+  const strict = await store.searchMessages({ q: "deploy rollback", spaceId: "space-a" });
+  assert.deepEqual(strict.map((h) => h.sessionId), ["together"]);
+  const broad = await store.searchMessages({ q: "deploy rollback", spaceId: "space-a", broaden: { sessions: 10, scanMessages: 0 } });
+  assert.equal(broad[0]!.sessionId, "together");
+  assert.equal(broad[0]!.via, undefined);
+  assert.deepEqual([...new Set(broad.slice(1).map((h) => h.sessionId))], ["spread"]);
+  assert.ok(broad.slice(1).every((h) => h.via === "chat"));
+  await store.close();
+});
+
+test("broaden finds a word inside a longer word among the newest messages", async () => {
+  const store = createStore(freshPath());
+  await store.upsertProjection(proj({ id: "code" }));
+  await store.upsertProjection(proj({ id: "other", projectId: "p2" }));
+  await store.append("code", "assistant/message", { text: "Updated SessionSearch.tsx and the OAuth flow" });
+  await store.append("other", "assistant/message", { text: "PaletteSearch lives elsewhere" });
+
+  assert.deepEqual(await store.searchMessages({ q: "search", spaceId: "space-a", projectId: "p1" }), []);
+  const hits = await store.searchMessages({ q: "search auth", spaceId: "space-a", projectId: "p1", broaden: { sessions: 10, scanMessages: 100 } });
+  assert.deepEqual(hits.map((h) => [h.sessionId, h.via]), [["code", "substring"]]);
+  const hit = hits[0]!;
+  assert.deepEqual(hit.ranges.map(([a, b]) => hit.snippet.slice(a, b)), ["Search", "Auth"]);
+  // The scan window is bounded: nothing older than it is read.
+  const outside = await store.searchMessages({ q: "search", spaceId: "space-a", projectId: "p1", broaden: { sessions: 10, scanMessages: 1 } });
+  assert.deepEqual(outside, []);
   await store.close();
 });

@@ -3105,6 +3105,24 @@ body[data-desktop-low-resource="true"] .timeline > .rewind-leaving { animation: 
 .hero-open-project { margin-top: var(--space-4); }
 /* Registry loading/failure never claim "no projects". */
 .side-projects-status { padding: 24px 12px; font-size: 12px; }
+/* A filtered chat list's way into the one chat search: chats that match only
+   in their messages. Quiet like a session row, accent ink like a link. */
+.chat-search-messages-row {
+  display: flex; align-items: center; gap: var(--control-gap);
+  inline-size: 100%; min-block-size: var(--nav-row-session, var(--control-h-sm));
+  padding-block: 0; padding-inline: var(--nav-indent-session, var(--space-3)) var(--space-3);
+  border: 0; border-radius: var(--radius-control); background: transparent;
+  color: var(--accent); font: inherit; font-size: var(--font-meta); text-align: start; cursor: pointer;
+}
+.chat-search-messages-row:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.chat-search-messages-row:focus-visible { outline: 2px solid var(--focus-ring, var(--accent)); outline-offset: -2px; }
+.chat-search-messages-label { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-search-messages-row > .ui-icon { flex: none; }
+.chat-search-messages-go { color: var(--faint); }
+.chat-search-messages-go:dir(rtl) { transform: scaleX(-1); }
+@media (hover: hover) {
+  .chat-search-messages-row:hover .chat-search-messages-go { color: var(--accent); }
+}
 .hero-retry-projects { margin-top: var(--space-4); }
 .hero-status { margin-top: 14px; max-width: 470px; font-size: var(--font-meta); color: var(--faint); overflow-wrap: anywhere; }
 /* Registry loading sits on the same canvas as the fresh-chat hero
@@ -4732,7 +4750,7 @@ border-color: var(--accent); color: var(--accent); background: var(--accent-wash
 .session-search-sub > span + span::before { content: "·"; margin-inline-end: var(--space-2); color: var(--faint); }
 .session-search-branch { font-family: var(--mono); font-size: var(--font-meta); }
 .session-search-label { color: var(--text-dim); }
-.session-search-archived { text-transform: uppercase; letter-spacing: .04em; font-size: calc(var(--font-meta) * .9); color: var(--faint); }
+.session-search-archived { color: var(--faint); }
 .session-search-row-meta { display: flex; flex: none; align-items: center; gap: var(--space-2); color: var(--faint); font-size: var(--font-meta); font-variant-numeric: tabular-nums; }
 .session-search-more { color: var(--muted); }
 .session-search-time { flex: none; color: var(--faint); font-size: var(--font-meta); font-variant-numeric: tabular-nums; }
@@ -4746,19 +4764,14 @@ border-color: var(--accent); color: var(--accent); background: var(--accent-wash
   color: var(--text-dim);
 }
 .session-search-row--message.active { border-inline-start-color: var(--accent); box-shadow: none; }
+/* Who said it: a quiet speaker label leading the excerpt inline (weight,
+   not colour alone, carries the distinction). */
 .session-search-role {
-  flex: none;
-  min-width: 3.2em;
-  padding: 1px 7px;
-  border-radius: var(--radius-round);
-  font-size: calc(var(--font-meta) * .9);
+  margin-inline-end: .45em;
   font-weight: 600;
-  letter-spacing: .02em;
-  text-align: center;
-  text-transform: uppercase;
 }
-.session-search-role--user { background: var(--blue-wash); color: var(--blue); }
-.session-search-role--assistant { background: var(--purple-wash); color: var(--purple); }
+.session-search-role--user { color: var(--blue); }
+.session-search-role--assistant { color: var(--muted); }
 .session-search-snippet {
   flex: 1;
   min-width: 0;
@@ -4854,37 +4867,32 @@ border-color: var(--accent); color: var(--accent); background: var(--accent-wash
   text-align: start;
   cursor: default;
 }
-.palette-session-actions {
-  display: flex;
-  flex: none;
-  gap: var(--space-1);
-  visibility: hidden;
-}
-.palette-session.active .palette-session-actions,
-.palette-session:has(:focus-visible) .palette-session-actions,
-.palette-session:has([aria-expanded="true"]) .palette-session-actions,
-.sheet.palette .palette-session-actions {
-  visibility: visible;
-}
-.palette-session-action {
-  min-height: max(26px, var(--hit-min));
-  padding-inline: var(--space-2);
-  border: 0;
-  border-radius: calc(var(--radius-control) - 2px);
-  background: transparent;
+/* A chat row's verbs sit behind one quiet ⋯ trigger at the trailing edge. The
+   slot always keeps its width, so titles never reflow as the selection moves;
+   the glyph shows where it would act (selected, pointed at, focused, open). */
+.palette-session-more.ui-icon-btn {
   color: var(--muted);
-  font: inherit;
-  font-size: var(--font-meta);
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease);
 }
-.palette-session-action.active {
+.palette-session.active .palette-session-more,
+.palette-session-more:is(:focus-visible, [aria-expanded="true"]) {
+  opacity: 1;
+}
+.palette-session-more[aria-expanded="true"] {
   background: var(--surface-overlay-strong);
   color: var(--text);
 }
 @media (hover: hover) {
-  .palette-session-action:hover:where(:not(:disabled)) {
-    background: var(--surface-overlay-strong);
-    color: var(--text);
-  }
+  .palette-session:hover .palette-session-more { opacity: 1; }
+  .palette-session-more:hover:where(:not(:disabled)) { background: var(--surface-overlay-strong); color: var(--text); }
+}
+/* Touch has no hover: the trigger stays visible with a full tap target. */
+.sheet.palette .palette-session-more.ui-icon-btn {
+  inline-size: max(var(--control-h-sm), var(--hit-min));
+  block-size: max(var(--control-h-sm), var(--hit-min));
+  margin-inline-end: calc(var(--space-2) * -1);
+  opacity: 1;
 }
 .palette-hint { color: var(--muted); font-size: var(--font-meta); }
 .palette-empty { color: var(--muted); font-size: var(--font-meta); text-align: center; padding: var(--space-5) 0; }
@@ -5538,7 +5546,8 @@ body[data-desktop-low-resource="true"] .lock-mark-frame {
 }
 .palette-list > .palette-group:first-child { padding-top: var(--space-2); }
 .palette-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: -0.005em; }
-.palette-label mark {
+.palette-label mark,
+.palette-excerpt mark {
   background: none;
   color: inherit;
   font-weight: 650;
@@ -5584,7 +5593,11 @@ body[data-desktop-low-resource="true"] .lock-mark-frame {
 .palette-sub { display: block; font-size: var(--font-meta); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .palette-check { flex: none; color: var(--accent); font-size: var(--font-meta); font-weight: 700; }
 .palette-status { font-size: var(--font-meta); font-weight: 600; letter-spacing: 0.02em; }
-.palette-status.archived { color: var(--muted); border: 1px solid var(--border-soft); border-radius: var(--radius-control); padding: 0 var(--space-1); margin-inline-start: var(--space-1); }
+.palette-status.archived { flex: none; color: var(--muted); border: 1px solid var(--border-soft); border-radius: var(--radius-control); padding: 0 var(--space-1); line-height: 1.4; }
+/* A chat title ellipsizes before its status badge, which always stays whole. */
+.palette-title-line { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+/* Phone rows show every verb at once: the row's own label wins the width. */
+.sheet.palette .palette-meta { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .palette-project .palette-label { font-weight: 600; }
 .palette-item .palette-label.mono { font-size: calc(var(--font-label) * .92); letter-spacing: 0; }
 .palette-item .palette-sub.mono { font-size: var(--font-meta); }
@@ -12638,18 +12651,24 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   font-size: var(--font-input);
 }
 .sheet-search input::-webkit-search-cancel-button { display: none; }
+/* A bare × at the field's end edge, like the desktop search fields: no fill,
+   no disc. The button keeps the full 44px touch target, pulled into the
+   field's end padding so the glyph sits near the edge. */
 .sheet-search-clear {
   flex: none;
   width: var(--tap);
   height: var(--tap);
+  margin-inline-end: calc(var(--space-3) * -1);
   display: inline-grid;
   place-items: center;
+  padding: 0;
   border: 0;
-  border-radius: var(--radius-round);
-  background: var(--elevated);
+  background: transparent;
   color: var(--muted);
   cursor: pointer;
 }
+.sheet-search-clear:active { color: var(--text); }
+.sheet-search-clear .ui-icon { width: 16px; height: 16px; }
 .sheet-body {
   flex: 1;
   min-height: 0;
