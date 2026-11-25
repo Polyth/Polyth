@@ -41,6 +41,30 @@ Only public aggregate counters are read; nothing is stored about a person, no co
 script talks only to `api.github.com` and `api.npmjs.org`. An optional `GITHUB_TOKEN` raises the API rate limit and is
 never written to the file. The data is as private as the file you choose to keep it in.
 
+## Team dashboard (closed)
+
+`scripts/community-metrics-server.mjs serve` shows the snapshots as one script-free HTML page (tiles with
+sparklines, a per-day table, the kept releases). It is dependency-free, reads `snapshots.jsonl` and
+`password.scrypt` and re-reads each when its mtime changes. It is closed by default and is meant to sit behind a
+TLS proxy:
+
+- No valid `password.scrypt` → every request answers `503`. A wrong or missing password answers `401` (HTTP Basic,
+  any user name); 10 failures within 15 minutes lock the whole service for the rest of the window (`429`), so no client
+  address is read or kept. Only `GET`/`HEAD` of `/`, `/healthz` and `/robots.txt` exist; the page sets `no-store`,
+  `noindex`, and a CSP with no script source.
+- `hash-password` (password on stdin, never an argument) prints the same `scrypt$N$r$p$salt$hash` line the report
+  relay uses; save it as `password.scrypt` in `METRICS_KEYS_DIR` (default `/keys`). Snapshots are read from
+  `METRICS_DATA_DIR` (default `/data`). `METRICS_HOST`/`METRICS_PORT` default to `127.0.0.1:8789`; a non-loopback host
+  needs `METRICS_TLS_TERMINATED=1`.
+
+The reference deployment follows the report relay's shape: files in `/opt/polyth-metrics/{app,keys,data}`, a
+hardened `node:22-alpine` container `polyth-metrics` on `127.0.0.1:8789`, and a systemd timer
+`polyth-metrics-snapshot.timer` (06:10 UTC, `Persistent=true`) whose oneshot service runs
+`community-metrics.mjs snapshot --out /data/snapshots.jsonl` in a throwaway container (no GitHub token, so the
+traffic signal is absent there). Updating is copying the two `.mjs` files into `app/` and restarting the
+container; they need no build. Public exposure (a TLS vhost forwarding only `/` and `/healthz`, a DNS-only record
+and the password) is a separate, owner-approved step.
+
 ## Not done on purpose
 
 An opt-out or opt-in heartbeat from the apps, and server-side counters at the edge of polyth.app or the report relay, are
@@ -50,4 +74,4 @@ endpoint and storage, a daily-rotating id like `dailyInstallId` in `packages/bug
 `…_ORIGIN=off` switch, workstation builds excluded) and updated documentation on this page, the security page and
 the workstation edition document.
 
-Tests: `scripts/test/community-metrics.test.ts`.
+Tests: `scripts/test/community-metrics.test.ts`, `scripts/test/community-metrics-server.test.ts`.

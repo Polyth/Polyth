@@ -522,6 +522,7 @@
         "scripts/ci/mac-legacy.mjs",
         "scripts/ci/release-notes.mjs",
         "scripts/community-metrics.mjs",
+        "scripts/community-metrics-server.mjs",
         "scripts/release-version.mjs",
         "scripts/bump-version.mjs",
         "Cargo.toml",
@@ -543,7 +544,8 @@
         "scripts/test/checkCoAuthors.test.ts",
         "scripts/test/bump-version.test.ts",
         "scripts/test/release-quality-gates.test.ts",
-        "scripts/test/community-metrics.test.ts"
+        "scripts/test/community-metrics.test.ts",
+        "scripts/test/community-metrics-server.test.ts"
       ],
       "risk": "high"
     },
