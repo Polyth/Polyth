@@ -98,8 +98,6 @@
   line-height: var(--font-meta-lh);
 }
 
-.ui-btn--primary .image-size-prompt-option-detail { color: inherit; }
-
 /* A finger's reach on touch; --hit-min is 0 on a fine pointer. */
 .image-size-prompt-head .ui-icon-btn {
   flex: 0 0 auto;

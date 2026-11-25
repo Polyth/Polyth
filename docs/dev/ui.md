@@ -2952,7 +2952,10 @@ before anything leaves the device (`ImageSizePrompt`, `imageUploadSize.ts`;
 Chat and an agent's page alike, by picker, camera, paste or drop). Small, Medium
 and Large are 1024, 1600 and 2560 px on the long edge, each showing its real
 encoded size; Original sends the file untouched. Other files in the batch do not
-wait, and a size that would change nothing is not offered. **Settings → Chat →
+wait, and a size that would change nothing is not offered. In Chat, sending
+before answering is the answer Original: the waiting photos go up untouched and
+the message leaves once they are attached (a photo that fails to attach keeps
+the draft unsent). **Settings → Chat →
 Photo size** (`imageUploadSize`) keeps a standing answer. A reduced copy is a
 canvas re-encode, so it carries no EXIF, and only that copy is uploaded.
 

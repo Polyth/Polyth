@@ -2193,6 +2193,7 @@ function ComposerBody({
             reason: r.reason,
           }));
         }
+        return r.ok;
       }),
     })));
   }, [offerImages]);
@@ -2780,6 +2781,8 @@ function ComposerBody({
   // Latest send callback for recovery actions (a transport failure during
   // first-send creation must be retryable without capturing a stale closure).
   const sendRef = useRef<((override?: string, deliveryOverride?: "steer" | "queue" | "interrupt", hiddenUserMessage?: boolean, parkAsDraft?: boolean) => void) | null>(null);
+  /** Set while waiting photos go up as originals ahead of a send. */
+  const imagesSettlingRef = useRef(false);
 
   const send = useCallback((
     override?: string,
@@ -2873,6 +2876,23 @@ function ComposerBody({
         .finally(() => setQueueEditSaving(false));
       return;
     }
+    // A photo still waiting for its size goes with the message as the
+    // original: sending is the answer. The send resumes once every waiting
+    // photo is a pill (and its render has run); a photo that did not attach,
+    // or a move to another chat meanwhile, keeps the draft unsent.
+    if (imageChoice.waiting()) {
+      if (imagesSettlingRef.current) return;
+      imagesSettlingRef.current = true;
+      void imageChoice.choose("original", false).then((attached) => {
+        setTimeout(() => {
+          imagesSettlingRef.current = false;
+          if (!attached || sessionIdRef.current !== target) return;
+          sendRef.current?.(override, deliveryOverride, hiddenUserMessage, parkAsDraft);
+        }, 0);
+      });
+      return;
+    }
+    if (imagesSettlingRef.current) return;
     // A parked draft is text, never a shell command or a host action.
     const command = !noTurn && guardedShellAllowed(getGuardrails()) ? shellCommand(t) : null;
     const hasPills = command === null && attachments.length > 0;
@@ -3590,6 +3610,7 @@ function ComposerBody({
     catalogHarnessId, routeCatalog.harnessName, runtimeFeatures?.capabilities.steering,
     draftExecution, draftRoute, profiles, activeProject?.defaults?.harness, newChatPersonHarness,
     sendPeopleMessage, peopleSendAwaitsAnswer, refreshMentionPeople, submitMode,
+    imageChoice.waiting, imageChoice.choose,
   ]);
   useEffect(() => { sendRef.current = send; }, [send]);
 
@@ -4616,7 +4637,7 @@ function ComposerBody({
     || compactPending
     || queueEditSaving
     || borrowedEpochPending
-    || (queueEdit ? !liveText.trim() : (!liveText.trim() && attachments.length === 0))
+    || (queueEdit ? !liveText.trim() : (!liveText.trim() && attachments.length === 0 && imageChoice.pending.length === 0))
     || (!queueEdit && !shellMode && (modelAbsenceBlocksSend || profileMissing) && !hostOnlyCommandReady);
   const hasDraft = liveText.trim() !== "" || attachments.length > 0 || imageChoice.pending.length > 0;
   // Answer later: a question or approval that arrives while this draft is

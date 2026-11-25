@@ -171,11 +171,6 @@ export function imageSizeOptions(items: readonly ImageSizeItem[]): ImageSizeOpti
   return options;
 }
 
-/** Medium when it is on offer, otherwise the nearest smaller choice. */
-export function recommendedImageSize(options: readonly ImageSizeOption[]): ImageUploadSize {
-  return options.find((option) => option.id === "medium")?.id ?? options[0]!.id;
-}
-
 export function formatImageBytes(bytes: number, locale: string): string {
   const megabytes = bytes >= 1000 * 1000;
   return new Intl.NumberFormat(locale, {
