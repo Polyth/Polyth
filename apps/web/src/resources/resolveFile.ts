@@ -1,9 +1,30 @@
 import type { ResourceRef } from "@polyth/web-sdk";
-import { resolveWorkspaceContext } from "@polyth/contracts/workspace";
+import { projectRepositories, resolveWorkspaceContext } from "@polyth/contracts/workspace";
 import { api } from "@polyth/session/web-api";
-import { getState } from "../store.ts";
+import { getState, type AppState } from "../store.ts";
 
 export interface ResolvedFile { ref: ResourceRef; alias: string; deletedDiff?: string }
+
+type StateProject = AppState["projectRegistry"]["projects"][number];
+type StateSession = AppState["sessions"][number];
+
+/** The checkout directories an absolute file path in this workspace may start
+ *  with: the session's own checkouts (an isolated worktree has its own) and
+ *  the Project's registered repositories, which an agent working in a
+ *  worktree may still name. Both map to the same repository id, so the path
+ *  opens in the session's checkout. Paths only — no file is read here. */
+export function workspaceFileRoots(project: StateProject | undefined, session: StateSession | undefined): Array<{ repositoryId: string; path: string }> {
+  if (!project) return [];
+  const roots: Array<{ repositoryId: string; path: string }> = [];
+  try {
+    const usable = session && session.projectId === project.id ? session : null;
+    for (const row of resolveWorkspaceContext(project, usable).repositories) roots.push({ repositoryId: row.repositoryId, path: row.path });
+  } catch { /* An invalid workspace contributes no roots. */ }
+  try {
+    for (const row of projectRepositories(project)) roots.push({ repositoryId: row.id, path: row.path });
+  } catch { /* Same as above. */ }
+  return roots;
+}
 
 /** Resolve only within the originating canonical workspace. A bare path is
  * never allowed to choose an arbitrary repository when several contain it. */

@@ -448,7 +448,10 @@ and the accent-tinted user message sets it to `--accent-on-wash` (macOS styles:
 under the pointer, and keyboard focus gets the `--focus-ring` outline. A bare
 URL (`.md-link-url`) breaks anywhere instead of widening the bubble, and its
 `https://` / `www.` (`.md-link-scheme`) steps back in ink while staying in the
-copied text.
+copied text. A Markdown link to a workspace file is a `ResourceLink` button
+(`.resource-link.file-ref.md-file-link`) that opens Project files. It keeps this
+same link look (prose face, `--link` ink, hairline, wash and focus ring), not
+the monospace look of a prose file reference.
 
 A Markdown table is a grid, not a paragraph that happens to have rules. It
 must read correctly at any width and with any cell text, so the renderer wraps

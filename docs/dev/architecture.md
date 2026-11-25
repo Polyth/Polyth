@@ -1057,7 +1057,9 @@ ignored by the web reducer (never crash).
   `#`/fence/`$` marker) so it never flashes as prose; fenced code, Mermaid, KaTeX, JSON tree, galleries,
   conservative file references with go-to-line — a token must name a file
   (`apps/web/src/store.ts`, `docs/README`), never a bare value pair or ratio
-  (`static/visible`, `35/35`); L13: windowed rendering via `timelineWindow.ts` —
+  (`static/visible`, `35/35`); a Markdown link to a local path (absolute,
+  relative, `file://`) opens in Project files, never as a browser address (see
+  `docs/dev/workspace.md`); L13: windowed rendering via `timelineWindow.ts` —
   long sessions render only the last 150 rows as a suffix window, "Show earlier"
   reveals anchored, prompt jumps grow the window; the prompt-navigator rail gains a
   hover-preview card with the bounded full prompt; `SelectionMenu` floats over

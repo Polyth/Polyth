@@ -1295,6 +1295,7 @@ export default function FilePane({ projectId, sessionId, repositoryId, resource:
               keyBase={`md-${doc.path}`}
               frontmatter
               resourceContext={{ projectId, sessionId, repositoryId }}
+              documentPath={doc.path}
             />
           </div>
         </div>

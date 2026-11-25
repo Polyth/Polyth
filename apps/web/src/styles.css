@@ -7212,6 +7212,24 @@ li > .md-quote { margin-block: calc(var(--prose-gap) * 0.6); }
    reads by its host: the scheme stays in the copied text, one step quieter. */
 .md-link-url { overflow-wrap: anywhere; word-break: normal; }
 .md-link-scheme { opacity: 0.62; }
+/* A markdown link to a workspace file is a ResourceLink button that opens it
+   in Project files. It keeps the markdown link's look (prose face, link ink,
+   the same hairline), not the monospace look of a prose file reference. */
+.resource-link.file-ref.md-file-link {
+  --md-link-ink: var(--link, var(--chat-ink-accent, var(--accent-text)));
+  font-family: inherit;
+  color: var(--md-link-ink);
+  text-align: start;
+  text-decoration-color: color-mix(in srgb, var(--md-link-ink) 40%, transparent);
+  text-decoration-thickness: max(1px, 0.07em);
+  text-underline-offset: 0.22em;
+  border-radius: min(var(--radius-control), 0.25em);
+}
+@media (hover: hover) {
+  .resource-link.file-ref.md-file-link:hover:where(:not(:disabled)) { text-decoration-color: currentColor; background-color: color-mix(in srgb, var(--md-link-ink) 8%, transparent); }
+}
+.resource-link.file-ref.md-file-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; text-decoration-color: currentColor; }
+.resource-link-missing.md-file-link { font-family: inherit; }
 /* The reader's own message is accent-tinted: its links take the accent that
    holds 4.5:1 on its own wash. */
 .msg.user .bubble { --link: var(--accent-on-wash); }

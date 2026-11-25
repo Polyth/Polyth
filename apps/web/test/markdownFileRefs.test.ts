@@ -24,18 +24,22 @@ Object.defineProperty(globalThis, "navigator", { value: dom.navigator, configura
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { MarkdownDoc } = await import("../src/markdown/render.tsx");
+const { applyProjectUpsert } = await import("../src/store.ts");
 const { createElement, act } = await import("react");
 const { createRoot } = await import("react-dom/client");
 
+// The project's checkout, so absolute link paths can be mapped into it.
+applyProjectUpsert({ id: "refs-project", path: "/home/polyth/workspace/Business1", name: "Business1", createdAt: 0 } as never);
+
 // File references resolve against a project resource context; without one the
 // renderer deliberately leaves paths as code.
-async function html(text: string): Promise<string> {
+async function html(text: string, documentPath?: string): Promise<string> {
   const host = document.createElement("div");
   document.body.appendChild(host);
   const root = createRoot(host);
   try {
     await act(async () => {
-      root.render(createElement(MarkdownDoc, { text, keyBase: "refs", resourceContext: { projectId: "refs-project", sessionId: null } }));
+      root.render(createElement(MarkdownDoc, { text, keyBase: "refs", resourceContext: { projectId: "refs-project", sessionId: null }, ...(documentPath ? { documentPath } : {}) }));
     });
     return host.innerHTML;
   } finally {
@@ -63,8 +67,37 @@ test("a real path in a code span still opens the editor", async () => {
   assert.doesNotMatch(out, /<code>apps\/web\/src\/mobileViewport\.ts<\/code>/);
 });
 
-test("a markdown link never nests a file-ref button inside the anchor", async () => {
+test("a markdown link to a path is one file control, never a button nested in an anchor", async () => {
   const out = await html("[mobileViewport.ts](/apps/web/src/mobileViewport.ts)");
-  assert.match(out, /<a [^>]*>mobileViewport\.ts<\/a>/);
-  assert.doesNotMatch(out, /<a [^>]*>[^<]*<button/);
+  assert.match(out, /<button [^>]*class="resource-link file-ref md-file-link"[^>]*>mobileViewport\.ts<\/button>/);
+  assert.match(out, /title="apps\/web\/src\/mobileViewport\.ts\s/);
+  assert.doesNotMatch(out, /<a /);
+});
+
+test("a markdown link to an absolute workspace path opens in Project files, not the browser", async () => {
+  const out = await html("Я вивчив базу. [Покажчик проєкту](/home/polyth/workspace/Business1/INDEX.md) і [Статут CEO](/home/polyth/workspace/Business1/departments/ceo/AGENTS.md).");
+  assert.match(out, /<button [^>]*class="resource-link file-ref md-file-link"[^>]*>Покажчик проєкту<\/button>/);
+  assert.match(out, /title="INDEX\.md\s/);
+  assert.match(out, /title="departments\/ceo\/AGENTS\.md\s/);
+  assert.doesNotMatch(out, /href="\/home\//);
+  assert.doesNotMatch(out, /<a /);
+});
+
+test("relative and file:// links open in Project files; web links stay links", async () => {
+  const out = await html("[agents](departments/ceo/AGENTS.md) [page](file:///home/polyth/workspace/Business1/site/index.html) [web](https://example.com/a.md)");
+  assert.match(out, /title="departments\/ceo\/AGENTS\.md\s/);
+  assert.match(out, /title="site\/index\.html\s/);
+  assert.match(out, /<a class="md-link" href="https:\/\/example\.com\/a\.md" target="_blank" rel="noopener noreferrer">web<\/a>/);
+});
+
+test("a link that climbs out of the workspace is plain text, not a broken link", async () => {
+  const out = await html("[secret](../../etc/passwd)");
+  assert.match(out, /<span title="\.\.\/\.\.\/etc\/passwd">secret<\/span>/);
+  assert.doesNotMatch(out, /<a |file-ref/);
+});
+
+test("a previewed document's relative links resolve from its own directory", async () => {
+  const out = await html("[guide](guide.md) [readme](../README.md)", "docs/dev/index.md");
+  assert.match(out, /title="docs\/dev\/guide\.md\s/);
+  assert.match(out, /title="docs\/README\.md\s/);
 });

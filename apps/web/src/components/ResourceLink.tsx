@@ -16,9 +16,12 @@ export interface ResourceLinkProps {
   selection?: OpenResourceOptions["selection"];
   /** File rows already carry validated identity; prose paths resolve on use. */
   resolve?: boolean;
+  /** Extra class on the control (and on its not-found text), e.g. a markdown
+   *  link that keeps the link look instead of the monospace path look. */
+  className?: string;
 }
 
-export default function ResourceLink({ resource, children, alias, mode = "qualified", selection, resolve = true }: ResourceLinkProps) {
+export default function ResourceLink({ resource, children, alias, mode = "qualified", selection, resolve = true, className }: ResourceLinkProps) {
   const key = JSON.stringify([resource, selection]);
   const anchor = useRef<HTMLButtonElement>(null);
   const epoch = useRef(0);
@@ -40,9 +43,10 @@ export default function ResourceLink({ resource, children, alias, mode = "qualif
     if (match.deletedDiff) setDeleted(match);
     else openResource(match.ref, { preview: preview.current, ...(selection ? { selection } : {}) });
   };
-  if (missing) return <span className="resource-link-missing">{label}</span>;
+  const extra = className ? ` ${className}` : "";
+  if (missing) return <span className={`resource-link-missing${extra}`}>{label}</span>;
   return <>
-    <button type="button" ref={anchor} className="resource-link file-ref" title={`${resource.locator}\n${tr("resourcelink.openFile")}`}
+    <button type="button" ref={anchor} className={`resource-link file-ref${extra}`} title={`${resource.locator}\n${tr("resourcelink.openFile")}`}
       aria-busy={busy || undefined} draggable={resource.repositoryId !== undefined}
       onDragStart={(event) => setDragResource(event.dataTransfer, resource, selection)}
       onClick={(event) => {

@@ -558,6 +558,20 @@ fenced against newer opens and Project/session changes. Packages use canonical
 refs through the supported host component seam instead of treating a bare path
 as globally unique.
 
+A Markdown link whose target is a local path never goes to the browser, which
+would ask the Polyth server for `/home/…/INDEX.md` and get "not found". The
+renderer (`apps/web/src/markdown/fileReference.ts`
+`isLocalLinkHref`/`parseFileLinkHref`) turns it into a `ResourceLink` that opens
+Project files:
+an absolute path or `file://` URL inside one of the session's checkouts or the
+Project's registered repositories (`workspaceFileRoots`) becomes that
+repository's relative locator, and the longest root wins. Any other absolute
+path reads as repository-root-relative (`/docs/a.md`). A relative path resolves
+from the previewed file's directory (`MarkdownDoc` `documentPath`) or from the
+workspace root in chat. `#L12`, `#L12-L20` and `:12` select lines, and `?query`
+is dropped. A path that climbs above the root, names a directory, or is a remote
+`file://host/` stays plain text. http(s) and mailto links keep the URL policy.
+
 File and selected-line drag payloads retain repository identity. Editor drops
 open the referenced location; composer drops attach the scoped file/range;
 terminal drops insert a quoted path without executing it. Attachments preserve

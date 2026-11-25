@@ -6,7 +6,8 @@ import ResourceLink from "../components/ResourceLink.tsx";
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { parseMarkdown, collectImages, holdBackStreamingTail, splitFrontmatter, type Block, type Inline, type TableAlign } from "./parse.ts";
 import { sanitizeLinkHref, sanitizeImageSrc, isVideoSource } from "./sanitize.ts";
-import { findFileRefs } from "./fileReference.ts";
+import { findFileRefs, isLocalLinkHref, parseFileLinkHref } from "./fileReference.ts";
+import { workspaceFileRoots } from "../resources/resolveFile.ts";
 import { activateSession, getState, useStore } from "../store.ts";
 import { getUiSettings } from "../uiPrefs.ts";
 import CopyButton from "../components/CopyButton.tsx";
@@ -44,6 +45,8 @@ interface DocContextValue {
   /** The answer's message id (the document's keyBase): fences read the user
    *  reply that followed it (MarkdownFenceContext.reply). */
   messageId?: string;
+  /** Directory of the previewed file, for its relative links. */
+  documentDir?: string;
 }
 
 const DocContext = createContext<DocContextValue>({ images: [], openGallery: () => {}, projectId: undefined });
@@ -57,6 +60,28 @@ function FileRefLink({ text, path, startLine, endLine, column }: {
   if (!context) return <code>{text}</code>;
   return <ResourceLink resource={{ ...context, scheme: "file", locator: path }}
     {...(startLine === undefined ? {} : { selection: { startLine, endLine: endLine ?? startLine, ...(column === undefined ? {} : { column }) } })}>{text}</ResourceLink>;
+}
+
+/** A markdown link to a local path (`[Index](/home/…/INDEX.md)`,
+ *  `[x](docs/x.md#L3)`, `file:///…`) opens the file in Project files, the same
+ *  way a prose file reference does. As a browser link it would ask the Polyth
+ *  server for that path and land on "not found". Without a workspace, or for
+ *  a path that cannot name a workspace file, the label stays plain text. */
+function MarkdownFileLink({ href, children }: { href: string; children: ReactNode }) {
+  const doc = useContext(DocContext);
+  const context = doc.resourceContext;
+  const projectId = context?.projectId;
+  const sessionId = context?.sessionId ?? undefined;
+  const project = useStore((s) => projectId === undefined ? undefined : s.projectRegistry.projects.find((row) => row.id === projectId));
+  const session = useStore((s) => sessionId === undefined ? undefined : s.sessions.find((row) => row.id === sessionId));
+  const target = useMemo(
+    () => parseFileLinkHref(href, { roots: workspaceFileRoots(project, session), ...(doc.documentDir ? { baseDir: doc.documentDir } : {}) }),
+    [href, project, session, doc.documentDir],
+  );
+  if (!context || !target) return <span title={href}>{children}</span>;
+  const { path, repositoryId, startLine, endLine, column } = target;
+  return <ResourceLink className="md-file-link" resource={{ ...context, ...(repositoryId ? { repositoryId } : {}), scheme: "file", locator: path }}
+    {...(startLine === undefined ? {} : { selection: { startLine, endLine: endLine ?? startLine, ...(column === undefined ? {} : { column }) } })}>{children}</ResourceLink>;
 }
 
 /** Text (and code-span) runs get conservative file-reference linkification.
@@ -147,6 +172,15 @@ export function renderInline(nodes: Inline[], keyBase: string, linkify = true): 
         if (chatId) {
           // A chat reference: the label in the text is never shown or trusted.
           out.push(<SessionChatChip key={k} sessionId={chatId} />);
+          break;
+        }
+        if (isLocalLinkHref(n.href)) {
+          // An image inside would put its gallery button inside the file
+          // button (nested controls): such a link keeps only its content.
+          const label = renderInline(n.children, k, false);
+          out.push(n.children.some((child) => child.kind === "image")
+            ? <span key={k}>{label}</span>
+            : <MarkdownFileLink key={k} href={n.href}>{label}</MarkdownFileLink>);
           break;
         }
         const href = sanitizeLinkHref(n.href);
@@ -560,7 +594,7 @@ function renderBlock(b: Block, k: string): ReactNode {
 
 // ---------------------------------------------------------------- document
 
-export function MarkdownDoc({ text, keyBase = "md", showGalleryShortcut = false, streaming = false, frontmatter = false, conversation = false, resourceContext }: {
+export function MarkdownDoc({ text, keyBase = "md", showGalleryShortcut = false, streaming = false, frontmatter = false, conversation = false, resourceContext, documentPath }: {
   text: string;
   keyBase?: string;
   showGalleryShortcut?: boolean;
@@ -574,7 +608,11 @@ export function MarkdownDoc({ text, keyBase = "md", showGalleryShortcut = false,
    *  without a click. Off for every other surface. */
   conversation?: boolean;
   resourceContext?: DocContextValue["resourceContext"];
+  /** Workspace-relative path of the file this document previews: its
+   *  relative links resolve from that file's directory, not the root. */
+  documentPath?: string;
 }) {
+  const documentDir = documentPath?.includes("/") ? documentPath.slice(0, documentPath.lastIndexOf("/")) : undefined;
   const activeProjectId = useStore((s) => s.activeProjectId);
   const activeSessionId = useStore((s) => s.activeSessionId);
   const projectId = resourceContext?.projectId ?? activeProjectId ?? undefined;
@@ -617,11 +655,12 @@ export function MarkdownDoc({ text, keyBase = "md", showGalleryShortcut = false,
     repositoryId,
     ...(projectId ? { resourceContext: { projectId, sessionId, ...(repositoryId ? { repositoryId } : {}) } } : {}),
     ...(conversation ? { conversation: true, messageId: keyBase } : {}),
+    ...(documentDir ? { documentDir } : {}),
     openGallery: (src: string) => {
       const at = images.findIndex((im) => im.src === src);
       setGalleryAt(at >= 0 ? at : 0);
     },
-  }), [images, projectId, sessionId, repositoryId, conversation, keyBase, streaming]);
+  }), [images, projectId, sessionId, repositoryId, conversation, keyBase, streaming, documentDir]);
 
   return (
     <DocContext.Provider value={ctx}>
