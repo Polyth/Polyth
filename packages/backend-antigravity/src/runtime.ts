@@ -15,6 +15,7 @@ import {
   releaseCapabilityLaunch,
   resolveModelSelection,
   isFilesystemMutationPermission,
+  withLaunchEnv,
 } from "@polyth/harness-runtime";
 import type { HarnessProcessAuthority } from "@polyth/harness-runtime/process-authority";
 import { stageAgyAttachments, type AgyInjectedStep, type AgyStagedAttachments } from "./attachments.ts";
@@ -686,7 +687,8 @@ export function createAntigravityRuntime(options: AntigravityRuntimeOptions): Ag
         bypass: launchBypass,
         hookRoot: permissionBridge.root,
       });
-      child = authority.spawn(process.execPath, [options.workerPath], { cwd: context.cwd, env: options.env });
+      // The chat's shell gets `polyth-tools` (HarnessContext.launchEnv).
+      child = authority.spawn(process.execPath, [options.workerPath], { cwd: context.cwd, env: withLaunchEnv(options.env ?? process.env, context) });
       started = true;
       child.stdin?.on("error", () => fail(agyError("outcome-unknown", "Antigravity worker input pipe closed; the prompt was not replayed")));
       child.stdout?.on("data", (chunk: Buffer) => {

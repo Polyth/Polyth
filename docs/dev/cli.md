@@ -134,6 +134,21 @@ from any principal the server allows.
   cause a re-read of persisted history, so a missed wake costs latency, never an
   event. Shutdown releases every parked request.
 
+## `polyth-tools`: agent tools from the shell
+
+Not the `polyth` CLI above, and not for people. In a chat that runs on this machine, the harness process gets `POLYTH_TOOLS_GRANT_FILE` and `<data>/runtime/agent-tools/bin` at the front of PATH (`HarnessContext.launchEnv`, applied by each backend with `withLaunchEnv` from `@polyth/harness-runtime`). The agent's shell can then run every Polyth tool its MCP server offers, under the same grant:
+
+```
+polyth-tools list
+polyth-tools describe polyth
+polyth-tools call polyth '{"action":"session.messages","parameters":{"sessionId":"<id>"}}'
+echo '{"query":"release"}' | polyth-tools call memory_search -
+```
+
+Exit codes: 0 done, 1 the tool or Polyth failed (message on stderr), 2 bad usage or arguments, 3 no grant in this shell. The launchers (`polyth-tools`, `polyth-tools.cmd`) run `packages/server/src/agentToolsMcp.mjs --cli` with the server's Node, or with the app binary as Node on a desktop build. The capability provisioner writes them, plus one owner-only grant file per chat, holding `{url, token}`. The file is rewritten when the grant is re-minted and removed when it is revoked. The CLI reads it on every call. The Global behavior section *Polyth tools from the shell* (`shellToolsBehaviorSection`) tells every agent about it.
+
+Not there: remote (SSH) legs; OpenCode, whose one process serves every chat of a project; a harness whose shell sandbox blocks loopback networking (Codex `workspace-write` without network access), where the call fails and says Polyth did not answer. Security notes: [security](../agents/security.md#execution-and-operational-boundaries).
+
 ## Verification
 
 - `node --experimental-strip-types --test packages/cli/test/*.test.ts packages/identity/test/accessTokens.test.ts packages/identity/test/cliHttp.test.ts packages/server/test/cliAccess.test.ts apps/desktop/test/cliInstall.test.ts`

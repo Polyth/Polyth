@@ -5,7 +5,7 @@ import { acpModelDescriptors, createAcpRuntime, parseSessionConfig, type AcpMode
 import { discoverAcpModels, invalidateAcpDiscovery } from "../src/discovery.ts";
 import { fakeRpc } from "../../harness-runtime/test/rpcPeer.ts";
 import { setCapabilityReceiptSink } from "@polyth/harness-runtime";
-import type { HarnessCapabilityApplicationReceipt, HarnessProvisioningPlan } from "@polyth/contracts";
+import type { HarnessCapabilityApplicationReceipt, HarnessContext, HarnessProvisioningPlan } from "@polyth/contracts";
 import { acpOverlays, createAcpProvisioner } from "../src/provisioner.ts";
 
 const context = { spaceId: "s", projectId: "p", cwd: "/tmp", sessionId: "canonical" };
@@ -406,4 +406,11 @@ test("an agent that needs absolute stdio commands gets them; an unknown command 
     } finally {
         acpOverlays.delete(context, "ds-abs");
     }
+});
+
+test("a profile can ask for Polyth's agent tools over HTTP", async () => {
+    const http = await createAcpProvisioner("acp-http", true, { agentToolsOverHttp: true }).support({} as HarnessContext);
+    assert.equal(http.kinds.tool?.agentToolsTransport, "http");
+    const plain = await createAcpProvisioner("acp-plain", true).support({} as HarnessContext);
+    assert.equal(plain.kinds.tool?.agentToolsTransport, undefined);
 });

@@ -18,6 +18,7 @@ export {
 } from "./authority.ts";
 export { releaseHarnessProcessExecution } from "./processAuthority.ts";
 export { createStdioRpc, type RpcPeer } from "./rpc.ts";
+export { withLaunchEnv } from "./launchEnv.ts";
 export {
   acknowledgeCapabilityApplication,
   captureCapabilityLaunch,
@@ -91,6 +92,7 @@ import type {
     HarnessAvailabilityState,
     HarnessContext,
     HarnessDescriptor,
+    HarnessLaunchEnv,
     HarnessProbe,
     HarnessProvider,
     HarnessRegistry,
@@ -768,8 +770,9 @@ export function createHarnessPool(options: {
     registry: HarnessRegistry;
     context(projectId: string, cwd?: string, sessionId?: string): Promise<HarnessContext>;
     legacyHarnessId: string;
-    /** Runs before a new runtime is constructed. Provisioning uses this hook. */
-    beforeCreate?: (provider: HarnessProvider, context: HarnessContext) => Promise<void>;
+    /** Runs before a new runtime is constructed. Provisioning uses this hook;
+     *  what it returns is added to the context `createRuntime` receives. */
+    beforeCreate?: (provider: HarnessProvider, context: HarnessContext) => Promise<void | { launchEnv?: HarnessLaunchEnv }>;
     /** Physical owners can refine factory reuse with per-acquisition evidence. */
     acquisitionInfo?: (provider: HarnessProvider, context: HarnessContext, runtime: AgentRuntime) => RuntimeAcquisitionInfo | undefined;
     /** Physical owner may retain a shared runtime with other bindings/executions. */
@@ -858,10 +861,12 @@ export function createHarnessPool(options: {
                 pending: Promise.resolve(undefined as unknown as AgentRuntime),
             };
             created.pending = (async () => {
-                await options.beforeCreate?.(provider, context);
+                const prepared = await options.beforeCreate?.(provider, context);
                 if (options.registry.get(provider.descriptor.id) !== provider)
                     throw harnessError("runtime-unavailable", `Harness ${provider.descriptor.id} is no longer registered`);
-                const runtime = enforceDelegation(await provider.createRuntime(context));
+                const runtime = enforceDelegation(await provider.createRuntime(
+                    prepared?.launchEnv ? { ...context, launchEnv: prepared.launchEnv } : context,
+                ));
                 if (disposals.has(runtime)) {
                     throw harnessError("runtime-unavailable", "Provider returned a released runtime");
                 }

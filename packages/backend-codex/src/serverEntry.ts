@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { HarnessContext, HarnessProvider, HarnessRegistry, SmallModelCompletionRequest } from "@polyth/contracts";
-import { createStdioRpc, releaseHarnessProcessExecution } from "@polyth/harness-runtime";
+import { createStdioRpc, releaseHarnessProcessExecution, withLaunchEnv } from "@polyth/harness-runtime";
 import { discoverHarnessExecutable, harnessExecutableChildEnv } from "@polyth/harness-runtime/executable-discovery";
 import { npmCliInstallCommand } from "@polyth/harness-runtime/installers";
 import { probeRemoteHarness, remoteHarnessLaunch, resolveRemoteHarnessHost, type RemoteProcessHost } from "@polyth/harness-runtime/remote-host";
@@ -53,7 +53,8 @@ export async function connectCodex(context: HarnessContext, stateFile?: string, 
         ? remoteHarnessLaunch(remote, [CODEX_REMOTE_BINARY, "app-server"], { cwd: context.cwd })
         : await (async () => {
             const command = await resolveCodexBinary();
-            return { command, args: ["app-server"], cwd: context.cwd, env: await codexEnv(command, account) };
+            // The chat's shell gets `polyth-tools` (HarnessContext.launchEnv).
+            return { command, args: ["app-server"], cwd: context.cwd, env: withLaunchEnv(await codexEnv(command, account), context) };
         })();
     const rpc = await createStdioRpc({ ...launch, stateFile, stableAuthority: true });
     try {

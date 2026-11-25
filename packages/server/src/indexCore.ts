@@ -1932,6 +1932,9 @@ export async function boot(opts: BootOptions = {}) {
     async beforeCreate(provider, context) {
       if (!capabilityController) return;
       await capabilityController.reconcile(provider, context);
+      // The chat's shell reaches the same tools through `polyth-tools`.
+      const launchEnv = capabilityController.launchEnv(context);
+      return launchEnv ? { launchEnv } : undefined;
     },
     allowProviderUnregistration: isShuttingDown,
   });
@@ -2348,6 +2351,7 @@ export async function boot(opts: BootOptions = {}) {
     },
     tools: agentTools,
     toolsEndpoint: () => `http://127.0.0.1:${port}${AGENT_TOOLS_PATH}`,
+    shellToolsDir: `${dataDir}/runtime/agent-tools`,
   });
   provideService("harness.provisioning", {
     status: (context: import("@polyth/contracts").HarnessContext, harnessId?: string) =>

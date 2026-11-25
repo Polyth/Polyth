@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { AgentRuntime, HarnessProvider, SpaceContext } from "@polyth/contracts";
 import {
   acknowledgeCapabilityApplication,
@@ -456,6 +456,163 @@ test("tool MCP tokens are reused across identical reconciles", async () => {
   assert.equal(tokens.length, 2);
   assert.equal(tokens[0], tokens[1]);
   assert.ok(tokens[0]);
+});
+
+test("a local chat's shell gets polyth-tools under the chat's own grant, rewritten on rotation and removed on dispose", async () => {
+  const dir = tmp();
+  const space = spaceOf(dir);
+  const context = { spaceId: space.spaceId, projectId: "p", cwd: "/tmp/p", space, sessionId: "chat-1" };
+  const registry = createCapabilityContributionRegistry();
+  const tool = (name: string) => ({
+    descriptor: {
+      id: `example-feature.${name}`,
+      kind: "tool" as const,
+      owner: "example-feature",
+      scope: "space" as const,
+      revision: "1",
+      name,
+      description: name,
+      inputSchema: { type: "object", properties: {} },
+      trust: "pure" as const,
+      mutating: false,
+    },
+    execute: async () => ({ output: name }),
+  });
+  registry.register("example-feature", tool("ping"));
+  const tokens: string[] = [];
+  const harness = provider("claude", {
+    support: () => ({
+      harnessId: "claude",
+      kinds: {
+        tool: { modes: ["mcp"], mutability: "session-create", configScope: "session" },
+        "mcp-server": { modes: ["native"], mutability: "session-create", configScope: "session" },
+      },
+    }),
+    apply: async (_ctx, plan, secrets) => {
+      tokens.push(secrets.mcpSecrets("polyth.agent-tools").POLYTH_AGENT_TOOLS_TOKEN ?? "");
+      return { harnessId: "claude", desiredRevision: plan.desiredRevision, records: [] };
+    },
+  });
+  const shellToolsDir = join(dir, "runtime", "agent-tools");
+  const controller = createCapabilityProvisioningController({
+    contributions: registry,
+    harnesses: mockHarnessRegistry(harness),
+    behavior: createBehaviorService({ file: join(dir, "behavior.md") }),
+    mcp: mcpOf(dir),
+    file: join(dir, "status.json"),
+    tools: createAgentToolBridge({
+      executor: (id) => registry.executor(id),
+      contribution: (id) => registry.contribution(id),
+    }),
+    toolsEndpoint: () => "http://127.0.0.1:9/internal/agent-tools",
+    shellToolsDir,
+  });
+  assert.equal(controller.launchEnv(context), undefined, "nothing before a reconcile");
+  await controller.reconcile(harness, context);
+  const launch = controller.launchEnv(context)!;
+  assert.deepEqual(launch.pathPrepend, [join(shellToolsDir, "bin")]);
+  const grantFile = launch.env.POLYTH_TOOLS_GRANT_FILE!;
+  assert.ok(grantFile.startsWith(join(shellToolsDir, "grants")));
+  assert.ok(!grantFile.includes("chat-1"), "the file name does not reveal the chat");
+  assert.equal(statSync(grantFile).mode & 0o777, 0o600);
+  assert.deepEqual(JSON.parse(readFileSync(grantFile, "utf8")), { url: "http://127.0.0.1:9/internal/agent-tools", token: tokens[0] });
+  assert.ok(existsSync(join(shellToolsDir, "bin", "polyth-tools")));
+  // No variable name a harness would strip from its shell.
+  assert.ok(Object.keys(launch.env).every((name) => !/KEY|TOKEN|SECRET/.test(name)));
+
+  // A remote leg or a context without a chat gets nothing.
+  assert.equal(controller.launchEnv({ ...context, remote: true }), undefined);
+  assert.equal(controller.launchEnv({ ...context, sessionId: undefined }), undefined);
+
+  // A new tool re-mints the grant; the same file now holds the new token.
+  registry.register("example-feature", tool("pong"));
+  await controller.reconcile(harness, context);
+  assert.notEqual(tokens[1], tokens[0]);
+  assert.equal(JSON.parse(readFileSync(grantFile, "utf8")).token, tokens[1]);
+
+  controller.dispose();
+  assert.equal(existsSync(grantFile), false);
+
+  // A file an earlier server process left behind names a dead grant.
+  mkdirSync(dirname(grantFile), { recursive: true });
+  writeFileSync(grantFile, "{}");
+  createCapabilityProvisioningController({
+    contributions: registry,
+    harnesses: mockHarnessRegistry(harness),
+    behavior: createBehaviorService({ file: join(dir, "behavior.md") }),
+    mcp: mcpOf(dir),
+    file: join(dir, "status.json"),
+    shellToolsDir,
+  }).dispose();
+  assert.equal(existsSync(grantFile), false);
+});
+
+test("a local harness that asks for HTTP agent tools gets the loopback MCP endpoint, not the bridge", async () => {
+  const dir = tmp();
+  const space = spaceOf(dir);
+  const context = { spaceId: space.spaceId, projectId: "p", cwd: "/tmp/p", space, sessionId: "s1" };
+  const registry = createCapabilityContributionRegistry();
+  registry.register("example-feature", {
+    descriptor: {
+      id: "example-feature.ping",
+      kind: "tool",
+      owner: "example-feature",
+      scope: "space",
+      revision: "1",
+      name: "ping",
+      description: "ping",
+      inputSchema: { type: "object", properties: {} },
+      trust: "pure",
+      mutating: false,
+    },
+    execute: async () => ({ output: "pong" }),
+  });
+  const seen: Array<{ transport: unknown; secrets: Record<string, string> }> = [];
+  const makeProvider = (transport: "stdio" | "http" | undefined) => provider("copilot", {
+    support: () => ({
+      harnessId: "copilot",
+      kinds: {
+        tool: { modes: ["mcp"], mutability: "session-create", configScope: "session", ...(transport ? { agentToolsTransport: transport } : {}) },
+        "mcp-server": { modes: ["native"], mutability: "session-create", configScope: "session" },
+      },
+    }),
+    apply: async (_ctx, plan, secrets) => {
+      const item = plan.items.find((row) => row.capability.id === "polyth.agent-tools");
+      seen.push({
+        transport: item?.capability.kind === "mcp-server" ? item.capability.transport : undefined,
+        secrets: secrets.mcpSecrets("polyth.agent-tools"),
+      });
+      return { harnessId: "copilot", desiredRevision: plan.desiredRevision, records: [] };
+    },
+  });
+  const tools = createAgentToolBridge({
+    executor: (id) => registry.executor(id),
+    contribution: (id) => registry.contribution(id),
+  });
+  for (const transport of ["http", undefined] as const) {
+    const harness = makeProvider(transport);
+    const controller = createCapabilityProvisioningController({
+      contributions: registry,
+      harnesses: mockHarnessRegistry(harness),
+      behavior: createBehaviorService({ file: join(dir, `behavior-${transport ?? "default"}.md`) }),
+      mcp: mcpOf(dir),
+      file: join(dir, `status-${transport ?? "default"}.json`),
+      tools,
+      toolsEndpoint: () => "http://127.0.0.1:9/internal/agent-tools",
+    });
+    await controller.reconcile(harness, context);
+  }
+  const [http, stdio] = seen;
+  assert.deepEqual(http!.transport, {
+    kind: "http",
+    url: "http://127.0.0.1:9/internal/agent-tools/mcp",
+    headersSecretRefs: ["Authorization"],
+  });
+  assert.match(http!.secrets.Authorization ?? "", /^Bearer \S+$/);
+  assert.equal(http!.secrets.POLYTH_AGENT_TOOLS_TOKEN, undefined);
+  // The default stays the stdio bridge.
+  assert.equal((stdio!.transport as { kind?: string }).kind, "stdio");
+  assert.ok(stdio!.secrets.POLYTH_AGENT_TOOLS_TOKEN);
 });
 
 test("support() failure does not throw out of reconcile", async () => {

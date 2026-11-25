@@ -1,7 +1,8 @@
 // Canonical capability desired-state + per-target application state.
 // Packages contribute through the registry; harness providers project.
-import { mkdirSync, readFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { createHash as createDigest } from "node:crypto";
+import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { atomicWriteSync, redactSecrets } from "@polyth/plugins";
 import type {
   AgentCapabilityContributionRegistry,
@@ -13,6 +14,7 @@ import type {
   HarnessCapabilityStatusDto,
   HarnessCapabilityTargetLifetime,
   HarnessContext,
+  HarnessLaunchEnv,
   HarnessProvider,
   HarnessProvisioningTarget,
   HarnessRegistry,
@@ -32,7 +34,7 @@ import {
 } from "@polyth/harness-runtime";
 import type { BehaviorService } from "./behavior.ts";
 import type { McpConfigService, McpProjectionState } from "./mcp.ts";
-import { AGENT_TOOLS_MCP_NAME, AGENT_TOOLS_MCP_PATH, type AgentToolBridge } from "./agentTools.ts";
+import { AGENT_TOOLS_MCP_NAME, AGENT_TOOLS_MCP_PATH, agentToolsShellLaunchers, type AgentToolBridge } from "./agentTools.ts";
 
 export interface InstructionProvisionState {
   provisioned: boolean;
@@ -87,8 +89,17 @@ export interface CapabilityProvisioningController {
   /** The chat's runtime that could carry personal MCP servers is gone. */
   forgetPersonalMcp(spaceId: string, sessionId: string): void;
   instructionState(context: HarnessContext, harnessId?: string): Promise<InstructionProvisionState>;
+  /** What a local process launched for this chat adds to its environment so
+   *  its shell runs `polyth-tools` under the chat's own tool grant; undefined
+   *  without a shell-tools directory, a session, tools, or for a remote leg.
+   *  Read after `reconcile`, which writes the grant file. */
+  launchEnv(context: HarnessContext): HarnessLaunchEnv | undefined;
   dispose(): void;
 }
+
+/** Environment variable naming a chat's grant file. No KEY/TOKEN/SECRET in
+ *  the name: some harnesses strip such variables from their shell. */
+export const AGENT_TOOLS_GRANT_FILE_ENV = "POLYTH_TOOLS_GRANT_FILE";
 
 interface StoredStatus {
   target: HarnessProvisioningTarget;
@@ -300,6 +311,9 @@ export function createCapabilityProvisioningController(opts: {
   file: string;
   tools?: AgentToolBridge;
   toolsEndpoint?: () => string;
+  /** Owner-only directory for the `polyth-tools` launchers (`bin/`) and one
+   *  grant file per local chat (`grants/`). Without it the shell has no tools. */
+  shellToolsDir?: string;
   contributionAllowed?: (owner: string, context: HarnessContext) => boolean;
   /** Generic physical-runtime restart hook. Shared code never chooses a harness. */
   onCapabilityRestartRequired?: (input: {
@@ -381,6 +395,60 @@ export function createCapabilityProvisioningController(opts: {
   /** `space:session` keys whose runtime may have been handed personal MCP servers. */
   const personalMcpSessions = new Set<string>();
 
+  // Shell tools (`polyth-tools`): one grant file per local chat, holding the
+  // same session-scoped grant its MCP tools use, rewritten when that grant is
+  // re-minted and removed when it is revoked.
+  const shellBin = opts.shellToolsDir ? join(opts.shellToolsDir, "bin") : undefined;
+  const grantDir = opts.shellToolsDir ? join(opts.shellToolsDir, "grants") : undefined;
+  /** Grant file path → the token written in it. */
+  const grantFiles = new Map<string, string>();
+  // Grants live only in this process, so files left by an earlier one name
+  // dead tokens; the next reconcile of each chat writes a fresh one.
+  if (grantDir) {
+    try { rmSync(grantDir, { recursive: true, force: true }); } catch { /* nothing to clear */ }
+  }
+  let launchersWritten = false;
+  const grantFileFor = (spaceId: string, sessionId: string): string | undefined => grantDir
+    ? join(grantDir, `${createDigest("sha256").update(`${spaceId}\0${sessionId}`).digest("hex").slice(0, 32)}.json`)
+    : undefined;
+  const ensureLaunchers = (): boolean => {
+    if (launchersWritten || !shellBin) return launchersWritten;
+    try {
+      mkdirSync(shellBin, { recursive: true, mode: 0o700 });
+      for (const launcher of agentToolsShellLaunchers()) {
+        const file = join(shellBin, launcher.name);
+        writeFileSync(file, launcher.content, { mode: launcher.mode });
+        chmodSync(file, launcher.mode);
+      }
+      launchersWritten = true;
+    } catch (error) {
+      console.warn("[capabilities] polyth-tools launchers could not be written", error instanceof Error ? error.message : error);
+    }
+    return launchersWritten;
+  };
+  const writeGrantFile = (file: string, url: string, token: string): void => {
+    if (grantFiles.get(file) === token) return;
+    try {
+      mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+      // Whole-file swap: a shell reading it never sees half a grant.
+      const tmp = `${file}.${process.pid}.tmp`;
+      writeFileSync(tmp, JSON.stringify({ url, token }), { mode: 0o600 });
+      chmodSync(tmp, 0o600);
+      renameSync(tmp, file);
+      grantFiles.set(file, token);
+    } catch (error) {
+      grantFiles.delete(file);
+      console.warn("[capabilities] polyth-tools grant file could not be written", error instanceof Error ? error.message : error);
+    }
+  };
+  const removeGrantFile = (file: string): void => {
+    grantFiles.delete(file);
+    try { rmSync(file, { force: true }); } catch { /* already gone */ }
+  };
+  function dropGrantFiles(token: string): void {
+    for (const [file, written] of [...grantFiles]) if (written === token) removeGrantFile(file);
+  }
+
   const referencedTokens = (): Set<string> => {
     const out = new Set<string>();
     for (const leases of leasesByTarget.values()) for (const lease of leases) if (lease.toolToken) out.add(lease.toolToken);
@@ -394,6 +462,7 @@ export function createCapabilityProvisioningController(opts: {
       if (keep.has(token)) continue;
       opts.tools?.revoke(token);
       activeTokens.delete(token);
+      dropGrantFiles(token);
     }
   };
 
@@ -654,6 +723,7 @@ export function createCapabilityProvisioningController(opts: {
       if (!lease.toolToken || lease.generation !== undefined || lease.captured) continue;
       opts.tools?.revoke(lease.toolToken);
       activeTokens.delete(lease.toolToken);
+      dropGrantFiles(lease.toolToken);
       delete lease.toolToken;
     }
     revokeUnreferencedTokens();
@@ -728,16 +798,23 @@ export function createCapabilityProvisioningController(opts: {
           revokeUnreferencedTokens();
         }
         const endpoint = opts.toolsEndpoint();
-        const stdio = context.remote ? undefined : opts.tools.stdioCommand(endpoint, token);
-        const remoteUrl = context.remote ? new URL(endpoint) : undefined;
+        // A remote leg cannot start the local bridge; a local harness may ask
+        // for the loopback endpoint itself (see agentToolsTransport).
+        const overHttp = Boolean(context.remote) || support.kinds.tool?.agentToolsTransport === "http";
+        const stdio = overHttp ? undefined : opts.tools.stdioCommand(endpoint, token);
+        const remoteUrl = overHttp ? new URL(endpoint) : undefined;
         if (remoteUrl) {
           remoteUrl.pathname = AGENT_TOOLS_MCP_PATH;
           remoteUrl.search = "";
           remoteUrl.hash = "";
         }
-        toolEnv = context.remote
+        toolEnv = overHttp
           ? { Authorization: `Bearer ${token}` }
           : stdio!.env;
+        const grantFile = lifetime === "session" && applyContext.sessionId && !context.remote
+          ? grantFileFor(applyContext.spaceId, applyContext.sessionId)
+          : undefined;
+        if (grantFile && ensureLaunchers()) writeGrantFile(grantFile, endpoint, token);
         const mcpMode = mcpSupport.modes.find((mode) => mode !== "unsupported") ?? "unsupported";
         plan.items.push({
           capability: {
@@ -1186,9 +1263,16 @@ export function createCapabilityProvisioningController(opts: {
       personalMcpSessions.delete(`${spaceId}:${sessionId}`);
     },
     instructionState,
+    launchEnv(context) {
+      if (!shellBin || !context.sessionId || context.remote) return undefined;
+      const file = grantFileFor(context.spaceId, context.sessionId);
+      if (!file || !grantFiles.has(file)) return undefined;
+      return { env: { [AGENT_TOOLS_GRANT_FILE_ENV]: file }, pathPrepend: [shellBin] };
+    },
     dispose() {
       disposeLaunchSink();
       disposeReceiptSink();
+      for (const file of [...grantFiles.keys()]) removeGrantFile(file);
     },
   };
 }

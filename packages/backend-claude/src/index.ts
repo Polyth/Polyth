@@ -5,7 +5,7 @@ import type { AgentRuntime, HarnessContext, JsonObject, ModelDescriptor, ModelRe
 import { createToolProgressThrottle, runtimeEventHasTurnContent } from "@polyth/contracts";
 import { createTodoToolTracker } from "@polyth/todos";
 import { redactSecrets } from "@polyth/plugins";
-import { agentBetaEnabled, attachmentModality, composeTurnPrompt, contextWindowTelemetry, createProcessAuthority, deltaCost, deltaTokenUsage, isPlaceholderTitle, normalizeTokenUsage, resolveModelSelection, unsupportedAttachmentMessage } from "@polyth/harness-runtime";
+import { agentBetaEnabled, attachmentModality, composeTurnPrompt, contextWindowTelemetry, createProcessAuthority, deltaCost, deltaTokenUsage, isPlaceholderTitle, normalizeTokenUsage, resolveModelSelection, unsupportedAttachmentMessage, withLaunchEnv } from "@polyth/harness-runtime";
 import type { EffortLevel, SDKUserMessage, Query, PermissionResult, Settings, SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
 import {
     acknowledgeCapabilityApplication,
@@ -767,7 +767,7 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                     promptSuggestions: preferences.promptSuggestions,
                     spawnClaudeCodeProcess(options) {
                         const args = protectClaudeMcpConfigArgs(context, options.args, protectedMcpConfigFiles);
-                        const child = authority.spawn(options.command, args, { cwd: options.cwd, env: claudeChildEnv(options.env), signal: options.signal });
+                        const child = authority.spawn(options.command, args, { cwd: options.cwd, env: withLaunchEnv(claudeChildEnv(options.env), context), signal: options.signal });
                         // Drained as before; only a bounded tail is kept.
                         child.stderr!.on("data", (chunk: Buffer | string) => {
                             stderrTail = (stderrTail + String(chunk)).slice(-STDERR_TAIL_CHARS);

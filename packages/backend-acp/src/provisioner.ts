@@ -26,13 +26,16 @@ export interface AcpLaunchOverlay {
 
 export const acpOverlays: LaunchOverlayStore<AcpLaunchOverlay> = createLaunchOverlayStore<AcpLaunchOverlay>();
 
-const support = (harnessId: string): HarnessCapabilitySupport => ({
+const support = (harnessId: string, options: AcpProvisionerOptions): HarnessCapabilitySupport => ({
   harnessId,
   targetLifetime: "session",
   kinds: {
     instruction: { modes: ["prompt"], mutability: "session-create", remote: false, configScope: "session" },
     "mcp-server": { modes: ["native"], mutability: "session-create", remote: false, configScope: "session" },
-    tool: { modes: ["mcp"], mutability: "session-create", remote: false, configScope: "session" },
+    tool: {
+      modes: ["mcp"], mutability: "session-create", remote: false, configScope: "session",
+      ...(options.agentToolsOverHttp ? { agentToolsTransport: "http" as const } : {}),
+    },
     skill: { modes: ["prompt"], mutability: "session-create", remote: false, configScope: "session" },
     context: { modes: ["prompt"], mutability: "session-create", remote: false, configScope: "session" },
     extension: { modes: ["unsupported"], mutability: "immutable" },
@@ -59,6 +62,10 @@ export interface AcpProvisionerOptions {
    *  a path). Bare names are resolved on this machine the way harness CLIs
    *  are; a command that cannot be found is recorded as failed, not sent. */
   absoluteMcpCommands?: boolean;
+  /** Polyth's agent tools go to the agent as its loopback HTTP MCP endpoint
+   *  on each session request, not as the stdio bridge (see
+   *  `AgentCapabilitySupport.agentToolsTransport`). */
+  agentToolsOverHttp?: boolean;
 }
 
 /** The absolute executable for a bare stdio MCP command, if this host has one. */
@@ -71,7 +78,7 @@ const absoluteMcpCommand = async (command: string): Promise<string | undefined> 
 
 export function createAcpProvisioner(harnessId: string, mcpHttp = false, options: AcpProvisionerOptions = {}): HarnessProvisioner {
   return {
-    support: () => support(harnessId),
+    support: () => support(harnessId, options),
     async apply(context, plan, secrets: CapabilitySecretResolver) {
       if (context.remote) {
         return {

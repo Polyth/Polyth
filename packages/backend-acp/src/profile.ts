@@ -161,7 +161,10 @@ export function createAcpProvider(host: ServerPackageHost, profile: RegisteredAc
         },
         // Stage HTTP entries, then require the actual initialize
         // advertisement before sending any native session request.
-        provisioner: createAcpProvisioner(profile.descriptor.id, true, profile.absoluteMcpCommands ? { absoluteMcpCommands: true } : {}),
+        provisioner: createAcpProvisioner(profile.descriptor.id, true, {
+            ...(profile.absoluteMcpCommands ? { absoluteMcpCommands: true } : {}),
+            ...(profile.agentToolsOverHttp ? { agentToolsOverHttp: true } : {}),
+        }),
         async discover(context) {
             const key = contextKey(context);
             const catalogEntry = catalogs.get(key) ?? {};

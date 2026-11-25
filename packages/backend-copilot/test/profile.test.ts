@@ -37,10 +37,19 @@ test("the descriptor offers this platform's installer, the POSIX one on SSH host
 test("the agent starts as an ACP stdio server without its own subagent tools or self-update", () => {
   assert.deepEqual(createCopilotProfile().args, COPILOT_ACP_ARGS);
   assert.deepEqual(COPILOT_ACP_ARGS.slice(0, 3), ["--acp", "--stdio", "--no-auto-update"]);
-  assert.equal(COPILOT_ACP_ARGS[3], "--excluded-tools=task,read_agent,list_agents,write_agent,run_dynamic_workflow,dynamic_workflows_manage");
+  assert.equal(COPILOT_ACP_ARGS[3], "--excluded-tools=task,read_agent,list_agents,write_agent,run_dynamic_workflow,dynamic_workflows_manage,session_store_sql");
   // No path of this machine is in the arguments, so an SSH host runs the same ones.
   assert.equal(createCopilotProfile().remoteArgs, undefined);
   assert.ok(COPILOT_NATIVE_AGENT_TOOLS.includes("task"));
+});
+
+test("Polyth's agent tools reach every Copilot session over loopback HTTP, not the launch file", () => {
+  // Copilot takes HTTP MCP servers on session/new (`mcpCapabilities.http`,
+  // seen on 1.0.115), so the tools never depend on a bridge process it starts.
+  assert.equal(createCopilotProfile().agentToolsOverHttp, true);
+  // Its native session-store SQL reads only native legs and Polyth's utility
+  // prompts; chat history comes from Polyth's `polyth` tool instead.
+  assert.ok(COPILOT_ACP_ARGS[3]!.split("=")[1]!.split(",").includes("session_store_sql"));
 });
 
 test("an added account runs in its own COPILOT_HOME and never on the server's token", () => {

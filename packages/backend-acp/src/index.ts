@@ -37,6 +37,7 @@ import {
     releaseCapabilityLaunch,
     resolveModelSelection,
     unsupportedAttachmentMessage,
+    withLaunchEnv,
     type RpcPeer,
     type SmallModelCliRunner,
 } from "@polyth/harness-runtime";
@@ -107,6 +108,12 @@ export interface AcpProfile {
     mcpServerFailure?: AcpRuntimeOptions["mcpServerFailure"];
     /** Stdio MCP commands must be absolute paths for this agent. */
     absoluteMcpCommands?: boolean;
+    /** Give Polyth's agent tools to the agent as the loopback HTTP MCP
+     *  endpoint on every session request instead of the stdio bridge. For an
+     *  agent that advertises `mcpCapabilities.http` but takes stdio servers
+     *  only at launch: the tools then never depend on the launch file, and a
+     *  re-minted grant reaches the next session request. */
+    agentToolsOverHttp?: boolean;
     /** See {@link AcpRuntimeOptions.agentNotice}. */
     agentNotice?: AcpRuntimeOptions["agentNotice"];
     /**
@@ -344,7 +351,8 @@ export async function connectAcp(
             args: profile.args,
             cwd: context.cwd,
             stateFile,
-            ...(profile.env ? { env: profile.env } : {}),
+            // The chat's shell gets `polyth-tools` (HarnessContext.launchEnv).
+            ...(profile.env || context.launchEnv ? { env: withLaunchEnv(profile.env ?? process.env, context) } : {}),
         });
     const abort = () => { void rpc.close().catch(() => {}); };
     signal?.addEventListener("abort", abort, { once: true });

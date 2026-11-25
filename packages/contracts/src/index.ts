@@ -5114,6 +5114,21 @@ export interface HarnessContext {
    * Polyth's canonical history still keeps it. The runtime pool sets it only
    * for a provider whose descriptor declares `privateSessions`. */
   privateSession?: true;
+  /** Set by the runtime pool on the context it hands `createRuntime`: what a
+   * local process launched for this chat adds to its environment so the
+   * agent's own shell reaches Polyth's tools (`polyth-tools`). Backends apply
+   * it with `withLaunchEnv` from `@polyth/harness-runtime`, never to a remote
+   * launch. Holds a file path, never a credential. */
+  launchEnv?: HarnessLaunchEnv;
+}
+
+/** See {@link HarnessContext.launchEnv}. */
+export interface HarnessLaunchEnv {
+  /** Variables to set (names never contain KEY, TOKEN or SECRET, which some
+   *  harnesses strip from their shell). */
+  env: Readonly<Record<string, string>>;
+  /** Directories put in front of PATH. */
+  pathPrepend: readonly string[];
 }
 
 /** What Polyth wants an agent to have. Distinct from RuntimeCapabilities, which
@@ -5159,6 +5174,12 @@ export interface AgentCapabilitySupport {
   configScope?: AgentCapabilityScope;
   /** For skill support only: the harness can enforce per-skill tool exclusions. */
   skillDisallowedTools?: boolean;
+  /** For tool support only: how Polyth's own agent tools reach a local
+   * runtime. `stdio` (default) launches the bridge process; `http` hands the
+   * harness the loopback MCP endpoint directly, for a harness that takes HTTP
+   * servers per session but stdio servers only at process launch. A remote
+   * runtime always uses HTTP. */
+  agentToolsTransport?: "stdio" | "http";
 }
 
 /** Who owns volatile application state. Independent of `configScope`. */
