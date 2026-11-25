@@ -3805,11 +3805,11 @@ run arrives as the person's own message. Paused tasks list after the upcoming
 ones; a finished one-time task has left. While open, the line stays even when
 its last upcoming task is paused; folded, it leaves once nothing is upcoming.
 Escape folds the list and returns focus to the line. Line and list enter and
-leave through `ComposerNoticeRow`. The look follows Chat settings → *Status
-above the composer*: `line` is plateless with a faint tray when open, `tab`
-insets both to the tab's line, `capsule` hugs the folded line in a centred
-hairline pill and frames the open list; outlines and the chevron are inset
-shadows and an icon, so *Hide interface borders* keeps them. Inks come from
+leave through `ComposerNoticeRow`. Folded, the line is plateless text. Open,
+list and line are one faint tray that fades with the fold: the line closes it
+under an inset-shadow hairline (so *Hide interface borders* keeps the seam)
+as the list's own handle, and the rows and closing note start on the line's
+mark column (`--planner-chat-inset`). Inks come from
 the chat frame (wallpaper wash). As an `inline-size` container the line drops
 the cadence at 520 px, and at 360 px the list stacks time over title and
 keeps only the menu. `planner.run-fact` in `session.timeline.event` renders

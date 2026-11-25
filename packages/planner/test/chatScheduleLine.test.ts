@@ -249,7 +249,19 @@ test("planner chat line spans full dock width and mark sits on pending stack gri
   const { readFileSync } = await import("node:fs");
   const css = readFileSync(new URL("../widgets/styles.css", import.meta.url), "utf8");
   assert.match(css, /\.planner-chat-line\s*\{[^}]*padding:\s*0;/);
-  assert.match(css, /\.planner-chat-toggle\s*\{[^}]*padding-inline-start:\s*calc\(var\(--composer-stack-mark/);
+  assert.match(css, /\.planner-chat\s*\{[^}]*--planner-chat-inset:\s*calc\(var\(--composer-stack-mark/);
+  assert.match(css, /\.planner-chat-toggle\s*\{[^}]*padding-inline-start:\s*var\(--planner-chat-inset\);/);
   assert.doesNotMatch(css, /\.planner-chat-toggle\s*\{[^}]*- var\(--space-1\)/, "no inset offset subtracting from mark grid");
   assert.match(css, /\.planner-chat-chevron\s*\{[^}]*margin-inline:\s*0;/);
+});
+
+test("the open list and its line are one tray, not a card above a line", async () => {
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync(new URL("../widgets/styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.planner-chat\[data-open\]\s*\{[^}]*background-color:\s*var\(--planner-chat-tray\);/, "the open fill wraps list and line");
+  const panel = /\.planner-chat-panel\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.doesNotMatch(panel, /background/, "the list draws no plate of its own");
+  assert.match(panel, /margin:\s*0;/, "no gap splits the list from its line");
+  // The rows start on the line's mark column.
+  assert.match(css, /\.planner-chat-task\s*\{[^}]*padding-inline:\s*calc\(var\(--planner-chat-inset\) - var\(--space-1\)\)/);
 });
