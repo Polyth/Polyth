@@ -166,6 +166,8 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
               spaceStorage: (spaceId) => spaceId && host.packageSpaces
                 ? packageSpaces().find((space) => space.spaceId === spaceId)?.storage
                 : undefined,
+              appendSessionEvent: (sessionId, type, data) =>
+                host.events.append(sessionId, type, data, { ignorable: true, producerPlugin: host.pluginId }),
             })),
           ];
         }

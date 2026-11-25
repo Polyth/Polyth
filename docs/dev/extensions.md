@@ -517,20 +517,41 @@ it enables:
   it needs no repository files: when to choose a sandboxed or a trusted server
   package, working templates for both, contributions, capabilities, RemoteUI,
   agent tool/skill registration from a trusted entry, tenancy, disposal, and
-  the check → install link → Update loop;
-- the read-only tool `polyth_packages` (`src/agentTool.ts`), whose actions are
+  the check → propose_install → Update loop;
+- the tool `polyth_packages` (`src/agentTool.ts`), whose actions are
   `info` (the trusted plugin directory `file:` sources resolve against, the
   engine version, edition, UI slots, limits), `list` (installed packages and
   their state in the calling Space, the same view as `GET /api/plugins`),
   `check` (loads the manifest of `<trusted dir>/<id>`, checks engine, assets
   and runtime rules, and builds its UI/sandbox bundle into a temporary
-  directory exactly as install does; server code is not executed) and `logs`
-  (the same lines as `GET /api/plugins/<id>/logs`).
+  directory exactly as install does; server code is not executed),
+  `propose_install` (runs `check`, then appends a `plugins/install-proposed`
+  event to the calling session) and `logs` (the same lines as
+  `GET /api/plugins/<id>/logs`).
 
-Neither installs, enables or grants anything. The agent writes the folder and
-hands the person `/?settings=packages&install=file:<id>`; installation, access
-review and enablement stay theirs, and a trusted server package still needs
-the instance owner. `loadServerEntry` reads the same manifest install did
+Neither installs, enables or grants anything. The install block is the
+person's seam (`src/installProposal.ts`, `widgets/InstallProposalBlock.tsx`,
+slot `session.timeline.event`):
+
+- every field it shows (name, version, required capabilities, connections,
+  contribution kinds, whether it runs server code) is read on the server from
+  the folder's manifest, never taken from the agent, and the event carries the
+  manifest's sha256;
+- its one button runs the Settings → Packages sequence under the person's own
+  session: `POST /api/plugins/install` with `expectManifestSha256` (the
+  registry refuses a staged manifest with another hash, so the agent cannot
+  swap the package after the person saw it), then grants of the required
+  capabilities and connections it listed, then enable. Install stays
+  instance-owner only and enable Space-admin only, by the same route checks;
+- `GET /api/plugins/install-access` answers `{ install, enable }` by running
+  those same checks. Only a caller who may install sees the "runs code on this
+  server" line; anyone else sees who can, and a link to hand the owner;
+- the outcome reaches the agent as an ordinary message the person's client
+  sends (`host.conversation.send`), so it is in history and wakes the agent.
+  It is not a permission request: no Auto-approve level, judge, delegated
+  approval or standing rule can press it.
+
+`/?settings=packages&install=file:<id>` remains the fallback. `loadServerEntry` reads the same manifest install did
 (`loadCanonicalManifest`: `polyth-package.json` `runtime.server`, a
 `package.json` `polyth` object, or legacy `polyth-plugin.json`
 `entries.server`) and refuses one whose real file leaves the install

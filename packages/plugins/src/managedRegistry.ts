@@ -23,7 +23,7 @@ import {
   type PackageManifest,
   type PackageManifestV2,
 } from "@polyth/package-sdk/manifest";
-import { loadCanonicalManifest } from "./canonical.ts";
+import { loadCanonicalManifest, manifestSha256 } from "./canonical.ts";
 import { type ManagedPluginManifest } from "./managedManifest.ts";
 import { loadServerEntry } from "./trustedServerEntry.ts";
 import { buildUiBundle } from "./uiBundle.ts";
@@ -95,6 +95,9 @@ export interface InstallOptions {
   /** Install a repository as a Polyth-owned fork that integrates upstream with this strategy. */
   fork?: { strategy: ForkStrategy };
   autoUpdate?: boolean;
+  /** Refuse unless the staged manifest has exactly this sha256: an install
+   *  from a chat proposal installs what the person was shown. */
+  expectManifestSha256?: string;
 }
 
 export interface PackageUpdateSettings {
@@ -1045,6 +1048,10 @@ export function createPluginRegistry(opts: PluginRegistryOptions): PluginRegistr
           allowDevPath,
           downloadRepository: opts.downloadRepository,
         });
+        if (options.expectManifestSha256 !== undefined
+          && manifestSha256(loadCanonicalManifest(staged.pkgDir).path) !== options.expectManifestSha256) {
+          throw err("conflict", "the package manifest changed since it was proposed; ask the agent to propose it again");
+        }
         const prepared = await prepareDir(staged.pkgDir, source.trim(), staged.trustedLocal === true);
         if (plugins.has(prepared.legacy.id)) {
           throw err("conflict", `plugin already installed: ${prepared.legacy.id}`);

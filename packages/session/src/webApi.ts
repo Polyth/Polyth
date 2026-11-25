@@ -1361,8 +1361,12 @@ export const api = {
   /** Spec-named probe — same reachability check, stores status/lastError. */
   mcpProbe: (id: string) => jfetch<{ ok: boolean; message: string }>(`/api/mcp/servers/${encodeURIComponent(id)}/probe`, json("POST", {})),
   pluginsList: () => jfetch<InstalledPluginDto[]>("/api/plugins").catch((): InstalledPluginDto[] => []),
-  pluginsInstall: (source: string, options: { fork?: { strategy: PackageForkStrategy }; autoUpdate?: boolean } = {}) =>
+  pluginsInstall: (source: string, options: { fork?: { strategy: PackageForkStrategy }; autoUpdate?: boolean; expectManifestSha256?: string } = {}) =>
     jfetch<InstalledPluginDto>("/api/plugins/install", json("POST", { source, ...options })),
+  /** What the caller may do here, by the checks install and enable run. */
+  pluginsInstallAccess: () =>
+    jfetch<{ install: boolean; enable: boolean }>("/api/plugins/install-access")
+      .catch(() => ({ install: false, enable: false })),
   /** Uploaded .zip archive (base64). Installing an id that is already present
    *  stages the uploaded release as an update instead of failing. */
   pluginsInstallArchive: (archive: string, filename: string) =>

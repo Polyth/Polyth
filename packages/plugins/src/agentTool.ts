@@ -1,8 +1,10 @@
 // `polyth_packages`: the agent's view of this installation's package manager,
 // so the `polyth-packages` skill works on any install (Desktop, Docker, a
 // server under any data dir) without guessing paths or versions. Read-only:
-// it never installs, enables or grants anything. Installing stays the
-// instance owner's action in Settings → Packages, where grants are reviewed.
+// it never installs, enables or grants anything. `propose_install` only puts
+// a block in the chat; installing stays the person's click there (or in
+// Settings → Packages), under the same instance-owner and Space-admin checks.
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
@@ -13,11 +15,12 @@ import {
   type SpaceStorage,
 } from "@polyth/contracts";
 import { assertEngineCompatible, requiredAssets } from "@polyth/package-sdk/manifest";
-import { loadCanonicalManifest } from "./canonical.ts";
+import { loadCanonicalManifest, manifestSha256 } from "./canonical.ts";
 import { workstationEdition } from "./edition.ts";
 import { ENGINE_VERSION, type PluginRegistry } from "./managedRegistry.ts";
 import { buildSandboxBundle } from "./sandboxBundle.ts";
 import { buildUiBundle } from "./uiBundle.ts";
+import { PACKAGE_INSTALL_PROPOSED_EVENT, type PackageInstallProposal } from "./installProposal.ts";
 
 export const PACKAGES_TOOL_NAME = "polyth_packages";
 
@@ -28,6 +31,8 @@ export interface PackageAuthoringRuntime {
   registry(): PluginRegistry | null;
   /** The grant Space's storage; undefined when the Space is unknown. */
   spaceStorage(spaceId: string | undefined): SpaceStorage | undefined;
+  /** Persist and broadcast a package-owned event in this session's chat. */
+  appendSessionEvent(sessionId: string, type: string, data: JsonObject): Promise<unknown>;
 }
 
 const PACKAGE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -47,13 +52,13 @@ const inputSchema: JsonObject = {
   properties: {
     action: {
       type: "string",
-      enum: ["info", "list", "check", "logs"],
-      description: "info: where to put a package on this installation and how to install it. list: installed packages and their state in this Space. check: validate and build the package folder <packageDir>/<id> exactly as install will, without installing. logs: an installed package's recent log lines.",
+      enum: ["info", "list", "check", "propose_install", "logs"],
+      description: "info: where to put a package on this installation and how to install it. list: installed packages and their state in this Space. check: validate and build the package folder <packageDir>/<id> exactly as install will, without installing. propose_install: run check, then show the person an install block in this chat built from the package's manifest; they install it with one click (or decline) and their reply comes back as a message. logs: an installed package's recent log lines.",
     },
     id: {
       type: "string",
       pattern: PACKAGE_ID.source,
-      description: "Package id (check, logs).",
+      description: "Package id (check, propose_install, logs).",
     },
     limit: {
       type: "integer",
@@ -87,7 +92,7 @@ function info(runtime: PackageAuthoringRuntime): JsonObject {
     uiSlots: [...UI_SLOTS],
     limits: { files: 512, archiveMiB: 32, unpackedMiB: 64 },
     note: trustedDir
-      ? "Write the package to <packageDir>/<id>/ (create packageDir if missing), run check, then give the person installLink with <id> filled in: Settings → Packages → Add package installs it after they review its access. packageDir is on the Polyth host; if your shell runs elsewhere (an SSH project), build the folder there and ask the person to upload it as a .zip in Add package instead."
+      ? "Write the package to <packageDir>/<id>/ (create packageDir if missing), run check, then propose_install so the person can install it from this chat with one click (installLink with <id> filled in is the fallback: Settings → Packages → Add package). packageDir is on the Polyth host; if your shell runs elsewhere (an SSH project), build the folder there and ask the person to upload it as a .zip in Add package instead."
       : "This installation has no trusted package directory: a package with server code cannot be installed. A sandboxed package can still be zipped and uploaded by the person in Settings → Packages → Add package.",
   };
 }
@@ -165,7 +170,43 @@ async function check(runtime: PackageAuthoringRuntime, id: string): Promise<Json
       ? "Fix the problems and run check again."
       : installed
         ? "Already installed: bump the manifest version, then the person presses Update on the package in Settings → Packages."
-        : `Give the person /?settings=packages&install=file:${id} to install it.`,
+        : "Call propose_install so the person can install it from this chat.",
+  };
+}
+
+/** What the install block shows, read from the folder's manifest on the server. */
+function proposalOf(runtime: PackageAuthoringRuntime, id: string): PackageInstallProposal {
+  const { canonical, legacy, path } = loadCanonicalManifest(resolve(runtime.trustedDir!, id));
+  const contributes = (canonical.contributes ?? {}) as Record<string, unknown>;
+  const surfaces = Object.keys(contributes).filter((key) => Array.isArray(contributes[key]) && (contributes[key] as unknown[]).length > 0);
+  if (legacy.entries?.ui && legacy.contributions?.length) surfaces.push("panels");
+  return {
+    proposalId: randomUUID(),
+    packageId: id,
+    source: `file:${id}`,
+    name: clip(canonical.display.name),
+    description: clip(canonical.display.description),
+    version: canonical.version,
+    server: canonical.runtime?.kind !== "sandboxed" && Boolean(canonical.runtime?.server ?? legacy.entries?.server),
+    capabilities: (canonical.capabilities ?? []).map((item) => ({ name: item.name, required: item.required !== false })),
+    connections: (canonical.connections ?? []).map((item) => clip(item.label)),
+    surfaces,
+    manifestSha256: manifestSha256(path),
+  };
+}
+
+async function proposeInstall(runtime: PackageAuthoringRuntime, id: string, sessionId: string): Promise<JsonObject> {
+  if (workstationEdition()) fail("unavailable", "this edition does not install packages");
+  const checked = await check(runtime, id);
+  if (!checked.ok) return { ...checked, proposed: false, next: "Fix the problems, then propose_install again." };
+  if (checked.installed) return { ...checked, proposed: false };
+  const proposal = proposalOf(runtime, id);
+  await runtime.appendSessionEvent(sessionId, PACKAGE_INSTALL_PROPOSED_EVENT, proposal as unknown as JsonObject);
+  return {
+    id,
+    proposed: true,
+    proposalId: proposal.proposalId,
+    next: "The person now sees an install block in this chat. End your turn; their choice arrives as a message. Do not install it another way, and propose again if you change the manifest.",
   };
 }
 
@@ -176,9 +217,9 @@ export function createPackagesAgentTool(owner: string, runtime: PackageAuthoring
       kind: "tool",
       owner,
       scope: "deployment",
-      revision: "1",
+      revision: "2",
       name: PACKAGES_TOOL_NAME,
-      description: "Inspect this Polyth installation's package manager for building the person's own packages: where package folders go and how they install (info), installed packages (list), a dry-run validation and build of a package folder (check), and an installed package's logs (logs). Read-only; installing and granting access stay the person's actions in Settings → Packages.",
+      description: "Inspect this Polyth installation's package manager for building the person's own packages: where package folders go and how they install (info), installed packages (list), a dry-run validation and build of a package folder (check), and an installed package's logs (logs), and an install block for the person in this chat (propose_install). It never installs, enables or grants access itself: the person does, with one click in that block.",
       inputSchema,
       trust: "workspace",
       mutating: false,
@@ -187,6 +228,9 @@ export function createPackagesAgentTool(owner: string, runtime: PackageAuthoring
       const action = input.action;
       if (action === "info") return { output: JSON.stringify(info(runtime)) };
       if (action === "check") return { output: JSON.stringify(await check(runtime, packageIdOf(input))) };
+      if (action === "propose_install") {
+        return { output: JSON.stringify(await proposeInstall(runtime, packageIdOf(input), context.sessionId)) };
+      }
       const registry = runtime.registry() ?? fail("unavailable", "the package manager is not running");
       if (action === "list") return { output: JSON.stringify(list(runtime, registry, context.spaceId)) };
       if (action === "logs") {
@@ -196,7 +240,7 @@ export function createPackagesAgentTool(owner: string, runtime: PackageAuthoring
         const lines = registry.logs(id, { limit: 10_000 }).slice(-limit).map((entry) => ({ at: entry.at, line: clip(entry.line) }));
         return { output: JSON.stringify({ id, lines }) };
       }
-      return fail("invalid-input", "action must be info, list, check or logs");
+      return fail("invalid-input", "action must be info, list, check, propose_install or logs");
     },
   };
 }

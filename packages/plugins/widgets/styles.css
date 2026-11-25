@@ -829,3 +829,72 @@ body .plugin-install-dialog .plugin-install.is-dragging .plugin-drop {
     min-height: var(--tap);
   }
 }
+
+/* Install block an agent leaves in the chat for a package it built: a quiet
+   timeline note like the activity blocks (no border, no shadow), with one
+   filled button where the person decides. */
+.plugin-proposal {
+  container: plugin-proposal / inline-size;
+  justify-self: start;
+  align-self: flex-start;
+  inline-size: min(100%, 32rem);
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: var(--icon-md) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-1) var(--conversation-row-gap);
+  min-width: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-card);
+  background: var(--surface-overlay);
+  color: var(--text-dim);
+  font-size: var(--font-technical);
+  line-height: var(--font-technical-lh);
+}
+.plugin-proposal > :not(.plugin-proposal-mark) { grid-column: 2; min-width: 0; margin: 0; }
+.plugin-proposal-mark {
+  grid-column: 1;
+  grid-row: 1;
+  inline-size: var(--icon-md);
+  block-size: var(--font-tool-label-lh);
+  display: inline-grid;
+  place-items: center;
+  color: var(--text-dim);
+}
+.plugin-proposal-head {
+  grid-row: 1;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.plugin-proposal-title {
+  color: var(--text);
+  font-size: var(--font-tool-label);
+  font-weight: 500;
+  line-height: var(--font-tool-label-lh);
+  overflow-wrap: anywhere;
+}
+.plugin-proposal[data-state="ready"] { padding-block: var(--space-2); align-items: center; }
+.plugin-proposal[data-state="ready"] .plugin-proposal-head { align-items: center; }
+.plugin-proposal[data-state="ready"] .plugin-proposal-title { color: var(--text-dim); }
+.plugin-proposal-version { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.plugin-proposal-description { overflow-wrap: anywhere; }
+.plugin-proposal-facts { display: grid; gap: 2px; }
+.plugin-proposal-facts > div { display: flex; flex-wrap: wrap; column-gap: var(--space-2); }
+.plugin-proposal-facts dt { color: var(--muted); }
+.plugin-proposal-facts dd { margin: 0; overflow-wrap: anywhere; }
+/* Server code: as quiet as the line under the title; only the glyph is amber. */
+.plugin-proposal-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+.plugin-proposal-warning .ui-icon { flex: none; color: var(--amber); block-size: var(--font-technical-lh); }
+.plugin-proposal-note { color: var(--muted); }
+.plugin-proposal-error { color: var(--red); overflow-wrap: anywhere; }
+.plugin-proposal > .plugin-proposal-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-block-start: var(--space-2); }
+.plugin-proposal > .plugin-proposal-actions:empty { display: none; }
+@container plugin-proposal (max-width: 30rem) {
+  .plugin-proposal-actions > .ui-btn { flex: 1 1 100%; }
+}

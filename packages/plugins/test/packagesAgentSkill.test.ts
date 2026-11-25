@@ -15,6 +15,7 @@ import {
 import registerPlugins from "../src/serverEntry.ts";
 import type { PluginRegistry } from "../src/managedRegistry.ts";
 import { testSpaceStorage } from "./helpers.ts";
+import { PACKAGE_INSTALL_PROPOSED_EVENT, readInstallProposal } from "../src/installProposal.ts";
 
 const SKILL_ID = "plugins.skill.polyth-packages";
 const TOOL_ID = "plugins.packages";
@@ -58,12 +59,19 @@ async function fixture() {
   raw.provide(serverServiceKey("plugins.config"), {});
   raw.provide(serverServiceKey("harness.capabilities"), capabilities);
   const storage = testSpaceStorage(join(dir, "space"));
+  const appended: Array<{ sessionId: string; type: string; data: Record<string, unknown>; opts: unknown }> = [];
   const host = {
     pluginId: "plugins", storageDir: dir, root,
     services: bindPackageServices(raw, "plugins"),
     managedPackageServices: (packageId: string) => bindPackageServices(raw, packageId),
     routes: { add: () => ({ dispose() {} }) }, broadcast: {},
     packageSpaces: () => [{ spaceId: "spc_a", storage }],
+    events: {
+      append: async (sessionId: string, type: string, data: Record<string, unknown>, opts: unknown) => {
+        appended.push({ sessionId, type, data, opts });
+        return { sessionId, type, data };
+      },
+    },
   } as unknown as ServerPackageHost;
   const manager = registerPlugins(host);
   await manager.onEnable?.();
@@ -71,7 +79,7 @@ async function fixture() {
   const tool = async (input: Record<string, unknown>) =>
     JSON.parse((await capabilities.executor(TOOL_ID)!(input as never, call())).output) as Record<string, unknown>;
   return {
-    dir, trustedDir, capabilities, registry, storage, manager, tool,
+    dir, trustedDir, capabilities, registry, storage, manager, tool, appended,
     async dispose() {
       await manager.onDisable?.();
       await root.dispose();
@@ -234,5 +242,58 @@ test("a server entry declared in polyth-package.json installs and runs like a po
     assert.equal((await f.capabilities.executor("v2server.ping")!({}, call())).output, "pong");
     await f.registry.disable("v2server", f.storage);
     assert.equal(f.capabilities.executor("v2server.ping"), undefined, "disable disposes the entry");
+  } finally { await f.dispose(); }
+});
+
+test("propose_install puts a manifest-derived install block in the chat, and install refuses a manifest changed since", async () => {
+  const f = await fixture();
+  try {
+    const source = "import { connectPolyth } from \"@polyth/package-sdk\";\nconst polyth = await connectPolyth();\nawait polyth.ui.render({ type: \"text\", text: \"hi\" });\n";
+    writePackage(f.trustedDir, "notes", { "polyth-package.json": sandboxed("notes"), "src/index.ts": source });
+    const proposed = await f.tool({ action: "propose_install", id: "notes" });
+    assert.equal(proposed.proposed, true, JSON.stringify(proposed));
+    assert.equal(f.registry.has("notes"), false, "proposing never installs");
+    assert.equal(f.appended.length, 1);
+    const [block] = f.appended;
+    assert.equal(block!.sessionId, "ses_a");
+    assert.equal(block!.type, PACKAGE_INSTALL_PROPOSED_EVENT);
+    assert.deepEqual(block!.opts, { ignorable: true, producerPlugin: "plugins" });
+    const proposal = readInstallProposal(block!.data);
+    assert.ok(proposal);
+    assert.equal(proposal.proposalId, proposed.proposalId);
+    assert.equal(proposal.source, "file:notes");
+    assert.equal(proposal.name, "Notes");
+    assert.equal(proposal.server, false);
+    assert.deepEqual(proposal.capabilities, [{ name: "ui.render", required: true }]);
+    assert.deepEqual(proposal.surfaces, ["surfaces"]);
+    assert.match(proposal.manifestSha256, /^[0-9a-f]{64}$/);
+
+    // The agent rewrites the manifest after the person saw the block.
+    writePackage(f.trustedDir, "notes", {
+      "polyth-package.json": sandboxed("notes", { display: { name: "Notes", description: "Now asks for more." } }),
+    });
+    await assert.rejects(
+      () => f.registry.install("file:notes", { expectManifestSha256: proposal.manifestSha256 }),
+      /manifest changed since it was proposed/,
+    );
+    assert.equal(f.registry.has("notes"), false);
+    const again = readInstallProposal((await f.tool({ action: "propose_install", id: "notes" }), f.appended[1]!.data));
+    await f.registry.install("file:notes", { expectManifestSha256: again!.manifestSha256 });
+    assert.equal(f.registry.has("notes"), true);
+
+    const installed = await f.tool({ action: "propose_install", id: "notes" });
+    assert.equal(installed.proposed, false, "an installed package is updated, not proposed");
+
+    writePackage(f.trustedDir, "broken", { "polyth-package.json": sandboxed("broken"), "src/index.ts": "nope(\n" });
+    const broken = await f.tool({ action: "propose_install", id: "broken" });
+    assert.equal(broken.proposed, false);
+    assert.equal(f.appended.length, 2, "a package that fails check gets no block");
+
+    writePackage(f.trustedDir, "srv", {
+      "polyth-package.json": sandboxed("srv", { runtime: { kind: "trusted-local", server: "server.mjs" }, contributes: {}, capabilities: [] }),
+      "server.mjs": "export default () => ({ manifest: { id: \"srv\", version: \"1.0.0\", trust: \"privileged\" }, setup() {} });\n",
+    });
+    await f.tool({ action: "propose_install", id: "srv" });
+    assert.equal(readInstallProposal(f.appended[2]!.data)?.server, true, "server code is flagged");
   } finally { await f.dispose(); }
 });

@@ -317,10 +317,23 @@ export function managedPluginRoutes(
         ? (input.fork as Record<string, unknown>)
         : undefined;
       if (fork && !isForkStrategy(fork.strategy)) fail("invalid-input", "fork strategy must be rebase or merge");
+      const expectManifestSha256 = typeof input.expectManifestSha256 === "string" ? input.expectManifestSha256 : undefined;
       request.json(200, await registry.install(String(input.source ?? ""), {
         ...(fork ? { fork: { strategy: fork.strategy as "rebase" | "merge" } } : {}),
         autoUpdate: input.autoUpdate === true,
+        ...(expectManifestSha256 !== undefined ? { expectManifestSha256 } : {}),
       }));
+      return true;
+    }
+    if (path === "/api/plugins/install-access" && method === "GET") {
+      // What this caller may do, by the very checks install and enable run.
+      const allowed = (check: () => void): boolean => {
+        try { check(); return true; } catch { return false; }
+      };
+      request.json(200, {
+        install: !workstationEdition() && allowed(() => assertDeploymentPackageMutator(request)),
+        enable: allowed(() => assertSpacePackageEnable(request, request.space)),
+      });
       return true;
     }
     if (path === "/api/plugins/check-updates" && method === "POST") {

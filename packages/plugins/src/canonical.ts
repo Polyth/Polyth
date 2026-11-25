@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { TrustClass } from "@polyth/contracts";
@@ -18,6 +19,11 @@ export function isPackageDocument(value: unknown): value is Record<string, unkno
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const version = (value as { manifestVersion?: unknown }).manifestVersion;
   return version === 1 || version === 2;
+}
+
+/** sha256 of a manifest file's bytes: what an install proposal pinned. */
+export function manifestSha256(path: string): string {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
 /** The package's manifest, from the first of `polyth-package.json`, a
