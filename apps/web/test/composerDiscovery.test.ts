@@ -190,9 +190,11 @@ test("add menu: camera leads the attach tiles only where a camera can open", () 
   const touch = addMenuRows({ ...base, canCapturePhoto: true });
   assert.deepEqual(touch.filter((r) => r.tile).map((r) => r.action), ["camera", "photos", "upload"]);
   assert.equal(touch.find((r) => r.id === "camera")?.description, tr("composer.discovery.takePhoto"));
-  // One upload block disables every attach source together.
-  const blocked = addMenuRows({ ...base, canCapturePhoto: true, uploadDisabledReason: "Read-only" });
-  assert.deepEqual(blocked.filter((r) => r.tile).map((r) => r.disabledReason), ["Read-only", "Read-only", "Read-only"]);
+  // Attach sources are never disabled by what the agent can reach; only a
+  // missing project blocks them, all together.
+  assert.deepEqual(touch.filter((r) => r.tile).map((r) => r.disabledReason), [undefined, undefined, undefined]);
+  const noProject = addMenuRows({ ...base, hasProject: false, canCapturePhoto: true });
+  assert.ok(noProject.filter((r) => r.tile).every((r) => r.disabledReason === OPEN_PROJECT_FIRST));
 });
 
 // ---------------------------------------------------------------- autocomplete
@@ -618,7 +620,8 @@ test("attachmentNote: a link never warns; other unsupported modalities keep thei
   const url = { id: "u", name: "PR", mime: "text/uri-list", size: 0, kind: "url" as const, url: "https://github.com/o/r/pull/1" };
   const audio = { id: "a", name: "a.mp3", mime: "audio/mpeg", size: 1, kind: "file" as const, path: "_inbox/a.mp3" };
   const support = { url: "unsupported", audio: "unsupported", pdf: "unsupported" } as const;
-  assert.equal(attachmentNote({ attachments: [url], support, referenceable: false }), null);
-  assert.equal(attachmentNote({ attachments: [audio], support, referenceable: false }), tr("composer.discovery.currentlyUnavailable"));
-  assert.equal(attachmentNote({ attachments: [audio], support, referenceable: true }), null);
+  const zip = { ...audio, id: "z", name: "a.zip", mime: "application/zip", path: "_inbox/a.zip" };
+  assert.equal(attachmentNote({ attachments: [url], support }), null);
+  // A stored file is delivered by path whatever the engine can read.
+  assert.equal(attachmentNote({ attachments: [audio, zip], support }), null);
 });

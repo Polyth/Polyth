@@ -446,7 +446,6 @@ export function addMenuRows(input: {
   snippets: CatalogState<unknown>;
   /** Available package contributions, already sorted by the host registry. */
   contributions?: readonly AddMenuContributionRow[];
-  uploadDisabledReason?: string;
   /** Protected mode: the server refuses `!` shell, so the row is not offered. */
   shellHidden?: boolean;
   /** The device has a camera the browser or native shell can open directly. */
@@ -455,9 +454,9 @@ export function addMenuRows(input: {
   const needsProject = input.hasProject ? undefined : OPEN_PROJECT_FIRST;
   const shellBlock = needsProject
     ?? (input.draftText.trim() !== "" ? SHELL_DRAFT_BLOCK : undefined);
-  // Every attach source lands in the same project `_inbox`, so one reason
-  // blocks all of them together.
-  const attachBlock = needsProject ?? input.uploadDisabledReason;
+  // Every attach source lands in the same project `_inbox`, so only a missing
+  // project blocks them; an agent that cannot reach the files never does.
+  const attachBlock = needsProject;
   const attach = (id: AddMenuAction, label: string, description: string): AddMenuRow => ({
     id, kind: "item", tile: true, label, description, action: id,
     ...(attachBlock ? { disabledReason: attachBlock } : {}),
@@ -1096,7 +1095,6 @@ export const ATTACHMENT_COMPAT_NOTE =
 export function attachmentNote(input: {
   attachments: readonly AttachmentRef[];
   support: Partial<Record<AttachmentModality, FeatureSupport>> | undefined;
-  referenceable: boolean;
 }): string | null {
   if (input.attachments.length === 0) return null;
   // No capability report is not a claim of incompatibility; only an explicit
@@ -1109,8 +1107,10 @@ export function attachmentNote(input: {
     const level = input.support[modality];
     if (level === "native" || level === "emulated") continue;
     // `level` is now "unsupported" or undefined (not reported for this modality).
-    // Any other uploaded file reaches the agent by path (file-reference plan).
-    if (input.referenceable && modality !== "image" && attachment.path) continue;
+    // A stored file is always delivered, by path when the engine cannot take
+    // its content (or only named as kept in the project when the agent's host
+    // cannot reach it); an unsupported engine is no reason to warn.
+    if (modality !== "image" && attachment.path) continue;
     if (modality === "image") return tr("composer.discovery.attachmentImagesOmitted");
     return tr("composer.discovery.currentlyUnavailable");
   }

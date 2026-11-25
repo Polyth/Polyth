@@ -75,6 +75,7 @@ export {
   projectAttachmentPdf,
   referenceAttachmentFile,
   projectAttachmentLink,
+  storedAttachmentFile,
   materializeAttachmentText,
   PDF_PROJECTION_MAX_BYTES,
   TEXT_PROJECTION_MAX_BYTES,

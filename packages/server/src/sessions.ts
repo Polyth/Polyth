@@ -102,6 +102,7 @@ import {
   projectAttachmentText,
   referenceAttachmentFile,
   projectAttachmentLink,
+  storedAttachmentFile,
   resolveModelSelection,
   titleFromPrompt,
 } from "@polyth/harness-runtime";
@@ -8768,11 +8769,9 @@ export function createSessionService(deps: {
       await deps.browserArtifacts.commit(committedIds, proj.projectId);
     }
     if (!deps.attachments) {
-      // The files package failed to load: ordinary refs pass through as before,
-      // but a staged upload can never be materialized — fail loudly.
-      if (refs.some((ref) => ref.path?.startsWith("_inbox/"))) {
-        throw Object.assign(new Error("attachment staging is unavailable"), { code: "unsupported" });
-      }
+      // The files package failed to load: nothing can be checked or copied, but
+      // the upload is still stored in the project, so the turn is admitted and
+      // the file is named by path (stored-only delivery).
       return refs;
     }
     const project = await projects.get(proj.projectId);
@@ -8809,7 +8808,11 @@ export function createSessionService(deps: {
       }
       let stat: { kind: "file" | "dir"; size: number };
       try {
-        stat = rel.startsWith("_inbox/")
+        // Without a materializer (or on a remote project that has none) a staged
+        // upload stays where it is stored, in the project root.
+        stat = rel.startsWith("_inbox/") && typeof deps.attachments.materialize !== "function"
+          ? await deps.attachments.stat(sourceRoot, rel, proj.projectId)
+          : rel.startsWith("_inbox/")
           ? await deps.attachments.materialize({ projectId: proj.projectId, projectRoot: sourceRoot, execRoot, rel })
           : await deps.attachments.stat(execRoot, rel, proj.projectId);
       } catch {
@@ -9422,9 +9425,11 @@ export function createSessionService(deps: {
         }
         // Any format is accepted: what the engine cannot take as content is
         // handed over by path, and the agent opens it or says it cannot.
-        const reference = (reason: string): string => referenceAttachmentFile({
-          path: ref.path!, ...(ref.mime ? { mime: ref.mime } : {}), size: ref.size, reason,
-        });
+        const reference = (reason: string): string => !referenceable
+          ? storedAttachmentFile({ path: ref.path!, ...(ref.mime ? { mime: ref.mime } : {}), size: ref.size })
+          : referenceAttachmentFile({
+            path: ref.path!, ...(ref.mime ? { mime: ref.mime } : {}), size: ref.size, reason,
+          });
         if (plan.kind === "file-reference") {
           sections.push(reference(plan.tooLarge
             ? "it is too large to send inside a message"
@@ -9461,7 +9466,7 @@ export function createSessionService(deps: {
         if (!projection.ok) {
           // A binary, non-UTF-8 or text-less file is still the person's
           // upload: name it instead of refusing the whole turn.
-          if (!referenceable || ref.kind === "range") {
+          if (ref.kind === "range") {
             throw Object.assign(new Error(projection.reason), { code: projection.code });
           }
           sections.push(reference(plan.modality === "pdf"

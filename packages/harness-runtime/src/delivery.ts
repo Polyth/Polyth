@@ -30,6 +30,10 @@ export type AttachmentDeliveryPlan =
       /** The engine could take this kind of content, but the file is bigger
        *  than Polyth sends inside a message. */
       tooLarge?: true;
+      /** The file is kept in Polyth's project workspace but the agent's own
+       *  host cannot reach it (remote project, no materialization). Still
+       *  delivered: named by path, never refused. */
+      storedOnly?: true;
     }
   | { kind: "unsupported"; modality?: AttachmentModality; code: TurnRejectionCode; reason: string };
 
@@ -71,6 +75,13 @@ export interface AttachmentDeliveryInput {
   inlineMaxBytes?: number;
 }
 
+const isHttpUrl = (value: string | undefined): boolean => {
+  try {
+    const protocol = new URL(value ?? "").protocol;
+    return protocol === "http:" || protocol === "https:";
+  } catch { return false; }
+};
+
 /** Whether a ref names an uploaded or project file the agent could open. */
 const isFileRef = (ref: AttachmentRef): boolean =>
   Boolean(ref.path) && ref.kind !== "url" && ref.kind !== "browser-context";
@@ -81,14 +92,9 @@ export function planAttachmentDelivery(input: AttachmentDeliveryInput): Attachme
   if (inlineMaxBytes === undefined || !isFileRef(ref) || !(ref.size > inlineMaxBytes)) return plan;
   if (plan.kind !== "native" && plan.kind !== "harness-emulated" && plan.kind !== "text-projection") return plan;
   const modality = attachmentModality(ref) ?? "file";
-  if (input.referenceable) return { kind: "file-reference", modality, tooLarge: true };
-  return {
-    kind: "unsupported",
-    modality,
-    code: "invalid-attachment",
-    reason: `${ref.name} is larger than ${formatBytes(inlineMaxBytes)}, the most Polyth sends inside a message, `
-      + "and the agent here cannot open uploaded files.",
-  };
+  return input.referenceable
+    ? { kind: "file-reference", modality, tooLarge: true }
+    : { kind: "file-reference", modality, tooLarge: true, storedOnly: true };
 }
 
 function planByModality(input: AttachmentDeliveryInput): AttachmentDeliveryPlan {
@@ -112,6 +118,12 @@ function planByModality(input: AttachmentDeliveryInput): AttachmentDeliveryPlan 
   // A link is plain text: an engine without native link input still gets it
   // as a prompt section, so it can never make a turn unsendable.
   if (modality === "url") {
+    if (!isHttpUrl(ref.url)) {
+      return {
+        kind: "unsupported", modality, code: "invalid-attachment",
+        reason: `${ref.name} is not an http(s) link Polyth can deliver.`,
+      };
+    }
     return support.url === "native" || support.url === "emulated"
       ? { kind: support.url === "native" ? "native" : "harness-emulated", modality }
       : { kind: "prompt-merged", modality: "url" };
@@ -126,7 +138,14 @@ function planByModality(input: AttachmentDeliveryInput): AttachmentDeliveryPlan 
         && (ref.mime?.startsWith("text/") || ref.mime === "application/json")) {
       return { kind: "text-projection", modality: "file" };
     }
-    if (input.referenceable && isFileRef(ref)) return { kind: "file-reference", modality };
+    // A stored file is never refused for what the engine can read: it may be
+    // an artefact the agent only has to place somewhere. Where the agent's host
+    // cannot reach it, it is named as kept in Polyth's workspace.
+    if (isFileRef(ref)) {
+      return input.referenceable
+        ? { kind: "file-reference", modality }
+        : { kind: "file-reference", modality, storedOnly: true };
+    }
     return {
       kind: "unsupported",
       modality,
@@ -359,6 +378,22 @@ export function projectAttachmentLink(ref: { name?: string; url?: string }): str
   return [
     `Attached link: ${label}${url || "(invalid link omitted)"}`,
     "[Polyth does not fetch link contents; open it with your own tools if you need it.]",
+  ].join("\n");
+}
+
+/**
+ * Prompt section for a file Polyth keeps but the agent's host cannot reach:
+ * the path is named so the agent can pass it on (upload, commit, publish) or
+ * ask the person, and it says plainly that opening may fail.
+ */
+export function storedAttachmentFile(input: FileReferenceInput): string {
+  const facts = [
+    input.mime && input.mime !== "application/octet-stream" ? oneLine(input.mime) : undefined,
+    typeof input.size === "number" && Number.isFinite(input.size) && input.size >= 0 ? formatBytes(input.size) : undefined,
+  ].filter(Boolean);
+  return [
+    `Attached file: ${oneLine(input.path)}${facts.length ? ` (${facts.join(", ")})` : ""}`,
+    "[Kept in the Polyth project workspace, not on your host. You may not be able to open it; place it where it is needed or ask the person for its contents.]",
   ].join("\n");
 }
 

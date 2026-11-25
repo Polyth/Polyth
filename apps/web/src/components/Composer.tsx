@@ -4316,17 +4316,7 @@ function ComposerBody({
   // keeps the legacy "not reported" line.
   // Where uploads land in the agent's own workspace, every format is
   // deliverable: what the engine cannot take as content is named by path.
-  const attachmentsReferenceable = runtimeFeatures
-    ? runtimeFeatures.remote !== true || runtimeFeatures.materializeAvailable === true
-    : true;
-  const attachNote = attachmentNote({ attachments, support: composerAttachmentSupport, referenceable: attachmentsReferenceable });
-  const uploadDisabledReason = (() => {
-    if (!composerAttachmentSupport || attachmentsReferenceable) return undefined;
-    const anySupported = Object.values(composerAttachmentSupport).some(
-      (level) => level === "native" || level === "emulated",
-    );
-    return anySupported ? undefined : tr("composer.discovery.currentlyUnavailable");
-  })();
+  const attachNote = attachmentNote({ attachments, support: composerAttachmentSupport });
   // A variant remembered for one model can be meaningless on the next. Drop
   // the stale value so the control shows the effective one instead of a
   // preference that would be discarded at send.
@@ -4663,7 +4653,6 @@ function ComposerBody({
       draftText={text}
       commands={commandCatalog}
       snippets={snippetCatalog}
-      {...(uploadDisabledReason ? { uploadDisabledReason } : {})}
       direction="up"
       onUpload={() => openAttachmentPicker("files")}
       onChoosePhotos={() => openAttachmentPicker("photos")}

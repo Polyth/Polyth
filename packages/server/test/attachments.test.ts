@@ -1,7 +1,7 @@
 // Attachment sanitation + send-path persistence and runtime handoff.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -144,7 +144,7 @@ test("sanitizeAttachments: typed rejections", () => {
 
 type Emit = (sessionId: string, ev: RuntimeEvent) => void;
 
-function fakeRuntime(fileSupport: "native" | "emulated" = "native", urlSupport: "native" | "unsupported" = "native") {
+function fakeRuntime(fileSupport: "native" | "emulated" | "unsupported" = "native", urlSupport: "native" | "unsupported" = "native") {
   const listeners = new Set<Emit>();
   const started: CanonicalTurnRequest[] = [];
   const emit = (sessionId: string, ev: RuntimeEvent) => {
@@ -188,7 +188,7 @@ const waitFor = async (condition: () => boolean): Promise<void> => {
 
 function makeService(
   fake: ReturnType<typeof fakeRuntime>,
-  opts: { withWorktree?: boolean; remote?: boolean; filesFor?: (projectId: string | null) => Promise<FileService> } = {},
+  opts: { withWorktree?: boolean; remote?: boolean; noMaterialize?: boolean; noAttachmentService?: boolean; filesFor?: (projectId: string | null) => Promise<FileService> } = {},
 ) {
   const dir = mkdtempSync(join(tmpdir(), "polyth-att-send-"));
   mkdirSync(join(dir, "docs"), { recursive: true });
@@ -217,7 +217,11 @@ function makeService(
     ...(opts.withWorktree
       ? { worktrees: { list: async () => [{ path: worktree, branch: "wt" }] } }
       : {}),
-    attachments: createAttachmentSourceService(opts.filesFor ?? (async () => files)),
+    ...(opts.noAttachmentService ? {} : {
+      attachments: opts.noMaterialize
+        ? (({ materialize: _unused, ...rest }) => rest as never)(createAttachmentSourceService(opts.filesFor ?? (async () => files)))
+        : createAttachmentSourceService(opts.filesFor ?? (async () => files)),
+    }),
   });
   return { sessions, store, dir, worktree, files };
 }
@@ -265,6 +269,52 @@ test("a link to an engine without link input is delivered as prompt text, not re
   assert.equal(fake.started.length, 1);
   assert.equal(fake.started[0]?.attachments?.some((a) => a.kind === "url") ?? false, false);
   assert.ok(JSON.stringify(fake.started[0]).includes(url), "prompt carries the link");
+  await store.close();
+});
+
+const sentText = (fake: ReturnType<typeof fakeRuntime>): string => JSON.stringify(fake.started[0]);
+
+test("an upload the engine cannot read is still sent, kept and named by path", async () => {
+  const fake = fakeRuntime("unsupported", "unsupported");
+  const { sessions, store, dir } = makeService(fake);
+  mkdirSync(join(dir, "_inbox"), { recursive: true });
+  writeFileSync(join(dir, "_inbox", "u1-site.zip"), "PK\u0003\u0004zip bytes");
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await sessions.send(id, { text: "publish this", attachments: [fileRef({ id: "z", name: "site.zip", mime: "application/zip", path: "_inbox/u1-site.zip" })] });
+  await flush();
+  assert.equal(fake.started.length, 1);
+  assert.ok(sentText(fake).includes("_inbox/u1-site.zip"), "prompt names the path");
+  assert.equal(existsSync(join(dir, "_inbox", "u1-site.zip")), true, "bytes stay stored");
+  assert.equal((await store.events(id)).some((e) => e.type === "user/message"), true);
+  await store.close();
+});
+
+test("without a materializer or attachment service an upload is stored-only, not refused", async () => {
+  for (const opts of [{ noMaterialize: true }, { noAttachmentService: true }] as const) {
+    const fake = fakeRuntime("unsupported", "unsupported");
+    const { sessions, store, dir } = makeService(fake, opts);
+    mkdirSync(join(dir, "_inbox"), { recursive: true });
+    writeFileSync(join(dir, "_inbox", "u2-memo.mp3"), "ID3 memo");
+    const { id } = await sessions.create({ projectId: "p1", title: "T" });
+    await sessions.send(id, { text: "keep", attachments: [fileRef({ id: "m", name: "memo.mp3", mime: "audio/mpeg", path: "_inbox/u2-memo.mp3" })] });
+    await flush();
+    assert.equal(fake.started.length, 1, JSON.stringify(opts));
+    assert.ok(sentText(fake).includes("_inbox/u2-memo.mp3"), JSON.stringify(opts));
+    assert.equal(existsSync(join(dir, "_inbox", "u2-memo.mp3")), true);
+    await store.close();
+  }
+});
+
+test("a remote project without materialization keeps the upload and says so", async () => {
+  const fake = fakeRuntime("emulated");
+  const { sessions, store, dir } = makeService(fake, { remote: true, noMaterialize: true });
+  mkdirSync(join(dir, "_inbox"), { recursive: true });
+  writeFileSync(join(dir, "_inbox", "u3-a.zip"), "zip");
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await sessions.send(id, { text: "ship", attachments: [fileRef({ id: "r", name: "a.zip", mime: "application/zip", path: "_inbox/u3-a.zip" })] });
+  await flush();
+  assert.equal(fake.started.length, 1);
+  assert.match(sentText(fake), /Kept in the Polyth project workspace/);
   await store.close();
 });
 

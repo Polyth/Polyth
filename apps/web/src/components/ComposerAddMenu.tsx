@@ -44,7 +44,6 @@ export interface ComposerAddMenuProps {
   draftText: string;
   commands: CatalogState<ComposerCommand>;
   snippets: CatalogState<SnippetDef>;
-  uploadDisabledReason?: string;
   /** Menu opens upward from the docked composer, downward from the hero. */
   direction: "up" | "down";
   onUpload: () => void;
@@ -166,7 +165,6 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
     commands: props.commands,
     snippets: props.snippets,
     contributions: contributionRows,
-    ...(props.uploadDisabledReason ? { uploadDisabledReason: props.uploadDisabledReason } : {}),
     ...(props.shellHidden ? { shellHidden: true } : {}),
     ...(canCapturePhoto ? { canCapturePhoto: true } : {}),
   });

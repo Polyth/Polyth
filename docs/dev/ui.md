@@ -266,9 +266,12 @@ outcome appears exactly once. Attach sources are one row of equal tiles —
 **Camera** (touch devices only: `capture="environment"`, the platform capture
 sheet in browsers and the native shell), **Photos** (`accept="image/*"`; native
 `FilePicker.pickImages`, transcoded so iOS HEIC arrives as JPEG) and **Files** —
-with one quiet note under them: the `_inbox` destination, or the shared reason
-all three are unavailable (only on a remote project Polyth cannot reach: any
-other format is delivered, by path when the engine cannot take its content).
+with one quiet note under them: the `_inbox` destination (or "open a project
+first" when there is none). The tiles are never disabled by what the agent can
+read or reach: an upload always lands in `_inbox`, and any other format is
+delivered, by path when the engine cannot take its content (named as kept in
+the Polyth workspace when the agent's host cannot reach it). A pending link is
+plain text and never shows an incompatibility note.
 Dragging files: while they are anywhere over the window the composer card
 firms its contour (`is-drop-ready`, an accent border and `--focus-wash`
 outline, so each style recipe keeps its own rim); over the card an opaque
