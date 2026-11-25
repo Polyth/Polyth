@@ -10,10 +10,11 @@ import type {
   SpaceContext,
   ToolExecutionContext,
 } from "@polyth/contracts";
-import { isolationBlocksUserMutation, liveBackgroundWork, liveBackgroundWorkNote } from "@polyth/contracts";
+import { isolationBlocksUserMutation, liveBackgroundWork, liveBackgroundWorkNote, resolveModelSelection } from "@polyth/contracts";
 import {
   SERVER_DELEGATION_POLICY,
   SERVER_MODEL_ROUTING,
+  SERVER_RUNTIME_CATALOG,
   SERVER_SESSION_ISOLATION,
   SERVER_SESSION_WATCHES,
   serverServiceKey,
@@ -546,6 +547,17 @@ export function registerPolythSessionControl(
         const selection = harness(parameters.harnessId);
         const selectedModel = model(parameters.model);
         const agent = text(parameters.agent);
+        // A pinned harness's own live catalog refuses a model or thinking
+        // level it does not offer here, before any child exists: the same
+        // refusal would otherwise only surface at the child's first dispatch.
+        // An unknown catalog (nothing listed for the harness) defers to it.
+        if (selectedModel && selection?.mode === "pinned") {
+          const catalog = await host.services.get(SERVER_RUNTIME_CATALOG)?.models({ maxAgeMs: 60_000 }).catch(() => undefined);
+          const verdict = catalog ? resolveModelSelection(catalog, selectedModel, selection.harnessId) : undefined;
+          if (verdict && !verdict.ok) {
+            throw Object.assign(new Error(verdict.message), { code: verdict.code });
+          }
+        }
         const requestedWorktreePath = text(parameters.worktreePath);
         const mode = workspaceMode(parameters.isolation);
         if (mode === "isolated" && requestedWorktreePath) {

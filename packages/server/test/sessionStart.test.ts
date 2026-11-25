@@ -8,7 +8,7 @@ import { join } from "node:path";
 
 import { createStore } from "@polyth/session";
 import type {
-  AgentRuntime, Project, ProjectService, RuntimeEvent, SessionEvent,
+  AgentRuntime, ModelDescriptor, Project, ProjectService, RuntimeEvent, SessionEvent,
 } from "@polyth/contracts";
 import type { PermissionService } from "@polyth/permissions";
 import type { SessionStartStep } from "@polyth/plugins";
@@ -48,6 +48,10 @@ interface FixtureOptions {
   createError?: () => Error | undefined;
   /** A definite refusal from the adapter (e.g. invalid-model). */
   rejectTurn?: { code: string; message: string };
+  /** The runtime's live model catalog, read on every dispatch. */
+  catalog?: () => ModelDescriptor[];
+  /** An uncertain turn-submit outcome: the adapter never confirmed delivery. */
+  unknownTurn?: boolean;
   keepDir?: boolean;
   startSteps?: Record<string, SessionStartStep>;
 }
@@ -62,7 +66,7 @@ const fixture = (options: FixtureOptions = {}) => {
     capabilities: async () => ({
       streaming: true, permissions: true, questions: true, compaction: false, subagents: false,
     }),
-    models: async () => [],
+    models: async () => options.catalog?.() ?? [],
     agents: async () => [],
     ensureSession: async (canonical) => {
       if (canonical.backendSessionId) return canonical.backendSessionId;
@@ -82,6 +86,12 @@ const fixture = (options: FixtureOptions = {}) => {
       startTurnOperation: async (request: { text: string }) => {
         prompts.push(request.text);
         return { kind: "rejected" as const, ...options.rejectTurn! };
+      },
+    } : {}),
+    ...(options.unknownTurn ? {
+      startTurnOperation: async (request: { text: string }) => {
+        prompts.push(request.text);
+        return { kind: "unknown" as const, code: "outcome-unknown", message: "delivery unconfirmed" };
       },
     } : {}),
     abort: async () => {},
@@ -474,6 +484,71 @@ test("a first turn refused at dispatch is reported as a start failure", async ()
     assert.equal((await h.store.projection(result.id))?.status, "failed");
     assert.deepEqual(await h.store.queueList(result.id), []);
     assert.equal(h.store.personStates([result.id], "u1")[result.id]?.draft, "use the model");
+  } finally {
+    await h.close();
+  }
+});
+
+const flashModel = (variants: string[]): ModelDescriptor[] => [
+  { providerID: "pv", modelID: "flash", name: "Flash", harnessId: "fixture", variants } as ModelDescriptor,
+];
+const BAD_MODEL = { providerID: "pv", modelID: "flash", variant: "high" };
+
+test("a first turn whose model variant the catalog does not offer fails the start visibly", async () => {
+  const h = fixture({ catalog: () => flashModel([]) });
+  try {
+    const result = await h.sessions.start!({
+      projectId: "p1", model: BAD_MODEL, start: { firstTurn: { text: "use it" } }, clientOperationId: KEY,
+    }, { author: AUTHOR });
+    await waitFor(async () => ofType(await h.store.events(result.id), "session/start-failed").length === 1);
+    const events = await h.store.events(result.id);
+    const failed = ofType(events, "session/start-failed")[0]!;
+    assert.equal(failed.data.code, "invalid-variant");
+    assert.match(String(failed.data.message), /does not offer a thinking level/);
+    assert.equal(failed.data.text, "use it");
+    assert.deepEqual(await h.store.queueList(result.id), []);
+    assert.equal(h.store.personStates([result.id], "u1")[result.id]?.draft, "use it");
+    assert.deepEqual(h.prompts, []);
+    const debug = await h.sessions.debug?.(result.id);
+    assert.ok(debug?.recentErrors.some((error) => error.code === "invalid-variant"), "session.debug says why");
+  } finally {
+    await h.close();
+  }
+});
+
+test("a later queued item refused by the catalog leaves the queue with an error event", async () => {
+  let catalog = flashModel(["high"]);
+  const h = fixture({ catalog: () => catalog });
+  try {
+    const result = await h.sessions.start!({
+      projectId: "p1", model: BAD_MODEL, start: { firstTurn: { text: "first" } }, clientOperationId: KEY,
+    }, { author: AUTHOR });
+    await waitFor(() => h.prompts.length === 1);
+    const queued = await h.sessions.send(result.id, { text: "second" }, { author: AUTHOR });
+    assert.equal(queued.queued, true);
+    catalog = flashModel([]);
+    h.emit(result.id, { type: "turn/stopped", reason: "completed" } as RuntimeEvent);
+    await waitFor(async () => (await h.store.queueList(result.id)).length === 0);
+    const events = await h.store.events(result.id);
+    assert.deepEqual(h.prompts, ["first"]);
+    assert.ok(ofType(events, "turn/failed").some((event) => event.data.code === "invalid-variant"));
+    assert.equal(ofType(events, "session/start-failed").length, 0, "only a first turn is a start failure");
+    assert.equal(h.store.personStates([result.id], "u1")[result.id]?.draft, "second");
+  } finally {
+    await h.close();
+  }
+});
+
+test("an uncertain dispatch outcome keeps the queued item", async () => {
+  const h = fixture({ unknownTurn: true });
+  try {
+    const result = await h.sessions.start!({
+      projectId: "p1", start: { firstTurn: { text: "maybe" } }, clientOperationId: KEY,
+    }, { author: AUTHOR });
+    await waitFor(() => h.prompts.length === 1);
+    await flush(50);
+    assert.equal(ofType(await h.store.events(result.id), "session/start-failed").length, 0);
+    assert.equal(h.prompts.length, 1, "an uncertain delivery is never replayed");
   } finally {
     await h.close();
   }

@@ -17,6 +17,7 @@ import {
   createServerServiceRegistry,
   SERVER_DELEGATION_POLICY,
   SERVER_MODEL_ROUTING,
+  SERVER_RUNTIME_CATALOG,
   SERVER_SESSION_ISOLATION,
   SERVER_SESSION_WATCHES,
   serverServiceKey,
@@ -1188,5 +1189,73 @@ test("agent.spawn sends its prompt with the create when the server can start a c
   // A start that already failed is said plainly: no watch will report it.
   startStatus = "failed";
   assert.match((await spawn()).startFailed ?? "", /could not start/);
+  await registration.dispose();
+});
+
+test("agent.spawn refuses a model or thinking level the pinned harness does not offer before any child exists", async () => {
+  const projects: Project[] = [{ id: "p1", name: "Current", path: "/projects/p1", spaceId: space.spaceId, createdAt: 1 }];
+  const rows = new Map<string, SessionProjection>([["caller", projection("caller", "p1", "Parent")], ["child", projection("child", "p1", "Worker")]]);
+  const createdInputs: CreateSessionInput[] = [];
+  const started: unknown[] = [];
+  const sessions = {
+    async create(input: CreateSessionInput) {
+      createdInputs.push(input);
+      return { id: "child" };
+    },
+    async start(input: unknown) {
+      started.push(input);
+      return { id: "child" };
+    },
+    async snapshot(id: string) { return rows.get(id)!; },
+  } as unknown as SessionService;
+  const registry = createCapabilityContributionRegistry();
+  const services = createServerServiceRegistry();
+  services.provide(serverServiceKey("harness.capabilities"), registry);
+  let catalog: Array<Record<string, unknown>> = [
+    { providerID: "opencode-go", modelID: "flash", name: "Flash", harnessId: "pi", variants: [] },
+    { providerID: "opencode-go", modelID: "pro", name: "Pro", harnessId: "pi", variants: ["low", "high"] },
+  ];
+  services.provide(SERVER_RUNTIME_CATALOG, { models: async () => catalog } as never);
+  services.provide(SERVER_SESSION_WATCHES, {
+    async create() { return { id: "w", sourceSessionId: "child", targetSessionId: "caller", events: [], delivery: "wake", once: true, createdAt: 1 }; },
+    async list() { return []; },
+    async remove() { return false; },
+  });
+  const host = {
+    services,
+    forSpace: () => ({
+      projects: { async list() { return projects; }, async get(id: string) { return projects.find((project) => project.id === id); } },
+      sessions,
+    }),
+  } as unknown as ServerPackageHost;
+  const registration = registerPolythSessionControl(host);
+  registry.resolve(context);
+  const execute = registry.executor("harness-runtime.polyth-control")!;
+  const spawn = (model: Record<string, string>, harnessId = "pi") => execute({
+    action: "agent.spawn",
+    parameters: { title: "Worker", prompt: "go", harnessId, model },
+  }, toolContext);
+
+  await assert.rejects(
+    () => spawn({ providerID: "opencode-go", modelID: "flash", variant: "high" }),
+    (error: Error & { code?: string }) => error.code === "invalid-variant" && /does not offer a thinking level/.test(error.message),
+  );
+  await assert.rejects(
+    () => spawn({ providerID: "opencode-go", modelID: "pro", variant: "max" }),
+    (error: Error & { code?: string }) => error.code === "invalid-variant" && /Choose one of: low, high/.test(error.message),
+  );
+  await assert.rejects(
+    () => spawn({ providerID: "opencode-go", modelID: "gone" }),
+    (error: Error & { code?: string }) => error.code === "invalid-model",
+  );
+  assert.deepEqual([createdInputs, started], [[], []], "a refused selection creates no child");
+
+  await spawn({ providerID: "opencode-go", modelID: "pro", variant: "high" });
+  assert.equal(started.length, 1, "an offered selection still starts the child");
+
+  // An unknown catalog for the harness keeps today's behavior.
+  catalog = [];
+  await spawn({ providerID: "opencode-go", modelID: "flash", variant: "high" });
+  assert.equal(started.length, 2);
   await registration.dispose();
 });
