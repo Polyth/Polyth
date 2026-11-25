@@ -847,3 +847,54 @@ test("retiring a workspace disposes only its project-scoped utility runtimes", a
     assert.equal(await pool.forSession(projection, "/work/isolate"), session, "canonical session leases stay with the session lifecycle");
     await pool.dispose();
 });
+
+test("a pinned Relay runs a member the direct picker hides (Relay-only account)", async () => {
+    const registry = createHarnessRegistry();
+    const member = (id: string, name: string): HarnessProvider => ({
+        ...provider(id, 0),
+        descriptor: { id, name, priority: 0, integration: "test", accounts: { family: "fam", endpoint: "/api/fam/accounts" } },
+    });
+    registry.register(member("fam", "Fam · Default"));
+    registry.register(member("fam-iryna", "Fam · Iryna"));
+    registry.register({
+        descriptor: { id: "fam-relay", name: "Fam · Relay", priority: 1000, integration: "relay", relay: { family: "fam" }, autoSelect: false },
+        relay: {
+            plan: async () => ({ candidates: ["fam-iryna"] }),
+            refused: () => {},
+        },
+        probe: async () => ({ harnessId: "fam-relay", installed: true, authenticated: true, healthy: true, state: "ready" }),
+        createRuntime: async () => ({ dispose: async () => { } } as AgentRuntime),
+    });
+    // Hiding an account from the picker and Auto is how a Space keeps it for
+    // Relay only; it must not make the person's Relay unusable.
+    registry.configurePolicy(async () => ({ fam: { enabled: false }, "fam-iryna": { enabled: false }, "fam-relay": { enabled: true } }));
+    await assert.rejects(registry.resolve(context, { mode: "auto" }), { code: "runtime-unavailable" }, "Auto still reaches neither the Relay nor its hidden members");
+    assert.equal((await registry.resolve(context, { mode: "pinned", harnessId: "fam-relay" })).descriptor.id, "fam-iryna");
+    await assert.rejects(registry.resolve(context, { mode: "pinned", harnessId: "fam-iryna" }), { code: "runtime-unavailable" }, "a direct pin to the hidden account stays refused");
+});
+
+test("a pinned Relay reports the refill time when every account is out of limits", async () => {
+    const registry = createHarnessRegistry();
+    const until = Date.UTC(2026, 10, 26, 9);
+    registry.register({
+        ...provider("fam", 0),
+        descriptor: { id: "fam", name: "Fam · Default", priority: 0, integration: "test", accounts: { family: "fam", endpoint: "/api/fam/accounts" } },
+    });
+    registry.register({
+        descriptor: { id: "fam-relay", name: "Fam · Relay", priority: 1000, integration: "relay", relay: { family: "fam" }, autoSelect: false },
+        relay: {
+            plan: async () => ({ candidates: [], exhaustedUntil: until }),
+            refused: () => {},
+        },
+        probe: async () => ({ harnessId: "fam-relay", installed: true, authenticated: true, healthy: true, state: "ready" }),
+        createRuntime: async () => ({ dispose: async () => { } } as AgentRuntime),
+    });
+    await assert.rejects(
+        registry.resolve(context, { mode: "pinned", harnessId: "fam-relay" }),
+        (error: Error & { code?: string }) => {
+            assert.equal(error.code, "runtime-unavailable");
+            assert.equal(error.message, `Every account in Fam · Relay is out of limits or unavailable until ${new Date(until).toISOString()}`);
+            return true;
+        },
+    );
+});

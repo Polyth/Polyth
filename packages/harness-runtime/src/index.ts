@@ -639,7 +639,13 @@ export function createHarnessRegistry() {
                 relayUntil = plan.exhaustedUntil;
                 for (const memberId of plan.candidates) {
                     const member = providers.get(memberId);
-                    if (member && !member.descriptor.relay && !unregistering.has(member) && preferences[memberId]?.enabled !== false) expanded.push(member);
+                    // The person's Relay membership is its own opt-in: a member
+                    // `enabled: false` in Harness Settings is hidden from the
+                    // direct picker and Auto (how a Space keeps an account for
+                    // Relay only), not banned from running through the Relay
+                    // the person deliberately added it to. Account access rules
+                    // were already applied by the family's own plan.
+                    if (member && !member.descriptor.relay && !unregistering.has(member)) expanded.push(member);
                 }
             }
             const candidates = expanded.filter((p) => !context.privateSession || p.descriptor.privateSessions === true);

@@ -2311,9 +2311,14 @@ const keepVisible = (sessionId: string): boolean =>
 
 /** An empty zombie: creation failed before any user turn and nothing of the
  *  person's is in it. A chat holding a draft is not one: a failed start puts
- *  its first prompt back there, and the navigator lists it as a draft. */
+ *  its first prompt back there, and the navigator lists it as a draft.
+ *  Dropping a row here is as good as deleting it for the person, so the
+ *  "Delete failed startup sessions" choice governs it exactly as it governs
+ *  the server-side cleanup: with the choice off, a failed startup row stays
+ *  listed with its error even when it holds nothing else. */
 const isEmptyZombie = (p: SessionProjection): boolean =>
-  !p.historyImport && (p.status === "failed" || p.status === "unknown") && p.lastTurnAt == null
+  state.settings.autoDeleteFailedStartupSessions
+  && !p.historyImport && (p.status === "failed" || p.status === "unknown") && p.lastTurnAt == null
   && !sessionDraftLine(p) && !keepVisible(p.id);
 
 /** The project the open chat just moved to, here or on another device. A row
