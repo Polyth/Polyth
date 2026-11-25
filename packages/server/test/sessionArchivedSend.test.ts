@@ -13,6 +13,19 @@ import type { AgentRuntime, Project, ProjectService, RuntimeEvent } from "@polyt
 import { createSessionService, type Broadcaster } from "../src/sessions.ts";
 import type { PermissionService } from "@polyth/permissions";
 
+import { after } from "node:test";
+import { rmSync } from "node:fs";
+
+const tempDirs: string[] = [];
+const tempDir = (prefix: string): string => {
+  const dir = mkdtempSync(prefix);
+  tempDirs.push(dir);
+  return dir;
+};
+after(() => {
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
 type Emit = (sessionId: string, ev: RuntimeEvent) => void;
 
 function makeService() {
@@ -43,7 +56,7 @@ function makeService() {
     },
     dispose: async () => {},
   };
-  const dir = mkdtempSync(join(tmpdir(), "polyth-archived-send-"));
+  const dir = tempDir(join(tmpdir(), "polyth-archived-send-"));
   const store = createStore(join(dir, "s.db"));
   const project: Project = { id: "p1", path: dir, name: "p", createdAt: 1 };
   const projects: ProjectService = {

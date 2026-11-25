@@ -10,7 +10,20 @@ import { deviceBaseLabel, distinctDeviceLabels, uniqueDeviceLabel } from "../src
 import { commitPairingDevice, revokeAccountDevices } from "../src/serverEntry.ts";
 import type { LinkHostClient } from "../src/host.ts";
 
-const db = () => join(mkdtempSync(join(tmpdir(), "polyth-tunnel-identity-")), "tunnel.db");
+import { after } from "node:test";
+import { rmSync } from "node:fs";
+
+const tempDirs: string[] = [];
+const tempDir = (prefix: string): string => {
+  const dir = mkdtempSync(prefix);
+  tempDirs.push(dir);
+  return dir;
+};
+after(() => {
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+const db = () => join(tempDir(join(tmpdir(), "polyth-tunnel-identity-")), "tunnel.db");
 
 function fakeHost(): { host: LinkHostClient; calls: Array<[string, Record<string, unknown> | undefined]> } {
   const calls: Array<[string, Record<string, unknown> | undefined]> = [];

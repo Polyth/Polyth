@@ -10,6 +10,19 @@ import { createHarnessRegistry } from "../src/index.ts";
 import { harnessRoutes } from "../src/serverEntry.ts";
 import { chooseRelayMembers, type RelayChooserInput, type RelayHeadroom, relayHost } from "../src/relay.ts";
 
+import { after } from "node:test";
+import { rmSync } from "node:fs";
+
+const tempDirs: string[] = [];
+const tempDir = (prefix: string): string => {
+  const dir = mkdtempSync(prefix);
+  tempDirs.push(dir);
+  return dir;
+};
+after(() => {
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
 const NOW = 1_000_000;
 const H = (windows: [number, number, number?][], known = true): RelayHeadroom => ({ known, windows: windows.map(([used, limit, resetsAt]) => ({ used, limit, ...(resetsAt !== undefined ? { resetsAt } : {}) })) });
 const choose = (over: Partial<RelayChooserInput> & { headroom?: Record<string, RelayHeadroom> }) => chooseRelayMembers({
@@ -60,7 +73,7 @@ const provider = (id: string, ready = true): HarnessProvider => ({
     createRuntime: async () => ({ dispose: async () => {} } as AgentRuntime),
 });
 const setup = () => {
-    const dir = mkdtempSync(join(tmpdir(), "relay-"));
+    const dir = tempDir(join(tmpdir(), "relay-"));
     const registry = createHarnessRegistry();
     const signedOut = new Set<string>();
     const accounts = createHarnessAccountFamily({
@@ -135,7 +148,7 @@ test("limits come from the usage service lazily; missing service means unknown",
 });
 
 test("store: old array file loads, relays round-trip, removal drops members", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "relay-store-"));
+    const dir = tempDir(join(tmpdir(), "relay-store-"));
     writeFileSync(join(dir, "codex-accounts.json"), JSON.stringify([{ id: "work", name: "Work" }, { id: "relay", name: "Bad" }]));
     const store = createHarnessAccountStore({ storageDir: dir, family: "codex" });
     assert.deepEqual((await store.list()).map((a) => a.id), ["work"]);

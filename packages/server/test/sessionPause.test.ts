@@ -8,8 +8,21 @@ import { createStore } from "@polyth/session";
 import type { PermissionService } from "@polyth/permissions";
 import { PAUSE_CONTINUE_PROMPT, createSessionService } from "../src/sessions.ts";
 
+import { after } from "node:test";
+import { rmSync } from "node:fs";
+
+const tempDirs: string[] = [];
+const tempDir = (prefix: string): string => {
+  const dir = mkdtempSync(prefix);
+  tempDirs.push(dir);
+  return dir;
+};
+after(() => {
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
 function harness(t: TestContext) {
-  const dir = mkdtempSync(join(tmpdir(), "polyth-session-pause-"));
+  const dir = tempDir(join(tmpdir(), "polyth-session-pause-"));
   const store = createStore(join(dir, "sessions.db"));
   const listeners = new Set<(id: string, event: RuntimeEvent) => void>();
   const emit = (id: string, event: RuntimeEvent) => {

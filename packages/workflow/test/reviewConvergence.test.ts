@@ -11,6 +11,19 @@ import {
   type WorkflowService,
 } from "../src/index.ts";
 
+import { after } from "node:test";
+import { rmSync } from "node:fs";
+
+const tempDirs: string[] = [];
+const tempDir = (prefix: string): string => {
+  const dir = mkdtempSync(prefix);
+  tempDirs.push(dir);
+  return dir;
+};
+after(() => {
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
 const BLOCKER = "- [blocker] src/cache.ts:12 — the cache key ignores the tenant; key it by tenant id";
 const DISPUTE = "Disputed: cache key tenant — the key is already tenant-scoped upstream";
 
@@ -27,7 +40,7 @@ function setup(reports: Record<string, string[] | ((round: number) => string)>, 
   };
   let clock = 1_000;
   const service = createWorkflowService({
-    file: join(mkdtempSync(join(tmpdir(), "polyth-workflow-convergence-")), "workflows.json"),
+    file: join(tempDir(join(tmpdir(), "polyth-workflow-convergence-")), "workflows.json"),
     append: async (_sessionId, type, data) => { events.push({ type, data }); },
     runNode,
     now: () => clock++,

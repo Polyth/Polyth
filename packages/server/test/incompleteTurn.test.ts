@@ -16,6 +16,19 @@ import type {
 import type { PermissionService } from "@polyth/permissions";
 import { createSessionService, type Broadcaster } from "../src/sessions.ts";
 
+import { after } from "node:test";
+import { rmSync } from "node:fs";
+
+const tempDirs: string[] = [];
+const tempDir = (prefix: string): string => {
+  const dir = mkdtempSync(prefix);
+  tempDirs.push(dir);
+  return dir;
+};
+after(() => {
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
 const flush = (ms = 20) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const waitFor = async (
@@ -90,7 +103,7 @@ const harness = (options: { autoContinueIncomplete?: boolean } = {}) => {
     dispose: async () => {},
   };
 
-  const dir = mkdtempSync(join(tmpdir(), "polyth-tool-timeout-"));
+  const dir = tempDir(join(tmpdir(), "polyth-tool-timeout-"));
   const store = createStore(join(dir, "s.db"));
   const project: Project = { id: "p1", spaceId: "space-a", path: dir, name: "p", createdAt: 1 };
   const projects: ProjectService = {

@@ -15,8 +15,21 @@ import type { PermissionService } from "@polyth/permissions";
 import { createStore } from "@polyth/session";
 import { createSessionService } from "../src/sessions.ts";
 
+import { after } from "node:test";
+import { rmSync } from "node:fs";
+
+const tempDirs: string[] = [];
+const tempDir = (prefix: string): string => {
+  const dir = mkdtempSync(prefix);
+  tempDirs.push(dir);
+  return dir;
+};
+after(() => {
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
 const service = (allowDelete?: () => boolean) => {
-  const dir = mkdtempSync(join(tmpdir(), "polyth-startup-list-"));
+  const dir = tempDir(join(tmpdir(), "polyth-startup-list-"));
   const store = createStore(join(dir, "sessions.db"));
   const project: Project = { id: "project-1", name: "Project", path: dir, createdAt: 1 };
   const projects = {

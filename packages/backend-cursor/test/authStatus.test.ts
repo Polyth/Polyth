@@ -5,10 +5,23 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { jwtExpiry, parseCursorAuthReport, readCursorAuthReport, readCursorSessionEnd } from "../src/authStatus.ts";
 
+import { after } from "node:test";
+import { rmSync } from "node:fs";
+
+const tempDirs: string[] = [];
+const tempDir = (prefix: string): string => {
+  const dir = mkdtempSync(prefix);
+  tempDirs.push(dir);
+  return dir;
+};
+after(() => {
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
 const NOW = Date.UTC(2026, 10, 9);
 const jwt = (exp: number) => `h.${Buffer.from(JSON.stringify({ exp: Math.floor(exp / 1000) })).toString("base64url")}.s`;
 const configWith = (refreshToken: string) => {
-    const root = mkdtempSync(join(tmpdir(), "cursor-auth-"));
+    const root = tempDir(join(tmpdir(), "cursor-auth-"));
     mkdirSync(join(root, "cursor"));
     writeFileSync(join(root, "cursor", "auth.json"), JSON.stringify({ accessToken: refreshToken, refreshToken }));
     return root;
