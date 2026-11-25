@@ -272,6 +272,12 @@ const CLAUDE_OAUTH_REFRESH_LOCK_RE = /Failed to refresh OAuth token: another Cla
  *  200k window, and every later message too, until a compaction. Measured on Haiku 4.5. */
 const CLAUDE_CONTEXT_FULL_RE = /\bprompt is too long\b/i;
 const CLAUDE_TRANSPORT_FAILURE_RE = /\b(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|EAI_AGAIN|UND_ERR_SOCKET)\b|socket connection was closed unexpectedly|socket hang up|\bfetch failed\b|\bConnection error\b|\bRequest timed out\b/i;
+/** The provider is briefly at capacity. Claude Code retries a 529 itself a few
+ *  times; once it gives up, its own line is the only evidence left ("API Error:
+ *  529 Overloaded. This is a server-side issue, usually temporary — try again in
+ *  a moment."). Nothing about this conversation is broken and the refused
+ *  request reached no model, so the server's capacity ladder resends it. */
+const CLAUDE_OVERLOADED_RE = /\b(?:503|529|overloaded_error)\b|\boverload(?:ed)?\b|at capacity|server is busy|temporarily unable to process/i;
 /** The SDK owns its protocol; Polyth owns the SDK's native child process and
  * records only public dialogue/tool outcomes. It never consumes thinking. */
 export interface ClaudeRuntimeOptions {
@@ -1062,6 +1068,12 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                                 ? rejectedLimit
                                 : { scope: "rate", retryable: true };
                         }
+                        // Capacity, not an allowance: the CLI's own retries ran
+                        // out, so this stop carries the resume hint instead of
+                        // an answer.
+                        else if (message.error === "overloaded" && !pendingRetry) {
+                            pendingRetry = { scope: "overloaded", provider: "anthropic", retryable: true };
+                        }
                         for (const [index, block] of message.message.content.entries()) {
                             if (block.type !== "text" || !block.text) continue;
                             const notice = { key: `${message.uuid}:${index}`, text: block.text };
@@ -1204,13 +1216,18 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                         // prompt. The failed request never reached the model,
                         // so re-sending the last user message is safe.
                         const oauthRefreshLock = Boolean(errorText && CLAUDE_OAUTH_REFRESH_LOCK_RE.test(errorText));
+                        // Provider capacity is transient and says nothing about
+                        // this conversation, so it resumes on the long ladder.
+                        const overloaded = Boolean(message.is_error && !pendingRetry && errorText && !authFailed
+                            && CLAUDE_OVERLOADED_RE.test(errorText));
                         // A dropped connection is not a provider limit: a few
                         // quick resends, then an ordinary failure.
                         const transportFailure = Boolean(message.is_error && !pendingRetry && errorText && !authFailed
-                            && CLAUDE_TRANSPORT_FAILURE_RE.test(errorText));
+                            && !overloaded && CLAUDE_TRANSPORT_FAILURE_RE.test(errorText));
                         const retry = message.is_error
                             ? pendingRetry
                                 ?? (oauthRefreshLock ? { scope: "unknown" as const, retryAfterSec: 60, retryable: true }
+                                    : overloaded ? { scope: "overloaded" as const, provider: "anthropic", retryable: true }
                                     : transportFailure ? { scope: "request" as const, provider: "anthropic", retryable: true }
                                     : undefined)
                             : undefined;
@@ -1233,7 +1250,7 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                             ...(!message.is_error && (message as { stop_reason?: unknown }).stop_reason === "max_tokens" ? { outputLimit: true as const } : {}),
                             ...(message.is_error ? {
                                 error: errorText ?? limitNotice ?? (contextFull ? contextFullText : undefined),
-                                code: contextFull ? "context-full" : authFailed ? "auth-expired" : oauthRefreshLock || transportFailure ? "unknown" : retry ? "rate-limited" : /rate.?limit|overloaded/i.test(errorText ?? "") ? "rate-limited" : "unknown",
+                                code: contextFull ? "context-full" : authFailed ? "auth-expired" : oauthRefreshLock || transportFailure ? "unknown" : retry?.scope === "overloaded" ? "overloaded" : retry ? "rate-limited" : /rate.?limit|overloaded/i.test(errorText ?? "") ? "rate-limited" : "unknown",
                             } : {}),
                         }, turnId + ":stop");
                         // `active` names the admitted operation until the turn's
