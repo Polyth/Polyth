@@ -580,7 +580,15 @@ export function createHarnessAccountFamily(options: HarnessAccountFamilyOptions)
             const { plan, members } = await evaluate(context, actor, settings);
             const first = plan.candidates[0] ?? members[0];
             const target = first ? options.registry().get(first) : undefined;
-            return target?.discover ? target.discover(context) : {};
+            if (!target?.discover) return {};
+            const discovery = await target.discover(context);
+            // The picker keeps only models owned by the harness it shows, so a
+            // member's catalog is re-owned by the Relay; the member runtime
+            // resolves the chosen model against its own catalog.
+            const models = discovery.catalog?.models;
+            return models
+                ? { ...discovery, catalog: { ...discovery.catalog, models: models.map((model) => ({ ...model, harnessId: relayId })) } }
+                : discovery;
         },
         createRuntime: async () => { throw coded(`${options.label} Relay resolves to one of its member accounts and runs no runtime of its own`, "runtime-unavailable"); },
     });

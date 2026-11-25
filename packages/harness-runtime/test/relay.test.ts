@@ -133,6 +133,18 @@ test("registry redirects a pinned Relay to a member, honours sticky, refusals an
     await assert.rejects(registry.resolve(ctx("u2"), pinned), /Codex · Relay/);
 });
 
+test("a Relay's model catalog is its member's, owned by the Relay so the picker lists it", async () => {
+    const { registry, accounts } = setup();
+    await accounts.onEnable();
+    const codex = registry.get("codex")!;
+    codex.discover = async () => ({ state: "ready", catalog: { models: [{ harnessId: "codex", providerID: "openai", modelID: "gpt", name: "GPT" }] } });
+    await accounts.store!.setRelay("u1", { members: ["codex"], order: "manual", handoverAt: 0.05 });
+    const discovery = await registry.get("codex-relay")!.discover!(ctx());
+    assert.equal(discovery.state, "ready");
+    assert.deepEqual(discovery.catalog?.models?.map((model) => [model.harnessId, model.modelID]), [["codex-relay", "gpt"]]);
+    await accounts.onDisable();
+});
+
 test("limits come from the usage service lazily; missing service means unknown", async () => {
     const { registry, accounts } = setup();
     await accounts.onEnable();
