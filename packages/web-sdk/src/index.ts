@@ -1507,6 +1507,38 @@ export interface MarkdownFenceRegistration {
   ownerPackageId?: string;
 }
 
+/** What a fence renderer hands an action: the block as the person sees it. */
+export interface MarkdownFenceActionInput {
+  /** The fence language, lowercase. */
+  lang: string;
+  /** The block's own title. */
+  title: string;
+  /** The content the block shows (for `page`, its HTML), which is not always
+   *  the fence text: a block may have loaded it from a project file. */
+  content: string;
+  /** That project-relative file, when the fence named one. */
+  from?: string;
+  context: MarkdownFenceContext;
+}
+
+/** A button one package adds to the blocks another package renders, for
+ *  example "Save as app" on a `page`. The host only keeps the list: the
+ *  renderer of the language decides where the buttons go and calls `run`
+ *  from the person's click, never on its own. A renderer that shows no
+ *  actions is valid, so an action must not be the only way to a feature. */
+export interface MarkdownFenceAction {
+  /** Unique among actions; a second registration of the id replaces nothing
+   *  and is refused. */
+  id: string;
+  languages: readonly string[];
+  /** Read at render time, so it follows the language. */
+  label(): string;
+  icon: WebIconComponent;
+  order?: number;
+  run(input: MarkdownFenceActionInput): void | Promise<void>;
+  ownerPackageId?: string;
+}
+
 /** A package's way to group the session lists. Pure functions of a session
  *  and the package's own state: the host draws the headings and rows. */
 export interface SessionGroupingDefinition {
@@ -1528,6 +1560,12 @@ export interface WebPackageHost {
   /** Markdown extension seams. Optional for older hosts. */
   markdown?: {
     registerFence(registration: MarkdownFenceRegistration): Unregister;
+    /** Add a button to the blocks of some languages. Optional for older hosts. */
+    registerFenceAction?(action: MarkdownFenceAction): Unregister;
+    /** The actions for `lang`, ordered. The same array until the list changes,
+     *  so it can be a `useSyncExternalStore` snapshot. */
+    fenceActions?(lang: string): readonly MarkdownFenceAction[];
+    subscribeFenceActions?(listener: () => void): Unregister;
   };
   slots: {
     register(registration: SlotRegistration): Unregister;
@@ -1667,6 +1705,19 @@ export interface WebPackageHost {
     openSettingsPage(pageId: string, target?: SettingsNavigationTarget): void;
     openWorkspacePane(surfaceId: string, resource?: string): boolean;
     closeWorkspacePane(): void;
+    /** Open a workspace window in a browser or desktop window of its own,
+     * showing `resource`. Every (window, resource) pair has its own window, and
+     * asking again brings it forward. False when the browser blocked it or no
+     * such window is registered. Optional for older hosts. */
+    openPaneWindow?(surfaceId: string, resource: string): boolean;
+    /** In a window opened by `openPaneWindow`: the name that window carries
+     * (its title bar and the task switcher), or null for the surface's own
+     * title. Ignored in every other window. Optional for older hosts. */
+    setPaneWindowTitle?(title: string | null): void;
+    /** The resource this window was opened for by `openPaneWindow`, or null in
+     * every other window. A surface uses it to show that one thing with no
+     * way back to its own list. Optional for older hosts. */
+    paneWindowResource?(): string | null;
     /** Show a registered page in place of Chat, as opening a chat from the
      * navigator does. `projectId` first switches the workspace to that
      * project. False when no such page is registered. Optional for older

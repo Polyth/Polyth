@@ -186,3 +186,38 @@ test("a conversation fence reads the user reply that followed its answer, and on
     await act(async () => { root.unmount(); });
   }
 });
+
+// ---- actions on blocks (`host.markdown.registerFenceAction`) -----------------
+
+test("fence actions: one package adds a button to the blocks another renders", async () => {
+  const { markdownFenceActions, registerMarkdownFenceAction, subscribeMarkdownFenceActions } = await import("../src/markdown/fenceRenderers.ts");
+  const icon = () => null;
+  const action = (id: string, order?: number, languages: readonly string[] = ["page"]) =>
+    ({ id, languages, label: () => id, icon, run: () => {}, ...(order !== undefined ? { order } : {}) });
+  let changes = 0;
+  const unsubscribe = subscribeMarkdownFenceActions(() => { changes += 1; });
+  const empty = markdownFenceActions("page");
+  assert.deepEqual(empty, []);
+  assert.equal(markdownFenceActions("page"), empty, "a stable snapshot while nothing changes");
+
+  const offLate = registerMarkdownFenceAction(action("b.late", 20));
+  const offEarly = registerMarkdownFenceAction(action("a.early", 10, [" PAGE ", "ui"]));
+  assert.equal(changes, 2);
+  assert.deepEqual(markdownFenceActions("page").map((entry) => entry.id), ["a.early", "b.late"]);
+  assert.equal(markdownFenceActions("page"), markdownFenceActions("PAGE"), "one list per language");
+  assert.deepEqual(markdownFenceActions("ui").map((entry) => entry.id), ["a.early"]);
+  assert.deepEqual(markdownFenceActions("mermaid"), []);
+
+  assert.throws(() => registerMarkdownFenceAction(action("b.late")), /already registered/);
+  assert.throws(() => registerMarkdownFenceAction(action("bad id")), /invalid fence action id/);
+  assert.throws(() => registerMarkdownFenceAction(action("c.none", 0, [])), /at least one language/);
+  assert.throws(() => registerMarkdownFenceAction(action("c.lang", 0, ["not a language"])), /invalid fence language/);
+
+  offEarly();
+  offEarly();
+  assert.equal(changes, 3, "disposing twice changes nothing twice");
+  assert.deepEqual(markdownFenceActions("page").map((entry) => entry.id), ["b.late"]);
+  offLate();
+  assert.deepEqual(markdownFenceActions("page"), []);
+  unsubscribe();
+});

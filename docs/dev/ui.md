@@ -5003,6 +5003,18 @@ and presence live in `apps/web/src/secondWindow.ts` (pure parts tested by
   Escape transitions; closing it closes the window). The host never names a
   package: a pane window shows whichever surface it was opened from. The URL
   sync keeps the role (`withWindowRole`), and a reload keeps it.
+- **A window for one thing.** `?window=pane&surface=<id>&resource=<id>` is the
+  window of that one resource of a surface (a saved app): the surface gets
+  the resource as its `resource` prop, there is one window per surface and
+  resource (target name `polyth-pane-<surface>-<resource>`, so asking again
+  brings it forward and the code window stays), it follows no chat, and its
+  header and title bar carry the name the content reports instead of
+  "project · branch". A resource is an id (`[a-z0-9._:-]`, up to 128
+  characters), never free text. Packages reach it through
+  `host.navigation.openPaneWindow(surfaceId, resource)`,
+  `setPaneWindowTitle(title)` (ignored in every other window) and
+  `paneWindowResource()` (null in every other window). Showing another
+  surface in that window makes it an ordinary pane window again.
 - **Entry points.** Navigator row menu *Open in new window* (hint
   *Shift+click*), Shift-click a row, a split pane's header, and every docked
   workspace window's *Open in new window* system action (`ModuleView`
@@ -5026,7 +5038,8 @@ and presence live in `apps/web/src/secondWindow.ts` (pure parts tested by
   role (`apps/desktop/src/secondWindows.ts`) with a native window of its own:
   no preload (desktop IPC answers only the main window), the same session and
   navigation rule, and the main window's local-server request guard. One
-  window per chat and one pane window; asking again brings it forward.
+  window per chat, one pane window and one window per pane resource; asking
+  again brings it forward.
 
 ### 4.4 Capabilities (`host.capabilities.register`)
 
@@ -6466,6 +6479,18 @@ code waits for a click everywhere else (files, issue/PR bodies, prompts).
 - Reuse the Markdown URL policy (`sanitizeImageSrc`, `sanitizeLinkHref` from
   `apps/web/src/markdown.tsx`); never render agent-supplied HTML, CSS or
   script.
+- **Actions on blocks.** `host.markdown.registerFenceAction({ id, languages,
+  label, icon, order, run })` lets one package add a button to the blocks
+  another package renders, without either naming the other (the Apps package
+  puts *Save as app* on a `page`). The host only keeps the list
+  (`markdown/fenceRenderers.ts`: unique ids, validated languages, ordered,
+  one stable array per language until the list changes, so
+  `fenceActions(lang)` with `subscribeFenceActions` is a
+  `useSyncExternalStore` pair). The renderer of the language decides where
+  the buttons go and calls `run` only from the person's click, with what the
+  block shows (`title`, `content`, `from`, `context`), not the raw fence
+  text. A renderer may show no actions, so an action is never the only way
+  to a feature.
 
 ### 4.12 Markdown rendering (`MarkdownDoc`)
 

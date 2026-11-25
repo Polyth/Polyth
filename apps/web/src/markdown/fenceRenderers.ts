@@ -3,7 +3,7 @@
 // language, and every consumer re-renders when a package enables/disables.
 // createElement-based so DOM-free node tests can import it.
 import { Component, createElement, useSyncExternalStore, type ComponentType, type ReactNode } from "react";
-import type { MarkdownFenceRegistration, MarkdownFenceRendererProps, Unregister } from "@polyth/web-sdk";
+import type { MarkdownFenceAction, MarkdownFenceRegistration, MarkdownFenceRendererProps, Unregister } from "@polyth/web-sdk";
 
 /** Fences the host renders itself; a package cannot take them over. */
 export const BUILT_IN_FENCES: ReadonlySet<string> = new Set(["mermaid", "json"]);
@@ -66,6 +66,58 @@ const subscribe = (listener: () => void) => {
 export function useMarkdownFenceRenderer(lang: string): ComponentType<MarkdownFenceRendererProps> | undefined {
   useSyncExternalStore(subscribe, () => version, () => version);
   return markdownFenceRenderer(lang);
+}
+
+// ---- actions on blocks (`host.markdown.registerFenceAction`) ----------------------
+// One package adds a button to the blocks another renders. The host keeps the
+// list and nothing else: the renderer draws the buttons and runs one from the
+// person's click.
+
+const ACTION_ID_RE = /^[a-z0-9][a-z0-9._:-]{0,63}$/i;
+const NO_ACTIONS: readonly MarkdownFenceAction[] = Object.freeze([]);
+const actions = new Map<string, { action: MarkdownFenceAction; languages: readonly string[] }>();
+const actionListeners = new Set<() => void>();
+// Per language, rebuilt after a change: a stable array is a valid
+// useSyncExternalStore snapshot.
+let actionLists = new Map<string, readonly MarkdownFenceAction[]>();
+
+const emitActions = () => {
+  actionLists = new Map();
+  for (const listener of [...actionListeners]) listener();
+};
+
+export function registerMarkdownFenceAction(action: MarkdownFenceAction): Unregister {
+  if (!ACTION_ID_RE.test(action.id)) throw invalid(`invalid fence action id "${action.id}"`);
+  if (actions.has(action.id)) throw invalid(`fence action "${action.id}" is already registered`);
+  const languages = [...new Set(action.languages.map((lang) => lang.trim().toLowerCase()))];
+  if (languages.length === 0) throw invalid("a fence action needs at least one language");
+  for (const lang of languages) if (!LANGUAGE_RE.test(lang)) throw invalid(`invalid fence language "${lang}"`);
+  const entry = { action, languages };
+  actions.set(action.id, entry);
+  emitActions();
+  return () => {
+    if (actions.get(action.id) !== entry) return;
+    actions.delete(action.id);
+    emitActions();
+  };
+}
+
+export function markdownFenceActions(lang: string): readonly MarkdownFenceAction[] {
+  const key = lang.trim().toLowerCase();
+  const cached = actionLists.get(key);
+  if (cached) return cached;
+  const list = [...actions.values()]
+    .filter((entry) => entry.languages.includes(key))
+    .map((entry) => entry.action)
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.id.localeCompare(b.id));
+  const next = list.length === 0 ? NO_ACTIONS : Object.freeze(list);
+  actionLists.set(key, next);
+  return next;
+}
+
+export function subscribeMarkdownFenceActions(listener: () => void): Unregister {
+  actionListeners.add(listener);
+  return () => { actionListeners.delete(listener); };
 }
 
 /** A renderer failure shows the host's own code block instead of breaking

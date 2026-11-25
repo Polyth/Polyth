@@ -23,3 +23,14 @@ test("everything else stays an external link", () => {
   assert.equal(secondWindowRequest(page, "javascript:alert(1)"), null);
   assert.equal(secondWindowRequest("not a url", "http://127.0.0.1:4100/?window=chat"), null);
 });
+
+test("a pane window opened for one resource is that resource's own window", () => {
+  const base = "http://127.0.0.1:4100/p/p1?window=pane&surface=page-apps";
+  const one = secondWindowRequest(page, `${base}&resource=11111111-1111-4111-8111-111111111111`);
+  const two = secondWindowRequest(page, `${base}&resource=22222222-2222-4222-8222-222222222222`);
+  assert.equal(one?.key, "http://127.0.0.1:4100 pane page-apps 11111111-1111-4111-8111-111111111111");
+  assert.notEqual(one?.key, two?.key, "two apps, two windows");
+  assert.equal(secondWindowRequest(page, base)?.key, "http://127.0.0.1:4100 pane", "no resource: the one code window");
+  assert.equal(secondWindowRequest(page, `${base}&resource=a%20b`)?.key, "http://127.0.0.1:4100 pane", "a resource is an id, not text");
+  assert.equal(secondWindowRequest(page, "http://127.0.0.1:4100/?window=pane&resource=x")?.key, "http://127.0.0.1:4100 pane", "no surface");
+});

@@ -200,6 +200,16 @@ export function createPackageActivation(
               if (disposed) return reject("markdown.registerFence");
               return track(markdown.registerFence({ ...registration, ownerPackageId }));
             },
+            ...(markdown.registerFenceAction
+              ? {
+                  registerFenceAction: (action) => {
+                    if (disposed) return reject("markdown.registerFenceAction");
+                    return track(markdown.registerFenceAction!({ ...action, ownerPackageId }));
+                  },
+                }
+              : {}),
+            ...(markdown.fenceActions ? { fenceActions: markdown.fenceActions } : {}),
+            ...(markdown.subscribeFenceActions ? { subscribeFenceActions: markdown.subscribeFenceActions } : {}),
           },
         }
       : {}),

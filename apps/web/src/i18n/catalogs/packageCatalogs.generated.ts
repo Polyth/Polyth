@@ -31,6 +31,7 @@ import type { ModelsMessageKey } from "@polyth/models/i18n";
 import type { MultirunMessageKey } from "@polyth/multirun/i18n";
 import type { OpencodeMessageKey } from "@polyth/opencode/i18n";
 import type { OrchestrationMessageKey } from "@polyth/orchestration/i18n";
+import type { PageAppsMessageKey } from "@polyth/page-apps/i18n";
 import type { PermissionsMessageKey } from "@polyth/permissions/i18n";
 import type { PersonalCoachMessageKey } from "@polyth/personal-coach/i18n";
 import type { PlaygroundMessageKey } from "@polyth/playground/i18n";
@@ -75,6 +76,7 @@ import { en as p_models } from "@polyth/models/i18n/en";
 import { en as p_multirun } from "@polyth/multirun/i18n/en";
 import { en as p_opencode } from "@polyth/opencode/i18n/en";
 import { en as p_orchestration } from "@polyth/orchestration/i18n/en";
+import { en as p_page_apps } from "@polyth/page-apps/i18n/en";
 import { en as p_permissions } from "@polyth/permissions/i18n/en";
 import { en as p_personal_coach } from "@polyth/personal-coach/i18n/en";
 import { en as p_playground } from "@polyth/playground/i18n/en";
@@ -120,6 +122,7 @@ export type PackageMessageKey =
   | MultirunMessageKey
   | OpencodeMessageKey
   | OrchestrationMessageKey
+  | PageAppsMessageKey
   | PermissionsMessageKey
   | PersonalCoachMessageKey
   | PlaygroundMessageKey
@@ -165,6 +168,7 @@ export const packageEnCatalogs: ReadonlyArray<Record<string, string>> = [
   p_multirun,
   p_opencode,
   p_orchestration,
+  p_page_apps,
   p_permissions,
   p_personal_coach,
   p_playground,

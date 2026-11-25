@@ -3,69 +3,50 @@
 // modals) under a strict policy built by src/page.ts. The page can resize
 // itself and offer a reply with polyth.send(text); the host shows that reply
 // as a pending row and only the user's click sends it.
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import type { MarkdownFenceRendererProps, WebPackageHost } from "@polyth/web-sdk";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps, type ReactNode } from "react";
+import type { MarkdownFenceAction, MarkdownFenceContext, MarkdownFenceRendererProps, WebPackageHost } from "@polyth/web-sdk";
 import { Button, CheckIcon, CodeIcon, Dialog, DownloadIcon, ExpandIcon, IconButton, Notice } from "../../../apps/web/src/components/ui/index.ts";
 import {
-  DEFAULT_PAGE_THEME,
-  PAGE_CHANNEL,
   PAGE_MAX_FILE_BYTES,
   PAGE_MAX_INLINE_BYTES,
   PAGE_MIN_HEIGHT,
-  PAGE_SANDBOX,
   buildPageDocument,
   pageByteLength,
   pageFileName,
-  pageThemeCss,
   parsePageFence,
   parsePageMessage,
-  type PageTheme,
 } from "../src/page.ts";
+import { MAX_RESETS, PageIframe, docsOf, readPageTheme, usePageThemePush } from "./pageFrame.tsx";
 import { chatBlockStrings, fill, type ChatBlockStrings } from "./strings.ts";
 import { readProjectFile } from "./useBlockRecords.ts";
 
+export { readPageTheme } from "./pageFrame.tsx";
+
 const SEND_GAP_MS = 300;
-/** A page that keeps leaving (a self-refresh loop) stops being remounted. */
-const MAX_RESETS = 3;
-/** Grace for the bridge's "ready" to arrive after a load; the two are separate tasks. */
-const READY_GRACE_MS = 400;
-/** Per frame: documents the bridge announced, and how many loads used one up. */
-const frameDocs = new WeakMap<HTMLIFrameElement, { readies: number; consumed: number }>();
-const docsOf = (frame: HTMLIFrameElement) => {
-  let docs = frameDocs.get(frame);
-  if (!docs) { docs = { readies: 0, consumed: 0 }; frameDocs.set(frame, docs); }
-  return docs;
-};
 const sentPages = new Map<string, string>();
 
 export interface PageBlockProps extends MarkdownFenceRendererProps {
-  host: Pick<WebPackageHost, "conversation" | "ui">;
+  host: PageHostAlias;
+}
+
+const NO_ACTIONS: readonly MarkdownFenceAction[] = [];
+const neverChanges = () => () => {};
+
+/** Buttons other packages add to a page (`host.markdown.registerFenceAction`),
+ *  for example saving it as an app. None on a host without the seam. */
+function usePageActions(host: PageHostAlias): readonly MarkdownFenceAction[] {
+  const markdown = host.markdown;
+  return useSyncExternalStore(
+    markdown?.subscribeFenceActions ?? neverChanges,
+    () => markdown?.fenceActions?.("page") ?? NO_ACTIONS,
+    () => NO_ACTIONS,
+  );
 }
 
 type FileState =
   | { status: "idle" | "loading" }
   | { status: "ready"; html: string }
   | { status: "error"; error: "no-project" | "not-found" | "too-large" | "unavailable" };
-
-/** Host tokens the page may use, read from the live document. */
-export function readPageTheme(): PageTheme {
-  const root = typeof document === "undefined" ? null : document.documentElement;
-  const compute = typeof getComputedStyle === "function" ? getComputedStyle : null;
-  if (!root || !compute) return DEFAULT_PAGE_THEME;
-  const style = compute(root);
-  const read = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback;
-  const d = DEFAULT_PAGE_THEME;
-  return {
-    scheme: root.classList.contains("light") ? "light" : "dark",
-    bg: read("--bg", d.bg),
-    fg: read("--text", d.fg),
-    muted: read("--muted", d.muted),
-    accent: read("--accent", d.accent),
-    border: read("--border", d.border),
-    font: read("--ui-font-family", d.font),
-    radius: read("--radius-card", d.radius),
-  };
-}
 
 function useProjectHtml(path: string | undefined, projectId: string | undefined, sessionId: string | null | undefined, enabled: boolean): FileState {
   const [state, setState] = useState<FileState>({ status: "idle" });
@@ -131,16 +112,19 @@ export default function PageBlock({ text, info, closed, context, host }: PageBlo
       </section>
     );
   }
-  return <PageFrame html={html} title={title} t={t} host={host} blockKey={context.blockKey} sessionId={context.sessionId} conversation={context.conversation === true} />;
+  return <PageFrame html={html} title={title} t={t} host={host} blockKey={context.blockKey} sessionId={context.sessionId} conversation={context.conversation === true} context={context} from={fence.from} />;
 }
 
-function PageFrame({ html, title, t, host, blockKey, sessionId, conversation }: {
+function PageFrame({ html, title, t, host, blockKey, sessionId, conversation, context, from }: {
   html: string;
   title: string;
   t: ChatBlockStrings;
   host: PageHostAlias;
   blockKey: string;
   sessionId: string | null | undefined;
+  context: MarkdownFenceContext;
+  /** The project file the page was loaded from, when the fence named one. */
+  from: string | undefined;
   /** An agent's answer in this chat. Anywhere else (a file, an issue, a
    *  prompt) the page is someone else's code and waits for a click. */
   conversation: boolean;
@@ -156,6 +140,8 @@ function PageFrame({ html, title, t, host, blockKey, sessionId, conversation }: 
   const [near, setNear] = useState(() => typeof IntersectionObserver === "undefined");
   const [generation, setGeneration] = useState(0);
   const [wasReset, setWasReset] = useState(false);
+  const [running, setRunning] = useState<string | null>(null);
+  const actions = usePageActions(host);
   const sectionRef = useRef<HTMLElement | null>(null);
   const frames = useRef(new Set<HTMLIFrameElement>());
   const lastAccepted = useRef(0);
@@ -212,6 +198,8 @@ function PageFrame({ html, title, t, host, blockKey, sessionId, conversation }: 
         if (from.dataset.pageFull !== "true") setHeight(message.value);
         return;
       }
+      // A page in a chat keeps nothing: polyth.storage lasts one load here.
+      if (message.kind !== "send") return;
       const now = Date.now();
       if (now - lastAccepted.current < SEND_GAP_MS) return;
       lastAccepted.current = now;
@@ -221,29 +209,7 @@ function PageFrame({ html, title, t, host, blockKey, sessionId, conversation }: 
     return () => window.removeEventListener("message", onMessage);
   }, []);
 
-  // The root's inline style also carries non-theme variables that can change
-  // per frame, so mutations coalesce to one read per animation frame and a
-  // page hears only an actual theme change.
-  useEffect(() => {
-    if (typeof MutationObserver === "undefined" || typeof document === "undefined") return;
-    let lastCss = pageThemeCss(readPageTheme());
-    let scheduled = false;
-    const push = () => {
-      scheduled = false;
-      const css = pageThemeCss(readPageTheme());
-      if (css === lastCss) return;
-      lastCss = css;
-      for (const frame of frames.current) frame.contentWindow?.postMessage({ channel: PAGE_CHANNEL, kind: "theme", css }, "*");
-    };
-    const observer = new MutationObserver(() => {
-      if (scheduled) return;
-      scheduled = true;
-      if (typeof requestAnimationFrame === "function") requestAnimationFrame(push);
-      else setTimeout(push, 16);
-    });
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme", "style"] });
-    return () => { observer.disconnect(); scheduled = false; };
-  }, []);
+  usePageThemePush(frames);
 
   // A sandboxed page may still navigate its own frame (a link, a meta refresh,
   // `location.href`). Every document built here announces itself through the
@@ -271,6 +237,20 @@ function PageFrame({ html, title, t, host, blockKey, sessionId, conversation }: 
     sentPages.set(blockKey, message);
     setSent(message);
     setPending(null);
+  };
+
+  // An action is another package's code handling this page: it runs from the
+  // click only, one at a time, and its failure is its own to report.
+  const runAction = async (action: MarkdownFenceAction) => {
+    if (running !== null) return;
+    setRunning(action.id);
+    try {
+      await action.run({ lang: "page", title, content: html, ...(from ? { from } : {}), context });
+    } catch (cause) {
+      console.error("[polyth] page action failed", action.id, cause);
+    } finally {
+      setRunning(null);
+    }
   };
 
   const download = () => {
@@ -315,6 +295,17 @@ function PageFrame({ html, title, t, host, blockKey, sessionId, conversation }: 
       <header className="chat-block-head">
         <span className="chat-block-title">{title}</span>
         <div className="chat-block-tools">
+          {actions.map((action) => (
+            <IconButton
+              key={action.id}
+              icon={action.icon as unknown as ComponentProps<typeof IconButton>["icon"]}
+              label={action.label()}
+              size="sm"
+              busy={running === action.id}
+              disabled={running !== null}
+              onClick={() => { void runAction(action); }}
+            />
+          ))}
           <IconButton icon={ExpandIcon} label={expanded || dialogFull ? t.pageClose : t.pageFullScreen} size="sm" pressed={expanded} onClick={toggleFullscreen} />
           <IconButton icon={DownloadIcon} label={t.pageDownload} size="sm" onClick={download} />
           <IconButton icon={CodeIcon} label={asSource ? t.pageRender : t.pageSource} size="sm" pressed={asSource} onClick={() => setAsSource(!asSource)} />
@@ -355,50 +346,4 @@ function PageFrame({ html, title, t, host, blockKey, sessionId, conversation }: 
   );
 }
 
-type PageHostAlias = Pick<WebPackageHost, "conversation" | "ui">;
-
-function PageIframe({ srcDoc, title, register, onNavigated, style, full }: {
-  srcDoc: string;
-  title: string;
-  register(node: HTMLIFrameElement | null, previous: { current: HTMLIFrameElement | null }): void;
-  onNavigated(): void;
-  style: CSSProperties;
-  full?: boolean;
-}) {
-  const previous = useRef<HTMLIFrameElement | null>(null);
-  const checks = useRef(new Set<ReturnType<typeof setTimeout>>());
-  useEffect(() => () => {
-    for (const timer of checks.current) clearTimeout(timer);
-    checks.current.clear();
-  }, []);
-  // Every load gets its own check, in order, and each check uses up at most
-  // one announcement. A page that leaves right after it loaded (a meta
-  // refresh, a redirect in its first script) produces two loads close
-  // together: the first uses up the announcement, the second finds none.
-  const onLoad = (event: { currentTarget: HTMLIFrameElement }) => {
-    const docs = docsOf(event.currentTarget);
-    // Before any announcement the load is the frame's first document (or an
-    // initial blank one): it may only use up an announcement, never reset.
-    const first = docs.readies === 0;
-    const timer = setTimeout(() => {
-      checks.current.delete(timer);
-      if (docs.readies > docs.consumed) docs.consumed += 1;
-      else if (!first) onNavigated();
-    }, READY_GRACE_MS);
-    checks.current.add(timer);
-  };
-  return (
-    <iframe
-      ref={(node) => register(node, previous)}
-      className="chat-block-page-frame"
-      title={title}
-      sandbox={PAGE_SANDBOX}
-      srcDoc={srcDoc}
-      referrerPolicy="no-referrer"
-      loading="lazy"
-      data-page-full={full ? "true" : undefined}
-      onLoad={onLoad}
-      style={style}
-    />
-  );
-}
+type PageHostAlias = Pick<WebPackageHost, "conversation" | "ui"> & Partial<Pick<WebPackageHost, "markdown">>;

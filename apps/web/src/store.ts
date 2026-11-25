@@ -1539,11 +1539,15 @@ export function handlePaneEscape(): boolean {
 /** A pane window (secondWindow.ts) shows `surfaceId` as the whole window: the
  *  full-screen layer, never written to the project's pane preference. False
  *  until the surface is registered. */
-export function presentPaneAsWindow(surfaceId: string): boolean {
+export function presentPaneAsWindow(surfaceId: string, resource?: string | null): boolean {
   const surface = paneSurfaceOf(surfaceId);
   if (surface === null) return false;
-  if (state.railPlugin !== surfaceId) {
-    if (!openWorkspacePane(surfaceId)) return false;
+  // A window opened for one thing keeps showing it: a project move drops the
+  // transient pane resource, and the window asks for its own again.
+  const wanted = resource ?? undefined;
+  const shown = state.paneResource?.surfaceId === surfaceId ? state.paneResource.resource : undefined;
+  if (state.railPlugin !== surfaceId || (wanted !== undefined && shown !== wanted)) {
+    if (!openWorkspacePane(surfaceId, wanted)) return false;
   }
   if (state.paneMode !== "fullscreen" || state.panePreviousMode !== "pinned") {
     set({ paneMode: "fullscreen", panePreviousMode: "pinned" });

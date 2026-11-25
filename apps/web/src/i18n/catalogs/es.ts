@@ -32,6 +32,7 @@ import { es as p_models } from "@polyth/models/i18n/es";
 import { es as p_multirun } from "@polyth/multirun/i18n/es";
 import { es as p_opencode } from "@polyth/opencode/i18n/es";
 import { es as p_orchestration } from "@polyth/orchestration/i18n/es";
+import { es as p_page_apps } from "@polyth/page-apps/i18n/es";
 import { es as p_permissions } from "@polyth/permissions/i18n/es";
 import { es as p_personal_coach } from "@polyth/personal-coach/i18n/es";
 import { es as p_playground } from "@polyth/playground/i18n/es";
@@ -77,6 +78,7 @@ const parts: Array<Record<string, string>> = [app,
   p_multirun,
   p_opencode,
   p_orchestration,
+  p_page_apps,
   p_permissions,
   p_personal_coach,
   p_playground,

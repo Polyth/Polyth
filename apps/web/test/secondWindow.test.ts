@@ -83,3 +83,41 @@ test("presence updates announce only real changes", () => {
   assert.equal(win.returnToMainWindow(), false, "a main window hands nothing back");
   stop();
 });
+
+test("a pane window opened for one resource has its own address, name and title", () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  assert.equal(win.parseWindowResource(`?window=pane&surface=page-apps&resource=${id}`), id);
+  assert.equal(win.parseWindowResource("?window=pane&surface=page-apps&resource=a%20b"), null, "an id, never free text");
+  assert.equal(win.parseWindowResource("?window=pane&surface=page-apps"), null);
+  assert.equal(
+    secondWindowUrl("pane", "p1", null, "page-apps", id),
+    `${secondWindowUrl("pane", "p1", null, "page-apps")}&resource=${id}`,
+  );
+  assert.equal(secondWindowUrl("pane", "p1", null, "page-apps", "a b"), secondWindowUrl("pane", "p1", null, "page-apps"), "a bad resource is dropped");
+  assert.equal(secondWindowUrl("chat", "p1", "s1", "page-apps", id), secondWindowUrl("chat", "p1", "s1"), "only a pane window carries one");
+  assert.equal(secondWindowName("pane", null, "page-apps", id), `polyth-pane-page-apps-${id}`);
+  assert.notEqual(secondWindowName("pane", null, "page-apps", id), secondWindowName("pane", null, "files"), "beside the code window, not in its place");
+  assert.equal(withWindowRole("/p/p1", "pane", "page-apps", id), `/p/p1?window=pane&surface=page-apps&resource=${id}`);
+  assert.equal(withWindowRole("/p/p1", "pane", "git", null), "/p/p1?window=pane&surface=git");
+
+  win.setWindowRoleForTest("pane", "page-apps", id);
+  try {
+    assert.equal(win.windowResource(), id);
+    win.setWindowContentTitle("  Budget\n2026  ");
+    assert.equal(win.windowContentTitle(), "Budget 2026");
+    win.setWindowContentTitle(null);
+    assert.equal(win.windowContentTitle(), null);
+    // Showing another surface makes it an ordinary pane window again.
+    win.setWindowContentTitle("Budget");
+    win.setWindowSurface("files");
+    assert.equal(win.windowResource(), null);
+    assert.equal(win.windowContentTitle(), null);
+    win.setWindowRoleForTest("pane", "files");
+    win.setWindowContentTitle("Budget");
+    assert.equal(win.windowContentTitle(), null, "only a resource window is named by its content");
+    win.setWindowRoleForTest("main", null, id);
+    assert.equal(win.windowResource(), null, "the main window has no resource");
+  } finally {
+    win.setWindowRoleForTest("main");
+  }
+});

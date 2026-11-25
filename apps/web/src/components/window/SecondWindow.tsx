@@ -15,6 +15,7 @@ import {
   subscribeWindowPresence,
   updateWindowPresence,
   useWindowPresence,
+  windowResource,
   windowRole,
   windowSurface,
 } from "../../secondWindow.ts";
@@ -62,7 +63,7 @@ export function useWindowCoordination(): void {
         return;
       }
       if (message.role === "pane" && message.surface) {
-        const reopen = () => { openWorkspacePane(message.surface!); };
+        const reopen = () => { openWorkspacePane(message.surface!, message.resource ?? undefined); };
         const state = getState();
         if (message.sessionId && message.sessionId !== state.activeSessionId) {
           void openSession(message.sessionId, { showChat: false }).then(reopen).catch(reportOpenError);
@@ -77,16 +78,18 @@ export function useWindowCoordination(): void {
   }, []);
 
   // Pane window: show the surface as the whole window, and follow the chat
-  // the main window focused last until the person pins it.
+  // the main window focused last until the person pins it. A window opened
+  // for one resource (a saved app) shows that and follows nothing.
   useEffect(() => {
     if (windowRole() !== "pane") return;
     const surface = windowSurface();
+    const resource = windowResource();
     let following: string | null = null;
     const present = () => {
-      if (surface) presentPaneAsWindow(surface);
+      if (surface) presentPaneAsWindow(surface, resource);
     };
     const follow = () => {
-      if (getSelfPresence().pinned) return;
+      if (resource !== null || getSelfPresence().pinned) return;
       const lead = leadMainWindow(getWindowPeers());
       if (!lead) return;
       const key = `${lead.projectId ?? ""}/${lead.sessionId ?? ""}`;
@@ -150,18 +153,21 @@ export function SecondWindowHeader() {
   // Packages register their windows after boot: present the pane once its
   // surface exists (the store subscription covers later project moves).
   useEffect(() => {
-    if (role === "pane" && surfaceId) presentPaneAsWindow(surfaceId);
+    if (role === "pane" && surfaceId) presentPaneAsWindow(surfaceId, windowResource());
   }, [role, surfaceId, surfaceVersion]);
+  // A resource window is named by what it shows, not by where it was opened.
+  const resourceWindow = role === "pane" && presence.resource !== null;
+  const contentTitle = resourceWindow ? presence.contentTitle : null;
   const surfaceTitle = surfaceId ? listSurfaces().find((surface) => surface.id === surfaceId)?.title ?? null : null;
   const workLine = [context.projectName, context.branch].filter(Boolean).join(" · ");
   const pinned = presence.self.pinned;
   const hasMain = leadMainWindow(presence.peers) !== null;
 
   useEffect(() => {
-    const name = role === "chat" ? context.title : surfaceTitle;
-    const where = workLine || null;
+    const name = role === "chat" ? context.title : contentTitle ?? surfaceTitle;
+    const where = resourceWindow ? null : workLine || null;
     document.title = [name, where, "Polyth"].filter(Boolean).join(" — ");
-  }, [role, context.title, surfaceTitle, workLine]);
+  }, [role, context.title, surfaceTitle, workLine, contentTitle, resourceWindow]);
 
   return (
     <header className="second-window-header" data-role={role}>
@@ -176,6 +182,11 @@ export function SecondWindowHeader() {
             />
             <strong className="second-window-title">{context.title ?? tr("split.newChat")}</strong>
             {workLine && <span className="second-window-quiet">{workLine}</span>}
+          </>
+        ) : resourceWindow ? (
+          <>
+            <strong className="second-window-title">{contentTitle || surfaceTitle || tr("header.polyth")}</strong>
+            {contentTitle && surfaceTitle && <span className="second-window-quiet">{surfaceTitle}</span>}
           </>
         ) : (
           <>

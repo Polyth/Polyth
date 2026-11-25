@@ -5,12 +5,15 @@
 import { HUB_ORIGIN } from "./windowSurface.ts";
 
 export interface SecondWindowRequest {
-  /** One window per chat, one pane window: a second request focuses it. */
+  /** One window per chat, one pane window, one per pane resource: a second
+   *  request focuses it. */
   key: string;
   url: string;
 }
 
 const ROLES = new Set(["chat", "pane"]);
+/** The web client's surface and resource ids (apps/web/src/secondWindow.ts). */
+const ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
 
 function parse(raw: string): URL | null {
   try { return new URL(raw); } catch { return null; }
@@ -27,8 +30,13 @@ export function secondWindowRequest(pageUrl: string, targetUrl: string): SecondW
   if (target.username || target.password) return null;
   const role = target.searchParams.get("window");
   if (!role || !ROLES.has(role)) return null;
+  // A pane window opened for one resource (a saved app) is that resource's
+  // window: one per surface and resource, beside the single code window.
+  const surface = target.searchParams.get("surface");
+  const resource = target.searchParams.get("resource");
+  const own = role === "pane" && surface !== null && resource !== null && ID.test(surface) && ID.test(resource);
   const key = role === "chat"
     ? `${target.origin} chat ${target.searchParams.get("session") ?? target.pathname}`
-    : `${target.origin} pane`;
+    : own ? `${target.origin} pane ${surface} ${resource}` : `${target.origin} pane`;
   return { key, url: target.toString() };
 }

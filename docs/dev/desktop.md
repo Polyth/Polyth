@@ -740,8 +740,9 @@ In the workstation edition only the shell sends: the server route stays off ther
   opens a native window from `src/secondWindows.ts`; every other `window.open` is an
   external link. That window has no preload, so no desktop bridge (desktop IPC still
   answers only the main window), shares the session and navigation rule, and its
-  requests pass the same local-server guard as the main window's. One window per chat and
-  one pane window; asking again focuses it. Source-inspected and unit-tested
+  requests pass the same local-server guard as the main window's. One window per chat,
+  one pane window, and one per pane resource (`surface` plus `resource`, a saved app's
+  own window); asking again focuses it. Source-inspected and unit-tested
   (`test/secondWindows.test.ts`); not yet run in a packaged app.
 - Permissions: only audio capture (not camera/video), notifications and clipboard read
   for the top page. Another server asks once for the microphone and once for the clipboard.

@@ -6,7 +6,10 @@
 // - chat: the chat named by the URL, full width, no navigator or work panes;
 // - pane: one workspace window (`&surface=`, e.g. the project's files) shown
 //   full size — the "code window". It follows the chat the main window shows
-//   (its project and checkout) until the person pins it.
+//   (its project and checkout) until the person pins it. With `&resource=` it
+//   is a window for that one thing (a package's item, such as a saved app):
+//   one window per surface and resource, named by its content, following
+//   nothing.
 //
 // Windows of one origin find each other over a BroadcastChannel: each one
 // announces what it shows, so the main window can mark chats open elsewhere
@@ -21,10 +24,15 @@ export type WindowRole = "main" | "chat" | "pane";
 
 export const WINDOW_PARAM = "window";
 export const WINDOW_SURFACE_PARAM = "surface";
+export const WINDOW_RESOURCE_PARAM = "resource";
 const ROLE_KEY = "polyth.window.role.v1";
 const SURFACE_KEY = "polyth.window.surface.v1";
+const RESOURCE_KEY = "polyth.window.resource.v1";
 const CHANNEL = "polyth.windows.v1";
 const SURFACE_ID = /^[a-z0-9][a-z0-9._:-]{0,63}$/i;
+/** A resource in a window URL is an id, never free text. */
+const RESOURCE_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
+const TITLE_MAX = 120;
 /** Heartbeat and expiry: a window that crashed stops counting after this. */
 const HEARTBEAT_MS = 15_000;
 const EXPIRE_MS = 40_000;
@@ -41,31 +49,58 @@ export function parseWindowSurface(search: string): string | null {
   return value && SURFACE_ID.test(value) ? value : null;
 }
 
+/** The one thing a pane window URL asks its surface to show, bounded. */
+export function parseWindowResource(search: string): string | null {
+  const value = new URLSearchParams(search.startsWith("?") || search.length === 0 ? search : `?${search}`).get(WINDOW_RESOURCE_PARAM);
+  return value && RESOURCE_ID.test(value) ? value : null;
+}
+
 /** URL of a second window: the canonical chat URL plus its role. */
 export function secondWindowUrl(
   role: Exclude<WindowRole, "main">,
   projectId: string | null,
   sessionId: string | null,
   surface?: string | null,
+  resource?: string | null,
 ): string {
   const base = formatAppUrl(projectId, sessionId);
   const params = new URLSearchParams();
   params.set(WINDOW_PARAM, role);
-  if (role === "pane" && surface && SURFACE_ID.test(surface)) params.set(WINDOW_SURFACE_PARAM, surface);
+  if (role === "pane" && surface && SURFACE_ID.test(surface)) {
+    params.set(WINDOW_SURFACE_PARAM, surface);
+    if (resource && RESOURCE_ID.test(resource)) params.set(WINDOW_RESOURCE_PARAM, resource);
+  }
   return `${base}${base.includes("?") ? "&" : "?"}${params.toString()}`;
 }
 
-/** Window target names: opening the same chat twice brings its window forward. */
-export function secondWindowName(role: Exclude<WindowRole, "main">, sessionId: string | null): string {
-  return role === "chat" ? `polyth-chat-${sessionId ?? "new"}` : "polyth-pane";
+/** Window target names: opening the same chat twice brings its window
+ *  forward, and so does opening the same resource of a surface. */
+export function secondWindowName(
+  role: Exclude<WindowRole, "main">,
+  sessionId: string | null,
+  surface?: string | null,
+  resource?: string | null,
+): string {
+  if (role === "chat") return `polyth-chat-${sessionId ?? "new"}`;
+  return surface && resource && SURFACE_ID.test(surface) && RESOURCE_ID.test(resource)
+    ? `polyth-pane-${surface}-${resource}`
+    : "polyth-pane";
 }
 
 /** Keep the role in the address the URL sync writes, so a reload keeps it. */
-export function withWindowRole(path: string, role: WindowRole = windowRole(), surface: string | null = windowSurface()): string {
+export function withWindowRole(
+  path: string,
+  role: WindowRole = windowRole(),
+  surface: string | null = windowSurface(),
+  resource: string | null = windowResource(),
+): string {
   if (role === "main") return path;
   const params = new URLSearchParams();
   params.set(WINDOW_PARAM, role);
-  if (role === "pane" && surface) params.set(WINDOW_SURFACE_PARAM, surface);
+  if (role === "pane" && surface) {
+    params.set(WINDOW_SURFACE_PARAM, surface);
+    if (resource) params.set(WINDOW_RESOURCE_PARAM, resource);
+  }
   return `${path}${path.includes("?") ? "&" : "?"}${params.toString()}`;
 }
 
@@ -76,18 +111,21 @@ function sessionStore(): Storage | null {
 // A window opened by window.open starts with a copy of its opener's
 // sessionStorage, so the stored role is only a reload memory for a window
 // whose URL lost the parameter; the URL always wins.
-function bootRole(): { role: WindowRole; surface: string | null } {
-  if (typeof location === "undefined") return { role: "main", surface: null };
+function bootRole(): { role: WindowRole; surface: string | null; resource: string | null } {
+  if (typeof location === "undefined") return { role: "main", surface: null, resource: null };
   const fromUrl = parseWindowRole(location.search);
   const store = sessionStore();
   if (fromUrl) {
     const surface = fromUrl === "pane" ? parseWindowSurface(location.search) : null;
+    const resource = surface ? parseWindowResource(location.search) : null;
     try {
       store?.setItem(ROLE_KEY, fromUrl);
       if (surface) store?.setItem(SURFACE_KEY, surface);
       else store?.removeItem(SURFACE_KEY);
+      if (resource) store?.setItem(RESOURCE_KEY, resource);
+      else store?.removeItem(RESOURCE_KEY);
     } catch { /* reload memory only */ }
-    return { role: fromUrl, surface };
+    return { role: fromUrl, surface, resource };
   }
   const stored = store?.getItem(ROLE_KEY);
   // Only a reload of this very window can lack the parameter: a window the
@@ -98,15 +136,20 @@ function bootRole(): { role: WindowRole; surface: string | null } {
   if ((stored === "chat" || stored === "pane") && reloaded) {
     const storedSurface = stored === "pane" ? store?.getItem(SURFACE_KEY) ?? null : null;
     const surface = storedSurface && SURFACE_ID.test(storedSurface) ? storedSurface : null;
-    return { role: stored, surface };
+    const storedResource = surface ? store?.getItem(RESOURCE_KEY) ?? null : null;
+    const resource = storedResource && RESOURCE_ID.test(storedResource) ? storedResource : null;
+    return { role: stored, surface, resource };
   }
-  try { store?.removeItem(ROLE_KEY); store?.removeItem(SURFACE_KEY); } catch { /* reload memory only */ }
-  return { role: "main", surface: null };
+  try { store?.removeItem(ROLE_KEY); store?.removeItem(SURFACE_KEY); store?.removeItem(RESOURCE_KEY); } catch { /* reload memory only */ }
+  return { role: "main", surface: null, resource: null };
 }
 
 const boot = bootRole();
 let role: WindowRole = boot.role;
 let surface: string | null = boot.surface;
+let resource: string | null = boot.resource;
+// What a resource window's content calls itself (a saved app's name).
+let contentTitle: string | null = null;
 
 export function windowRole(): WindowRole {
   return role;
@@ -121,18 +164,48 @@ export function windowSurface(): string | null {
   return surface;
 }
 
-/** The pane window shows another surface: kept for a reload of this window. */
+/** The one thing this pane window was opened for; null for the code window
+ *  and for every other role. */
+export function windowResource(): string | null {
+  return role === "pane" ? resource : null;
+}
+
+/** The pane window shows another surface: kept for a reload of this window.
+ *  It is then no longer the window of one resource. */
 export function setWindowSurface(next: string): void {
   if (role !== "pane" || !SURFACE_ID.test(next) || next === surface) return;
   surface = next;
-  try { sessionStore()?.setItem(SURFACE_KEY, next); } catch { /* reload memory only */ }
+  resource = null;
+  contentTitle = null;
+  try {
+    sessionStore()?.setItem(SURFACE_KEY, next);
+    sessionStore()?.removeItem(RESOURCE_KEY);
+  } catch { /* reload memory only */ }
   emit();
 }
 
+/** A resource window is named by its content. Ignored everywhere else, so a
+ *  surface can report its title without knowing which window it is in. */
+export function setWindowContentTitle(title: string | null): void {
+  if (windowResource() === null) return;
+  const next = typeof title === "string"
+    ? title.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, TITLE_MAX) || null
+    : null;
+  if (next === contentTitle) return;
+  contentTitle = next;
+  emit();
+}
+
+export function windowContentTitle(): string | null {
+  return windowResource() === null ? null : contentTitle;
+}
+
 /** Test seam: set the role a module instance reports. */
-export function setWindowRoleForTest(next: WindowRole, nextSurface: string | null = null): void {
+export function setWindowRoleForTest(next: WindowRole, nextSurface: string | null = null, nextResource: string | null = null): void {
   role = next;
   surface = nextSurface;
+  resource = nextResource;
+  contentTitle = null;
   emit();
 }
 
@@ -167,9 +240,15 @@ export function openChatWindow(sessionId: string, projectId: string | null): boo
 }
 
 /** Open a workspace window (the project's files, its changes, the browser…)
- *  in a window of its own. False when the browser blocked it. */
-export function openPaneWindow(projectId: string | null, sessionId: string | null, surfaceId: string): boolean {
-  return openWindow(secondWindowUrl("pane", projectId, sessionId, surfaceId), secondWindowName("pane", null));
+ *  in a window of its own. With `resourceId` it is that one thing's window,
+ *  beside the code window instead of in its place. False when the browser
+ *  blocked it or the ids are not ids. */
+export function openPaneWindow(projectId: string | null, sessionId: string | null, surfaceId: string, resourceId?: string | null): boolean {
+  if (!SURFACE_ID.test(surfaceId) || (resourceId != null && !RESOURCE_ID.test(resourceId))) return false;
+  return openWindow(
+    secondWindowUrl("pane", projectId, sessionId, surfaceId, resourceId),
+    secondWindowName("pane", null, surfaceId, resourceId),
+  );
 }
 
 // ---- presence ---------------------------------------------------------------------
@@ -190,7 +269,7 @@ export type WindowMessage =
   | { t: "gone"; id: string }
   | { t: "ask" }
   /** A second window hands its content back to the main window last focused. */
-  | { t: "return"; to: string; role: Exclude<WindowRole, "main">; projectId: string | null; sessionId: string | null; surface: string | null };
+  | { t: "return"; to: string; role: Exclude<WindowRole, "main">; projectId: string | null; sessionId: string | null; surface: string | null; resource?: string | null };
 
 export interface PeerRecord {
   presence: WindowPresence;
@@ -269,11 +348,13 @@ interface PresenceSnapshot {
   peers: ReadonlyMap<string, PeerRecord>;
   role: WindowRole;
   surface: string | null;
+  resource: string | null;
+  contentTitle: string | null;
 }
-let snapshot: PresenceSnapshot = { self, peers, role, surface };
+let snapshot: PresenceSnapshot = { self, peers, role, surface, resource: windowResource(), contentTitle: null };
 
 function emit(): void {
-  snapshot = { self, peers, role, surface };
+  snapshot = { self, peers, role, surface, resource: windowResource(), contentTitle: windowContentTitle() };
   for (const listener of [...listeners]) listener();
 }
 
@@ -366,7 +447,7 @@ export function returnToMainWindow(): boolean {
   if (role === "main") return false;
   const lead = leadMainWindow(peers);
   if (!lead) return false;
-  post({ t: "return", to: lead.id, role, projectId: self.projectId, sessionId: self.sessionId, surface });
+  post({ t: "return", to: lead.id, role, projectId: self.projectId, sessionId: self.sessionId, surface, resource: windowResource() });
   return true;
 }
 

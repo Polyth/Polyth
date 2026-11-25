@@ -14,6 +14,12 @@ export const PAGE_MIN_HEIGHT = 80;
 export const PAGE_MAX_HEIGHT = 1200;
 export const PAGE_MAX_SEND = 500;
 export const PAGE_MAX_TITLE = 120;
+/** `polyth.storage`: a small string map a page keeps. Enforced again by
+ *  whoever persists it; in a chat nothing does, and the map lasts one load. */
+export const PAGE_STORAGE_MAX_KEYS = 200;
+export const PAGE_STORAGE_MAX_KEY = 128;
+export const PAGE_STORAGE_MAX_VALUE_BYTES = 64 * 1024;
+export const PAGE_STORAGE_MAX_BYTES = 256 * 1024;
 
 export const PAGE_CSP = [
   "default-src 'none'",
@@ -77,19 +83,42 @@ export function pageThemeCss(theme: PageTheme): string {
 
 // Runs before the agent's content. Announces each document it starts (the
 // host's navigation check), reports height, relays theme updates and
-// exposes polyth.send(text), which only ever asks the host to show a choice.
-const BRIDGE = `(function(){var C=${JSON.stringify(PAGE_CHANNEL)},last=-1;`
-  + `function post(m){m.channel=C;parent.postMessage(m,"*")}`
-  + `function h(){var v=Math.ceil(document.documentElement.getBoundingClientRect().height);if(v!==last){last=v;post({kind:"height",value:v})}}`
-  + `window.polyth={send:function(t){if(typeof t==="string")post({kind:"send",text:t})}};`
-  + `addEventListener("message",function(e){var d=e.data;if(e.source!==parent||!d||d.channel!==C||d.kind!=="theme"||typeof d.css!=="string")return;`
-  + `var s=document.getElementById("polyth-theme");if(s)s.textContent=d.css});`
-  + `post({kind:"ready"});if(window.ResizeObserver)new ResizeObserver(h).observe(document.documentElement);addEventListener("load",h);h()})()`;
+// exposes polyth.send(text), which only ever asks the host to show a choice,
+// and polyth.storage, a string map shaped like localStorage (a sandboxed
+// frame has none). The map is seeded by the host and every change is posted
+// to it; whether it outlives this load is the host's decision (`persistent`).
+export interface PageBridgeOptions {
+  /** The map the page starts with. */
+  storage?: Readonly<Record<string, string>>;
+  /** True when the host keeps the map between loads (an installed page). */
+  persistent?: boolean;
+}
+
+// JSON inside a script element: nothing in it may end the element or a line.
+const scriptJson = (value: unknown): string =>
+  JSON.stringify(value).replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+
+function pageBridge(options: PageBridgeOptions): string {
+  return `(function(){var C=${JSON.stringify(PAGE_CHANNEL)},last=-1,S=Object.assign(Object.create(null),JSON.parse(${scriptJson(JSON.stringify(options.storage ?? {}))}));`
+    + `function post(m){m.channel=C;parent.postMessage(m,"*")}`
+    + `function h(){var v=Math.ceil(document.documentElement.getBoundingClientRect().height);if(v!==last){last=v;post({kind:"height",value:v})}}`
+    + `function key(k){k=String(k);if(!k||k.length>${PAGE_STORAGE_MAX_KEY})throw new Error("polyth.storage: invalid key");return k}`
+    + `window.polyth={send:function(t){if(typeof t==="string")post({kind:"send",text:t})},storage:{persistent:${options.persistent === true},`
+    + `getItem:function(k){k=String(k);return k in S?S[k]:null},`
+    + `setItem:function(k,v){k=key(k);v=String(v);if(v.length>${PAGE_STORAGE_MAX_VALUE_BYTES})throw new Error("polyth.storage: value too large");`
+    + `if(!(k in S)&&Object.keys(S).length>=${PAGE_STORAGE_MAX_KEYS})throw new Error("polyth.storage: too many keys");S[k]=v;post({kind:"storage",op:"set",key:k,value:v})},`
+    + `removeItem:function(k){k=String(k);if(k in S){delete S[k];post({kind:"storage",op:"remove",key:k})}},`
+    + `clear:function(){S=Object.create(null);post({kind:"storage",op:"clear"})},`
+    + `keys:function(){return Object.keys(S)}}};`
+    + `addEventListener("message",function(e){var d=e.data;if(e.source!==parent||!d||d.channel!==C||d.kind!=="theme"||typeof d.css!=="string")return;`
+    + `var s=document.getElementById("polyth-theme");if(s)s.textContent=d.css});`
+    + `post({kind:"ready"});if(window.ResizeObserver)new ResizeObserver(h).observe(document.documentElement);addEventListener("load",h);h()})()`;
+}
 
 /** The complete srcdoc. The policy comes first, our theme and bridge next,
  *  the agent's content last and untouched (no head surgery). */
-export function buildPageDocument(content: string, theme: PageTheme = DEFAULT_PAGE_THEME): string {
-  return `${PAGE_PREAMBLE}<style id="polyth-theme">${pageThemeCss(theme)}</style><script>${BRIDGE}</script>${content}`;
+export function buildPageDocument(content: string, theme: PageTheme = DEFAULT_PAGE_THEME, options: PageBridgeOptions = {}): string {
+  return `${PAGE_PREAMBLE}<style id="polyth-theme">${pageThemeCss(theme)}</style><script>${pageBridge(options)}</script>${content}`;
 }
 
 export const pageByteLength = (text: string): number => new TextEncoder().encode(text).length;
@@ -154,7 +183,10 @@ export function parsePageFence(text: string, info?: string): PageFence {
 export type PageMessage =
   | { kind: "ready" }
   | { kind: "height"; value: number }
-  | { kind: "send"; text: string };
+  | { kind: "send"; text: string }
+  | { kind: "storage"; op: "set"; key: string; value: string }
+  | { kind: "storage"; op: "remove"; key: string }
+  | { kind: "storage"; op: "clear" };
 
 export const clampPageHeight = (value: number): number =>
   Math.min(PAGE_MAX_HEIGHT, Math.max(PAGE_MIN_HEIGHT, Math.round(value)));
@@ -174,8 +206,43 @@ export function parsePageMessage(data: unknown): PageMessage | null {
     const text = m.text.trim();
     return text && text.length <= PAGE_MAX_SEND ? { kind: "send", text } : null;
   }
+  if (m.kind === "storage") {
+    if (m.op === "clear") return { kind: "storage", op: "clear" };
+    if (!pageStorageKey(m.key)) return null;
+    if (m.op === "remove") return { kind: "storage", op: "remove", key: m.key };
+    if (m.op === "set" && pageStorageValue(m.value)) return { kind: "storage", op: "set", key: m.key, value: m.value };
+  }
   return null;
 }
+
+export const pageStorageKey = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0 && value.length <= PAGE_STORAGE_MAX_KEY;
+
+export const pageStorageValue = (value: unknown): value is string =>
+  typeof value === "string" && value.length <= PAGE_STORAGE_MAX_VALUE_BYTES && pageByteLength(value) <= PAGE_STORAGE_MAX_VALUE_BYTES;
+
+/** A stored map as the bridge may be seeded with it: own string entries
+ *  within the key, value, count and total limits. Anything else is dropped,
+ *  so a damaged file never reaches a page. */
+export function cleanPageStorage(raw: unknown): Record<string, string> {
+  const clean: Record<string, string> = Object.create(null) as Record<string, string>;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return clean;
+  let count = 0;
+  let bytes = 0;
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!pageStorageKey(key) || !pageStorageValue(value)) continue;
+    const size = pageByteLength(key) + pageByteLength(value);
+    if (count >= PAGE_STORAGE_MAX_KEYS || bytes + size > PAGE_STORAGE_MAX_BYTES) break;
+    clean[key] = value;
+    count += 1;
+    bytes += size;
+  }
+  return clean;
+}
+
+/** Size of a map against PAGE_STORAGE_MAX_BYTES. */
+export const pageStorageBytes = (values: Readonly<Record<string, string>>): number =>
+  Object.entries(values).reduce((sum, [key, value]) => sum + pageByteLength(key) + pageByteLength(value), 0);
 
 /** A safe download name from a page title. */
 export function pageFileName(title: string): string {
