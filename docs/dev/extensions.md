@@ -507,6 +507,40 @@ polyth-package pack ./my-extension
 
 `validate` checks the manifest and required assets. `doctor` adds developer-facing diagnostics for dynamic contributions without a runtime entry, missing assets, optional authority, connection/capability mismatches, and declarative zero-runtime rendering. `pack` creates the installable archive.
 
+## Agent authoring
+
+Every installation's agents can build the person's own packages. The package
+manager (`packages/plugins`) registers two deployment-scoped capabilities when
+it enables:
+
+- the product skill `polyth-packages` (`src/agentSkill.ts`), self-contained so
+  it needs no repository files: when to choose a sandboxed or a trusted server
+  package, working templates for both, contributions, capabilities, RemoteUI,
+  agent tool/skill registration from a trusted entry, tenancy, disposal, and
+  the check → install link → Update loop;
+- the read-only tool `polyth_packages` (`src/agentTool.ts`), whose actions are
+  `info` (the trusted plugin directory `file:` sources resolve against, the
+  engine version, edition, UI slots, limits), `list` (installed packages and
+  their state in the calling Space, the same view as `GET /api/plugins`),
+  `check` (loads the manifest of `<trusted dir>/<id>`, checks engine, assets
+  and runtime rules, and builds its UI/sandbox bundle into a temporary
+  directory exactly as install does; server code is not executed) and `logs`
+  (the same lines as `GET /api/plugins/<id>/logs`).
+
+Neither installs, enables or grants anything. The agent writes the folder and
+hands the person `/?settings=packages&install=file:<id>`; installation, access
+review and enablement stay theirs, and a trusted server package still needs
+the instance owner. `loadServerEntry` reads the same manifest install did
+(`loadCanonicalManifest`: `polyth-package.json` `runtime.server`, a
+`package.json` `polyth` object, or legacy `polyth-plugin.json`
+`entries.server`) and refuses one whose real file leaves the install
+directory. React UI in host slots (`entries.ui` + `contributions`) still needs
+`polyth-plugin.json`: a v2 trusted-local manifest maps no slot contributions.
+Change the skill text
+whenever a manifest field, capability, contribution kind, install source or
+limit it names changes; `test/packagesAgentSkill.test.ts` installs the skill's
+trusted-package template end to end.
+
 ## Examples
 
 Repository examples using only the public SDK:

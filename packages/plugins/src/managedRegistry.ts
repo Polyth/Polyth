@@ -81,7 +81,8 @@ import type { PackageOpaqueVault } from "./connections.ts";
 import { assertPackageServices, type PackageSpaceAdminView, type ServerServiceRegistry } from "./serverPackage.ts";
 
 const err = (code: string, message: string) => Object.assign(new Error(message), { code });
-const ENGINE_VERSION = "0.1.0";
+/** The host version a manifest's `engines.polyth` range is checked against. */
+export const ENGINE_VERSION = "0.1.0";
 const MAX_LOG_LINES = 500;
 /** Uploaded/served gallery frame ceiling; the asset route shares this. */
 export const MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024;

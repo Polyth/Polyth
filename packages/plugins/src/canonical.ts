@@ -20,14 +20,18 @@ export function isPackageDocument(value: unknown): value is Record<string, unkno
   return version === 1 || version === 2;
 }
 
+/** The package's manifest, from the first of `polyth-package.json`, a
+ *  `package.json` `polyth` object, or the legacy `polyth-plugin.json`; `path`
+ *  is the file it was read from. */
 export function loadCanonicalManifest(dir: string): {
   canonical: PackageManifest;
   legacy: ManagedPluginManifest;
+  path: string;
 } {
   const manifestPath = join(dir, "polyth-package.json");
   if (existsSync(manifestPath) && statSync(manifestPath).isFile()) {
     const canonical = parsePackageManifestDocument(JSON.parse(readFileSync(manifestPath, "utf8")));
-    return { canonical, legacy: legacyFromCanonical(canonical) };
+    return { canonical, legacy: legacyFromCanonical(canonical), path: manifestPath };
   }
   const pkgPath = join(dir, "package.json");
   if (existsSync(pkgPath)) {
@@ -49,7 +53,7 @@ export function loadCanonicalManifest(dir: string): {
         },
       };
       const canonical = parsePackageManifestDocument(document);
-      return { canonical, legacy: legacyFromCanonical(canonical) };
+      return { canonical, legacy: legacyFromCanonical(canonical), path: pkgPath };
     }
   }
   const legacyPath = join(dir, "polyth-plugin.json");
@@ -59,7 +63,7 @@ export function loadCanonicalManifest(dir: string): {
     });
   }
   const legacy = parseManifest(readFileSync(legacyPath, "utf8"));
-  return { canonical: canonicalFromLegacy(legacy), legacy };
+  return { canonical: canonicalFromLegacy(legacy), legacy, path: legacyPath };
 }
 
 export function canonicalFromLegacy(legacy: ManagedPluginManifest): PackageManifestV1 {

@@ -14,6 +14,8 @@ Repository-relative paths below. Read root `AGENTS.md` once. Locate the current 
 - `docs/dev/README.md`
 - `docs/agents/security.md`
 
+This skill is for Polyth's own workspace packages. Installed Polyths ship a product skill of the same name for the person's own managed packages, with its `polyth_packages` tool (`packages/plugins/src/agentSkill.ts`, `agentTool.ts`; see `docs/dev/extensions.md` § Agent authoring). Update that text when a managed-package contract it names changes.
+
 ## Containment
 Every package outside the reviewed framework list is one removable folder: the host never names it, dependents declare it, its data lives under its id, and deleting the folder leaves nothing broken. Read §0 of [package-structure.md](package-structure.md) before adding a package, a host integration, a cross-package import or package storage; `scripts/test/packageRemovability.test.ts` enforces it.
 
