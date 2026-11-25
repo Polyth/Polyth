@@ -70,6 +70,7 @@ const DESCRIPTION =
   + "Before agent.spawn, call agent.models once: a few lines ranking the user's favorite and most-used harness/model pairs, named as each harness's live model catalog lists them, with live quota headroom; pass the chosen row's harnessId and model to agent.spawn exactly. "
   + "agent.spawn always creates a canonical child Session of the calling Session, so every delegated worker has a durable parentId and appears as a Polyth sub-session. "
   + "session.create in your own project also files the new chat under you as a sub-session; pass parameters.standalone=true when the person asked for chats they can see and steer themselves: it becomes a chat of its own in the project's session list, with no parent. "
+  + "A session an automation started (a Polyth Agent's run, a monitoring chat) has no subagents: there agent.spawn and session.create always open a standalone chat the person sees in the project's session list, isolated when you ask, which the person reviews and merges from its isolation card; agent.merge does not apply to it. "
   + "Choose each child's workspace with parameters.isolation: shared (default) runs it in your checkout, where it sees your uncommitted files; isolated gives it its own git worktree branched from your last commit, so parallel or risky edits cannot collide. "
   + "Isolated work reaches your checkout only through agent.merge (agent.resolve for conflicts, agent.discard to drop it on purpose); merge or discard every isolated child before you finish. "
   + "Inside the current project, session orchestration is autonomous: spawn, create, inspect, debug, message, cancel, archive, fork, and switch harnesses without a Polyth orchestration approval on every call. "
@@ -89,9 +90,9 @@ export const polythDelegationPolicy = {
     kind: "instruction" as const,
     owner: "harness-runtime",
     scope: "deployment" as const,
-    revision: "3",
+    revision: "4",
     title: "Polyth-owned delegation",
-    text: "Delegation is owned by Polyth. Never use harness-native Agent, Task, task, agent, invoke_subagent, or equivalent subagent/spawn tools. When work should be delegated, use the Polyth control tool with action agent.spawn. Every delegated worker must be a canonical Polyth child Session with parentId set by Polyth. For asynchronous work, use agent.spawn with watchCaller=true or session.watch so completion is event-driven; do not poll session status in a loop. Use session.send, session.messages, session.debug, and polyth_peer to coordinate those child sessions. Choose each child's workspace deliberately with agent.spawn isolation: shared (default) when it only reads, makes a small sequential edit, or must see your uncommitted files; isolated for parallel or risky code changes, which get their own git worktree branched from your last commit. You own integration: review every isolated child's result and bring it into your checkout with agent.merge (agent.resolve for conflicts, agent.discard only to drop work on purpose) before you finish. Polyth reminds you about unmerged isolated work and refuses to merge or discard your own isolated workspace while delegated work still targets it.",
+    text: "Delegation is owned by Polyth. Never use harness-native Agent, Task, task, agent, invoke_subagent, or equivalent subagent/spawn tools. When work should be delegated, use the Polyth control tool with action agent.spawn. Every delegated worker must be a canonical Polyth child Session with parentId set by Polyth. For asynchronous work, use agent.spawn with watchCaller=true or session.watch so completion is event-driven; do not poll session status in a loop. Use session.send, session.messages, session.debug, and polyth_peer to coordinate those child sessions. Choose each child's workspace deliberately with agent.spawn isolation: shared (default) when it only reads, makes a small sequential edit, or must see your uncommitted files; isolated for parallel or risky code changes, which get their own git worktree branched from your last commit. You own integration: review every isolated child's result and bring it into your checkout with agent.merge (agent.resolve for conflicts, agent.discard only to drop work on purpose) before you finish. Polyth reminds you about unmerged isolated work and refuses to merge or discard your own isolated workspace while delegated work still targets it. A session an automation started (a Polyth Agent's run) has no subagents: what it hands off opens as a chat of the project's own that the person sees, steers and merges.",
   },
 } satisfies import("@polyth/contracts").AgentCapabilityContribution;
 
@@ -101,13 +102,13 @@ export const polythSessionsSkill = {
     kind: "skill" as const,
     owner: "harness-runtime",
     scope: "deployment" as const,
-    revision: "9",
+    revision: "10",
     name: "polyth-sessions",
     title: "Polyth sessions",
     description: "Orchestrate Polyth sessions and delegated subagents in any project.",
     instructions: `Use the available polyth tool (its harness may prefix the name) to work with canonical Polyth sessions. This is a Polyth product capability — available in every project and not dependent on project-specific skill installs.
 ${DESCRIPTION}
-For delegated/subagent work, always use agent.spawn (title + optional prompt/harness). To choose the worker, call agent.models first — one cheap call returning ranked lines "N. ★ <harness> <provider>/<model> (<what an alias runs>) · <turns>t/<sessions>s · quota NN%" plus one quota line per source. Models are named as each harness's live catalog lists them (Claude Code takes alias rows such as anthropic/opus, not the concrete claude-… id it reports), and models a harness no longer offers are left out; skip BLOCKED/UNAVAILABLE rows, prefer favorites with headroom, match model strength to the task, and pass harnessId plus model {providerID, modelID} exactly as listed — never an id from memory or another harness. When the person set a routing policy (Settings → Orchestration), the output starts with "Routing policy": classify the work by its roles and use the model it names for that role; it takes precedence over the ranked list, its "never delegate to" models are left out of the list, and its concurrency limits apply. Optional parameters: harnessId (one harness), limit (rows, default 12), windowDays (default 30). Never invoke a harness-native Agent, Task, task, agent, invoke_subagent, or equivalent delegation tool. agent.spawn creates a canonical child Polyth Session with parentId set to the calling Session, so nested delegation remains a real session tree. Drive children with session.send / session.debug / session.messages. For asynchronous delegation, prefer agent.spawn with watchCaller=true so the calling session is woken exactly once when the child completes, fails, or aborts (a person pausing it also wakes you, as "paused", and the watch stays armed until it ends; only that person can continue it); use session.watch for other event-driven links and never poll session.get in a loop. Keep delegated work bounded and report findings via the peer observation skill instead of copying full transcripts. Respect cross-project approvals and Space isolation; never assume access to another project without an explicit grant.
+For delegated/subagent work, always use agent.spawn (title + optional prompt/harness). To choose the worker, call agent.models first — one cheap call returning ranked lines "N. ★ <harness> <provider>/<model> (<what an alias runs>) · <turns>t/<sessions>s · quota NN%" plus one quota line per source. Models are named as each harness's live catalog lists them (Claude Code takes alias rows such as anthropic/opus, not the concrete claude-… id it reports), and models a harness no longer offers are left out; skip BLOCKED/UNAVAILABLE rows, prefer favorites with headroom, match model strength to the task, and pass harnessId plus model {providerID, modelID} exactly as listed — never an id from memory or another harness. When the person set a routing policy (Settings → Orchestration), the output starts with "Routing policy": classify the work by its roles and use the model it names for that role; it takes precedence over the ranked list, its "never delegate to" models are left out of the list, and its concurrency limits apply. Optional parameters: harnessId (one harness), limit (rows, default 12), windowDays (default 30). Never invoke a harness-native Agent, Task, task, agent, invoke_subagent, or equivalent delegation tool. agent.spawn creates a canonical child Polyth Session with parentId set to the calling Session, so nested delegation remains a real session tree. In a session an automation started (a Polyth Agent's run, a monitoring chat) there are no subagents: agent.spawn and session.create open a standalone chat in the project's session list instead, isolated when asked, and the person reviews and merges it from its isolation card. Drive children with session.send / session.debug / session.messages. For asynchronous delegation, prefer agent.spawn with watchCaller=true so the calling session is woken exactly once when the child completes, fails, or aborts (a person pausing it also wakes you, as "paused", and the watch stays armed until it ends; only that person can continue it); use session.watch for other event-driven links and never poll session.get in a loop. Keep delegated work bounded and report findings via the peer observation skill instead of copying full transcripts. Respect cross-project approvals and Space isolation; never assume access to another project without an explicit grant.
 Messaging another chat (session.send with sessionId + text) — pick parameters.delivery by urgency:
 - queue (default): the chat finishes what it is doing first; your message waits behind its current turn and anything queued before it. Use it for ordinary follow-ups, answers and new work.
 - interrupt: stop the chat's running turn now and run your message next. Use it when the running work is wrong, obsolete or blocking you. Partial work from the stopped turn stays in history.
@@ -371,7 +372,7 @@ export function registerPolythSessionControl(
     kind: "tool" as const,
     owner: "harness-runtime",
     scope: "project" as const,
-    revision: "10",
+    revision: "11",
     name: "polyth",
     description: DESCRIPTION,
     inputSchema,
@@ -550,19 +551,26 @@ export function registerPolythSessionControl(
         if (mode === "isolated" && requestedWorktreePath) {
           return invalid("worktreePath cannot be combined with isolation=isolated: an isolated agent gets its own worktree");
         }
+        // A session an automation started without a person (an Agent's run,
+        // a monitoring incident chat) has no subagents: work it hands off is
+        // the person's to see, steer and merge, so every chat it opens is a
+        // standalone one of the project's own. Its own session is not an
+        // ordinary chat, so children filed under it would be invisible.
+        const caller = ctx.sessionId ? await scoped.sessions.snapshot(ctx.sessionId) : undefined;
+        const visibleOnly = Boolean(caller?.origin);
         // A standalone chat has no parent, so lists show it as a chat of its
-        // own rather than nesting it under the caller (whose own session may
-        // not be listed at all, as an agent's is not).
-        const parentId = action === "agent.spawn"
-          ? ctx.sessionId!
-          : parameters.standalone !== true && targetProjectId === ctx.projectId && ctx.sessionId ? ctx.sessionId : undefined;
+        // own rather than nesting it under the caller.
+        const parentId = visibleOnly
+          ? undefined
+          : action === "agent.spawn"
+            ? ctx.sessionId!
+            : parameters.standalone !== true && targetProjectId === ctx.projectId && ctx.sessionId ? ctx.sessionId : undefined;
         let delegated: ServerDelegatedSessionCreated | undefined;
-        if (mode === "isolated") {
+        if (mode === "isolated" && !visibleOnly) {
           const isolation = isolationService();
           // The caller's own canonical session proves the Space; the child
           // is created in the caller's project from the caller's checkout.
-          const caller = await scoped.sessions.snapshot(ctx.sessionId!);
-          if (caller.projectId !== targetProjectId) return invalid("agent.spawn cannot cross project boundaries");
+          if (!caller || caller.projectId !== targetProjectId) return invalid("agent.spawn cannot cross project boundaries");
           delegated = await isolation.createDelegatedSession({
             parentSessionId: caller.id,
             title: sessionTitle,
@@ -587,14 +595,20 @@ export function registerPolythSessionControl(
         // not wait for the runtime and a restart cannot strand the prompt. A
         // start that cannot run ends as `session/start-failed`, which a watch
         // reports as a failure.
-        const started = !delegated && prompt !== undefined && scoped.sessions.start
+        // A visible chat that must be isolated is created at rest, isolated,
+        // and only then given its prompt, as session.isolate needs it idle.
+        const isolateVisible = visibleOnly && mode === "isolated";
+        const started = !delegated && !isolateVisible && prompt !== undefined && scoped.sessions.start
           ? await scoped.sessions.start({ ...fields, start: { firstTurn: { text: prompt } } })
           : undefined;
         const ref = delegated ? { id: delegated.id } : started ?? await scoped.sessions.create(fields);
+        const visibleIsolation = isolateVisible
+          ? await isolationService().isolateSession(ref.id, { sessions: scoped.sessions })
+          : undefined;
         // An isolated child's result is unusable until merged, so its
         // delegator is woken by default when it terminates.
         const watchCaller = action === "agent.spawn"
-          && (parameters.watchCaller === true || (delegated !== undefined && parameters.watchCaller !== false));
+          && (parameters.watchCaller === true || (mode === "isolated" && parameters.watchCaller !== false));
         let spawnWatch: ServerSessionWatchDto | undefined;
         if (watchCaller) {
           spawnWatch = await watchService().create(space, {
@@ -641,6 +655,24 @@ export function registerPolythSessionControl(
                 ...(delegated.originUncommitted
                   ? [`It starts from your last commit and does not see your ${delegated.originUncommitted} uncommitted file(s); commit and spawn again if it needs them.`]
                   : []),
+              ].join(" "),
+            } : {}),
+            ...(visibleOnly ? {
+              visibility: "standalone",
+              ...(visibleIsolation ? {
+                workspace: {
+                  mode: "isolated",
+                  worktreePath: visibleIsolation.session.isolation?.worktreePath,
+                  branch: visibleIsolation.session.isolation?.worktreeBranch,
+                  mergeTarget: visibleIsolation.targetBranch,
+                  baseCommit: visibleIsolation.session.isolation?.baseCommit,
+                },
+              } : {}),
+              next: [
+                "An automation started your session, so it has no subagents: this is a chat of the project's own that the person sees and steers in the session list.",
+                visibleIsolation
+                  ? `It works in its own isolated worktree; the person reviews it and merges it into ${visibleIsolation.targetBranch} from the chat's isolation card. Do not merge it yourself; agent.merge does not apply.`
+                  : "Use session.send, session.watch and session.messages to work with it.",
               ].join(" "),
             } : {}),
             ...(spawnWatch ? { watch: spawnWatch } : {}),
