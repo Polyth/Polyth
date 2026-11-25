@@ -2503,6 +2503,13 @@ body[data-shell-look="obsidian"]:not(#\#) {
   --look-glass-highlight: 0 1px 0 0 color-mix(in srgb, white 7%, transparent) inset;
   --look-glass-drop: 0 18px 40px -24px rgba(0, 0, 0, 0.6);
   --look-glass-shadow: var(--look-glass-highlight), var(--look-glass-drop);
+  /* A surface in the conversation sits in the flow, not above it: the code
+     block, a person's turn and the in-flow cards keep the rim and the top
+     highlight and take a short, quiet drop instead of the chrome's wide one.
+     The deep drop belongs to the chrome and to floating windows, which really
+     do hover; in the pearl (light) canvas the wide one laid a grey band under
+     every block. */
+  --look-glass-inline-shadow: var(--look-glass-highlight), 0 10px 24px -20px rgba(0, 0, 0, 0.5);
   --look-float-radius: calc(18px * var(--look-round));
   --look-scrim: color-mix(in srgb, black 40%, transparent);
   --look-scrim-blur: blur(10px) saturate(1.2);
@@ -2600,6 +2607,12 @@ body[data-shell-look="obsidian"]:not(#\#) :is(.sidebar, .railbar, .view-switcher
   background: linear-gradient(var(--look-fill), var(--look-fill)) padding-box, var(--look-rim) border-box !important;
   backdrop-filter: var(--look-glass-blur) !important;
   box-shadow: var(--look-glass-shadow) !important;
+}
+
+/* Rimmed glass in the conversation: the same edge, the chat's own elevation. */
+
+body[data-shell-look="obsidian"]:not(#\#) :is(.md-code-block, .msg.user .bubble, .question-card, .isolation-card, .turn-rate-limit) {
+  box-shadow: var(--look-glass-inline-shadow) !important;
 }
 
 body[data-shell-look="obsidian"]:not(#\#) :is(.notify-card, .ui-popover, .ui-tooltip, .dialog-panel, .modal.settings-shell, .perm-banner) {

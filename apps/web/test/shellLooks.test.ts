@@ -489,6 +489,32 @@ test("Obsidian's project marks are glass in the project's own colour, never the 
   assert.doesNotMatch(css, new RegExp(`${look} [^{]*\\.project-glyph[^{]*\\{[^}]*\\scolor:`));
 });
 
+test("Obsidian's conversation stays in the flow: the deep drop belongs to the chrome and to floating windows", async () => {
+  const css = stripComments(await read("../src/shellLooks.css"));
+  const look = 'body\\[data-shell-look="obsidian"\\]:not\\(#\\\\#\\)';
+  const tokens = css.match(new RegExp(`${look} \\{[^}]*\\}`))?.[0] ?? "";
+  const inline = tokens.match(/--look-glass-inline-shadow:\s*([^;]+);/)?.[1] ?? "";
+  // A short drop, not the chrome's wide one and not none at all.
+  assert.match(inline, /^var\(--look-glass-highlight\), 0 10px 24px -20px /);
+  assert.equal(inline.includes("--look-glass-drop"), false, "the conversation took the chrome's drop");
+  // The rimmed-glass role list still gives every surface the same edge, but a
+  // surface inside the conversation takes the theme's own card step: a code
+  // block and a prompt are written on the canvas, not lifted off it.
+  const rules = [...css.matchAll(new RegExp(`${look} ([^{}]*)\\{([^{}]*)\\}`, "g"))].map((match) => ({ selector: match[1]!, body: match[2]! }));
+  const role = rules.find((rule) => rule.selector.includes(".md-code-block") && rule.body.includes("--look-glass-inline-shadow")) ?? { selector: "", body: "" };
+  assert.match(role.body, /box-shadow: var\(--look-glass-inline-shadow\) !important;/);
+  for (const member of [".md-code-block", ".msg.user .bubble", ".question-card", ".isolation-card", ".turn-rate-limit"]) {
+    assert.ok(role.selector.includes(member), `${member} is not an in-flow glass surface`);
+  }
+  for (const floating of [".sidebar", ".railbar", ".ui-popover"]) {
+    assert.equal(role.selector.includes(floating), false, `${floating} hovers; it keeps the drop`);
+  }
+  // The chrome and the floating surfaces keep the deep drop.
+  const chrome = rules.find((rule) => rule.selector.includes(".desktop-session-status-trigger"));
+  assert.ok(chrome, "the chrome lost its glass role");
+  assert.match(chrome.body, /box-shadow: var\(--look-glass-shadow\) !important;/);
+});
+
 test("Send and Stop share each look's corner, with no glow or ring", async () => {
   const css = stripComments(await read("../src/shellLooks.css"));
   for (const look of ["paper", "editorial"]) {

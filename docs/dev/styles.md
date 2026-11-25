@@ -623,7 +623,7 @@ paints `--look-overlay-solid` (the look's overlay material, opaque; default
 | `air` | Soft islands with diffuse shadows and pill shapes, and no lines. |
 | `monolith` | Chrome on a deep backdrop; the conversation is one raised sheet with a short, light shadow. Over a wallpaper the backdrop is the tinted image and the sheet frosts as a canvas does (`--look-veil`). |
 | `monolith-reverse` | A lit chrome plane with the conversation recessed into it. Raised pieces (composer, prompt, cards) are made of the plane; navigator selection is carved down to the well. Fields and control strips are a shallower cut (`--look-cut`: halfway to the well in dark, the well's gray in light). In dark mode the plane is `--bg` lit by a tenth of white, so quiet ink keeps 4.5:1 on it. Over a wallpaper the plane and its raised pieces are lit glass on `--look-veil-soft`, and the well and every cut and selection veil as the well does (`--look-veil`), so nothing on the glass is an opaque slot. |
-| `obsidian` | Rimmed glass with gradient edges, an aurora backdrop and a glowing composer. In light mode it reads as pearl. |
+| `obsidian` | Rimmed glass with gradient edges, an aurora backdrop and a glowing composer. In light mode it reads as pearl. A surface written into the conversation — a prompt, a code block, an in-flow card — keeps the rim and the top highlight and takes a short, quiet drop (`--look-glass-inline-shadow`); the wide drop (`--look-glass-shadow`) belongs to the chrome and to the floating windows that really hover. |
 | `editorial` | Source Serif 4 titles and prompts, a small-caps index navigator and a letter-field composer on warm paper. |
 
 Six workspace backgrounds in `backgrounds.ts` were drawn alongside the looks.
