@@ -805,6 +805,24 @@ jobs:
         if: inputs.draft == false
         run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
 
+      # winget has no autobump, so every stable release ships the manifests a person
+      # then submits to microsoft/winget-pkgs (scripts/ci/winget-manifest.mjs); the
+      # Homebrew cask is autobumped in homebrew/homebrew-cask and needs nothing here.
+      - name: Attach the winget manifests
+        if: ${{ !contains(needs.prepare.outputs.version, '-') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A draft has no publishedAt yet; the release date is then the day it is built.
+          release_date="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json publishedAt --jq '.publishedAt[0:10] // empty' 2>/dev/null || true)"
+          [ -n "$release_date" ] || release_date="$(date -u +%F)"
+          node scripts/ci/winget-manifest.mjs --if-present "$VERSION" "$release_date" release-assets "$RUNNER_TEMP/winget"
+          [ -d "$RUNNER_TEMP/winget/manifests" ] || exit 0
+          tar -czf "$RUNNER_TEMP/polyth-winget-$VERSION.tar.gz" -C "$RUNNER_TEMP/winget" manifests
+          gh release upload "$TAG" "$RUNNER_TEMP/polyth-winget-$VERSION.tar.gz" --clobber --repo "$GITHUB_REPOSITORY"
+
       - name: Release summary
         run: |
           {

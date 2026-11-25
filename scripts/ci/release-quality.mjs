@@ -44,6 +44,7 @@ const QUALITY_TEST_FILES = [
   // because it runs after every build has already succeeded.
   "scripts/test/update-feed.test.ts",
   "scripts/test/publishServerNpm.test.ts",
+  "scripts/test/wingetManifest.test.ts",
   "scripts/test/workstation.test.ts",
   "scripts/test/workstationEdition.test.ts",
   "scripts/test/promote-master.test.ts",
