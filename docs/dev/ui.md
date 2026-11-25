@@ -5750,20 +5750,34 @@ projects. A fresh install starts in Tree (`SIDEBAR_VIEW_MODE_DEFAULT`,
 registry with no project, or only the lone Personal project — presents the
 tree whatever was saved, so the left edge is never an empty strip; the layout
 menu then leaves out the Project rail choice until a project exists. Clicking a
-project in the phone navigator, desktop tree, compact drawer rail, or a
+project in the phone navigator, compact drawer (tree or rail), or a
 collapsed Project rail only toggles its sessions; it never activates the
 project, changes the current session, or closes the navigator. In the wide
-expanded Project rail one click on a project (its icon or its header row)
-enters it at once, so the main area and the active (white) mark follow the
-click: from the New chat page it opens New chat in that project, and from
-another project's chat it opens that project's latest top-level chat
-(`latestProjectSession`, `Sidebar.tsx`; New chat when it has none). Inside the
-project already, the click does nothing, and it never collapses the sessions
-column. A double-click's second click does not act again. The rail's
+expanded Project rail and the wide desktop tree one click on a project (its
+icon or its header row) enters it at once, so the main area and the active
+mark follow the click: from the New chat page it opens New chat in that
+project, and from another project's chat it opens that project's latest
+top-level chat (`latestProjectSession`, `Sidebar.tsx`; New chat when it has
+none). A project with no chats yet therefore opens on its own New chat page,
+with its files and panes, in one click. Inside the project already, the rail
+click does nothing and never collapses the sessions column, while the tree
+click opens and closes that project's list (entering a project opens its
+list). A double-click's second click does not act again. The rail's
 browsed project is local presentation state, independent of the active
 workspace; only the compact drawer rail and a collapsed rail's peek browse
 without entering. Opening a session or using an explicit project action still
 navigates normally.
+The tree marks the active project the way the rail lights its icon: while no
+chat row inside it is lit (its New chat page, or its list closed), the
+project's row wears the current chat row's selection, the base plate
+(`--surface-overlay-strong`, `styles.css`), Fluent's plate and accent pill, a
+look's `--look-select` plate, Paper's start bar, Editorial's accent underline.
+Once one of its chats is current, that chat row is the only mark, since two
+identical plates would leave the current chat ambiguous. The selectors are
+scoped to `.project-tree-node`, so the rail's focused-project header (the same
+card) stays unlit. Editorial gives its underlined names room below their
+clipped line box (a padding returned by an equal negative margin), without
+which the rule under a current chat or project was cut off.
 Phone project headers are one vertically centred line: the name truncates and
 the status pills keep their own width beside it, expanded or collapsed, so the
 name never moves. Pills run most urgent first (running, waiting, failed,

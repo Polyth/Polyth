@@ -234,9 +234,18 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .session-row.ac
   box-shadow: var(--look-select-edge) !important;
 }
 
+/* The tree's active project row, while none of its chats is lit
+   (styles.css), wears the same plate in the look's row corner. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .project-tree-node:not(:has(.session-row.active)) > .project-card-shell:has(> .project-card.active)::before {
+  background: var(--look-select) !important;
+  box-shadow: var(--look-select-edge) !important;
+  border-radius: var(--look-select-radius) !important;
+}
+
 /* The look's plate is the only selection mark: the accent bars and pills the
    base and Fluent draw beside a current row go. */
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .session-row.active .session-btn::after,
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .project-card-shell::after,
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .settings-nav-item.active::before {
   content: none !important;
 }
@@ -1289,6 +1298,20 @@ body[data-shell-look="paper"]:not(#\#) .sidebar-project-rail-item.active::after 
   content: "";
   position: absolute;
   inset-inline-start: -6px;
+  top: 50%;
+  width: 3px;
+  height: 14px;
+  margin-top: -7px;
+  border-radius: calc(3px * var(--look-round));
+  background: var(--text);
+}
+
+/* Paper's plate is clear, so the tree's active project row (while none of
+   its chats is lit) takes the rail's bar, on the plate's start edge. */
+body[data-shell-look="paper"]:not(#\#) .project-tree-node:not(:has(.session-row.active)) > .project-card-shell > .project-card.active::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: calc(var(--nav-indent-project) - var(--nav-pill-air));
   top: 50%;
   width: 3px;
   height: 14px;
@@ -2879,11 +2902,20 @@ body[data-shell-look="editorial"]:not(#\#) .project-path {
 
 /* Selection is ink plus a fine accent rule under the words. */
 
-body[data-shell-look="editorial"]:not(#\#) :is(.session-row.active .session-title-text, .workspace-mode-switch button.active) {
+body[data-shell-look="editorial"]:not(#\#) :is(.session-row.active .session-title-text, .workspace-mode-switch button.active),
+body[data-shell-look="editorial"]:not(#\#) .project-tree-node:not(:has(.session-row.active)) > .project-card-shell > .project-card.active .project-name {
   text-decoration: underline;
   text-decoration-color: var(--accent);
   text-decoration-thickness: 1.5px;
   text-underline-offset: 5px;
+}
+
+/* The navigator's names are one clipped line (overflow: hidden), and the rule
+   sits below that line box: room for it inside the clip, none in the row. */
+body[data-shell-look="editorial"]:not(#\#) .session-row.active .session-title-text,
+body[data-shell-look="editorial"]:not(#\#) .project-tree-node:not(:has(.session-row.active)) > .project-card-shell > .project-card.active .project-name {
+  padding-block-end: 8px;
+  margin-block-end: -8px;
 }
 
 body[data-shell-look="editorial"]:not(#\#) .sidebar-project-rail-item .project-glyph {

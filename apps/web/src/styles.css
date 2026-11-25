@@ -1561,6 +1561,16 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
     opacity: 1;
   }
 }
+/* The tree's "you are here": the active project's row carries the current
+   chat row's plate (.session-row.active below) while no chat row inside it
+   is lit — on its New chat page, or with its list closed — the way the rail
+   lights the active project's icon. One mark at a time: two identical plates
+   made the current chat ambiguous. Interface styles restyle it with the chat
+   row (fluentTheme.css, shellLooks.css). */
+.project-tree-node:not(:has(.session-row.active)) > .project-card-shell:has(> .project-card.active)::before {
+  background: var(--surface-overlay-strong);
+  opacity: 1;
+}
 /* Project actions are contextual: two quiet controls (new session + overflow
    menu) that reveal on row hover/focus with fine pointers and stay persistent
    on coarse pointers and drawer layouts. Opacity — not display — keeps them

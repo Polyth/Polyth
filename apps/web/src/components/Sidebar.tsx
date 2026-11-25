@@ -641,11 +641,12 @@ export default function Sidebar() {
   useEscape(peek !== null && railCollapsed, closePeek);
   // The peek previews the hovered project without stealing the active one.
   const focusProjectId = soloPersonal?.id ?? (railCollapsed ? peek?.projectId : null) ?? railProjectId;
-  /** Entering a rail project: the New chat page moves to that project, and a
-   *  chat open in another project gives way to this project's latest chat
-   *  (its New chat when it has none). Inside the project already, it does
-   *  nothing; it never collapses the navigator. */
-  const enterRailProject = (projectId: string) => {
+  /** Entering a project from the wide rail or tree: the New chat page moves to
+   *  that project, and a chat open in another project gives way to this
+   *  project's latest chat (its New chat when it has none), so a project with
+   *  no chats yet still opens with its files and panes. Inside the project
+   *  already, it does nothing; it never collapses the navigator. */
+  const enterProject = (projectId: string) => {
     if (projectId === activeProjectId) return;
     const target = projects.find((candidate) => candidate.id === projectId);
     if (!target) return;
@@ -669,12 +670,21 @@ export default function Sidebar() {
       // The wide expanded rail enters the project on the first click, so the
       // main area and the active mark never lag the column behind them.
       setRailProjectId(projectId);
-      enterRailProject(projectId);
+      enterProject(projectId);
     } else if (railProjectId === projectId) {
       setRailProjectId(null);
     } else {
       setRailProjectId(projectId);
     }
+  };
+  /** The wide tree enters a project it is not in yet (the active project's
+   *  list opens with it) and opens or closes the list of the project it is
+   *  already in. The compact drawer's tree only browses. */
+  const clickTreeProject = (projectId: string, clickCount: number) => {
+    // A double-click's second click (the rename gesture) does not act again.
+    if (clickCount > 1) return;
+    if (!compact && projectId !== activeProjectId) enterProject(projectId);
+    else toggleTree(projectId);
   };
   const focusedProject = effectiveViewMode === "rail" && query.trim() === ""
     ? visibleProjects.find((candidate) => candidate.id === focusProjectId) ?? null
@@ -1308,7 +1318,7 @@ export default function Sidebar() {
           aria-keyshortcuts={reorderable ? "Alt+Shift+ArrowUp Alt+Shift+ArrowDown" : undefined}
           onContextMenu={(event) => onProjectContextMenu(event, p.id, "card")}
           onClick={(event) => {
-            if (effectiveViewMode === "tree") toggleTree(p.id);
+            if (effectiveViewMode === "tree") clickTreeProject(p.id, event.detail);
             else if (railCollapsed) closePeek();
             else toggleRailProject(p.id, event.detail);
           }}

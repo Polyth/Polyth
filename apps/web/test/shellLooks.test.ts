@@ -524,3 +524,30 @@ test("Send and Stop share each look's corner, with no glow or ring", async () =>
   assert.doesNotMatch(css, /\.send:not\(:disabled\) \{[^}]*box-shadow:\s*0 /, "no Send glows");
   assert.doesNotMatch(css, /transform:\s*scale\(0\.82\)/, "Send keeps its size");
 });
+
+test("the tree lights the active project's row in every style until one of its chats is current", async () => {
+  const [base, fluent, looks] = await Promise.all([
+    read("../src/styles.css").then(stripComments),
+    read("../src/fluentTheme.css").then(stripComments),
+    read("../src/shellLooks.css").then(stripComments),
+  ]);
+  const row = ".project-tree-node:not(:has(.session-row.active)) > .project-card-shell";
+  const plate = `${row}:has(> .project-card.active)::before`;
+  const rule = (css: string, selector: string) => [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+    .filter((m) => m[1]!.split(/,(?![^(]*\))/).some((part) => part.trim().endsWith(selector)))
+    .map((m) => m[2]!).join("\n");
+  // Scoped to the tree: the rail's focused-project header is the same card.
+  assert.match(rule(base, plate), /background: var\(--surface-overlay-strong\);[^]*opacity: 1;/, "base plate");
+  assert.match(rule(fluent, plate), /background: var\(--surface-overlay-hover\)/, "Fluent plate");
+  assert.match(rule(fluent, `${row}:has(> .project-card.active)::after`), /background: var\(--accent\)/, "Fluent pill");
+  assert.match(rule(looks, plate), /background: var\(--look-select\) !important;/, "a look's plate");
+  assert.match(rule(looks, `${row} > .project-card.active::before`), /background: var\(--text\)/, "Paper's bar");
+  const editorial = rule(looks, `${row} > .project-card.active .project-name`);
+  assert.match(editorial, /text-decoration: underline;/, "Editorial's underline");
+  // The underline sits below the clipped one-line box: it needs room inside the
+  // clip, given back to the row by an equal negative margin.
+  for (const name of [`${row} > .project-card.active .project-name`, ".session-row.active .session-title-text"]) {
+    const room = rule(looks, name);
+    assert.match(room, /padding-block-end: (\d+)px;\s*margin-block-end: -\1px;/, `Editorial clips the rule under ${name}`);
+  }
+});
