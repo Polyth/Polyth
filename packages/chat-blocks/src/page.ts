@@ -250,8 +250,9 @@ export function pageFileName(title: string): string {
     .normalize("NFKD")
     .replace(/[̀-ͯ]/g, "")
     .replace(/[^\p{L}\p{N}]+/gu, "-")
-    .replace(/^-+|-+$/g, "")
+    // The run above leaves no "--", so one dash per end is enough (and linear).
+    .replace(/^-|-$/g, "")
     .slice(0, 60)
-    .replace(/-+$/g, "");
+    .replace(/-$/, "");
   return `${stem || "page"}.html`;
 }

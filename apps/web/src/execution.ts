@@ -241,7 +241,7 @@ function codeModeScript(tool: string, input: JsonObject): string | undefined {
 /** The tools a Code Mode script calls, in first-call order. */
 export function codeModeToolCalls(code: string): string[] {
   const names: string[] = [];
-  const call = /\btools((?:\s*\??\.\s*[A-Za-z_$][\w$]*|\s*(?:\?\.)?\s*\[\s*(?:"[^"\n]*"|'[^'\n]*'|`[^`\n]*`)\s*\])+)\s*(?:\?\.)?\s*\(/g;
+  const call = /\btools((?:\s*\??\.\s*[A-Za-z_$][\w$]*|\s*(?:\?\.\s*)?\[\s*(?:"[^"\n]*"|'[^'\n]*'|`[^`\n]*`)\s*\])+)\s*(?:\?\.\s*)?\(/g;
   for (const match of code.matchAll(call)) {
     const last = /(?:\.\s*([A-Za-z_$][\w$]*)|\[\s*["'`]([^"'`\n]*)["'`]\s*\])\s*$/.exec(match[1] ?? "");
     const name = last?.[1] ?? last?.[2];

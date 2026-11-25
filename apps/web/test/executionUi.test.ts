@@ -223,6 +223,13 @@ test("an OpenCode Code Mode script reads as Code with the tools it calls, not as
   assert.equal(describeToolActivity("execute", { code: codeModeScript }).kind, "tool");
 });
 
+test("Code Mode tool-call scanning stays linear on whitespace-heavy scripts", () => {
+  const started = performance.now();
+  assert.deepEqual(codeModeToolCalls(`tools${'\t[""]'.repeat(5000)}!`), []);
+  assert.deepEqual(codeModeToolCalls(`tools.a${" ".repeat(20000)}?.${" ".repeat(20000)}(`), ["a"]);
+  assert.ok(performance.now() - started < 1000);
+});
+
 test("shell-backed tests use human summaries across harness command shapes", () => {
   const direct = executionPresentation(tool({
     input: { command: "node --experimental-strip-types --test --test-name-pattern=\"Files keeps its draft\" apps/web/test/responsiveOverlays.test.ts" },

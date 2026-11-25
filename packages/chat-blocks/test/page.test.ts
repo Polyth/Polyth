@@ -131,6 +131,11 @@ test("download names are sanitized", () => {
   assert.equal(pageFileName("../../etc/passwd"), "etc-passwd.html");
   assert.equal(pageFileName("  "), "page.html");
   assert.equal(pageFileName("Сторінка оплати"), "Сторінка-оплати.html");
+  assert.equal(pageFileName("--a  b--"), "a-b.html");
+  assert.equal(pageFileName(`${"x".repeat(59)} y`), `${"x".repeat(59)}.html`);
+  const started = performance.now();
+  assert.equal(pageFileName(`a${"-".repeat(100000)}`), "a.html");
+  assert.ok(performance.now() - started < 1000);
 });
 
 // ---- polyth.storage --------------------------------------------------------
