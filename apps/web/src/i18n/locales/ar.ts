@@ -3496,6 +3496,8 @@ export const ar: AppMessages = {
   "settings.chatPage.groupSteps": "جمع الخطوات في كتلة واحدة",
   "settings.chatPage.thinking": "التفكير",
   "settings.chatPage.width": "العرض",
+  "settings.chatPage.collapseLongPrompts": "طيّ الرسائل الطويلة",
+  "settings.chatPage.collapseLongPromptsHint": "اعرض أول أربعة أسطر فقط من الرسالة الطويلة المرسلة مع زر توسيع. عند الإيقاف تظهر كل رسالة كاملة.",
   "settings.chatPage.sendWith": "الإرسال باستخدام",
   "settings.chatPage.sendPhoneButton": "زر على الهواتف",
   "settings.chatPage.sendPhoneKey": "{key} على الهواتف",

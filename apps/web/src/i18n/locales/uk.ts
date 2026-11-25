@@ -3496,6 +3496,8 @@ export const uk: AppMessages = {
   "settings.chatPage.groupSteps": "Групувати кроки в один блок",
   "settings.chatPage.thinking": "Міркування",
   "settings.chatPage.width": "Ширина",
+  "settings.chatPage.collapseLongPrompts": "Скорочувати довгі повідомлення",
+  "settings.chatPage.collapseLongPromptsHint": "Показувати лише перші чотири рядки довгого надісланого повідомлення з кнопкою «Розгорнути». Вимкнено — кожне повідомлення видно повністю.",
   "settings.chatPage.sendWith": "Надсилати клавішею",
   "settings.chatPage.sendPhoneButton": "кнопка на телефонах",
   "settings.chatPage.sendPhoneKey": "{key} на телефонах",

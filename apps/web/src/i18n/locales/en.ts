@@ -3499,6 +3499,8 @@ export const en = {
   "settings.chatPage.groupSteps": "Group steps into one block",
   "settings.chatPage.thinking": "Thinking",
   "settings.chatPage.width": "Width",
+  "settings.chatPage.collapseLongPrompts": "Collapse long messages",
+  "settings.chatPage.collapseLongPromptsHint": "Show only the first four lines of a long message you sent, with an Expand button. Off shows every message in full.",
   "settings.chatPage.sendWith": "Send with",
   "settings.chatPage.sendPhoneButton": "button on phones",
   "settings.chatPage.sendPhoneKey": "{key} on phones",

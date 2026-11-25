@@ -177,6 +177,9 @@ export interface UiSettings {
   promptNavigatorSide: "left" | "right";
   /** Show the quick actions under user messages. */
   showMessageActions: boolean;
+  /** Fold a long sent prompt to four lines behind an Expand control; off
+   *  shows every prompt in full. */
+  collapseLongPrompts: boolean;
   /** Show the opt-in conversation prompt history bookmark on phones and
    * windows too narrow for the rail. The field keeps its original name so
    * existing account settings migrate in place. */
@@ -309,6 +312,7 @@ export const UI_DEFAULTS: UiSettings = {
   promptNavigator: "auto",
   promptNavigatorSide: "left",
   showMessageActions: true,
+  collapseLongPrompts: true,
   pinLatestPrompt: false,
   promptBookmarkDesktop: false,
   messageCopyFormat: "markdown",
@@ -477,6 +481,7 @@ export function parseUiSettings(raw: string | null): UiSettings {
       promptNavigator: data.promptNavigator === "on" || data.promptNavigator === "off" ? data.promptNavigator : "auto",
       promptNavigatorSide: data.promptNavigatorSide === "left" ? "left" : "right",
       showMessageActions: data.showMessageActions !== false,
+      collapseLongPrompts: data.collapseLongPrompts !== false,
       pinLatestPrompt: data.pinLatestPrompt === true,
       promptBookmarkDesktop: data.promptBookmarkDesktop === true,
       messageCopyFormat: data.messageCopyFormat === "json" ? "json" : "markdown",

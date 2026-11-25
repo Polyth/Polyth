@@ -3496,6 +3496,8 @@ export const fr: AppMessages = {
   "settings.chatPage.groupSteps": "Regrouper les étapes en un bloc",
   "settings.chatPage.thinking": "Réflexion",
   "settings.chatPage.width": "Largeur",
+  "settings.chatPage.collapseLongPrompts": "Réduire les longs messages",
+  "settings.chatPage.collapseLongPromptsHint": "N’afficher que les quatre premières lignes d’un long message envoyé, avec un bouton Développer. Désactivé, chaque message s’affiche en entier.",
   "settings.chatPage.sendWith": "Envoyer avec",
   "settings.chatPage.sendPhoneButton": "bouton sur téléphone",
   "settings.chatPage.sendPhoneKey": "{key} sur téléphone",

@@ -3496,6 +3496,8 @@ export const de: AppMessages = {
   "settings.chatPage.groupSteps": "Schritte in einem Block gruppieren",
   "settings.chatPage.thinking": "Überlegungen",
   "settings.chatPage.width": "Breite",
+  "settings.chatPage.collapseLongPrompts": "Lange Nachrichten einklappen",
+  "settings.chatPage.collapseLongPromptsHint": "Von langen gesendeten Nachrichten nur die ersten vier Zeilen zeigen, mit einer Schaltfläche zum Aufklappen. Aus zeigt jede Nachricht vollständig.",
   "settings.chatPage.sendWith": "Senden mit",
   "settings.chatPage.sendPhoneButton": "Schaltfläche auf Handys",
   "settings.chatPage.sendPhoneKey": "{key} auf Handys",

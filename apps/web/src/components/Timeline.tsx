@@ -909,14 +909,16 @@ function useClipped(ref: RefObject<HTMLElement | null>, clamped: boolean): boole
 }
 
 /** A sent prompt is a record, not a wall of text: the log keeps four lines and
- *  the rest stays one tap away. */
+ *  the rest stays one tap away. Settings → Chat can turn the fold off, and then
+ *  every prompt shows in full with no control. */
 export function UserPrompt({ text, id, resourceContext }: { text: string; id: string; resourceContext?: TimelineResourceContext }) {
+  const collapse = useUiSettings().collapseLongPrompts;
   const [open, setOpen] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
-  const clipped = useClipped(bodyRef, !open);
+  const clipped = useClipped(bodyRef, collapse && !open) && collapse;
   return (
     <>
-      <div className={`user-prompt${open ? " open" : clipped ? " clipped" : ""}`} ref={bodyRef}>
+      <div className={`user-prompt${!collapse || open ? " open" : clipped ? " clipped" : ""}`} ref={bodyRef}>
         {renderMarkdown(text, id, resourceContext ? { resourceContext } : {})}
       </div>
       {clipped && (

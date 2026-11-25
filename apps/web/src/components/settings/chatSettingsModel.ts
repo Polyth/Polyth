@@ -108,7 +108,7 @@ export type ChatRowId = keyof typeof CHAT_ROW_ITEMS;
 export const CHAT_MORE_ITEMS: readonly string[] = ["chat.copyFormat", "chat.promptHistory", "chat.promptHistoryLimit", "chat.activityDetails"];
 
 /** Always on the page: never behind a row or "More options". */
-export const CHAT_ALWAYS_VISIBLE_ITEMS: readonly string[] = ["chat.detailLevel", "chat.width"];
+export const CHAT_ALWAYS_VISIBLE_ITEMS: readonly string[] = ["chat.detailLevel", "chat.width", "chat.collapseLongPrompts"];
 
 export function chatRowOfItem(itemId: string | undefined): ChatRowId | null {
   if (!itemId) return null;

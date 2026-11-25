@@ -554,6 +554,22 @@ test("a reveal change and the master switch still write the same preferences", a
   }
 });
 
+test("the long-message fold is a switch on the conversation group", async () => {
+  const { container, unmount } = await mount();
+  try {
+    const toggle = container.querySelector('[data-settings-item="chat.collapseLongPrompts"] [role="switch"]');
+    assert.ok(toggle, "the switch sits on the page itself");
+    assert.equal(getUiSettings().collapseLongPrompts, true, "long messages fold by default");
+    await click(toggle);
+    assert.equal(getUiSettings().collapseLongPrompts, false);
+    await click(toggle);
+    assert.equal(getUiSettings().collapseLongPrompts, true);
+  } finally {
+    setUiSettings({ collapseLongPrompts: true });
+    await unmount();
+  }
+});
+
 test("a row reports it has opened only once its panel has finished growing", async () => {
   const container = document.createElement("div");
   document.body.append(container);

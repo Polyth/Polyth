@@ -3496,6 +3496,8 @@ export const zhCN: AppMessages = {
   "settings.chatPage.groupSteps": "将步骤归入一个块",
   "settings.chatPage.thinking": "思考过程",
   "settings.chatPage.width": "宽度",
+  "settings.chatPage.collapseLongPrompts": "折叠长消息",
+  "settings.chatPage.collapseLongPromptsHint": "长的已发送消息只显示前四行，并提供展开按钮。关闭后每条消息完整显示。",
   "settings.chatPage.sendWith": "发送方式",
   "settings.chatPage.sendPhoneButton": "手机上用按钮",
   "settings.chatPage.sendPhoneKey": "手机上用 {key}",

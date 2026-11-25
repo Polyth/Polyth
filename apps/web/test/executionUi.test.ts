@@ -982,7 +982,16 @@ test("a long sent prompt keeps four lines in the log and expands on demand", asy
     assert.ok(container.querySelector(".user-prompt")?.classList.contains("open"), "it expands in place");
     assert.equal(container.querySelector(".user-prompt-toggle")?.getAttribute("aria-expanded"), "true",
       "and the control stays available to collapse it again");
+    await act(async () => toggle.click());
+
+    // Settings → Chat can turn the fold off: every prompt shows in full.
+    await act(async () => setUiSettings({ collapseLongPrompts: false }));
+    assert.equal(container.querySelector(".user-prompt")?.className, "user-prompt open", "the whole prompt shows");
+    assert.equal(container.querySelector(".user-prompt-toggle"), null, "with no Expand control");
+    await act(async () => setUiSettings({ collapseLongPrompts: true }));
+    assert.ok(container.querySelector(".user-prompt")?.classList.contains("clipped"), "turning it back on folds it again");
   } finally {
+    setUiSettings({ collapseLongPrompts: true });
     if (original) Object.defineProperty(proto, "scrollHeight", original);
     else delete (proto as unknown as Record<string, unknown>).scrollHeight;
     await act(async () => root.unmount());

@@ -3496,6 +3496,8 @@ export const bg: AppMessages = {
   "settings.chatPage.groupSteps": "Групиране на стъпките в един блок",
   "settings.chatPage.thinking": "Разсъждения",
   "settings.chatPage.width": "Ширина",
+  "settings.chatPage.collapseLongPrompts": "Свиване на дълги съобщения",
+  "settings.chatPage.collapseLongPromptsHint": "Показва само първите четири реда на дълго изпратено съобщение с бутон „Разгъни“. Изключено показва всяко съобщение изцяло.",
   "settings.chatPage.sendWith": "Изпращане с",
   "settings.chatPage.sendPhoneButton": "бутон на телефони",
   "settings.chatPage.sendPhoneKey": "{key} на телефони",

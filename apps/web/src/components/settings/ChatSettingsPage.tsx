@@ -633,6 +633,17 @@ export function ChatPage({ settingsTarget }: { settingsTarget?: SettingsNavigati
                   />
                 )}
               />
+              <DisclosureRow
+                label={tr("settings.chatPage.collapseLongPrompts")}
+                itemId="chat.collapseLongPrompts"
+                control={(
+                  <Toggle
+                    on={ui.collapseLongPrompts}
+                    onChange={(collapseLongPrompts) => setUiSettings({ collapseLongPrompts })}
+                    label={tr("settings.chatPage.collapseLongPrompts")}
+                  />
+                )}
+              />
             </ItemList>
           </Section>
 
