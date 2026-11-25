@@ -533,6 +533,15 @@ starts Node or OpenCode. See `docs/mobile/architecture.md`.
   not idle, or it holds a `wake` watch on that child for that outcome, read
   from `watches(source)` the instant the turn stops); an idle, unwatched parent
   still gets the push so the person knows. Aborted turns stay silent, and auto-accepted permissions never reach the seam.
+  A stop that says the provider's window is used up (a `rate`/`quota` retry
+  hint, a rate/quota stop code, or limit/quota prose without one) is one
+  account-wide episode, not one chat's news: `limitEpisode` keys it by harness,
+  provider and reset minute (or the provider's words when no reset is stated),
+  the notice is chat-neutral (`Polyth — limit reached`, the provider text as
+  body), and the send sink drops it for a recipient already told about that
+  episode until the window resets — so several chats stopping on the same
+  exhausted limit produce one inbox row and one push, never one per chat. The
+  ledger is per recipient and in memory (a restart may repeat the notice once).
   The body says what happened when the durable events show it — a plain-text
   excerpt of the turn's final reply, the error, the first question, or the
   requested command/path first (`Run: npm test`) — read from bounded keyset

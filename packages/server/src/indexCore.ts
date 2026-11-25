@@ -135,7 +135,7 @@ import { authRequestLike, createAuthService, publicHttpIngress } from "./auth.ts
 import { createSessionEventWaiters } from "./sessionEventWaiters.ts";
 import { createServerApplicationSurface } from "./applicationSurface.ts";
 import { authRoutes } from "./routes/auth.ts";
-import { createPushNotifier, createPushService, plainTextExcerpt, type PushPayload } from "./push.ts";
+import { createLimitAnnouncements, createPushNotifier, createPushService, plainTextExcerpt, type PushPayload } from "./push.ts";
 import { pushRoutes } from "./routes/push.ts";
 import { createNotificationStore, type NotificationAccount } from "./notifications.ts";
 import { createPackageNotify } from "./packageNotify.ts";
@@ -2484,6 +2484,9 @@ export async function boot(opts: BootOptions = {}) {
       }),
     ]);
   };
+  // One provider-limit notice per recipient and limit window, however many
+  // chats stop on it (read by the notifier's send sink below).
+  const limitAnnouncements = createLimitAnnouncements();
   // A `person/message`: named people get kind `mention`; a conversation's
   // other participants get kind `message`. Access and mute are rechecked at
   // delivery, so a person who can no longer open the chat is never told.
@@ -2562,6 +2565,24 @@ export async function boot(opts: BootOptions = {}) {
       }
       const recipient = await notifications.recipientForSession(payload.sessionId, { spaceId: target.spaceId });
       if (!recipient) return;
+      // An exhausted provider limit reaches every chat on that account at
+      // once. One notice per recipient and limit window: later chats stopping
+      // on it add neither an inbox row nor a push. Keyed by the recipient so
+      // two people who share a Space are never silenced for each other. The
+      // episode is claimed before anything is awaited, so two chats stopping
+      // together cannot both publish it.
+      const audience = `${recipient.userId}\0${recipient.spaceId}`;
+      if (payload.limitKey !== undefined) {
+        if (limitAnnouncements.announced(audience, payload.limitKey)) return;
+        limitAnnouncements.remember(audience, payload.limitKey, payload.limitUntil);
+        try {
+          await deliverToRecipient(recipient, payload);
+        } catch (error) {
+          limitAnnouncements.release(audience, payload.limitKey);
+          throw error;
+        }
+        return;
+      }
       await deliverToRecipient(recipient, payload);
     },
     projection: (sessionId) => store.projection(sessionId),
