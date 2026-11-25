@@ -114,6 +114,32 @@ test("interface styles keep quiet text readable and speak one selection language
   assert.match(css, /\.session-row \.session-btn::before \{\s*background: transparent !important;/);
 });
 
+test("the current project on the left rail is the look's plate alone, unless that plate is clear", async () => {
+  const css = stripComments(await read("../src/shellLooks.css"));
+  const shared = 'body[data-shell-look]:not([data-shell-look="standard"]):not(#\\#)';
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({ sel: m[1]!.trim(), body: m[2]! }));
+  const tile = rules.filter((r) => r.sel.includes(".sidebar-project-rail-item.active") && /box-shadow:(?!\s*none\b)/.test(r.body));
+  assert.deepEqual(tile.map((r) => r.sel), [`${shared} .sidebar-project-rail-item.active`], "one shared rule draws the tile's edge");
+  assert.match(tile[0]!.body, /background: var\(--look-rail-select\) !important;/);
+  assert.match(tile[0]!.body, /box-shadow: var\(--look-rail-select-edge\) !important;/);
+  // No ring or carved shadow around the icon by default, on the look's own plate…
+  assert.match(css, /--look-rail-select: var\(--look-select\);\s*--look-rail-select-edge: none;/);
+  // …but a look whose plate is clear keeps its edge, or nothing marks the project.
+  for (const look of SHELL_LOOKS) {
+    const block = rules.find((r) => r.sel === `body[data-shell-look="${look}"]:not(#\\#)`)?.body ?? "";
+    const edge = block.match(/--look-select-edge:\s*([^;]+);/)?.[1]?.trim();
+    if (/--look-select:\s*transparent;/.test(block) && edge && edge !== "none") {
+      assert.match(block, /--look-rail-select-edge: var\(--look-select-edge\);/, `${look}'s rail project would carry no mark`);
+    }
+  }
+  // A project tile hovers in the rail's own hover, the look's hover unless a look deepens it…
+  assert.match(css, /--look-rail-select-edge: none;\s*--look-rail-hover: var\(--look-hover\);/);
+  assert.match(rules.find((r) => r.sel === `${shared} .sidebar-project-rail-item`)?.body ?? "", /^\s*--look-hover: var\(--look-rail-hover\);\s*$/);
+  // …as Monolith Reverse light does: its 5% wash was lost round the icon on the near-white plane.
+  const reverseLight = rules.filter((r) => r.sel === 'html.light body[data-shell-look="monolith-reverse"]:not(#\\#)').map((r) => r.body).join("");
+  assert.match(reverseLight, /--look-rail-hover: var\(--look-well\);/);
+});
+
 test("the suggested prompt stays a line in every look, in its quiet ink", async () => {
   const css = stripComments(await read("../src/shellLooks.css"));
   const shared = 'body[data-shell-look]:not([data-shell-look="standard"]):not(#\\#)';

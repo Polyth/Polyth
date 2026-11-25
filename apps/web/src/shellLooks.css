@@ -60,6 +60,16 @@
   --look-hover: color-mix(in srgb, var(--text) 5%, transparent);
   --look-select: color-mix(in srgb, var(--text) 8%, transparent);
   --look-select-edge: none;
+  /* The current project on the left rail is the plate alone: no ring or
+     carved shadow around its icon. A look whose plate is clear keeps its
+     edge here, or nothing would mark the project; a look whose plate only
+     read through its edge deepens it here, so it still outweighs the hover
+     wash on the next project. The icon covers most of a project tile, so a
+     wash shows only as a thin margin round it: a look whose hover is lost
+     there takes a deeper one in --look-rail-hover. */
+  --look-rail-select: var(--look-select);
+  --look-rail-select-edge: none;
+  --look-rail-hover: var(--look-hover);
   --look-select-ink: var(--text);
   --look-select-weight: 600;
   --look-select-radius: calc(8px * var(--look-round));
@@ -255,10 +265,21 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .session-pinned
   background: var(--look-line);
 }
 
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.sidebar-project-rail-item.active, .view-icon.active, .rail-icon.active, .sidebar-filter .ui-icon-btn.active, .sidebar-list-options.active, .ui-menu-item--checked, .settings-nav-item.active, .model-picker-row.current) {
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.view-icon.active, .rail-icon.active, .sidebar-filter .ui-icon-btn.active, .sidebar-list-options.active, .ui-menu-item--checked, .settings-nav-item.active, .model-picker-row.current) {
   background: var(--look-select) !important;
   box-shadow: var(--look-select-edge) !important;
   border-radius: var(--look-select-radius) !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .sidebar-project-rail-item.active {
+  background: var(--look-rail-select) !important;
+  box-shadow: var(--look-rail-select-edge) !important;
+  border-radius: var(--look-select-radius) !important;
+}
+
+/* The shared hover below paints a project tile in the rail's own hover. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .sidebar-project-rail-item {
+  --look-hover: var(--look-rail-hover);
 }
 
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.view-switcher-pill .view-icon.active, .mobile-shortcut-track > .mobile-shortcut.active) {
@@ -1415,6 +1436,7 @@ body[data-shell-look="line"]:not(#\#) {
   --look-hover: color-mix(in srgb, var(--text) 4%, transparent);
   --look-select: transparent;
   --look-select-edge: inset 0 0 0 1px var(--look-line-strong);
+  --look-rail-select-edge: var(--look-select-edge);
   --look-select-radius: var(--look-r);
   --look-control-edge: inset 0 0 0 1px var(--look-line);
   --look-control-radius: var(--look-r);
@@ -2283,6 +2305,11 @@ html.light body[data-shell-look="monolith-reverse"]:not(#\#) {
   --look-plane-solid: color-mix(in srgb, var(--bg) 40%, white);
   --look-well-solid: color-mix(in srgb, var(--bg) 88%, var(--text) 9%);
   --look-cut-solid: var(--look-well-solid);
+  /* On the near-white plane the 5% hover wash was lost in the thin margin
+     round a project icon: a hovered tile in the rail sinks to the well, and
+     the current project, which has no carve there, a step deeper. */
+  --look-rail-hover: var(--look-well);
+  --look-rail-select: color-mix(in srgb, color-mix(in srgb, var(--text) 8%, var(--look-well-solid)) var(--look-veil), transparent);
   --look-raise: 0 0 0 1px var(--look-edge), 0 3px 10px -6px rgba(0, 0, 0, 0.14);
   --look-float-shadow: 0 10px 28px -16px rgba(0, 0, 0, 0.22);
 }
@@ -2483,6 +2510,10 @@ body[data-shell-look="obsidian"]:not(#\#) {
   --look-option-edge: color-mix(in srgb, var(--text) 8%, transparent);
   --look-select: color-mix(in srgb, var(--accent) 13%, transparent);
   --look-select-edge: inset 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent);
+  /* Dark: without its accent edge the 13% wash is as light as the hover
+     wash, so the rail's current project takes a fuller tint (light keeps
+     the shared one). */
+  --look-rail-select: color-mix(in srgb, var(--accent) 22%, transparent);
   --look-select-radius: var(--look-pill-radius);
   --look-control-radius: var(--look-pill-radius);
   /* A floating window is rimmed glass like the rail it extends, so their
@@ -2520,6 +2551,7 @@ body[data-shell-look="obsidian"]:not(#\#) {
 
 /* Pearl: the phone layers are the light canvas. */
 html.light body[data-shell-look="obsidian"]:not(#\#) {
+  --look-rail-select: var(--look-select);
   --look-phone-layer: color-mix(in srgb, var(--bg) var(--look-overlay-a), transparent);
   --look-widget-shadow: 0 1px 0 0 color-mix(in srgb, white 60%, transparent) inset, 0 14px 30px -22px rgba(0, 0, 0, 0.3);
 }
