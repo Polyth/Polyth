@@ -158,6 +158,9 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
   const [claimInput, setClaimInput] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
+  // Typed twice: the owner may not type this password again for weeks, and a
+  // slip nobody saw then reads as "Polyth forgot my password".
+  const [passwordRepeat, setPasswordRepeat] = useState("");
   const [recovery, setRecovery] = useState<RecoveryState | null>(null);
   const [recoverySaved, setRecoverySaved] = useState(false);
   const [codesRenewed, setCodesRenewed] = useState(false);
@@ -198,7 +201,8 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
   const claimMalformed = normalizedClaim.length > 0 && !claimReady
     && (normalizedClaim.length >= 64 || /[^a-f0-9]/.test(normalizedClaim));
   const passwordReady = [...password].length >= MIN_PASSWORD_LENGTH;
-  const accountReady = !!name.trim() && passwordReady;
+  const passwordMismatch = passwordRepeat.length > 0 && passwordRepeat !== password;
+  const accountReady = !!name.trim() && passwordReady && passwordRepeat === password;
   const report = (cause: unknown): void => {
     setProblem(problemFor(errorCode(cause), { desktop: !!desktop, expired: claimExpired(claim.current) }));
   };
@@ -368,6 +372,7 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
     }
     try { localStorage.setItem("polyth.lastLogin", OWNER_LOGIN); } catch { /* private mode */ }
     setPassword("");
+    setPasswordRepeat("");
     if (desktop) {
       setView("finishing");
       return;
@@ -632,6 +637,24 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
                     {passwordReady && <Icon icon={CheckIcon} size="sm" />}
                     {tr("setup.account.passwordHint", { count: MIN_PASSWORD_LENGTH })}
                   </small>
+                </div>
+                <div className="lock-field">
+                  <label className="lock-field-label" htmlFor="setup-password-repeat">{tr("lockscreen.passwordChange.repeat")}</label>
+                  <TextInput
+                    id="setup-password-repeat"
+                    type="password"
+                    value={passwordRepeat}
+                    autoComplete="new-password"
+                    autoCapitalize="off"
+                    spellCheck={false}
+                    disabled={busy}
+                    invalid={passwordMismatch}
+                    aria-describedby={passwordMismatch ? "setup-password-repeat-error" : undefined}
+                    onChange={(event) => { setPasswordRepeat(event.target.value); setProblem(null); }}
+                  />
+                  {passwordMismatch && (
+                    <small id="setup-password-repeat-error" className="lock-field-error">{tr("lockscreen.passwordChange.mismatch")}</small>
+                  )}
                 </div>
               </div>
               <div className="lock-actions">

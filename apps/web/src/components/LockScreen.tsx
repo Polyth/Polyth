@@ -185,7 +185,9 @@ function PasswordLock({ onUnlocked }: { onUnlocked: () => void }) {
           unlock();
           return;
         }
-        showFailure(result, tr("lockscreen.wrongPassword"));
+        // The server answers the same for an unknown login and a wrong
+        // password; saying "wrong password" sent people hunting the wrong field.
+        showFailure(result, tr("lockscreen.wrongCredentials"));
         setPassword("");
         return;
       }
@@ -228,6 +230,20 @@ function PasswordLock({ onUnlocked }: { onUnlocked: () => void }) {
     }
   };
 
+  const desktopRenew = localDesktopBridge()?.renewOwnerSession;
+  const continueOnThisComputer = async (): Promise<void> => {
+    if (!desktopRenew || busy) return;
+    setBusy(true);
+    setError(null);
+    const renewed = await desktopRenew().catch(() => false);
+    if (renewed) {
+      reloadBehindVeil();
+      return;
+    }
+    setError(tr("setup.error.generic"));
+    setBusy(false);
+  };
+
   const switchMode = (): void => {
     setMode((current) => current === "password" ? "recovery" : "password");
     setPassword("");
@@ -256,12 +272,16 @@ function PasswordLock({ onUnlocked }: { onUnlocked: () => void }) {
               value={login}
               placeholder="owner"
               autoComplete="username"
+              autoCapitalize="off"
+              spellCheck={false}
+              aria-describedby="lock-login-hint"
               disabled={locked || busy}
               onChange={(e) => {
                 setLogin(e.target.value);
                 setError(null);
               }}
             />
+            <small id="lock-login-hint" className="lock-field-hint">{tr("lockscreen.ownerLoginHint")}</small>
           </label>
           {mode === "recovery" && (
             <label className="lock-field" htmlFor="lock-recovery-code">
@@ -272,6 +292,8 @@ function PasswordLock({ onUnlocked }: { onUnlocked: () => void }) {
                 value={recoveryCode}
                 placeholder={tr("lockscreen.recoveryCode")}
                 autoComplete="one-time-code"
+                autoCapitalize="off"
+                spellCheck={false}
                 disabled={locked || busy}
                 onChange={(e) => {
                   setRecoveryCode(e.target.value);
@@ -310,9 +332,16 @@ function PasswordLock({ onUnlocked }: { onUnlocked: () => void }) {
                 ? tr("lockscreen.lockedValueS", { secondsLeft })
                 : mode === "password" ? tr("lockscreen.unlock") : tr("lockscreen.recoverAndSignIn")}
           </Button>
-          {mode === "password" && (passkeySupported || providers.length > 0) && (
+          {mode === "password" && (passkeySupported || providers.length > 0 || desktopRenew) && (
             <div className="lock-alternatives">
               <span className="lock-divider" aria-hidden="true">{tr("lockscreen.or")}</span>
+              {desktopRenew && (
+                // Polyth Desktop showing its own server: the person signed in
+                // to this computer opens it as its owner, no password needed.
+                <Button className="lock-submit lock-submit--secondary" type="button" disabled={busy} onClick={() => void continueOnThisComputer()} block>
+                  {tr("lockscreen.desktopContinue")}
+                </Button>
+              )}
               {passkeySupported && (
                 <Button className="lock-submit lock-submit--secondary" type="button" disabled={busy || locked} onClick={() => void signInPasskey()} block>
                   {tr("lockscreen.signInWithPasskey")}

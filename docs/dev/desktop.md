@@ -49,14 +49,14 @@ reload lands on the setup server's ready state). Standalone/headless server setu
 keeps the explicit `npm run setup:claim` operator flow. The screen contract is in
 [UI §3.5](ui.md#35-first-run-setup-and-sign-in-screens).
 
-Desktop boots the server with `desktopOwnerChannel: true`, which adds two
-in-process lifecycle methods. When the person chooses "just me" or "me, from my
+Desktop boots the server with `desktopOwnerChannel: true`, which adds
+in-process lifecycle methods (never HTTP routes). When the person chooses "just me" or "me, from my
 phone too", `desktop:setup:local` → `completeLocalSetup({ name })` finishes
 setup without a password (`src/osDisplayName.ts` takes the name from the OS:
 macOS `id -F`, the Linux GECOS field, otherwise the login name; renamed later in
-Settings → Users → your account). While that owner has no password, every
-server start (`startServer`) and `desktop:session:renew` call
-`issueLocalOwnerSession()` and write the session with
+Settings → Users → your account). Every server start (`startServer`) and
+`desktop:session:renew` call `issueDesktopOwnerSession(current)` with the
+window's present cookie and write the session it returns with
 `session.defaultSession.cookies.set` (httpOnly, SameSite=Strict, no expiry, so
 it never rests in the profile's cookie database) for the window's loopback
 origin; each call replaces the previous Desktop session. Protecting the
@@ -66,9 +66,35 @@ elevates that session for five minutes. The
 token never crosses the bridge, so a browser or another app on the machine
 stays at the sign-in screen. Cookies ignore ports, so the main process keeps
 each `polyth_auth_*` cookie on the server it belongs to
-(`src/sessionCookieGuard.ts`, `webRequest.onBeforeSendHeaders`). Once the owner sets a password the method returns
-null and the window signs in like any browser. See
+(`src/sessionCookieGuard.ts`, `webRequest.onBeforeSendHeaders`). The method
+returns a session while the owner has no password, and also once they have
+one on a loopback-only server (no `POLYTH_PUBLIC_ORIGIN`): whoever is signed
+in to the computer that runs Polyth already holds its files and could run
+break-glass, so the window opens as the owner instead of locking them out
+every time a 30-day session ends. It answers "kept" when the window's cookie
+is still a live session (the owner's, or another account someone signed in
+to here), and the new session is never elevated: elevated steps still ask
+for the password. Behind a public origin the owner signs in like anyone
+else. See
 [Spaces §3.1](../architecture/spaces-and-tenancy.md#31-access-modes-accounts-or-a-password-less-desktop-owner).
+
+A forgotten owner password is reset on the same computer:
+`desktop:owner:reset-password` (trusted IPC, page passes only the new
+password) reads the window's own cookie, asks the operating system first
+(`systemPreferences.promptTouchID` on a Mac that has it, otherwise a native
+`dialog.showMessageBox` no page can answer), then calls
+`resetDesktopOwnerPassword(token, password)` →
+`credentials.desktopOwnerResetPassword`: the instance owner only, audited as
+`auth.desktop-owner-password-reset`, every session revoked (the outbox treats
+it like any password change), refused behind a public origin. The main
+process then reopens the window's owner session.
+
+Offline recovery needs no Node.js either: the build bundles
+`scripts/break-glass-password.ts` as `resources/cli/break-glass.mjs` beside
+the CLI, and `polyth --target desktop server break-glass [inspect]` runs it
+with the app binary in Node mode on the Desktop data directory
+([CLI](cli.md)). It refuses while Polyth runs (the data directory's writer
+lease).
 
 ## Connecting to another Polyth
 

@@ -278,6 +278,9 @@ with `npm run build:mobile`, then `npm run mobile:open:android` or
   requests act as the active owner without signing in. It never applies to Polyth Link
   ingress, and identity and setup endpoints keep their CSRF and origin checks.
 - `npm run auth:break-glass -- --help` is offline owner password recovery for a stopped
-  server.
+  server. `inspect` lists the installation ID and the local logins (read-only);
+  run with only `--data-dir DIR` on a terminal, it asks for the login, a typed
+  `RESET` and the new password twice. Polyth Desktop ships the same tool:
+  `polyth --target desktop server break-glass` with the app quit.
 - [`polyth`](../dev/cli.md) is a command-line client for a running server or Polyth
   Desktop.

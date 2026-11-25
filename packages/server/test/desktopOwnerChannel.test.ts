@@ -84,3 +84,71 @@ test("a server behind a public origin never offers the password-less first run",
     }
   });
 });
+
+const passwordOwner = async (dataDir: string, origin: string): Promise<void> => {
+  const security = createCanonicalSecurity({ dataDir, origin, localOnly: true });
+  try {
+    const setup = security.identity.setup;
+    const claim = setup.issueClaim(), binding = "ab".repeat(32);
+    setup.bindClaim(claim.token, binding);
+    const recovery = setup.prepareRecovery(claim.token, binding);
+    await setup.complete({
+      claimToken: claim.token, browserBinding: binding, name: "Ida", organizationName: "Home",
+      login: "owner", password: "owner test passphrase", recoverySetId: recovery.setId, recoveryAcknowledged: true,
+    });
+  } finally {
+    security.close();
+  }
+};
+type DesktopChannel = {
+  issueDesktopOwnerSession(current: string | null): { token: string } | "kept" | null;
+  resetDesktopOwnerPassword(token: string, password: string): Promise<{ login: string }>;
+  shutdown(): Promise<void>;
+};
+
+test("a loopback Desktop opens its window as the owner who has a password, and resets a forgotten one in-process", async t => {
+  const dataDir = mkdtempSync(join(tmpdir(), "polyth-desktop-owner-"));
+  t.after(() => rmSync(dataDir, { recursive: true, force: true }));
+  await passwordOwner(dataDir, "http://127.0.0.1:4490");
+  await withEnv(loopbackOnly, async () => {
+    const plain = await boot({ port: 4490, hostname: "127.0.0.1", dataDir });
+    try {
+      assert.equal("issueDesktopOwnerSession" in plain, false, "a plain host has no owner channel");
+      assert.equal("resetDesktopOwnerPassword" in plain, false);
+    } finally {
+      await plain.shutdown();
+    }
+    const desktop = await boot({ port: 4490, hostname: "127.0.0.1", dataDir, desktopOwnerChannel: true }) as unknown as DesktopChannel;
+    try {
+      const issued = desktop.issueDesktopOwnerSession(null);
+      assert.ok(issued && issued !== "kept");
+      assert.equal(desktop.issueDesktopOwnerSession(issued.token), "kept");
+      // Neither is an HTTP route.
+      for (const path of ["/api/auth/desktop/session", "/api/auth/desktop/reset-password"]) {
+        const response = await fetch(`http://127.0.0.1:4490${path}`, {
+          method: "POST", headers: { origin: "http://127.0.0.1:4490", "content-type": "application/json" }, body: "{}",
+        });
+        assert.notEqual(response.status, 200, path);
+      }
+      assert.deepEqual(await desktop.resetDesktopOwnerPassword(issued.token, "a new owner passphrase"), { login: "owner" });
+      assert.notEqual(desktop.issueDesktopOwnerSession(issued.token), "kept", "the reset ended the window's session too");
+    } finally {
+      await desktop.shutdown();
+    }
+  });
+});
+
+test("behind a public origin the owner with a password signs in like anyone, and no reset runs in-process", async t => {
+  const dataDir = mkdtempSync(join(tmpdir(), "polyth-desktop-owner-public-"));
+  t.after(() => rmSync(dataDir, { recursive: true, force: true }));
+  await passwordOwner(dataDir, "https://polyth.example");
+  await withEnv({ ...loopbackOnly, POLYTH_PUBLIC_ORIGIN: "https://polyth.example", POLYTH_TRUSTED_PROXIES: "127.0.0.1" }, async () => {
+    const desktop = await boot({ port: 4491, hostname: "127.0.0.1", dataDir, desktopOwnerChannel: true }) as unknown as DesktopChannel;
+    try {
+      assert.equal(desktop.issueDesktopOwnerSession(null), null);
+      await assert.rejects(() => desktop.resetDesktopOwnerPassword("f".repeat(64), "a new owner passphrase"), { code: "forbidden" });
+    } finally {
+      await desktop.shutdown();
+    }
+  });
+});

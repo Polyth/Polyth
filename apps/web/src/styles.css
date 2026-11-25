@@ -6511,6 +6511,9 @@ html[data-density="compact"] .set-row { padding: 6px 0; }
 }
 .user-detail-savebar .settings-save-bar { border-top: 1px solid var(--hair); }
 .users-dialog-form { display: flex; flex-direction: column; gap: var(--space-4); margin: 0; }
+/* "Forgot your password?" sits under the password it answers, not as a
+   full-width row between fields. */
+.users-dialog-form > .desktop-reset-link { align-self: flex-start; margin-block-start: calc(-1 * var(--space-3)); }
 .users-dialog-intro { margin: 0; font-size: var(--font-label); line-height: 1.55; color: var(--muted); }
 .users-passphrase { display: flex; align-items: center; gap: var(--space-1); min-width: 0; }
 .users-passphrase > .ui-input { flex: 1 1 auto; min-width: 0; font-family: var(--mono); }

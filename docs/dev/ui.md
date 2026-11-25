@@ -1828,8 +1828,10 @@ what cannot be defaulted:
   the foot, "Connect to Polyth on another computer", opens the app's
   [server list](desktop.md#connecting-to-another-polyth). The progress dots
   stay hidden (height kept) for this one-step start. "With other people" shows
-  three dots and continues to the account (name, and a password with a reveal
-  toggle instead of a confirmation field) → recovery codes → automatic restart;
+  three dots and continues to the account (name, a password with a reveal
+  toggle, and "Repeat the new password", which keeps Continue disabled and
+  says so while the two differ: a slip in a password typed once surfaced only
+  weeks later as "Polyth forgot my password") → recovery codes → automatic restart;
   Back from the account returns to the choice. A shell without
   `completeLocalSetup` starts at the account. A standalone server first asks
   for the setup code printed by `npm run setup:claim`, shown with a copy
@@ -1843,8 +1845,25 @@ what cannot be defaulted:
   window on another server takes the browser's path on these screens and adds
   "Choose another server" (`DesktopServerExit`), since they show no shell. Settings →
   Users → your account offers "Set a password…" (`SecureAccountDialog`:
-  password → recovery codes → Protect account); "Add user" opens the same
+  password twice → recovery codes → Protect account); "Add user" opens the same
   dialog first, then the add-user flow (§3.6).
+- **The password sign-in names the real failure.** The server answers the
+  same for an unknown login and a wrong password, so the lock screen says
+  "Login or password is incorrect", and a hint under Login says the owner
+  usually signs in as `owner`. Login and recovery-code fields turn off
+  autocapitalization and spellcheck; the server ignores spaces, dashes
+  (including macOS's en/em dash substitutions) and invisible characters inside
+  a recovery code. In Polyth Desktop on its own server the alternatives under
+  "or" start with "Continue as the owner on this computer"
+  (`renewOwnerSession`, see [Desktop](desktop.md)). Every new-password form
+  (setup, Set a password, Change password, the Desktop reset) asks twice.
+- **A forgotten owner password is reset on this computer.** In Polyth
+  Desktop on its own server, Change password and the owner re-authentication
+  prompt show "Forgot your password? Reset it on this computer" under the
+  password field. It opens "Reset password on this computer" (new password
+  twice); the main process confirms the person with the operating system
+  first, every sign-in ends and the window reloads signed in
+  (`desktopPasswordReset.tsx`).
 - **A claim never strands the flow.** Desktop requests its claim only when the
   person continues, and replaces a claim the server refuses once with
   `requestSetupClaim({ fresh: true })`. A claim that expired while the codes

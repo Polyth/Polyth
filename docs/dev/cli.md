@@ -95,7 +95,9 @@ sessions (`sessions`, `show`, `log [-f]`, `new`, `send`, `chat`, `stop`,
 `on`, `requests`), Polyth (`status`, `projects`, `models`, `open`, `api`),
 connection (`login`, `logout`, `whoami`, `target`), this machine (`server
 status|logs|start|restart|setup-claim|break-glass`, only for a local checkout's
-socket; Desktop manages its own server), `completion bash|zsh|fish`.
+socket; Desktop manages its own server, except `polyth --target desktop server
+break-glass [inspect]`, which runs the reset bundled in the app with Polyth
+quit), `completion bash|zsh|fish`.
 
 Projects resolve by id, name or path, defaulting to the project that contains
 the working directory. Sessions resolve by full id, a unique ≥ 4-character

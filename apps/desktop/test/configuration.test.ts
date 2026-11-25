@@ -168,10 +168,16 @@ test("a password-less first run and its owner session stay in-process", async ()
   assert.match(preloadSource, /renewOwnerSession: \(\) => ipcRenderer\.invoke\("desktop:session:renew"\)/);
   // The token goes straight into the window's cookie jar, never to the page.
   assert.match(mainSource, /session\.defaultSession\.cookies\.set\(\{[\s\S]*?httpOnly: true,[\s\S]*?sameSite: "strict"/);
-  assert.doesNotMatch(preloadSource, /issueLocalOwnerSession|cookieName/);
+  assert.doesNotMatch(preloadSource, /issueLocalOwnerSession|issueDesktopOwnerSession|cookieName/);
   assert.match(serverSource, /opts\.desktopOwnerChannel === true/);
   // No HTTP route can finish setup without a credential or mint that session.
-  assert.doesNotMatch(identityHttp, /completeLocal|issueLocalOwnerSession/);
+  assert.doesNotMatch(identityHttp, /completeLocal|issueLocalOwnerSession|issueDesktopOwnerSession|desktopOwnerResetPassword/);
+  // A forgotten owner password: trusted IPC only, the operating system asks
+  // the person first, and the server refuses it with a public origin.
+  assert.match(mainSource, /trustedHandle\("desktop:owner:reset-password", resetDesktopOwnerPassword\)/);
+  assert.match(mainSource, /const resetDesktopOwnerPassword[\s\S]*?if \(!\(await confirmPersonAtComputer\(\)\)\) return \{ ok: false, error: "cancelled" \}[\s\S]*?reset\.call\(/);
+  assert.match(mainSource, /systemPreferences\.promptTouchID\(/);
+  assert.match(serverSource, /async resetDesktopOwnerPassword\(token: string, password: string\)[\s\S]*?if \(publicOrigin\) throw/);
 });
 
 test("desktop chrome keeps native macOS/Windows controls and renderer actions clickable", async () => {

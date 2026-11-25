@@ -172,6 +172,25 @@ const bundles = await Promise.all([
     metafile: true,
     logLevel: "info",
   }),
+  // Offline owner password reset (`polyth server break-glass`), run by the
+  // app binary in Node mode beside the CLI while Polyth is quit: the person
+  // at this computer needs no separate Node.js or source checkout.
+  build({
+    entryPoints: [join(repoRoot, "scripts", "break-glass-password.ts")],
+    outfile: join(here, "resources", "cli", "break-glass.mjs"),
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    target: "node22",
+    packages: "bundle",
+    external: ["electron"],
+    banner: {
+      js: 'import { createRequire as __polythCreateRequire } from "node:module"; const require = __polythCreateRequire(import.meta.url);',
+    },
+    legalComments: "none",
+    metafile: true,
+    logLevel: "info",
+  }),
   build({
     entryPoints: [join(here, "src", "preload.ts")],
     outfile: join(dist, "preload.cjs"),

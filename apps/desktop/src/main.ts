@@ -14,6 +14,7 @@ import {
   screen,
   session,
   shell,
+  systemPreferences,
   Tray,
   type ContextMenuParams,
   type IpcMainInvokeEvent,
@@ -76,6 +77,7 @@ import type {
   DesktopInfo,
   DesktopKeepAwakeState,
   DesktopLocalSetupResult,
+  DesktopOwnerPasswordResetResult,
   DesktopOpenServer,
   DesktopServerAnchor,
   DesktopServerInfo,
@@ -1688,18 +1690,29 @@ const updateWindowHandle = <Args extends unknown[], Result>(channel: string, han
 };
 
 /**
- * While the owner has no password ("only me" first run), the server opens an
- * owner session only through this in-process channel and the main process
- * puts it straight into this window's cookie jar: the page never sees the
- * token, and another browser or app on this machine stays at the sign-in
- * screen. A no-op once the owner protected the account.
+ * The window's owner session comes only from this in-process channel; the main
+ * process puts it straight into this window's cookie jar, so the page never
+ * sees the token and another browser or app on this machine stays at the
+ * sign-in screen. While the owner has no password that is the one way in.
+ * Once they have one, a loopback-only server still opens the window as its
+ * owner (whoever is signed in to this computer already holds Polyth's files),
+ * unless the window holds a live session already, such as another account
+ * someone signed in to here. Elevated steps keep asking for the password.
  */
 let ownerCookieName: string | null = null;
+const windowSessionCookie = async (lifecycle: NonNullable<typeof serverLifecycle>): Promise<{ name: string; value: string | null } | null> => {
+  const name = "localSessionCookieName" in lifecycle ? lifecycle.localSessionCookieName : undefined;
+  if (typeof name !== "string" || !baseUrl) return null;
+  const [cookie] = await session.defaultSession.cookies.get({ url: baseUrl, name });
+  return { name, value: cookie?.value ?? null };
+};
 const ensureDesktopOwnerSession = async (): Promise<boolean> => {
   const lifecycle = serverLifecycle;
-  const issue = lifecycle && "issueLocalOwnerSession" in lifecycle ? lifecycle.issueLocalOwnerSession : undefined;
-  if (typeof issue !== "function" || !baseUrl) return false;
-  const owner = issue.call(lifecycle);
+  const issue = lifecycle && "issueDesktopOwnerSession" in lifecycle ? lifecycle.issueDesktopOwnerSession : undefined;
+  if (!lifecycle || typeof issue !== "function" || !baseUrl) return false;
+  const present = await windowSessionCookie(lifecycle);
+  const owner = issue.call(lifecycle, present?.value ?? null);
+  if (owner === "kept") return true;
   if (!owner) return false;
   // No expiry: a memory-only cookie. Every launch opens a new session, so the
   // token never needs to rest in the profile's cookie database.
@@ -1715,6 +1728,57 @@ const ensureDesktopOwnerSession = async (): Promise<boolean> => {
   ownerCookieName = owner.cookieName;
   log("Opened the owner session for this window");
   return true;
+};
+
+/** The person at this computer, now: Touch ID where the Mac has it, otherwise
+ *  a native confirmation, which no page can answer for them. */
+const confirmPersonAtComputer = async (): Promise<boolean> => {
+  if (process.platform === "darwin" && systemPreferences.canPromptTouchID()) {
+    try {
+      await systemPreferences.promptTouchID("reset the Polyth owner password");
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  const options = {
+    type: "warning" as const,
+    buttons: ["Reset Password", "Cancel"],
+    defaultId: 1,
+    cancelId: 1,
+    message: "Reset the Polyth owner password?",
+    detail: "Polyth on this computer opens as its owner again. Every other sign-in ends, and other browsers and devices need the new password.",
+  };
+  const { response } = await (mainWindow && !mainWindow.isDestroyed()
+    ? dialog.showMessageBox(mainWindow, options)
+    : dialog.showMessageBox(options));
+  return response === 0;
+};
+
+/** A forgotten owner password, reset at the computer that runs Polyth. The
+ *  new password crosses only this IPC and the in-process call, never a log. */
+const resetDesktopOwnerPassword = async (_event: IpcMainInvokeEvent, password: unknown): Promise<DesktopOwnerPasswordResetResult> => {
+  if (typeof password !== "string" || !password || password.length > 1024) return { ok: false, error: "invalid-input" };
+  const lifecycle = serverLifecycle;
+  const reset = lifecycle && "resetDesktopOwnerPassword" in lifecycle ? lifecycle.resetDesktopOwnerPassword : undefined;
+  if (!lifecycle || typeof reset !== "function") return { ok: false, error: "unavailable" };
+  const present = await windowSessionCookie(lifecycle);
+  if (!present?.value) return { ok: false, error: "forbidden" };
+  if (!(await confirmPersonAtComputer())) return { ok: false, error: "cancelled" };
+  let login: string;
+  try {
+    ({ login } = await reset.call(lifecycle, present.value, password));
+  } catch (error) {
+    const code = (error as { code?: unknown } | null)?.code;
+    if (code === "invalid-input") return { ok: false, error: "invalid-input" };
+    if (code === "forbidden" || code === "invalid-transition" || code === "unauthorized" || code === "invalid-credentials") return { ok: false, error: "forbidden" };
+    log("Owner password reset on this computer failed", code ?? "error");
+    return { ok: false, error: "unavailable" };
+  }
+  log("Owner password was reset on this computer");
+  // Every session ended with the change, this window's too: open it again.
+  await ensureDesktopOwnerSession().catch((error: unknown) => log("Could not reopen the owner session", error));
+  return { ok: true, login };
 };
 
 /** Protecting the account (choosing the owner's first password) needs this
@@ -1996,6 +2060,7 @@ const installIpc = (): void => {
   trustedHandle("desktop:setup:restart", async () => { await restartDesktopSetupServer(); });
   trustedHandle("desktop:setup:local", completeLocalSetup);
   trustedHandle("desktop:session:renew", ensureDesktopOwnerSession);
+  trustedHandle("desktop:owner:reset-password", resetDesktopOwnerPassword);
   trustedHandle("desktop:session:confirm", confirmDesktopOwnerSession);
   trustedHandle("desktop:settings:get", () => settings);
   trustedHandle("desktop:settings:set", (event, patch: unknown) => persistSettings(settingsPatchFor(senderSurface(event), patch)));

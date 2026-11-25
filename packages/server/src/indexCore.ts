@@ -267,8 +267,11 @@ export interface BootOptions {
   /**
    * Polyth Desktop only. Exposes, in-process and never over HTTP, the first-run
    * `completeLocalSetup` (an owner without a credential) and
-   * `issueLocalOwnerSession` (the Desktop window's owner session while that
-   * owner has no credential). Other hosts leave it unset.
+   * `issueDesktopOwnerSession` (the Desktop window's owner session: always
+   * while that owner has no credential, and on a loopback-only server also
+   * once they have a password) and `resetDesktopOwnerPassword` (a forgotten
+   * owner password, after Desktop asked the operating system). Other hosts
+   * leave it unset.
    */
   desktopOwnerChannel?: boolean;
   /** Told about each event-loop stall as well. A packaged desktop app has no

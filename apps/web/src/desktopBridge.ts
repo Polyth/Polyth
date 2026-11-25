@@ -143,6 +143,11 @@ export type DesktopLocalSetupResult =
   | { ok: true }
   | { ok: false; error: "setup-completed" | "recovery-required" | "unavailable" };
 
+/** Resetting a forgotten owner password on the computer that runs Polyth. */
+export type DesktopOwnerPasswordResetResult =
+  | { ok: true; login: string }
+  | { ok: false; error: "cancelled" | "invalid-input" | "forbidden" | "unavailable" };
+
 export interface DesktopServerAnchor {
   x: number;
   y: number;
@@ -233,6 +238,9 @@ export interface PolythDesktopApi {
   /** Re-open this window's owner session while the owner has no password;
    *  false once they protected the account (absent from older shells). */
   renewOwnerSession?(): Promise<boolean>;
+  /** Reset a forgotten owner password on this computer after the operating
+   *  system confirmed the person (absent from older shells). */
+  resetOwnerPassword?(password: string): Promise<DesktopOwnerPasswordResetResult>;
   /** Confirm, from the main process, that this window may protect the
    *  account now (absent from older shells). */
   confirmOwnerSession?(): Promise<boolean>;

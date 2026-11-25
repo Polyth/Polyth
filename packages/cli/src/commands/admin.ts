@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createReadStream, existsSync, readFileSync, statSync, watch } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { bool, int, str, UsageError } from "../args.ts";
 import { listProjects, resolveProject, session, summaries, type WhoAmI } from "../api.ts";
@@ -185,6 +185,18 @@ function withoutBundleMarker(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return rest;
 }
 
+/** Polyth Desktop ships its offline owner password reset beside this CLI
+ *  (resources/cli/break-glass.mjs); the app binary runs both in Node mode,
+ *  so the person at the computer needs no Node.js or source checkout. The
+ *  tool itself refuses while Polyth runs (the data directory's writer lease). */
+function desktopBreakGlass(dataDir: string, args: string[]): Promise<number> {
+  const script = join(dirname(process.argv[1] ?? ""), "break-glass.mjs");
+  if (!process.env.POLYTH_DESKTOP_EXECUTABLE || !existsSync(script)) {
+    throw new UsageError("this Polyth Desktop has no break-glass tool yet; update Polyth Desktop, or run `npm run auth:break-glass -- --data-dir DIR` from a Polyth checkout");
+  }
+  return runIn(process.cwd(), process.execPath, [script, ...args, "--data-dir", dataDir], { ...process.env, ELECTRON_RUN_AS_NODE: "1" });
+}
+
 const runIn = (cwd: string, command: string, args: string[], env?: NodeJS.ProcessEnv) => new Promise<number>((resolveExit) => {
   // npm needs a shell on Windows; a direct executable such as Node does not.
   const child = spawn(command, args, { cwd, stdio: "inherit", shell: process.platform === "win32" && command === "npm", ...(env ? { env } : {}) });
@@ -223,14 +235,16 @@ export const server: Command = {
     "polyth server start                 # foreground, from a server checkout or install",
     "polyth server restart               # drain-aware: waits for running turns",
     "polyth server setup-claim           # one-time claim for first-run setup",
-    "polyth server break-glass           # reset an owner password (interactive)",
+    "polyth server break-glass [inspect] # reset an owner password (interactive; Polyth quit)",
   ].join("\n       "),
   flags: [
     { name: "follow", short: "f" },
     { name: "lines", short: "n", value: true },
   ],
   async run(ctx, args) {
-    const [action = "status"] = args.positionals;
+    const [action = "status", ...rest] = args.positionals;
+    const desktop = ctx.target();
+    if (action === "break-glass" && isDesktop(desktop)) return desktopBreakGlass(desktop.kind === "socket" ? desktop.dataDir : "", rest);
     const { dataDir, root, bundle } = localServer(ctx);
     const o = ctx.o;
     const needRoot = () => {

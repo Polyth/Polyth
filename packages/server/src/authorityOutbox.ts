@@ -23,6 +23,7 @@ const USER_SESSION_REVOCATION_RESOURCE_ACTIONS = new Set([
   "auth.password-changed",
   "auth.recovery-used",
   "auth.break-glass-password-reset",
+  "auth.desktop-owner-password-reset",
 ]);
 const USER_SESSION_REVOCATION_ACTOR_ACTIONS = new Set([
   "auth.passkey-removed",

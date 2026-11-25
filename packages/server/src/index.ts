@@ -176,13 +176,28 @@ export async function boot(opts: BootOptions = {}) {
         ...(opts.desktopOwnerChannel === true ? {
           /** What this installation calls its session cookie, for the app's cookie guard. */
           localSessionCookieName: authority.http.cookieName,
-          /** The Desktop window's owner session while the owner has no
-           *  credential; null once they protected the account. */
-          issueLocalOwnerSession(): LocalOwnerSession | null {
-            const issued = authority.identity.issueLocalOwnerSession(LOCAL_OWNER_SESSION_LABEL);
+          /** The Desktop window's owner session. While the owner has no
+           *  credential, always (the one way in). With a password, only on a
+           *  loopback-only server (no public origin: a team server signs its
+           *  owner in like anyone else) and only when `current`, the window's
+           *  present cookie, holds no live session: then "kept". */
+          issueDesktopOwnerSession(current: string | null): LocalOwnerSession | "kept" | null {
+            if (publicOrigin) {
+              const issued = authority.identity.issueLocalOwnerSession(LOCAL_OWNER_SESSION_LABEL);
+              return issued ? { cookieName: authority.http.cookieName, token: issued.token, expiresAt: issued.session.expiresAt } : null;
+            }
+            const issued = authority.identity.issueDesktopOwnerSession(LOCAL_OWNER_SESSION_LABEL, current);
+            if (issued === "kept") return "kept";
             return issued
               ? { cookieName: authority.http.cookieName, token: issued.token, expiresAt: issued.session.expiresAt }
               : null;
+          },
+          /** The owner forgot the password and is at this computer: Desktop
+           *  confirmed with the operating system and passes its window's own
+           *  session. Loopback-only servers only; every session ends. */
+          async resetDesktopOwnerPassword(token: string, password: string): Promise<{ login: string }> {
+            if (publicOrigin) throw Object.assign(new Error("Reset the password from the server's own console"), { code: "forbidden" });
+            return authority.identity.credentials.desktopOwnerResetPassword({ token, password });
           },
           /** Elevate the window's own session (the token Desktop read from
            *  its cookie jar) for protecting the account; false otherwise. */

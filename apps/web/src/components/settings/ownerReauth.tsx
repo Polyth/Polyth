@@ -4,6 +4,7 @@ import { Button, Dialog, Notice, TextInput } from "../ui/index.ts";
 import { FormField } from "./parts.tsx";
 import { accountErrorText } from "./usersModel.ts";
 import { tr } from "../../i18n/index.ts";
+import { DesktopPasswordResetDialog, ResetOnThisComputerLink } from "./desktopPasswordReset.tsx";
 
 /** Thrown when the owner closes the password prompt; callers stay quiet. */
 export const REAUTH_CANCELLED = Object.freeze(Object.assign(new Error("Cancelled"), { code: "reauth-cancelled" }));
@@ -22,6 +23,7 @@ export function useOwnerReauth(): { withReauth: WithReauth; prompt: ReactNode } 
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [forgot, setForgot] = useState(false);
   const pending = useRef<{ resolve: () => void; reject: (cause: unknown) => void } | null>(null);
 
   const ask = useCallback(() => new Promise<void>((resolve, reject) => {
@@ -66,7 +68,8 @@ export function useOwnerReauth(): { withReauth: WithReauth; prompt: ReactNode } 
     }
   };
 
-  const prompt = open ? (
+  // Forgot it: reset on this computer; the page reloads signed in again.
+  const prompt = open && forgot ? <DesktopPasswordResetDialog onClose={() => setForgot(false)} /> : open ? (
     <Dialog
       title={tr("settings.reauth.title")}
       size="sm"
@@ -94,6 +97,7 @@ export function useOwnerReauth(): { withReauth: WithReauth; prompt: ReactNode } 
             onChange={(event) => setPassword(event.target.value)}
           />
         </FormField>
+        <ResetOnThisComputerLink disabled={busy} onClick={() => setForgot(true)} />
         {error && <Notice tone="error" role="alert">{error}</Notice>}
       </form>
     </Dialog>

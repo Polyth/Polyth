@@ -11,6 +11,7 @@ import type {
   DesktopWindowPlacement,
   DesktopKeepAwakeState,
   DesktopLocalSetupResult,
+  DesktopOwnerPasswordResetResult,
   DesktopSettings,
   DesktopSetupClaim,
   DesktopCaptionGeometry,
@@ -81,6 +82,8 @@ const api: PolythDesktopApi = {
   restartAfterSetup: () => ipcRenderer.invoke("desktop:setup:restart") as Promise<void>,
   completeLocalSetup: () => ipcRenderer.invoke("desktop:setup:local") as Promise<DesktopLocalSetupResult>,
   renewOwnerSession: () => ipcRenderer.invoke("desktop:session:renew") as Promise<boolean>,
+  resetOwnerPassword: (password: string) =>
+    ipcRenderer.invoke("desktop:owner:reset-password", password) as Promise<DesktopOwnerPasswordResetResult>,
   confirmOwnerSession: () => ipcRenderer.invoke("desktop:session:confirm") as Promise<boolean>,
   getSettings: () => ipcRenderer.invoke("desktop:settings:get") as Promise<DesktopSettings>,
   setSettings: (patch) =>
