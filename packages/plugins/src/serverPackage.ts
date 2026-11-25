@@ -367,8 +367,17 @@ export interface ServerSessionAttention {
    *  for approvals and answers still notify as usual. Optional for older hosts. */
   claimTurnNotifications?(owns: (sessionId: string) => boolean): Disposable;
   /** One notification about a session the caller owns. A later call with the
-   *  same `key` replaces it. Delivery only: it changes no session state. */
-  notify?(sessionId: string, input: { kind: "completed" | "failed"; statusText: string; key: string }): void;
+   *  same `key` replaces it. Delivery only: it changes no session state.
+   *  `recipient` names the person a session started by server work (an
+   *  agent's run) acts for: it becomes the session's notification owner when
+   *  none is recorded yet, only while that person is a member of the
+   *  session's Space. A recorded owner is never replaced. */
+  notify?(sessionId: string, input: {
+    kind: "completed" | "failed";
+    statusText: string;
+    key: string;
+    recipient?: { userId: string };
+  }): void;
 }
 export const SESSION_ATTENTION_SERVICE =
   serverServiceKey<ServerSessionAttention>("session.attention");

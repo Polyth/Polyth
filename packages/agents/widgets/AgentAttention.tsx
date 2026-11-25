@@ -5,7 +5,7 @@ import { getLocale, tr } from "../../../apps/web/src/i18n/index.ts";
 import { useShellMode } from "../../../apps/web/src/responsiveShell.ts";
 import { Button } from "../../../apps/web/src/components/ui/index.ts";
 import { sameNeed } from "../src/agentReport.ts";
-import { pauseAgent } from "./agentActions.ts";
+import { pauseAgent, runAgent } from "./agentActions.ts";
 import { agentAttention, failureTitle, type AttentionItem } from "./agentFailure.ts";
 import { pinnedHarnessOf } from "./agentSignIn.tsx";
 import { optimistic } from "./agentsStore.ts";
@@ -123,6 +123,12 @@ export default function AgentAttention({ host, agent, onOpenSession }: {
     }
     const { need } = item;
     const url = webLink(need.url);
+    // The answer goes to the agent as the person's words, so it acts on it
+    // now and closes the request itself.
+    const answer = (message: string) => {
+      setBusy(item.key);
+      void runAgent(agent, message).finally(() => setBusy(""));
+    };
     return {
       title: need.text,
       ...(need.detail ? { detail: need.detail } : {}),
@@ -134,6 +140,24 @@ export default function AgentAttention({ host, agent, onOpenSession }: {
               {/\/pull\/\d+/.test(url) ? tr("agents.openPr") : tr("agents.openLink")}
             </a>
           )}
+          <Button
+            size="sm"
+            variant="primary"
+            className="agent-attention-approve"
+            disabled={busy === item.key}
+            onClick={() => answer(tr("agents.need.approveMessageValue", { need: need.text }))}
+          >
+            {tr("agents.need.approve")}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="agent-attention-decline"
+            disabled={busy === item.key}
+            onClick={() => answer(tr("agents.need.declineMessageValue", { need: need.text }))}
+          >
+            {tr("agents.need.decline")}
+          </Button>
           <Button
             size="sm"
             variant="ghost"

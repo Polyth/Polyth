@@ -4903,13 +4903,17 @@ drawn. Most urgent first:
   itself.
 - **What its reports asked for.** Every open `Needs you` request across the
   journal (`openNeeds`): the newest wording, since when, a web link when the
-  report gave one, and Done. Done settles the request wherever it was asked;
-  the agent closes one itself with a `Resolved:` line.
+  report gave one, and three answers: Go ahead, Decline and Done. Go ahead
+  and Decline send the person's answer to the agent as their own message
+  ("Yes, go ahead: …" / "No, do not do this: … Close the request…"), so it
+  acts at once and closes the request itself; Done settles the request
+  wherever it was asked; the agent closes one itself with a `Resolved:` line.
 
 The list shows three lines (two on a phone) and folds the rest behind
 "N more". It is type on the page with a label, never a card or a banner, and
 all lines share one grid so dates and actions keep their columns; on a narrow
-page the action sits beside the words and the date under them.
+page the action sits beside the words and the date under them, except a
+request's three answers, which go on their own line under its words.
 
 Under a report, `Needs you` is only the record of what that report asked
 ("Asked you", settled ones struck through): the to-do lives above, never in

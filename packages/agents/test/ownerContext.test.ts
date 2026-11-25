@@ -4,14 +4,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { HarnessSelection, JsonObject, SessionEvent } from "@polyth/contracts";
-import { RUNTIME_SYSTEM_PRINCIPAL_ID, serverServiceKey } from "@polyth/plugins";
+import { RUNTIME_SYSTEM_PRINCIPAL_ID, SESSION_ATTENTION_SERVICE, serverServiceKey } from "@polyth/plugins";
 import type { ScheduleService } from "../src/index.ts";
 import registerPackage from "../src/serverEntry.ts";
 
 // A schedule's runs act as its owner: create/send go through the owner's own
 // Space context, so the owner's private assistant account works and someone
 // else's is refused by the same session facade a person would hit.
-async function harness(t: { after(fn: () => void): void }, members: Record<string, string[]>) {
+async function harness(t: { after(fn: () => void): void }, members: Record<string, string[]>, reply?: string) {
   const dir = mkdtempSync(join(tmpdir(), "polyth-schedule-owner-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const project = { id: "prj", path: dir, name: "P", createdAt: 1, spaceId: "spc" };
@@ -48,6 +48,7 @@ async function harness(t: { after(fn: () => void): void }, members: Record<strin
           ...(admission?.author ? { author: admission.author.userId, ...(admission.author.via ? { via: admission.author.via } : {}) } : {}),
         });
         append(sessionId, "turn/started", {});
+        if (reply) append(sessionId, "assistant/message", { text: reply });
         append(sessionId, "turn/stopped", { reason: "completed" });
         return { turnId: "t" };
       },
@@ -87,7 +88,7 @@ async function harness(t: { after(fn: () => void): void }, members: Record<strin
     for (let i = 0; i < 100 && agents.runsOf(id)[0]?.status === "running"; i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
     await new Promise((resolve) => setImmediate(resolve));
   };
-  return { agents, calls, settled };
+  return { agents, calls, settled, provide: (id: string, value: unknown) => services.set(id, value) };
 }
 
 const ida = { mode: "pinned", harnessId: "claude-ida" } as const;
@@ -130,4 +131,27 @@ test("an owner who left the Space refuses the run with a recorded error; ownerle
   await settled(system.id);
   assert.equal(agents.runsOf(system.id)[0]!.status, "ok");
   assert.deepEqual(calls, [{ op: "create", as: RUNTIME_SYSTEM_PRINCIPAL_ID }, { op: "send", as: RUNTIME_SYSTEM_PRINCIPAL_ID }]);
+});
+
+test("an alert reaches the agent's owner: the run's session has no owner of its own", async (t) => {
+  const { agents, settled, provide } = await harness(t, { spc: ["u-ida"] }, "Disk is at 94%.\nReport: alert — disk / at 94%");
+  const notified: Array<{ sessionId: string; input: unknown }> = [];
+  provide(SESSION_ATTENTION_SERVICE.id, { waitingForPerson() {}, notify: (sessionId: string, input: unknown) => notified.push({ sessionId, input }) });
+  const owned = agents.create({ projectId: "prj", spaceId: "spc", ownerUserId: "u-ida", prompt: "Watch the disk.", kind: "every", everyMinutes: 60 });
+  await agents.runNow(owned.id);
+  await settled(owned.id);
+  const run = agents.runsOf(owned.id)[0]!;
+  assert.equal(run.signal, "alert");
+  assert.deepEqual(notified, [{
+    sessionId: run.sessionId,
+    input: { kind: "completed", statusText: "needs you: disk / at 94%", key: run.runId, recipient: { userId: "u-ida" } },
+  }]);
+
+  // An ownerless (system) agent names nobody; the host keeps whatever owner the session has.
+  notified.length = 0;
+  const system = agents.create({ projectId: "prj", spaceId: "spc", prompt: "Watch the disk.", kind: "every", everyMinutes: 60 });
+  await agents.runNow(system.id);
+  await settled(system.id);
+  assert.equal(notified.length, 1);
+  assert.equal((notified[0]!.input as { recipient?: unknown }).recipient, undefined);
 });

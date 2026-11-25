@@ -29,6 +29,8 @@ import {
   type ServerPackageHost,
 } from "@polyth/plugins";
 import { checkWakeScript, runWakeScript, scriptEvents } from "./agentScript.ts";
+import { lastReportOf } from "./agentHold.ts";
+import { openNeeds } from "./agentReport.ts";
 import { cacheTelemetry, KEEP_ALIVE_PROMPT, planWarm, runCacheStats } from "./agentCache.ts";
 import { promptLayers } from "./agentPrompt.ts";
 import { DRAFT_SYSTEM_PROMPT, draftPrompt, parseAgentDraft, type AgentDraft } from "./agentDraft.ts";
@@ -1360,6 +1362,8 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       name: task.title ?? "",
       runsToday: spendInLastDay(task.history, Date.now()).runs,
       lastRunAt: task.lastRunAt ?? null,
+      waitingFor: openNeeds(task.history, Date.now()).map((need) => need.text),
+      lastReport: lastReportOf(task.history),
     },
   });
 
@@ -1500,16 +1504,20 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     const attention = host.services.get(SESSION_ATTENTION_SERVICE);
     const sessionId = run.sessionId ?? task.lastSessionId;
     if (!attention?.notify || !sessionId) return;
+    // The run's session was started by server work, not typed by a person,
+    // so it has no notification owner of its own: the agent's owner is told.
+    const recipient = task.ownerUserId ? { recipient: { userId: task.ownerUserId } } : {};
     if (reason === "tripped") {
       attention.notify(sessionId, {
         kind: "failed",
         statusText: `stopped and will not wake until you resume it: ${failureWords(run)}`,
         key: `tripped:${run.runId}`,
+        ...recipient,
       });
       return;
     }
     if (reason === "failed") {
-      attention.notify(sessionId, { kind: "failed", statusText: `did not finish: ${failureWords(run)}`, key: `failed:${run.runId}` });
+      attention.notify(sessionId, { kind: "failed", statusText: `did not finish: ${failureWords(run)}`, key: `failed:${run.runId}`, ...recipient });
       return;
     }
     const headline = run.headline ?? "has an update";
@@ -1517,6 +1525,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       kind: "completed",
       statusText: run.signal === "alert" ? `needs you: ${headline}` : headline,
       key: run.runId,
+      ...recipient,
     });
   };
   /** The person stops the agent's runs; they are marked first so the abort

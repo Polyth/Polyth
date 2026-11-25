@@ -634,6 +634,10 @@ export interface ScheduleRunDto {
   /** What the run's report says: quiet (filed silently), update, alert. */
   signal?: AgentSignalDto;
   headline?: string;
+  /** The report only asked again for what already waited, with the same
+   *  figures, so it was filed as quiet: `of` asked first, `signal` is what
+   *  this report said. */
+  repeat?: { of: string; signal: "update" | "alert" };
   /** Notes this run added to the notebook. */
   remembered?: string[];
   /** What was set aside for this wake and the run carried. */
@@ -848,7 +852,7 @@ export interface AgentApprovalPolicyDto {
 export interface AgentEventLogEntryDto {
   at: number;
   triggerId: string;
-  outcome: "fired" | "rate-limited" | "chain-limit" | "budget" | "busy" | "overlap" | "script-skip" | "script-pause" | "script-error";
+  outcome: "fired" | "rate-limited" | "chain-limit" | "budget" | "busy" | "overlap" | "script-skip" | "script-pause" | "script-error" | "held";
   count: number;
   text?: string;
 }

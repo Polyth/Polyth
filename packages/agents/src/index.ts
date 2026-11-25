@@ -23,6 +23,7 @@ import type { LoopFileResult } from "./loops.ts";
 import { fallbacksFromFile, fallbacksToFile, type AgentFileSpec } from "./agentFile.ts";
 import { budgetExceeded, failureStreakReached, pendingFeedback, type AgentTrigger, type AgentWake } from "./agentPrompt.ts";
 import { computeNextBeat, validateHeartbeat, type AgentHeartbeat } from "./agentHeartbeat.ts";
+import { eventMarks, heldNote, holdDecision, repeatedReport, type AgentEventMark } from "./agentHold.ts";
 import {
   sameNeed,
   appendToNotebook,
@@ -167,6 +168,8 @@ export interface ScheduleRunRecord {
   rotated?: "instructions-changed" | "context-full" | "compacted";
   /** Event wakes: one line per event that started this run. */
   events?: string[];
+  /** Event wakes: what those events said, to tell later news from a repeat. */
+  marks?: AgentEventMark[];
   /** How many agent hops led here (event wakes only); capped at MAX_CHAIN_DEPTH. */
   chainDepth?: number;
   /** Approval requests in this run's session that wait for a person. */
@@ -176,6 +179,10 @@ export interface ScheduleRunRecord {
   signal?: AgentSignal;
   /** One line from the report (or the answer's first line). */
   headline?: string;
+  /** The report only asked again for what already waited, with the same
+   *  figures: filed as quiet. `of` is the run that asked before, `signal` the
+   *  one this report gave. */
+  repeat?: { of: string; signal: "update" | "alert" };
   /** Notes this run added to the notebook. */
   remembered?: string[];
   /** What was set aside for this wake and the run's prompt carried. They
@@ -340,7 +347,7 @@ export interface AgentEventLogEntry {
   at: number;
   triggerId: string;
   outcome: "fired" | "rate-limited" | "chain-limit" | "budget" | "busy" | "overlap"
-    | "script-skip" | "script-pause" | "script-error";
+    | "script-skip" | "script-pause" | "script-error" | "held";
   /** Number of events behind this entry. */
   count: number;
   text?: string;
@@ -1684,6 +1691,13 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
     else delete rec.headline;
     if (report.needs.length) rec.needs = report.needs;
     else delete rec.needs;
+    // Asking the person again for what already waits, with the same figures,
+    // is not news: filed quietly, so it neither lights up nor notifies.
+    const repeated = ok && !rec.input ? repeatedReport(rec, (task.history ?? []).filter((run) => run !== rec), now()) : undefined;
+    if (repeated) {
+      rec.repeat = repeated;
+      rec.signal = "quiet";
+    } else delete rec.repeat;
     if (ok) {
       remember(task, rec, report.remember);
       setAside(task, rec, report.nextWake);
@@ -1914,7 +1928,7 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
       ...(input ? { input } : {}),
       ...(note ? { note } : {}),
       ...(attachments?.length ? { attachments: attachmentSummary(attachments) } : {}),
-      ...(events?.length ? { events: events.map(describeEvent) } : {}),
+      ...(events?.length ? { events: events.map(describeEvent), marks: eventMarks(events) } : {}),
       ...(chainDepth ? { chainDepth } : {}),
     };
     const wake: AgentWake = {
@@ -2392,7 +2406,23 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
           save();
           continue;
         }
-        let note: string | undefined;
+        // The same news while the agent waits for its person: counted, not run.
+        const held = holdDecision(task.history, result.events, t0);
+        if (held.hold) {
+          const newest = task.eventLog?.[0];
+          if (newest?.outcome === "held" && newest.triggerId === trigger.id && newest.at > held.since) {
+            task.eventLog![0] = { ...newest, count: newest.count + count };
+          } else {
+            logEvent(task, { at: t0, triggerId: trigger.id, outcome: "held", count, text: held.need.slice(0, 300) });
+          }
+          save();
+          continue;
+        }
+        const lastRunAt = (task.history ?? []).find((run) => run.status !== "running")?.startedAt ?? 0;
+        const heldCount = (task.eventLog ?? [])
+          .filter((entry) => entry.outcome === "held" && entry.triggerId === trigger.id && entry.at > lastRunAt)
+          .reduce((sum, entry) => sum + entry.count, 0);
+        let note: string | undefined = heldCount ? heldNote(heldCount) : undefined;
         if (trigger.script) {
           // A script decides; anything but an explicit "run" leaves the agent asleep.
           const scripted: WakeScriptResult = opts.runScript
@@ -2432,7 +2462,8 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
             save();
             continue;
           }
-          note = scripted.decision.action === "run" ? scripted.decision.note : undefined;
+          const scriptNote = scripted.decision.action === "run" ? scripted.decision.note : undefined;
+          note = [note, scriptNote].filter(Boolean).join("\n") || undefined;
         }
         const overBudget = budgetExceeded(task, t0);
         if (overBudget) {

@@ -50,7 +50,7 @@ function dryRunReason(event: NonNullable<AgentTriggerPreviewDto["recent"]>[numbe
 }
 
 const SCRIPT_EXAMPLE = `// events: [{ kind, outcome, at, fields: { title, error, … } }]
-// agent: { name, runsToday, lastRunAt }
+// agent: { name, runsToday, lastRunAt, waitingFor: [text], lastReport: { signal, headline, at } }
 const failed = events.filter((e) => /deploy/i.test(e.fields.title ?? ""));
 if (!failed.length) return { action: "skip", reason: "no deploy failed" };
 return { action: "run", note: failed.map((e) => e.fields.title).join(", ") };`;

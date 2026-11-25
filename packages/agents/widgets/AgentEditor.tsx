@@ -130,6 +130,7 @@ function eventLogLabel(entry: AgentEventLogEntryDto): string {
   if (entry.outcome === "script-skip") return tr("agents.logScriptSkip") + (entry.text ? ` — ${entry.text}` : "");
   if (entry.outcome === "script-pause") return tr("agents.logScriptPause") + (entry.text ? ` — ${entry.text}` : "");
   if (entry.outcome === "script-error") return tr("agents.logScriptErrorValue", { error: entry.text ?? "" });
+  if (entry.outcome === "held") return tr("agents.logHeldValue", { count }) + (entry.text ? ` — ${entry.text}` : "");
   return tr("agents.logBusy");
 }
 

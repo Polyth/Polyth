@@ -2063,6 +2063,13 @@
   .agents-page .agent-attention-actions,
   .agents-page .agent-attention-item:not(:has(.agent-attention-since)) .agent-attention-actions { grid-column: 2; grid-row: 1 / span 2; }
   .agents-page .agent-attention-detail { -webkit-line-clamp: 1; }
+  /* A request carries three answers: they go under its words, in reading order. */
+  .agents-page .agent-attention-item[data-kind="need"] .agent-attention-actions {
+    grid-column: 1 / -1;
+    grid-row: auto;
+    justify-content: flex-start;
+    margin-block-start: var(--space-1);
+  }
 }
 
 /* How the run went: the full report's account, time by time. */

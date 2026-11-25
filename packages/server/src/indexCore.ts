@@ -138,6 +138,7 @@ import { authRoutes } from "./routes/auth.ts";
 import { createPushNotifier, createPushService, plainTextExcerpt, type PushPayload } from "./push.ts";
 import { pushRoutes } from "./routes/push.ts";
 import { createNotificationStore, type NotificationAccount } from "./notifications.ts";
+import { createPackageNotify } from "./packageNotify.ts";
 import { resolveSessionAccount } from "./sessionAccount.ts";
 import { notificationRoutes } from "./routes/notifications.ts";
 import { apnsFromDir, createNativePushService, nativePushRoutes, relaySender } from "./nativePush.ts";
@@ -2705,13 +2706,23 @@ export async function boot(opts: BootOptions = {}) {
   const turnCompletedListeners = new Set<
     (event: { sessionId: string; assistantText: string; userId?: string }) => void | Promise<void>
   >();
+  const packageNotify = createPackageNotify({
+    projection: (sessionId) => store.projection(sessionId),
+    registerSessionRecipient: (sessionId, recipient) => notifications.registerSessionRecipient(sessionId, recipient),
+    recipientForSession: (sessionId, account) => notifications.recipientForSession(sessionId, account),
+    report: (sessionId, kind, statusText, key) => pushNotifier.report(sessionId, kind, statusText, key),
+  });
   services.provide(SESSION_ATTENTION_SERVICE, {
     waitingForPerson: (sessionId) => pushNotifier.waitingForPerson(sessionId),
     claimTurnNotifications(owns) {
       turnNotificationClaims.add(owns);
       return { dispose: () => { turnNotificationClaims.delete(owns); } };
     },
-    notify: (sessionId, input) => pushNotifier.report(sessionId, input.kind, input.statusText, input.key),
+    notify: (sessionId, input) => {
+      void packageNotify(sessionId, input).catch((error: unknown) => {
+        console.error(`[polyth] package notification for ${sessionId} failed`, error);
+      });
+    },
   });
   services.provide(SERVER_TURN_COMPLETION_BUS, {
     subscribe(listener) {

@@ -619,12 +619,15 @@ function QuietFold({ runs, dated }: { runs: ScheduleRunDto[]; dated?: boolean })
   const last = runs.at(-1)!;
   const skipped = runs.filter((run) => run.status === "skipped").length;
   const checks = runs.length - skipped;
+  // Reports that only asked again for what already waits are filed here too.
+  const repeated = runs.filter((run) => run.repeat).length;
   const lone = runs.length === 1;
   const words = (run: ScheduleRunDto) => run.status === "skipped"
     ? (run.error ? budgetWords(run.error) : tr("agents.runSkipped"))
     : run.headline || run.summary?.split("\n").find((line) => line.trim())?.replace(/^#+\s*/, "").trim() || tr("agents.signalQuiet");
   const label = lone ? words(first) : [
     checks ? tr("agents.quietChecksValue", { count: checks }) : "",
+    repeated ? tr("agents.repeatedCountValue", { count: repeated }) : "",
     skipped ? tr("agents.skippedCountValue", { count: skipped }) : "",
   ].filter(Boolean).join(" · ");
   const end = !lone ? `${timeOf(first.startedAt)}–${timeOf(last.startedAt)}`
