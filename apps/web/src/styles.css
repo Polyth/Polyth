@@ -2095,6 +2095,83 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   border-radius: 50%;
   background: var(--session-blue, var(--accent));
 }
+/* A row of the navigator's Pinned group above the projects
+   (PinnedSessions.tsx): its project's glyph, in the project's own colour,
+   stands in the state column, so the chat says where it lives without a
+   second line. Live state stays in sight on the glyph, as the project rail
+   marks its icons: a running chat turns a thin ring around it, the others
+   tint a dot at its corner. */
+.session-lead-project {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+}
+.session-lead-project .project-glyph {
+  width: 100%;
+  height: 100%;
+  font-size: calc(var(--session-lead-size) * .8);
+}
+.session-lead-project .project-glyph > svg,
+.session-lead-project .project-glyph img,
+.session-lead-project .project-glyph-mask {
+  width: calc(var(--session-lead-size) * .86);
+  height: calc(var(--session-lead-size) * .86);
+}
+.session-lead-project .project-remote-marker { display: none; }
+/* A project without an icon goes by its initials (pinnedSessions.ts
+   projectMonogram) on a disc washed with its colour, or with the default
+   project glyph ink when it has none. A disc, like an avatar, so the running
+   ring stays concentric with it; it reaches a little past the slot so two
+   letters stay legible. */
+.session-lead-monogram {
+  --monogram-ink: var(--project-mark, var(--session-blue, var(--accent)));
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: calc(var(--session-lead-size) * 1.14);
+  height: calc(var(--session-lead-size) * 1.14);
+  border-radius: var(--radius-circle);
+  background: color-mix(in srgb, var(--monogram-ink) 16%, transparent);
+  color: var(--monogram-ink);
+  font: 650 calc(var(--session-lead-size) * .64)/1 var(--ui-font-family);
+  letter-spacing: -.02em;
+  user-select: none;
+}
+.session-lead-monogram[data-length="2"] {
+  font-size: calc(var(--session-lead-size) * .52);
+  letter-spacing: -.03em;
+}
+.session-lead-project[data-ring]::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  box-sizing: border-box;
+  border: 1.5px solid color-mix(in srgb, var(--session-blue, var(--accent)) 18%, transparent);
+  border-top-color: var(--session-blue, var(--accent));
+  border-radius: 50%;
+  animation: session-lead-spin .9s linear infinite;
+}
+.session-lead-project[data-ring="reconciling"]::after {
+  border-color: color-mix(in srgb, var(--amber) 18%, transparent);
+  border-top-color: var(--amber);
+  animation-duration: 1.6s;
+}
+.session-lead-project-dot {
+  position: absolute;
+  inset-inline-end: -3px;
+  bottom: -3px;
+  width: 7px;
+  height: 7px;
+  box-sizing: content-box;
+  border: 1.5px solid var(--panel);
+  border-radius: 50%;
+}
+.session-lead-project-dot.attention { background: var(--amber); }
+.session-lead-project-dot.failed { background: var(--red); }
+.session-lead-project-dot.unknown { background: var(--muted); }
+.session-lead-project-dot.result { background: var(--session-blue, var(--accent)); }
 
 /* Column 2 — title, with the subagent disclosure right after its text. */
 .session-row.archived .session-title { color: var(--muted); }

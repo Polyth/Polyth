@@ -18,7 +18,8 @@ test("session rows reserve one status zone and expose an aligned action menu", a
   // identity icons share one trailing edge).
   const body = row.indexOf('<span className="session-row-body">');
   const lead = row.indexOf('<span className="session-lead"', body);
-  const leadStatus = row.indexOf("<LeadMark mark={leadMark} />", lead);
+  // The Pinned group above the projects passes its project's mark into the same slot.
+  const leadStatus = row.indexOf("<LeadMark mark={leadMark} projectMark={projectMark} />", lead);
   const title = row.indexOf('<span className="session-title">', lead);
   const titleText = row.indexOf('className="session-title-text"', title);
   const disclosure = row.indexOf('className="session-subagent-toggle"', titleText);
@@ -230,6 +231,6 @@ test("the highlight pill hugs the title when the state column is empty, and a re
   assert.doesNotMatch(sessions, /session-pin-icon/, "the trailing pin is gone");
   // data-lead comes from the same decision that renders the mark.
   assert.match(sessions, /data-lead=\{sessionLeadState\(leadMark, selectMode\)\}/);
-  assert.match(sessions, /<LeadMark mark=\{leadMark\} \/>/);
+  assert.match(sessions, /<LeadMark mark=\{leadMark\} projectMark=\{projectMark\} \/>/);
   assert.match(lead, /default:\s*return pinned \? "pin" : null;/, "a pin only shows when no live state does");
 });

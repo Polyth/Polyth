@@ -183,7 +183,11 @@ A recency page never guarantees a pinned chat, so `pinned=true` filters the
 catalog to the reader's pinned rows (their own pin, else the shared pre-v21
 one; `pin_position -1` is an explicit unpin). The WS navigator snapshot and the
 web client's project refresh read it next to the newest page, so an old pinned
-chat stays in the Pinned group after a reload or reconnect. `updatedAt` is
+chat stays in the Pinned group after a reload or reconnect. With the
+navigator's *Pinned chats above projects* (`pinnedPlacement: "top"`) the web
+client also reads `pinned=true` without a `projectId` (`refreshPinnedSessions`,
+`apps/web/src/init.ts`, at most 100 rows), because that group lists the pinned
+chats of projects whose own list was never opened. `updatedAt` is
 session activity: derived maintenance (runtime wiring, reconciliation,
 Auto-Approve/Full access flag sweeps after a Space or project policy change or
 at boot) writes the projection without touching it, so such a sweep cannot

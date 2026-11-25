@@ -2324,6 +2324,32 @@ The command palette
   field) — it outranks the lock while post-merge cleanup is still pending.
   The phone host renders its runtime status, unread mark and resting pin in
   the row's status slot; it must not add a second isolation lock.
+- **Pinned chats above projects:** the desktop navigator's list options menu
+  (Sessions) has a *Pinned chats above projects* checkbox, the account
+  preference `pinnedPlacement` (`"project"` by default, `"top"`;
+  `apps/web/src/sidebarPrefs.ts`, synced as its own preference id
+  `core.sidebar-pinned` so an older client's `core.sidebar` snapshot cannot
+  drop it). With `"top"`, `PinnedSessions`
+  (`components/sidebar/PinnedSessions.tsx`, list rules in
+  `apps/web/src/pinnedSessions.ts`) draws every live pinned chat of the Space
+  in one Pinned chats group above the projects, in pin order, kept by the Needs
+  attention and date filters and hidden while searching (search results keep
+  each project's pinned rows). Project lists then leave their pinned block out
+  (`SessionList pinnedAbove`); their subagents still ride under the pinned
+  parent, and a project whose every chat is pinned says so instead of looking
+  empty. In that group every row is pinned, so the state column carries the
+  chat's project glyph (icon and colour, a private room as its project) in
+  place of the pin, and its description names the project. A project without
+  an icon shows its initials instead of the default folder, so several such
+  projects stay apart: the first letter or digit of its first two words (of
+  its name, or of its folder when it has none; `projectMonogram`) on a disc
+  washed with the project's colour, or with the default project ink when it
+  has none. Symbols and emoji are skipped; a name without a letter or digit
+  keeps the folder. Live state stays
+  on the glyph the way the project rail marks its icons: a running or
+  reconciling chat turns a thin ring around it, attention (reply, approval,
+  epoch, limit) an amber corner dot, a failure a red one, an unread reply an
+  accent one. The phone navigator does not offer the option yet.
 - **Desktop session row geometry:** the open button (`.session-btn`) is an
   empty, full-row hit surface; `.session-row-body` paints above it with
   `pointer-events: none` in three fixed columns — a state mark reserved on

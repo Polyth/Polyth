@@ -37,6 +37,8 @@ import { announce } from "../a11y/live.tsx";
 import { worktreeLabel } from "../../worktreeSessions.ts";
 import SlotHost from "../slots/SlotHost.ts";
 import SessionHoverCard from "./SessionHoverCard.tsx";
+import ProjectGlyph from "../ProjectGlyph.tsx";
+import { sessionNeedsAttention, type SessionProjectMark } from "../../pinnedSessions.ts";
 import {
   Button, Checkbox, Dialog, EmptyState, Menu, ResponsiveOverlay, TextInput,
   type MenuEntry,
@@ -83,11 +85,51 @@ const INLINE_LABEL_LIMIT = 6;
 const isManagedIsolationBranch = (branch: string | null | undefined): boolean =>
   branch?.startsWith("polyth/isolate/") === true;
 
+/** Live states the project glyph keeps in sight: a running chat rings it and
+ *  the others tint a dot at its corner, as the project rail marks its icons
+ *  (attention amber, an unread reply in the accent). */
+const PROJECT_LEAD_RING: ReadonlySet<SessionLeadMark> = new Set(["working", "reconciling", "opening"]);
+const PROJECT_LEAD_DOT: Partial<Record<SessionLeadMark, string>> = {
+  "needs-reply": "attention",
+  "needs-approval": "attention",
+  "epoch-pending": "attention",
+  "rate-limited": "attention",
+  failed: "failed",
+  unknown: "unknown",
+  unread: "result",
+};
+
+/** Every row of the Pinned group is pinned, so its pin would say nothing: the
+ *  state column carries the project's glyph instead. Decorative; the row's
+ *  description names the project and its state. */
+function ProjectLeadMark({ projectMark, mark }: { projectMark: SessionProjectMark; mark: SessionLeadMark | null }) {
+  const { project, monogram } = projectMark;
+  const ring = mark !== null && PROJECT_LEAD_RING.has(mark) ? mark : undefined;
+  const dot = mark ? PROJECT_LEAD_DOT[mark] : undefined;
+  return (
+    <span className="session-lead-project" data-ring={ring} aria-hidden="true">
+      {/* A project without an icon goes by its initials on a disc of its
+          colour: every such project would otherwise show the same folder. */}
+      {monogram
+        ? (
+          <span
+            className="session-lead-monogram"
+            data-length={monogram.length > 1 ? "2" : undefined}
+            style={project.color ? { "--project-mark": project.color } as CSSProperties : undefined}
+          >{monogram}</span>
+        )
+        : <ProjectGlyph project={project} />}
+      {dot && <span className={`session-lead-project-dot ${dot}`} />}
+    </span>
+  );
+}
+
 /** Leading state mark. Every row reserves this one fixed slot so titles
  *  align down the list whatever the state; an idle row leaves it empty and a
  *  pinned one at rest shows its pin. `mark` comes from sessionLeadMark, the
  *  same decision that sets the row's `data-lead`. */
-function LeadMark({ mark }: { mark: SessionLeadMark | null }) {
+function LeadMark({ mark, projectMark }: { mark: SessionLeadMark | null; projectMark?: SessionProjectMark }) {
+  if (projectMark) return <ProjectLeadMark projectMark={projectMark} mark={mark} />;
   switch (mark) {
     case "people":
       return <span className="session-lead-mark people" aria-hidden="true"><UiIcon icon={PeopleIcon} size="sm" /></span>;
@@ -133,14 +175,40 @@ function ElapsedBadge({ status }: { status: SessionRowStatus }) {
   return <span className="session-elapsed" aria-hidden="true">{fmtSessionElapsed(status.elapsedMs)}</span>;
 }
 
-interface SubagentDisclosure {
+export interface SubagentDisclosure {
   /** Listed direct children and what their subtrees are doing. */
   activity: SubagentActivity;
   expanded: boolean;
   onToggle: () => void;
 }
 
-interface RowProps {
+/** Chats titled by their first user message, by id. Narrow subscription: rows
+ *  only need each session's derived title, so the fingerprint changes only
+ *  when a derived title appears or changes. Selecting the whole events map
+ *  re-rendered every list on each streamed chunk of every session (the
+ *  per-array WeakMap cache keeps the selector cheap, and the store LRU bounds
+ *  the entry count). */
+export function useEventsTitles(): ReadonlyMap<string, string> {
+  const titlesFingerprint = useStore((st) => {
+    let out = "";
+    for (const id in st.events) {
+      const text = firstUserTextCached(st.events[id]);
+      if (text !== undefined) out += `${id}\u0000${text}\u0001`;
+    }
+    return out;
+  });
+  return useMemo(() => {
+    const events = getState().events;
+    const titles = new Map<string, string>();
+    for (const id in events) {
+      const text = firstUserTextCached(events[id]);
+      if (text !== undefined) titles.set(id, text);
+    }
+    return titles;
+  }, [titlesFingerprint]);
+}
+
+export interface RowProps {
   s: SessionProjection;
   activeSessionId: string | null;
   labels: WorkspaceLabel[];
@@ -168,17 +236,21 @@ interface RowProps {
   /** The project has another checkout (a linked worktree or its main one) the
    *  chat could be dragged to. */
   otherCheckouts?: boolean;
+  /** A row of the navigator's Pinned group above the projects: its project's
+   *  glyph takes the state column. */
+  projectMark?: SessionProjectMark;
 }
 
-function SessionRow({
+export function SessionRow({
   s, activeSessionId, labels, eventsTitle, opening, selectMode, selected,
   onToggleSelect, onChanged, onOpen, onTogglePin,
   projectName, branch, workspacePath, contextLabel, pinnedWorktreeLabel, shiftQuick, subagents, repositoryMark,
-  otherCheckouts = false,
+  otherCheckouts = false, projectMark,
 }: RowProps) {
   const statusId = useId();
   const repositoryMarkId = useId();
   const pinnedId = useId();
+  const projectMarkId = useId();
   const [menuOpen, setMenuOpen] = useState(false);
   const [labelPickerOpen, setLabelPickerOpen] = useState(false);
   const [labelQuery, setLabelQuery] = useState("");
@@ -528,7 +600,7 @@ function SessionRow({
           <button
             ref={sessionBtnRef}
             className="session-btn"
-            aria-describedby={[leadDescription ? statusId : "", s.pinned ? pinnedId : "", repositoryMark ? repositoryMarkId : ""].filter(Boolean).join(" ") || undefined}
+            aria-describedby={[leadDescription ? statusId : "", s.pinned ? pinnedId : "", projectMark ? projectMarkId : "", repositoryMark ? repositoryMarkId : ""].filter(Boolean).join(" ") || undefined}
             aria-current={s.id === activeSessionId ? "true" : undefined}
             aria-expanded={swipeRevealed}
             aria-busy={opening || undefined}
@@ -612,11 +684,12 @@ function SessionRow({
         <span className="session-row-body">
           <span className="session-lead" id={statusId}>
             {leadDescription && <span className="sr-only">{leadDescription}</span>}
-            <LeadMark mark={leadMark} />
+            <LeadMark mark={leadMark} projectMark={projectMark} />
           </span>
           {/* Pinned-ness is named here whatever the state column shows, since
               live state hides the lead pin. */}
           {s.pinned && <span className="sr-only" id={pinnedId}>{pinnedLabel}</span>}
+          {projectMark && <span className="sr-only" id={projectMarkId}>{tr("sidebar.sessionlist.projectValue", { name: projectMark.name })}</span>}
           <span className="session-title">
             <span className="session-title-text">{displayTitle}</span>
             {subagents && (
@@ -813,6 +886,7 @@ export default function SessionList({
   searchProjectName = "",
   dateFilter = EMPTY_SESSION_DATE_FILTER,
   leadingExclude,
+  pinnedAbove = false,
 }: {
   projectId: string;
   query?: string;
@@ -826,6 +900,11 @@ export default function SessionList({
   /** `sidebar.project.leading` contributions not drawn here (hidden, or
    *  shown under their action row). */
   leadingExclude?: readonly string[];
+  /** The navigator draws every pinned chat in its Pinned group above the
+   *  projects (`PinnedSessions`), so this list leaves its own out. They still
+   *  count as listed, so their subagents stay with them instead of turning
+   *  into rows of this list. Search results keep theirs. */
+  pinnedAbove?: boolean;
 }) {
   const sessionsRaw = useStore((st) => st.sessions);
   const pendingSends = useStore((st) => st.pendingSends);
@@ -846,28 +925,7 @@ export default function SessionList({
   const activeRepository = filterRepositories.length > 0 ? storedRepositoryFilter : undefined;
   const projectRepositoryIds = useMemo(() => filterRepositories.map((repository) => repository.id), [filterRepositories]);
   const openingSessionId = useStore((st) => st.openingSessionId);
-  // Narrow subscription: rows only need each session's derived title (its
-  // first user message). Selecting the whole events map re-rendered the whole
-  // list on EVERY streamed chunk of every session; this fingerprint changes
-  // only when a derived title appears or changes (the per-array WeakMap cache
-  // keeps the selector cheap, and the store LRU bounds the entry count).
-  const titlesFingerprint = useStore((st) => {
-    let out = "";
-    for (const id in st.events) {
-      const text = firstUserTextCached(st.events[id]);
-      if (text !== undefined) out += `${id}\u0000${text}\u0001`;
-    }
-    return out;
-  });
-  const eventsTitles = useMemo(() => {
-    const events = getState().events;
-    const titles = new Map<string, string>();
-    for (const id in events) {
-      const text = firstUserTextCached(events[id]);
-      if (text !== undefined) titles.set(id, text);
-    }
-    return titles;
-  }, [titlesFingerprint]);
+  const eventsTitles = useEventsTitles();
   const relativeTime = useStore((st) => st.settings.relativeTime);
   const defaultVisibleSessionCount = useStore((st) => st.settings.defaultVisibleSessionCount);
   const grouping = useSessionGrouping();
@@ -959,14 +1017,7 @@ export default function SessionList({
     if (terms.length && !sessionMatchesSearch(session, terms)) return false;
     if (activeRepository && !sessionMatchesRepositoryFilter(session, activeRepository, projectRepositoryIds, projectSessionsById)) return false;
     if (!sessionMatchesDateFilter(session, dateFilter)) return false;
-    if (!attentionOnly) return true;
-    return session.status === "working"
-      || session.status === "waiting"
-      || session.status === "reconciling"
-      || session.status === "unknown"
-      || resolveSessionStatus(session).kind === "epoch-pending"
-      || (session.attention?.questions ?? 0) > 0
-      || (session.attention?.permissions ?? 0) > 0;
+    return !attentionOnly || sessionNeedsAttention(session);
   };
   const matchingActive = projectSessions.filter((s) => s.status !== "archived" && matchesFilters(s));
   const mainWorktree = worktrees.find((worktree) => worktree.isMain);
@@ -1320,7 +1371,7 @@ export default function SessionList({
           onNavigate: () => { if (getState().sidebarOpen) setSidebarOpen(false); },
         }}
       />
-      {pinned.length > 0 && (
+      {pinned.length > 0 && !pinnedAbove && (
         <div className="session-pinned" aria-label={tr("sidebar.sessionlist.pinnedChats")}>
           <div className="session-date-divider session-pinned-divider" role="separator">
             <span><Icon.pin />{tr("sidebar.sessionlist.pinnedChats")}</span>
@@ -1408,6 +1459,9 @@ export default function SessionList({
         );
       })}
 
+      {pinnedAbove && pinned.length > 0 && unpinnedRoots.length === 0 && !pages.hasMore && (
+        <div className="empty session-list-empty">{tr("sidebar.sessionlist.allPinnedAbove")}</div>
+      )}
       {matchingActive.length === 0 && (
         <div className="empty session-list-empty">
           {/* A first chat is not a filter miss. */}

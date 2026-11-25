@@ -1965,6 +1965,19 @@ async function readSessionList(projectId: string): Promise<void> {
   }
 }
 
+let pinnedSessionsRead: Promise<void> | null = null;
+
+/** Every chat the reader pinned in this Space, whatever its project, for the
+ *  navigator's Pinned group above the projects (`pinnedPlacement: "top"`). A
+ *  project's own read covers only the projects whose list was opened. */
+export function refreshPinnedSessions(): Promise<void> {
+  pinnedSessionsRead ??= api.listSessionSummaries({ pinned: true, archived: false, limit: 100 })
+    .then((page) => { store.upsertSessions(page.sessions); })
+    .catch((error: unknown) => { console.warn("list pinned sessions failed", error); })
+    .finally(() => { pinnedSessionsRead = null; });
+  return pinnedSessionsRead;
+}
+
 // Add/Create ordering: the POST response is authoritative for
 // id, name, and canonical path. On success the store applies one atomic
 // upsert-and-activate transition (mutationVersion increments, so any list

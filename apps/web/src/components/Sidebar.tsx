@@ -15,6 +15,7 @@ import { useSessionSummaryPages } from "../useSessionSummaryPages.ts";
 import { useElementWidth } from "../useElementWidth.ts";
 import { Icon } from "../icons.tsx";
 import SessionList from "./sidebar/SessionList.tsx";
+import PinnedSessions from "./sidebar/PinnedSessions.tsx";
 import { filterRepositoriesOf, newChatOptions } from "../repositoryFilter.ts";
 import SessionDateFilterControls from "./sidebar/SessionDateFilterControls.tsx";
 import SessionSelectionBar from "./sidebar/SessionSelectionBar.tsx";
@@ -50,7 +51,7 @@ import { commandHint, listCommands } from "../commands.ts";
 import {
   permuteManualProjects,
   setProjectOrder, setProjectSortMode,
-  setSidebarViewMode, useProjectSortMode,
+  setPinnedPlacement, setSidebarViewMode, usePinnedPlacement, useProjectSortMode,
   useSidebarViewMode, type SidebarViewMode,
   type ProjectSortMode,
 } from "../sidebarPrefs.ts";
@@ -434,6 +435,9 @@ export default function Sidebar() {
     setAppearanceProjectId(projectId);
   }), []);
   const [attentionOnly, setAttentionOnly] = useState(false);
+  // Every pinned chat in one group above the projects, instead of leading
+  // its own project's list.
+  const pinnedAbove = usePinnedPlacement() === "top";
   const navActions = useNavigatorActions();
   const navSections = useNavigatorSections();
   const [dateFilter, setDateFilter] = useState<SessionDateFilter>(EMPTY_SESSION_DATE_FILTER);
@@ -1061,6 +1065,13 @@ export default function Sidebar() {
       checked: attentionOnly,
       onSelect: () => setAttentionOnly((value) => !value),
     },
+    {
+      id: "pinned-above",
+      label: tr("sidebar.sessionlist.pinnedAboveProjects"),
+      kind: "checkbox",
+      checked: pinnedAbove,
+      onSelect: () => setPinnedPlacement(pinnedAbove ? "project" : "top"),
+    },
     ...arrangementEntries,
     ...sectionFilterEntries,
   ];
@@ -1268,6 +1279,7 @@ export default function Sidebar() {
           projectId={roomId}
           leadingExclude={leadingExclude(roomId)}
           attentionOnly={attentionOnly}
+          pinnedAbove={pinnedAbove}
           dateFilter={dateFilter}
           selectMode={selectMode}
           selectedSessionIds={selectedSessionIds}
@@ -1882,6 +1894,15 @@ export default function Sidebar() {
               })}
             </div>
           )}
+          {query.trim() === "" && pinnedAbove && registry.status === "ready" && (
+            <PinnedSessions
+              attentionOnly={attentionOnly}
+              dateFilter={dateFilter}
+              selectMode={selectMode}
+              selectedSessionIds={selectedSessionIds}
+              onToggleSelected={toggleSelectedSession}
+            />
+          )}
           {/* Beside other servers' zones, this server's projects get its name. */}
           {query.trim() === "" && effectiveViewMode !== "rail" && registry.status === "ready" && <OwnServerZoneHeading />}
           {query.trim() === "" && (effectiveViewMode === "rail"
@@ -1894,6 +1915,7 @@ export default function Sidebar() {
                     projectId={p.id}
                     leadingExclude={leadingExclude(p.id)}
                     attentionOnly={attentionOnly}
+                    pinnedAbove={pinnedAbove}
                     dateFilter={dateFilter}
                     selectMode={selectMode}
                     selectedSessionIds={selectedSessionIds}
@@ -1910,6 +1932,7 @@ export default function Sidebar() {
                     projectId={p.id}
                     leadingExclude={leadingExclude(p.id)}
                     attentionOnly={attentionOnly}
+                    pinnedAbove={pinnedAbove}
                     dateFilter={dateFilter}
                     selectMode={selectMode}
                     selectedSessionIds={selectedSessionIds}
@@ -1939,6 +1962,7 @@ export default function Sidebar() {
                       leadingExclude={leadingExclude(p.id)}
                       query={projectQuery}
                       attentionOnly={attentionOnly}
+                      pinnedAbove={pinnedAbove}
                       dateFilter={dateFilter}
                       selectMode={selectMode}
                       selectedSessionIds={selectedSessionIds}
