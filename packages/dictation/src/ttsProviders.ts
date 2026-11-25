@@ -1,6 +1,8 @@
 // Server-side synthesis for the server voice (`/api/tts/speak`). Each service
-// returns one complete clip; keys are resolved from env references by the
-// caller and only ever travel to the service's own fixed endpoint.
+// returns one complete clip; the ones that can also return raw PCM while it
+// is being generated (`streamsPcm`) let playback start before synthesis ends.
+// Keys are resolved from env references by the caller and only ever travel to
+// the service's own fixed endpoint.
 import { createHash, createHmac } from "node:crypto";
 import { ttsProviderInfo, type TtsProviderId } from "./ttsCatalog.ts";
 
@@ -29,6 +31,21 @@ export interface TtsClip {
   contentType: string;
 }
 
+/** Audio as the service generates it: signed 16-bit little-endian mono PCM. */
+export interface TtsPcmStream {
+  body: ReadableStream<Uint8Array>;
+  sampleRate: number;
+}
+
+/** Services whose HTTP API streams headerless PCM16 (checked against their
+ *  API references, 2026-11): OpenAI `response_format: "pcm"` (24 kHz),
+ *  ElevenLabs `/stream?output_format=pcm_24000`, Amazon Polly
+ *  `OutputFormat: "pcm"` (16 kHz, its highest PCM rate). Google's REST call
+ *  returns one base64 document, Gradium is used for whole clips, and an
+ *  OpenAI-compatible server is not known to support `pcm`. */
+export const streamsPcm = (provider: TtsProviderId): boolean =>
+  provider === "openai" || provider === "elevenlabs" || provider === "polly";
+
 /** A failed upstream call; `status` is the service's HTTP status when it answered. */
 export class TtsUpstreamError extends Error {
   readonly status: number | undefined;
@@ -53,7 +70,7 @@ const requireKey = (key: string | undefined, label: string): string => {
   return key;
 };
 
-const openAiSpeech = async (request: TtsSynthesisRequest, baseUrl: string, label: string): Promise<TtsClip> => {
+const openAiResponse = async (request: TtsSynthesisRequest, baseUrl: string, label: string, format: "mp3" | "pcm"): Promise<Response> => {
   const { settings, key } = request;
   const response = await request.fetchFn(`${baseUrl.replace(/\/+$/, "")}/audio/speech`, {
     method: "POST",
@@ -65,21 +82,24 @@ const openAiSpeech = async (request: TtsSynthesisRequest, baseUrl: string, label
       model: settings.model || ttsProviderInfo(settings.provider).defaultModel || "tts-1",
       input: request.text,
       voice: settings.voice || "alloy",
-      response_format: "mp3",
+      response_format: format,
     }),
     ...(request.signal ? { signal: request.signal } : {}),
   });
-  return clip(await upstream(response, label), "audio/mpeg");
+  return upstream(response, label);
 };
 
-const elevenLabs = async (request: TtsSynthesisRequest): Promise<TtsClip> => {
+const openAiSpeech = async (request: TtsSynthesisRequest, baseUrl: string, label: string): Promise<TtsClip> =>
+  clip(await openAiResponse(request, baseUrl, label, "mp3"), "audio/mpeg");
+
+const elevenLabsResponse = async (request: TtsSynthesisRequest, stream: boolean): Promise<Response> => {
   const key = requireKey(request.key, "ElevenLabs");
   const voice = request.settings.voice || ttsProviderInfo("elevenlabs").defaultVoice;
   const response = await request.fetchFn(
-    `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voice)}?output_format=mp3_44100_128`,
+    `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voice)}${stream ? "/stream?output_format=pcm_24000" : "?output_format=mp3_44100_128"}`,
     {
       method: "POST",
-      headers: { "content-type": "application/json", "xi-api-key": key, accept: "audio/mpeg" },
+      headers: { "content-type": "application/json", "xi-api-key": key, ...(stream ? {} : { accept: "audio/mpeg" }) },
       body: JSON.stringify({
         text: request.text,
         model_id: request.settings.model || ttsProviderInfo("elevenlabs").defaultModel,
@@ -87,8 +107,11 @@ const elevenLabs = async (request: TtsSynthesisRequest): Promise<TtsClip> => {
       ...(request.signal ? { signal: request.signal } : {}),
     },
   );
-  return clip(await upstream(response, "ElevenLabs"), "audio/mpeg");
+  return upstream(response, "ElevenLabs");
 };
+
+const elevenLabs = async (request: TtsSynthesisRequest): Promise<TtsClip> =>
+  clip(await elevenLabsResponse(request, false), "audio/mpeg");
 
 /** Google voice names start with their language ("en-US-Neural2-F"). */
 export const googleLanguageCode = (voice: string, lang?: string): string => {
@@ -162,7 +185,10 @@ export function signAwsV4(input: SigV4Input): Record<string, string> {
   };
 }
 
-const polly = async (request: TtsSynthesisRequest): Promise<TtsClip> => {
+/** Polly's PCM tops out at 16 kHz. */
+const POLLY_PCM_RATE = 16_000;
+
+const pollyResponse = async (request: TtsSynthesisRequest, stream: boolean): Promise<Response> => {
   const accessKeyId = requireKey(request.key, "Amazon Polly access key");
   const secretAccessKey = requireKey(request.secret, "Amazon Polly secret");
   const info = ttsProviderInfo("polly");
@@ -170,7 +196,8 @@ const polly = async (request: TtsSynthesisRequest): Promise<TtsClip> => {
   const host = `polly.${region}.amazonaws.com`;
   const body = JSON.stringify({
     Engine: request.settings.model || info.defaultModel,
-    OutputFormat: "mp3",
+    OutputFormat: stream ? "pcm" : "mp3",
+    ...(stream ? { SampleRate: String(POLLY_PCM_RATE) } : {}),
     Text: request.text,
     VoiceId: request.settings.voice || info.defaultVoice,
   });
@@ -185,8 +212,11 @@ const polly = async (request: TtsSynthesisRequest): Promise<TtsClip> => {
     body,
     ...(request.signal ? { signal: request.signal } : {}),
   });
-  return clip(await upstream(response, "Amazon Polly"), "audio/mpeg");
+  return upstream(response, "Amazon Polly");
 };
+
+const polly = async (request: TtsSynthesisRequest): Promise<TtsClip> =>
+  clip(await pollyResponse(request, false), "audio/mpeg");
 
 const gradium = async (request: TtsSynthesisRequest): Promise<TtsClip> => {
   const key = requireKey(request.key, "Gradium");
@@ -217,4 +247,30 @@ export async function synthesizeSpeech(request: TtsSynthesisRequest): Promise<Tt
     case "gradium": return gradium(bounded);
     case "openai-compatible": return openAiSpeech(bounded, request.settings.baseUrl, "TTS server");
   }
+}
+
+/** Start synthesis and hand back the audio as it is generated. Resolves once
+ *  the service has accepted the request (a refusal throws before any audio);
+ *  only for `streamsPcm` services. */
+export async function synthesizeSpeechStream(request: TtsSynthesisRequest): Promise<TtsPcmStream> {
+  const text = request.text.slice(0, ttsProviderInfo(request.settings.provider).maxChars);
+  const bounded = { ...request, text };
+  let response: Response;
+  let sampleRate = 24_000;
+  switch (request.settings.provider) {
+    case "openai":
+      response = await openAiResponse({ ...bounded, key: requireKey(request.key, "OpenAI TTS") }, "https://api.openai.com/v1", "OpenAI TTS", "pcm");
+      break;
+    case "elevenlabs":
+      response = await elevenLabsResponse(bounded, true);
+      break;
+    case "polly":
+      response = await pollyResponse(bounded, true);
+      sampleRate = POLLY_PCM_RATE;
+      break;
+    default:
+      throw new TtsUpstreamError(`${ttsProviderInfo(request.settings.provider).label} does not stream audio`);
+  }
+  if (!response.body) throw new TtsUpstreamError(`${ttsProviderInfo(request.settings.provider).label} returned no audio`);
+  return { body: response.body, sampleRate };
 }

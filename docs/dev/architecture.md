@@ -637,8 +637,10 @@ into a name field is moved into that file. GET returns only `configured` flags a
 (server voice through the configured `tts.provider`: an OpenAI-compatible
 `/audio/speech` URL, or OpenAI TTS, ElevenLabs, Google Cloud TTS, Amazon Polly (SigV4,
 key-pair env refs + region) or Gradium at their fixed endpoints — `dictation/src/ttsProviders.ts`;
-buffered audio back, only standard fields forwarded, honest 503 when the URL or key is
-missing; local-only for paired devices),
+buffered audio back, or with `stream: true` headerless PCM16 as it is generated
+(`audio/pcm;rate=N`) from the services that stream it (OpenAI, ElevenLabs, Polly); only
+standard fields forwarded, honest 503 when the URL or key is missing; local-only for paired
+devices),
 `/api/tts/voices` + `/api/tts/local` (built-in Piper/Kokoro voices run by the
 dictation package's sherpa runtime in a child process; one-step install of voice +
 engine, WAV synthesis with measured real-time factor; listing and synthesis are

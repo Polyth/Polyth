@@ -33,6 +33,8 @@ const en = {
   testsFailed: "The tests failed.",
   stepFailed: "A step failed.",
   period: ".",
+  /** Said in turn, "|"-separated, when a turn has started and no reply has. */
+  acknowledgements: "Got it.|On it.|Okay, one moment.",
 };
 
 export type NarrationPhrases = typeof en;
@@ -66,6 +68,7 @@ const uk = {
   testsFailed: "Тести впали.",
   stepFailed: "Крок не вдався.",
   period: ".",
+  acknowledgements: "Зрозуміло.|Секунду.|Добре, дивлюся.",
 } satisfies Catalog;
 
 const de = {
@@ -96,6 +99,7 @@ const de = {
   testsFailed: "Die Tests sind fehlgeschlagen.",
   stepFailed: "Ein Schritt ist fehlgeschlagen.",
   period: ".",
+  acknowledgements: "Verstanden.|Einen Moment.|Okay, ich schaue nach.",
 } satisfies Catalog;
 
 const fr = {
@@ -126,6 +130,7 @@ const fr = {
   testsFailed: "Les tests ont échoué.",
   stepFailed: "Une étape a échoué.",
   period: ".",
+  acknowledgements: "Compris.|Un instant.|D’accord, je regarde.",
 } satisfies Catalog;
 
 const pl = {
@@ -156,6 +161,7 @@ const pl = {
   testsFailed: "Testy nie przeszły.",
   stepFailed: "Jeden krok się nie powiódł.",
   period: ".",
+  acknowledgements: "Rozumiem.|Chwileczkę.|Dobrze, sprawdzam.",
 } satisfies Catalog;
 
 const ptBR = {
@@ -186,6 +192,7 @@ const ptBR = {
   testsFailed: "Os testes falharam.",
   stepFailed: "Uma etapa falhou.",
   period: ".",
+  acknowledgements: "Entendi.|Um momento.|Certo, vou ver.",
 } satisfies Catalog;
 
 const pt = {
@@ -216,6 +223,7 @@ const pt = {
   testsFailed: "Os testes falharam.",
   stepFailed: "Uma etapa falhou.",
   period: ".",
+  acknowledgements: "Entendido.|Um momento.|Certo, vou ver.",
 } satisfies Catalog;
 
 const it = {
@@ -246,6 +254,7 @@ const it = {
   testsFailed: "I test sono falliti.",
   stepFailed: "Un passaggio non è riuscito.",
   period: ".",
+  acknowledgements: "Capito.|Un momento.|Va bene, controllo.",
 } satisfies Catalog;
 
 const es = {
@@ -276,6 +285,7 @@ const es = {
   testsFailed: "Las pruebas fallaron.",
   stepFailed: "Un paso falló.",
   period: ".",
+  acknowledgements: "Entendido.|Un momento.|De acuerdo, lo miro.",
 } satisfies Catalog;
 
 const zhCN = {
@@ -306,6 +316,7 @@ const zhCN = {
   testsFailed: "测试失败了。",
   stepFailed: "有一步失败了。",
   period: "。",
+  acknowledgements: "好的。|稍等。|明白，我看看。",
 } satisfies Catalog;
 
 const bg = {
@@ -336,6 +347,7 @@ const bg = {
   testsFailed: "Тестовете се провалиха.",
   stepFailed: "Една стъпка не успя.",
   period: ".",
+  acknowledgements: "Разбрах.|Момент.|Добре, проверявам.",
 } satisfies Catalog;
 
 const ar = {
@@ -366,6 +378,7 @@ const ar = {
   testsFailed: "فشلت الاختبارات.",
   stepFailed: "فشلت إحدى الخطوات.",
   period: ".",
+  acknowledgements: "فهمت.|لحظة.|حسنًا، سأتحقق.",
 } satisfies Catalog;
 
 export const NARRATION_PHRASES: Readonly<Record<Locale, NarrationPhrases>> = {

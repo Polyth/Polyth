@@ -45,6 +45,10 @@ const text = (data: unknown, key: string): string => {
   return typeof value === "string" ? value : "";
 };
 
+/** An opening sentence still streaming at this length starts at its last
+ *  clause instead of waiting for its full stop. */
+export const FIRST_CLAUSE_CHARS = 64;
+
 interface Part {
   stream: SpeakableStream;
   /** Raw streamed text so far, to find what a final message adds. */
@@ -54,8 +58,9 @@ interface Part {
 
 export function createReplyTracker(options: ReplyTrackerOptions = {}): ReplyTracker {
   let parts = new Map<string, Part>();
-  // The first sentence of a reply starts speech immediately; later text
-  // gathers into longer utterances so the voice does not stutter.
+  // The first sentence of a reply starts speech immediately — its first
+  // clause already, when the sentence is long — and later text gathers into
+  // longer utterances so the voice does not stutter.
   const part = (id: string): Part => {
     let existing = parts.get(id);
     if (!existing) {
@@ -63,6 +68,7 @@ export function createReplyTracker(options: ReplyTrackerOptions = {}): ReplyTrac
         stream: createSpeakableStream({
           minChars: 90,
           maxChars: 260,
+          firstClauseChars: FIRST_CLAUSE_CHARS,
           ...(options.codePlaceholder ? { codePlaceholder: options.codePlaceholder } : {}),
           ...(options.tablePlaceholder ? { tablePlaceholder: options.tablePlaceholder } : {}),
         }),

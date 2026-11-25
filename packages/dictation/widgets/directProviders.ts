@@ -1,4 +1,5 @@
 import { DictationError, type DictationContext, type DictationProviderId } from "@polyth/dictation";
+import type { Pcm16Capture, Pcm16CaptureOptions } from "./audioCapture.ts";
 import type { StreamingDictation } from "./dictationClient.ts";
 import { startDirectDeepgramDictation } from "./directDeepgram.ts";
 import { startDirectElevenLabsDictation } from "./directElevenLabs.ts";
@@ -13,6 +14,8 @@ export interface DirectProviderOptions {
   onPartial?: (text: string) => void;
   onLevel?: (rms: number) => void;
   onError?: (message: string) => void;
+  /** Where the audio comes from; absent: the provider opens the microphone. */
+  captureFactory?: (options: Pcm16CaptureOptions) => Promise<Pcm16Capture>;
 }
 
 type DirectStarter = (options: DirectProviderOptions) => Promise<StreamingDictation>;
@@ -25,6 +28,7 @@ const starters: Partial<Record<DictationProviderId, DirectStarter>> = {
     onPartial: options.onPartial,
     onLevel: options.onLevel,
     onError: options.onError,
+    ...(options.captureFactory ? { captureFactory: options.captureFactory } : {}),
   }),
   wispr: (options) => startDirectWisprDictation({
     language: options.language,
@@ -32,6 +36,7 @@ const starters: Partial<Record<DictationProviderId, DirectStarter>> = {
     onPartial: options.onPartial,
     onLevel: options.onLevel,
     onError: options.onError,
+    ...(options.captureFactory ? { captureFactory: options.captureFactory } : {}),
   }),
   deepgram: (options) => startDirectDeepgramDictation({
     model: options.model || "nova-3",
@@ -40,6 +45,7 @@ const starters: Partial<Record<DictationProviderId, DirectStarter>> = {
     onPartial: options.onPartial,
     onLevel: options.onLevel,
     onError: options.onError,
+    ...(options.captureFactory ? { captureFactory: options.captureFactory } : {}),
   }),
 };
 

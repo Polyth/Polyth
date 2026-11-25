@@ -5,15 +5,18 @@ import {
   SPEECH_CLAIM_EVENT,
   createSpeechOutput,
   primeSpeechOutput,
+  startPcm16Capture,
   type SpeechOutputSettings,
 } from "@polyth/dictation/voice-runtime";
 import { api } from "@polyth/session/web-api";
 import { tapFeedback } from "../../../apps/web/src/haptics.ts";
 import { resolveCommandPhrases } from "../src/commands.ts";
 import { narrationLocale, narrationPhrases } from "../src/narrationPhrases.ts";
+import { parseLatencyList } from "../src/latency.ts";
 import { bargeInEnabled } from "../src/prefs.ts";
 import { voiceModeStrings } from "../src/strings.ts";
 import { createVoiceModeController } from "./controller.ts";
+import { announceVoiceLive } from "./liveClient.ts";
 import { loadNarrationStatus, requestNarration } from "./narrateClient.ts";
 import { playEarcon } from "./earcons.ts";
 import { startListener } from "./listener.ts";
@@ -21,6 +24,7 @@ import { startMicMonitor } from "./micMonitor.ts";
 import { getVoiceModePrefs, replaceVoiceModePrefs, subscribeVoiceModePrefs } from "./prefsStore.ts";
 import { readVoicePrefs, resolveRecognitionRoutes } from "./route.ts";
 import { sendQueuedNow, stopTurn } from "./sessionActions.ts";
+import { startSharedCapture } from "./sharedCapture.ts";
 import { createTabClaim } from "./tabClaim.ts";
 import VoiceModeSettings from "./VoiceModeSettings.tsx";
 import { VoiceModeButton, VoiceModeHost } from "./VoiceModeLayer.tsx";
@@ -44,6 +48,8 @@ const outputSettings = (): SpeechOutputSettings => {
 type WakeLockNavigator = Navigator & {
   wakeLock?: { request(type: "screen"): Promise<{ release(): Promise<void> }> };
 };
+
+const LATENCY_KEY = "polyth.voice-mode.latency";
 
 /** The voice's language; "auto" is the browser's. */
 const spokenLang = (): string => {
@@ -74,6 +80,7 @@ export default defineWebPackage((host) => () => {
     createOutput: createSpeechOutput,
     primeOutput: primeSpeechOutput,
     startMicMonitor,
+    startSharedCapture: () => startSharedCapture({ start: startPcm16Capture }),
     bargeIn,
     earcon: (kind) => {
       if (getVoiceModePrefs().sounds) playEarcon(kind);
@@ -108,8 +115,19 @@ export default defineWebPackage((host) => () => {
       return lock ? () => { void lock.release().catch(() => {}); } : null;
     },
     haptic: tapFeedback,
+    announceLive: announceVoiceLive,
+    // Times only, kept on this device so Settings can show them later.
+    latencyStore: {
+      load: () => {
+        try { return parseLatencyList(localStorage.getItem(LATENCY_KEY)); } catch { return []; }
+      },
+      save: (list) => {
+        try { localStorage.setItem(LATENCY_KEY, JSON.stringify(list)); } catch { /* private mode */ }
+      },
+    },
     now: () => Date.now(),
   });
+  const latency = { get: controller.getLatency, subscribe: controller.subscribeLatency };
   const activeSessionId = () => host.store.getSnapshot().activeSessionId;
   const sessionTitle = (sessionId: string | null) => {
     const id = sessionId ?? activeSessionId();
@@ -137,7 +155,7 @@ export default defineWebPackage((host) => () => {
       component: () => (
         <VoiceModeSettings strings={strings()} openVoiceSettings={() => host.navigation.openSettingsPage("voice")}
           openSmallModelSettings={() => host.navigation.openSettingsPage("sessions", { itemId: "sessions.small-model" })}
-          loadNarrationStatus={loadNarrationStatus} commandPhrases={commandPhrases} />
+          loadNarrationStatus={loadNarrationStatus} commandPhrases={commandPhrases} latency={latency} />
       ),
     }),
     // Directly above the composer: the compact dock sits where the user's

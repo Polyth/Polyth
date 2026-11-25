@@ -1,6 +1,7 @@
 // The small-model narrator route: scope before anything, the account's small
 // model only, a digest without tool output, rate limits shared by devices, and
-// a paired-phone policy that opens exactly the two narrator routes.
+// a paired-phone policy that opens the two narrator routes (the lease route
+// is covered by `liveRoutes.test.ts`) and nothing else.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { matchRemotePath, type SessionEvent, type SpaceContext } from "@polyth/contracts";
