@@ -14,8 +14,8 @@
     "serverEntry": "./src/serverEntry.ts",
     "webEntry": "./widgets/index.tsx",
     "descriptor": {
-      "name": "Bug reports",
-      "description": "Nightly builds, in the desktop app or a browser: press ⌘⇧B (Ctrl+Shift+B) to send the Polyth team a screenshot, the build and its settings, with your note.",
+      "name": "Feedback",
+      "description": "Press ⌘⇧B (Ctrl+Shift+B) to tell the Polyth team a bug, an idea or what feels awkward, with optional screenshot, technical details and a note about you. You see everything before it is sent.",
       "core": false,
       "enabled": true,
       "settingsGroup": "System",

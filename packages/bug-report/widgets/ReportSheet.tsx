@@ -1,14 +1,17 @@
-// The report sheet: the screenshot taken when the key was pressed (in a
-// browser: this tab, or an image the person pastes or attaches), an optional
-// note, and every byte that will go, shown before anything is sent. The
-// desktop shell or the Polyth server adds the build and sends; this sheet
-// never sees the stored tester password, only what the person types once.
+// The feedback sheet: what kind of remark it is, the person's words, and one
+// switch per optional part (technical details, screenshot, "About me", a way
+// to reply) with every byte that will go shown before anything is sent. A
+// part is on the wire exactly when its switch is on. The desktop shell or the
+// Polyth server adds the build and sends.
 import { useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
 import type { WebPackageHost } from "@polyth/web-sdk";
 import type { BugReportError, BugReportPackage, BugReportSettingValue, BugReportWeb } from "@polyth/contracts/bug-report";
-import { BUG_REPORT_LIMITS } from "@polyth/contracts/bug-report";
+import {
+  FEEDBACK_EXPERIENCE, FEEDBACK_KINDS, FEEDBACK_LIMITS, FEEDBACK_ROLES,
+  type FeedbackExperience, type FeedbackKind, type FeedbackRole,
+} from "@polyth/contracts/feedback";
 import type { BugReportMessageKey } from "../src/i18n/en.ts";
-import { contactName } from "../src/snapshot.ts";
+import { feedbackContact } from "../src/snapshot.ts";
 import type { Mark } from "../src/annotate.ts";
 import type { ReportBridge, ReportCapture, ReportDraft, ReportOutcome } from "./bridge.ts";
 import { ScreenshotEditor, composeMarked, type MarkImage } from "./ScreenshotEditor.tsx";
@@ -28,22 +31,32 @@ export interface ReportSheetProps {
   onClose: () => void;
 }
 
-type Problem = "rate" | "version" | "invalid" | "unavailable" | null;
+type Problem = "rate" | "invalid" | "unavailable" | null;
 
 const kb = (bytes: number) => `${Math.max(1, Math.round(bytes / 1024))} KB`;
 
 export function ReportSheet({ host, bridge, capture, page, onClose }: ReportSheetProps) {
   const t = (key: BugReportMessageKey, values?: Record<string, string | number>) => host.ui.locale.translate(key, values);
-  const { Button, Checkbox, Notice, Textarea, TextInput } = host.ui.components;
+  const { Button, Checkbox, Notice, Select, Textarea, TextInput } = host.ui.components;
   const EditIcon = host.ui.iconSet?.EditIcon;
   const Dialog = host.ui.components.Dialog;
+  const [kind, setKind] = useState<FeedbackKind>("bug");
   const [text, setText] = useState("");
   const [contact, setContact] = useState("");
-  const [password, setPassword] = useState("");
-  const [needsPassword, setNeedsPassword] = useState(capture.needsPassword);
-  const [passwordWrong, setPasswordWrong] = useState(false);
+  // The default of a part follows the kind (a bug wants the technical details
+  // and a screenshot, an idea does not) until the person switches it.
+  const [technicalChoice, setTechnicalChoice] = useState<boolean | null>(null);
+  const [screenshotChoice, setScreenshotChoice] = useState<boolean | null>(null);
+  const saved = capture.base.savedProfile;
+  const [withProfile, setWithProfile] = useState(saved !== null);
+  const [role, setRole] = useState<FeedbackRole>(saved?.role ?? "other");
+  const [experience, setExperience] = useState<FeedbackExperience>(saved?.experience ?? "sometimes");
+  const [forgetting, setForgetting] = useState(false);
   const [shot, setShot] = useState(capture.screenshot);
-  const [withScreenshot, setWithScreenshot] = useState(capture.screenshot !== null);
+  const technicalDefault = kind === "bug" || kind === "pain";
+  const withTechnical = technicalChoice ?? technicalDefault;
+  const withScreenshot = shot !== null && (screenshotChoice ?? technicalDefault);
+  const setWithScreenshot = (value: boolean) => setScreenshotChoice(value);
   const [attaching, setAttaching] = useState(false);
   const [attachFailed, setAttachFailed] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -56,38 +69,48 @@ export function ReportSheet({ host, bridge, capture, page, onClose }: ReportShee
   const [applying, setApplying] = useState(false);
   const [markFailed, setMarkFailed] = useState(false);
   const canMark = typeof bridge.annotate === "function" && shot !== null && original !== null;
-  const [withErrors, setWithErrors] = useState(page.errors.length > 0);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<Problem>(null);
-  const passwordRef = useRef<HTMLInputElement | null>(null);
+  
+  const reply = feedbackContact(contact);
+  const profile = withProfile ? { role, experience } : null;
+  const technical = withTechnical
+    ? { web: page.web, settings: page.settings, packages: page.packages, errors: page.errors }
+    : null;
 
   const draft = (): ReportDraft => ({
-    captureId: withScreenshot && shot ? capture.captureId : null,
+    kind,
     text: text.trim(),
-    contact: contactName(contact),
-    web: page.web,
-    settings: page.settings,
-    packages: page.packages,
-    errors: withErrors ? page.errors : [],
-    ...(needsPassword && password.trim() ? { password: password.trim() } : {}),
+    contact: reply,
+    captureId: withScreenshot && shot ? capture.captureId : null,
+    technical,
+    profile,
   });
 
-  // Exactly what goes, minus the image bytes and the password.
+  // Exactly what goes, minus the image bytes. The pseudonym is the stable one
+  // only when the person chose to be known (a profile or a way to reply).
+  const known = profile !== null || reply !== "";
   const preview = useMemo(() => JSON.stringify({
-    app: capture.base.app,
-    install: capture.base.install,
-    web: page.web,
-    settings: { ...page.settings, ...capture.base.settings },
-    packages: page.packages,
-    errors: withErrors ? page.errors : [],
+    kind,
     text: text.trim(),
-    contact: contactName(contact),
+    install: known ? capture.base.installPerson : capture.base.installDaily,
+    contact: reply,
+    basics: {
+      version: capture.base.app.version,
+      channel: capture.base.app.channel,
+      edition: capture.base.app.edition,
+      locale: capture.base.app.locale,
+    },
+    technical: technical
+      ? { app: capture.base.app, web: technical.web, settings: { ...technical.settings, ...capture.base.settings }, packages: technical.packages, errors: technical.errors }
+      : null,
+    profile,
     screenshot: withScreenshot && shot
       ? `image/jpeg ${shot.width}×${shot.height}, ${kb(shot.bytes)}`
       : null,
-  }, null, 2), [capture, page, shot, withErrors, withScreenshot, text, contact]);
+  }, null, 2), [capture, kind, text, known, reply, technical, profile, shot, withScreenshot]);
 
-  const canSend = !busy && !attaching && editing === null && (!needsPassword || password.trim() !== "");
+  const canSend = !busy && !attaching && editing === null && text.trim() !== "" && (contact.trim() === "" || reply !== "");
 
   const attach = async (file: Blob) => {
     if (!bridge.attach) return;
@@ -160,25 +183,14 @@ export function ReportSheet({ host, bridge, capture, page, onClose }: ReportShee
   };
 
   const finish = (outcome: ReportOutcome) => {
-    if (outcome.result === "created" || outcome.result === "added") {
-      host.notifications?.show({
-        kind: "success",
-        title: t("bugreport.sentTitle"),
-        body: t(outcome.result === "created" ? "bugreport.sentBody" : "bugreport.addedBody", { issue: outcome.issue }),
-      });
+    if (outcome.result === "received") {
+      host.notifications?.show({ kind: "success", title: t("bugreport.sentTitle"), body: t("bugreport.sentBody", { ref: outcome.ref }) });
       onClose();
       return;
     }
     if (outcome.result === "queued") {
       host.notifications?.show({ kind: "info", title: t("bugreport.queuedTitle"), body: t("bugreport.queuedBody") });
       onClose();
-      return;
-    }
-    if (outcome.result === "password") {
-      setPasswordWrong(needsPassword && password.trim() !== "");
-      setNeedsPassword(true);
-      setPassword("");
-      queueMicrotask(() => passwordRef.current?.focus());
       return;
     }
     setProblem(outcome.result);
@@ -188,13 +200,31 @@ export function ReportSheet({ host, bridge, capture, page, onClose }: ReportShee
     if (!canSend) return;
     setBusy(true);
     setProblem(null);
-    setPasswordWrong(false);
     try {
       finish(await bridge.send(draft()));
     } catch {
       setProblem("invalid");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const forget = async () => {
+    if (!bridge.forget || forgetting) return;
+    setForgetting(true);
+    try {
+      const outcome = await bridge.forget();
+      host.notifications?.show(outcome.result === "forgotten"
+        ? { kind: "success", title: t("bugreport.forgottenTitle"), body: t("bugreport.forgottenBody", { count: outcome.count }) }
+        : { kind: "error", title: t("bugreport.forgetFailed"), body: "" });
+      if (outcome.result === "forgotten") {
+        setWithProfile(false);
+        onClose();
+      }
+    } catch {
+      host.notifications?.show({ kind: "error", title: t("bugreport.forgetFailed"), body: "" });
+    } finally {
+      setForgetting(false);
     }
   };
 
@@ -223,16 +253,23 @@ export function ReportSheet({ host, bridge, capture, page, onClose }: ReportShee
   const body = (
     <form className="bug-report-sheet" onSubmit={(event) => { event.preventDefault(); void submit(); }} onKeyDown={onKeyDown} onPaste={onPaste}>
       <p className="bug-report-sheet__intro">{t("bugreport.intro")}</p>
+      <div className="bug-report-sheet__kinds" role="group" aria-label={t("bugreport.kindLabel")}>
+        {FEEDBACK_KINDS.map((value) => (
+          <Button key={value} size="sm" variant={kind === value ? "primary" : "quiet"} aria-pressed={kind === value} onClick={() => setKind(value)}>
+            {t(`bugreport.kind.${value}`)}
+          </Button>
+        ))}
+      </div>
       <label className="bug-report-sheet__field">
         <span className="bug-report-sheet__label">{t("bugreport.textLabel")}</span>
         <Textarea
           className="bug-report-sheet__text"
           value={text}
-          maxLength={BUG_REPORT_LIMITS.textChars}
+          maxLength={FEEDBACK_LIMITS.textChars}
           minRows={3}
           maxRows={10}
           autoGrow
-          placeholder={t("bugreport.textPlaceholder")}
+          placeholder={t(`bugreport.placeholder.${kind}`)}
           onChange={(event) => setText(event.target.value)}
         />
       </label>
@@ -281,50 +318,63 @@ export function ReportSheet({ host, bridge, capture, page, onClose }: ReportShee
             </div>
           )}
           {attachFailed && <p className="bug-report-sheet__error" role="alert">{t("bugreport.attachFailed")}</p>}
-          {page.errors.length > 0 && (
-            <Checkbox checked={withErrors} onChange={setWithErrors} label={t("bugreport.errors", { count: page.errors.length })} />
-          )}
+          <Checkbox
+            checked={withTechnical}
+            onChange={setTechnicalChoice}
+            label={t("bugreport.technical")}
+            description={t("bugreport.technicalHint", { errors: page.errors.length })}
+          />
         </div>
       </div>
-      <div className="bug-report-sheet__row" data-columns={needsPassword ? "2" : "1"}>
-        <label className="bug-report-sheet__field">
-          <span className="bug-report-sheet__label">{t("bugreport.contactLabel")}</span>
-          <TextInput
-            value={contact}
-            maxLength={40}
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="octocat"
-            onChange={(event) => setContact(event.target.value)}
-          />
-        </label>
-        {needsPassword && (
-          <label className="bug-report-sheet__field">
-            <span className="bug-report-sheet__label">{t("bugreport.passwordLabel")}</span>
-            <TextInput
-              ref={passwordRef}
-              type="password"
-              value={password}
-              maxLength={BUG_REPORT_LIMITS.passwordChars}
-              autoComplete="off"
-              invalid={passwordWrong}
-              aria-describedby="bug-report-password-hint"
-              onChange={(event) => { setPassword(event.target.value); setPasswordWrong(false); }}
-            />
-          </label>
+      <div className="bug-report-sheet__about">
+        <Checkbox checked={withProfile} onChange={setWithProfile} label={t("bugreport.profile")} description={t("bugreport.profileHint")} />
+        {withProfile && (
+          <div className="bug-report-sheet__row" data-columns="2">
+            <div className="bug-report-sheet__field">
+              <span className="bug-report-sheet__label">{t("bugreport.roleLabel")}</span>
+              <Select
+                label={t("bugreport.roleLabel")}
+                value={role}
+                options={FEEDBACK_ROLES.map((value) => ({ value, label: t(`bugreport.role.${value}`) }))}
+                onChange={(value) => setRole(value as FeedbackRole)}
+              />
+            </div>
+            <div className="bug-report-sheet__field">
+              <span className="bug-report-sheet__label">{t("bugreport.experienceLabel")}</span>
+              <Select
+                label={t("bugreport.experienceLabel")}
+                value={experience}
+                options={FEEDBACK_EXPERIENCE.map((value) => ({ value, label: t(`bugreport.experience.${value}`) }))}
+                onChange={(value) => setExperience(value as FeedbackExperience)}
+              />
+            </div>
+          </div>
         )}
       </div>
-      {needsPassword && (
-        <p id="bug-report-password-hint" className={passwordWrong ? "bug-report-sheet__error" : "bug-report-sheet__hint"} role={passwordWrong ? "alert" : undefined}>
-          {t(passwordWrong ? "bugreport.passwordWrong"
-            : capture.passwordStorage === "session" ? "bugreport.passwordHintSession"
-              : capture.passwordStorage === "server" ? "bugreport.passwordHintServer" : "bugreport.passwordHint")}
-        </p>
-      )}
+      <label className="bug-report-sheet__field">
+        <span className="bug-report-sheet__label">{t("bugreport.contactLabel")}</span>
+        <TextInput
+          type="text"
+          value={contact}
+          maxLength={FEEDBACK_LIMITS.contactChars}
+          autoComplete="off"
+          spellCheck={false}
+          invalid={contact.trim() !== "" && reply === ""}
+          placeholder="name@example.com"
+          onChange={(event) => setContact(event.target.value)}
+        />
+      </label>
+      <p className="bug-report-sheet__hint">{t(known ? "bugreport.identityKnown" : "bugreport.identityDaily")}</p>
       <details className="bug-report-sheet__details">
         <summary>{t("bugreport.details")}</summary>
         <pre className="bug-report-sheet__json">{preview}</pre>
       </details>
+      {bridge.forget && (
+        <div className="bug-report-sheet__forget">
+          <Button size="sm" variant="quiet" busy={forgetting} onClick={() => void forget()}>{t("bugreport.forget")}</Button>
+          <span className="bug-report-sheet__hint">{t("bugreport.forgetHint")}</span>
+        </div>
+      )}
       {problem && Notice && (
         <Notice tone={problem === "rate" ? "warning" : "error"} role="alert">{t(`bugreport.${problem}`)}</Notice>
       )}

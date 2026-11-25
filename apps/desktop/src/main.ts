@@ -11,7 +11,6 @@ import {
   powerMonitor,
   powerSaveBlocker,
   protocol,
-  safeStorage,
   screen,
   session,
   shell,
@@ -146,7 +145,7 @@ const edition = desktopEdition(__POLYTH_DESKTOP_FLAVOR__);
 const workstation = edition === "workstation";
 /** A feed the build is pinned to whatever the chosen channel; null = the chosen channel. */
 const pinnedUpdates = pinnedUpdaterChannel(__POLYTH_DESKTOP_FLAVOR__, process.platform, process.getSystemVersion());
-/** Where nightly bug reports go; null on builds that send none (src/bugReport.ts). */
+/** Where feedback goes; null when an administrator turned it off (src/bugReport.ts). */
 const reportOrigin = bugReportOrigin({ version: app.getVersion(), edition, env: process.env });
 
 interface SavedWindowState {
@@ -1374,10 +1373,10 @@ const installApplicationMenu = (): void => {
       { type: "separator" }, { role: "togglefullscreen" },
     ] },
     { role: "windowMenu" },
-    // Nightly builds only: the report sheet belongs to the page, which owns
-    // ⌘⇧B / Ctrl+Shift+B through its remappable keymap (`reportBug`).
+    // The feedback sheet belongs to the page, which owns ⌘⇧B / Ctrl+Shift+B
+    // through its remappable keymap (`reportBug`).
     ...(reportOrigin ? [{ role: "help" as const, submenu: [
-      { label: "Report a Bug…", ...rendererShortcut("CommandOrControl+Shift+B"), click: () => sendCommand("report-bug") },
+      { label: "Send Feedback…", ...rendererShortcut("CommandOrControl+Shift+B"), click: () => sendCommand("report-bug") },
     ] }] : []),
   ]));
 };
@@ -1861,17 +1860,6 @@ const createDesktopBugReports = (desktopDir: string): BugReportClient => createB
   },
   locale: () => app.getLocale(),
   desktopSettings: bugReportDesktopSettings,
-  // The OS keychain seals the tester password; without one it lasts this run.
-  encrypt: (plain) => {
-    try {
-      if (!safeStorage.isEncryptionAvailable()) return null;
-      if (process.platform === "linux" && safeStorage.getSelectedStorageBackend() === "basic_text") return null;
-      return safeStorage.encryptString(plain).toString("base64");
-    } catch { return null; }
-  },
-  decrypt: (stored) => {
-    try { return safeStorage.decryptString(Buffer.from(stored, "base64")); } catch { return null; }
-  },
   fetch: (input, init) => net.fetch(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, init),
   log,
 });
@@ -1926,9 +1914,9 @@ const installIpc = (): void => {
     if (!window || !nativeWebViews) throw new Error("no browser pages here");
     nativeWebViews.place(window, id, rect);
   });
-  trustedHandle("desktop:report:state", () => bugReports?.state() ?? { available: false, needsPassword: true, queued: 0 });
+  trustedHandle("desktop:report:state", () => bugReports?.state() ?? { available: false, queued: 0 });
   trustedHandle("desktop:report:capture", async () => {
-    if (!bugReports?.state().available) throw new Error("Bug reports are off on this build");
+    if (!bugReports?.state().available) throw new Error("Feedback is off on this build");
     return bugReports.capture(await captureForBugReport());
   });
   // The sheet's marked-up screenshot: decoded here and re-encoded to the
@@ -1946,6 +1934,8 @@ const installIpc = (): void => {
   });
   trustedHandle("desktop:report:send", async (_event, draft: unknown) =>
     bugReports ? bugReports.send(draft) : { result: "unavailable" as const });
+  trustedHandle("desktop:report:forget", async () =>
+    bugReports ? bugReports.forget() : { result: "unavailable" as const });
   trustedHandle("desktop:servers:open", async (_event, target: unknown): Promise<DesktopServersResult<void>> => {
     const wanted = target as { kind?: unknown; url?: unknown; path?: unknown } | null;
     try {

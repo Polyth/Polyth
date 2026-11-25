@@ -1,8 +1,8 @@
-// Nightly bug reports: one `bug-report` capability (the palette command
+// Feedback: one `bug-report` capability (the palette command
 // `capability.bug-report`, which the `reportBug` hotkey ⌘⇧B / Ctrl+Shift+B and
-// the desktop Help menu run) and one dialog layer. It is available where the
-// desktop shell says reports are on (nightly builds of the standard edition)
-// or, in a browser, where this page's Polyth server does (a nightly server).
+// the desktop Help menu run) and one dialog layer. It is available on every
+// channel where the desktop shell or, in a browser, this page's Polyth server
+// says feedback is on; nothing is sent until the person presses Send.
 import "./styles.css";
 import { createElement, useSyncExternalStore } from "react";
 import { createApiTransport, defineWebPackage, type WebPackageHost } from "@polyth/web-sdk";
@@ -94,8 +94,7 @@ function ReportLayer({ host }: { host: WebPackageHost }) {
   });
 }
 
-/** The desktop shell when it reports; otherwise this page's server. A stable
- *  desktop window showing a nightly server reports through the server. */
+/** The desktop shell when it sends feedback; otherwise this page's server. */
 async function chooseBridge(): Promise<ReportBridge | null> {
   const desktop = reportBridge();
   if (desktop) {
@@ -120,9 +119,9 @@ export default defineWebPackage((host) => () => {
     host.capabilities.register({
       id: BUG_REPORT_CAPABILITY_ID,
       label: host.ui.locale.translate("bugreport.title"),
-      technicalLabel: "Bug report",
+      technicalLabel: "Feedback",
       plainDescription: host.ui.locale.translate("bugreport.description"),
-      keywords: ["bug", "report", "feedback", "nightly", "screenshot", "issue", "problem"],
+      keywords: ["feedback", "bug", "report", "idea", "suggestion", "screenshot", "issue", "problem"],
       standardTier: "technical",
       standardRank: 90,
       rail: false,

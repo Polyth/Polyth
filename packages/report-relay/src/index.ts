@@ -5,6 +5,8 @@ import {
 } from "@polyth/contracts/bug-report";
 
 import { githubFromDir, type GithubConfig } from "./config.ts";
+import { FeedbackIntake } from "./feedback.ts";
+import { FeedbackStore } from "./feedbackStore.ts";
 import {
   commentBody, fingerprintOf, issueBody, issueLabels, issueTitle, type FormatContext, type ReportGroup,
 } from "./format.ts";
@@ -17,7 +19,7 @@ import {
   authenticate as authenticateToken, DEFAULT_DAY_CAP, DEFAULT_GROUP, tokenSetFromDir,
   type ReportIdentity, type TokenRecord,
 } from "./tokens.ts";
-import type { RelayGitHub, RelayLogger } from "./types.ts";
+import type { RelayGitHub, RelayLogEvent, RelayLogger } from "./types.ts";
 
 export * from "./types.ts";
 export { GitHubClient } from "./github.ts";
@@ -27,6 +29,8 @@ const DAY = 86_400_000;
 const MINUTE = 60_000;
 const PASSWORD_WINDOW = 10 * MINUTE;
 const RETENTION_DAYS = 30;
+/** Feedback is kept longer than a bug report: ideas stay useful. */
+const FEEDBACK_RETENTION_DAYS = 90;
 const DEFAULT_PRUNE_INTERVAL = DAY;
 /** Rate-window keys kept at most; past it new keys wait for the sweep. */
 const MAX_WINDOWS = 50_000;
@@ -43,6 +47,8 @@ export interface ReportRelayLimits {
   passwordFailures: number;
   /** A token's daily cap when its `tokens.json` entry names none. */
   tokenDay: number;
+  /** Feedback stored per rolling day, the whole service (stage 1's only cap). */
+  feedbackDay: number;
 }
 
 export interface ReportRelayOptions {
@@ -63,6 +69,7 @@ export interface ReportRelayOptions {
   off?: boolean;
   limits?: Partial<ReportRelayLimits>;
   retentionDays?: number;
+  feedbackRetentionDays?: number;
   pruneIntervalMs?: number;
   pruneAtStart?: boolean;
   /** Test seam: group tokens without a `tokens.json` file. */
@@ -177,6 +184,9 @@ export class ReportRelay {
   private readonly retentionDays: number;
   private client: RelayGitHub | null = null;
   private clientConfig: GithubConfig | undefined;
+  /** Feedback intake and the team inbox; null without a data folder. */
+  readonly feedback: FeedbackIntake | null;
+  private readonly feedbackStore: FeedbackStore | null;
   private pruneTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(options: ReportRelayOptions = {}) {
@@ -188,6 +198,7 @@ export class ReportRelay {
       globalDay: positive(options.limits?.globalDay, 200),
       passwordFailures: positive(options.limits?.passwordFailures, 10),
       tokenDay: positive(options.limits?.tokenDay, DEFAULT_DAY_CAP),
+      feedbackDay: positive(options.limits?.feedbackDay, 2_000),
     };
     this.retentionDays = positive(options.retentionDays, RETENTION_DAYS);
     this.password = passwordFromDir(options.keysDir ?? "/keys");
@@ -201,6 +212,17 @@ export class ReportRelay {
     }));
     this.state = options.dataDir ? new ReportState(join(options.dataDir, "state.json"), this.now) : null;
     this.stats = options.dataDir ? new ReportStats(join(options.dataDir, "stats.json"), this.now) : null;
+    this.feedbackStore = options.dataDir ? new FeedbackStore(join(options.dataDir, "feedback.db")) : null;
+    this.feedback = this.feedbackStore
+      ? new FeedbackIntake({
+        store: this.feedbackStore,
+        now: this.now,
+        limits: { globalDay: this.limits.feedbackDay, tokenFailures: this.limits.passwordFailures },
+        retentionDays: positive(options.feedbackRetentionDays, FEEDBACK_RETENTION_DAYS),
+        inboxRecord: passwordFromDir(options.keysDir ?? "/keys", "inbox.scrypt"),
+        github: () => this.githubTarget(),
+      })
+      : null;
     this.releases = new ReleaseCache({
       repo: options.releasesRepo ?? "Polyth/Polyth",
       fetchFn: this.fetchFn,
@@ -220,14 +242,20 @@ export class ReportRelay {
   close(): void {
     if (this.pruneTimer) clearInterval(this.pruneTimer);
     this.pruneTimer = null;
+    try { this.feedbackStore?.close(); } catch { /* already closed */ }
+  }
+
+  /** The kill switch: every report and feedback answers `unavailable`. */
+  get off(): boolean {
+    return this.options.off === true;
   }
 
   health(): { ok: true; github: boolean } {
     return { ok: true, github: this.githubTarget() !== null };
   }
 
-  logRequest(route: "report" | "health" | "not-found", result: BugReportResult["result"] | "ok" | "not-found", status: number, latencyMs: number): void {
-    this.logger({ route, result, status, latencyMs: Math.min(Math.max(0, latencyMs), 60_000) });
+  logRequest(route: "report" | "health" | "not-found" | "feedback" | "inbox", result: string, status: number, latencyMs: number): void {
+    this.logger({ route, result, status, latencyMs: Math.min(Math.max(0, latencyMs), 60_000) } as RelayLogEvent);
   }
 
   /** Retention: prune attachments and close stale issues. Never throws; the
@@ -242,6 +270,7 @@ export class ReportRelay {
     }
     try { this.state?.prune(this.now()); } catch { /* best effort */ }
     await this.publishStats(target);
+    try { this.feedback?.prune(); } catch { /* best effort */ }
     return { closed };
   }
 

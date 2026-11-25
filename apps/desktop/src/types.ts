@@ -5,6 +5,7 @@ import type {
   BugReportSettingValue,
   BugReportWeb,
 } from "@polyth/contracts/bug-report";
+import type { FeedbackKind, FeedbackProfile } from "@polyth/contracts/feedback";
 
 export type DesktopControlPosition = "left" | "right";
 export type DesktopControlTheme = "system" | "dark" | "light";
@@ -151,13 +152,11 @@ export interface DesktopTitleBarAppearance {
 /** Native menu commands the renderer carries out with its own handlers. */
 export type DesktopCommand = "open-settings" | "new-session" | "search-sessions" | "command-palette" | "report-bug";
 
-/** Nightly bug reports (src/bugReport.ts). */
+/** Feedback (src/bugReport.ts). */
 export interface DesktopBugReportState {
-  /** False on stable and workstation builds: no hotkey, no menu item. */
+  /** False when an administrator turned feedback off (`POLYTH_BUG_REPORT_ORIGIN=off`). */
   available: boolean;
-  /** No tester password is held yet (or the relay stopped taking it). */
-  needsPassword: boolean;
-  /** Reports waiting for the relay. */
+  /** Feedback waiting for the intake. */
   queued: number;
 }
 
@@ -166,51 +165,63 @@ export interface DesktopBugReportCapture {
   captureId: string;
   /** This window only, as the person will see it in the preview. */
   screenshot: { dataUrl: string; width: number; height: number; bytes: number } | null;
-  /** What the desktop adds to every report, shown before sending. */
-  base: { app: BugReportApp; install: string; settings: Record<string, BugReportSettingValue> };
-  needsPassword: boolean;
-  /** Where an accepted password is kept: the OS keychain, or only this run
-   *  (Linux without a keyring). Absent from older shells. */
-  passwordStorage?: "keychain" | "session";
+  /** What the desktop adds to every feedback, shown before sending. */
+  base: {
+    app: BugReportApp;
+    settings: Record<string, BugReportSettingValue>;
+    /** The pseudonym that changes every day (anonymous feedback). */
+    installDaily: string;
+    /** The pseudonym the person can reset: sent only with a profile or contact. */
+    installPerson: string;
+    /** The profile the person saved with an earlier feedback, to prefill. */
+    savedProfile: FeedbackProfile | null;
+  };
 }
 
-/** The renderer's part of a report. The desktop adds build, install id and
- *  `desktop.*` settings itself and validates the whole report. */
+/** The renderer's part of a feedback. The desktop adds build, pseudonym and
+ *  `desktop.*` settings itself and validates the whole feedback. A part the
+ *  person left out is null: it is sent exactly when it is present. */
 export interface DesktopBugReportDraft {
+  kind: FeedbackKind;
+  text: string;
+  /** "" for none. */
+  contact: string;
   /** null sends no screenshot. */
   captureId: string | null;
-  text: string;
-  contact: string;
-  web: BugReportWeb;
-  /** `ui.*` keys only; anything else is dropped. */
-  settings: Record<string, BugReportSettingValue>;
-  packages: BugReportPackage[];
-  errors: BugReportError[];
-  /** The tester password, typed once; kept (OS-encrypted) after the relay takes it. */
-  password?: string;
+  /** null sends no technical details. */
+  technical: {
+    web: BugReportWeb;
+    /** `ui.*` keys only; anything else is dropped. */
+    settings: Record<string, BugReportSettingValue>;
+    packages: BugReportPackage[];
+    errors: BugReportError[];
+  } | null;
+  /** null sends no profile. */
+  profile: FeedbackProfile | null;
 }
 
 export type DesktopBugReportOutcome =
-  | { result: "created" | "added"; issue: number }
-  /** Kept on this computer; it goes when the relay can take it. */
+  | { result: "received"; ref: number }
+  /** Kept on this computer; it goes when the intake can take it. */
   | { result: "queued" }
-  /** Ask for the tester password (again). */
-  | { result: "password" }
-  /** This build is not a published nightly. */
-  | { result: "version" }
+  /** The service-wide daily budget is used up: try later. */
+  | { result: "rate" }
   | { result: "invalid" }
-  /** Reports are off on this build. */
+  /** Feedback is off on this build. */
   | { result: "unavailable" };
 
 export interface PolythDesktopBugReportApi {
   state(): Promise<DesktopBugReportState>;
-  /** Screenshot this window now; call before showing the report sheet. */
+  /** Screenshot this window now; call before showing the sheet. */
   capture(): Promise<DesktopBugReportCapture>;
   send(draft: DesktopBugReportDraft): Promise<DesktopBugReportOutcome>;
   /** The screenshot with the person's marks drawn in (a JPEG) replaces the
    *  capture's; the shell re-encodes it to the wire's limits. Null when the
    *  capture is gone or the bytes are not an image. */
   annotate(captureId: string, jpeg: Uint8Array): Promise<DesktopBugReportCapture["screenshot"]>;
+  /** Erases what this computer sent under its resettable pseudonym and starts
+   *  a new one. Absent from older shells. */
+  forget(): Promise<{ result: "forgotten"; count: number } | { result: "unavailable" }>;
 }
 
 export interface DesktopSetupClaim {

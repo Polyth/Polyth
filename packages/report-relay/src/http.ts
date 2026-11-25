@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
 import { BUG_REPORT_LIMITS, bugReportStatus } from "@polyth/contracts/bug-report";
+import { FEEDBACK_LIMITS, feedbackStatus } from "@polyth/contracts/feedback";
 
 import type { ReportRelay } from "./index.ts";
 
@@ -61,31 +62,28 @@ async function route(relay: ReportRelay, options: ReportRelayHttpOptions, reques
   const startedAt = Date.now();
   const elapsed = () => Date.now() - startedAt;
   try {
-    if (request.method === "GET" && request.url === "/v1/health") {
+    const url = new URL(request.url ?? "/", "http://relay.invalid");
+    const path = url.pathname;
+    if (request.method === "GET" && path === "/v1/health") {
       respond(response, 200, relay.health());
       relay.logRequest("health", "ok", 200, elapsed());
       return;
     }
-    if (request.method !== "POST" || request.url !== "/v1/report") {
+    if (path === "/v1/feedback" || path === "/v1/feedback/forget") {
+      await routeFeedback(relay, request, response, path, elapsed);
+      return;
+    }
+    if (path === "/v1/inbox" || path.startsWith("/v1/inbox/")) {
+      await routeInbox(relay, options, request, response, url, elapsed);
+      return;
+    }
+    if (request.method !== "POST" || path !== "/v1/report") {
       respond(response, 404, { error: "not-found" });
       relay.logRequest("not-found", "not-found", 404, elapsed());
       return;
     }
-    if (!JSON_TYPE.test(request.headers["content-type"] ?? "")) {
-      respond(response, 400, { result: "invalid" });
-      relay.logRequest("report", "invalid", 400, elapsed());
-      return;
-    }
-    const declared = request.headers["content-length"];
-    if (declared && (!/^\d+$/.test(declared) || Number(declared) > BUG_REPORT_LIMITS.bodyBytes)) {
-      request.resume();
-      respond(response, 400, { result: "invalid" });
-      relay.logRequest("report", "invalid", 400, elapsed());
-      return;
-    }
-    const body = await readBody(request, BUG_REPORT_LIMITS.bodyBytes);
+    const body = await readJsonBody(request, response, BUG_REPORT_LIMITS.bodyBytes);
     if (body === null) {
-      respond(response, 400, { result: "invalid" });
       relay.logRequest("report", "invalid", 400, elapsed());
       return;
     }
@@ -98,6 +96,123 @@ async function route(relay: ReportRelay, options: ReportRelayHttpOptions, reques
     respond(response, 503, { result: "unavailable" });
     relay.logRequest("report", "unavailable", 503, elapsed());
   }
+}
+
+/** The JSON body of a POST, or null after answering `400 invalid` itself:
+ *  wrong content type, a declared or streamed size over the limit. */
+async function readJsonBody(request: IncomingMessage, response: ServerResponse, limit: number): Promise<string | null> {
+  if (!JSON_TYPE.test(request.headers["content-type"] ?? "")) {
+    respond(response, 400, { result: "invalid" });
+    return null;
+  }
+  const declared = request.headers["content-length"];
+  if (declared && (!/^\d+$/.test(declared) || Number(declared) > limit)) {
+    request.resume();
+    respond(response, 400, { result: "invalid" });
+    return null;
+  }
+  const body = await readBody(request, limit);
+  if (body === null) respond(response, 400, { result: "invalid" });
+  return body;
+}
+
+/** `POST /v1/feedback` takes feedback from anyone (no password, no account);
+ *  `POST /v1/feedback/forget` erases what one install pseudonym sent. */
+async function routeFeedback(
+  relay: ReportRelay, request: IncomingMessage, response: ServerResponse, path: string, elapsed: () => number,
+): Promise<void> {
+  if (request.method !== "POST") {
+    respond(response, 404, { error: "not-found" });
+    relay.logRequest("not-found", "not-found", 404, elapsed());
+    return;
+  }
+  const intake = relay.feedback;
+  if (!intake) {
+    respond(response, 503, { result: "unavailable" });
+    relay.logRequest("feedback", "unavailable", 503, elapsed());
+    return;
+  }
+  const body = await readJsonBody(request, response, FEEDBACK_LIMITS.bodyBytes);
+  if (body === null) {
+    relay.logRequest("feedback", "invalid", 400, elapsed());
+    return;
+  }
+  if (path === "/v1/feedback/forget") {
+    const outcome = intake.forget(body);
+    const status = outcome.result === "forgotten" ? 200 : outcome.result === "invalid" ? 400 : 503;
+    respond(response, status, outcome);
+    relay.logRequest("feedback", outcome.result, status, elapsed());
+    return;
+  }
+  const outcome = relay.off ? { result: "unavailable" as const } : intake.receive(body);
+  const status = feedbackStatus(outcome.result);
+  respond(response, status, outcome);
+  relay.logRequest("feedback", outcome.result, status, elapsed());
+}
+
+const INBOX_REF = /^\/v1\/inbox\/(\d{1,9})(\/screenshot|\/github)?$/;
+
+/** The team's read side: every route needs the inbox token. The public proxy
+ *  does not forward these paths; the team server reaches the relay on its
+ *  private address. */
+async function routeInbox(
+  relay: ReportRelay, options: ReportRelayHttpOptions, request: IncomingMessage, response: ServerResponse,
+  url: URL, elapsed: () => number,
+): Promise<void> {
+  const finish = (status: number, body: unknown, result: string) => {
+    respond(response, status, body);
+    relay.logRequest("inbox", result, status, elapsed());
+  };
+  const intake = relay.feedback;
+  if (!intake) return finish(503, { result: "unavailable" }, "unavailable");
+  const auth = intake.authorize(request.headers.authorization, sourceOf(request, options.trustedProxy));
+  if (auth === "denied") { request.resume(); return finish(401, { result: "token" }, "token"); }
+  if (auth === "rate") { request.resume(); return finish(429, { result: "rate" }, "rate"); }
+  if (auth === "unavailable") { request.resume(); return finish(503, { result: "unavailable" }, "unavailable"); }
+
+  const path = url.pathname;
+  if (request.method === "GET" && path === "/v1/inbox") {
+    const page = intake.list(url.searchParams);
+    return page ? finish(200, page, "ok") : finish(400, { result: "invalid" }, "invalid");
+  }
+  if (request.method === "GET" && path === "/v1/inbox/summary") {
+    const summary = intake.summary(url.searchParams);
+    return summary ? finish(200, summary, "ok") : finish(400, { result: "invalid" }, "invalid");
+  }
+  const match = INBOX_REF.exec(path);
+  if (!match) return finish(404, { error: "not-found" }, "not-found");
+  const ref = Number(match[1]);
+  const tail = match[2];
+
+  if (request.method === "GET" && tail === undefined) {
+    const item = intake.get(ref);
+    return item ? finish(200, item, "ok") : finish(404, { error: "not-found" }, "not-found");
+  }
+  if (request.method === "GET" && tail === "/screenshot") {
+    const image = intake.screenshot(ref);
+    if (!image) return finish(404, { error: "not-found" }, "not-found");
+    response.statusCode = 200;
+    response.setHeader("cache-control", "no-store");
+    response.setHeader("content-type", "image/jpeg");
+    response.setHeader("content-length", image.length);
+    response.end(image);
+    relay.logRequest("inbox", "ok", 200, elapsed());
+    return;
+  }
+  if (request.method === "POST" && tail === "/github") {
+    request.resume();
+    const filed = await intake.fileToGithub(ref);
+    if (filed.ok) return finish(200, { result: "filed", issue: filed.issue }, "ok");
+    return filed.reason === "not-found" ? finish(404, { error: "not-found" }, "not-found") : finish(503, { result: "unavailable" }, "unavailable");
+  }
+  if (request.method === "POST" && tail === undefined) {
+    const body = await readJsonBody(request, response, 8_192);
+    if (body === null) { relay.logRequest("inbox", "invalid", 400, elapsed()); return; }
+    const updated = intake.update(ref, body);
+    if (updated.ok) return finish(200, updated.item, "ok");
+    return updated.reason === "not-found" ? finish(404, { error: "not-found" }, "not-found") : finish(400, { result: "invalid" }, "invalid");
+  }
+  return finish(404, { error: "not-found" }, "not-found");
 }
 
 /** Reads the body, keeping at most `limit` bytes. A body over the limit is

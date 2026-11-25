@@ -109,7 +109,7 @@ test("state is a JSON file with the report and fingerprint maps", async (t) => {
   assert.equal(state.reports["aaaabbbb-1111-4222-8333-444444444444"]!.issue, 100);
   assert.equal(state.reports["aaaabbbb-1111-4222-8333-444444444444"]!.result, "created");
   assert.equal(Object.values(state.fingerprints)[0]!.issue, 100);
-  assert.deepEqual(readdirSync(base.data), ["state.json", "stats.json"], "the temporary files were renamed into place");
+  assert.deepEqual(readdirSync(base.data).filter((name) => !name.startsWith("feedback.db")), ["state.json", "stats.json"], "the temporary files were renamed into place");
 });
 
 test("a corrupt state file is set aside and the relay starts empty", async (t) => {

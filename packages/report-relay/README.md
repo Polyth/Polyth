@@ -1,6 +1,8 @@
 # Polyth report relay
 
-Nightly bug-report intake for Polyth. A tester's nightly desktop app, or the
+Feedback intake and legacy bug-report intake for Polyth. See [Feedback intake](#feedback-intake) for the current path; the rest of this page describes the legacy bug-report path (`POST /v1/report`), still answered for older nightlies.
+
+Legacy bug-report intake: a tester's nightly desktop app, or the
 nightly Polyth server behind a page opened in a browser (`app.client: "browser"`,
 labelled `client:browser`; its version is the server's), sends one report to
 `POST /v1/report`; the relay checks the tester's group token (or the legacy
@@ -217,6 +219,38 @@ helpers place the secrets from stdin only, never from arguments, and print only
 to the host (the Cloudflare record must be DNS-only) and then keeps a twice-daily
 renewal job. The install and verification scripts are kept with the deployment in
 `/opt/polyth-reports/deploy-kit`, not in this public repository.
+
+## Feedback intake
+
+The app and the Polyth server send feedback to `POST /v1/feedback`
+(`application/json`, at most `FEEDBACK_LIMITS.bodyBytes`, no password or login: the
+person has no account). The body is the exact `FeedbackPayload` of
+`@polyth/contracts/feedback`: `kind` (`bug`, `idea`, `pain`, `praise`), `text`, `basics`
+(always) and the optional `technical`, `profile`, `contact` and `screenshot`, each present
+exactly when its `consent.*` flag says so. A repeated `feedbackId` answers the stored
+result. Answers: `received` 200 with the `ref` shown to the person, `invalid` 400, `rate`
+429, `unavailable` 503.
+
+- **Store.** `feedback.db` (SQLite, `node:sqlite`) in the data folder, one row per
+  feedback with its screenshot as a blob (`src/feedbackStore.ts`). Nothing is public. It is
+  kept `feedbackRetentionDays` (90) and pruned with the legacy data; rows with status `keep` stay.
+- **Limits (stage 1).** Only a service-wide daily budget (`feedbackDay`, 2 000 stored per
+  rolling day); no cap per source address or install, because the team wants to hear every
+  user. Stage 2 (per-install quotas, proof of work, verified contact) is not built.
+- **Forget.** `POST /v1/feedback/forget` with `{version: 1, install}` deletes everything
+  stored under that pseudonym and answers `forgotten` with the count.
+- **Inbox.** The team reads with an inbox token (the scrypt record `inbox.scrypt` in the
+  keys folder; written like the tester password with `hash-password`; more than the
+  failure limit per address in 10 minutes answers `429`): `GET /v1/inbox` (filter by `kind`, `status`, `role`, `days`;
+  paged), `GET /v1/inbox/summary` (counts by kind, status and role, for
+  the PM), `GET /v1/inbox/<ref>`, `GET /v1/inbox/<ref>/screenshot`, `POST /v1/inbox/<ref>`
+  (status `new|seen|planned|done|dropped|keep` and a team note) and
+  `POST /v1/inbox/<ref>/github` (files that feedback as an issue in the private reports
+  repository; the text is quoted and `@`/`#` neutralised as for bug reports). The proxy
+  must forward `/v1/feedback`, `/v1/feedback/forget` and `/v1/inbox/*` in addition to
+  `/v1/report` and `/v1/health`; the inbox should be reachable only by the team.
+- **Privacy.** The intake logs `{route, result, status, latencyMs}` only: never text,
+  contact, profile, screenshot, pseudonym or source address.
 
 ## Attachments and retention
 

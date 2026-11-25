@@ -48,11 +48,11 @@ export function neutralize(text: string): string {
 
 /** Text inside a fenced block: neutralized, and no run of backticks long
  *  enough to close the fence and turn the rest into live Markdown. */
-const fenced = (text: string): string => neutralize(text).replace(/`{3,}/g, (run) => run.split("").join(ZWJ));
+export const fenced = (text: string): string => neutralize(text).replace(/`{3,}/g, (run) => run.split("").join(ZWJ));
 
 const normalize = (text: string): string => text.toLowerCase().replace(/\s+/g, " ").trim().slice(0, TEXT_SNIPPET);
 
-const quoted = (text: string): string => neutralize(text).split("\n").map((line) => `> ${line}`).join("\n");
+export const quoted = (text: string): string => neutralize(text).split("\n").map((line) => `> ${line}`).join("\n");
 
 /** 16 hex chars of sha256 over a stable fingerprint basis. Errors dedup on the
  *  first notice's machine-readable lines; without errors only the same install
@@ -96,11 +96,11 @@ export function issueLabels(report: BugReportPayload, group: ReportGroup): strin
   return labels;
 }
 
-const fileUrl = (context: FormatContext, path: string): string =>
+export const fileUrl = (context: Pick<FormatContext, "repo" | "branch">, path: string): string =>
   `https://github.com/${context.repo}/blob/${context.branch}/${path}?raw=true`;
 
 /** A table cell: backslashes first, so a trailing `\` cannot eat the `|` escape. */
-const cell = (value: string): string =>
+export const cell = (value: string): string =>
   neutralize(value).replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\r?\n|\r/g, " ");
 
 /** `qa-eu · QA EU`, or just the id when the label adds nothing. */

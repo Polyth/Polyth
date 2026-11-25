@@ -1,9 +1,10 @@
-// Nightly bug reports from a page opened in a browser. The desktop shell
-// captures and sends its own window's reports; a browser has no shell, so
-// this server sends them instead (src/sender.ts): `GET /api/bug-report/state`
-// says whether it reports and what it adds, `POST /api/bug-report/send` takes
-// the sheet's draft with the screenshot the page captured. Paired devices
-// reach the routes only with full access (default-deny).
+// Feedback from a page opened in a browser. The desktop shell captures and
+// sends its own window's feedback; a browser has no shell, so this server sends
+// it instead (src/sender.ts): `GET /api/bug-report/state` says whether it sends
+// and what it adds, `POST /api/bug-report/send` takes the sheet's draft with the
+// screenshot the page captured, `POST /api/bug-report/forget` erases what this
+// server sent under its resettable pseudonym. Paired devices reach the routes
+// only with full access (default-deny).
 import { arch, platform } from "node:os";
 import type { RouteHandler } from "@polyth/contracts";
 import { isWorkstationEdition } from "@polyth/contracts/edition";
@@ -17,7 +18,7 @@ export function bugReportRoutes(reporter: () => ServerReporter | null): RouteHan
   return async ({ path, method, json, body }) => {
     if (path === "/api/bug-report/state" && method === "GET") {
       const current = reporter();
-      json(200, current?.state() ?? { available: false, needsPassword: false, queued: 0, base: null });
+      json(200, current?.state() ?? { available: false, queued: 0, base: null });
       return true;
     }
     if (path === "/api/bug-report/send" && method === "POST") {
@@ -35,6 +36,11 @@ export function bugReportRoutes(reporter: () => ServerReporter | null): RouteHan
       }
       // The outcome is the answer; the sheet reads `result`, not the status.
       json(200, await current.send(draft));
+      return true;
+    }
+    if (path === "/api/bug-report/forget" && method === "POST") {
+      const current = reporter();
+      json(200, current ? await current.forget() : { result: "unavailable" });
       return true;
     }
     return false;

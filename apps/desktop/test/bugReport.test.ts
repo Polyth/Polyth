@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { parseBugReport } from "@polyth/contracts/bug-report";
+import { parseFeedback } from "@polyth/contracts/feedback";
 
 import {
   bugReportOrigin,
@@ -16,20 +16,18 @@ import {
 } from "../src/bugReport.ts";
 
 const NIGHTLY = "1.2.357-nightly";
+const NOW = Date.parse("2026-11-25T12:00:00.000Z");
 // A JPEG-looking buffer (FF D8 FF E0 …).
 const jpegOf = (bytes: number) => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(Math.max(0, bytes - 4), 1)]);
 
-test("only nightly builds report, to an https or loopback relay", () => {
+test("every build sends feedback to an https or loopback intake unless it is switched off", () => {
   const env = {};
-  assert.equal(bugReportOrigin({ version: NIGHTLY, edition: "standard", env }), "https://reports.polyth.app");
-  assert.equal(bugReportOrigin({ version: "1.2.357", edition: "standard", env }), null);
-  assert.equal(bugReportOrigin({ version: "1.2.357", edition: "standard", env: { POLYTH_BUG_REPORT: "1" } }), "https://reports.polyth.app");
-  // A nightly workstation build reports; a stable one never does, not even with the dev switch.
-  assert.equal(bugReportOrigin({ version: NIGHTLY, edition: "workstation", env }), "https://reports.polyth.app");
-  assert.equal(bugReportOrigin({ version: NIGHTLY, edition: "workstation", env: { POLYTH_BUG_REPORT_ORIGIN: "off" } }), null);
-  assert.equal(bugReportOrigin({ version: "1.2.357", edition: "workstation", env }), null);
-  assert.equal(bugReportOrigin({ version: "1.2.357", edition: "workstation", env: { POLYTH_BUG_REPORT: "1" } }), null);
-  assert.equal(bugReportOrigin({ version: NIGHTLY, edition: "standard", env: { POLYTH_BUG_REPORT_ORIGIN: "off" } }), null);
+  for (const edition of ["standard", "workstation"] as const) {
+    for (const version of [NIGHTLY, "1.2.357"]) {
+      assert.equal(bugReportOrigin({ version, edition, env }), "https://reports.polyth.app", `${edition} ${version}`);
+      assert.equal(bugReportOrigin({ version, edition, env: { POLYTH_BUG_REPORT_ORIGIN: "off" } }), null, "an administrator's off switch");
+    }
+  }
   assert.equal(bugReportOrigin({ version: NIGHTLY, edition: "standard", env: { POLYTH_BUG_REPORT_ORIGIN: "http://reports.example" } }), null);
   assert.equal(bugReportOrigin({ version: NIGHTLY, edition: "standard", env: { POLYTH_BUG_REPORT_ORIGIN: "https://u:p@reports.example" } }), null);
   assert.equal(bugReportOrigin({ version: NIGHTLY, edition: "standard", env: { POLYTH_BUG_REPORT_ORIGIN: "http://127.0.0.1:8788/" } }), "http://127.0.0.1:8788");
@@ -84,14 +82,14 @@ test("screenshots shrink to the wire's edge and re-encode until they fit", () =>
   assert.equal(encodeScreenshot(new FakeImage({ width: 0, height: 0 }, () => 10)), null);
 });
 
-interface Call { url: string; authorization: string; body: unknown }
+interface Call { url: string; headers: Headers; body: unknown }
 
 function harness(t: test.TestContext, overrides: Partial<BugReportClientOptions> = {}) {
   const dir = mkdtempSync(join(tmpdir(), "polyth-bug-report-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const calls: Call[] = [];
   const answers: Array<() => Response | Promise<Response>> = [];
-  let clock = Date.parse("2026-11-19T12:00:00.000Z");
+  let clock = NOW;
   const options: BugReportClientOptions = {
     dir,
     origin: "https://reports.example",
@@ -101,11 +99,8 @@ function harness(t: test.TestContext, overrides: Partial<BugReportClientOptions>
     },
     locale: () => "uk",
     desktopSettings: () => ({ "desktop.updateChannel": "nightly", "desktop.closeToTray": true }),
-    encrypt: (plain) => `sealed:${Buffer.from(plain).toString("base64")}`,
-    decrypt: (stored) => stored.startsWith("sealed:") ? Buffer.from(stored.slice(7), "base64").toString() : null,
     fetch: (async (input: string | URL | Request, init?: RequestInit) => {
-      const headers = new Headers(init?.headers);
-      calls.push({ url: String(input), authorization: headers.get("authorization") ?? "", body: JSON.parse(String(init?.body)) });
+      calls.push({ url: String(input), headers: new Headers(init?.headers), body: JSON.parse(String(init?.body)) });
       const next = answers.shift();
       if (!next) throw new TypeError("fetch failed");
       return next();
@@ -125,126 +120,134 @@ function harness(t: test.TestContext, overrides: Partial<BugReportClientOptions>
 }
 
 const draft = (overrides: Record<string, unknown> = {}) => ({
-  captureId: null,
+  kind: "bug",
   text: "  The composer jumps when I paste.  ",
-  contact: "@octo-cat",
-  web: { build: "abc123", serverVersion: NIGHTLY, view: "chat", viewport: { width: 1440, height: 900, scale: 2 } },
-  settings: { "ui.theme": "midnight", "desktop.updateChannel": "stable", "secret.token": "x" },
-  packages: [{ id: "voice-mode", version: "0.3.0" }],
-  errors: [],
+  contact: "",
+  captureId: null,
+  technical: {
+    web: { build: "abc123", serverVersion: NIGHTLY, view: "chat", viewport: { width: 1440, height: 900, scale: 2 } },
+    settings: { "ui.theme": "midnight", "desktop.updateChannel": "stable", "secret.token": "x" },
+    packages: [{ id: "voice-mode", version: "0.3.0" }],
+    errors: [],
+  },
+  profile: null,
   ...overrides,
 });
 
-test("the first report asks for the password, then the relay's yes keeps it sealed", async (t) => {
+test("feedback needs no password and goes as exactly the wire shape", async (t) => {
   const h = harness(t);
-  assert.deepEqual(h.client.state(), { available: true, needsPassword: true, queued: 0 });
-  assert.deepEqual(await h.client.send(draft()), { result: "password" });
-  assert.equal(h.calls.length, 0, "nothing goes without a password");
-
-  h.reply(200, { result: "created", issue: 7 });
-  assert.deepEqual(await h.client.send(draft({ password: " hunter2 " })), { result: "created", issue: 7 });
+  assert.deepEqual(h.client.state(), { available: true, queued: 0 });
+  h.reply(200, { result: "received", ref: 7 });
+  assert.deepEqual(await h.client.send(draft()), { result: "received", ref: 7 });
   const [call] = h.calls;
-  assert.equal(call!.url, "https://reports.example/v1/report");
-  assert.equal(call!.authorization, "Bearer hunter2");
-  const sent = parseBugReport(call!.body, Date.parse("2026-11-19T12:00:00.000Z"));
+  assert.equal(call!.url, "https://reports.example/v1/feedback");
+  assert.equal(call!.headers.get("authorization"), null, "no password, no account");
+  const sent = parseFeedback(call!.body, NOW);
   assert.ok(sent, "the body is exactly the wire shape");
   assert.equal(sent.text, "The composer jumps when I paste.");
-  assert.equal(sent.contact, "octo-cat");
-  assert.equal(sent.app.channel, "nightly");
+  assert.equal(sent.kind, "bug");
   assert.equal(sent.screenshot, null);
+  assert.deepEqual(sent.consent, { technical: true, screenshot: false, profile: false, contact: false });
+  assert.deepEqual(sent.basics, { version: NIGHTLY, channel: "nightly", edition: "standard", locale: "uk" });
   // Renderer settings are ui.* only; desktop.* comes from the desktop.
-  assert.deepEqual(sent.settings, { "ui.theme": "midnight", "desktop.updateChannel": "nightly", "desktop.closeToTray": true });
-  assert.ok(!JSON.stringify(call!.body).includes("hunter2"), "the password is never in the body");
+  assert.deepEqual(sent.technical?.settings, { "ui.theme": "midnight", "desktop.updateChannel": "nightly", "desktop.closeToTray": true });
+  assert.equal(sent.install, h.client.capture(null).base.installDaily, "anonymous feedback carries the daily pseudonym");
+});
 
+test("an idea can go with only its words: no technical block, no screenshot", async (t) => {
+  const h = harness(t);
+  h.reply(200, { result: "received", ref: 1 });
+  await h.client.send(draft({ kind: "idea", technical: null }));
+  const sent = parseFeedback(h.calls[0]!.body, NOW)!;
+  assert.equal(sent.technical, null);
+  assert.deepEqual(sent.consent, { technical: false, screenshot: false, profile: false, contact: false });
+  assert.ok(!JSON.stringify(h.calls[0]!.body).includes("darwin"), "no machine facts without the technical consent");
+});
+
+test("a profile or contact makes the pseudonym the stable one the person can reset; the profile is kept, the contact is not", async (t) => {
+  const h = harness(t);
+  const person = h.client.capture(null).base.installPerson;
+  assert.equal(h.client.capture(null).base.savedProfile, null);
+  h.reply(200, { result: "received", ref: 1 });
+  await h.client.send(draft({ kind: "idea", technical: null, profile: { role: "accountant", experience: "sometimes" }, contact: "ann@example.com" }));
+  const sent = parseFeedback(h.calls[0]!.body, NOW)!;
+  assert.equal(sent.install, person);
+  assert.equal(sent.contact, "ann@example.com");
+  assert.deepEqual(h.client.capture(null).base.savedProfile, { role: "accountant", experience: "sometimes" }, "the next sheet opens with it");
   const stored = readFileSync(join(h.dir, "bug-report.json"), "utf8");
-  assert.ok(!stored.includes("hunter2"), "only the sealed password is written");
-  assert.match(stored, /sealed:/);
-
-  // A new run decrypts it: no prompt.
+  assert.ok(!stored.includes("ann@example.com"), "the contact is typed each time");
+  // A new run still has the pseudonym and the profile.
   const again = h.make();
   t.after(() => again.dispose());
-  assert.equal(again.state().needsPassword, false);
-  h.advance(2 * 60_000);
-  h.reply(200, { result: "added", issue: 7 });
-  assert.deepEqual(await again.send(draft()), { result: "added", issue: 7 });
-  assert.equal(h.calls[1]!.authorization, "Bearer hunter2");
+  assert.equal(again.capture(null).base.installPerson, person);
 });
 
-test("a password the relay refuses is forgotten; a typed wrong one is never kept", async (t) => {
+test("forget erases what this computer sent and starts a new pseudonym", async (t) => {
   const h = harness(t);
-  h.reply(401, { result: "password" });
-  assert.deepEqual(await h.client.send(draft({ password: "wrong" })), { result: "password" });
-  assert.equal(h.client.state().needsPassword, true);
-  assert.ok(!readdirSync(h.dir).includes("bug-report.json") || !readFileSync(join(h.dir, "bug-report.json"), "utf8").includes("sealed:"));
+  const old = h.client.capture(null).base.installPerson;
+  h.reply(200, { result: "received", ref: 1 });
+  await h.client.send(draft({ kind: "idea", technical: null, profile: { role: "lawyer", experience: "new" } }));
+  assert.deepEqual(await h.client.forget(), { result: "unavailable" }, "an unreachable intake changes nothing");
+  assert.equal(h.client.capture(null).base.installPerson, old);
 
-  h.reply(200, { result: "created", issue: 1 });
-  await h.client.send(draft({ password: "right" }));
-  assert.equal(h.client.state().needsPassword, false);
-  h.advance(2 * 60_000);
-  h.reply(401, { result: "password" });
-  assert.deepEqual(await h.client.send(draft()), { result: "password" });
-  assert.equal(h.client.state().needsPassword, true, "a rotated password asks again");
-  assert.ok(!readFileSync(join(h.dir, "bug-report.json"), "utf8").includes("sealed:"));
+  h.reply(200, { result: "forgotten", count: 1 });
+  assert.deepEqual(await h.client.forget(), { result: "forgotten", count: 1 });
+  assert.equal(h.calls.at(-1)!.url, "https://reports.example/v1/feedback/forget");
+  assert.deepEqual(h.calls.at(-1)!.body, { version: 1, install: old });
+  const after = h.client.capture(null).base;
+  assert.notEqual(after.installPerson, old);
+  assert.equal(after.savedProfile, null);
 });
 
-test("without OS encryption the password lasts only this run", async (t) => {
-  const h = harness(t, { encrypt: () => null });
-  assert.equal(h.client.capture(null).passwordStorage, "session", "the sheet can say so");
-  h.reply(200, { result: "created", issue: 2 });
-  await h.client.send(draft({ password: "hunter2" }));
-  assert.equal(h.client.state().needsPassword, false);
-  assert.ok(!readFileSync(join(h.dir, "bug-report.json"), "utf8").includes("hunter2"));
-  const next = h.make();
-  t.after(() => next.dispose());
-  assert.equal(next.state().needsPassword, true);
-});
-
-test("this computer does not cap how many reports it sends", async (t) => {
+test("this computer does not cap how much feedback it sends", async (t) => {
   const h = harness(t);
   for (let index = 0; index < 15; index += 1) {
-    h.reply(200, { result: "created", issue: index + 1 });
-    assert.equal((await h.client.send(draft({ password: "p" }))).result, "created", `report ${index}, same minute`);
+    h.reply(200, { result: "received", ref: index + 1 });
+    assert.equal((await h.client.send(draft({ text: `Remark ${index}` }))).result, "received", `feedback ${index}, same minute`);
   }
   assert.equal(h.calls.length, 15);
-  assert.ok(!readFileSync(join(h.dir, "bug-report.json"), "utf8").includes("sent"), "no send log is kept");
+  // The store is only written when it has something to keep; either way it holds no send log.
+  const store = existsSync(join(h.dir, "bug-report.json")) ? readFileSync(join(h.dir, "bug-report.json"), "utf8") : "";
+  assert.ok(!store.includes("sent"), "no send log is kept");
 });
 
-test("an unreachable or busy relay keeps the report and sends it later", async (t) => {
+test("an unreachable or busy intake keeps the feedback and sends it later; the daily budget keeps nothing", async (t) => {
   const h = harness(t);
   // fetch throws: no answer queued.
-  assert.deepEqual(await h.client.send(draft({ password: "p" })), { result: "queued" });
+  assert.deepEqual(await h.client.send(draft()), { result: "queued" });
   assert.equal(h.client.state().queued, 1);
-  assert.equal(h.client.state().needsPassword, false, "the queued report needs the password later");
   const [file] = readdirSync(join(h.dir, "bug-reports"));
   assert.match(file!, /^[0-9a-f-]{36}\.json$/);
-  assert.ok(!readFileSync(join(h.dir, "bug-reports", file!), "utf8").includes("\"p\""));
 
   h.advance(61_000);
-  h.reply(429, { result: "rate" });
-  assert.deepEqual(await h.client.send(draft()), { result: "queued" });
+  h.reply(503, { result: "unavailable" });
+  assert.deepEqual(await h.client.send(draft({ text: "Another remark" })), { result: "queued" });
   assert.equal(h.client.state().queued, 2);
 
-  h.reply(200, { result: "created", issue: 3 });
-  h.reply(200, { result: "added", issue: 3 });
+  h.reply(200, { result: "received", ref: 3 });
+  h.reply(200, { result: "received", ref: 4 });
   await h.client.flushOutbox();
   assert.equal(h.client.state().queued, 0);
-  const ids = h.calls.slice(-2).map((call) => (call.body as { reportId: string }).reportId);
-  assert.equal(new Set(ids).size, 2, "each queued report keeps its own id");
+  const ids = h.calls.slice(-2).map((call) => (call.body as { feedbackId: string }).feedbackId);
+  assert.equal(new Set(ids).size, 2, "each queued feedback keeps its own id");
+
+  h.reply(429, { result: "rate" });
+  assert.deepEqual(await h.client.send(draft({ text: "One more" })), { result: "rate" });
+  assert.equal(h.client.state().queued, 0, "a spent budget is told, not queued");
 });
 
-test("the outbox drops reports the relay will never take, and stops on a password refusal", async (t) => {
+test("the outbox drops what the intake will never take and what is too old", async (t) => {
   const h = harness(t);
-  await h.client.send(draft({ password: "p" }));
-  h.advance(61_000);
   await h.client.send(draft());
+  h.advance(61_000);
+  await h.client.send(draft({ text: "Second" }));
   assert.equal(h.client.state().queued, 2);
-  h.reply(422, { result: "version" });
-  h.reply(401, { result: "password" });
+  h.reply(400, { result: "invalid" });
+  h.reply(503, {});
   await h.client.flushOutbox();
-  assert.equal(h.client.state().queued, 1, "the refused version is dropped, the other waits");
-  assert.equal(h.client.state().needsPassword, true);
+  assert.equal(h.client.state().queued, 1, "the refused one is dropped, the other waits");
 
-  // Older than the relay accepts: dropped on read without a request.
+  // Older than the intake accepts: dropped on read without a request.
   h.advance(8 * 24 * 60 * 60_000);
   const before = h.calls.length;
   await h.client.flushOutbox();
@@ -259,22 +262,23 @@ test("the screenshot goes only with the capture it was shown for", async (t) => 
   assert.match(capture.screenshot!.dataUrl, /^data:image\/jpeg;base64,\/9j\//);
   assert.equal(capture.base.app.channel, "nightly");
   assert.equal(capture.base.app.locale, "uk");
-  assert.match(capture.base.install, /^[0-9a-f]{32}$/);
-  assert.equal(capture.passwordStorage, "keychain");
+  assert.match(capture.base.installDaily, /^[0-9a-f]{32}$/);
+  assert.match(capture.base.installPerson, /^[0-9a-f]{32}$/);
   assert.deepEqual(capture.base.settings, { "desktop.updateChannel": "nightly", "desktop.closeToTray": true });
 
-  assert.deepEqual(await h.client.send(draft({ password: "p", captureId: "another" })), { result: "invalid" });
-  h.reply(200, { result: "created", issue: 4 });
-  await h.client.send(draft({ password: "p", captureId: capture.captureId }));
-  const body = h.calls.at(-1)!.body as { screenshot: { data: string; width: number } };
+  assert.deepEqual(await h.client.send(draft({ captureId: "another" })), { result: "invalid" });
+  h.reply(200, { result: "received", ref: 4 });
+  await h.client.send(draft({ captureId: capture.captureId }));
+  const body = h.calls.at(-1)!.body as { screenshot: { data: string; width: number }; consent: { screenshot: boolean } };
   assert.equal(body.screenshot.width, 1600);
+  assert.equal(body.consent.screenshot, true);
   assert.equal(Buffer.from(body.screenshot.data, "base64").length, 64);
 
   // Unchecked "include screenshot": captureId null sends none.
   h.advance(61_000);
   const second = h.client.capture(shot);
-  h.reply(200, { result: "created", issue: 5 });
-  await h.client.send(draft({ captureId: null }));
+  h.reply(200, { result: "received", ref: 5 });
+  await h.client.send(draft({ captureId: null, text: "Without it" }));
   assert.equal((h.calls.at(-1)!.body as { screenshot: unknown }).screenshot, null);
   assert.ok(second.captureId);
 });
@@ -288,8 +292,8 @@ test("a marked-up screenshot replaces only its own capture's", async (t) => {
   assert.deepEqual(h.client.annotate(capture.captureId, marked), {
     dataUrl: `data:image/jpeg;base64,${marked.jpeg.toString("base64")}`, width: 800, height: 500, bytes: 96,
   });
-  h.reply(200, { result: "created", issue: 6 });
-  await h.client.send(draft({ password: "p", captureId: capture.captureId }));
+  h.reply(200, { result: "received", ref: 6 });
+  await h.client.send(draft({ captureId: capture.captureId }));
   const body = h.calls.at(-1)!.body as { screenshot: { data: string; width: number; height: number } };
   assert.equal(body.screenshot.width, 800);
   assert.equal(body.screenshot.height, 500);
@@ -301,13 +305,14 @@ test("a marked-up screenshot replaces only its own capture's", async (t) => {
 test("a malformed draft is refused before anything is sent", async (t) => {
   const h = harness(t);
   assert.deepEqual(await h.client.send(null), { result: "invalid" });
-  assert.deepEqual(await h.client.send(draft({ password: "two words" })), { result: "password" }, "no header could carry it");
-  assert.deepEqual(await h.client.send(draft({ password: "пароль" })), { result: "password" });
-  assert.deepEqual(await h.client.send(draft({ password: "p", text: "x".repeat(4_001) })), { result: "invalid" });
-  assert.deepEqual(await h.client.send(draft({ password: "p", web: { build: "a", serverVersion: "", view: "/sessions/abc", viewport: { width: 1, height: 1, scale: 1 } } })), { result: "invalid" });
-  assert.deepEqual(await h.client.send(draft({ password: "p", errors: [{ time: "2026-11-19T11:00:00.000Z", text: "ok", stack: "at x" }] })), { result: "invalid" });
+  assert.deepEqual(await h.client.send(draft({ text: "x".repeat(4_001) })), { result: "invalid" });
+  assert.deepEqual(await h.client.send(draft({ text: "   " })), { result: "invalid" });
+  assert.deepEqual(await h.client.send(draft({ kind: "rant" })), { result: "invalid" });
+  assert.deepEqual(await h.client.send(draft({ profile: { role: "wizard", experience: "new" } })), { result: "invalid" });
+  assert.deepEqual(await h.client.send(draft({ technical: { ...draft().technical, web: { build: "a", serverVersion: "", view: "/sessions/abc", viewport: { width: 1, height: 1, scale: 1 } } } })), { result: "invalid" });
+  assert.deepEqual(await h.client.send(draft({ technical: { ...draft().technical, errors: [{ time: "2026-11-25T11:00:00.000Z", text: "ok", stack: "at x" }] } })), { result: "invalid" });
   assert.equal(h.calls.length, 0);
   const off = harness(t, { origin: null });
   assert.equal(off.client.state().available, false);
-  assert.deepEqual(await off.client.send(draft({ password: "p" })), { result: "unavailable" });
+  assert.deepEqual(await off.client.send(draft()), { result: "unavailable" });
 });

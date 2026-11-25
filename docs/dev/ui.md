@@ -6268,7 +6268,7 @@ its revealed chats.
 - `host.errors.recent?()` — the tab's last ten error notices (kind `error`
   only), oldest first, as `{ time, text }`: the notice's copyable report
   (`UiErrorAction.report`, set by `copyErrorAction`) or else its words. Only
-  for a report the person reviews before sending (the nightly bug-report sheet);
+  for a report the person reviews before sending (the feedback sheet);
   never send it anywhere silently.
 - `host.errors.show(message, action?, { kind? })` — the host's one transient
   error (`setUiError(message, action, dedupeKey?, kind?)`). It is drawn as a

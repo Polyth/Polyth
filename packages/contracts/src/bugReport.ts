@@ -142,13 +142,17 @@ export type BugReportResult =
 
 export const BUG_REPORT_RESULTS = ["created", "added", "invalid", "password", "version", "rate", "unavailable"] as const;
 
-const VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,5}(?:-nightly)?$/;
-const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const INSTALL = /^[0-9a-f]{32}$/;
+/** @internal shared with feedback.ts */
+export const VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,5}(?:-nightly)?$/;
+/** @internal shared with feedback.ts */
+export const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+/** @internal shared with feedback.ts */
+export const INSTALL = /^[0-9a-f]{32}$/;
 const ARCH = /^[a-z0-9_]{1,16}$/;
 const DOTTED = /^[0-9][0-9.]{0,31}$/;
 const BROWSER = /^(?:|[A-Za-z][A-Za-z ]{0,30}(?: [0-9]{1,4})?)$/;
-const LOCALE = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,3}$/;
+/** @internal shared with feedback.ts */
+export const LOCALE = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,3}$/;
 const BUILD = /^[A-Za-z0-9._-]{0,64}$/;
 const VIEW = /^[A-Za-z0-9._:-]{0,64}$/;
 const SETTING_KEY = /^[a-z][A-Za-z0-9]{0,30}(?:\.[A-Za-z0-9]{1,30}){0,2}$/;
@@ -164,28 +168,35 @@ const CONTROL = /[\u0000-\u001f\u007f]/;
 // eslint-disable-next-line no-control-regex
 const CONTROL_EXCEPT_LINES = /[\u0000-\u0008\u000b-\u001f\u007f]/;
 
-type Plain = Record<string, unknown>;
+/** @internal */
+export type Plain = Record<string, unknown>;
 
-const isPlain = (value: unknown): value is Plain =>
+/** @internal shared with feedback.ts */
+export const isPlain = (value: unknown): value is Plain =>
   typeof value === "object" && value !== null && !Array.isArray(value)
   && Object.getPrototypeOf(value) === Object.prototype;
 
-const exactKeys = (value: Plain, keys: readonly string[]): boolean => {
+/** @internal shared with feedback.ts */
+export const exactKeys = (value: Plain, keys: readonly string[]): boolean => {
   const own = Object.keys(value);
   return own.length === keys.length && own.every((key) => keys.includes(key));
 };
 
-const line = (value: unknown, max: number, pattern?: RegExp): value is string =>
+/** @internal shared with feedback.ts */
+export const line = (value: unknown, max: number, pattern?: RegExp): value is string =>
   typeof value === "string" && value.length <= max && !CONTROL.test(value) && (!pattern || pattern.test(value));
 
-const block = (value: unknown, max: number): value is string =>
+/** @internal shared with feedback.ts */
+export const block = (value: unknown, max: number): value is string =>
   typeof value === "string" && value.length <= max && !CONTROL_EXCEPT_LINES.test(value);
 
-const int = (value: unknown, min: number, max: number): value is number =>
+/** @internal shared with feedback.ts */
+export const int = (value: unknown, min: number, max: number): value is number =>
   typeof value === "number" && Number.isInteger(value) && value >= min && value <= max;
 
 /** An ISO time at most `pastMs` before `now` and a day after it (clock skew). */
-const isoWithin = (value: unknown, now: number, pastMs: number): value is string => {
+/** @internal shared with feedback.ts */
+export const isoWithin = (value: unknown, now: number, pastMs: number): value is string => {
   if (typeof value !== "string" || !ISO.test(value)) return false;
   const time = Date.parse(value);
   return Number.isFinite(time) && time >= now - pastMs && time <= now + DAY;
@@ -208,7 +219,8 @@ function parseBrowserApp(value: Plain): BugReportBrowserApp | null {
   return { client: "browser", version, channel: channelOf(version), edition, platform, browser, serverPlatform, serverArch, locale };
 }
 
-function parseApp(value: unknown): BugReportApp | null {
+/** @internal shared with feedback.ts */
+export function parseApp(value: unknown): BugReportApp | null {
   if (isPlain(value) && value.client === "browser") return parseBrowserApp(value);
   if (!isPlain(value) || !exactKeys(value, ["version", "channel", "edition", "platform", "arch", "osVersion", "electron", "chromium", "packaged", "locale"])) return null;
   const { version, channel, edition, platform, arch, osVersion, electron, chromium, packaged, locale } = value;
@@ -222,7 +234,8 @@ function parseApp(value: unknown): BugReportApp | null {
   return { version, channel: expected, edition, platform, arch, osVersion, electron, chromium, packaged, locale };
 }
 
-function parseWeb(value: unknown): BugReportWeb | null {
+/** @internal shared with feedback.ts */
+export function parseWeb(value: unknown): BugReportWeb | null {
   if (!isPlain(value) || !exactKeys(value, ["build", "serverVersion", "view", "viewport"])) return null;
   const { build, serverVersion, view, viewport } = value;
   if (!line(build, 64, BUILD) || !line(view, 64, VIEW)) return null;
@@ -234,7 +247,8 @@ function parseWeb(value: unknown): BugReportWeb | null {
   return { build, serverVersion: serverVersion as string, view, viewport: { width, height, scale } };
 }
 
-function parseSettings(value: unknown): Record<string, BugReportSettingValue> | null {
+/** @internal shared with feedback.ts */
+export function parseSettings(value: unknown): Record<string, BugReportSettingValue> | null {
   if (!isPlain(value)) return null;
   const entries = Object.entries(value);
   if (entries.length > BUG_REPORT_LIMITS.settingsKeys) return null;
@@ -249,7 +263,8 @@ function parseSettings(value: unknown): Record<string, BugReportSettingValue> | 
   return out;
 }
 
-function parsePackages(value: unknown): BugReportPackage[] | null {
+/** @internal shared with feedback.ts */
+export function parsePackages(value: unknown): BugReportPackage[] | null {
   if (!Array.isArray(value) || value.length > BUG_REPORT_LIMITS.packages) return null;
   const out: BugReportPackage[] = [];
   for (const item of value) {
@@ -260,7 +275,8 @@ function parsePackages(value: unknown): BugReportPackage[] | null {
   return out;
 }
 
-function parseErrors(value: unknown, now: number): BugReportError[] | null {
+/** @internal shared with feedback.ts */
+export function parseErrors(value: unknown, now: number): BugReportError[] | null {
   if (!Array.isArray(value) || value.length > BUG_REPORT_LIMITS.errors) return null;
   const out: BugReportError[] = [];
   for (const item of value) {
@@ -278,7 +294,8 @@ export function base64DecodedLength(data: string): number {
   return Math.floor((data.length * 3) / 4) - padding;
 }
 
-function parseScreenshot(value: unknown): BugReportScreenshot | null | undefined {
+/** @internal shared with feedback.ts */
+export function parseScreenshot(value: unknown): BugReportScreenshot | null | undefined {
   if (value === null) return null;
   if (!isPlain(value) || !exactKeys(value, ["type", "width", "height", "data"])) return undefined;
   const { type, width, height, data } = value;

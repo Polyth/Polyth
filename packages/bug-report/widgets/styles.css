@@ -1,4 +1,4 @@
-/* Nightly bug-report sheet. Every rule is scoped under .bug-report-*; sizes,
+/* Feedback sheet. Every rule is scoped under .bug-report-*; sizes,
    colours and type come from the canonical tokens. */
 
 .bug-report-sheet {
@@ -12,6 +12,30 @@
   margin: 0;
   color: var(--text-dim);
   font-size: var(--font-meta);
+}
+
+/* The four kinds sit in one row; they wrap on a narrow window. */
+.bug-report-sheet__kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* "About me": the switch, and its two choices only while it is on. */
+.bug-report-sheet__about {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.bug-report-sheet__forget {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.bug-report-sheet__forget .bug-report-sheet__hint {
+  margin: 0;
 }
 
 .bug-report-sheet__field {

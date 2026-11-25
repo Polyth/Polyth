@@ -1,4 +1,4 @@
-// What the report sheet adds to a nightly bug report from the page: an
+// What the feedback sheet adds to a feedback from the page: an
 // allowlist of interface settings, what the window showed, the viewport and
 // the tab's recent error notices. Allowlists, never denylists: a setting
 // that is not named here never leaves the computer, whatever it holds.
@@ -11,6 +11,7 @@ import {
   type BugReportSettingValue,
   type BugReportWeb,
 } from "@polyth/contracts/bug-report";
+import { isFeedbackContact } from "@polyth/contracts/feedback";
 
 /** Interface settings worth knowing to reproduce a layout or theme bug.
  *  Free text the person wrote (product name, prompts, branch templates) is
@@ -152,4 +153,11 @@ export function enabledPackages(body: unknown): BugReportPackage[] {
 export function contactName(raw: string): string {
   const name = raw.trim().replace(/^@/, "");
   return /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/.test(name) ? name : "";
+}
+
+/** A contact as typed: an email or a short handle, trimmed; "" when it is not
+ *  one the intake takes (so nothing half-typed travels). */
+export function feedbackContact(raw: string): string {
+  const value = raw.trim();
+  return isFeedbackContact(value) ? value : "";
 }
