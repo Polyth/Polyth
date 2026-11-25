@@ -707,7 +707,16 @@ The project row's highlight is the whole row — its glyph and title together
 with the new-chat and ⋮ controls beside them — painted by
 `.project-card-shell::before`, not by the card button: the card occupies only
 the leading grid track, so a highlight scoped to it stops at the title and
-leaves those controls on the bare list.
+leaves those controls on the bare list. It takes the chat pills' extents
+(`--nav-pill-air` before the glyph, `--nav-trailing-inset - --nav-pill-air`
+past the row's end), so a project row is exactly as wide as the chat rows under
+it, and its actions end where the ⋮ glyph centres on the chats' trailing column
+(`--session-trailing-axis`). The rail header row (`[data-tools]`) adds its own
+`--nav-gutter` padding to both extents. A worktree heading follows the same
+rule: its highlight is `.session-worktree-head::before` (the whole heading,
++/− sign through its new-chat and delete actions), not the toggle button's,
+with `--nav-pill-air` before the sign and the same trailing extent, and its
+last action glyph centres on `--session-trailing-axis`.
 
 On touch-capable screens (`any-pointer: coarse`) project row actions stay
 hidden at rest, except on the focused project: its new-chat and ⋮ actions stay

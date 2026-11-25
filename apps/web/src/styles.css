@@ -1517,9 +1517,10 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 }
 /* The row's highlight lives on the shell, not on the card button: the card is
    only the leading grid column, so its own surface stopped at the title and
-   left the actions beside it unlit. The shell spans the whole row. */
+   left the actions beside it unlit. The shell spans the whole row; a
+   worktree heading's highlight lives on its head for the same reason. */
 .project-card-shell::before,
-.session-worktree-toggle::before,
+.session-worktree-head::before,
 .session-btn::before {
   content: "";
   position: absolute;
@@ -1532,7 +1533,18 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   pointer-events: none;
   transition: opacity var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease);
 }
-.project-card-shell::before { left: calc(var(--nav-indent-project) - var(--nav-glyph-inset)); }
+/* The project highlight takes the chat pills' extents: --nav-pill-air before
+   the glyph and after the trailing inset, so it is as wide as the rows under
+   it instead of stopping short of the trailing gutter. */
+.project-card-shell::before {
+  inset-inline: calc(var(--nav-indent-project) - var(--nav-pill-air)) calc(var(--nav-trailing-inset) - var(--nav-pill-air));
+}
+/* The rail header row pads its content in from the sidebar edge itself. */
+.sidebar-focused-project[data-tools] > .project-card-shell::before {
+  inset-inline:
+    calc(var(--nav-gutter) + var(--nav-glyph-inset) - var(--nav-pill-air))
+    calc(var(--nav-gutter) + var(--nav-trailing-inset) - var(--nav-pill-air));
+}
 /* The glyph column ends where the text axis starts; the 17px folder (or a
    19px project image) sits at its start. */
 .project-card > .project-glyph {
@@ -1561,6 +1573,9 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   display: inline-flex;
   align-items: center;
   flex: none;
+  /* The ⋮ glyph centres on the chat rows' trailing column
+     (--session-trailing-axis), not 16px in from the row's edge. */
+  margin-inline-end: calc(var(--nav-trailing-inset) + (var(--icon-sm) - 2px) / 2 - 16px);
 }
 .project-new-session,
 .project-menu-btn {
@@ -1770,11 +1785,17 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   font-weight: 600;
   text-align: left;
 }
-.session-worktree-toggle::before { inset-inline: calc(var(--nav-worktree-row-indent, var(--nav-indent-worktree)) - var(--nav-glyph-inset)) 4px; }
+/* Same extents as the project row and the chat pills under it: --nav-pill-air
+   before the +/− sign and after the trailing inset. */
+.session-worktree-head::before {
+  inset-inline:
+    calc(var(--nav-worktree-row-indent, var(--nav-indent-worktree)) - var(--nav-pill-air))
+    calc(var(--nav-trailing-inset) - var(--nav-pill-air));
+}
 .session-worktree-toggle > * { position: relative; z-index: 1; }
 @media (hover: hover) {
   .session-worktree-toggle:hover:where(:not(:disabled)) { color: var(--text); background: transparent; }
-  .session-worktree-toggle:hover:where(:not(:disabled))::before { background: var(--elevated); opacity: 1; }
+  .session-worktree-head:hover:where(:not([data-session-drop-over="true"]))::before { background: var(--elevated); opacity: 1; }
 }
 .session-worktree-toggle > svg { width: 14px; height: 14px; flex: none; color: var(--session-blue, var(--accent)); }
 .session-worktree-toggle-sign {
@@ -1793,6 +1814,9 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   display: flex;
   gap: 2px;
   flex: none;
+  /* The last glyph centres on the chat rows' trailing column
+     (--session-trailing-axis), not 18px in from the heading's edge. */
+  margin-inline-end: calc(var(--nav-trailing-inset) + (var(--icon-sm) - 2px) / 2 - 18px);
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--motion-fast) var(--motion-ease);
