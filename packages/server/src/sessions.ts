@@ -891,6 +891,19 @@ export function validateStartRequest(start: unknown): asserts start is SessionSt
   }
 }
 
+/** A startup row with nothing of its own yet: no parent, no imported history,
+ *  no admitted turn. Such a row is what the startup sweeps delete. */
+const isBlankStartupRow = (p: SessionProjection): boolean =>
+  !p.parentId && !p.historyImport && p.lastTurnAt == null
+  && (p.status === "failed" || p.status === "unknown");
+
+/** Work no automatic cleanup may remove: the person's unsent draft, a checkout
+ *  the chat owns, a package lifecycle. A row holding one is never a blank
+ *  remnant, so no listing may hide it away. */
+const ownsStartupWork = (p: SessionProjection): boolean =>
+  Boolean(p.draft?.trim()) || Boolean(p.purpose) || Boolean(p.worktreePath) || Boolean(p.isolation)
+  || Boolean(p.workspace?.repositories.some((repository) => repository.isolation));
+
 export function createSessionService(deps: {
   store: SessionPersistence;
   /** Package schemas can omit write-only inputs from canonical native tool events. */
@@ -17174,12 +17187,24 @@ export function createSessionService(deps: {
 
     async list(projectId) {
       const projections = await store.projections(projectId);
-      // Keep legacy failed-startup filtering. Imports remain visible with
-      // their explicit failure/pending state; reads never settle children.
-      const alive = projections.filter((p): p is SessionProjection => {
-        if (!p) return false;
-        return Boolean(p.parentId || p.historyImport) || p.lastTurnAt != null || (p.status !== "failed" && p.status !== "unknown");
-      });
+      // Hide a blank startup remnant: no parent, no imported history, no turn.
+      // A row that still owns a draft, a checkout or a package lifecycle is not
+      // one (the startup sweep refuses to delete those too), and the owning
+      // account's "Delete failed startup sessions" choice is authoritative here
+      // as it is for every automatic removal: with the choice off, the row stays
+      // listed with its error instead of vanishing from every client. Imports
+      // remain visible with their explicit failure/pending state; reads never
+      // settle children.
+      const rows = projections.filter((p): p is SessionProjection => Boolean(p));
+      const blank = rows.filter((p) => isBlankStartupRow(p) && !ownsStartupWork(p));
+      const hidden = new Set<string>();
+      for (const row of blank) {
+        const allowed = deps.failedStartupCleanupAllowed
+          ? await deps.failedStartupCleanupAllowed(row)
+          : true;
+        if (allowed) hidden.add(row.id);
+      }
+      const alive = rows.filter((p) => !hidden.has(p.id));
       const hydrated = await effectiveListSettings(alive);
       if (!deps.org || hydrated.length === 0) return hydrated.map(overlayProjection);
       // Attention badges derive from durable events on every read.

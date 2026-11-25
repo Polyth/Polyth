@@ -434,6 +434,13 @@ starts Node or OpenCode. See `docs/mobile/architecture.md`.
   observed event/projection versions so a concurrent draft, queue or status
   change wins. Delegated children are excluded; their lifecycle belongs to the
   parent's settlement path.
+- The session list (`SessionService.list`, which feeds the navigator sync)
+  hides a failed or uncertain startup row only while it is a blank remnant —
+  no parent, no imported history, no admitted turn — and only while the owning
+  account's "Delete failed startup sessions" allows removing it. A row that
+  still holds a draft, a checkout the chat owns or a package lifecycle is never
+  hidden: the startup sweep refuses to delete those, so listing them away would
+  strand real work. Hidden is not deleted; nothing in the list removes data.
 - `failedStartupCleanup.ts` — every automatic removal of a failed or
   never-started session (browser cleanup, delegated-child settlement in
   `sessions.ts`, the pristine sweep) obeys the synced
