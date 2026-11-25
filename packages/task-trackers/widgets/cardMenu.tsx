@@ -274,10 +274,9 @@ export function TaskCardMenu({
   useEffect(() => () => cancelLongPress(), []);
   useEffect(() => {
     if (!open) return;
-    // A left press anywhere outside the anchored menu closes it — also on the
-    // card that opened it and inside the detail panel, which the shared menu
-    // dismissal leaves alone. Capture phase, so a board handler that stops the
-    // press can't keep the menu up. The phone sheet dismisses itself.
+    // The shared menu dismissal covers ordinary outside presses; this adds the
+    // two it deliberately leaves alone: the card that opened the menu (its
+    // trigger) and the detail panel (a dialog). The phone sheet dismisses itself.
     const onPointer = (event: PointerEvent) => {
       if (event.button !== 0) return;
       const surface = contentRef.current?.closest(".ui-menu");

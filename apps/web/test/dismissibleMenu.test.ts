@@ -51,7 +51,7 @@ function Harness() {
 // Mirrors the phone Navigator: the menu's trigger lives inside an ancestor
 // role="dialog", so a press elsewhere in that dialog is an ordinary outside
 // press, not a nested-dialog interaction.
-function DialogHostHarness() {
+function DialogHostHarness({ stopPresses = false }: { stopPresses?: boolean }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -63,7 +63,12 @@ function DialogHostHarness() {
   });
   return createElement(
     "div",
-    { role: "dialog", "aria-label": "Navigator" },
+    {
+      role: "dialog",
+      "aria-label": "Navigator",
+      // The Settings dialog stops its presses so the scrim behind it stays put.
+      ...(stopPresses ? { onPointerDown: (event: { stopPropagation: () => void }) => event.stopPropagation() } : {}),
+    },
     createElement("button", { "aria-label": "Another row" }, "Another row"),
     createElement("button", {
       ref: triggerRef,
@@ -165,6 +170,30 @@ test("a menu hosted by a dialog closes on an outside press inside that dialog", 
       other.dispatchEvent(new KeyboardEventCtor("keydown", { key: "Escape", bubbles: true, cancelable: true }));
     });
     assert.equal(!!container.querySelector('[role="menu"]'), false, "Escape in the host dialog closes the menu");
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
+// The Harnesses → Accounts row menu lives in Settings, whose dialog stops
+// pointerdown from bubbling; a bubble-phase listener never saw the press.
+test("a menu closes on an outside press inside a host that stops press propagation", async () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement(DialogHostHarness, { stopPresses: true })); });
+    const trigger = container.querySelector<HTMLButtonElement>('[aria-label="Actions"]')!;
+    const other = container.querySelector<HTMLButtonElement>('[aria-label="Another row"]')!;
+
+    await act(async () => { trigger.click(); });
+    assert.ok(container.querySelector('[role="menu"]'), "the menu opens inside the host");
+    await act(async () => {
+      other.dispatchEvent(new MouseEventCtor("pointerdown", { bubbles: true, cancelable: true }));
+    });
+    assert.equal(!!container.querySelector('[role="menu"]'), false, "the press closes the menu despite stopPropagation");
+    assert.equal(document.activeElement, trigger, "focus returns to the opener");
   } finally {
     await act(async () => { root.unmount(); });
     container.remove();

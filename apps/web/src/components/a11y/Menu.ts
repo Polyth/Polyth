@@ -19,7 +19,8 @@ export interface DismissibleMenuOptions {
   restoreRef?: RefObject<HTMLElement | null>;
 }
 
-/** Shared menu interaction contract: outside press, Escape and a window blur
+/** Shared menu interaction contract: outside press (seen in the capture phase,
+ * so no ancestor's stopPropagation can swallow it), Escape and a window blur
  * dismiss, focus returns to the opener, and arrow/Home/End navigation cycles
  * menu items (see `passive` for menus that must not take focus). Neither focus move happens while a writing surface holds the
  * software keyboard for a touch (the composer): the menu is then operated by taps. */
@@ -80,11 +81,14 @@ export function useDismissibleMenu({
     // key event to dismiss on, so the menu used to stay open behind whatever
     // the user did next and the first click on it only closed the menu.
     const onWindowBlur = () => close();
-    document.addEventListener("pointerdown", onPointer);
+    // Capture phase: a surface that stops its own presses from bubbling (the
+    // Settings dialog does, so the scrim behind it does not close it) must not
+    // keep a menu opened inside it from seeing an outside press.
+    document.addEventListener("pointerdown", onPointer, true);
     document.addEventListener("keydown", onKey, true);
     window.addEventListener("blur", onWindowBlur);
     return () => {
-      document.removeEventListener("pointerdown", onPointer);
+      document.removeEventListener("pointerdown", onPointer, true);
       document.removeEventListener("keydown", onKey, true);
       window.removeEventListener("blur", onWindowBlur);
     };
