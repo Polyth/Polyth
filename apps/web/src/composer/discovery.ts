@@ -20,7 +20,12 @@ import {
   type CatalogCommand,
 } from "@polyth/commands/catalog";
 import { filterSnippets, type AutocompleteItem } from "../utils.ts";
-import { attachmentModality, type AttachmentRef } from "@polyth/contracts";
+import {
+  attachmentModality,
+  type AttachmentModality,
+  type AttachmentRef,
+  type FeatureSupport,
+} from "@polyth/contracts";
 import { tr } from "../i18n/index.ts";
 import { promptHistoryShortcutLabel } from "./history.ts";
 import { accessLabel } from "../sessionSharing.ts";
@@ -1090,7 +1095,7 @@ export const ATTACHMENT_COMPAT_NOTE =
  *  A link never warns: it always reaches the agent as text. */
 export function attachmentNote(input: {
   attachments: readonly AttachmentRef[];
-  support: Partial<Record<string, string>> | undefined;
+  support: Partial<Record<AttachmentModality, FeatureSupport>> | undefined;
   referenceable: boolean;
 }): string | null {
   if (input.attachments.length === 0) return null;
@@ -1103,6 +1108,7 @@ export function attachmentNote(input: {
     if (!modality) continue;
     const level = input.support[modality];
     if (level === "native" || level === "emulated") continue;
+    // `level` is now "unsupported" or undefined (not reported for this modality).
     // Any other uploaded file reaches the agent by path (file-reference plan).
     if (input.referenceable && modality !== "image" && attachment.path) continue;
     if (modality === "image") return tr("composer.discovery.attachmentImagesOmitted");
