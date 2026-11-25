@@ -147,6 +147,7 @@ is always present.
 - multirun
 - opencode
 - orchestration
+- page-apps
 - peak-pricing
 - permissions
 - plugins
