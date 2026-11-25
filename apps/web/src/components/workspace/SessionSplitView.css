@@ -28,6 +28,12 @@
   flex-direction: column;
 }
 
+/* Keep the pair clear of a launcher strip floating over the edge (measured
+   by the host; 0 when the strip sits beside the workspace). */
+.session-split[data-split="on"] {
+  padding-left: var(--split-clear-left, 0px);
+  padding-right: var(--split-clear-right, 0px);
+}
 .session-split[data-split="on"] > .session-split-pane[data-side="0"] {
   flex: 0 0 calc((100% - var(--split-divider)) * var(--split-ratio));
 }
@@ -100,6 +106,27 @@
   font-weight: 600;
   letter-spacing: -0.005em;
 }
+/* The focused pane's title opens the chat overview (the shell header's
+   title rests while two chats are on screen). Text, not a chip. */
+.session-split-title-button {
+  appearance: none;
+  border: 0;
+  margin: 0;
+  padding: 2px var(--space-1);
+  margin-inline-start: calc(var(--space-1) * -1);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: var(--font-label);
+  font-weight: 600;
+  cursor: pointer;
+  text-align: start;
+  transition: background-color var(--motion-fast) var(--motion-ease);
+}
+.session-split-title-button:hover,
+.session-split-title-button[aria-expanded="true"] { background: var(--surface-overlay-hover); }
+.session-split-title-button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 .session-split-project {
   flex: none;
   max-inline-size: 30%;

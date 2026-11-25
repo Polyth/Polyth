@@ -129,8 +129,10 @@ test("compact package windows are fullscreen-only", async () => {
   assert.match(surfaces, /input\.compact && input\.isWorkspacePane \? "fullscreen" : input\.paneMode/);
   assert.match(source, /paneWindowLayout\(\{ isWorkspacePane, compact, paneMode, dockEdge, measured, admits, guardPromoted \}\)/);
   // A profile's home surface (the Tasks tab) is the whole view: no toggles.
-  assert.match(source, /onTogglePin=\{paneWorkspace && !compact && !homePane \? togglePanePin : undefined\}/);
-  assert.match(source, /onToggleFullscreen=\{paneWorkspace && !compact && !homePane \? togglePaneFullscreen : undefined\}/);
+  // A pane window (secondWindow.ts) is the pane itself: no toggles either.
+  assert.match(source, /onTogglePin=\{paneWorkspace && !compact && !homePane && !paneWindow \? togglePanePin : undefined\}/);
+  assert.match(source, /onToggleFullscreen=\{paneWorkspace && !compact && !homePane && !paneWindow \? togglePaneFullscreen : undefined\}/);
+  assert.match(source, /const paneWindow = windowRole\(\) === "pane";/);
   assert.match(source, /if \(homePane\) return;/, "Escape does not shrink a home surface into a window");
   assert.match(source, /if \(compact\) closeWorkspacePane\(\);\s*else handlePaneEscape\(\);/);
 });

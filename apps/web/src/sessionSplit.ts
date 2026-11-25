@@ -10,6 +10,7 @@
 // preference (localStorage).
 import { useSyncExternalStore } from "react";
 import { getState, subscribeStore } from "./store.ts";
+import { isSecondaryWindow } from "./secondWindow.ts";
 
 export type SplitSide = 0 | 1;
 
@@ -168,10 +169,15 @@ function rememberedRatio(): number {
   return raw ? clampSplitRatio(Number(raw)) : SPLIT_RATIO_DEFAULT;
 }
 
-let current: SessionSplitState | null = parseSessionSplit(storage("session")?.getItem(STATE_KEY) ?? null);
+// A second window (secondWindow.ts) starts with a copy of its opener's
+// sessionStorage: it shows one chat or the code, never the opener's pair.
+let current: SessionSplitState | null = isSecondaryWindow()
+  ? null
+  : parseSessionSplit(storage("session")?.getItem(STATE_KEY) ?? null);
 const listeners = new Set<() => void>();
 
 function publish(next: SessionSplitState | null): void {
+  if (next !== null && isSecondaryWindow()) return;
   if (next === current) return;
   current = next;
   try {
@@ -263,6 +269,55 @@ function installActiveSessionFollow(): void {
     lastActive = active;
     publish(followActiveSession(current, active));
   });
+}
+
+// ---- presented ------------------------------------------------------------------
+// The host publishes whether the pair is on screen right now (a split rests
+// on a narrow workspace or the phone shell): the shell header drops the chat
+// title only while each pane names its own chat.
+
+let presented = false;
+const presentedListeners = new Set<() => void>();
+
+export function setSessionSplitPresented(next: boolean): void {
+  if (next === presented) return;
+  presented = next;
+  for (const listener of [...presentedListeners]) listener();
+}
+
+export function isSessionSplitPresented(): boolean {
+  return presented;
+}
+
+export function useSessionSplitPresented(): boolean {
+  return useSyncExternalStore(
+    (listener) => {
+      presentedListeners.add(listener);
+      return () => { presentedListeners.delete(listener); };
+    },
+    isSessionSplitPresented,
+    isSessionSplitPresented,
+  );
+}
+
+/** Pure: should an open split ask the wide sidebar to rest on its rail?
+ *  Only when the pair does not fit, and collapsing frees enough room for
+ *  both panes; once asked, it holds while the split stays open (the freed
+ *  width must not undo the request that freed it). */
+export function splitWantsSidebarRail(input: {
+  open: boolean;
+  wide: boolean;
+  /** The split host's width now. */
+  widthPx: number;
+  /** Width the sidebar would give back by resting on its rail. */
+  sidebarSavingPx: number;
+  /** The split asked already (and the person has not expanded by hand). */
+  holding: boolean;
+}): boolean {
+  if (!input.open || !input.wide) return false;
+  if (input.holding) return true;
+  if (input.widthPx <= 0 || splitFits(input.widthPx)) return false;
+  return splitFits(input.widthPx + Math.max(0, input.sidebarSavingPx));
 }
 
 /** End the split because one of its chats is gone. */

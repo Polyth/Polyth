@@ -735,6 +735,14 @@ In the workstation edition only the shell sends: the server route stays off ther
   (see [What another server's page may do](#what-another-servers-page-may-do)).
 - Navigation: a page stays on its own origin, and only the server list may hand the
   window to a server it connected; allowlisted HTTP(S)/mailto links open in the system browser.
+- Second windows: a page's `window.open` of its own origin with a `window=chat|pane`
+  role (a chat or a workspace window on another screen, [ui.md](ui.md#second-windows-a-chat-or-a-workspace-window-on-another-screen))
+  opens a native window from `src/secondWindows.ts`; every other `window.open` is an
+  external link. That window has no preload, so no desktop bridge (desktop IPC still
+  answers only the main window), shares the session and navigation rule, and its
+  requests pass the same local-server guard as the main window's. One window per chat and
+  one pane window; asking again focuses it. Source-inspected and unit-tested
+  (`test/secondWindows.test.ts`); not yet run in a packaged app.
 - Permissions: only audio capture (not camera/video), notifications and clipboard read
   for the top page. Another server asks once for the microphone and once for the clipboard.
 - Server: binds to `127.0.0.1` in desktop mode.

@@ -33,8 +33,10 @@ import {
   getSessionSplit,
   openSessionInSplit,
   otherSide,
+  setSessionSplitPresented,
   setSessionSplitRatio,
   splitFits,
+  splitWantsSidebarRail,
   SPLIT_RATIO_DEFAULT,
   SPLIT_RATIO_MAX,
   SPLIT_RATIO_MIN,
@@ -55,7 +57,17 @@ import { motionIsReduced } from "../../motionPresence.ts";
 import { useExitGhost } from "../../exitGhost.ts";
 import { friendlyError } from "../../settings.ts";
 import { getDragSession, hasDragSession } from "../../dnd.ts";
-import { CloseIcon, HandoffIcon, Icon as UiIcon, IconButton, ReplyIcon } from "../ui/index.ts";
+import {
+  getSidebarLayout,
+  isAutomaticSidebarRailApplied,
+  setAutomaticSidebarRailSource,
+  SIDEBAR_RAIL_WIDTH,
+  useAutomaticSidebarRail,
+  useSidebarLayout,
+} from "../../sidebarLayout.ts";
+import { openChatWindow } from "../../secondWindow.ts";
+import { toggleSessionStatusPopover, useSessionStatusPopover } from "../../sessionStatusPopover.ts";
+import { CloseIcon, HandoffIcon, Icon as UiIcon, IconButton, NewWindowIcon, ReplyIcon } from "../ui/index.ts";
 import "./SessionSplitView.css";
 
 /** The window glide (tokens.css --motion-window*): one clock for the panes. */
@@ -125,11 +137,23 @@ function useCompanionFeed(sessionId: string, session: SessionProjection | undefi
   return cached ? "ready" : failed ? "failed" : "loading";
 }
 
-function SplitPaneHeader({ sessionId, focused, onClose }: {
+/** Show a split chat in a window of its own; the split closes around it. */
+export function popOutSplitSession(sessionId: string, projectId: string | null, after: () => void): void {
+  if (!openChatWindow(sessionId, projectId)) {
+    setUiError(tr("window.blocked"));
+    return;
+  }
+  after();
+}
+
+function SplitPaneHeader({ sessionId, focused, onClose, onPopOut }: {
   sessionId: string | null;
   focused: boolean;
   onClose: () => void;
+  onPopOut?: (() => void) | undefined;
 }) {
+  const titleRef = useRef<HTMLButtonElement>(null);
+  const overview = useSessionStatusPopover();
   const session = useStore((state) => sessionId ? state.sessions.find((candidate) => candidate.id === sessionId) : undefined);
   const activeProjectId = useStore((state) => state.activeProjectId);
   const projectName = useStore((state) => {
@@ -147,9 +171,31 @@ function SplitPaneHeader({ sessionId, focused, onClose }: {
         aria-label={status && status.kind !== "regular" ? status.label : undefined}
         title={status?.label}
       />
-      <span className="session-split-title" title={title}>{title}</span>
+      {/* The shell header drops its chat title while the pair is on screen
+          (Header.tsx): the focused pane's title opens the same overview. */}
+      {focused && sessionId ? (
+        <button
+          ref={titleRef}
+          type="button"
+          className="session-split-title session-split-title-button"
+          title={title}
+          aria-haspopup="dialog"
+          aria-expanded={overview.open && overview.anchor === titleRef.current}
+          aria-label={status ? tr("sessionStatus.sessionStatusValue", { title, status: status.label }) : title}
+          onClick={(event) => { event.stopPropagation(); toggleSessionStatusPopover(titleRef.current, "header"); }}
+        >{title}</button>
+      ) : <span className="session-split-title" title={title}>{title}</span>}
       {projectName && activeProjectId && <span className="session-split-project">{projectName}</span>}
       <span className="session-split-actions">
+        {onPopOut && sessionId && (
+          <IconButton
+            icon={NewWindowIcon}
+            size="sm"
+            variant="ghost"
+            label={tr("window.openChat")}
+            onClick={(event) => { event.stopPropagation(); onPopOut(); }}
+          />
+        )}
         <IconButton icon={HandoffIcon} size="sm" variant="ghost" label={tr("split.swapSides")} onClick={(event) => { event.stopPropagation(); swapSessionSplit(); }} />
         <IconButton
           icon={CloseIcon}
@@ -213,7 +259,12 @@ function CompanionPane({ sessionId, side, enter: arrival, paneRef }: {
       onPointerDownCapture={onPointerDownCapture}
       onClickCapture={onClickCapture}
     >
-      <SplitPaneHeader sessionId={sessionId} focused={false} onClose={closeSessionSplit} />
+      <SplitPaneHeader
+        sessionId={sessionId}
+        focused={false}
+        onClose={closeSessionSplit}
+        onPopOut={() => popOutSplitSession(sessionId, session?.projectId ?? null, closeSessionSplit)}
+      />
       <TimelineSessionProvider sessionId={sessionId} companion>
         <div className="focus-conversation session-split-companion">
           <div className="timeline-wrap">
@@ -345,6 +396,29 @@ export default function SessionSplitHost({ focused }: { focused: ReactNode }) {
   const ratio = split ? fitSplitRatio(split.ratio, width) : SPLIT_RATIO_DEFAULT;
   const [resizing, setResizing] = useState(false);
   const [dropZone, setDropZone] = useState<DropZone | null>(null);
+  const activeProjectOfFocused = useStore((state) => state.sessions.find((candidate) => candidate.id === state.activeSessionId)?.projectId
+    ?? state.activeProjectId);
+
+  // The shell header names the focused chat only while one chat is shown.
+  useLayoutEffect(() => { setSessionSplitPresented(shown); }, [shown]);
+  useEffect(() => () => setSessionSplitPresented(false), []);
+
+  // Too narrow for the pair beside the full sidebar: rest the sidebar on its
+  // rail while the split is open, and give it back when the split closes
+  // (sidebarLayout.ts "split" source; never written to the preference). The
+  // person expanding it by hand wins until the next split.
+  const sidebarLayout = useSidebarLayout();
+  const automaticRail = useAutomaticSidebarRail();
+  const sidebarResting = sidebarLayout.collapsed || isAutomaticSidebarRailApplied(automaticRail);
+  const wantsRail = splitWantsSidebarRail({
+    open: split !== null && companion !== null,
+    wide: shell === "wide",
+    widthPx: width,
+    sidebarSavingPx: sidebarResting ? 0 : getSidebarLayout().width - SIDEBAR_RAIL_WIDTH,
+    holding: automaticRail.sources.includes("split"),
+  });
+  useLayoutEffect(() => { setAutomaticSidebarRailSource("split", wantsRail); }, [wantsRail]);
+  useEffect(() => () => setAutomaticSidebarRailSource("split", false), []);
 
   // What this render changed: the split opened or closed, focus moved to the
   // other chat in place, the chats traded places, or a new chat took the
@@ -386,6 +460,20 @@ export default function SessionSplitHost({ focused }: { focused: ReactNode }) {
         width: next.companion.width,
       };
     }
+    // A launcher strip floating over the workspace's edge (some looks draw it
+    // over the content) must not cover a pane's header actions: the pair
+    // keeps clear of it, measured, in whichever physical edge it sits.
+    const hostRect = host.getBoundingClientRect();
+    const strip = shown ? document.querySelector<HTMLElement>(".rail-icon-col.plugin-strip") : null;
+    const stripRect = strip && strip.offsetParent !== null ? strip.getBoundingClientRect() : null;
+    const overlaps = stripRect !== null && stripRect.width > 0
+      && stripRect.top < hostRect.bottom && stripRect.bottom > hostRect.top;
+    const clearRight = overlaps && stripRect.left > hostRect.left + hostRect.width / 2
+      ? Math.max(0, Math.round(hostRect.right - stripRect.left)) : 0;
+    const clearLeft = overlaps && stripRect.right < hostRect.left + hostRect.width / 2
+      ? Math.max(0, Math.round(stripRect.right - hostRect.left)) : 0;
+    host.style.setProperty("--split-clear-right", `${clearRight}px`);
+    host.style.setProperty("--split-clear-left", `${clearLeft}px`);
     const kind = splitTransition(was, previous.current);
     if (kind === null || motionIsReduced()) return;
     const glide = (node: HTMLElement, from: DOMRect | null, to: DOMRect | null) => {
@@ -486,7 +574,14 @@ export default function SessionSplitHost({ focused }: { focused: ReactNode }) {
         role={shown ? "region" : undefined}
         aria-label={shown ? tr("split.focusedPane") : undefined}
       >
-        {shown ? <SplitPaneHeader sessionId={activeSessionId} focused onClose={closeFocused} /> : null}
+        {shown ? (
+          <SplitPaneHeader
+            sessionId={activeSessionId}
+            focused
+            onClose={closeFocused}
+            onPopOut={activeSessionId ? () => popOutSplitSession(activeSessionId, activeProjectOfFocused, closeFocused) : undefined}
+          />
+        ) : null}
         {focused}
       </div>
       {shown && <SplitDivider hostRef={hostRef} ratio={ratio} onResizing={setResizing} />}

@@ -55,6 +55,7 @@ import { useWidgetLayout } from "../widgets/widgetLayout.ts";
 import { useRailDragZone } from "../railDrag.ts";
 import { CAPABILITY_MIME } from "../dnd.ts";
 import { isAutomaticSidebarRailApplied, useAutomaticSidebarRail, useSidebarLayout } from "../sidebarLayout.ts";
+import { useSessionSplitPresented } from "../sessionSplit.ts";
 import { useUiSettings } from "../uiPrefs.ts";
 import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
 import { RailWidgetItemView, useRailWidgetItems } from "./RailZoneWidgets.tsx";
@@ -549,7 +550,10 @@ export default function Header() {
   // choice here (rather than inside each view) prevents a surface switch from
   // bringing back the legacy compact bar.
   const windowControls = <SlotHost slot="app.window.controls" />;
-  const showSessionStatus = mode === "wide" || mode === "compact";
+  // Two chats side by side: each pane names its own chat (SessionSplitView),
+  // so the bar keeps only the overview, opened from the focused pane's title.
+  const splitPresented = useSessionSplitPresented();
+  const showSessionStatus = (mode === "wide" || mode === "compact") && !splitPresented;
 
   const barContent = (
     <>

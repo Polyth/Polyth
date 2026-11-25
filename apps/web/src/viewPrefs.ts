@@ -2,6 +2,7 @@
 // presentation state (localStorage polyth.activeView) following the
 // railPrefs.ts pattern — never session data, never appended to the event log.
 import type { AppView } from "./store.ts";
+import { isSecondaryWindow } from "./secondWindow.ts";
 
 export const ACTIVE_VIEW_KEY = "polyth.activeView";
 
@@ -23,5 +24,6 @@ export function loadActiveView(): AppView {
 }
 
 export function saveActiveView(view: AppView): void {
+  if (isSecondaryWindow()) return;
   try { localStorage.setItem(ACTIVE_VIEW_KEY, view); } catch { /* private mode / no DOM */ }
 }

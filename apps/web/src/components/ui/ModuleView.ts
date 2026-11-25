@@ -27,7 +27,7 @@ import {
   showMobileWorkspaceHome,
 } from "../../mobileWorkspaceNavigation.ts";
 import { WindowBackContext, type WindowBackSeam } from "./windowBack.ts";
-import { BackIcon, CloseIcon, CollapseIcon, DockBottomIcon, DockSideIcon, ExpandIcon, PinIcon } from "./icons.ts";
+import { BackIcon, CloseIcon, CollapseIcon, DockBottomIcon, DockSideIcon, ExpandIcon, NewWindowIcon, PinIcon } from "./icons.ts";
 
 export type ModuleViewVariant = "main" | "rail";
 export type ModuleContentMode = SurfaceContentMode;
@@ -63,6 +63,8 @@ export interface ModuleViewProps {
    *  pin toggle (which every pinnable window keeps). */
   dockActions?: readonly ModuleDockAction[];
   onToggleFullscreen?: () => void;
+  /** Show this window in a window of its own (secondWindow.ts). */
+  onOpenWindow?: () => void;
   pinned?: boolean;
   fullscreen?: boolean;
   /** Close/dismiss the module. Phone modules also get a separate Back. */
@@ -109,7 +111,7 @@ function dockIcon(edge: ModuleDockEdge): typeof DockSideIcon {
 export default function ModuleView(props: ModuleViewProps): ReactNode {
   const {
     id, surfaceId, title, description, icon, actions, tabs, headingProps, onClose, closeLabel,
-    onTogglePin, dockActions, onToggleFullscreen, pinned = false, fullscreen = false,
+    onTogglePin, dockActions, onToggleFullscreen, onOpenWindow, pinned = false, fullscreen = false,
     variant = "main", contentMode = "page", depth = 0, className, children, presented = true, dir,
   } = props;
   const shellMode = useShellMode();
@@ -233,6 +235,9 @@ export default function ModuleView(props: ModuleViewProps): ReactNode {
           dockIcon(action.edge), action.label, action.onClick, action.selected || undefined,
           "module-view-system-action module-view-dock-action", `dock-${action.edge}`,
         ))
+        : null,
+      !phone && onOpenWindow
+        ? systemAction(NewWindowIcon, tr("window.openPane"), onOpenWindow, undefined, "module-view-system-action module-view-window-action", "open-window")
         : null,
       !phone && onTogglePin
         ? systemAction(PinIcon, pinned ? tr("contextrail.unpinWindow") : "Pin window", onTogglePin, pinned, "module-view-system-action")

@@ -9,6 +9,13 @@ export const Activity: IconNode = [
   ["path", { d: "M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2", key: "169zse" }],
 ];
 
+export const AppWindow: IconNode = [
+  ["rect", { x: "2", y: "4", width: "20", height: "16", rx: "2", key: "rect-0" }],
+  ["path", { d: "M10 4v4", key: "path-1" }],
+  ["path", { d: "M2 8h20", key: "path-2" }],
+  ["path", { d: "M6 4v4", key: "path-3" }],
+];
+
 export const Archive: IconNode = [
   ["rect", { width: "20", height: "5", x: "2", y: "3", rx: "1", key: "1wp1u1" }],
   ["path", { d: "M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8", key: "1s80jp" }],
@@ -834,6 +841,11 @@ export const Pause: IconNode = [
 export const Pencil: IconNode = [
   ["path", { d: "M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z", key: "1a8usu" }],
   ["path", { d: "m15 5 4 4", key: "1mk7zo" }],
+];
+
+export const PictureInPicture2: IconNode = [
+  ["path", { d: "M21 9V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10c0 1.1.9 2 2 2h4", key: "path-0" }],
+  ["rect", { width: "10", height: "7", x: "12", y: "13", rx: "2", key: "rect-1" }],
 ];
 
 export const Pin: IconNode = [

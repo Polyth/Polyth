@@ -128,6 +128,7 @@ import {
   type HubOptions,
   type WindowOrigins,
 } from "./windowSurface.ts";
+import { secondWindowRequest, type SecondWindowRequest } from "./secondWindows.ts";
 
 declare const __POLYTH_OPENCODE_VERSION__: string;
 declare const __POLYTH_DESKTOP_FLAVOR__: string;
@@ -1463,6 +1464,75 @@ const firstWindowUrl = (): string => {
   return hubUrl(plan.connect ? { open: plan.connect } : {});
 };
 
+// A chat or a workspace window in a window of its own (apps/web
+// secondWindow.ts). It is the plain web client in a native frame: no preload,
+// so no desktop bridge (desktop IPC answers only the main window), the same
+// session and cookies, the same navigation rule. One window per chat and one
+// pane window; asking again brings it forward.
+const secondWindows = new Map<string, BrowserWindow>();
+const isSecondWindowContents = (contents: WebContents): boolean => {
+  for (const window of secondWindows.values()) {
+    if (!window.isDestroyed() && window.webContents === contents) return true;
+  }
+  return false;
+};
+const openSecondWindow = (parent: BrowserWindow, request: SecondWindowRequest): void => {
+  const existing = secondWindows.get(request.key);
+  if (existing && !existing.isDestroyed()) {
+    if (existing.webContents.getURL() !== request.url) void existing.loadURL(request.url).catch(() => {});
+    existing.show();
+    existing.focus();
+    return;
+  }
+  const bounds = parent.getBounds();
+  const child = new BrowserWindow({
+    width: 1200,
+    height: 860,
+    ...visibleSecondWindowPosition(bounds),
+    minWidth: 480,
+    minHeight: 360,
+    show: false,
+    title: "Polyth",
+    icon: appIconPath(),
+    autoHideMenuBar: true,
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#14171d" : "#ffffff",
+    webPreferences: {
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+      webSecurity: true,
+      spellcheck: !startupLowResourceMode,
+      backgroundThrottling: true,
+    },
+  });
+  child.webContents.setUserAgent(parent.webContents.getUserAgent());
+  if (process.platform !== "darwin") child.setMenuBarVisibility(false);
+  child.webContents.on("context-menu", (_event, params) => showContextMenu(child, params));
+  child.webContents.setWindowOpenHandler(({ url }) => {
+    const next = secondWindowRequest(child.webContents.getURL(), url);
+    if (next) openSecondWindow(child, next);
+    else if (safeExternalUrl(url)) void shell.openExternal(url);
+    return { action: "deny" };
+  });
+  child.webContents.on("will-navigate", (event, url) => {
+    if (navigationAllowed(child.webContents.getURL(), url, windowOrigins())) return;
+    event.preventDefault();
+    if (safeExternalUrl(url)) void shell.openExternal(url);
+  });
+  child.once("ready-to-show", () => child.show());
+  child.on("closed", () => { if (secondWindows.get(request.key) === child) secondWindows.delete(request.key); });
+  secondWindows.set(request.key, child);
+  void child.loadURL(request.url).catch((error: unknown) => log(`Could not open a second window: ${String(error)}`));
+};
+
+/** Just below and beside the window it came from, on that window's screen. */
+const visibleSecondWindowPosition = (from: { x: number; y: number; width: number; height: number }): { x: number; y: number } => {
+  const area = screen.getDisplayMatching(from).workArea;
+  const x = Math.min(from.x + 48, area.x + Math.max(0, area.width - 1200));
+  const y = Math.min(from.y + 48, area.y + Math.max(0, area.height - 860));
+  return { x: Math.max(area.x, x), y: Math.max(area.y, y) };
+};
+
 const createWindow = async (startUrl = firstWindowUrl()): Promise<void> => {
   const saved = readSavedWindowState();
   const bounds = visibleBounds(saved.bounds);
@@ -1508,7 +1578,12 @@ const createWindow = async (startUrl = firstWindowUrl()): Promise<void> => {
   // With the stall log above this tells a frozen server from a frozen page.
   window.on("unresponsive", () => log("Window page stopped responding"));
   window.on("responsive", () => log("Window page is responding again"));
-  window.webContents.setWindowOpenHandler(({ url }) => { if (safeExternalUrl(url)) void shell.openExternal(url); return { action: "deny" }; });
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    const second = secondWindowRequest(window.webContents.getURL(), url);
+    if (second) openSecondWindow(window, second);
+    else if (safeExternalUrl(url)) void shell.openExternal(url);
+    return { action: "deny" };
+  });
   window.webContents.on("will-navigate", (event, url) => {
     if (navigationAllowed(window.webContents.getURL(), url, windowOrigins())) return;
     event.preventDefault();
@@ -2253,8 +2328,11 @@ async function start(): Promise<void> {
   }
   // Only this computer's own page may call this computer's server.
   session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
-    const contents = mainWindow?.webContents;
-    const fromWindow = contents !== undefined && details.webContents === contents;
+    // A second window (a chat or pane window) is held to the main window's rule.
+    const contents = details.webContents !== undefined && (details.webContents === mainWindow?.webContents || isSecondWindowContents(details.webContents))
+      ? details.webContents
+      : undefined;
+    const fromWindow = contents !== undefined;
     callback({ cancel: fromWindow && (
       blockedFromLocalServer(details, details.frame?.url ?? contents.getURL(), windowOrigins())
       // The workstation window talks to this computer's server only: no

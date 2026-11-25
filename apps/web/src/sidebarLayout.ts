@@ -95,13 +95,18 @@ export function subscribeSidebarLayout(listener: () => void): () => void {
   return () => { listeners.delete(listener); };
 }
 
-// ---- automatic project rail (focused profiles) ---------------------------------
-// A focused workbench profile may declare `presentation.sidebarRailBelow`:
-// below that viewport width the wide shell shows the sidebar as its project
-// rail. This is presentation state only — it lives in memory, is never
-// written to SIDEBAR_LAYOUT_KEY / account settings, and the person's own
-// `collapsed` preference is untouched. Expanding the rail by hand releases the
-// automatic collapse until the condition next becomes true.
+// ---- automatic project rail ----------------------------------------------------
+// The wide sidebar may rest on its project rail by itself:
+// - "profile": a focused workbench profile declares
+//   `presentation.sidebarRailBelow`, and the viewport is below that width;
+// - "split": two chats side by side would not fit beside the full sidebar
+//   (sessionSplit.ts `splitWantsSidebarRail`), until the split closes.
+// This is presentation state only — it lives in memory, is never written to
+// SIDEBAR_LAYOUT_KEY / account settings, and the person's own `collapsed`
+// preference is untouched. Expanding the rail by hand releases the automatic
+// collapse until a source next becomes true.
+
+export type AutomaticSidebarRailSource = "profile" | "split";
 
 /** Pure: does the active profile's hint collapse the wide sidebar now? */
 export function automaticSidebarRail(input: {
@@ -117,13 +122,17 @@ export interface AutomaticSidebarRail {
   active: boolean;
   /** The person expanded the rail by hand while the condition held. */
   released: boolean;
+  /** Which sources ask for the rail now. */
+  sources: readonly AutomaticSidebarRailSource[];
 }
 
-let automatic: AutomaticSidebarRail = { active: false, released: false };
+let automatic: AutomaticSidebarRail = { active: false, released: false, sources: [] };
 const automaticListeners = new Set<() => void>();
 
 function publishAutomatic(next: AutomaticSidebarRail): void {
-  if (next.active === automatic.active && next.released === automatic.released) return;
+  if (next.active === automatic.active && next.released === automatic.released
+    && next.sources.length === automatic.sources.length
+    && next.sources.every((source) => automatic.sources.includes(source))) return;
   automatic = next;
   for (const l of [...automaticListeners]) l();
 }
@@ -132,14 +141,30 @@ export function getAutomaticSidebarRail(): AutomaticSidebarRail {
   return automatic;
 }
 
-/** App publishes the condition; a new activation clears an old release. */
+/** A source publishes its condition; a newly asking source clears an old
+ *  release, so the rail comes back when, say, a split opens. */
+export function setAutomaticSidebarRailSource(source: AutomaticSidebarRailSource, active: boolean): void {
+  const had = automatic.sources.includes(source);
+  if (had === active) return;
+  const sources = active
+    ? [...automatic.sources, source]
+    : automatic.sources.filter((candidate) => candidate !== source);
+  const nextActive = sources.length > 0;
+  publishAutomatic({
+    active: nextActive,
+    released: nextActive && !active ? automatic.released : false,
+    sources,
+  });
+}
+
+/** App publishes the profile condition. */
 export function setAutomaticSidebarRail(active: boolean): void {
-  publishAutomatic({ active, released: active ? automatic.released && automatic.active : false });
+  setAutomaticSidebarRailSource("profile", active);
 }
 
 /** Expand by hand while automatic: in memory only. */
 export function releaseAutomaticSidebarRail(): void {
-  if (automatic.active) publishAutomatic({ active: true, released: true });
+  if (automatic.active) publishAutomatic({ ...automatic, released: true });
 }
 
 /** The wide sidebar is rail-collapsed by the automatic hint right now. */

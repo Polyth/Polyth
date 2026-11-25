@@ -4906,19 +4906,72 @@ live in `apps/web/src/sessionSplit.ts` (pure, tested by
   choosing the companion moves focus; choosing another chat shows it in the
   focused place; a fresh chat keeps the companion beside it. Chats are not
   pruned from the session list (a list page holds only recent chats).
-- **Entry points.** Navigator row menu *Open in split view*, Alt-click a row,
-  drag a row onto the workspace (end half, or onto the companion to replace
-  it; `SESSION_MIME` in `dnd.ts`), `Mod+\` (*split with the previous chat*,
-  toggles), palette commands (toggle, focus the other chat, swap sides, close).
+- **Entry points.** Navigator row menu *Open in split view* (hint
+  *Alt+click*), Alt-click a row, drag a row onto the workspace (end half, or
+  onto the companion to replace it; `SESSION_MIME` in `dnd.ts`), `Mod+\`
+  (*split with the previous chat*, toggles), palette commands (toggle, focus
+  the other chat, swap sides, close).
+- **One title per pane.** While the pair is on screen the host publishes
+  `setSessionSplitPresented(true)` and the shell header drops its chat title
+  (`DesktopSessionStatus` renders only its overview); the focused pane's
+  title is the button that opens that overview. The navigator marks the
+  companion's row with a two-column glyph (`.session-place-mark`).
 - **Layout.** Presentation only, tab-scoped (`sessionStorage`); the divider
   position is a remembered preference (`localStorage`). Never on the phone
-  shell; below two 360 px panes the split rests (the focused chat fills the
-  workspace, the pair is kept). The live chat surface never remounts: the host
-  always wraps it, and places are CSS `order`.
+  shell. When the pair does not fit beside the full wide sidebar but would fit
+  with it on its rail, the split asks the sidebar to rest
+  (`splitWantsSidebarRail` → `sidebarLayout.ts` automatic source `"split"`,
+  in memory, never written to the sidebar preference) and holds that until
+  the split closes; expanding the sidebar by hand wins until the next split.
+  Below two 360 px panes otherwise the split rests (the focused chat fills
+  the workspace, the pair is kept). The live chat surface never remounts: the
+  host always wraps it, and places are CSS `order`.
+- **Into a window.** Each pane header has *Open in new window*: that chat
+  moves to a chat window (below) and the split closes around it.
 - **Motion.** Transform/opacity only, on the window clock
   (`--motion-window*`): opening FLIPs the focused chat to its place while the
   companion arrives from the end; closing leaves an exit ghost of the
   companion; swapping sides FLIPs both. Reduced motion turns it all off.
+
+#### Second windows (a chat, or a workspace window, on another screen)
+
+A chat or one workspace window can move to a browser/desktop window of its
+own, so code sits on one screen and the chats on another. Roles, addresses
+and presence live in `apps/web/src/secondWindow.ts` (pure parts tested by
+`apps/web/test/secondWindow.test.ts`); the window header and coordination are
+`components/window/SecondWindow.tsx`.
+
+- **Roles.** The same client with `?window=chat` (the chat the URL names, full
+  width; no navigator, launcher strip or status bar; a file link still opens
+  beside it) or `?window=pane&surface=<id>` (that workspace window as the
+  whole window, through `presentPaneAsWindow`: no pin, fullscreen, dock or
+  Escape transitions; closing it closes the window). The host never names a
+  package: a pane window shows whichever surface it was opened from. The URL
+  sync keeps the role (`withWindowRole`), and a reload keeps it.
+- **Entry points.** Navigator row menu *Open in new window* (hint
+  *Shift+click*), Shift-click a row, a split pane's header, and every docked
+  workspace window's *Open in new window* system action (`ModuleView`
+  `onOpenWindow`), which closes the docked pane so the chat keeps the width.
+  Not on the phone shell. A blocked pop-up says so (`window.blocked`).
+- **Header.** A chat window names the chat, then "project · branch" quietly.
+  A pane window names "project · branch", then "following ‹chat›": it follows
+  the chat of the main window focused last (`leadMainWindow`) until that text
+  is clicked to pin it. *Move back to main window* hands the content back
+  (the main window opens the chat, or reopens the pane) and closes the window;
+  it is offered only while a main window answers.
+- **Presence.** Windows of one origin announce what they show over a
+  `BroadcastChannel` (heartbeat 15 s, expiry 40 s). The main window marks a row
+  whose chat is open in a chat window (`.session-place-mark`). Presentation
+  only: no SessionEvent, no runtime.
+- **The main window's preferences stay its own.** A second window starts
+  with a copy of its opener's `sessionStorage`: it ignores a copied split, and
+  `isSecondaryWindow()` stops it writing navigation hints, restored
+  navigation, the active view, pane and workbench layout.
+- **Desktop.** The shell answers a same-origin `window.open` with a `window=`
+  role (`apps/desktop/src/secondWindows.ts`) with a native window of its own:
+  no preload (desktop IPC answers only the main window), the same session and
+  navigation rule, and the main window's local-server request guard. One
+  window per chat and one pane window; asking again brings it forward.
 
 ### 4.4 Capabilities (`host.capabilities.register`)
 

@@ -26,6 +26,7 @@ import { applySettingsToDom, loadSettings, saveSettings, type PolythSettings } f
 import { getRailPrefs, setRailLastOpen } from "./railPrefs.ts";
 import { loadActiveView, saveActiveView } from "./viewPrefs.ts";
 import { isWorkspaceSurface, listSurfaces } from "./surfaces.ts";
+import { isSecondaryWindow, windowRole } from "./secondWindow.ts";
 import { getPage, pagesVersion, subscribePages } from "./pages.ts";
 import {
   getWorkspacePanePrefs,
@@ -177,6 +178,7 @@ export interface RestoredClientNavigation {
 }
 
 function persistClientNavigation(projectId: string | null, sessionId: string | null): void {
+  if (isSecondaryWindow()) return;
   const targetScope = clientAccountPersistenceScope();
   if (!projectId) {
     removeClientRecord(RESTORED_NAVIGATION, targetScope);
@@ -194,6 +196,8 @@ function persistClientNavigation(projectId: string | null, sessionId: string | n
 
 /** Legacy browser navigation hints are optional; full/private storage must not block navigation. */
 function saveNavigationHint(key: "polyth.activeProjectId" | "polyth.activeSessionId", value: string): void {
+  // A chat or pane window must not change where the main window reopens.
+  if (isSecondaryWindow()) return;
   try { localStorage.setItem(key, value); } catch { /* quota or unavailable storage */ }
 }
 
@@ -1489,6 +1493,9 @@ function applyPaneModeTransition(
   restoreFocus = true,
 ): boolean {
   if (paneSurfaceOf(state.railPlugin) === null) return false;
+  // A pane window is the pane: it has no chat to dock beside, so Escape,
+  // pin and fullscreen leave it as it is (secondWindow.ts).
+  if (windowRole() === "pane") return false;
   const surfaceId = state.railPlugin;
   if (transition.type === "toggle-fullscreen") workbenchToggleFullscreen(surfaceId);
   else if (transition.type === "toggle-pin") workbenchTogglePin(surfaceId);
@@ -1527,6 +1534,21 @@ export function closePaneFromOutside(): void {
 /** Returns true when Escape changed mode or closed the package window. */
 export function handlePaneEscape(): boolean {
   return applyPaneModeTransition({ type: "escape" });
+}
+
+/** A pane window (secondWindow.ts) shows `surfaceId` as the whole window: the
+ *  full-screen layer, never written to the project's pane preference. False
+ *  until the surface is registered. */
+export function presentPaneAsWindow(surfaceId: string): boolean {
+  const surface = paneSurfaceOf(surfaceId);
+  if (surface === null) return false;
+  if (state.railPlugin !== surfaceId) {
+    if (!openWorkspacePane(surfaceId)) return false;
+  }
+  if (state.paneMode !== "fullscreen" || state.panePreviousMode !== "pinned") {
+    set({ paneMode: "fullscreen", panePreviousMode: "pinned" });
+  }
+  return true;
 }
 
 /** Pane-host presentation truth (never persisted as user intent). */

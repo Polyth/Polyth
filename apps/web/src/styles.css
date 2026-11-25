@@ -2194,6 +2194,17 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   color: var(--muted);
 }
 .session-shared-icon svg { width: 100%; height: 100%; }
+/* Where else the chat is on screen: beside the focused chat, or in a window
+   of its own (sessionSplit.ts, secondWindow.ts). The sharing mark's weight. */
+.session-place-mark {
+  display: inline-grid;
+  width: calc(var(--icon-sm) - 2px);
+  height: calc(var(--icon-sm) - 2px);
+  flex: none;
+  place-items: center;
+  color: var(--muted);
+}
+.session-place-mark svg { width: 100%; height: 100%; }
 /* Someone mentioned the reader: the same quiet weight as the sharing mark. */
 .session-mention-badge {
   display: inline-grid;

@@ -603,3 +603,29 @@ test("automatic sidebar rail: shell sources only publish/release it, never write
   assert.match(sidebar, /collapsed = !compact && !projectsOnly && \(layout\.collapsed \|\| automaticRail\)/);
   assert.match(header, /sidebarLayout\.collapsed \|\| sidebarAutoRail \? 46/);
 });
+
+test("automatic sidebar rail: a split and a profile ask independently; a new asker clears a release", async () => {
+  const values = new Map<string, string>();
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: {
+      getItem(key: string) { return values.get(key) ?? null; },
+      setItem(key: string, value: string) { values.set(key, value); },
+      removeItem(key: string) { values.delete(key); },
+    },
+  });
+  const layoutModule = await import(`../src/sidebarLayout.ts?rail-sources=${Date.now()}`) as typeof import("../src/sidebarLayout.ts");
+  layoutModule.setAutomaticSidebarRailSource("split", true);
+  assert.equal(layoutModule.isAutomaticSidebarRailApplied(), true, "a split that needs room rests the sidebar");
+  assert.deepEqual(layoutModule.getAutomaticSidebarRail().sources, ["split"]);
+  layoutModule.releaseAutomaticSidebarRail();
+  assert.equal(layoutModule.isAutomaticSidebarRailApplied(), false, "expanding by hand wins");
+  layoutModule.setAutomaticSidebarRailSource("profile", true);
+  assert.equal(layoutModule.isAutomaticSidebarRailApplied(), true, "a newly asking source collapses again");
+  layoutModule.setAutomaticSidebarRailSource("split", false);
+  assert.equal(layoutModule.isAutomaticSidebarRailApplied(), true, "the profile still asks");
+  layoutModule.setAutomaticSidebarRailSource("profile", false);
+  assert.equal(layoutModule.getAutomaticSidebarRail().active, false);
+  assert.equal(layoutModule.getAutomaticSidebarRail().released, false);
+  assert.equal(values.size, 0, "never written");
+});

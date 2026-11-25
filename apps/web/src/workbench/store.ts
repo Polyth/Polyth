@@ -16,6 +16,7 @@ import type {
   WorkbenchSnapshot,
 } from "@polyth/web-sdk";
 import { isWorkspaceSurface, listSurfaces, type RailSurface } from "../surfaces.ts";
+import { isSecondaryWindow } from "../secondWindow.ts";
 import {
   ANY_REGION,
   CHAT_SURFACE_ID,
@@ -235,7 +236,8 @@ function commit(prefs: WorkbenchPrefs, options: { customized?: boolean } = {}): 
   }
   if (next === runtime.prefs) return;
   runtime = { ...runtime, prefs: next };
-  if (runtime.projectId !== null) writeWorkbenchPrefs(runtime.projectId, next);
+  // A second window's layout lives in memory (secondWindow.ts).
+  if (runtime.projectId !== null && !isSecondaryWindow()) writeWorkbenchPrefs(runtime.projectId, next);
   notify();
 }
 

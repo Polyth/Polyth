@@ -51,7 +51,7 @@ import {
 import { Icon } from "../../icons.tsx";
 import UiIcon from "../ui/Icon.tsx";
 import Badge from "../ui/Badge.tsx";
-import { ArchiveIcon, ChevronRightIcon, MentionIcon, PeopleIcon, SharedIcon, ShieldAlertIcon, TimerIcon } from "../ui/icons.ts";
+import { ArchiveIcon, ChevronRightIcon, MentionIcon, NewWindowIcon, PeopleIcon, SharedIcon, ShieldAlertIcon, SplitViewIcon, TimerIcon } from "../ui/icons.ts";
 import { getLocale, tr } from "../../i18n/index.ts";
 import {
   arrangeSessions, getVisibleSessionCount, isIsolatedSession, sessionGroupsOf, setVisibleSessionCount,
@@ -61,7 +61,8 @@ import { errorFeedback, successFeedback, tapFeedback } from "../../haptics.ts";
 import { horizontalDistance, SESSION_SWIPE_REVEAL, type GesturePoint } from "../../mobileGestures.ts";
 import { useShiftArmed } from "../../useShiftArmed.ts";
 import { useShellMode } from "../../responsiveShell.ts";
-import { openSessionInSplit } from "../../sessionSplit.ts";
+import { companionSessionId, openSessionInSplit, useSessionSplit, useSessionSplitPresented } from "../../sessionSplit.ts";
+import { isSecondaryWindow, openChatWindow, useChatWindowSessions } from "../../secondWindow.ts";
 import { setDragSession } from "../../dnd.ts";
 import { beginSessionMoveDrag, canMoveSession, canMoveSessionAnywhere, endSessionMoveDrag, useCheckoutDropOver, useDraggedSession } from "../../sessionMove.ts";
 import { useInlineRename } from "../input/inlineRename.ts";
@@ -199,6 +200,17 @@ function SessionRow({
   const rowStatus = resolveSessionStatus(s, now);
   // Split view needs room for two chats; the phone shell never offers it.
   const splitAvailable = useShellMode() !== "phone" && s.id !== activeSessionId;
+  // A chat in a window of its own is a desktop/browser affordance: a phone
+  // would only open another tab of the same app.
+  const windowAvailable = useShellMode() !== "phone" && !isSecondaryWindow();
+  // Where else this chat is on screen: beside the focused chat, or in a
+  // window of its own (secondWindow.ts presence).
+  const splitCompanion = companionSessionId(useSessionSplit());
+  const besideMark = useSessionSplitPresented() && splitCompanion === s.id;
+  const windowMark = useChatWindowSessions().has(s.id);
+  const openInWindow = () => {
+    if (!openChatWindow(s.id, s.projectId ?? null)) setUiError(tr("window.blocked"));
+  };
   // Dragging a row is a mouse gesture; touch keeps its long-press menu.
   const rowDragPointer = useShellMode() !== "phone"
     && typeof matchMedia === "function" && matchMedia("(pointer: fine)").matches;
@@ -423,6 +435,13 @@ function SessionRow({
       id: "split",
       label: tr("split.openBeside"),
       onSelect: () => { prefetchSessionTail(s.id); openSessionInSplit(s.id); },
+      ...(rowDragPointer ? { detail: tr("split.altClickHint") } : {}),
+    } satisfies MenuEntry] : []),
+    ...(windowAvailable ? [{
+      id: "new-window",
+      label: tr("window.openChat"),
+      onSelect: openInWindow,
+      ...(rowDragPointer ? { detail: tr("window.shiftClickHint") } : {}),
     } satisfies MenuEntry] : []),
     ...(movable ? [{
       id: "move",
@@ -539,7 +558,13 @@ function SessionRow({
                 onToggleSelect(s.id);
                 return;
               }
-              // Alt-click shows the chat beside the open one instead.
+              // Shift-click opens the chat in a window of its own, as a
+              // browser opens a link; Alt-click shows it beside the open one.
+              if (event.shiftKey && windowAvailable) {
+                event.preventDefault();
+                openInWindow();
+                return;
+              }
               if (event.altKey && splitAvailable) {
                 event.preventDefault();
                 prefetchSessionTail(s.id);
@@ -625,6 +650,16 @@ function SessionRow({
               <RepositoryMark id={repositoryMarkId} repositories={repositoryMark.repositories} active={repositoryMark.active} />
             )}
             {!conversation && <ElapsedBadge status={rowStatus} />}
+            {besideMark && (
+              <span className="session-place-mark" role="img" title={tr("split.markBeside")} aria-label={tr("split.markBeside")}>
+                <UiIcon icon={SplitViewIcon} size="sm" />
+              </span>
+            )}
+            {windowMark && (
+              <span className="session-place-mark" role="img" title={tr("window.markOpen")} aria-label={tr("window.markOpen")}>
+                <UiIcon icon={NewWindowIcon} size="sm" />
+              </span>
+            )}
             {draftMark && <span aria-hidden="true" className="session-draft-slot"><Badge tone="accent" className="session-draft-mark">{draftLabel}</Badge></span>}
             <span className="session-identity">
               <SlotHost

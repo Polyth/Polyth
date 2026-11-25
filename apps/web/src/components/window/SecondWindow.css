@@ -1,0 +1,81 @@
+/* Second windows (secondWindow.ts): a chat or one workspace window in a
+   window of its own. One quiet bar names what the window works on; the rest
+   of the shell chrome (navigator, rails, status bar) stays in the main window. */
+
+.second-window-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-block-size: 44px;
+  padding-inline: var(--space-4) var(--space-2);
+  border-block-end: 1px solid var(--border-soft);
+  background: var(--material-glass, var(--bg));
+  color: var(--text);
+  font-size: var(--font-label);
+  flex: none;
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+.second-window-header :is(button, a, [role="button"]) {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.second-window-heading {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-inline-size: 0;
+}
+.second-window-title {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+.second-window-quiet,
+.second-window-follow {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+}
+
+/* "following ‹chat›" is plain text that pins on a click, not a chip. */
+.second-window-follow {
+  appearance: none;
+  border: 0;
+  margin: 0;
+  padding: 2px var(--space-1);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+.second-window-follow:hover { background: var(--surface-overlay-hover); color: var(--text); }
+.second-window-follow[aria-pressed="true"] { color: var(--text); }
+.second-window-follow:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+
+.second-window-status {
+  flex: none;
+  align-self: center;
+  inline-size: 7px;
+  block-size: 7px;
+  border-radius: var(--radius-circle);
+  background: color-mix(in srgb, var(--text-dim) 45%, transparent);
+}
+.second-window-status:is([data-kind="working"], [data-kind="reconciling"], [data-kind="epoch-pending"]) { background: var(--accent); }
+.second-window-status:is([data-kind="needs-approval"], [data-kind="needs-reply"], [data-kind="rate-limited"], [data-kind="resume-ready"]) { background: var(--amber); }
+.second-window-status[data-kind="failed"] { background: var(--red); }
+
+.second-window-spacer { flex: 1 1 auto; }
+
+/* A pane window is its pane: no chat to dock beside, no strip of launchers. */
+.app[data-window-role="pane"] .rail-fullscreen { inset-inline-end: 0; }
+.app[data-window-role] .rail-icon-col.plugin-strip { display: none; }
+.app[data-window-role] .rail-fullscreen { inset-inline-end: 0; }
+.app[data-window-role="pane"] .module-view-system-action { display: none; }

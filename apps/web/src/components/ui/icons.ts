@@ -15,6 +15,7 @@ import * as nodes from "./iconNodes.ts";
 // alias list preserves the extra legacy classes Lucide emits for renamed icons.
 const Activity = createIcon("activity", nodes.Activity);
 const Archive = createIcon("archive", nodes.Archive);
+const AppWindow = createIcon("app-window", nodes.AppWindow);
 const ArchiveRestore = createIcon("archive-restore", nodes.ArchiveRestore);
 const ArrowDown = createIcon("arrow-down", nodes.ArrowDown);
 const ArrowDownToLine = createIcon("arrow-down-to-line", nodes.ArrowDownToLine);
@@ -143,6 +144,7 @@ const PanelRight = createIcon("panel-right", nodes.PanelRight);
 const Paperclip = createIcon("paperclip", nodes.Paperclip);
 const Pause = createIcon("pause", nodes.Pause);
 const Pencil = createIcon("pencil", nodes.Pencil);
+const PictureInPicture2 = createIcon("picture-in-picture-2", nodes.PictureInPicture2);
 const Pin = createIcon("pin", nodes.Pin);
 const Pipette = createIcon("pipette", nodes.Pipette);
 const Play = createIcon("play", nodes.Play);
@@ -391,6 +393,10 @@ export {
   SlidersHorizontal as ViewOptionsIcon,
   WrapText as WrapIcon,
   Columns2 as SplitViewIcon,
+  // A chat or the code in a window of its own, and the way back into the
+  // main window (secondWindow.ts).
+  AppWindow as NewWindowIcon,
+  PictureInPicture2 as ReturnToWindowIcon,
   Rows2 as UnifiedViewIcon,
   Workflow as WorkflowIcon,
   User as SessionIcon,

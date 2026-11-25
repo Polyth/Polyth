@@ -25,8 +25,9 @@ import { isImeComposing } from "./input/editorCore.ts";
 import {
   closeAllModules, closePaneFromOutside, closeWorkspacePane, handlePaneEscape, setPaneFullscreen,
   togglePaneFullscreen, togglePanePin,
-  getState, setRailPlugin, setSidebarOpen, toggleRailPlugin, useActiveModel, useStore, workspaceProjectId,
+  getState, setRailPlugin, setSidebarOpen, setUiError, toggleRailPlugin, useActiveModel, useStore, workspaceProjectId,
 } from "../store.ts";
+import { openPaneWindow, windowRole } from "../secondWindow.ts";
 import { useGitStatus } from "../../../../packages/git/widgets/gitStatusStore.ts";
 import { gitChangedFiles } from "../pendingChanges.ts";
 import {
@@ -109,6 +110,17 @@ const BOTTOM_DOCK_CHAT_FLOOR = 240;
  * under it. */
 
 // Small count badge on strip buttons.
+/** Move the open workspace window into a window of its own; the chat keeps
+ *  the main window's width (secondWindow.ts). */
+function popOutPane(surfaceId: string): void {
+  const state = getState();
+  if (!openPaneWindow(workspaceProjectId(state), state.activeSessionId, surfaceId)) {
+    setUiError(tr("window.blocked"));
+    return;
+  }
+  closeWorkspacePane({ restoreFocus: false });
+}
+
 function Badge({ n }: { n: number }) {
   if (n <= 0) return null;
   return <span className="strip-badge">{n > 9 ? "9+" : n}</span>;
@@ -1282,6 +1294,8 @@ export default function ContextRail() {
 
   const paneSurface = open ?? exitPaneMotion?.surface ?? null;
   const paneWorkspace = open !== null ? isWorkspacePane : exitPaneMotion?.isWorkspacePane ?? false;
+  // This whole window is the pane (secondWindow.ts): no pin, no fullscreen.
+  const paneWindow = windowRole() === "pane";
   const paneCompactContext = open !== null ? compactContext : exitPaneMotion?.compactContext ?? false;
   const paneDynamic = open !== null ? dynamic : exitPaneMotion?.dynamic ?? false;
   const panePinned = open !== null ? pinned : exitPaneMotion?.pinned ?? false;
@@ -1473,11 +1487,17 @@ export default function ContextRail() {
             pinned={panePinned}
             fullscreen={paneLayered}
             dockActions={renderedDockActions}
-            onTogglePin={paneWorkspace && !compact && !homePane ? togglePanePin : undefined}
-            onToggleFullscreen={paneWorkspace && !compact && !homePane ? togglePaneFullscreen : undefined}
+            onTogglePin={paneWorkspace && !compact && !homePane && !paneWindow ? togglePanePin : undefined}
+            onToggleFullscreen={paneWorkspace && !compact && !homePane && !paneWindow ? togglePaneFullscreen : undefined}
+            onOpenWindow={paneWorkspace && !compact && !homePane && !paneWindow && windowRole() === "main" && paneSurface
+              ? () => popOutPane(paneSurface.id)
+              : undefined}
             presented={open !== null}
+            {...(paneWindow ? { closeLabel: tr("window.close") } : {})}
             onClose={() => {
-              if (isWorkspacePane) closeWorkspacePane();
+              // A pane window is this pane: closing it closes the window.
+              if (paneWindow) window.close();
+              else if (isWorkspacePane) closeWorkspacePane();
               else if (compact) closeAllModules();
               else setRailPlugin(null);
             }}

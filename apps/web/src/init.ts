@@ -9,6 +9,7 @@ import { loadSpaces } from "./spaces.ts";
 import { displaySessionTitle, isPlaceholderTitle, modelToMarkdown } from "./format.ts";
 import { friendlyError } from "./settings.ts";
 import { formatAppUrl, PACKAGES_LINK_PARAMS, packagesLinkFromSearch, parseAppUrl, settingsPageFromSearch } from "./router.ts";
+import { isSecondaryWindow, withWindowRole } from "./secondWindow.ts";
 import { requestPackageInstall } from "./packages/installRequest.ts";
 import * as store from "./store.ts";
 import { successFeedback, warningFeedback } from "./haptics.ts";
@@ -744,8 +745,13 @@ const historyDepth = (): number => {
  *  URL already matches — popstate navigation never double-pushes. */
 function syncUrl(replace: boolean): void {
   const s = store.getState();
-  const target = formatAppUrl(s.activeProjectId, s.activeSessionId);
-  if (location.pathname === target && !location.search.includes("session=")) return;
+  // A second window keeps its role in the address, so a reload stays a chat
+  // or pane window (secondWindow.ts); its moves never stack history.
+  const secondary = isSecondaryWindow();
+  const target = withWindowRole(formatAppUrl(s.activeProjectId, s.activeSessionId));
+  if (secondary ? `${location.pathname}${location.search}` === target
+    : location.pathname === target && !location.search.includes("session=")) return;
+  if (secondary) replace = true;
   if (replace) history.replaceState({ polyth: true, depth: historyDepth() } satisfies PolythHistoryState, "", target);
   else history.pushState({ polyth: true, depth: historyDepth() + 1 } satisfies PolythHistoryState, "", target);
   if (s.activeSessionId) markSessionPerformance("route_committed", s.activeSessionId);
