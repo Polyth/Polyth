@@ -16,6 +16,7 @@ import {
 import {claudeAuthFingerprint, claudeModelDescriptors, discoverClaudeModels, invalidateClaudeModelCache, peekClaudeModels, CLAUDE_ULTRACODE_VARIANT} from "./discovery.ts";
 import { claudeOverlays, removeClaudeMcpConfigFiles, writeClaudeMcpConfigFile } from "./provisioner.ts";
 import type { RemoteHandsSession } from "./remoteHands.ts";
+import { DISABLE_AUTO_MEMORY_ENV } from "./nativeMemory.ts";
 import { CLAUDE_QUESTION_DISMISSED, CLAUDE_QUESTION_TOOL, CLAUDE_QUESTION_UNREADABLE, claudeQuestionAnswers, claudeQuestionItems, parseClaudeQuestions, type ClaudeQuestion } from "./questions.ts";
 
 /** How many unadmitted model events may pass before the native loop is
@@ -33,9 +34,11 @@ const NATIVE_SCHEDULING_TOOLS = ["ScheduleWakeup", "CronCreate", "CronDelete", "
  *  (Opus/Sonnet 5.x, Fable) unless this is set. Polyth renders those native
  *  todos in the timeline, status and island, and its todo rule names them, so
  *  without the opt-in the agent has to ToolSearch for the deferred
- *  `polyth_todo` MCP tool first. An operator's explicit value wins. */
-export function claudeChildEnv(env: Record<string, string | undefined>): Record<string, string | undefined> {
-    return env.CLAUDE_CODE_ENABLE_TODO_TOOLS === undefined ? { ...env, CLAUDE_CODE_ENABLE_TODO_TOOLS: "true" } : env;
+ *  `polyth_todo` MCP tool first. An operator's explicit value wins.
+ *  Where Polyth memory replaces Claude Code's own, its memory files go off. */
+export function claudeChildEnv(env: Record<string, string | undefined>, preferences?: Pick<ClaudeLaunchPreferences, "nativeMemory">): Record<string, string | undefined> {
+    const todos = env.CLAUDE_CODE_ENABLE_TODO_TOOLS === undefined ? { ...env, CLAUDE_CODE_ENABLE_TODO_TOOLS: "true" } : env;
+    return preferences?.nativeMemory === false ? { ...todos, [DISABLE_AUTO_MEMORY_ENV]: "1" } : todos;
 }
 /** A `/compact` reports its outcome in a status message; the CLI's closing
  *  `result` normally follows at once. Stop waiting for it after this long. */
@@ -303,6 +306,9 @@ export interface ClaudeLaunchPreferences {
     inheritSkills: boolean;
     /** Inherited skills that stay hidden from the model and the slash menu. */
     mutedSkills: readonly string[];
+    /** false when Polyth memory replaces Claude Code's own memory files in this
+     *  project: the CLI then neither reads nor writes them. */
+    nativeMemory?: boolean;
 }
 export const DEFAULT_CLAUDE_LAUNCH_PREFERENCES: ClaudeLaunchPreferences = { promptSuggestions: true, inheritSkills: false, mutedSkills: [] };
 
@@ -761,7 +767,7 @@ export async function createClaudeRuntime(context: HarnessContext, sdk: Sdk, aut
                     promptSuggestions: preferences.promptSuggestions,
                     spawnClaudeCodeProcess(options) {
                         const args = protectClaudeMcpConfigArgs(context, options.args, protectedMcpConfigFiles);
-                        const child = authority.spawn(options.command, args, { cwd: options.cwd, env: claudeChildEnv(options.env), signal: options.signal });
+                        const child = authority.spawn(options.command, args, { cwd: options.cwd, env: claudeChildEnv(options.env, preferences), signal: options.signal });
                         // Drained as before; only a bounded tail is kept.
                         child.stderr!.on("data", (chunk: Buffer | string) => {
                             stderrTail = (stderrTail + String(chunk)).slice(-STDERR_TAIL_CHARS);

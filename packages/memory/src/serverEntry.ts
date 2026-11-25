@@ -1,4 +1,4 @@
-import type { Disposable } from "@polyth/contracts";
+import type { Disposable, NativeHarnessMemory } from "@polyth/contracts";
 import {
   SERVER_ACCOUNT_REMOVAL_BUS,
   SERVER_PERSON_DATA_VOLUME,
@@ -8,7 +8,7 @@ import {
   type ServerPackageHost,
 } from "@polyth/plugins";
 import { JUDGMENT_SERVICE } from "@polyth/judgment/server";
-import { createMemoryRuntimeService, createMemoryService, erasePersonMemory, openEverySpace, personMemoryBytes, memoryRoutes, registerMemoryTool, type ScopedMemorySource } from "./service.ts";
+import { createMemoryRuntimeService, createMemoryService, createNativeHarnessMemory, erasePersonMemory, openEverySpace, personMemoryBytes, memoryRoutes, registerMemoryTool, type ScopedMemorySource } from "./service.ts";
 import { createSpaceMemoryStores } from "./spaceStore.ts";
 import { REFLECT_DURABILITY_DESCRIPTOR, unregisterReflectDurability } from "./reflectService.ts";
 
@@ -22,6 +22,8 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   const service = createMemoryService(host, source);
   host.services.provide(serverServiceKey("memory"), service);
   host.services.provide(serverServiceKey("memory.runtime"), createMemoryRuntimeService(host, service));
+  let enabled = false;
+  host.services.provide(serverServiceKey<NativeHarnessMemory>("memory.native-harness"), createNativeHarnessMemory(host, service, () => enabled));
   let tool: Disposable | undefined;
   let completion: Disposable | undefined;
   let accountRemoval: Disposable | undefined;
@@ -32,6 +34,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     remoteAccess: { routeScopes: ["memory"], http: [] },
     routes: memoryRoutes(host, service),
     onEnable() {
+      enabled = true;
       tool = registerMemoryTool(host, service);
       const judgment = host.services?.get ? host.services.get(JUDGMENT_SERVICE) : undefined;
       if (judgment) {
@@ -57,6 +60,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       void openEverySpace(host, service);
     },
     async onDisable() {
+      enabled = false;
       unregisterUse?.();
       unregisterUse = undefined;
       unregisterReflectDurability();

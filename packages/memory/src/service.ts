@@ -5,6 +5,7 @@ import type {
   AgentToolAuthorizationGrant,
   Disposable,
   JsonObject,
+  NativeHarnessMemory,
   RouteHandler,
   SessionEvent,
   SpaceContext,
@@ -26,7 +27,7 @@ import type {
   MemoryListItemDto,
 } from "./contracts.ts";
 import { excludedByPolicy as excludedRecord, type MemoryHarvestRecordInput, type MemoryStore } from "./store.ts";
-import { harvestSegments, parseHarvestExtraction, sanitizeHarvestText, type HarvestCandidate } from "./extraction.ts";
+import { harvestSegments, parseHarvestExtraction, redact, sanitizeHarvestText, type HarvestCandidate } from "./extraction.ts";
 import { createReflectController, personOf, reflectRoutes, type ReflectController } from "./reflectService.ts";
 
 export interface ScopedMemorySource {
@@ -575,6 +576,51 @@ export function createMemoryService(host: ServerPackageHost, source: ScopedMemor
   service.harvest = new HarvestController(host, service);
   service.reflect = createReflectController(host, service);
   return service;
+}
+
+/** A harness's own memory note type, as the closest Polyth category. */
+const nativeCategory = (type: string | undefined): MemoryCreateInput["category"] => type === "feedback" ? "convention" : "observation";
+
+/** Polyth memory in Automatic mode replaces a harness's own memory files: the
+ * backend turns them off and hands their notes over here once. */
+export function createNativeHarnessMemory(host: ServerPackageHost, service: MemoryService, enabled: () => boolean): NativeHarnessMemory {
+  return {
+    async replaces({ spaceId, projectId }) {
+      if (!enabled()) return false;
+      try {
+        const { store, scope } = await service.scope(host.systemSpaceContext(spaceId), projectId);
+        return store.getPolicy(scope).mode === "auto";
+      } catch {
+        return false;
+      }
+    },
+    async adopt({ spaceId, projectId, sessionId, harness, notes }) {
+      const { store, scope, writeTo, personal } = await service.chatAccess(host.systemSpaceContext(spaceId), projectId, sessionId);
+      if (store.getPolicy(scope).mode !== "auto") return { imported: 0, deferred: true };
+      // The files are the host operator's, the Space owner on a local Polyth:
+      // only a chat private to them takes them, never one others read.
+      if (!personal) return { imported: 0, deferred: true };
+      const reader = host.personSpaceContext?.(personal.userId, spaceId);
+      if (host.personSpaceContext && reader?.role !== "owner") return { imported: 0, deferred: true };
+      let imported = 0;
+      for (const note of notes) {
+        const title = redact(note.title).trim().slice(0, 160);
+        const body = redact(note.body).trim();
+        if (!title || !body) continue;
+        // Keyed by content: a note forgotten in Polyth never comes back, and a
+        // file edited later arrives as a new note.
+        // ponytail: an edited file leaves its older import active; supersede it if that piles up.
+        const key = `native-memory:${createHash("sha256").update(JSON.stringify([harness, note.file, title, body])).digest("hex")}`;
+        const receipt = store.create(scope, {
+          projectId: scope.projectId, title, body, category: nativeCategory(note.type), tags: [`${harness}-memory`],
+          sources: [{ kind: "document", document: `${harness} memory: ${note.file}` }],
+          lifecycle: "active", evidence: "source-observed", idempotencyKey: key, requestFingerprint: key,
+        }, { placement: writeTo, authoredBy: { kind: "system", via: "import" } });
+        if (receipt.status !== "duplicate") imported++;
+      }
+      return { imported };
+    },
+  };
 }
 
 export function createMemoryRuntimeService(host: ServerPackageHost, service: MemoryService): MemoryRuntimeService {

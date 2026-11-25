@@ -144,6 +144,26 @@ goes (not a separate memory MCP server such as MemPalace), search before answeri
 about earlier work, save settled facts with `memory_remember`, and use
 `memory_search_projects` for other projects.
 
+**Harness memory files.** While a project's memory is Automatic (and the
+package is enabled), Polyth memory replaces Claude Code's own auto-memory
+(`<config dir>/projects/<project path>/memory/*.md`). The memory package
+provides the host service `memory.native-harness` (`NativeHarnessMemory` in
+contracts); backend-claude asks it at every launch and, when it replaces native
+memory, starts the CLI with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, so Claude Code
+neither reads nor writes those files. Before that launch, on a local
+single-operator Polyth, backend-claude reads the project's memory directory
+(the project path, so worktrees and isolates share it; plain `.md` files only,
+`MEMORY.md` and links skipped, each account's own config dir) and hands the
+notes to `adopt`. They are saved as active notes where the chat's own saves go
+(the person's notes in a shared project, the project memory for someone working
+alone), only from a chat private to the Space owner, because the host's files
+are the operator's; any other launch saves nothing and the next one tries
+again. Each note is keyed by its content, so a launch adds nothing new and a
+note forgotten in Polyth never returns; an edited file arrives as a new note.
+The files are never changed: switching project memory to read-only or off
+gives Claude Code its own memory back. Remote (SSH) Claude launches import
+nothing, and whether the switch reaches a remote CLI is unverified.
+
 Every harness (Claude, Codex, OpenCode, Pi, Antigravity, Command Code and the
 ACP family: Cursor, Grok, omp, fx) receives the memory tools through the same
 `polyth-agent-tools` MCP bridge. The Space and project come from the harness
