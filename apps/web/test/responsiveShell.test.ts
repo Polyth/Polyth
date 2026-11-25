@@ -265,7 +265,7 @@ test("composer active-run controls and mobile actions stay direct", async () => 
   assert.ok(composer.includes('tr("composer.sendNow")'), "active options expose immediate delivery");
   // The primary segment follows the configured follow-up mode (its glyph
   // shows queue vs send); immediate delivery is the explicit menu entry.
-  assert.ok(composer.includes("onClick={onPrimaryClick}"), "the primary segment uses the configured delivery");
+  assert.ok(/className=\{`send composer-delivery[\s\S]{0,120}?ref=\{sendPressRef\}/.test(composer) && composer.includes("onSend: () => sendRef.current?.()"), "the primary segment uses the configured delivery");
   assert.match(composer, /id: "send-now",[\s\S]*?onSelect: \(\) => send\(undefined, "interrupt"\)/, "Send now interrupts explicitly");
   assert.ok(composer.includes('id: "stop"'), "active options expose stop");
   assert.ok(composer.includes("composer-stop-primary"), "active sends become a primary stop control");

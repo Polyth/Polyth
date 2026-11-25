@@ -30,6 +30,7 @@ import {
 } from "./chatSettingsModel.ts";
 import MessageActionsEditor, { useMessageActionRows } from "./MessageActionsEditor.tsx";
 import SendHoldField from "./SendHoldField.tsx";
+import SendDiagnosticsButton from "./SendDiagnosticsButton.tsx";
 import { blocksOnDevice, onDevice, OtherDevicesSection, useSettingsDevice, type DeviceBlock, type SettingsDevice } from "./OtherDevicesSection.tsx";
 import { DisclosureRow, ItemList, NumberField, ResetLink, Row, Section, Seg, Toggle } from "./parts.tsx";
 import "./ShellLookPicker.css";
@@ -656,6 +657,12 @@ export function ChatPage({ settingsTarget }: { settingsTarget?: SettingsNavigati
                     />
                   </Row>
                 )}
+                {/* Temporary (2026-11-25), until the phone Send report is
+                    closed: remove this row, or move it to a debug menu once
+                    the app has one (docs/dev/ui.md, "The Send press"). */}
+                <Row label={tr("settings.chatPage.sendDiagnostics")} hint={tr("settings.chatPage.sendDiagnosticsHint")} itemId="chat.sendDiagnostics">
+                  <SendDiagnosticsButton />
+                </Row>
               </DisclosureRow>
               <DisclosureRow
                 {...rowProps("followUp")}

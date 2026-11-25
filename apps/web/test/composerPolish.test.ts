@@ -119,93 +119,32 @@ test("the primary action is terminal and draft engagement survives blur", async 
   );
 });
 
-test("keyboard-open primary taps keep the send slot stable through click", async () => {
+test("both primary send variants hand their press to the one Send controller", async () => {
   const composer = await read("../src/components/Composer.tsx");
   const send = composer.indexOf('className="send"');
   const runningPrimary = composer.indexOf("className={`send composer-delivery");
   assert.ok(send > -1 && runningPrimary > -1, "both primary send variants remain present");
   const sendBlock = composer.slice(send, composer.indexOf("</button>", send));
   const queueBlock = composer.slice(runningPrimary, composer.indexOf("</button>", runningPrimary));
-  assert.match(
-    sendBlock,
-    /onPointerDown=\{onPrimaryPointerDown\}[\s\S]*?onClick=\{onPrimaryClick\}/,
-    "idle Send admits the primary pointer lifecycle before click dispatches",
-  );
-  assert.match(
-    queueBlock,
-    /onPointerDown=\{onPrimaryPointerDown\}[\s\S]*?onKeyDown=\{onPrimaryKeyDown\}[\s\S]*?onClick=\{onPrimaryClick\}/,
-    "active-run delivery uses the same first-touch admission as idle Send",
-  );
+  assert.match(sendBlock, /ref=\{sendPressRef\}/, "idle Send is driven by the press controller");
+  assert.match(queueBlock, /ref=\{sendPressRef\}/, "active-run delivery uses the same controller as idle Send");
+  for (const block of [sendBlock, queueBlock]) {
+    assert.doesNotMatch(block, /onPointer(Down|Up|Cancel|Leave)=|onTouch(Start|End)=|onKeyDown=|onClick=/,
+      "the button handles no press event itself: the controller listens, and the platform's click is its own");
+  }
 });
 
-test("mobile primary touch activation survives keyboard dismissal without a duplicate click", async () => {
+test("Send keeps the keyboard and cancels no platform event, so a touch click is the press's own", async () => {
   const composer = await read("../src/components/Composer.tsx");
   assert.match(
     composer,
-    /onPointerDown=\{onPrimaryPointerDown\} onPointerUp=\{onPrimaryPointerUp\}[\s\S]*?onKeyDown=\{onPrimaryKeyDown\} onClick=\{onPrimaryClick\}/,
-    "the primary Send slot owns the whole touch gesture (down, up, cancel)",
+    /return attachSendPress\(button, \{[\s\S]*?holdMs: \(\) => \(canParkRef\.current\(\) \? sendHoldRef\.current : 0\),[\s\S]*?onSend: \(\) => sendRef\.current\?\.\(\),[\s\S]*?onDraft: keepHeldDraft,[\s\S]*?onCue: showHoldCue,[\s\S]*?onCueDropped: dropHoldCue,/,
+    "a press sends, keeps a draft or cues through the controller's handlers",
   );
-  assert.match(
-    composer,
-    /activation\.touch = true;[\s\S]*?event\.preventDefault\(\);\n    watchTouchEnd\(event\.currentTarget, event\.pointerId\);\n    startHold\(event\);/,
-    "touch pointerdown keeps focus on the editor, watches for the touch's end anywhere, and arms the save-as-draft hold",
-  );
-  // A touch release is settled in one place, whether Send's own pointerup or
-  // the touch's end elsewhere on the page reached it (`watchTouchEnd`).
-  const touchRelease = composer.slice(composer.indexOf("const finishTouchPress"), composer.indexOf("const cancelTouchPress"));
-  // What counts as "on Send" is composer/sendRelease.ts, measured with real
-  // touches in composerSendTouchTarget.test.ts.
-  assert.match(touchRelease, /if \(held\) return;[\s\S]*?if \(releaseSends\(\{[\s\S]*?\}\)\) sendRef\.current\?\.\(\);/,
-    "a touch released on Send before the hold completes sends; one slid off does not");
-  const pointerDown = composer.slice(composer.indexOf("const onPrimaryPointerDown"), composer.indexOf("const onPrimaryKeyDown"));
-  assert.doesNotMatch(pointerDown, /\.blur\(\)/, "Send keeps the software keyboard open for the next message");
-  assert.match(
-    composer,
-    /if \(activation\.touch && !keyboardClick\) \{[\s\S]*?activation\.touch = false;[\s\S]*?return;[\s\S]*?\}\n    activation\.touch = false;[\s\S]*?send\(\);/,
-    "the delayed click from the same touch is consumed exactly once",
-  );
-  assert.match(
-    composer,
-    /if \(event\.pointerType !== "touch" && event\.pointerType !== "pen"\) \{[\s\S]*?return;/,
-    "desktop mouse and keyboard activation remain on the existing click path",
-  );
-  assert.match(
-    composer,
-    /activation\.staleTouchClick = activation\.touch;[\s\S]*?activation\.touch = false;[\s\S]*?activation\.keyboard = true;/,
-    "a legitimate keyboard activation disarms a touch whose synthetic click was suppressed",
-  );
-  assert.match(composer, /const keyboardClick = event\.detail === 0;/,
-    "keyboard clicks are distinguished from pointer clicks at the click boundary",
-  );
-  const activation = composer.slice(composer.indexOf("const onPrimaryKeyDown"), composer.indexOf("const retryFailedSend"));
-  assert.doesNotMatch(activation, /Date\.now|setTimeout/,
-    "touch/click pairing is event-lifecycle based rather than timeout based",
-  );
-
-  // Causal state-machine proof for the two edge cases: a suppressed touch
-  // click must not poison the next keyboard activation, while a delayed click
-  // from the original touch must still be consumed as its duplicate.
-  let armed = false;
-  let staleTouchClick = false;
-  let sends = 0;
-  const touchDown = () => { armed = true; sends++; }; // down + up before the hold
-  const keyboardDown = () => { staleTouchClick = armed; armed = false; };
-  const click = (detail: number) => {
-    const keyboardClick = detail === 0;
-    if (staleTouchClick && !keyboardClick) { staleTouchClick = false; return; }
-    if (armed && !keyboardClick) { armed = false; return; }
-    armed = false;
-    sends++;
-  };
-  touchDown();
-  keyboardDown();
-  click(0);
-  assert.equal(sends, 2, "suppressed touch click does not swallow a later keyboard send");
-  click(1);
-  assert.equal(sends, 2, "a delayed click from the earlier touch is consumed after keyboard activation");
-  touchDown();
-  click(1);
-  assert.equal(sends, 3, "the delayed synthetic click is consumed without a duplicate send");
+  const wiring = composer.slice(composer.indexOf("const sendPressRef"), composer.indexOf("const sendPressRef") + 600);
+  assert.doesNotMatch(wiring, /preventDefault|\.blur\(\)/, "Send keeps the software keyboard open for the next message");
+  assert.doesNotMatch(composer, /ownPrimaryTouch|activation\.touch|staleTouchClick|primaryActivationRef|holdSpentRef/,
+    "no touch/click pairing flags remain: the controller swallows only a spent press's trailing click");
 });
 
 test("thinking effort is offered beside the model and labelled by the picker", async () => {
@@ -284,7 +223,7 @@ test("a running turn uses a split only for sendable drafts and keeps Stop standa
     split.indexOf("className={`send composer-delivery") < split.indexOf('className="composer-send-options"'),
     "the running primary precedes the chevron",
   );
-  assert.match(split, /onClick=\{onPrimaryClick\}/, "the primary action follows the configured delivery setting");
+  assert.match(split, /ref=\{sendPressRef\}/, "the primary action is the Send controller's, which delivers per the configured setting");
   assert.match(composer, /followUp === "queue"[\s\S]*?tr\("composer\.queue"\)/, "the queue preference names the primary action Queue");
   assert.doesNotMatch(split, /onClick=\{\(\) => send\(undefined, queueEdit \? undefined : "interrupt"\)\}/, "the primary action cannot silently interrupt a queued follow-up");
   assert.match(split, /id: "send-now"/, "Send now is available in the draft menu");

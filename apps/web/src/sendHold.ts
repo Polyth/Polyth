@@ -8,7 +8,7 @@
 // the hold or longer keeps a draft (`sendPressOutcome`), measured between the
 // input's own time stamps (`inputTime`). Only a press the person abandons — a
 // finger slid off Send — does neither. The press itself, its ring and its
-// cue live in `composer/sendHoldPress.ts`.
+// cue live in `composer/sendPress.ts`.
 
 /** Shortest hold that is still visibly deliberate. */
 export const SEND_HOLD_MIN_MS = 250;

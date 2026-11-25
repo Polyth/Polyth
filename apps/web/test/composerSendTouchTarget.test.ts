@@ -98,21 +98,35 @@ async function fixture(): Promise<string> {
       // What became of a touch on Send once the page's own handlers had run:
       // whether it was withheld from the platform, and whether a click followed.
       window.__touchStarts = [];
+      window.__touchEnds = [];
       window.__sendClicks = 0;
       window.addEventListener("touchstart", (event) => {
         if (event.target.closest?.("button.send")) window.__touchStarts.push(event.defaultPrevented);
       });
+      window.addEventListener("touchend", (event) => {
+        if (event.target.closest?.("button.send")) window.__touchEnds.push(event.defaultPrevented);
+      });
+      window.__anyClicks = [];
       window.addEventListener("click", (event) => {
+        window.__anyClicks.push(event.target.closest?.("button") ? event.target.closest("button").className : String(event.target.className || event.target.nodeName));
         if (event.target.closest?.("button.send")) window.__sendClicks += 1;
       }, true);
       // A lift that never reaches Send (seen on the iPhone app: Send left on
-      // its check, the message unsent). "send": Send's own pointerup handler
-      // never hears it, the page still does. "page": no pointerup at all,
-      // only the touch's touchend arrives.
+      // its check, the message unsent). These listeners sit on the window in
+      // the capture phase and are registered before the page's bundle, so
+      // they run before the press controller's own window capture listeners
+      // and can hide an event from it. "send": the controller still hears
+      // everything (the lift is only stopped past the document).
+      // "pointerup": no pointerup, the touchend and click arrive. "lift": no
+      // pointerup and no touchend, only the tap's click. "all": no pointerup,
+      // touchend or click, so only the hold's grace timer can end the press.
       window.__lostLift = "";
-      window.addEventListener("pointerup", (event) => {
-        if (window.__lostLift === "page" && event.target.closest?.("button.send")) event.stopImmediatePropagation();
-      }, true);
+      const hidden = { pointerup: ["pointerup", "lift", "all"], touchend: ["lift", "all"], click: ["all"] };
+      for (const type of Object.keys(hidden)) {
+        window.addEventListener(type, (event) => {
+          if (hidden[type].includes(window.__lostLift) && event.target.closest?.("button.send")) event.stopImmediatePropagation();
+        }, true);
+      }
       document.addEventListener("pointerup", (event) => {
         if (window.__lostLift === "send" && event.target.closest?.("button.send")) event.stopPropagation();
       }, true);
@@ -153,8 +167,10 @@ type Probe = {
   __busyAfterDown: number;
   __sentBody: string;
   __touchStarts: boolean[];
+  __touchEnds: boolean[];
   __sendClicks: number;
-  __lostLift: "" | "send" | "page";
+  __anyClicks: string[];
+  __lostLift: "" | "send" | "pointerup" | "lift" | "all";
 };
 type PressOutcome = "send" | "draft" | "nothing";
 type Press = {
@@ -165,8 +181,8 @@ type Press = {
   drift?: { dx: number; dy: number };
   /** Keep the page busy this long right after Send's pointerdown. */
   busyMs?: number;
-  /** Withhold the lift from Send's own handler, or from the page entirely. */
-  lostLift?: "send" | "page";
+  /** Withhold events of the lift from the controller (see the page's `__lostLift`). */
+  lostLift?: "send" | "pointerup" | "lift" | "all";
 };
 type PressResult = {
   sends: number;
@@ -326,7 +342,7 @@ test("touch on Send: hold 300 ms with no drift sends", { skip: !CHROME }, async 
 // app Send was seen left on its check with the message unsent, which only a
 // press whose end Send never heard can do. The end of the same touch anywhere
 // on the page settles it instead.
-test("touch on Send: a tap whose lift Send's own handler never hears still sends once", { skip: !CHROME }, async () => {
+test("touch on Send: a tap whose lift the document stops past the controller still sends once", { skip: !CHROME }, async () => {
   const result = await press("hello", { holdMs: 60, lostLift: "send" });
   assert.equal(result.outcome, "send", "the lift heard by the page sends");
   assert.equal(result.sends, 1, `exactly once (sent ${result.sends})`);
@@ -334,15 +350,28 @@ test("touch on Send: a tap whose lift Send's own handler never hears still sends
 });
 
 test("touch on Send: a tap that ends with touchend alone still sends once", { skip: !CHROME }, async () => {
-  const result = await press("hello", { holdMs: 60, lostLift: "page" });
+  const result = await press("hello", { holdMs: 60, lostLift: "pointerup" });
   assert.equal(result.outcome, "send", "the touch's own end sends");
   assert.equal(result.sends, 1, `exactly once (sent ${result.sends})`);
   assert.equal(result.checked, false, "Send is not left on its check");
 });
 
+test("touch on Send: a tap whose pointerup and touchend never reach the page is sent by its click", { skip: !CHROME }, async () => {
+  const result = await press("hello", { holdMs: 60, lostLift: "lift" });
+  assert.equal(result.outcome, "send", "the click alone sends");
+  assert.equal(result.sends, 1, `exactly once (sent ${result.sends})`);
+  assert.equal(result.checked, false, "Send is not left on its check");
+});
+
 test("touch on Send: a full hold that ends with touchend alone keeps a draft", { skip: !CHROME }, async () => {
-  const result = await press("hello", { holdMs: 800, lostLift: "page" });
+  const result = await press("hello", { holdMs: 800, lostLift: "pointerup" });
   assert.equal(result.outcome, "draft", "the hold keeps its draft");
+});
+
+test("touch on Send: a full hold whose release never reaches the page still keeps a draft", { skip: !CHROME }, async () => {
+  const result = await press("hello", { holdMs: 800, lostLift: "all" });
+  assert.equal(result.outcome, "draft", "the grace timer keeps the held draft without any release");
+  assert.equal(result.sends, 0, "and sends nothing");
 });
 
 test("touch on Send: hold 800 ms keeps a draft", { skip: !CHROME }, async () => {
@@ -374,21 +403,24 @@ test("touch on Send: a full hold (800 ms) on a page busy for 700 ms keeps a draf
   assert.equal(result.sends, 0, "and sends nothing");
 });
 
-// A touch that begins on Send is the page's. Left to the platform, iOS takes a
-// tap within 66px of a word the keyboard is still composing for the text even
-// when it lands outside the field (WebKit `isNearMarkedText`), and Send sits
-// one row under the end of the message. Only a cancelled `touchstart` withholds
-// a touch from the platform's own gestures; cancelling `pointerdown` does not.
-test("a touch on Send is withheld from the platform's own gestures and sends without a click", { skip: !CHROME }, async () => {
+// Send is an ordinary button to the platform: its touch is not withheld from
+// the platform's own gestures. The press controller cancels no event, so a
+// tap's click (when the platform dispatches one) is swallowed as the trailing
+// click of a press that already sent, and the message goes out exactly once.
+test("a touch on Send cancels no touch event and sends exactly once", { skip: !CHROME }, async () => {
   const result = await press("hello");
   assert.equal(result.sends, 1, `the release sends once (sent ${result.sends})`);
   assert.ok(page);
   const probe = await page.evaluate(() => {
-    const { __touchStarts: touchStarts, __sendClicks: clicks } = window as unknown as Probe;
-    return { touchStarts, clicks };
+    const { __touchStarts: touchStarts, __touchEnds: touchEnds, __sendClicks: clicks, __anyClicks: any } = window as unknown as Probe;
+    return { touchStarts, touchEnds, clicks, any };
   });
-  assert.deepEqual(probe.touchStarts, [true], "Send cancelled its touchstart");
-  assert.equal(probe.clicks, 0, "no click follows a touch the page took, so none is left to consume");
+  assert.deepEqual(probe.touchStarts, [false], "Send did not cancel its touchstart");
+  assert.deepEqual(probe.touchEnds, [false], "Send did not cancel its touchend");
+  // The send clears the draft at the lift, so Send is disabled before the
+  // platform would dispatch its click: observed, no click arrives at all.
+  // Whether one does or not, it must never send a second time (sends is 1).
+  assert.ok(probe.clicks <= 1, `at most the one click of the tap (clicks: ${JSON.stringify(probe.any)})`);
 });
 
 // Send owns its whole touch, so the word the keyboard is still composing is

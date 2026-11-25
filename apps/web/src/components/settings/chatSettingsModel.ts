@@ -92,7 +92,7 @@ export function chatDetailLevelOf(prefs: ChatDetailPrefs): ChatDetailLevel | nul
 export const CHAT_ROW_ITEMS = {
   steps: ["chat.actionBlocks", "chat.activityStyle"],
   thinking: ["chat.thinking"],
-  send: ["chat.sendOnEnter", "chat.mobileSendShortcut", "chat.sendHoldDraft", "chat.sendHoldDuration"],
+  send: ["chat.sendOnEnter", "chat.mobileSendShortcut", "chat.sendHoldDraft", "chat.sendHoldDuration", "chat.sendDiagnostics"],
   followUp: ["chat.followUp"],
   paste: ["chat.largePaste"],
   imageSize: ["chat.imageSize"],

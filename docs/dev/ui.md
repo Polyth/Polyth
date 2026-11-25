@@ -290,7 +290,7 @@ it off makes every press send at once and removes the "hold to save" hint from
 Send's tooltip, while the chosen length is kept for when it is turned back on.
 The row's summary names the current state ("hold 500 ms" / "no hold") for the
 device the row is read on, and its length row carries a specimen Send that runs
-the composer's own press and ring (`composer/sendHoldPress.ts`), so the
+the composer's own press and ring (`composer/sendPress.ts`), so the
 duration can be felt before leaving Settings.
 The ring around Send winds from the top over the chosen length
 (`--send-hold-ms`), on both Send variants. It is a bordered box in Send's own
@@ -299,9 +299,10 @@ across the corners of a rounded-square Send, and the phone's 18px glyph rule
 once shrank it into Send's corner. The press sets `data-send-hold` on the
 control (`arming` → `full` → `release`) without a React render, and starts the
 ring at the press's real age, so it closes exactly when the hold is reached.
-A quick tap ends before the ring fades in. When the hold is reached with the
-finger still down, the ring stands whole, Send springs back and turns to a
-check; letting go keeps the draft. A release fades the ring where it stood. The
+A quick tap ends before the ring fades in. When the hold is reached, the ring
+stands whole, Send springs back and turns to a check; the draft is kept at the
+release, or a moment later if no release is heard. A release fades the ring
+where it stood. The
 gesture is pointer-only: there is no keyboard
 equivalent for "keep as a draft" yet, and the trial Send is decorative for
 assistive tech because the track announces its value. A draft is an ordinary
@@ -313,27 +314,76 @@ chat's scoped draft record, saves the draft to the server at once
 spawn surface starts. In an open chat the text stays in the composer and is
 saved at once. Once kept, Send keeps its check for a beat; there is no
 notification, because the result is visible in place.
-Every press ends as exactly one of the two, split at the hold length with no
-gap (`sendPressOutcome`): a release before it sends, a release at or after it
-keeps the draft. The release alone decides, measured between the input's own
-time stamps (`inputTime`), never by when a handler ran and never by the timer,
-which only cues. On a page busy after the press (a streaming turn, a long
-render) a quick tap's lift waits in the queue; timed by the handler, or kept
-by a timer that won the race, that tap became a draft instead of a send or a
-new chat. A press that leaves Send or is cancelled keeps a draft only if it had
-already lasted the hold. Touch/pen Send is admitted on
-`pointerup` (pointerdown is cancelled so the editor keeps focus; a finger slid
-off Send does not send), and the click that ends a hold is swallowed. Send has
-`touch-action: none`: with panning allowed, a finger that rolled a few pixels
-while holding was taken for a scroll, the browser cancelled the press, and the
-message was neither sent nor kept. An empty composer or a queued-message edit
-never starts a hold.
+An empty composer or a queued-message edit never starts a hold.
+
+**The Send press.** One controller owns a press on Send from the moment it
+lands to the one thing it does (`attachSendPress`,
+`apps/web/src/composer/sendPress.ts`; both Send variants and the Settings
+specimen attach it through a `ref` and have no pointer, touch or click handler
+of their own). Send is an ordinary button to the platform: nothing cancels
+`pointerdown`, `touchstart` or `touchend`, the tap's click is synthesised as
+for any button, and the editor keeps its focus through the composer's
+`data-keep-keyboard`. The controller listens on `window` in the capture phase,
+where no other listener can hide an event from it, and every press ends in
+exactly one outcome: **send** (released before the hold length, still on
+Send), **draft** (held for the hold length, `sendPressOutcome`) or **none**
+(the finger slid off Send, another press began, or the page went to the
+background). These rules make a lost event harmless, and a change to the press
+must keep all of them:
+
+- Any end is an end. `pointerup`, `touchend` and the tap's `click` each settle
+  an open press; whichever arrive afterwards belong to a spent press. The click
+  of a press that took effect is cancelled at the window
+  (`SEND_TRAILING_CLICK_MS`), also after Send was replaced under it, so it
+  cannot act on what stands there now (Stop).
+- A click with no press behind it sends: the keyboard and assistive path, and
+  the whole of a tap whose other events never came.
+- A hold does not wait for the finger. The cue comes when the hold length has
+  passed, and the draft is kept at the release or `SEND_HOLD_GRACE_MS` after
+  the cue, whichever is first. A release stamped before the hold length still
+  sends and takes the cue back, however late a busy page delivered it: presses
+  are timed between the input's own stamps (`inputTime`), never by when a
+  handler ran.
+- A touch the system takes away (`pointercancel`, `touchcancel`) is a press
+  whose lift will not be heard, not an outcome: its click still sends and its
+  hold is still kept.
+- A new press anywhere ends the one before it.
+
+Send keeps `touch-action: none`: with panning allowed, a finger that rolled a
+few pixels while holding was taken for a scroll and the browser cancelled the
+press. `sendPress.test.ts` states each rule as the exact event sequence a
+device produced; `composerSendTouchTarget.test.ts` runs them with real touches
+in Chromium, with lifts withheld from the page.
+
+History, so the same repairs are not made again. From 2026-09 touch Send acted
+on its own `pointerup` alone, the click was swallowed (later cancelled outright
+with `touchstart`), and from 2026-11-14 a hold was judged only when that
+release arrived. On iPhones the release of a press beside the end of the draft
+did not always reach the page (2026-11-22: Send left on its check with the
+message unsent), so the press did nothing at all, neither a send nor a kept
+draft. Six repairs each fixed a defect reproduced in headless Chromium or read
+from WebKit source (IME gate, dead ring of the touch box, pan cancel, marked
+text beside Send, a window-level end watch) and none was verified on the
+device. Why the iPhone drops that release is still **not device-verified**.
+The controller therefore keeps a trace of the last presses (`sendPressTrace`,
+also in `localStorage["polyth.sendPress.trace"]`): event names, millisecond
+offsets, the outcome, and presses that landed beside Send on something else;
+never the message. If Send fails on a device again, read that trace from the
+device before changing the press. The person copies it from **Settings > Chat >
+Send with > Send diagnostics** (`SendDiagnosticsButton`, `sendPressReport`): the
+trace with the web build id, the browser's user agent and the viewport, on the
+clipboard, to paste to the agent or into a bug report. The trace is carried
+across a reload (`localStorage`), so it can be copied after the app was
+reopened. That row is **temporary**: remove it (with `chat.sendDiagnostics` in
+the settings registry and `CHAT_ROW_ITEMS`, and its four
+`settings.chatPage.sendDiagnostics*` strings) once the phone report is closed,
+or move it to a debug menu when the app has one.
 
 **What counts as on Send.** The disc is 36px; its touch box is larger (the
 `::after` grown to `--hit-min`), and the browser also gives Send a press that
 lands a few pixels outside that box. Since touch Send does not wait for the
 click, `releaseSends` (`apps/web/src/composer/sendRelease.ts`) decides what the
-click would have: a finger that did not travel (`SEND_TAP_SLOP_PX`) sends
+click would have, for every kind of pointer: a finger that did not travel (`SEND_TAP_SLOP_PX`) sends
 wherever the browser let it land, and one that travelled sends if it lifted over
 Send's hit-tested box. Never judge the release against the drawn disc alone:
 that left the ring between the disc and the touch box dead, about 40% of the
@@ -362,24 +412,13 @@ the word and moved it away. Two rules close that. A touch or pen that lands on
 any composer control outside a text field first calls `finishComposition()`
 (`commitComposingWordOnPress`, a capture handler on the composer root), so the
 word is ordinary text before the platform decides what the tap was. Send is
-the exception to that rule: it cancels `touchstart` and `touchend` through a
-listener that is not passive (`ownPrimaryTouch`; React's touch listeners are
-passive, and cancelling `pointerdown` does not withhold a touch from native
-gestures), so the press is the page's, the release sends, no click follows,
-and `send()` commits the word itself. Send does not refocus the field
-mid-touch, because `finishComposition()` blurs and refocuses it, which
-restarts the iOS input session under a finger that is still down. A Send touch
-also never waits on Send's own `pointerup` alone (`watchTouchEnd`): the end of
-the same touch anywhere on the page (`pointerup`/`pointercancel` for its
-pointer, `touchend`/`touchcancel` for its touch) settles the press a task
-later if Send's handler has not. On the iPhone app (2026-11-22) Send was seen left on its hold check with the message unsent, which only an armed
-press whose end never reached Send can produce. A new control that must work
-beside the end of a draft acts on `click` and relies on the first rule; only a
-control that already acts on `pointerup` may cancel the touch.
-`composerSendTouchTarget.test.ts` covers these with real touches, a lift
-withheld from Send or from the page, and a CDP IME composition. The iOS
-classification is read from WebKit source, and which of these causes the
-lost lift on the device is not device-verified. Text the platform writes without
+the exception to that rule: `send()` commits the word itself, and Send does not
+refocus the field mid-touch, because `finishComposition()` blurs and refocuses
+it, which restarts the iOS input session under a finger that is still down.
+Whatever the platform makes of a tap beside marked text, the Send press takes
+any end it reports (above). `composerSendTouchTarget.test.ts` covers this with
+a CDP IME composition; the iOS classification is read from WebKit source and
+is not device-verified. Text the platform writes without
 any `input` event (dictation and some phone keyboards have) is committed at the
 field's next caret move, key release or focus, so Send's enabled state cannot
 stay behind a draft the field visibly holds.

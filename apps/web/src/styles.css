@@ -10371,15 +10371,16 @@ body:not([data-glass="off"]) .turn-rate-limit .turn-rate-limit-model .picker-chi
 .send-plane { display: inline-grid; place-items: center; }
 .send-plane svg { width: 19px; height: 19px; }
 /* Press and hold Send keeps the message as a draft chat
-   (composer/sendHoldPress.ts, which sets `data-send-hold` on the control
+   (composer/sendPress.ts, which sets `data-send-hold` on the control
    without a React render). A hairline ring in Send's own shape winds round
    it from the top over the person's hold length (`--send-hold-ms`), started
    at the press's real age (`--send-hold-age`) so that it closes exactly when
    the hold is reached, while the button settles a touch. A quick tap ends
    before the ring fades in. Once the hold is reached with the finger still
    down (`full`), the ring stands whole, the button springs back and its glyph
-   turns to a check (`data-parked`): letting go keeps the draft. A release
-   (`release`) fades the ring out where it stood.
+   turns to a check (`data-parked`): the draft is kept at the release, or a
+   moment later if no release is heard. A release (`release`) fades the ring
+   out where it stood.
    The ring is a bordered box masked by a turning cone, not an SVG circle: it
    takes each theme's corner radius, where a circle cut across the corners of a
    rounded-square Send, and no `.send svg` sizing rule can shrink it (the phone
