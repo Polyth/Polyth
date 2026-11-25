@@ -30,7 +30,10 @@ export function personDefaultSessionService(
     ...(base.start
       ? { start: async (input, admission) => base.start!(await pinned(input, input.start?.agentProfileId), admission) }
       : {}),
-    create: async (input) => base.create(await pinned(input)),
+    create: async (input, admission) => {
+      const next = await pinned(input);
+      return admission ? base.create(next, admission) : base.create(next);
+    },
   };
 }
 

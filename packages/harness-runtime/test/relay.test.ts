@@ -270,3 +270,18 @@ test("a paired device may read Relays but never save them", async () => {
     assert.equal(allowed("GET", "/api/harnesses/roster"), false);
     assert.ok(HARNESS_REMOTE_ACCESS.http.every((rule) => !rule.mutation));
 });
+
+test("a Relay's cached readiness is per person, never shared inside a Space", async () => {
+    const { registry, accounts } = setup();
+    await accounts.onEnable();
+    await accounts.store!.setRelay("u1", { members: ["codex"], order: "manual", handoverAt: 0.05 });
+    // u1 has a member and is ready; u2's Relay is empty and needs setup.
+    const first = await registry.snapshots(ctx("u1"), { harnessId: "codex-relay" });
+    assert.equal(first[0]!.availability.state, "ready");
+    const second = await registry.snapshots(ctx("u2"), { harnessId: "codex-relay" });
+    assert.equal(second[0]!.availability.state, "setup-required");
+    // Reading u1 again still answers for u1 (no poisoned entry from u2).
+    const again = await registry.snapshots(ctx("u1"), { harnessId: "codex-relay" });
+    assert.equal(again[0]!.availability.state, "ready");
+    await accounts.onDisable();
+});

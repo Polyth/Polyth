@@ -13101,7 +13101,11 @@ export function createSessionService(deps: {
 
   /** The synchronous part of a create: validation, then the canonical row
    *  (status `reconciling`) with its prepared session-create operation. */
-  const createSessionRow = async (input: CreateSessionInput, start?: SessionRowStart): Promise<CreatedSessionRow> => {
+  /** `actor` is the person creating the chat through an authenticated Space
+   *  context. It is recorded on the row before any runtime exists so per-person
+   *  harness selection (a Relay's member accounts) can act for them even while
+   *  the first turn is still queued. */
+  const createSessionRow = async (input: CreateSessionInput, start?: SessionRowStart, actor?: SessionPerson): Promise<CreatedSessionRow> => {
     if (input.purpose !== undefined && (typeof input.purpose !== "string" || !SESSION_PURPOSE_ID.test(input.purpose))) {
       throw Object.assign(new Error("purpose must be a short lowercase id"), { code: "invalid-input" });
     }
@@ -13266,7 +13270,8 @@ export function createSessionService(deps: {
       ...(input.parentId ? { parentId: input.parentId } : {}),
       // Delegated work acts for whoever ran the parent's turn when it was
       // spawned, not for whoever writes to the parent later.
-      ...(parent?.actor ? { actor: { ...parent.actor, via: "delegation" as const } } : {}),
+      ...(parent?.actor ? { actor: { ...parent.actor, via: "delegation" as const } }
+        : actor ? { actor } : {}),
       ...(input.purpose ? { purpose: input.purpose } : {}),
       ...(origin ? { origin } : {}),
       ...(startAutoAccept
@@ -14113,8 +14118,11 @@ export function createSessionService(deps: {
       if (dormantAfter) return { safe: false, reason: dormantAfter };
       return { safe: true };
     },
-    async create(input: CreateSessionInput): Promise<SessionRef> {
-      const row = await createSessionRow(input);
+    async create(input: CreateSessionInput, admission?: TurnAdmission): Promise<SessionRef> {
+      // The creator is the server's admission fact, never request input. It is
+      // durable before the runtime is acquired, so a Relay can pick this
+      // person's member account rather than an anonymous system identity.
+      const row = await createSessionRow(input, undefined, normalizeSessionPerson(admission?.author));
       await provisionCreatedSession(row);
       return { id: row.sessionId };
     },
@@ -14160,11 +14168,15 @@ export function createSessionService(deps: {
         ...(turnKey ? { firstTurnQueueId: turnKey } : {}),
         ...(firstTurn?.autoTitle === true ? { autoTitle: true as const } : {}),
       };
+      // The first turn is authored by the authenticated person even though it
+      // is only queued here: record that actor on the row so the provisioning
+      // flight (which acquires the runtime before the queue is drained) resolves
+      // per-person harness settings such as a Relay for the right person.
       const row = existing ? undefined : await createSessionRow({ ...input, id: sessionId }, {
         ...(start.autoAccept !== undefined ? { autoAccept: start.autoAccept } : {}),
         ...(start.agentProfileId !== undefined ? { agentProfileId: start.agentProfileId } : {}),
         marker,
-      });
+      }, author);
       if (row && turnKey) startFirstTurns.set(sessionId, marker);
       const pending = firstTurn ? {
         text: firstTurn.text,

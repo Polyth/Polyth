@@ -226,6 +226,10 @@ export function createHarnessRegistry() {
         context.cwd,
         context.remote ?? false,
         harnessId,
+        // A Relay resolves per person (its member accounts are that person's),
+        // so its readiness and catalog must never be shared between the people
+        // of a Space. Every other harness reads the same for everyone.
+        providers.get(harnessId)?.descriptor.relay ? context.actorUserId ?? context.space?.userId ?? "" : "",
     ]);
     const list = () => [...providers.values()]
         .filter((provider) => !unregistering.has(provider))

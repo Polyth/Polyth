@@ -2958,10 +2958,12 @@ export interface SessionProjection {
    *  never need a project join. Backfilled by session-store migration v10. */
   spaceId?: string;
   /** The person this session currently acts for: the author of its latest
-   *  admitted human message. A delegated child inherits its parent's at
-   *  creation; agent/system prompts never change it. Tools, credentials and
-   *  outside services must act as this person and nobody else. Absent on
-   *  sessions no person has written to since authorship shipped. */
+   *  admitted human message, or the authenticated person who created it (that
+   *  is recorded before its runtime exists, so a Relay can resolve its member
+   *  accounts). A delegated child inherits its parent's at creation;
+   *  agent/system prompts never change it. Tools, credentials and outside
+   *  services must act as this person and nobody else. Absent on sessions no
+   *  person has written to or created since authorship shipped. */
   actor?: SessionPerson;
   /** The agent of this chat, or one of its subagents, has read someone's
    *  personal notes. The harness's own context now holds them, so the chat can
@@ -3253,7 +3255,11 @@ export interface SessionService {
    *  replacement happens without release proof; a pending transition is
    *  continued instead of starting another. */
   restartRuntime?(sessionId: string): Promise<SessionProjection>;
-  create(input: CreateSessionInput): Promise<SessionRef>;
+  /** Create a chat. `admission.author` is the authenticated person creating
+   *  it; the server records them as the chat's actor before any runtime is
+   *  acquired, so per-person harness selection (a Relay's member accounts)
+   *  already acts for the right person while the first turn is still queued. */
+  create(input: CreateSessionInput, admission?: TurnAdmission): Promise<SessionRef>;
   /** Create a chat and own its whole start. Resolves once the canonical row
    *  and the first turn's queue row are durable — before the runtime exists.
    *  Runtime creation and delivery continue on the server, survive a restart,

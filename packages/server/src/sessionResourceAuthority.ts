@@ -260,7 +260,7 @@ export function canonicalSessionService(
     return projection;
   };
 
-  const create: SessionService["create"] = async (input): Promise<SessionRef> => {
+  const create: SessionService["create"] = async (input, admission): Promise<SessionRef> => {
     requireMutation();
     const project = await projects.get(input.projectId);
     if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
@@ -281,7 +281,7 @@ export function canonicalSessionService(
       sessionId,
       project.id,
       input.parentId,
-      () => base.create({ ...rest, id: sessionId }),
+      () => admission ? base.create({ ...rest, id: sessionId }, admission) : base.create({ ...rest, id: sessionId }),
       audience,
     );
   };

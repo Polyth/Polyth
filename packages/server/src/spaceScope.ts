@@ -250,10 +250,14 @@ function scopeSessions(
       const page = await base.summaries!({ ...query, spaceId: ctx.spaceId, ...(personScope ? { personId: personScope.userId } : {}) });
       return { ...page, sessions: mine(page.sessions) };
     }) } : {}),
-    async create(input) {
+    async create(input, admission) {
       const project = await projects.get(input.projectId);
       if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
-      return runWithSecureSafeSpace(ctx, () => base.create(input));
+      // The creator is the authenticated person, stamped server-side exactly
+      // like a send's author, so a Relay can resolve their member accounts
+      // before the chat's runtime exists.
+      const author = admittedAuthor(ctx, admission?.author, people?.directory);
+      return runWithSecureSafeSpace(ctx, () => author ? base.create(input, { author }) : base.create(input));
     },
     switchHarness: base.switchHarness ? (sessionId, selection, timing, launch) => guarded(() => base.switchHarness!(g(sessionId), selection, timing, launch)) : undefined,
     cancelHarnessSwitch: base.cancelHarnessSwitch ? (sessionId) => guarded(() => base.cancelHarnessSwitch!(g(sessionId))) : undefined,

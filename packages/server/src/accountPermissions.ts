@@ -77,9 +77,9 @@ export function privateHarnessSessionService(
   harnessAccess: HarnessAccess,
 ): SessionService {
   const scoped: SessionService = { ...base };
-  scoped.create = async (input) => {
+  scoped.create = async (input, admission) => {
     checkSelection(harnessAccess(), actor, input.harness);
-    return base.create(input);
+    return admission ? base.create(input, admission) : base.create(input);
   };
   if (base.start) {
     const start = base.start.bind(base);
