@@ -187,8 +187,11 @@ chat stays in the Pinned group after a reload or reconnect. With the
 navigator's *Pinned chats above projects* (`pinnedPlacement: "top"`) the web
 client also reads `pinned=true` without a `projectId` (`refreshPinnedSessions`,
 `apps/web/src/init.ts`, at most 100 rows), because that group lists the pinned
-chats of projects whose own list was never opened. `updatedAt` is
-session activity: derived maintenance (runtime wiring, reconciliation,
+chats of projects whose own list was never opened. The WS snapshot also reads the rows the project rail counts (`railStatus`, internal, not an HTTP
+filter): every chat that is working or waiting on a person, however old, and
+each project's ten newest unread top-level chats. Unread chats pile up, so a
+Space-wide newest page can hold nothing else. Rows are filtered by access above
+the store, so a person with restricted access can see fewer than the true count. `updatedAt` is session activity: derived maintenance (runtime wiring, reconciliation,
 Auto-Approve/Full access flag sweeps after a Space or project policy change or
 at boot) writes the projection without touching it, so such a sweep cannot
 reorder the whole catalog.

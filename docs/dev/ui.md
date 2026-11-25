@@ -5958,11 +5958,15 @@ Project rail hides only the sessions column while keeping the project icons
 visible, then expands back to Project rail. An older collapsed rail without a
 saved return mode restores Tree once when expanded. Only the rail's collapse
 toggle hides the sessions column; clicking the focused project's icon does not.
-A project icon carries one corner mark from `projectRailMark`
-(`sessionStatus.ts`): amber when any chat needs a person (question, approval,
-waiting), the accent colour when a finished top-level chat has a reply the
-reader has not read, green while chats only work. Subagents and archived chats
-never count. The marks of projects that are not open depend on the WS snapshot,
+A project icon carries corner marks from `projectRailStatus`
+(`sessionStatus.ts`, drawn by `sidebar/ProjectRailStatus.tsx`), counting chats
+of the project and its nested projects: questions top-start (blue), permission
+requests top-end (amber), unread results of finished top-level chats or forks
+bottom-end (green; a hollow accent ring there while chats only work). One chat
+shows a glyph or dot, several a count capped at `9+`; bottom-start stays free.
+The tooltip and accessible name carry the breakdown. Subagent requests count,
+their results do not; archived and muted chats never count. Styling:
+`docs/dev/styles.md`. The marks of projects that are not open depend on the WS snapshot,
 which reads `SessionSummaryQuery.railStatus` (internal, never HTTP): every
 working/waiting/open-request chat plus each project's ten newest chats unread by
 the reader's own cursor (a chat without a cursor is read, as in

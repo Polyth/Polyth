@@ -292,6 +292,17 @@ both lists scroll and would clip an outside ring. Touch widens the gap to 8px
 (project tiles then sit on a `--tap` pitch) and a transparent `::after` reaches
 `--hit-min`.
 
+A project tile carries its status in its corners (`ProjectRailStatus.tsx`,
+counted by `projectRailStatus` in `sessionStatus.ts`), one corner per kind:
+question at the top start (blue), permission at the top end (amber), finished
+unread result at the bottom end (green). The bottom start corner is free for a
+later kind. Marks count chats: one question or permission shows `?` or `!`,
+several show a number up to `9+`; one result is a dot, several a number. A hollow
+accent ring at the bottom end means the project is working and has no result to
+show. Marks stay inside the tile, because the scrolling list clips past it, use
+`--panel` as their cut-out and pick black or white ink from the tone's lightness.
+The tooltip and the button's accessible name list every count.
+
 | Token | Purpose |
 | --- | --- |
 | `--rail-scale-left` | Left project-rail icon and track scale (default 1). |

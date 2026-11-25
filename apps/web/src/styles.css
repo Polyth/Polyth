@@ -812,19 +812,81 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.sidebar-project-rail-status {
+/* Status marks: each kind owns a corner of the tile (ProjectRailStatus.tsx).
+   They stay inside the tile because the scrolling list clips anything past it.
+   The ink is black or white by the tone's own lightness: every theme sets its
+   signal colours differently, and neither --panel nor --text holds on all. */
+.sidebar-project-rail-mark {
+  --rail-mark: calc(14px * var(--rail-scale-left, 1));
+  --rail-mark-tone: var(--green);
   position: absolute;
-  inset-inline-end: 1px;
-  bottom: 1px;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  min-width: var(--rail-mark);
+  height: var(--rail-mark);
+  padding-inline: calc(2px * var(--rail-scale-left, 1));
+  border-radius: var(--radius-round);
+  background: var(--rail-mark-tone);
+  box-shadow: 0 0 0 1px var(--panel);
+  color: var(--panel);
+  font-size: max(8px, calc(10px * var(--rail-scale-left, 1)));
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  pointer-events: none;
+}
+@supports (color: oklch(from red l c h)) {
+  .sidebar-project-rail-mark { color: oklch(from var(--rail-mark-tone) calc((0.56 - l) * 1000) 0 0); }
+}
+.sidebar-project-rail-mark.is-question { --rail-mark-tone: var(--blue); top: 0; inset-inline-start: 0; }
+.sidebar-project-rail-mark.is-permission { --rail-mark-tone: var(--amber); top: 0; inset-inline-end: 0; }
+.sidebar-project-rail-mark:is(.is-result, .is-working) { bottom: 0; inset-inline-end: 0; }
+.sidebar-project-rail-mark.is-dot {
+  --rail-mark: calc(10px * var(--rail-scale-left, 1));
+  min-width: var(--rail-mark);
+  padding: 0;
+}
+/* Working is a hollow ring: it shares the result's corner, and a green accent
+   must not make the two read the same. */
+.sidebar-project-rail-mark.is-working {
+  background: var(--panel);
+  box-shadow: inset 0 0 0 calc(2px * var(--rail-scale-left, 1)) var(--accent), 0 0 0 1px var(--panel);
+}
+.sidebar-project-rail-tooltip-copy > .sidebar-project-rail-tooltip-status {
+  display: grid;
+  gap: 2px;
+  margin-block-start: var(--space-1);
+  direction: inherit;
+  font-family: inherit;
+}
+.sidebar-project-rail-tooltip-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.sidebar-project-rail-tooltip-swatch {
+  --rail-mark-tone: var(--green);
+  flex: none;
   width: 8px;
   height: 8px;
-  border: 2px solid var(--panel);
-  border-radius: var(--radius-circle);
-  background: var(--green);
+  border-radius: var(--radius-round);
+  background: var(--rail-mark-tone);
 }
-.sidebar-project-rail-status.attention { background: var(--amber); }
-/* A finished chat with a reply you have not read. */
-.sidebar-project-rail-status.result { background: var(--accent); }
+.sidebar-project-rail-tooltip-swatch.is-question { --rail-mark-tone: var(--blue); }
+.sidebar-project-rail-tooltip-swatch.is-permission { --rail-mark-tone: var(--amber); }
+.sidebar-project-rail-tooltip-swatch.is-working {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.sidebar-project-rail-tooltip-count {
+  color: var(--text);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
 /* Every rail control is one tile with one glyph size. The toggle and Settings
    are IconButtons, whose own md box (later in this sheet) and 16px service-bar
    glyph would otherwise win. */

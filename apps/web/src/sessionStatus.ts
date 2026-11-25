@@ -137,22 +137,29 @@ export function resolveSessionStatus(
   return { kind: "regular", glyph: "○", label: tr("sessionStatus.idle") };
 }
 
-export type ProjectRailMark = "attention" | "result" | "working";
+/** Chats behind each mark on a project's rail icon. */
+export interface ProjectRailStatus {
+  permissions: number;
+  questions: number;
+  results: number;
+  working: number;
+}
 
-/** The one mark a project's rail icon carries, from every chat the client
- *  holds for it: something that needs a person outranks a finished chat with
- *  an unread reply, which outranks plain activity. Archived chats and
- *  delegated subagents (they report into their parent) never count; a chat's
- *  unread reply only counts once it is not running or waiting itself. */
-export function projectRailMark(sessions: readonly SessionProjection[], now = Date.now()): ProjectRailMark | null {
-  let result = false;
-  let working = false;
+/** Counts chats, not requests, through the same resolver as their rows, so an
+ * icon and the list it opens agree. A subagent's request blocks work and counts;
+ * its finished run is its parent's business (a fork's is its own), and a muted chat does not call. */
+export function projectRailStatus(
+  sessions: readonly SessionProjection[],
+  now = Date.now(),
+): ProjectRailStatus {
+  const status: ProjectRailStatus = { permissions: 0, questions: 0, results: 0, working: 0 };
   for (const session of sessions) {
     if (session.status === "archived") continue;
-    const kind = resolveSessionStatus(session, now).kind;
-    if (kind === "needs-approval" || kind === "needs-reply" || kind === "reconciling" || kind === "unknown") return "attention";
-    if (kind === "working") working = true;
-    else if (kind === "unread" && (!session.parentId || session.forkOf)) result = true;
+    const { kind } = resolveSessionStatus(session, now);
+    if (kind === "needs-approval") status.permissions += 1;
+    else if (kind === "needs-reply") status.questions += 1;
+    else if (kind === "working" || kind === "reconciling") status.working += 1;
+    else if (kind === "unread" && (!session.parentId || session.forkOf) && !session.muted) status.results += 1;
   }
-  return result ? "result" : working ? "working" : null;
+  return status;
 }

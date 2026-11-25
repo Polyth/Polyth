@@ -22,6 +22,8 @@ import SessionSelectionBar from "./sidebar/SessionSelectionBar.tsx";
 import { useSessionArrangementEntries } from "./sidebar/sessionArrangementEntries.ts";
 import { useShellMode } from "../responsiveShell.ts";
 import { useLaneSessions, useWorkbenchShellPresentation } from "../workbench/profileNavigation.ts";
+import { projectRailStatus } from "../sessionStatus.ts";
+import { ProjectRailMarks, ProjectRailStatusLines, projectRailStatusLabel } from "./sidebar/ProjectRailStatus.tsx";
 import { useModalSurface } from "./a11y/Dialog.tsx";
 import { isImeComposing } from "./input/editorCore.ts";
 import SlotHost, { SlotBoundary, type SlotContext } from "./slots/SlotHost.ts";
@@ -30,7 +32,6 @@ import { ShellColumnAccount, ShellColumnFoot, ShellColumnHead, ShellDock } from 
 import { ProjectRailTools } from "./sidebar/ProjectRailTools.tsx";
 import { OwnServerZoneHeading, ServerZonesRail, ServerZonesTree } from "./sidebar/ServerZones.tsx";
 import { checkoutTargetKey, closePendingCheckoutMove, usePendingCheckoutMove, useSessionMoveDropZones } from "../sessionMove.ts";
-import { projectRailMark } from "../sessionStatus.ts";
 import { SIDEBAR_RAIL_SLOT } from "../railPlacement.ts";
 import { useSidebarExpanded } from "../sidebarPresentation.ts";
 import { useUiSettings } from "../uiPrefs.ts";
@@ -1496,8 +1497,7 @@ export default function Sidebar() {
               data-arranging={railArrange && arrange.draggingId ? "" : undefined}
             >
               {(soloPersonal ? [] : arrangedOrder(orderedProjects)).map((candidate) => {
-                const candidateSessions = sessions.filter((session) => rootProjectId(registry.projects, session.projectId) === candidate.id);
-                const railMark = projectRailMark(candidateSessions);
+                const railStatus = projectRailStatus(sessions.filter((session) => rootProjectId(registry.projects, session.projectId) === candidate.id));
                 return (
                   <Menu
                     key={candidate.id}
@@ -1527,6 +1527,7 @@ export default function Sidebar() {
                             <span className="sidebar-project-rail-tooltip-copy">
                               <strong>{candidate.name || candidate.path}</strong>
                               {candidate.name && candidate.path !== candidate.name && !candidate.personal && <span>{candidate.path}</span>}
+                              <ProjectRailStatusLines status={railStatus} />
                             </span>
                           </span>
                         )}
@@ -1538,7 +1539,7 @@ export default function Sidebar() {
                           aria-current={candidate.id === activeProjectId ? "true" : undefined}
                           aria-expanded={candidate.id === focusProjectId && (!railCollapsed || peek !== null)}
                           aria-keyshortcuts={reorderable ? "Alt+Shift+ArrowUp Alt+Shift+ArrowDown" : undefined}
-                          aria-label={candidate.name || candidate.path}
+                          aria-label={projectRailStatusLabel(candidate.name || candidate.path, railStatus)}
                           title=""
                           data-arrange-id={reorderable ? candidate.id : undefined}
                           data-session-drop-project={candidate.id}
@@ -1562,9 +1563,7 @@ export default function Sidebar() {
                           }}
                         >
                           <ProjectGlyph project={candidate} />
-                          {railMark && (
-                            <span className={`sidebar-project-rail-status ${railMark}`} aria-hidden="true" />
-                          )}
+                          <ProjectRailMarks status={railStatus} />
                         </button>
                       </Tooltip>
                     )}
