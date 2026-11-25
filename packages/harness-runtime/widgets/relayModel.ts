@@ -1,8 +1,42 @@
-// Pure helpers for the Relay group of the Accounts section.
-import type { RelayMemberView, RelayView } from "@polyth/harness-runtime/relay";
+// Pure helpers for Relay inside the Accounts section.
+import { RELAY_MIN_MEMBERS, type RelayMemberView, type RelayView } from "@polyth/harness-runtime/relay";
 
 export type { RelayMemberView, RelayView };
 export type RelayTranslate = (key: string, values?: Record<string, string | number>) => string;
+
+/** The family has enough accounts this person may use to rotate between, so
+ *  Settings offers Relay at all. */
+export const relayAvailable = (view: Pick<RelayView, "members"> | undefined): boolean => (view?.members.length ?? 0) >= RELAY_MIN_MEMBERS;
+
+/** Enough members to rotate: the server then lists `<family>-relay` in this
+ *  person's harness list and picker (same rule as `RelayFamilyHandle.listed`). */
+export const relayListed = (rows: readonly Pick<RelayMemberView, "included">[]): boolean => rows.filter((row) => row.included).length >= RELAY_MIN_MEMBERS;
+
+const STATE_RANK: Record<RelayMemberView["state"], number> = { now: 0, next: 1, queued: 2, exhausted: 3, skipped: 4 };
+
+/** Included members in the order a Relay chat would try them now: the
+ *  current one, the next, the rest of the queue, then those out of limit or
+ *  skipped, each by position. */
+export const routeMembers = (rows: readonly RelayMemberView[]): RelayMemberView[] => rows
+  .filter((row) => row.included)
+  .toSorted((a, b) => STATE_RANK[a.state] - STATE_RANK[b.state] || (a.position ?? 0) - (b.position ?? 0));
+
+/** How the unified account list is ordered: with My order the Relay members
+ *  come first in their order (the rows a person drags), then everything else
+ *  in server order; otherwise rows keep the server order so nothing jumps
+ *  when an account joins or leaves Relay. */
+export function relayRowOrder<T extends { harnessId: string }>(accounts: readonly T[], rows: readonly RelayMemberView[], manual: boolean): T[] {
+  if (!manual) return [...accounts];
+  const position = new Map(rows.filter((row) => row.included).map((row) => [row.harnessId, row.position ?? 0] as const));
+  const members = accounts.filter((account) => position.has(account.harnessId))
+    .toSorted((a, b) => position.get(a.harnessId)! - position.get(b.harnessId)!);
+  return [...members, ...accounts.filter((account) => !position.has(account.harnessId))];
+}
+
+/** What a row's two switches add up to, when it is not the plain default
+ *  (in Relay or not, and shown in the picker). */
+export const accountRole = (included: boolean, inPicker: boolean): "relay-only" | "off" | undefined =>
+  inPicker ? undefined : included ? "relay-only" : "off";
 
 /** Included members in plan order, then the rest in server order. */
 export function orderedMembers(view: RelayView): RelayMemberView[] {

@@ -5,7 +5,9 @@ import { join } from "node:path";
 import test from "node:test";
 import type { AgentRuntime, HarnessContext, HarnessProvider, RouteRequest } from "@polyth/contracts";
 import { createHarnessAccountFamily, createHarnessAccountStore, harnessCommandLine, relayFamilies } from "../src/accounts.ts";
+import { bindPackageServices, createServerServiceRegistry, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { createHarnessRegistry } from "../src/index.ts";
+import { harnessRoutes } from "../src/serverEntry.ts";
 import { chooseRelayMembers, type RelayChooserInput, type RelayHeadroom, relayHost } from "../src/relay.ts";
 
 const NOW = 1_000_000;
@@ -181,6 +183,64 @@ test("routes: view, save, validation and private-account non-disclosure", async 
     assert.equal(registry.get("codex-relay") !== undefined, true);
     await accounts.onDisable();
     assert.equal(relayFamilies.has("codex-relay"), false);
+});
+
+test("the harness list and picker leave out a Relay below two members the caller may use", async () => {
+    const { dir, registry, accounts } = setup();
+    await accounts.onEnable();
+    const mine = await accounts.store!.add("Mine", async () => {}, "u1");
+    const theirs = await accounts.store!.add("Theirs", async () => {}, "u2");
+    await accounts.onDisable();
+    await accounts.onEnable();
+    const services = createServerServiceRegistry();
+    services.provide(serverServiceKey("harnesses"), registry);
+    const host = {
+        pluginId: "harness-runtime",
+        services: bindPackageServices(services, "harness-runtime"),
+        spaceStorage: () => ({ root: dir, packageDir: (id: string) => join(dir, "packages", id), path: (relative: string) => join(dir, relative) }),
+        forSpace: () => ({ projects: { list: async () => [], get: async () => undefined }, sessions: {} }),
+    } as unknown as ServerPackageHost;
+    const routes = harnessRoutes(host);
+    const call = async (method: string, path: string, userId: string, body: Record<string, unknown> = {}) => {
+        const url = new URL(`http://polyth.test${path}`);
+        const r = request(method, url.pathname, body, userId, { deployment: "local-trusted", storageDir: dir });
+        Object.assign(r.req, { url });
+        assert.equal(await routes(r.req), true);
+        return r.reply;
+    };
+    const ids = async (path: string, userId: string) => {
+        const rows = (await call("GET", path, userId)).body as Array<{ id?: string; identity?: { id: string } }>;
+        return rows.map((row) => row.identity?.id ?? row.id);
+    };
+    const handle = relayFamilies.get("codex-relay")!;
+    const u1 = { userId: "u1", spaceId: "s", allowedHarnesses: null };
+    for (const path of ["/api/harnesses/roster", "/api/harnesses/snapshots", "/api/harnesses"])
+        assert.equal((await ids(path, "u1")).includes("codex-relay"), false, `${path}: no members, no Relay`);
+    assert.equal(await handle.listed(u1), false);
+
+    // One member is nothing to rotate; a member the caller may not use never counts.
+    await accounts.store!.setRelay("u1", { members: ["codex", theirs.harnessId], order: "manual", handoverAt: 0.05 });
+    assert.equal(await handle.listed(u1), false);
+    assert.equal((await ids("/api/harnesses/roster", "u1")).includes("codex-relay"), false);
+
+    await handle.save(u1, { members: ["codex", mine.harnessId], order: "manual", handoverAt: 0.05 }, ctx());
+    assert.equal(await handle.listed(u1), true);
+    for (const path of ["/api/harnesses/roster", "/api/harnesses/snapshots", "/api/harnesses"]) {
+        assert.equal((await ids(path, "u1")).includes("codex-relay"), true, `${path}: two members list it for u1`);
+        assert.equal((await ids(path, "u2")).includes("codex-relay"), false, `${path}: u2's own Relay is still empty`);
+    }
+    // A chat already pinned to it still reads its exact row.
+    assert.deepEqual(await ids("/api/harnesses/snapshots?harnessId=codex-relay", "u2"), ["codex-relay"]);
+
+    // A reorder by someone the Relay is hidden from keeps its name and colour.
+    const prefsPath = join(dir, "harnesses/preferences.json");
+    const { mkdirSync } = await import("node:fs");
+    mkdirSync(join(dir, "harnesses"), { recursive: true });
+    writeFileSync(prefsPath, JSON.stringify({ "codex-relay": { enabled: true, priority: 5, title: "Night shift" } }));
+    const saved = await call("PUT", "/api/harnesses/preferences", "u2", { preferences: { codex: { enabled: true, priority: 1 } } });
+    assert.equal(saved.code, 200);
+    assert.deepEqual(JSON.parse(readFileSync(prefsPath, "utf8"))["codex-relay"], { enabled: true, priority: 5, title: "Night shift" });
+    await accounts.onDisable();
 });
 
 test("a paired device may read Relays but never save them", async () => {

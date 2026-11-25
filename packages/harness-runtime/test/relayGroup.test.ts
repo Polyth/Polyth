@@ -37,19 +37,26 @@ const baseView = () => ({
     member("claude-team", "Claude Code · Team"),
   ],
 });
+type AccountMock = { id: string; harnessId: string; name: string; removable: boolean; usable: boolean; signInCommand?: string; status: { loggedIn: boolean } };
+const fourAccounts = (): AccountMock[] => [
+  { id: "default", harnessId: "claude", name: "", removable: false, usable: true, status: { loggedIn: true } },
+  { id: "iryna", harnessId: "claude-iryna", name: "Iryna", removable: true, usable: true, status: { loggedIn: true } },
+  { id: "max", harnessId: "claude-max", name: "Max", removable: true, usable: true, signInCommand: "claude auth login", status: { loggedIn: false } },
+  { id: "team", harnessId: "claude-team", name: "Team", removable: true, usable: true, status: { loggedIn: true } },
+];
+let accounts = fourAccounts();
+let manage = true;
+// Picker visibility (`enabled`) per harness, as the roster reports it.
+let pickerShown: Record<string, boolean> = {};
+const rosterRows = () => ["claude", "claude-iryna", "claude-max", "claude-team", "claude-relay", "codex"]
+  .map((id, index) => ({ identity: { id }, policy: { enabled: pickerShown[id] ?? true, priority: index + 1 } }));
 globalThis.fetch = (async (input, init) => {
   const url = new URL(String(input), "http://localhost:3000");
   const method = init?.method ?? "GET";
   const body = typeof init?.body === "string" ? JSON.parse(init.body) as unknown : undefined;
   requests.push({ method, path: url.pathname, body });
   const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
-  if (url.pathname === "/api/claude/accounts") return json({
-    manageable: true, label: "Claude Code", canAddShared: true, canEditAccess: true,
-    accounts: [
-      { id: "default", harnessId: "claude", name: "", removable: false, usable: true, status: { loggedIn: true } },
-      { id: "max", harnessId: "claude-max", name: "Max", removable: true, usable: true, signInCommand: "claude auth login", status: { loggedIn: false } },
-    ],
-  });
+  if (url.pathname === "/api/claude/accounts") return json({ manageable: true, label: "Claude Code", canAddShared: true, canEditAccess: true, accounts });
   if (url.pathname === "/api/harnesses/relays" && method === "GET") return relayStatus === 200 ? json({ relays }) : new Response("no", { status: relayStatus });
   if (url.pathname === "/api/harnesses/relays/claude-relay" && method === "PUT") {
     if (putStatus !== 200) return json({ error: "nope" }, putStatus);
@@ -59,14 +66,23 @@ globalThis.fetch = (async (input, init) => {
     view.members = view.members.map((row) => ({ ...row, included: sent.members.includes(row.harnessId), position: sent.members.indexOf(row.harnessId) + 1 || undefined })) as never;
     return json(view);
   }
-  if (url.pathname === "/api/harnesses/roster" || url.pathname === "/api/harnesses/snapshots") return json([]);
+  if (url.pathname === "/api/harnesses/access") return json({ manage, personal: true });
+  if (url.pathname === "/api/harnesses/preferences" && method === "PUT") {
+    if (putStatus !== 200) return json({ error: "nope" }, putStatus);
+    const sent = (body as { preferences: Record<string, { enabled: boolean }> }).preferences;
+    pickerShown = Object.fromEntries(Object.entries(sent).map(([id, row]) => [id, row.enabled]));
+    return json({ ok: true });
+  }
+  if (url.pathname === "/api/harnesses/roster") return json(rosterRows());
+  if (url.pathname === "/api/harnesses/snapshots") return json([]);
   return new Response("not found", { status: 404 });
 }) as typeof fetch;
 
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { default: HarnessAccounts } = await import("../widgets/HarnessAccounts.tsx");
-const { moveIncluded, setIncluded, orderedMembers, meterText, reasonText } = await import("../widgets/relayModel.ts");
+const { accountRole, moveIncluded, setIncluded, orderedMembers, meterText, reasonText, relayAvailable, relayListed, relayRowOrder, routeMembers } = await import("../widgets/relayModel.ts");
+const { pickerPreferences } = await import("../widgets/accountsModel.ts");
 const { relayHandover, relayDividerReason, SwitchMarker } = await import("../widgets/runtime.tsx");
 const { replaceRelayPrefs, getRelayPrefs } = await import("../widgets/relayPrefs.ts");
 
@@ -87,7 +103,11 @@ const mount = async () => {
   await flush();
   return { container, unmount: async () => { await act(async () => { root.unmount(); }); container.remove(); } };
 };
-const relayRows = (scope: ParentNode) => [...scope.querySelectorAll<HTMLElement>('[data-testid="relay-row"]')];
+const accountRows = (scope: ParentNode) => [...scope.querySelectorAll<HTMLElement>('[data-testid="account-row"]')];
+const relaySwitch = (row: HTMLElement) => row.querySelector<HTMLButtonElement>('[data-testid="relay-switch"]');
+const pickerSwitch = (row: HTMLElement) => row.querySelector<HTMLButtonElement>('[data-testid="picker-switch"]');
+const relayCard = (scope: ParentNode) => scope.querySelector<HTMLElement>("section.pkg-harnesses-relay");
+const reset = () => { relays = [baseView()]; relayStatus = 200; putStatus = 200; accounts = fourAccounts(); manage = true; pickerShown = {}; };
 
 test("relay model orders included members first and moves them", () => {
   const rows = orderedMembers(baseView() as never);
@@ -102,20 +122,46 @@ test("relay model orders included members first and moves them", () => {
   assert.equal(reasonText(rows[2]!, t, now, "en"), "Signed out · skipped");
 });
 
-test("the Relay group renders members with state, meter and a sign-in action, saves a reorder and an order change", async () => {
-  relays = [baseView()]; relayStatus = 200; putStatus = 200;
+test("relay model: availability, route order, row order and the account role", () => {
+  const view = baseView();
+  assert.equal(relayAvailable(undefined), false);
+  assert.equal(relayAvailable({ members: view.members.slice(0, 1) } as never), false, "one account: no Relay to offer");
+  assert.equal(relayAvailable(view as never), true);
+  const rows = orderedMembers(view as never);
+  assert.equal(relayListed(rows), true);
+  assert.equal(relayListed(setIncluded(setIncluded(rows, "claude-iryna", false), "claude-max", false)), false, "one member is not listed");
+  assert.deepEqual(routeMembers([{ ...rows[2]!, state: "skipped" }, { ...rows[1]!, state: "next" }, { ...rows[0]!, state: "now" }, rows[3]!]).map((row) => row.harnessId), ["claude", "claude-iryna", "claude-max"]);
+  const list = [{ harnessId: "claude-team" }, { harnessId: "claude-max" }, { harnessId: "claude" }, { harnessId: "claude-iryna" }];
+  assert.deepEqual(relayRowOrder(list, rows, false).map((row) => row.harnessId), ["claude-team", "claude-max", "claude", "claude-iryna"], "automatic order: nothing jumps");
+  assert.deepEqual(relayRowOrder(list, rows, true).map((row) => row.harnessId), ["claude", "claude-iryna", "claude-max", "claude-team"], "My order: members first, in their order");
+  assert.equal(accountRole(true, true), undefined);
+  assert.equal(accountRole(true, false), "relay-only");
+  assert.equal(accountRole(false, false), "off");
+  assert.deepEqual(pickerPreferences(rosterRows(), "claude-max", false).preferences["claude-max"], { enabled: false, priority: 3 });
+  assert.equal(Object.keys(pickerPreferences(rosterRows(), "claude-max", false).preferences).length, 6, "every row is sent back");
+});
+
+test("one account list: each row shows its Relay place, reading and switches; the card shows the route", async () => {
+  reset();
   const view = await mount();
   try {
-    const heads = [...view.container.querySelectorAll("h4")].map((heading) => heading.textContent ?? "");
-    assert.ok(heads.some((text) => text.startsWith("Relay")), "a Relay group");
-    const rows = relayRows(view.container);
+    const card = relayCard(view.container)!;
+    assert.ok(card, "a Relay card");
+    assert.equal(card.getAttribute("data-listed"), "true");
+    assert.match(card.textContent ?? "", /On · 3 accounts/);
+    assert.deepEqual([...card.querySelectorAll(".pkg-harnesses-relay-route > li")].map((stop) => [stop.querySelector(".pkg-harnesses-relay-stop-name")?.textContent, stop.getAttribute("data-state")]),
+      [["Default", "now"], ["Iryna", "next"], ["Max", "skipped"]]);
+    assert.equal(view.container.querySelectorAll("ul.pkg-harnesses-accounts-list").length, 1, "one list, not an accounts table and a Relay table");
+    const rows = accountRows(view.container);
     assert.equal(rows.length, 4);
     assert.match(rows[0]!.textContent ?? "", /Now/);
     assert.match(rows[0]!.textContent ?? "", /5h · 62% left · resets/);
     assert.match(rows[1]!.textContent ?? "", /Next/);
-    assert.match(rows[2]!.textContent ?? "", /Signed out · skipped/);
+    assert.doesNotMatch(rows[2]!.textContent ?? "", /Signed out · skipped/, "the account status already says it is signed out");
     assert.ok([...rows[2]!.querySelectorAll("button")].some((button) => button.textContent?.trim() === "Sign in"), "sign-in for a signed-out member");
-    assert.equal(rows[3]!.querySelector<HTMLInputElement>('input[type="checkbox"]')!.checked, false);
+    assert.deepEqual(rows.map((row) => relaySwitch(row)?.getAttribute("aria-pressed")), ["true", "true", "true", "false"]);
+    assert.deepEqual(rows.map((row) => pickerSwitch(row)?.getAttribute("aria-pressed")), ["true", "true", "true", "true"]);
+    assert.equal(rows[3]!.getAttribute("data-relay"), "out");
     assert.equal(rows[0]!.querySelector('[draggable="true"]'), null, "no drag while the order is automatic");
 
     const manual = [...view.container.querySelectorAll<HTMLButtonElement>(".pkg-harnesses-relay-control button")].find((button) => button.textContent === "My order")!;
@@ -124,16 +170,19 @@ test("the Relay group renders members with state, meter and a sign-in action, sa
     assert.deepEqual(requests.find((request) => request.method === "PUT")?.body, { members: ["claude", "claude-iryna", "claude-max"], order: "manual", handoverAt: 0.05 });
 
     requests.length = 0;
-    const handle = relayRows(view.container)[1]!.querySelector<HTMLElement>(".pkg-harnesses-relay-handle")!;
+    const handle = accountRows(view.container)[1]!.querySelector<HTMLElement>(".pkg-harnesses-relay-handle")!;
     assert.equal(handle.getAttribute("draggable"), "true");
     await act(async () => { handle.dispatchEvent(new (dom as unknown as { KeyboardEvent: typeof KeyboardEvent }).KeyboardEvent("keydown", { key: "ArrowUp", altKey: true, shiftKey: true, bubbles: true })); });
     await flush();
     assert.deepEqual((requests.find((request) => request.method === "PUT")?.body as { members: string[] }).members, ["claude-iryna", "claude", "claude-max"]);
+    assert.deepEqual(accountRows(view.container).map((row) => row.querySelector("strong")?.textContent), ["Iryna", "Default", "Max", "Team"], "My order lists members in their order");
 
     requests.length = 0;
-    await act(async () => { relayRows(view.container)[3]!.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click(); });
+    const team = accountRows(view.container).find((row) => row.querySelector("strong")?.textContent === "Team")!;
+    await act(async () => { relaySwitch(team)!.click(); });
     await flush();
     assert.deepEqual((requests.find((request) => request.method === "PUT")?.body as { members: string[] }).members, ["claude-iryna", "claude", "claude-max", "claude-team"]);
+    assert.ok(requests.some((request) => request.path === "/api/harnesses/snapshots"), "the harness catalog is refreshed after a Relay save");
 
     requests.length = 0;
     const ten = [...view.container.querySelectorAll<HTMLButtonElement>(".pkg-harnesses-relay-control button")].find((button) => button.textContent === "10%")!;
@@ -143,30 +192,90 @@ test("the Relay group renders members with state, meter and a sign-in action, sa
   } finally { await view.unmount(); }
 });
 
-test("a refused save rolls the group back and says so", async () => {
-  relays = [baseView()]; relayStatus = 200; putStatus = 500;
+test("In picker off keeps a member Relay only; off for a non-member hides it", async () => {
+  reset();
   const view = await mount();
   try {
-    await act(async () => { relayRows(view.container)[3]!.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click(); });
+    const max = () => accountRows(view.container).find((row) => row.querySelector("strong")?.textContent === "Max")!;
+    await act(async () => { pickerSwitch(max())!.click(); });
     await flush();
-    assert.equal(relayRows(view.container)[3]!.querySelector<HTMLInputElement>('input[type="checkbox"]')!.checked, false, "rolled back");
+    const put = requests.find((request) => request.method === "PUT" && request.path === "/api/harnesses/preferences")!;
+    const sent = (put.body as { preferences: Record<string, { enabled: boolean; priority: number }> }).preferences;
+    assert.deepEqual(sent["claude-max"], { enabled: false, priority: 3 });
+    assert.equal(sent.codex?.enabled, true, "rows outside this family are sent back unchanged");
+    assert.equal(pickerSwitch(max())!.getAttribute("aria-pressed"), "false");
+    assert.equal(max().getAttribute("data-role"), "relay-only");
+    assert.match(max().textContent ?? "", /Relay only/);
+
+    const team = () => accountRows(view.container).find((row) => row.querySelector("strong")?.textContent === "Team")!;
+    await act(async () => { pickerSwitch(team())!.click(); });
+    await flush();
+    assert.equal(team().getAttribute("data-role"), "off");
+    assert.match(team().textContent ?? "", /Hidden/);
+  } finally { await view.unmount(); }
+});
+
+test("without harness management the rows keep their Relay switch but no picker switch", async () => {
+  reset(); manage = false;
+  const view = await mount();
+  try {
+    const rows = accountRows(view.container);
+    assert.equal(rows.filter((row) => relaySwitch(row)).length, 4);
+    assert.equal(rows.filter((row) => pickerSwitch(row)).length, 0);
+    assert.equal(requests.some((request) => request.method === "PUT"), false);
+  } finally { await view.unmount(); }
+});
+
+test("a refused save rolls the switch back and says so", async () => {
+  reset(); putStatus = 500;
+  const view = await mount();
+  try {
+    const team = () => accountRows(view.container).find((row) => row.querySelector("strong")?.textContent === "Team")!;
+    await act(async () => { relaySwitch(team())!.click(); });
+    await flush();
+    assert.equal(relaySwitch(team())!.getAttribute("aria-pressed"), "false", "rolled back");
     assert.ok(view.container.querySelector('[role="alert"]'), "a failure notice");
+    await act(async () => { pickerSwitch(team())!.click(); });
+    await flush();
+    assert.equal(pickerSwitch(team())!.getAttribute("aria-pressed"), "true", "picker switch rolled back too");
   } finally { await view.unmount(); putStatus = 200; }
 });
 
-test("empty and single-member Relays show their hint; a missing Relay shows no group", async () => {
+test("Relay stays out of sight below two accounts; with two it asks for members; a missing Relay shows nothing", async () => {
+  reset();
+  // One account the person may use: no card, no switches, a hint to add one.
+  accounts = fourAccounts().slice(0, 1);
+  const single = baseView(); single.settings.members = ["claude"]; single.members = single.members.slice(0, 1) as never;
+  relays = [single];
+  let view = await mount();
+  try {
+    assert.equal(relayCard(view.container), null);
+    assert.equal(view.container.querySelector('[data-testid="relay-switch"]'), null);
+    assert.match(view.container.textContent ?? "", /Add a second one to rotate between them with Relay/);
+  } finally { await view.unmount(); }
+
+  reset();
   const empty = baseView(); empty.settings.members = []; empty.members = empty.members.map((row) => ({ ...row, included: false, position: undefined, state: "skipped" })) as never;
   relays = [empty];
-  let view = await mount();
-  try { assert.match(view.container.textContent ?? "", /Add accounts to Relay/); } finally { await view.unmount(); }
+  view = await mount();
+  try {
+    assert.equal(relayCard(view.container)!.getAttribute("data-listed"), "false");
+    assert.match(view.container.querySelector('[data-testid="relay-needs-two"]')?.textContent ?? "", /Add two accounts below to Relay/);
+    assert.equal(view.container.querySelector(".pkg-harnesses-relay-route"), null);
+  } finally { await view.unmount(); }
+
   const one = baseView(); one.members = one.members.map((row, index) => ({ ...row, included: index === 0 })) as never;
   relays = [one];
   view = await mount();
-  try { assert.ok(view.container.querySelector('[data-testid="relay-needs-two"]')); } finally { await view.unmount(); }
+  try { assert.match(view.container.querySelector('[data-testid="relay-needs-two"]')?.textContent ?? "", /Add one more account to Relay/); } finally { await view.unmount(); }
+
   for (const status of [404, 403]) {
     relayStatus = status;
     view = await mount();
-    try { assert.equal([...view.container.querySelectorAll("h4")].some((heading) => heading.textContent?.startsWith("Relay")), false); } finally { await view.unmount(); }
+    try {
+      assert.equal(relayCard(view.container), null);
+      assert.equal(view.container.querySelector('[data-testid="relay-switch"]'), null);
+    } finally { await view.unmount(); }
   }
   relayStatus = 200;
 });
@@ -208,7 +317,7 @@ test("a Relay hand-over divider renders only when the preference is on; ordinary
 });
 
 test("the Settings switch writes the preference", async () => {
-  relays = [baseView()]; relayStatus = 200; putStatus = 200;
+  reset();
   replaceRelayPrefs({ showHandovers: false });
   const view = await mount();
   try {

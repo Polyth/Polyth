@@ -8,6 +8,11 @@ export const RELAY_ORDERS: readonly RelayOrder[] = ["expire-first", "manual"];
 /** Fractions of a window that must remain before a member hands over. */
 export const RELAY_HANDOVER_LEVELS: readonly number[] = [0.02, 0.05, 0.1];
 export const RELAY_MAX_MEMBERS = 16;
+/** A Relay with fewer members has nothing to rotate: the harness list and the
+ *  picker leave it out for that person, and Settings keeps it out of sight
+ *  until the family has this many accounts the person may use. A chat already
+ *  pinned to it still runs on its one member. */
+export const RELAY_MIN_MEMBERS = 2;
 /** How long a member that refused a turn is skipped when no time was stated. */
 export const RELAY_DEFAULT_REFUSAL_MS = 15 * 60_000;
 

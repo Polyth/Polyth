@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { HarnessAccountsRef } from "@polyth/contracts";
 import { createApiTransport, type WebPackageHost } from "@polyth/web-sdk";
 import { invalidateRuntimeCatalogs, readHarnessSnapshots } from "@polyth/models/runtime-catalog";
-import { AddIcon, Button, confirmAlert, DeleteIcon, Dialog, EditIcon, IconButton, KeyIcon, Menu, MoreIcon, Notice, SharedIcon, TextInput } from "../../../apps/web/src/components/ui/index.ts";
+import { AddIcon, ArrowDownIcon, ArrowUpIcon, Badge, Button, CheckIcon, confirmAlert, DeleteIcon, Dialog, EditIcon, IconButton, KeyIcon, Menu, MoreIcon, Notice, SharedIcon, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 import { CheckGroup, EmptyState, Section, Seg } from "../../../apps/web/src/components/settings/parts.tsx";
-import RelayGroup from "./RelayGroup.tsx";
+import { RelayBadge, RelayCard, RelayReading, useRelay } from "./RelayGroup.tsx";
+import { usePickerVisibility } from "./pickerVisibility.ts";
 import { useHarnessSignIn, useSetupProjectId } from "./HarnessSignIn.tsx";
 import { hostTranslate } from "./englishTranslate.ts";
 import { signInExpiryNote } from "./presentation.ts";
+import { accountRole, relayRowOrder } from "./relayModel.ts";
 import {
   accessBody,
   accessDraftFrom,
@@ -48,9 +50,11 @@ function useAccessChoices(enabled: boolean): { people: Named[]; spaces: Named[] 
   return { people, spaces };
 }
 
-/** Extra native logins of one harness family. Each one becomes its own
- *  harness, so it shows up in the harness list and the picker; sign-in runs
- *  the native CLI in a terminal, like the harness setup action. */
+/** Every native login of one harness family in one list. Each account is its
+ *  own harness (picker, harness list); sign-in runs the native CLI in a
+ *  terminal, like the harness setup action. Once the person may use two or
+ *  more, each row also says whether Relay rotates through it and whether the
+ *  picker shows it, and a Relay card above the list sums that up. */
 export default function HarnessAccounts({ host, accounts, projectId }: { host: WebPackageHost; accounts: HarnessAccountsRef; projectId?: string | null }) {
   const t: AccountsTranslate = useCallback((key, values) => host.ui.locale.translate(`harnessruntime.accounts.${key}`, values), [host]);
   const [list, setList] = useState<AccountList>();
@@ -60,6 +64,8 @@ export default function HarnessAccounts({ host, accounts, projectId }: { host: W
   const [newPrivate, setNewPrivate] = useState(false);
   const [renaming, setRenaming] = useState<{ id: string; name: string }>();
   const [editingAccess, setEditingAccess] = useState<AccountRow>();
+  // Bumped when what the roster lists may have changed.
+  const [revision, setRevision] = useState(0);
   const base = accounts.endpoint;
   const choices = useAccessChoices(Boolean(list?.accounts.some((row) => row.accessEditable)));
 
@@ -78,16 +84,24 @@ export default function HarnessAccounts({ host, accounts, projectId }: { host: W
     return () => window.removeEventListener("focus", focus);
   }, [load]);
 
+  // The Relay and every account are harnesses: refresh the catalogs (harness
+  // list, picker) after a change, and the roster the picker switches send.
+  const refreshCatalogs = useCallback(async () => {
+    await readHarnessSnapshots({ projectId, force: true }).catch(() => {});
+    invalidateRuntimeCatalogs();
+    setRevision((value) => value + 1);
+  }, [projectId]);
+  const relay = useRelay({ host, family: accounts.family, onChanged: () => { void refreshCatalogs(); } });
+  const picker = usePickerVisibility({ host, projectId, enabled: relay.available, revision, label: t("action.picker") });
+
   const run = async (key: string, label: string, action: () => Promise<unknown>): Promise<boolean> => {
     setBusy(key);
     setFailure("");
     try {
       await action();
-      await load();
-      // Harness rows and picker tabs come from the catalog; re-probe so a new,
-      // renamed or removed account is reflected everywhere.
-      await readHarnessSnapshots({ projectId, force: true }).catch(() => {});
-      invalidateRuntimeCatalogs();
+      await Promise.all([load(), relay.reload()]);
+      // A new, renamed or removed account is reflected everywhere.
+      await refreshCatalogs();
       return true;
     } catch (cause) {
       setFailure(host.errors.friendly(label, cause));
@@ -111,12 +125,20 @@ export default function HarnessAccounts({ host, accounts, projectId }: { host: W
     if (!await confirmAlert(t("removeBody"), { title: t("removeTitle", { name: label }), confirmLabel: t("remove") })) return;
     void run(`remove:${row.id}`, t("action.remove"), () => api.delete(`${base}/${row.id}`));
   };
+  const nameOf = (row: Pick<AccountRow, "name">) => row.name || t("defaultName");
   const groups = groupAccounts(list.accounts);
-  const renderRow = (row: AccountRow) => {
-    const label = row.name || t("defaultName");
+  // Yours and shared ones in one list; other people's private logins (the
+  // server owner sees them) can't be yours to use, so they stay apart.
+  const own = relayRowOrder(list.accounts.filter((row) => !row.private || row.mine), relay.rows, relay.manual && relay.available);
+  const switching = relay.saving || Boolean(picker.saving) || Boolean(busy);
+
+  const renderRow = (row: AccountRow, withUse: boolean) => {
+    const label = nameOf(row);
     const usable = rowUsable(row);
     const plan = row.status.plan ? t("plan", { plan: `${row.status.plan.charAt(0).toUpperCase()}${row.status.plan.slice(1)}` }) : "";
-    const detail = [row.status.email, plan].filter(Boolean).join(" · ");
+    const scope = row.private ? t("scope.mineTag") : row.accessEditable ? "" : t("scope.sharedTag");
+    // One span, so a wrapped line never starts with "·".
+    const detail = [row.status.email, plan, scope].filter(Boolean).join(" · ");
     // A login within 10 days of its sign-in end says so, and its sign-in
     // button becomes the main action.
     const expiry = usable && row.status.loggedIn === true ? signInExpiryNote(row.status.expiresAt, hostTranslate(host.ui.locale.translate), host.ui.locale.get()) : undefined;
@@ -124,7 +146,24 @@ export default function HarnessAccounts({ host, accounts, projectId }: { host: W
     // An account the caller can't use keeps a neutral dot: its sign-in isn't theirs to fix.
     const state = !usable ? "off" : row.status.loggedIn === true ? "ready" : row.status.loggedIn === false ? "auth-required" : "unknown";
     const canEdit = row.removable && list.manageable;
-    return <li key={row.id} className="pkg-harnesses-accounts-row" data-usable={usable ? undefined : "false"} data-state={row.status.loggedIn === true ? "signed-in" : row.status.loggedIn === false ? "signed-out" : "unknown"}>
+    // Relay and picker switches: only once Relay has something to rotate,
+    // and only for an account this person may run.
+    const member = withUse && relay.available && usable ? relay.member(row.harnessId) : undefined;
+    const included = member?.included === true;
+    const shown = member ? picker.shown(row.harnessId) : undefined;
+    const role = member && shown !== undefined ? accountRole(included, shown) : undefined;
+    const movable = included && relay.manual && relay.rows.filter((candidate) => candidate.included).length > 1;
+    return <li
+      key={row.id}
+      className="pkg-harnesses-accounts-row"
+      data-testid="account-row"
+      data-usable={usable ? undefined : "false"}
+      data-state={row.status.loggedIn === true ? "signed-in" : row.status.loggedIn === false ? "signed-out" : "unknown"}
+      data-relay={member ? (included ? "in" : "out") : undefined}
+      data-role={role}
+      {...(member ? relay.dropTarget(row.harnessId) : {})}
+    >
+      {withUse && relay.available && relay.manual && relay.lead(row.harnessId, label, switching)}
       {renaming?.id === row.id
         ? <form className="pkg-harnesses-accounts-rename" onSubmit={(event) => { event.preventDefault(); void run(`rename:${row.id}`, t("action.rename"), () => api.patch(`${base}/${row.id}`, { name: renaming.name })).then((ok) => { if (ok) setRenaming(undefined); }); }}>
             <TextInput uiSize="sm" aria-label={t("renameAria", { name: label })} value={renaming.name} maxLength={60} autoFocus onChange={(event) => setRenaming({ id: row.id, name: event.target.value })} />
@@ -132,41 +171,89 @@ export default function HarnessAccounts({ host, accounts, projectId }: { host: W
             <Button size="sm" type="submit" busy={busy === `rename:${row.id}`} disabled={!renaming.name.trim()}>{t("save")}</Button>
           </form>
         : <span className="pkg-harnesses-accounts-name">
-            <span className="pkg-harnesses-accounts-title"><strong>{label}</strong></span>
-            <small><span className="pkg-harnesses-status" data-state={state}>{usable ? stateLabel(row, t) : t("state.unavailable")}</span>{detail && <span>{detail}</span>}{renew && <span className="pkg-harnesses-expiry" data-level={expiry.level} title={expiry.date}>{expiry.text}</span>}</small>
+            <span className="pkg-harnesses-accounts-title">
+              <strong>{label}</strong>
+              {member && <RelayBadge relay={relay} harnessId={row.harnessId} />}
+              {role && <Badge className="pkg-harnesses-accounts-role">{t(`role.${role}`)}</Badge>}
+            </span>
+            <small>
+              <span className="pkg-harnesses-status" data-state={state}>{usable ? stateLabel(row, t) : t("state.unavailable")}</span>
+              {detail && <span>{detail}</span>}
+              {renew && <span className="pkg-harnesses-expiry" data-level={expiry.level} title={expiry.date}>{expiry.text}</span>}
+            </small>
             {row.accessEditable && <small className="pkg-harnesses-accounts-access">{t("accessLine", { summary: accessSummary(row, choices.people, choices.spaces, t) })}</small>}
+            {member && <RelayReading relay={relay} harnessId={row.harnessId} locale={host.ui.locale.get()} />}
           </span>}
       {renaming?.id !== row.id && <span className="pkg-harnesses-accounts-actions">
+        {member && <span className="pkg-harnesses-accounts-use" role="group" aria-label={t("useGroup", { name: label })}>
+          <Button
+            size="sm"
+            className="pkg-harnesses-use-chip"
+            data-testid="relay-switch"
+            aria-pressed={included}
+            aria-label={t("relayAria", { name: label })}
+            iconStart={included ? CheckIcon : AddIcon}
+            busy={relay.pending === row.harnessId}
+            // Not `disabled`: every pressed chip would flash gray on each save.
+            aria-disabled={switching || undefined}
+            onClick={() => { if (!switching) relay.include(row.harnessId, !included); }}
+          >{t("relayChip")}</Button>
+          {picker.editable && shown !== undefined && <Button
+            size="sm"
+            className="pkg-harnesses-use-chip"
+            data-testid="picker-switch"
+            aria-pressed={shown}
+            aria-label={t("pickerAria", { name: label })}
+            iconStart={shown ? CheckIcon : AddIcon}
+            busy={picker.saving === row.harnessId}
+            aria-disabled={switching || undefined}
+            onClick={() => { if (!switching) picker.set(row.harnessId, !shown); }}
+          >{t("picker")}</Button>}
+        </span>}
         {row.signInCommand && usable && <Button size="sm" variant={row.status.loggedIn === true && !renew ? "ghost" : "primary"} iconStart={KeyIcon} disabled={Boolean(busy) || !list.manageable} onClick={() => signIn(row)}>{row.status.loggedIn === true ? t("signInAgain") : t("signIn")}</Button>}
         {row.accessEditable && <Button size="sm" variant="ghost" iconStart={SharedIcon} disabled={Boolean(busy)} aria-label={t("accessAria", { name: label })} onClick={() => { setFailure(""); setEditingAccess(row); }}>{t("access")}</Button>}
-        {canEdit && <Menu label={t("menuLabel", { name: label })} align="end" entries={[
-          { id: "rename", label: t("rename"), icon: EditIcon, disabled: Boolean(busy), onSelect: () => setRenaming({ id: row.id, name: row.name }) },
-          { id: "remove", label: t("remove"), icon: DeleteIcon, danger: true, disabled: Boolean(busy), onSelect: () => void remove(row, label) },
+        {(canEdit || movable) && <Menu label={t("menuLabel", { name: label })} align="end" entries={[
+          // Drag needs a mouse; the menu moves a member on touch too.
+          ...(movable ? [
+            { id: "up", label: t("moveUp"), icon: ArrowUpIcon, disabled: switching || !relay.canMove(row.harnessId, -1), onSelect: () => relay.move(row.harnessId, -1) },
+            { id: "down", label: t("moveDown"), icon: ArrowDownIcon, disabled: switching || !relay.canMove(row.harnessId, 1), onSelect: () => relay.move(row.harnessId, 1) },
+            ...(canEdit ? ["separator" as const] : []),
+          ] : []),
+          ...(canEdit ? [
+            { id: "rename", label: t("rename"), icon: EditIcon, disabled: Boolean(busy), onSelect: () => setRenaming({ id: row.id, name: row.name }) },
+            { id: "remove", label: t("remove"), icon: DeleteIcon, danger: true, disabled: Boolean(busy), onSelect: () => void remove(row, label) },
+          ] : []),
         ]}>
           {(trigger) => <IconButton {...trigger} icon={MoreIcon} size="sm" busy={busy === `remove:${row.id}`} label={t("moreActions", { name: label })} />}
         </Menu>}
       </span>}
     </li>;
   };
-  const group = (key: string, title: string, rows: AccountRow[], hint: string, empty?: string) => (rows.length > 0 || empty) && <section className="pkg-harnesses-accounts-group" aria-labelledby={`pkg-harnesses-accounts-${key}`}>
-    <header className="pkg-harnesses-accounts-group-head">
-      <h4 id={`pkg-harnesses-accounts-${key}`}>{title}</h4>
-      <p className="pkg-harnesses-accounts-help">{hint}</p>
-    </header>
-    {rows.length > 0
-      ? <ul className="pkg-harnesses-accounts-list">{rows.map(renderRow)}</ul>
-      : <p className="pkg-harnesses-accounts-empty">{empty}</p>}
-  </section>;
   const addsPrivate = !list.canAddShared || newPrivate;
+  const accountName = (harnessId: string) => {
+    const row = list.accounts.find((candidate) => candidate.harnessId === harnessId);
+    return row ? nameOf(row) : relay.member(harnessId)?.name ?? harnessId;
+  };
 
   return <div className="pkg-harnesses-accounts">
     <Section title={t("title")} hint={t("hint", { label: list.label })}>
       {failure && !editingAccess && <Notice tone="error" role="alert">{failure}</Notice>}
       {list.unsupported && <Notice>{list.unsupported}</Notice>}
-      {group("mine", t("group.mine"), groups.mine, t("group.mineHint"), list.manageable ? t("group.mineEmpty") : undefined)}
-      {group("shared", t("group.shared"), groups.shared, list.canEditAccess ? t("group.sharedHintEdit") : t("group.sharedHint"))}
-      {group("others", t("group.others"), groups.others, t("group.othersHint"))}
-      <RelayGroup host={host} family={accounts.family} accounts={list.accounts} manageable={list.manageable} busy={Boolean(busy)} onSignIn={signIn} onChanged={() => { void readHarnessSnapshots({ projectId, force: true }).catch(() => {}); invalidateRuntimeCatalogs(); }} />
+      <RelayCard host={host} relay={relay} accountName={accountName} />
+      {picker.failure && <Notice tone="error" role="alert">{picker.failure}</Notice>}
+      <div className="pkg-harnesses-accounts-group">
+        {own.length > 0
+          ? <ul className="pkg-harnesses-accounts-list" aria-label={t("listLabel", { label: list.label })} data-manual={relay.available && relay.manual ? "true" : undefined}>{own.map((row) => renderRow(row, true))}</ul>
+          : <p className="pkg-harnesses-accounts-empty">{t("empty")}</p>}
+        {relay.available && <p className="pkg-harnesses-accounts-help">{picker.editable ? t("useHint", { relay: relay.name }) : t("useHintRelay", { relay: relay.name })}</p>}
+      </div>
+      {groups.others.length > 0 && <section className="pkg-harnesses-accounts-group" aria-labelledby="pkg-harnesses-accounts-others">
+        <header className="pkg-harnesses-accounts-group-head">
+          <h4 id="pkg-harnesses-accounts-others">{t("group.others")}</h4>
+          <p className="pkg-harnesses-accounts-help">{t("group.othersHint")}</p>
+        </header>
+        <ul className="pkg-harnesses-accounts-list">{groups.others.map((row) => renderRow(row, false))}</ul>
+      </section>}
       {list.manageable
         ? <form className="pkg-harnesses-accounts-add" onSubmit={(event) => {
             event.preventDefault();
@@ -177,7 +264,10 @@ export default function HarnessAccounts({ host, accounts, projectId }: { host: W
               {list.canAddShared && <Seg label={t("whoGroup")} value={newPrivate ? "private" : "shared"} disabled={Boolean(busy)} options={[["shared", t("scope.shared")], ["private", t("scope.private")]]} onChange={(value) => setNewPrivate(value === "private")} />}
               <Button size="sm" type="submit" iconStart={AddIcon} busy={busy === "add"} disabled={Boolean(busy) || !newName.trim()}>{t("add")}</Button>
             </div>
-            <p className="pkg-harnesses-accounts-help">{addsPrivate ? t("addPrivateHint") : t("addSharedHint")}</p>
+            <p className="pkg-harnesses-accounts-help">
+              {addsPrivate ? t("addPrivateHint") : t("addSharedHint")}
+              {relay.view && !relay.available && <> {t("addForRelay")}</>}
+            </p>
           </form>
         : !list.unsupported && <p className="pkg-harnesses-accounts-help">{t("cannotAdd")}</p>}
     </Section>

@@ -46,6 +46,7 @@ import {
     RELAY_DEFAULT_REFUSAL_MS,
     RELAY_HANDOVER_LEVELS,
     RELAY_MAX_MEMBERS,
+    RELAY_MIN_MEMBERS,
     RELAY_ORDERS,
     tightestWindow,
     type RelayMemberView,
@@ -423,6 +424,9 @@ export interface RelayFamilyHandle {
     label: string;
     view(actor: RelayActor, context: HarnessContext): Promise<RelayView>;
     save(actor: RelayActor, body: Record<string, unknown>, context: HarnessContext): Promise<RelayView>;
+    /** The actor's Relay has `RELAY_MIN_MEMBERS` members they may use, so the
+     *  harness list and the picker show it to them. Cheap: no member probes. */
+    listed(actor: RelayActor): Promise<boolean>;
 }
 export interface RelayActor {
     userId: string;
@@ -638,6 +642,8 @@ export function createHarnessAccountFamily(options: HarnessAccountFamilyOptions)
             await store!.setRelay(actor.userId, { members, order: body.order as RelaySettings["order"], handoverAt: body.handoverAt as number });
             return viewFor(actor, context);
         },
+        listed: async (actor) => store !== undefined
+            && (await store.relay(actor.userId)).members.filter((id) => accessible(id, actor)).length >= RELAY_MIN_MEMBERS,
     };
     const register = (account?: ResolvedHarnessAccount, relay = false) => {
         if (relay) {
