@@ -866,11 +866,17 @@ at ≥ 6.6:1.
   an island (`--look-rail-island`, `--package-window-foot`). Only its width
   resizes, from the inline-start edge (ui.md).
 - A pinned (docked) window is part of the rail column (shellLooks.css §1e):
-  the host, still the idle frame, grows around it, so the window has no
+  the host, still the idle frame, grows around it, so the window adds no
   material of its own. It sits in the rail's fill, edge and shadow (none by
   default, so it sits on the canvas as the idle rail does; Line and Editorial
   keep the rail's hairline down the window's start; Air and Obsidian keep
-  their island around window and strip).
+  their island around window and strip). A look whose idle rail has no fill
+  of its own — Line, Editorial and Paper draw a line on the page or a bare
+  sheet — paints the look's column material on the docked pane instead
+  (`--look-rail`, `--look-rail-clip`, `--look-rail-blur`, the same ladder as
+  the floating window), inside the host's frame, so the pane never shows the
+  conversation through it. Looks whose host already paints one, or whose
+  window is a plane of its own (the Monoliths), are untouched.
   The Monoliths are the exception, because there work lies on a plane of its
   own and only chrome on the backdrop: the pane itself is a second plane in
   the conversation's material (`--look-work`, `--look-work-shadow`,
