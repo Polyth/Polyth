@@ -19,7 +19,9 @@ export interface AgentEvent {
   outcome: string;
   /** Integration events: the publishing source id. */
   source?: string;
-  /** Webhook events: the one agent and trigger the URL belongs to. */
+  /** Webhook events: the one agent and trigger the URL belongs to. Integration
+   *  events may carry one too when the source fetched them for that trigger
+   *  alone (for example with its owner's account); no other agent sees them. */
   target?: { agentId: string; triggerId: string };
   /** Agent whose run produced the event (its own session or its run). */
   sourceAgentId?: string;
@@ -118,6 +120,9 @@ export function explainMatch(trigger: AgentEventTrigger, event: AgentEvent, self
   if (trigger.kind !== event.kind) return { matched: false, reason: "source" };
   if (trigger.kind === "agent" && event.sourceAgentId !== trigger.agentId) return { matched: false, reason: "source" };
   if (trigger.kind === "integration" && event.source !== trigger.source) return { matched: false, reason: "source" };
+  if (trigger.kind === "integration" && event.target && (event.target.agentId !== selfAgentId || event.target.triggerId !== trigger.id)) {
+    return { matched: false, reason: "source" };
+  }
   if (trigger.kind !== "webhook" && !(trigger.on as readonly string[]).includes(event.outcome)) return { matched: false, reason: "outcome" };
   const failed = (trigger.filters ?? []).find((filter) => !filterPasses(filter, event));
   return failed ? { matched: false, reason: "filter", filter: failed } : { matched: true };
@@ -132,6 +137,7 @@ export function triggerMatches(trigger: AgentEventTrigger, event: AgentEvent, se
   } else {
     if (trigger.kind === "agent" && event.sourceAgentId !== trigger.agentId) return false;
     if (trigger.kind === "integration" && event.source !== trigger.source) return false;
+    if (trigger.kind === "integration" && event.target && (event.target.agentId !== selfAgentId || event.target.triggerId !== trigger.id)) return false;
     if (!(trigger.on as readonly string[]).includes(event.outcome)) return false;
   }
   return (trigger.filters ?? []).every((filter) => filterPasses(filter, event));
@@ -246,7 +252,8 @@ export function describeEvent(event: AgentEvent): string {
   }
   if (event.kind === "integration") {
     const body = event.fields.text ? ` — ${clip(event.fields.text.replace(/\s+/g, " ").trim(), 400)}` : "";
-    return `${event.source ?? "integration"} · ${event.outcome}: ${title}${body}`;
+    const link = event.fields.url ? ` <${clip(event.fields.url, 300)}>` : "";
+    return `${event.source ?? "integration"} · ${event.outcome}: ${title}${link}${body}`;
   }
   return `Session “${title}” ${event.outcome}${detail}`;
 }

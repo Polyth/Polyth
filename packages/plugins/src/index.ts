@@ -112,6 +112,7 @@ export {
   type AgentEventPublication,
   type AgentEventSourceDescriptor,
   type AgentEventSources,
+  type AgentEventSubscription,
   type SessionPurposeRegistry,
   type SessionStartStep,
   type SessionStartStepContext,

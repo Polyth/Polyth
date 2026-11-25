@@ -845,6 +845,8 @@ export interface AgentEventSourceDto {
   id: string;
   label: string;
   types: Array<{ id: string; label: string }>;
+  /** Extra fields a wake on this source can filter on. */
+  fields?: Array<{ id: string; label: string }>;
 }
 export interface AgentApprovalPolicyDto {
   timeoutMinutes: number;

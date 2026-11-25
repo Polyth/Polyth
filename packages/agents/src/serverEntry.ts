@@ -678,8 +678,11 @@ export function scheduleRoutes(deps: {
       if (trigger.kind === "session") {
         events = await deps.recentSessionEvents?.(owned.id, spaceId, since) ?? [];
       } else if (trigger.kind === "integration") {
+        // A targeted event was fetched for one agent with its owner's
+        // account: only that owner may see it, whatever agent id is asked.
         events = deps.recentIntegrationEvents?.(spaceId, trigger.source, since)
-          .filter((event) => !event.projectId || event.projectId === owned.id) ?? [];
+          .filter((event) => !event.projectId || event.projectId === owned.id)
+          .filter((event) => !event.target || deps.schedule.get(event.target.agentId)?.ownerUserId === rc.space.userId) ?? [];
       } else if (trigger.kind === "agent") {
         const source = deps.schedule.get(trigger.agentId);
         if (source && inSpace(source) && accessOf(source) === "own" && (await project(source.projectId))) {
@@ -1403,6 +1406,9 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         spaceId: input.spaceId,
         source: input.source,
         outcome: input.type,
+        ...(input.target && typeof input.target.agentId === "string" && typeof input.target.triggerId === "string"
+          ? { target: { agentId: input.target.agentId, triggerId: input.target.triggerId } }
+          : {}),
         chainDepth: 0,
         fields: {
           ...Object.fromEntries(Object.entries(input.fields ?? {}).map(([key, value]) => [key, String(value).slice(0, 2_000)])),
@@ -1415,6 +1421,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       schedule?.dispatchEvent(event);
     },
     subscribed: (source) => schedule?.subscribed(source) ?? [],
+    subscriptions: (source) => schedule?.subscriptions(source) ?? [],
   });
   const recentIntegrationEvents = (spaceId: string, source: string, since: number): AgentEvent[] =>
     recentIntegration.filter((event) => event.spaceId === spaceId && event.source === source && event.at >= since);
@@ -1544,6 +1551,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     personSpace: (userId, spaceId) => host.personSpaceContext?.(userId, spaceId),
     project: (space, projectId) => host.forSpace(space).projects.get(projectId),
     access: scheduleTaskAccess,
+    sources: () => [...sources.values()],
   });
   let capabilities: Disposable[] = [];
   let routes: RouteHandler | null = null;

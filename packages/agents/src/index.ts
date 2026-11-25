@@ -11,7 +11,7 @@ import { dirname } from "node:path";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { AttachmentRef, HarnessSelection, HarnessSnapshot, ModelRef, TokenUsage, TurnAdmission } from "@polyth/contracts";
 import { harnessSignInExpiry } from "@polyth/contracts";
-import { atomicWriteSync } from "@polyth/plugins";
+import { atomicWriteSync, type AgentEventSubscription } from "@polyth/plugins";
 import {
   contentTrustMatches,
   issueContentTrustReceipt,
@@ -947,6 +947,9 @@ export interface ScheduleService {
   takeIssuedWebhookTokens(id: string): Record<string, string>;
   /** Projects with an active agent waking on integration `source`. */
   subscribed(source: string): Array<{ spaceId: string; projectId: string }>;
+  /** Every active agent wake on integration `source`, with its owner,
+   *  types and filters, so the source can watch what the wake names. */
+  subscriptions(source: string): AgentEventSubscription[];
   /** Turn `id` into a repository-defined agent backed by `file`, which the
    *  person just wrote from it (trusted as exactly these bytes). */
   adoptFile(id: string, spaceId: string, file: LoopFileResult): ScheduleTask;
@@ -2339,6 +2342,8 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
       if (event.kind === "webhook" && event.target?.agentId !== task.id) continue;
       if (event.kind === "integration"
         && (task.spaceId !== event.spaceId || (event.projectId && task.projectId !== event.projectId))) continue;
+      // A targeted integration event was read for one agent (its owner's account).
+      if (event.kind === "integration" && event.target && event.target.agentId !== task.id) continue;
       if (event.kind === "agent") {
         const source = tasks.find((candidate) => candidate.id === event.sourceAgentId);
         if (!source || source.spaceId !== task.spaceId) continue;
@@ -2648,6 +2653,25 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
         }
       }
       return [...out.values()];
+    },
+    subscriptions(source) {
+      const out: AgentEventSubscription[] = [];
+      for (const task of tasks) {
+        if (!task.spaceId || !wakeable(task)) continue;
+        for (const trigger of task.eventTriggers ?? []) {
+          if (trigger.kind !== "integration" || trigger.source !== source) continue;
+          out.push({
+            spaceId: task.spaceId,
+            projectId: task.projectId,
+            agentId: task.id,
+            triggerId: trigger.id,
+            ...(task.ownerUserId ? { ownerUserId: task.ownerUserId } : {}),
+            types: [...trigger.on],
+            filters: (trigger.filters ?? []).map((filter) => ({ ...filter })),
+          });
+        }
+      }
+      return out;
     },
     list(projectId) {
       const all = [...tasks].sort((a, b) => (a.nextRunAt ?? Infinity) - (b.nextRunAt ?? Infinity));

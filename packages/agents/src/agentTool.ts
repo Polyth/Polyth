@@ -4,6 +4,8 @@
 // it a chat asked to "create an agent in Polyth" has no way to do so.
 // Server-only; it acts for the person of the turn, who owns what it creates.
 import type { AgentCapabilityContribution, JsonObject, SpaceContext, ToolExecutionContext } from "@polyth/contracts";
+import type { AgentEventSourceDescriptor } from "@polyth/plugins";
+import { MAX_EVENT_TRIGGERS, type AgentEventTrigger } from "./agentEvents.ts";
 import { AGENT_ICON_IDS } from "./agentPrompt.ts";
 import type { AgentColor, AgentNotifyPolicy, ScheduleService, ScheduleTask, ScheduleTaskInput } from "./index.ts";
 
@@ -27,6 +29,8 @@ export interface AgentsToolDeps {
   project(space: SpaceContext, projectId: string): Promise<{ id: string; name?: string } | undefined>;
   /** "own" | "admin" | "none", as the HTTP routes decide it. */
   access(space: SpaceContext, task: ScheduleTask): "own" | "admin" | "none";
+  /** Registered integration event sources (GitHub, Monitoring…). */
+  sources?(): AgentEventSourceDescriptor[];
 }
 
 const inputSchema: JsonObject = {
@@ -93,6 +97,47 @@ const inputSchema: JsonObject = {
     notebook: { type: "string", description: "create/update: the agent's notebook — facts it should start from and keep up to date (preferences, constraints, what it already knows)." },
     notify: { type: "string", enum: [...NOTIFY], description: "create/update: when a finished run notifies the person (default alerts)." },
     enabled: { type: "boolean", description: "create/update: false keeps the agent paused (create default true)." },
+    eventTriggers: {
+      type: "array",
+      maxItems: MAX_EVENT_TRIGGERS,
+      description: "create/update: wake on events instead of (or besides) a clock. On update the list replaces every event wake; [] removes them. `list` names the integration sources and their event types and fields. kind \"integration\": an event from a source such as github (needs source and on); kind \"session\": a chat of this project finished (on: completed|failed|stopped); kind \"agent\": another agent finished a run (agentId, on: ok|failed). filters narrow it, e.g. GitHub: {\"field\":\"repo\",\"op\":\"equals\",\"value\":\"owner/name\"} watches that repository (without one, the project's own GitHub repository). Webhook wakes and wake scripts are set up on the Agents page.",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "kind", "on"],
+        properties: {
+          id: { type: "string", description: "Short lowercase id, unique within the agent, e.g. \"new-issues\"." },
+          kind: { type: "string", enum: ["integration", "session", "agent"] },
+          source: { type: "string", description: "integration: the source id, e.g. \"github\"." },
+          agentId: { type: "string", description: "agent: the agent whose runs wake this one." },
+          on: { type: "array", items: { type: "string" }, description: "Event types (integration) or outcomes (session, agent)." },
+          filters: {
+            type: "array",
+            maxItems: 8,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["field", "op", "value"],
+              properties: {
+                field: { type: "string" },
+                op: { type: "string", enum: ["equals", "not-equals", "contains", "not-contains"] },
+                value: { type: "string" },
+              },
+            },
+          },
+          pace: {
+            type: "object",
+            additionalProperties: false,
+            description: "Default: wait 1 minute after the last event, one run with the newest event, at most 6 wakes an hour.",
+            properties: {
+              quietMs: { type: "integer", minimum: 0, description: "Wait this long after the last matching event." },
+              coalesce: { type: "string", enum: ["latest", "batch"], description: "batch: one run with every waiting event." },
+              maxPerHour: { type: "integer", minimum: 1, maximum: 60 },
+            },
+          },
+        },
+      },
+    },
     message: { type: "string", description: "run: text the agent receives from the person on this wake. next-wake: what the agent should do at its next wake, complete and self-contained." },
   },
 };
@@ -103,14 +148,14 @@ export const agentsSkill: AgentCapabilityContribution = {
     kind: "skill",
     owner: AGENTS_PACKAGE_ID,
     scope: "deployment",
-    revision: "1",
+    revision: "2",
     name: "polyth-agents",
     title: "Polyth Agents",
-    description: "Create, change, list and wake Polyth Agents: named agents that live on the Agents page, wake on a schedule, heartbeat or on demand, and keep a notebook.",
+    description: "Create, change, list and wake Polyth Agents: named agents that live on the Agents page, wake on a schedule, heartbeat, events or on demand, and keep a notebook.",
     instructions: `A Polyth Agent is a named, long-lived agent of a project that lives on Polyth's Agents page. It has a charter (standing instructions and character), a notebook (what it knows), and wakes on a schedule, on a heartbeat, on events or when the person runs it; every run is its own Polyth conversation the person can read and answer.
 When the user asks to create, make or set up an agent "in Polyth" (any language, for example "створи агента в Політі", "агент Політу"), or describes a persistent assistant or persona with a name, make a Polyth Agent with ${AGENTS_TOOL_NAME} action "create". This is not a delegated child session (agent.spawn), not a harness agent file (.opencode/agents, .claude/agents) and not a persona written into AGENTS.md; do not substitute those.
 Before creating: call ${AGENTS_TOOL_NAME} action "list" so you do not duplicate an agent of the same name (update it instead). Write the charter to the agent in the second person from everything the user said — its name, role, character and tone, what it watches, how and when it asks questions, what it suggests, its boundaries — and keep the user's language. Put facts it should start from (preferences, constraints, known context from memory or this chat) in the notebook, not the charter. Choose a fitting icon and colour.
-When to wake: use the schedule or heartbeat the user asked for. A proactive companion that checks in "sometimes" or "if we have not talked for a while" fits a heartbeat with daytime active hours (for example every 240 minutes, 09:00–21:00) in the user's time zone; ask for the time zone if you cannot tell it. With no timing at all, create it on demand only and say how to add a schedule later. Keep rolling memory unless the user wants every run to start fresh.
+When to wake: use the schedule or heartbeat the user asked for. A proactive companion that checks in "sometimes" or "if we have not talked for a while" fits a heartbeat with daytime active hours (for example every 240 minutes, 09:00–21:00) in the user's time zone; ask for the time zone if you cannot tell it. When the agent should react to something happening — new commits, issues, pull requests, comments, discussions or releases in a GitHub repository, a Monitoring alert, a chat of the project finishing, another agent's run — give it eventTriggers instead of polling on a heartbeat: action "list" names the event sources with their types and filter fields (GitHub watches the repository of a "repo equals owner/name" filter). With no timing at all, create it on demand only and say how to add a schedule later. Keep rolling memory unless the user wants every run to start fresh.
 After creating, report the agent's name and id and that it is on the Agents page; wake it with action "run" only when the user asks. When the user wants an agent to do something at its next wake (next run, next time) rather than now, use action "next-wake" with that request as the message: it waits on the agent's page and its next wake that is not a conversation carries it once. Change an existing agent with action "update" (only the fields to change). Agents defined by a repository file (.agents/agents/*.md) are changed by editing that file.`,
   },
 };
@@ -169,6 +214,16 @@ function fieldsOf(input: JsonObject): Partial<ScheduleTaskInput> {
   if (typeof input.notebook === "string") out.notebook = input.notebook;
   if (typeof input.enabled === "boolean") out.enabled = input.enabled;
   if (input.heartbeat !== undefined) out.heartbeat = input.heartbeat;
+  if (input.eventTriggers !== undefined) {
+    if (!Array.isArray(input.eventTriggers)) throw invalid("eventTriggers must be a list");
+    for (const raw of input.eventTriggers) {
+      const trigger = raw as { kind?: unknown; script?: unknown };
+      if (trigger?.kind === "webhook") throw invalid("webhook wakes are set up on the Agents page, where their URL is shown once");
+      if (trigger?.script !== undefined) throw invalid("wake scripts are written on the Agents page");
+    }
+    // The service validates each wake (ids, kinds, types, filters, pace).
+    out.eventTriggers = input.eventTriggers as unknown as AgentEventTrigger[];
+  }
   if (input.schedule !== undefined && input.schedule !== null) {
     const schedule = input.schedule as { cron?: unknown; timeZone?: unknown };
     const cron = text(schedule.cron);
@@ -221,8 +276,11 @@ export function createAgentsTool(deps: AgentsToolDeps): AgentCapabilityContribut
       const tasks = deps.service.list(project.id)
         .filter((task) => (!task.spaceId || task.spaceId === space.spaceId) && deps.access(space, task) !== "none");
       const where = project.name ? `${project.name} (${project.id})` : project.id;
-      if (!tasks.length) return { output: `No Polyth Agents in project ${where} yet.` };
-      return { output: [`${tasks.length} Polyth Agent${tasks.length === 1 ? "" : "s"} in project ${where}:`, ...tasks.map(summary)].join("\n") };
+      const sources = (deps.sources?.() ?? []).map((source) =>
+        `- ${source.id} (${source.label}): types ${source.types.map((type) => type.id).join(", ")}${source.fields?.length ? `; filter fields ${source.fields.map((field) => field.id).join(", ")}` : ""}`);
+      const sourceLines = sources.length ? ["", "Event sources an agent can wake on (eventTriggers kind \"integration\"):", ...sources] : [];
+      if (!tasks.length) return { output: [`No Polyth Agents in project ${where} yet.`, ...sourceLines].join("\n") };
+      return { output: [`${tasks.length} Polyth Agent${tasks.length === 1 ? "" : "s"} in project ${where}:`, ...tasks.map(summary), ...sourceLines].join("\n") };
     }
 
     if (action === "get") {
@@ -234,6 +292,9 @@ export function createAgentsTool(deps: AgentsToolDeps): AgentCapabilityContribut
           `Charter:\n${task.prompt}`,
           task.notebook ? `Notebook:\n${task.notebook}` : "Notebook: empty",
           ...(task.nextWake?.length ? [`For the next wake:\n${task.nextWake.map((note) => `- ${note.text}`).join("\n")}`] : []),
+          ...(task.eventTriggers?.length
+            ? [`Event wakes:\n${task.eventTriggers.map(({ tokenHash: _hash, ...trigger }: AgentEventTrigger & { tokenHash?: string }) => `- ${JSON.stringify(trigger)}`).join("\n")}`]
+            : []),
           `Memory: ${(task.target?.mode ?? "new-session-per-run") === "dedicated-session" ? "rolling" : "fresh"} · notify: ${task.notify ?? "alerts"}`,
         ].join("\n\n"),
       };
@@ -298,9 +359,9 @@ export function createAgentsTool(deps: AgentsToolDeps): AgentCapabilityContribut
       kind: "tool",
       owner: AGENTS_PACKAGE_ID,
       scope: "deployment",
-      revision: "1",
+      revision: "2",
       name: AGENTS_TOOL_NAME,
-      description: "List, create, change and wake Polyth Agents — the named agents on Polyth's Agents page that wake on a schedule, heartbeat or on demand and keep a notebook. Use it whenever the user asks to create or set up an agent in Polyth.",
+      description: "List, create, change and wake Polyth Agents — the named agents on Polyth's Agents page that wake on a schedule, heartbeat, events (GitHub, Monitoring, chats, other agents) or on demand and keep a notebook. Use it whenever the user asks to create or set up an agent in Polyth.",
       inputSchema,
       trust: "workspace",
       mutating: true,

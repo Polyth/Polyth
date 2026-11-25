@@ -7,8 +7,10 @@ import { describeChangeRequest, hostingRoutes } from "@polyth/code-hosting/route
 import { GIT_BINARY_ENV, resolveExecutable } from "@polyth/kernel/executable";
 
 import {
+  AGENT_EVENT_SOURCES,
   localOnlyRemoteAccess,
   serverServiceKey,
+  type AgentEventSources,
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
@@ -21,6 +23,7 @@ import { createGithubCredentialProvider } from "./accounts.ts";
 import {
   createGithubService,
   GITHUB_SIGNED_OUT,
+  runGh,
   withGithubAuth,
   type GithubCallAuth,
   type GithubService,
@@ -29,6 +32,14 @@ import {
 import { createUserCache, type UserCache, type UserLoad } from "./userCache.ts";
 import { createGithubPrWatch, type GithubPrWatch } from "./prWatch.ts";
 import { createGithubRunWaitProvider, type WaitConditionRegistryShape } from "./waitProvider.ts";
+import {
+  createGithubRepoWatch,
+  createRepoWatchFileStore,
+  GITHUB_EVENT_SOURCE,
+  parseGhInclude,
+  type GhApiAnswer,
+  type GithubRepoWatch,
+} from "./repoWatch.ts";
 
 export function githubRoutes(deps: Omit<Parameters<typeof hostingRoutes>[0], "provider" | "prefix" | "presentation" | "mergeStrategies"> & { github: GithubService }): RouteHandler {
   return hostingRoutes({ ...deps, provider: deps.github, prefix: "/api/github", mergeStrategies: ["squash", "merge", "rebase"], presentation: { changeRequest: "pull request", abbreviation: "PR", numberPrefix: "#", conflictEvent: "github/conflict-resolution-started" } });
@@ -173,6 +184,18 @@ export function createGithubPackage(host: ServerPackageHost, seams: GithubPackag
   let prWatch: GithubPrWatch | null = null;
   let toolRegistrations: Disposable[] = [];
   let waitRegistration: Disposable | undefined;
+  let repoWatch: GithubRepoWatch | null = null;
+  let sourceRegistration: { sources: AgentEventSources; registration: Disposable } | undefined;
+  /** The Agents package may enable after GitHub: register when it appears. */
+  const eventSources = (): AgentEventSources | undefined => {
+    const current = host.services.get(AGENT_EVENT_SOURCES);
+    if (!current) return undefined;
+    if (sourceRegistration?.sources !== current) {
+      void sourceRegistration?.registration.dispose();
+      sourceRegistration = { sources: current, registration: current.register(GITHUB_EVENT_SOURCE) };
+    }
+    return current;
+  };
   const users = seams.users ?? createUserCache();
   const people = host.people ? createPersonHostingAccounts(host.people, "github") : undefined;
   const isMember = (userId: string, spaceId: string) => host.people?.isMember(userId, spaceId) ?? true;
@@ -221,6 +244,48 @@ export function createGithubPackage(host: ServerPackageHost, seams: GithubPackag
           return access.kind === "personal" ? { kind: "personal", auth: access.auth } : access;
         },
       }));
+      // Agents waking on GitHub events: each wake's repository is polled as
+      // the agent's owner, decided exactly like that person's own request.
+      repoWatch = createGithubRepoWatch({
+        sources: eventSources,
+        async projectRepo(projectId) {
+          const project = await host.projects.get(projectId);
+          if (!project) return undefined;
+          const remotes = await remotesAt(project.path).catch(() => []);
+          const origin = remotes.find((remote) => remote.remoteName === "origin") ?? remotes[0];
+          return origin ? { repo: origin.fullPath, host: origin.hostname } : undefined;
+        },
+        async access(sub, hostName) {
+          const project = await host.projects.get(sub.projectId);
+          if (!project || (project.spaceId && project.spaceId !== sub.spaceId)) return { refused: "The project is no longer available." };
+          if (!sub.ownerUserId) return { refused: "This agent acts for no one." };
+          const space = host.personSpaceContext?.(sub.ownerUserId, sub.spaceId);
+          if (!space) return { refused: "The agent's owner is no longer a member of this Space." };
+          const access = githubRequestAuth({ people, request: { space }, hosts: [hostName], isMember });
+          if (access.kind === "refused") return { refused: access.reason };
+          const auth = access.kind === "personal" ? access.auth : null;
+          const hostArgs = hostName === "github.com" ? [] : ["--hostname", hostName];
+          return {
+            // Per person and account: one person's reads are never another's.
+            key: `${sub.ownerUserId}:${access.kind === "personal" ? `account:${access.accountId}` : "installation"}`,
+            api: async (args): Promise<GhApiAnswer> => {
+              const call = [args[0]!, ...hostArgs, ...args.slice(1)];
+              try {
+                const result = await withGithubAuth(auth, () => runGh(call, project.path));
+                return parseGhInclude(result.stdout) ?? { status: 0, body: null };
+              } catch (error) {
+                // `gh api` exits non-zero on 304 and on errors; -i keeps the status.
+                const parsed = parseGhInclude(String((error as { stdout?: unknown }).stdout ?? ""));
+                if (parsed) return parsed;
+                throw error;
+              }
+            },
+          };
+        },
+        ...createRepoWatchFileStore((spaceId) => host.spaceStorage(host.systemSpaceContext(spaceId)).packageDir(host.pluginId)),
+      });
+      eventSources();
+      repoWatch.start();
       const watchRoutes = prWatch;
       routes = async request => {
         if (!request.path.startsWith("/api/github/")) return false;
@@ -307,6 +372,10 @@ export function createGithubPackage(host: ServerPackageHost, seams: GithubPackag
       waitRegistration = undefined;
       prWatch?.dispose();
       prWatch = null;
+      repoWatch?.stop();
+      repoWatch = null;
+      await sourceRegistration?.registration.dispose();
+      sourceRegistration = undefined;
       for (const registration of toolRegistrations.toReversed()) await registration.dispose();
       toolRegistrations = [];
     },

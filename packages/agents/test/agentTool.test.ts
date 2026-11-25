@@ -154,6 +154,41 @@ test("create refuses system turns, viewers, foreign projects and bad input", asy
   assert.equal(service.list().length, 0);
 });
 
+test("event wakes are set, shown, replaced and removed through the tool; webhooks and scripts stay on the Agents page", async (t) => {
+  const { service, call } = fixture(t);
+  const issues = { id: "new-reports", kind: "integration", source: "github", on: ["issue-opened"],
+    filters: [{ field: "repo", op: "equals", value: "Polyth/nightly-reports" }], pace: { quietMs: 60_000, coalesce: "batch", maxPerHour: 12 } };
+  const created = await call({ ...OTTO, heartbeat: undefined, eventTriggers: [issues] } as unknown as JsonObject);
+  const id = (created.metadata as { agentId: string }).agentId;
+  assert.match(created.output, /1 event wake/);
+  assert.deepEqual(service.get(id)!.eventTriggers, [issues]);
+  const shown = await call({ action: "get", agentId: id });
+  assert.match(shown.output, /Event wakes:\n- \{"id":"new-reports","kind":"integration","source":"github"/);
+
+  await assert.rejects(call({ action: "update", agentId: id, eventTriggers: [{ id: "hook", kind: "webhook", on: [] }] } as unknown as JsonObject), { code: "invalid-input" });
+  await assert.rejects(call({ action: "update", agentId: id, eventTriggers: [{ ...issues, script: "return { action: 'run' }" }] } as unknown as JsonObject), { code: "invalid-input" });
+  await assert.rejects(call({ action: "update", agentId: id, eventTriggers: [{ ...issues, on: [] }] } as unknown as JsonObject), { code: "invalid-input" });
+  await assert.rejects(call({ action: "update", agentId: id, eventTriggers: [{ ...issues }] } as unknown as JsonObject, { actorUserId: "usr_bob" }), { code: "not-found" });
+
+  await call({ action: "update", agentId: id, eventTriggers: [{ ...issues, on: ["issue-opened", "push"] }] } as unknown as JsonObject);
+  assert.deepEqual((service.get(id)!.eventTriggers![0] as { on: string[] }).on, ["issue-opened", "push"]);
+  await call({ action: "update", agentId: id, eventTriggers: [] } as unknown as JsonObject);
+  assert.deepEqual(service.get(id)!.eventTriggers ?? [], []);
+});
+
+test("list names the event sources an agent can wake on", async (t) => {
+  const { service } = fixture(t);
+  const tool = createAgentsTool({
+    service,
+    personSpace: (userId, spaceId) => members[`${userId}:${spaceId}`],
+    project: async (space, id) => projects[id]?.spaceId === space.spaceId ? projects[id] : undefined,
+    access: scheduleTaskAccess,
+    sources: () => [{ id: "github", label: "GitHub", types: [{ id: "issue-opened", label: "Issue" }, { id: "push", label: "Commits" }], fields: [{ id: "repo", label: "Repo" }] }],
+  });
+  const listed = await tool.execute!({ action: "list" }, { sessionId: "ses_chat", projectId: "prj_food", cwd: "/food", spaceId: "spc_a", actorUserId: "usr_ada" } as ToolExecutionContext);
+  assert.match(listed.output, /- github \(GitHub\): types issue-opened, push; filter fields repo/);
+});
+
 test("the package registers the skill and tool on enable and removes them on disable", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "polyth-agents-register-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));

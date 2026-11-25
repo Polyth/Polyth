@@ -208,8 +208,13 @@ export default function EventTriggerRow({
   const pace: AgentPaceDto = trigger.pace ?? { ...DEFAULT_TRIGGER_PACE };
   const filters = trigger.filters ?? [];
   const agentName = (id: string) => agents.find((agent) => agent.id === id)?.name ?? "";
-  const fields = EVENT_FIELDS[trigger.kind];
   const source = trigger.kind === "integration" ? sources.find((item) => item.id === trigger.source) : undefined;
+  const baseFields: readonly string[] = EVENT_FIELDS[trigger.kind];
+  // A source may name its own fields (GitHub: repository, branch…).
+  const fieldOptions = [
+    ...EVENT_FIELDS[trigger.kind].map((field) => ({ value: field as string, label: tr(`agents.field.${field}`) })),
+    ...(source?.fields ?? []).filter((field) => !baseFields.includes(field.id)).map((field) => ({ value: field.id, label: field.label })),
+  ];
 
   // "Would have woken": the server replays the last day through the same rules.
   const [preview, setPreview] = useState<AgentTriggerPreviewDto | null>(null);
@@ -334,7 +339,7 @@ export default function EventTriggerRow({
               <Select
                 label={tr("agents.filterField")}
                 value={filter.field}
-                options={fields.map((field) => ({ value: field, label: tr(`agents.field.${field}`) }))}
+                options={fieldOptions}
                 onChange={(value) => setFilters(filters.map((item, i) => i === index ? { ...item, field: value } : item))}
               />
               <Select
@@ -354,7 +359,7 @@ export default function EventTriggerRow({
           ))}
           {filters.length < 8 && (
             <span>
-              <Button size="sm" variant="ghost" iconStart={PlusIcon} onClick={() => setFilters([...filters, { field: fields[0], op: "contains", value: "" }])}>
+              <Button size="sm" variant="ghost" iconStart={PlusIcon} onClick={() => setFilters([...filters, { field: fieldOptions[0]!.value, op: "contains", value: "" }])}>
                 {tr("agents.addCondition")}
               </Button>
             </span>

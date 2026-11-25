@@ -328,6 +328,9 @@ export interface AgentEventSourceDescriptor {
   id: string;
   label: string;
   types: Array<{ id: string; label: string }>;
+  /** Event fields the source fills that a wake can filter on (besides
+   *  `title` and `text`), e.g. `repo`. Optional for older sources. */
+  fields?: Array<{ id: string; label: string }>;
 }
 
 export interface AgentEventPublication {
@@ -339,8 +342,28 @@ export interface AgentEventPublication {
   projectId?: string;
   /** Short human title. Event text is data for agents, never instructions. */
   title: string;
-  /** Extra filterable facts; `text` is shown to the agent (bounded). */
+  /** Extra filterable facts; `text` is shown to the agent (bounded), and
+   *  `url` is shown as its link. */
   fields?: Record<string, string>;
+  /** The one agent wake this event is for (see {@link AgentEventSubscription}),
+   *  e.g. because it was read with that agent owner's account. No other
+   *  agent sees it, and only that owner sees it in previews. */
+  target?: { agentId: string; triggerId: string };
+}
+
+/** One active agent wake on a source, with what it asked for. Lets a source
+ *  watch exactly the things a wake names (a repository in a `repo` filter)
+ *  and act as the agent's owner. */
+export interface AgentEventSubscription {
+  spaceId: string;
+  projectId: string;
+  agentId: string;
+  triggerId: string;
+  /** The person the agent acts for; absent for an agent nobody owns. */
+  ownerUserId?: string;
+  /** Event types the wake listens to. */
+  types: string[];
+  filters: Array<{ field: string; op: "equals" | "not-equals" | "contains" | "not-contains"; value: string }>;
 }
 
 /** Provided by the Agents package. Sources register once and publish events;
@@ -350,6 +373,8 @@ export interface AgentEventSources {
   publish(event: AgentEventPublication): void;
   /** Projects (per Space) with an active agent waking on `source`. */
   subscribed(source: string): Array<{ spaceId: string; projectId: string }>;
+  /** Every active agent wake on `source`. Optional for older hosts. */
+  subscriptions?(source: string): AgentEventSubscription[];
 }
 
 export const AGENT_EVENT_SOURCES =
