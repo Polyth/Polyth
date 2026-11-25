@@ -233,9 +233,12 @@ test("the launcher column keeps its idle frame under a window, and a docked wind
   // a border there would nudge every launcher.
   assert.match(css, new RegExp(`${prefix} \\.railbar > \\.plugin-strip::before \\{\\s*background: var\\(--look-rail-seam\\);`));
   assert.equal(/plugin-strip \{[^}]*border-inline-start: 1px/.test(css), false, "the strip draws its seam as a border again");
-  // A docked window needs no material: it sits in the frame the rail has idle.
+  // By default a docked window adds no material: it sits in the frame the rail
+  // has idle. A look whose idle rail is a line or a bare sheet has no host
+  // fill, so it paints its own column material (--look-rail) on the pane.
   assert.match(css, new RegExp(`${dock} > \\.rail \\{[^}]*background: transparent !important;[^}]*backdrop-filter: var\\(--look-shell-blur, none\\) !important;[^}]*border: 0 !important;`));
   assert.equal(css.includes("--look-dock"), false, "the docked window has a material of its own again");
+  assert.match(css, /body:is\(\[data-shell-look="line"\], \[data-shell-look="editorial"\], \[data-shell-look="paper"\]\):not\(#\\#\):not\(#\\#\) \.railbar:[^{]*> \.rail:[^{]*\{\s*background: var\(--look-rail\) !important;/);
   // An island's end padding sits on the strip, so the strip fills the frame.
   for (const look of ["air", "obsidian"]) {
     assert.match(css, new RegExp(`body\\[data-shell-look="${look}"\\]:not\\(#\\\\#\\) \\{[^}]*--look-strip-pad: \\d+px;[^}]*--look-strip-card: `), look);

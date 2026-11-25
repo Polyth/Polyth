@@ -680,6 +680,20 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .railbar:is([da
   clip-path: none !important;
 }
 
+/* Line, Editorial and Paper draw their idle rail as a line on the page or as
+   a bare sheet, not as a filled column, so the host has no material for a
+   docked window to sit in: the flattened column showed the conversation
+   through the pane (Standard's glass host, Air and Obsidian's island and the
+   Monoliths' plane do paint one, so they are untouched). Those looks paint
+   their own column material (--look-rail) on the docked pane instead, inside
+   the host's hairline frame, with the same transparency ladder as the
+   floating window (--look-rail*). */
+body:is([data-shell-look="line"], [data-shell-look="editorial"], [data-shell-look="paper"]):not(#\#):not(#\#) .railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]) > .rail:not(.rail-dynamic):not(.rail-fullscreen):not(.rail-dock-bottom):not(.rail-pinned-narrow) {
+  background: var(--look-rail) !important;
+  background-clip: var(--look-rail-clip, border-box) !important;
+  backdrop-filter: var(--look-rail-blur) !important;
+}
+
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]):has(> .rail:not(.rail-dynamic):not(.rail-fullscreen):not(.rail-dock-bottom):not(.rail-pinned-narrow)) > .plugin-strip {
   border-start-start-radius: 0 !important;
   border-end-start-radius: 0 !important;
