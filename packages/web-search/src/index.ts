@@ -29,7 +29,10 @@ export {
   type WebSearchProviderStatus,
   type WebSearchSettingsSnapshot,
 } from "./client.ts";
-export { createDuckDuckGoProvider, parseDuckDuckGoResults } from "./providers/duckduckgo.ts";
+export { bingResultsMatchQuery, createBingProvider, parseBingResults } from "./providers/bing.ts";
+export { createExaProvider, parseExaResults } from "./providers/exa.ts";
+export { createFirecrawlProvider, parseFirecrawlResults } from "./providers/firecrawl.ts";
+export { createParallelProvider, parseParallelResults } from "./providers/parallel.ts";
 export { createTavilyProvider, parseTavilyResults } from "./providers/tavily.ts";
 export { WebSearchRuntime, type WebSearchRuntimeDependencies } from "./runtime.ts";
 export { webSearchRoutes, type WebSearchRouteRuntime } from "./routes.ts";

@@ -17,7 +17,7 @@ export default defineWebPackage((host) => () => {
       component: () => createElement(WebSearchSettingsPage, { host }),
       settingsItems: [
         { id: "web-search.enabled", pageId: "web-search", label: copy.enabled, description: copy.enabledDescription, keywords: ["web", "search", "internet", "enable"], focusTarget: "web-search.enabled" },
-        { id: "web-search.provider", pageId: "web-search", label: copy.provider, description: copy.providerDescription, keywords: ["duckduckgo", "tavily", "provider"], focusTarget: "web-search.provider" },
+        { id: "web-search.provider", pageId: "web-search", label: copy.provider, description: copy.providerDescription, keywords: ["exa", "parallel", "firecrawl", "bing", "tavily", "provider"], focusTarget: "web-search.provider" },
         { id: "web-search.credential", pageId: "web-search", label: copy.credential, description: copy.credentialDescription, keywords: ["credential", "vault", "tavily", "api key"], focusTarget: "web-search.credential" },
       ],
     }),
@@ -25,7 +25,7 @@ export default defineWebPackage((host) => () => {
       id: "web-search",
       label: copy.title,
       plainDescription: copy.description,
-      keywords: ["web", "search", "internet", "research", "duckduckgo", "tavily"],
+      keywords: ["web", "search", "internet", "research", "exa", "parallel", "firecrawl", "bing", "tavily"],
       standardTier: "more",
       standardRank: 18,
       open: () => host.navigation.openSettingsPage("web-search"),

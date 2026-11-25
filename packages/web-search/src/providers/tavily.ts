@@ -3,6 +3,10 @@ import { webSearchError } from "../errors.ts";
 import { providerHttpRequest, type ProviderHttpTransport } from "../http.ts";
 import type { RawSearchResult, SearchProvider } from "../types.ts";
 
+/**
+ * With a credential this is the keyed API. Without one the same endpoint is
+ * called in Tavily's keyless mode: same response, a small shared daily limit.
+ */
 const ENDPOINT = "https://api.tavily.com/search";
 const TIME_RANGE: Readonly<Record<string, string>> = {
   day: "day",
@@ -37,9 +41,9 @@ export function createTavilyProvider(options: {
   return {
     id: "tavily",
     name: "Tavily",
-    requiresCredential: true,
+    requiresCredential: false,
+    acceptsCredential: true,
     async search(request, credential) {
-      if (!credential) throw webSearchError("auth-required", "Tavily is not configured for this Space");
       const payload: Record<string, unknown> = {
         query: request.query,
         search_depth: "basic",
@@ -57,7 +61,7 @@ export function createTavilyProvider(options: {
         method: "POST",
         headers: {
           accept: "application/json",
-          authorization: `Bearer ${credential}`,
+          ...(credential ? { authorization: `Bearer ${credential}` } : { "x-tavily-access-mode": "keyless" }),
           "content-type": "application/json",
           "user-agent": "Polyth/0.1 WebSearch",
         },
@@ -67,9 +71,13 @@ export function createTavilyProvider(options: {
         maxBytes: 1024 * 1024,
       }, options);
       if (result.status === 401 || result.status === 403) {
-        throw webSearchError("auth-required", "Tavily rejected the configured Credential Vault handle");
+        throw credential
+          ? webSearchError("auth-required", "Tavily rejected the configured Credential Vault handle")
+          : webSearchError("provider-unavailable", "Tavily refused the keyless request");
       }
-      if (result.status === 429) throw webSearchError("rate-limited", "Tavily rate limit reached");
+      if (result.status === 429) {
+        throw webSearchError("rate-limited", credential ? "Tavily rate limit reached" : "Tavily keyless limit reached");
+      }
       if (result.status === 432 || result.status === 433) {
         throw webSearchError("tavily-plan-exhausted", "the configured Tavily plan is exhausted");
       }

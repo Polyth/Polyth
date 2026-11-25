@@ -25,6 +25,9 @@ test("settings parser accepts bounded documented values", () => {
     maxResults: 10,
     tavilyCredentialHandle: "TAVILY_KEY",
   });
+  // A choice saved while DuckDuckGo was the only free service becomes the free chain.
+  assert.equal(parseWebSearchSettings({ ...DEFAULT_WEB_SEARCH_SETTINGS, provider: "duckduckgo" }).provider, "keyless");
+  assert.throws(() => parseWebSearchSettings({ ...DEFAULT_WEB_SEARCH_SETTINGS, provider: "bing" }), /provider/);
   assert.equal(parseWebSearchCount(undefined, 8), 8);
   assert.equal(parseWebSearchCount(10, 8), 8);
   assert.equal(normalizeWebSearchQuery("  current   Polyth\nrelease  "), "current Polyth release");
@@ -44,15 +47,27 @@ test("settings and public snapshots reject malformed values", () => {
     credentialHandles: [],
     vaultAvailable: false,
   }), /revision/);
+  // `keyed` is absent in a snapshot from an older server and reads as false.
   assert.deepEqual(parseWebSearchSettingsSnapshot({
     version: 1,
     revision: 3,
     settings: DEFAULT_WEB_SEARCH_SETTINGS,
     providers: [
-      { id: "duckduckgo", name: "DuckDuckGo", available: true, requiresCredential: false, configured: true },
-      { id: "tavily", name: "Tavily", available: false, requiresCredential: true, configured: false },
+      { id: "exa", name: "Exa", available: true, requiresCredential: false, configured: true },
+      { id: "parallel", name: "Parallel", available: true, requiresCredential: false, configured: true },
+      { id: "firecrawl", name: "Firecrawl", available: true, requiresCredential: false, configured: true },
+      { id: "tavily", name: "Tavily", available: true, requiresCredential: false, configured: true, keyed: true },
+      { id: "bing", name: "Bing", available: true, requiresCredential: false, configured: true },
     ],
     credentialHandles: [{ handle: "TAVILY_KEY", label: "Tavily", kind: "token" }],
     vaultAvailable: true,
-  }).revision, 3);
+  }).providers.map((provider) => provider.keyed), [false, false, false, true, false]);
+  assert.throws(() => parseWebSearchSettingsSnapshot({
+    version: 1,
+    revision: 3,
+    settings: DEFAULT_WEB_SEARCH_SETTINGS,
+    providers: [{ id: "duckduckgo", name: "DuckDuckGo", available: true, requiresCredential: false, configured: true }],
+    credentialHandles: [],
+    vaultAvailable: true,
+  }), /unsupported/);
 });

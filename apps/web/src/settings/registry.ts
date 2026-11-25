@@ -92,7 +92,7 @@ export const SETTINGS_PAGE_KEYWORDS: Readonly<Record<string, readonly string[]>>
   "task-trackers": ["jira", "trello", "linear", "issues", "tickets"],
   monitoring: ["logs", "metrics", "system", "health", "admin"],
   browser: ["web", "page", "auto-approve", "preview"],
-  "web-search": ["internet", "search engine", "tavily", "duckduckgo"],
+  "web-search": ["internet", "search engine", "tavily", "exa", "parallel", "firecrawl", "bing"],
   "secure-safe": ["password", "secret", "token", "api key", "credential", "vault"],
   tunnel: ["phone", "mobile", "pair", "device", "qr", "remote access"],
   shortcuts: ["hotkeys", "keyboard", "keybindings"],

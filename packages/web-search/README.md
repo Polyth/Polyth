@@ -30,14 +30,50 @@ harness through the generic `polyth-agent-tools` MCP projection.
 
 ## Providers
 
-- **DuckDuckGo** is the keyless default and is always available while the
-  package is enabled.
-- **Tavily** is optional. Only a global `token` or `env` Credential Vault handle can be selected;
+- The **free chain** needs no key and is the default: **Exa**, then
+  **Parallel**, **Firecrawl**, **Tavily** in keyless mode, and **Bing** last.
+  A service that is rate limited, unreachable or answers something unreadable
+  hands over to the next; a cancelled search does not. The response names the
+  service that answered in `provider` and the first one that failed in
+  `fallbackFrom`. When every service fails the error lists each reason, and
+  is `rate-limited` only if all of them were.
+  - **Exa** (`mcp.exa.ai/mcp`, tool `web_search_advanced_exa`), **Parallel**
+    (`search.parallel.ai/mcp`, tool `web_search`) and **Firecrawl**
+    (`mcp.firecrawl.dev/mcp`, tool `firecrawl_search`) are the vendors' hosted
+    MCP endpoints, which they document as usable without a key at a free
+    limit that none of them publishes. Each search is one stateless
+    `tools/call` POST with no account, session id, conversation id or model
+    name attached. Snippets are capped at 600 characters.
+    - Exa receives the region as a country, safe search and a
+      publication-date floor.
+    - Parallel has no such filters, so freshness is stated in words in its
+      objective and is a preference, not a guarantee.
+    - Firecrawl receives the region as a country name and freshness as a time
+      filter, and has no safe-search control. Its tool requires an
+      `objective` that must not carry user words, so a fixed sentence is sent.
+  - **Tavily** without a key calls the same `api.tavily.com/search` endpoint
+    with `X-Tavily-Access-Mode: keyless`: same response, a small daily limit
+    shared per network address (a `429` hands over to the next service).
+  - **Bing** is the last resort: its ordinary results page, parsed from
+    markup that is not a contract. Bing answers clients it distrusts
+    (datacenter addresses in particular) with a normal-looking page about
+    something else, so a page where fewer than a third of the results mention
+    a significant query word is rejected as `provider-invalid-response`
+    rather than returned.
+  - TinyFish is not in the chain: its search is free but its REST API
+    requires an account key and its MCP endpoint an OAuth sign-in.
+- **Tavily with a key** is optional. Only a global `token` or `env` Credential Vault handle can be selected;
   its plaintext is resolved inside the server callback that performs the
   request and never enters settings DTOs, tool arguments, events, or logs.
-- `auto` prefers Tavily when configured and falls back to DuckDuckGo for an
-  invalid/expired credential, provider failure, rate limit, or exhausted plan.
-  Explicit Tavily selection fails honestly instead of changing providers.
+  A provider status row carries `keyed: true` while a stored key is in use.
+- The provider setting is `auto`, `keyless` or `tavily`. `auto` prefers
+  keyed Tavily when configured and falls back to the free chain for an
+  invalid/expired credential, provider failure, rate limit, or exhausted
+  plan; that fallback skips keyless Tavily. Explicit Tavily selection needs a
+  key and fails honestly instead of changing providers.
+  A stored `duckduckgo` choice, from when DuckDuckGo was the only free
+  service, is read as `keyless`; DuckDuckGo was removed because it answers
+  automated clients with a challenge page.
 - Provider calls use HTTPS origin allowlists, DNS resolution with private and
   metadata address blocking, and a pinned socket for the validated address.
   Redirects are not followed. Timeouts, response-size limits, cancellation,
@@ -104,4 +140,4 @@ npm run build:web
 ```
 
 The tests use injected transports, resolvers and temporary Space directories.
-They do not require DuckDuckGo, Tavily, a live page or a paid provider turn.
+They do not require Exa, Parallel, Firecrawl, Tavily, Bing, a live page or a paid provider turn.
