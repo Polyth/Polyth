@@ -241,6 +241,51 @@ test("selecting text opens the selection menu with chat, explain, and fix", asyn
   }
 });
 
+test("the selection menu leaves focus in the editor and typing dismisses it", async () => {
+  resetDocsForTest();
+  selectionForTest = { text: "const total = 1;", startLine: 1, endLine: 1 };
+  const { container, unmount } = await mountFile("src/app.ts");
+  const KeyboardEventCtor = (dom as unknown as { KeyboardEvent: typeof KeyboardEvent }).KeyboardEvent;
+  const selectionMenu = () => [...document.querySelectorAll<HTMLElement>('[role="menu"]')].find((node) =>
+    [...node.querySelectorAll(".ui-menu-item-label")].some((label) => (label.textContent ?? "").trim() === "Explain"));
+  try {
+    const editSurface = container.querySelector<HTMLElement>(".editor-edit")!;
+    const typingTarget = editSurface.querySelector<HTMLElement>("textarea, [contenteditable='true']") ?? editSurface;
+    if (typingTarget === editSurface) editSurface.tabIndex = -1;
+    typingTarget.focus();
+    await act(async () => {
+      editSurface.dispatchEvent(new MouseEventCtor("mouseup", { bubbles: true, button: 0, clientX: 64, clientY: 80 }));
+    });
+    const menu = selectionMenu();
+    assert.ok(menu, "selection menu opens on mouseup");
+    assert.ok(!menu!.contains(document.activeElement), "the menu does not take focus from the editor");
+    assert.equal(document.activeElement, typingTarget);
+
+    // Modifier presses alone keep the menu; a typed character dismisses it
+    // without being swallowed.
+    await act(async () => {
+      typingTarget.dispatchEvent(new KeyboardEventCtor("keydown", { bubbles: true, key: "Shift" }));
+    });
+    assert.ok(selectionMenu(), "a lone modifier keeps the menu");
+    const typed = new KeyboardEventCtor("keydown", { bubbles: true, cancelable: true, key: "x" });
+    await act(async () => { typingTarget.dispatchEvent(typed); });
+    assert.equal(selectionMenu(), undefined, "typing dismisses the menu");
+    assert.equal(typed.defaultPrevented, false, "the key still reaches the editor");
+    assert.equal(document.activeElement, typingTarget);
+
+    // Right-click still opens a focused, keyboard-operable menu.
+    await act(async () => {
+      editSurface.dispatchEvent(new MouseEventCtor("contextmenu", { bubbles: true, cancelable: true, button: 2, clientX: 64, clientY: 80 }));
+    });
+    const focused = selectionMenu();
+    assert.ok(focused, "context menu opens");
+    assert.ok(focused!.contains(document.activeElement), "the context menu focuses its first item");
+  } finally {
+    selectionForTest = null;
+    await unmount();
+  }
+});
+
 
 test("CSV opens as a sortable, filterable table; SVG previews as an image", async () => {
   resetDocsForTest();

@@ -220,6 +220,11 @@ viewport**:
   `<dialog>`) and the host primitives, which already implement the hard parts
   (Dialog focus trap + restoration, Menu keyboard/roving, Popover
   positioning + dismissal, live regions).
+- A menu that pops up over a writing surface on its own (the file editor's
+  menu after a mouse selection) passes `Menu passive`: it never takes focus,
+  any non-modifier key typed outside it dismisses it and still reaches the
+  editor. The same menu opened by right-click or Shift+F10 stays focused so
+  it is keyboard-operable.
 - Keyboard navigation: every interactive element reachable and operable by
   keyboard; visible focus (`--focus-ring`, `focus-visible` styles).
 - Accessible names: `aria-label`/`aria-labelledby` on icon-only controls

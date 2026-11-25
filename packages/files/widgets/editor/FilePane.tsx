@@ -331,6 +331,7 @@ export default function FilePane({ projectId, sessionId, repositoryId, resource:
     text: string;
     startLine: number;
     endLine: number;
+    passive: boolean;
   } | null>(null);
   const [explainPanel, setExplainPanel] = useState<{
     x: number;
@@ -586,8 +587,11 @@ export default function FilePane({ projectId, sessionId, repositoryId, resource:
     setSelectionMenu(null);
   };
 
-  const openSelectionMenu = (x: number, y: number, sel: { text: string; startLine: number; endLine: number }) => {
-    setSelectionMenu({ x, y, ...sel });
+  // A menu revealed by finishing a mouse selection is passive: focus stays in
+  // the editor, so typing replaces the selection and dismisses the menu.
+  // Right-click and Shift+F10/ContextMenu open a focused, keyboard-operable menu.
+  const openSelectionMenu = (x: number, y: number, sel: { text: string; startLine: number; endLine: number }, passive = false) => {
+    setSelectionMenu({ x, y, passive, ...sel });
     setFileMenu(null);
   };
 
@@ -603,7 +607,7 @@ export default function FilePane({ projectId, sessionId, repositoryId, resource:
     const { clientX, clientY } = e;
     const reveal = () => {
       const sel = currentSelection();
-      if (sel) openSelectionMenu(clientX, clientY, sel);
+      if (sel) openSelectionMenu(clientX, clientY, sel, true);
       else setSelectionMenu(null);
     };
     if (typeof requestAnimationFrame === "function") requestAnimationFrame(reveal);
@@ -1094,6 +1098,7 @@ export default function FilePane({ projectId, sessionId, repositoryId, resource:
         label={tr("editor.filepane.selectionActions")}
         title={tr("editor.filepane.selectionActions")}
         phonePresentation="popover"
+        passive={selectionMenu?.passive ?? false}
         open={selectionMenu !== null}
         onOpenChange={(open) => { if (!open) setSelectionMenu(null); }}
         entries={selectionMenu ? [

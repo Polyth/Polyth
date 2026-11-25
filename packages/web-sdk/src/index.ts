@@ -1122,6 +1122,9 @@ export interface WebMenuProps {
   header?: ReactNode;
   footer?: ReactNode;
   renderContent?: (context: { close: () => void; sheet: boolean }) => ReactNode;
+  /** Leave focus where it is (a selection toolbar over an editor): typing
+   *  outside the menu dismisses it and the keys still reach their target. */
+  passive?: boolean;
 }
 /** The host `TextInput`: every native input attribute (id, ref, aria-*,
  *  enterKeyHint, autoCapitalize…) plus the shared invalid state and size.
