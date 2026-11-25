@@ -76,6 +76,8 @@ type ColorScheme = "light" | "dark" | "no-preference";
 type BrowserConnection = "idle" | "connecting" | "connected" | "reconnecting";
 type ContextMode = "off" | "select" | "area" | "text";
 type DevTab = "device" | "appearance" | "inspect" | "console" | "activity";
+/** One queued live keystroke: text for the caret, or a named key press. */
+type LiveKeyOp = { kind: "text"; text: string } | { kind: "press"; key: string };
 
 interface ApprovalRequest { url: string; message: string }
 interface Capability { available: boolean; engine: "chromium" | "fake" | null; reason?: string }
@@ -268,6 +270,8 @@ function BrowserTabView({ projectId, activeSessionId, initialBrowser, tabs, rest
   const followPaneRef = useRef(true);
   const remoteFocusRef = useRef(false);
   const composingRef = useRef(false);
+  const keyQueue = useRef<LiveKeyOp[]>([]);
+  const keyDraining = useRef(false);
   const scrollPending = useRef<{ x: number; y: number } | null>(null);
   const scrollRaf = useRef(0);
   const scrollInFlight = useRef(false);
@@ -1227,20 +1231,51 @@ function BrowserTabView({ projectId, activeSessionId, initialBrowser, tabs, rest
     const special = pressKeyFromEvent(event);
     if (special) {
       event.preventDefault();
-      void actLive({ kind: "press", key: special }).then((out) => {
-        if (!out.ok || !out.session) return;
-        if (focusUrlRef.current && out.session.url !== focusUrlRef.current) {
-          applyRemoteFocus(null);
-          return;
-        }
-        applyRemoteFocus(pointedFromActionResult(out.result), out.session.viewport, out.session.url);
-      });
+      enqueueKey({ kind: "press", key: special });
       return;
     }
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     if (event.key.length === 1) {
       event.preventDefault();
-      void actLive({ kind: "type", target: { selector: ":focus" }, text: event.key });
+      enqueueKey({ kind: "text", text: event.key });
+    }
+  };
+
+  /** Live keyboard input must land in order and add to the field rather than
+   *  replace it: one request at a time, consecutive text coalesced into one
+   *  caret insertion. Parallel requests could reach the page out of order. */
+  const enqueueKey = (op: LiveKeyOp) => {
+    const queue = keyQueue.current;
+    const last = queue[queue.length - 1];
+    if (op.kind === "text" && last?.kind === "text") last.text += op.text;
+    else queue.push(op);
+    if (!keyDraining.current) void drainKeys();
+  };
+
+  const drainKeys = async () => {
+    keyDraining.current = true;
+    const gen = generationRef.current;
+    try {
+      while (keyQueue.current.length) {
+        const op = keyQueue.current.shift()!;
+        const out = op.kind === "text"
+          ? await actLive({ kind: "insert-text", text: op.text })
+          : await actLive({ kind: "press", key: op.key });
+        // A failed or superseded keystroke drops the rest: typing on past it
+        // could put the remaining characters in the wrong place.
+        if (!out.ok || !out.session || gen !== generationRef.current) {
+          keyQueue.current = [];
+          return;
+        }
+        if (op.kind !== "press") continue;
+        if (focusUrlRef.current && out.session.url !== focusUrlRef.current) {
+          applyRemoteFocus(null);
+          continue;
+        }
+        applyRemoteFocus(pointedFromActionResult(out.result), out.session.viewport, out.session.url);
+      }
+    } finally {
+      keyDraining.current = false;
     }
   };
 
@@ -1249,7 +1284,7 @@ function BrowserTabView({ projectId, activeSessionId, initialBrowser, tabs, rest
     const value = event.currentTarget.value;
     if (!value) return;
     event.currentTarget.value = "";
-    void actLive({ kind: "type", target: { selector: ":focus" }, text: value });
+    enqueueKey({ kind: "text", text: value });
   };
 
   const onProxyCompositionStart = () => {
@@ -1260,7 +1295,7 @@ function BrowserTabView({ projectId, activeSessionId, initialBrowser, tabs, rest
     composingRef.current = false;
     const value = event.data || event.currentTarget.value;
     event.currentTarget.value = "";
-    if (value) void actLive({ kind: "type", target: { selector: ":focus" }, text: value });
+    if (value) enqueueKey({ kind: "text", text: value });
   };
 
   if (!projectId) {

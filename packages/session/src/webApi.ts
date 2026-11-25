@@ -163,6 +163,7 @@ export type BrowserActionDto =
   | { kind: "click"; target: BrowserTargetDto }
   | { kind: "point"; target: Extract<BrowserTargetDto, { point: unknown }> }
   | { kind: "type"; target: BrowserTargetDto; text: string; submit?: boolean }
+  | { kind: "insert-text"; text: string }
   | { kind: "press"; key: string }
   | { kind: "scroll"; x?: number; y?: number; target?: BrowserTargetDto }
   | { kind: "select"; target: BrowserTargetDto; value: string }

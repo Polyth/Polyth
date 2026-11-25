@@ -279,6 +279,7 @@ const durableActionSummary = (action: BrowserAction): string => {
     case "click": return `click ${durableTarget(action.target)}`;
     case "point": return `point ${durableTarget(action.target)}`;
     case "type": return `type ${durableTarget(action.target)}`;
+    case "insert-text": return "insert-text";
     case "press": return `press ${durableMessage(action.key)}`;
     case "scroll": return `scroll ${action.x ?? 0},${action.y ?? 0}${action.target ? ` ${durableTarget(action.target)}` : ""}`;
     case "select": return `select ${durableTarget(action.target)}`;
@@ -332,7 +333,7 @@ export function createBrowserService(opts: BrowserServiceOptions): BrowserServic
     actionKind?: BrowserAction["kind"],
   ): Error => {
     const raw = reason as Error & { code?: string };
-    const message = actionKind === "type" || actionKind === "select"
+    const message = actionKind === "type" || actionKind === "insert-text" || actionKind === "select"
       ? `browser ${actionKind} failed`
       : safeSessionText(s, raw.message ?? String(reason), 500);
     return Object.assign(new Error(message), raw.code ? { code: raw.code } : {});
@@ -373,7 +374,7 @@ export function createBrowserService(opts: BrowserServiceOptions): BrowserServic
       code: error.code ?? "internal",
       // Locator fill/select failures may echo submitted values verbatim,
       // including short values that credential-pattern redaction cannot know.
-      message: actionKind === "type" || actionKind === "select"
+      message: actionKind === "type" || actionKind === "insert-text" || actionKind === "select"
         ? `browser ${actionKind} failed`
         : redactObservationText(error.message ?? String(failure), {
           secrets: opts.secrets ?? [],
@@ -846,6 +847,7 @@ export function createBrowserService(opts: BrowserServiceOptions): BrowserServic
               return;
             }
             case "type": return s.page.type(action.target, action.text, action.submit);
+            case "insert-text": return s.page.insertText(action.text);
             case "press": {
               const hit = await s.page.press(action.key);
               if (hit && Object.keys(hit).length) result = redactJsonObject(hit, opts.secrets ?? [], strictSecretsOf(s));

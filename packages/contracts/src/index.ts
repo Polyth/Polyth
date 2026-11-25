@@ -7989,7 +7989,11 @@ export type BrowserAction =
   /** Resolve the DOM element under a revisioned screenshot point without
    * interacting with it. Used by the user-facing element picker. */
   | { kind: "point"; target: Extract<BrowserTarget, { point: unknown }> }
+  /** Replace the target's value (fill semantics). */
   | { kind: "type"; target: BrowserTarget; text: string; submit?: boolean }
+  /** Insert text at the caret of the focused element, as live keyboard input
+   * does. Unlike `type`, it never clears the existing value. */
+  | { kind: "insert-text"; text: string }
   | { kind: "press"; key: string }
   | { kind: "scroll"; x?: number; y?: number; target?: BrowserTarget }
   | { kind: "select"; target: BrowserTarget; value: string }

@@ -130,6 +130,17 @@ test("user and agent actions serialize on one queue with unique action ids", asy
   await svc.close(s.id);
 });
 
+test("live keyboard insert-text adds at the caret instead of replacing the field", async () => {
+  const svc = service();
+  const s = await svc.create({ projectId: "p1", url: HOME });
+  svc.setViewerVisible(s.id, true);
+  for (const text of ["h", "e", "llo"]) {
+    await svc.action(s.id, { kind: "insert-text", text }, "user");
+  }
+  assert.match((await svc.observe(s.id)).text, /:focus=hello/);
+  await svc.close(s.id);
+});
+
 test("stale point coordinates are rejected before touching the page", async () => {
   const svc = service();
   const s = await svc.create({ projectId: "p1", url: HOME });

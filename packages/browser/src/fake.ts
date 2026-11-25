@@ -124,6 +124,9 @@ export function createFakeDriver(web: FakeWeb): BrowserDriver {
         async type(target, text) {
           typed.set(targetKey(target), text);
         },
+        async insertText(text) {
+          typed.set(":focus", (typed.get(":focus") ?? "") + text);
+        },
         press: async () => ({ ...(pageOf(nav().url).focused ?? {}) } as JsonObject),
         async textRange(start, end) {
           const p = pageOf(nav().url);

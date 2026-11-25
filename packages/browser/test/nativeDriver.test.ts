@@ -209,6 +209,26 @@ test("type replaces existing text with Cyrillic and submits; press handles chord
   }
 });
 
+test("insertText adds keystrokes at the caret of the focused field", { skip }, async () => {
+  const { page, events } = await openPage();
+  try {
+    await page.goto(`${origin}/`);
+    await page.type({ selector: "#name" }, "ab");
+    await page.click({ selector: "#name" });
+    await page.press("End");
+    for (const text of ["c", "d", "ef"]) await page.insertText(text);
+    assert.equal((await dump(page, events)).name, "abcdef");
+    // dump() clicks a button; refocus the field as the user's click would.
+    await page.click({ selector: "#name" });
+    await page.press("End");
+    await page.press("Backspace");
+    await page.insertText("Ж");
+    assert.equal((await dump(page, events)).name, "abcdeЖ");
+  } finally {
+    await page.close();
+  }
+});
+
 test("select, scroll, back and forward", { skip }, async () => {
   const { page, events } = await openPage();
   try {

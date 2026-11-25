@@ -990,6 +990,14 @@ async function buildPage(
         throw wrapError(error);
       }
     },
+    async insertText(text) {
+      try {
+        ensureOpen();
+        if (text) await call("Input.insertText", { text });
+      } catch (error) {
+        throw wrapError(error);
+      }
+    },
     async press(key) {
       try {
         await pressChord(key);

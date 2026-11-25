@@ -34,6 +34,8 @@ export interface DriverPage {
   /** Describe the element at viewport coordinates without mutating the page. */
   point(point: { x: number; y: number }): Promise<JsonObject>;
   type(target: BrowserTarget, text: string, submit?: boolean): Promise<void>;
+  /** Insert text at the focused element's caret without clearing its value. */
+  insertText(text: string): Promise<void>;
   press(key: string): Promise<JsonObject | void>;
   /** Quote and bounds for the DOM range between two viewport points. */
   textRange?(start: { x: number; y: number }, end: { x: number; y: number }): Promise<{
