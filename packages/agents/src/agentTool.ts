@@ -49,28 +49,41 @@ const inputSchema: JsonObject = {
     description: { type: "string", description: "create/update: one line shown on the agent's card (up to 280 characters)." },
     icon: { type: "string", enum: [...AGENT_ICON_IDS], description: "create/update: the agent's glyph." },
     color: { type: "string", enum: [...COLORS], description: "create/update: the agent's colour." },
+    // Removing a clock or a heartbeat is a `null`, so the schema has to allow
+    // one: a harness that validates arguments against it drops an unexpected
+    // null and the update silently keeps the old wake.
     schedule: {
-      type: "object",
-      additionalProperties: false,
-      required: ["cron", "timeZone"],
+      anyOf: [
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["cron", "timeZone"],
+          properties: {
+            cron: { type: "string", description: "e.g. \"0 9 * * 1-5\" for weekdays at 09:00." },
+            timeZone: { type: "string", description: "IANA zone, e.g. \"Europe/Kyiv\"." },
+          },
+        },
+        { type: "null" },
+      ],
       description: "create/update: wake on a clock (five-field cron, at most hourly). Omit for an agent that wakes only on demand and on its heartbeat; null on update removes the clock.",
-      properties: {
-        cron: { type: "string", description: "e.g. \"0 9 * * 1-5\" for weekdays at 09:00." },
-        timeZone: { type: "string", description: "IANA zone, e.g. \"Europe/Kyiv\"." },
-      },
     },
     heartbeat: {
-      type: "object",
-      additionalProperties: false,
-      required: ["everyMinutes", "timeZone"],
+      anyOf: [
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["everyMinutes", "timeZone"],
+          properties: {
+            everyMinutes: { type: "integer", minimum: 10, maximum: 1440 },
+            timeZone: { type: "string", description: "IANA zone of the active hours." },
+            activeFrom: { type: "integer", description: "Start of active hours, minutes after local midnight (e.g. 540 = 09:00)." },
+            activeTo: { type: "integer", description: "End of active hours, minutes after local midnight (exclusive)." },
+            checklist: { type: "string", description: "What to look at on every beat. Empty = the charter." },
+          },
+        },
+        { type: "null" },
+      ],
       description: "create/update: a light, frequent check-in inside the agent's ongoing conversation; it stays quiet unless something needs the person. null on update turns it off.",
-      properties: {
-        everyMinutes: { type: "integer", minimum: 10, maximum: 1440 },
-        timeZone: { type: "string", description: "IANA zone of the active hours." },
-        activeFrom: { type: "integer", description: "Start of active hours, minutes after local midnight (e.g. 540 = 09:00)." },
-        activeTo: { type: "integer", description: "End of active hours, minutes after local midnight (exclusive)." },
-        checklist: { type: "string", description: "What to look at on every beat. Empty = the charter." },
-      },
     },
     memory: {
       type: "string",

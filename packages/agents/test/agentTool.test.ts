@@ -88,6 +88,29 @@ test("create makes an owned, on-demand Polyth Agent with rolling memory, heartbe
   assert.match(listed.output, new RegExp(id));
 });
 
+/** Whether a property schema admits `null`: a harness that validates the
+ *  arguments against it drops an unexpected null before the tool sees it. */
+const allowsNull = (schema: JsonObject | undefined): boolean => {
+  const anyOf = schema?.anyOf as JsonObject[] | undefined;
+  if (anyOf?.some((branch) => branch.type === "null")) return true;
+  return Array.isArray(schema?.type) && (schema.type as string[]).includes("null");
+};
+
+test("update turns a heartbeat off, and the schema admits the null that does it", async (t) => {
+  const { service, tool, call } = fixture(t);
+  const id = String((await call(OTTO)).metadata?.agentId);
+  assert.equal(service.get(id)?.heartbeat?.everyMinutes, 240);
+  const descriptor = tool.descriptor;
+  if (descriptor.kind !== "tool") throw new Error(`expected a tool, got ${descriptor.kind}`);
+  const properties = (descriptor.inputSchema as JsonObject).properties as Record<string, JsonObject>;
+  assert.equal(allowsNull(properties.heartbeat), true);
+  assert.equal(allowsNull(properties.schedule), true);
+
+  await call({ action: "update", agentId: id, heartbeat: null });
+  assert.equal(service.get(id)?.heartbeat, undefined);
+  assert.doesNotMatch((await call({ action: "get", agentId: id })).output, /heartbeat every/);
+});
+
 test("a schedule, updates and wakes go through the owner only", async (t) => {
   const { service, call, woken } = fixture(t);
   const { heartbeat: _heartbeat, ...scheduled } = OTTO;
