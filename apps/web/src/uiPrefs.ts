@@ -101,6 +101,15 @@ export type SessionActivityDetailsMode = "tabs" | "all";
 /** How agent activity blocks draw in the transcript (docs/dev/ui.md). */
 export const ACTIVITY_BLOCK_STYLES = ["thread", "ledger", "chip", "margin"] as const;
 export type ActivityBlockStyle = typeof ACTIVITY_BLOCK_STYLES[number];
+/** The lines a folded sent prompt may keep. Four is the original fold; past
+ *  twenty a fold stops saving room, so the next step is "never fold". */
+export const PROMPT_FOLD_LINE_STOPS = [4, 6, 8, 12, 20] as const;
+export type PromptFoldLines = typeof PROMPT_FOLD_LINE_STOPS[number];
+/** A stored line count, snapped to the nearest stop; anything else is the default four. */
+export function parsePromptFoldLines(value: unknown): PromptFoldLines {
+  if (typeof value !== "number" || !Number.isFinite(value)) return PROMPT_FOLD_LINE_STOPS[0];
+  return PROMPT_FOLD_LINE_STOPS.reduce((best, stop) => (Math.abs(stop - value) < Math.abs(best - value) ? stop : best));
+}
 export type MobileSessionTitleMode = "hidden" | "title" | "button";
 
 export const MOBILE_SHORTCUT_IDS = [
@@ -177,9 +186,11 @@ export interface UiSettings {
   promptNavigatorSide: "left" | "right";
   /** Show the quick actions under user messages. */
   showMessageActions: boolean;
-  /** Fold a long sent prompt to four lines behind an Expand control; off
-   *  shows every prompt in full. */
+  /** Fold a long sent prompt to `collapsePromptLines` lines behind an Expand
+   *  control; off shows every prompt in full. */
   collapseLongPrompts: boolean;
+  /** How many lines a folded prompt keeps: one of `PROMPT_FOLD_LINE_STOPS`. */
+  collapsePromptLines: PromptFoldLines;
   /** Show the opt-in conversation prompt history bookmark on phones and
    * windows too narrow for the rail. The field keeps its original name so
    * existing account settings migrate in place. */
@@ -313,6 +324,7 @@ export const UI_DEFAULTS: UiSettings = {
   promptNavigatorSide: "left",
   showMessageActions: true,
   collapseLongPrompts: true,
+  collapsePromptLines: 4,
   pinLatestPrompt: false,
   promptBookmarkDesktop: false,
   messageCopyFormat: "markdown",
@@ -482,6 +494,7 @@ export function parseUiSettings(raw: string | null): UiSettings {
       promptNavigatorSide: data.promptNavigatorSide === "left" ? "left" : "right",
       showMessageActions: data.showMessageActions !== false,
       collapseLongPrompts: data.collapseLongPrompts !== false,
+      collapsePromptLines: parsePromptFoldLines(data.collapsePromptLines),
       pinLatestPrompt: data.pinLatestPrompt === true,
       promptBookmarkDesktop: data.promptBookmarkDesktop === true,
       messageCopyFormat: data.messageCopyFormat === "json" ? "json" : "markdown",

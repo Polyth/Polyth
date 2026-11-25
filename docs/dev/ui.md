@@ -5271,7 +5271,10 @@ empty or error markup.
   saves at once and an option raises risk, arrows only move focus (Enter,
   Space or a click chooses) and the risky option confirms first.
   A number → `NumberField({ unit, min, max })` (commits on blur/Enter, clamps,
-  Escape reverts); a visual size/scale → `SizeStepper`.
+  Escape reverts); a visual size/scale → `SizeStepper`; an ordered set of
+  named stops (Settings → Chat "Collapse long messages": 4, 6, 8, 12, 20
+  lines, then Full) → `SizeStepper` over the stop index with `format` naming
+  each stop in the readout and `aria-valuetext`.
 - **Sub-pages and states.** A page with sub-views (harness detail, Source
   control) uses `SettingsTabs({ tabs, value, onChange, label })` (wraps
   `ui/Tabs` + `TabPanel` with the settings spacing) — never a `Seg` or custom

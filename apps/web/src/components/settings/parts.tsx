@@ -508,7 +508,7 @@ export function NumberField({ value, onCommit, label, unit, min, max, step = 1, 
  *  only a number. Both the track and the buttons stay keyboard-reachable and
  *  announce the value through `aria-valuetext`. Every stepper shares one
  *  fixed-width grid so tracks and nudges align from row to row. */
-export function SizeStepper({ value, min, max, step = 1, label, unit, onChange, specimen, ends }: {
+export function SizeStepper({ value, min, max, step = 1, label, unit, onChange, specimen, ends, format }: {
   value: number;
   min: number;
   max: number;
@@ -524,6 +524,9 @@ export function SizeStepper({ value, min, max, step = 1, label, unit, onChange, 
   /** Endpoint captions when the extremes are worth naming ("Square"/"Rounded");
    *  they render under the track so the control keeps the shared geometry. */
   ends?: [string, string];
+  /** Names a value in place of the number and unit, for a track over named
+   *  stops ("4 lines" … "Full"); both the readout and `aria-valuetext` use it. */
+  format?: (value: number) => string;
 }) {
   const settle = (next: number) => Math.min(max, Math.max(min, Math.round(next / step) * step));
   const nudge = (direction: -1 | 1) => onChange(settle(value + direction * step));
@@ -547,7 +550,7 @@ export function SizeStepper({ value, min, max, step = 1, label, unit, onChange, 
           step={step}
           value={value}
           aria-label={label}
-          aria-valuetext={unit ? `${value} ${unit}` : `${value} / ${max}`}
+          aria-valuetext={format ? format(value) : unit ? `${value} ${unit}` : `${value} / ${max}`}
           style={{ "--p": `${filled}%` } as CSSProperties}
           onChange={(event) => onChange(settle(Number(event.target.value)))}
         />
@@ -578,8 +581,12 @@ export function SizeStepper({ value, min, max, step = 1, label, unit, onChange, 
       {/* The track already exposes the value to assistive tech; the readout is
           the visual confirmation, so it stays out of the accessibility tree. */}
       <span className="size-stepper-value" aria-hidden="true">
-        <b>{value}</b>
-        {unit ? <i>{unit}</i> : <i>/{max}</i>}
+        {format ? <b>{format(value)}</b> : (
+          <>
+            <b>{value}</b>
+            {unit ? <i>{unit}</i> : <i>/{max}</i>}
+          </>
+        )}
       </span>
     </div>
   );

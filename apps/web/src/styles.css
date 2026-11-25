@@ -2993,12 +2993,13 @@ body[data-desktop-low-resource="true"] .timeline > .rewind-leaving { animation: 
    appearance. chatMotion owns its single entrance; the echo must not pulse or
    blink when the durable event replaces it. */
 
-/* A sent prompt keeps four lines in the log; the rest is one tap away. The
-   fade only appears once the text really is taller than the clamp. */
-.user-prompt { max-height: 4lh; overflow: hidden; }
+/* A sent prompt keeps --prompt-fold-lines lines in the log (Settings → Chat,
+   4 by default); the rest is one tap away. The fade covers the last line
+   whatever the clamp, and only appears once the text really is taller. */
+.user-prompt { max-height: calc(var(--prompt-fold-lines, 4) * 1lh); overflow: hidden; }
 .user-prompt.clipped {
-  -webkit-mask-image: linear-gradient(to bottom, #000 74%, transparent 100%);
-  mask-image: linear-gradient(to bottom, #000 74%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 1lh), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 1lh), transparent 100%);
 }
 .user-prompt.open { max-height: none; }
 .user-prompt > :first-child { margin-block-start: 0; }

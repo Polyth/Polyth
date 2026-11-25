@@ -11,7 +11,7 @@ import type { SettingsNavigationTarget } from "@polyth/web-sdk";
 import { tr, type TranslationKey } from "../../i18n/index.ts";
 import { isPromptBookmarkHome, usePromptBookmarkPosition, writePromptBookmarkPosition } from "../../promptBookmarkPosition.ts";
 import { updateSettings, useStore } from "../../store.ts";
-import { setUiSettings, useUiSettings, type ActivityBlockStyle } from "../../uiPrefs.ts";
+import { PROMPT_FOLD_LINE_STOPS, setUiSettings, useUiSettings, type ActivityBlockStyle } from "../../uiPrefs.ts";
 import { useTouchPointer } from "../MessageActionBar.tsx";
 import { Button, CheckIcon, ChevronDownIcon, ChevronUpIcon, Select } from "../ui/index.ts";
 import { parseImageUploadPreference } from "../../imageUploadSize.ts";
@@ -32,7 +32,7 @@ import MessageActionsEditor, { useMessageActionRows } from "./MessageActionsEdit
 import SendHoldField from "./SendHoldField.tsx";
 import SendDiagnosticsButton from "./SendDiagnosticsButton.tsx";
 import { blocksOnDevice, onDevice, OtherDevicesSection, useSettingsDevice, type DeviceBlock, type SettingsDevice } from "./OtherDevicesSection.tsx";
-import { DisclosureRow, ItemList, NumberField, ResetLink, Row, Section, Seg, Toggle } from "./parts.tsx";
+import { DisclosureRow, ItemList, NumberField, ResetLink, Row, Section, Seg, SizeStepper, Toggle } from "./parts.tsx";
 import "./ShellLookPicker.css";
 import "./ChatSettingsPage.css";
 
@@ -637,11 +637,29 @@ export function ChatPage({ settingsTarget }: { settingsTarget?: SettingsNavigati
                 label={tr("settings.chatPage.collapseLongPrompts")}
                 itemId="chat.collapseLongPrompts"
                 control={(
-                  <Toggle
-                    on={ui.collapseLongPrompts}
-                    onChange={(collapseLongPrompts) => setUiSettings({ collapseLongPrompts })}
-                    label={tr("settings.chatPage.collapseLongPrompts")}
-                  />
+                  <span className="chat-fold-field">
+                    {/* One track for both decisions: four to twenty kept lines,
+                        then "Full" — never fold. The last stop is the old switch. */}
+                    <SizeStepper
+                      value={ui.collapseLongPrompts ? PROMPT_FOLD_LINE_STOPS.indexOf(ui.collapsePromptLines) : PROMPT_FOLD_LINE_STOPS.length}
+                      min={0}
+                      max={PROMPT_FOLD_LINE_STOPS.length}
+                      label={tr("settings.chatPage.collapseLongPrompts")}
+                      unit=""
+                      format={(index) => {
+                        const lines = PROMPT_FOLD_LINE_STOPS[index];
+                        return lines === undefined
+                          ? tr("settings.chatPage.collapsePromptsFull")
+                          : tr("settings.chatPage.collapsePromptsLines", { count: lines });
+                      }}
+                      onChange={(index) => {
+                        const lines = PROMPT_FOLD_LINE_STOPS[index];
+                        setUiSettings(lines === undefined
+                          ? { collapseLongPrompts: false }
+                          : { collapseLongPrompts: true, collapsePromptLines: lines });
+                      }}
+                    />
+                  </span>
                 )}
               />
             </ItemList>

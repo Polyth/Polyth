@@ -955,7 +955,7 @@ test("a live block names its newest step in its own line; nothing mounts outside
   }
 });
 
-test("a long sent prompt keeps four lines in the log and expands on demand", async () => {
+test("a long sent prompt keeps its fold lines in the log and expands on demand", async () => {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -990,8 +990,13 @@ test("a long sent prompt keeps four lines in the log and expands on demand", asy
     assert.equal(container.querySelector(".user-prompt-toggle"), null, "with no Expand control");
     await act(async () => setUiSettings({ collapseLongPrompts: true }));
     assert.ok(container.querySelector(".user-prompt")?.classList.contains("clipped"), "turning it back on folds it again");
+
+    // The fold keeps as many lines as Settings → Chat asks for.
+    assert.equal(container.querySelector<HTMLElement>(".user-prompt")?.style.getPropertyValue("--prompt-fold-lines"), "4");
+    await act(async () => setUiSettings({ collapsePromptLines: 12 }));
+    assert.equal(container.querySelector<HTMLElement>(".user-prompt")?.style.getPropertyValue("--prompt-fold-lines"), "12");
   } finally {
-    setUiSettings({ collapseLongPrompts: true });
+    setUiSettings({ collapseLongPrompts: true, collapsePromptLines: 4 });
     if (original) Object.defineProperty(proto, "scrollHeight", original);
     else delete (proto as unknown as Record<string, unknown>).scrollHeight;
     await act(async () => root.unmount());
