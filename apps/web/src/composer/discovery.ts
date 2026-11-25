@@ -20,6 +20,7 @@ import {
   type CatalogCommand,
 } from "@polyth/commands/catalog";
 import { filterSnippets, type AutocompleteItem } from "../utils.ts";
+import { attachmentModality, type AttachmentRef } from "@polyth/contracts";
 import { tr } from "../i18n/index.ts";
 import { promptHistoryShortcutLabel } from "./history.ts";
 import { accessLabel } from "../sessionSharing.ts";
@@ -1084,3 +1085,28 @@ export function modelDisplayName(
 
 export const ATTACHMENT_COMPAT_NOTE =
   tr("composer.discovery.attachmentCompatibilityNotReported");
+
+/** Note under pending attachments when the next-turn engine cannot take one.
+ *  A link never warns: it always reaches the agent as text. */
+export function attachmentNote(input: {
+  attachments: readonly AttachmentRef[];
+  support: Partial<Record<string, string>> | undefined;
+  referenceable: boolean;
+}): string | null {
+  if (input.attachments.length === 0) return null;
+  // No capability report is not a claim of incompatibility; only an explicit
+  // unsupported modality is worth interrupting the draft for.
+  if (!input.support) return null;
+  for (const attachment of input.attachments) {
+    if (attachment.kind === "url") continue;
+    const modality = attachmentModality(attachment);
+    if (!modality) continue;
+    const level = input.support[modality];
+    if (level === "native" || level === "emulated") continue;
+    // Any other uploaded file reaches the agent by path (file-reference plan).
+    if (input.referenceable && modality !== "image" && attachment.path) continue;
+    if (modality === "image") return tr("composer.discovery.attachmentImagesOmitted");
+    return tr("composer.discovery.currentlyUnavailable");
+  }
+  return null;
+}

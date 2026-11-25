@@ -155,6 +155,7 @@ import {
   type ComposerCommand,
   type InsertPlan,
   type ModelAbsenceGate,
+  attachmentNote,
 } from "../composer/discovery.ts";
 import { composerPromptSuggestion, visiblePromptSuggestion } from "../composer/promptSuggestion.ts";
 import { isHostOnlyExtensionCommand } from "../composer/extensionCommandGate.ts";
@@ -4318,28 +4319,7 @@ function ComposerBody({
   const attachmentsReferenceable = runtimeFeatures
     ? runtimeFeatures.remote !== true || runtimeFeatures.materializeAvailable === true
     : true;
-  const attachNote = (() => {
-    if (attachments.length === 0) return null;
-    // No capability report is not a claim of incompatibility — most providers
-    // simply don't report it, and it works. Only an explicit unsupported
-    // modality is worth interrupting the draft for.
-    if (!composerAttachmentSupport) return null;
-    for (const attachment of attachments) {
-      const modality = attachmentModality(attachment);
-      if (!modality) continue;
-      const level = composerAttachmentSupport[modality];
-      if (level === "native" || level === "emulated") continue;
-      // Any other uploaded file reaches the agent by path (the server's
-      // file-reference plan); the agent opens it or says it cannot.
-      if (attachmentsReferenceable && modality !== "image" && attachment.path) continue;
-      if (modality === "image") return tr("composer.discovery.attachmentImagesOmitted");
-      if (modality === "pdf") return tr("composer.discovery.currentlyUnavailable");
-      if (modality === "audio") return tr("composer.discovery.currentlyUnavailable");
-      if (modality === "file") return tr("composer.discovery.currentlyUnavailable");
-      return tr("composer.discovery.currentlyUnavailable");
-    }
-    return null;
-  })();
+  const attachNote = attachmentNote({ attachments, support: composerAttachmentSupport, referenceable: attachmentsReferenceable });
   const uploadDisabledReason = (() => {
     if (!composerAttachmentSupport || attachmentsReferenceable) return undefined;
     const anySupported = Object.values(composerAttachmentSupport).some(

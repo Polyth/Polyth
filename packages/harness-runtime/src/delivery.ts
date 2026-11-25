@@ -109,6 +109,13 @@ function planByModality(input: AttachmentDeliveryInput): AttachmentDeliveryPlan 
       reason: `${ref.name} is not a kind of attachment Polyth can deliver.`,
     };
   }
+  // A link is plain text: an engine without native link input still gets it
+  // as a prompt section, so it can never make a turn unsendable.
+  if (modality === "url") {
+    return support.url === "native" || support.url === "emulated"
+      ? { kind: support.url === "native" ? "native" : "harness-emulated", modality }
+      : { kind: "prompt-merged", modality: "url" };
+  }
   if (modality === "pdf" && input.projected?.includes("pdf")) return { kind: "text-projection", modality: "pdf" };
   const level = support[modality];
   if (level === undefined || level === "unsupported") {
@@ -333,6 +340,25 @@ export function referenceAttachmentFile(input: FileReferenceInput): string {
   return [
     `Attached file: ${oneLine(input.path)}${facts.length ? ` (${facts.join(", ")})` : ""}`,
     `[Saved in your workspace; ${reason}. Open it with your own tools if you can (for example, list or extract an archive). If you cannot work with this kind of file, tell the user so plainly instead of guessing what it contains.]`,
+  ].join("\n");
+}
+
+/**
+ * A prompt section that hands the agent a link as text. Polyth never fetches
+ * the page. Only an http(s) URL is kept; CR/LF in the name cannot add lines.
+ */
+export function projectAttachmentLink(ref: { name?: string; url?: string }): string {
+  const raw = oneLine(ref.url ?? "");
+  let url = "";
+  try {
+    const parsed = new URL(raw);
+    if ((parsed.protocol === "http:" || parsed.protocol === "https:") && !/\s/.test(raw)) url = raw;
+  } catch { /* not a URL: omitted below */ }
+  const name = oneLine(ref.name ?? "").slice(0, 200);
+  const label = name && name !== url ? `${name} \u2014 ` : "";
+  return [
+    `Attached link: ${label}${url || "(invalid link omitted)"}`,
+    "[Polyth does not fetch link contents; open it with your own tools if you need it.]",
   ].join("\n");
 }
 

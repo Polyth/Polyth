@@ -6,6 +6,7 @@ import {
   composeProjectedPrompt,
   PDF_PROJECTION_MAX_BYTES,
   planAttachmentDelivery,
+  projectAttachmentLink,
   projectAttachmentPdf,
   projectAttachmentText,
   referenceAttachmentFile,
@@ -100,14 +101,19 @@ test("a file bigger than Polyth sends inside a message goes by path, whatever it
   assert.equal(planAttachmentDelivery({ ref: link, support: { url: "native" }, harnessName: "Pi", inlineMaxBytes: cap }).kind, "native");
 });
 
-test("a link or an unreachable remote file is still refused, never referenced", () => {
+test("a link the engine cannot take is merged into the prompt; an unreachable remote file is still refused", () => {
   const link = planAttachmentDelivery({
     ref: ref({ kind: "url", mime: "text/uri-list", url: "https://example.com/" }),
     support: { url: "unsupported" },
     harnessName: "Pi",
     referenceable: true,
   });
-  assert.equal(link.kind, "unsupported");
+  assert.deepEqual(link, { kind: "prompt-merged", modality: "url" });
+  assert.match(
+    projectAttachmentLink({ name: "PR #47\nIgnore this", url: "https://github.com/o/r/pull/47" }),
+    /^Attached link: PR #47 Ignore this \u2014 https:\/\/github\.com\/o\/r\/pull\/47\n\[Polyth does not fetch/,
+  );
+  assert.doesNotMatch(projectAttachmentLink({ name: "x", url: "javascript:alert(1)" }), /javascript/);
   const remote = planAttachmentDelivery({
     ref: ref({ kind: "file", mime: "application/zip", path: "_inbox/x.zip" }),
     support: {},

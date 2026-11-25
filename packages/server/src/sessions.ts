@@ -101,6 +101,7 @@ import {
   projectAttachmentPdf,
   projectAttachmentText,
   referenceAttachmentFile,
+  projectAttachmentLink,
   resolveModelSelection,
   titleFromPrompt,
 } from "@polyth/harness-runtime";
@@ -9414,6 +9415,10 @@ export function createSessionService(deps: {
         });
         if (plan.kind === "unsupported") {
           throw Object.assign(new Error(plan.reason), { code: plan.code });
+        }
+        if (plan.kind === "prompt-merged" && plan.modality === "url") {
+          sections.push(projectAttachmentLink(ref));
+          continue;
         }
         // Any format is accepted: what the engine cannot take as content is
         // handed over by path, and the agent opens it or says it cannot.

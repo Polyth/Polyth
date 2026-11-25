@@ -144,7 +144,7 @@ test("sanitizeAttachments: typed rejections", () => {
 
 type Emit = (sessionId: string, ev: RuntimeEvent) => void;
 
-function fakeRuntime(fileSupport: "native" | "emulated" = "native") {
+function fakeRuntime(fileSupport: "native" | "emulated" = "native", urlSupport: "native" | "unsupported" = "native") {
   const listeners = new Set<Emit>();
   const started: CanonicalTurnRequest[] = [];
   const emit = (sessionId: string, ev: RuntimeEvent) => {
@@ -153,7 +153,7 @@ function fakeRuntime(fileSupport: "native" | "emulated" = "native") {
   const rt: AgentRuntime = {
     capabilities: async () => ({
       streaming: true, permissions: true, questions: true, compaction: false, subagents: false, steering: true,
-      attachments: { modalities: { file: fileSupport, url: "native" } },
+      attachments: { modalities: { file: fileSupport, url: urlSupport } },
     }),
     models: async () => [],
     agents: async () => [],
@@ -252,6 +252,19 @@ test("send persists attachments in user/message before the runtime sees them", a
   const msgs = deriveMessages(evs);
   const files = msgs[0]!.parts.filter((p) => p.type === "file");
   assert.equal(files.length, 2);
+  await store.close();
+});
+
+test("a link to an engine without link input is delivered as prompt text, not refused", async () => {
+  const fake = fakeRuntime("emulated", "unsupported");
+  const { sessions, store } = makeService(fake);
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  const url = "https://github.com/o/r/pull/47";
+  await sessions.send(id, { text: "review", attachments: [{ id: "u1", name: "PR #47", mime: "text/uri-list", size: 0, kind: "url", url }] });
+  await flush();
+  assert.equal(fake.started.length, 1);
+  assert.equal(fake.started[0]?.attachments?.some((a) => a.kind === "url") ?? false, false);
+  assert.ok(JSON.stringify(fake.started[0]).includes(url), "prompt carries the link");
   await store.close();
 });
 

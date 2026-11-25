@@ -612,3 +612,13 @@ test("consume after send removes the record only when it still equals what was s
   consumeComposerConfig("sess-a", routed);
   assert.ok(configEquals(loadComposerConfig("sess-a"), emptyComposerConfig()));
 });
+
+test("attachmentNote: a link never warns; other unsupported modalities keep their note", async () => {
+  const { attachmentNote } = await import("../src/composer/discovery.ts");
+  const url = { id: "u", name: "PR", mime: "text/uri-list", size: 0, kind: "url" as const, url: "https://github.com/o/r/pull/1" };
+  const audio = { id: "a", name: "a.mp3", mime: "audio/mpeg", size: 1, kind: "file" as const, path: "_inbox/a.mp3" };
+  const support = { url: "unsupported", audio: "unsupported", pdf: "unsupported" };
+  assert.equal(attachmentNote({ attachments: [url], support, referenceable: false }), null);
+  assert.equal(attachmentNote({ attachments: [audio], support, referenceable: false }), tr("composer.discovery.currentlyUnavailable"));
+  assert.equal(attachmentNote({ attachments: [audio], support, referenceable: true }), null);
+});
