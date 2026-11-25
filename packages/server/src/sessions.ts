@@ -1018,6 +1018,8 @@ export function createSessionService(deps: {
   releaseArchivedCheckouts?: (info: {
     sessionId: string;
     releaseExecution(sessionId: string, cwd: string, options?: { sharer?: boolean }): Promise<void>;
+    /** Release only checkouts that hold no work (see the contract). */
+    onlyEmpty?: boolean;
   }) => void | Promise<void>;
   /** Drop volatile provisioning for one session-lifetime harness after this
    *  session released its execution occupancy. Physical-runtime targets are
@@ -12785,6 +12787,18 @@ export function createSessionService(deps: {
     const queue = deps.queue ? await deps.queue.queueList(sessionId) : [];
     return queue.some((item) => !item.heldForReview);
   };
+  /** Release the archived session's isolated checkouts that hold no work, with
+   *  everything the Cleanup release removes. Never throws: the archive stands. */
+  const releaseEmptyArchivedCheckouts = async (sessionId: string): Promise<void> => {
+    if (!deps.releaseArchivedCheckouts) return;
+    try {
+      const proj = await store.projection(sessionId);
+      if (!proj || (!proj.isolation && !proj.workspace?.repositories.some((row) => row.isolation))) return;
+      await deps.releaseArchivedCheckouts({ sessionId, releaseExecution: releaseArchivedExecution, onlyEmpty: true });
+    } catch (error) {
+      console.warn(`[polyth] archived empty checkout release failed for ${sessionId}`, error);
+    }
+  };
   /** Archive owns no further turns: release its session-lifetime runtime now
    *  instead of leaving an unwired process to the shutdown sweep. */
   const retireArchivedSessionRuntime = async (sessionId: string): Promise<void> => {
@@ -16115,7 +16129,13 @@ export function createSessionService(deps: {
       deps.outputCache?.clear(sessionId);
       // Unwiring alone leaves a session-lifetime process (Claude, Pi, Codex…)
       // running until shutdown: it is no longer in the idle sweep's view.
-      if (releaseNow) await retireArchivedSessionRuntime(sessionId);
+      if (releaseNow) {
+        await retireArchivedSessionRuntime(sessionId);
+        // An archived chat at rest keeps no checkout that holds nothing. The
+        // archive is the person's intent: a failure here never undoes it, and
+        // the cleanup timer retries what stays.
+        await releaseEmptyArchivedCheckouts(sessionId);
+      }
     },
     async restore(sessionId) {
       const proj = await store.projection(sessionId);
@@ -16506,11 +16526,15 @@ export function createSessionService(deps: {
       });
     },
 
-    async releaseArchivedCheckouts(sessionId) {
+    async releaseArchivedCheckouts(sessionId, options) {
       if (!deps.releaseArchivedCheckouts) {
         throw Object.assign(new Error("isolated workspace cleanup is unavailable"), { code: "unsupported" });
       }
-      await deps.releaseArchivedCheckouts({ sessionId, releaseExecution: releaseArchivedExecution });
+      await deps.releaseArchivedCheckouts({
+        sessionId,
+        releaseExecution: releaseArchivedExecution,
+        ...(options?.onlyEmpty ? { onlyEmpty: true } : {}),
+      });
     },
 
     async patchIsolation(sessionId, isolation) {

@@ -3111,11 +3111,12 @@ export async function boot(opts: BootOptions = {}) {
       }
       await isolation.cleanupForSessionDelete(projection, releaseExecution);
     },
-    releaseArchivedCheckouts: async ({ sessionId, releaseExecution }) => {
+    releaseArchivedCheckouts: async ({ sessionId, releaseExecution, onlyEmpty }) => {
       const isolation = svc<{
         releaseArchivedCheckouts(
           sessionId: string,
           release: (sessionId: string, cwd: string, options?: { sharer?: boolean }) => Promise<void>,
+          options?: { onlyEmpty?: boolean },
         ): Promise<void>;
       }>("isolation");
       if (!isolation) {
@@ -3123,7 +3124,7 @@ export async function boot(opts: BootOptions = {}) {
           code: "unsupported",
         });
       }
-      await isolation.releaseArchivedCheckouts(sessionId, releaseExecution);
+      await isolation.releaseArchivedCheckouts(sessionId, releaseExecution, onlyEmpty ? { onlyEmpty: true } : {});
     },
     updateIsolatedWorkspace: async (sessionId, selection) => {
       const isolation = svc<{ updateIsolatedWorkspace: NonNullable<SessionDeps["updateIsolatedWorkspace"]> }>("isolation");
@@ -3487,16 +3488,17 @@ export async function boot(opts: BootOptions = {}) {
   };
   // "Clean up automatically" in Settings → Projects → Cleanup. Nothing here runs before
   // its first timer, well after boot recovery.
-  const releaseArchivedCheckouts = (sessionId: string): Promise<void> => {
+  const releaseArchivedCheckouts = (sessionId: string, options?: { onlyEmpty?: boolean }): Promise<void> => {
     if (!sessionsImpl?.releaseArchivedCheckouts) {
       throw Object.assign(new Error("isolated workspace cleanup is unavailable"), { code: "unsupported" });
     }
-    return sessionsImpl.releaseArchivedCheckouts(sessionId);
+    return sessionsImpl.releaseArchivedCheckouts(sessionId, options);
   };
   const expiredSessionCleanup = startExpiredSessionCleanup({
     spaceIds: () => spaceGateway.store.allSpaces().map((space) => space.id),
     sessionsFor: (spaceId) => spaceServices(spaceGateway.resolveInternal(spaceId)).sessions,
     releaseCheckouts: releaseArchivedCheckouts,
+    releaseEmptyCheckouts: (sessionId) => releaseArchivedCheckouts(sessionId, { onlyEmpty: true }),
     policy: createExpiredSessionPolicy({
       ...sessionAccounts,
       settingsProjectOf: (projectId) => projects.parentOfRoom(projectId) ?? projectId,

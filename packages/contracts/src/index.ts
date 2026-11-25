@@ -3405,7 +3405,12 @@ export interface SessionService {
    *  and everything else Polyth made for it; the sessions stay archived on the
    *  checkouts their work targeted. Host-only cleanup: no Space or package facade
    *  exposes it, and a caller checks access by archiving the tree first. */
-  releaseArchivedCheckouts?(sessionId: string): Promise<void>;
+  releaseArchivedCheckouts?(sessionId: string, options?: {
+    /** Release only the archived members whose checkouts hold no work (nothing
+     *  beyond the target branch, a clean tree) and keep every other one; a
+     *  member that cannot be released is skipped instead of failing the call. */
+    onlyEmpty?: boolean;
+  }): Promise<void>;
   /** What moving this chat to another project of its Space would do. Reads
    *  only: a blocked move is reported, not thrown. */
   previewMoveToProject?(sessionId: string, input: SessionMoveInput): Promise<SessionMovePreview>;

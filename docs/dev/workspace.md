@@ -279,6 +279,23 @@ the missing path. An in-flight publication or corrupt record is kept. A live
 checkout or a branch with unmerged commits is kept too: restore the session to
 merge or discard it.
 
+Archiving also releases the isolated checkouts that hold no work. When an archive
+retires an idle session's runtime, every checkout of that session goes through the
+Cleanup release (`releaseArchivedCheckouts`, with `onlyEmpty`) if it is owned, has
+no commit its target branch lacks and a clean `git status --untracked-files=all`
+(ignored files such as `node_modules` do not count), is not merging, publishing or
+corrupt, and a multi-repository session releases only if every row qualifies. It is
+kept, and retried later, when work remains, when another session still depends on
+the checkout, when a non-archived session shares the session's runtime authority
+(a Space-level shared runtime is never stopped to free a checkout), or when a live
+process still has the checkout as its working directory. The release re-reads
+`archived` after the execution proof, so a restore that wins keeps its checkout. A
+release failure is logged and never undoes the archive. The expired-session timer
+repeats the same release for every archived tree regardless of the Cleanup
+"skip isolated" choice, which covers a chat archived mid-turn, before this
+behavior, or whose release failed; it loses nothing, since only checkouts without
+work go.
+
 An active isolate proves its line of work by the recorded base commit in its
 history (`inspectOwned`, `packages/git/src/managedWorktrees.ts`). When the
 target branch itself is rewritten (rebased onto its remote, force-pulled), an

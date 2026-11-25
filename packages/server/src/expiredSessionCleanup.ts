@@ -370,6 +370,54 @@ export async function sweepExpiredSessions(input: {
   return result;
 }
 
+/** Archived chats whose isolated checkouts hold no work lose them, whatever the
+ *  person chose in Cleanup: nothing is lost, and the archive-time release skips a
+ *  chat archived mid-turn, before this behavior, or whose release failed. The unit
+ *  is each archived session whose parent is not archived; the host releases its
+ *  archived subtree and keeps every checkout that holds work. */
+export async function releaseEmptyArchivedCheckouts(input: {
+  sessions: Pick<ExpiredSessionSource, "list">;
+  releaseEmpty: (sessionId: string) => Promise<void>;
+  stopped?: () => boolean;
+  pause?: () => Promise<void>;
+}): Promise<{ released: string[]; failed: Array<{ id: string; code: string }> }> {
+  const result: { released: string[]; failed: Array<{ id: string; code: string }> } = { released: [], failed: [] };
+  const rows = await input.sessions.list();
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const childrenOf = new Map<string, SessionProjection[]>();
+  for (const row of rows) {
+    if (row.parentId) childrenOf.set(row.parentId, [...childrenOf.get(row.parentId) ?? [], row]);
+  }
+  const withCheckout = (top: SessionProjection): boolean => {
+    const stack = [top];
+    const seen = new Set<string>();
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      if (seen.has(current.id)) continue;
+      seen.add(current.id);
+      if (current.status === "archived" && sessionOwnsIsolatedCheckout(current)) return true;
+      stack.push(...childrenOf.get(current.id) ?? []);
+    }
+    return false;
+  };
+  for (const top of rows) {
+    if (top.status !== "archived") continue;
+    const parent = top.parentId ? byId.get(top.parentId) : undefined;
+    if (parent?.status === "archived") continue;
+    if (!withCheckout(top)) continue;
+    if (input.stopped?.()) break;
+    try {
+      await input.pause?.();
+      await input.releaseEmpty(top.id);
+      result.released.push(top.id);
+    } catch (error) {
+      const code = (error as { code?: unknown } | null)?.code;
+      result.failed.push({ id: top.id, code: typeof code === "string" && code ? code : "internal" });
+    }
+  }
+  return result;
+}
+
 /** Archives past their period go for good. The unit is the topmost archived
  *  session of each tree; deleting it takes the rest. A tree anyone pinned, left
  *  a draft in, queued delivery to or touched since the list stays. */
@@ -429,6 +477,8 @@ export function startExpiredSessionCleanup(deps: {
   spaceIds(): readonly string[];
   sessionsFor(spaceId: string): ExpiredSessionSource;
   releaseCheckouts?: (sessionId: string) => Promise<void>;
+  /** Release the empty checkouts of an archived tree ({@link releaseEmptyArchivedCheckouts}). */
+  releaseEmptyCheckouts?: (sessionId: string) => Promise<void>;
   policy: ExpiredSessionPolicy;
   keep(spaceId: string, sessionIds: readonly string[]): ReadonlySet<string>;
   stopped(): boolean;
@@ -464,6 +514,20 @@ export function startExpiredSessionCleanup(deps: {
         } catch (error) {
           // Housekeeping must never take the server with it.
           console.warn(`[polyth] expired session cleanup failed for space ${spaceId}`, error);
+        }
+        if (!deps.releaseEmptyCheckouts) continue;
+        try {
+          const empty = await releaseEmptyArchivedCheckouts({
+            sessions: deps.sessionsFor(spaceId),
+            releaseEmpty: deps.releaseEmptyCheckouts,
+            stopped: () => ended || deps.stopped(),
+            ...(deps.pause ? { pause: deps.pause } : {}),
+          });
+          for (const failure of empty.failed) {
+            console.warn(`[polyth] archived empty checkout release kept ${failure.id} (${failure.code})`);
+          }
+        } catch (error) {
+          console.warn(`[polyth] archived empty checkout release failed for space ${spaceId}`, error);
         }
       }
     })().finally(() => { flight = undefined; });
