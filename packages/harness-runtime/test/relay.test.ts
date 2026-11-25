@@ -182,3 +182,18 @@ test("routes: view, save, validation and private-account non-disclosure", async 
     await accounts.onDisable();
     assert.equal(relayFamilies.has("codex-relay"), false);
 });
+
+test("a paired device may read Relays but never save them", async () => {
+    const { matchRemotePath } = await import("@polyth/contracts");
+    const { CORE_REMOTE_ACCESS, findRemotePolicyOverlaps, validateRemoteAccessPolicy } = await import("../../server/src/remotePolicy.ts");
+    const { HARNESS_REMOTE_ACCESS } = await import("../src/serverEntry.ts");
+    const core = { owner: "core", policy: CORE_REMOTE_ACCESS };
+    validateRemoteAccessPolicy("harnesses", HARNESS_REMOTE_ACCESS, [core]);
+    assert.deepEqual(findRemotePolicyOverlaps([core, { owner: "harnesses", policy: HARNESS_REMOTE_ACCESS }]), []);
+    const allowed = (method: string, path: string) => HARNESS_REMOTE_ACCESS.http.some((rule) =>
+        (rule.methods as readonly string[]).includes(method) && matchRemotePath(rule.path, path));
+    assert.equal(allowed("GET", "/api/harnesses/relays"), true);
+    assert.equal(allowed("PUT", "/api/harnesses/relays/claude-relay"), false);
+    assert.equal(allowed("GET", "/api/harnesses/roster"), false);
+    assert.ok(HARNESS_REMOTE_ACCESS.http.every((rule) => !rule.mutation));
+});

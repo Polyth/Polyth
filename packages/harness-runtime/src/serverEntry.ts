@@ -48,6 +48,14 @@ import { createHarnessAutoUpdater, type AutoUpdateRelease, type HarnessAutoUpdat
 import { editionUnavailable, workstationEdition } from "./edition.ts";
 import { pruneHarnessVersions, type HarnessVersionPrune } from "./versionStore.ts";
 
+/** Paired devices may read the person's Relays (Settings group, Usage pool):
+ *  member account names and limit headroom only, the same names a chat reader
+ *  already sees under each answer. Every other harness route stays local-only. */
+export const HARNESS_REMOTE_ACCESS = {
+    ...localOnlyRemoteAccess(["harnesses"]),
+    http: [{ methods: ["GET"] as const, path: "/api/harnesses/relays", capability: "core.sessions.read", mutation: false }],
+};
+
 const MAX_HARNESS_SYSTEM_PROMPT = 64 * 1024;
 type StoredHarnessPreference = {
     enabled?: boolean;
@@ -616,8 +624,8 @@ export function harnessRoutes(
             return { space: request.space, spaceId: request.space.spaceId, projectId: project?.id ?? "__default__", cwd: project?.path ?? process.cwd(), remote: Boolean(project?.remote) };
         };
         // Relay settings are per person: the actor is the gateway-validated
-        // `request.space`, never the body. Paired devices stay default-deny
-        // (the package declares no remote HTTP rule for these routes).
+        // `request.space`, never the body. A paired device may only read them
+        // (`HARNESS_REMOTE_ACCESS`); saving stays local or full access.
         if (request.path === "/api/harnesses/relays" || request.path.startsWith("/api/harnesses/relays/")) {
             const actor = { userId: request.space.userId, spaceId: request.space.spaceId, allowedHarnesses: allowedHarnessesFor(request) };
             const context = await contextForRequest();
@@ -1236,7 +1244,7 @@ export default function registerPackage(host: ServerPackageHost) {
     });
     return {
         routes: harnessRoutes(host, installs, { installContainment, updateChecker, autoUpdates }),
-        remoteAccess: localOnlyRemoteAccess(["harnesses"]),
+        remoteAccess: HARNESS_REMOTE_ACCESS,
         onEnable() {
             active = true;
             relayHost.limits = () => host.services.get(serverServiceKey<RelayLimitsSource>("usage-limits"));
