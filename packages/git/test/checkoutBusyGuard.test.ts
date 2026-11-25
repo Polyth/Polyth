@@ -36,6 +36,21 @@ test("idle, archived and foreign-Space chats never block", async () => {
   assert.equal(head(root), "other");
 });
 
+test("a dormant chat whose owned runtime was replaced does not block; an unsettled one does", async () => {
+  const root = tempRepo(dirs);
+  gitIn(root, "branch", "other");
+  // Owned epoch-pending: the Navigator shows "reconnects on use"; no process can write.
+  const dormant = branchRouteHarness(root, [chat("s-old", "epoch-pending", { runtimeControl: "owned" })]);
+  assert.equal((await dormant.post("/api/git/checkout", { projectId: "p1", name: "other" })).status, 200);
+  assert.equal(head(root), "other");
+  for (const status of ["epoch-pending", "unknown", "reconciling", "waiting"]) {
+    const h = branchRouteHarness(root, [chat("s-uncertain", status, status === "epoch-pending" ? { runtimeControl: "borrowed" } : {})]);
+    const refused = await h.post("/api/git/checkout", { projectId: "p1", name: "main" });
+    assert.equal(refused.body.error, "session-busy", status);
+  }
+  assert.equal(head(root), "other");
+});
+
 test("creating without switching is not guarded", async () => {
   const root = tempRepo(dirs);
   const h = branchRouteHarness(root, [chat("s-run", "working")]);

@@ -380,11 +380,18 @@ export function gitRoutes(deps: {
         && (session.worktreePath ? resolve(session.worktreePath) === here : isMain))
       .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
   };
+  /** A chat whose agent may still be changing the checkout's files. A chat
+   *  whose Polyth-owned runtime was replaced (`epoch-pending` + `owned`) has no
+   *  process left: it is dormant until it is next opened or sent to, and the
+   *  Navigator shows it as "reconnects on use", so it must not block either. */
+  const chatMayBeWorking = (session: SessionProjection): boolean =>
+    delegatedChildRunning(session.status)
+    && !(session.status === "epoch-pending" && session.runtimeControl === "owned");
   /** A running chat in the checkout must not have its files swapped under it.
    *  Nothing in the request proves which chat is calling (an agent and a person
    *  both send the viewed `sessionId`), so no chat is exempt. */
   const assertCheckoutIdle = async (projectId: string, root: string, space: import("@polyth/contracts").SpaceContext): Promise<void> => {
-    const busy = (await sessionsInCheckout(projectId, root, space)).filter((session) => delegatedChildRunning(session.status));
+    const busy = (await sessionsInCheckout(projectId, root, space)).filter(chatMayBeWorking);
     if (busy.length) {
       throw Object.assign(new Error("A chat is running in this checkout. Wait for it to finish before switching branches."), {
         code: "session-busy", sessionIds: busy.map((session) => session.id),

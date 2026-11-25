@@ -872,8 +872,11 @@ launched by Polyth also receives the resolved Git and OpenSSH directories.
 form offers *Create and switch* (default, remembered in `gitPrefs`) and *Create
 only*. Names are checked with `git check-ref-format --branch` first.
 `/api/git/checkout` and a branch-with-checkout refuse with `session-busy` while any
-chat in that checkout has a turn running (no chat is exempt: the request does not
-prove which chat calls). Git's own refusals become typed, not-started errors
+chat in that checkout may still be at work: `working`, `waiting`, `reconciling`,
+`unknown`, or `epoch-pending` on a borrowed runtime (no chat is exempt: the request
+does not prove which chat calls). An `epoch-pending` chat whose Polyth-owned runtime
+was replaced has no process left and does not block; the Navigator shows it as
+"reconnects on use". Git's own refusals become typed, not-started errors
 (`classifyGitRefusal`, `packages/git/src/index.ts`): `branch-in-use` (with the
 worktree, only one Git lists for that repository, and the caller's chats in it),
 `worktree-dirty`, `branch-exists`, `branch-not-found`, `invalid-branch-name`. They

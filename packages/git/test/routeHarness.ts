@@ -20,6 +20,7 @@ export interface FakeSession {
   sharing?: { access: string };
   isolation?: { kind: string; worktreePath: string };
   runtimeBinding?: unknown;
+  runtimeControl?: "owned" | "borrowed";
   workspace?: { revision: number; repositories: unknown[] };
 }
 
