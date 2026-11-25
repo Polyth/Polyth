@@ -2004,6 +2004,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         ...(obj(d, "options")
           ? { options: obj(d, "options") as unknown as Required<WorkflowRunOptionsDto> }
           : {}),
+        ...(d.wake === true ? { wake: true } : {}),
         status: "running",
         startedAt: num(d, "startedAt") ?? ev.time,
         layers,
@@ -2049,6 +2050,20 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       run.finishedAt = num(d, "finishedAt") ?? ev.time;
       if (typeof d.result === "string") run.result = d.result;
       if (typeof d.interrupted === "boolean") run.interrupted = d.interrupted;
+      break;
+    }
+    case "workflow/run-outcome": {
+      const run = model.workflowRun;
+      if (!run || run.id !== (str(d, "runId") ?? run.id)) break;
+      const raw = obj(d, "outcome");
+      const value = raw ? str(raw, "value") : undefined;
+      if (!raw || (value !== "accepted" && value !== "reworked" && value !== "discarded")) break;
+      run.outcome = {
+        value,
+        ...(str(raw, "note") ? { note: str(raw, "note") } : {}),
+        at: num(raw, "at") ?? ev.time,
+        by: str(raw, "by") === "agent" ? "agent" : "person",
+      };
       break;
     }
     case "fusion/started": {

@@ -10,6 +10,8 @@ import type {
   WorkflowEdgeDto,
   WorkflowLaunchOptionsDto,
   WorkflowNodeDto,
+  WorkflowOutcomeInputDto,
+  WorkflowOutcomeSummaryDto,
   WorkflowPermissionPolicy,
   WorkflowPipeMode,
   WorkflowPreferencesDto,
@@ -18,13 +20,22 @@ import type {
   WorkflowRunDto,
   WorkflowRunNodeDto,
   WorkflowRunOptionsDto,
+  WorkflowRunOutcomeDto,
   WorkflowRunStatus,
   SpaceContext,
 } from "@polyth/contracts";
 import type { AppendEventOptions } from "@polyth/plugins";
 import type { JudgmentService } from "@polyth/judgment/server";
 import { ancestors, layerize, upstream } from "./graph.ts";
-import { buildNodePrompt, buildReworkPrompt, type WorkflowPromptSource } from "./prompt.ts";
+import {
+  MAX_FACT_CHARS,
+  buildNodePrompt,
+  buildReworkPrompt,
+  launchFacts,
+  mergeFacts,
+  parseFacts,
+  type WorkflowPromptSource,
+} from "./prompt.ts";
 import {
   DEFAULT_REVIEW_ROUNDS,
   MAX_REVIEW_ROUNDS,
@@ -156,6 +167,25 @@ export interface WorkflowDeps {
   /** The review loop reached an outcome worth telling the person: every
    * review approved, or a gate waits for their decision. Delivery only. */
   onReviewSettled?: (event: WorkflowReviewSettled) => void;
+  /** The model the launcher's delegation policy gives `role` right now,
+   * leaving out the `harness::provider/model` keys in `exclude`. Undefined
+   * when that person does not route by role or nothing in the role is usable. */
+  routeFor?: (
+    role: string,
+    context: { launchedBy: string; projectId: string; exclude: readonly string[] }
+  ) => Promise<WorkflowNodeRoute | undefined>;
+  /** A run started with `wake` settled, or waits for a fix or a decision:
+   * tell the parent chat's agent. Delivery only. */
+  onRunAttention?: (event: WorkflowRunAttention) => void;
+}
+export interface WorkflowRunAttention {
+  runId: string;
+  parentSessionId: string;
+  kind: "settled" | "needs-fix" | "needs-decision";
+  /** What the agent is told, ready to send. */
+  text: string;
+  /** The person the run acts for; absent for system work. */
+  launchedBy?: string;
 }
 export interface WorkflowReviewSettled {
   runId: string;
@@ -189,7 +219,20 @@ export interface WorkflowService {
   ): Promise<WorkflowRunDto>;
   listRuns(projectId?: string): WorkflowRunDto[];
   getRun(runId: string): WorkflowRunDto | null;
-  stop(runId: string): Promise<WorkflowRunDto>;
+  /** `quiet` skips the wake a run started with `wake` would send: the caller
+   * asking for the stop already knows. */
+  stop(runId: string, options?: { quiet?: boolean }): Promise<WorkflowRunDto>;
+  /** Records how a settled run's result was used. Only the person who
+   * started the run (or system work) records it; a later record replaces
+   * the earlier one. */
+  recordOutcome(
+    runId: string,
+    input: WorkflowOutcomeInputDto,
+    requestedBy?: string,
+    by?: WorkflowRunOutcomeDto["by"]
+  ): Promise<WorkflowRunDto>;
+  /** Settled runs counted per template, newest template first. */
+  outcomes(projectId?: string): WorkflowOutcomeSummaryDto[];
   /** A unit the running run holds for a fix continues in place; a settled
    * run forks from the unit. */
   retry(
@@ -226,6 +269,8 @@ interface ActiveRun {
   terminalEventAttempted?: boolean;
   /** The canonical terminal event was accepted before local projection work failed. */
   terminalEventAccepted?: boolean;
+  /** Whoever stops the run already knows: no wake for its settlement. */
+  quiet?: boolean;
 }
 interface State {
   v: 1;
@@ -304,8 +349,29 @@ function routeOf(value: unknown): WorkflowNodeRoute {
 function routed(node: WorkflowNodeDto, route: WorkflowNodeRoute): WorkflowNodeDto {
   const next: WorkflowNodeDto = { ...node, ...clone(route) };
   if (route.model) delete next.allowedModels;
+  // A route a person picked for the unit is the route: the role no longer chooses.
+  if (route.model || route.harness) delete next.routingRole;
   return next;
 }
+/** A routing role id: a built-in name or `custom-<slug>`. */
+const ROUTING_ROLE = /^[a-z][a-z0-9-]{0,63}$/;
+/** A role's model and harness in place of the unit's own; its agent stays. */
+function roleRouted(node: WorkflowNodeDto, route: WorkflowNodeRoute): WorkflowNodeDto {
+  const next: WorkflowNodeDto = { ...node };
+  delete next.model;
+  delete next.harness;
+  delete next.allowedModels;
+  if (route.model) next.model = clone(route.model);
+  if (route.harness) next.harness = clone(route.harness);
+  return next;
+}
+/** `harness::provider/model`, as the delegation policy names a route. */
+const routeKey = (route: WorkflowNodeRoute): string =>
+  `${route.harness?.mode === "pinned" ? route.harness.harnessId : ""}::${route.model ? `${route.model.providerID}/${route.model.modelID}` : ""}`;
+/** Routes one unit may be tried on before the run asks a person. */
+const MAX_ROLE_ROUTES = 6;
+const OUTCOME_VALUES = ["accepted", "reworked", "discarded"] as const;
+const MAX_OUTCOME_NOTE = 500;
 const restore = <T extends object>(target: T, snapshot: T): void => {
   for (const key of Object.keys(target))
     if (!(key in snapshot)) delete (target as Record<string, unknown>)[key];
@@ -431,6 +497,8 @@ function validate(input: WorkflowCreateInput): string[][] {
       throw error(`prompt is required for node ${node.id || "(missing id)"}`);
     if (node.harness?.mode === "pinned" && !node.harness.harnessId.trim())
       throw error("harnessId is required");
+    if (node.routingRole !== undefined && (typeof node.routingRole !== "string" || !ROUTING_ROLE.test(node.routingRole)))
+      throw error(`routingRole is invalid for node ${node.id || "(missing id)"}`);
     if (node.allowedModels !== undefined) {
       if (
         !Array.isArray(node.allowedModels) ||
@@ -471,6 +539,15 @@ function options(
 }
 function validateLaunch(launch?: WorkflowLaunchOptionsDto): void {
   if (!launch) return;
+  const facts = launch.facts as unknown;
+  if (
+    facts !== undefined &&
+    (!Array.isArray(facts) || facts.length > 200 ||
+      !facts.every((fact) => typeof fact === "string" && fact.length <= 4 * MAX_FACT_CHARS))
+  )
+    throw error("facts must be a list of at most 200 short lines");
+  if (launch.wake !== undefined && typeof launch.wake !== "boolean")
+    throw error("wake must be true or false");
   if (
     launch.clientOperationId !== undefined &&
     (!launch.clientOperationId.trim() || launch.clientOperationId.length > 200)
@@ -814,6 +891,23 @@ export function createWorkflowService(deps: WorkflowDeps): WorkflowService {
     } catch (cause) {
       console.warn("[workflow] interrupted run reconciliation failed", cause);
     }
+    // An agent that ended its turn to wait for one of these runs would
+    // otherwise never hear that the run is gone.
+    for (const run of interrupted) {
+      if (!run.wake || !run.parentSessionId) continue;
+      const launchedBy = launchers.get(run.id);
+      try {
+        deps.onRunAttention?.({
+          runId: run.id,
+          parentSessionId: run.parentSessionId,
+          kind: "settled",
+          text: `Workflow "${run.name}" (run ${run.id}): stopped, the server restarted while it ran. "status" shows what finished; "retry" a stopped unit to continue in a new run.`,
+          ...(launchedBy ? { launchedBy } : {}),
+        });
+      } catch {
+        // Delivery only.
+      }
+    }
   }
   const mustGet = (id: string) => {
     const bundled = workflows.some((w) => w.id === id) ? null : deps.builtin?.(id);
@@ -949,6 +1043,22 @@ export function createWorkflowService(deps: WorkflowDeps): WorkflowService {
     });
   /** Wait for a person to fix a held unit: their route, or null once the run
    * stops or the unit's own deadline passes without one. */
+  /** Tell the parent chat's agent about a run it started with `wake`. */
+  const attention = (owner: ActiveRun, kind: WorkflowRunAttention["kind"], detail: string): void => {
+    if (!owner.run.wake || owner.quiet) return;
+    const launchedBy = launchers.get(owner.run.id);
+    try {
+      deps.onRunAttention?.({
+        runId: owner.run.id,
+        parentSessionId: owner.parentSessionId,
+        kind,
+        text: `Workflow "${owner.workflow.name}" (run ${owner.run.id}): ${detail}`,
+        ...(launchedBy ? { launchedBy } : {}),
+      });
+    } catch {
+      // Delivery only: a lost wake never changes the run.
+    }
+  };
   const holdForFix = (owner: ActiveRun, nodeId: string, timeoutMs: number) =>
     new Promise<WorkflowNodeRoute | null>((resolve) => {
       const key = `${owner.run.id}:${nodeId}`;
@@ -973,8 +1083,11 @@ export function createWorkflowService(deps: WorkflowDeps): WorkflowService {
     opts: Required<WorkflowRunOptionsDto>,
     layerOrder: Map<string, number>,
     rework?: Rework,
-    /** Set when a person fixed this unit while the run held it. */
-    fixed?: { fresh: boolean }
+    /** Set when a person fixed this unit while the run held it, and when the
+     * unit moves to another route of its role. */
+    fixed?: { fresh: boolean },
+    /** Routes this pass was already refused on, as `routeKey`s. */
+    tried: readonly string[] = []
   ): Promise<void> => {
     const row = owner.run.nodes.find((entry) => entry.id === node.id);
     if (!row || owner.controller.signal.aborted) return;
@@ -1018,6 +1131,25 @@ export function createWorkflowService(deps: WorkflowDeps): WorkflowService {
     const resumeSessionId = rework && row.sessionId && !fixed?.fresh ? row.sessionId : undefined;
     // Every pass, rework round included, acts for the person who started it.
     const launchedBy = launchers.get(owner.run.id);
+    // A routing role picks the model when the pass starts, from the
+    // launcher's own policy and live quota. A resumed child keeps the route
+    // it began on; without a usable role model the unit's own route runs.
+    let unit = node;
+    let routedRole: string | undefined;
+    if (node.routingRole && resumeSessionId && row.routedRole) {
+      unit = roleRouted(node, { ...(row.model ? { model: row.model } : {}), ...(row.harness ? { harness: row.harness } : {}) });
+      routedRole = row.routedRole;
+    } else if (node.routingRole && launchedBy && deps.routeFor) {
+      const route = await deps
+        .routeFor(node.routingRole, { launchedBy, projectId: owner.workflow.projectId, exclude: tried })
+        .catch(() => undefined);
+      if (route && (route.model || route.harness) && !tried.includes(routeKey(route))) {
+        unit = roleRouted(node, route);
+        routedRole = node.routingRole;
+      }
+    }
+    if (owner.controller.signal.aborted) return;
+    const facts = owner.run.facts ?? [];
     const prompt = rework
       ? buildReworkPrompt(node, owner.run.input, {
           round: rework.round,
@@ -1025,8 +1157,8 @@ export function createWorkflowService(deps: WorkflowDeps): WorkflowService {
           resumed: !!resumeSessionId,
           ...(row.output ? { previousOutput: row.output } : {}),
           ...(rework.guidance ? { guidance: rework.guidance } : {}),
-        }, { sources, ...(context ? { context } : {}), team: owner.workflow.nodes })
-      : buildNodePrompt(node, owner.run.input, sources, context, owner.workflow.nodes);
+        }, { sources, ...(context ? { context } : {}), team: owner.workflow.nodes, facts })
+      : buildNodePrompt(node, owner.run.input, sources, context, owner.workflow.nodes, facts);
     await patchNode(owner, node.id, {
       status: "running",
       startedAt: now(),
@@ -1035,6 +1167,12 @@ export function createWorkflowService(deps: WorkflowDeps): WorkflowService {
       retryable: false,
       attempt: (row.attempt ?? 0) + 1,
       round: rework?.round ?? 1,
+      // The row shows the route this pass really runs on.
+      ...(routedRole
+        ? { model: unit.model, harness: unit.harness, routedRole }
+        : row.routedRole
+          ? { model: node.model, harness: node.harness, routedRole: undefined }
+          : {}),
       ...(rework
         ? {
             verdict: undefined,
@@ -1055,7 +1193,7 @@ export function createWorkflowService(deps: WorkflowDeps): WorkflowService {
           runId: owner.run.id,
           workflowId: owner.workflow.id,
           projectId: owner.workflow.projectId,
-          node,
+          node: unit,
           prompt,
           permissions: opts.permissions,
           timeoutMs: opts.nodeTimeoutMs,
@@ -1089,6 +1227,12 @@ export function createWorkflowService(deps: WorkflowDeps): WorkflowService {
               sessionId: result.sessionId,
               signal: owner.controller.signal,
             });
+      }
+      // What the unit located joins the run's map before the unit settles,
+      // so the durable node patch below saves both.
+      if (!owner.controller.signal.aborted) {
+        const located = parseFacts(result.output).facts;
+        if (located.length) owner.run.facts = mergeFacts(owner.run.facts ?? [], located);
       }
       await patchNode(
         owner,
@@ -1127,6 +1271,21 @@ export function createWorkflowService(deps: WorkflowDeps): WorkflowService {
       // harness): the run waits for a person to fix the unit instead of
       // failing everything after it.
       const waitsForFix = retryable && failure?.phase === "pre-admission" && failure.fixable !== false;
+      // A unit with a routing role that was refused before it started moves
+      // to the role's next model, then to its own route, before the run asks
+      // a person. Nothing ran, so nothing is repeated.
+      if (waitsForFix && node.routingRole && launchedBy && deps.routeFor && tried.length < MAX_ROLE_ROUTES) {
+        const refused = [...tried, routeKey(unit)];
+        const another = await deps
+          .routeFor(node.routingRole, { launchedBy, projectId: owner.workflow.projectId, exclude: refused })
+          .catch(() => undefined);
+        const next = another && !refused.includes(routeKey(another));
+        const own = routedRole !== undefined && !refused.includes(routeKey(node));
+        if (next || own) {
+          await executeNode(owner, node, opts, layerOrder, rework, { fresh: true }, refused);
+          return;
+        }
+      }
       await patchNode(
         owner,
         node.id,
@@ -1150,6 +1309,7 @@ export function createWorkflowService(deps: WorkflowDeps): WorkflowService {
             }
       );
       if (!waitsForFix) return;
+      attention(owner, "needs-fix", `unit ${node.id} (${node.role}) could not start: ${clip((cause instanceof Error ? cause.message : String(cause)).replace(/\s+/g, " "), 240)}. The run waits: "retry" it (nodeId; another harnessId/model if the route is the problem) or "stop".`);
       const route = await holdForFix(owner, node.id, opts.nodeTimeoutMs);
       if (!route) {
         // No fix: the unit stays failed and the settled run can still fork it.
@@ -1294,6 +1454,7 @@ export function createWorkflowService(deps: WorkflowDeps): WorkflowService {
     } catch {
       // Delivery only: a lost notification never changes the run.
     }
+    attention(owner, "needs-decision", `review unit ${gate.id} (${gate.role}) still requests changes after ${row.round ?? 1} round${(row.round ?? 1) === 1 ? "" : "s"}. The run waits: read the blockers with "status", then "decide" (accept${canAnotherRound ? " or another-round with a note" : ""}) or "stop".`);
     const held = await holdForDecision(owner, gate.id, deps.decisionTimeoutMs ?? DEFAULT_DECISION_TIMEOUT_MS);
     if (owner.controller.signal.aborted) return null;
     if (held.choice) return held.choice;
@@ -1407,6 +1568,7 @@ export function createWorkflowService(deps: WorkflowDeps): WorkflowService {
     if (status !== "stopped") delete owner.run.interrupted;
     if (result) owner.run.result = result;
     records.set(owner.run.id, owner.run);
+    attention(owner, "settled", `${status === "done" ? "finished" : status === "error" ? "failed" : "stopped"}. Its units and result are in this chat's context. Verify the work, then record "outcome" (accepted, reworked or discarded).`);
     try {
       save();
     } catch (cause) {
@@ -1449,6 +1611,8 @@ export function createWorkflowService(deps: WorkflowDeps): WorkflowService {
         : {}),
       ...(context ? { context } : {}),
       ...(retryOf ? { retryOf } : {}),
+      ...(launch?.facts?.length ? { facts: launchFacts(launch.facts) } : {}),
+      ...(launch?.wake ? { wake: true } : {}),
       nodes: workflow.nodes.map((node) => ({
         id: node.id,
         role: node.role,
@@ -1726,6 +1890,7 @@ export function createWorkflowService(deps: WorkflowDeps): WorkflowService {
               startedAt: run.startedAt,
               layers: run.layers,
               nodes: run.nodes,
+              ...(run.wake ? { wake: true } : {}),
               definition: run.definition,
               ...(run.clientOperationId
                 ? { clientOperationId: run.clientOperationId }
@@ -1769,16 +1934,85 @@ export function createWorkflowService(deps: WorkflowDeps): WorkflowService {
       const run = records.get(id);
       return run ? clone(run) : null;
     },
-    async stop(id) {
+    async stop(id, stopOptions) {
       const owner = active.get(id);
       if (!owner) {
         const run = records.get(id);
         if (!run) throw error("workflow run not found", "not-found");
         return clone(run);
       }
+      if (stopOptions?.quiet) owner.quiet = true;
       if (owner.run.status === "running") owner.controller.abort();
       await owner.done;
       return clone(owner.run);
+    },
+    async recordOutcome(id, input, requestedBy, by = "person") {
+      const record = records.get(id);
+      if (!record) throw error("workflow run not found", "not-found");
+      const value = (input as { value?: unknown } | undefined)?.value;
+      if (!OUTCOME_VALUES.includes(value as typeof OUTCOME_VALUES[number]))
+        throw error(`value must be one of ${OUTCOME_VALUES.join(", ")}`);
+      const rawNote = (input as { note?: unknown }).note;
+      if (rawNote !== undefined && (typeof rawNote !== "string" || rawNote.length > MAX_OUTCOME_NOTE))
+        throw error(`note must be text of at most ${MAX_OUTCOME_NOTE} characters`);
+      if (by !== "person" && by !== "agent") throw error("invalid outcome author");
+      if (record.status === "running" || active.has(id))
+        throw error("the run is still running; record its outcome once it settles", "conflict");
+      const launcher = launchers.get(id);
+      if (requestedBy && launcher && requestedBy !== launcher)
+        throw error("only the person who started this run can record its outcome", "conflict");
+      const note = typeof rawNote === "string" ? rawNote.replace(/\s+/g, " ").trim() : "";
+      const outcome: WorkflowRunOutcomeDto = {
+        value: value as WorkflowRunOutcomeDto["value"],
+        ...(note ? { note } : {}),
+        at: now(),
+        by,
+      };
+      // Clients fold runs from the parent chat's events, so the event comes
+      // first; the stored record follows it.
+      if (record.parentSessionId)
+        await deps.append(
+          record.parentSessionId,
+          "workflow/run-outcome",
+          json({ runId: id, outcome }),
+          { ignorable: true, producerPlugin: "workflow" }
+        );
+      const previous = record.outcome;
+      record.outcome = outcome;
+      try {
+        save();
+      } catch (cause) {
+        if (previous) record.outcome = previous;
+        else delete record.outcome;
+        throw cause;
+      }
+      return clone(record);
+    },
+    outcomes(projectId) {
+      const rows = new Map<string, WorkflowOutcomeSummaryDto & { latest: number }>();
+      for (const run of records.values()) {
+        if (run.status === "running" || (projectId && run.projectId !== projectId)) continue;
+        const row = rows.get(run.workflowId) ?? {
+          workflowId: run.workflowId, name: run.name, latest: 0,
+          runs: 0, done: 0, error: 0, stopped: 0,
+          accepted: 0, reworked: 0, discarded: 0, unrecorded: 0,
+          units: 0, reworkedUnits: 0,
+        };
+        if (run.startedAt >= row.latest) { row.latest = run.startedAt; row.name = run.name; }
+        row.runs++;
+        row[run.status]++;
+        if (run.outcome) row[run.outcome.value]++;
+        else row.unrecorded++;
+        for (const node of run.nodes) {
+          if (!node.startedAt) continue;
+          row.units++;
+          if ((node.round ?? 1) > 1) row.reworkedUnits++;
+        }
+        rows.set(run.workflowId, row);
+      }
+      return [...rows.values()]
+        .sort((a, b) => b.latest - a.latest)
+        .map(({ latest: _latest, ...row }) => row);
     },
     async decide(id, input, requestedBy) {
       const record = records.get(id);
@@ -1982,6 +2216,8 @@ export function createWorkflowService(deps: WorkflowDeps): WorkflowService {
         );
         run.context = clone(original.context);
         run.clientOperationId = clientOperationId;
+        if (original.facts?.length) run.facts = [...original.facts];
+        if (original.wake) run.wake = true;
         for (const prior of original.nodes) {
           const targetRow = run.nodes.find((node) => node.id === prior.id)!;
           if (prior.status === "done" || !restart.has(prior.id))
@@ -2038,6 +2274,7 @@ export function createWorkflowService(deps: WorkflowDeps): WorkflowService {
               startedAt: run.startedAt,
               layers: run.layers,
               nodes: run.nodes,
+              ...(run.wake ? { wake: true } : {}),
               definition: run.definition,
               retryOf: original.id,
               ...(run.clientOperationId

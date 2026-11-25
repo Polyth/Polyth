@@ -97,6 +97,7 @@ export {
   type ServerModelRoutingOrder,
   type ServerModelRoutingPlacement,
   type ServerDelegationPolicyBrief,
+  type ServerDelegationRoute,
   type ServerDelegationPolicyService,
   type ServerRuntimeCatalogService,
   type ServerTurnCompletedEvent,

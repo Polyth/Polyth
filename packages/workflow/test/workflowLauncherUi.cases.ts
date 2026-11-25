@@ -45,14 +45,22 @@ const { default: WorkflowLauncher, requestWorkflowLauncher } = await import("../
 const { default: WorkflowMessageAction } = await import("../widgets/WorkflowMessageAction.tsx");
 const { default: WorkflowView } = await import("../widgets/WorkflowView.tsx");
 const { workflowDecisionApi } = await import("../widgets/workflowDecision.ts");
+const { workflowOutcomeApi } = await import("../widgets/workflowOutcome.ts");
 const { registerWidgetPlugin } = await import("../../../apps/web/src/widgets/catalog.ts");
 const { handOffWorkflowLaunch, takeWorkflowLaunch } = await import("../widgets/workflowLaunch.ts");
 const { beginWorkflowStart, dismissWorkflowStart, retryWorkflowStart, workflowStartFor } =
   await import("../widgets/workflowStart.ts");
-const { drainInserts } = await import("../../../apps/web/src/composerInsert.ts");
+const { drainInserts, drainComposerReplacement } = await import("../../../apps/web/src/composerInsert.ts");
 registerWidgetPlugin(WORKFLOW_WIDGET_PLUGIN);
 
 const tick = async () => { await Promise.resolve(); await Promise.resolve(); };
+/** A run card folds to its header and summary line; this opens it. */
+const openCard = async (container: ParentNode) => {
+  const toggle = container.querySelector<HTMLButtonElement>(".workflow-timeline-toggle");
+  assert.ok(toggle, "the card has one toggle that opens it");
+  await act(async () => { toggle.click(); await tick(); });
+  assert.equal(toggle.getAttribute("aria-expanded"), "true");
+};
 // The view opens on the library; a workflow's page has Run and Edit tabs.
 const openWorkflow = async (container: ParentNode, name: string, tab?: "edit") => {
   const card = container.querySelector<HTMLButtonElement>(`.workflow-card-main[aria-label="Open ${name}"]`);
@@ -227,7 +235,7 @@ test("Auto allow-list uses the shared model picker and stops at the 24-model con
   }
 });
 
-test("a new-chat launch opens its workflow window at once and a lost response reuses its operation key", async () => {
+test("a new-chat launch opens its parent chat at once and a lost response reuses its operation key", async () => {
   const original = { listWorkflows: api.listWorkflows, getWorkflowPreferences: api.getWorkflowPreferences,
     createSession: api.createSession, runWorkflow: api.runWorkflow, getSession: api.getSession,
     getEvents: api.getEvents, listSessions: api.listSessions };
@@ -291,16 +299,14 @@ test("a new-chat launch opens its workflow window at once and a lost response re
       harness: { mode: "pinned", harnessId: "chat-harness" },
       agent: "chat-agent",
     });
-    // The new chat does not wait for admission: the parent and its workflow
-    // window open while the start is still in flight.
+    // The new chat does not wait for admission: the parent chat opens while the
+    // start is still in flight. The run's card lives there once admitted.
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); await tick(); });
     assert.equal(getState().activeSessionId, "parent-1", "the parent session opens before admission");
-    const intent = takeWorkflowLaunch("project");
-    assert.equal(intent?.sessionId, "parent-1", "the workflow window is handed this launch");
-    assert.equal(intent?.workflowId, workflow.id);
+    assert.equal(takeWorkflowLaunch("project"), null, "the workflow window is handed nothing: a run is watched in its chat");
     assert.equal(workflowStartFor("parent-1")?.status, "starting");
     assert.equal(workflowStartFor("parent-1")?.input, "Exact request");
-    assert.equal(consumed, 1, "the task moved into the workflow window");
+    assert.equal(consumed, 1, "the task moved into the launch; the composer is left clean");
     await act(async () => { rejectRequest?.(new Error("response lost")); await tick(); });
     assert.equal(workflowStartFor("parent-1")?.status, "failed", "a failed start stays visible");
     await act(async () => { void retryWorkflowStart("parent-1")?.catch(() => undefined); await tick(); });
@@ -477,7 +483,7 @@ test("a retried timeline follows the new run immediately without a WebSocket upd
   }
 });
 
-test("a unit the run holds offers Fix in the chat card instead of a retry", async () => {
+test("a unit the run holds is fixed right in the chat card, never retried from a forked run", async () => {
   const held: WorkflowRunDto = { id: "held", workflowId: workflow.id, projectId: "project",
     parentSessionId: "parent", name: workflow.name, input: "Task", startedAt: 1, status: "running",
     layers: [["scout"], ["review"]], nodes: [
@@ -492,9 +498,10 @@ test("a unit the run holds offers Fix in the chat card instead of a retry", asyn
   const root = createRoot(container);
   try {
     await act(async () => { root.render(createElement(WorkflowTimelineCard, { run: held })); await tick(); });
-    const fix = container.querySelector<HTMLButtonElement>('button[aria-label="Fix Codebase Scout"]');
-    assert.ok(fix, "the held unit offers Fix");
-    assert.equal(fix.textContent?.trim(), "Fix");
+    assert.equal(container.querySelectorAll(".workflow-timeline-card .workflow-retry-controls").length, 1,
+      "the held unit offers its other-route controls under its row");
+    assert.ok(buttonByText(container, "Continue"), "the fix continues the run in place");
+    assert.ok(!container.querySelector('button[aria-label="Fix Codebase Scout"]'), "no hand-off button to another window");
     assert.ok(!buttonByText(container, "Retry step"), "a running run is never forked from the card");
     assert.ok(container.querySelector(".workflow-timeline-card.has-attention"), "the card asks for attention");
     assert.match(container.textContent ?? "", /Waiting for your fix/);
@@ -505,7 +512,7 @@ test("a unit the run holds offers Fix in the chat card instead of a retry", asyn
   }
 });
 
-test("a review held for a decision asks for it in the chat card and points to the run", async () => {
+test("a review held for a decision is settled in the chat card itself", async () => {
   const blocker = { severity: "blocker" as const, message: "no tests" };
   const held: WorkflowRunDto = { id: "decide", workflowId: workflow.id, projectId: "project",
     parentSessionId: "parent", name: workflow.name, input: "Task", startedAt: 1, status: "running",
@@ -523,10 +530,11 @@ test("a review held for a decision asks for it in the chat card and points to th
     await act(async () => { root.render(createElement(WorkflowTimelineCard, { run: held })); await tick(); });
     assert.ok(container.querySelector(".workflow-timeline-card.has-attention"), "the card asks for attention");
     assert.match(container.textContent ?? "", /Waiting for your decision/);
-    const decide = container.querySelector<HTMLButtonElement>('button[aria-label="Decide on Reviewer"]');
-    assert.ok(decide, "the held review offers Decide");
-    assert.equal(decide.textContent?.trim(), "Decide");
-    assert.ok(!buttonByText(container, "Review & respond"), "the decision is made in the run, not in the reviewer's chat");
+    assert.equal(container.querySelectorAll(".workflow-timeline-card .workflow-dispute").length, 1,
+      "the decision card opens under the held review");
+    assert.ok(buttonByText(container, "Accept as is") ?? buttonByText(container, "Accept"), "the gate can be accepted here");
+    assert.ok(!buttonByText(container, "Decide"), "no hand-off button to another window");
+    assert.ok(!buttonByText(container, "Review & respond"), "the decision is made in the card, not in the reviewer's chat");
   } finally {
     await act(async () => { root.unmount(); });
     Object.assign(api, original);
@@ -1012,7 +1020,7 @@ test("failed workflow start never consumes or replaces the composer draft", asyn
   }
 });
 
-test("history handoff waits for workflow surface registration and follows unload", async () => {
+test("the settings handoff waits for workflow surface registration and follows unload", async () => {
   const { registerSurface } = await import("../../../apps/web/src/surfaces.ts");
   const run: WorkflowRunDto = {
     id: "cold-start-run", workflowId: workflow.id, projectId: workflow.projectId,
@@ -1024,9 +1032,10 @@ test("history handoff waits for workflow surface registration and follows unload
   const root = createRoot(container);
   let dispose: (() => void) | undefined;
   const action = () => [...container.querySelectorAll<HTMLButtonElement>("button")]
-    .find((button) => button.textContent?.trim() === "View workflow");
+    .find((button) => button.textContent?.trim() === "Workflow settings");
   try {
     await act(async () => { root.render(createElement(WorkflowTimelineCard, { run })); });
+    await openCard(container);
     assert.equal(action()?.disabled, true, "history can arrive before package activation");
     await act(async () => {
       dispose = registerSurface({ id: "workflow", title: "Workflows", order: 22,
@@ -1115,9 +1124,16 @@ test("chat workflow card styles itself and lets the reader inspect and jump to a
     await act(async () => { root.render(createElement(WorkflowTimelineCard, { run })); });
     const segments = [...container.querySelectorAll(".workflow-timeline-progress i")].map((segment) => segment.className);
     assert.deepEqual(segments, ["tone-running", "tone-queued"], "one progress segment per node");
-    assert.match(container.querySelector(".workflow-timeline-title .workflow-timeline-elapsed")?.textContent ?? "", /^1:0\d$/);
-    assert.ok(container.querySelector('button[aria-label="Open Builder child session"]'), "a running agent is one tap away");
-    assert.equal(container.querySelector('button[aria-label="Reviewer details"]'), null, "nothing extra to show for a queued node");
+    assert.match(container.querySelector(".workflow-timeline-card > header .workflow-timeline-elapsed")?.textContent ?? "", /^1:0\d$/);
+    // Folded, the card is its header and one line naming what runs now.
+    assert.equal(container.querySelector(".workflow-timeline-now")?.textContent, "Builder · tool: edit");
+    assert.equal(container.querySelector(".workflow-timeline-count")?.textContent, "0/2");
+    assert.equal(Boolean(container.querySelector(".workflow-timeline-nodes")), false, "no unit rows until the card opens");
+    assert.equal(Boolean(container.querySelector(".workflow-timeline-card > footer")), false, "no action row until the card opens");
+    await openCard(container);
+    assert.ok(container.querySelector('button[aria-label="Open Builder child session"]'), "a running agent is two taps away");
+    assert.ok(container.querySelector('button[aria-label="Stop Build + Review workflow run"]'), "Stop opens with the card");
+    assert.equal(Boolean(container.querySelector('button[aria-label="Reviewer details"]')), false, "nothing extra to show for a queued node");
 
     const toggle = container.querySelector<HTMLButtonElement>('button[aria-label="Builder details"]');
     assert.equal(toggle?.getAttribute("aria-expanded"), "false");
@@ -1128,7 +1144,7 @@ test("chat workflow card styles itself and lets the reader inspect and jump to a
     assert.match(details, /Agent.*build/);
     assert.match(details, /Elapsed/);
     await act(async () => { toggle?.click(); });
-    assert.equal(container.querySelector(".workflow-timeline-node-details"), null);
+    assert.equal(Boolean(container.querySelector(".workflow-timeline-node-details")), false);
   } finally {
     await act(async () => { root.unmount(); });
     container.remove();
@@ -1157,6 +1173,8 @@ test("long workflow cards expand and collapse without burying chat", async () =>
   const root = createRoot(container);
   try {
     await act(async () => { root.render(createElement(WorkflowTimelineCard, { run })); });
+    assert.equal(container.querySelectorAll(".workflow-timeline-card li").length, 0, "a folded card lists no units");
+    await openCard(container);
     assert.equal(container.querySelectorAll(".workflow-timeline-card li").length, 6);
     const toggle = container.querySelector<HTMLButtonElement>(".workflow-timeline-nodes-toggle");
     assert.match(toggle?.textContent?.trim() ?? "", /Show all 12 nodes/);
@@ -1209,7 +1227,7 @@ test("user and assistant workflow actions receive the canonical project's Space"
   }
 });
 
-// ---- Workflow view: run panel, library and chat-card layout -------------------
+// ---- Workflow window (template settings) and the chat card (the run surface) ----
 
 const GAPPED = "Checking the diff.\n\n\n\n\n\n\n\nRunning the tests.";
 const COMPACT = "Checking the diff.\n\nRunning the tests.";
@@ -1253,63 +1271,126 @@ const typeInto = (element: HTMLTextAreaElement, value: string) => {
 const buttonByText = (container: ParentNode, text: string) =>
   [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === text);
 
-test("a failed run keeps its output compact and offers an explicit new run, never a one-click replay", async () => {
-  const { started, restore } = stubWorkflowApi([{ ...workflow, revision: 1 }], [failedRun]);
+const noRunRequests = () => {
+  const original = { listWorkflowRuns: api.listWorkflowRuns, getWorkflowRun: api.getWorkflowRun,
+    stopWorkflowRun: api.stopWorkflowRun, retryWorkflowRun: api.retryWorkflowRun };
+  const calls: string[] = [];
+  api.listWorkflowRuns = async () => { calls.push("listWorkflowRuns"); return []; };
+  api.getWorkflowRun = async () => { calls.push("getWorkflowRun"); return failedRun; };
+  api.stopWorkflowRun = async () => { calls.push("stopWorkflowRun"); return failedRun; };
+  api.retryWorkflowRun = async () => { calls.push("retryWorkflowRun"); return failedRun; };
+  return { calls, restore: () => { Object.assign(api, original); } };
+};
+const runUi = (container: ParentNode) => container.querySelectorAll(
+  ".workflow-run-form, .workflow-run-results, .workflow-run-starting, .workflow-run-units, .workflow-run-usage, #workflow-detail-tab-run").length;
+
+test("a failed run's card keeps its output compact and offers no one-click replay", async () => {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
   try {
-    await act(async () => { activateProject("project"); activateSession("parent"); root.render(createElement(WorkflowView)); await settle(); });
-    await openWorkflow(container, workflow.name);
-    assert.equal(container.querySelector(".workflow-run-result")?.textContent, COMPACT, "recorded gaps collapse to one blank line");
-    assert.equal(container.querySelector(".workflow-node-output")?.textContent, COMPACT);
-    assert.equal(Boolean(container.querySelector(".workflow-run-form")), true, "a failed run leaves a way to start a new run");
+    await act(async () => { root.render(createElement(WorkflowTimelineCard, { run: failedRun })); await tick(); });
+    assert.equal(container.querySelector(".workflow-timeline-result p")?.textContent, COMPACT, "recorded gaps collapse to one blank line");
     assert.ok(!buttonByText(container, "Run again"), "a failed run is not replayed in one click");
-    const run = () => buttonByText(container.querySelector(".workflow-run-footer")!, "Run workflow");
-    assert.equal(run()?.disabled, true, "the form needs a request before it can launch");
-    const input = container.querySelector<HTMLTextAreaElement>(".workflow-run-form textarea");
-    assert.ok(input);
-    await act(async () => { typeInto(input, "Run the review again"); });
-    assert.equal(run()?.disabled, false);
-    await act(async () => { run()?.click(); await settle(); await settle(); });
-    assert.equal(started.length, 1);
-    assert.equal(started[0]!.input, "Run the review again");
-    assert.equal(started[0]!.workflowId, workflow.id);
-    assert.ok(!container.querySelector(".workflow-run-form"), "the form steps aside while the new run is running");
+    assert.ok(!buttonByText(container, "Retry full workflow"));
+    assert.ok(!buttonByText(container, "Workflow settings"), "settings wait in the opened card");
+    await openCard(container);
+    assert.ok(buttonByText(container, "Workflow settings"), "the card opens the template's settings");
+    assert.equal(container.querySelectorAll(".workflow-run-usage").length, 1, "a settled run asks how its result was used");
   } finally {
     await act(async () => { root.unmount(); });
-    restore();
     container.remove();
   }
 });
 
-test("Run again reruns the recorded request even when the form starts empty", async () => {
-  const { started, restore } = stubWorkflowApi([{ ...workflow, revision: 1 }], [doneRun]);
+test("a folded failed run says why; a retryable failure shows its retry row instead; a done run says nothing", async () => {
+  const lineOf = (container: HTMLElement) => container.querySelector(".workflow-timeline-summary .workflow-timeline-now")?.textContent ?? null;
+  const render = async (run: WorkflowRunDto) => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => { root.render(createElement(WorkflowTimelineCard, { run })); await tick(); });
+    return { container, root };
+  };
+  const dispose = async (view: { container: HTMLElement; root: ReturnType<typeof createRoot> }) => {
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  };
+  const failedUnit = failedRun.nodes[0]!;
+  const failed = await render(failedRun);
+  try {
+    assert.equal(lineOf(failed.container), `Reviewer · ${failedUnit.error}`, "a folded failed run names the unit and its error");
+    assert.equal(buttonByText(failed.container, "Retry step") === undefined, true);
+    await openCard(failed.container);
+    assert.equal(lineOf(failed.container), null, "the opened card carries the error on the unit row, not in a second line");
+    assert.equal((failed.container.textContent ?? "").includes(failedUnit.error!), true, "the unit row still shows the error");
+  } finally { await dispose(failed); }
+  const retryable = await render({ ...failedRun, nodes: [{ ...failedUnit, retryable: true }] });
+  try {
+    assert.equal(lineOf(retryable.container), null, "a retry row replaces the line");
+    assert.equal(buttonByText(retryable.container, "Retry step") !== undefined, true, "the retry row is shown folded");
+  } finally { await dispose(retryable); }
+  const done = await render(doneRun);
+  try {
+    assert.equal(lineOf(done.container), null, "a done run has no failure line");
+  } finally { await dispose(done); }
+});
+
+test("Run again on a done run's card starts the same template with its own request in this chat", async () => {
+  const original = { runWorkflow: api.runWorkflow };
+  const started: Array<Parameters<typeof api.runWorkflow>> = [];
+  api.runWorkflow = async (...args) => { started.push(args); return { ...doneRun, id: "again", status: "running", finishedAt: undefined } as WorkflowRunDto; };
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
   try {
-    await act(async () => { activateProject("project"); activateSession("parent"); root.render(createElement(WorkflowView)); await settle(); });
-    await openWorkflow(container, workflow.name);
-    assert.ok(!container.querySelector(".workflow-run-form"), "a done run keeps its single Run again action");
+    await act(async () => { root.render(createElement(WorkflowTimelineCard, { run: doneRun })); await tick(); });
+    assert.ok(!buttonByText(container, "Run again"), "a settled card is a result line until opened");
+    await openCard(container);
     const again = buttonByText(container, "Run again");
-    assert.ok(again, "done run offers Run again");
+    assert.ok(again, "a done run offers Run again on its card");
     await act(async () => { again.click(); await settle(); await settle(); });
-    assert.equal(started.length, 1, "no hand-off is needed for Run again to work");
-    assert.equal(started[0]!.input, doneRun.input);
-    assert.deepEqual(started[0]!.options, doneRun.options);
+    assert.equal(started.length, 1);
+    assert.equal(started[0]![0], doneRun.workflowId);
+    assert.equal(started[0]![1], "parent", "it starts in the chat the run came from");
+    assert.equal(started[0]![2], doneRun.input);
+    assert.deepEqual(started[0]![3], doneRun.options);
+    assert.equal(started[0]![4]?.context, "request");
+    assert.equal(typeof started[0]![4]?.clientOperationId, "string");
   } finally {
     await act(async () => { root.unmount(); });
-    restore();
+    Object.assign(api, original);
     container.remove();
   }
 });
 
-test("opening the view from a run leads with that run's page; a plain open shows the library", async () => {
+test("a run card records how the result was used, from the card itself", async () => {
+  const original = workflowOutcomeApi.record;
+  const calls: Array<{ id: string; value: string }> = [];
+  workflowOutcomeApi.record = async (id, input) => {
+    calls.push({ id, value: input.value });
+    return { ...doneRun, outcome: { value: input.value, at: 5, by: "person" } };
+  };
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement(WorkflowTimelineCard, { run: doneRun })); await tick(); });
+    assert.equal(container.querySelector(".workflow-run-usage-text")?.textContent, "How was the result used?");
+    await act(async () => { buttonByText(container, "Accepted")?.click(); await settle(); await settle(); });
+    assert.deepEqual(calls, [{ id: "done-run", value: "accepted" }]);
+    assert.equal(container.querySelector(".workflow-run-usage-text")?.textContent, "Result: Accepted · recorded by you");
+    assert.ok(buttonByText(container, "Change"));
+  } finally {
+    workflowOutcomeApi.record = original;
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
+test("opening settings from a card leads with the template page and no run; a plain open shows the library", async () => {
   const { restore } = stubWorkflowApi([{ ...workflow, revision: 1 }], [failedRun]);
-  const revealed: string[] = [];
-  const originalReveal = HTMLElement.prototype.scrollIntoView;
-  HTMLElement.prototype.scrollIntoView = function reveal(this: HTMLElement) { revealed.push(this.className); };
+  const requests = noRunRequests();
   const container = document.createElement("div");
   document.body.appendChild(container);
   const mount = async () => {
@@ -1319,80 +1400,33 @@ test("opening the view from a run leads with that run's page; a plain open shows
   };
   try {
     let unmount = await mount();
-    assert.equal(container.querySelector(".workflow-page")?.getAttribute("data-page"), "library",
-      "a plain open starts from the library");
-    assert.ok(!container.querySelector(".workflow-run-form"), "no workflow page is mixed into the library");
-    assert.deepEqual(revealed, []);
+    assert.equal(container.querySelector(".workflow-page")?.getAttribute("data-page"), "library", "a plain open starts from the library");
     await unmount();
 
-    handOffWorkflowLaunch({ projectId: "project", workflowId: workflow.id, input: failedRun.input, run: failedRun });
+    handOffWorkflowLaunch({ projectId: "project", workflowId: workflow.id });
     unmount = await mount();
     assert.equal(container.querySelector(".workflow-page")?.getAttribute("data-page"), "workflow",
-      "View workflow leads with the workflow, not the library");
-    assert.deepEqual(revealed, ["workflow-run-results"], "the run is brought into view once");
-    assert.equal(container.querySelector<HTMLTextAreaElement>(".workflow-run-form textarea")?.value, failedRun.input,
-      "the new-run form starts from the request being viewed");
+      "Workflow settings leads with the template, not the library");
+    assert.equal(runUi(container), 0, "the window shows no run form, no Run tab, no run monitor");
+    assert.ok(container.querySelector(".workflow-canvas"), "the template's editor is on the page itself");
+    assert.ok(!container.textContent?.includes(failedRun.input), "no run request is shown");
+    assert.equal(container.querySelector('[role="tablist"]'), null, "the page has no tabs");
+    assert.match(container.querySelector(".workflow-started-from")?.textContent ?? "", /started from a chat/);
     await unmount();
+    assert.deepEqual(requests.calls, [], "the Workflows window makes no run request");
   } finally {
-    HTMLElement.prototype.scrollIntoView = originalReveal;
+    requests.restore();
     restore();
     container.remove();
   }
 });
 
-test("a start in flight leads the workflow window and the admitted run replaces it", async () => {
-  const { restore } = stubWorkflowApi([{ ...workflow, revision: 1 }], [failedRun]);
-  let admit!: (run: WorkflowRunDto) => void;
-  let fail!: (cause: Error) => void;
-  let attempts = 0;
-  const container = document.createElement("div");
-  document.body.appendChild(container);
-  const root = createRoot(container);
-  try {
-    activateProject("project");
-    activateSession("parent");
-    void beginWorkflowStart(
-      { parentSessionId: "parent", projectId: "project", workflowId: workflow.id, input: "Ship it" },
-      () => new Promise((resolve, reject) => { attempts++; admit = resolve; fail = reject; }),
-      (cause) => String((cause as Error).message),
-    ).catch(() => undefined);
-    handOffWorkflowLaunch({ projectId: "project", sessionId: "parent", workflowId: workflow.id, input: "Ship it" });
-    await act(async () => { root.render(createElement(WorkflowView)); await settle(); });
-    assert.equal(container.querySelector(".workflow-page")?.getAttribute("data-page"), "workflow");
-    assert.ok(container.querySelector(".workflow-run-starting"), "the start shows at once");
-    assert.equal(container.querySelector(".workflow-run-starting .workflow-run-request")?.textContent, "Ship it");
-    assert.ok(!container.querySelector(".workflow-run-form"), "no empty run form while starting");
-    assert.ok(!container.textContent?.includes(failedRun.input), "the previous run does not stand in for the new one");
-
-    await act(async () => { fail(new Error("server busy")); await settle(); });
-    assert.match(container.querySelector(".workflow-run-starting.failed [role=alert]")?.textContent ?? "", /server busy/);
-    await act(async () => {
-      container.querySelector<HTMLButtonElement>(".workflow-run-starting .workflow-run-actions button")?.click();
-      await settle();
-    });
-    assert.equal(attempts, 2, "Retry resends the same start");
-    assert.ok(container.querySelector(".workflow-run-starting:not(.failed)"));
-
-    await act(async () => {
-      admit({ ...doneRun, id: "admitted", parentSessionId: "parent", input: "Ship it", status: "running" });
-      await settle();
-    });
-    assert.ok(!container.querySelector(".workflow-run-starting"), "the admitted run takes over");
-    assert.equal(container.querySelector(".workflow-run-request")?.textContent, "Ship it");
-  } finally {
-    dismissWorkflowStart("parent");
-    await act(async () => { root.unmount(); });
-    activateSession(null);
-    restore();
-    container.remove();
-  }
-});
-
-test("choosing a saved workflow opens its own page with its latest run; back returns to the library", async () => {
+test("choosing a saved workflow opens its own settings page; back returns to the library", async () => {
   const first: WorkflowDto = { ...workflow, revision: 1 };
   const second: WorkflowDto = { ...workflow, id: "second", name: "Second flow", revision: 1 };
   const secondRun: WorkflowRunDto = { ...doneRun, id: "second-run", workflowId: "second", input: "Second request" };
   const { restore } = stubWorkflowApi([first, second], [failedRun, secondRun]);
+  const requests = noRunRequests();
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -1403,19 +1437,19 @@ test("choosing a saved workflow opens its own page with its latest run; back ret
     await openWorkflow(container, "Second flow");
     assert.equal(page(), "workflow");
     assert.equal(container.querySelector<HTMLInputElement>(".workflow-detail-title input")?.value, "Second flow");
-    assert.equal(container.querySelector(".workflow-run-request")?.textContent, "Second request",
-      "the page shows this workflow's own latest run, not the first workflow's");
-    assert.ok(!container.querySelector(".workflow-canvas"), "the pipeline lives on the Edit tab");
+    assert.ok(container.querySelector(".workflow-canvas"), "the pipeline is on the page");
+    assert.equal(runUi(container), 0);
+    assert.ok(!container.textContent?.includes("Second request"), "a run's request never shows in the window");
     await act(async () => { container.querySelector<HTMLButtonElement>('button[aria-label="More workflow actions"]')?.click(); await settle(); });
     assert.deepEqual([...document.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent?.trim()),
       ["Duplicate", "Delete workflow"], "secondary actions live in one menu");
     await act(async () => { document.dispatchEvent(new dom.KeyboardEvent("keydown", { key: "Escape", bubbles: true }) as unknown as Event); await settle(); });
-    await act(async () => { container.querySelector<HTMLButtonElement>("#workflow-detail-tab-edit")?.click(); await settle(); });
-    assert.ok(container.querySelector(".workflow-canvas"));
     await act(async () => { container.querySelector<HTMLButtonElement>('button[aria-label="All workflows"]')?.click(); await settle(); });
     assert.equal(page(), "library");
+    assert.deepEqual(requests.calls, []);
   } finally {
     await act(async () => { root.unmount(); });
+    requests.restore();
     restore();
     container.remove();
   }
@@ -1458,9 +1492,7 @@ test("library cards stay compact: counts instead of role chains, examples as a b
     await act(async () => { copy.click(); await settle(); });
     assert.equal(created.length, 1);
     assert.equal(container.querySelector(".workflow-page")?.getAttribute("data-page"), "workflow");
-    assert.equal(container.querySelector("#workflow-detail-tab-edit")?.getAttribute("aria-selected"), "true",
-      "a fresh copy opens on its pipeline");
-    assert.ok(container.querySelector('button[aria-label="Add worker after selected node"]'), "the copy is editable");
+    assert.ok(container.querySelector('button[aria-label="Add worker after selected node"]'), "the copy opens on its editable pipeline");
   } finally {
     await act(async () => { root.unmount(); });
     api.createWorkflow = originalCreate;
@@ -1469,26 +1501,29 @@ test("library cards stay compact: counts instead of role chains, examples as a b
   }
 });
 
-test("a workflow's page shows only this chat's run of it, never another chat's", async () => {
+test("a template's page shows only settings, never a run of this or another chat", async () => {
   const otherChatRun: WorkflowRunDto = { ...failedRun, id: "other-chat-run", parentSessionId: "another-chat", input: "Someone else's request" };
-  const { restore } = stubWorkflowApi([{ ...workflow, revision: 1 }], [otherChatRun]);
+  const { restore } = stubWorkflowApi([{ ...workflow, revision: 1 }], [otherChatRun, failedRun]);
+  const requests = noRunRequests();
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
   try {
     await act(async () => { activateProject("project"); activateSession("parent"); root.render(createElement(WorkflowView)); await settle(); });
     await openWorkflow(container, workflow.name);
-    assert.ok(!container.textContent?.includes("Someone else's request"), "another chat's run stays in that chat");
-    assert.ok(!container.querySelector(".workflow-run-results"));
-    assert.ok(container.querySelector(".workflow-run-form"), "the page offers a run for this chat");
+    assert.ok(!container.textContent?.includes("Someone else's request"));
+    assert.ok(!container.textContent?.includes(failedRun.input));
+    assert.equal(runUi(container), 0);
+    assert.deepEqual(requests.calls, []);
   } finally {
     await act(async () => { root.unmount(); });
+    requests.restore();
     restore();
     container.remove();
   }
 });
 
-test("a held unit continues in place on another model, kept for future runs", async () => {
+test("a held unit continues in place on another model from its card, kept for future runs", async () => {
   const models = [
     { providerID: "openai", modelID: "gpt-gone", name: "GPT Gone", connected: true },
     { providerID: "openai", modelID: "gpt-good", name: "GPT Good", connected: true },
@@ -1498,13 +1533,11 @@ test("a held unit continues in place on another model, kept for future runs", as
     nodes: [{ id: "review", role: "Reviewer", status: "error", retryable: true, needsFix: true,
       model: { providerID: "openai", modelID: "gpt-gone" },
       error: "gpt-gone is not available on this engine. Pick a model from the list." }] };
-  const { restore } = stubWorkflowApi([{ ...workflow, revision: 1 }], [heldRun]);
   const originalRetry = api.retryWorkflowRun;
   const originalGet = api.getWorkflowRun;
+  const originalHarness = api.harnessSnapshots;
   const retries: Array<Parameters<typeof api.retryWorkflowRun>[1]> = [];
-  let listed = 0;
-  const originalList = api.listWorkflows;
-  api.listWorkflows = async (projectId) => { listed++; return originalList(projectId); };
+  api.harnessSnapshots = async () => [];
   api.getWorkflowRun = async () => heldRun;
   api.retryWorkflowRun = async (_runId, input) => {
     retries.push(input);
@@ -1514,10 +1547,8 @@ test("a held unit continues in place on another model, kept for future runs", as
   document.body.appendChild(container);
   const root = createRoot(container);
   try {
-    await act(async () => { activateProject("project"); activateSession("parent"); root.render(createElement(WorkflowView)); await settle(); });
-    await openWorkflow(container, workflow.name);
-    assert.match(container.querySelector(".workflow-run-notice.wait-fix")?.textContent ?? "", /Reviewer could not start/);
-    const unit = container.querySelector<HTMLElement>(".workflow-run-unit.needs-fix");
+    await act(async () => { activateProject("project"); root.render(createElement(WorkflowTimelineCard, { run: heldRun })); await settle(); });
+    const unit = container.querySelector<HTMLElement>(".workflow-timeline-nodes > li.needs-fix");
     assert.ok(unit, "the held unit is marked for a fix");
     assert.match(unit.textContent ?? "", /Waiting for your fix/);
     const proceed = buttonByText(unit, "Continue");
@@ -1529,18 +1560,16 @@ test("a held unit continues in place on another model, kept for future runs", as
     await act(async () => { row.click(); await settle(); });
     const keep = unit.querySelector<HTMLInputElement>(".workflow-retry-save input");
     assert.ok(keep?.checked, "a new route is kept for future runs by default");
-    const listedBefore = listed;
     await act(async () => { buttonByText(unit, "Continue")?.click(); await settle(); await settle(); });
     assert.equal(retries.length, 1);
     assert.equal(retries[0]!.nodeId, "review");
     assert.deepEqual(retries[0]!.replacement?.model, { providerID: "openai", modelID: "gpt-good" });
     assert.equal(retries[0]!.saveToWorkflow, true);
-    assert.ok(listed > listedBefore, "the saved template is read back for the library and editor");
   } finally {
     await act(async () => { root.unmount(); });
     api.retryWorkflowRun = originalRetry;
     api.getWorkflowRun = originalGet;
-    restore();
+    api.harnessSnapshots = originalHarness;
     container.remove();
   }
 });
@@ -1563,7 +1592,7 @@ test("the chat card keeps a gapped result compact and leaves continuing to the c
   }
 });
 
-test("the run panel reads as stages with rounds and verdicts, and the options stay minimal", async () => {
+test("a run's card reads rounds and verdicts per unit, and its report and route open with the unit", async () => {
   const reviewed: WorkflowDto = {
     ...workflow, id: "reviewed", name: "Build and review", revision: 1,
     nodes: [
@@ -1577,87 +1606,84 @@ test("the run panel reads as stages with rounds and verdicts, and the options st
     ...doneRun, id: "reworking", workflowId: reviewed.id, name: reviewed.name, status: "running", result: undefined,
     definition: reviewed, layers: [["builder"], ["review"]],
     nodes: [
-      { id: "builder", role: "Builder", status: "running", round: 2, sessionId: "builder-child", activity: "tool: edit", output: "Fixing the icon." },
+      { id: "builder", role: "Builder", status: "running", round: 2, sessionId: "builder-child", activity: "tool: edit", output: "Fixing the icon.", routedRole: "implement",
+        harness: { mode: "pinned", harnessId: "opencode" }, model: { providerID: "p", modelID: "fast-1" } },
       { id: "review", role: "Reviewer", status: "done", round: 1, verdict: "changes-requested", sessionId: "review-child", output: "Icon is a box.\n\nVerdict: changes requested" },
     ],
   };
-  const approved: WorkflowRunDto = {
-    ...reworking, id: "approved", status: "done", result: "All good.\n\nVerdict: approved", startedAt: 5,
-    nodes: [
-      { id: "builder", role: "Builder", status: "done", round: 2, sessionId: "builder-child", output: "Fixed." },
-      { id: "review", role: "Reviewer", status: "done", round: 2, verdict: "approved", sessionId: "review-child", output: "All good.\n\nVerdict: approved" },
-    ],
-  };
-  const { restore } = stubWorkflowApi([reviewed], [approved]);
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
   const texts = (selector: string) => [...container.querySelectorAll(selector)].map((element) => element.textContent?.trim());
+  const originalGet = api.getWorkflowRun;
+  api.getWorkflowRun = async () => reworking;
   try {
-    await act(async () => { activateProject("project"); activateSession("parent"); root.render(createElement(WorkflowView)); await settle(); });
-    await openWorkflow(container, reviewed.name);
-    assert.deepEqual(texts(".workflow-run-stage-label"), ["Stage 1", "Stage 2"], "units are grouped by the run's own stages");
-    assert.deepEqual(texts(".workflow-run-unit-round"), ["Round 2", "Round 2"]);
-    assert.deepEqual(texts(".workflow-run-unit-verdict"), ["Approved"]);
-    assert.deepEqual(texts(".workflow-run-unit-report > summary"), ["Report", "Report"], "reports stay folded by default");
-    assert.equal(container.querySelector(".workflow-run-unit-report .workflow-node-output")?.textContent, "Fixed.");
-    assert.equal(container.querySelector(".workflow-run-result")?.textContent, "All good.\n\nVerdict: approved");
-    assert.ok(!container.querySelector(".workflow-run-notice.waiting"), "an approved run carries no unresolved-review notice");
-
-    await act(async () => { container.querySelector<HTMLButtonElement>("#workflow-detail-tab-edit")?.click(); await settle(); });
-    assert.deepEqual(texts(".workflow-canvas-stage-label"), ["Stage 1", "Stage 2"]);
-    assert.deepEqual(texts(".workflow-node-gate"), ["Can send work back"], "the reviewer card says what it can do");
-    assert.ok(!container.querySelector('select[aria-label="Execution profile"]'), "profiles are gone");
-    assert.ok(!container.querySelector('select[aria-label="Workflow category"]'), "categories are gone");
-    assert.ok(!container.querySelector(".workflow-category-tabs"));
+    await act(async () => { root.render(createElement(WorkflowTimelineCard, { run: reworking })); await tick(); });
+    assert.deepEqual(texts(".workflow-timeline-summary em"), ["Rework round 2"]);
+    await openCard(container);
+    assert.deepEqual(texts(".workflow-timeline-card li small"), ["Round 2 · tool: edit", "Changes requested · Sent back to Builder"]);
+    assert.ok(!container.querySelector(".workflow-run-usage"), "nothing to record while the run is running");
+    const toggle = container.querySelector<HTMLButtonElement>(".workflow-timeline-nodes > li.status-running .workflow-timeline-details-toggle");
+    assert.ok(toggle, "a unit with a route and a report opens its details");
+    await act(async () => { toggle.click(); await tick(); });
+    assert.ok(texts(".workflow-timeline-node-details p").includes("By role: Implement → opencode · fast-1"), "the route reads with its role");
+    // Opening the card and the unit are the two steps; the report reads at once.
+    assert.deepEqual(texts(".workflow-run-unit-report > h4"), ["Report"]);
+    assert.deepEqual(texts(".workflow-run-unit-report > pre"), ["Fixing the icon."]);
   } finally {
+    api.getWorkflowRun = originalGet;
     await act(async () => { root.unmount(); });
-    restore();
     container.remove();
-  }
-
-  // A review that sent work back shows where it went, in the view and in chat.
-  const { restore: restoreRework } = stubWorkflowApi([reviewed], [reworking]);
-  const again = document.createElement("div");
-  document.body.appendChild(again);
-  const reworkRoot = createRoot(again);
-  const text = (selector: string) => [...again.querySelectorAll(selector)].map((element) => element.textContent?.trim());
-  try {
-    await act(async () => { activateProject("project"); activateSession("parent"); reworkRoot.render(createElement(WorkflowView)); await settle(); });
-    await openWorkflow(again, reviewed.name);
-    assert.deepEqual(text(".workflow-run-unit-verdict"), ["Changes requested"]);
-    assert.deepEqual(text(".workflow-run-unit.status-done .workflow-node-activity"), ["Sent back to Builder"]);
-    assert.deepEqual(text(".workflow-run-unit.status-running .workflow-node-activity"), ["tool: edit"]);
-    assert.ok(!again.querySelector(".workflow-run-form"), "a running run shows no second form");
-    await act(async () => { reworkRoot.unmount(); });
-  } finally {
-    restoreRework();
-  }
-  try {
-    const card = createRoot(again);
-    await act(async () => { card.render(createElement(WorkflowTimelineCard, { run: reworking })); });
-    assert.deepEqual(text(".workflow-timeline-card li small"), ["Round 2 · tool: edit", "Changes requested · Sent back to Builder"]);
-    assert.deepEqual(text(".workflow-timeline-summary em"), ["Rework round 2"]);
-    await act(async () => { card.unmount(); });
-  } finally {
-    again.remove();
   }
 });
 
-test("a review held for a decision shows its findings and a dispute card with both sides", async () => {
-  const reviewed: WorkflowDto = {
-    ...workflow, id: "disputed", name: "Disputed review", revision: 1,
-    nodes: [
-      { id: "builder", role: "Builder", prompt: "Build", kind: "worker" },
-      { id: "review", role: "Reviewer", prompt: "Review", kind: "review" },
-    ],
-    edges: [{ id: "e", source: "builder", target: "review" }],
-    defaults: { permissions: "manual", reviewRounds: 2 },
+test("run defaults are edited on the template page and saved with the template", async () => {
+  const saved: WorkflowDto = { ...workflow, revision: 1, defaults: { permissions: "manual", maxParallel: 2, nodeTimeoutMs: 60_000, reviewRounds: 2 } };
+  const { restore } = stubWorkflowApi([saved], []);
+  const originalUpdate = api.updateWorkflow;
+  const writes: Array<Parameters<typeof api.updateWorkflow>[1]> = [];
+  api.updateWorkflow = async (_id, patch) => { writes.push(patch); return { ...saved, ...patch, revision: 1 + writes.length } as WorkflowDto; };
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const field = (label: string) => [...container.querySelectorAll<HTMLLabelElement>(".workflow-run-options .workflow-field")]
+    .find((item) => item.querySelector("span")?.textContent === label)?.querySelector<HTMLInputElement>("input");
+  const type = (input: HTMLInputElement, value: string) => {
+    Object.getOwnPropertyDescriptor(dom.HTMLInputElement.prototype, "value")!.set!.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
   };
+  const flush = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 760)); });
+  try {
+    await act(async () => { activateProject("project"); activateSession("parent"); root.render(createElement(WorkflowView)); await settle(); });
+    await openWorkflow(container, workflow.name);
+    assert.equal(container.querySelector("#workflow-defaults-title")?.textContent, "Defaults for runs");
+    const parallel = field("Parallel workers");
+    const timeout = field("Timeout (seconds)");
+    assert.ok(parallel && timeout, "the four run options are template settings");
+    assert.equal(parallel.value, "2");
+    assert.equal(timeout.value, "60");
+    await act(async () => { type(parallel, "5"); await tick(); });
+    await flush();
+    assert.equal(writes.at(-1)?.defaults?.maxParallel, 5, "the new default is saved with the template");
+    assert.equal(writes.at(-1)?.defaults?.nodeTimeoutMs, 60_000);
+    const saves = writes.length;
+    await act(async () => { type(parallel, "0"); await tick(); });
+    await flush();
+    assert.equal(writes.length, saves, "an invalid value is never saved");
+    assert.equal(parallel.getAttribute("aria-invalid"), "true", "the field says why");
+  } finally {
+    await act(async () => { root.unmount(); });
+    api.updateWorkflow = originalUpdate;
+    restore();
+    container.remove();
+  }
+});
+
+test("a review held for a decision is settled in the card with both sides shown", async () => {
   const blocker = { severity: "blocker" as const, path: "src/cache.ts", line: 12, message: "the cache key ignores the tenant" };
   const held: WorkflowRunDto = {
-    ...doneRun, id: "held", workflowId: reviewed.id, name: reviewed.name, status: "running", result: undefined,
-    definition: reviewed, layers: [["builder"], ["review"]],
+    ...doneRun, id: "held", name: "Disputed review", status: "running", result: undefined,
+    layers: [["builder"], ["review"]],
     nodes: [
       { id: "builder", role: "Builder", status: "done", round: 3, sessionId: "builder-child", output: "Left it." },
       {
@@ -1668,30 +1694,31 @@ test("a review held for a decision shows its findings and a dispute card with bo
       },
     ],
   };
-  const { restore } = stubWorkflowApi([reviewed], [held]);
   const decisions: Array<Parameters<typeof workflowDecisionApi.decide>[1]> = [];
   const originalDecide = workflowDecisionApi.decide;
+  const originalGet = api.getWorkflowRun;
+  api.getWorkflowRun = async () => held;
   workflowDecisionApi.decide = async (_runId, input) => { decisions.push(input); return held; };
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
   const texts = (selector: string) => [...container.querySelectorAll(selector)].map((element) => element.textContent?.trim());
   try {
-    await act(async () => { activateProject("project"); activateSession("parent"); root.render(createElement(WorkflowView)); await settle(); });
-    await openWorkflow(container, reviewed.name);
-    assert.deepEqual(texts(".workflow-finding-mark"), ["Note"], "open blockers are read once, in the decision card");
-    assert.deepEqual(texts(".workflow-finding-path"), ["src/cache.ts:12"], "the location reads in mono in the dispute");
-    const unit = [...container.querySelectorAll<HTMLElement>(".workflow-run-unit")].find((element) => element.querySelector(".workflow-dispute"));
+    await act(async () => { root.render(createElement(WorkflowTimelineCard, { run: held })); await tick(); });
+    const unit = [...container.querySelectorAll<HTMLElement>(".workflow-timeline-nodes > li")].find((element) => element.querySelector(".workflow-dispute"));
     assert.ok(unit?.classList.contains("needs-human"), "the held review is marked as waiting for a person");
     assert.match(unit?.textContent ?? "", /Waiting for your decision/);
     assert.deepEqual(texts(".workflow-dispute-columns > span"), ["Reviewer", "Builder"], "one header names the two sides");
-    assert.deepEqual(texts(".workflow-run-unit-round"), ["Round 3", "Round 3 of 3"], "the builder keeps its plain round; the review shows the limit");
     assert.equal(texts(".workflow-dispute-title")[0], "The review rounds are used up");
-    assert.deepEqual(texts(".workflow-dispute-label"), ["Reviewer", "Builder", "Reviewer", "Builder"]);
     assert.deepEqual(texts(".workflow-dispute-text.is-empty"), ["No reply"]);
     assert.ok(texts(".workflow-dispute-text").includes("already scoped upstream"));
     assert.deepEqual(texts(".workflow-dispute-actions button"), ["Accept as is", "Another round"]);
+    assert.deepEqual(texts(".workflow-timeline-card .ui-btn--primary"), ["Accept as is"], "the person's call has one filled button");
+    assert.deepEqual(texts(".workflow-dispute-actions .ui-btn--ghost"), ["Another round"], "the other choice is a text button");
     assert.ok(!container.querySelector(".workflow-dispute-note"), "the note field stays hidden until asked for");
+    // The review's own findings (notes only; blockers are read once, in the decision) open with its details.
+    await act(async () => { unit!.querySelector<HTMLButtonElement>(".workflow-timeline-details-toggle")?.click(); await tick(); });
+    assert.deepEqual(texts(".workflow-finding-mark"), ["Note"], "open blockers are read once, in the decision card");
 
     await act(async () => { [...container.querySelectorAll<HTMLButtonElement>(".workflow-dispute-actions button")][1]!.click(); await tick(); });
     const note = container.querySelector<HTMLTextAreaElement>(".workflow-dispute-note textarea");
@@ -1706,8 +1733,212 @@ test("a review held for a decision shows its findings and a dispute card with bo
     assert.deepEqual({ ...decisions[0], clientOperationId: undefined }, { nodeId: "review", action: "another-round", note: "Key it by tenant id", clientOperationId: undefined });
   } finally {
     workflowDecisionApi.decide = originalDecide;
+    api.getWorkflowRun = originalGet;
     await act(async () => { root.unmount(); });
-    restore();
     container.remove();
   }
+});
+
+test("a failed new-chat start stays in its chat: request shown, Retry reuses the operation id, Dismiss puts the request back", async () => {
+  const original = { listWorkflows: api.listWorkflows, getWorkflowPreferences: api.getWorkflowPreferences, runWorkflow: api.runWorkflow };
+  const attempts: Array<Parameters<typeof api.runWorkflow>> = [];
+  let failNext = true;
+  api.listWorkflows = async () => [workflow];
+  api.getWorkflowPreferences = async () => ({ selectedId: workflow.id, pinnedIds: [], recentIds: [] });
+  api.runWorkflow = async (...args) => {
+    attempts.push(args);
+    if (failNext) throw new Error("server busy");
+    return { ...doneRun, id: "admitted", parentSessionId: "start-chat", status: "running" } as WorkflowRunDto;
+  };
+  const request = "Ship the export retry\nwith a note";
+  const begin = (parent: string) => void beginWorkflowStart(
+    { parentSessionId: parent, projectId: "project", workflowId: workflow.id, name: workflow.name, input: request },
+    () => api.runWorkflow(workflow.id, parent, request, undefined, { clientOperationId: "op-fixed", context: "recent" }),
+    (cause) => String((cause as Error).message),
+  ).catch(() => undefined);
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const mount = async (sessionId: string, draftText = "") => {
+    await act(async () => { root.render(createElement(WorkflowLauncher, { projectId: "project", sessionId, draftText })); await settle(); });
+  };
+  const openPanel = async () => {
+    await act(async () => { container.querySelector<HTMLButtonElement>(".composer-workflow")?.click(); await settle(); await settle(); });
+  };
+  const row = () => document.querySelector<HTMLElement>(".workflow-launch-start");
+  try {
+    await mount("start-chat");
+    assert.equal(row(), null, "nothing without a tracked start");
+    // In flight: the launcher button shows its busy state, no row yet.
+    await act(async () => { failNext = true; begin("start-chat"); await settle(); });
+    await act(async () => { await settle(); });
+    // Failed: attention on the button, the row holds the request.
+    assert.equal(container.querySelector(".composer-workflow")?.getAttribute("data-attention"), "true");
+    await openPanel();
+    assert.ok(row(), "the failed start shows above the list");
+    assert.match(row()?.textContent ?? "", /Release review did not start/);
+    assert.match(row()?.textContent ?? "", /server busy/);
+    assert.equal(row()?.querySelector(".workflow-launch-start-request")?.getAttribute("title"), request, "the full request is in the title");
+    assert.equal(row()?.querySelector(".workflow-launch-start-request")?.textContent, request);
+    assert.ok(!buttonByText(row()!, "Copy request"), "an empty composer restores the text instead");
+
+    failNext = false;
+    await act(async () => { buttonByText(row()!, "Retry")?.click(); await settle(); await settle(); });
+    assert.equal(attempts.length, 2);
+    assert.equal(attempts[0]![4]?.clientOperationId, "op-fixed");
+    assert.equal(attempts[1]![4]?.clientOperationId, attempts[0]![4]?.clientOperationId, "a retry reuses the operation id");
+    assert.equal(row(), null, "the row goes once the run is admitted");
+    assert.equal(workflowStartFor("start-chat"), undefined);
+
+    // Dismiss removes the row and puts the request back into an empty composer.
+    failNext = true;
+    await act(async () => { begin("start-chat"); await settle(); await settle(); });
+    drainComposerReplacement();
+    assert.ok(row(), "a second failure shows the row again");
+    await act(async () => { buttonByText(row()!, "Dismiss")?.click(); await settle(); });
+    assert.equal(row(), null);
+    assert.equal(workflowStartFor("start-chat"), undefined);
+    assert.equal(drainComposerReplacement(), request, "the request returns to the composer");
+
+    // With a draft already typed, the request is offered as a copy instead of replacing it.
+    await act(async () => { begin("start-chat"); await settle(); await settle(); });
+    await mount("start-chat", "Something else");
+    await openPanel();
+    assert.ok(buttonByText(row()!, "Copy request"));
+    await act(async () => { buttonByText(row()!, "Dismiss")?.click(); await settle(); });
+    assert.equal(drainComposerReplacement(), undefined, "a typed draft is never replaced");
+
+    // Another chat never shows this chat's start.
+    await act(async () => { begin("start-chat"); await settle(); await settle(); });
+    await mount("other-chat");
+    assert.equal(container.querySelector(".composer-workflow")?.getAttribute("data-attention"), null);
+    await openPanel();
+    assert.equal(row(), null);
+  } finally {
+    dismissWorkflowStart("start-chat");
+    await act(async () => { root.unmount(); });
+    Object.assign(api, original);
+    container.remove();
+  }
+});
+
+/** Mounts a run card with polling answered by the same run. */
+async function withCard(run: WorkflowRunDto, check: (container: HTMLElement) => Promise<void>) {
+  const original = { getWorkflowRun: api.getWorkflowRun, harnessSnapshots: api.harnessSnapshots };
+  api.getWorkflowRun = async () => run;
+  api.harnessSnapshots = async () => [];
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement(WorkflowTimelineCard, { run })); await tick(); });
+    await check(container);
+  } finally {
+    await act(async () => { root.unmount(); });
+    Object.assign(api, original);
+    container.remove();
+  }
+}
+
+const agentRun = (patch: Partial<WorkflowRunDto>): WorkflowRunDto => ({
+  id: "agent-run", workflowId: workflow.id, projectId: "project", parentSessionId: "parent",
+  name: "Build + Review", input: "Add a retry", startedAt: Date.now() - 30_000, status: "running", wake: true,
+  layers: [["builder"], ["review"]],
+  nodes: [
+    { id: "builder", role: "Builder", status: "done", sessionId: "builder-child", output: "Added it." },
+    { id: "review", role: "Reviewer", status: "running", sessionId: "review-child", activity: "Reading src/export.ts" },
+  ],
+  ...patch,
+});
+
+test("an agent-steered run that goes fine is one quiet block; units and actions open with it", async () => {
+  await withCard(agentRun({}), async (container) => {
+    const card = container.querySelector<HTMLElement>(".workflow-timeline-card");
+    assert.equal(card?.classList.contains("is-agent-steered"), true);
+    assert.equal(card?.classList.contains("has-attention"), false, "no alarm while the agent runs it");
+    assert.doesNotMatch(container.textContent ?? "", /waiting for you/i);
+    assert.equal(container.querySelector(".workflow-timeline-now")?.textContent, "Reviewer · Reading src/export.ts");
+    assert.equal(Boolean(container.querySelector(".workflow-timeline-nodes")), false, "no unit rows");
+    assert.equal(Boolean(container.querySelector(".workflow-run-usage")), false, "no outcome question");
+    assert.equal(Boolean(container.querySelector(".workflow-timeline-card > footer")), false, "no footer of buttons");
+    assert.equal(container.querySelectorAll("button").length, 1, "the one control is the toggle that opens it");
+    await openCard(container);
+    assert.equal(container.querySelectorAll(".workflow-timeline-nodes > li").length, 2);
+    assert.ok(container.querySelector('button[aria-label="Open Reviewer child session"]'), "a unit's chat opens from its row");
+    assert.ok(container.querySelector('button[aria-label="Stop Build + Review workflow run"]'), "the person can still stop it");
+    assert.ok(buttonByText(container, "Workflow settings"));
+  });
+});
+
+test("an agent-steered gate says the agent is on it, and Step in opens the decision", async () => {
+  const blocker = { severity: "blocker" as const, message: "no tests" };
+  const gate = agentRun({ nodes: [
+    { id: "builder", role: "Builder", status: "done", sessionId: "builder-child" },
+    { id: "review", role: "Reviewer", status: "done", sessionId: "review-child", round: 3, roundLimit: 3,
+      verdict: "changes-requested", findings: [blocker], needsDecision: { items: [{ finding: blocker }], canAnotherRound: true } },
+  ] });
+  await withCard(gate, async (container) => {
+    assert.equal(Boolean(container.querySelector(".workflow-timeline-card.has-attention")), false, "the agent's gate is no alarm");
+    assert.doesNotMatch(container.textContent ?? "", /waiting for you|Waiting for your decision/i);
+    assert.equal(container.querySelector(".workflow-timeline-agent")?.textContent, "The agent is on it · Reviewer: Review rounds used up");
+    assert.equal(Boolean(container.querySelector(".workflow-dispute")), false, "the decision waits behind Step in");
+    const stepIn = buttonByText(container, "Step in");
+    assert.ok(stepIn, "the person can take over");
+    await act(async () => { stepIn.click(); await tick(); });
+    assert.equal(Boolean(buttonByText(container, "Step in")), false);
+    const unit = [...container.querySelectorAll<HTMLElement>(".workflow-timeline-nodes > li")].find((row) => row.querySelector(".workflow-dispute"));
+    assert.ok(unit, "the decision opens under the held review");
+    assert.equal(unit.classList.contains("agent-handling"), true);
+    assert.equal(unit.classList.contains("needs-human"), false);
+    assert.equal(unit.querySelector("small")?.textContent, "Round 3 · Review rounds used up");
+    assert.ok(buttonByText(container, "Accept as is"), "the gate can be settled by the person");
+    assert.equal(container.querySelectorAll(".workflow-timeline-card .ui-btn--primary").length, 0,
+      "stepping in on the agent's call offers no filled button");
+  });
+});
+
+test("an agent-steered held unit offers its fix after Step in, with the reason", async () => {
+  const held = agentRun({ nodes: [
+    { id: "builder", role: "Builder", status: "error", retryable: true, needsFix: true, error: "gpt-gone is not available." },
+    { id: "review", role: "Reviewer", status: "queued" },
+  ] });
+  await withCard(held, async (container) => {
+    assert.equal(Boolean(container.querySelector(".workflow-timeline-card.has-attention")), false);
+    assert.equal(container.querySelector(".workflow-timeline-agent")?.textContent, "The agent is on it · Builder: Held for another route");
+    assert.equal(Boolean(container.querySelector(".workflow-retry-controls")), false);
+    await act(async () => { buttonByText(container, "Step in")?.click(); await tick(); });
+    assert.equal(container.querySelectorAll(".workflow-retry-controls").length, 1);
+    assert.equal(container.querySelectorAll(".workflow-timeline-card .ui-btn--primary").length, 0, "no filled Continue on the agent's fix");
+    assert.equal(container.querySelector(".workflow-timeline-node-reason")?.textContent, "gpt-gone is not available.");
+    assert.ok(buttonByText(container, "Continue"));
+  });
+});
+
+test("an approval inside an agent-steered unit still asks the person", async () => {
+  await withCard(agentRun({ nodes: [
+    { id: "review", role: "Reviewer", status: "running", sessionId: "review-child", activity: "awaiting permission: bash" },
+  ] }), async (container) => {
+    assert.equal(Boolean(container.querySelector(".workflow-timeline-card.has-attention")), true);
+    assert.match(container.textContent ?? "", /1 waiting for you/);
+    assert.equal(container.querySelector(".needs-human button")?.getAttribute("aria-label"), "Review and respond in Reviewer child session");
+  });
+});
+
+test("an agent-steered settled run reads its recorded outcome as text; Change and Run again open with the card", async () => {
+  const settled = agentRun({ status: "done", finishedAt: Date.now(), result: "Retries twice with backoff.",
+    nodes: [{ id: "builder", role: "Builder", status: "done", sessionId: "builder-child" }],
+    outcome: { value: "accepted", at: 5, by: "agent" } });
+  await withCard(settled, async (container) => {
+    assert.equal(container.querySelector(".workflow-timeline-result p")?.textContent, "Retries twice with backoff.");
+    assert.equal(container.querySelector(".workflow-run-usage-text")?.textContent, "Result: Accepted · recorded by the agent");
+    assert.equal(container.querySelectorAll("button").length, 1, "only the toggle: no Change, no Run again, no settings");
+    await openCard(container);
+    assert.ok(buttonByText(container, "Change"), "the record can be changed from the opened card");
+    assert.ok(buttonByText(container, "Run again"));
+  });
+  await withCard({ ...settled, id: "agent-unrecorded", outcome: undefined }, async (container) => {
+    assert.equal(container.querySelector(".workflow-run-usage-text")?.textContent, "How was the result used?",
+      "nothing was recorded, so the reader is asked");
+    assert.ok(buttonByText(container, "Accepted"));
+  });
 });

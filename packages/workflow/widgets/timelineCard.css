@@ -1,141 +1,229 @@
-/* Chat timeline card for one workflow run.
- * The host timeline renders this card from history before the lazy workflow
- * package (and its styles.css) loads, so the card imports this file itself.
+/* Chat timeline block for one workflow run.
+ * The host timeline renders this block from history before the lazy workflow
+ * package (and its styles.css) loads, so the block imports this file itself.
  * Everything stays under .workflow-timeline-card and inherits host tokens;
- * global reduced-motion / reduce-animations rules disable the loops below. */
+ * global reduced-motion / reduce-animations / low-resource rules switch the
+ * transitions and animations below off.
+ *
+ * Look: the chat's activity thread (styles.css "Activity block" + "Activity
+ * block looks"). No plate, outline or shadow: text on the chat surface on the
+ * conversation's text column. One header line (mark, name, dim status, time,
+ * chevron) whose row bleeds into the gutter for its hover band; everything
+ * under it hangs on the name's edge, and an opened block draws a hairline
+ * thread from its mark down. Colour is spent on the mark and where a person
+ * must act. The values mirror the activity block's (--activity-* live on
+ * .activity-group only, so they are restated from the same tokens). */
 .workflow-timeline-card {
+  --wf-bleed: var(--space-2);
+  --wf-mark: var(--icon-md);
+  --wf-gap: var(--space-2);
+  --wf-indent: calc(var(--wf-mark) + var(--wf-gap));
+  --wf-head: max(36px, var(--hit-min));
+  --wf-row: max(34px, var(--hit-min));
+  --wf-unit-mark: 14px;
+  --wf-thread: var(--borderless-edge);
+  --wf-thread-live: color-mix(in srgb, var(--accent) 55%, transparent);
+  --wf-thread-x: calc(var(--wf-mark) / 2 - .5px);
+  /* Wait text sits on the chat wallpaper, not a plate: pulled toward the
+     ink so it keeps 4.5:1 on light and dark wallpapers. */
+  --wf-wait-ink: color-mix(in srgb, var(--amber-on-wash) 78%, var(--text));
   container: workflow-timeline-card / inline-size;
   position: relative;
-  width: min(760px, 100%);
+  isolation: isolate;
+  width: 100%;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-3);
-  overflow: hidden;
-  isolation: isolate;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-activity);
-  background: var(--surface-activity);
-  box-shadow: var(--shadow-sm);
-  transition: border-color var(--motion-normal) var(--motion-ease);
+  gap: 0;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
-.workflow-timeline-card.status-running { border-color: color-mix(in srgb, var(--accent-line) 55%, var(--border-soft)); }
-.workflow-timeline-card.has-attention { border-color: color-mix(in srgb, var(--amber) 42%, var(--border-soft)); }
-.workflow-timeline-card.status-error { border-color: color-mix(in srgb, var(--red) 40%, var(--border-soft)); }
-/* A light sweep along the top edge says "live" without moving any content. */
-.workflow-timeline-card.status-running::before {
+/* The thread: from under the mark down through the opened block (or the
+   units a person must see while it is folded), like the activity thread. */
+.workflow-timeline-card:is(.is-open, :has(> .workflow-timeline-nodes))::before {
   content: "";
   position: absolute;
-  inset: 0 0 auto;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--accent), transparent) no-repeat;
-  background-size: 45% 100%;
-  animation: workflow-timeline-sweep 3.2s var(--motion-ease) infinite;
+  inset-block: calc(var(--wf-head) - var(--space-1)) var(--space-2);
+  inset-inline-start: var(--wf-thread-x);
+  width: 1px;
+  background: var(--wf-thread);
   pointer-events: none;
 }
-.workflow-timeline-card.has-attention::before {
-  background-image: linear-gradient(90deg, transparent, var(--amber), transparent);
+.workflow-timeline-card.status-running:is(.is-open, :has(> .workflow-timeline-nodes))::before {
+  background: linear-gradient(to bottom, var(--wf-thread), var(--wf-thread-live));
+}
+.workflow-timeline-card.has-attention:is(.is-open, :has(> .workflow-timeline-nodes))::before {
+  background: linear-gradient(to bottom, var(--wf-thread), color-mix(in srgb, var(--amber) 55%, transparent));
 }
 
-/* Header: identity, elapsed time and one status pill. */
+/* Header: one line of the conversation. The chevron's hit area spans the row,
+   so the whole line opens the block, as an activity summary does. */
 .workflow-timeline-card > header {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-}
-.workflow-timeline-icon {
   position: relative;
-  width: 32px;
-  height: 32px;
+  display: grid;
+  grid-template-columns: var(--wf-mark) minmax(0, 1fr) auto auto;
+  align-items: center;
+  column-gap: var(--wf-gap);
+  min-height: var(--wf-head);
+  margin-inline: calc(-1 * var(--wf-bleed));
+  padding: var(--space-1) var(--wf-bleed);
+  border-radius: var(--radius-control);
+  transition: background-color var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) {
+  .workflow-timeline-card > header:has(.workflow-timeline-toggle:hover:where(:not(:disabled))) { background: var(--surface-overlay-hover); }
+  .workflow-timeline-card > header:has(.workflow-timeline-toggle:hover) :is(.workflow-timeline-title strong, .workflow-timeline-toggle) { color: var(--text); }
+}
+.workflow-timeline-card > header:has(.workflow-timeline-toggle:active) { background: var(--surface-overlay-hover); }
+.workflow-timeline-card > header:has(.workflow-timeline-toggle:focus-visible) { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.workflow-timeline-card > header > .workflow-timeline-toggle { position: static; color: var(--faint); background: transparent; box-shadow: none; transform: none; }
+.workflow-timeline-card > header > .workflow-timeline-toggle:focus-visible { outline: 0; }
+/* The row is the control: the chevron paints no box of its own. */
+.workflow-timeline-card > header > .workflow-timeline-toggle.ui-icon-btn:is(:hover, :active, :focus-visible) { background: transparent; box-shadow: none; transform: none; }
+.workflow-timeline-card > header > .workflow-timeline-toggle::after {
+  inset: 0;
+  left: auto;
+  top: auto;
+  width: auto;
+  height: auto;
+  transform: none;
+  border-radius: inherit;
+}
+.workflow-timeline-toggle svg,
+.workflow-timeline-details-toggle svg { transition: transform var(--motion-normal) var(--motion-ease); }
+.workflow-timeline-toggle[aria-expanded="true"] svg,
+.workflow-timeline-details-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+
+/* The mark: the run's one coloured glyph, no disc. */
+.workflow-timeline-icon {
+  width: var(--wf-mark);
+  height: var(--wf-mark);
   display: grid;
   place-items: center;
-  border-radius: var(--radius-control);
-  background: var(--accent-wash);
-  color: var(--accent);
-  transition: background-color var(--motion-normal) var(--motion-ease), color var(--motion-normal) var(--motion-ease);
-}
-.workflow-timeline-icon svg { width: 16px; height: 16px; }
-.workflow-timeline-card.status-running .workflow-timeline-icon::after {
-  content: "";
-  position: absolute;
-  inset: -3px;
-  border: 1px solid var(--accent-line);
-  border-radius: calc(var(--radius-control) + 3px);
-  animation: workflow-timeline-ring 2.4s ease-out infinite;
-}
-.workflow-timeline-card.has-attention .workflow-timeline-icon { background: var(--amber-wash); color: var(--amber-on-wash); }
-.workflow-timeline-card.has-attention .workflow-timeline-icon::after { border-color: color-mix(in srgb, var(--amber) 60%, transparent); }
-.workflow-timeline-card.status-done .workflow-timeline-icon { background: var(--green-wash); color: var(--green); }
-.workflow-timeline-card.status-error .workflow-timeline-icon { background: var(--red-wash); color: var(--red); }
-.workflow-timeline-card.status-stopped .workflow-timeline-icon { background: var(--sunken); color: var(--muted); }
-
-.workflow-timeline-title { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.workflow-timeline-title small {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
   color: var(--muted);
-  font-size: var(--font-meta);
-  line-height: var(--font-meta-lh);
-  font-weight: 600;
-  letter-spacing: .04em;
-  text-transform: uppercase;
+  transition: color var(--motion-normal) var(--motion-ease);
 }
-.workflow-timeline-title small .workflow-timeline-elapsed::before { content: "·"; margin-inline-end: 6px; color: var(--faint); }
-.workflow-timeline-elapsed { font-variant-numeric: tabular-nums; letter-spacing: 0; }
+.workflow-timeline-icon svg { width: 15px; height: 15px; }
+.workflow-timeline-card.status-running .workflow-timeline-icon { color: var(--accent); }
+.workflow-timeline-card.status-done .workflow-timeline-icon { color: var(--green); }
+.workflow-timeline-card.status-error .workflow-timeline-icon { color: var(--red); }
+.workflow-timeline-card.has-attention .workflow-timeline-icon { color: var(--amber); }
+
+.workflow-timeline-title { min-width: 0; display: flex; align-items: baseline; gap: var(--space-2); }
 .workflow-timeline-title strong {
+  min-width: 0;
   overflow: hidden;
   color: var(--text);
   font-size: var(--font-label);
-  font-weight: 650;
+  line-height: var(--font-tool-label-lh);
+  font-weight: 550;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transition: color var(--motion-fast) var(--motion-ease);
 }
-
+/* The status is a dim word; the mark carries the tone. */
 .workflow-timeline-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 10px 3px 8px;
-  border: 1px solid var(--accent-line);
-  border-radius: var(--radius-round);
-  background: var(--accent-wash);
-  color: var(--accent);
+  flex: none;
+  color: var(--muted);
   font-size: var(--font-meta);
   line-height: var(--font-meta-lh);
-  font-weight: 650;
+  font-weight: 400;
   white-space: nowrap;
-  transition: background-color var(--motion-normal) var(--motion-ease), color var(--motion-normal) var(--motion-ease), border-color var(--motion-normal) var(--motion-ease);
 }
-.workflow-timeline-pill i { width: 6px; height: 6px; flex: none; border-radius: 50%; background: currentColor; }
-.workflow-timeline-pill.status-running i { animation: workflow-timeline-dot 1.8s ease-out infinite; }
-.workflow-timeline-card.has-attention .workflow-timeline-pill {
-  border-color: color-mix(in srgb, var(--amber) 45%, transparent);
-  background: var(--amber-wash);
-  color: var(--amber-on-wash);
-}
-.workflow-timeline-pill.status-done { border-color: color-mix(in srgb, var(--green) 35%, transparent); background: var(--green-wash); color: var(--green-on-wash); }
-.workflow-timeline-pill.status-error { border-color: color-mix(in srgb, var(--red) 40%, transparent); background: var(--red-wash); color: var(--red); }
-.workflow-timeline-pill.status-stopped { border-color: var(--hair-strong); background: var(--sunken); color: var(--muted); }
+.workflow-timeline-card > header > .workflow-timeline-elapsed { color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.workflow-timeline-elapsed { font-variant-numeric: tabular-nums; letter-spacing: 0; }
 
-/* The request that started the run: a quiet two-line preview. */
-.workflow-timeline-input {
+/* Everything under the header hangs on the name's edge. */
+.workflow-timeline-card > :not(header) { margin-inline-start: var(--wf-indent); min-width: 0; }
+
+.workflow-timeline-overview { display: flex; flex-direction: column; gap: var(--space-1); padding-block-end: var(--space-1); }
+/* Opened, the unit rows say what runs now; the line keeps only a wait. */
+.workflow-timeline-card.is-open > .workflow-timeline-overview:not(:has(.workflow-timeline-waiting, .workflow-timeline-agent, em)) > .workflow-timeline-summary { display: none; }
+.workflow-timeline-summary {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: calc(var(--font-meta) * var(--font-meta-lh));
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.workflow-timeline-summary > span:not(.workflow-timeline-count),
+.workflow-timeline-summary > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-timeline-now { color: var(--text-dim); }
+/* What the agent is handling may take two lines on a narrow column; it is
+   the one thing the line has to say. */
+.workflow-timeline-summary > span.workflow-timeline-agent {
+  display: -webkit-box;
+  color: var(--text-dim);
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.workflow-timeline-summary em { flex: none; color: var(--muted); font-style: normal; }
+/* A wait on the person is the one place the line takes colour and weight. */
+.workflow-timeline-waiting { color: var(--wf-wait-ink); font-weight: 600; }
+.workflow-timeline-step-in { flex: none; margin-block: calc(-1 * var(--space-1)); }
+.workflow-timeline-count { flex: none; margin-inline-start: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* Progress is the count. The per-unit segments stay for assistive tech
+   (role=progressbar) but draw nothing: a full-width line read as a rule. */
+.workflow-timeline-progress {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  display: flex;
+}
+.workflow-timeline-progress i {
+  min-width: 2px;
+  flex: 1 1 0;
+  background: var(--borderless-edge);
+  transition: background-color var(--motion-surface) var(--motion-ease);
+}
+.workflow-timeline-progress i:is(.tone-done, .tone-rework, .tone-stopped, .tone-skipped) { background: var(--muted); }
+.workflow-timeline-progress i.tone-error { background: var(--red); }
+.workflow-timeline-progress i.tone-running { background: var(--accent); }
+.workflow-timeline-progress i.tone-attention { background: var(--amber); }
+
+/* A settled run's result: a quiet passage, two lines until opened. */
+.workflow-timeline-result { padding-block-end: var(--space-1); }
+.workflow-timeline-result p {
   margin: 0;
   color: var(--text-dim);
-  font-size: var(--font-label);
-  line-height: 1.45;
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-p.workflow-timeline-input,
-button.workflow-timeline-input > span {
+.workflow-timeline-card:not(.is-open) .workflow-timeline-result p {
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
+.workflow-timeline-card.is-open .workflow-timeline-result p { color: var(--text); }
+
+/* The request that started the run, in the opened block. */
+.workflow-timeline-input {
+  margin-block: 0 var(--space-1);
+  margin-inline-end: 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  overflow-wrap: anywhere;
+}
+p.workflow-timeline-input,
+button.workflow-timeline-input > span { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 button.workflow-timeline-input {
-  width: 100%;
+  width: calc(100% - var(--wf-indent));
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
@@ -149,152 +237,57 @@ button.workflow-timeline-input {
   cursor: pointer;
 }
 button.workflow-timeline-input[aria-expanded="true"] > span { display: block; white-space: pre-wrap; }
-button.workflow-timeline-input > svg {
-  width: 15px;
-  height: 15px;
-  margin-top: 2px;
-  color: var(--faint);
-  transition: transform var(--motion-normal) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
-}
+button.workflow-timeline-input > svg { width: 14px; height: 14px; margin-top: 1px; color: var(--faint); transition: transform var(--motion-normal) var(--motion-ease), color var(--motion-fast) var(--motion-ease); }
 @media (hover: hover) {
+  button.workflow-timeline-input:hover:where(:not(:disabled)) { background: transparent; color: var(--text-dim); }
   button.workflow-timeline-input:hover:where(:not(:disabled)) > svg { color: var(--text-dim); }
 }
 button.workflow-timeline-input[aria-expanded="true"] > svg { transform: rotate(180deg); }
 button.workflow-timeline-input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+.workflow-timeline-note { margin-block: 0 var(--space-1); color: var(--text-dim); font-size: var(--font-meta); line-height: var(--font-meta-lh); overflow-wrap: anywhere; }
 
-/* One segment per node, so the bar reads as the pipeline itself. */
-.workflow-timeline-overview { display: flex; flex-direction: column; gap: 7px; }
-.workflow-timeline-progress { display: flex; gap: 3px; height: 5px; }
-.workflow-timeline-progress i {
-  min-width: 2px;
-  flex: 1 1 0;
-  border-radius: var(--radius-round);
-  background: color-mix(in srgb, var(--text) 11%, transparent);
-  transition: background-color var(--motion-surface) var(--motion-ease);
-}
-.workflow-timeline-progress i.tone-done { background: var(--green); }
-.workflow-timeline-progress i.tone-rework { background: var(--amber); }
-.workflow-timeline-progress i.tone-error { background: var(--red); }
-.workflow-timeline-progress i.tone-stopped,
-.workflow-timeline-progress i.tone-skipped { background: var(--faint); }
-.workflow-timeline-progress i.tone-running {
-  background: linear-gradient(90deg, var(--accent-line), var(--accent), var(--accent-line));
-  background-size: 200% 100%;
-  animation: workflow-timeline-shimmer 1.8s linear infinite;
-}
-.workflow-timeline-progress i.tone-attention { background: var(--amber); animation: workflow-timeline-breathe 1.8s ease-in-out infinite; }
-
-.workflow-timeline-summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 4px var(--space-3);
-  color: var(--muted);
-  font-size: var(--font-meta);
-  line-height: var(--font-meta-lh);
-  font-variant-numeric: tabular-nums;
-}
-.workflow-timeline-summary em { color: var(--text-dim); font-style: normal; }
-.workflow-timeline-summary strong {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--amber-on-wash);
-  font-weight: 650;
-}
-.workflow-timeline-summary strong::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--amber);
-  animation: workflow-timeline-dot 1.8s ease-out infinite;
-}
-
-/* Node rows: a vertical stepper. The connector runs from one status disc to
- * the next; the bleed lets tinted rows keep their text on the card grid. */
-.workflow-timeline-nodes {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 0 -6px;
-  padding: 0;
-  list-style: none;
-}
+/* Units: lines on the name's edge, the thread in the gutter beside them. */
+.workflow-timeline-nodes { display: flex; flex-direction: column; margin-block: 0; margin-inline-end: 0; padding: 0; list-style: none; }
 .workflow-timeline-nodes > li {
   position: relative;
   display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) auto auto;
+  grid-template-columns: var(--wf-unit-mark) minmax(0, 1fr) auto auto;
   grid-template-areas: "icon copy actions tools";
   align-items: center;
-  gap: var(--space-2) 10px;
-  min-height: var(--control-h-sm);
-  padding: 7px 6px;
-  border-radius: var(--radius-control);
-  transition: background-color var(--motion-normal) var(--motion-ease), box-shadow var(--motion-normal) var(--motion-ease);
+  gap: 0 var(--space-2);
+  min-height: var(--wf-row);
 }
-.workflow-timeline-nodes > li:not(:last-child)::before {
-  content: "";
-  position: absolute;
-  inset-inline-start: 18.5px;
-  top: 40px;
-  bottom: -10px;
-  width: 1px;
-  background: var(--hair-strong);
-  transition: background-color var(--motion-surface) var(--motion-ease);
-}
-.workflow-timeline-nodes > li.status-done:not(:last-child)::before { background: color-mix(in srgb, var(--green) 45%, transparent); }
-.workflow-timeline-nodes > li.needs-human {
-  background: color-mix(in srgb, var(--amber) 9%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--amber) 26%, transparent);
-}
-.workflow-timeline-nodes > li.status-error {
-  background: color-mix(in srgb, var(--red) 7%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--red) 22%, transparent);
-}
-
 .workflow-timeline-status-icon {
   grid-area: icon;
-  align-self: start;
-  position: relative;
-  z-index: 1;
-  width: 26px;
-  height: 26px;
-  margin-top: 4px;
+  width: var(--wf-unit-mark);
+  height: var(--wf-unit-mark);
   display: grid;
   place-items: center;
-  border: 1px solid var(--hair-strong);
-  border-radius: 50%;
-  background: var(--surface-activity);
   color: var(--faint);
-  transition: background-color var(--motion-normal) var(--motion-ease), color var(--motion-normal) var(--motion-ease), border-color var(--motion-normal) var(--motion-ease);
+  transition: color var(--motion-normal) var(--motion-ease);
 }
-.workflow-timeline-status-icon svg { width: 14px; height: 14px; }
-li.status-done .workflow-timeline-status-icon { border-color: color-mix(in srgb, var(--green) 40%, transparent); background: var(--green-wash); color: var(--green); }
-li.status-done.verdict-changes-requested .workflow-timeline-status-icon,
-li.status-done.verdict-uncertain .workflow-timeline-status-icon { border-color: color-mix(in srgb, var(--amber) 40%, transparent); background: var(--amber-wash); color: var(--amber-on-wash); }
-li.status-running .workflow-timeline-status-icon { border-color: var(--accent-line); background: var(--accent-wash); color: var(--accent); }
-li.status-error .workflow-timeline-status-icon { border-color: color-mix(in srgb, var(--red) 45%, transparent); background: var(--red-wash); color: var(--red); }
-li.needs-human .workflow-timeline-status-icon {
-  border-color: color-mix(in srgb, var(--amber) 55%, transparent);
-  background: var(--amber-wash);
-  color: var(--amber-on-wash);
-  animation: workflow-timeline-halo 2s ease-out infinite;
-}
+.workflow-timeline-status-icon svg { width: var(--wf-unit-mark); height: var(--wf-unit-mark); }
+li.status-done .workflow-timeline-status-icon { color: var(--muted); }
+li.status-running .workflow-timeline-status-icon { color: var(--accent); }
+li.status-error .workflow-timeline-status-icon { color: var(--red); }
+li:is(.needs-human, .needs-fix) .workflow-timeline-status-icon { color: var(--amber); }
+.workflow-timeline-nodes > li.agent-handling .workflow-timeline-status-icon { color: var(--accent); }
 
-.workflow-timeline-node-copy { grid-area: copy; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.workflow-timeline-node-copy { grid-area: copy; min-width: 0; display: flex; align-items: baseline; gap: var(--space-2); }
 .workflow-timeline-node-copy strong {
+  flex: none;
+  max-width: 60%;
   overflow: hidden;
-  color: var(--text);
-  font-size: var(--font-label);
-  font-weight: 600;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  font-weight: 550;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-li.status-queued .workflow-timeline-node-copy strong,
-li.status-skipped .workflow-timeline-node-copy strong { color: var(--text-dim); }
+li:is(.status-queued, .status-skipped) .workflow-timeline-node-copy strong { color: var(--muted); font-weight: 400; }
 .workflow-timeline-node-copy small {
+  min-width: 0;
   overflow: hidden;
   color: var(--muted);
   font-size: var(--font-meta);
@@ -302,149 +295,165 @@ li.status-skipped .workflow-timeline-node-copy strong { color: var(--text-dim); 
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-li.needs-human .workflow-timeline-node-copy small { color: var(--amber-on-wash); font-weight: 650; }
-li.verdict-changes-requested .workflow-timeline-node-copy small,
-li.verdict-uncertain .workflow-timeline-node-copy small { color: var(--amber-on-wash); }
-li.verdict-approved .workflow-timeline-node-copy small { color: var(--green-on-wash); }
-li.status-error .workflow-timeline-node-copy small {
-  display: -webkit-box;
-  color: var(--red);
-  overflow-wrap: anywhere;
-  white-space: normal;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-}
-/* A unit the run holds for a fix waits on a person; it has not failed. */
-.workflow-timeline-nodes > li.needs-fix {
-  background: color-mix(in srgb, var(--amber) 9%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--amber) 26%, transparent);
-}
-li.needs-fix .workflow-timeline-status-icon {
-  border-color: color-mix(in srgb, var(--amber) 55%, transparent);
-  background: var(--amber-wash);
-  color: var(--amber-on-wash);
-}
-li.needs-fix .workflow-timeline-node-copy small { color: var(--amber-on-wash); font-weight: 650; }
+li:is(.needs-human, .needs-fix) .workflow-timeline-node-copy { flex-wrap: wrap; column-gap: var(--space-2); }
+li:is(.needs-human, .needs-fix) .workflow-timeline-node-copy small { color: var(--wf-wait-ink); font-weight: 600; white-space: normal; }
+li.status-error:not(.needs-fix):not(.agent-handling) .workflow-timeline-node-copy small { color: var(--red); white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.workflow-timeline-nodes > li.agent-handling .workflow-timeline-node-copy small { color: var(--text-dim); font-weight: 400; }
 
-.workflow-timeline-node-actions { grid-area: actions; display: flex; gap: 6px; }
+.workflow-timeline-node-actions { grid-area: actions; display: flex; gap: var(--space-1); }
 .workflow-timeline-node-actions .ui-btn { white-space: nowrap; }
-.workflow-timeline-node-tools { grid-area: tools; display: flex; align-items: center; gap: 2px; }
+.workflow-timeline-node-tools { grid-area: tools; display: flex; align-items: center; gap: 0; }
 .workflow-timeline-node-tools:empty { display: none; }
-.workflow-timeline-details-toggle svg { transition: transform var(--motion-normal) var(--motion-ease); }
-.workflow-timeline-details-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+/* Row tools rest faint and wake on the row's hover or focus. */
+.workflow-timeline-node-tools .ui-icon-btn { color: var(--faint); transition: color var(--motion-fast) var(--motion-ease); }
+.workflow-timeline-nodes > li:focus-within .workflow-timeline-node-tools .ui-icon-btn,
+.workflow-timeline-node-tools .ui-icon-btn[aria-expanded="true"] { color: var(--text-dim); }
+@media (hover: hover) {
+  .workflow-timeline-nodes > li:hover .workflow-timeline-node-tools .ui-icon-btn { color: var(--text-dim); }
+  .workflow-timeline-nodes > li .workflow-timeline-node-tools .ui-icon-btn:hover:where(:not(:disabled)) { color: var(--text); }
+}
 
-.workflow-timeline-node-details {
+/* A unit's details and the controls it needs read as type on its copy
+   column: no frame, no well. */
+.workflow-timeline-node-details,
+.workflow-timeline-node-body {
   grid-column: 2 / -1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding: 9px 11px;
-  border: 1px solid var(--hair);
-  border-radius: var(--radius-control);
-  background: var(--surface-overlay);
-  animation: workflow-timeline-reveal var(--motion-normal) var(--motion-ease) both;
+  padding-block-end: var(--space-2);
 }
-.workflow-timeline-node-details > p {
-  margin: 0;
-  color: var(--text-dim);
-  font-size: var(--font-meta);
-  line-height: var(--font-meta-lh);
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
-.workflow-timeline-node-details dl {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 128px), 1fr));
-  gap: 6px var(--space-3);
-  margin: 0;
-}
+.workflow-timeline-node-details { animation: workflow-timeline-reveal var(--motion-normal) var(--motion-ease) both; }
+.workflow-timeline-node-details > p,
+.workflow-timeline-node-reason { margin: 0; color: var(--text-dim); font-size: var(--font-meta); line-height: var(--font-meta-lh); overflow-wrap: anywhere; white-space: pre-wrap; }
+.workflow-timeline-node-details dl { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 128px), 1fr)); gap: var(--space-1) var(--space-3); margin: 0; }
 .workflow-timeline-node-details dl > div { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.workflow-timeline-node-details dt {
-  color: var(--faint);
-  font-size: var(--font-meta);
-  line-height: var(--font-meta-lh);
-  font-weight: 600;
+.workflow-timeline-node-details :is(dt, dd) { margin: 0; font-size: var(--font-meta); line-height: var(--font-meta-lh); overflow-wrap: anywhere; }
+.workflow-timeline-node-details dt { color: var(--muted); }
+.workflow-timeline-node-details dd { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.workflow-timeline-card .workflow-run-unit-report { min-width: 0; margin: 0; }
+.workflow-timeline-card .workflow-run-unit-report > h4 { margin: 0; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); font-weight: 400; }
+/* The report hangs on a hairline drawn as a shadow, so Hide interface
+   borders keeps it. */
+.workflow-timeline-card .workflow-node-output {
+  max-height: 220px;
+  margin: 2px 0 0;
+  padding-block: 0;
+  padding-inline: var(--space-3) 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: inset 1px 0 0 var(--borderless-edge);
 }
-.workflow-timeline-node-details dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-  color: var(--text);
-  font-size: var(--font-meta);
-  line-height: var(--font-meta-lh);
-}
+.workflow-timeline-card .workflow-node-output:dir(rtl) { box-shadow: inset -1px 0 0 var(--borderless-edge); }
 
-.workflow-timeline-result {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-3);
-  border-inline-start: 2px solid var(--accent-line);
-  border-radius: var(--radius-control);
-  background: var(--surface-overlay);
+/* A review call: a short passage. Findings are lines; a reply hangs under
+   the finding it answers, on a hairline. */
+.workflow-timeline-card .workflow-dispute { margin-top: 0; padding: 0; gap: var(--space-2); border-radius: 0; background: transparent; }
+.workflow-timeline-card .workflow-dispute-head { grid-template-columns: minmax(0, 1fr); }
+.workflow-timeline-card .workflow-dispute-mark,
+.workflow-timeline-card .workflow-dispute-columns { display: none; }
+/* The row already says a decision waits; the heading stays for the group's
+   accessible name only. */
+.workflow-timeline-card .workflow-dispute-title { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.workflow-timeline-card .workflow-dispute-intro { color: var(--text-dim); }
+.workflow-timeline-card .workflow-dispute-items { gap: var(--space-2); }
+.workflow-timeline-card .workflow-dispute-item { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+.workflow-timeline-card .workflow-dispute-label { position: static; width: auto; height: auto; overflow: visible; clip-path: none; color: var(--muted); font-size: var(--font-meta); }
+.workflow-timeline-card .workflow-dispute-side { flex-direction: row; flex-wrap: wrap; column-gap: var(--space-2); align-items: baseline; }
+.workflow-timeline-card .workflow-dispute-side.is-builder {
+  margin-inline-start: 0;
+  padding-inline-start: var(--space-3);
+  border: 0;
+  box-shadow: inset 1px 0 0 var(--borderless-edge);
 }
-.workflow-timeline-card.status-done .workflow-timeline-result { border-inline-start-color: var(--green); }
-.workflow-timeline-card.status-error .workflow-timeline-result { border-inline-start-color: var(--red); }
-.workflow-timeline-result strong { color: var(--text-dim); font-size: var(--font-label); }
-.workflow-timeline-result p { margin: 0; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.workflow-timeline-card .workflow-dispute-side.is-builder:dir(rtl) { box-shadow: inset -1px 0 0 var(--borderless-edge); }
+.workflow-timeline-card code.workflow-finding-path {
+  margin-inline-end: var(--space-2);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font: var(--font-meta) / var(--font-meta-lh) var(--mono);
+}
+.workflow-timeline-card .workflow-dispute-actions { gap: var(--space-1); }
+.workflow-timeline-card .workflow-retry-controls { margin-top: 0; }
+/* The host's harness picker adds nothing while it offers fewer than two
+   choices (loading, or one harness): it rendered as an empty or filled bar. */
+.workflow-timeline-card .workflow-route-harness:not(:has([role="tab"] ~ [role="tab"])) { display: none; }
 
-.workflow-timeline-disclosure {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-}
+/* Settled outcome, long-run disclosure and actions: text on the copy column. */
+.workflow-timeline-card > .workflow-run-usage { padding-block-end: var(--space-1); }
+.workflow-timeline-card .workflow-run-usage-row { column-gap: 0; }
+.workflow-timeline-card .workflow-run-usage-text { margin-inline-end: var(--space-1); }
+.workflow-timeline-card .workflow-run-usage-row > .ui-btn { padding-inline: var(--space-2); color: var(--text-dim); }
+.workflow-timeline-disclosure { display: flex; align-items: center; gap: var(--space-2); }
 .workflow-timeline-range { color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); font-variant-numeric: tabular-nums; }
 .workflow-timeline-nodes-toggle { color: var(--muted); }
 .workflow-timeline-nodes-toggle svg { width: 13px; height: 13px; }
-
 .workflow-timeline-card > footer {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: var(--space-2);
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--hair);
+  gap: 0 var(--space-1);
+  margin-inline-start: calc(var(--wf-indent) - var(--space-2));
+  padding-block-end: var(--space-1);
+}
+.workflow-timeline-card > footer .ui-btn { color: var(--text-dim); }
+.workflow-timeline-card > footer .workflow-timeline-stop { color: var(--red); }
+
+/* Opening eases the new lines in; closing is immediate. */
+.workflow-timeline-card.is-open > :is(.workflow-timeline-input, .workflow-timeline-note, .workflow-timeline-nodes, .workflow-timeline-disclosure, footer) {
+  animation: workflow-timeline-reveal var(--motion-normal) var(--motion-ease) both;
 }
 
-/* Narrow cards (phone chat, split panes): the primary row action gets its own
- * full-width line under the text instead of squeezing the role name. */
+/* Narrow column (phone chat, split panes). */
 @container workflow-timeline-card (max-width: 520px) {
   .workflow-timeline-nodes > li {
-    grid-template-columns: 26px minmax(0, 1fr) auto;
+    grid-template-columns: var(--wf-unit-mark) minmax(0, 1fr) auto;
     grid-template-areas:
       "icon copy tools"
       ". actions actions";
   }
   .workflow-timeline-node-actions > .ui-btn { flex: 1 1 0; min-height: var(--tap); justify-content: center; }
   .workflow-timeline-disclosure { flex-wrap: wrap; }
-  .workflow-timeline-nodes-toggle { width: 100%; min-height: var(--tap); justify-content: center; }
-  .workflow-timeline-card > footer > .ui-btn { flex: 1 1 0; min-height: var(--tap); justify-content: center; }
+  .workflow-timeline-nodes-toggle { min-height: var(--tap); }
+  .workflow-timeline-card > footer > .ui-btn { min-height: var(--tap); }
+}
+@media (pointer: coarse) {
+  .workflow-timeline-step-in { min-height: var(--tap); margin-block: calc((var(--tap) - var(--control-h-sm)) / -2); }
 }
 
-@keyframes workflow-timeline-sweep {
-  from { background-position: -60% 0; }
-  to { background-position: 160% 0; }
+/* The other activity looks (Chat settings → Activity block style) restyle
+   this block the way they restyle the activity block. */
+:is(body[data-activity-style="ledger"], body[data-activity-style="chip"], body[data-activity-style="margin"]) .workflow-timeline-card::before { display: none; }
+body[data-activity-style="ledger"] .workflow-timeline-card > header .workflow-timeline-title::after {
+  content: "";
+  flex: 1 1 var(--space-4);
+  min-width: var(--space-4);
+  height: 1px;
+  align-self: center;
+  background: var(--borderless-edge);
 }
-@keyframes workflow-timeline-ring {
-  0% { opacity: .75; transform: scale(.92); }
-  70%, 100% { opacity: 0; transform: scale(1.18); }
+body[data-activity-style="ledger"] .workflow-timeline-nodes > li + li { box-shadow: inset 0 1px 0 var(--borderless-edge); }
+body[data-activity-style="chip"] .workflow-timeline-card > header {
+  width: fit-content;
+  margin-inline-start: 0;
+  max-width: calc(100% + 2 * var(--wf-bleed));
+  padding-inline: var(--space-3);
+  border-radius: var(--radius-round);
+  box-shadow: inset 0 0 0 1px var(--borderless-edge);
 }
-@keyframes workflow-timeline-dot {
-  0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 55%, transparent); }
-  70%, 100% { box-shadow: 0 0 0 5px transparent; }
+body[data-activity-style="chip"] .workflow-timeline-card.status-running > header { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
+@media (min-width: 961px) and (not ((max-height: 480px) and (pointer: coarse))) {
+  body[data-activity-style="margin"] .focus-conversation .workflow-timeline-card {
+    width: calc(100% + var(--wf-indent));
+    margin-inline-start: calc(-1 * var(--wf-indent));
+  }
 }
-@keyframes workflow-timeline-halo {
-  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--amber) 45%, transparent); }
-  70%, 100% { box-shadow: 0 0 0 6px transparent; }
-}
-@keyframes workflow-timeline-shimmer {
-  from { background-position: 100% 0; }
-  to { background-position: -100% 0; }
-}
-@keyframes workflow-timeline-breathe {
-  50% { opacity: .55; }
-}
+
 @keyframes workflow-timeline-reveal {
-  from { opacity: 0; transform: translateY(-4px); }
+  from { opacity: 0; transform: translateY(-3px); }
   to { opacity: 1; transform: none; }
 }

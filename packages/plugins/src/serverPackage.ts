@@ -738,6 +738,18 @@ export interface ServerDelegationPolicyService {
   /** Undefined when the person behind `space` leaves routing entirely to
    *  Polyth's automatic ranking. `harnessId` narrows the brief to one harness. */
   brief(space: SpaceContext, options?: { harnessId?: string }): Promise<ServerDelegationPolicyBrief | undefined>;
+  /** The model the person behind `space` routes `roleId` work to right now:
+   *  the first usable one of that role's chain whose `harness::provider/model`
+   *  key is not in `exclude`. Undefined in Auto mode, for an unknown, disabled
+   *  or empty role, and when nothing in the chain is usable. Optional: older
+   *  providers answer only `brief`. */
+  route?(space: SpaceContext, roleId: string, options?: { exclude?: readonly string[] }): Promise<ServerDelegationRoute | undefined>;
+}
+
+export interface ServerDelegationRoute {
+  harnessId: string;
+  providerID: string;
+  modelID: string;
 }
 
 export const SERVER_DELEGATION_POLICY =

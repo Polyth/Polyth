@@ -1,13 +1,18 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import "./timelineCard.css";
 import type { WorkflowRunDto, WorkflowRunNodeDto } from "@polyth/contracts";
 import { api } from "@polyth/session/web-api";
 import { openSession } from "../../../apps/web/src/init.ts";
 import { Icon } from "../../../apps/web/src/icons.tsx";
-import { getState, openWorkspacePane, setUiError } from "../../../apps/web/src/store.ts";
+import { getState, openWorkspacePane, setUiError, useStore } from "../../../apps/web/src/store.ts";
+import { modelSupportsTextWorkflow } from "../../../apps/web/src/composer/discovery.ts";
 import { listSurfaces, useSurfaceVersion } from "../../../apps/web/src/surfaces.ts";
 import { handOffWorkflowLaunch } from "./workflowLaunch.ts";
-import { publishWorkflowRun } from "./workflowMonitor.ts";
+import { publishWorkflowRun, subscribeWorkflowRuns } from "./workflowMonitor.ts";
+import { ReviewDecision, ReviewFindings } from "./ReviewFindings.tsx";
+import { WorkflowRunOutcome } from "./WorkflowRunOutcome.tsx";
+import { RetryControls, type RetryFn } from "./WorkflowRunUnits.tsx";
+import { workflowRunRouteText } from "./workflowLabels.ts";
 import { friendlyError } from "../../../apps/web/src/settings.ts";
 import {
   fresherWorkflowRun,
@@ -16,10 +21,14 @@ import {
   workflowHumanWait,
   workflowNeedsFix,
   workflowNodeDetail,
+  workflowNodeFinished,
   workflowSentBackRoles,
   workflowNeedsDecision,
+  workflowRoundLabel,
   workflowStatusLabel,
   workflowTimelineNodes,
+  workflowUncertainReviews,
+  workflowUnresolvedReviews,
 } from "./workflowRun.ts";
 import { formatNumber, tr } from "../../../apps/web/src/i18n/index.ts";
 import {
@@ -31,8 +40,7 @@ import {
   RefreshIcon,
   ShieldAlertIcon,
   Spinner,
-  StopIcon,
-  TreeViewIcon,
+
   UndoIcon,
   WarningIcon,
   WrenchIcon,
@@ -97,11 +105,14 @@ function nodeSegmentTone(node: WorkflowRunNodeDto): string {
 
 /** A row offers details only when they add something the one-line summary hides. */
 function nodeHasDetails(node: WorkflowRunNodeDto, detail: string): boolean {
-  return !!node.model?.modelID || !!node.agent || node.harness?.mode === "pinned"
+  return !!node.routedRole || !!node.findings?.length || (!!node.decision && node.decision !== "another-round") || !!workflowDisplayText(node.output)
+    || !!node.model?.modelID || !!node.agent || node.harness?.mode === "pinned"
     || typeof node.startedAt === "number" || detail.length > 48;
 }
 
-function NodeFacts({ node, detail }: { node: WorkflowRunNodeDto; detail: string }) {
+function NodeFacts({ node, detail, decide }: { node: WorkflowRunNodeDto; detail: string; decide: boolean }) {
+  const route = workflowRunRouteText(node);
+  const output = workflowDisplayText(node.output);
   const facts: Array<[string, string]> = [];
   if (node.model?.modelID) facts.push([tr("workflowview.model"), node.model.modelID]);
   if (node.agent) facts.push([tr("workflowview.agent"), node.agent]);
@@ -109,6 +120,10 @@ function NodeFacts({ node, detail }: { node: WorkflowRunNodeDto; detail: string 
   return (
     <div className="workflow-timeline-node-details">
       {detail && <p>{detail}</p>}
+      {route && <p>{route}</p>}
+      {node.decision && node.decision !== "another-round" && (
+        <p>{tr(node.decision === "accepted" ? "workflowview.reviewAccepted" : "workflowview.reviewTimedOut")}</p>
+      )}
       {(facts.length > 0 || typeof node.startedAt === "number") && (
         <dl>
           {facts.map(([label, value]) => (
@@ -122,11 +137,26 @@ function NodeFacts({ node, detail }: { node: WorkflowRunNodeDto; detail: string 
           )}
         </dl>
       )}
+      {node.status === "done" && node.findings && node.findings.length > 0 && (
+        <ReviewFindings findings={decide ? node.findings.filter((finding) => finding.severity !== "blocker") : node.findings} />
+      )}
+      {/* The report reads at once with the unit's details: opening the card
+          and the unit are the two steps, never a third fold. */}
+      {output && (
+        <section className="workflow-run-unit-report" aria-label={tr("workflowview.report")}>
+          <h4>{tr("workflowview.report")}</h4>
+          <pre className="workflow-node-output">{output}</pre>
+        </section>
+      )}
     </div>
   );
 }
 
-export default function WorkflowTimelineCard({ run }: { run: WorkflowRunDto }) {
+export default function WorkflowTimelineCard({ run, harnessSlot }: {
+  run: WorkflowRunDto;
+  /** The composer's harness picker, offered where a held unit gets another route. */
+  harnessSlot?: (context: Record<string, unknown>) => ReactNode;
+}) {
   // History can render before the lazy workflow package registers its surface.
   // Keep the handoff unavailable until the shared host can accept it.
   useSurfaceVersion();
@@ -136,25 +166,43 @@ export default function WorkflowTimelineCard({ run }: { run: WorkflowRunDto }) {
   const [retryingNode, setRetryingNode] = useState("");
   const [apiRun, setApiRun] = useState<WorkflowRunDto | null>(null);
   const [expanded, setExpanded] = useState(false);
+  // The card folds to its header and one summary line until someone opens it.
+  const [open, setOpen] = useState(false);
   const [openingSessionId, setOpeningSessionId] = useState("");
   const [openDetails, setOpenDetails] = useState<ReadonlySet<string>>(() => new Set());
   const [requestOpen, setRequestOpen] = useState(false);
-  const retryKey = useRef<{ runId: string; nodeId: string; clientOperationId: string } | null>(null);
+  const [starting, setStarting] = useState(false);
+  const globalModels = useStore((state) => state.models);
+  const textModels = useMemo(() => globalModels.filter(modelSupportsTextWorkflow), [globalModels]);
+  const spaceId = useStore((state) =>
+    state.projectRegistry.projects.find((project) => project.id === (run.projectId ?? state.activeProjectId))?.spaceId) ?? "";
+  const retryKey = useRef<{ intent: string; clientOperationId: string } | null>(null);
+  const startKey = useRef<string | null>(null);
   const pendingAction = useRef(false);
   const generation = useRef(0);
-  const shownRun = fresherWorkflowRun(apiRun, run) ?? run;
+  const freshest = fresherWorkflowRun(apiRun, run) ?? run;
+  // A record or decision the person just made shows at once; the event that
+  // confirms it replaces it a moment later.
+  const shownRun = apiRun?.id === freshest.id && apiRun.outcome && (!freshest.outcome || apiRun.outcome.at > freshest.outcome.at)
+    ? { ...freshest, outcome: apiRun.outcome }
+    : freshest;
   useEffect(() => {
     setApiRun(null);
     setExpanded(false);
+    setOpen(false);
     setOpeningSessionId("");
     setOpenDetails(new Set());
     setRequestOpen(false);
     setRetryingNode("");
+    setStarting(false);
     retryKey.current = null;
+    startKey.current = null;
     pendingAction.current = false;
     generation.current += 1;
     return () => { generation.current += 1; };
   }, [run.id]);
+  // Outcome and decision calls made inside the card publish their result.
+  useEffect(() => subscribeWorkflowRuns((next) => { if (next.id === run.id) setApiRun(next); }), [run.id]);
   useEffect(() => {
     if (shownRun.status !== "running") return;
     let active = true;
@@ -184,8 +232,31 @@ export default function WorkflowTimelineCard({ run }: { run: WorkflowRunDto }) {
   }, [shownRun.id, shownRun.status]);
   const complete = workflowFinishedCount(shownRun);
   const result = workflowDisplayText(shownRun.result);
-  const waiting = shownRun.nodes.filter(needsHuman);
+  const running = shownRun.status === "running";
+  // The chat's agent started this run and is woken to steer it: fixes and
+  // review calls are its job, so the card stays an observer's line. An
+  // approval or answer inside a unit's chat still needs the person.
+  const agentSteered = shownRun.wake === true;
+  const personNeeded = (node: WorkflowRunNodeDto): boolean =>
+    agentSteered ? workflowHumanWait(node) !== null : needsHuman(node);
+  const waiting = running ? shownRun.nodes.filter(personNeeded) : [];
+  const agentHandling = running && agentSteered ? shownRun.nodes.filter((node) => needsHuman(node) && !personNeeded(node)) : [];
+  // Rows a person must see without opening the card: the ones waiting on
+  // them, or a settled run's failed units that can be retried.
+  const attentionNodes = running
+    ? waiting
+    : shownRun.nodes.filter((node) => node.retryable && node.status === "error");
+  const focusNode = shownRun.nodes.find((node) => node.status === "running")
+    ?? shownRun.nodes.find((node) => !workflowNodeFinished(node));
+  // A failed run says why without being opened: the first failed unit that is
+  // not already shown as a row to retry.
+  const failedNode = !running && shownRun.status === "error"
+    ? shownRun.nodes.find((node) => node.status === "error" && !attentionNodes.includes(node))
+    : undefined;
+  const unresolved = workflowUnresolvedReviews(shownRun);
+  const uncertain = workflowUncertainReviews(shownRun);
   const visibleWindow = workflowTimelineNodes(shownRun, expanded);
+  const listedNodes = open ? visibleWindow.nodes : attentionNodes;
   const toggleDetails = (nodeId: string) => setOpenDetails((current) => {
     const next = new Set(current);
     if (!next.delete(nodeId)) next.add(nodeId);
@@ -197,6 +268,10 @@ export default function WorkflowTimelineCard({ run }: { run: WorkflowRunDto }) {
     ? Math.max(0, ...shownRun.nodes.filter((node) => node.status === "running").map((node) => node.round ?? 1))
     : 0;
   const nodeDetail = (node: WorkflowRunNodeDto): string => {
+    if (agentSteered && running && (workflowNeedsFix(node) || workflowNeedsDecision(node))) {
+      const round = (node.round ?? 1) > 1 ? `${workflowRoundLabel(node.round!)} · ` : "";
+      return round + tr(workflowNeedsFix(node) ? "workflowtimeline.heldForFix" : "workflowtimeline.roundsUsedUp");
+    }
     if (workflowNeedsFix(node) && shownRun.status === "running") return tr("workflowtimeline.waitingForYourFix");
     const detail = workflowNodeDetail(node);
     const sentBack = node.status === "done" ? workflowSentBackRoles(shownRun, node) : [];
@@ -224,22 +299,28 @@ export default function WorkflowTimelineCard({ run }: { run: WorkflowRunDto }) {
       });
   };
 
-  const retryNode = (node: WorkflowRunNodeDto) => {
-    if (pendingAction.current || !node.retryable) return;
+  const retryNode: RetryFn = (nodeId, replacement, saveToWorkflow) => {
+    const node = shownRun.nodes.find((candidate) => candidate.id === nodeId);
+    if (pendingAction.current || !node?.retryable) return;
     pendingAction.current = true;
     const currentGeneration = generation.current;
-    const previous = retryKey.current;
-    const clientOperationId = previous?.runId === shownRun.id && previous.nodeId === node.id
-      ? previous.clientOperationId
+    const intent = JSON.stringify([shownRun.id, node.id, replacement, !!saveToWorkflow]);
+    const clientOperationId = retryKey.current?.intent === intent
+      ? retryKey.current.clientOperationId
       : (() => {
       const id = typeof crypto !== "undefined" && "randomUUID" in crypto
         ? crypto.randomUUID()
         : `workflow-retry-${Date.now()}`;
-      retryKey.current = { runId: shownRun.id, nodeId: node.id, clientOperationId: id };
+      retryKey.current = { intent, clientOperationId: id };
       return id;
     })();
     setRetryingNode(node.id);
-    void api.retryWorkflowRun(shownRun.id, { nodeId: node.id, clientOperationId })
+    void api.retryWorkflowRun(shownRun.id, {
+      nodeId: node.id,
+      clientOperationId,
+      ...(replacement ? { replacement } : {}),
+      ...(replacement && saveToWorkflow ? { saveToWorkflow: true } : {}),
+    })
       .then((retried) => {
         if (generation.current !== currentGeneration) return;
         retryKey.current = null;
@@ -256,6 +337,36 @@ export default function WorkflowTimelineCard({ run }: { run: WorkflowRunDto }) {
       });
   };
 
+  /** A done run starts again with its own request, here in this chat. A failed
+   * or stopped run offers no one-click replay: the next run is a new request
+   * from the composer. */
+  const runAgain = () => {
+    if (pendingAction.current || shownRun.status !== "done" || !shownRun.parentSessionId) return;
+    pendingAction.current = true;
+    const currentGeneration = generation.current;
+    const clientOperationId = startKey.current ?? (startKey.current = typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `workflow-run-${Date.now()}`);
+    setStarting(true);
+    void api.runWorkflow(shownRun.workflowId, shownRun.parentSessionId, shownRun.input, shownRun.options, {
+      clientOperationId,
+      context: "request",
+    })
+      .then((started) => {
+        if (generation.current !== currentGeneration) return;
+        startKey.current = null;
+        publishWorkflowRun(started);
+      })
+      .catch((cause) => {
+        if (generation.current === currentGeneration) setUiError(friendlyError(tr("workflowview.couldNotStartWorkflow"), cause));
+      })
+      .finally(() => {
+        if (generation.current !== currentGeneration) return;
+        pendingAction.current = false;
+        setStarting(false);
+      });
+  };
+
   const openChildSession = async (sessionId: string) => {
     if (openingSessionId) return;
     setOpeningSessionId(sessionId);
@@ -267,23 +378,44 @@ export default function WorkflowTimelineCard({ run }: { run: WorkflowRunDto }) {
     }
   };
 
-  const viewWorkflow = () => {
+  const openSettings = () => {
     const projectId = shownRun.projectId ?? getState().activeProjectId;
     if (projectId) {
-      handOffWorkflowLaunch({
-        projectId,
-        ...(shownRun.parentSessionId ? { sessionId: shownRun.parentSessionId } : {}),
-        workflowId: shownRun.workflowId,
-        input: shownRun.input,
-        run: shownRun,
-      });
+      handOffWorkflowLaunch({ projectId, workflowId: shownRun.workflowId });
     }
     openWorkspacePane("workflow");
   };
 
+  // One summary line under the header says where the run stands.
+  const firstAgentWait = agentHandling[0];
+  const summary: ReactNode = running
+    ? waiting.length > 0
+      ? (
+        <strong className="workflow-timeline-waiting">
+          {tr(waiting.length === 1 ? "workflowtimeline.waitingOne" : "workflowtimeline.waitingOther", { count: waiting.length })}
+        </strong>
+      )
+      : firstAgentWait
+        ? (
+          <span className="workflow-timeline-agent">
+            {`${tr("workflowtimeline.agentOnIt")} · ${firstAgentWait.role}: ${tr(workflowNeedsFix(firstAgentWait) ? "workflowtimeline.heldForFix" : "workflowtimeline.roundsUsedUp")}`}
+          </span>
+        )
+        : focusNode
+          ? <span className="workflow-timeline-now" title={workflowNodeDetail(focusNode)}>{`${focusNode.role} · ${workflowNodeDetail(focusNode)}`}</span>
+          : null
+    : null;
+  const totalLabel = tr("workflowtimeline.nodesFinished", { complete, total: shownRun.nodes.length });
+  // A settled run's record reads as text; the choice is asked of the person
+  // who started it, and of an agent-steered run's reader only while nothing
+  // was recorded. Change waits in the opened card when the agent recorded it.
+  const outcomeReadOnly = !open && agentSteered && !!shownRun.outcome;
+  const tone = waiting.length > 0 ? "attention" : agentHandling.length > 0 ? "agent" : shownRun.status;
+
   return (
     <section
-      className={`workflow-timeline-card status-${shownRun.status}${waiting.length ? " has-attention" : ""}`}
+      className={`workflow-timeline-card status-${shownRun.status} tone-${tone}${waiting.length ? " has-attention" : ""}${
+        agentSteered ? " is-agent-steered" : ""}${open ? " is-open" : ""}`}
       aria-label={tr("workflowtimeline.valueLabel", {
         name: shownRun.name,
         status: workflowStatusLabel(shownRun.status),
@@ -292,18 +424,73 @@ export default function WorkflowTimelineCard({ run }: { run: WorkflowRunDto }) {
       <header>
         <span className="workflow-timeline-icon" aria-hidden="true"><Icon.workflow /></span>
         <span className="workflow-timeline-title">
-          <small>
-            {tr("workflowtimeline.workflow")}
-            <Elapsed from={shownRun.startedAt} to={shownRun.status === "running" ? undefined : shownRun.finishedAt ?? shownRun.startedAt} />
-          </small>
           <strong title={shownRun.name}>{shownRun.name}</strong>
+          <b className={`workflow-timeline-pill status-${shownRun.status}`} role="status" aria-live="polite">
+            {workflowStatusLabel(shownRun.status)}
+          </b>
         </span>
-        <b className={`workflow-timeline-pill status-${shownRun.status}`} role="status" aria-live="polite">
-          <i aria-hidden="true" />
-          {workflowStatusLabel(shownRun.status)}
-        </b>
+        <Elapsed from={shownRun.startedAt} to={running ? undefined : shownRun.finishedAt ?? shownRun.startedAt} />
+        <IconButton
+          size="sm"
+          variant="ghost"
+          icon={ChevronDownIcon}
+          className="workflow-timeline-toggle"
+          label={tr("workflowtimeline.showRunValue", { name: shownRun.name })}
+          aria-expanded={open}
+          onClick={() => setOpen((current) => !current)}
+        />
       </header>
-      {longRequest ? (
+      {running && (
+        <div className="workflow-timeline-overview">
+          <div className="workflow-timeline-summary">
+            {summary}
+            {reworkRound > 1 && waiting.length === 0 && !firstAgentWait && (
+              <em>{tr("workflowtimeline.reworkRound", { round: reworkRound })}</em>
+            )}
+            {firstAgentWait && !open && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="workflow-timeline-step-in"
+                onClick={() => setOpen(true)}
+              >
+                {tr("workflowtimeline.stepIn")}
+              </Button>
+            )}
+            <span className="workflow-timeline-count" aria-label={totalLabel} title={totalLabel}>
+              {`${formatNumber(complete)}/${formatNumber(shownRun.nodes.length)}`}
+            </span>
+          </div>
+          <div
+            className="workflow-timeline-progress"
+            role="progressbar"
+            aria-label={tr("workflowtimeline.progress")}
+            aria-valuemin={0}
+            aria-valuemax={shownRun.nodes.length}
+            aria-valuenow={complete}
+            aria-valuetext={totalLabel}
+          >
+            {shownRun.nodes.map((node) => (
+              <i key={node.id} className={`tone-${agentSteered && !personNeeded(node) && needsHuman(node) ? "running" : nodeSegmentTone(node)}`} />
+            ))}
+          </div>
+        </div>
+      )}
+      {failedNode && !open && (
+        <div className="workflow-timeline-overview">
+          <div className="workflow-timeline-summary">
+            <span className="workflow-timeline-now" title={failedNode.error?.trim() || undefined}>
+              {`${failedNode.role} · ${failedNode.error?.trim().replace(/\s+/g, " ") || workflowNodeDetail(failedNode)}`}
+            </span>
+          </div>
+        </div>
+      )}
+      {result && (
+        <div className="workflow-timeline-result">
+          <p>{result}</p>
+        </div>
+      )}
+      {open && (longRequest ? (
         <button
           type="button"
           className="workflow-timeline-input"
@@ -315,55 +502,39 @@ export default function WorkflowTimelineCard({ run }: { run: WorkflowRunDto }) {
         </button>
       ) : (
         <p className="workflow-timeline-input">{shownRun.input}</p>
+      ))}
+      {open && unresolved.length > 0 && (
+        <p className="workflow-timeline-note" role="status">
+          {tr("workflowview.reviewUnresolvedValue", { roles: unresolved.map((node) => node.role).join(", ") })}
+        </p>
       )}
-      <div className="workflow-timeline-overview">
-        <div
-          className="workflow-timeline-progress"
-          role="progressbar"
-          aria-label={tr("workflowtimeline.progress")}
-          aria-valuemin={0}
-          aria-valuemax={shownRun.nodes.length}
-          aria-valuenow={complete}
-          aria-valuetext={tr("workflowtimeline.nodesFinished", { complete, total: shownRun.nodes.length })}
-        >
-          {shownRun.nodes.map((node) => (
-            <i key={node.id} className={`tone-${nodeSegmentTone(node)}`} />
-          ))}
-        </div>
-        <div className="workflow-timeline-summary">
-          <span>{tr("workflowtimeline.nodesFinished", { complete, total: shownRun.nodes.length })}</span>
-          {reworkRound > 1 && waiting.length === 0 && (
-            <em>{tr("workflowtimeline.reworkRound", { round: reworkRound })}</em>
-          )}
-          {waiting.length > 0 && (
-            <strong>
-              {tr(waiting.length === 1 ? "workflowtimeline.waitingOne" : "workflowtimeline.waitingOther", {
-                count: waiting.length,
-              })}
-            </strong>
-          )}
-        </div>
-      </div>
+      {open && uncertain.length > 0 && (
+        <p className="workflow-timeline-note" role="status">
+          {tr("workflowview.reviewUncertainValue", { roles: uncertain.map((node) => node.role).join(", ") })}
+        </p>
+      )}
+      {listedNodes.length > 0 && (
       <ul
         className="workflow-timeline-nodes"
         aria-label={expanded ? tr("workflowtimeline.allNodes") : tr("workflowtimeline.focusedNodes")}
       >
-        {visibleWindow.nodes.map((node) => {
-          const held = workflowNeedsFix(node) && shownRun.status === "running";
-          // The decision card lives in the run view; the card points there.
-          const decide = workflowNeedsDecision(node) && shownRun.status === "running";
-          const human = needsHuman(node);
+        {listedNodes.map((node) => {
+          const held = workflowNeedsFix(node) && running;
+          // The decision card opens right under its row while a gate waits.
+          const decide = workflowNeedsDecision(node) && running;
+          const human = running && personNeeded(node);
+          const handledByAgent = running && agentSteered && needsHuman(node) && !human;
           const detail = nodeDetail(node);
           const hasDetails = nodeHasDetails(node, detail);
           const detailsOpen = hasDetails && openDetails.has(node.id);
-          // A held unit is fixed in the run view (another model, kept for later
-          // runs if wanted); a settled run's unit retries from here.
-          const retry = node.retryable && node.status === "error" && shownRun.status !== "running";
-          const primary = Boolean(node.sessionId && human && !held && !decide) || Boolean(retry) || held || decide;
+          // A held unit is fixed right under its row (another route, kept for
+          // later runs if wanted); a settled run's unit retries from here.
+          const retry = node.retryable && node.status === "error" && !running;
+          const primary = Boolean(node.sessionId && human && !held && !decide) || Boolean(retry);
           return (
             <li
               key={node.id}
-              className={`status-${node.status}${human ? " needs-human" : ""}${held ? " needs-fix" : ""}${
+              className={`status-${node.status}${human ? " needs-human" : ""}${held ? " needs-fix" : ""}${handledByAgent ? " agent-handling" : ""}${
                 node.status === "done" && (node.verdict ?? (node.judgment?.verdict === "uncertain" ? "uncertain" : undefined)) ? ` verdict-${node.verdict ?? "uncertain"}` : ""}${
                 detailsOpen ? " details-open" : ""}${primary ? " has-primary" : ""}`}
             >
@@ -376,29 +547,6 @@ export default function WorkflowTimelineCard({ run }: { run: WorkflowRunDto }) {
               </span>
               {primary && (
                 <span className="workflow-timeline-node-actions">
-                  {held && (
-                    <Button
-                      size="sm"
-                      variant="primary"
-                      iconStart={WrenchIcon}
-                      disabled={!canViewWorkflow}
-                      aria-label={tr("workflowtimeline.fixValue", { role: node.role })}
-                      onClick={viewWorkflow}
-                    >
-                      {tr("workflowtimeline.fix")}
-                    </Button>
-                  )}
-                  {decide && (
-                    <Button
-                      size="sm"
-                      variant="primary"
-                      disabled={!canViewWorkflow}
-                      aria-label={tr("workflowtimeline.decideValue", { role: node.role })}
-                      onClick={viewWorkflow}
-                    >
-                      {tr("workflowtimeline.decide")}
-                    </Button>
-                  )}
                   {node.sessionId && human && !held && !decide && (
                     <Button
                       size="sm"
@@ -419,7 +567,7 @@ export default function WorkflowTimelineCard({ run }: { run: WorkflowRunDto }) {
                       iconStart={RefreshIcon}
                       busy={retryingNode === node.id}
                       disabled={!!retryingNode}
-                      onClick={() => retryNode(node)}
+                      onClick={() => retryNode(node.id)}
                     >
                       {tr("trackspanel.retryStep")}
                     </Button>
@@ -451,18 +599,33 @@ export default function WorkflowTimelineCard({ run }: { run: WorkflowRunDto }) {
                   />
                 )}
               </span>
-              {detailsOpen && <NodeFacts node={node} detail={detail} />}
+              {detailsOpen && <NodeFacts node={node} detail={detail} decide={decide} />}
+              {((held && node.retryable) || decide) && (
+                <div className="workflow-timeline-node-body">
+                  {held && node.error && <p className="workflow-timeline-node-reason">{node.error}</p>}
+                  {held && node.retryable && (
+                    <RetryControls
+                      node={node}
+                      runStatus={shownRun.status}
+                      busy={!!retryingNode}
+                      models={textModels}
+                      {...(harnessSlot ? { harnessSlot } : {})}
+                      projectId={shownRun.projectId ?? ""}
+                      spaceId={spaceId}
+                      onRetry={retryNode}
+                      primary={!agentSteered}
+                    />
+                  )}
+                  {decide && <ReviewDecision run={shownRun} node={node} primary={!agentSteered} />}
+                </div>
+              )}
             </li>
           );
         })}
       </ul>
-      {result && (
-        <div className="workflow-timeline-result">
-          <strong>{tr("workflowtimeline.result")}</strong>
-          <p>{result}</p>
-        </div>
       )}
-      {shownRun.nodes.length > 6 && (
+      <WorkflowRunOutcome run={shownRun} readOnly={outcomeReadOnly} />
+      {open && shownRun.nodes.length > 6 && (
         <div className="workflow-timeline-disclosure">
           <span className="workflow-timeline-range">
             {tr("workflowtimeline.nodeRange", {
@@ -485,30 +648,42 @@ export default function WorkflowTimelineCard({ run }: { run: WorkflowRunDto }) {
           </Button>
         </div>
       )}
-      <footer>
-        <Button
-          size="sm"
-          variant="quiet"
-          iconStart={TreeViewIcon}
-          disabled={!!openingSessionId || !canViewWorkflow}
-          onClick={viewWorkflow}
-        >
-          {tr("workflowtimeline.viewWorkflow")}
-        </Button>
-        {shownRun.status === "running" && (
+      {open && (
+        <footer>
           <Button
             size="sm"
-            variant="danger"
-            iconStart={StopIcon}
-            busy={stopping}
-            disabled={stopping}
-            aria-label={tr("workflowtimeline.stopValue", { name: shownRun.name })}
-            onClick={stop}
+            variant="ghost"
+            disabled={!!openingSessionId || !canViewWorkflow}
+            onClick={openSettings}
           >
-            {tr("workflowtimeline.stopRun")}
+            {tr("workflowtimeline.workflowSettings")}
           </Button>
-        )}
-      </footer>
+          {shownRun.status === "done" && shownRun.parentSessionId && (
+            <Button
+              size="sm"
+              variant="ghost"
+              busy={starting}
+              disabled={starting}
+              onClick={runAgain}
+            >
+              {tr("workflowview.runAgain")}
+            </Button>
+          )}
+          {running && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="workflow-timeline-stop"
+              busy={stopping}
+              disabled={stopping}
+              aria-label={tr("workflowtimeline.stopValue", { name: shownRun.name })}
+              onClick={stop}
+            >
+              {tr("workflowtimeline.stopRun")}
+            </Button>
+          )}
+        </footer>
+      )}
     </section>
   );
 }

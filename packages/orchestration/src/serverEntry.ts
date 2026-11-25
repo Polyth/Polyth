@@ -207,6 +207,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         providerID: row.providerID,
         modelID: row.modelID,
         turns: row.turns,
+        failed: row.failed,
         ...(row.runs ? { runs: row.runs } : {}),
       })),
       available: (harnessId) => Boolean(harnesses?.get(harnessId)),
@@ -271,6 +272,20 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       if (policy.mode === "auto") return Object.keys(list).length ? { text: "", ...shaped } : undefined;
       const { roles, now } = await resolved(space, policy, options?.harnessId);
       return { text: formatBrief(policy, roles, now), ...shaped };
+    },
+    async route(space, roleId, options) {
+      if (!active) return undefined;
+      const policy = readSaved(space);
+      if (policy.mode !== "roles") return undefined;
+      const { roles } = await resolved(space, policy);
+      const role = roles.find((entry) => entry.id === roleId);
+      if (!role?.enabled) return undefined;
+      const skip = new Set(options?.exclude ?? []);
+      const choice = role.choices.find((entry) =>
+        (entry.status === "ready" || entry.status === "unverified") && !skip.has(entry.key));
+      return choice
+        ? { harnessId: choice.harnessId, providerID: choice.providerID, modelID: choice.modelID }
+        : undefined;
     },
   });
 

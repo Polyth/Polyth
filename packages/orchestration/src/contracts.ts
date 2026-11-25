@@ -262,6 +262,8 @@ export interface ModelOption {
   favoriteIndex?: number;
   /** Turns in the usage window. */
   turns: number;
+  /** Failed turns among them; absent when unknown. */
+  failed?: number;
   /** The catalog says the model reads images. */
   vision: boolean;
   context?: number;

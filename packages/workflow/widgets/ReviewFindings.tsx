@@ -35,7 +35,9 @@ export function ReviewFindings({ findings }: { findings: readonly WorkflowReview
  * beside the builder's reply, and the two ways forward. Wide panels read it
  * as two columns under one header; narrow ones as a thread, the reply
  * indented under the blocker it answers. */
-export function ReviewDecision({ run, node }: { run: WorkflowRunDto; node: WorkflowRunNodeDto }) {
+/** `primary` is false when the person is only stepping in on a call the
+ * chat's agent owns: the decision then offers no filled button. */
+export function ReviewDecision({ run, node, primary = true }: { run: WorkflowRunDto; node: WorkflowRunNodeDto; primary?: boolean }) {
   const request = node.needsDecision;
   const titleId = useId();
   const noteId = useId();
@@ -118,20 +120,20 @@ export function ReviewDecision({ run, node }: { run: WorkflowRunDto; node: Workf
       <div className="workflow-dispute-actions">
         {asking ? (
           <>
-            <Button variant="primary" size="sm" disabled={busy} onClick={() => void decide("another-round")}>
+            <Button variant={primary ? "primary" : "quiet"} size="sm" disabled={busy} onClick={() => void decide("another-round")}>
               {tr("workflowview.reviewStartRound")}
             </Button>
-            <Button variant="quiet" size="sm" disabled={busy} onClick={() => { setAsking(false); setNote(""); }}>
+            <Button variant="ghost" size="sm" disabled={busy} onClick={() => { setAsking(false); setNote(""); }}>
               {tr("workflowview.reviewCancel")}
             </Button>
           </>
         ) : (
           <>
-            <Button variant="primary" size="sm" disabled={busy} onClick={() => void decide("accept")}>
+            <Button variant={primary ? "primary" : "quiet"} size="sm" disabled={busy} onClick={() => void decide("accept")}>
               {tr("workflowview.reviewAccept")}
             </Button>
             {request.canAnotherRound && (
-              <Button variant="quiet" size="sm" disabled={busy} onClick={() => setAsking(true)}>
+              <Button variant="ghost" size="sm" disabled={busy} onClick={() => setAsking(true)}>
                 {tr("workflowview.reviewAnotherRound")}
               </Button>
             )}

@@ -58,3 +58,35 @@ export function workflowTopology(workflow: WorkflowDto): string {
       : node.kind === "review" ? "workflowview.reviewer" : "workflowview.worker"),
   })) });
 }
+
+/** The built-in routing roles, in the order the editor offers them. A template
+ * may carry another id (`custom-…`); it stays selectable as it is. */
+export const WORKFLOW_ROUTING_ROLES = ["explore", "implement", "verify", "review", "vision", "write"] as const;
+
+export function workflowRoleLabel(role: string): string {
+  return (WORKFLOW_ROUTING_ROLES as readonly string[]).includes(role)
+    ? tr(`workflowview.role.${role}` as "workflowview.role.explore")
+    : role;
+}
+
+interface RouteFields {
+  harness?: { mode: string; harnessId?: string };
+  model?: { modelID: string };
+}
+
+const routeLabel = (node: RouteFields): string =>
+  `${node.harness?.mode === "pinned" && node.harness.harnessId ? node.harness.harnessId : tr("workflowview.projectHarness")} · ${node.model?.modelID ?? tr("workflowview.defaultModel")}`;
+
+/** A definition unit's route as one muted line: "By role: Implement" and, when
+ * the unit also pins a route (its fallback), that route after it. */
+export function workflowNodeRouteText(node: RouteFields & { routingRole?: string }): string {
+  if (!node.routingRole) return routeLabel(node);
+  const role = tr("workflowview.byRole", { role: workflowRoleLabel(node.routingRole) });
+  return node.model || node.harness?.mode === "pinned" ? `${role} · ${routeLabel(node)}` : role;
+}
+
+/** A run unit's route: the role that chose it, then what it ran on. */
+export function workflowRunRouteText(node: RouteFields & { routedRole?: string }): string | undefined {
+  if (!node.routedRole) return undefined;
+  return `${tr("workflowview.byRole", { role: workflowRoleLabel(node.routedRole) })} → ${routeLabel(node)}`;
+}

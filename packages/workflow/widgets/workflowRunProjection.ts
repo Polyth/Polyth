@@ -7,8 +7,22 @@ import type {
   WorkflowRunCompletedData,
   WorkflowRunDto,
   WorkflowRunNodeDto,
+  WorkflowRunOutcomeData,
+  WorkflowRunOutcomeDto,
   WorkflowRunStartedData,
 } from "@polyth/contracts";
+
+/** A well-formed recorded outcome from event data, else undefined. */
+export function workflowOutcomeFrom(value: unknown): WorkflowRunOutcomeDto | undefined {
+  const raw = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+  if (!raw || (raw.value !== "accepted" && raw.value !== "reworked" && raw.value !== "discarded")) return undefined;
+  return {
+    value: raw.value,
+    ...(typeof raw.note === "string" && raw.note ? { note: raw.note } : {}),
+    at: typeof raw.at === "number" && Number.isFinite(raw.at) ? raw.at : 0,
+    by: raw.by === "agent" ? "agent" : "person",
+  };
+}
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -29,6 +43,7 @@ function startedRun(data: WorkflowRunStartedData): WorkflowRunDto {
     ...(data.context ? { context: data.context } : {}),
     ...(data.definition ? { definition: data.definition } : {}),
     ...(data.options ? { options: data.options } : {}),
+    ...(data.wake === true ? { wake: true } : {}),
     status: "running",
     startedAt: typeof data.startedAt === "number" ? data.startedAt : 0,
     layers: (data.layers ?? []).map((layer) => [...layer]),
@@ -95,6 +110,11 @@ export function workflowRunFromStartedEvent(
       const data = later.data as unknown as WorkflowRunCompletedData;
       if (data.runId !== run.id) continue;
       applyRunCompleted(run, data, later.time);
+    } else if (later.type === "workflow/run-outcome") {
+      const data = later.data as unknown as WorkflowRunOutcomeData;
+      if (data.runId !== run.id) continue;
+      const outcome = workflowOutcomeFrom(data.outcome);
+      if (outcome) run.outcome = outcome;
     }
   }
   return run;

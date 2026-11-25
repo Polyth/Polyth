@@ -72,29 +72,31 @@ launcher remains an anchored,
 keyboard-aware popover; its short list scrolls internally so More and the
 builder action stay reachable.
 
-The surface has two pages. It opens on the library: search, New workflow and
-the Templates list, each entry a compact card (graph glyph, name,
-description, agent and stage counts and a copy action; the role chain is only a
-tooltip). A bundled example keeps its stored "Example · " name but the card
-shows an Example badge instead, with the sample catalog's description when the
-stored workflow has none. Choosing a card opens that workflow's page, which
-replaces the library; its back button returns. Opening the surface from a run
-(View workflow) or from the composer with a workflow lands on that page.
+The Workflows window holds template settings and nothing else. Starting a
+run, watching it and every run action belong to the chat the run was started
+from ([Chat execution](#chat-execution)); the window makes no run request.
 
-A workflow page has Run and Edit tabs. Run holds the request form, the open
-chat's latest run of the workflow (never another chat's) and collapsed run Options (approvals, review rounds,
-parallel agents, timeout); Edit holds the pipeline, inspector and Details
-(description). The latest run renders as the run's own stages: one row per
-unit with its status, a "Round n" badge once a review sent work back, an
-Approved / Changes requested badge on reviews, the roles a review sent work
-back to, and the unit's report folded under a disclosure. Saved workflows and
-templates open on Run; a new blank workflow or a copy opens on Edit. Templates
-are read-only: the header and Edit tab offer Customize, which creates an
-editable copy. Undo retains up to 50 local edits for the selected workflow and
-survives autosave acknowledgements; switching workflows resets it. Leaving a
-page with pending edits saves them at once; edits that cannot be saved
-(an empty name or role) ask before they are discarded. View workflow on a run
-brings that run into view once.
+It has two pages. It opens on the library: search, New workflow and the
+Templates list, each entry a compact card (graph glyph, name, description,
+agent and stage counts and a copy action; the role chain is only a tooltip).
+A bundled example keeps its stored "Example · " name but the card shows an
+Example badge instead, with the sample catalog's description when the stored
+workflow has none. Choosing a card opens that template's settings page, which
+replaces the library; its back button returns. Workflow settings on a run's
+card and the composer launcher's Open workflow builder land on that page;
+neither hands over a run or a request (`widgets/workflowLaunch.ts` carries
+only the project and the template).
+
+A settings page holds the pipeline, the unit inspector, Details (description)
+and Defaults for runs (approvals, review rounds, parallel agents, unit
+timeout), which are saved with the template as `defaults` and apply to every
+run started from it; an invalid value blocks saving. One muted line says that
+a workflow is started from a chat's composer. Templates are read-only: the
+page offers Customize, which creates an editable copy. Undo retains up to 50
+local edits for the selected workflow and survives autosave acknowledgements;
+switching workflows resets it. Leaving a page with pending edits saves them
+at once; edits that cannot be saved (an empty name or role) ask before they
+are discarded.
 
 ## Chat execution
 
@@ -213,7 +215,7 @@ markers fail the unit rather than unlock its dependents.
 
 Launching leaves chat usable. Run progress and the final result appear in the
 conversation as one card placed at the run's `workflow/run-started` position, so
-later prompts and answers read below it. The View workflow action becomes available when the package
+later prompts and answers read below it. The card's Workflow settings action becomes available when the package
 surface has registered, including during cold startup. Child sessions remain available for inspection and human
 questions or permissions; a node's permission request that its own policy holds
 for a person is also mirrored into the launching chat. Node sessions inherit the
@@ -243,12 +245,62 @@ The chat card shows the same facts compactly: a unit's detail line reads
 "Rework round n" while units re-run, and a review that sent work back uses the
 return glyph instead of a check mark.
 
-The run panel keeps the next step explicit. A running run offers Stop. A done run
-offers Run again, which repeats the run's recorded request and options and does
-not depend on any hand-off. A failed or stopped run is never replayed in one
-click: the surface shows the run form below it (prefilled with the run's request
-when it was opened with View workflow), so the next run is a new request the user
-launches. Node retry stays the only way to continue a failed run.
+The card is the whole run surface (`widgets/WorkflowTimelineCard.tsx`, with
+the shared held-unit controls in `widgets/WorkflowRunUnits.tsx`). It is
+folded by default: one header line (mark, name, the status as a word in its
+tone, elapsed time, a toggle) and one summary line: what runs now with the
+unit count and a thin progress bar, or the first line of the result with the
+recorded outcome as quiet text. Everything else appears when the card is
+opened, and state is said once.
+
+The block belongs to the chat's activity-block family and has no plate,
+outline or shadow in any state (`widgets/timelineCard.css`;
+`test/workflowTimelineLook.test.ts` pins this on the stylesheet): text on the
+chat surface, its mark and name on the activity block's columns, a hairline
+thread from the mark through the opened block, and matching rules for the
+other activity looks (`body[data-activity-style]`). One accent speaks at a
+time: the status is a dim word, progress is the count alone (the bar stays a
+`progressbar` for assistive technology but is not drawn), and colour is spent
+only where the person must act. A decision or a fix is a short passage with
+at most one filled button, and only when the person is the one who acts;
+everything else is a text button. The harness strip above a held unit's model
+picker is hidden while it offers fewer than two choices. The activity
+thread's values are copied from the same tokens, because the host scopes
+`--activity-*` to `.activity-group`.
+
+The card knows who steers the run. A run the chat's agent started through
+the workflow tool carries `wake`; fixing a held unit and settling a review
+gate are then the agent's job, so the folded card says "The agent is on it"
+with the reason and offers a quiet Step in that opens the card, instead of
+raising "waiting for you". An approval or a question inside a unit's own chat
+still asks the person in every run, because the agent is not woken for those.
+A run a person started keeps the person as the one who decides: the row that
+waits for them (gate decision, held-unit fix, approval) shows while the card
+is folded, with its control inline and the held unit's real error above the
+fix. The outcome buttons show for a person-started run without a record, and
+for an agent-steered one only when nothing was recorded.
+
+Opened, the card holds:
+
+- a unit's details hold its report (shown at once, not behind a second
+  fold), a review's findings and its route, read as "By role: Implement →
+  harness · model" when a routing role chose it;
+- a review gate that waits after its rounds shows the decision (Accept as is
+  / Another round) under its row;
+- a unit the run holds because it could not start is fixed under its row,
+  with another route when the route was the problem; a failed unit of a
+  settled run keeps its plain retry;
+- the request, Stop while the run runs, Workflow settings, and under the
+  result of a settled run the outcome row with Change
+  ([Run outcomes](#run-outcomes));
+- a done run offers Run again, which repeats the run's recorded request and
+  options in the same chat. A failed or stopped run is never replayed in one
+  click: unit retry stays the only way to continue it, and a new run is a new
+  request from the composer.
+
+Whatever points at a run opens its parent chat, where the card is: the status
+bar segment, a waiting notice, the launcher after a start. Nothing opens the
+Workflows window to show a run.
 
 Recorded node output and run results keep at most one blank line between blocks.
 The runner joins only non-empty streamed parts (reasoning-only and marker
@@ -257,16 +309,162 @@ older records; stored records are not rewritten.
 
 From an open chat the launcher retains the draft until admission succeeds.
 From the unsent new chat it does not wait: once the parent session exists it
-starts tracking the request (`widgets/workflowStart.ts`, UI-only state), moves
-the task into the workflow window, opens the parent and hands the window the
-launch. The window shows the starting run with indeterminate progress, a failed
-start with Retry (the same request and `clientOperationId`, so a lost response
-never admits a second run), and switches to the admitted run as soon as the
-request returns. Someone who left the new chat while the parent was created
+starts tracking the request (`widgets/workflowStart.ts`, UI-only state), clears
+the composer and opens the parent chat, where the run's card appears as soon as
+the run is admitted. The start stays with that chat: while it is in flight the
+composer's workflow button is busy; if it fails, the button shows an attention
+state, a notice says so, and opening the launcher shows the failed start above
+the template list with its request, Retry (the same request and
+`clientOperationId`, so a lost response never admits a second run) and Dismiss.
+Dismiss puts the request back into an empty composer; when a draft is already
+typed it is never replaced and Copy request is offered instead. Someone who left the new chat while the parent was created
 keeps their place and the launch behaves like an open-chat one. The host's conditional
 composer replacement checks scope and exact submitted text before clearing it,
 including after a composer remount. Late responses must preserve newer text and
 newly attached files.
+
+## Routing roles
+
+A unit may name a routing role (`WorkflowNodeDto.routingRole`: `explore`,
+`implement`, `verify`, `review`, `vision`, `write` or a `custom-…` id from
+Settings → Orchestration). When the pass starts, the engine asks the
+launcher's delegation policy for that role's first usable model
+(`WorkflowDeps.routeFor`, served by `SERVER_DELEGATION_POLICY.route` of the
+optional Orchestration package) and runs the unit on it; the run row then
+carries that `model`/`harness` and `routedRole`.
+
+- The role applies only while the person who started the run routes By role.
+  In Auto mode, for system runs, without the Orchestration package, and when
+  nothing in the role's chain is usable, the unit runs on its own route (its
+  pinned model/harness, an Auto allow-list, or the inherited chat route).
+- A role model refused before the turn was admitted (the same pre-admission
+  proof that otherwise holds a unit for a fix) moves to the role's next
+  usable model, then to the unit's own route. Only when every route was
+  refused does the run hold the unit for a person. Nothing ran, so nothing is
+  repeated; at most six routes are tried.
+- A rework round continues in the unit's child session and keeps the route
+  that session began on.
+- A route a person picks while fixing a held unit, or saves for a bundled
+  template, removes the unit's role: an explicit route is the route.
+- A role chain's `maxConcurrent` is advisory and is not enforced by the
+  scheduler; `maxParallel` bounds a stage.
+
+In the settings page the unit inspector has a "Model by role" select (Off or
+a role) above the unit's own route, which is then captioned as the fallback.
+Unit route text reads "By role: Implement" on a definition and "By role:
+Implement → harness · model" in the details of a run's unit on the chat card
+when the role chose its model.
+
+Bundled templates name a role on every unit: workers `implement`, researchers
+`explore`, leads and review units `review`. A person who routes By role
+therefore gets their own models per kind of work instead of the launching
+chat's model on every unit.
+
+## Located facts
+
+Units share what they located so the next one does not search again.
+
+- Every unit's brief asks for a closing `# Located facts` section of at most
+  20 lines `- locator — what is there`. A locator is whatever lets the next
+  unit open the thing again, in any kind of project: a file (`a/b.ts`,
+  `a/b.ts:12`, `a/b.ts:12-40`, `notes.md#part`), a folder path, or the URL of
+  a web source. `parseFacts` (`prompt.ts`) keeps only lines that start with a
+  locator; the section ends at the next heading or at a review's verdict
+  line.
+- The heading stays in English whatever language the report is in (the brief
+  says so), and is accepted as a markdown heading, a bold line or a plain
+  `Located facts:` line, because models differ in how they write it.
+- The run keeps the map in `WorkflowRunDto.facts` (at most 40 lines of 240
+  characters, oldest first; a full map keeps what it has). A launch may seed
+  it with `WorkflowLaunchOptionsDto.facts`; a retry fork inherits it.
+- Each brief carries the map as `# Located facts so far`, before the upstream
+  reports and within 3,000 characters of the 12,000-character brief. Upstream
+  reports are passed without their facts section, so nothing is repeated.
+- A launch that shares only the request (`context: "request"` without a
+  source message) no longer repeats the input as conversation context.
+
+## Run outcomes
+
+A finished run says the units ended, not that the result was used.
+`WorkflowRunDto.outcome` records that: `accepted` (used as delivered),
+`reworked` (kept after more work outside the run) or `discarded`, with an
+optional one-line note, the time and `by: "person" | "agent"` (never a user
+id).
+
+- `POST /api/workflow-runs/:id/outcome` `{ value, note? }` and the agent
+  tool's `outcome` action call `recordOutcome`. Only a settled run takes an
+  outcome, only the person who started it (or an agent turn acting for that
+  person) records it, and a later record replaces the earlier one.
+- The service appends `workflow/run-outcome` to the parent chat before it
+  stores the record; clients fold runs from events, so both reducers
+  (`apps/web/src/reduce.ts`, `widgets/workflowRunProjection.ts`) read it.
+- The run's card in the chat shows one quiet row under the result of a
+  settled run: the question with Accepted / Reworked / Discarded, or the
+  recorded outcome with who recorded it and a Change action
+  (`widgets/WorkflowRunOutcome.tsx`).
+- `GET /api/workflow-outcomes?projectId` and the tool's `stats` action count
+  settled runs per template: done/error/stopped, the three outcomes,
+  unrecorded runs, and how many units a review sent back. This is the
+  evidence for choosing between a template and hand-driven delegation.
+
+## Agent tools
+
+`packages/workflow/src/agentTool.ts` registers two tools and the
+`polyth-workflow` skill through `harness.capabilities` in the enable hook.
+
+| Tool | Actions | Approval |
+|---|---|---|
+| `polyth_workflow` | `templates`, `template`, `run`, `runs`, `status`, `output`, `stop`, `retry`, `outcome`, `stats` | approved by the package |
+| `polyth_workflow_manage` | `create`, `update`, `delete` (templates), `decide` (a held review gate) | the chat's permission flow |
+
+Boundaries, all enforced in the handler:
+
+- A call acts for the person of the calling turn (`ctx.actorUserId`), exactly
+  as a route acts for the signed-in person; a turn with no person runs as
+  system work. A viewer can read but not run or change anything.
+- Templates are those of the calling chat's project. Runs are only the ones
+  started from the calling chat; any other run answers not-found.
+- A run the agent starts always uses `permissions: "manual"`, so its units
+  inherit the chat's own approval level, and a template the agent saves
+  always stores `manual`. An agent cannot raise approvals through a workflow.
+- `run` starts with the chat's route as the launch default, `context:
+  "request"` unless the agent asks for `recent`, the agent's `facts`, and
+  `wake` on by default.
+- Input is read the way models of any strength write it: a template is found
+  by id, by a bundled short id, or by its name when exactly one template of
+  the project carries it; an outcome value is taken in any verb form
+  (`accept`, `Reworked`, `discard`); a model is `provider/model` as
+  `agent.models` prints it (the object form is accepted too).
+
+Standing context is a cost every user pays on every request, so it is
+budgeted. Harnesses that do not defer tools carry both schemas with each
+request, and prompt-delivered skills carry the skill text with each prompt.
+
+- The two tool descriptors and the skill text are terse on purpose (about 450
+  and 500 tokens for the tools, under 200 for the skill);
+  `packages/workflow/test/agentTool.test.ts` fails when they grow past their
+  character budgets. Guidance needed at one step goes into that step's
+  output instead: `run` says to end the turn, a wake notice names the next
+  action, `templates` says how to start one.
+- Outputs are bounded and do not repeat what the chat already holds:
+  `templates` is one line per template, `template` clips unit prompts to a
+  preview unless `full` is passed (a copy keeps them whole), `status` omits a
+  settled run's result because the run's `package/context` record already
+  put it in the chat, `output` returns the end of one report within a limit.
+- A unit's brief adds a fixed 1.1k characters (handoff and facts rules)
+  before the task, the map and the upstream reports.
+
+Nothing here depends on one installation. Without the Orchestration package,
+for a person in Auto mode and for a role with no models, units run on their
+own route exactly as before; the tools, the skill text and the briefs name
+no harness, model or project type.
+
+A run started with `wake` (`WorkflowRunDto.wake`) tells the parent chat's
+agent, as a hidden turn sent for the launcher, when it settles, when a unit
+could not start on any route (`needsFix`), when a review still has blockers
+after its rounds (`needsDecision`), and when a server restart fenced it. A
+stop the agent itself asked for sends nothing. Delivery only: a lost wake
+never changes the run (`WorkflowDeps.onRunAttention`).
 
 ## Ownership and extension points
 
@@ -281,12 +479,15 @@ newly attached files.
 - `packages/workflow/src/serverEntry.ts` validates the request's
   Space/project/session and obtains storage and sessions through
   `host.spaceStorage` and `host.forSpace`.
+- `packages/workflow/src/agentTool.ts` owns the two agent tools and the
+  `polyth-workflow` skill text; it reaches runs only through `WorkflowService`.
 - `packages/workflow/src/runner.ts` bridges to canonical child sessions.
   Provider protocols, processes, and execution release remain with the existing
   session and harness owners.
 - `packages/workflow/widgets/index.tsx` registers the surface, composer widget,
   message actions, and the `session.list.badges` workflow-session badge through
-  supported web package seams. `WorkflowView.tsx` owns the builder UI and reuses
+  supported web package seams. `WorkflowTimelineCard.tsx` owns the run
+  surface in the chat; `WorkflowView.tsx` owns the settings UI and reuses
   the composer model picker plus the `modelPicker.header` harness slot.
 - DTOs live in `@polyth/contracts`; `@polyth/session/web-api` exposes the typed
   transport for workflow routes.

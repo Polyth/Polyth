@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type {
+  AgentCapabilityContributionRegistry,
   AttachmentRef,
   HarnessRegistry,
   ModelRef,
@@ -10,6 +12,7 @@ import type {
   WorkflowEdgeDto,
   WorkflowLaunchOptionsDto,
   WorkflowNodeDto,
+  WorkflowOutcomeInputDto,
   WorkflowRunOptionsDto,
 } from "@polyth/contracts";
 import {
@@ -17,6 +20,7 @@ import {
   publishBackgroundWork,
   publishRecoveredBackgroundWork,
   serverServiceKey,
+  SERVER_DELEGATION_POLICY,
   SESSION_ATTENTION_SERVICE,
   type ServerPackage,
   type ServerPackageHost,
@@ -33,6 +37,7 @@ import {
 import { createWorkflowRunNode } from "./runner.ts";
 import { getWorkflowPreset, workflowPresets } from "./presets.ts";
 import { workflowReviewVerdictDescriptor } from "./judgment.ts";
+import { createWorkflowTools, workflowSkill } from "./agentTool.ts";
 
 const asModel = (value: unknown): ModelRef | undefined => {
   if (!value || typeof value !== "object") return undefined;
@@ -172,6 +177,10 @@ const nodesOf = (value: unknown): WorkflowNodeDto[] =>
           ...(model ? { model } : {}),
           ...(raw.allowedModels !== undefined
             ? { allowedModels: asModels(raw.allowedModels) }
+            : {}),
+          // Kept as sent: the service refuses an id that is not a role id.
+          ...(typeof raw.routingRole === "string" && raw.routingRole
+            ? { routingRole: raw.routingRole }
             : {}),
           ...(typeof raw.agent === "string" && raw.agent
             ? { agent: raw.agent }
@@ -349,6 +358,12 @@ export function workflowRoutes(
       json(200, service.listRuns(projectId));
       return true;
     }
+    if (path === "/api/workflow-outcomes" && method === "GET") {
+      const projectId = url.searchParams.get("projectId") ?? "";
+      await assertProject(projectId);
+      json(200, service.outcomes(projectId));
+      return true;
+    }
 
     if (
       path === "/api/workflows/preferences" &&
@@ -366,7 +381,7 @@ export function workflowRoutes(
     }
 
     let match = path.match(
-      /^\/api\/workflow-runs\/([^/]+)(?:\/(stop|retry|decision))?$/
+      /^\/api\/workflow-runs\/([^/]+)(?:\/(stop|retry|decision|outcome))?$/
     );
     if (match) {
       const runId = decodeURIComponent(match[1]!);
@@ -413,6 +428,28 @@ export function workflowRoutes(
             runId,
             raw as unknown as WorkflowDecisionInputDto,
             actorOf(request.space)
+          )
+        );
+        return true;
+      }
+      if (method === "POST" && match[2] === "outcome") {
+        const raw = await body();
+        const run = service.getRun(runId);
+        if (!run?.projectId)
+          throw Object.assign(new Error("workflow run not found"), {
+            code: "not-found",
+          });
+        await assertProject(run.projectId);
+        await assertSession(run.parentSessionId ?? "", run.projectId);
+        // The service validates the value and refuses anyone but the person
+        // who started the run.
+        json(
+          200,
+          await service.recordOutcome(
+            runId,
+            raw as unknown as WorkflowOutcomeInputDto,
+            actorOf(request.space),
+            "person"
           )
         );
         return true;
@@ -620,6 +657,28 @@ export default function registerPackage(
       );
     return person;
   };
+  /** Wake the parent chat's agent about a run it started. The message is a
+   * hidden turn that acts for the run's launcher, like every unit of the run. */
+  const wakeParent = (
+    spaceId: string,
+    event: { runId: string; parentSessionId: string; kind: string; text: string; launchedBy?: string }
+  ): void => {
+    void (async () => {
+      const person = contextFor(spaceId, event.launchedBy);
+      await host.forSpace(person).sessions.send(
+        event.parentSessionId,
+        {
+          text: event.text,
+          delivery: "normal",
+          hiddenUserMessage: true,
+          // Every notice is its own turn: the same unit may be refused twice
+          // with the same message, and the second wake must still arrive.
+          clientOperationId: randomUUID(),
+        },
+        event.launchedBy ? { author: { userId: event.launchedBy, via: "delegation" } } : undefined
+      );
+    })().catch((cause) => console.warn("[workflow] could not wake the parent chat", cause));
+  };
   const serviceFor = async (space: SpaceContext): Promise<WorkflowService> => {
     const existing = services.get(space.spaceId);
     if (existing) return await existing;
@@ -695,6 +754,20 @@ export default function registerPackage(
               .catch((cause) => console.warn("[workflow] removed stale background activity failed", cause));
           }
         },
+        routeFor: async (role, { launchedBy, exclude }) => {
+          // Resolved when a unit starts, never at registration: the policy
+          // belongs to an optional package and to the person, not the Space.
+          const policy = host.services.get(SERVER_DELEGATION_POLICY);
+          if (!policy?.route) return undefined;
+          const picked = await policy.route(contextFor(spaceId, launchedBy), role, { exclude });
+          return picked
+            ? {
+                model: { providerID: picked.providerID, modelID: picked.modelID },
+                harness: { mode: "pinned", harnessId: picked.harnessId },
+              }
+            : undefined;
+        },
+        onRunAttention: (event) => wakeParent(spaceId, event),
         onReviewSettled: (event) => {
           // Resolved when it fires, never at registration. Older hosts have
           // no notify; the review is then simply not announced.
@@ -864,14 +937,37 @@ export default function registerPackage(
     serverServiceKey<WorkflowService>("workflow"),
     compatibility
   );
+  // Agents reach workflows through two package tools. They bind to the
+  // calling turn's person and Space when a call runs, never at registration.
+  const tools = createWorkflowTools({
+    service: (space) => serviceFor(space),
+    personSpace: (userId, spaceId) =>
+      host.personSpaceContext?.(userId, spaceId) ?? unnamedPeople.get(personKey(spaceId, userId)),
+    systemSpace: (spaceId) => host.systemSpaceContext(spaceId),
+    session: async (space, sessionId) =>
+      (await host.forSpace(space).sessions.snapshot(sessionId)) ?? undefined,
+  });
+  let capabilities: { dispose(): void | Promise<void> }[] = [];
   return {
     remoteAccess: localOnlyRemoteAccess(["workflow"]),
     onEnable: () => {
       ensureRegistered();
+      const registry = host.services.get(
+        serverServiceKey<AgentCapabilityContributionRegistry>("harness.capabilities")
+      );
+      if (registry && capabilities.length === 0) {
+        capabilities = [
+          registry.register("workflow", workflowSkill),
+          registry.register("workflow", tools.run),
+          registry.register("workflow", tools.manage),
+        ];
+      }
     },
-    onDisable: () => {
+    onDisable: async () => {
       unregisterUse?.();
       unregisterUse = undefined;
+      for (const capability of capabilities.toReversed()) await capability.dispose();
+      capabilities = [];
     },
     routes: workflowRoutes(
       (space) => serviceFor(space),

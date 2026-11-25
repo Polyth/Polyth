@@ -50,7 +50,7 @@ Polyth enforces the duty in three places:
 
 Give each worker the requested behavior, baseline/dirty scope, owning skill, key files/symbols, constraints, allowed write paths, expected integration contract and verification requirements. Include only relevant evidence; do not broadcast the whole repo, logs or chat. A worker must verify an assumption before turning it into code.
 
-The packet's exact fields (located facts, what to read, when to stop, report size), the standing lines every packet ends with, the scout-to-implementer hand-off through a scratch file and the order of result checks with their round limit are in the [cost-aware delegation skill](../../.agents/skills/delegate/SKILL.md#4-spawn-a-bounded-packet). The same rule in short form reaches agents in every project through the shipped `polyth-sessions` skill (`packages/harness-runtime/src/sessionControlTool.ts`).
+The packet's exact fields (located facts, what to read, when to stop, report size), the standing lines every packet ends with, the scout-to-implementer hand-off through a scratch file and the order of result checks with their round limit are in the [cost-aware delegation skill](../../.agents/skills/delegate/SKILL.md#4-spawn-a-bounded-packet). The same rule in short form reaches agents in every project through the shipped `polyth-sessions` skill (`packages/harness-runtime/src/sessionControlTool.ts`). When a task fits a saved workflow template, an agent runs the template through the `polyth_workflow` tool instead of driving each worker by hand; its boundaries (own project, own chat's runs, never above the chat's approval level) are in [workflows](../dev/workflows.md#agent-tools).
 
 ## Ownership and integration
 

@@ -1,20 +1,9 @@
-import type {
-  HarnessSelection,
-  ModelRef,
-  WorkflowRunDto,
-} from "@polyth/contracts";
-
-/** Pure UI hand-off from Chat to the workflow surface. The run itself and all
- * model-visible progress stay in the parent session event log. */
+/** Pure UI hand-off from Chat to the workflow settings: which template's
+ * settings page to open. Runs belong to the chat that started them; the
+ * window carries no run, request or route. */
 export interface WorkflowLaunchIntent {
   projectId: string;
-  sessionId?: string;
-  input: string;
   workflowId?: string;
-  model?: ModelRef;
-  harness?: HarnessSelection;
-  agent?: string;
-  run?: WorkflowRunDto;
 }
 
 const STORAGE_KEY = "polyth.workflow-launch.v1";
@@ -40,7 +29,7 @@ function storedIntent(): WorkflowLaunchIntent | null {
   if (!raw) return null;
   try {
     const value = JSON.parse(raw) as Partial<WorkflowLaunchIntent>;
-    if (typeof value.projectId === "string" && typeof value.input === "string") {
+    if (typeof value.projectId === "string") {
       return value as WorkflowLaunchIntent;
     }
   } catch {

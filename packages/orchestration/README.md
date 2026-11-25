@@ -24,6 +24,17 @@ for which kind of work, with quota fallbacks and a never-use list.
   `src/serverEntry.ts`). The never lists and the order apply in both modes: in
   `auto` mode the brief has empty `text` (no policy block) and is undefined only
   when the person set none of them.
+- **Recommend** (`src/recommend.ts`) fills each role from the person's
+  favorites and use by name-based tier. A model with at least 20 turns in the
+  window of which 30% or more failed is placed after every reliable model of
+  the role's tiers, so a person's own failure history shapes the draft; it is
+  still offered when nothing else exists.
+- **Route for one role**: the same service answers `route(space, roleId,
+  { exclude })` with the first usable model of that role's chain (statuses
+  `ready` and `unverified`) whose key is not excluded; undefined in `auto`
+  mode, while the package is disabled, and for an unknown, disabled or empty
+  role. The workflow engine uses it to run a unit that names a routing role
+  ([workflows](../../docs/dev/workflows.md#routing-roles)).
 - **Resolution** (`src/resolve.ts`): one `SERVER_MODEL_ROUTING.candidates(space,
   { pairs, limit: 50 })` call; per choice the status is
   excluded > unlisted > unavailable > blocked > over-pace > ceiling > unverified > ready.

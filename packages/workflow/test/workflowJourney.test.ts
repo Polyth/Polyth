@@ -14,29 +14,12 @@ import {
 
 const source = (path: string) => readFile(new URL(path, import.meta.url), "utf8");
 
-test("chat hands its draft and direct-run result to the workflow surface", () => {
-  handOffWorkflowLaunch({
-    projectId: "project",
-    sessionId: "parent",
-    workflowId: "workflow",
-    input: "Audit the release",
-    run: {
-      id: "run",
-      workflowId: "workflow",
-      projectId: "project",
-      parentSessionId: "parent",
-      name: "Release",
-      input: "Audit the release",
-      status: "running",
-      startedAt: 1,
-      layers: [["review"]],
-      nodes: [{ id: "review", role: "Reviewer", status: "queued" }],
-    },
-  });
+test("chat hands only a template to the workflow settings, never a run or a request", () => {
+  handOffWorkflowLaunch({ projectId: "project", workflowId: "workflow" });
   assert.equal(takeWorkflowLaunch("other"), null, "another project cannot consume the hand-off");
   const launch = takeWorkflowLaunch("project");
-  assert.equal(launch?.input, "Audit the release");
-  assert.equal(launch?.run?.parentSessionId, "parent");
+  assert.equal(launch?.workflowId, "workflow");
+  assert.deepEqual(Object.keys(launch ?? {}).sort(), ["projectId", "workflowId"], "no run, input or route travels with it");
   assert.equal(takeWorkflowLaunch("project"), null, "the hand-off is one-shot");
 });
 
@@ -221,11 +204,13 @@ test("workflow journey surfaces expose draft launch, chat progress, HITL, stop, 
     launcher.indexOf("consumeDraft?.(enteredTask);", admitted) < launcher.indexOf("publishWorkflowRun(started);"),
     "the accepted workflow clears the draft before publishing its run indicator",
   );
-  // The new chat hands off at once: the start is tracked, then the parent and
-  // its workflow window open while admission is still pending.
+  // The new chat hands off at once: the start is tracked, then the parent
+  // chat opens while admission is still pending. The run's card lives there;
+  // the workflow window is not opened for it.
   const handOff = launcher.slice(launcher.indexOf("const startInNewParent"), admitted);
   assert.ok(handOff.indexOf("beginWorkflowStart(") < handOff.indexOf("await openSession(parentSessionId)"));
-  assert.ok(handOff.indexOf("handOffWorkflowLaunch(") < handOff.indexOf('openWorkspacePane("workflow")'));
+  assert.doesNotMatch(handOff, /handOffWorkflowLaunch\(/);
+  assert.doesNotMatch(handOff, /openWorkspacePane\("workflow"\)/);
   assert.match(launcher, /await api\.createSession\(\{[\s\S]*?projectId/);
   assert.match(
     launcher,
@@ -255,9 +240,16 @@ test("workflow journey surfaces expose draft launch, chat progress, HITL, stop, 
   assert.match(entry, /slot: "session\.timeline\.event"/);
   assert.match(entry, /eventTypes: \["workflow\/run-started"\]/);
   assert.match(await source("../widgets/WorkflowTimelineCard.tsx"), /handOffWorkflowLaunch/);
-  assert.match(workflow, /workflowHumanWaitLabel/);
-  assert.match(workflow, /api\.retryWorkflowRun/);
-  assert.match(workflow, /api\.stopWorkflowRun/);
+  // Watching and steering a run is the chat card's business; the workflow
+  // window holds template settings only and makes no run request.
+  const card = await source("../widgets/WorkflowTimelineCard.tsx");
+  assert.match(card, /workflowNodeDetail/);
+  assert.match(card, /api\.retryWorkflowRun/);
+  assert.match(card, /api\.stopWorkflowRun/);
+  assert.match(card, /api\.runWorkflow/);
+  assert.match(card, /ReviewDecision/);
+  assert.match(card, /WorkflowRunOutcome/);
+  assert.doesNotMatch(workflow, /api\.(runWorkflow|stopWorkflowRun|retryWorkflowRun|listWorkflowRuns|getWorkflowRun)/);
   // Active work stays visible in Chat. The bar is opt-in (Appearance → Status
   // bar), and its "Workflows" mode renders the package's own strip while a run
   // is active, in any view, even though the full bar is off.

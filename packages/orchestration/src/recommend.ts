@@ -31,6 +31,14 @@ const TIER_ORDER: Record<BuiltinRoleId, readonly ModelTier[]> = {
 
 const PER_ROLE = 3;
 
+/** A model the person's own history shows failing often: at least this many
+ *  turns in the window and this share of them failed. It is recommended only
+ *  after every reliable model of the role's tiers. */
+const UNRELIABLE_MIN_TURNS = 20;
+const UNRELIABLE_SHARE = 0.3;
+export const unreliable = (option: Pick<ModelOption, "turns" | "failed">): boolean =>
+  option.turns >= UNRELIABLE_MIN_TURNS && (option.failed ?? 0) / option.turns >= UNRELIABLE_SHARE;
+
 const rank = (a: ModelOption, b: ModelOption): number =>
   (a.favoriteIndex ?? Number.POSITIVE_INFINITY) - (b.favoriteIndex ?? Number.POSITIVE_INFINITY)
   || b.turns - a.turns
@@ -42,7 +50,8 @@ export function recommendPolicy(saved: RoutingPolicy, options: ModelOption[]): R
 
   const pickFor = (id: BuiltinRoleId): ModelChoice[] => {
     const source = id === "vision" ? pool.filter((option) => option.vision) : pool;
-    const ordered = TIER_ORDER[id].flatMap((tier) => source.filter((option) => option.tier === tier).sort(rank));
+    const byTier = (pool: ModelOption[]) => TIER_ORDER[id].flatMap((tier) => pool.filter((option) => option.tier === tier).sort(rank));
+    const ordered = [...byTier(source.filter((option) => !unreliable(option))), ...byTier(source.filter(unreliable))];
     const chosen: ModelOption[] = [];
     const first = ordered[0];
     if (first) {

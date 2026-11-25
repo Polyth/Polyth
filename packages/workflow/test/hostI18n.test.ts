@@ -58,7 +58,6 @@ test("workflow catalogs contain no unjustified English-filled fallbacks", () => 
       "workflowview.agentValue",
       "workflowview.instructions",
       "workflowview.pipeline",
-      "workflowview.runOptions",
       "workflowview.description",
       "workflowcount.agentOne",
       "workflowcount.agentOther",

@@ -4,6 +4,8 @@ import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
+  AgentCapabilityContribution,
+  AgentCapabilityContributionRegistry,
   JsonObject,
   HarnessRegistry,
   RouteRequest,
@@ -134,6 +136,7 @@ function registeredRouteHarness(seed: SessionEvent[], harnesses?: HarnessRegistr
   const root = mkdtempSync(join(tmpdir(), "polyth-workflow-registered-"));
   const events = new Map<string, SessionEvent[]>([["parent", [...seed]]]);
   const childInputs: UserTurnInput[] = [];
+  const sent: Array<{ sessionId: string; input: UserTurnInput }> = [];
   let childCreates = 0;
   const appended: SessionEvent[] = [];
   const nextSeq = new Map<string, number>([
@@ -154,8 +157,9 @@ function registeredRouteHarness(seed: SessionEvent[], harnesses?: HarnessRegistr
       return { id };
     },
     autoAcceptSet: async () => ({ setting: "off", effective: false }),
-    send: async (_sessionId: string, input: UserTurnInput) => {
+    send: async (sessionId: string, input: UserTurnInput) => {
       childInputs.push(input);
+      sent.push({ sessionId, input });
       return {};
     },
     events: async (sessionId: string, afterSeq = 0) =>
@@ -206,7 +210,7 @@ function registeredRouteHarness(seed: SessionEvent[], harnesses?: HarnessRegistr
     },
   } as unknown as ServerPackageHost;
   const registered = registerPackage(host);
-  return { route: registered.routes!, childInputs, childCreates: () => childCreates, appended };
+  return { route: registered.routes!, childInputs, childCreates: () => childCreates, appended, registered, services, sent };
 }
 
 test("built-in workflows run directly and copies preserve origin metadata", async () => {
@@ -550,4 +554,83 @@ test("a fix kept for future runs reaches the bundled template the routes serve",
   const single = request(space("space-a"), `/api/workflows/${encodeURIComponent(preset.id)}`, "GET");
   await route(single.request);
   assert.deepEqual((single.response.body as WorkflowDto).nodes[0]?.model, good);
+});
+
+test("routes keep a unit's routing role, record a settled run's outcome for its launcher and count outcomes", async () => {
+  const service = serviceIn(async () => ({ output: "ok" }));
+  const { route } = routeHarness(service);
+  const create = request(space("space-a"), "/api/workflows", "POST", {
+    projectId: "project",
+    name: "Roles",
+    nodes: [{ id: "build", role: "Builder", prompt: "Build", routingRole: "implement" }],
+    edges: [],
+  });
+  await route(create.request);
+  const saved = create.response.body as WorkflowDto;
+  assert.equal(saved.nodes[0]?.routingRole, "implement");
+  const bad = request(space("space-a"), "/api/workflows", "POST", {
+    projectId: "project", name: "Bad", nodes: [{ id: "build", role: "Builder", prompt: "Build", routingRole: "No Such Role" }], edges: [],
+  });
+  await assert.rejects(Promise.resolve(route(bad.request)), /routingRole is invalid/);
+
+  const start = request(space("space-a"), `/api/workflows/${saved.id}/run`, "POST", { sessionId: "parent", input: "Task" });
+  await route(start.request);
+  const runId = (start.response.body as WorkflowRunDto).id;
+  for (let attempt = 0; attempt < 200 && service.getRun(runId)?.status === "running"; attempt++)
+    await new Promise<void>((resolve) => setTimeout(resolve, 1));
+
+  const foreign = request(space("space-b"), `/api/workflow-runs/${runId}/outcome`, "POST", { value: "accepted" });
+  await assert.rejects(Promise.resolve(route(foreign.request)), /not found/);
+  assert.equal(service.getRun(runId)?.outcome, undefined);
+  const invalid = request(space("space-a"), `/api/workflow-runs/${runId}/outcome`, "POST", { value: "great" });
+  await assert.rejects(Promise.resolve(route(invalid.request)), /value must be one of/);
+  const record = request(space("space-a"), `/api/workflow-runs/${runId}/outcome`, "POST", { value: "discarded", note: "wrong approach" });
+  await route(record.request);
+  assert.equal(record.response.status, 200);
+  const outcome = (record.response.body as WorkflowRunDto).outcome!;
+  assert.deepEqual({ ...outcome, at: 0 }, { value: "discarded", note: "wrong approach", at: 0, by: "person" });
+
+  const summary = request(space("space-a"), "/api/workflow-outcomes?projectId=project", "GET");
+  await route(summary.request);
+  assert.deepEqual(summary.response.body, [{
+    workflowId: saved.id, name: "Roles", runs: 1, done: 1, error: 0, stopped: 0,
+    accepted: 0, reworked: 0, discarded: 1, unrecorded: 0, units: 1, reworkedUnits: 0,
+  }]);
+  const foreignSummary = request(space("space-b"), "/api/workflow-outcomes?projectId=project", "GET");
+  await assert.rejects(Promise.resolve(route(foreignSummary.request)), /not found/);
+});
+
+test("the package registers its skill and tools, and a run an agent starts wakes the parent chat when it settles", async () => {
+  const harness = registeredRouteHarness([]);
+  const contributions: AgentCapabilityContribution[] = [];
+  let disposed = 0;
+  harness.services.provide(serverServiceKey<AgentCapabilityContributionRegistry>("harness.capabilities"), {
+    register: (owner: string, contribution: AgentCapabilityContribution) => {
+      assert.equal(owner, "workflow");
+      contributions.push(contribution);
+      return { dispose: () => { disposed++; } };
+    },
+  } as unknown as AgentCapabilityContributionRegistry);
+  await harness.registered.onEnable?.();
+  await harness.registered.onEnable?.();
+  assert.deepEqual(
+    contributions.map((entry) => [entry.descriptor.kind, (entry.descriptor as { name?: string }).name ?? "", typeof entry.autoApprove]),
+    [["skill", "polyth-workflow", "undefined"], ["tool", "polyth_workflow", "function"], ["tool", "polyth_workflow_manage", "undefined"]],
+    "registered once, and only the run tool is approved by the package",
+  );
+  const run = contributions[1]!.execute!;
+  const ctx = { sessionId: "parent", projectId: "project", cwd: "/project", spaceId: "space-a" };
+  const started = await run({ action: "run", workflowId: "review", input: "Check the change" }, ctx);
+  assert.match(started.output, /End your turn now/);
+  for (let attempt = 0; attempt < 400 && !harness.sent.some((entry) => entry.sessionId === "parent"); attempt++)
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+  const wake = harness.sent.find((entry) => entry.sessionId === "parent");
+  assert.ok(wake, "the parent chat is woken");
+  assert.equal(wake.input.hiddenUserMessage, true);
+  assert.match(wake.input.text ?? "", /^Workflow "Review" \(run [0-9a-f-]{36}\): (finished|failed|stopped)\. /);
+  // A chat of another Space's project, or a chat this context cannot see, is refused.
+  await assert.rejects(run({ action: "runs" }, { ...ctx, sessionId: "elsewhere" }), /not available/);
+  await assert.rejects(run({ action: "runs" }, { ...ctx, projectId: "other" }), /not available/);
+  await harness.registered.onDisable?.();
+  assert.equal(disposed, 3);
 });

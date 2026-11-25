@@ -1125,6 +1125,13 @@ export interface WorkflowNodeDto {
    * harness differs from the launch harness, the model stays unset so the
    * selected harness chooses its own default. */
   allowedModels?: ModelRef[];
+  /** Routing role from the launcher's delegation policy (Settings →
+   * Orchestration): `explore`, `implement`, `verify`, `review`, `vision`,
+   * `write` or a `custom-…` id. While that person routes By role, the unit
+   * runs on the role's first usable model, chosen when the unit starts. In
+   * Auto mode, for system runs and when no model of the role is usable, the
+   * unit keeps the route this node resolves to without the role. */
+  routingRole?: string;
   agent?: string;
   /** Absent preserves the project's existing harness selection. */
   harness?: HarnessSelection;
@@ -1187,6 +1194,52 @@ export interface WorkflowLaunchOptionsDto {
   model?: ModelRef;
   harness?: HarnessSelection;
   agent?: string;
+  /** What the launcher already located, one line each (`path:line — fact`).
+   * Every unit receives them and is told not to search for them again. */
+  facts?: string[];
+  /** Wake the parent chat's agent when the run settles or waits for a fix or
+   * a review decision. Set by the workflow agent tool. */
+  wake?: boolean;
+}
+
+/** How the result of a settled run was used. `accepted`: as delivered;
+ * `reworked`: kept after more work outside the run; `discarded`: not used. */
+export type WorkflowRunOutcomeValue = "accepted" | "reworked" | "discarded";
+
+export interface WorkflowRunOutcomeDto {
+  value: WorkflowRunOutcomeValue;
+  note?: string;
+  at: number;
+  /** Who recorded it: the person, or the parent chat's agent. Never an id. */
+  by: "person" | "agent";
+}
+
+export interface WorkflowOutcomeInputDto {
+  value: WorkflowRunOutcomeValue;
+  note?: string;
+}
+
+/** Settled runs of one template, counted for comparing routes of work. */
+export interface WorkflowOutcomeSummaryDto {
+  workflowId: string;
+  name: string;
+  runs: number;
+  done: number;
+  error: number;
+  stopped: number;
+  accepted: number;
+  reworked: number;
+  discarded: number;
+  /** Settled runs nobody recorded an outcome for. */
+  unrecorded: number;
+  /** Units that ran, and how many of them a review sent back at least once. */
+  units: number;
+  reworkedUnits: number;
+}
+
+export interface WorkflowRunOutcomeData {
+  runId: string;
+  outcome: WorkflowRunOutcomeDto;
 }
 
 export interface WorkflowRunContextDto {
@@ -1257,6 +1310,9 @@ export interface WorkflowRunNodeDto {
   model?: ModelRef;
   agent?: string;
   harness?: HarnessSelection;
+  /** The routing role that chose `model` and `harness` for this pass; absent
+   * when the unit runs on its own route. */
+  routedRole?: string;
   group?: string;
   attempt?: number;
   /** Only true when the server can prove that restarting this unit is safe. */
@@ -1312,6 +1368,13 @@ export interface WorkflowRunDto {
   finishedAt?: number;
   layers: string[][];
   nodes: WorkflowRunNodeDto[];
+  /** Code locations the launcher and the finished units reported, one line
+   * each. Later units receive them instead of searching again. */
+  facts?: string[];
+  /** How the settled run's result was used, once someone records it. */
+  outcome?: WorkflowRunOutcomeDto;
+  /** The parent chat's agent is woken when the run settles or waits. */
+  wake?: boolean;
 }
 
 export interface WorkflowRunStartedData {
@@ -1329,6 +1392,8 @@ export interface WorkflowRunStartedData {
   startedAt: number;
   layers: string[][];
   nodes: WorkflowRunNodeDto[];
+  /** The parent chat's agent started the run and is woken to steer it. */
+  wake?: boolean;
 }
 
 export interface WorkflowNodeProgressData {

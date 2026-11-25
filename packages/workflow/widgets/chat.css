@@ -151,3 +151,30 @@
 /* (max-height: 560px), published by the host as a body token: a height
    media query flips with every phone keyboard and re-lays the whole app. */
 :where(body[data-viewport-short~="560"]) .workflow-launch-panel .workflow-launch-list { max-height: 28dvh; }
+
+/* A start this chat could not complete: kept above the template list with its
+ * request, so it can be retried with the same operation id or put back. */
+.workflow-launch-panel .workflow-launch-start {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+}
+.workflow-launch-start > strong { color: var(--text); font-size: var(--font-label); }
+.workflow-launch-start-error { color: var(--red-on-wash, var(--red)); font-size: var(--font-meta); line-height: var(--font-meta-lh); overflow-wrap: anywhere; }
+.workflow-launch-start-request {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.workflow-launch-start-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.composer-workflow[data-attention="true"] { color: var(--amber); }

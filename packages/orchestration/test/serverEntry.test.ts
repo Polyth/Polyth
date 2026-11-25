@@ -167,10 +167,18 @@ test("a disabled package gives agents no brief; an alias of an excluded model is
   assert.equal((put.body as OrchestrationState).shortlist.rows[0]!.name, "Claude Sonnet 5.5");
 
   assert.equal(await service.brief(alice), undefined, "not enabled yet");
+  assert.equal(await service.route!(alice, "review"), undefined, "not enabled yet");
   await f.pkg.onEnable?.();
   assert.match((await service.brief(alice))!.text, /use claude anthropic\/sonnet/);
+  // A role's route is its first usable model: the excluded alias is skipped.
+  assert.deepEqual(await service.route!(alice, "review"), { harnessId: "claude", providerID: "anthropic", modelID: "sonnet" });
+  assert.equal(await service.route!(alice, "review", { exclude: ["claude::anthropic/sonnet"] }), undefined, "nothing else in the chain");
+  assert.equal(await service.route!(alice, "implement"), undefined, "a role without models");
+  assert.equal(await service.route!(alice, "no-such-role"), undefined);
+  assert.equal(await service.route!(bob, "review"), undefined, "bob routes automatically");
   await f.pkg.onDisable?.();
   assert.equal(await service.brief(alice), undefined, "disabled again");
+  assert.equal(await service.route!(alice, "review"), undefined, "disabled again");
 });
 
 test("auto mode: never lists and the person's order shape the list and reach agents without policy lines", async (t) => {

@@ -14,7 +14,8 @@ import { friendlyError } from "../../../apps/web/src/settings.ts";
 import { getState, openWorkspacePane, setUiError } from "../../../apps/web/src/store.ts";
 import { publishWorkflowRun } from "./workflowMonitor.ts";
 import { handOffWorkflowLaunch } from "./workflowLaunch.ts";
-import { beginWorkflowStart } from "./workflowStart.ts";
+import { beginWorkflowStart, dismissWorkflowStart, retryWorkflowStart, useWorkflowStart } from "./workflowStart.ts";
+import { requestComposerReplace } from "../../../apps/web/src/composerInsert.ts";
 import { orderWorkflows } from "../src/presets.ts";
 import { workflowDisplayName, workflowDisplayDescription, workflowTopology } from "./workflowLabels.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
@@ -296,15 +297,7 @@ export default function WorkflowLauncher({
 
   const openBuilder = (workflowId?: string) => {
     if (!projectId || busyId) return;
-    handOffWorkflowLaunch({
-      projectId,
-      ...(sessionId ? { sessionId } : {}),
-       input: task,
-       ...(workflowId ? { workflowId } : {}),
-       ...(model ? { model } : {}),
-       ...(harness ? { harness } : {}),
-       ...(agent ? { agent } : {}),
-    });
+    handOffWorkflowLaunch({ projectId, ...(workflowId ? { workflowId } : {}) });
     setOpen(false);
     openWorkspacePane("workflow");
   };
@@ -315,8 +308,8 @@ export default function WorkflowLauncher({
   });
 
   /** A launch from the unsent new chat does not wait for admission on the new
-   * chat screen: its parent session and the workflow window open at once and
-   * show the start in progress, while the request completes in the background. */
+   * chat screen: its parent session opens at once, where the run's card
+   * appears once admitted, while the request completes in the background. */
   const startInNewParent = async (
     workflow: WorkflowDto,
     launch: NonNullable<typeof launchRef.current>,
@@ -326,43 +319,29 @@ export default function WorkflowLauncher({
   ) => {
     const parentSessionId = launch.parentSessionId;
     const started = beginWorkflowStart(
-      { parentSessionId, projectId: launch.projectId, workflowId: workflow.id, input: enteredTask },
+      { parentSessionId, projectId: launch.projectId, workflowId: workflow.id, name: workflowDisplayName(workflow), input: enteredTask },
       request,
       (cause) => friendlyError(tr("workflowlauncher.couldNotStart"), cause),
     );
-    // From here a retry belongs to the workflow window, which resends this
-    // exact request and operation id.
+    // From here the start is tracked by `beginWorkflowStart`, not the launcher.
     retryRef.current = null;
     void started.then(
       () => { if (version === scopeVersion.current) rememberWorkflow(workflow.id); },
       (cause) => {
-        // The workflow window shows the failure with Retry. Anywhere else it
-        // must still be reported rather than lost.
-        const state = getState();
-        if (state.activeSessionId !== parentSessionId || state.railPlugin !== "workflow") {
-          setUiError(friendlyError(tr("workflowlauncher.couldNotStart"), cause));
-        }
+        // The failed start stays in its chat: the workflow button offers Retry
+        // with the same request and operation id; this says where to look.
+        setUiError(friendlyError(tr("workflowlauncher.startFailedRetry"), cause));
       },
     );
-    // The task moves with the launch into the workflow window, which keeps it
-    // for a retry; the new chat is left clean. This runs while the new chat's
-    // composer still owns the draft.
+    // The task moves with the launch into the run's card in the new chat; the
+    // composer is left clean. This runs while the new chat's composer still
+    // owns the draft.
     consumeDraft?.(enteredTask);
     setOpen(false);
     await openSession(parentSessionId).catch((cause) => {
       setUiError(friendlyError(tr("workflowlauncher.couldNotStart"), cause));
     });
     if (getState().activeSessionId !== parentSessionId) return;
-    handOffWorkflowLaunch({
-      projectId: launch.projectId,
-      sessionId: parentSessionId,
-      input: enteredTask,
-      workflowId: workflow.id,
-      ...(launch.model ? { model: launch.model } : {}),
-      ...(launch.harness ? { harness: launch.harness } : {}),
-      ...(launch.agent ? { agent: launch.agent } : {}),
-    });
-    openWorkspacePane("workflow");
   };
 
   const run = async (workflow: WorkflowDto) => {
@@ -466,6 +445,20 @@ export default function WorkflowLauncher({
     }
   };
 
+  // A start this chat is waiting on, or could not complete: it stays here so the
+  // request is never lost and a retry reuses the same operation id.
+  const start = useWorkflowStart(sessionId);
+  const failedStart = start?.status === "failed" ? start : undefined;
+  const dismissStart = (restore: boolean) => {
+    if (!failedStart) return;
+    const text = failedStart.input;
+    dismissWorkflowStart(failedStart.parentSessionId);
+    if (restore && !draftText.trim()) requestComposerReplace(text);
+  };
+  const copyStart = () => {
+    if (failedStart) void navigator.clipboard?.writeText(failedStart.input).catch(() => undefined);
+  };
+
   const sorted = orderWorkflows(workflows, { ...preferences, selectedId });
   const visibleWorkflows = sorted.slice(0, visibleCount);
   const canRun = (open ? task : draftText).trim().length > 0;
@@ -492,6 +485,8 @@ export default function WorkflowLauncher({
             size="md"
             variant="ghost"
             disabled={!projectId || workflowBusy}
+            busy={start?.status === "starting"}
+            data-attention={failedStart ? "true" : undefined}
             pressed={open}
             onClick={openLauncher}
             title={!projectId ? tr("workflowlauncher.openProject") : tr("workflowlauncher.chooseWorkflowRun")}
@@ -515,6 +510,18 @@ export default function WorkflowLauncher({
         popoverOverflow="auto"
       >
         <div className="workflow-launch-panel">
+          {failedStart && (
+            <div className="workflow-launch-start" role="alert">
+              <strong>{tr("workflowlauncher.startFailedValue", { name: failedStart.name ?? failedStart.workflowId })}</strong>
+              {failedStart.error && <span className="workflow-launch-start-error">{failedStart.error}</span>}
+              <p className="workflow-launch-start-request" title={failedStart.input}>{failedStart.input}</p>
+              <div className="workflow-launch-start-actions">
+                <Button size="sm" variant="primary" onClick={() => { void retryWorkflowStart(failedStart.parentSessionId)?.catch(() => undefined); }}>{tr("common.retry")}</Button>
+                {draftText.trim() && <Button size="sm" variant="ghost" onClick={copyStart}>{tr("workflowlauncher.copyRequest")}</Button>}
+                <Button size="sm" variant="ghost" onClick={() => dismissStart(true)}>{tr("workflowlauncher.dismiss")}</Button>
+              </div>
+            </div>
+          )}
           {error && !loadFailed && <div className="form-error workflow-error" role="alert">{error}</div>}
           {loading ? <div className="workflow-launch-empty" role="status">{tr("workflowlauncher.loading")}</div> : loadFailed ? (
             <div className="workflow-launch-empty workflow-launch-failed"><strong role="alert">{tr("workflowlauncher.couldNotLoad")}</strong><span>{error}</span><Button size="sm" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>{tr("common.retry")}</Button></div>

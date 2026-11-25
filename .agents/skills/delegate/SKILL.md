@@ -20,6 +20,17 @@ What a worker costs is its context size multiplied by its model calls, not its a
 
 Add the orchestration itself to the plan/todo list and keep exactly one item in progress.
 
+### A workflow template instead of hand-driven workers
+
+When the task has the shape of a saved template (a bounded change that deserves an independent review; work that splits into two or three non-overlapping scopes), run the template with the `polyth_workflow` tool instead of spawning and reviewing each worker yourself. The engine runs the units and their review rounds, so you spend no turns relaying reports, and it wakes you when the run settles or waits.
+
+- `run` takes the same packet you would write for a worker as `input`, and your located `path:line` lines as `facts`; units pass on what they locate, so later units do not search again.
+- Units with a routing role take their model from the person's routing policy; a refused model moves to the role's next one.
+- Check the result yourself (section 6 still applies: a finished run is evidence, not proof), then record `outcome`: accepted, reworked or discarded. `stats` shows those counts per template, which is the evidence for choosing a template again.
+- Keep it out of a workflow when it is a few tool calls, one file, or a T2 decision one strong session should own: every unit starts with tens of thousands of tokens of its own.
+
+Contract and limits: [workflows](../../../docs/dev/workflows.md#agent-tools).
+
 ## 2. Shortlist the fleet once
 
 Call the Polyth control capability with action `agent.models` exactly once before any spawn (`limit`, `windowDays`, optional `harnessId`). It returns ranked lines `N. ★ <harness> <provider>/<model> (<what an alias runs>) · <turns>t/<sessions>s · <fail>% fail · quota NN%` plus one quota line per source. Models are named as each harness's live catalog names them, and models a harness no longer offers are left out.
@@ -124,4 +135,4 @@ Rounds:
 
 ## What this cannot promise
 
-No routing rule makes a worker's result flawless, and Polyth records no per-child quality outcome (accepted as delivered, accepted after rework, discarded), so the routing above rests on cost, failure and follow-up counts plus reviewed samples. Quality comes from the gates in section 6, and those cost tokens: delegation lowers the cost of a unit of work only where it removes repeated reading, unbounded output, failed starts and top-tier workers on mechanical work. For T2 work the cheaper option is usually one strong session, not a pipeline.
+No routing rule makes a worker's result flawless. A workflow run records its outcome (accepted as delivered, kept after rework, discarded) when someone sets it; a child spawned with `agent.spawn` has no such record, so the routing above rests on cost, failure and follow-up counts plus reviewed samples. Quality comes from the gates in section 6, and those cost tokens: delegation lowers the cost of a unit of work only where it removes repeated reading, unbounded output, failed starts and top-tier workers on mechanical work. For T2 work the cheaper option is usually one strong session, not a pipeline.

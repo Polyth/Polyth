@@ -24,18 +24,21 @@ interface Preset {
   stages: WorkflowNodeDto[][];
 }
 
+// Every bundled unit names the kind of work it does. A person who routes By
+// role (Settings → Orchestration) gets that role's model for the unit; anyone
+// else, and a role with no usable model, keeps the launching chat's route.
 const lead = (role = "Lead", focus = "implementation"): WorkflowNodeDto => ({
-  id: "lead", role, kind: "lead",
+  id: "lead", role, kind: "lead", routingRole: "review",
   prompt: `Inspect the request, project, and supplied context. Produce a concise ${focus} brief grounded in actual files and evidence. Allocate a bounded, non-overlapping scope to each downstream worker, identify shared contracts and checks, and state what must remain unchanged. Do not edit files. Keep the brief sufficient for workers without repeating the conversation.`,
 });
 
-const worker = (id: string, role: string, prompt: string, group?: string): WorkflowNodeDto => ({
-  id, role, kind: "worker", ...(group ? { group } : {}),
+const worker = (id: string, role: string, prompt: string, group?: string, routingRole = "implement"): WorkflowNodeDto => ({
+  id, role, kind: "worker", routingRole, ...(group ? { group } : {}),
   prompt: `${prompt} Follow the lead's scope for your execution-unit identity; inspect current source first. If ownership is ambiguous, report the dependency instead of editing shared files concurrently. Preserve unrelated work. Return concise results, changed paths, checks, and unresolved questions.`,
 });
 
 const review = (role = "Reviewer", focus = "correctness, regression risk, and the requested behavior"): WorkflowNodeDto => ({
-  id: "review", role, kind: "review",
+  id: "review", role, kind: "review", routingRole: "review",
   prompt: `Review the actual work and upstream evidence for ${focus}. Use the original request and current project state. Run relevant available checks without modifying files. Identify actionable findings and partial or unverified work explicitly; when something must change, request changes so the units before you rework it, and approve only work that meets the request. Produce one coherent final result with the outcome, useful evidence, and any next action; do not simply concatenate worker reports.`,
 });
 
@@ -82,7 +85,7 @@ const PRESETS: readonly Preset[] = [
     description: "Research three independent angles and synthesize the evidence.",
     stages: [
       [lead("Research Lead", "research scope, independent questions, and source quality")],
-      Array.from({ length: 3 }, (_, index) => worker(`researcher-${index + 1}`, "Researcher", "Research your assigned question with available primary sources. Do not modify the project. Cite supporting sources, distinguish inference, and preserve uncertainty.", "research")),
+      Array.from({ length: 3 }, (_, index) => worker(`researcher-${index + 1}`, "Researcher", "Research your assigned question with available primary sources. Do not modify the project. Cite supporting sources, distinguish inference, and preserve uncertainty.", "research", "explore")),
       [review("Synthesis", "source quality, contradictory evidence, and decision-relevant findings; preserve citations and uncertainty")],
     ],
   },

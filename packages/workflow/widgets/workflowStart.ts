@@ -5,11 +5,13 @@ import { publishWorkflowRun } from "./workflowMonitor.ts";
 /** A run the client asked to start in a fresh parent session that the server
  * has not admitted yet. Pure UI: the admitted run and all of its progress live
  * in the parent session's event log; this only covers the gap between Run and
- * admission so the workflow window can show the launch the moment it opens. */
+ * admission so a failed start can be reported and resent with the same operation id. */
 export interface WorkflowStart {
   parentSessionId: string;
   projectId: string;
   workflowId: string;
+  /** The template's display name, for the row that offers a retry. */
+  name?: string;
   input: string;
   status: "starting" | "failed";
   error?: string;
@@ -87,6 +89,7 @@ export function subscribeWorkflowStarts(listener: () => void): () => void {
   return () => { listeners.delete(listener); };
 }
 
+/** The start this chat is waiting on or could not complete, if any. */
 export function useWorkflowStart(parentSessionId: string | null | undefined): WorkflowStart | undefined {
   return useSyncExternalStore(
     subscribeWorkflowStarts,

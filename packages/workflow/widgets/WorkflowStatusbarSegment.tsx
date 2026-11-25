@@ -11,7 +11,6 @@ import { HelpIcon, Icon, ShieldAlertIcon, WrenchIcon } from "../../../apps/web/s
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { subscribeWorkflowRuns } from "./workflowMonitor.ts";
 import { prioritizeWorkflowRuns, workflowFinishedCount, workflowHumanWait, workflowNeedsFix } from "./workflowRun.ts";
-import { handOffWorkflowLaunch } from "./workflowLaunch.ts";
 
 // Two-tier cadence: the fast poll only runs while a run is actually active, so
 // an idle project costs one slow heartbeat. WS pushes wake the fast poll the
@@ -97,7 +96,7 @@ function WorkflowChip({ host, projectId, runs }: {
         : null;
   // The request is answered in the waiting unit's own chat, so the chip goes
   // straight there instead of to a run overview that only points at it. A fix
-  // is made in the run itself.
+  // is made on the run's card in its chat.
   const waitingSessionId = wait && wait !== "fix"
     ? run.nodes.find((node) => workflowHumanWait(node) === wait && node.sessionId)?.sessionId
     : undefined;
@@ -108,14 +107,10 @@ function WorkflowChip({ host, projectId, runs }: {
         host.errors.show?.(error instanceof Error ? error.message : String(error)));
       return;
     }
-    handOffWorkflowLaunch({
-      projectId: run.projectId ?? projectId,
-      ...(run.parentSessionId ? { sessionId: run.parentSessionId } : {}),
-      workflowId: run.workflowId,
-      input: run.input,
-      run,
-    });
-    host.navigation.openWorkspacePane("workflow");
+    // The run is watched and steered in the chat that started it.
+    if (!run.parentSessionId) return;
+    void host.conversation.openSession(run.parentSessionId).catch((error) =>
+      host.errors.show?.(error instanceof Error ? error.message : String(error)));
   };
   return (
     <button

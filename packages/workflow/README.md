@@ -3,6 +3,26 @@
 Multi-agent DAG pipelines. Review units end with a `Verdict:` line that decides
 whether their upstream work is sent back (bounded by `reviewRounds`).
 
+## Agents, roles, facts and outcomes
+
+- **Agent tools.** `polyth_workflow` (list templates, run, status, output,
+  stop, retry, outcome, stats) and `polyth_workflow_manage` (create, update,
+  delete templates; decide a held review gate). They reach only the calling
+  chat's project and the runs started from that chat, act for the turn's
+  person, and never start or save anything above the chat's approval level.
+- **Routing roles.** A unit with `routingRole` takes its model from the
+  launcher's routing policy when the pass starts and falls back to its own
+  route; a refused role model moves to the next one before the run asks a
+  person.
+- **Located facts.** Units end with `# Located facts`; the run carries the
+  map (`run.facts`) into every later brief so units stop searching for what
+  was already found. A launch can seed it.
+- **Outcomes.** `run.outcome` records whether a settled run's result was
+  accepted, reworked or discarded; `/api/workflow-outcomes` counts them per
+  template.
+
+Details: [docs/dev/workflows.md](../../docs/dev/workflows.md#routing-roles).
+
 ## Who a run acts for
 
 The workflow service and its store are shared by everyone in a Space, but each
