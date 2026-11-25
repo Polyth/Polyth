@@ -64,6 +64,8 @@ export interface AssistantMsg {
   harnessId?: string;
   runtimeLegId?: string;
   profileId?: string;
+  /** The Relay member account that ran this answer's turn. */
+  viaAccount?: string;
   tokens?: TokenUsage;
   cost?: number;
   undone?: boolean;
@@ -401,6 +403,7 @@ export interface TurnState {
   harnessId?: string;
   runtimeLegId?: string;
   profileId?: string;
+  viaAccount?: string;
   reason?: string;
   error?: string;
   /** The harness refused this turn because the conversation no longer fits;
@@ -1263,6 +1266,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           ...(model.turn?.harnessId ? { harnessId: model.turn.harnessId } : {}),
           ...(model.turn?.runtimeLegId ? { runtimeLegId: model.turn.runtimeLegId } : {}),
           ...(model.turn?.profileId ? { profileId: model.turn.profileId } : {}),
+          ...(model.turn?.viaAccount ? { viaAccount: model.turn.viaAccount } : {}),
           ...turnTiming(model),
         };
         pushAssistant(model, m);
@@ -1303,6 +1307,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           ...(model.turn?.harnessId ? { harnessId: model.turn.harnessId } : {}),
           ...(model.turn?.runtimeLegId ? { runtimeLegId: model.turn.runtimeLegId } : {}),
           ...(model.turn?.profileId ? { profileId: model.turn.profileId } : {}),
+          ...(model.turn?.viaAccount ? { viaAccount: model.turn.viaAccount } : {}),
           ...turnTiming(model),
         };
         pushAssistant(model, m);
@@ -1312,6 +1317,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       if (!m.harnessId && model.turn?.harnessId) m.harnessId = model.turn.harnessId;
       if (!m.runtimeLegId && model.turn?.runtimeLegId) m.runtimeLegId = model.turn.runtimeLegId;
       if (!m.profileId && model.turn?.profileId) m.profileId = model.turn.profileId;
+      if (!m.viaAccount && model.turn?.viaAccount) m.viaAccount = model.turn.viaAccount;
       // Chunks make an answer visible before its canonical message row exists.
       // Actions such as pinning must nevertheless target that final row: the
       // server deliberately rejects transient `assistant/chunk` events.
@@ -1748,6 +1754,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         harnessId: str(d, "harnessId"),
         runtimeLegId: str(d, "runtimeLegId"),
         profileId: str(d, "profileId"),
+        viaAccount: str(d, "viaAccount"),
         startedAt: ev.time,
       };
       // Same-model samples remain useful. Never manufacture a zero sample or

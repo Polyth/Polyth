@@ -4,6 +4,7 @@ import { createApiTransport, type WebPackageHost } from "@polyth/web-sdk";
 import { invalidateRuntimeCatalogs, readHarnessSnapshots } from "@polyth/models/runtime-catalog";
 import { AddIcon, Button, confirmAlert, DeleteIcon, Dialog, EditIcon, IconButton, KeyIcon, Menu, MoreIcon, Notice, SharedIcon, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 import { CheckGroup, EmptyState, Section, Seg } from "../../../apps/web/src/components/settings/parts.tsx";
+import RelayGroup from "./RelayGroup.tsx";
 import { useHarnessSignIn, useSetupProjectId } from "./HarnessSignIn.tsx";
 import { hostTranslate } from "./englishTranslate.ts";
 import { signInExpiryNote } from "./presentation.ts";
@@ -165,6 +166,7 @@ export default function HarnessAccounts({ host, accounts, projectId }: { host: W
       {group("mine", t("group.mine"), groups.mine, t("group.mineHint"), list.manageable ? t("group.mineEmpty") : undefined)}
       {group("shared", t("group.shared"), groups.shared, list.canEditAccess ? t("group.sharedHintEdit") : t("group.sharedHint"))}
       {group("others", t("group.others"), groups.others, t("group.othersHint"))}
+      <RelayGroup host={host} family={accounts.family} accounts={list.accounts} manageable={list.manageable} busy={Boolean(busy)} onSignIn={signIn} onChanged={() => { void readHarnessSnapshots({ projectId, force: true }).catch(() => {}); invalidateRuntimeCatalogs(); }} />
       {list.manageable
         ? <form className="pkg-harnesses-accounts-add" onSubmit={(event) => {
             event.preventDefault();

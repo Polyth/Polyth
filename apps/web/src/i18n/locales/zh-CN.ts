@@ -3795,6 +3795,7 @@ export const zhCN: AppMessages = {
   "timeline.startedSession": '{name} 启动了一个会话',
   "timeline.untitledSession": '未命名会话',
   "timeline.metaHarness": "运行框架",
+  "timeline.viaAccount": "经由 {name}",
   "timeline.metaProfile": "配置",
   "timeline.metaModel": "模型",
   "timeline.metaEffort": "思考强度",

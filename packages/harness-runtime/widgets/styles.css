@@ -585,3 +585,45 @@
 .pkg-harnesses-status[data-state="installing"] { color: var(--accent-text); }
 .pkg-harnesses-status[data-state="install-failed"] { color: var(--text-dim); }
 .pkg-harnesses-status[data-state="install-failed"]::before { background: var(--red); }
+
+/* Settings → Harnesses → harness → Accounts → Relay group. */
+.pkg-harnesses-relay { margin-block-start: var(--space-2); }
+.pkg-harnesses-relay-sub { margin-inline-start: var(--space-2); color: var(--muted); font-size: var(--font-meta); font-weight: 400; }
+.pkg-harnesses-relay-row { flex-wrap: nowrap; padding-inline-start: var(--space-2); }
+.pkg-harnesses-relay-row.dragging { opacity: .5; }
+.pkg-harnesses-relay-row[data-included="false"] .pkg-harnesses-accounts-title > strong { color: var(--muted); }
+.pkg-harnesses-relay-handle { flex: none; margin-inline-start: 0; }
+.pkg-harnesses-relay-handle:focus-visible { outline: 2px solid var(--focus-ring, var(--accent)); outline-offset: 1px; }
+.pkg-harnesses-relay-pos { flex: none; inline-size: 1.25rem; color: var(--muted); font-size: var(--font-meta); font-variant-numeric: tabular-nums; text-align: center; }
+.pkg-harnesses-relay-include { flex: none; display: inline-grid; place-items: center; inline-size: var(--tap, 2rem); block-size: var(--tap, 2rem); margin-inline: calc(-1 * var(--space-1)); }
+.pkg-harnesses-relay-include > input { inline-size: 1rem; block-size: 1rem; accent-color: var(--accent); }
+.pkg-harnesses-relay-row .pkg-harnesses-accounts-name { flex: 1 1 0; }
+.pkg-harnesses-relay-badge { padding: 0 var(--space-2); border-radius: var(--radius-pill, 999px); border: 1px solid var(--border-soft); color: var(--text-dim); font-size: var(--font-meta); font-weight: 500; line-height: 1.5; }
+.pkg-harnesses-relay-badge[data-kind="now"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.pkg-harnesses-relay-note[data-tone="warn"] { color: var(--amber, var(--text-dim)); }
+.pkg-harnesses-relay-meter { display: block; block-size: 3px; max-inline-size: 16rem; margin-block-start: var(--space-1); border-radius: 2px; background: var(--hair, var(--border-soft)); overflow: hidden; }
+.pkg-harnesses-relay-meter > i { display: block; block-size: 100%; border-radius: inherit; background: var(--accent); }
+.pkg-harnesses-relay-meter[data-low] > i { background: var(--amber, var(--accent)); }
+.pkg-harnesses-relay-meter[data-empty] { background: none; border-block-end: 1px dashed var(--border); border-radius: 0; block-size: 0; }
+.pkg-harnesses-relay-foot { display: grid; gap: var(--space-3); margin-block-start: var(--space-1); }
+.pkg-harnesses-relay-control { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
+.pkg-harnesses-relay-label { min-inline-size: 6rem; font-size: var(--font-label); font-weight: 500; }
+@media (prefers-reduced-motion: no-preference) {
+  .pkg-harnesses-relay-meter > i { transition: inline-size var(--motion-base, 160ms) ease; }
+}
+@media (max-width: 480px) {
+  .pkg-harnesses-relay-row { flex-wrap: wrap; }
+  .pkg-harnesses-relay-row .pkg-harnesses-accounts-name { flex-basis: 10rem; }
+  .pkg-harnesses-relay-row .pkg-harnesses-accounts-actions { margin-inline-start: calc(var(--space-5) + 1.25rem + var(--tap, 2rem)); }
+  .pkg-harnesses-relay-label { min-inline-size: 100%; }
+}
+
+/* Relay hand-over divider in the timeline: quiet, hairline, persistent. */
+.pkg-harnesses-relay-divider { display: flex; align-items: center; gap: var(--space-3); margin-block: var(--space-3); color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+.pkg-harnesses-relay-divider::before, .pkg-harnesses-relay-divider::after { content: ""; flex: 1 1 1.5rem; block-size: 1px; background: var(--border-soft); }
+.pkg-harnesses-relay-divider-text { display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 0 var(--space-2); max-inline-size: 48rem; min-inline-size: 0; text-align: center; overflow-wrap: anywhere; }
+.pkg-harnesses-relay-divider-text > strong { color: var(--text-dim); font-weight: 500; }
+.pkg-harnesses-relay-divider-text > span::before { content: "·"; margin-inline-end: var(--space-2); color: var(--faint); }
+@media (max-width: 480px) {
+  .pkg-harnesses-relay-divider::before, .pkg-harnesses-relay-divider::after { flex-basis: .5rem; }
+}

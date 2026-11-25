@@ -3798,6 +3798,7 @@ export const en = {
   "timeline.startedSession": '{name} started a session',
   "timeline.untitledSession": 'Untitled session',
   "timeline.metaHarness": "Harness",
+  "timeline.viaAccount": "via {name}",
   "timeline.metaProfile": "Profile",
   "timeline.metaModel": "Model",
   "timeline.metaEffort": "Thinking effort",

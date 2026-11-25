@@ -3795,6 +3795,7 @@ export const uk: AppMessages = {
   "timeline.startedSession": '{name} — нова сесія',
   "timeline.untitledSession": 'Сесія без назви',
   "timeline.metaHarness": "Харнес",
+  "timeline.viaAccount": "через {name}",
   "timeline.metaProfile": "Профіль",
   "timeline.metaModel": "Модель",
   "timeline.metaEffort": "Рівень міркування",

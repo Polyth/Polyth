@@ -32,6 +32,8 @@ import {
     requireHarnessManagerAuthority,
     requireInstanceOwnerAuthority,
 } from "@polyth/contracts/instance-authority";
+import { relayFamilies } from "./accounts.ts";
+import { relayHost, type RelayLimitsSource } from "./relay.ts";
 import { localOnlyRemoteAccess, packageDataDir, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { discoverHarnessExecutable, harnessExecutableChildEnv, windowsCmdShimFile, windowsCmdWrapperTarget } from "./executableDiscovery.ts";
 import { createHarnessRegistry, type HarnessPreferences, harnessError } from "./index.ts";
@@ -613,6 +615,33 @@ export function harnessRoutes(
                 throw harnessError("not-found", "project not found");
             return { space: request.space, spaceId: request.space.spaceId, projectId: project?.id ?? "__default__", cwd: project?.path ?? process.cwd(), remote: Boolean(project?.remote) };
         };
+        // Relay settings are per person: the actor is the gateway-validated
+        // `request.space`, never the body. Paired devices stay default-deny
+        // (the package declares no remote HTTP rule for these routes).
+        if (request.path === "/api/harnesses/relays" || request.path.startsWith("/api/harnesses/relays/")) {
+            const actor = { userId: request.space.userId, spaceId: request.space.spaceId, allowedHarnesses: allowedHarnessesFor(request) };
+            const context = await contextForRequest();
+            const handles = [...relayFamilies.values()].filter((handle) => visibleId(handle.id));
+            try {
+                if (request.path === "/api/harnesses/relays" && request.method === "GET") {
+                    request.json(200, { relays: await Promise.all(handles.map((handle) => handle.view(actor, context))) });
+                    return true;
+                }
+                const relayId = request.path.slice("/api/harnesses/relays/".length);
+                if (request.method === "PUT" && relayId && !relayId.includes("/")) {
+                    const handle = handles.find((candidate) => candidate.id === relayId);
+                    if (!handle) { request.json(404, { error: "Relay not found" }); return true; }
+                    request.json(200, await handle.save(actor, await request.body(), context));
+                    return true;
+                }
+            } catch (error) {
+                const code = (error as { code?: unknown }).code;
+                request.json(code === "invalid-input" ? 400 : code === "not-found" ? 404 : 500, { error: error instanceof Error ? error.message : String(error) });
+                return true;
+            }
+            request.json(404, { error: "Not found" });
+            return true;
+        }
         if (request.path === "/api/harnesses/roster" && request.method === "GET") {
             const roster = await registry.roster(await contextForRequest());
             request.json(200, roster.filter((row) => visibleId(row.identity.id)));
@@ -1210,6 +1239,7 @@ export default function registerPackage(host: ServerPackageHost) {
         remoteAccess: localOnlyRemoteAccess(["harnesses"]),
         onEnable() {
             active = true;
+            relayHost.limits = () => host.services.get(serverServiceKey<RelayLimitsSource>("usage-limits"));
             // The workstation edition runs no updater, so it schedules none.
             if (!workstationEdition()) autoUpdates.start();
             // An installer a crashed Polyth left running is released, never adopted.
@@ -1224,6 +1254,7 @@ export default function registerPackage(host: ServerPackageHost) {
         },
         async onDisable() {
             active = false;
+            relayHost.limits = () => undefined;
             autoUpdates.stop();
             // No installer outlives the package that started it.
             await installs.interruptAll();

@@ -24,7 +24,7 @@ import {
 } from "./streamCoalesce.ts";
 import type {
   AgentProfile, AgentRuntime, AttachmentRef, AutoAcceptSetting, CanonicalEventInput, ChildSnapshotResult, ClientMutationStatusDto, ClientSettingsDto, ContextWindowState, CreateSessionInput, DeliveryMode, ProjectPresentationSettingsDto,
-  Disposable, DurableOperation, HarnessSelection, HarnessTransition, ForkDraft, ForkResult, JsonObject, ModelRef, MutationOutcome, NotificationRecord, ResumeTurnOptions,
+  Disposable, DurableOperation, HarnessRelayCause, HarnessRelayPolicy, HarnessSelection, HarnessTransition, ForkDraft, ForkResult, JsonObject, ModelRef, MutationOutcome, NotificationRecord, ResumeTurnOptions,
   PersistedRuntimeBinding,
   ModelDescriptor, PackageDescriptorDto, QueueItemDto, RateLimitRetry, RateLimitRetryHint, RuntimeBackgroundTask, RuntimeEvent,
   RuntimeEpochTransitionResult, TurnResumeCancelledData,
@@ -1135,6 +1135,11 @@ export function createSessionService(deps: {
     staticFeatures(harnessId: string): RuntimeCapabilities | undefined;
     /** Product name for the harness, used in user-facing refusals. */
     displayName?(harnessId: string): string | undefined;
+    /** The Relay policy of a harness whose descriptor declares `relay`;
+     *  undefined for every ordinary harness. */
+    relay?(harnessId: string): HarnessRelayPolicy | undefined;
+    /** Short account name of a harness (`accountLabel`, else its name). */
+    accountName?(harnessId: string): string | undefined;
   };
   /** Oversized tool-output cache filled by the agent-tool bridge. This service
    * ages it once per terminal turn event and clears a session on archive and
@@ -5281,6 +5286,26 @@ export function createSessionService(deps: {
     return true;
   };
 
+  /** Rate-limit half of the Relay: refuse the member that was just limited,
+   *  ask the registry again and, when another member qualifies, switch to it
+   *  and fire the already-planned resume immediately. None left (the registry
+   *  throws `runtime-unavailable`) or no Relay: the countdown stays. */
+  const relayRateLimitHandOver = async (sessionId: string, resumeAt: number): Promise<void> => {
+    const before = await store.projection(sessionId);
+    const member = before?.resolvedHarnessId;
+    if (!before?.resume || !member || before.status === "working") return;
+    let switched: SessionProjection | undefined;
+    try {
+      switched = await relayHandOver(sessionId, "rate-limited", resumeAt, { harnessId: member, until: resumeAt });
+    } catch (error) {
+      if ((error as { code?: string }).code === "runtime-unavailable") return;
+      throw error;
+    }
+    if (!switched) return;
+    const after = await store.projection(sessionId);
+    if (after?.resume && after.status !== "working") resumeScheduler.arm(sessionId, Date.now());
+  };
+
   // Runs from the timer (no session lock held). The check + clear are done
   // under the lock; service.send runs after release so it can take the lock
   // through its own admission path.
@@ -6397,12 +6422,19 @@ export function createSessionService(deps: {
         // Runtime turn models must not replace the user's session choice.
         {
           const execution = await store.projection(sessionId);
+          // A Relay chat records which member account ran the turn ("via Iryna").
+          const relayPin = execution?.harness?.mode === "pinned" ? execution.harness.harnessId : undefined;
+          const viaAccount = relayPin && execution?.resolvedHarnessId && relayPin !== execution.resolvedHarnessId
+            && deps.harnesses?.relay?.(relayPin)
+            ? deps.harnesses.accountName?.(execution.resolvedHarnessId)
+            : undefined;
           await persist(sessionId, "turn/started", {
             turnId: ev.turnId,
             ...(ev.model ? { model: ev.model } : {}),
             ...(execution?.resolvedHarnessId ? { harnessId: execution.resolvedHarnessId } : {}),
             ...(execution?.runtimeLeg?.id ? { runtimeLegId: execution.runtimeLeg.id } : {}),
             ...(execution?.agentProfileId ? { profileId: execution.agentProfileId } : {}),
+            ...(viaAccount ? { viaAccount } : {}),
           } as unknown as JsonObject, { ignorable: true });
         }
         if (sideEffects) {
@@ -6596,6 +6628,13 @@ export function createSessionService(deps: {
           }
           // Background work held back by the limit wait reaches the agent now.
           if (!retry) releaseDeferredRuntimeWakes(sessionId);
+          // A Relay chat whose member hit a limit moves to the next member and
+          // retries now instead of waiting out the countdown. Detached: the
+          // switch takes the session lock, the event path must not wait on it.
+          if (applied && retry && !paused) {
+            void relayRateLimitHandOver(sessionId, retry.resumeAt).catch((err) =>
+              console.error(`[polyth] relay hand-over failed for ${sessionId}`, err));
+          }
         }
         break;
       }
@@ -13382,6 +13421,42 @@ export function createSessionService(deps: {
     }
   };
 
+  /** A Relay chat runs on the member its provider wants now. Idle, no pending
+   *  transition, a member already resolved: ask the registry; a different
+   *  member becomes an ordinary after-turn switch annotated with `relay`.
+   *  Throws the registry's `runtime-unavailable` when every member is out.
+   *  Never called with a turn active. Returns the (possibly switched)
+   *  projection, or undefined when nothing moved. */
+  const relayHandOver = async (
+    sessionId: string,
+    cause: HarnessRelayCause,
+    refillsAt?: number,
+    refuse?: { harnessId: string; until?: number },
+  ): Promise<SessionProjection | undefined> => {
+    const projection = await store.projection(sessionId);
+    const selection = projection?.harness;
+    if (!projection || !selection || selection.mode !== "pinned" || !projection.resolvedHarnessId
+      || projection.harnessTransition || !runtimes.resolve || !service.switchHarness) return undefined;
+    const policy = deps.harnesses?.relay?.(selection.harnessId);
+    if (!policy) return undefined;
+    if (refuse) policy.refused(refuse.harnessId, refuse.until);
+    const project = await projects.get(projection.projectId);
+    if (!project) return undefined;
+    const cwd = await executionCwd(projection, project);
+    const target = await runtimes.resolve(projection, cwd, selection);
+    if (target === projection.resolvedHarnessId) return undefined;
+    // Still registered? `displayName` answers for every registered harness;
+    // `staticFeatures` is optional per provider and would misreport. Without
+    // the lookup, assume the member is still there.
+    const displayName = deps.harnesses?.displayName;
+    const memberUsable = !displayName || displayName(projection.resolvedHarnessId) !== undefined;
+    return service.switchHarness!(sessionId, selection, "after-turn", undefined, {
+      relayId: selection.harnessId,
+      cause: cause === "limit" && !memberUsable ? "unavailable" : cause,
+      ...(refillsAt !== undefined ? { refillsAt } : {}),
+    });
+  };
+
   const service: RuntimeEpochSessionService = {
     async summaries(input) {
       if (!store.summaries) throw Object.assign(new Error("session summaries unavailable"), { code: "unsupported" });
@@ -13703,7 +13778,7 @@ export function createSessionService(deps: {
         });
       });
     },
-    async switchHarness(sessionId, selection, timing = "after-turn", launch) {
+    async switchHarness(sessionId, selection, timing = "after-turn", launch, relay) {
       return withSessionLock(sessionId, async () => {
         let projection = await store.projection(sessionId);
         if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
@@ -13737,13 +13812,14 @@ export function createSessionService(deps: {
               } else {
                 // A retarget belongs to a different target harness: the previous
                 // launch intent cannot be inherited. Use the new one, or none.
-                const retargeted: HarnessTransition = { ...pending, selection, targetHarnessId, timing, launch };
+                const retargeted: HarnessTransition = { ...pending, selection, targetHarnessId, timing, launch, relay };
                 await commitHarnessIntent(sessionId, { harnessTransition: retargeted }, "harness/switch-retargeted", {
                   transitionId: pending.id,
                   targetHarnessId,
                   timing,
                   selection: { ...selection },
                   ...(launch ? { launch: launch as JsonObject } : {}),
+                  ...(relay ? { relay: relay as unknown as JsonObject } : {}),
                 });
               }
             } else {
@@ -13758,6 +13834,7 @@ export function createSessionService(deps: {
                 launch,
                 phase: "released",
                 released: pending.released,
+                relay,
               };
               await commitHarnessIntent(sessionId, { harnessTransition: retargeted }, "harness/switch-retargeted", {
                 previousTransitionId: pending.id,
@@ -13766,6 +13843,7 @@ export function createSessionService(deps: {
                 selection: { ...selection },
                 previousAuthorityReleased: true,
                 ...(retargeted.launch ? { launch: retargeted.launch as JsonObject } : {}),
+                ...(relay ? { relay: relay as unknown as JsonObject } : {}),
               });
             }
           } else if (timing === "stop-now" && pending.phase === "requested" && pending.timing !== timing) {
@@ -13793,10 +13871,12 @@ export function createSessionService(deps: {
           await commitHarnessIntent(sessionId, { harness: selection }, "harness/selection-changed", { selection: { ...selection } });
           return (await store.projection(sessionId))!;
         }
-        await clearResume(sessionId, "user");
+        // A Relay hand-over for a rate limit keeps the pending resume: the same
+        // turn retries on the new member as soon as the switch completes.
+        if (relay?.cause !== "rate-limited") await clearResume(sessionId, "user");
         await commitHarnessIntent(sessionId, {
-          harnessTransition: { id: randomUUID(), selection, targetHarnessId, timing, launch, phase: "requested" },
-        }, "harness/switch-requested", { targetHarnessId, timing, selection: { ...selection }, ...(launch ? { launch: launch as JsonObject } : {}) });
+          harnessTransition: { id: randomUUID(), selection, targetHarnessId, timing, launch, phase: "requested", ...(relay ? { relay } : {}) },
+        }, "harness/switch-requested", { targetHarnessId, timing, selection: { ...selection }, ...(launch ? { launch: launch as JsonObject } : {}), ...(relay ? { relay: relay as unknown as JsonObject } : {}) });
         return finishHarnessSwitchUnderLock(sessionId);
       });
     },
@@ -14462,6 +14542,10 @@ export function createSessionService(deps: {
           queuedTurnModels.set(sessionId, { queueId: queuedResult.queueId, model: pendingQueuedModel });
         }
         return queuedResult;
+      }
+      if (!input.harness && input.keepAlive !== true && proj.status === "idle" && !proj.harnessTransition
+        && !turnActive(sessionId) && deps.harnesses?.relay) {
+        proj = (await relayHandOver(sessionId, "limit")) ?? proj;
       }
       if (input.harness) {
         const selection = input.harness;

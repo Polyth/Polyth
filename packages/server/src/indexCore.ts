@@ -3003,6 +3003,15 @@ export async function boot(opts: BootOptions = {}) {
         harnesses.providers().find((provider) => provider.descriptor.id === harnessId)?.staticFeatures,
       displayName: (harnessId) =>
         harnesses.providers().find((provider) => provider.descriptor.id === harnessId)?.descriptor.name,
+      relay: (harnessId) => {
+        const provider = harnesses.providers().find((candidate) => candidate.descriptor.id === harnessId);
+        return provider?.descriptor.relay ? provider.relay : undefined;
+      },
+      accountName: (harnessId) => {
+        const descriptor = harnesses.providers().find((provider) => provider.descriptor.id === harnessId)?.descriptor;
+        // The family's default login has no account label; Settings calls it "Default".
+        return descriptor ? descriptor.accountLabel || (descriptor.accounts ? "Default" : descriptor.name) : undefined;
+      },
     },
     admission: admissionBarrier,
     isShuttingDown,

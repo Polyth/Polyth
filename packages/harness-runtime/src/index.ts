@@ -181,8 +181,9 @@ type ReadinessEvidence = {
     version?: string;
 };
 /** Account presentation fields; a descriptor may compute them on read. */
-const accountIdentity = (descriptor: HarnessDescriptor): Pick<HarnessDescriptor, "accountLabel" | "accounts"> => ({
+const accountIdentity = (descriptor: HarnessDescriptor): Pick<HarnessDescriptor, "accountLabel" | "accounts" | "relay"> => ({
     ...(descriptor.accountLabel ? { accountLabel: descriptor.accountLabel } : {}),
+    ...(descriptor.relay ? { relay: { family: descriptor.relay.family } } : {}),
     ...(descriptor.accounts ? { accounts: { family: descriptor.accounts.family, endpoint: descriptor.accounts.endpoint } } : {}),
 });
 export function createHarnessRegistry() {
@@ -614,12 +615,32 @@ export function createHarnessRegistry() {
             // A private session never reaches a harness that would save it.
             if (context.privateSession && selection.mode === "pinned") {
                 const pinned = ordered.find((p) => p.descriptor.id === id);
-                if (pinned && pinned.descriptor.privateSessions !== true) throw privateSessionUnsupported(pinned.descriptor.name);
+                if (pinned && !pinned.descriptor.relay && pinned.descriptor.privateSessions !== true) throw privateSessionUnsupported(pinned.descriptor.name);
             }
-            const candidates = (selection.mode === "pinned"
+            const wanted = (selection.mode === "pinned"
                 ? ordered.filter((p) => p.descriptor.id === id)
-                : [...ordered.filter((p) => p.descriptor.id === id), ...ordered.filter((p) => p.descriptor.id !== id)].filter((p) => p.descriptor.autoSelect !== false))
-                .filter((p) => !context.privateSession || p.descriptor.privateSessions === true);
+                : [...ordered.filter((p) => p.descriptor.id === id), ...ordered.filter((p) => p.descriptor.id !== id)].filter((p) => p.descriptor.autoSelect !== false));
+            // A Relay runs on one of the acting person's member accounts: it is
+            // replaced by the members its policy would try now, in order. Auto
+            // never reaches one (`autoSelect: false`), and a persisted route
+            // is an exact lookup that never comes through here.
+            let relayed: HarnessProvider | undefined;
+            let relayUntil: number | undefined;
+            const expanded: HarnessProvider[] = [];
+            for (const provider of wanted) {
+                if (selection.mode !== "pinned" || !provider.descriptor.relay || !provider.relay) {
+                    expanded.push(provider);
+                    continue;
+                }
+                relayed = provider;
+                const plan = await provider.relay.plan(context, stickyId);
+                relayUntil = plan.exhaustedUntil;
+                for (const memberId of plan.candidates) {
+                    const member = providers.get(memberId);
+                    if (member && !member.descriptor.relay && !unregistering.has(member) && preferences[memberId]?.enabled !== false) expanded.push(member);
+                }
+            }
+            const candidates = expanded.filter((p) => !context.privateSession || p.descriptor.privateSessions === true);
             // Why the last candidate was passed over; a pinned selection reports it
             // instead of an anonymous "unavailable".
             let why = "";
@@ -704,6 +725,8 @@ export function createHarnessRegistry() {
                 if (runnable(probe))
                     return provider;
             }
+            if (relayed)
+                throw harnessError("runtime-unavailable", `Every account in ${relayed.descriptor.name} is out of limits or unavailable${relayUntil !== undefined ? ` until ${new Date(relayUntil).toISOString()}` : ""}${why ? ` (${why.slice(0, 200)})` : ""}`);
             throw harnessError("runtime-unavailable", selection.mode === "pinned" ? `Selected harness ${selection.harnessId} is unavailable${why ? ` (${why.slice(0, 200)})` : ""}`
                 : context.privateSession ? "No harness that can run a private session is ready. Open Harnesses in Settings to set one up."
                     : "No compatible harness is ready. Open Harnesses in Settings to set one up.");

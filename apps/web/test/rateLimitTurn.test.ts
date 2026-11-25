@@ -186,3 +186,22 @@ test("a model-unavailable stop offers recovery without a countdown", () => {
   });
   assert.equal(model.turn?.limit?.resumeAt, undefined, "an unavailable model has no wait to run out");
 });
+
+test("a Relay turn names the member account on its answer", () => {
+  const model = buildModel([
+    ev("user/message", { text: "hello" }),
+    ev("turn/started", { turnId: "t1", harnessId: "claude-iryna", viaAccount: "Iryna" }),
+    ev("assistant/message", { partId: "a:0", text: "Hi." }),
+    ev("turn/stopped", { turnId: "t1", reason: "complete" }),
+  ]);
+  assert.equal(model.turn?.viaAccount, "Iryna");
+  const answer = model.messages.find((message) => message.kind === "assistant");
+  assert.equal(answer?.kind === "assistant" ? answer.viaAccount : undefined, "Iryna");
+  const plain = buildModel([
+    ev("user/message", { text: "hello" }),
+    ev("turn/started", { turnId: "t2", harnessId: "claude" }),
+    ev("assistant/message", { partId: "a:0", text: "Hi." }),
+  ]);
+  const plainAnswer = plain.messages.find((message) => message.kind === "assistant");
+  assert.equal(plainAnswer?.kind === "assistant" ? plainAnswer.viaAccount : "x", undefined);
+});

@@ -192,6 +192,19 @@
   color: var(--faint);
 }
 
+/* The Relay member account that answered, right after the model:
+   "Opus 5.5 (Iryna)". Shrinks after the model name; never hidden. */
+.chat-response-account {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 14em;
+  overflow: hidden;
+  color: var(--muted);
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .chat-response-actions {
   flex: 0 1 auto;
 }

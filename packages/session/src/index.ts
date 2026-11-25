@@ -2528,6 +2528,7 @@ export function createStore(dbPath: string): Store {
         to: input.harness.leg.harnessId,
         ...(projection.runtimeLeg ? { closedLeg: { ...projection.runtimeLeg, endedAt: Date.now() } } : {}),
         leg: { ...input.harness.leg },
+        ...(projection.harnessTransition?.relay ? { relay: { ...projection.harnessTransition.relay } } : {}),
       }, { ignorable: true });
       const sameHarnessFreshLeg = input.harness?.leg.harnessId === projection.resolvedHarnessId;
       const nextProjection: SessionProjection = {

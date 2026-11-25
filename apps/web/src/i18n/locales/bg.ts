@@ -3795,6 +3795,7 @@ export const bg: AppMessages = {
   "timeline.startedSession": '{name} започна сесия',
   "timeline.untitledSession": 'Сесия без заглавие',
   "timeline.metaHarness": "Харнес",
+  "timeline.viaAccount": "чрез {name}",
   "timeline.metaProfile": "Профил",
   "timeline.metaModel": "Модел",
   "timeline.metaEffort": "Ниво на мислене",

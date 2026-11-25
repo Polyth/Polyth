@@ -3795,6 +3795,7 @@ export const ar: AppMessages = {
   "timeline.startedSession": 'بدأ {name} جلسة',
   "timeline.untitledSession": 'جلسة بلا عنوان',
   "timeline.metaHarness": "بيئة التشغيل",
+  "timeline.viaAccount": "عبر {name}",
   "timeline.metaProfile": "الملف التعريفي",
   "timeline.metaModel": "النموذج",
   "timeline.metaEffort": "مستوى التفكير",

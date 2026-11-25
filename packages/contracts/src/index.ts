@@ -3242,6 +3242,9 @@ export interface SessionService {
      *  passes the model/agent its own first turn will use, so a launch-locked
      *  runtime is created with that selection instead of its default. */
     launch?: RuntimeLaunchSelection,
+    /** Server-only: a Relay hand-over between member accounts. Never taken
+     *  from an HTTP body. */
+    relay?: HarnessRelayHandover,
   ): Promise<SessionProjection>;
   /** Cancel is valid only while the previous runtime still owns authority. */
   cancelHarnessSwitch?(sessionId: string): Promise<SessionProjection>;
@@ -4827,6 +4830,11 @@ export interface HarnessDescriptor {
   accountAllowedUserIds?: readonly string[];
   /** A shared account limited to these Spaces; absent = every Space. */
   accountAllowedSpaceIds?: readonly string[];
+  /** Present only on a family's Relay harness (`<family>-relay`): it runs no
+   *  native process of its own. Resolving it picks one of the acting person's
+   *  member accounts (`HarnessProvider.relay`), and the chat runs on that
+   *  account's harness while its selection stays pinned to the Relay. */
+  relay?: HarnessRelayRef;
   /** How this harness's CLI is found and installed on a POSIX machine Polyth
    *  reaches over SSH. Absent means it can only be set up there by hand. */
   remoteHost?: HarnessRemoteHostSupport;
@@ -4884,7 +4892,7 @@ export interface HarnessAppearanceIdentity {
 }
 /** Stable, process-free presentation metadata for the harness picker. */
 export interface HarnessRosterItem {
-  identity: Pick<HarnessDescriptor, "id" | "name" | "integration" | "accountLabel" | "accounts"> & HarnessAppearanceIdentity;
+  identity: Pick<HarnessDescriptor, "id" | "name" | "integration" | "accountLabel" | "accounts" | "relay"> & HarnessAppearanceIdentity;
   policy: {
     enabled: boolean;
     priority: number;
@@ -5446,6 +5454,48 @@ export interface HarnessProvider {
    * server's own login. `request.model` is required. Absent: use a project
    * runtime's `completeSmallModel`. */
   completeUtility?(request: SmallModelCompletionRequest): Promise<SmallModelCompletionResult>;
+  /** Only on a Relay harness (`descriptor.relay`). `createRuntime` of a Relay
+   *  is never called: the registry resolves it to a member's provider. */
+  relay?: HarnessRelayPolicy;
+}
+
+/** Identifies a family's Relay harness in the roster. */
+export interface HarnessRelayRef {
+  /** The account family (`HarnessAccountsRef.family`) whose logins it spends. */
+  family: string;
+}
+/** Why a Relay chat moved from one member account to another. */
+export type HarnessRelayCause =
+  /** The running account fell to the person's hand-over level in a limit window. */
+  | "limit"
+  /** The provider refused a turn for rate limits or quota. */
+  | "rate-limited"
+  /** The running account stopped being usable (signed out, removed, access withdrawn). */
+  | "unavailable";
+/** Server-only annotation of a Relay hand-over, kept on the transition and
+ *  copied into its `harness/switched` event for the timeline divider. */
+export interface HarnessRelayHandover {
+  relayId: string;
+  cause: HarnessRelayCause;
+  /** When the account it left refills, if known (epoch ms). */
+  refillsAt?: number;
+}
+/** What a Relay may run right now for one acting person. */
+export interface HarnessRelayPlan {
+  /** Member harness ids in the order to try. The sticky member comes first
+   *  while it still qualifies. Already limited to accounts the context's actor
+   *  may use in the context's Space. Empty when none can run now. */
+  candidates: string[];
+  /** With no candidate: the earliest time a member is expected to refill. */
+  exhaustedUntil?: number;
+}
+export interface HarnessRelayPolicy {
+  /** Never starts a process or a model turn. `stickyId` is the member the
+   *  chat runs on now, if any. */
+  plan(context: HarnessContext, stickyId?: string): Promise<HarnessRelayPlan>;
+  /** A member refused a turn for limits: skip it until `until` (or a
+   *  conservative default when the provider stated no time). */
+  refused(harnessId: string, until?: number): void;
 }
 export interface HarnessRegistry {
   register(provider: HarnessProvider): Disposable;
@@ -5514,6 +5564,8 @@ export type HarnessTransition = {
   /** Submit-time intent for the target leg. Absent means no selection was
    *  stated and the target runtime resolves its own default. */
   launch?: RuntimeLaunchSelection;
+  /** Set when a Relay moved the chat between its member accounts. */
+  relay?: HarnessRelayHandover;
 } & (
   | { phase: "requested"; attempt?: number; lastAttemptAt?: number }
   | { phase: "released"; released: ExecutionReleaseProof; attempt?: number; lastAttemptAt?: number }

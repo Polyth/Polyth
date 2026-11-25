@@ -45,6 +45,9 @@ function fixture(path = ":memory:", options: {
   /** After a turn, report idle by ordering evidence alone, as Pi does,
    *  instead of naming the create operation as its cause. */
   orderedStatusEvidence?: boolean;
+  /** Register a Relay harness `fake-relay` over fake-a / fake-b: its policy
+   *  keeps the sticky member while it is not refused or marked out. */
+  relay?: boolean;
 } = {}) {
   let store = createStore(path);
   const detach: Array<() => void> = [];
@@ -240,9 +243,55 @@ function fixture(path = ":memory:", options: {
     },
   });
   registry.register(provider("fake-a")); registry.register(provider("fake-b")); registry.register(provider("fake-c"));
+  // Relay stand-in: the registry redirection belongs to harness-runtime; the
+  // server only needs `resolve` to answer with a member and `refused` to count.
+  const relayMembers = ["fake-a", "fake-b"];
+  const relayOut = new Set<string>();
+  const relayRefusals: Array<{ harnessId: string; until?: number }> = [];
+  const relayPlan = (sticky?: string): string[] => {
+    const open = relayMembers.filter((member) => !relayOut.has(member));
+    return sticky && open.includes(sticky) ? [sticky, ...open.filter((member) => member !== sticky)] : open;
+  };
+  if (options.relay) {
+    registry.register({
+      descriptor: { id: "fake-relay", name: "fake-relay", integration: "fake", priority: 5, relay: { family: "fake" } },
+      probe: async () => ({ harnessId: "fake-relay", installed: true, authenticated: true, healthy: true }),
+      async createRuntime() { throw new Error("a Relay never runs a process"); },
+      relay: {
+        async plan(_context: HarnessContext, sticky?: string) { return { candidates: relayPlan(sticky) }; },
+        refused(harnessId: string, until?: number) { relayRefusals.push({ harnessId, ...(until !== undefined ? { until } : {}) }); relayOut.add(harnessId); },
+      },
+    } as unknown as HarnessProvider);
+  }
   let privatePreferences = options.privateSessions?.preferences ?? {};
   registry.configurePolicy(async () => privatePreferences);
-  const pool = createHarnessPool({ registry, legacyHarnessId: "fake-a", context: async (projectId, cwd, sessionId) => ({ projectId, cwd: cwd ?? "/same/worktree", sessionId, spaceId: "space-a" }) });
+  const basePool = createHarnessPool({ registry, legacyHarnessId: "fake-a", context: async (projectId, cwd, sessionId) => ({ projectId, cwd: cwd ?? "/same/worktree", sessionId, spaceId: "space-a" }) });
+  const pool = options.relay ? new Proxy(basePool, {
+    get(target, key, receiver) {
+      if (key === "resolve") {
+        return async (projection: Parameters<NonNullable<typeof basePool.resolve>>[0], cwd: string, selection: Parameters<NonNullable<typeof basePool.resolve>>[2]) => {
+          if (selection.mode === "pinned" && selection.harnessId === "fake-relay") {
+            const [next] = relayPlan(projection.resolvedHarnessId);
+            if (!next) throw Object.assign(new Error("every account is out"), { code: "runtime-unavailable" });
+            return next;
+          }
+          return target.resolve!(projection, cwd, selection);
+        };
+      }
+      if (key === "forSession") {
+        return (projection: Parameters<NonNullable<typeof basePool.forSession>>[0], cwd: string, targetHarnessId?: string) =>
+          target.forSession!(projection, cwd, targetHarnessId === "fake-relay"
+            || (!targetHarnessId && projection.harness?.mode === "pinned" && projection.harness.harnessId === "fake-relay")
+            ? (projection.resolvedHarnessId ?? relayPlan()[0]) : targetHarnessId);
+      }
+      if (key === "forProject") {
+        return (projectId: string, cwd?: string, targetHarnessId?: string) =>
+          target.forProject(projectId, cwd, targetHarnessId === "fake-relay" ? relayPlan()[0] : targetHarnessId);
+      }
+      const value = Reflect.get(target, key, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  }) : basePool;
   const projects = { get: async () => ({ id: "p", name: "p", path: "/same/worktree", spaceId: "space-a", createdAt: 0 }), list: async () => [] } as unknown as ProjectService;
   const autoAcceptPath = path === ":memory:"
     ? join(mkdtempSync(join(tmpdir(), "harness-auto-accept-")), "auto-accept.json")
@@ -256,6 +305,12 @@ function fixture(path = ":memory:", options: {
     broadcast: { event(event) { broadcasts.push(event.type); }, projection() {} },
     queue: store,
     isShuttingDown: () => shuttingDown,
+    ...(options.relay ? { harnesses: {
+      staticFeatures: (harnessId: string) => registry.providers().find((p) => p.descriptor.id === harnessId)?.staticFeatures,
+      relay: (harnessId: string) => { const p = registry.providers().find((c) => c.descriptor.id === harnessId); return p?.descriptor.relay ? p.relay : undefined; },
+      displayName: (harnessId: string) => registry.providers().find((p) => p.descriptor.id === harnessId)?.descriptor.name,
+      accountName: (harnessId: string) => { const d = registry.providers().find((p) => p.descriptor.id === harnessId)?.descriptor; return d ? d.accountLabel || d.name : undefined; },
+    } } : {}),
     ...(options.workspaceInstructions ? { workspaceInstructions: options.workspaceInstructions } : {}),
     ...(options.workspaceInstructionsEnabled !== undefined
       ? { workspaceInstructionsEnabled: async () => options.workspaceInstructionsEnabled! }
@@ -265,7 +320,7 @@ function fixture(path = ":memory:", options: {
   });
   let sessions = makeSessions();
   const drain = () => new Promise((resolve) => setTimeout(resolve, 40));
-  return { get store() { return store; }, get sessions() { return sessions; }, pool, engines, nativeCreates, nativeResets, nativeCompactions, nativeBranches, createRequests, broadcasts, beginShutdown, launches,
+  return { get store() { return store; }, get sessions() { return sessions; }, pool, relayOut, relayRefusals, engines, nativeCreates, nativeResets, nativeCompactions, nativeBranches, createRequests, broadcasts, beginShutdown, launches,
     setPrivatePreferences(next: Record<string, { privateSessions?: boolean }>) { privatePreferences = next; },
     async idle(id: string) { await until(async () => { const events = await store.events(id); return (await store.projection(id))?.status === "idle" && (events.findLast(e => e.type === "turn/stopped")?.seq ?? 0) > (events.findLast(e => e.type === "user/message")?.seq ?? 0); }); },
     async close() { await drain(); detach.forEach((off) => off()); await store.close(); },
@@ -2769,4 +2824,123 @@ test("the fresh harness learns what the previous one did, not just what was said
   assert.doesNotMatch(text, /SOURCE-STAYS|OUTPUT-STAYS/);
   f.engines.at(-1)!.complete();
   await f.idle(id);
+});
+
+const relayEvents = async (f: ReturnType<typeof fixture>, id: string, type: string) =>
+  (await f.store.events(id)).filter((event) => event.type === type);
+
+test("relay: the next send hands over to the member the Relay now wants", async () => {
+  const f = fixture(":memory:", { relay: true });
+  try {
+    const relay = { mode: "pinned" as const, harnessId: "fake-relay" };
+    const { id } = await f.sessions.create({ projectId: "p", harness: relay });
+    await f.sessions.send(id, { text: "first" });
+    await until(async () => f.engines.at(-1)?.requests.length === 1);
+    assert.equal(f.engines.at(-1)!.harnessId, "fake-a");
+    f.engines.at(-1)!.complete();
+    await f.idle(id);
+    // The turn records which member account ran it, for "via <account>".
+    const firstStarted = (await relayEvents(f, id, "turn/started")).at(-1)!.data as { harnessId?: string; viaAccount?: string };
+    assert.equal(firstStarted.harnessId, "fake-a");
+    assert.equal(firstStarted.viaAccount, "fake-a");
+    // Sticky: the same plan is a no-op.
+    await f.sessions.send(id, { text: "second" });
+    await until(async () => f.engines.at(-1)?.requests.length === 2);
+    assert.equal((await relayEvents(f, id, "harness/switch-requested")).length, 0);
+    f.engines.at(-1)!.complete();
+    await f.idle(id);
+
+    f.relayOut.add("fake-a");
+    await f.sessions.send(id, { text: "third" });
+    await until(async () => f.engines.at(-1)?.harnessId === "fake-b" && f.engines.at(-1)!.requests.length === 1);
+    assert.match(f.engines.at(-1)!.requests[0]!.text, /third$/);
+    const projection = await f.store.projection(id);
+    assert.deepEqual(projection?.harness, relay);
+    assert.equal(projection?.resolvedHarnessId, "fake-b");
+    const requested = (await relayEvents(f, id, "harness/switch-requested")).at(-1)!.data as { relay?: unknown };
+    // fake-a is still registered, only out of the plan: a limit hand-over.
+    assert.deepEqual(requested.relay, { relayId: "fake-relay", cause: "limit" });
+    const switched = (await relayEvents(f, id, "harness/switched")).at(-1)!.data as { relay?: unknown; to: string };
+    assert.equal(switched.to, "fake-b");
+    assert.deepEqual(switched.relay, { relayId: "fake-relay", cause: "limit" });
+  } finally {
+    await f.close();
+  }
+});
+
+test("relay: every member out fails the send with runtime-unavailable", async () => {
+  const f = fixture(":memory:", { relay: true });
+  try {
+    const { id } = await f.sessions.create({ projectId: "p", harness: { mode: "pinned", harnessId: "fake-relay" } });
+    await f.sessions.send(id, { text: "first" });
+    await until(async () => f.engines.at(-1)?.requests.length === 1);
+    f.engines.at(-1)!.complete();
+    await f.idle(id);
+    f.relayOut.add("fake-a"); f.relayOut.add("fake-b");
+    await assert.rejects(f.sessions.send(id, { text: "second" }), (error: { code?: string }) => error.code === "runtime-unavailable");
+    assert.equal((await f.store.projection(id))?.resolvedHarnessId, "fake-a");
+  } finally {
+    await f.close();
+  }
+});
+
+test("relay: a rate limit refuses the member and retries the same turn on the next at once", async () => {
+  const f = fixture(":memory:", { relay: true });
+  try {
+    const { id } = await f.sessions.create({ projectId: "p", harness: { mode: "pinned", harnessId: "fake-relay" } });
+    await f.sessions.send(id, { text: "keep going" });
+    await until(async () => f.engines.at(-1)?.requests.length === 1);
+    f.engines.at(-1)!.rateLimit();
+    await until(async () => f.engines.at(-1)?.harnessId === "fake-b" && f.engines.at(-1)!.requests.length === 1);
+    assert.match(f.engines.at(-1)!.requests[0]!.text, /keep going$/);
+    assert.equal(f.relayRefusals.length, 1);
+    assert.equal(f.relayRefusals[0]!.harnessId, "fake-a");
+    const switched = (await relayEvents(f, id, "harness/switched")).at(-1)!.data as { relay?: { cause: string; relayId: string; refillsAt?: number } };
+    assert.equal(switched.relay?.cause, "rate-limited");
+    assert.equal(switched.relay?.relayId, "fake-relay");
+    assert.equal(typeof switched.relay?.refillsAt, "number");
+    assert.equal((await f.store.projection(id))?.resume, undefined);
+  } finally {
+    await f.close();
+  }
+});
+
+test("relay: a rate limit with every member out keeps the countdown", async () => {
+  const f = fixture(":memory:", { relay: true });
+  try {
+    const { id } = await f.sessions.create({ projectId: "p", harness: { mode: "pinned", harnessId: "fake-relay" } });
+    await f.sessions.send(id, { text: "keep going" });
+    await until(async () => f.engines.at(-1)?.requests.length === 1);
+    f.relayOut.add("fake-b");
+    f.engines.at(-1)!.rateLimit();
+    await until(async () => Boolean((await f.store.projection(id))?.resume));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const projection = await f.store.projection(id);
+    assert.equal(projection?.resolvedHarnessId, "fake-a");
+    assert.equal(projection?.harnessTransition, undefined);
+    assert.ok(projection?.resume);
+    assert.equal((await relayEvents(f, id, "harness/switch-requested")).length, 0);
+  } finally {
+    await f.close();
+  }
+});
+
+test("relay: an ordinary (route-style) switch carries no relay annotation", async () => {
+  const f = fixture(":memory:", { relay: true });
+  try {
+    const { id } = await f.sessions.create({ projectId: "p" });
+    await f.sessions.send(id, { text: "first" });
+    await until(async () => f.engines.at(-1)?.requests.length === 1);
+    f.engines.at(-1)!.complete();
+    await f.idle(id);
+    // Route-level callers pass (selection, timing, launch) only; the scoped
+    // wrappers (spaceScope, accountPermissions, ...) forward exactly four
+    // arguments, so no HTTP body can reach the `relay` parameter.
+    await f.sessions.switchHarness!(id, { mode: "pinned", harnessId: "fake-b" }, "after-turn");
+    await until(async () => (await f.store.projection(id))?.resolvedHarnessId === "fake-b");
+    const switched = (await relayEvents(f, id, "harness/switched")).at(-1)!.data as { relay?: unknown };
+    assert.equal(switched.relay, undefined);
+  } finally {
+    await f.close();
+  }
 });

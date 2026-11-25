@@ -127,6 +127,8 @@ export default function ChatResponseFooter({
   // flight; otherwise a later model switch would re-label every older answer.
   const modelRef = answerModelRef(m, turn, sessionModel, inFlight);
   const harnessId = m.harnessId ?? turn?.harnessId ?? sessionHarnessId;
+  // A Relay chat's turn records the member account that ran it ("via Iryna").
+  const viaAccount = m.viaAccount ?? turn?.viaAccount;
   const presentation = resolveModelPresentation(modelRef, models, harnessId);
   const descriptor = presentation.descriptor;
   const modelName = presentation.name;
@@ -344,6 +346,11 @@ export default function ChatResponseFooter({
           className="chat-response-logo"
         />
         <span className="chat-response-model" title={modelName}>{modelName}</span>
+        {viaAccount && (
+          <span className="chat-response-account" title={tr("timeline.viaAccount", { name: viaAccount })}>
+            ({viaAccount})
+          </span>
+        )}
         {duration && <span className="chat-response-duration">{duration}</span>}
       </div>
 

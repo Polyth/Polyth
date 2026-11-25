@@ -3795,6 +3795,7 @@ export const es: AppMessages = {
   "timeline.startedSession": '{name} inició una sesión',
   "timeline.untitledSession": 'Sesión sin título',
   "timeline.metaHarness": "Harness",
+  "timeline.viaAccount": "vía {name}",
   "timeline.metaProfile": "Perfil",
   "timeline.metaModel": "Modelo",
   "timeline.metaEffort": "Nivel de razonamiento",
