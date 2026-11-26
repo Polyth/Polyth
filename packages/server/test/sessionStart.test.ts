@@ -231,6 +231,30 @@ test("opening a chat while it starts neither fails nor disturbs its status", asy
   }
 });
 
+test("the start's own queued first turn runs no recover-on-use pass that finds its create uncertain", async () => {
+  // 2026-11-26: every new chat logged "recovery for a message queued in …
+  // (session-starting) did not complete: backend session creation outcome is
+  // unknown" — the queued send's activate ran before the start flight existed.
+  const gate = deferred();
+  const h = fixture({ createGate: gate.promise });
+  const warnings: string[] = [];
+  const warn = console.warn;
+  console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(" ")); };
+  try {
+    const result = await h.sessions.start!({
+      projectId: "p1", start: { firstTurn: { text: "hello" } }, clientOperationId: KEY,
+    }, { author: AUTHOR });
+    await waitFor(() => h.creates() === 1);
+    gate.resolve();
+    await waitFor(() => h.prompts.length === 1);
+    assert.deepEqual(warnings.filter((line) => line.includes("recovery for a message queued")), []);
+    assert.ok(!h.projections.some((row) => row.id === result.id && row.status === "unknown"), "never published as unknown");
+  } finally {
+    console.warn = warn;
+    await h.close();
+  }
+});
+
 test("a resend with the same id and key returns the same result with one row, one create and one prompt", async () => {
   const gate = deferred();
   const h = fixture({ createGate: gate.promise });

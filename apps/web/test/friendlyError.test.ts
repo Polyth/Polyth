@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { friendlyError } from "../src/settings.ts";
+import { friendlyError, isMutationOutcomeUnknown } from "../src/settings.ts";
 import { tr } from "../src/i18n/index.ts";
 
 // The host owns the user-facing phrasing for action failures. A gateway/proxy
@@ -64,4 +64,12 @@ test("an unknown outcome is described without a session or draft that may not ex
   const message = friendlyError("Archive", Object.assign(new Error("upstream outcome is unknown; reconciliation is required"), { code: "outcome-unknown" }));
   assert.equal(message, `Archive: ${tr("settings.mutationOutcomeUnknown")}`);
   assert.doesNotMatch(tr("settings.mutationOutcomeUnknown"), /draft|session|reconciliation/i);
+});
+
+test("an explicit outcome wins over the outcome-unknown code: opening a chat never reads as an unconfirmed write", () => {
+  const open = Object.assign(new Error("backend session creation outcome is unknown"), { code: "outcome-unknown", mutationOutcome: "not-applicable" });
+  assert.equal(isMutationOutcomeUnknown(open), false);
+  assert.doesNotMatch(friendlyError("Open session", open), new RegExp(tr("settings.mutationOutcomeUnknown").slice(0, 20)));
+  assert.equal(isMutationOutcomeUnknown(Object.assign(new Error("x"), { code: "outcome-unknown", mutationOutcome: "unknown" })), true);
+  assert.equal(isMutationOutcomeUnknown(Object.assign(new Error("x"), { code: "outcome-unknown" })), true, "an untagged code stays unknown");
 });

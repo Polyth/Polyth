@@ -62,7 +62,7 @@ import { sessionClosedTo } from "./sessionSharing.ts";
 import { privateHarnessCatalog, type HarnessAccess } from "./accountPermissions.ts";
 import { createProxyTrust, type ProxyTrust } from "./trustedProxy.ts";
 import { logHttp500 } from "./httpLog.ts";
-import { httpErrorDiagnostics } from "./errorDiagnostics.ts";
+import { httpErrorDiagnostics, lifecyclePassError } from "./errorDiagnostics.ts";
 import { streamHistoryResponse } from "./historyResponse.ts";
 import { withProjectIconRef } from "./projectIconRefs.ts";
 import { createSessionOnce, sessionCreateOperationStatus, sessionIdForCreateOperation, startSessionOnce } from "./sessionCreateIdempotency.ts";
@@ -1035,7 +1035,12 @@ async function dispatchHttp(
         if (intent !== undefined && intent !== "open" && intent !== "warm") {
           throw Object.assign(new Error("invalid activation intent"), { code: "invalid-input" });
         }
-        await activate(m[1]!, intent ? { intent } : undefined);
+        try {
+          await activate(m[1]!, intent ? { intent } : undefined);
+        } catch (error) {
+          // Opening a chat must never read "it may have worked anyway".
+          throw lifecyclePassError(error);
+        }
         return json(res, 200, { ok: true });
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/events\/forward$/);

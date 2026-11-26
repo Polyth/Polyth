@@ -13567,11 +13567,18 @@ export function createSessionService(deps: {
       return { ...page, sessions: hydrated.map((row) => ({ ...row, ...(counts?.[row.id] ? { attention: { ...counts[row.id]! } } : {}) })) };
     },
     async activate(sessionId, options) {
+      const projection = await store.projection(sessionId);
       // Opening a conversation is a pure read: it has no runtime to warm.
-      if (isConversation(await store.projection(sessionId))) return;
+      if (isConversation(projection)) return;
+      // An archived chat runs no further turn: reading it needs no runtime,
+      // and restore re-materializes one lazily. Wiring it anyway met a runtime
+      // authority gone since the archive, and the epoch transition that
+      // archived status never takes answered `epoch-pending` to a plain open.
+      if (projection?.status === "archived") return;
       // A chat that is starting is already getting its runtime; opening it
-      // (the client does, as soon as the start replies) has nothing to warm.
-      if (startFlights.has(sessionId)) return;
+      // (the client does, as soon as the start replies) has nothing to warm,
+      // nor does the start's own first send before its flight exists.
+      if (startFlights.has(sessionId) || startAdmitting.has(sessionId)) return;
       if (options?.intent === "open" && !await openNeedsRuntime(sessionId)) return;
       try {
         await sessionJobs.enqueue(sessionId);

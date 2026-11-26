@@ -1,6 +1,23 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { httpErrorDiagnostics } from "../src/errorDiagnostics.ts";
+import { httpErrorDiagnostics, lifecyclePassError } from "../src/errorDiagnostics.ts";
+
+test("opening or warming a chat never reports an unknown outcome, and a shared error keeps its own tags", () => {
+  // 2026-11-26: opening an archived chat answered 409 `epoch-pending`, which
+  // the phone showed as "it may have worked anyway".
+  const cached = Object.assign(new Error("backend session creation outcome is unknown"), { code: "outcome-unknown", mutationOutcome: "unknown" });
+  for (const error of [Object.assign(new Error("runtime replacement is pending"), { code: "epoch-pending" }), cached, new Error("boom")]) {
+    const passed = lifecyclePassError(error) as Error & { code?: string };
+    const diagnostics = httpErrorDiagnostics(passed, "POST", "r");
+    assert.equal(diagnostics.mutationOutcome, "not-applicable");
+    assert.equal(diagnostics.retryability, "safe");
+    assert.equal(passed.message, error.message);
+    assert.equal(passed.code, (error as { code?: string }).code);
+    assert.equal(passed.cause, error);
+  }
+  assert.equal(cached.mutationOutcome, "unknown", "the send path rethrowing a cached failure still reports it");
+  assert.equal(lifecyclePassError("plain"), "plain");
+});
 
 test("diagnostics distinguish components and preserve request identity without exposing authority", () => {
   for (const [code, component] of [["auth-rejected", "auth"], ["storage-unavailable", "storage"], ["invalid-input", "validation"], ["validation", "validation"], ["native-failure", "provider"], ["harness-transport", "harness-transport"], ["http-500", "harness-transport"], ["protocol-response-invalid", "harness-transport"]]) {

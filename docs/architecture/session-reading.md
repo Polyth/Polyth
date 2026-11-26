@@ -19,6 +19,13 @@ a non-held queued prompt. A quiet idle chat starts no native process.
 and starts the runtime for an imminent turn. The client warms the chat on
 screen after 20 s of visible dwell or as soon as the person types into its
 focused composer, at most once a minute per chat (`apps/web/src/sessionRuntimeWarm.ts`).
+Whatever the intent, activation is a no-op for a conversation, an archived chat
+(it runs no further turn; restore re-materializes the runtime lazily) and a chat
+that is still starting, including the start's own queued first turn (its
+provisioning flight delivers it). A failed activation answers
+`mutationOutcome: "not-applicable"`, `retryability: "safe"`
+(`lifecyclePassError`, `packages/server/src/errorDiagnostics.ts`): opening a
+chat is never presented as a write that "may have worked anyway".
 Sending wires the runtime on demand either way. A session lifecycle job owner
 provides single-flight activation, two concurrent jobs, a 128-job admission
 bound and shutdown cancellation. Each active job owns a cancellation signal;

@@ -20,6 +20,19 @@ const REFUSED = new Set([
   EDITION_UNAVAILABLE_CODE,
 ]);
 
+/** A failure of an idempotent lifecycle pass (opening or warming a chat): not
+ *  a write the caller made, so nothing waits to be checked before trying
+ *  again and it never reports an unknown outcome, whatever it failed on. A
+ *  copy keeps a shared (cached) error's own tags intact for its other callers. */
+export function lifecyclePassError(error: unknown): unknown {
+  if (!error || typeof error !== "object") return error;
+  return Object.assign(
+    new Error(error instanceof Error ? error.message : String(error), { cause: error }),
+    error,
+    { mutationOutcome: "not-applicable", retryability: "safe" },
+  );
+}
+
 export function httpErrorDiagnostics(error: unknown, method: string, requestId: string): ErrorDiagnostics {
   const typed = readErrorDiagnostics(error);
   const code = typed.code ?? "internal";
