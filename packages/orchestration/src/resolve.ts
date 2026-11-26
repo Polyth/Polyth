@@ -79,6 +79,9 @@ function resolveChoice(policy: RoutingPolicy, choice: ModelChoice, facts: Routin
     favorite: row?.favorite ?? false,
     status: "ready",
     ...(row?.runs ? { runs: row.runs } : {}),
+    ...(row && row.harnessId !== choice.harnessId
+      ? { spawn: { harnessId: row.harnessId, providerID: row.providerID, modelID: row.modelID } }
+      : {}),
     ...(row?.quotaUsed !== undefined ? { quotaUsed: row.quotaUsed } : {}),
     ...(row?.quotaWindow ? { quotaWindow: row.quotaWindow } : {}),
     ...(row?.blockedUntil !== undefined ? { blockedUntil: row.blockedUntil } : {}),
@@ -119,7 +122,10 @@ export function resolveRoles(policy: RoutingPolicy, facts: RoutingFacts, options
 }
 
 const ref = (choice: ResolvedChoice): string => {
-  let text = `${choice.harnessId} ${choice.providerID}/${choice.modelID}`;
+  // A choice saved on a member account the Space keeps for a family Relay
+  // only is followed through that Relay: name the selection a spawn must make.
+  const selection = choice.spawn ?? { harnessId: choice.harnessId, providerID: choice.providerID, modelID: choice.modelID };
+  let text = `${selection.harnessId} ${selection.providerID}/${selection.modelID}`;
   if (choice.runs) text += ` (${choice.runs})`;
   if (choice.maxConcurrent !== undefined) text += ` (at most ${choice.maxConcurrent} at once)`;
   if (choice.status === "unverified") text += " (model unverified)";

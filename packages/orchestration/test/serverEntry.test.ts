@@ -18,7 +18,12 @@ import registerPackage from "../src/serverEntry.ts";
 
 const ctx = (spaceId: string, userId: string) => ({ spaceId, userId, role: "member", spaceSlug: spaceId, storageDir: "" }) as unknown as SpaceContext;
 
-function fixture(t: TestContext, options: { routing?: boolean } = {}) {
+function fixture(t: TestContext, options: {
+  routing?: boolean;
+  /** Simulates Usage re-owning a disabled member's pair to the family Relay. */
+  relay?: boolean;
+  roster?: Array<{ identity: { id: string; accounts?: { family: string }; relay?: { family: string } }; policy: { enabled: boolean } }>;
+} = {}) {
   const root = mkdtempSync(join(tmpdir(), "orchestration-routes-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const provided = new Map<unknown, unknown>();
@@ -34,7 +39,8 @@ function fixture(t: TestContext, options: { routing?: boolean } = {}) {
           const [providerID, ...m] = rest.split("/");
           const modelID = m.join("/");
           const runs = modelID === "opus" || modelID === "default" ? { runs: "Claude Opus 5.5" } : {};
-          return { harnessId, providerID: providerID!, modelID, ...runs, listed: true, favorite: false, turns: 3, sessions: 1, failed: 0, available: true, blocked: false };
+          const owned = options.relay && harnessId === "antigravity" ? "antigravity-relay" : harnessId;
+          return { harnessId: owned, providerID: providerID!, modelID, ...runs, listed: true, favorite: false, turns: 3, sessions: 1, failed: 0, available: true, blocked: false };
         }),
         text: "SHORTLIST",
       };
@@ -50,7 +56,19 @@ function fixture(t: TestContext, options: { routing?: boolean } = {}) {
       packageDir: (id: string) => { const dir = join(root, space.spaceId, "packages", id); mkdirSync(dir, { recursive: true }); return dir; },
     }),
     services: {
-      get: (key: unknown) => services.get(key) ?? (typeof key === "object" && (key as { id?: string }).id === "polyth.service.harnesses" ? { get: (id: string) => id === "claude" ? {} : undefined } : undefined),
+      get: (key: unknown) => services.get(key) ?? (typeof key === "object" && (key as { id?: string }).id === "polyth.service.harnesses"
+        ? {
+          get: (id: string) => id === "claude" ? {} : undefined,
+          providers: options.roster
+            ? () => [
+              { descriptor: { id: "antigravity", name: "Antigravity" } },
+              { descriptor: { id: "antigravity-relay", name: "Antigravity · Relay" } },
+              { descriptor: { id: "claude", name: "Claude Code" } },
+            ]
+            : undefined,
+          roster: options.roster ? async () => options.roster : undefined,
+        }
+        : undefined),
       provide: (key: unknown, value: unknown) => { provided.set(key, value); },
     },
   } as unknown as ServerPackageHost;
@@ -225,4 +243,31 @@ test("an untouched auto policy gives agents no brief and an unsaved policy keeps
   assert.equal(strict.status, 400);
   const rule = await f.call(alice, "PUT", "/api/orchestration/policy", { policy: { ...DEFAULT_POLICY, harnesses: { pi: "sometimes" } }, expectedRevision: "default" });
   assert.equal(rule.status, 400);
+});
+
+test("a role saved on a Relay-only member account is briefed and routed through the Relay", async (t) => {
+  const f = fixture(t, {
+    relay: true,
+    roster: [
+      { identity: { id: "antigravity", accounts: { family: "antigravity" } }, policy: { enabled: false } },
+      { identity: { id: "antigravity-relay", relay: { family: "antigravity" } }, policy: { enabled: true } },
+      { identity: { id: "claude" }, policy: { enabled: true } },
+    ],
+  });
+  const policy = { ...DEFAULT_POLICY, mode: "roles", roles: [{
+    id: "explore", enabled: true, maxChildren: 2,
+    models: [{ harnessId: "antigravity", providerID: "antigravity", modelID: "gemini-3.8-flash", maxConcurrent: 2 }],
+  }] };
+  await f.pkg.onEnable?.();
+  const put = await f.call(alice, "PUT", "/api/orchestration/policy", { policy, expectedRevision: "default" });
+  assert.equal(put.status, 200);
+  const service = f.provided.get(SERVER_DELEGATION_POLICY) as ServerDelegationPolicyService;
+  const brief = await service.brief!(alice);
+  assert.match(brief!.text!, /use antigravity-relay antigravity\/gemini-3\.8-flash \(at most 2 at once\)/);
+  assert.deepEqual(await service.route!(alice, "explore"), {
+    harnessId: "antigravity-relay", providerID: "antigravity", modelID: "gemini-3.8-flash",
+  });
+  const state = put.body as OrchestrationState;
+  assert.ok(state.harnesses.some((h) => h.id === "antigravity" && !h.available), "a disabled member is listed but not directly usable");
+  assert.ok(state.harnesses.some((h) => h.id === "antigravity-relay" && h.available), "the enabled Relay is usable");
 });

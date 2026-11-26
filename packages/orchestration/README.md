@@ -33,8 +33,11 @@ for which kind of work, with quota fallbacks and a never-use list.
   { exclude })` with the first usable model of that role's chain (statuses
   `ready` and `unverified`) whose key is not excluded; undefined in `auto`
   mode, while the package is disabled, and for an unknown, disabled or empty
-  role. The workflow engine uses it to run a unit that names a routing role
-  ([workflows](../../docs/dev/workflows.md#routing-roles)).
+  role. A choice saved on a member account the Space keeps for a family Relay
+  only (disabled in Harness Settings while the Relay is enabled) resolves
+  through that Relay: the brief names the Relay id a spawn pins and `route`
+  returns it. The workflow engine uses it to run a unit that names a routing
+  role ([workflows](../../docs/dev/workflows.md#routing-roles)).
 - **Resolution** (`src/resolve.ts`): one `SERVER_MODEL_ROUTING.candidates(space,
   { pairs, limit: 50 })` call; per choice the status is
   excluded > unlisted > unavailable > blocked > over-pace > ceiling > unverified > ready.

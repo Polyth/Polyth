@@ -51,6 +51,11 @@ export interface ModelRoutingInput {
   exclude?: readonly string[];
   /** Never list a row of these harnesses. */
   excludeHarnesses?: readonly string[];
+  /** Rename a pair's harness to the one a spawn must name: a member account
+   *  the Space keeps for a family Relay only (disabled in Harness Settings
+   *  while the Relay is enabled) runs through that Relay, so its rows are
+   *  re-owned to the Relay id and verified against the Relay's catalog. */
+  relayHarness?: (harnessId: string) => string | undefined;
   /** The person's own order on top of the automatic one. */
   order?: ServerModelRoutingOrder;
   /** Rows `text` prints when fewer than `limit`. */
@@ -87,6 +92,10 @@ interface Tally extends Pair {
   lastUsedAt: number;
   /** False when the harness's catalog could not confirm the pair. */
   listed: boolean;
+  /** The member accounts a Relay re-owning keeps quota attribution on: every
+   *  member whose pairs merged into this row (a favorite and real use of the
+   *  same Relay model may name different accounts). */
+  quotaHarnessIds?: string[];
   /** What an alias row runs now (`Claude Opus 5.5` for `opus`). */
   runs?: string;
   /** Ids a `<model>/<period>` quota window may name: the row and what it runs. */
@@ -190,13 +199,22 @@ function rankModelRouting(input: ModelRoutingInput): { report: RankedReport; tex
   }
 
   const resolve = createCatalogResolver(input.catalog ?? []);
+  // A member account kept for a Relay only runs through that Relay: its pairs
+  // are re-owned before anything else, so catalog resolution, exclusions,
+  // allow-lists and candidate keys all agree on the spawn's harness id.
+  const relayOf = input.relayHarness ?? (() => undefined);
+  const spawnPair = (pair: Pair): { pair: Pair; from?: string } => {
+    const relay = relayOf(pair.harnessId);
+    return relay ? { pair: { ...pair, harnessId: canonicalHarnessId(relay) }, from: pair.harnessId } : { pair };
+  };
   const tallies = new Map<string, Tally>();
   const unlisted = new Set<string>();
   /** The tally a pair counts toward, keyed by the selection a spawn names. */
-  const target = (pair: Pair, preferred: (row: ModelDescriptor) => number | undefined): [string, Tally] | undefined => {
+  const target = (raw: Pair, preferred: (row: ModelDescriptor) => number | undefined): [string, Tally] | undefined => {
+    const { pair, from } = spawnPair(raw);
     const resolution = resolve(pair, preferred);
     if (resolution.kind === "unlisted") {
-      unlisted.add(pairKey(pair.harnessId, pair.providerID, pair.modelID));
+      unlisted.add(pairKey(raw.harnessId, raw.providerID, raw.modelID));
       return undefined;
     }
     const selection: Pair = resolution.kind === "listed"
@@ -204,6 +222,9 @@ function rankModelRouting(input: ModelRoutingInput): { report: RankedReport; tex
       : { harnessId: pair.harnessId, providerID: pair.providerID, modelID: pair.modelID };
     const key = pairKey(selection.harnessId, selection.providerID, selection.modelID);
     let tally = tallies.get(key);
+    if (tally && from && !tally.quotaHarnessIds?.includes(from)) {
+      tally.quotaHarnessIds = [...tally.quotaHarnessIds ?? [], from];
+    }
     if (!tally) {
       const runs = resolution.kind === "listed" && resolution.row.resolvedModelID !== resolution.row.modelID
         ? resolution.row.resolvedModelID
@@ -211,6 +232,7 @@ function rankModelRouting(input: ModelRoutingInput): { report: RankedReport; tex
       tally = {
         ...selection, turns: 0, failed: 0, sessions: new Set(), lastUsedAt: 0,
         listed: resolution.kind === "listed",
+        ...(from ? { quotaHarnessIds: [from] } : {}),
         ...(runs ? { runs: friendlyModelId(runs) } : {}),
         quotaModel: runs ? `${selection.modelID} ${runs}` : selection.modelID,
         concrete: runs ?? selection.modelID,
@@ -269,13 +291,14 @@ function rankModelRouting(input: ModelRoutingInput): { report: RankedReport; tex
   for (const raw of input.exclude ?? []) {
     const parsed = parseFavoriteKey(raw);
     if (!parsed) continue;
-    const resolution = resolve(parsed, starred(parsed.harnessId));
+    const { pair } = spawnPair(parsed);
+    const resolution = resolve(pair, starred(parsed.harnessId));
     if (resolution.kind === "unlisted") continue;
     const row = resolution.kind === "listed" ? resolution.row : undefined;
-    const providerID = row?.providerID ?? parsed.providerID;
-    const modelID = row?.modelID ?? parsed.modelID;
-    excludedRows.add(pairKey(parsed.harnessId, providerID, modelID));
-    excludedModels.add(sameModel(parsed.harnessId, providerID, row?.resolvedModelID ?? modelID));
+    const providerID = row?.providerID ?? pair.providerID;
+    const modelID = row?.modelID ?? pair.modelID;
+    excludedRows.add(pairKey(pair.harnessId, providerID, modelID));
+    excludedModels.add(sameModel(pair.harnessId, providerID, row?.resolvedModelID ?? modelID));
   }
   const excludedHarnesses = new Set((input.excludeHarnesses ?? []).map(canonicalHarnessId));
   // Demotions name a row the same way, without listing an unused one.
@@ -283,10 +306,11 @@ function rankModelRouting(input: ModelRoutingInput): { report: RankedReport; tex
   (input.order?.demote ?? []).forEach((raw, index) => {
     const parsed = parseFavoriteKey(raw);
     if (!parsed) return;
-    const resolution = resolve(parsed, starred(parsed.harnessId));
+    const { pair } = spawnPair(parsed);
+    const resolution = resolve(pair, starred(parsed.harnessId));
     if (resolution.kind === "unlisted") return;
     const row = resolution.kind === "listed" ? resolution.row : undefined;
-    const key = pairKey(parsed.harnessId, row?.providerID ?? parsed.providerID, row?.modelID ?? parsed.modelID);
+    const key = pairKey(pair.harnessId, row?.providerID ?? pair.providerID, row?.modelID ?? pair.modelID);
     if (!demoteRank.has(key)) demoteRank.set(key, index);
   });
   const harnessRules = new Map<string, "prefer" | "avoid">();
@@ -305,11 +329,14 @@ function rankModelRouting(input: ModelRoutingInput): { report: RankedReport; tex
   };
 
   const snapshots = input.snapshots;
-  const sourcesOf = (pair: { harnessId: string; providerID: string; modelID: string }): Set<string> =>
-    new Set(currentLimitSources(
-      { resolvedHarnessId: pair.harnessId, model: { providerID: pair.providerID, modelID: pair.modelID } },
-      snapshots,
-    ));
+  const sourcesOf = (pair: { harnessId: string; quotaHarnessIds?: readonly string[]; providerID: string; modelID: string }): Set<string> =>
+    // Quotas stay attributed to the member accounts a Relay row runs on; the
+    // Relay itself has no plan of its own.
+    new Set((pair.quotaHarnessIds ?? [pair.harnessId]).flatMap((resolvedHarnessId) =>
+      currentLimitSources(
+        { resolvedHarnessId, model: { providerID: pair.providerID, modelID: pair.modelID } },
+        snapshots,
+      )));
 
   const sourcesByPair = new Map<string, Set<string>>();
   const candidates: ServerModelRoutingCandidate[] = [...tallies.entries()].filter(kept).map(([key, tally]) => {

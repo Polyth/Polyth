@@ -478,3 +478,47 @@ test("textLimit prints an agent's cut while the rows go to limit; names and mete
   assert.deepEqual(claude.quotaWindows, [{ sourceId: "claude", windowId: "5h" }, { sourceId: "claude", windowId: "7d" }]);
   assert.equal(report.quotas.find((q) => q.sourceId === "claude")?.harnessName, "Claude Code");
 });
+
+test("a member account kept for a Relay only is named by that Relay, catalog-verified, quota still on the member", () => {
+  const report = buildModelRouting({
+    now: NOW,
+    observations: [observation("antigravity-work", "antigravity", "gemini-3.8-flash"), observation("grok", "xai", "grok-5")],
+    favorites: ["antigravity::antigravity/gemini-3.8-flash", "grok::xai/grok-5"],
+    snapshots: [snapshot("antigravity-work", [["weekly", 53, NOW + 5 * DAY]], {
+      account: { family: "antigravity", harnessId: "antigravity-work", label: "Work" },
+    })],
+    // The live catalog belongs to the Relay: the Space disabled the members.
+    catalog: [row("antigravity-relay", "antigravity", "gemini-3.8-flash")],
+    available: (id) => id !== "antigravity" && id !== "antigravity-work" && id !== "grok",
+    relayHarness: (id) => (id === "antigravity" || id === "antigravity-work") ? "antigravity-relay" : undefined,
+  });
+  const rows = report.candidates.filter((candidate) => candidate.modelID === "gemini-3.8-flash");
+  assert.equal(rows.length, 1);
+  const [relay] = rows as [Candidate];
+  assert.equal(relay.harnessId, "antigravity-relay");
+  assert.equal(relay.listed, true);
+  assert.equal(relay.favorite, true);
+  assert.equal(relay.available, true);
+  assert.equal(relay.quotaUsed, 0.53);
+  assert.deepEqual(relay.quotaWindows, [{ sourceId: "antigravity-work", windowId: "weekly" }]);
+  assert.match(report.text, /1\. ★ antigravity-relay antigravity\/gemini-3\.8-flash/);
+  // A disabled member with no enabled Relay stays named and unusable.
+  const [stuck] = report.candidates.filter((candidate) => candidate.harnessId === "grok") as [Candidate];
+  assert.equal(stuck?.available, false);
+  assert.match(report.text, /UNAVAILABLE: harness not running/);
+});
+
+test("exclusions and demotions match a Relay-re-owned row", () => {
+  const report = buildModelRouting({
+    now: NOW,
+    observations: [observation("antigravity", "antigravity", "gemini-3.8-flash")],
+    favorites: [],
+    snapshots: [],
+    catalog: [row("antigravity-relay", "antigravity", "gemini-3.8-flash")],
+    available: () => true,
+    relayHarness: (id) => id === "antigravity" ? "antigravity-relay" : undefined,
+    exclude: ["antigravity::antigravity/gemini-3.8-flash"],
+  });
+  assert.equal(report.candidates.length, 0);
+  assert.equal(report.excluded, 1);
+});
