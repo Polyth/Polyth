@@ -225,6 +225,7 @@ export default function registerPackage(host: ServerPackageHost) {
     const accounts = createHarnessAccountFamily({
         family: "vibe",
         label: "Mistral Vibe",
+        relay: { policy: "prohibited" },
         packageId: "backend-vibe",
         storageDir: host.storageDir,
         deployment: host.deployment,

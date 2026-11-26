@@ -135,6 +135,7 @@ is always present.
 - gitlab
 - goals
 - handoff
+- harness-relay
 - harness-runtime
 - hotkeys
 - ide-mode

@@ -5,9 +5,13 @@ import { Window } from "happy-dom";
 import type { WebPackageHost } from "@polyth/web-sdk";
 
 register("../../../apps/web/test/tsxHooks.mjs", import.meta.url);
-const { en: enMessages } = await import("../src/i18n/en.ts");
+/** Both catalogs the Accounts section reads: the package's Relay keys and the
+ *  harness-runtime keys that stayed (account list, hand-over divider). */
+const { en: relayMessages } = await import("../src/i18n/en.ts");
+const { en: runtimeMessages } = await import("../../harness-runtime/src/i18n/en.ts");
+const messages: Record<string, string> = { ...(runtimeMessages as Record<string, string>), ...(relayMessages as Record<string, string>) };
 const enTranslate = (key: string, values: Record<string, string | number> = {}) =>
-  ((enMessages as Record<string, string>)[key] ?? key).replace(/\{(\w+)\}/g, (_: string, name: string) => String(values[name] ?? `{${name}}`));
+  (messages[key] ?? key).replace(/\{(\w+)\}/g, (_: string, name: string) => String(values[name] ?? `{${name}}`));
 
 const dom = new Window({ url: "http://localhost:3000/" });
 Object.assign(globalThis, {
@@ -21,10 +25,12 @@ Object.defineProperty(globalThis, "navigator", { value: dom.navigator, configura
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 type Rec = { method: string; path: string; body?: unknown };
+type FamilyView = { family: string; label: string; relayId: string; policy: "prohibited" | "unsupported" | "tolerated"; enabled: boolean; editable: boolean; offered: boolean };
 const requests: Rec[] = [];
 const now = Date.now();
 const member = (harnessId: string, name: string, extra: Record<string, unknown> = {}) => ({ harnessId, name, included: false, state: "skipped", owner: "mine", ...extra });
 let relays: unknown;
+let families: FamilyView[];
 let relayStatus = 200;
 let putStatus = 200;
 const baseView = () => ({
@@ -37,6 +43,8 @@ const baseView = () => ({
     member("claude-team", "Claude Code · Team"),
   ],
 });
+const familyView = (family: string, label: string, policy: FamilyView["policy"]): FamilyView =>
+  ({ family, label, relayId: `${family}-relay`, policy, enabled: true, editable: true, offered: true });
 type AccountMock = { id: string; harnessId: string; name: string; removable: boolean; usable: boolean; signInCommand?: string; status: { loggedIn: boolean } };
 const fourAccounts = (): AccountMock[] => [
   { id: "default", harnessId: "claude", name: "", removable: false, usable: true, status: { loggedIn: true } },
@@ -57,8 +65,8 @@ globalThis.fetch = (async (input, init) => {
   requests.push({ method, path: url.pathname, body });
   const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
   if (url.pathname === "/api/claude/accounts") return json({ manageable: true, label: "Claude Code", canAddShared: true, canEditAccess: true, accounts });
-  if (url.pathname === "/api/harnesses/relays" && method === "GET") return relayStatus === 200 ? json({ relays }) : new Response("no", { status: relayStatus });
-  if (url.pathname === "/api/harnesses/relays/claude-relay" && method === "PUT") {
+  if (url.pathname === "/api/harness-relay/relays" && method === "GET") return relayStatus === 200 ? json({ relays, families }) : new Response("no", { status: relayStatus });
+  if (url.pathname === "/api/harness-relay/relays/claude-relay" && method === "PUT") {
     if (putStatus !== 200) return json({ error: "nope" }, putStatus);
     const sent = body as { members: string[]; order: string; handoverAt: number };
     const view = baseView();
@@ -80,11 +88,14 @@ globalThis.fetch = (async (input, init) => {
 
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
-const { default: HarnessAccounts } = await import("../widgets/HarnessAccounts.tsx");
-const { accountRole, moveIncluded, setIncluded, orderedMembers, meterText, reasonText, relayAvailable, relayListed, relayRowOrder, routeMembers } = await import("../widgets/relayModel.ts");
-const { pickerPreferences } = await import("../widgets/accountsModel.ts");
-const { relayHandover, relayDividerReason, SwitchMarker } = await import("../widgets/runtime.tsx");
-const { replaceRelayPrefs, getRelayPrefs } = await import("../widgets/relayPrefs.ts");
+const { default: HarnessAccounts } = await import("../../harness-runtime/widgets/HarnessAccounts.tsx");
+const { registerRelayKit } = await import("@polyth/harness-runtime/relay-ui");
+const { RelayBadge, RelayCard, RelayReading, useRelay } = await import("../widgets/RelayGroup.tsx");
+// Harness-runtime draws the account list and joins a rotating package here.
+registerRelayKit({ useRelay, RelayCard, RelayBadge, RelayReading });
+const { meterText, moveIncluded, orderedMembers, reasonText, relayAvailable, relayListed, routeMembers, setIncluded } = await import("../widgets/relayModel.ts");
+const { pickerPreferences } = await import("../../harness-runtime/widgets/accountsModel.ts");
+const { replaceRelayPrefs, getRelayPrefs } = await import("../../harness-runtime/widgets/relayPrefs.ts");
 
 const flush = async (rounds = 8) => { for (let index = 0; index < rounds; index++) await act(async () => { await Promise.resolve(); }); };
 const host = {
@@ -94,12 +105,12 @@ const host = {
   navigation: { setOverlay: () => {}, openWorkspacePane: () => {}, openSettingsPage: () => {} },
   ui: { Slot: () => null, locale: { get: () => "en", translate: enTranslate } },
 } as unknown as WebPackageHost;
-const mount = async () => {
+const mount = async (family = "claude") => {
   requests.length = 0;
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
-  await act(async () => { root.render(createElement(HarnessAccounts, { host, accounts: { family: "claude", endpoint: "/api/claude/accounts" } as never, projectId: "p1" })); });
+  await act(async () => { root.render(createElement(HarnessAccounts, { host, accounts: { family, endpoint: "/api/claude/accounts" } as never, projectId: "p1" })); });
   await flush();
   return { container, unmount: async () => { await act(async () => { root.unmount(); }); container.remove(); } };
 };
@@ -107,7 +118,15 @@ const accountRows = (scope: ParentNode) => [...scope.querySelectorAll<HTMLElemen
 const relaySwitch = (row: HTMLElement) => row.querySelector<HTMLButtonElement>('[data-testid="relay-switch"]');
 const pickerSwitch = (row: HTMLElement) => row.querySelector<HTMLButtonElement>('[data-testid="picker-switch"]');
 const relayCard = (scope: ParentNode) => scope.querySelector<HTMLElement>("section.pkg-harnesses-relay");
-const reset = () => { relays = [baseView()]; relayStatus = 200; putStatus = 200; accounts = fourAccounts(); manage = true; pickerShown = {}; };
+const reset = () => {
+  relays = [baseView()];
+  families = [familyView("claude", "Claude Code", "tolerated")];
+  relayStatus = 200;
+  putStatus = 200;
+  accounts = fourAccounts();
+  manage = true;
+  pickerShown = {};
+};
 
 test("relay model orders included members first and moves them", () => {
   const rows = orderedMembers(baseView() as never);
@@ -116,13 +135,13 @@ test("relay model orders included members first and moves them", () => {
   assert.equal(moveIncluded(rows, "claude", -1)[0]!.harnessId, "claude", "the first row cannot go up");
   assert.deepEqual(setIncluded(rows, "claude-team", true).map((row) => row.harnessId), ["claude", "claude-iryna", "claude-max", "claude-team"]);
   assert.equal(setIncluded(rows, "claude-iryna", false).find((row) => row.harnessId === "claude-iryna")?.included, false);
-  const t = (key: string, values?: Record<string, string | number>) => enTranslate(`harnessruntime.relay.${key}`, values);
+  const t = (key: string, values?: Record<string, string | number>) => enTranslate(`harnessrelay.${key}`, values);
   assert.match(meterText(rows[0]!, t, now, "en"), /^5h · 62% left · resets /);
   assert.equal(meterText(rows[3]!, t, now, "en"), "No reading");
   assert.equal(reasonText(rows[2]!, t, now, "en"), "Signed out · skipped");
 });
 
-test("relay model: availability, route order, row order and the account role", () => {
+test("relay model: availability and route order", () => {
   const view = baseView();
   assert.equal(relayAvailable(undefined), false);
   assert.equal(relayAvailable({ members: view.members.slice(0, 1) } as never), false, "one account: no Relay to offer");
@@ -131,12 +150,6 @@ test("relay model: availability, route order, row order and the account role", (
   assert.equal(relayListed(rows), true);
   assert.equal(relayListed(setIncluded(setIncluded(rows, "claude-iryna", false), "claude-max", false)), false, "one member is not listed");
   assert.deepEqual(routeMembers([{ ...rows[2]!, state: "skipped" }, { ...rows[1]!, state: "next" }, { ...rows[0]!, state: "now" }, rows[3]!]).map((row) => row.harnessId), ["claude", "claude-iryna", "claude-max"]);
-  const list = [{ harnessId: "claude-team" }, { harnessId: "claude-max" }, { harnessId: "claude" }, { harnessId: "claude-iryna" }];
-  assert.deepEqual(relayRowOrder(list, rows, false).map((row) => row.harnessId), ["claude-team", "claude-max", "claude", "claude-iryna"], "automatic order: nothing jumps");
-  assert.deepEqual(relayRowOrder(list, rows, true).map((row) => row.harnessId), ["claude", "claude-iryna", "claude-max", "claude-team"], "My order: members first, in their order");
-  assert.equal(accountRole(true, true), undefined);
-  assert.equal(accountRole(true, false), "relay-only");
-  assert.equal(accountRole(false, false), "off");
   assert.deepEqual(pickerPreferences(rosterRows(), "claude-max", false).preferences["claude-max"], { enabled: false, priority: 3 });
   assert.equal(Object.keys(pickerPreferences(rosterRows(), "claude-max", false).preferences).length, 6, "every row is sent back");
 });
@@ -280,42 +293,6 @@ test("Relay stays out of sight below two accounts; with two it asks for members;
   relayStatus = 200;
 });
 
-test("hand-over divider text covers the limit, rate-limited and unavailable causes", () => {
-  assert.equal(relayHandover({ relayId: "x", cause: "bogus" }), undefined);
-  assert.equal(relayHandover(undefined), undefined);
-  const limit = relayHandover({ relayId: "claude-relay", cause: "limit", refillsAt: 5 })!;
-  assert.equal(relayDividerReason(limit, "Iryna", "19:00", enTranslate), "Iryna's limit ran out, refills 19:00");
-  assert.equal(relayDividerReason(limit, "Iryna", undefined, enTranslate), "Iryna's limit ran out");
-  assert.equal(relayDividerReason({ ...limit, cause: "rate-limited" }, "Iryna", "19:00", enTranslate), "Iryna was rate-limited, refills 19:00");
-  assert.equal(relayDividerReason({ ...limit, cause: "unavailable" }, "Iryna", undefined, enTranslate), "Iryna is unavailable");
-});
-
-const markerHtml = async (data: Record<string, unknown>) => {
-  const container = document.createElement("div");
-  document.body.appendChild(container);
-  const root = createRoot(container);
-  await act(async () => { root.render(createElement(SwitchMarker, { host, event: { type: "harness/switched", time: now, data } as never })); });
-  const html = container.innerHTML;
-  await act(async () => { root.unmount(); });
-  container.remove();
-  return html;
-};
-
-test("a Relay hand-over divider renders only when the preference is on; ordinary switches are unchanged", async () => {
-  const relaySwitch = { from: "claude-iryna", to: "claude-max", relay: { relayId: "claude-relay", cause: "limit", refillsAt: now + 3_600_000 } };
-  const plainSwitch = { from: "claude", to: "codex" };
-  replaceRelayPrefs(undefined);
-  assert.equal(getRelayPrefs().showHandovers, false, "default off");
-  assert.equal(await markerHtml(relaySwitch), "", "off: nothing at all");
-  assert.match(await markerHtml(plainSwitch), /pkg-harnesses-switch-marker/, "ordinary switch still shows");
-  replaceRelayPrefs({ showHandovers: true });
-  const shown = await markerHtml(relaySwitch);
-  assert.match(shown, /Relay moved this chat to/);
-  assert.match(shown, /context sent again without cache/);
-  assert.match(await markerHtml(plainSwitch), /pkg-harnesses-switch-marker/);
-  replaceRelayPrefs({ showHandovers: false });
-});
-
 test("the Settings switch writes the preference", async () => {
   reset();
   replaceRelayPrefs({ showHandovers: false });
@@ -327,4 +304,38 @@ test("the Settings switch writes the preference", async () => {
     assert.equal(getRelayPrefs().showHandovers, true);
     assert.equal(requests.some((request) => request.method === "PUT"), false, "a UI preference is never sent to the Relay route");
   } finally { replaceRelayPrefs({ showHandovers: false }); await view.unmount(); }
+});
+
+test("a family's Relay card states its vendor policy from the policy keys; no vendor has a bespoke warning", async () => {
+  reset();
+  const claude = await mount();
+  try {
+    const notice = claude.container.querySelector('[data-testid="relay-policy-notice"]');
+    assert.equal(notice?.getAttribute("data-policy"), "tolerated");
+    assert.match(notice?.textContent ?? "", /Several accounts are allowed/);
+    assert.match(notice?.textContent ?? "", /Claude Code does not forbid several accounts/, "the body names the vendor");
+    assert.equal(claude.container.querySelector('[data-testid="antigravity-relay-warning"]'), null, "no vendor-specific warning branch");
+  } finally { await claude.unmount(); }
+
+  relays = [{
+    id: "antigravity-relay",
+    family: "antigravity",
+    label: "Antigravity",
+    limitsAvailable: true,
+    settings: { members: ["antigravity", "antigravity-work"], order: "expire-first", handoverAt: 0.05 },
+    members: [
+      member("antigravity", "Antigravity", { included: true, position: 1, state: "now" }),
+      member("antigravity-work", "Antigravity · Work", { included: true, position: 2, state: "next" }),
+    ],
+  }];
+  families = [familyView("antigravity", "Antigravity", "unsupported")];
+  const view = await mount("antigravity");
+  try {
+    const notice = view.container.querySelector('[data-testid="relay-policy-notice"]');
+    assert.equal(Boolean(notice), true, "the Relay card shows the policy notice");
+    assert.equal(notice?.getAttribute("data-policy"), "unsupported");
+    assert.match(notice?.textContent ?? "", /Account suspension risk/, "the heading comes from the policy key");
+    assert.match(notice?.textContent ?? "", /Relay can get every Antigravity account on this server suspended/, "the body names the vendor");
+    assert.equal(view.container.querySelector('[data-testid="antigravity-relay-warning"]'), null, "the old hardcoded warning is gone");
+  } finally { await view.unmount(); }
 });

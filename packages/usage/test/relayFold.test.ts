@@ -55,7 +55,7 @@ beforeEach(() => {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input instanceof Request ? input.url : input);
     if (url.includes("/api/usage/limits")) return Response.json({ fetchedAt: now, providers });
-    if (url.includes("/api/harnesses/relays")) return Response.json({ relays });
+    if (url.includes("/api/harness-relay/relays")) return Response.json({ relays });
     return new Response("{}", { status: 404 });
   }) as typeof fetch;
 });

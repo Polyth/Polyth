@@ -19,6 +19,7 @@ import type { GithubMessageKey } from "@polyth/github/i18n";
 import type { GoalsMessageKey } from "@polyth/goals/i18n";
 import type { GoogleMessageKey } from "@polyth/google/i18n";
 import type { HandoffMessageKey } from "@polyth/handoff/i18n";
+import type { HarnessRelayMessageKey } from "@polyth/harness-relay/i18n";
 import type { HarnessRuntimeMessageKey } from "@polyth/harness-runtime/i18n";
 import type { HotkeysMessageKey } from "@polyth/hotkeys/i18n";
 import type { IdeModeMessageKey } from "@polyth/ide-mode/i18n";
@@ -64,6 +65,7 @@ import { en as p_github } from "@polyth/github/i18n/en";
 import { en as p_goals } from "@polyth/goals/i18n/en";
 import { en as p_google } from "@polyth/google/i18n/en";
 import { en as p_handoff } from "@polyth/handoff/i18n/en";
+import { en as p_harness_relay } from "@polyth/harness-relay/i18n/en";
 import { en as p_harness_runtime } from "@polyth/harness-runtime/i18n/en";
 import { en as p_hotkeys } from "@polyth/hotkeys/i18n/en";
 import { en as p_ide_mode } from "@polyth/ide-mode/i18n/en";
@@ -110,6 +112,7 @@ export type PackageMessageKey =
   | GoalsMessageKey
   | GoogleMessageKey
   | HandoffMessageKey
+  | HarnessRelayMessageKey
   | HarnessRuntimeMessageKey
   | HotkeysMessageKey
   | IdeModeMessageKey
@@ -156,6 +159,7 @@ export const packageEnCatalogs: ReadonlyArray<Record<string, string>> = [
   p_goals,
   p_google,
   p_handoff,
+  p_harness_relay,
   p_harness_runtime,
   p_hotkeys,
   p_ide_mode,

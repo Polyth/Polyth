@@ -4,7 +4,7 @@ import { createApiTransport, type WebPackageHost } from "@polyth/web-sdk";
 import { invalidateRuntimeCatalogs, readHarnessSnapshots } from "@polyth/models/runtime-catalog";
 import { AddIcon, ArrowDownIcon, ArrowUpIcon, Badge, Button, CheckIcon, confirmAlert, DeleteIcon, Dialog, EditIcon, IconButton, KeyIcon, Menu, MoreIcon, Notice, SharedIcon, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 import { CheckGroup, EmptyState, Section, Seg } from "../../../apps/web/src/components/settings/parts.tsx";
-import { RelayBadge, RelayCard, RelayReading, useRelay } from "./RelayGroup.tsx";
+import { NO_RELAY, useRelayKit, type RelayKit } from "./relaySeam.ts";
 import { usePickerVisibility } from "./pickerVisibility.ts";
 import { useHarnessSignIn, useSetupProjectId } from "./HarnessSignIn.tsx";
 import { hostTranslate } from "./englishTranslate.ts";
@@ -55,7 +55,16 @@ function useAccessChoices(enabled: boolean): { people: Named[]; spaces: Named[] 
  *  terminal, like the harness setup action. Once the person may use two or
  *  more, each row also says whether Relay rotates through it and whether the
  *  picker shows it, and a Relay card above the list sums that up. */
-export default function HarnessAccounts({ host, accounts, projectId }: { host: WebPackageHost; accounts: HarnessAccountsRef; projectId?: string | null }) {
+const useNoRelay = () => NO_RELAY;
+
+/** Remounts when a rotating package arrives or leaves, so the list below may
+ *  call that package's hook unconditionally. */
+export default function HarnessAccounts(props: { host: WebPackageHost; accounts: HarnessAccountsRef; projectId?: string | null }) {
+  const kit = useRelayKit();
+  return <AccountList key={kit ? "relay" : "plain"} {...props} kit={kit} />;
+}
+
+function AccountList({ host, accounts, projectId, kit }: { host: WebPackageHost; accounts: HarnessAccountsRef; projectId?: string | null; kit: RelayKit | undefined }) {
   const t: AccountsTranslate = useCallback((key, values) => host.ui.locale.translate(`harnessruntime.accounts.${key}`, values), [host]);
   const [list, setList] = useState<AccountList>();
   const [busy, setBusy] = useState("");
@@ -91,7 +100,7 @@ export default function HarnessAccounts({ host, accounts, projectId }: { host: W
     invalidateRuntimeCatalogs();
     setRevision((value) => value + 1);
   }, [projectId]);
-  const relay = useRelay({ host, family: accounts.family, onChanged: () => { void refreshCatalogs(); } });
+  const relay = (kit?.useRelay ?? useNoRelay)({ host, family: accounts.family, onChanged: () => { void refreshCatalogs(); } });
   const picker = usePickerVisibility({ host, projectId, enabled: relay.available, revision, label: t("action.picker") });
 
   const run = async (key: string, label: string, action: () => Promise<unknown>): Promise<boolean> => {
@@ -173,7 +182,7 @@ export default function HarnessAccounts({ host, accounts, projectId }: { host: W
         : <span className="pkg-harnesses-accounts-name">
             <span className="pkg-harnesses-accounts-title">
               <strong>{label}</strong>
-              {member && <RelayBadge relay={relay} harnessId={row.harnessId} />}
+              {member && kit && <kit.RelayBadge relay={relay} harnessId={row.harnessId} />}
               {role && <Badge className="pkg-harnesses-accounts-role">{t(`role.${role}`)}</Badge>}
             </span>
             <small>
@@ -182,7 +191,7 @@ export default function HarnessAccounts({ host, accounts, projectId }: { host: W
               {renew && <span className="pkg-harnesses-expiry" data-level={expiry.level} title={expiry.date}>{expiry.text}</span>}
             </small>
             {row.accessEditable && <small className="pkg-harnesses-accounts-access">{t("accessLine", { summary: accessSummary(row, choices.people, choices.spaces, t) })}</small>}
-            {member && <RelayReading relay={relay} harnessId={row.harnessId} locale={host.ui.locale.get()} />}
+            {member && kit && <kit.RelayReading relay={relay} harnessId={row.harnessId} locale={host.ui.locale.get()} />}
           </span>}
       {renaming?.id !== row.id && <span className="pkg-harnesses-accounts-actions">
         {member && <span className="pkg-harnesses-accounts-use" role="group" aria-label={t("useGroup", { name: label })}>
@@ -239,7 +248,7 @@ export default function HarnessAccounts({ host, accounts, projectId }: { host: W
     <Section title={t("title")} hint={t("hint", { label: list.label })}>
       {failure && !editingAccess && <Notice tone="error" role="alert">{failure}</Notice>}
       {list.unsupported && <Notice>{list.unsupported}</Notice>}
-      <RelayCard host={host} relay={relay} accountName={accountName} />
+      {kit && <kit.RelayCard host={host} relay={relay} accountName={accountName} />}
       {picker.failure && <Notice tone="error" role="alert">{picker.failure}</Notice>}
       <div className="pkg-harnesses-accounts-group">
         {own.length > 0

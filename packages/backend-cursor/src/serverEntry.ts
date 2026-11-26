@@ -268,6 +268,7 @@ export default function registerPackage(host: ServerPackageHost) {
     const accounts = createHarnessAccountFamily({
         family: "cursor",
         label: "Cursor",
+        relay: { policy: "tolerated" },
         packageId: "backend-cursor",
         storageDir: host.storageDir,
         deployment: host.deployment,

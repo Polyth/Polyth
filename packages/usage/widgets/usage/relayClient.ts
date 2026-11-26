@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { sessionFetch } from "@polyth/session/web-api";
 import { tr } from "../../../../apps/web/src/i18n/index.ts";
 
-/** The slice of `/api/harnesses/relays` the Limits page reads. Mirrors
+/** The slice of `/api/harness-relay/relays` the Limits page reads. Mirrors
  *  `RelayView` of `@polyth/harness-runtime/relay`; kept structural so Usage
  *  does not depend on that package. */
 export interface UsageRelayMember {
@@ -33,7 +33,7 @@ export const withDefaultName = (relay: UsageRelay): UsageRelay => ({
  *  without access (403) yields none. */
 export async function requestUsageRelays(signal?: AbortSignal): Promise<UsageRelay[]> {
   try {
-    const body = await sessionFetch<{ relays?: UsageRelay[] }>("/api/harnesses/relays", signal ? { signal } : undefined);
+    const body = await sessionFetch<{ relays?: UsageRelay[] }>("/api/harness-relay/relays", signal ? { signal } : undefined);
     return Array.isArray(body?.relays) ? body.relays.map(withDefaultName) : [];
   } catch {
     return [];

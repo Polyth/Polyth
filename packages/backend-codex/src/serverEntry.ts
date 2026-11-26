@@ -277,6 +277,7 @@ export default function registerPackage(host: ServerPackageHost) {
     const accounts = createHarnessAccountFamily({
         family: "codex",
         label: "Codex",
+        relay: { policy: "unsupported" },
         packageId: "backend-codex",
         storageDir: host.storageDir,
         deployment: host.deployment,

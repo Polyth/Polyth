@@ -381,6 +381,7 @@ export function createAntigravityPackage(
   const accounts = createHarnessAccountFamily({
     family: "antigravity",
     label: "Antigravity",
+    relay: { policy: "unsupported" },
     packageId: "backend-antigravity",
     storageDir: host.storageDir,
     deployment: host.deployment,

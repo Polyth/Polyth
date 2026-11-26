@@ -32,8 +32,6 @@ import {
     requireHarnessManagerAuthority,
     requireInstanceOwnerAuthority,
 } from "@polyth/contracts/instance-authority";
-import { relayFamilies } from "./accounts.ts";
-import { relayHost, type RelayLimitsSource } from "./relay.ts";
 import { localOnlyRemoteAccess, packageDataDir, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { discoverHarnessExecutable, harnessExecutableChildEnv, windowsCmdShimFile, windowsCmdWrapperTarget } from "./executableDiscovery.ts";
 import { createHarnessRegistry, type HarnessPreferences, harnessError } from "./index.ts";
@@ -48,13 +46,7 @@ import { createHarnessAutoUpdater, type AutoUpdateRelease, type HarnessAutoUpdat
 import { editionUnavailable, workstationEdition } from "./edition.ts";
 import { pruneHarnessVersions, type HarnessVersionPrune } from "./versionStore.ts";
 
-/** Paired devices may read the person's Relays (Settings group, Usage pool):
- *  member account names and limit headroom only, the same names a chat reader
- *  already sees under each answer. Every other harness route stays local-only. */
-export const HARNESS_REMOTE_ACCESS = {
-    ...localOnlyRemoteAccess(["harnesses"]),
-    http: [{ methods: ["GET"] as const, path: "/api/harnesses/relays", capability: "core.sessions.read", mutation: false }],
-};
+export const HARNESS_REMOTE_ACCESS = localOnlyRemoteAccess(["harnesses"]);
 
 const MAX_HARNESS_SYSTEM_PROMPT = 64 * 1024;
 type StoredHarnessPreference = {
@@ -555,8 +547,9 @@ export function harnessRoutes(
         const unlisted = () => unlistedRelays ??= (async () => {
             const actor = { userId: request.space.userId, spaceId: request.space.spaceId, allowedHarnesses };
             const hidden = new Set<string>();
-            await Promise.all([...relayFamilies.values()].map(async (handle) => {
-                if (!await handle.listed(actor).catch(() => false)) hidden.add(handle.id);
+            await Promise.all(registry.providers().map(async (provider) => {
+                const listed = provider.descriptor.relay && provider.relay?.listed;
+                if (listed && !await listed(actor).catch(() => false)) hidden.add(provider.descriptor.id);
             }));
             return hidden;
         })();
@@ -642,33 +635,6 @@ export function harnessRoutes(
                 throw harnessError("not-found", "project not found");
             return { space: request.space, spaceId: request.space.spaceId, projectId: project?.id ?? "__default__", cwd: project?.path ?? process.cwd(), remote: Boolean(project?.remote) };
         };
-        // Relay settings are per person: the actor is the gateway-validated
-        // `request.space`, never the body. A paired device may only read them
-        // (`HARNESS_REMOTE_ACCESS`); saving stays local or full access.
-        if (request.path === "/api/harnesses/relays" || request.path.startsWith("/api/harnesses/relays/")) {
-            const actor = { userId: request.space.userId, spaceId: request.space.spaceId, allowedHarnesses: allowedHarnessesFor(request) };
-            const context = await contextForRequest();
-            const handles = [...relayFamilies.values()].filter((handle) => visibleId(handle.id));
-            try {
-                if (request.path === "/api/harnesses/relays" && request.method === "GET") {
-                    request.json(200, { relays: await Promise.all(handles.map((handle) => handle.view(actor, context))) });
-                    return true;
-                }
-                const relayId = request.path.slice("/api/harnesses/relays/".length);
-                if (request.method === "PUT" && relayId && !relayId.includes("/")) {
-                    const handle = handles.find((candidate) => candidate.id === relayId);
-                    if (!handle) { request.json(404, { error: "Relay not found" }); return true; }
-                    request.json(200, await handle.save(actor, await request.body(), context));
-                    return true;
-                }
-            } catch (error) {
-                const code = (error as { code?: unknown }).code;
-                request.json(code === "invalid-input" ? 400 : code === "not-found" ? 404 : 500, { error: error instanceof Error ? error.message : String(error) });
-                return true;
-            }
-            request.json(404, { error: "Not found" });
-            return true;
-        }
         if (request.path === "/api/harnesses/roster" && request.method === "GET") {
             const roster = await registry.roster(await contextForRequest());
             request.json(200, await listed(roster.filter((row) => visibleId(row.identity.id)), (row) => row.identity.id));
@@ -1268,7 +1234,6 @@ export default function registerPackage(host: ServerPackageHost) {
         remoteAccess: HARNESS_REMOTE_ACCESS,
         onEnable() {
             active = true;
-            relayHost.limits = () => host.services.get(serverServiceKey<RelayLimitsSource>("usage-limits"));
             // The workstation edition runs no updater, so it schedules none.
             if (!workstationEdition()) autoUpdates.start();
             // An installer a crashed Polyth left running is released, never adopted.
@@ -1283,7 +1248,6 @@ export default function registerPackage(host: ServerPackageHost) {
         },
         async onDisable() {
             active = false;
-            relayHost.limits = () => undefined;
             autoUpdates.stop();
             // No installer outlives the package that started it.
             await installs.interruptAll();

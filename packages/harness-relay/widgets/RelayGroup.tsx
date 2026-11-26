@@ -1,69 +1,53 @@
 // Relay inside Settings → Harnesses → harness → Accounts. The account list is
-// one list (HarnessAccounts): each row carries its own Relay switch, order
+// harness-runtime's one list (HarnessAccounts), which this package joins
+// through its Relay seam: each row carries its own Relay switch, order
 // handle, now/next badge and limit reading. This file owns the Relay state
 // (load, optimistic save), the summary card above the list and those row parts.
 import { useCallback, useEffect, useRef, useState, type DragEvent, type HTMLAttributes, type KeyboardEvent, type ReactElement } from "react";
 import { createApiTransport, type WebPackageHost } from "@polyth/web-sdk";
 import { Badge, Button, ChevronRightIcon, DragHandleIcon, Icon, Notice, Switch, SyncIcon } from "../../../apps/web/src/components/ui/index.ts";
 import { Seg } from "../../../apps/web/src/components/settings/parts.tsx";
-import { replaceRelayPrefs, useRelayPrefs } from "./relayPrefs.ts";
+import {
+  refillTime,
+  RelayPolicyNotice,
+  replaceRelayPrefs,
+  useRelayPrefs,
+  type Relay,
+  type RelayMemberView,
+  type RelayTranslate,
+  type RelayView,
+} from "@polyth/harness-runtime/relay-ui";
+import { RELAY_FAMILIES_PATH, RELAYS_PATH, type RelayFamilyView, type RelaysResponse } from "../src/views.ts";
 import {
   includedIds,
   meterText,
   moveIncluded,
   orderedMembers,
   reasonText,
-  refillTime,
   relayAvailable,
   relayListed,
   reorderIncluded,
   routeMembers,
   setIncluded,
-  type RelayMemberView,
-  type RelayTranslate,
-  type RelayView,
 } from "./relayModel.ts";
 
 const api = createApiTransport();
 const HANDOVER_LEVELS = [0.02, 0.05, 0.1] as const;
 
-export interface Relay {
-  /** Absent: no Relay for this server or device (older server, 403/404). */
-  view?: RelayView;
-  rows: RelayMemberView[];
-  t: RelayTranslate;
-  now: number;
-  saving: boolean;
-  /** The member whose Relay switch is being saved, if any. */
-  pending: string;
-  failure: string;
-  /** Two or more accounts this person may use: Relay is offered at all. */
-  available: boolean;
-  /** Two or more members: the Relay harness is in this person's picker. */
-  listed: boolean;
-  manual: boolean;
-  /** `<label> · Relay`, the harness name people pick. */
-  name: string;
-  member(harnessId: string): RelayMemberView | undefined;
-  include(harnessId: string, included: boolean): void;
-  /** With My order, whether a member can move one place up (-1) or down (1). */
-  canMove(harnessId: string, delta: -1 | 1): boolean;
-  /** Moves a member one place; the row menu's way, for touch and keyboards. */
-  move(harnessId: string, delta: -1 | 1): void;
-  options(patch: Partial<RelayView["settings"]>): void;
-  /** Read the Relay again (an account was added, renamed or removed). */
-  reload(): Promise<void>;
-  /** Leading order cell of a row while the order is manual. */
-  lead(harnessId: string, label: string, disabled: boolean): ReactElement;
-  /** Drop target props for a member row while the order is manual. */
-  dropTarget(harnessId: string): Pick<HTMLAttributes<HTMLElement>, "onDragOver" | "onDrop"> & { "data-dragging"?: "true" };
+/** What this package's own parts read beyond the seam's `Relay`. */
+interface FamilyRelay extends Relay {
+  /** The family's switch and vendor policy; absent on an older server. */
+  family?: RelayFamilyView;
+  /** Turn the family's Relay on or off (server admins). */
+  enable(enabled: boolean): void;
 }
 
 /** Loads the person's Relay for `family` and saves changes optimistically:
  *  a refused save rolls the rows back and says why. */
 export function useRelay({ host, family, onChanged }: { host: WebPackageHost; family: string; onChanged?(): void }): Relay {
-  const t: RelayTranslate = useCallback((key, values) => host.ui.locale.translate(`harnessruntime.relay.${key}`, values), [host]);
+  const t: RelayTranslate = useCallback((key, values) => host.ui.locale.translate(`harnessrelay.${key}`, values), [host]);
   const [view, setView] = useState<RelayView>();
+  const [familyView, setFamilyView] = useState<RelayFamilyView>();
   const [rows, setRows] = useState<RelayMemberView[]>([]);
   const [saving, setSaving] = useState(false);
   const [pending, setPending] = useState("");
@@ -75,14 +59,16 @@ export function useRelay({ host, family, onChanged }: { host: WebPackageHost; fa
 
   const load = useCallback(async () => {
     try {
-      const body = await api.get<{ relays?: RelayView[] }>("/api/harnesses/relays");
+      const body = await api.get<Partial<RelaysResponse>>(RELAYS_PATH);
       const found = body.relays?.find((relay) => relay.family === family);
+      setFamilyView(body.families?.find((candidate) => candidate.family === family));
       setView(found);
       setRows(found ? orderedMembers(found) : []);
       setNow(Date.now());
     } catch {
       // 404/403: no Relay for this server or device.
       setView(undefined);
+      setFamilyView(undefined);
     }
   }, [family]);
   useEffect(() => {
@@ -106,7 +92,7 @@ export function useRelay({ host, family, onChanged }: { host: WebPackageHost; fa
     setSaving(true);
     setFailure("");
     try {
-      const saved = await api.put<RelayView>(`/api/harnesses/relays/${view.id}`, { members: settings.members, order: settings.order, handoverAt: settings.handoverAt });
+      const saved = await api.put<RelayView>(`${RELAYS_PATH}/${view.id}`, { members: settings.members, order: settings.order, handoverAt: settings.handoverAt });
       setView(saved);
       setRows(orderedMembers(saved));
       setNow(Date.now());
@@ -115,6 +101,21 @@ export function useRelay({ host, family, onChanged }: { host: WebPackageHost; fa
       setView(before.view);
       setRows(before.rows);
       setFailure(host.errors.friendly(t("action.save"), cause));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const enable = async (enabled: boolean) => {
+    setSaving(true);
+    setFailure("");
+    try {
+      await api.put<RelayFamilyView>(`${RELAY_FAMILIES_PATH}/${family}`, { enabled });
+      await load();
+      // The Relay harness appeared or left: lists and pickers must follow.
+      onChanged?.();
+    } catch (cause) {
+      setFailure(host.errors.friendly(t("action.switch"), cause));
     } finally {
       setSaving(false);
     }
@@ -129,8 +130,10 @@ export function useRelay({ host, family, onChanged }: { host: WebPackageHost; fa
     void save(moveIncluded(rows, harnessId, event.key === "ArrowUp" ? -1 : 1));
   };
 
-  return {
+  const relay: FamilyRelay = {
     ...(view ? { view } : {}),
+    ...(familyView ? { family: familyView } : {}),
+    enable: (enabled) => { if (!saving) void enable(enabled); },
     rows,
     t,
     now,
@@ -191,6 +194,7 @@ export function useRelay({ host, family, onChanged }: { host: WebPackageHost; fa
       };
     },
   };
+  return relay;
 }
 
 /** A member's place in the queue, beside its name. */
@@ -226,9 +230,26 @@ export function RelayReading({ relay, harnessId, locale }: { relay: Relay; harne
  *  takes now, and the less frequent options folded away. */
 export function RelayCard({ host, relay, accountName }: { host: WebPackageHost; relay: Relay; accountName(harnessId: string): string }) {
   const prefs = useRelayPrefs();
+  const { family, enable } = relay as FamilyRelay;
   const view = relay.view;
-  if (!view || !relay.available) return null;
   const t = relay.t;
+  const policy = family && <RelayPolicyNotice host={host} policy={family.policy} name={family.label} />;
+  if (!view || !relay.available) {
+    // Off for this harness: say why, and offer the switch to whoever may flip it.
+    if (!family || family.enabled || !family.offered) return null;
+    return <section className="pkg-harnesses-relay" aria-labelledby="pkg-harnesses-accounts-relay" data-listed="false" data-testid="relay-off">
+      <header className="pkg-harnesses-relay-head">
+        <span className="pkg-harnesses-relay-mark" aria-hidden="true"><Icon icon={SyncIcon} size="sm" /></span>
+        <h4 id="pkg-harnesses-accounts-relay">{t("title")} <span className="pkg-harnesses-relay-sub">{t("sub")}</span></h4>
+        <Badge>{t("status.off")}</Badge>
+      </header>
+      {policy}
+      {relay.failure && <Notice tone="error" role="alert">{relay.failure}</Notice>}
+      {family.editable
+        ? <div><Button size="sm" busy={relay.saving} data-testid="relay-enable" onClick={() => enable(true)}>{t(family.policy === "unsupported" ? "family.enableAck" : "family.enable")}</Button></div>
+        : family.policy !== "prohibited" && <p className="pkg-harnesses-accounts-help">{t("family.adminOnly", { name: family.label })}</p>}
+    </section>;
+  }
   const locale = host.ui.locale.get();
   const members = relay.rows.filter((row) => row.included).length;
   const route = routeMembers(relay.rows);
@@ -257,6 +278,7 @@ export function RelayCard({ host, relay, accountName }: { host: WebPackageHost; 
           </ol>
         </>
       : <p className="pkg-harnesses-accounts-help" data-testid="relay-needs-two">{members === 0 ? t("pickTwo", { name: relay.name }) : t("pickOneMore", { name: relay.name })}</p>}
+    {policy}
     {relay.failure && <Notice tone="error" role="alert">{relay.failure}</Notice>}
     <details className="pkg-harnesses-relay-options">
       <summary><span>{t("options")}</span><small>{optionsSummary}</small></summary>
@@ -276,6 +298,10 @@ export function RelayCard({ host, relay, accountName }: { host: WebPackageHost; 
           <Switch checked={prefs.showHandovers} labelledBy="pkg-harnesses-relay-show" onChange={(showHandovers) => replaceRelayPrefs({ showHandovers })} />
           <span className="pkg-harnesses-accounts-help">{t("showHandoversHint")}</span>
         </div>
+        {family?.editable && <div className="pkg-harnesses-relay-link">
+          <span className="pkg-harnesses-accounts-help">{t("family.disableHint", { name: relay.name })}</span>
+          <Button size="sm" variant="ghost" disabled={relay.saving} data-testid="relay-disable" onClick={() => enable(false)}>{t("family.disable")}</Button>
+        </div>}
         {relay.listed && <div className="pkg-harnesses-relay-link">
           <span className="pkg-harnesses-accounts-help">{t("settingsLink", { name: relay.name })}</span>
           <Button size="sm" variant="ghost" iconEnd={ChevronRightIcon} onClick={() => host.navigation.openSettingsPage("harnesses", { itemId: view.id })}>{t("openSettings", { name: relay.name })}</Button>

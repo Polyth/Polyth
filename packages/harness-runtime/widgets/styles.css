@@ -588,82 +588,15 @@
 .pkg-harnesses-status[data-state="install-failed"] { color: var(--text-dim); }
 .pkg-harnesses-status[data-state="install-failed"]::before { background: var(--red); }
 
-/* Settings → Harnesses → harness → Accounts → Relay. A card above the one
-   account list sums Relay up (status, the route a chat takes now, folded
-   options); each row carries its own Relay and Picker chips, order handle,
-   place badge and limit reading. */
-.pkg-harnesses-relay { display: grid; gap: var(--space-3); min-width: 0; padding: var(--space-3) var(--space-4); border: 1px solid var(--border-soft); border-radius: var(--radius-card); background: var(--panel); overflow: hidden; container: pkg-harnesses-relay / inline-size; }
-.pkg-harnesses-relay[data-listed="true"] { border-color: var(--accent-line); background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 7%, var(--panel)), var(--panel) 70%); }
-/* Fewer than two members: a dashed outline reads as "not set up yet". */
-.pkg-harnesses-relay[data-listed="false"] { border-style: dashed; border-color: var(--border); }
-/* Outranks the settings page's generic `header { display: grid }`. */
-.pkg-harnesses-relay > .pkg-harnesses-relay-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); min-width: 0; }
-.pkg-harnesses-relay-head > h4 { flex: 1 1 auto; min-width: 0; margin: 0; font-size: var(--font-label); font-weight: 600; }
-.pkg-harnesses-relay-mark { display: inline-grid; flex: none; place-items: center; inline-size: var(--control-h-sm); block-size: var(--control-h-sm); border-radius: var(--radius-round); background: var(--surface-overlay-strong); color: var(--text-dim); }
-.pkg-harnesses-relay[data-listed="true"] .pkg-harnesses-relay-mark { background: var(--accent-wash); color: var(--accent-text, var(--accent)); }
-.pkg-harnesses-relay-sub { margin-inline-start: var(--space-2); color: var(--muted); font-size: var(--font-meta); font-weight: 400; }
-/* The route: account stops joined by arrows, the current one lit. */
-.pkg-harnesses-relay-route { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: 0; padding: 0; list-style: none; font-size: var(--font-meta); line-height: var(--font-meta-lh); }
-.pkg-harnesses-relay-route > li { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; }
-.pkg-harnesses-relay-route > li + li::before { content: "→"; flex: none; color: var(--faint); }
-.pkg-harnesses-relay-route:dir(rtl) > li + li::before { content: "←"; }
-.pkg-harnesses-relay-stop { display: inline-flex; align-items: baseline; gap: var(--space-1); min-width: 0; max-inline-size: 22ch; padding: 2px var(--space-2); border-radius: var(--radius-round); background: var(--surface-overlay-strong); color: var(--text-dim); font-weight: 500; }
-.pkg-harnesses-relay-stop-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pkg-harnesses-relay-stop > small { flex: none; font-size: inherit; font-weight: 400; opacity: .8; }
-.pkg-harnesses-relay-route > li[data-state="now"] > .pkg-harnesses-relay-stop { background: var(--accent-wash); box-shadow: inset 0 0 0 1px var(--accent-line); color: var(--accent-text, var(--accent)); font-weight: 600; }
-.pkg-harnesses-relay-route > li[data-state="exhausted"] > .pkg-harnesses-relay-stop { background: var(--amber-wash); color: var(--amber-on-wash); }
-.pkg-harnesses-relay-route > li[data-state="skipped"] > .pkg-harnesses-relay-stop { background: transparent; box-shadow: inset 0 0 0 1px var(--border-soft); color: var(--muted); }
-/* Less frequent options fold into the card's foot. */
-.pkg-harnesses-relay-options { margin: 0 calc(-1 * var(--space-4)) calc(-1 * var(--space-3)); border-block-start: 1px solid var(--border-soft); }
-.pkg-harnesses-relay-options > summary { display: flex; align-items: center; gap: var(--space-3); min-height: max(var(--control-h-sm), var(--hit-min)); padding-inline: var(--space-4); cursor: pointer; list-style: none; font-size: var(--font-label); font-weight: 500; transition: background-color var(--motion-fast) var(--motion-ease); }
-.pkg-harnesses-relay-options > summary::-webkit-details-marker { display: none; }
-.pkg-harnesses-relay-options > summary > small { min-width: 0; margin-inline-start: auto; overflow: hidden; color: var(--muted); font-size: var(--font-meta); font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
-.pkg-harnesses-relay-options > summary::after { content: "›"; flex: none; color: var(--faint); font-weight: 400; transition: transform var(--motion-fast) var(--motion-ease); }
-.pkg-harnesses-relay-options[open] > summary::after { transform: rotate(90deg); }
-.pkg-harnesses-relay-options > summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
-@media (hover: hover) {
-  .pkg-harnesses-relay-options > summary:hover { background: var(--surface-overlay); }
-}
-/* One label column for every option, so the controls line up. */
-.pkg-harnesses-relay-options-body { display: grid; grid-template-columns: minmax(7rem, 12rem) minmax(0, 1fr); gap: var(--space-4) var(--space-4); padding: var(--space-2) var(--space-4) var(--space-4); }
-.pkg-harnesses-relay-options-body > * { grid-column: 1 / -1; }
-.pkg-harnesses-relay-control { display: grid; grid-template-columns: subgrid; align-items: center; gap: var(--space-1) var(--space-4); }
-.pkg-harnesses-relay-control > :is(.seg, .ui-switch, .switch) { justify-self: start; }
-.pkg-harnesses-relay-control > .pkg-harnesses-accounts-help { grid-column: 2; }
-.pkg-harnesses-relay-label { font-size: var(--font-label); font-weight: 500; }
-.pkg-harnesses-relay-link { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3); padding-block-start: var(--space-3); border-block-start: 1px solid var(--border-soft); }
-@container pkg-harnesses-relay (max-width: 520px) {
-  .pkg-harnesses-relay-options-body { grid-template-columns: minmax(0, 1fr); }
-  .pkg-harnesses-relay-control > .pkg-harnesses-accounts-help { grid-column: 1; }
-  .pkg-harnesses-relay-options > summary > small { display: none; }
-}
-
-/* Row parts. With My order every row keeps a lead cell so names line up. */
+/* Account rows. With My order (a rotating package's) every row keeps a lead
+   cell so names line up. */
 .pkg-harnesses-accounts-list[data-manual] > .pkg-harnesses-accounts-row { padding-inline-start: var(--space-2); }
-.pkg-harnesses-relay-lead { display: inline-flex; flex: none; align-items: center; inline-size: calc(var(--space-5) + 1.25rem); }
-.pkg-harnesses-relay-handle { flex: none; margin-inline-start: 0; }
-.pkg-harnesses-relay-handle:focus-visible { outline: 2px solid var(--focus-ring, var(--accent)); outline-offset: 1px; }
-.pkg-harnesses-relay-pos { flex: none; inline-size: 1.25rem; color: var(--muted); font-size: var(--font-meta); font-variant-numeric: tabular-nums; text-align: center; }
 .pkg-harnesses-accounts-row[data-dragging="true"] { opacity: .5; }
-.pkg-harnesses-relay-badge, .pkg-harnesses-accounts-role { flex: none; }
+.pkg-harnesses-accounts-role { flex: none; }
 /* A name never breaks letter by letter: its badges wrap under it instead. */
 .pkg-harnesses-accounts-title:has(.ui-badge) { flex-wrap: wrap; row-gap: var(--space-1); }
 /* Hidden from the picker and outside Relay: the account is idle here. */
 .pkg-harnesses-accounts-row[data-role="off"] .pkg-harnesses-accounts-title > strong { color: var(--muted); }
-.pkg-harnesses-relay-reading { display: grid; gap: 3px; max-inline-size: 24rem; margin-block-start: var(--space-1); }
-.pkg-harnesses-relay-reading > small { display: flex; flex-wrap: wrap; gap: 0 var(--space-2); min-width: 0; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
-.pkg-harnesses-relay-reading > small > span + span::before { content: "·"; margin-inline-end: var(--space-2); color: var(--faint); }
-.pkg-harnesses-relay-note[data-tone="warn"] { color: var(--amber, var(--text-dim)); }
-/* Why Relay passes a member over gets its own line above the reading. */
-.pkg-harnesses-relay-reading > small > .pkg-harnesses-relay-note { flex-basis: 100%; }
-.pkg-harnesses-relay-reading > small > .pkg-harnesses-relay-note + span::before { content: none; }
-.pkg-harnesses-relay-meter { display: block; block-size: 3px; border-radius: var(--radius-round); background: var(--hair, var(--border-soft)); overflow: hidden; }
-.pkg-harnesses-relay-meter > i { display: block; block-size: 100%; border-radius: inherit; background: var(--accent); }
-.pkg-harnesses-relay-meter[data-low] > i { background: var(--amber, var(--accent)); }
-.pkg-harnesses-relay-meter[data-empty] { background: none; border-block-end: 1px dashed var(--border); border-radius: 0; block-size: 0; }
-@media (prefers-reduced-motion: no-preference) {
-  .pkg-harnesses-relay-meter > i { transition: inline-size var(--motion-normal, 160ms) var(--motion-ease, ease); }
-}
 /* Relay and Picker: two toggle chips, told apart by fill, ink and weight so
    they read with borders hidden and in every look. */
 .pkg-harnesses-accounts-use { display: inline-flex; flex: none; align-items: center; gap: var(--space-1); margin-inline-end: var(--space-1); }

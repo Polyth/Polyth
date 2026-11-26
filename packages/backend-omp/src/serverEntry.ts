@@ -118,6 +118,7 @@ export default function registerPackage(host: ServerPackageHost) {
     const accounts = createHarnessAccountFamily({
         family: "omp",
         label: "OMP",
+        relay: { policy: "unsupported" },
         packageId: "backend-omp",
         storageDir: host.storageDir,
         deployment: host.deployment,

@@ -519,6 +519,7 @@ export default function registerPackage(host: ServerPackageHost) {
     const accounts = createHarnessAccountFamily({
         family: "claude",
         label: "Claude Code",
+        relay: { policy: "unsupported" },
         packageId: "backend-claude",
         storageDir: host.storageDir,
         deployment: host.deployment,

@@ -347,6 +347,7 @@ export default function registerPackage(host: ServerPackageHost) {
   const accounts = createHarnessAccountFamily({
     family: "pi",
     label: "Pi",
+    relay: { policy: "unsupported" },
     packageId: "backend-pi",
     storageDir: host.storageDir,
     deployment: host.deployment,

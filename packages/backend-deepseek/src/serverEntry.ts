@@ -196,6 +196,7 @@ export default function registerPackage(host: ServerPackageHost) {
     const accounts = createHarnessAccountFamily({
         family: "deepseek",
         label: "DeepSeek",
+        relay: { policy: "unsupported" },
         packageId: "backend-deepseek",
         storageDir: host.storageDir,
         deployment: host.deployment,

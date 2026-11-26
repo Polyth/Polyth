@@ -20,6 +20,7 @@ import { ptBR as p_github } from "@polyth/github/i18n/pt-BR";
 import { ptBR as p_goals } from "@polyth/goals/i18n/pt-BR";
 import { ptBR as p_google } from "@polyth/google/i18n/pt-BR";
 import { ptBR as p_handoff } from "@polyth/handoff/i18n/pt-BR";
+import { ptBR as p_harness_relay } from "@polyth/harness-relay/i18n/pt-BR";
 import { ptBR as p_harness_runtime } from "@polyth/harness-runtime/i18n/pt-BR";
 import { ptBR as p_hotkeys } from "@polyth/hotkeys/i18n/pt-BR";
 import { ptBR as p_ide_mode } from "@polyth/ide-mode/i18n/pt-BR";
@@ -66,6 +67,7 @@ const parts: Array<Record<string, string>> = [app,
   p_goals,
   p_google,
   p_handoff,
+  p_harness_relay,
   p_harness_runtime,
   p_hotkeys,
   p_ide_mode,

@@ -452,3 +452,52 @@ test("private sessions show only for a harness that supports them and save from 
     await other.unmount();
   }
 });
+
+test("a Relay settings detail states the family's vendor policy on overview and hides the duplicate on accounts tab", async () => {
+  const projectId = "settings-relay-policy";
+  const agyRelay = row("antigravity-relay", 10, {
+    identity: {
+      id: "antigravity-relay",
+      name: "Antigravity · Relay",
+      integration: "relay",
+      accounts: { family: "antigravity", endpoint: "/api/antigravity/accounts" },
+      relay: { family: "antigravity", policy: "unsupported" },
+    },
+    policy: { enabled: true, priority: 10, autoSelect: false },
+  });
+  const claudeRelay = row("claude-relay", 20, {
+    identity: {
+      id: "claude-relay",
+      name: "Claude Code · Relay",
+      integration: "relay",
+      relay: { family: "claude", policy: "tolerated" },
+    },
+    policy: { enabled: true, priority: 20, autoSelect: false },
+  });
+
+  const agyView = await mountSettings([agyRelay, claudeRelay], projectId, [{ id: "harnesses.accounts", order: 3, meta: { harnessId: "*", sectionId: "accounts", label: "Accounts", requires: "accounts" } }], { itemId: "antigravity-relay" });
+  try {
+    const notice = agyView.container.querySelector('[data-testid="relay-policy-notice"]');
+    assert.equal(Boolean(notice), true, "the Relay overview shows its vendor policy");
+    assert.equal(notice?.getAttribute("data-policy"), "unsupported");
+    assert.match(notice?.textContent ?? "", /Account suspension risk/, "the heading comes from the policy key");
+    assert.match(notice?.textContent ?? "", /every Antigravity account on this server suspended/, "the body names the vendor");
+    const accountsTab = [...agyView.container.querySelectorAll<HTMLElement>('[role="tab"]')].find((tab) => tab.textContent === "Accounts");
+    assert.equal(Boolean(accountsTab), true);
+    await act(async () => { accountsTab!.click(); });
+    await flush();
+    assert.equal(agyView.container.querySelector('[data-testid="relay-policy-notice"]') === null, true, "Accounts tab relies on RelayCard without duplicating the detail notice");
+  } finally {
+    await agyView.unmount();
+  }
+
+  const claudeView = await mountSettings([agyRelay, claudeRelay], projectId, [], { itemId: "claude-relay" });
+  try {
+    const notice = claudeView.container.querySelector('[data-testid="relay-policy-notice"]');
+    assert.equal(notice?.getAttribute("data-policy"), "tolerated", "another family states its own policy");
+    assert.match(notice?.textContent ?? "", /Several accounts are allowed/);
+    assert.match(notice?.textContent ?? "", /Claude Code does not forbid several accounts/);
+  } finally {
+    await claudeView.unmount();
+  }
+});

@@ -452,6 +452,7 @@ export default function registerPackage(host: ServerPackageHost) {
   const accounts = createHarnessAccountFamily({
     family: "commandcode",
     label: "Command Code",
+    relay: { policy: "unsupported" },
     packageId: "backend-commandcode",
     storageDir: host.storageDir,
     deployment: host.deployment,

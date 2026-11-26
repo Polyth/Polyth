@@ -139,6 +139,7 @@ export default function registerPackage(host: ServerPackageHost) {
     const accounts = createHarnessAccountFamily({
         family: "grok",
         label: "Grok Build",
+        relay: { policy: "unsupported" },
         packageId: "backend-grok",
         storageDir: host.storageDir,
         deployment: host.deployment,

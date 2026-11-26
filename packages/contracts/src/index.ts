@@ -5161,6 +5161,8 @@ export interface HarnessSnapshot {
     version?: string;
     accountLabel?: string;
     accounts?: HarnessAccountsRef;
+    /** A family's Relay harness; see `HarnessDescriptor.relay`. */
+    relay?: HarnessRelayRef;
     /** The provider can list this harness's own native plugins. */
     nativePlugins?: true;
     /** The provider can list this harness's own skills. */
@@ -5639,7 +5641,16 @@ export interface HarnessProvider {
 export interface HarnessRelayRef {
   /** The account family (`HarnessAccountsRef.family`) whose logins it spends. */
   family: string;
+  /** `relay.policy` of the family's descriptor. */
+  policy?: HarnessRelayVendorPolicy;
 }
+
+/** How a vendor's terms treat one person spending several accounts in turn.
+ *  `prohibited`: several accounts per person are forbidden, so the family gets
+ *  no Relay. `unsupported`: rotation is not a supported use and may get the
+ *  accounts suspended; Relay stays off until someone turns it on knowingly.
+ *  `tolerated`: several accounts are allowed; Relay is on unless turned off. */
+export type HarnessRelayVendorPolicy = "prohibited" | "unsupported" | "tolerated";
 /** Why a Relay chat moved from one member account to another. */
 export type HarnessRelayCause =
   /** The running account fell to the person's hand-over level in a limit window. */
@@ -5672,6 +5683,10 @@ export interface HarnessRelayPolicy {
   /** A member refused a turn for limits: skip it until `until` (or a
    *  conservative default when the provider stated no time). */
   refused(harnessId: string, until?: number): void;
+  /** Whether the harness list and the picker show this Relay to the actor
+   *  (it has enough member accounts they may use). Cheap: no member probes.
+   *  Absent: always listed. */
+  listed?(actor: { userId: string; spaceId: string; allowedHarnesses: readonly string[] | null }): Promise<boolean>;
 }
 export interface HarnessRegistry {
   register(provider: HarnessProvider): Disposable;

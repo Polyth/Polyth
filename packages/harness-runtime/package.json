@@ -8,6 +8,7 @@
     "./features": "./src/features.ts",
     "./accounts": "./src/accounts.ts",
     "./relay": "./src/relay.ts",
+    "./relay-ui": "./widgets/relaySeam.ts",
     "./capability-text": "./src/capabilityText.ts",
     "./executable-discovery": "./src/executableDiscovery.ts",
     "./installers": "./src/installers.ts",

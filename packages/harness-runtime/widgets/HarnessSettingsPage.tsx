@@ -9,6 +9,7 @@ import { BackIcon, Button, ChevronRightIcon, ClockIcon, Dialog, DownloadIcon, Dr
 import MoveControls from "../../../apps/web/src/components/MoveControls.tsx";
 import { EmptyState, ErrorState, ReadonlyRow, Row, Section } from "../../../apps/web/src/components/settings/parts.tsx";
 import ProviderLogo from "@polyth/models/provider-logo";
+import { RelayPolicyNotice } from "./RelayPolicyNotice.tsx";
 import { canExecute, useHarnesses } from "./harnessData.ts";
 import {
   attachmentFacts, autoCandidates, availabilityLabel, configurationSections, displayVersion, harnessProfileName, harnessSummary, harnessTint as tint, integrationLabel, listedHarnesses, listPreferences,
@@ -595,6 +596,8 @@ function HarnessDetail({
     {(error || failure) && <Notice tone="error" role="alert">{failure || error}</Notice>}
     {pending && <Notice actions={pendingSection && <Button size="sm" onClick={() => onSection(pendingSection.id)}>{t("reviewChanges")}</Button>}>{pending}</Notice>}
     {detail.stale && (detail.availability.state === "offline" || detail.availability.state === "degraded") && <Notice tone="warning">{t("staleNotice")}</Notice>}
+    {/* A Relay harness is named `<vendor> · Relay`; its Accounts tab shows the same notice in the Relay card. */}
+    {detail.identity.relay?.policy && activeSection !== "accounts" && <RelayPolicyNotice host={host} policy={detail.identity.relay.policy} name={detail.identity.name.split(" · ")[0]!} />}
     <div className="pkg-harnesses-tabstrip" ref={strip}>
       <Tabs className="pkg-harnesses-tabs" tabs={[{ id: "overview", label: t("overview") }, ...contributed]} value={activeSection} onChange={onSection} label={t("settingsOf", { name: detail.identity.name })} size="sm" idBase={tabsId} />
     </div>

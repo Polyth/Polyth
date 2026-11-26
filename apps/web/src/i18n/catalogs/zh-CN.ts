@@ -20,6 +20,7 @@ import { zhCN as p_github } from "@polyth/github/i18n/zh-CN";
 import { zhCN as p_goals } from "@polyth/goals/i18n/zh-CN";
 import { zhCN as p_google } from "@polyth/google/i18n/zh-CN";
 import { zhCN as p_handoff } from "@polyth/handoff/i18n/zh-CN";
+import { zhCN as p_harness_relay } from "@polyth/harness-relay/i18n/zh-CN";
 import { zhCN as p_harness_runtime } from "@polyth/harness-runtime/i18n/zh-CN";
 import { zhCN as p_hotkeys } from "@polyth/hotkeys/i18n/zh-CN";
 import { zhCN as p_ide_mode } from "@polyth/ide-mode/i18n/zh-CN";
@@ -66,6 +67,7 @@ const parts: Array<Record<string, string>> = [app,
   p_goals,
   p_google,
   p_handoff,
+  p_harness_relay,
   p_harness_runtime,
   p_hotkeys,
   p_ide_mode,

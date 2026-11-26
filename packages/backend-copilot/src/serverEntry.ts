@@ -251,6 +251,7 @@ export default function registerPackage(host: ServerPackageHost) {
     const accounts = createHarnessAccountFamily({
         family: "copilot",
         label: "GitHub Copilot",
+        relay: { policy: "prohibited" },
         packageId: "backend-copilot",
         storageDir: host.storageDir,
         deployment: host.deployment,

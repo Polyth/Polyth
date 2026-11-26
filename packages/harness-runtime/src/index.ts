@@ -187,7 +187,7 @@ type ReadinessEvidence = {
 /** Account presentation fields; a descriptor may compute them on read. */
 const accountIdentity = (descriptor: HarnessDescriptor): Pick<HarnessDescriptor, "accountLabel" | "accounts" | "relay"> => ({
     ...(descriptor.accountLabel ? { accountLabel: descriptor.accountLabel } : {}),
-    ...(descriptor.relay ? { relay: { family: descriptor.relay.family } } : {}),
+    ...(descriptor.relay ? { relay: { family: descriptor.relay.family, ...(descriptor.relay.policy ? { policy: descriptor.relay.policy } : {}) } } : {}),
     ...(descriptor.accounts ? { accounts: { family: descriptor.accounts.family, endpoint: descriptor.accounts.endpoint } } : {}),
 });
 export function createHarnessRegistry() {
