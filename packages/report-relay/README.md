@@ -203,7 +203,8 @@ docker run -d --name polyth-reports --restart unless-stopped \
 The production deployment (`reports.polyth.app`) follows this shape: the bundle in
 `/opt/polyth-reports/app`, keys in `/opt/polyth-reports/keys`, state in
 `/opt/polyth-reports/data`, container `polyth-reports` on `127.0.0.1:8788`, and an
-Apache vhost that forwards only `/v1/report` and `/v1/health` (body limit
+Apache vhost that forwards only `/v1/report`, `/v1/health`, `/v1/feedback` and
+`/v1/feedback/forget` (the inbox is not forwarded; body limit
 2 400 000 bytes, 40 s timeout, no client addresses in its access log). Root-owned
 helpers place the secrets from stdin only, never from arguments, and print only
 `saved` or a validation error; the relay re-reads them without a restart:
