@@ -257,7 +257,7 @@ test("desktop setup asks only for a name and a password (typed twice), then show
 
     const complete = server.calls.find((call) => call.path === "/api/auth/setup/complete");
     assert.ok(complete, "setup completed");
-    assert.equal(complete.body.login, "owner");
+    assert.equal(complete.body.login, "ida.lindqvist", "the login comes from the name; nobody invents one");
     assert.equal(complete.body.organizationName, "Personal");
     assert.equal(complete.body.name, "Ida Lindqvist");
     assert.equal(complete.body.recoveryAcknowledged, true);
@@ -329,7 +329,7 @@ test("\"with other people\" continues to the owner account; Back returns to the 
     assert.equal(codesShown().length, 8);
     await click($(".lock-agree input"));
     await click(submitButton());
-    assert.equal(server.calls.find((call) => call.path === "/api/auth/setup/complete")?.body.login, "owner");
+    assert.equal(server.calls.find((call) => call.path === "/api/auth/setup/complete")?.body.login, "ida.lindqvist");
     assert.equal(desktop.localSetups, 0, "people always get a password");
     assert.equal(desktop.restarts, 1);
   } finally {

@@ -2549,7 +2549,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .repository-filter-chip[aria-pressed="true"] {
   background: color-mix(in srgb, var(--accent) 17%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 34%, transparent);
-  color: var(--accent-text, var(--accent));
+  color: var(--accent);
   font-weight: 650;
 }
 .repository-filter-chip:focus-visible {
@@ -5398,6 +5398,12 @@ body[data-hide-borders="true"] .lock-card .ui-checkbox input:checked + .ui-check
   font-size: var(--font-meta);
   line-height: var(--font-meta-lh);
 }
+/* Good news in the same slot (a password was reset): not alarming red. */
+.lock-error.lock-error--notice {
+  color: var(--text);
+  background: var(--accent-wash);
+  border-color: var(--accent-line);
+}
 .lock-actions {
   display: grid;
   gap: var(--space-2);
@@ -5443,6 +5449,77 @@ body[data-hide-borders="true"] .lock-card .ui-checkbox input:checked + .ui-check
   align-self: center;
   min-height: max(var(--control-h-sm), var(--hit-min));
   margin-top: var(--space-3);
+}
+/* Accounts this browser signed in to: who is signing in, so only the
+   password is typed. The picked tile sits in the field well with an accent
+   edge; the others stay quiet rows. */
+.lock-accounts {
+  display: grid;
+  gap: var(--space-1);
+  animation: lock-field-in var(--motion-normal) var(--motion-ease) both;
+}
+.lock-account {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: max(48px, var(--hit-min));
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease);
+}
+.lock-account[aria-checked="true"] {
+  background: var(--lock-well);
+  border-color: var(--accent-line);
+}
+@media (hover: hover) {
+  .lock-account:hover:not(:disabled):not([aria-checked="true"]) {
+    background: color-mix(in srgb, var(--lock-well) 60%, transparent);
+  }
+}
+.lock-account:focus-visible {
+  outline: 0;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus-wash);
+}
+.lock-account:disabled { cursor: default; opacity: .7; }
+.lock-account-mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-circle);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: color-mix(in srgb, var(--accent) 82%, var(--text));
+  font-weight: 650;
+}
+.lock-account-text {
+  min-width: 0;
+  display: grid;
+}
+.lock-account-name,
+.lock-account-login {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lock-account-name { font-weight: 600; }
+.lock-account-login {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.lock-account-switch {
+  justify-self: start;
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  margin-top: calc(var(--space-2) * -1);
 }
 
 /* ---------- first-run setup ---------- */

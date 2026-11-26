@@ -567,8 +567,9 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
             label: req.headers['user-agent'],
           }));
         } else if (req.method === 'POST' && path === '/api/auth/recover') {
-          await identity.credentials.recover({ login: text(body, 'login'), code: text(body, 'code'), password: text(body, 'password'), address: req.socket.remoteAddress });
-          res.setHeader('Set-Cookie', cookie(cookieName, '', 0)); send(200, { ok: true });
+          // `login` is optional: the code identifies the account (old shells still send one).
+          const recovered = await identity.credentials.recover({ code: text(body, 'code'), password: text(body, 'password'), address: req.socket.remoteAddress });
+          res.setHeader('Set-Cookie', cookie(cookieName, '', 0)); send(200, { ok: true, login: recovered.login });
         } else if (req.method === 'POST' && path === '/api/auth/logout') {
           identity.sessions.logout(token); res.setHeader('Set-Cookie', cookie(cookieName, '', 0)); send(200, { ok: true });
         } else {

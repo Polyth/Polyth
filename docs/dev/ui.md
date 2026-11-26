@@ -1837,7 +1837,11 @@ what cannot be defaulted:
   Back from the account returns to the choice. A shell without
   `completeLocalSetup` starts at the account. A standalone server first asks
   for the setup code printed by `npm run setup:claim`, shown with a copy
-  button. The owner login is fixed (`owner`, stated under the form) and the
+  button. Nobody invents a login: it is proposed from the name
+  (`loginFromName` in `apps/web/src/loginName.ts`: lowercase, accents
+  dropped, Cyrillic transliterated, other runs become dots, `owner` when
+  nothing is left), stated under the form as "You'll sign in as …", and
+  "Change" opens the Login field for anyone who wants another. The
   organization defaults to "Personal".
 - **No password, no form.** For a password-less owner (`accessMode: "local"`
   in `/api/auth/status`) a locked Desktop window asks its main process for a
@@ -1849,13 +1853,25 @@ what cannot be defaulted:
   Users → your account offers "Set a password…" (`SecureAccountDialog`:
   password twice → recovery codes → Protect account); "Add user" opens the same
   dialog first, then the add-user flow (§3.6).
-- **The password sign-in names the real failure.** The server answers the
-  same for an unknown login and a wrong password, so the lock screen says
-  "Login or password is incorrect", and a hint under Login says the owner
-  usually signs in as `owner`. Login and recovery-code fields turn off
-  autocapitalization and spellcheck; the server ignores spaces, dashes
-  (including macOS's en/em dash substitutions) and invisible characters inside
-  a recovery code. In Polyth Desktop on its own server the alternatives under
+- **The lock screen shows who signs in; only the password is typed.**
+  Accounts this browser signed in to before (`knownBrowserLogins`, at most 5,
+  most recent first, with the display name from `/api/auth/me`) are tiles
+  (monogram, name, login); the first is picked. The server never lists logins
+  to an anonymous caller, so a browser that has not signed in here sees the
+  Login field (prefilled with the best guess); "Use another account" and
+  "Choose a saved account" switch between the two. The server answers the
+  same for an unknown login and a wrong password, so a failure says "Login or
+  password is incorrect".
+- **A recovery code alone recovers the account.** The code (160 bits) is what
+  identifies the account; the recovery form asks only for the code and a new
+  password, `POST /api/auth/recover` accepts `login` but ignores it (older
+  shells send one, a server older than this needs it, so the shell sends the
+  picked login as a hint) and answers with the account's `login`. The shell
+  then signs in with it; if that sign-in fails, the notice (accent, not red)
+  says "Password was reset. Your login is …" and keeps the new password
+  typed. Login and recovery-code fields turn off autocapitalization and
+  spellcheck; the server ignores spaces, dashes (including macOS's en/em dash
+  substitutions) and invisible characters inside a recovery code. In Polyth Desktop on its own server the alternatives under
   "or" start with "Continue as the owner on this computer"
   (`renewOwnerSession`, see [Desktop](desktop.md)). Every new-password form
   (setup, Set a password, Change password, the Desktop reset) asks twice.

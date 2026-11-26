@@ -152,15 +152,25 @@ export function createCredentials(control: ControlPlane, passwords: PasswordServ
       });
       return { login: row.login_name };
     },
-    async recover(input: { login: string; code: string; password: string; address?: string }) {
-      let login: string;
-      try { login = loginName(input.login); } catch { throw invalidCredentials(); }
-      limiter.admit(input.address, login);
-      const observed = find(login), code = recoveryCode(input.code);
-      const codeRow = code && observed ? control.get<{ id: string }>(
-        'SELECT id FROM recovery_codes WHERE user_id=? AND code_hash=? AND used_at_ms IS NULL', observed.user_id, tokenHash('recovery', code),
+    /**
+     * A recovery code is a 160-bit secret, so the code alone identifies its
+     * account: a login typed wrong (or forgotten) must not turn a valid code
+     * into "incorrect". A supplied login is ignored except as the old clients'
+     * shape. There is no account before the code is checked, so the account
+     * bucket is per address ("recovery:<address>"): guessing 160 bits stays
+     * hopeless under the address/installation budgets, and one caller cannot
+     * spend everyone's recovery budget.
+     * Returns the account's login so the person learns what to sign in with.
+     */
+    async recover(input: { login?: string; code: string; password: string; address?: string }): Promise<{ login: string }> {
+      limiter.admit(input.address, `recovery:${input.address ?? 'unknown'}`);
+      const code = recoveryCode(input.code);
+      const codeRow = code ? control.get<{ id: string; user_id: string }>(
+        'SELECT id,user_id FROM recovery_codes WHERE code_hash=? AND used_at_ms IS NULL', tokenHash('recovery', code),
       ) : undefined;
-      if (!live(observed) || !codeRow) throw invalidCredentials();
+      const login = codeRow ? control.get<{ login_name: string }>('SELECT login_name FROM password_credentials WHERE user_id=?', codeRow.user_id)?.login_name : undefined;
+      const observed = login ? find(login) : undefined;
+      if (!codeRow || !login || !live(observed) || observed.user_id !== codeRow.user_id) throw invalidCredentials();
       validateNewPassword(input.password);
       const encoded = await passwords.hash(input.password);
       control.transaction(() => {
@@ -172,6 +182,7 @@ export function createCredentials(control: ControlPlane, passwords: PasswordServ
         control.audit(observed.user_id, 'auth.recovery-used', observed.user_id);
       });
       // Recovery does not unsuspend users, restore memberships or grant roles.
+      return { login };
     },
   };
 }

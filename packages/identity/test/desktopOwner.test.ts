@@ -30,6 +30,19 @@ test('recovery succeeds with a code typed in its shown groups', async t => {
   await f.identity.credentials.login({ login: input.login, password: 'a replacement passphrase' });
 });
 
+test('the recovery code alone identifies the account and tells the person their login', async t => {
+  const f = fixture(t);
+  const { recovery, input } = await installed(f);
+  // No login at all, as the current lock screen sends it.
+  assert.deepEqual(await f.identity.credentials.recover({ code: recovery.codes[0]!, password: 'first replacement passphrase' }), { login: input.login.toLowerCase() });
+  // A mistyped login (an old shell still sends one) does not turn a valid code into "incorrect".
+  assert.deepEqual(await f.identity.credentials.recover({ login: 'not-my-login', code: recovery.codes[1]!, password: 'second replacement passphrase' }), { login: input.login.toLowerCase() });
+  await f.identity.credentials.login({ login: input.login, password: 'second replacement passphrase' });
+  // A used code and a wrong code still fail the same way.
+  await assert.rejects(f.identity.credentials.recover({ code: recovery.codes[0]!, password: 'third replacement passphrase' }), { code: 'invalid-credentials' });
+  await assert.rejects(f.identity.credentials.recover({ code: '0'.repeat(40), password: 'third replacement passphrase' }), { code: 'invalid-credentials' });
+});
+
 test('with a password, the Desktop window opens as the owner, never elevated, and keeps a live session it holds', async t => {
   const f = fixture(t);
   const { owner, input } = await installed(f);

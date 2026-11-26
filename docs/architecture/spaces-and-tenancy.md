@@ -610,9 +610,13 @@ store it lowercased (`loginName`), keep the password, passkeys (keyed by account
 ID), recovery codes and sessions, bump the account revision and audit
 `identity.login-changed`. IdP-managed accounts are refused (`managed-identity`).
 A taken login answers `login-taken` (409, also from account creation) so a client
-can tell it from a stale revision. `owner` (the login setup and owner protection
-hand out, named in the recovery file) belongs only to an instance owner: nobody
-else may take it, even after the owner moves away from it. The browser's
+can tell it from a stale revision. `owner` (the login owner protection hands out,
+and setup's fallback when the name gives no login; setup otherwise proposes one
+from the name, and the recovery file names whichever was chosen) belongs only to
+an instance owner: nobody else may take it, even after the owner moves away from
+it. A recovery code needs no login: `POST /api/auth/recover` finds the account
+by the code's hash, ignores any `login` sent with it and answers with the
+account's login (its rate-limit account bucket is per address). The browser's
 remembered sign-in login follows its own person's move (`changeCurrentLogin`).
 
 | Seam | Effect | Owner |
