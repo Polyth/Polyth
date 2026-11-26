@@ -51,6 +51,25 @@ test("duplicate model ids resolve only within the requested provider", () => {
   assert.equal(findModelDescriptor(duplicates, { providerID: "provider-c", modelID: "same" }, "shared"), undefined);
 });
 
+test("a name the harness resolves itself selects the one row that claims it", () => {
+  const vibe: ModelDescriptor[] = [
+    { harnessId: "vibe", providerID: "vibe", modelID: "mistral-medium-latest", name: "Mistral Medium 3.5",
+      aliases: ["mistral-medium", "mistral-medium-3.5"], variants: ["low", "high"] },
+    { harnessId: "vibe", providerID: "vibe", modelID: "glm-a", name: "A", aliases: ["glm"] },
+    { harnessId: "vibe", providerID: "vibe", modelID: "glm-b", name: "B", aliases: ["glm"] },
+  ];
+  const saved = resolveModelSelection(vibe, { providerID: "vibe", modelID: "mistral-medium-3.5", variant: "high" }, "vibe");
+  assert.equal(saved.ok && saved.descriptor?.modelID, "mistral-medium-latest");
+  assert.equal(saved.ok && saved.variant, "high");
+  // An exact id always wins over an alias, and an alias two rows claim names neither.
+  assert.equal(findModelDescriptor([...vibe, { harnessId: "vibe", providerID: "vibe", modelID: "glm", name: "G" }],
+    { providerID: "vibe", modelID: "glm" }, "vibe")?.name, "G");
+  const shared = resolveModelSelection(vibe, { providerID: "vibe", modelID: "glm" }, "vibe");
+  assert.equal(shared.ok === false && shared.code, "invalid-model");
+  // Aliases stay provider-scoped like ids.
+  assert.equal(findModelDescriptor(vibe, { providerID: "other", modelID: "mistral-medium-3.5" }, "vibe"), undefined);
+});
+
 test("a harness switch with identical provider/model ids stays harness-scoped", () => {
   const duplicates: ModelDescriptor[] = [
     { harnessId: "left", providerID: "shared", modelID: "same", name: "Left" },

@@ -54,6 +54,16 @@ configuration layer above the person's `config.toml`
 - Models are the `model` config option, valued by Vibe's model aliases. The
   thinking select has category `thinking`; the shared adapter reads it as the
   thought level, so its values are the model's variants.
+- One model has several ids. Until the account's Mistral catalog has loaded,
+  the select offers the built-in defaults by alias (`mistral-medium-3.5`,
+  `mistral-large-4-0`); afterwards it offers catalog ids
+  (`mistral-medium-latest`, …), and Vibe resolves every alias itself.
+  `src/models.ts` reads the catalog's aliases from
+  `$VIBE_HOME/model_catalog_cache.json` (Vibe's own rules: an alias that is a
+  model id or that two models claim names nothing) and publishes them as
+  `ModelDescriptor.aliases`, so a chat saved under either name keeps working
+  and a row the select offers under an alias gets its catalog id. No catalog
+  file means no aliases, never a guess.
 - Text and reasoning stream as deltas with a `messageId`. Vibe echoes each
   prompt as `user_message_chunk` before its first model request; that echo
   proves admission. While Vibe retries a 429 or 5xx (about five minutes) it

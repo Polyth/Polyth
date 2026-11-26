@@ -35,6 +35,10 @@ export interface AcpSelectOption {
  */
 export interface AcpModelIdCodec {
   canonical(nativeValue: string): string;
+  /** Other names the agent itself resolves to this canonical id (a catalog's
+   *  aliases), published as `ModelDescriptor.aliases` so a selection saved
+   *  under one of them still names the row. Read live from the agent. */
+  aliases?(canonicalValue: string): readonly string[] | undefined;
 }
 
 export interface AcpConfigSelect {
@@ -209,18 +213,26 @@ export const modelControl = (config: AcpSessionConfig): AcpModelControl => {
 export function acpModelDescriptors(
   config: AcpSessionConfig,
   harnessId: string,
+  codec?: AcpModelIdCodec,
 ): ModelDescriptor[] {
   const rows = config.model?.options ?? config.legacyModels?.available ?? [];
   const variants = config.thoughtLevel?.options
     .map((option) => option.value)
     .filter((value) => value !== "auto" && value !== "default") ?? [];
-  return rows.map((row) => ({
-    providerID: harnessId,
-    modelID: row.value,
-    name: row.name,
-    connected: true,
-    ...(variants.length ? { variants } : {}),
-  } satisfies ModelDescriptor));
+  const ids = new Set(rows.map((row) => row.value));
+  return rows.map((row) => {
+    // An alias that is another row's id names that row, never this one.
+    const aliases = [...new Set(codec?.aliases?.(row.value) ?? [])]
+      .filter((alias) => typeof alias === "string" && alias.trim() && !ids.has(alias));
+    return {
+      providerID: harnessId,
+      modelID: row.value,
+      name: row.name,
+      connected: true,
+      ...(aliases.length ? { aliases } : {}),
+      ...(variants.length ? { variants } : {}),
+    } satisfies ModelDescriptor;
+  });
 }
 
 /** Only an explicit protocol value is a portable reset target. Mutable

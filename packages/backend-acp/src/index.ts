@@ -458,7 +458,7 @@ export function createAcpRuntime(
     };
     const advertisedModels = (): ModelDescriptor[] => {
         const current = currentModelId(sessionConfig);
-        return acpModelDescriptors(sessionConfig, harnessId).map((model) => {
+        return acpModelDescriptors(sessionConfig, harnessId, options.modelIdCodec).map((model) => {
             const { variants: liveVariants, defaultVariant: _defaultVariant, ...base } = model;
             // Discovery rows are scoped to this ACP profile, but keep the
             // provider and harness identity in the lookup so a same-named model
@@ -1126,9 +1126,13 @@ export function createAcpRuntime(
             }
             prompt.push({ type: "text", text: delivered.text });
             if (request.model) {
-                const applied = await applySelection(request.model.modelID, selection.variant);
+                // A selection saved under an alias the agent resolves itself
+                // is applied as the row it names, so the agent's current value
+                // matches and the change is not re-sent every turn.
+                const modelId = selection.descriptor?.modelID ?? request.model.modelID;
+                const applied = await applySelection(modelId, selection.variant);
                 if (!applied.ok) return { kind: "rejected", code: applied.code, message: applied.message };
-                desiredModelId = request.model.modelID;
+                desiredModelId = modelId;
                 desiredVariant = selection.variant;
             }
             active = true;

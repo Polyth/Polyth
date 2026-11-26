@@ -68,6 +68,43 @@ test("a model id codec gives Polyth ids while changes send the advertised native
     await rt.dispose();
 });
 
+test("a selection saved under an alias the agent resolves runs as the row it names", async () => {
+    // Mistral Vibe offers `mistral-medium-3.5` until its catalog loads and
+    // `mistral-medium-latest` after; both name one model.
+    const vibeSelect = {
+        id: "model", name: "Model", category: "model", type: "select", currentValue: "mistral-medium-latest",
+        options: [{ value: "mistral-medium-latest", name: "Mistral Medium 3.5" }, { value: "glm-flash", name: "GLM Flash" }],
+    };
+    const aliasCodec: AcpModelIdCodec = {
+        canonical: (value) => value,
+        aliases: (value) => value === "mistral-medium-latest"
+            ? ["mistral-medium", "mistral-medium-3.5", "glm-flash", "mistral-medium"]
+            : undefined,
+    };
+    const f = fakeRpc();
+    f.handle(async (method) => {
+        if (method === "session/new") return { sessionId: "native", configOptions: [vibeSelect] };
+        if (method === "session/prompt") return { stopReason: "end_turn" };
+        return {};
+    });
+    const rt = createAcpRuntime(context, f.rpc, "vibe", undefined, "Mistral Vibe", { modelIdCodec: aliasCodec });
+    await rt.createSessionOperation!({ projectId: "p", sessionId: "canonical", title: "x", cwd: "/tmp" }, "create");
+    // Another row's id is never published as an alias, and duplicates collapse.
+    assert.deepEqual((await rt.models()).map((model) => [model.modelID, model.aliases]), [
+        ["mistral-medium-latest", ["mistral-medium", "mistral-medium-3.5"]],
+        ["glm-flash", undefined],
+    ]);
+    const outcome = await rt.startTurnOperation!({ sessionId: "canonical", text: "hi", model: { providerID: "vibe", modelID: "mistral-medium-3.5" } }, "turn");
+    assert.equal(outcome.kind, "confirmed", JSON.stringify(outcome));
+    // Already the agent's current model: nothing is re-sent.
+    assert.deepEqual(f.calls.filter((call) => call.method === "session/set_config_option"), []);
+    await settle();
+    const unknown = await rt.startTurnOperation!({ sessionId: "canonical", text: "hi", model: { providerID: "vibe", modelID: "mistral-large" } }, "turn-2");
+    assert.equal(unknown.kind, "rejected");
+    assert.match(unknown.kind === "rejected" ? unknown.message : "", /mistral-large is not available/);
+    await rt.dispose();
+});
+
 test("a colliding codec keeps the agent's own values instead of guessing", () => {
     const config = parseSessionConfig({ configOptions: [modelSelect("flash")] }, { canonical: () => "same" });
     assert.deepEqual(acpModelDescriptors(config, "ds").map((model) => model.modelID), [

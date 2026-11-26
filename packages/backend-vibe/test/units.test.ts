@@ -7,6 +7,7 @@ import type { ResolvedHarnessAccount } from "@polyth/harness-runtime/accounts";
 import { classifyVibePromptFailure } from "../src/failures.ts";
 import { vibeChildEnv, VIBE_POLYTH_DISABLED_TOOLS, VIBE_POLYTH_SETTINGS } from "../src/launchEnv.ts";
 import { foldReplay, listVibeSessions, parseVibeSessionMeta, resolveVibeHome } from "../src/nativeSessions.ts";
+import { createVibeModelIdCodec, parseVibeModelCatalog } from "../src/models.ts";
 import { createVibeClientTranslator, createVibeProfile, parseVibeAcpVersion, vibeCliBeside, vibeInstallCommand, vibeUpdateCommand, VIBE_WINDOWS_INSTALL } from "../src/serverEntry.ts";
 import { signInFromSessionNew } from "../src/signIn.ts";
 import { vibeNativeToolName, vibeToolName } from "../src/toolNames.ts";
@@ -191,4 +192,43 @@ test("replayed chunks fold into one record per message", () => {
         { role: "assistant", text: "Done." },
         { role: "user", text: "again" },
     ]);
+});
+
+test("Vibe's catalog aliases keep a model selected under either of its ids", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vibe-models-"));
+    try {
+        const codec = createVibeModelIdCodec(() => dir);
+        // No catalog yet: ids are kept verbatim.
+        assert.equal(codec.canonical("mistral-medium-3.5"), "mistral-medium-3.5");
+        assert.equal(codec.aliases?.("mistral-medium-latest"), undefined);
+        await writeFile(join(dir, "model_catalog_cache.json"), JSON.stringify({
+            old: { stored_at_timestamp: 1, payload: { models: [{ id: "gone", aliases: ["mistral-medium-3.5"] }] } },
+            current: { stored_at_timestamp: 2, payload: { models: [
+                { id: "mistral-medium-latest", aliases: ["mistral-medium", "mistral-medium-3.5", "mistral-vibe-cli-latest"] },
+                { id: "zai-glm-5-3-flash-vibe-free", aliases: ["zai-glm-5-3-flash", "glm"] },
+                // Vibe's rules: an alias that is a model id, or that two models claim, names nothing.
+                { id: "zai-glm-5-3-flash", aliases: ["glm"] },
+                { id: "x", aliases: "not-a-list" },
+            ] } },
+        }));
+        assert.equal(codec.canonical("mistral-medium-3.5"), "mistral-medium-latest");
+        assert.equal(codec.canonical("mistral-medium-latest"), "mistral-medium-latest");
+        assert.equal(codec.canonical("zai-glm-5-3-flash"), "zai-glm-5-3-flash");
+        assert.equal(codec.canonical("glm"), "glm");
+        assert.deepEqual(codec.aliases?.("mistral-medium-latest"), ["mistral-medium", "mistral-medium-3.5", "mistral-vibe-cli-latest"]);
+        assert.equal(codec.aliases?.("zai-glm-5-3-flash-vibe-free"), undefined);
+        // A rewritten catalog is read again; a broken one means no aliases.
+        await writeFile(join(dir, "model_catalog_cache.json"), "{not json");
+        assert.equal(codec.canonical("mistral-medium-3.5"), "mistral-medium-3.5");
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
+test("the Vibe catalog read before and after the account catalog loads names one row", () => {
+    const index = parseVibeModelCatalog(JSON.stringify({ k: { stored_at_timestamp: 5, payload: { models: [
+        { id: "mistral-medium-latest", aliases: ["mistral-medium-3.5"] },
+    ] } } }));
+    assert.deepEqual([...index.targets], [["mistral-medium-3.5", "mistral-medium-latest"]]);
+    assert.deepEqual([...parseVibeModelCatalog("[]").targets], []);
 });

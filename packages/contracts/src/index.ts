@@ -4871,7 +4871,7 @@ export type ResponseIntentSettlement =
   | { kind: "unknown"; code?: string; message: string }
   | { kind: "not-applied"; code?: string; message: string };
 
-export interface ModelDescriptor { /** Present in aggregated/prospective catalogs; runtime-local catalogs may omit it. */ harnessId?: string; providerID: string; modelID: string; /** The concrete model id this row currently routes to when `modelID` is an alias the harness resolves itself (Claude Code `opus` → `claude-opus-5-5`). Turn telemetry reports the concrete id; this maps it back to the row a selection must name. Read live from the harness, never from a static table; absent when the id is already concrete or the harness does not say. */ resolvedModelID?: string; name: string; providerName?: string; context?: number; /** Conflicting native context evidence: omit context and refuse fallback enrichment. Absent preserves legacy missing/known semantics. Serializable across catalogs and caches. */ contextStatus?: "conflict"; cost?: { input: number; output: number }; /** Normalized values include `input:text`, `output:image`, `input:none`, `toolcall`, and `attachment`. */ capabilities?: string[]; /** Named reasoning variants the backend advertises for this model (for example low/medium/high). A selected variant is `ModelRef.variant`; there is no parallel thinking field. */ variants?: string[]; /** The variant the backend applies when `ModelRef.variant` is absent, when it names one. */ defaultVariant?: string; /** Provider has live credentials (backend `connected[]`); undefined = unknown/assume connected. */ connected?: boolean }
+export interface ModelDescriptor { /** Present in aggregated/prospective catalogs; runtime-local catalogs may omit it. */ harnessId?: string; providerID: string; modelID: string; /** The concrete model id this row currently routes to when `modelID` is an alias the harness resolves itself (Claude Code `opus` → `claude-opus-5-5`). Turn telemetry reports the concrete id; this maps it back to the row a selection must name. Read live from the harness, never from a static table; absent when the id is already concrete or the harness does not say. */ resolvedModelID?: string; /** Other names the harness itself resolves to this row, read live from the harness (Mistral Vibe offers `mistral-medium-3.5` before its catalog loads and `mistral-medium-latest` after). A selection saved under an alias names this row; an alias two rows claim names neither. */ aliases?: string[]; name: string; providerName?: string; context?: number; /** Conflicting native context evidence: omit context and refuse fallback enrichment. Absent preserves legacy missing/known semantics. Serializable across catalogs and caches. */ contextStatus?: "conflict"; cost?: { input: number; output: number }; /** Normalized values include `input:text`, `output:image`, `input:none`, `toolcall`, and `attachment`. */ capabilities?: string[]; /** Named reasoning variants the backend advertises for this model (for example low/medium/high). A selected variant is `ModelRef.variant`; there is no parallel thinking field. */ variants?: string[]; /** The variant the backend applies when `ModelRef.variant` is absent, when it names one. */ defaultVariant?: string; /** Provider has live credentials (backend `connected[]`); undefined = unknown/assume connected. */ connected?: boolean }
 export interface AgentDescriptor {
   /** Present in aggregated/prospective catalogs; runtime-local catalogs may omit it. */
   harnessId?: string;
@@ -9677,8 +9677,14 @@ export const findModelDescriptor = (
   ref: Pick<ModelRef, "providerID" | "modelID">,
   harnessId?: string,
 ): ModelDescriptor | undefined => {
-  return harnessModels(catalog, harnessId).find((descriptor) =>
-    descriptor.providerID === ref.providerID && descriptor.modelID === ref.modelID);
+  const rows = harnessModels(catalog, harnessId).filter((descriptor) => descriptor.providerID === ref.providerID);
+  const exact = rows.find((descriptor) => descriptor.modelID === ref.modelID);
+  if (exact) return exact;
+  // A name the harness resolves itself (a model saved before a rename, or
+  // offered under another name while its catalog loaded) selects the row that
+  // claims it, unless more than one does.
+  const claimed = rows.filter((descriptor) => descriptor.aliases?.includes(ref.modelID));
+  return claimed.length === 1 ? claimed[0] : undefined;
 };
 
 /**

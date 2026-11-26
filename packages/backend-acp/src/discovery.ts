@@ -74,7 +74,7 @@ const discoverDescriptors = async (
 ): Promise<ModelDescriptor[]> => {
   if (opened.models) return opened.models;
   const initial = parseSessionConfig(opened.result, codec);
-  const models = acpModelDescriptors(initial, harnessId).map(withoutVariants);
+  const models = acpModelDescriptors(initial, harnessId, codec).map(withoutVariants);
   // The fresh session's controls say nothing about the other models: selecting
   // one may add a thought-level select that was absent here, so every model is
   // probed. The timeout above, not a guess, bounds the cost.
@@ -84,7 +84,7 @@ const discoverDescriptors = async (
       const result = initial.model.currentValue === model.modelID
         ? opened.result
         : await opened.setConfigOption(initial.model.id, nativeOptionValue(initial.model, model.modelID));
-      const selected = acpModelDescriptors(parseSessionConfig(result, codec), harnessId)
+      const selected = acpModelDescriptors(parseSessionConfig(result, codec), harnessId, codec)
         .find((candidate) => candidate.modelID === model.modelID);
       if (selected?.variants?.length) model.variants = selected.variants;
     } catch {

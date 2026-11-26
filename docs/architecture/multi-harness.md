@@ -420,6 +420,13 @@ ran (`claude-opus-5-5`). Each alias row therefore carries the concrete id the
 current binary resolves it to, read from the SDK's `resolvedModel`, as
 `ModelDescriptor.resolvedModelID`. Hosts map a reported id back to the row a
 selection must name through it; no alias table is kept anywhere.
+The opposite case, a harness that offers one model under several ids over time
+(Mistral Vibe lists `mistral-medium-3.5` before its catalog loads and
+`mistral-medium-latest` after), publishes the other names it resolves itself as
+`ModelDescriptor.aliases`. `findModelDescriptor` matches an exact id first and
+otherwise the one row that claims the alias, so a saved selection passes the
+server preflight and the adapter; the ACP adapter then applies the matched row's
+id. ACP profiles supply aliases through `AcpModelIdCodec.aliases`.
 
 #### OpenCode free auto-picks
 

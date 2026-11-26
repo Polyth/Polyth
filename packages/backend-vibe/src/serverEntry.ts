@@ -13,6 +13,7 @@ import { createFolderSkillManager, nativeSkillFolders } from "@polyth/harness-ru
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { classifyVibePromptFailure } from "./failures.ts";
 import { MISTRAL_API_KEY_ENV, vibeChildEnv } from "./launchEnv.ts";
+import { createVibeModelIdCodec } from "./models.ts";
 import { listVibeSessions, readVibeDialogue, resolveVibeHome } from "./nativeSessions.ts";
 import { readVibeSignIn } from "./signIn.ts";
 import { vibeNativeToolName } from "./toolNames.ts";
@@ -126,6 +127,9 @@ export function createVibeProfile(account?: ResolvedHarnessAccount): RegisteredA
         // `mcpCapabilities.http` (3.1.5), and the shared adapter never sends
         // a transport the agent did not advertise.
         classifyPromptFailure: classifyVibePromptFailure,
+        // One model, several ids: the built-in alias before the account's
+        // catalog loads, the catalog id after. Aliases keep either selection.
+        modelIdCodec: createVibeModelIdCodec(() => home()),
         nativeToolName: vibeNativeToolName,
         // Vibe's `session_info_update` title is first the raw first prompt
         // (Polyth's context blocks included), then one its title request
