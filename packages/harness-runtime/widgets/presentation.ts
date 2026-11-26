@@ -166,6 +166,30 @@ export function harnessSummary(rows: HarnessSnapshot[], options: { checking?: Re
 }
 
 export const orderedHarnesses = (rows: HarnessSnapshot[]) => rows.toSorted((a, b) => a.policy.priority - b.policy.priority || a.identity.id.localeCompare(b.identity.id));
+/** An extra login of a multi-account family (`<family>-<account>`): not the
+ *  family's default harness, which has no account label, nor its Relay. */
+const extraAccount = (row: HarnessSnapshot) => Boolean(row.identity.accounts && row.identity.accountLabel?.trim());
+/** The Harnesses list, in order, without the extra accounts that are off: one
+ *  runs only for a Relay it is in (or nowhere), and In picker under its
+ *  family's Accounts turns it back on, so its own row would only repeat that.
+ *  Without the family's default harness here there is no Accounts page to
+ *  open, so such an account keeps its row. */
+export const listedHarnesses = (rows: HarnessSnapshot[]) => {
+  const ids = new Set(rows.map((row) => row.identity.id));
+  return orderedHarnesses(rows).filter((row) => row.policy.enabled || !extraAccount(row) || !ids.has(row.identity.accounts!.family));
+};
+/** The body of a Harnesses list save: the listed rows in their new order, and
+ *  each row the list leaves out exactly as it was, because the server resets
+ *  a harness the save does not name (a hidden account would come back on). */
+export function listPreferences(next: readonly HarnessSnapshot[], rows: readonly HarnessSnapshot[]): { preferences: Record<string, { enabled: boolean; priority: number }> } {
+  const listed = new Set(next.map((row) => row.identity.id));
+  return {
+    preferences: Object.fromEntries([
+      ...next.map((row, index) => [row.identity.id, { enabled: row.policy.enabled, priority: index * 10 }] as const),
+      ...rows.filter((row) => !listed.has(row.identity.id)).map((row) => [row.identity.id, { enabled: row.policy.enabled, priority: row.policy.priority }] as const),
+    ]),
+  };
+}
 export const autoCandidates = (rows: HarnessSnapshot[]) => orderedHarnesses(rows).filter((row) => row.policy.enabled && row.policy.autoSelect);
 // Match the prospective Auto route; cheap probes cannot promise successful native discovery.
 export const resolvedAuto = (rows: HarnessSnapshot[]) => autoCandidates(rows).find((row) => row.availability.installed

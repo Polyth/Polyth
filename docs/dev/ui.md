@@ -5578,7 +5578,14 @@ Harnesses list layout: the summary card names who new conversations use (the
 person's usable *My default* first, then Auto), *My default* sits between it and
 the list, and the list is one card of rows that share subgrid columns (drag ·
 identity · hover reorder · action · switch · chevron), so switches and actions
-align whatever a row offers. Logo tiles take a Space's harness color
+align whatever a row offers. The list (`listedHarnesses`) leaves out an extra
+account (`<family>-<account>`) that is switched off, Relay-only included: it is
+turned back on with **In picker** under its family's Accounts, and the summary
+counts only listed rows. A list save still sends each left-out row unchanged
+(`listPreferences`), because the server resets a harness the save omits. The
+family's default harness, its Relay and ordinary harnesses stay listed when
+off, and so does an off account whose family's default harness the caller
+cannot see (there is no Accounts page to open). Logo tiles take a Space's harness color
 (`harnessTint` → `--pkg-harness-color`, `data-tinted`) and resolve the logo
 from `identity.defaultName` when the Space retitled the harness; the detail's
 Overview holds the Appearance section. A row's meta line is status · route ·

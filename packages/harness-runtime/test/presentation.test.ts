@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { HarnessSnapshot } from "@polyth/contracts";
-import { availabilityLabel, configurationSections, displayVersion, HARNESS_COLORS, harnessDisplayName, harnessProfileName, harnessSummary, harnessTint, needsReadinessCheck, signInEndsSoon, signInExpiryNote, statusTone } from "../widgets/presentation.ts";
+import { availabilityLabel, configurationSections, displayVersion, HARNESS_COLORS, harnessDisplayName, harnessProfileName, harnessSummary, harnessTint, listedHarnesses, listPreferences, needsReadinessCheck, signInEndsSoon, signInExpiryNote, statusTone } from "../widgets/presentation.ts";
 
 test("harness display names keep known brands readable and format unknown ids", () => {
   assert.equal(harnessDisplayName("claude"), "Claude");
@@ -92,6 +92,34 @@ test("only a state someone can act on needs attention; unverified and checking r
   assert.equal(availabilityLabel(rows[1]!), "Not verified");
   assert.equal(availabilityLabel(rows[2]!, { checking: true }), "Checking…");
   assert.equal(statusTone(rows[1]!), "neutral");
+});
+
+test("the Harnesses list leaves out an extra account that is off, and a save keeps it as it was", () => {
+  const accounts = { family: "claude", endpoint: "/api/backend-claude/accounts" };
+  const off = (priority: number) => ({ policy: { enabled: false, priority, autoSelect: true } });
+  const rows = [
+    snapshot("claude", {}, { identity: { id: "claude", name: "Claude Code", integration: "test", accounts } }),
+    snapshot("claude-work", {}, { identity: { id: "claude-work", name: "Claude Code · Work", integration: "test", accounts, accountLabel: "Work" }, ...off(20) }),
+    snapshot("claude-home", {}, { identity: { id: "claude-home", name: "Claude Code · Home", integration: "test", accounts, accountLabel: "Home" }, policy: { enabled: true, priority: 30, autoSelect: true } }),
+    snapshot("claude-relay", {}, { identity: { id: "claude-relay", name: "Claude Code · Relay", integration: "relay", accounts }, ...off(40) }),
+    snapshot("codex", {}, { ...off(50) }),
+  ];
+  const listed = listedHarnesses(rows);
+  // The default login, a Relay and an ordinary harness stay listed when off.
+  assert.deepEqual(listed.map((row) => row.identity.id), ["claude", "claude-home", "claude-relay", "codex"]);
+  assert.deepEqual(harnessSummary(listed).off, 2);
+  assert.deepEqual(listPreferences(listed.toReversed(), rows), {
+    preferences: {
+      codex: { enabled: false, priority: 0 },
+      "claude-relay": { enabled: false, priority: 10 },
+      "claude-home": { enabled: true, priority: 20 },
+      claude: { enabled: true, priority: 30 },
+      "claude-work": { enabled: false, priority: 20 },
+    },
+  });
+  // A Space without the family's default harness has no Accounts page to
+  // turn it back on from, so the off account keeps its row.
+  assert.deepEqual(listedHarnesses(rows.slice(1)).map((row) => row.identity.id), ["claude-work", "claude-home", "claude-relay", "codex"]);
 });
 
 test("a kept row reads as its state, and only a failed check says last known", () => {

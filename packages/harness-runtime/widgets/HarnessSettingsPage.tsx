@@ -11,7 +11,7 @@ import { EmptyState, ErrorState, ReadonlyRow, Row, Section } from "../../../apps
 import ProviderLogo from "@polyth/models/provider-logo";
 import { canExecute, useHarnesses } from "./harnessData.ts";
 import {
-  attachmentFacts, autoCandidates, availabilityLabel, configurationSections, displayVersion, harnessProfileName, harnessSummary, harnessTint as tint, integrationLabel, orderedHarnesses,
+  attachmentFacts, autoCandidates, availabilityLabel, configurationSections, displayVersion, harnessProfileName, harnessSummary, harnessTint as tint, integrationLabel, listedHarnesses, listPreferences,
   pendingLabel, projectionFacts, resolvedAuto, routingLabel, runtimeFacts, setupStep, signInEndsSoon, signInExpiryNote, statusTone, supportLabel, type CapabilityFact,
 } from "./presentation.ts";
 import { hostTranslate } from "./englishTranslate.ts";
@@ -224,12 +224,13 @@ export function HarnessSettings({ host, settingsTarget }: { host: WebPackageHost
     && pendingRow.availability.authenticated !== false && pendingRow.availability.state !== "auth-required"
     && pendingRow.availability.state !== "not-installed");
 
-  const ordered = orderedHarnesses(rows);
+  // An extra account that is off is managed under its family's Accounts.
+  const ordered = listedHarnesses(rows);
   const saveOrder = async (next: HarnessSnapshot[]) => {
     setBusy(true);
     setFailure("");
     try {
-      await api.put("/api/harnesses/preferences", { preferences: Object.fromEntries(next.map((row, index) => [row.identity.id, { enabled: row.policy.enabled, priority: index * 10 }])) });
+      await api.put("/api/harnesses/preferences", listPreferences(next, rows));
       await refresh(true);
     } catch (cause) {
       setFailure(host.errors.friendly(s("savePreferences"), cause));
@@ -340,7 +341,8 @@ export function HarnessSettings({ host, settingsTarget }: { host: WebPackageHost
   }
 
   const updateIds = new Set([...updates.statuses.values()].filter((status) => status.available).map((status) => status.harnessId));
-  const summary = harnessSummary(rows, { checking: readiness.checking, updates: updateIds });
+  // Counts only what the list shows, so "n off" never counts a hidden account.
+  const summary = harnessSummary(ordered, { checking: readiness.checking, updates: updateIds });
   const checkingAny = summary.checking > 0;
   const installing = rows.filter((row) => !row.availability.installed && installIsActive(installs.jobs.get(row.identity.id))).length;
   const outcomes = ordered.map(outcome).filter(Boolean);
