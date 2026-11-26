@@ -79,6 +79,8 @@ test("a project without an icon is marked by its initial", () => {
     ["2026 budget", "2"],
     ["🚀 launch plan", "L"],
     ["україна дім", "У"],
+    ["Écoles", "É"],
+    ["polyth_site.v2", "P"],
     ["项目管理", "项"],
     ["  ", ""],
     ["🚀", ""],
