@@ -2,7 +2,7 @@
 // (`settings.users.invite.methods`, described by `meta.inviteMethod`). The Add
 // user flow lists them as choices beside the browser and asks the chosen one
 // for the invitation; a package supplies data, the host draws the choice.
-import type { InviteMethodContext, InviteMethodInvitation, InviteMethodSlotMeta } from "@polyth/web-sdk";
+import type { InviteMethodContext, InviteMethodInvitation, InviteMethodInvitations, InviteMethodSlotMeta } from "@polyth/web-sdk";
 import { listSlots, type SlotItem } from "../../slots.ts";
 import type { LucideIcon } from "../ui/index.ts";
 import { PluginIcon } from "../ui/index.ts";
@@ -18,6 +18,7 @@ export interface InviteMethod {
   available(context: InviteMethodContext): Promise<true | string>;
   preferred(context: InviteMethodContext): boolean;
   issue: InviteMethodSlotMeta["issue"];
+  invitations?: () => Promise<InviteMethodInvitations>;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -53,6 +54,7 @@ export function inviteMethodContribution(item: SlotItem): InviteMethod | null {
       try { return typeof preferred === "function" && preferred(context) === true; } catch { return false; }
     },
     issue: meta.issue,
+    ...(typeof meta.invitations === "function" ? { invitations: meta.invitations } : {}),
   };
 }
 
@@ -60,6 +62,31 @@ export function listInviteMethods(): InviteMethod[] {
   return listSlots(INVITE_METHODS_SLOT)
     .map(inviteMethodContribution)
     .filter((entry): entry is InviteMethod => entry !== null);
+}
+
+/** Where each invited person stands, by account id: joined (and when) or
+ *  still holding an unopened link (until when). Joining wins over a newer
+ *  link, e.g. one for a second device. */
+export type InviteStatus = { joined: number } | { until: number };
+
+export async function inviteStatuses(methods: readonly InviteMethod[] = listInviteMethods()): Promise<Map<string, InviteStatus>> {
+  const statuses = new Map<string, InviteStatus>();
+  const answers = await Promise.all(methods.map((method) => method.invitations?.().catch(() => null)));
+  for (const answer of answers) {
+    for (const entry of Array.isArray(answer?.pending) ? answer.pending : []) {
+      if (typeof entry?.accountId === "string" && Number.isFinite(entry.expiresAt) && !statuses.has(entry.accountId)) {
+        statuses.set(entry.accountId, { until: entry.expiresAt });
+      }
+    }
+  }
+  for (const answer of answers) {
+    for (const entry of Array.isArray(answer?.joined) ? answer.joined : []) {
+      const known = statuses.get(entry?.accountId);
+      if (typeof entry?.accountId !== "string" || !Number.isFinite(entry.at)) continue;
+      if (!known || !("joined" in known) || known.joined < entry.at) statuses.set(entry.accountId, { joined: entry.at });
+    }
+  }
+  return statuses;
 }
 
 /** Only a usable invitation: a link, a future expiry and a message. */

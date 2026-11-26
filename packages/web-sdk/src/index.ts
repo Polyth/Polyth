@@ -236,6 +236,15 @@ export interface InviteMethodSlotMeta {
     /** The name the person was added with. */
     name: string;
   }) => Promise<InviteMethodInvitation>;
+  /** What became of the invitations it made, for the people list in
+   *  Settings → Users: whose link is still unopened and who joined through
+   *  one. Asked when the page loads; a throw shows nothing. */
+  invitations?: () => Promise<InviteMethodInvitations>;
+}
+
+export interface InviteMethodInvitations {
+  pending: Array<{ accountId: string; expiresAt: number }>;
+  joined: Array<{ accountId: string; at: number }>;
 }
 
 /** Context the host gives every `session.code.actions` contribution. Render a

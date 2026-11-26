@@ -167,7 +167,7 @@ export function createJoinedSpaces(options: {
   env?: NodeJS.ProcessEnv;
   timing?: Partial<JoinedTiming>;
   /** Where a person's notifications from joined Spaces go; resolved late. */
-  notices?: () => ServerPersonNotices | undefined;
+  notices?: () => Pick<ServerPersonNotices, "deliver" | "withdraw"> | undefined;
 }) {
   const timing = { ...TIMING, ...options.timing };
   const people = new Map<string, Person>();

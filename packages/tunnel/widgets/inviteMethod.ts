@@ -4,7 +4,7 @@
 // still take a teammate. The host draws the choice; this module supplies the
 // data for `settings.users.invite.methods` (InviteMethodSlotMeta).
 import type { TunnelStatusDto } from "@polyth/contracts";
-import { ApiError, type InviteMethodSlotMeta } from "@polyth/web-sdk";
+import { ApiError, type InviteMethodInvitations, type InviteMethodSlotMeta } from "@polyth/web-sdk";
 import type { TunnelServerNameDto } from "../src/serverName.ts";
 import type { Translate } from "./i18n.ts";
 
@@ -17,6 +17,12 @@ export interface TunnelInvitationDto {
   /** polyth://pair?v=1&t=… — the same ticket for a field that takes it. */
   link: string;
   expiresAt: number;
+}
+
+interface InvitationListDto {
+  invitations: Array<Pick<TunnelInvitationDto, "forUserId" | "expiresAt">>;
+  /** Older servers leave it out. */
+  joined?: Array<{ forUserId: string; at: number | null }>;
 }
 
 interface Api {
@@ -61,7 +67,7 @@ export function tunnelInviteMethod(
     },
     preferred: ({ shareableAddress }) => linkPreferred(shareableAddress),
     issue: async ({ accountId, name }) => {
-      const issued = await api.post<TunnelInvitationDto>("/api/tunnel/invitations", { forUserId: accountId });
+      const issued = await api.post<TunnelInvitationDto>("/api/tunnel/invitations", { forUserId: accountId, name });
       let server = "";
       try {
         server = (await api.get<TunnelServerNameDto>("/api/tunnel/server-name")).name.trim();
@@ -72,6 +78,13 @@ export function tunnelInviteMethod(
         expiresAt: issued.expiresAt,
         message: t(server ? "tunnel.invite.messageNamed" : "tunnel.invite.message", values),
         note: t("tunnel.invite.note", values),
+      };
+    },
+    invitations: async (): Promise<InviteMethodInvitations> => {
+      const list = await api.get<InvitationListDto>("/api/tunnel/invitations");
+      return {
+        pending: list.invitations.map((invitation) => ({ accountId: invitation.forUserId, expiresAt: invitation.expiresAt })),
+        joined: (list.joined ?? []).flatMap((entry) => entry.at === null ? [] : [{ accountId: entry.forUserId, at: entry.at }]),
       };
     },
   };

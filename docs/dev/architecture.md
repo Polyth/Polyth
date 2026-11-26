@@ -1289,7 +1289,12 @@ the widget placement slots (`workspace.header/left/main/right/bottom/floating`,
 `settings.users.invite.methods` is a data-only slot for ways of connecting a
 person in the Add user wizard: a contribution gives a label and detail, an
 `available`/`preferred` check and an `issue` that returns the connection link
-for the chosen person.
+for the chosen person, and optionally `invitations()` so the Users list can show
+who joined and whose link is still open.
+A server package files a notice about this server rather than a chat (someone
+accepted an invitation) with `server.person-notices` `notify(account, notice)`:
+the row has empty `sessionId`/`projectId` and a `settings: {pageId, itemId?}`
+target, is never hidden by project visibility, and opens that Settings page.
 
 Feature web UI registers through the **web-sdk host**
 (`@polyth/web-sdk`: `defineWebPackage` + `WebPackageHost` — slots, widgets,

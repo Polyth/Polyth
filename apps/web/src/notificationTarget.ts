@@ -1,14 +1,21 @@
 // Where a notification leads. A notice from a Space joined on another server
 // names that server's project and session, so opening it switches to the Space
-// first and lands on the session's URL there.
+// first and lands on the session's URL there. A notice about this server (an
+// invitation was used) opens Settings instead.
 import type { NotificationRecord } from "@polyth/contracts";
 import { notificationCentre, type NotificationCentre } from "./notificationCentre.ts";
 import { formatAppUrl } from "./router.ts";
 import { getSpacesState, switchSpace } from "./spaces.ts";
+import { openSettingsPage } from "./store.ts";
 
-type Target = Pick<NotificationRecord, "sessionId" | "projectId" | "joinedSpace">;
+type Target = Pick<NotificationRecord, "sessionId" | "projectId" | "joinedSpace" | "settings">;
 
 export function openNotificationRecord(record: Target, open: (sessionId: string) => Promise<void>): Promise<void> {
+  if (record.settings) {
+    const { pageId, itemId } = record.settings;
+    openSettingsPage(pageId, itemId ? { itemId } : undefined);
+    return Promise.resolve();
+  }
   const joined = record.joinedSpace;
   if (!joined || joined.id === getSpacesState().activeSpaceId) return open(record.sessionId);
   return switchSpace(joined.id, formatAppUrl(record.projectId, record.sessionId));

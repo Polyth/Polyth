@@ -2460,22 +2460,35 @@ export async function boot(opts: BootOptions = {}) {
   });
   devicePresence.subscribe(deferredAlerts.presenceChanged);
   // Notices from Spaces a person joined on other servers (Polyth Link).
-  services.provide(SERVER_PERSON_NOTICES, createPersonNotices({
-    store: notifications, push, nativePush, presence: devicePresence,
-    spacesOf: (userId) => spaceGateway.store.spacesFor(userId).map((space) => space.id)
-      .filter((spaceId) => notificationAccess({ userId, spaceId })),
-    broadcast: (record, recipient) => broadcast.notification?.(record, recipient),
-  }));
+  services.provide(SERVER_PERSON_NOTICES, {
+    ...createPersonNotices({
+      store: notifications, push, nativePush, presence: devicePresence,
+      spacesOf: (userId) => spaceGateway.store.spacesFor(userId).map((space) => space.id)
+        .filter((spaceId) => notificationAccess({ userId, spaceId })),
+      broadcast: (record, recipient) => broadcast.notification?.(record, recipient),
+    }),
+    // A notice about this server (an invitation was used), not a chat's.
+    notify: (account, notice) => {
+      const payload: PushPayload = {
+        kind: "message", sessionId: "", projectId: "", key: notice.key,
+        title: notice.title, body: notice.body, tag: `polyth-${notice.key}`,
+      };
+      void deliverToRecipient(account, payload, {
+        ...(notice.author ? { author: notice.author } : {}),
+        settings: notice.settings,
+      }).catch((error: unknown) => console.error("[polyth] server notice failed", error));
+    },
+  });
   // One recipient's delivery leg: durable inbox row -> recipient-filtered WS
   // broadcast -> independent Web/native push. Shared by the turn notifier and
   // by person-message notifications so neither duplicates the ordering.
   const deliverToRecipient = async (
     recipient: NotificationAccount,
     payload: PushPayload,
-    people?: Pick<NotificationRecord, "author" | "chat" | "accessRequest">,
+    people?: Pick<NotificationRecord, "author" | "chat" | "accessRequest" | "settings">,
   ): Promise<void> => {
     const { key, projectId } = payload;
-    if (!key || !payload.sessionId || !projectId) {
+    if (!key || (!people?.settings && (!payload.sessionId || !projectId))) {
       throw Object.assign(new Error("notification payload missing key/session/project"), { code: "invalid-input" });
     }
     const record = await notifications.add(recipient, {

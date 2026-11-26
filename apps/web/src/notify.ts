@@ -33,7 +33,7 @@ import {
   recordChat,
   type PeopleThread,
 } from "./peopleAlerts.ts";
-import { getLocale } from "./i18n/index.ts";
+import { getLocale, tr } from "./i18n/index.ts";
 import { decidePersonAccess, firstNamesList, forgetPersonMessageOperation, personMessageOperationId, postPersonMessage } from "./sessionPeople.ts";
 
 export function requestNotifyPermission(): void {
@@ -339,7 +339,9 @@ const peopleThreads = new Map<string, PeopleThread>();
 /** One messenger card per chat: a burst updates it in place, brings it
  *  forward and shows its newest lines, each voice in its colour. */
 function showPeopleCard(record: NotificationRecord): void {
-  const sessionId = record.sessionId;
+  // A notice about this server (someone accepted an invitation) has no chat:
+  // it is a card of its own, headed by the page it opens.
+  const sessionId = record.settings ? `settings:${record.key}` : record.sessionId;
   const thread = addToThread(peopleThreads.get(sessionId), record);
   peopleThreads.set(sessionId, thread);
   showBanner({
@@ -350,13 +352,14 @@ function showPeopleCard(record: NotificationRecord): void {
     body: record.body,
     conversation: {
       sessionId,
-      chat: record.joinedSpace ? `${recordChat(record)} · ${notificationSource(record.joinedSpace)}` : recordChat(record),
+      chat: record.settings ? tr("settingsview.users")
+        : record.joinedSpace ? `${recordChat(record)} · ${notificationSource(record.joinedSpace)}` : recordChat(record),
       lines: thread.lines,
       count: thread.count,
       mention: thread.mention,
       open: () => { void openNotificationRecord(record, openSession).catch(() => undefined); },
       // A reply posts to this server, which does not have another server's chat.
-      ...(record.joinedSpace ? {} : { reply: (text: string) => replyFromCard(sessionId, text) }),
+      ...(record.joinedSpace || record.settings ? {} : { reply: (text: string) => replyFromCard(sessionId, text) }),
       ...(thread.accessRequest ? {
         accessRequest: {
           names: firstNamesList(thread.accessRequest.people.map((person) => person.name), getLocale()),

@@ -356,3 +356,17 @@ test("when the chosen way in fails, the person is still created and gets the pas
     await view.unmount();
   });
 });
+
+test("Users reads who joined and whose link is still open from every invite method", async () => {
+  const { inviteStatuses } = await import("../src/components/settings/inviteMethods.ts");
+  const method = (answer: () => Promise<unknown>) => ({ invitations: answer }) as never;
+  const statuses = await inviteStatuses([
+    method(async () => ({ pending: [{ accountId: "ann", expiresAt: 50 }, { accountId: "bo", expiresAt: 60 }], joined: [{ accountId: "cy", at: 10 }] })),
+    // Joining wins over a newer link (a second device); the newest join counts.
+    method(async () => ({ pending: [], joined: [{ accountId: "bo", at: 20 }, { accountId: "cy", at: 30 }] })),
+    method(async () => { throw new Error("offline"); }),
+    method(async () => ({ pending: "nope", joined: [{ accountId: 7, at: 1 }] })),
+    {} as never,
+  ]);
+  assert.deepEqual([...statuses].sort(), [["ann", { until: 50 }], ["bo", { joined: 20 }], ["cy", { joined: 30 }]]);
+});

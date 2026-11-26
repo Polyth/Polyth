@@ -48,6 +48,11 @@ export interface TunnelInvitationRecord {
   state: "pending" | "used" | "cancelled" | "expired";
   deviceId: string | null;
   finishedAt: number | null;
+  /** The Space it was issued from: where its owner hears that it was used.
+   *  Null on invitations made before this was kept. */
+  spaceId: string | null;
+  /** The name the person was added with, for that notice. */
+  forName: string | null;
 }
 
 export function grantsForProfile(profile: GrantProfileId): string[] {
@@ -144,6 +149,9 @@ export class TunnelStore {
     if (!columns.has("issued_by")) this.db.exec("ALTER TABLE tunnel_device ADD COLUMN issued_by TEXT");
     const pairingColumns = new Set((this.db.prepare("PRAGMA table_info(tunnel_pairing_owner)").all() as Array<{ name: string }>).map((row) => row.name));
     if (!pairingColumns.has("for_user_id")) this.db.exec("ALTER TABLE tunnel_pairing_owner ADD COLUMN for_user_id TEXT");
+    const invitationColumns = new Set((this.db.prepare("PRAGMA table_info(tunnel_invitation)").all() as Array<{ name: string }>).map((row) => row.name));
+    if (!invitationColumns.has("space_id")) this.db.exec("ALTER TABLE tunnel_invitation ADD COLUMN space_id TEXT");
+    if (!invitationColumns.has("for_name")) this.db.exec("ALTER TABLE tunnel_invitation ADD COLUMN for_name TEXT");
     this.db.prepare("UPDATE tunnel_device SET owner_user_id = ? WHERE owner_user_id IS NULL OR owner_user_id = ''").run(LEGACY_OWNER_USER_ID);
     this.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS tunnel_device_pairing_id ON tunnel_device(pairing_id) WHERE pairing_id IS NOT NULL");
     this.db.exec("CREATE INDEX IF NOT EXISTS tunnel_device_owner ON tunnel_device(owner_user_id)");
@@ -218,9 +226,11 @@ export class TunnelStore {
     label?: string | null;
     expiresAt: number;
     createdAt?: number;
+    spaceId?: string | null;
+    forName?: string | null;
   }): TunnelInvitationRecord {
     this.db.prepare(
-      "INSERT INTO tunnel_invitation(pairing_id, issued_by, for_user_id, profile, ticket, share_url, label, created_at, expires_at, state, device_id, finished_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL)",
+      "INSERT INTO tunnel_invitation(pairing_id, issued_by, for_user_id, profile, ticket, share_url, label, created_at, expires_at, state, device_id, finished_at, space_id, for_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, ?, ?)",
     ).run(
       input.pairingId,
       input.issuedBy,
@@ -231,6 +241,8 @@ export class TunnelStore {
       input.label ?? null,
       input.createdAt ?? Date.now(),
       input.expiresAt,
+      input.spaceId ?? null,
+      input.forName ?? null,
     );
     return this.invitation(input.pairingId)!;
   }
@@ -246,6 +258,16 @@ export class TunnelStore {
       "SELECT * FROM tunnel_invitation WHERE issued_by = ? AND state = 'pending' AND expires_at > ? ORDER BY created_at DESC",
     ).all(userId, now) as Record<string, unknown>[];
     return rows.map(hydrateInvitation);
+  }
+
+  /** The newest used invitation of each person an issuer invited: when that
+   *  person joined. */
+  joinedByIssuer(userId: string): TunnelInvitationRecord[] {
+    const rows = this.db.prepare(
+      "SELECT * FROM tunnel_invitation WHERE issued_by = ? AND state = 'used' ORDER BY finished_at DESC",
+    ).all(userId) as Record<string, unknown>[];
+    const seen = new Set<string>();
+    return rows.map(hydrateInvitation).filter((invitation) => !seen.has(invitation.forUserId) && !!seen.add(invitation.forUserId));
   }
 
   /** Every live invitation, for restoring them into a restarted host. */
@@ -652,6 +674,8 @@ function hydrateInvitation(row: Record<string, unknown>): TunnelInvitationRecord
     state,
     deviceId: row.device_id == null ? null : String(row.device_id),
     finishedAt: row.finished_at == null ? null : Number(row.finished_at),
+    spaceId: row.space_id == null ? null : String(row.space_id),
+    forName: row.for_name == null ? null : String(row.for_name),
   };
 }
 

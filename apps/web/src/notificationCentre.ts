@@ -270,8 +270,8 @@ export function centreRows(items: NotificationRecord[], historyOn: boolean): Not
  *  archived sessions remain in the registry and stay openable. A joined
  *  Space's session lives on another server, so its row always navigates. */
 export function canOpenNotification(
-  record: Pick<NotificationRecord, "sessionId" | "projectId" | "joinedSpace">,
+  record: Pick<NotificationRecord, "sessionId" | "projectId" | "joinedSpace" | "settings">,
   sessions: ReadonlyArray<{ id: string; projectId: string }>,
 ): boolean {
-  return record.joinedSpace !== undefined || sessions.some((s) => s.id === record.sessionId && s.projectId === record.projectId);
+  return record.joinedSpace !== undefined || record.settings !== undefined || sessions.some((s) => s.id === record.sessionId && s.projectId === record.projectId);
 }

@@ -41,7 +41,8 @@ export function notificationRoutes(notifications: NotificationStore, visibleProj
       const projects = await visibleProjects(rc.space);
       // A notice from a joined Space names the other server's project; only
       // the person-notice path sets `joinedSpace` (ordinary adds never carry it).
-      return (record) => record.joinedSpace !== undefined || projects.has(record.projectId);
+      // A notice about this server (`settings`) names no project at all.
+      return (record) => record.joinedSpace !== undefined || record.settings !== undefined || projects.has(record.projectId);
     };
     // The unread counter covers only rows the caller can see.
     const unreadOf = async (shown: (record: NotificationRecord) => boolean): Promise<number> =>

@@ -70,7 +70,7 @@ function remoteRow(value: unknown): RemoteRow | null {
 /** The relay of one joined connection. */
 export function createNoticeRelay(options: {
   userId: string;
-  sink: () => ServerPersonNotices | undefined;
+  sink: () => Pick<ServerPersonNotices, "deliver" | "withdraw"> | undefined;
   timing: NoticeTiming;
   saved?: unknown;
   /** The saved list changed. */

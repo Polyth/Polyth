@@ -23,6 +23,7 @@ import {
   serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
+  type ServerPersonNotices,
 } from "@polyth/plugins";
 import { createTunnelStore, grantsForProfile, type TunnelStore } from "./index.ts";
 import { startLinkHost, randomIngressSecret, unpackQrModules, type LinkHostClient } from "./host.ts";
@@ -79,6 +80,8 @@ export async function commitPairingDevice(input: {
   store: TunnelStore;
   host: LinkHostClient;
   events: TunnelEventBus;
+  /** Tells the invitation's issuer that it was used (`server.person-notices`). */
+  notify?: ServerPersonNotices["notify"];
 }): Promise<void> {
   // An invitation is one-time and short-lived: a commit that arrives after it
   // was cancelled, used or expired stores nothing, exactly like a commit the
@@ -142,6 +145,16 @@ export async function commitPairingDevice(input: {
         label: device.label,
         platform: device.platform,
       }, invitation.issuedBy);
+      if (invitation.spaceId) {
+        const name = invitation.forName || "Your teammate";
+        deps.notify?.({ userId: invitation.issuedBy, spaceId: invitation.spaceId }, {
+          key: `tunnel-invitation-used:${input.pairingId}`,
+          title: `${name} joined Polyth`,
+          body: `Accepted your invitation in the Polyth app on ${device.label}`,
+          author: { userId: invitation.forUserId, name },
+          settings: { pageId: "users", itemId: invitation.forUserId },
+        });
+      }
     }
   }
 }
@@ -449,6 +462,8 @@ export function tunnelRoutes(deps: {
         shareUrl,
         label: invitationLabel,
         expiresAt,
+        spaceId: request.space.spaceId,
+        forName: typeof body.name === "string" && body.name.trim() ? body.name.trim().slice(0, 200) : null,
       });
       // Audit and events carry the identifiers only: never the ticket or the
       // share URL, which together let whoever holds them join the account.
@@ -482,6 +497,11 @@ export function tunnelRoutes(deps: {
           url: invitation.shareUrl,
           expiresAt: invitation.expiresAt,
           createdAt: invitation.createdAt,
+        })),
+        // Who already joined through one, newest first: Settings → Users.
+        joined: deps.store.joinedByIssuer(request.space.userId).map((invitation) => ({
+          forUserId: invitation.forUserId,
+          at: invitation.finishedAt,
         })),
       });
       return true;
@@ -993,7 +1013,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
             label: String(event.label ?? "Mobile device"),
             platform: event.platform ? String(event.platform) : undefined,
             grants: Array.isArray(event.grants) ? event.grants.map(String) : [],
-          }, { store, host: activeHost, events })
+          }, { store, host: activeHost, events, notify: (account, notice) => host.services.get(SERVER_PERSON_NOTICES)?.notify(account, notice) })
             .catch((error) => {
               console.error("[polyth-link] pairing commit failed", error instanceof Error ? error.message : error);
             })

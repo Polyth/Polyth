@@ -18,7 +18,7 @@ export function createPersonNotices(opts: {
   push: Pick<PushService, "send">;
   nativePush: Pick<NativePushService, "send">;
   presence: Pick<DevicePresence, "activeUse" | "subscribe">;
-}): ServerPersonNotices & { settled(): Promise<void> } {
+}): Omit<ServerPersonNotices, "notify"> & { settled(): Promise<void> } {
   const accountsOf = (userId: string): NotificationAccount[] =>
     opts.spacesOf(userId).map((spaceId) => ({ userId, spaceId }));
   const send = async (accounts: NotificationAccount[], record: NotificationRecord, exceptDevice?: string): Promise<void> => {

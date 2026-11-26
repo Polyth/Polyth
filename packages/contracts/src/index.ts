@@ -8622,6 +8622,10 @@ export type NotificationRecord = {
    *  recipient joined (Polyth Link): `sessionId`/`projectId` are that
    *  server's, and opening it switches to `id` first. */
   joinedSpace?: { id: string; name: string; serverLabel: string };
+  /** A notice about this server rather than a chat (a person accepted an
+   *  invitation): `sessionId`/`projectId` are empty and opening it shows this
+   *  Settings page. */
+  settings?: { pageId: string; itemId?: string };
 };
 
 // Well-known capability keys

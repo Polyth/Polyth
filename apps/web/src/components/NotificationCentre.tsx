@@ -128,7 +128,7 @@ export function NotificationCentrePanel({
   const activate = (record: NotificationRecord): void => {
     const marked = record.read ? undefined : centre.markRead([record.id]);
     // Switching to a joined Space reloads the page: the row is marked read first.
-    const opened = record.joinedSpace
+    const opened = record.joinedSpace || record.settings
       ? Promise.resolve(marked).catch(() => {}).then(() => openNotificationRecord(record, open))
       : open(record.sessionId);
     void opened.catch(() => {});

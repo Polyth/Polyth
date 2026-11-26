@@ -466,3 +466,28 @@ test("a joined Space's notice names the other server's project and still lists; 
   assert.deepEqual(listed.items.map((r) => r.joinedSpace?.serverLabel ?? "local"), ["Studio"]);
   assert.equal(listed.unread, 1);
 });
+
+test("a notice about this server has no chat: it keeps its Settings target, reloads and is never hidden by project", async () => {
+  const file = tmpFile();
+  const store = createNotificationStore({ file });
+  const joined = await store.add(input(1, {
+    key: "tunnel-invitation-used:pair-1", kind: "message", sessionId: "", projectId: "",
+    title: "Pat joined Polyth", body: "Accepted your invitation",
+    author: { userId: "usr_pat", name: "Pat" }, settings: { pageId: "users", itemId: "usr_pat" },
+  }));
+  assert.deepEqual(joined.settings, { pageId: "users", itemId: "usr_pat" });
+  assert.equal(joined.sessionId, "");
+  // Without a target the empty chat is still refused, and a malformed target is no target.
+  await assert.rejects(() => store.add(input(2, { sessionId: "", projectId: "" })), (error: { code?: string }) => error.code === "invalid-input");
+  await assert.rejects(() => store.add(input(3, { sessionId: "", projectId: "", settings: { pageId: "" } })), (error: { code?: string }) => error.code === "invalid-input");
+  const chat = await store.add(input(4, { settings: { pageId: "users" } }));
+  assert.equal(chat.sessionId, "", "a Settings notice never also names a chat");
+
+  const reloaded = (await createNotificationStore({ file }).list()).items;
+  assert.deepEqual(reloaded.map((row) => row.settings), [{ pageId: "users", itemId: "usr_pat" }, { pageId: "users" }]);
+
+  const { call } = routeHarness(store, () => new Set(["p1"]));
+  const listed = (await call("GET", "/api/notifications")).payload as { items: NotificationRecord[]; unread: number };
+  assert.deepEqual(listed.items.map((row) => row.id), [joined.id, chat.id]);
+  assert.equal(listed.unread, 2);
+});

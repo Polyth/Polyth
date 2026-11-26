@@ -18,6 +18,7 @@ import UserDetail from "./UserDetail.tsx";
 import AccountDetail from "./AccountDetail.tsx";
 import AddUserWizard from "./AddUserWizard.tsx";
 import UsersGuide from "./UsersGuide.tsx";
+import { inviteStatuses, type InviteStatus } from "./inviteMethods.ts";
 import SecureAccountDialog from "./SecureAccountDialog.tsx";
 import { fetchAuthStatus } from "../../authClient.ts";
 import { SignInProviders } from "./ExternalIdentitySettings.tsx";
@@ -54,6 +55,8 @@ export default function UsersPage({ settingsTarget }: { settingsTarget?: Setting
   const [readOnly, setReadOnly] = useState<{ owner: boolean } | null>(null);
   const [spaceAccess, setSpaceAccess] = useState<CurrentSpaceAccess | null>(null);
   const [harnessNames, setHarnessNames] = useState<Record<string, string>>({});
+  // Who joined through an invitation, and whose link is still unopened.
+  const [invites, setInvites] = useState<ReadonlyMap<string, InviteStatus>>(new Map());
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [feedback, setFeedback] = useState<Feedback | null>(null);
@@ -72,6 +75,8 @@ export default function UsersPage({ settingsTarget }: { settingsTarget?: Setting
   const targetItem = settingsTarget?.itemId;
   useEffect(() => {
     if (targetItem === OWN_ACCOUNT_TARGET) { setSelectedId(null); setOwnOpen(true); }
+    // A person's id: "Roman joined" opens Roman.
+    else if (targetItem) { setOwnOpen(false); setSelectedId(targetItem); }
   }, [targetItem]);
   const { withReauth, prompt } = useOwnerReauth();
 
@@ -87,6 +92,7 @@ export default function UsersPage({ settingsTarget }: { settingsTarget?: Setting
       setReadOnly(state.readOnly ? { owner: state.canManageInBrowser } : null);
       setSpaceAccess(access);
       setLoadError(null);
+      if (state.canManage) void inviteStatuses().then(setInvites, () => undefined);
     } catch (cause) {
       setLoadError(cause);
     } finally {
@@ -322,11 +328,15 @@ export default function UsersPage({ settingsTarget }: { settingsTarget?: Setting
             {visibleAccounts.map((account) => {
               const name = displayName(account);
               const role = spaceAccess?.members.find((member) => member.userId === account.id)?.role;
+              const invite = invites.get(account.id);
+              const day = (at: number) => new Date(at).toLocaleDateString(getLocale(), { day: "numeric", month: "long" });
               // Limits read as words in the summary line, so the name line
               // keeps only what changes how the account behaves at a glance.
               const summary = [
                 account.login ? `@${account.login}` : null,
                 spaceAccess ? (role ? roleText(role).label : tr("settings.users.noAccess")) : null,
+                invite && "joined" in invite ? tr("settings.users.joinedOn", { date: day(invite.joined) }) : null,
+                invite && "until" in invite ? tr("settings.users.invitedUntil", { date: day(invite.until) }) : null,
                 ...limitsSummary(account.limits, (id) => harnessNames[id] ?? id),
               ].filter(Boolean).join(" · ");
               const content = (
@@ -338,6 +348,9 @@ export default function UsersPage({ settingsTarget }: { settingsTarget?: Setting
                       {account.status === "suspended" && <Badge tone="warning">{tr("settings.users.paused")}</Badge>}
                       {(account.status === "disabled" || account.status === "offboarding") && <Badge tone="danger">{tr("settings.users.disabled")}</Badge>}
                       {account.managed && <Badge>{tr("settings.users.managed")}</Badge>}
+                      {invite && "until" in invite && (
+                        <Badge tone="info">{tr("settings.users.invited")}</Badge>
+                      )}
                       {canManageAccounts && account.guarded && <Badge tone="info">{tr("settings.users.protected")}</Badge>}
                     </span>
                     <span className="user-row-meta" title={account.id}>{summary || account.id}</span>

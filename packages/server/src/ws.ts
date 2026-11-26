@@ -1159,8 +1159,9 @@ export function createWsGateway(
         if (!allowWsCapability(sub.principal, REMOTE_CAPABILITY.coreNotificationsRead)) continue;
         // Same rule as `/api/notifications`: a row from a project the
         // recipient can no longer open (removed or limited away) is not shown.
-        // A joined Space's notice names the other server's project instead.
-        if (!record.joinedSpace) {
+        // A joined Space's notice names the other server's project instead;
+        // a notice about this server (`settings`) names none.
+        if (!record.joinedSpace && !record.settings) {
           try { spaces?.guard.assertProject({ spaceId: account.spaceId }, record.projectId); }
           catch { continue; }
           if (!projectVisibleToUser(account.userId, record.projectId)) continue;

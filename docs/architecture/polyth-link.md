@@ -364,28 +364,34 @@ An invitation is a ticket marked `invitation: true` that the person can open
 later, without the owner and teammate being online together. Its lifetime is
 up to 7 days and it expires by wall clock.
 
-- Issuing: `POST /api/tunnel/invitations` `{forUserId, profile?, ttlMs?}`.
+- Issuing: `POST /api/tunnel/invitations` `{forUserId, name?, profile?, ttlMs?}`.
   `forUserId` must be another member of the current Space; the profile
   defaults to `full-remote` and the TTL to 7 days (1 hour … 7 days allowed).
   A new invitation cancels the issuer's earlier pending one for that person,
   and an older Link host answers `501 unsupported`. The answer carries
   `{id, forUserId, profile, url, link, expiresAt, qrModules}`.
 - Listing and cancelling: `GET /api/tunnel/invitations` returns the caller's
-  pending invitations, and `DELETE /api/tunnel/invitations/:id` cancels one,
+  pending invitations and `joined` (`[{forUserId, at}]`, the newest used
+  invitation per person, for Settings → Users), and `DELETE /api/tunnel/invitations/:id` cancels one,
   answering the same 404 for an unknown id, someone else's invitation and a
   no-longer-pending one. These routes are local/full-access only (not in
   `TUNNEL_REMOTE_ACCESS`); each requires `tunnelPairingManage` and instance
   owner authority.
 - Storage: the `tunnel_invitation` table in `tunnel.db` keeps the pairing id,
   issuer, `for_user_id`, profile, ticket, share URL, label, created and
-  expiry times, state (`pending|used|cancelled|expired`) and device id. The
+  expiry times, state (`pending|used|cancelled|expired`), device id, the
+  issuing `space_id` and the name the person was added with (`for_name`). The
   ticket is kept so the host can be given it back after a restart, which makes
   the link a bearer credential until it is used or expires. Audit rows and
   events carry only ids, never the ticket or URL.
 - Commit: when a committing pairing belongs to an invitation, the device is
   stored in `forUserId`'s account with `issuedBy` the owner, the row becomes
   `used`, and `invitation-used` is audited and emitted as
-  `tunnel/invitation-used` to the issuer. A cancelled, used or expired
+  `tunnel/invitation-used` to the issuer. The issuer also gets a notice in the
+  Space they invited from (`server.person-notices` `notify`: inbox row, live
+  card and push, kind `message`, the person's monogram, "<name> joined Polyth");
+  opening it shows the person in Settings → Users. Invitations made before
+  `space_id` was kept send no notice. A cancelled, used or expired
   invitation stores nothing (`pairing.storage_failed`).
 - Restart: after every trust sync Node sends its pending invitations to the
   Link host with `pairing.restore`; rejected entries become `expired` or

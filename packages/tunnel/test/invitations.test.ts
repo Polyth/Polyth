@@ -232,13 +232,15 @@ test("DELETE works only for the issuer and gives one answer for everything else"
 });
 
 test("committing a live invitation creates the invitee's device, marks it used and tells the issuer", async () => {
-  const { store, events, host, issued, calls } = setup();
-  await issued({ profile: "interact" });
+  const { store, events, host, issued, calls, routes } = setup();
+  await issued({ profile: "interact", name: "Pat Morgan" });
   const seen: Array<{ type: string; data: Record<string, unknown> }> = [];
   events.subscribe((event) => seen.push({ type: event.type, data: event.data as Record<string, unknown> }));
+  const notices: Array<{ account: unknown; notice: Record<string, unknown> }> = [];
+  const notify = (account: unknown, notice: Record<string, unknown>) => { notices.push({ account, notice }); };
 
   await commitPairingDevice({ pairingId: "pair-1", endpointId: endpoint, label: "PM phone", platform: "android", grants: grantsForProfile("interact") }, {
-    store, host: host as never, events,
+    store, host: host as never, events, notify,
   });
   const device = store.deviceByPairing("pair-1")!;
   assert.equal(device.ownerUserId, PM);
@@ -261,11 +263,29 @@ test("committing a live invitation creates the invitee's device, marks it used a
   const audit = store["db"].prepare("SELECT metadata_json FROM tunnel_audit WHERE event_type = 'invitation-used'").all() as Array<{ metadata_json: string }>;
   assert.deepEqual(JSON.parse(audit[0]!.metadata_json), { pairingId: "pair-1", forUserId: PM, deviceId: device.id });
 
+  // The issuer hears it in the Space they invited from, and the notice opens
+  // the person in Settings → Users; it never carries the link.
+  assert.deepEqual(notices, [{
+    account: { userId: OWNER, spaceId: SPACE_ID },
+    notice: {
+      key: "tunnel-invitation-used:pair-1",
+      title: "Pat Morgan joined Polyth",
+      body: "Accepted your invitation in the Polyth app on PM phone",
+      author: { userId: PM, name: "Pat Morgan" },
+      settings: { pageId: "users", itemId: PM },
+    },
+  }]);
+  assert.ok(!JSON.stringify(notices).includes("polyth.app/join"));
+  const listed = await call(routes, { path: "/api/tunnel/invitations", userId: OWNER, instanceOwner: true });
+  assert.deepEqual(listed.body.invitations, [], "a used link is no longer live");
+  assert.deepEqual(listed.body.joined, [{ forUserId: PM, at: store.invitation("pair-1")!.finishedAt }]);
+
   // A second commit of the same invitation must not add or revive anything.
   calls.length = 0;
   await commitPairingDevice({ pairingId: "pair-1", endpointId: endpoint, label: "PM phone", grants: grantsForProfile("interact") }, {
-    store, host: host as never, events,
+    store, host: host as never, events, notify,
   });
+  assert.equal(notices.length, 1, "nobody is told twice");
   assert.equal(store.list(PM).length, 1);
   assert.ok(calls.some((entry) => entry.method === "pairing.storage_failed"), "the late commit is refused like a storage failure");
   store.close();

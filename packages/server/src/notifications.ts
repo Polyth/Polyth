@@ -100,7 +100,9 @@ function validateRecord(raw: unknown): NotificationRecord | null {
   const r = raw as Record<string, unknown>;
   if (!isNonEmptyString(r.id) || !isNonEmptyString(r.key)) return null;
   if (!KINDS.includes(r.kind as NotificationKind)) return null;
-  if (!isNonEmptyString(r.sessionId) || !isNonEmptyString(r.projectId)) return null;
+  const settings = settingsOf(r.settings);
+  if (typeof r.sessionId !== "string" || typeof r.projectId !== "string") return null;
+  if (!settings && (!isNonEmptyString(r.sessionId) || !isNonEmptyString(r.projectId))) return null;
   if (typeof r.title !== "string" || typeof r.body !== "string") return null;
   if (typeof r.ts !== "number" || !Number.isSafeInteger(r.ts) || r.ts < 0) return null;
   if (typeof r.read !== "boolean") return null;
@@ -109,7 +111,15 @@ function validateRecord(raw: unknown): NotificationRecord | null {
     sessionId: r.sessionId, projectId: r.projectId,
     title: r.title, body: r.body, ts: r.ts, read: r.read,
     ...peopleFields(r),
+    ...(settings ? { settings } : {}),
   };
+}
+
+/** Where a notice about this server leads, when well formed. */
+function settingsOf(raw: unknown): NotificationRecord["settings"] {
+  const value = raw as { pageId?: unknown; itemId?: unknown } | null | undefined;
+  if (!value || typeof value !== "object" || !isNonEmptyString(value.pageId) || value.pageId.length > 64) return undefined;
+  return { pageId: value.pageId, ...(isNonEmptyString(value.itemId) ? { itemId: value.itemId.slice(0, 128) } : {}) };
 }
 
 /** The optional people fields, kept only when well formed. */
@@ -289,15 +299,18 @@ export function createNotificationStore(opts: {
       const account = second === undefined ? LEGACY_TEST_ACCOUNT : first as NotificationAccount;
       const input = second === undefined ? first as Omit<NotificationRecord, "id" | "ts" | "read"> : second;
       if (!authorized(account)) return undefined;
-      if (!isNonEmptyString(input.key) || !isNonEmptyString(input.sessionId) || !isNonEmptyString(input.projectId)) {
+      const settings = settingsOf(input.settings);
+      if (!isNonEmptyString(input.key) || (!settings && (!isNonEmptyString(input.sessionId) || !isNonEmptyString(input.projectId)))) {
         throw Object.assign(new Error("notification needs key, sessionId, and projectId"), { code: "invalid-input" });
       }
       if (!KINDS.includes(input.kind)) throw Object.assign(new Error("unknown notification kind"), { code: "invalid-input" });
       const ts = Math.max(now(), lastTs + 1);
       const record: NotificationRecord = {
-        id: randomUUID(), key: input.key, kind: input.kind, sessionId: input.sessionId, projectId: input.projectId,
+        id: randomUUID(), key: input.key, kind: input.kind,
+        sessionId: settings ? "" : input.sessionId, projectId: settings ? "" : input.projectId,
         title: String(input.title ?? ""), body: String(input.body ?? ""), ts, read: false,
         ...peopleFields(input as unknown as Record<string, unknown>),
+        ...(settings ? { settings } : {}),
       };
       const nextItems = evictFor([...items, { record, recipient: { ...account } }], account);
       persist(nextItems);

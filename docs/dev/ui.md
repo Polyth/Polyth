@@ -2712,7 +2712,11 @@ Add user wizard (see *Settings → Users*). It is data only
 `preferred(context)`, and `issue({member, shareableAddress, accountId, name})`
 returning `{url, expiresAt, message, note?}`. The host lists the methods,
 chooses the default and calls `issue` when the wizard creates the person; the
-contribution's `render` is never mounted.
+contribution's `render` is never mounted. An optional `invitations()` returns
+`{pending: [{accountId, expiresAt}], joined: [{accountId, at}]}`; the Users list
+merges every method's answer (`inviteStatuses`, joining wins over a newer link)
+and shows an **Invited** badge with "Invitation link until …" or "Joined …" in a
+person's meta line. A throw shows nothing.
 
 `host.conversation.revealEvent` takes an optional `passage`: text inside the
 message to land on and light for a moment with the CSS Custom Highlight API,

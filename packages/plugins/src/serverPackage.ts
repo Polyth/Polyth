@@ -370,6 +370,18 @@ export interface ServerPersonNotices {
   }): void;
   /** The other server cleared it (read there, answered, withdrawn). */
   withdraw(userId: string, key: string): void;
+  /** A notice about this server for one person in one of their Spaces here
+   *  (someone accepted their invitation): filed in that Space's inbox and
+   *  alerted like a person's message; opening it shows `settings`. Dropped
+   *  when the person cannot read that Space's notifications. */
+  notify(account: { userId: string; spaceId: string }, notice: {
+    key: string;
+    title: string;
+    body: string;
+    /** The person the notice is about, drawn as their monogram. */
+    author?: { userId: string; name: string };
+    settings: { pageId: string; itemId?: string };
+  }): void;
 }
 
 export const SERVER_PERSON_NOTICES =
