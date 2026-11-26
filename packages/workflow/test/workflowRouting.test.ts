@@ -1,6 +1,6 @@
-import test from "node:test";
+import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { JsonObject, WorkflowNodeDto, WorkflowRunDto } from "@polyth/contracts";
@@ -14,6 +14,14 @@ import {
 } from "../src/index.ts";
 import { MAX_UNIT_FACTS, buildNodePrompt, mergeFacts, parseFacts } from "../src/prompt.ts";
 
+const dirs: string[] = [];
+afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+const tempDir = (prefix: string): string => {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  dirs.push(dir);
+  return dir;
+};
+
 interface Harness {
   events: Array<{ sessionId: string; type: string; data: JsonObject }>;
   service: WorkflowService;
@@ -23,7 +31,7 @@ function harness(runNode: RunNodeFn, extra: Partial<WorkflowDeps> = {}): Harness
   const events: Harness["events"] = [];
   let clock = 1_000;
   const service = createWorkflowService({
-    file: join(mkdtempSync(join(tmpdir(), "polyth-workflow-routing-")), "workflows.json"),
+    file: join(tempDir("polyth-workflow-routing-"), "workflows.json"),
     append: async (sessionId, type, data) => {
       events.push({ sessionId, type, data });
     },

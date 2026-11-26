@@ -3,7 +3,7 @@
 // continued once, hidden, with a deterministic operation id.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -129,6 +129,12 @@ const harness = (options: { autoContinueIncomplete?: boolean } = {}) => {
   return { sessions, store, emit, startedTexts, aborted, observers, endpoint, dir, runtime };
 };
 
+const teardown = async (h: ReturnType<typeof harness>) => {
+  h.sessions.dispose();
+  await h.store.close();
+  rmSync(h.dir, { recursive: true, force: true });
+};
+
 const CONTINUE_TEXT = "Your previous answer ended before it was complete. Continue from where you stopped without repeating what you already wrote.";
 const operationId = (sessionId: string, turnId: string) => {
   const hex = createHash("sha256").update(sessionId + turnId + "incomplete-continue").digest("hex");
@@ -142,7 +148,7 @@ const continuations = async (store: ReturnType<typeof createStore>, id: string) 
 
 test("an empty completed turn is recorded, then continued once with a stable operation id", async (t) => {
   const h = harness();
-  t.after(() => { h.sessions.dispose(); return h.store.close(); });
+  t.after(() => teardown(h));
   const { id } = await h.sessions.create({ projectId: "p1", title: "Empty" });
   await h.sessions.send(id, { text: "hello" });
   h.emit(id, { type: "turn/stopped", turnId: "t1", reason: "completed" });
@@ -164,7 +170,7 @@ test("an empty completed turn is recorded, then continued once with a stable ope
 
 test("a reasoning-only turn counts as empty", async (t) => {
   const h = harness();
-  t.after(() => { h.sessions.dispose(); return h.store.close(); });
+  t.after(() => teardown(h));
   const { id } = await h.sessions.create({ projectId: "p1", title: "Reasoning" });
   await h.sessions.send(id, { text: "hello" });
   h.emit(id, { type: "assistant/message", partId: "r1", text: "", reasoning: "thinking about it" });
@@ -175,7 +181,7 @@ test("a reasoning-only turn counts as empty", async (t) => {
 
 test("a tool-only turn is not empty", async (t) => {
   const h = harness();
-  t.after(() => { h.sessions.dispose(); return h.store.close(); });
+  t.after(() => teardown(h));
   const { id } = await h.sessions.create({ projectId: "p1", title: "Tools" });
   await h.sessions.send(id, { text: "hello" });
   h.emit(id, { type: "tool/started", callId: "c1", tool: "bash", input: {} });
@@ -188,7 +194,7 @@ test("a tool-only turn is not empty", async (t) => {
 
 test("aborted and error stops are never incomplete", async (t) => {
   const h = harness();
-  t.after(() => { h.sessions.dispose(); return h.store.close(); });
+  t.after(() => teardown(h));
   const { id } = await h.sessions.create({ projectId: "p1", title: "Aborted" });
   await h.sessions.send(id, { text: "hello" });
   h.emit(id, { type: "turn/stopped", turnId: "t1", reason: "aborted" });
@@ -205,7 +211,7 @@ test("aborted and error stops are never incomplete", async (t) => {
 
 test("the output limit is a length kind even with text; a second incomplete only records the fact", async (t) => {
   const h = harness();
-  t.after(() => { h.sessions.dispose(); return h.store.close(); });
+  t.after(() => teardown(h));
   const { id } = await h.sessions.create({ projectId: "p1", title: "Length" });
   await h.sessions.send(id, { text: "write a lot" });
   h.emit(id, { type: "assistant/message", partId: "a1", text: "partial answer" });
@@ -221,7 +227,7 @@ test("the output limit is a length kind even with text; a second incomplete only
 
 test("with autoContinueIncomplete off only the fact is kept", async (t) => {
   const h = harness({ autoContinueIncomplete: false });
-  t.after(() => { h.sessions.dispose(); return h.store.close(); });
+  t.after(() => teardown(h));
   const { id } = await h.sessions.create({ projectId: "p1", title: "Off" });
   await h.sessions.send(id, { text: "hello" });
   h.emit(id, { type: "turn/stopped", turnId: "t1", reason: "completed" });
@@ -233,7 +239,7 @@ test("with autoContinueIncomplete off only the fact is kept", async (t) => {
 
 test("a paused stop records nothing", async (t) => {
   const h = harness();
-  t.after(() => { h.sessions.dispose(); return h.store.close(); });
+  t.after(() => teardown(h));
   const { id } = await h.sessions.create({ projectId: "p1", title: "Paused" });
   await h.sessions.send(id, { text: "hello" });
   await h.sessions.pause(id);

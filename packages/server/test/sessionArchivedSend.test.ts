@@ -2,9 +2,9 @@
 // explicit restore, but agents, API clients and old shells reach `send`
 // directly, so the service itself refuses every delivery mode instead of
 // running a turn that the archived projection would hide.
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -28,7 +28,7 @@ after(() => {
 
 type Emit = (sessionId: string, ev: RuntimeEvent) => void;
 
-function makeService() {
+function makeService(t: TestContext) {
   const listeners = new Set<Emit>();
   const started: string[] = [];
   const emit = (sessionId: string, ev: RuntimeEvent) => {
@@ -72,13 +72,18 @@ function makeService() {
     store, projects, permissions, broadcast, queue: store,
     runtimes: { forProject: async () => rt },
   });
+  t.after(async () => {
+    sessions.dispose();
+    await store.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
   return { sessions, store, emit, started };
 }
 
 const flush = () => new Promise((r) => setTimeout(r, 20));
 
-test("send to an archived session is refused in every delivery mode and starts no turn", async () => {
-  const { sessions, store, emit, started } = makeService();
+test("send to an archived session is refused in every delivery mode and starts no turn", async (t) => {
+  const { sessions, store, emit, started } = makeService(t);
   const { id } = await sessions.create({ projectId: "p1", title: "T" });
   await sessions.send(id, { text: "first" });
   await flush();
@@ -105,8 +110,8 @@ test("send to an archived session is refused in every delivery mode and starts n
   assert.equal((await store.events(id)).length, before, "the log took no user message or turn");
 });
 
-test("a restored session takes messages again", async () => {
-  const { sessions, started } = makeService();
+test("a restored session takes messages again", async (t) => {
+  const { sessions, started } = makeService(t);
   const { id } = await sessions.create({ projectId: "p1", title: "T" });
   await sessions.archive(id);
   await assert.rejects(sessions.send(id, { text: "while archived" }), { code: "conflict" });

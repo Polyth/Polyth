@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
@@ -65,6 +65,7 @@ function harness(t: TestContext) {
   t.after(async () => {
     sessions.dispose();
     await store.close();
+    rmSync(dir, { recursive: true, force: true });
   });
   return { store, sessions, emit, prompts, ended, project };
 }
