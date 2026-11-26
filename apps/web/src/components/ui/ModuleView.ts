@@ -74,6 +74,10 @@ export interface ModuleViewProps {
    *  be the Workspace resume target or reopen the Workspace on its own. */
   presented?: boolean;
   closeLabel?: string;
+  /** False where the frame is the whole window (a pane window,
+   *  secondWindow.ts): the window's own controls close it, so the frame shows
+   *  no close button of its own. Default true. */
+  closable?: boolean;
   /** "main" = WorkspaceHost surface, "rail" = ContextRail panel. */
   variant?: ModuleViewVariant;
   /** Legacy/core fallback. Registered content metadata wins in every placement. */
@@ -110,7 +114,7 @@ function dockIcon(edge: ModuleDockEdge): typeof DockSideIcon {
 
 export default function ModuleView(props: ModuleViewProps): ReactNode {
   const {
-    id, surfaceId, title, description, icon, actions, tabs, headingProps, onClose, closeLabel,
+    id, surfaceId, title, description, icon, actions, tabs, headingProps, onClose, closeLabel, closable = true,
     onTogglePin, dockActions, onToggleFullscreen, onOpenWindow, pinned = false, fullscreen = false,
     variant = "main", contentMode = "page", depth = 0, className, children, presented = true, dir,
   } = props;
@@ -248,7 +252,9 @@ export default function ModuleView(props: ModuleViewProps): ReactNode {
           systemAction(BackIcon, tr("common.back"), phoneBack, undefined, "module-view-back", "phone-back"),
           systemAction(CloseIcon, closeLabel ?? tr("contextrail.closePanel"), phoneClose, undefined, "module-view-close module-view-dismiss", "phone-close"),
         ]
-        : systemAction(CloseIcon, closeLabel ?? tr("contextrail.closePanel"), onClose, undefined, "module-view-close"),
+        : closable
+          ? systemAction(CloseIcon, closeLabel ?? tr("contextrail.closePanel"), onClose, undefined, "module-view-close")
+          : null,
     ),
     createElement(
       "div",

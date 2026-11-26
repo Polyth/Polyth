@@ -204,6 +204,19 @@ const bundles = await Promise.all([
     metafile: true,
     logLevel: "info",
   }),
+  // Second windows: their own caption controls only (secondWindowPreload.ts).
+  build({
+    entryPoints: [join(here, "src", "secondWindowPreload.ts")],
+    outfile: join(dist, "second-window-preload.cjs"),
+    bundle: true,
+    platform: "node",
+    format: "cjs",
+    target: "node22",
+    external: ["electron"],
+    legalComments: "none",
+    metafile: true,
+    logLevel: "info",
+  }),
   // The small update window: its own least-privilege preload and page script.
   build({
     entryPoints: [join(here, "src", "updateWindowPreload.ts")],

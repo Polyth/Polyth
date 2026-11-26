@@ -762,12 +762,21 @@ used by the app; the relay still answers it for older nightlies.
 - Second windows: a page's `window.open` of its own origin with a `window=chat|pane`
   role (a chat or a workspace window on another screen, [ui.md](ui.md#second-windows-a-chat-or-a-workspace-window-on-another-screen))
   opens a native window from `src/secondWindows.ts`; every other `window.open` is an
-  external link. That window has no preload, so no desktop bridge (desktop IPC still
-  answers only the main window), shares the session and navigation rule, and its
+  external link. It wears the main window's chrome (`desktopChromeOptions`: no system
+  title bar; traffic lights, the Windows caption overlay or Polyth's Linux buttons in
+  the page's header) through its own least-privilege preload,
+  `src/secondWindowPreload.ts` → `window.polythDesktopWindow`: that window's caption
+  controls (state, minimize/maximize/close, traffic-light placement, overlay colours)
+  and the five caption-related settings (`secondWindowSettings`), on the
+  `desktop:second-window:*` channels (`src/secondWindowChrome.ts`). Main answers them
+  only from a second window's top frame and acts only on that window; every other
+  desktop channel still answers only the main window, so a second window has no
+  `polythDesktop` bridge. It shares the session and navigation rule, and its
   requests pass the same local-server guard as the main window's. One window per chat,
   one pane window, and one per pane resource (`surface` plus `resource`, a saved app's
   own window); asking again focuses it. Source-inspected and unit-tested
-  (`test/secondWindows.test.ts`); not yet run in a packaged app.
+  (`test/secondWindows.test.ts`, `test/secondWindowChrome.test.ts`; renderer side
+  `apps/web/test/desktopWindowChrome.test.ts`); not yet run in a packaged app.
 - Permissions: only audio capture (not camera/video), notifications and clipboard read
   for the top page. Another server asks once for the microphone and once for the clipboard.
 - Server: binds to `127.0.0.1` in desktop mode.

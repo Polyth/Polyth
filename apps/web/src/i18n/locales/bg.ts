@@ -4254,7 +4254,6 @@ export const bg: AppMessages = {
   "window.shiftClickHint": "Shift+клик",
   "window.markOpen": "Отворен в друг прозорец",
   "window.blocked": "Браузърът блокира новия прозорец. Разрешете изскачащите прозорци за Polyth и опитайте отново.",
-  "window.close": "Затваряне на прозореца",
   "window.returnToMain": "Връщане в главния прозорец",
   "window.noMainWindow": "Главният прозорец е затворен, затова този прозорец остава отворен.",
   "window.following": "следва {title}",

@@ -5130,7 +5130,17 @@ and presence live in `apps/web/src/secondWindow.ts` (pure parts tested by
   the chat of the main window focused last (`leadMainWindow`) until that text
   is clicked to pin it. *Move back to main window* hands the content back
   (the main window opens the chat, or reopens the pane) and closes the window;
-  it is offered only while a main window answers.
+  it is offered only while a main window answers. The header is the window's
+  title bar, in flow: the chat or package starts right under its line, with
+  no gap. The full-height layouts' room for the main window's overlaid bar
+  (`--shell-bar-block`, and in Desktop `--desktop-caption-band`) shrinks to
+  the floating inset there (`SecondWindow.css`), so no empty band opens above
+  the content. In Desktop the window has no system title bar: the header is
+  one `--desktop-titlebar-h` band carrying the caption controls and keeping
+  their corner clear (`installDesktopWindowChrome` in `desktop.tsx`, over the
+  window's own bridge; [desktop.md](desktop.md)). A pane window's frame shows
+  no close button (`ModuleView` `closable={false}`): the window's own controls
+  close it.
 - **Presence.** Windows of one origin announce what they show over a
   `BroadcastChannel` (heartbeat 15 s, expiry 40 s). The main window marks a row
   whose chat is open in a chat window (`.session-place-mark`). Presentation

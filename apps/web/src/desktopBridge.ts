@@ -108,6 +108,36 @@ export interface DesktopTitleBarAppearance {
   height: number;
 }
 
+/** The desktop settings a second window's caption controls read: where the
+ *  buttons sit and how the chrome performs. Nothing else of the settings
+ *  reaches a second window. */
+export type DesktopSecondWindowSettings = Pick<
+  DesktopSettings,
+  "controlsPosition" | "controlsFollowSystem" | "controlsTheme" | "lowResourceMode" | "reduceAnimations"
+>;
+
+/** What a second window (`window=chat|pane`) is told about its own chrome. */
+export interface DesktopSecondWindowChrome {
+  platform: string;
+  settings: DesktopSecondWindowSettings;
+  state: DesktopWindowState;
+}
+
+/** The second-window bridge (`window.polythDesktopWindow`,
+ *  apps/desktop/src/secondWindowPreload.ts): the caption controls of the
+ *  window that asks, and nothing else. Every other desktop channel answers
+ *  the main window only. */
+export interface PolythDesktopWindowApi {
+  getChrome(): Promise<DesktopSecondWindowChrome>;
+  windowAction(action: DesktopWindowAction): Promise<DesktopWindowState>;
+  /** macOS: centre the traffic lights on the header band (CSS px). */
+  syncCaptionControls(band: number): Promise<DesktopCaptionGeometry | null>;
+  /** Windows: the native caption overlay's colours and height. */
+  setTitleBarAppearance(appearance: DesktopTitleBarAppearance): Promise<void>;
+  onSettingsChanged(listener: (settings: DesktopSecondWindowSettings) => void): () => void;
+  onWindowState(listener: (state: DesktopWindowState) => void): () => void;
+}
+
 /** Native menu commands the renderer carries out with its own handlers. */
 export type DesktopCommand = "open-settings" | "new-session" | "search-sessions" | "command-palette" | "report-bug";
 
@@ -282,11 +312,17 @@ export interface PolythDesktopApi {
 declare global {
   interface Window {
     polythDesktop?: PolythDesktopApi;
+    polythDesktopWindow?: PolythDesktopWindowApi;
   }
 }
 
 export const desktopBridge = (): PolythDesktopApi | undefined =>
   typeof window === "undefined" ? undefined : window.polythDesktop;
+
+/** A Desktop second window's own caption-control bridge; undefined in the
+ *  main window and in a browser. */
+export const desktopWindowBridge = (): PolythDesktopWindowApi | undefined =>
+  typeof window === "undefined" ? undefined : window.polythDesktopWindow;
 
 /** The bridge only when the window shows this computer's own server: file paths
  *  name files here, and only then may they open in the native file manager. */

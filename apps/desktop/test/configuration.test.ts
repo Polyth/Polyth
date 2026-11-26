@@ -192,7 +192,7 @@ test("desktop chrome keeps native macOS/Windows controls and renderer actions cl
   assert.match(desktopSource, /dataset\.desktopPlatform = platform/);
   // Native platforms get only the caption zone (an empty box the layouts keep
   // clear), never Polyth's own buttons.
-  assert.match(desktopSource, /if \(NATIVE_CONTROL_PLATFORMS\.has\(info\.platform\)\) return captionZone;/);
+  assert.match(desktopSource, /if \(NATIVE_CONTROL_PLATFORMS\.has\(platform\)\) return captionZone;/);
   assert.match(styles, /body\.desktop-app :is\([\s\S]*?\.scrim,[\s\S]*?\)\s*\{[^}]*-webkit-app-region:\s*no-drag/s);
   assert.match(styles, /\.desktop-window-controls\s*\{[^}]*pointer-events:\s*none/s);
   assert.match(styles, /\.desktop-window-button\s*\{[^}]*pointer-events:\s*auto/s);

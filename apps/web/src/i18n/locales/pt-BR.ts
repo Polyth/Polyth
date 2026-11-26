@@ -4254,7 +4254,6 @@ export const ptBR: AppMessages = {
   "window.shiftClickHint": "Shift+clique",
   "window.markOpen": "Aberto em outra janela",
   "window.blocked": "O navegador bloqueou a nova janela. Permita pop-ups para o Polyth e tente de novo.",
-  "window.close": "Fechar janela",
   "window.returnToMain": "Voltar para a janela principal",
   "window.noMainWindow": "A janela principal está fechada, então esta janela continua aberta.",
   "window.following": "seguindo {title}",

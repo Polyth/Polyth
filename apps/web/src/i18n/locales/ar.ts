@@ -4254,7 +4254,6 @@ export const ar: AppMessages = {
   "window.shiftClickHint": "Shift+نقر",
   "window.markOpen": "مفتوحة في نافذة أخرى",
   "window.blocked": "حظر المتصفح النافذة الجديدة. اسمح بالنوافذ المنبثقة لـ Polyth ثم حاول مجددًا.",
-  "window.close": "إغلاق النافذة",
   "window.returnToMain": "إعادة إلى النافذة الرئيسية",
   "window.noMainWindow": "النافذة الرئيسية مغلقة، لذا تبقى هذه النافذة مفتوحة.",
   "window.following": "تتبع {title}",

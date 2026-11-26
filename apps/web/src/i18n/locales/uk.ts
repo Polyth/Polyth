@@ -4254,7 +4254,6 @@ export const uk: AppMessages = {
   "window.shiftClickHint": "Shift+клік",
   "window.markOpen": "Відкрито в іншому вікні",
   "window.blocked": "Браузер заблокував нове вікно. Дозвольте спливні вікна для Polyth і спробуйте ще раз.",
-  "window.close": "Закрити вікно",
   "window.returnToMain": "Повернути в головне вікно",
   "window.noMainWindow": "Головне вікно закрите, тож це вікно лишається відкритим.",
   "window.following": "за чатом {title}",

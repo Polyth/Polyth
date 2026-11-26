@@ -4254,7 +4254,6 @@ export const zhCN: AppMessages = {
   "window.shiftClickHint": "Shift+点击",
   "window.markOpen": "已在另一个窗口中打开",
   "window.blocked": "浏览器拦截了新窗口。请允许 Polyth 弹出窗口后重试。",
-  "window.close": "关闭窗口",
   "window.returnToMain": "移回主窗口",
   "window.noMainWindow": "主窗口已关闭，因此此窗口保持打开。",
   "window.following": "跟随 {title}",

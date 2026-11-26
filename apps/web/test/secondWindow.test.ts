@@ -121,3 +121,27 @@ test("a pane window opened for one resource has its own address, name and title"
     win.setWindowRoleForTest("main");
   }
 });
+
+test("a second window's content starts right under its header, in every layout", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const css = await readFile(new URL("../src/components/window/SecondWindow.css", import.meta.url), "utf8");
+  // No gap between the in-flow header and the shell (the wide shell's header-card gap).
+  assert.match(css, /\.app\[data-window-role\]\s*\{\s*gap:\s*0;\s*\}/);
+  // The full-height layouts' room for the main window's overlaid bar is only
+  // the floating inset here, at id strength above the island and bare rules.
+  assert.match(
+    css,
+    /body:is\(\[data-shell-layout="columns"\], \[data-shell-layout="bare"\]\) \.app\[data-window-role\]:not\(#\\#\)\s*\{\s*--shell-bar-block:\s*var\(--shell-edge\);\s*--desktop-caption-band:\s*var\(--shell-edge\);\s*\}/,
+  );
+  // Desktop: the header is the title bar, and keeps the caption corner clear.
+  const header = /body\.desktop-app \.second-window-header \{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(header, /min-block-size:\s*var\(--desktop-titlebar-h\)/);
+  assert.match(header, /padding-left:\s*max\([^;]*var\(--desktop-caption-left\)\)/);
+  assert.match(header, /padding-right:\s*max\([^;]*var\(--desktop-caption-right\)\)/);
+});
+
+test("a pane window's frame has no close button: the window's own controls close it", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const rail = await readFile(new URL("../src/components/ContextRail.tsx", import.meta.url), "utf8");
+  assert.match(rail, /closable=\{!paneWindow\}/);
+});

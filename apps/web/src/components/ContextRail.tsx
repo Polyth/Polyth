@@ -1493,7 +1493,8 @@ export default function ContextRail() {
               ? () => popOutPane(paneSurface.id)
               : undefined}
             presented={open !== null}
-            {...(paneWindow ? { closeLabel: tr("window.close") } : {})}
+            // A pane window is this pane: the window's own controls close it.
+            closable={!paneWindow}
             onClose={() => {
               // A pane window is this pane: closing it closes the window.
               if (paneWindow) window.close();

@@ -130,6 +130,7 @@ import {
   type WindowOrigins,
 } from "./windowSurface.ts";
 import { secondWindowRequest, type SecondWindowRequest } from "./secondWindows.ts";
+import { SECOND_WINDOW_CHANNELS, secondWindowSettings } from "./secondWindowChrome.ts";
 
 declare const __POLYTH_OPENCODE_VERSION__: string;
 declare const __POLYTH_DESKTOP_FLAVOR__: string;
@@ -372,13 +373,20 @@ const refreshSystemControls = (): Promise<void> => {
   return systemControlsReading;
 };
 
-const windowState = (): DesktopWindowState => ({
-  maximized: mainWindow?.isMaximized() ?? false,
-  fullscreen: mainWindow?.isFullScreen() ?? false,
-  visible: mainWindow?.isVisible() ?? false,
-  focused: mainWindow?.isFocused() ?? false,
-  ...(process.platform === "linux" ? { systemControls } : {}),
-});
+/** Open second windows by request key (openSecondWindow below). */
+const secondWindows = new Map<string, BrowserWindow>();
+
+const windowStateOf = (window: BrowserWindow | null): DesktopWindowState => {
+  const live = window && !window.isDestroyed() ? window : null;
+  return {
+    maximized: live?.isMaximized() ?? false,
+    fullscreen: live?.isFullScreen() ?? false,
+    visible: live?.isVisible() ?? false,
+    focused: live?.isFocused() ?? false,
+    ...(process.platform === "linux" ? { systemControls } : {}),
+  };
+};
+const windowState = (): DesktopWindowState => windowStateOf(mainWindow);
 
 const sendToRenderer = (channel: string, value: unknown): void => {
   if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return;
@@ -403,7 +411,17 @@ const broadcastUpdateState = (): void => {
   }
 };
 
-const broadcastWindowState = (): void => sendToRenderer("desktop:window:state", windowState());
+/** A second window's own state, on its own channel (secondWindowChrome.ts). */
+const sendSecondWindowState = (window: BrowserWindow): void => {
+  if (window.isDestroyed() || window.webContents.isDestroyed()) return;
+  window.webContents.send(SECOND_WINDOW_CHANNELS.state, windowStateOf(window));
+};
+
+const broadcastWindowState = (): void => {
+  sendToRenderer("desktop:window:state", windowState());
+  // The Linux caption layout is shared: every second window follows it too.
+  for (const window of secondWindows.values()) sendSecondWindowState(window);
+};
 
 const sendCommand = (command: DesktopCommand): void => {
   showWindow();
@@ -494,6 +512,10 @@ const persistSettings = async (patch: unknown): Promise<DesktopSettings> => {
   refreshAutomaticUpdateSchedule();
   await writeDesktopSettings(settingsPath, settings);
   sendToRenderer("desktop:settings:changed", settings);
+  const chromeSettings = secondWindowSettings(settings);
+  for (const window of secondWindows.values()) {
+    if (!window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send(SECOND_WINDOW_CHANNELS.settings, chromeSettings);
+  }
   rebuildTrayMenu();
   return settings;
 };
@@ -1466,11 +1488,13 @@ const firstWindowUrl = (): string => {
 };
 
 // A chat or a workspace window in a window of its own (apps/web
-// secondWindow.ts). It is the plain web client in a native frame: no preload,
-// so no desktop bridge (desktop IPC answers only the main window), the same
-// session and cookies, the same navigation rule. One window per chat and one
-// pane window; asking again brings it forward.
-const secondWindows = new Map<string, BrowserWindow>();
+// secondWindow.ts). It is the web client in the main window's chrome (hidden
+// title bar, caption controls in the page header) with its own small bridge:
+// the caption controls of that window and nothing else
+// (secondWindowPreload.ts); every other desktop channel answers only the main
+// window. The same session and cookies, the same navigation rule. One window
+// per chat and one pane window; asking again brings it forward. The map
+// (`secondWindows`) is declared with the window state helpers above.
 const isSecondWindowContents = (contents: WebContents): boolean => {
   for (const window of secondWindows.values()) {
     if (!window.isDestroyed() && window.webContents === contents) return true;
@@ -1492,12 +1516,17 @@ const openSecondWindow = (parent: BrowserWindow, request: SecondWindowRequest): 
     ...visibleSecondWindowPosition(bounds),
     minWidth: 480,
     minHeight: 360,
+    // The main window's chrome (windowChrome.ts): no system title bar; the
+    // page's header carries the caption controls, through a bridge that
+    // reaches only this window's own controls (secondWindowPreload.ts).
+    ...desktopChromeOptions(process.platform, nativeTheme.shouldUseDarkColors, process.getSystemVersion()),
+    roundedCorners: true,
     show: false,
     title: "Polyth",
     icon: appIconPath(),
     autoHideMenuBar: true,
-    backgroundColor: nativeTheme.shouldUseDarkColors ? "#14171d" : "#ffffff",
     webPreferences: {
+      preload: join(import.meta.dirname, "second-window-preload.cjs"),
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
@@ -1521,6 +1550,9 @@ const openSecondWindow = (parent: BrowserWindow, request: SecondWindowRequest): 
     if (safeExternalUrl(url)) void shell.openExternal(url);
   });
   child.once("ready-to-show", () => child.show());
+  const sendState = () => sendSecondWindowState(child);
+  for (const event of ["maximize", "unmaximize", "enter-full-screen", "leave-full-screen", "blur"] as const) child.on(event as "maximize", sendState);
+  child.on("focus", () => { sendState(); void refreshSystemControls(); });
   child.on("closed", () => { if (secondWindows.get(request.key) === child) secondWindows.delete(request.key); });
   secondWindows.set(request.key, child);
   void child.loadURL(request.url).catch((error: unknown) => log(`Could not open a second window: ${String(error)}`));
@@ -2091,6 +2123,39 @@ const installIpc = (): void => {
     else if (action === "close") mainWindow.close();
     else throw new Error("Unknown window action");
     return windowState();
+  });
+  // A second window's own caption controls (secondWindowChrome.ts): asked by
+  // that window's top frame, acting on that window and never another one.
+  const secondWindowHandle = <Args extends unknown[], Result>(channel: string, handler: (window: BrowserWindow, ...args: Args) => Result | Promise<Result>): void => {
+    ipcMain.handle(channel, (event, ...args: Args) => {
+      const window = BrowserWindow.fromWebContents(event.sender);
+      if (!window || window === mainWindow || !isSecondWindowContents(event.sender) || event.senderFrame !== event.sender.mainFrame) {
+        throw new Error("Untrusted second window IPC sender");
+      }
+      return handler(window, ...args);
+    });
+  };
+  secondWindowHandle(SECOND_WINDOW_CHANNELS.get, async (window) => {
+    await Promise.race([refreshSystemControls(), new Promise((resolve) => setTimeout(resolve, 400).unref?.())]);
+    return { platform: process.platform, settings: secondWindowSettings(settings), state: windowStateOf(window) };
+  });
+  secondWindowHandle(SECOND_WINDOW_CHANNELS.action, (window, action: unknown) => {
+    if (action === "minimize") window.minimize();
+    else if (action === "toggle-maximize") { if (window.isMaximized()) window.unmaximize(); else window.maximize(); }
+    else if (action === "close") window.close();
+    else throw new Error("Unknown window action");
+    return windowStateOf(window);
+  });
+  secondWindowHandle(SECOND_WINDOW_CHANNELS.caption, (window, band: unknown) => {
+    if (process.platform !== "darwin") return null;
+    const zoom = window.webContents.getZoomFactor();
+    const group = macTrafficLightGroup(process.getSystemVersion());
+    window.setWindowButtonPosition(macTrafficLightPosition(band, zoom, group));
+    return macCaptionGeometry(window.getWindowButtonPosition(), zoom, group);
+  });
+  secondWindowHandle(SECOND_WINDOW_CHANNELS.titlebar, (window, appearance: unknown) => {
+    if (process.platform !== "win32") return;
+    window.setTitleBarOverlay(normalizeTitleBarAppearance(appearance, window.webContents.getZoomFactor()));
   });
   trustedHandle("desktop:path:reveal", async (_event, path: unknown) => {
     const target = await validateAbsoluteLocalPath(path);

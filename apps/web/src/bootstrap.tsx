@@ -46,7 +46,7 @@ import { installBuiltinAreas } from "./widgets/builtinAreas.ts";
 import { installCapabilityWidgets } from "./widgets/capabilityWidgets.tsx";
 import { installNotificationCentre } from "./components/NotificationCentre.tsx";
 import { installRuntimeEpochBanner } from "./components/RuntimeEpochBanner.tsx";
-import { installDesktopIntegration } from "./desktop.tsx";
+import { installDesktopIntegration, installDesktopWindowChrome } from "./desktop.tsx";
 import { exposeWidgets } from "./widgets/catalog.ts";
 import { bootPackages } from "./packages/registry.ts";
 import { getLocaleSnapshot, subscribeLocale } from "./i18n/index.ts";
@@ -108,6 +108,8 @@ installCapabilityWidgets();
 installNotificationCentre();
 installRuntimeEpochBanner();
 installDesktopIntegration();
+// A Desktop second window has only its own caption-control bridge.
+installDesktopWindowChrome();
 // The phone apps list the other paired servers in the navigator, as Polyth
 // Desktop does; nothing installs anywhere else.
 installMobileServerZones({ get: () => getState().projectRegistry, subscribe: subscribeStore });

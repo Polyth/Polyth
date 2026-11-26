@@ -4254,7 +4254,6 @@ export const de: AppMessages = {
   "window.shiftClickHint": "Umschalt+Klick",
   "window.markOpen": "In einem anderen Fenster geöffnet",
   "window.blocked": "Der Browser hat das neue Fenster blockiert. Erlaube Pop-ups für Polyth und versuche es erneut.",
-  "window.close": "Fenster schließen",
   "window.returnToMain": "Zurück ins Hauptfenster",
   "window.noMainWindow": "Das Hauptfenster ist geschlossen, daher bleibt dieses Fenster offen.",
   "window.following": "folgt {title}",

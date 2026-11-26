@@ -4257,7 +4257,6 @@ export const en = {
   "window.shiftClickHint": "Shift+click",
   "window.markOpen": "Open in another window",
   "window.blocked": "The browser blocked the new window. Allow pop-ups for Polyth and try again.",
-  "window.close": "Close window",
   "window.returnToMain": "Move back to main window",
   "window.noMainWindow": "The main window is closed, so this window stays open.",
   "window.following": "following {title}",

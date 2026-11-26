@@ -34,7 +34,8 @@ Object.defineProperty(globalThis, "navigator", { value: dom.navigator, configura
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { default: SlotHost } = await import("../src/components/slots/SlotHost.ts");
-const { desktopCaptionSide, desktopControlLayout, installDesktopIntegration, macCaptionInset, overlayInsets } = await import("../src/desktop.tsx");
+const { desktopCaptionSide, desktopControlLayout, installDesktopIntegration, installDesktopWindowChrome, macCaptionInset, overlayInsets } = await import("../src/desktop.tsx");
+const { hasSlotRegistration, listSlots } = await import("../src/slots.ts");
 const { registerCommand } = await import("../src/commands.ts");
 type Bridge = import("../src/desktopBridge.ts").PolythDesktopApi;
 type WindowState = import("../src/desktopBridge.ts").DesktopWindowState;
@@ -444,4 +445,87 @@ test("the macOS 12 build shows a fixed Stable update channel instead of the pick
     assert.equal(row?.querySelector(".set-row-value")?.textContent, "Stable");
     assert.match(row?.textContent ?? "", /macOS 12 build updates from stable releases only/);
   } finally { await legacy(); }
+});
+
+// A second window (`window=chat|pane`) has no system title bar either: its own
+// small bridge (apps/desktop/src/secondWindowPreload.ts) gives it the caption
+// controls of that window and nothing else of the desktop integration.
+function fakeWindowBridge(platform: string, caption?: (band: number) => unknown) {
+  const actions: string[] = [];
+  const bands: number[] = [];
+  const windowListeners = new Set<(state: WindowState) => void>();
+  const state: WindowState = { maximized: false, fullscreen: false, visible: true, focused: true };
+  const bridge = {
+    getChrome: async () => ({
+      platform,
+      settings: { controlsPosition: "right", controlsFollowSystem: false, controlsTheme: "system", lowResourceMode: false, reduceAnimations: false },
+      state: { ...state },
+    }),
+    windowAction: async (action: string) => { actions.push(action); return { ...state }; },
+    syncCaptionControls: async (band: number) => { bands.push(band); return caption ? caption(band) : null; },
+    setTitleBarAppearance: async () => {},
+    onSettingsChanged: () => () => {},
+    onWindowState: (listener: (next: WindowState) => void) => { windowListeners.add(listener); return () => windowListeners.delete(listener); },
+  };
+  return { bridge, actions, bands, emitState: (next: Partial<WindowState>) => { for (const l of windowListeners) l({ ...state, ...next }); } };
+}
+
+async function mountSecondWindow(platform: string, caption?: (band: number) => unknown) {
+  const fake = fakeWindowBridge(platform, caption);
+  (window as unknown as { polythDesktopWindow?: unknown }).polythDesktopWindow = fake.bridge;
+  document.body.innerHTML = `<div class="app" data-window-role="pane"><header class="second-window-header"></header></div><div id="host"></div>`;
+  const uninstallMain = installDesktopIntegration();
+  const uninstall = installDesktopWindowChrome();
+  const root = createRoot(document.getElementById("host")!);
+  await act(async () => { root.render(createElement(SlotHost, { slot: "app.window.controls", context: {} })); });
+  for (let i = 0; i < 4; i += 1) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 5)); });
+  return {
+    ...fake,
+    cleanup: async () => {
+      await act(async () => root.unmount());
+      uninstall();
+      uninstallMain();
+      delete (window as unknown as { polythDesktopWindow?: unknown }).polythDesktopWindow;
+    },
+  };
+}
+
+test("a second window carries its own caption controls in its header, and nothing else of Desktop", async () => {
+  const view = await mountSecondWindow("linux");
+  try {
+    assert.ok(document.body.classList.contains("desktop-app"), "the window is chromed as Desktop");
+    assert.equal(document.body.dataset.desktopPlatform, "linux");
+    assert.equal(document.body.dataset.desktopCaption, "right");
+    // No tray here: close closes this window.
+    assert.deepEqual(labels(), ["Minimize window", "Maximize window", "Close window"]);
+    (document.querySelector('[aria-label="Close window"]') as HTMLElement).click();
+    (document.querySelector('[aria-label="Minimize window"]') as HTMLElement).click();
+    assert.deepEqual(view.actions, ["close", "minimize"], "actions go to this window's own bridge");
+    await act(async () => { view.emitState({ maximized: true, focused: false }); });
+    assert.equal(document.body.dataset.desktopMaximized, "true");
+    assert.equal(document.body.dataset.desktopFocused, "false");
+    // The main window's integration did not install: no settings page, no
+    // update notice, one set of caption controls.
+    assert.equal(hasSlotRegistration("settings.pages", "desktop"), false);
+    assert.deepEqual(listSlots("app.window.controls").map((entry) => entry.id), ["desktop.window-controls"]);
+    assert.equal(document.querySelectorAll(".desktop-window-controls").length, 1);
+  } finally { await view.cleanup(); }
+  assert.equal(document.body.classList.contains("desktop-app"), false, "uninstall clears the chrome");
+  assert.equal(listSlots("app.window.controls").length, 0);
+});
+
+test("a second window centres the macOS traffic lights on its header and keeps their corner clear", async () => {
+  const view = await mountSecondWindow("darwin", () => ({ x: 20, y: 18, width: 54, height: 16 }));
+  try {
+    assert.equal(document.querySelectorAll(".desktop-window-button").length, 0, "the OS draws the lights");
+    assert.ok(view.bands.length > 0, "the window placed the lights on the header band");
+    assert.equal(document.body.dataset.desktopCaption, "left");
+    assert.equal(document.body.style.getPropertyValue("--desktop-macos-titlebar-inset"), "88px");
+  } finally { await view.cleanup(); }
+});
+
+test("a browser second window installs no desktop chrome", () => {
+  const uninstall = installDesktopWindowChrome();
+  assert.equal(document.body.classList.contains("desktop-app"), false);
+  uninstall();
 });

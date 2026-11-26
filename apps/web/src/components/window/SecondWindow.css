@@ -74,6 +74,40 @@
 
 .second-window-spacer { flex: 1 1 auto; }
 
+/* The header is the window's title bar: the chat or package starts right
+   under its line. The wide shell's gap between the main window's header card
+   and the columns (styles.css) would show as an empty strip here. */
+.app[data-window-role] { gap: 0; }
+/* The full-height layouts (shellLayout.css) lay the main window's bar over the
+   workspace top and step the workspace and the full-window layer down by
+   --shell-bar-block to clear it. A second window has no such bar: its header
+   above sits in flow, so that step would leave an empty band between the
+   header and the chat or package. Only the floating inset stays. In Desktop
+   the same goes for the caption band (shellLayout.css, "desktop app"): the
+   caption controls sit in this header, not over the workspace. */
+body:is([data-shell-layout="columns"], [data-shell-layout="bare"]) .app[data-window-role]:not(#\#) {
+  --shell-bar-block: var(--shell-edge);
+  --desktop-caption-band: var(--shell-edge);
+}
+
+/* Desktop: a second window has no system title bar either (apps/desktop
+   secondWindowPreload.ts). Its header is the title bar — one
+   --desktop-titlebar-h band the caption controls centre on — and keeps their
+   corner clear: the traffic lights (macOS), the caption overlay (Windows) or
+   Polyth's buttons (Linux), on the side data-desktop-caption names. The
+   caption zone is physical, so the paddings are too. */
+body.desktop-app .second-window-header {
+  --second-window-pad-left: var(--space-4);
+  --second-window-pad-right: var(--space-2);
+  min-block-size: var(--desktop-titlebar-h);
+  padding-left: max(var(--second-window-pad-left), var(--desktop-caption-left));
+  padding-right: max(var(--second-window-pad-right), var(--desktop-caption-right));
+}
+body.desktop-app .second-window-header:dir(rtl) {
+  --second-window-pad-left: var(--space-2);
+  --second-window-pad-right: var(--space-4);
+}
+
 /* A pane window is its pane: no chat to dock beside, no strip of launchers. */
 .app[data-window-role="pane"] .rail-fullscreen { inset-inline-end: 0; }
 .app[data-window-role] .rail-icon-col.plugin-strip { display: none; }
