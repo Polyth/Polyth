@@ -9850,7 +9850,7 @@ button.theme-accent-swatch.is-scheme[aria-pressed="true"] { outline-color: color
   min-width: 0;
   height: 12px;
   margin: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-round);
   background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
   appearance: none;
   -webkit-appearance: none;

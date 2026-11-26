@@ -657,7 +657,7 @@
 /* Why Relay passes a member over gets its own line above the reading. */
 .pkg-harnesses-relay-reading > small > .pkg-harnesses-relay-note { flex-basis: 100%; }
 .pkg-harnesses-relay-reading > small > .pkg-harnesses-relay-note + span::before { content: none; }
-.pkg-harnesses-relay-meter { display: block; block-size: 3px; border-radius: 2px; background: var(--hair, var(--border-soft)); overflow: hidden; }
+.pkg-harnesses-relay-meter { display: block; block-size: 3px; border-radius: var(--radius-round); background: var(--hair, var(--border-soft)); overflow: hidden; }
 .pkg-harnesses-relay-meter > i { display: block; block-size: 100%; border-radius: inherit; background: var(--accent); }
 .pkg-harnesses-relay-meter[data-low] > i { background: var(--amber, var(--accent)); }
 .pkg-harnesses-relay-meter[data-empty] { background: none; border-block-end: 1px dashed var(--border); border-radius: 0; block-size: 0; }
