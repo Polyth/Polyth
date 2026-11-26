@@ -59,6 +59,15 @@
   transition: color var(--motion-normal) var(--motion-ease);
 }
 .session-split-header[data-focused="true"] { color: var(--text); }
+/* Where the bare workspace reaches the window top (no title line: the pane
+   titles replace it), the titles take that line's place: clear of the edge
+   like the floating columns, on the line a single chat's title uses (never
+   shorter than the density's own header). The desktop app's workspace
+   already starts below its title bar. */
+body:not(.desktop-app)[data-shell-layout="bare"] .app:not(:has(> .header[data-shell-bar="title"])) .session-split-header {
+  margin-block-start: var(--shell-bar-top);
+  block-size: max(var(--split-header-h), var(--shell-bar-h));
+}
 /* The focus mark: an accent hairline that grows under the focused chat and
    withdraws from the other, on the window clock. */
 .session-split-header::after {

@@ -5017,7 +5017,13 @@ live in `apps/web/src/sessionSplit.ts` (pure, tested by
 - **One title per pane.** While the pair is on screen the host publishes
   `setSessionSplitPresented(true)` and the shell header drops its chat title
   (`DesktopSessionStatus` renders only its overview); the focused pane's
-  title is the button that opens that overview. The navigator marks the
+  title is the button that opens that overview. In the `bare` layout a
+  resting title leaves the line over the chat nothing to show, so it reserves
+  no room (`bareBarShown` in `shellLayout.ts`; a Space switcher or a remote
+  computer still keep it) and the overview stays mounted without it; the
+  pane headers then take the line's place, `--shell-bar-top` below the
+  window edge and at least `--shell-bar-h` tall, where a single chat's
+  title sits. The navigator marks the
   companion's row with a two-column glyph (`.session-place-mark`).
 - **Layout.** Presentation only, tab-scoped (`sessionStorage`); the divider
   position is a remembered preference (`localStorage`). Never on the phone

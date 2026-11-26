@@ -66,7 +66,7 @@ import { railIconFor } from "../railIcons.ts";
 import { switchWorkspaceMode } from "../workbench/profileNavigation.ts";
 import { ownerName } from "../sessionSharing.ts";
 import HeaderViewTabs from "./HeaderViewTabs.tsx";
-import { shellBarReserves, useShellLayout } from "../shellLayout.ts";
+import { bareBarShown, shellBarReserves, useShellLayout } from "../shellLayout.ts";
 import { loadSpaces, useSpaces } from "../spaces.ts";
 import { soloPersonalProject } from "../personalProject.ts";
 
@@ -538,8 +538,14 @@ export default function Header() {
   useEffect(() => { if (bareLayout) void loadSpaces(); }, [bareLayout]);
   const multiSpace = spaces.status === "ready" && spaces.spaces.length > 1;
   const showTitle = session !== null && shell.title;
+  // Two chats side by side: each pane names its own chat (SessionSplitView),
+  // so the bar keeps only the overview, opened from the focused pane's title.
+  const splitPresented = useSessionSplitPresented();
   // Another computer's Polyth always says so, even with nothing else in the bar.
-  const bareBar = shell.layout === "bare" && (showTitle || multiSpace || onRemoteDesktopSurface());
+  // A title resting for the split leaves the bare line nothing to show, so it
+  // reserves no room above the panes (their titles take its place).
+  const bareBar = shell.layout === "bare"
+    && bareBarShown({ title: showTitle, splitPresented, multiSpace, remote: onRemoteDesktopSurface() });
   const island = shell.layout === "columns" && shell.barStyle === "island";
   useShellBarFrame(occupancy.headerRef, fullHeight && (shell.layout !== "bare" || bareBar));
   const sessionStatusContribution = session ? (
@@ -550,9 +556,6 @@ export default function Header() {
   // choice here (rather than inside each view) prevents a surface switch from
   // bringing back the legacy compact bar.
   const windowControls = <SlotHost slot="app.window.controls" />;
-  // Two chats side by side: each pane names its own chat (SessionSplitView),
-  // so the bar keeps only the overview, opened from the focused pane's title.
-  const splitPresented = useSessionSplitPresented();
   const showSessionStatus = (mode === "wide" || mode === "compact") && !splitPresented;
 
   const barContent = (
@@ -608,7 +611,10 @@ export default function Header() {
     </>
   );
 
-  if (shell.layout === "bare" && !bareBar) return windowControls;
+  // Without a bare line the overview still answers the focused pane's title.
+  if (shell.layout === "bare" && !bareBar) {
+    return <>{windowControls}{splitPresented && session && <DesktopSessionStatus showTrigger={false} />}</>;
+  }
 
   if (mode === "phone") {
     return (

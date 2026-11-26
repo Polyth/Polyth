@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { parseUiSettings, UI_DEFAULTS, SHELL_LAYOUTS } from "../src/uiPrefs.ts";
-import { resolveShellLayout, shellBarReserves, shellColumnGroups } from "../src/shellLayout.ts";
+import { bareBarShown, resolveShellLayout, shellBarReserves, shellColumnGroups } from "../src/shellLayout.ts";
 
 const read = (path: string) => readFile(new URL(path, import.meta.url), "utf8");
 
@@ -194,4 +194,22 @@ test("a docked group with nothing on it is not a bar, but is one while a launche
   // railDrag.ts measures a rail again once it has layout.
   const drag = await read("../src/railDrag.ts");
   assert.match(drag, /if \(box\.width === 0 && box\.height === 0\) return null;/);
+});
+
+test("two chats side by side leave no empty bare line above their titles", async () => {
+  const base = { title: true, splitPresented: false, multiSpace: false, remote: false };
+  assert.equal(bareBarShown(base), true, "a single chat's title draws the line");
+  assert.equal(bareBarShown({ ...base, splitPresented: true }), false, "the panes name their chats; nothing is left to reserve room for");
+  assert.equal(bareBarShown({ ...base, splitPresented: true, multiSpace: true }), true, "a Space switcher keeps its line");
+  assert.equal(bareBarShown({ ...base, splitPresented: true, remote: true }), true, "another computer's Polyth still says so");
+  assert.equal(bareBarShown({ ...base, title: false }), false, "a hidden title draws nothing");
+  // Without the line the panes' titles take its place, from the bar tokens;
+  // the overview stays mounted for the focused pane's title.
+  const css = await read("../src/components/workspace/SessionSplitView.css");
+  const rule = css.slice(css.indexOf('body:not(.desktop-app)[data-shell-layout="bare"] .app:not(:has(> .header[data-shell-bar="title"])) .session-split-header'));
+  const body = rule.slice(rule.indexOf("{"), rule.indexOf("}"));
+  assert.match(body, /margin-block-start: var\(--shell-bar-top\);/);
+  assert.match(body, /block-size: max\(var\(--split-header-h\), var\(--shell-bar-h\)\);/);
+  const header = await read("../src/components/Header.tsx");
+  assert.match(header, /splitPresented && session && <DesktopSessionStatus showTrigger=\{false\} \/>/);
 });
