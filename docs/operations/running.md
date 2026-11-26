@@ -248,6 +248,41 @@ expose plain HTTP on a public interface. The first-run setup page does not accep
 proxy-terminated TLS, so create the owner account once over loopback (plain
 `npm start`, or an SSH tunnel), then start with the public origin.
 
+### Through a tunnel to work with people outside your network
+
+A tunnel (Tailscale Funnel, Cloudflare Tunnel, or a proxy on another machine)
+is the same setup: something terminates TLS and forwards plain HTTP to Polyth.
+What changes is where TLS ends and which address Polyth sees:
+
+- **The tunnel daemon runs on this computer** and forwards to `127.0.0.1:4400`:
+  keep `HOST` on loopback and set `POLYTH_TRUSTED_PROXIES=127.0.0.1`. It must
+  forward the public `Host` and send `X-Forwarded-Proto: https`; check with a
+  sign-in from another network before inviting anyone. **It cannot be
+  combined with `POLYTH_DEBUG_AGENT_ACCESS=1`**: that flag runs every
+  direct-loopback request as the owner, and a same-host tunnel delivers every
+  internet request over loopback, so the server refuses to start with the
+  flag and a loopback entry in `POLYTH_TRUSTED_PROXIES`. A loopback request
+  carrying forwarding headers (`Forwarded`, `X-Forwarded-*`, `X-Real-IP`,
+  `Via`) never gets the flag's owner access either, which covers a tunnel
+  started without any proxy configuration.
+- **Where TLS ends is who can read the traffic.** A tunnel that terminates TLS
+  at its provider's edge (Cloudflare Tunnel) lets that provider see sign-ins
+  and chats; one that terminates on this computer (Tailscale Funnel, your own
+  proxy with your certificate) does not.
+- **Sign-in throttling counts the proxy's address**, not the visitor's: the
+  identity limiter (`packages/identity/src/rateLimit.ts`: 10 attempts a minute
+  per login, 40 per address, 200 for the installation) keys on the socket
+  peer, so behind a proxy every outside visitor shares one address bucket. A
+  burst of wrong passwords from anyone slows sign-in for everyone for a
+  minute; it does not lock accounts.
+
+Then add people in Settings → Users: the wizard gives a one-time invitation
+link at the public address (see
+[Spaces §14.5](../architecture/spaces-and-tenancy.md)). Before inviting anyone,
+check from a phone on mobile data: the link opens, sign-in works, your private
+chats stay invisible to the new account, and disabling the account in
+Settings → Users ends its open session.
+
 ## Desktop app
 
 Polyth Desktop (Electron) runs its own loopback server with bundled OpenCode and
@@ -280,7 +315,9 @@ with `npm run build:mobile`, then `npm run mobile:open:android` or
   data is removed on exit.
 - `POLYTH_DEBUG_AGENT_ACCESS=1 npm start` lets direct loopback HTTP and WebSocket
   requests act as the active owner without signing in. It never applies to Polyth Link
-  ingress, and identity and setup endpoints keep their CSRF and origin checks.
+  ingress or to a loopback request carrying forwarding headers, the server refuses to
+  start with it when `POLYTH_TRUSTED_PROXIES` lists a loopback address, and identity
+  and setup endpoints keep their CSRF and origin checks.
 - `npm run auth:break-glass -- --help` is offline owner password recovery for a stopped
   server. `inspect` lists the installation ID and the local logins (read-only);
   run with only `--data-dir DIR` on a terminal, it asks for the login, a typed

@@ -5315,6 +5315,28 @@ body.desktop-app .lock-screen::before {
   text-align: center;
   text-wrap: balance;
 }
+/* An invited person's first look: three things a shared Polyth has that a
+   solo one hides until someone else is there. */
+.lock-card--invitation .lock-hint { max-width: 38ch; }
+.invitation-pointers {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.invitation-pointers > li {
+  display: grid;
+  gap: 2px;
+  padding: var(--space-3);
+  background: var(--lock-well);
+  border-radius: var(--radius-control);
+  animation: lock-field-in var(--motion-normal) var(--motion-ease) both;
+}
+.invitation-pointers > li:nth-child(2) { animation-delay: 30ms; }
+.invitation-pointers > li:nth-child(3) { animation-delay: 60ms; }
+.invitation-pointers strong { color: var(--text); font-size: var(--font-label); font-weight: 600; }
+.invitation-pointers span { color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
 .lock-fields {
   display: grid;
   gap: var(--space-3);
@@ -9422,6 +9444,13 @@ color: var(--text-dim);
 }
 .space-switcher[disabled] { opacity: .6; }
 .space-switcher-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Another server's Space names its server, so it never passes for one of
+   this server's. A quiet chip: the Space name stays the label. */
+.space-switcher-server {
+  flex: none; max-width: 72px; padding: 0 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  border-radius: var(--radius-control); background: var(--sunken); color: var(--muted);
+  font-size: 10.5px; font-weight: 500; line-height: 16px;
+}
 
 .space-manage-list { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .space-manage-row { display: flex; align-items: center; gap: var(--space-2); }
@@ -14724,6 +14753,12 @@ html[data-modal-surface="open"] body {
 
 .settings-nav-scroll,
 .settings-mobile-nav-head { display: contents; }
+/* In another server's Space: why most settings are not listed. */
+.settings-joined-note {
+  margin: 0 var(--space-2) var(--space-2); padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control); background: var(--sunken); color: var(--muted);
+  font-size: var(--font-meta); line-height: var(--font-meta-lh);
+}
 .dialog-panel,
 .settings-pane,
 .settings-pane-body,

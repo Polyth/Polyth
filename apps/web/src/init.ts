@@ -21,6 +21,7 @@ import { CONNECTION_RESTORED_EVENT, setConnectionGate } from "@polyth/contracts/
 import type { AttachmentRef, HarnessSelection, JsonObject, ManagedProjectInput, ModelRef, Project, ProjectCloneInput, ProjectDefaults, ProjectPatch, ResumeTurnOptions, SessionDeleteOptions, SessionCreationSharing, SessionEvent, SessionProjection, SessionStartRequest, StartSessionResult, StartWorktreeSessionInput } from "@polyth/contracts";
 import { suggestWorktreeBranch, temporaryWorktreeBranch } from "./worktreeSessions.ts";
 import { installPushDeepLinks, reconcilePushSubscription, registerServiceWorker } from "./push.ts";
+import { openNotifiedSession } from "./notificationTarget.ts";
 import { alertPersonMessage, installNotify } from "./notify.ts";
 import { notificationCentre } from "./notificationCentre.ts";
 import { applyComposerSeed, hydrateComposerDraft } from "./drafts.ts";
@@ -949,7 +950,7 @@ export function init(): Promise<void> {
   installNotify();
   // Notification clicks from the service worker land here when a tab
   // already exists (postMessage instead of a second window).
-  installPushDeepLinks(openSession);
+  installPushDeepLinks((sessionId) => openNotifiedSession(sessionId, openSession));
   if (sync) subscribeSyncScope(sync);
   store.subscribeStore(() => {
     const s = store.getState();

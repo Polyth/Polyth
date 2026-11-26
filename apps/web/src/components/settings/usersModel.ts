@@ -216,6 +216,12 @@ export function invitationText({ name, login, password, address }: {
     : tr("settings.users.invitation", { name: first, login, password });
 }
 
+/** The message to send with a one-time invitation link. */
+export function invitationLinkText({ name, url, until }: { name: string; url: string; until: string }): string {
+  const first = name.trim().split(/\s+/)[0] || name.trim();
+  return tr("settings.users.invitationLink", { name: first, url, date: until });
+}
+
 /** Settings target that opens the signed-in person's own account:
  *  `openSettingsPage("users", { itemId: OWN_ACCOUNT_TARGET })`, or the
  *  `?settings=users/account` deep link. */

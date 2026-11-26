@@ -48,6 +48,8 @@ import { Button, Icon, IconButton, TextInput } from "./ui/index.ts";
 import { BackIcon, ChevronRightIcon, CloseIcon, HelpIcon, SearchIcon } from "./ui/icons.ts";
 import type { SettingsNavigationTarget } from "@polyth/web-sdk";
 import { guardedSettingsPageVisible, useGuardrails } from "../guardrails.ts";
+import { joinedSpaceSettingsPageVisible } from "../joinedSpaceSettings.ts";
+import { activeJoinedSpace, useSpaces } from "../spaces.ts";
 
 type DeclaredGroup = "Workspace" | "Engineering" | "Customize" | "System";
 type NavGroup = "Workspace" | "Agents" | "Code" | "Integrations" | "Customize" | "System";
@@ -529,6 +531,10 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
     [packagesAt, slotItems],
   );
   const guardrails = useGuardrails();
+  // In another server's Space only the person's own settings and the Space's
+  // projects show; this computer's settings wait for one of its Spaces.
+  const joinedSpace = activeJoinedSpace(useSpaces());
+  const inJoinedSpace = !!joinedSpace;
   const pages = useMemo<PageDef[]>(() => {
     // Built-in and workspace pages claim their ids first; a managed package page that asks
     // for a taken id keeps its slot id instead of shadowing the other page.
@@ -570,12 +576,14 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
         render: (settingsTarget) => <>{item.render({ prefs, settingsTarget })}</>,
       };
     });
-    return [...BUILTIN, ...extra].filter((page) => guardedSettingsPageVisible(guardrails, page.id)).sort(
+    return [...BUILTIN, ...extra]
+      .filter((page) => guardedSettingsPageVisible(guardrails, page.id) && joinedSpaceSettingsPageVisible(inJoinedSpace, page.id))
+      .sort(
       (a, b) => GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group)
         || a.order - b.order
         || a.label.localeCompare(b.label),
     );
-  }, [prefs, visibleSlotItems, guardrails]);
+  }, [prefs, visibleSlotItems, guardrails, inJoinedSpace]);
 
   useEffect(() => {
     const redirect = pages.find((page) => page.id === active)?.redirect;
@@ -822,6 +830,11 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
               </div>
               {mobile && <IconButton icon={CloseIcon} label={tr("common.close")} onClick={closeSettings} />}
             </div>
+            {joinedSpace && (
+              <p className="settings-joined-note">
+                {tr("settingsview.joinedSpaceNote", { space: joinedSpace.name, server: joinedSpace.serverLabel })}
+              </p>
+            )}
             {q ? (
               <div className="settings-results" id="settings-search-results" role="listbox" aria-label={tr("settingsview.settingsSearchResults")}>
                 {searchEntries.map((entry, i) => entry.kind === "page" ? (

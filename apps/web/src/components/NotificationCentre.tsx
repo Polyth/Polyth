@@ -15,6 +15,7 @@ import {
   bellBadge, bellName, canOpenNotification, centreRows, notificationBody, notificationCentre,
   notificationKindLabel, notificationWhen, useNotificationCentre, type NotificationCentre,
 } from "../notificationCentre.ts";
+import { notificationSource, openNotificationRecord } from "../notificationTarget.ts";
 import { defineWidgetPlugin, registerWidgetPlugin } from "../widgets/catalog.ts";
 import { tr } from "../i18n/index.ts";
 import { RAIL_ICONS } from "../railIcons.ts";
@@ -96,6 +97,7 @@ function NotificationRow({
           {record.body !== "" && <span className="ntc-body">{notificationBody(record)}</span>}
           <span className="ntc-meta">
             <span className={`ntc-kind kind-${record.kind}`}>{notificationKindLabel(record)}</span>
+            {record.joinedSpace && <span className="ntc-kind ntc-source">{notificationSource(record.joinedSpace)}</span>}
             {!record.read && <span className="sr-only">{tr("notificationcentre.unread")}</span>}
             <time className="ntc-time" dateTime={new Date(record.ts).toISOString()}>{notificationWhen(record.ts)}</time>
           </span>
@@ -124,8 +126,12 @@ export function NotificationCentrePanel({
   const rows = centreRows(state.items, historyOn);
 
   const activate = (record: NotificationRecord): void => {
-    if (!record.read) void centre.markRead([record.id]);
-    void open(record.sessionId).catch(() => {});
+    const marked = record.read ? undefined : centre.markRead([record.id]);
+    // Switching to a joined Space reloads the page: the row is marked read first.
+    const opened = record.joinedSpace
+      ? Promise.resolve(marked).catch(() => {}).then(() => openNotificationRecord(record, open))
+      : open(record.sessionId);
+    void opened.catch(() => {});
   };
 
   return (

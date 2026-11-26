@@ -16,7 +16,15 @@ const REQUEST_ALLOW: &[&str] = &[
     "if-unmodified-since",
     "if-range",
     "range",
+    // Which of the account's Spaces a request is for. The server checks it
+    // against the device's account like any Space choice (a Space the account
+    // is not in answers 404), so it grants nothing; without it a server that
+    // opens another server's Spaces through Link could only use the device's
+    // last activated Space (docs/architecture/polyth-link.md "Joined Spaces").
+    SPACE_HEADER,
 ];
+
+const SPACE_HEADER: &str = "x-polyth-space";
 
 const RESPONSE_ALLOW: &[&str] = &[
     "content-type",
@@ -52,7 +60,7 @@ fn strip_name(name: &str) -> bool {
             | "x-real-ip"
             | "cookie"
             | "authorization"
-    ) || lower.starts_with("x-polyth-")
+    ) || (lower.starts_with("x-polyth-") && lower != SPACE_HEADER)
         || lower.starts_with("x-forwarded-")
 }
 
@@ -133,6 +141,19 @@ mod tests {
                 ("Content-Type".into(), "application/json".into()),
             ]
         );
+    }
+
+    #[test]
+    fn the_space_choice_crosses_requests_only() {
+        let out = sanitize_request_headers(&[
+            ("X-Polyth-Space".into(), "spc_team".into()),
+            ("X-Polyth-Csrf".into(), "nope".into()),
+        ])
+        .unwrap();
+        assert_eq!(out, vec![("X-Polyth-Space".into(), "spc_team".into())]);
+        let back =
+            sanitize_response_headers(&[("X-Polyth-Space".into(), "spc_team".into())]).unwrap();
+        assert!(back.is_empty());
     }
 
     #[test]

@@ -10,15 +10,19 @@
 // Projects, assistants and daily limits are fine-tuned on the person's page.
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { GUARDRAIL_DEFAULT_GRANTS } from "@polyth/contracts";
-import SlotHost from "../slots/SlotHost.ts";
+import SlotHost, { useSlotVersion } from "../slots/SlotHost.ts";
+import { listSlots } from "../../slots.ts";
+import { openSettingsPage } from "../../store.ts";
 import Dialog from "../a11y/Dialog.tsx";
 import { refreshProjects } from "../../init.ts";
 import {
   accountGuardrails,
   createAccount,
+  inviteAccount,
   setAccountGuardrails,
   type AccountChoice,
 } from "../../accounts.ts";
+import { invitationUrl } from "../../invitationLink.ts";
 import { grantSpaceMember, type CurrentSpaceAccess } from "../../spaceAccess.ts";
 import { Button, Icon, IconButton, Notice, TextInput } from "../ui/index.ts";
 import {
@@ -45,6 +49,7 @@ import {
   accountErrorText,
   defaultPreset,
   generatePassphrase,
+  invitationLinkText,
   invitationText,
   LOGIN_PATTERN,
   MIN_PASSWORD_LENGTH,
@@ -73,6 +78,10 @@ interface Created {
   name: string;
   login: string;
   password: string;
+  /** A one-time sign-in link, when this server could issue one at a shareable address. */
+  invitation: { url: string; expiresAt: number } | null;
+  /** Joined the current Space, so the owner can pair their Polyth app. */
+  member: boolean;
   preset: UserPreset;
   /** Sentences for whatever was created only in part. */
   problems: string[];
@@ -160,15 +169,25 @@ export default function AddUserWizard({ spaceAccess, withReauth, onClose, onCrea
           }));
         }
       }
+      let member = false;
       if (plan.role && spaceAccess && guarded) {
         try {
           await grantSpaceMember(spaceAccess.id, account.id, plan.role);
+          member = true;
           void refreshProjects();
         } catch (cause) {
           problems.push(tr("settings.users.createdGrantFailed", { name: shownName, space: spaceAccess.name, reason: accountErrorText(cause) }));
         }
       }
-      setCreated({ account, name: shownName, login: account.login ?? normalizedLogin, password, preset, problems });
+      // The link is the easy way in; the temporary password stays as a fallback
+      // (an older server, or one reachable only on this computer).
+      let invitation: Created["invitation"] = null;
+      try {
+        const issued = await withReauth(() => inviteAccount(account.id));
+        const url = invitationUrl(issued.url, typeof location === "undefined" ? "" : location.origin, shareableAddress);
+        if (url) invitation = { url, expiresAt: issued.expiresAt };
+      } catch { /* the password below still works */ }
+      setCreated({ account, name: shownName, login: account.login ?? normalizedLogin, password, invitation, member, preset, problems });
       setStep("done");
       onCreated(account);
     } catch (cause) {
@@ -345,7 +364,11 @@ function DoneStep({ created, space, canManageMembers, bodyRef, onDone, onOpenAcc
   onOpenAccount: () => void;
 }) {
   const address = useMemo(() => shareableAddress(typeof location === "undefined" ? "" : location.origin), []);
-  const invitation = invitationText({ name: created.name, login: created.login, password: created.password, address });
+  const link = created.invitation;
+  const until = link ? new Date(link.expiresAt).toLocaleDateString(undefined, { day: "numeric", month: "long" }) : "";
+  const invitation = link
+    ? invitationLinkText({ name: created.name, url: link.url, until })
+    : invitationText({ name: created.name, login: created.login, password: created.password, address });
   const [copied, setCopied] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
@@ -357,6 +380,15 @@ function DoneStep({ created, space, canManageMembers, bodyRef, onDone, onOpenAcc
     }, () => undefined);
   };
   const canShare = typeof navigator !== "undefined" && typeof navigator.share === "function";
+  // Without an internet address the link reaches no one outside this network:
+  // Polyth Link pairs their own Polyth app instead (the Link page, owner side).
+  const slotsAt = useSlotVersion();
+  const linkPairing = useMemo(() => created.member && listSlots("settings.pages").some((page) => page.id === "tunnel"), [slotsAt, created.member]);
+  const remote = !link || !link.url.startsWith("https:");
+  const connectApp = () => {
+    onDone();
+    openSettingsPage("tunnel", { sectionId: "pair-for", itemId: created.account.id });
+  };
   const access = presetPlan(created.preset, canManageMembers).role || created.preset === "protected"
     ? space
       ? tr("settings.users.wizard.accessValue", { preset: presetText(created.preset, space).label, space })
@@ -366,7 +398,16 @@ function DoneStep({ created, space, canManageMembers, bodyRef, onDone, onOpenAcc
   return (
     <>
       <div className="user-wizard-body" ref={bodyRef}>
-        <dl className="user-wizard-credentials">
+        {link && (
+          <dl className="user-wizard-credentials">
+            <CredentialRow label={tr("settings.users.wizard.invitationLink")} value={link.url} mono copyLabel={tr("settings.users.wizard.copyLink")} copied={copied === "link"} onCopy={() => copy("link", link.url)} />
+            <div className="user-wizard-credential">
+              <dt>{tr("settings.users.wizard.access")}</dt>
+              <dd><span className="user-wizard-credential-value">{access}</span></dd>
+            </div>
+          </dl>
+        )}
+        {!link && <dl className="user-wizard-credentials">
           {address && (
             <CredentialRow label={tr("settings.users.wizard.address")} value={address} copyLabel={tr("settings.users.wizard.copyAddress")} copied={copied === "address"} onCopy={() => copy("address", address)} />
           )}
@@ -376,7 +417,7 @@ function DoneStep({ created, space, canManageMembers, bodyRef, onDone, onOpenAcc
             <dt>{tr("settings.users.wizard.access")}</dt>
             <dd><span className="user-wizard-credential-value">{access}</span></dd>
           </div>
-        </dl>
+        </dl>}
         <div className="user-wizard-share">
           <Button
             variant="quiet"
@@ -391,7 +432,27 @@ function DoneStep({ created, space, canManageMembers, bodyRef, onDone, onOpenAcc
             </Button>
           )}
         </div>
-        <p className="user-wizard-note">{tr("settings.users.wizard.passwordOnce")}</p>
+        <p className="user-wizard-note">{link ? tr("settings.users.wizard.linkOnce", { date: until }) : tr("settings.users.wizard.passwordOnce")}</p>
+        {link && (
+          <details className="user-wizard-fallback">
+            <summary>{tr("settings.users.wizard.passwordInstead")}</summary>
+            <dl className="user-wizard-credentials">
+              <CredentialRow label={tr("settings.users.login")} value={created.login} mono copyLabel={tr("settings.users.wizard.copyLogin")} copied={copied === "login"} onCopy={() => copy("login", created.login)} />
+              <CredentialRow label={tr("settings.users.wizard.tempPassword")} value={created.password} mono copyLabel={tr("settings.users.copyPassword")} copied={copied === "password"} onCopy={() => copy("password", created.password)} />
+            </dl>
+            <p className="user-wizard-note">{tr("settings.users.wizard.passwordOnce")}</p>
+          </details>
+        )}
+        {linkPairing && (
+          <div className="user-wizard-connect">
+            <p className="user-wizard-note">
+              {remote
+                ? tr("settings.users.wizard.connectAppRemote", { name: created.name.split(/\s+/)[0] || created.name })
+                : tr("settings.users.wizard.connectAppAlso")}
+            </p>
+            <Button variant="quiet" onClick={connectApp}>{tr("settings.users.wizard.connectApp")}</Button>
+          </div>
+        )}
         {created.problems.map((problem) => <Notice key={problem} tone="warning" role="alert">{problem}</Notice>)}
       </div>
       <footer className="user-wizard-foot">

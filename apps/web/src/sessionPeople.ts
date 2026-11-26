@@ -14,7 +14,11 @@ import type {
 } from "@polyth/contracts";
 import { useEffect, useMemo, useState } from "react";
 import { sessionFetch } from "@polyth/session/web-api";
-import { activeBrowserAccountId } from "./accountStorage.ts";
+import { activeBrowserAccountId as localAccountId } from "./accountStorage.ts";
+import { selfInOpenSpace } from "./spaces.ts";
+
+/** "Me" as the open Space's server names me (a joined Space: the account there). */
+const activeBrowserAccountId = (): string => selfInOpenSpace(localAccountId());
 import { assignPersonTones, preferredPersonTone } from "./personIdentity.ts";
 
 const personMessagesPath = (sessionId: string) =>

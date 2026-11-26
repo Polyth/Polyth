@@ -7,6 +7,7 @@ import { createSetup } from './setup.ts';
 import { createCredentials } from './credentials.ts';
 import { createPairedDevice } from './pairedDevice.ts';
 import { createAccounts } from './accounts.ts';
+import { createInvitations } from './invitations.ts';
 import { createGuardrails, type GuardrailsNormalizer } from './guardrails.ts';
 import { createLimits, type LimitsNormalizer } from './limits.ts';
 import { createPermissions, type PermissionsNormalizer } from './permissions.ts';
@@ -166,6 +167,7 @@ export function createIdentityService(control: ControlPlane, opts: {
      *  `pairedDevice.ts` for the session/elevation boundary. */
     pairedDevice: createPairedDevice(control, sessions, credentials, now),
     accounts,
+    invitations: createInvitations(control, passwords, sessions, now),
     guardrails,
     limits,
     permissions,

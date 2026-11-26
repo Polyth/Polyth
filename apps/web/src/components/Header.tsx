@@ -536,7 +536,8 @@ export default function Header() {
   // whether there is a choice before it can mount one.
   const bareLayout = shell.layout === "bare";
   useEffect(() => { if (bareLayout) void loadSpaces(); }, [bareLayout]);
-  const multiSpace = spaces.status === "ready" && spaces.spaces.length > 1;
+  // Another server's Space the person joined is a choice too.
+  const multiSpace = spaces.status === "ready" && spaces.spaces.length + spaces.joined.length > 1;
   const showTitle = session !== null && shell.title;
   // Two chats side by side: each pane names its own chat (SessionSplitView),
   // so the bar keeps only the overview, opened from the focused pane's title.

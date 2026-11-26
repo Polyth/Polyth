@@ -39,7 +39,8 @@ import { aggregateRuntimes } from "./runtimeAggregate.ts";
 import type { ModelVisibilityService } from "./modelVisibility.ts";
 import type { RuntimeCatalog } from "./runtimeCatalog.ts";
 import type { HttpServerContext } from "@polyth/plugins";
-import { PairedSocketRegistry } from "@polyth/plugins";
+import { PairedSocketRegistry, isJoinedSpaceId, type JoinedSpacesService } from "@polyth/plugins";
+import { joinedSpaceRoute, mayUseJoinedSpaces } from "./joinedSpaceRouting.ts";
 import {
   AuthorizationError,
   authRequestLike,
@@ -465,6 +466,9 @@ export interface HttpDeps {
   auth?: HttpAuth;
   /** Extra remote-access policies (package-owned). Core policy is always included. */
   remotePolicies?: () => readonly OwnedRemotePolicy[];
+  /** Spaces of other Polyth servers people here joined through Polyth Link
+   *  (resolved per request: the Link package may come and go). */
+  joinedSpaces?: () => JoinedSpacesService | undefined;
   /** Public listener id recorded on RequestIngress. */
   listenerId?: string;
   /** Optional request drain/fence. When set, new requests stop at shutdown
@@ -739,8 +743,47 @@ async function dispatchHttp(
       // no code path can fetch a row first and check ownership afterwards. The
       // explicit header is a request, not an authority: a Space the caller does
       // not belong to answers 404 exactly like a Space that does not exist.
-      const explicitSpace = headerValue(req, SPACE_HEADER) ?? null;
-      const rememberedSpace = parseSpaceCookie(req.headers.cookie, deps.spaces.cookieName);
+      const requestedSpace = headerValue(req, SPACE_HEADER) ?? null;
+      const cookieSpace = parseSpaceCookie(req.headers.cookie, deps.spaces.cookieName);
+      // A joined Space (another server's, through Polyth Link) is never a
+      // Space of this server: requests that stay here resolve in the
+      // person's own Space, the rest go to the other server or nowhere.
+      // An explicit header decides alone; the cookie only when there is none.
+      const joinedSpaceId = requestedSpace !== null
+        ? (isJoinedSpaceId(requestedSpace) ? requestedSpace : null)
+        : isJoinedSpaceId(cookieSpace) ? cookieSpace : null;
+      const explicitSpace = isJoinedSpaceId(requestedSpace) ? null : requestedSpace;
+      const rememberedSpace = isJoinedSpaceId(cookieSpace) ? null : cookieSpace;
+      if (joinedSpaceId && path.startsWith("/api/") && !AUTH_PUBLIC.has(path)) {
+        const route = joinedSpaceRoute(method, path, [
+          { owner: "core", policy: CORE_REMOTE_ACCESS },
+          ...(deps.remotePolicies?.() ?? []),
+        ]);
+        const service = route === "local" ? undefined : deps.joinedSpaces?.();
+        const person = service && mayUseJoinedSpaces(principal)
+          ? deps.spaces.resolve(principal, { explicit: null, remembered: null }).userId
+          : null;
+        const known = !!person && !!service?.get(person, joinedSpaceId);
+        if (route !== "local" && !known && requestedSpace !== null) {
+          // Naming a joined Space that is not this person's: like a missing Space.
+          return json(res, 404, { error: "not-found", message: "space not found" });
+        }
+        // A cookie left from a server the person has since left falls back to
+        // their own Space below, like any stale Space cookie.
+        if (route === "unavailable" && known) {
+          return json(res, 404, {
+            error: "not-available",
+            message: "This is not available in a Space of another Polyth server.",
+          });
+        }
+        if (route === "forward" && known && service && person) {
+          if (!canonicalizeRemotePath(rawPath) || path !== rawPath) {
+            throw Object.assign(new Error("The requested path is invalid."), { code: "invalid-path" });
+          }
+          await service.forwardHttp(person, joinedSpaceId, { method, path: `${path}${url.search}`, req, res });
+          return;
+        }
+      }
       let scoped: SpaceServices | null = null;
       const space = (): SpaceServices => {
         deps.admission?.assertLive();

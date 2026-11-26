@@ -240,6 +240,24 @@
 .user-wizard-credential .ui-icon-btn.is-copied { color: var(--green); }
 .user-wizard-share { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .user-wizard-note { margin: 0; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh); }
+/* Pairing their Polyth app: the way in when no internet address exists. */
+.user-wizard-connect { display: grid; gap: var(--space-2); justify-items: start; padding-top: var(--space-3); border-top: 1px solid var(--border-subtle); }
+/* The temporary password stays one click away for a server the link cannot reach. */
+.user-wizard-fallback { display: grid; gap: var(--space-3); }
+.user-wizard-fallback > summary {
+  width: fit-content; min-height: var(--hit-min); display: flex; align-items: center;
+  color: var(--muted); font-size: var(--font-meta); cursor: pointer;
+}
+.user-wizard-fallback > summary { gap: var(--space-2); list-style: none; }
+.user-wizard-fallback > summary::-webkit-details-marker { display: none; }
+.user-wizard-fallback > summary::before {
+  content: ""; width: 6px; height: 6px; flex: none;
+  border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg); transition: transform var(--motion-normal) var(--motion-ease);
+}
+.user-wizard-fallback[open] > summary::before { transform: rotate(45deg); }
+.user-wizard-fallback[open] > summary { color: var(--text); }
+@media (hover: hover) { .user-wizard-fallback > summary:hover { color: var(--text); } }
 
 /* Phone: the shell's bottom sheet. 16px gutters shared by head, body and
    footer; the footer's buttons split its row and clear the home indicator. */

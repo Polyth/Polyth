@@ -3,7 +3,7 @@ import { controlError, digest } from '@polyth/control-plane';
 
 export const opaqueId = (prefix: string): string => `${prefix}_${randomUUID()}`;
 export const newToken = (): string => randomBytes(32).toString('hex');
-export const tokenHash = (purpose: 'session' | 'setup' | 'browser' | 'recovery' | 'access' | 'device', token: string): string => digest(`${purpose}:${token}`);
+export const tokenHash = (purpose: 'session' | 'setup' | 'browser' | 'recovery' | 'access' | 'device' | 'invitation', token: string): string => digest(`${purpose}:${token}`);
 export const validToken = (token: unknown): token is string => typeof token === 'string' && /^[a-f0-9]{64}$/.test(token);
 export function displayName(value: unknown): string {
   if (typeof value !== 'string' || !value.trim() || value.trim().length > 80 || /[\x00-\x1f\x7f]/.test(value)) {

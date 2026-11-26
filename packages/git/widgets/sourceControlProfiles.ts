@@ -145,7 +145,14 @@ export function parseSourceControlProfileState(raw: string | null, legacyRaw: st
   return { profiles, globalDefaultProfileId: null, repositoryProfileIds: {}, repositorySystemIdentities: {} };
 }
 
+/** A Space of another Polyth server is open (Polyth Link, "Joined Spaces"):
+ *  this device's cached profiles (names, emails) belong to this server's
+ *  person and must never reach that server, nor its profiles this cache. */
+export const inJoinedSpace = (): boolean =>
+  typeof document !== "undefined" && /(?:^|;\s*)polyth_space=rmt_[0-9a-f]{24}(?:;|$)/.test(document.cookie ?? "");
+
 function read(): SourceControlProfileState {
+  if (inJoinedSpace()) return { ...EMPTY, repositoryProfileIds: {}, repositorySystemIdentities: {} };
   try {
     const raw = localStorage.getItem(KEY);
     const legacyRaw = localStorage.getItem(LEGACY_KEY);
@@ -185,14 +192,16 @@ const hasData = (s: SourceControlProfileState): boolean => s.profiles.length > 0
 function adopt(next: SourceControlProfileState): void {
   if (JSON.stringify(next) === JSON.stringify(state)) return;
   state = next;
-  try { localStorage.setItem(KEY, JSON.stringify(next)); } catch { /* best effort */ }
+  if (!inJoinedSpace()) {
+    try { localStorage.setItem(KEY, JSON.stringify(next)); } catch { /* best effort */ }
+  }
   for (const listener of [...listeners]) listener();
 }
 
 async function fetchServer(): Promise<{ state: SourceControlProfileState; revision: number }> {
   let snap = await transport.load();
   // One-time migration: an empty server adopts this device's cached profiles.
-  if (snap.revision === 0 && !hasData(normalize(snap.state)) && hasData(state)) {
+  if (snap.revision === 0 && !hasData(normalize(snap.state)) && hasData(state) && !inJoinedSpace()) {
     try { snap = await transport.save(state, 0); } catch { snap = await transport.load(); }
   }
   return base = { state: normalize(snap.state), revision: snap.revision };
@@ -238,6 +247,9 @@ export function getSourceControlProfileState(): SourceControlProfileState {
 }
 
 export function replaceSourceControlProfileState(value: unknown): void {
+  // The account's synced profiles are this server's person's; in a joined
+  // Space they would be written into the other server's Space.
+  if (inJoinedSpace()) return;
   const next = normalize(value);
   publish(() => next);
 }

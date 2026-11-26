@@ -1939,7 +1939,32 @@ feature CSS in `settings/UsersPage.css`, list and detail rules in
      `createAccount` → guardrails (when Protected) → `grantSpaceMember`, in that
      order: if Protected mode can't be set, no Space access is granted and the
      done step says so.
-  3. *Done*: the login, the temporary password (shown for the last time),
+  3. *Done*, with an invitation link: Create user also issues a one-time link
+     (`inviteAccount` → `POST /api/auth/accounts/:id/invitation`). When the
+     server's address or this page's is shareable (`invitationUrl`), the step
+     shows the link and the access, "Copy invitation"/"Share…" send a message
+     with the link and its end date, and the login with the temporary password
+     folds under "Sign in with a temporary password instead". The link is
+     `<origin>/#invite=<code>`: the code rides in the fragment, `bootstrap.tsx`
+     takes it out of the address bar before the first render
+     (`invitationLink.ts`, kept in this tab's sessionStorage until used) and a
+     signed-out tab renders `InvitationScreen.tsx` in place of the lock screen:
+     "Welcome, {name}", the login read-only, a new password twice, *Join*. A
+     used, expired or replaced link reads "This link no longer works" with the
+     way to sign in. After joining, a "You're in" card names the three things a
+     newcomer looks for (chats shared with them, @-mentions and people-only
+     conversations, Settings → Notifications) before *Open Polyth*.
+     Without a shareable address or on an older server the step is the one
+     below.
+     Both forms end with *Connect their Polyth app* (`.user-wizard-connect`)
+     when the person joined the current Space and the Polyth Link settings
+     page is registered. Without an `https:` link its note says the address
+     opens only on this network, and the button is the way in from anywhere.
+     It closes the flow and opens the Link page at
+     `openSettingsPage("tunnel", { sectionId: "pair-for", itemId: <accountId> })`,
+     which pairs that person's app into their account
+     ([Pairing for another person](../architecture/polyth-link.md#pairing-for-another-person)).
+     *Done* without a link: the login, the temporary password (shown for the last time),
      the access and — when the page was opened through an address another
      device can reach (`shareableAddress`: not loopback, not a desktop shell) —
      the address, each with its own copy button; "Copy invitation" (and

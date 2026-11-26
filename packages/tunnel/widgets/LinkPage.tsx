@@ -7,17 +7,19 @@ import type {
   TunnelStatusDto,
 } from "@polyth/contracts";
 import { GRANT_PROFILE_PRESETS } from "@polyth/contracts";
-import { createApiTransport, type WebPackageHost } from "@polyth/web-sdk";
+import { ApiError, createApiTransport, type SettingsNavigationTarget, type WebPackageHost } from "@polyth/web-sdk";
 import type { TunnelMessageKey } from "../src/i18n/en.ts";
 import { SERVER_NAME_MAX_CHARS, type TunnelServerNameDto } from "../src/serverName.ts";
 import { CheckGroup, EmptyState, ErrorState, PageHead, ReadonlyRow, Row, SaveStatus, Section, Seg, Toggle, type SaveStatusState } from "../../../apps/web/src/components/settings/parts.tsx";
-import { Badge, Button, ChevronDownIcon, Dialog, Icon, IconButton, QrCodeIcon, RefreshIcon, Spinner, TextInput, type BadgeTone } from "../../../apps/web/src/components/ui/index.ts";
+import { Badge, Button, ChevronDownIcon, Dialog, Icon, IconButton, QrCodeIcon, RefreshIcon, Spinner, Select, TextInput, type BadgeTone } from "../../../apps/web/src/components/ui/index.ts";
 import CopyButton from "../../../apps/web/src/components/CopyButton.tsx";
 import { copyText } from "../../../apps/web/src/utils.ts";
 import { confirmAlert } from "../../../apps/web/src/alerts.ts";
 import { applyTunnelStatusToCapability, setPolythLinkCapabilityAvailable } from "./availability.ts";
 import { createTranslate, type Translate } from "./i18n.ts";
 import { accessLabel, CAPABILITY_GROUPS, hasFullAccess, matchingPreset, PRESETS, withFullAccess } from "./permissions.ts";
+import { loadTeammates, type Teammate } from "./people.ts";
+import JoinedServers from "./JoinedServers.tsx";
 
 const api = createApiTransport({
   fetch: (url, init) => fetch(url, { credentials: "include", ...init }),
@@ -30,8 +32,21 @@ type PairingOffer = PairingOfferDto & {
   qrModules?: boolean[][];
   numericCode?: string;
   numericExpiresAt?: string;
+  /** Set when the invitation joins another person's account. */
+  forUserId?: string;
 };
 
+/** A device this owner paired into someone else's account. */
+type IssuedDevice = TunnelDeviceDto & { accountId: string };
+
+/** Deep-link targets already acted on, so a remount does not reopen the dialog. */
+const handledTargets = new WeakSet<SettingsNavigationTarget>();
+
+const FOR_SELF = "self";
+const FOR_PREFIX = "user:";
+
+/** Full access first: for another person it means everything that person may
+ *  do when signed in here, bounded by their own account, never yours. */
 const pairingAccess = (t: Translate): Array<[GrantProfileId, string]> => [
   ["full-remote", t("tunnel.permissions.fullAccess")],
   ...PRESETS.map(([id, key]) => [id, t(key)] as [GrantProfileId, string]),
@@ -283,7 +298,37 @@ function DeviceRow({ device, onGrants, onRevoke, onForget, t, locale }: {
   );
 }
 
-export default function LinkPage({ host }: { host?: WebPackageHost }) {
+function IssuedDeviceRow({ device, person, onRevoke, onForget, t, locale }: {
+  device: IssuedDevice;
+  person: string;
+  onRevoke: () => void;
+  onForget: () => void;
+  t: Translate;
+  locale: string;
+}) {
+  const revoked = Boolean(device.revokedAt);
+  return (
+    <li className="pkg-tunnel-device">
+      <div className="pkg-tunnel-device-head">
+        <span className={`pkg-tunnel-dot${device.online && !revoked ? " is-online" : ""}`} aria-hidden="true" />
+        <div className="pkg-tunnel-device-copy">
+          <strong>{device.label || t("tunnel.permissions.phone")}</strong>
+          <span title={device.endpointFingerprint}>
+            {[person, device.platform, deviceStatus(device, t, locale)].filter(Boolean).join(" · ")}
+          </span>
+        </div>
+        {revoked
+          ? <Button size="sm" variant="ghost" onClick={onForget}>{t("tunnel.permissions.forget")}</Button>
+          : <Button size="sm" variant="ghost" onClick={onRevoke}>{t("tunnel.permissions.revokeAction")}</Button>}
+      </div>
+    </li>
+  );
+}
+
+export default function LinkPage({ host, settingsTarget }: {
+  host?: WebPackageHost;
+  settingsTarget?: SettingsNavigationTarget;
+}) {
   const t = useMemo(() => createTranslate(host), [host]);
   const locale = host?.ui?.locale?.get?.() ?? "en";
   const [status, setStatus] = useState<TunnelStatusDto | null>(null);
@@ -298,6 +343,14 @@ export default function LinkPage({ host }: { host?: WebPackageHost }) {
   const [now, setNow] = useState(() => Date.now());
   const [signInRequired, setSignInRequired] = useState<boolean | null>(null);
   const [serverName, setServerName] = useState<TunnelServerNameDto | null>(null);
+  const [issued, setIssued] = useState<IssuedDevice[]>([]);
+  // Null until known, and for everyone but the instance owner.
+  const [teammates, setTeammates] = useState<Teammate[] | null>(null);
+  // Empty pairs the owner's own device.
+  const [forUserId, setForUserId] = useState("");
+  const [teammateProfile, setTeammateProfile] = useState<GrantProfileId>("full-remote");
+  const [targetError, setTargetError] = useState("");
+  const issueRef = useRef(0);
   const pairingIdRef = useRef<string | null>(null);
   const statusRequestRef = useRef(0);
   pairingIdRef.current = offer?.pairing.id ?? null;
@@ -321,11 +374,13 @@ export default function LinkPage({ host }: { host?: WebPackageHost }) {
 
   const reload = useCallback(async () => {
     try {
-      const [, nextDevices] = await Promise.all([
+      const [, nextDevices, nextIssued] = await Promise.all([
         refreshStatus(),
         api.get<TunnelDeviceDto[]>("/api/tunnel/devices").catch(() => [] as TunnelDeviceDto[]),
+        api.get<IssuedDevice[]>("/api/tunnel/devices/issued").catch(() => [] as IssuedDevice[]),
       ]);
       setDevices(nextDevices);
+      setIssued(Array.isArray(nextIssued) ? nextIssued : []);
       setError("");
     } catch (cause) {
       setError(errorText(cause));
@@ -333,6 +388,13 @@ export default function LinkPage({ host }: { host?: WebPackageHost }) {
   }, [refreshStatus]);
 
   useEffect(() => { void reload(); }, [reload]);
+  const refreshTeammates = useCallback(async () => {
+    const next = await loadTeammates(api);
+    setTeammates(next);
+    return next;
+  }, []);
+  // Without the list the page still pairs the person's own devices.
+  useEffect(() => { void refreshTeammates().catch(() => {}); }, [refreshTeammates]);
   const refreshServerName = useCallback(async () => {
     try {
       const next = await api.get<TunnelServerNameDto>("/api/tunnel/server-name");
@@ -387,6 +449,7 @@ export default function LinkPage({ host }: { host?: WebPackageHost }) {
         const pairingId = pairingIdRef.current;
         if (pairingId) {
           void api.get<PairingStateDto>(`/api/tunnel/pairing/${pairingId}`).then((next) => {
+            if (pairingIdRef.current !== pairingId) return;
             setPairing(next);
             if (next.state === "committed") {
               setPairingOpen(false);
@@ -413,6 +476,7 @@ export default function LinkPage({ host }: { host?: WebPackageHost }) {
     const timer = setInterval(async () => {
       try {
         const next = await api.get<PairingStateDto>(`/api/tunnel/pairing/${offer.pairing.id}`);
+        if (pairingIdRef.current !== offer.pairing.id) return;
         setPairing(next);
         if (next.state === "committed") {
           setPairingOpen(false);
@@ -426,24 +490,45 @@ export default function LinkPage({ host }: { host?: WebPackageHost }) {
     return () => clearInterval(timer);
   }, [offer?.pairing.id, reload]);
 
-  // Omitting the profile lets the server apply its Full access default.
-  const createPairing = (access: GrantProfileId): Promise<PairingOffer> =>
-    api.post<PairingOffer>("/api/tunnel/pairing", access === "full-remote" ? {} : { profile: access });
+  const personName = (id: string): string =>
+    teammates?.find((person) => person.id === id)?.name || t("tunnel.for.teammate");
 
-  const issueOffer = async (access: GrantProfileId, previous: PairingOffer | null) => {
+  // For the owner's own device, omitting the profile lets the server apply its
+  // Full access default.
+  const createPairing = (access: GrantProfileId, forId: string): Promise<PairingOffer> =>
+    api.post<PairingOffer>("/api/tunnel/pairing", forId
+      ? { forUserId: forId, profile: access }
+      : access === "full-remote" ? {} : { profile: access });
+
+  const cancelPairing = (id: string) => api.delete(`/api/tunnel/pairing/${id}`).catch(() => {});
+
+  const issueOffer = async (access: GrantProfileId, forId: string, previousId: string | null) => {
+    // Only the newest request may show its code: an older one could belong to a
+    // different person than the dialog now names.
+    const request = ++issueRef.current;
     setBusy(true);
     setError("");
     try {
-      if (previous) await api.delete(`/api/tunnel/pairing/${previous.pairing.id}`).catch(() => {});
-      const created = await createPairing(access);
+      if (previousId) await cancelPairing(previousId);
+      if (request !== issueRef.current) return;
+      const created = await createPairing(access, forId);
+      if (request !== issueRef.current) {
+        await cancelPairing(created.pairing.id);
+        return;
+      }
+      if (forId && created.forUserId !== forId) {
+        await cancelPairing(created.pairing.id);
+        throw new Error(t("tunnel.for.mismatch"));
+      }
       setOffer(created);
       setPairing(created.pairing as unknown as PairingStateDto);
     } catch (cause) {
+      if (request !== issueRef.current) return;
       setOffer(null);
-      setError(errorText(cause));
+      setError(forId && cause instanceof ApiError && cause.status === 403 ? t("tunnel.for.ownerOnly") : errorText(cause));
       await refreshStatus().catch(() => {});
     } finally {
-      setBusy(false);
+      if (request === issueRef.current) setBusy(false);
     }
   };
 
@@ -462,6 +547,8 @@ export default function LinkPage({ host }: { host?: WebPackageHost }) {
 
   const closePairing = async () => {
     // Esc, the backdrop, the header close button and Cancel all route here.
+    issueRef.current++;
+    setBusy(false);
     if (offer) await api.post(`/api/tunnel/pairing/${offer.pairing.id}/reject`).catch(() => {});
     setPairingOpen(false);
     setOffer(null);
@@ -506,15 +593,48 @@ export default function LinkPage({ host }: { host?: WebPackageHost }) {
 
   const hostInfo = hostState(status, t);
   const diagnostics = hostDiagnostics(status, t);
-  const openPairing = () => {
-    setPairingOpen(true);
+  // A new person starts a new invitation; the old code leaves the screen at once.
+  const pairFor = (forId: string) => {
+    const previousId = pairingIdRef.current;
+    setForUserId(forId);
+    setTeammateProfile("full-remote");
+    setOffer(null);
     setPairing(null);
-    void issueOffer(profile, null);
+    void issueOffer(forId ? "full-remote" : profile, forId, previousId);
+  };
+  const openPairing = (forId = "") => {
+    setPairingOpen(true);
+    setTargetError("");
+    pairFor(forId);
   };
   const changeAccess = (next: GrantProfileId) => {
-    setProfile(next);
-    void issueOffer(next, offer);
+    if (forUserId) setTeammateProfile(next);
+    else setProfile(next);
+    void issueOffer(next, forUserId, offer?.pairing.id ?? null);
   };
+
+  useEffect(() => {
+    const target = settingsTarget;
+    const id = target?.sectionId === "pair-for" ? target.itemId : undefined;
+    if (!target || !id || handledTargets.has(target)) return undefined;
+    let live = true;
+    const settle = (apply: () => void) => {
+      if (!live || handledTargets.has(target)) return;
+      handledTargets.add(target);
+      apply();
+    };
+    void refreshTeammates().then(
+      (list) => settle(() => {
+        if (list?.some((person) => person.id === id)) openPairing(id);
+        else setTargetError(t(list ? "tunnel.for.unavailable" : "tunnel.for.ownerOnly"));
+      }),
+      (cause) => settle(() => setTargetError(
+        cause instanceof ApiError && cause.status === 403 ? t("tunnel.for.ownerOnly") : errorText(cause),
+      )),
+    );
+    return () => { live = false; };
+    // Runs once per target; the handlers it calls only use state setters and refs.
+  }, [settingsTarget, refreshTeammates]);
 
   const phrase = pairing?.safetyPhrase ?? null;
   const canAllow = Boolean(pairing?.deviceConfirmed) && pairing?.state !== "committed";
@@ -527,12 +647,15 @@ export default function LinkPage({ host }: { host?: WebPackageHost }) {
   const summary = hostInfo.hint || (active.length === 0
     ? t("tunnel.hero.pairFirst")
     : t("tunnel.hero.connected", { online, total: active.length }));
+  const access = forUserId ? teammateProfile : profile;
   const accessOptions = pairingAccess(t);
+  const forName = forUserId ? personName(forUserId) : "";
 
   return (
     <div className="pkg-tunnel">
       <PageHead blurb={t("tunnel.page.blurb")} />
       {error && !pairingOpen && <ErrorState compact error={error} />}
+      {targetError && <ErrorState compact error={targetError} />}
 
       <section className="pkg-tunnel-hero" aria-labelledby="pkg-tunnel-hero-title" data-settings-item="tunnel.host">
         <div className="pkg-tunnel-hero-head">
@@ -564,7 +687,7 @@ export default function LinkPage({ host }: { host?: WebPackageHost }) {
             <dd>{signInRequired === false ? t("tunnel.hero.signInNotRequired") : t("tunnel.hero.signInRequired")}</dd>
           </div>
         </dl>
-        <Button variant="primary" className="pkg-tunnel-hero-pair" disabled={!status?.pairingAvailable} onClick={openPairing}>
+        <Button variant="primary" className="pkg-tunnel-hero-pair" disabled={!status?.pairingAvailable} onClick={() => openPairing()}>
           {t("tunnel.hero.pairPhone")}
         </Button>
       </section>
@@ -596,6 +719,26 @@ export default function LinkPage({ host }: { host?: WebPackageHost }) {
           </ul>
         )}
       </Section>
+
+      {issued.length > 0 && (
+        <Section title={t("tunnel.issued.title")} hint={t("tunnel.issued.hint")}>
+          <ul className="pkg-tunnel-devices">
+            {issued.map((device) => (
+              <IssuedDeviceRow
+                key={device.id}
+                device={device}
+                person={personName(device.accountId)}
+                onRevoke={() => void revoke(device)}
+                onForget={() => void forget(device)}
+                t={t}
+                locale={locale}
+              />
+            ))}
+          </ul>
+        </Section>
+      )}
+
+      <JoinedServers api={api} t={t} {...(settingsTarget ? { settingsTarget } : {})} />
 
       <details className="pkg-tunnel-advanced">
         <summary>{t("tunnel.advanced.summary")}</summary>
@@ -638,7 +781,9 @@ export default function LinkPage({ host }: { host?: WebPackageHost }) {
 
       {pairingOpen && (
         <Dialog
-          title={phrase ? t("tunnel.dialog.confirmTitle") : t("tunnel.dialog.pairTitle")}
+          title={!phrase
+            ? t("tunnel.dialog.pairTitle")
+            : forUserId ? t("tunnel.for.confirmTitle", { name: forName }) : t("tunnel.dialog.confirmTitle")}
           size="sm"
           className="pkg-tunnel-dialog"
           onClose={() => { void closePairing(); }}
@@ -650,13 +795,34 @@ export default function LinkPage({ host }: { host?: WebPackageHost }) {
                   {t("tunnel.dialog.allow")}
                 </Button>
               ) : (
-                <Button variant={expired ? "primary" : "ghost"} disabled={busy || !status?.pairingAvailable} onClick={() => void issueOffer(profile, offer)}>
+                <Button variant={expired ? "primary" : "ghost"} disabled={busy || !status?.pairingAvailable} onClick={() => void issueOffer(access, forUserId, offer?.pairing.id ?? null)}>
                   {t("tunnel.dialog.newCode")}
                 </Button>
               )}
             </>
           )}
         >
+          {!phrase && teammates && teammates.length > 0 && (
+            <div className="pkg-tunnel-for">
+              <span aria-hidden="true">{t("tunnel.for.label")}</span>
+              <Select
+                label={t("tunnel.for.label")}
+                value={forUserId ? `${FOR_PREFIX}${forUserId}` : FOR_SELF}
+                options={[
+                  { value: FOR_SELF, label: t("tunnel.for.me") },
+                  ...teammates.map((person) => ({ value: `${FOR_PREFIX}${person.id}`, label: personName(person.id) })),
+                ]}
+                disabled={busy}
+                onChange={(value) => {
+                  const next = value.startsWith(FOR_PREFIX) ? value.slice(FOR_PREFIX.length) : "";
+                  if (next !== forUserId) pairFor(next);
+                }}
+              />
+            </div>
+          )}
+          {forUserId && !phrase && (
+            <p className="pkg-tunnel-for-notice">{t("tunnel.for.notice", { name: forName })}</p>
+          )}
           {error && <ErrorState compact error={error} />}
           {!offer && !error && (
             <div className="pkg-tunnel-pair is-loading" role="status">
@@ -668,7 +834,9 @@ export default function LinkPage({ host }: { host?: WebPackageHost }) {
             <div className="pkg-tunnel-pair">
               {offer.qrModules && offer.qrModules.length > 0 && <QrMatrix modules={offer.qrModules} t={t} />}
               <p className="pkg-tunnel-lead">
-                {expired ? t("tunnel.dialog.expired") : t("tunnel.dialog.scan")}
+                {expired
+                  ? t("tunnel.dialog.expired")
+                  : forUserId ? t("tunnel.for.send", { name: forName }) : t("tunnel.dialog.scan")}
               </p>
               <p className="pkg-tunnel-meta">
                 {offer.numericCode && numericSeconds !== 0 && (
@@ -683,9 +851,9 @@ export default function LinkPage({ host }: { host?: WebPackageHost }) {
                 </p>
               )}
               <details className="pkg-tunnel-access">
-                <summary>{t("tunnel.dialog.accessSummary", { access: accessOptions.find(([id]) => id === profile)?.[1] ?? "" })}</summary>
-                <Seg label={t("tunnel.dialog.accessAria")} value={profile} options={accessOptions} disabled={busy} onChange={changeAccess} />
-                <p className="pkg-tunnel-meta">{t("tunnel.dialog.accessHint")}</p>
+                <summary>{t("tunnel.dialog.accessSummary", { access: accessOptions.find(([id]) => id === access)?.[1] ?? "" })}</summary>
+                <Seg label={t("tunnel.dialog.accessAria")} value={access} options={accessOptions} disabled={busy} onChange={changeAccess} />
+                <p className="pkg-tunnel-meta">{t(forUserId ? "tunnel.for.accessHint" : "tunnel.dialog.accessHint")}</p>
               </details>
             </div>
           )}
@@ -696,8 +864,8 @@ export default function LinkPage({ host }: { host?: WebPackageHost }) {
               </ol>
               <p className="pkg-tunnel-lead">
                 {pairing?.deviceConfirmed
-                  ? t("tunnel.dialog.confirmed", { device: pairing.device?.label || t("tunnel.dialog.phoneFallback") })
-                  : t("tunnel.dialog.checkWords")}
+                  ? t(forUserId ? "tunnel.for.confirmed" : "tunnel.dialog.confirmed", { device: pairing.device?.label || t("tunnel.dialog.phoneFallback"), name: forName })
+                  : forUserId ? t("tunnel.for.checkWords", { name: forName }) : t("tunnel.dialog.checkWords")}
               </p>
             </div>
           )}

@@ -1338,10 +1338,14 @@ checks.
 
 `POLYTH_DEBUG_AGENT_ACCESS=1` is an explicit development-only exception for local
 agent/API inspection. Direct loopback public HTTP/WS may be projected to the active
-owner without a browser session. Startup rejects this mode if the listener is not
-loopback-only, if `POLYTH_PUBLIC_ORIGIN` is configured, or if the deployment profile
-is not `local-trusted`. The exception is evaluated from server-created ingress, never
-client headers, so it does not apply to Polyth Link. Canonical `/api/auth/*` setup,
+owner without a browser session. Startup refuses this mode when
+`POLYTH_TRUSTED_PROXIES` lists a loopback address (a tunnel or proxy on the same
+computer delivers internet requests over loopback). A non-loopback listener, a
+configured `POLYTH_PUBLIC_ORIGIN` or a non-`local-trusted` profile only logs an
+operator override (`packages/server/src/index.ts`); that deviates from the startup
+refusal [agent security](../agents/security.md) asks for. The exception is evaluated
+from server-created ingress, never client headers, so it does not apply to Polyth
+Link, and a loopback request that carries forwarding headers never receives it. Canonical `/api/auth/*` setup,
 same-origin and CSRF handling stay unchanged. In that local-only profile a
 direct-loopback `GET /api/auth/status` also mints one reusable owner session, because
 reporting `authorized` while every other identity read still demanded a cookie left

@@ -12,6 +12,8 @@ import {
 import type { AuditSink, CreateSpaceInput, SpaceResolver, TenancyStore } from "@polyth/tenancy";
 import { AUDIT } from "@polyth/tenancy";
 import { personDisplayName } from "../sessionSharing.ts";
+import { isJoinedSpaceId, type JoinedSpacesService } from "@polyth/plugins";
+import { mayUseJoinedSpaces } from "../joinedSpaceRouting.ts";
 
 const invalid = (message: string): Error =>
   Object.assign(new Error(message), { code: "invalid-input" });
@@ -46,6 +48,10 @@ export interface SpaceRoutesDeps {
   setActiveSpaceCookie(rc: Pick<RouteRequest, "res" | "ingress">, spaceId: string): void;
   /** Max Spaces one user may own. Hosted deployments tighten this. */
   maxSpacesPerUser?: number;
+  /** Spaces of other servers people here joined (the Link package). */
+  joinedSpaces?: () => JoinedSpacesService | undefined;
+  /** The joined Space this request's Space cookie names, if any. */
+  joinedSpaceCookie?: (rc: Pick<RouteRequest, "req">) => string | null;
 }
 
 export function spaceRoutes(deps: SpaceRoutesDeps): RouteHandler {
@@ -53,7 +59,12 @@ export function spaceRoutes(deps: SpaceRoutesDeps): RouteHandler {
   const mutations = store as CanonicalMutationStore;
   const limit = deps.maxSpacesPerUser ?? 24;
 
-  const state = (userId: string, activeSpaceId: string): SpacesStateDto => {
+  /** Only a person signed in here sees their joined Spaces, and only theirs. */
+  const joinedFor = (rc: Pick<RouteRequest, "principal">, userId: string) => {
+    if (!mayUseJoinedSpaces(rc.principal)) return [];
+    return deps.joinedSpaces?.()?.list(userId) ?? [];
+  };
+  const state = (userId: string, activeSpaceId: string, joined: ReturnType<typeof joinedFor> = []): SpacesStateDto => {
     const user = store.user(userId);
     if (!user) throw Object.assign(new Error("unknown user"), { code: "unauthorized" });
     const spaces = store.spacesFor(userId);
@@ -63,6 +74,7 @@ export function spaceRoutes(deps: SpaceRoutesDeps): RouteHandler {
       activeSpaceId,
       deployment: resolver.deployment,
       canCreate: spaces.filter((s) => s.role === "owner").length < limit,
+      ...(joined.length ? { joined } : {}),
     };
   };
 
@@ -72,7 +84,10 @@ export function spaceRoutes(deps: SpaceRoutesDeps): RouteHandler {
     const ctx = rc.space;
 
     if (path === "/api/spaces" && method === "GET") {
-      rc.json(200, state(ctx.userId, ctx.spaceId));
+      const joined = joinedFor(rc, ctx.userId);
+      const cookie = deps.joinedSpaceCookie?.(rc) ?? null;
+      const active = cookie && joined.some((space) => space.id === cookie) ? cookie : ctx.spaceId;
+      rc.json(200, state(ctx.userId, active, joined));
       return true;
     }
 
@@ -127,6 +142,18 @@ export function spaceRoutes(deps: SpaceRoutesDeps): RouteHandler {
     m = path.match(/^\/api\/spaces\/([^/]+)\/activate$/);
     if (m && method === "POST") {
       const spaceId = m[1]!;
+      if (isJoinedSpaceId(spaceId)) {
+        // Another server's Space: only its own person may open it, and this
+        // server's remembered Space stays as it was for the way back.
+        const joined = joinedFor(rc, ctx.userId);
+        if (!joined.some((space) => space.id === spaceId)) {
+          throw Object.assign(new Error("space not found"), { code: "not-found" });
+        }
+        deps.setActiveSpaceCookie(rc, spaceId);
+        audit.record(ctx, AUDIT.spaceSwitched, { resource: { kind: "joined-space", id: spaceId } });
+        rc.json(200, state(ctx.userId, spaceId, joined));
+        return true;
+      }
       // requireMembership throws not-found for a Space this user cannot use,
       // so an unauthorized switch is indistinguishable from a bad id.
       store.requireMembership(ctx.userId, spaceId);

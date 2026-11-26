@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import { tr } from "../i18n/index.ts";
 import {
+  activeJoinedSpace,
   activeSpace,
   createSpace,
   deleteSpace,
@@ -16,6 +17,9 @@ import {
   useSpaces,
 } from "../spaces.ts";
 import { Button, Dialog, Menu, TextInput, type MenuEntry } from "./ui/index.ts";
+import { listSlots } from "../slots.ts";
+import { useSlotVersion } from "./slots/SlotHost.ts";
+import { openSettingsPage } from "../store.ts";
 
 function ManageSpaces({ onClose }: { onClose: () => void }) {
   const state = useSpaces();
@@ -96,20 +100,39 @@ function ManageSpaces({ onClose }: { onClose: () => void }) {
 export default function SpaceSwitcher() {
   const state = useSpaces();
   const [managing, setManaging] = useState(false);
+  // The Polyth Link page registers after boot: re-read the pages when it does.
+  const slotsAt = useSlotVersion();
 
   useEffect(() => { void loadSpaces(); }, []);
 
   // A single Space is the default installation. Showing a switcher with one
-  // entry would be noise, so it only appears once there is a choice to make.
-  if (state.status !== "ready" || state.spaces.length < 2) {
+  // entry would be noise, so it only appears once there is a choice to make:
+  // another Space here, or one joined on another Polyth server.
+  if (state.status !== "ready" || state.spaces.length + state.joined.length < 2) {
     return managing ? <ManageSpaces onClose={() => setManaging(false)} /> : null;
   }
 
-  const current = activeSpace(state);
+  const joinedCurrent = activeJoinedSpace(state);
+  const current = activeSpace(state) ?? joinedCurrent;
+  // Joining happens on the Polyth Link page, when that package is on.
+  const canJoin = slotsAt >= 0 && listSlots("settings.pages").some((page) => page.id === "tunnel");
   const entries: MenuEntry[] = [
     ...state.spaces.map((space) => ({
       id: space.id,
       label: space.name,
+      kind: "radio" as const,
+      checked: space.id === state.activeSpaceId,
+      ...(space.color ? { swatch: space.color } : {}),
+      disabled: state.switching,
+      onSelect: () => { void switchSpace(space.id); },
+    })),
+    // Other servers' Spaces, each named with its server so the two never
+    // look alike; an offline one still opens and says so on its own.
+    ...(state.joined.length ? [{ heading: tr("spaces.joinedHeading") }] : []),
+    ...state.joined.map((space) => ({
+      id: space.id,
+      label: space.name,
+      detail: space.online ? space.serverLabel : tr("spaces.joinedOffline", { server: space.serverLabel }),
       kind: "radio" as const,
       checked: space.id === state.activeSpaceId,
       ...(space.color ? { swatch: space.color } : {}),
@@ -122,6 +145,11 @@ export default function SpaceSwitcher() {
       label: tr("spaces.manage"),
       onSelect: () => setManaging(true),
     },
+    ...(canJoin ? [{
+      id: "join",
+      label: tr("spaces.join"),
+      onSelect: () => openSettingsPage("tunnel", { sectionId: "join" }),
+    }] : []),
   ];
 
   return (
@@ -135,6 +163,7 @@ export default function SpaceSwitcher() {
         {(trigger) => (
           <button {...trigger} className="space-switcher header-control" disabled={state.switching}>
             <span className="space-switcher-name">{current?.name ?? tr("spaces.title")}</span>
+            {joinedCurrent && <span className="space-switcher-server">{joinedCurrent.serverLabel}</span>}
             <svg className="ui-icon ui-icon--sm" viewBox="0 0 16 16" aria-hidden="true">
               <path d="M4.5 6.5 8 10l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>

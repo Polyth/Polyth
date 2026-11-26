@@ -330,6 +330,29 @@ export interface SpaceSummaryDto extends SpaceDto {
   memberCount: number;
 }
 
+/** A Space of another Polyth server that this person joined through Polyth
+ *  Link and opens here as one more Space. Theirs alone: nobody else on this
+ *  server sees it (docs/architecture/polyth-link.md "Joined Spaces"). */
+export interface JoinedSpaceDto {
+  /** Opaque, `rmt_` + 24 hex; fits the Space cookie, names nothing by itself. */
+  id: string;
+  /** The other server's name for the Space. */
+  name: string;
+  color?: string;
+  icon?: string;
+  /** The person's role there. */
+  role: SpaceRole;
+  memberCount: number;
+  /** The other server, as the person named it or as it calls itself. */
+  serverLabel: string;
+  connectionId: string;
+  /** Whether the Link connection is up right now. */
+  online: boolean;
+  /** The person's own account id on the other server, which names them as
+   *  an author there ("me" in that Space's chats). Absent until connected. */
+  remoteUserId?: string;
+}
+
 /** `/api/spaces` payload: what the switcher renders. */
 export interface SpacesStateDto {
   user: UserDto;
@@ -338,6 +361,8 @@ export interface SpacesStateDto {
   deployment: DeploymentProfile;
   /** False when the caller may not create more spaces (quota/profile). */
   canCreate: boolean;
+  /** Spaces of other servers this person joined; `activeSpaceId` may name one. */
+  joined?: JoinedSpaceDto[];
 }
 
 /** Resolved, validated tenant context for one request, socket, or job.
@@ -8573,6 +8598,10 @@ export type NotificationRecord = {
   chat?: string;
   /** Someone asks the recipient to open this chat to these people. */
   accessRequest?: { messageSeq: number; people: Array<{ userId: string; name: string }> };
+  /** Set when the notice came from a Space of another Polyth server the
+   *  recipient joined (Polyth Link): `sessionId`/`projectId` are that
+   *  server's, and opening it switches to `id` first. */
+  joinedSpace?: { id: string; name: string; serverLabel: string };
 };
 
 // Well-known capability keys

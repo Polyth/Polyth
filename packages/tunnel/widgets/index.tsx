@@ -97,7 +97,7 @@ export default defineWebPackage((host) => () => {
       group: "System",
       icon: "qr",
       order: 42,
-      component: () => createElement(LinkPage, { host }),
+      component: ({ settingsTarget }) => createElement(LinkPage, { host, ...(settingsTarget ? { settingsTarget } : {}) }),
     }),
     () => {
       unsubAvailability();

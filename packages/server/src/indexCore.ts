@@ -75,7 +75,10 @@ import {
   SERVER_PERMISSION_WAITING_BUS,
   SERVER_TOOL_QUIET_BUS,
   SERVER_ACCOUNT_REMOVAL_BUS,
+  SERVER_JOINED_SPACES,
+  isJoinedSpaceId,
   SERVER_PERSON_DATA_VOLUME,
+  SERVER_PERSON_NOTICES,
   SESSION_ATTENTION_SERVICE,
   SESSION_PURPOSES,
   SESSION_START_STEPS,
@@ -95,6 +98,7 @@ import { defaultStallReport, watchEventLoopStalls, type EventLoopStall } from ".
 import {
   createSpaceGateway,
   spaceCookieHeader,
+  parseSpaceCookie,
   type SpaceGateway,
 } from "./spaces.ts";
 import { spaceRoutes } from "./routes/spaces.ts";
@@ -138,6 +142,7 @@ import { authRoutes } from "./routes/auth.ts";
 import { createLimitAnnouncements, createPushNotifier, createPushService, plainTextExcerpt, type PushPayload } from "./push.ts";
 import { pushRoutes } from "./routes/push.ts";
 import { createNotificationStore, type NotificationAccount } from "./notifications.ts";
+import { createPersonNotices } from "./notificationsPersonNotices.ts";
 import { createPackageNotify } from "./packageNotify.ts";
 import { resolveSessionAccount } from "./sessionAccount.ts";
 import { notificationRoutes } from "./routes/notifications.ts";
@@ -2454,6 +2459,13 @@ export async function boot(opts: BootOptions = {}) {
     },
   });
   devicePresence.subscribe(deferredAlerts.presenceChanged);
+  // Notices from Spaces a person joined on other servers (Polyth Link).
+  services.provide(SERVER_PERSON_NOTICES, createPersonNotices({
+    store: notifications, push, nativePush, presence: devicePresence,
+    spacesOf: (userId) => spaceGateway.store.spacesFor(userId).map((space) => space.id)
+      .filter((spaceId) => notificationAccess({ userId, spaceId })),
+    broadcast: (record, recipient) => broadcast.notification?.(record, recipient),
+  }));
   // One recipient's delivery leg: durable inbox row -> recipient-filtered WS
   // broadcast -> independent Web/native push. Shared by the turn notifier and
   // by person-message notifications so neither duplicates the ordering.
@@ -3697,6 +3709,11 @@ export async function boot(opts: BootOptions = {}) {
       store: spaceGateway.store,
       resolver: spaceGateway.resolver,
       audit: spaceGateway.audit,
+      joinedSpaces: () => services.get(SERVER_JOINED_SPACES),
+      joinedSpaceCookie: (rc) => {
+        const value = parseSpaceCookie(rc.req.headers.cookie, spaceGateway.cookieName);
+        return isJoinedSpaceId(value) ? value : null;
+      },
       setActiveSpaceCookie: (rc, spaceId) => rc.res.setHeader(
         "set-cookie",
         spaceCookieHeader({
@@ -3813,6 +3830,7 @@ export async function boot(opts: BootOptions = {}) {
     packagesDir: resolve(opts.webPackagesDir ?? packagesDir),
     version,
     remotePolicies: () => routeRegistry.policies(),
+    joinedSpaces: () => services.get(SERVER_JOINED_SPACES),
     listenerId: "public",
     admission: httpAdmission,
     notificationRecipients: {
@@ -3839,7 +3857,7 @@ export async function boot(opts: BootOptions = {}) {
     svc<BrowserForWs>("browser"),
     svc<DictationForWs>("dictation"),
     spaceGateway,
-    { presence: devicePresence },
+    { presence: devicePresence, joinedSpaces: () => services.get(SERVER_JOINED_SPACES) },
   );
   // WebSocket upgrades bypass the request handler, so they repeat the
   // listener's one trusted-proxy transport decision instead of inheriting it.

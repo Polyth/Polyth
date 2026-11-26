@@ -225,6 +225,7 @@ export function createAccounts(control: ControlPlane, passwords: PasswordService
         control.run('UPDATE principals SET status=?,revision=revision+1,auth_epoch=auth_epoch+1 WHERE id=?', status, userId);
         control.run('UPDATE users SET updated_at_ms=? WHERE id=?', now(), userId);
         control.run('DELETE FROM auth_sessions WHERE user_id=?', userId);
+        if (status !== 'active') control.run('UPDATE account_invitations SET revoked_at_ms=? WHERE user_id=? AND consumed_at_ms IS NULL AND revoked_at_ms IS NULL', now(), userId);
         control.bumpEpoch(); control.audit(actor, `identity.${status}`, userId);
         return get(userId);
       });

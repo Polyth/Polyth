@@ -37,6 +37,7 @@ const { slotSurfaces } = await import("../src/surfaces.ts");
 const { getState, setRailPlugin, setSessions } = await import("../src/store.ts");
 const { setUiSettings } = await import("../src/uiPrefs.ts");
 const { createNotificationCentre } = await import("../src/notificationCentre.ts");
+const { openNotifiedSession } = await import("../src/notificationTarget.ts");
 const {
   NOTIFICATION_SURFACE_ID, NotificationBell, NotificationCentrePanel, installNotificationCentre,
 } = await import("../src/components/NotificationCentre.tsx");
@@ -256,6 +257,56 @@ test("activating a live row marks it read optimistically and opens the session",
     await unmount();
     setSessions("p1", []);
   }
+});
+
+const JOINED = { id: "rmt_0123456789abcdef01234567", name: "Design", serverLabel: "Studio" };
+
+test("a joined Space's row names its source and switches there, landing on the session", async () => {
+  const { centre, calls } = await seededCentre([
+    rec({ id: "far", ts: 1, sessionId: "s there", projectId: "p-there", joinedSpace: JOINED }),
+  ]);
+  const requests: string[] = [];
+  const stub = (globalThis as { fetch?: unknown }).fetch;
+  (globalThis as { fetch?: unknown }).fetch = async (url: unknown) => {
+    requests.push(String(url));
+    return { ok: true, status: 200, statusText: "OK", json: async () => ({}), text: async () => "{}" };
+  };
+  const landed: string[] = [];
+  Object.defineProperty(window.location, "assign", { configurable: true, value: (url: string) => landed.push(url) });
+  const opened: string[] = [];
+  const { container, unmount } = await mount(createElement(NotificationCentrePanel, {
+    centre, open: async (id: string) => { opened.push(id); },
+  }));
+  try {
+    const row = container.querySelector<HTMLButtonElement>(".ntc-row")!;
+    assert.equal(row.querySelector(".ntc-source")!.textContent, "Design · Studio");
+    assert.equal(row.disabled, false, "its session is not in this server's registry");
+    await act(async () => { click(row); await new Promise((resolve) => setTimeout(resolve, 20)); });
+    assert.deepEqual(calls.filter((c) => c.op === "read"), [{ op: "read", arg: ["far"] }]);
+    assert.ok(requests.some((url) => url.endsWith(`/api/spaces/${JOINED.id}/activate`)), requests.join());
+    assert.deepEqual(landed, ["/p/p-there/s/s%20there"]);
+    assert.equal(opened.length, 0, "nothing opens before the reload");
+
+    // An alert that carries only the session id finds the same way there.
+    await openNotifiedSession("s there", async (id) => { opened.push(id); }, centre);
+    assert.equal(landed.length, 2);
+    await openNotifiedSession("s-here", async (id) => { opened.push(id); }, centre);
+    assert.deepEqual(opened, ["s-here"]);
+  } finally {
+    await unmount();
+    (globalThis as { fetch?: unknown }).fetch = stub;
+  }
+});
+
+test("a later notice of the same joined key replaces the row", async () => {
+  const { centre } = await seededCentre([rec({ id: "one", ts: 1, key: "rmt:c:k", joinedSpace: JOINED })]);
+  centre.append(rec({ id: "two", ts: 2, key: "rmt:c:k", joinedSpace: JOINED }));
+  assert.deepEqual(centre.getState().items.map((item) => item.id), ["two"]);
+  assert.equal(centre.getState().unread, 1);
+  // This server's own repeated keys keep every row.
+  centre.append(rec({ id: "three", ts: 3 }));
+  centre.append(rec({ id: "four", ts: 4 }));
+  assert.equal(centre.getState().items.length, 3);
 });
 
 test("Centre history off keeps unread rows only and names the empty state", async () => {

@@ -53,6 +53,8 @@ import { getLocaleSnapshot, subscribeLocale } from "./i18n/index.ts";
 import App from "./App.tsx";
 import LockScreen from "./components/LockScreen.tsx";
 import PasswordChangeScreen from "./components/PasswordChangeScreen.tsx";
+import InvitationScreen from "./components/InvitationScreen.tsx";
+import { forgetInvitationCode, takeInvitationCode } from "./invitationLink.ts";
 import { DesktopServerExit } from "./components/DesktopServerSwitcher.tsx";
 import SetupScreen from "./components/SetupScreen.tsx";
 import { dismissTopEscapeLayer } from "./useEscape.ts";
@@ -187,6 +189,9 @@ const bootOnce = (): void => {
   });
 };
 
+// Taken before anything renders, so the code leaves the address bar at once.
+let invitationCode = takeInvitationCode();
+
 type BootstrapPhase = "checking" | "setup" | "restart" | "locked" | "password-change" | "ready" | "unavailable";
 
 function Root() {
@@ -256,6 +261,11 @@ function Root() {
   useEffect(() => { noteLaunchPhase(phase); }, [phase]);
 
   if (phase === "checking") return null;
+  if (invitationCode && (phase === "locked" || phase === "password-change")) {
+    return <InvitationScreen key={locale} code={invitationCode} onDone={() => { invitationCode = null; reloadBehindVeil(); }} />;
+  }
+  // Someone already signed in here has no use for the link.
+  if (invitationCode && phase === "ready") { forgetInvitationCode(); invitationCode = null; }
   if (phase === "unavailable") return (
     <div className="lock-screen">
       <div className="lock-card">

@@ -22,6 +22,8 @@ Object.defineProperty(globalThis, "location", { value: dom.location, configurabl
 interface Call { method: string; path: string; body: Record<string, unknown> | null }
 let calls: Call[] = [];
 let guardrailsStatus = 200;
+// Off by default: the older-server path, where the wizard hands over a password.
+let invitationUrl: string | null = null;
 const json = (status: number, body: unknown) => ({
   ok: status < 400, status, statusText: "", headers: { get: () => null },
   json: async () => body, text: async () => JSON.stringify(body),
@@ -39,6 +41,9 @@ const json = (status: number, body: unknown) => ({
       : json(guardrailsStatus, { error: "conflict", message: "changed elsewhere" });
   }
   if (path === "/api/spaces/spc_home/members" && method === "POST") return json(200, { userId: body?.userId, spaceId: "spc_home", role: body?.role, createdAt: 1 });
+  if (path === "/api/auth/accounts/usr_new/invitation" && method === "POST") {
+    return invitationUrl ? json(200, { code: "x", url: invitationUrl, expiresAt: Date.UTC(2026, 11, 2) }) : json(404, { error: "not-found" });
+  }
   if (path.startsWith("/api/projects")) return json(200, []);
   return json(404, { error: "not-found" });
 };
@@ -131,6 +136,7 @@ test("a protected teammate gets Protected mode before any Space access, then see
     "POST /api/auth/accounts",
     "POST /api/auth/accounts/usr_new/guardrails",
     "POST /api/spaces/spc_home/members",
+    "POST /api/auth/accounts/usr_new/invitation",
   ]);
   const created = calls.find((call) => call.path === "/api/auth/accounts" && call.method === "POST")!;
   assert.deepEqual(created.body, { login: "iryna", name: "Iryna Petrenko", password });
@@ -150,6 +156,29 @@ test("a protected teammate gets Protected mode before any Space access, then see
   await view.click([...view.panel().querySelectorAll("button")].find((button) => /Fine-tune access/.test(button.textContent ?? ""))!);
   assert.deepEqual(view.events, ["created:usr_new", "open:usr_new"]);
   await view.unmount();
+});
+
+test("a server that issues invitation links hands over the link and folds the password away", async () => {
+  invitationUrl = `http://127.0.0.1:4400/#invite=pinv_${"B".repeat(43)}`;
+  try {
+    const view = await mount();
+    const [name] = [...view.panel().querySelectorAll<HTMLInputElement>(".user-wizard-body input")];
+    await view.type(name!, "Iryna Petrenko");
+    const password = view.panel().querySelectorAll<HTMLInputElement>(".user-wizard-body input")[2]!.value;
+    await view.click(view.submit());
+    await view.click(view.submit());
+
+    const values = [...view.panel().querySelectorAll(".user-wizard-body > .user-wizard-credentials .user-wizard-credential-value")].map((node) => node.textContent);
+    // The server only knew its loopback origin: the link uses the address this page was opened at.
+    assert.equal(values[0], `https://polyth.example.org/#invite=pinv_${"B".repeat(43)}`);
+    assert.match(view.panel().textContent ?? "", /The link works once, until/);
+    const fallback = view.panel().querySelector<HTMLDetailsElement>("details.user-wizard-fallback");
+    assert.ok(fallback && !fallback.open, "the temporary password waits behind a disclosure");
+    assert.ok(fallback.textContent?.includes(password));
+    await view.unmount();
+  } finally {
+    invitationUrl = null;
+  }
 });
 
 test("when Protected mode can't be turned on, the new account gets no Space access", async () => {
@@ -193,5 +222,41 @@ test("Back keeps what was typed, and the X closes from any step", async () => {
   assert.equal(view.panel().querySelector<HTMLInputElement>(".user-wizard-body input")!.value, "Dmytro");
   await view.click(view.panel().querySelector('.user-wizard-head button[aria-label="Close"]')!);
   assert.deepEqual(view.events, ["close"]);
+  await view.unmount();
+});
+
+test("with Polyth Link on and no internet address, Done offers to pair their Polyth app", async () => {
+  const { registerSlot } = await import("../src/slots.ts");
+  const off = registerSlot("settings.pages", "tunnel", () => null, 42, { label: "Polyth Link", group: "System", pageId: "tunnel" }, "tunnel");
+  const opened: unknown[] = [];
+  const listen = (event: Event) => opened.push((event as CustomEvent).detail);
+  window.addEventListener("polyth:settings-page", listen);
+  try {
+    const view = await mount();
+    const [name] = [...view.panel().querySelectorAll<HTMLInputElement>(".user-wizard-body input")];
+    await view.type(name!, "Iryna Petrenko");
+    await view.click(view.submit());
+    await view.click(view.submit());
+
+    const connect = view.panel().querySelector<HTMLElement>(".user-wizard-connect");
+    assert.ok(connect, "the Link way in is offered to a new Space member");
+    assert.match(connect.textContent ?? "", /opens only on your network/);
+    await view.click(connect.querySelector("button")!);
+    assert.ok(view.events.includes("close"), "the flow closes before the Link page opens");
+    assert.deepEqual(opened, [{ pageId: "tunnel", target: { sectionId: "pair-for", itemId: "usr_new" } }]);
+    await view.unmount();
+  } finally {
+    window.removeEventListener("polyth:settings-page", listen);
+    off();
+  }
+});
+
+test("without Polyth Link, or for an account outside the Space, Done offers no pairing", async () => {
+  const view = await mount();
+  const [name] = [...view.panel().querySelectorAll<HTMLInputElement>(".user-wizard-body input")];
+  await view.type(name!, "Iryna Petrenko");
+  await view.click(view.submit());
+  await view.click(view.submit());
+  assert.equal(view.panel().querySelector(".user-wizard-connect"), null);
   await view.unmount();
 });

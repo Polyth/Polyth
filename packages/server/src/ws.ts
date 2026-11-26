@@ -20,6 +20,8 @@ import type { SpaceGateway } from "./spaces.ts";
 import type { NotificationAccount } from "./notifications.ts";
 import { presenceDeviceKey, type DevicePresence } from "./devicePresence.ts";
 import { parseSpaceCookie } from "./spaces.ts";
+import { isJoinedSpaceId, type JoinedSpacesService } from "@polyth/plugins";
+import { mayUseJoinedSpaces } from "./joinedSpaceRouting.ts";
 import { sessionSummary } from "./sessionSummary.ts";
 import { BROADCAST_LIFECYCLES, rowForReader, sessionAccess } from "./sessionSharing.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
@@ -196,6 +198,8 @@ export interface WsGatewayOptions {
   streamBatchMs?: number;
   /** Which device each person is using; pages report it with `presence`. */
   presence?: DevicePresence;
+  /** Spaces of other servers people here joined: their `/ws` goes there. */
+  joinedSpaces?: () => JoinedSpacesService | undefined;
 }
 
 export interface WsGateway extends Broadcaster {
@@ -563,7 +567,7 @@ export function createWsGateway(
     if (spaces) {
       try {
         const ctx = spaces.resolve(resolution.principal, {
-          remembered: parseSpaceCookie(req.headers.cookie, spaces.cookieName),
+          remembered: ((value) => isJoinedSpaceId(value) ? null : value)(parseSpaceCookie(req.headers.cookie, spaces.cookieName)),
         });
         socketSpaceId = ctx.spaceId;
         notificationAccount = { userId: ctx.userId, spaceId: ctx.spaceId };
@@ -986,6 +990,25 @@ export function createWsGateway(
           denyUpgrade(socket, 403);
           return true;
         }
+        // A joined Space's live stream comes from its own server, through
+        // Polyth Link as the person's device; this server streams nothing.
+        const cookieSpace = spaces ? parseSpaceCookie(req.headers.cookie, spaces.cookieName) : null;
+        if (isJoinedSpaceId(cookieSpace)) {
+          const service = options?.joinedSpaces?.();
+          let person: string | null = null;
+          try {
+            person = spaces && service && mayUseJoinedSpaces(resolution.principal)
+              ? spaces.resolve(resolution.principal, { remembered: null }).userId
+              : null;
+          } catch { person = null; }
+          // A cookie left from a server the person has since left: this
+          // server's own stream, in their own Space (resolved below).
+          if (person && service?.get(person, cookieSpace)) {
+            void service.forwardUpgrade(person, cookieSpace, { path: req.url ?? "/ws", req, socket, head })
+              .catch(() => { socket.destroy(); });
+            return true;
+          }
+        }
         wss.handleUpgrade(req, socket, head, (ws) => {
           (ws as WebSocket & { _polythAuth?: WsAttachAuth })._polythAuth = auth;
           wss.emit("connection", ws, req);
@@ -1136,9 +1159,12 @@ export function createWsGateway(
         if (!allowWsCapability(sub.principal, REMOTE_CAPABILITY.coreNotificationsRead)) continue;
         // Same rule as `/api/notifications`: a row from a project the
         // recipient can no longer open (removed or limited away) is not shown.
-        try { spaces?.guard.assertProject({ spaceId: account.spaceId }, record.projectId); }
-        catch { continue; }
-        if (!projectVisibleToUser(account.userId, record.projectId)) continue;
+        // A joined Space's notice names the other server's project instead.
+        if (!record.joinedSpace) {
+          try { spaces?.guard.assertProject({ spaceId: account.spaceId }, record.projectId); }
+          catch { continue; }
+          if (!projectVisibleToUser(account.userId, record.projectId)) continue;
+        }
         send(ws, { type: "notification/added", notification: record });
       }
     },

@@ -12,7 +12,11 @@ import { useUiSettings } from "../uiPrefs.ts";
 import { cancelResume, continuePausedSession, forkSession, loadOlderEvents, openSession, resumeNow, sendMessage, setResumeCompact } from "../init.ts";
 import { friendlyError } from "../settings.ts";
 import { resumeOptionsForModel } from "../rateLimitRecovery.ts";
-import { useSpaces } from "../spaces.ts";
+import { selfInOpenSpace, useSpaces } from "../spaces.ts";
+
+/** "Me" as the open Space's server names me: in a joined Space, the person's
+ *  account on that server, which authors their messages there. */
+const activeBrowserAccountId = (): string => selfInOpenSpace(localAccountId());
 import { markSessionPerformance } from "../sessionPerformance.ts";
 import { requestComposerReplace } from "../composerInsert.ts";
 import {
@@ -40,7 +44,7 @@ import {
   type MutationGuards,
 } from "../messageActions.ts";
 import { applyComposerSeed, discardComposerSeed, loadSeedRecord } from "../drafts.ts";
-import { activeBrowserAccountId } from "../accountStorage.ts";
+import { activeBrowserAccountId as localAccountId } from "../accountStorage.ts";
 import { decidePersonAccess, firstNamesList, mentionTokensOf, personInitials, useSessionPeople } from "../sessionPeople.ts";
 import { assignPersonTones, personToneOf } from "../personIdentity.ts";
 import { canCollaborateSession } from "../sessionSharing.ts";

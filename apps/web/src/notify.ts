@@ -15,6 +15,7 @@ import { isNativeMobile } from "@polyth/mobile/runtime";
 import { webPushDeliveryActive } from "./push.ts";
 import { notificationCentre } from "./notificationCentre.ts";
 import { activeElsewhere } from "./devicePresence.ts";
+import { notificationSource, openNotificationRecord, openNotifiedSession } from "./notificationTarget.ts";
 import { eventHaptic } from "./haptics.ts";
 import {
   nativePushLocalProjectionEnabled,
@@ -252,7 +253,7 @@ function presentNative(spec: NotificationSpec, key: string, people = false): ((b
       // Activate the owning project+session (openSession switches atomically);
       // an archived/deleted session fails quietly — the app is focused anyway.
       window.focus();
-      void openSession(spec.sessionId).catch(() => undefined);
+      void openNotifiedSession(spec.sessionId, openSession).catch(() => undefined);
       n.close();
     };
   };
@@ -349,12 +350,13 @@ function showPeopleCard(record: NotificationRecord): void {
     body: record.body,
     conversation: {
       sessionId,
-      chat: recordChat(record),
+      chat: record.joinedSpace ? `${recordChat(record)} · ${notificationSource(record.joinedSpace)}` : recordChat(record),
       lines: thread.lines,
       count: thread.count,
       mention: thread.mention,
-      open: () => { void openSession(sessionId).catch(() => undefined); },
-      reply: (text) => replyFromCard(sessionId, text),
+      open: () => { void openNotificationRecord(record, openSession).catch(() => undefined); },
+      // A reply posts to this server, which does not have another server's chat.
+      ...(record.joinedSpace ? {} : { reply: (text: string) => replyFromCard(sessionId, text) }),
       ...(thread.accessRequest ? {
         accessRequest: {
           names: firstNamesList(thread.accessRequest.people.map((person) => person.name), getLocale()),

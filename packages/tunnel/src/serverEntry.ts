@@ -14,8 +14,12 @@ import {
   REMOTE_CAPABILITY,
   requireLocalTunnelAdmin,
 } from "@polyth/contracts";
+import { hasInstanceOwnerAuthority, requireInstanceOwnerAuthority } from "@polyth/contracts/instance-authority";
 import {
   SERVER_ACCOUNT_REMOVAL_BUS,
+  SERVER_JOINED_SPACES,
+  SERVER_PERSON_NOTICES,
+  packageDataDir,
   serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
@@ -28,6 +32,8 @@ import { buildTunnelDiagnostics, buildTunnelStatus, type TunnelLiveSnapshot } fr
 import { fallbackServerName, type TunnelServerNameDto } from "./serverName.ts";
 import { deviceBaseLabel, distinctDeviceLabels } from "./deviceLabel.ts";
 import { linkIpcPaths } from "./localIpc.ts";
+import { createJoinedSpaces } from "./joinedSpaces.ts";
+import { joinedRoutes } from "./joinedRoutes.ts";
 
 const OWNER_USER_ID = "usr_owner";
 
@@ -155,12 +161,15 @@ export function tunnelRoutes(deps: {
   fallbackServerName?: string;
   /** Hands a changed server name to the running Link host. */
   publishServerName?: (name: string) => Promise<void>;
+  /** Whether an account belongs to a Space; an invitation for another
+   *  person's app is refused without it. */
+  isSpaceMember?: (userId: string, spaceId: string) => boolean;
 }): RouteHandler {
   const fallbackName = deps.fallbackServerName ?? "Polyth";
-  const serverNameDto = (userId: string): TunnelServerNameDto => ({
+  const serverNameDto = (owner: boolean): TunnelServerNameDto => ({
     name: deps.store.serverName(),
     fallback: fallbackName,
-    editable: userId === OWNER_USER_ID,
+    editable: owner,
   });
   const connectionCount = (deviceId: string): number => {
     let count = 0;
@@ -182,8 +191,19 @@ export function tunnelRoutes(deps: {
     if (!device) throw notFound("unknown device");
     return device;
   };
+  /** A device of the caller's own, or one the caller, still the instance
+   *  owner, paired for someone else: it can see, revoke and forget it. */
+  const ownedOrIssuedDevice = (id: string, request: Parameters<RouteHandler>[0]) => {
+    const userId = request.space.userId;
+    const own = deps.store.deviceForUser(id, userId);
+    if (own) return own;
+    const device = deps.store.device(id);
+    if (device?.issuedBy === userId && hasInstanceOwnerAuthority(request)) return device;
+    throw notFound("unknown device");
+  };
   const assertPairingOwner = (id: string, userId: string): void => {
-    const owner = deps.store.pairingOwner(id) ?? deps.store.deviceByPairing(id)?.ownerUserId ?? OWNER_USER_ID;
+    const device = deps.store.pairingOwner(id) ? undefined : deps.store.deviceByPairing(id);
+    const owner = deps.store.pairingOwner(id) ?? device?.issuedBy ?? device?.ownerUserId ?? OWNER_USER_ID;
     if (owner !== userId) throw notFound("unknown pairing");
   };
   const dropDevicePrincipals = (deviceId: string): void => {
@@ -209,6 +229,23 @@ export function tunnelRoutes(deps: {
     if (path === "/api/tunnel/pairing" && method === "POST") {
       request.requireCapability(REMOTE_CAPABILITY.tunnelPairingManage);
       const body = await request.body();
+      // An instance owner may pair someone else's app: the device joins that
+      // person's account (full access there means that person's own rights,
+      // never the owner's), and only the owner sees and approves the pairing.
+      const forUserId = typeof body.forUserId === "string" && body.forUserId && body.forUserId !== request.space.userId
+        ? body.forUserId
+        : undefined;
+      if (body.forUserId !== undefined && body.forUserId !== null && typeof body.forUserId !== "string") {
+        json(400, { error: "invalid-input", message: "forUserId must be an account id" });
+        return true;
+      }
+      if (forUserId) {
+        requireInstanceOwnerAuthority(request, "only the instance owner can pair a device for another person");
+        if (!deps.isSpaceMember?.(forUserId, request.space.spaceId)) {
+          json(400, { error: "invalid-input", message: "that person is not a member of this Space" });
+          return true;
+        }
+      }
       // A new phone is trusted like this computer unless the owner narrows it.
       const profile = (body.profile === "observe" || body.profile === "interact" || body.profile === "developer"
         ? body.profile
@@ -241,13 +278,14 @@ export function tunnelRoutes(deps: {
         throw Object.assign(new Error("Polyth Link returned no pairing id"), { code: "invalid-response" });
       }
       try {
-        deps.store.claimPairing(pairingId, request.space.userId);
+        deps.store.claimPairing(pairingId, request.space.userId, forUserId);
       } catch (error) {
         try { await host.request("pairing.cancel", { id: pairingId }); } catch { /* fail closed locally */ }
         throw error;
       }
-      deps.events.emit("tunnel/pairing-created", { id: pairingId }, request.space.userId);
-      json(200, result);
+      deps.events.emit("tunnel/pairing-created", { id: pairingId, ...(forUserId ? { forUserId } : {}) }, request.space.userId);
+      if (forUserId) deps.store.audit("pairing-issued-for-account", { metadata: { pairingId, profile, issuedBy: request.space.userId, forUserId } });
+      json(200, forUserId ? { ...result, forUserId, profile } : result);
       return true;
     }
 
@@ -255,7 +293,9 @@ export function tunnelRoutes(deps: {
       request.requireCapability(REMOTE_CAPABILITY.tunnelPairingManage);
       if (method === "PUT") {
         // One name for the whole server: every member's phones show it.
-        if (request.space.userId !== OWNER_USER_ID) {
+        // The instance owner, whatever its account id (canonical installs
+        // do not use the legacy `usr_owner`).
+        if (!hasInstanceOwnerAuthority(request)) {
           throw Object.assign(new Error("not allowed"), { code: "forbidden" });
         }
         const body = await request.body();
@@ -265,7 +305,7 @@ export function tunnelRoutes(deps: {
         } catch { /* the host picks it up when it next starts */ }
         deps.events.emit("tunnel/server-name-changed", { name });
       }
-      json(200, serverNameDto(request.space.userId));
+      json(200, serverNameDto(hasInstanceOwnerAuthority(request)));
       return true;
     }
 
@@ -315,13 +355,26 @@ export function tunnelRoutes(deps: {
       return true;
     }
 
+    if (path === "/api/tunnel/devices/issued" && method === "GET") {
+      request.requireCapability(REMOTE_CAPABILITY.tunnelDevicesManage);
+      if (!hasInstanceOwnerAuthority(request)) {
+        json(200, []);
+        return true;
+      }
+      json(200, deps.store.listIssuedBy(request.space.userId).map((device) => ({
+        ...dto(device),
+        accountId: device.ownerUserId,
+      })));
+      return true;
+    }
+
     const deviceMatch = path.match(/^\/api\/tunnel\/devices\/([^/]+)(?:\/(revoke|restore|grants))?$/);
     if (deviceMatch) {
       const id = deviceMatch[1]!;
       const action = deviceMatch[2];
       if (method === "GET" && !action) {
         request.requireCapability(REMOTE_CAPABILITY.tunnelDevicesManage);
-        json(200, dto(ownedDevice(id, request.space.userId)));
+        json(200, dto(ownedOrIssuedDevice(id, request)));
         return true;
       }
       if (method === "PATCH" && !action) {
@@ -336,7 +389,7 @@ export function tunnelRoutes(deps: {
       }
       if (method === "POST" && action === "revoke") {
         request.requireCapability(REMOTE_CAPABILITY.tunnelDevicesManage);
-        ownedDevice(id, request.space.userId);
+        ownedOrIssuedDevice(id, request);
         const device = deps.store.revoke(id);
         if (!device) throw notFound("unknown device");
         dropDevicePrincipals(id);
@@ -425,7 +478,7 @@ export function tunnelRoutes(deps: {
       }
       if (method === "DELETE" && !action) {
         request.requireCapability(REMOTE_CAPABILITY.tunnelDevicesManage);
-        ownedDevice(id, request.space.userId);
+        ownedOrIssuedDevice(id, request);
         if (!deps.store.forget(id)) throw Object.assign(new Error("revoke the device first"), { code: "conflict" });
         json(200, { ok: true });
         return true;
@@ -441,7 +494,7 @@ export function tunnelRoutes(deps: {
 
     if (path === "/api/tunnel/identity/rotate" && method === "POST") {
       request.requireCapability(REMOTE_CAPABILITY.serverIdentityRotate);
-      if (request.space.userId !== OWNER_USER_ID) {
+      if (!hasInstanceOwnerAuthority(request)) {
         throw Object.assign(new Error("not allowed"), { code: "forbidden" });
       }
       const host = deps.host();
@@ -513,6 +566,15 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     },
   };
   host.services.provide(serverServiceKey<NativePushAuthorityService>("tunnel.native-push"), nativePushAuthority);
+
+  // Spaces joined on other servers: this server as each person's Link client.
+  const joined = createJoinedSpaces({
+    rootDir: () => join(packageDataDir({ storageDir: host.storageDir, pluginId: host.pluginId ?? "tunnel" }), "joined"),
+    // The chosen server name only: the host name is not the other server's business.
+    deviceLabel: () => store.serverName() || "Polyth server",
+    notices: () => host.services.get(SERVER_PERSON_NOTICES),
+  });
+  host.services.provide(SERVER_JOINED_SPACES, joined.service);
 
   const syncTrust = async (): Promise<void> => {
     if (!linkHost?.available) return;
@@ -791,32 +853,45 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     },
   });
 
+  const handleJoined = joinedRoutes(joined);
+  const handleHost = tunnelRoutes({
+    store,
+    events,
+    host: () => lifecycle.ready ? linkHost : null,
+    ensureHost: lifecycle.ensure,
+    connections,
+    status: async (userId) => buildTunnelStatus(await liveSnapshot(userId)),
+    diagnostics: async (userId) => buildTunnelDiagnostics(await liveSnapshot(userId)),
+    closeDeviceSockets: (deviceId) => host.closePairedDevice(deviceId),
+    fallbackServerName: fallbackName,
+    publishServerName: (name) => publishServerName(lifecycle.ready ? linkHost : null, name),
+    isSpaceMember: (userId, spaceId) => host.services
+      .get(serverServiceKey<{ hasAccess(userId: string, spaceId: string): boolean }>("tenancy.membership"))
+      ?.hasAccess(userId, spaceId) === true,
+  });
+
   return {
     remoteAccess: TUNNEL_REMOTE_ACCESS,
-    routes: tunnelRoutes({
-      store,
-      events,
-      host: () => lifecycle.ready ? linkHost : null,
-      ensureHost: lifecycle.ensure,
-      connections,
-      status: async (userId) => buildTunnelStatus(await liveSnapshot(userId)),
-      diagnostics: async (userId) => buildTunnelDiagnostics(await liveSnapshot(userId)),
-      closeDeviceSockets: (deviceId) => host.closePairedDevice(deviceId),
-      fallbackServerName: fallbackName,
-      publishServerName: (name) => publishServerName(lifecycle.ready ? linkHost : null, name),
-    }),
+    routes: async (request) => await handleJoined(request) || handleHost(request),
     async onEnable() {
       eventsEnabled = true;
       for (const ctx of httpContexts) attachEvents(ctx);
       accountRemoval?.dispose();
-      accountRemoval = host.services.get(SERVER_ACCOUNT_REMOVAL_BUS)?.subscribe(({ userId }) =>
-        revokeAccountDevices(userId, {
-          store,
-          connections,
-          closeDeviceSockets: (deviceId) => host.closePairedDevice(deviceId),
-          host: lifecycle.ready ? linkHost : null,
-          events,
-        }).then(() => undefined));
+      accountRemoval = host.services.get(SERVER_ACCOUNT_REMOVAL_BUS)?.subscribe(async ({ userId }) => {
+        const joinedGone = joined.removeAccount(userId);
+        try {
+          await revokeAccountDevices(userId, {
+            store,
+            connections,
+            closeDeviceSockets: (deviceId) => host.closePairedDevice(deviceId),
+            host: lifecycle.ready ? linkHost : null,
+            events,
+          });
+        } finally {
+          await joinedGone;
+        }
+      });
+      joined.start();
       await lifecycle.enable();
     },
     async onDisable() {
@@ -825,9 +900,11 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       eventsEnabled = false;
       for (const stop of detachers.values()) stop();
       detachers.clear();
+      await joined.stop();
       await lifecycle.disable();
     },
     stopIngress() {
+      void joined.stop();
       lifecycle.stop();
       eventsEnabled = false;
       for (const stop of detachers.values()) stop();

@@ -322,6 +322,63 @@ export interface ServerPersonDataVolume {
 export const SERVER_PERSON_DATA_VOLUME =
   serverServiceKey<ServerPersonDataVolume>("server.person-data-volume");
 
+/** A Space of another Polyth server that one person on this server joined
+ *  through Polyth Link (docs/architecture/polyth-link.md "Joined Spaces").
+ *  It belongs to that person alone: no one else on this server sees it. */
+export type JoinedSpace = import("@polyth/contracts").JoinedSpaceDto;
+
+/** Where a request goes while a joined Space is active. The host decides
+ *  which paths follow the Space (forwarded) and which stay on this server;
+ *  the service only carries a request it is handed, as the person's paired
+ *  device on the other server, and never forwards this server's cookies,
+ *  authorization or CSRF headers. */
+export interface JoinedSpacesService {
+  /** The joined Spaces of one person (cached lists; never another person's). */
+  list(userId: string): JoinedSpace[];
+  /** The joined Space with this id, only when it is this person's. */
+  get(userId: string, joinedSpaceId: string): JoinedSpace | undefined;
+  /** Sends one HTTP request to the other server in that Space and streams
+   *  the answer back. `path` is the canonical path with its query. */
+  forwardHttp(userId: string, joinedSpaceId: string, input: {
+    method: string;
+    path: string;
+    req: import("node:http").IncomingMessage;
+    res: import("node:http").ServerResponse;
+  }): Promise<void>;
+  /** Hands a WebSocket upgrade (`/ws`) to the other server in that Space. */
+  forwardUpgrade(userId: string, joinedSpaceId: string, input: {
+    path: string;
+    req: import("node:http").IncomingMessage;
+    socket: import("node:stream").Duplex;
+    head: Buffer;
+  }): Promise<void>;
+}
+
+export const SERVER_JOINED_SPACES =
+  serverServiceKey<JoinedSpacesService>("server.joined-spaces");
+
+/** Notices for one person that no session of this server owns: today, those
+ *  a joined Space's own server raised for the person (a mention, a message,
+ *  an approval or question, a finished turn). The host files them in the
+ *  person's notification list and sends them to the person's devices like
+ *  any other, by the person's notification settings, tagged with
+ *  `record.joinedSpace`; they never enter a session's history. A later
+ *  notice with the same `key` replaces the earlier one. */
+export interface ServerPersonNotices {
+  deliver(userId: string, record: import("@polyth/contracts").NotificationRecord & {
+    joinedSpace: NonNullable<import("@polyth/contracts").NotificationRecord["joinedSpace"]>;
+  }): void;
+  /** The other server cleared it (read there, answered, withdrawn). */
+  withdraw(userId: string, key: string): void;
+}
+
+export const SERVER_PERSON_NOTICES =
+  serverServiceKey<ServerPersonNotices>("server.person-notices");
+
+/** True for an id shaped like a joined Space's (not proof that it is one). */
+export const isJoinedSpaceId = (value: string | null | undefined): value is string =>
+  typeof value === "string" && /^rmt_[0-9a-f]{24}$/.test(value);
+
 /** An event source a package offers agents (Monitoring, Git, Home Assistant…). */
 export interface AgentEventSourceDescriptor {
   /** Lowercase id, e.g. `monitoring`. */

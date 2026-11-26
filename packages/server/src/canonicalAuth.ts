@@ -150,7 +150,9 @@ export function createCanonicalAuthGateway(options: {
     const session = options.identity.sessions.resolve(token);
     if (session && changePending(session.userId)) return { principal: ANONYMOUS, authenticated: false };
     if (session) return { principal: withCeiling(principalForSession(session) as Extract<AuthPrincipal, { kind: "ui-session" }>, session.userId), authenticated: true };
-    const debugPrincipal = ingress.loopback ? debugOwnerPrincipal() : null;
+    // Forwarding headers on a loopback socket mean a relay on this computer
+    // (an unconfigured tunnel) is passing someone else's request along.
+    const debugPrincipal = ingress.loopback && request.forwarded !== true ? debugOwnerPrincipal() : null;
     return debugPrincipal
       ? { principal: debugPrincipal, authenticated: true }
       : { principal: ANONYMOUS, authenticated: false };

@@ -45,9 +45,9 @@ test("debug agent access permits explicit operator override outside loopback-onl
   await bootsDebugOverride({
     POLYTH_DEBUG_AGENT_ACCESS: "1",
     POLYTH_PUBLIC_ORIGIN: "https://polyth.example",
-    POLYTH_TRUSTED_PROXIES: "127.0.0.1",
+    POLYTH_TRUSTED_PROXIES: "10.0.0.1",
     POLYTH_DEPLOYMENT_PROFILE: "local-trusted",
-  }, "127.0.0.1", 4482);
+  }, "0.0.0.0", 4482);
 
   await bootsDebugOverride({
     POLYTH_DEBUG_AGENT_ACCESS: "1",
@@ -101,4 +101,30 @@ test("agent beta is fail-closed outside loopback-only local-trusted deployment",
     POLYTH_PUBLIC_ORIGIN: "https://polyth.example",
     POLYTH_DEPLOYMENT_PROFILE: "local-trusted",
   }, "127.0.0.1", 4486);
+});
+
+test("debug agent access refuses to start behind a proxy trusted at a loopback address", async () => {
+  for (const [proxies, port] of [["127.0.0.1", 4487], ["10.0.0.1, ::1", 4488], ["::ffff:127.0.0.1", 4489]] as const) {
+    const keys = ["POLYTH_DEBUG_AGENT_ACCESS", "POLYTH_PUBLIC_ORIGIN", "POLYTH_TRUSTED_PROXIES", "POLYTH_DEPLOYMENT_PROFILE"] as const;
+    const before = keys.map((key) => [key, process.env[key]] as const);
+    Object.assign(process.env, {
+      POLYTH_DEBUG_AGENT_ACCESS: "1",
+      POLYTH_PUBLIC_ORIGIN: "https://polyth.example",
+      POLYTH_TRUSTED_PROXIES: proxies,
+      POLYTH_DEPLOYMENT_PROFILE: "local-trusted",
+    });
+    const dataDir = tempData();
+    try {
+      await assert.rejects(
+        () => boot({ port, hostname: "127.0.0.1", dataDir }),
+        /POLYTH_DEBUG_AGENT_ACCESS cannot be combined with a loopback POLYTH_TRUSTED_PROXIES entry/,
+      );
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+      for (const [key, value] of before) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  }
 });

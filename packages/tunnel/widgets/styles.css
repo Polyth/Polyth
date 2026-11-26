@@ -256,6 +256,30 @@
 
 /* Pairing dialog */
 
+.pkg-tunnel-for {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+/* Who the device will act as: stated before the code, in full-strength text. */
+.pkg-tunnel-for-notice {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--sunken);
+  color: var(--text);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
 .pkg-tunnel-pair {
   display: flex;
   flex-direction: column;
@@ -341,7 +365,71 @@
   font-weight: 650;
 }
 
+/* Other Polyth servers: paste a pairing link, then the servers joined. */
+
+.pkg-tunnel-join {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-block: var(--space-2);
+}
+
+.pkg-tunnel-join > label,
+.pkg-tunnel-rename > label {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.pkg-tunnel-join-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.pkg-tunnel-join-row > input {
+  flex: 1 1 14rem;
+  min-inline-size: 0;
+}
+
+.pkg-tunnel-join .pkg-tunnel-meta {
+  margin: 0;
+}
+
+.pkg-tunnel-joined-done {
+  margin: 0 0 var(--space-2);
+  text-align: start;
+}
+
+.pkg-tunnel-rename {
+  padding-top: var(--space-3);
+}
+
+/* Every Space name stays readable: long lists wrap. */
+.pkg-tunnel-device-copy .pkg-tunnel-server-spaces {
+  overflow-wrap: anywhere;
+}
+
+.pkg-tunnel-join-progress {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.pkg-tunnel-pair .pkg-tunnel-join-fingerprint {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
 @container tunnel-page (max-width: 30rem) {
+  /* The name keeps its line; status and actions wrap under it. */
+  .pkg-tunnel-server .pkg-tunnel-device-copy {
+    flex-basis: calc(100% - var(--space-6));
+  }
+
   .pkg-tunnel-device-head {
     flex-wrap: wrap;
   }

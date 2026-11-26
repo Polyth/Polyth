@@ -424,6 +424,41 @@ export async function resetAccountPassword(accountId: string, password: string):
   if (!result.response.ok) throw authFailure(result.response, result.body);
 }
 
+/** A one-time link that lets a new person choose their own password and sign in. */
+export interface AccountInvitation { url: string; expiresAt: number }
+
+/** Instance owner issues an invitation link for an account; any earlier one stops working. */
+export async function inviteAccount(accountId: string): Promise<AccountInvitation> {
+  const result = await authJson<{ url?: unknown; expiresAt?: unknown }>(`/api/auth/accounts/${encodeURIComponent(accountId)}/invitation`, {});
+  if (!result.response.ok) throw authFailure(result.response, result.body);
+  const { url, expiresAt } = result.body;
+  if (typeof url !== "string" || typeof expiresAt !== "number") throw new Error("invalid invitation response");
+  return { url, expiresAt };
+}
+
+/** Who an invitation link is for, before its holder chooses a password. */
+export interface InvitationPreview { name: string; login: string; expiresAt: number }
+
+export async function previewInvitation(code: string): Promise<InvitationPreview> {
+  const result = await authJson<{ name?: unknown; login?: unknown; expiresAt?: unknown }>("/api/auth/invitation/preview", { code });
+  if (!result.response.ok) throw authFailure(result.response, result.body);
+  const { name, login, expiresAt } = result.body;
+  if (typeof name !== "string" || typeof login !== "string" || typeof expiresAt !== "number") throw new Error("invalid invitation response");
+  return { name, login, expiresAt };
+}
+
+/** Accepting the link sets the person's own password and signs this browser in. */
+export async function acceptInvitation(code: string, login: string, password: string): Promise<AccountLoginResult> {
+  const { response, body } = await authJson<{
+    ok?: unknown; error?: string; message?: string; retryAfterSec?: number;
+  }>("/api/auth/invitation/accept", { code, password });
+  if (!response.ok) return accountAuthResult(response, body);
+  const me = await request<{ id?: unknown }>("/api/auth/me").catch(() => null);
+  if (me && typeof me.id === "string" && me.id.trim()) acceptAuthenticatedBrowserAccount(me.id);
+  rememberLogin(login.trim().toLowerCase());
+  return { ok: true };
+}
+
 /** Instance owner (or the account itself) reads an account's limits and today's use. */
 export async function accountLimits(accountId: string): Promise<AccountLimitsDto> {
   return request<AccountLimitsDto>(`/api/auth/accounts/${encodeURIComponent(accountId)}/limits`);

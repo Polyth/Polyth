@@ -22,6 +22,17 @@ export interface NotificationDelivery {
   recipient: NotificationAccount;
 }
 
+/** A notice relayed from a Space the person joined on another server. It
+ *  belongs to the person, not to one of their Spaces here. */
+export type JoinedNotice = NotificationRecord & { joinedSpace: NonNullable<NotificationRecord["joinedSpace"]> };
+
+/** Storage scope of a person's joined notices; no real Space has this id. Each
+ *  is one row, listed, read and cleared from any Space the person is in. */
+const PERSON_SCOPE = "@person";
+/** Cleared or evicted joined notices remembered per person, so the other
+ *  server still listing one does not bring it back. */
+const DISMISSED_CAP = 500;
+
 export interface NotificationStore {
   list(account: NotificationAccount, after?: number): Promise<{ items: NotificationRecord[]; unread: number }>;
   list(after?: number): Promise<{ items: NotificationRecord[]; unread: number }>;
@@ -45,17 +56,27 @@ export interface NotificationStore {
   /** Drop a permanently deleted session's creator bindings in every Space.
    * Inbox items stay; nothing is written when the session had none. */
   forgetSession(sessionId: string): Promise<number>;
+  /** File a joined notice for one person; `record.ts` is the other server's.
+   *  A later notice with the same key replaces the row. Returns the row only
+   *  when there is something new to announce: a read or malformed record, and
+   *  one no newer than what was filed or cleared under its key, return nothing. */
+  deliverPerson(userId: string, record: JoinedNotice): Promise<NotificationRecord | undefined>;
+  /** Remove that person's joined notice; returns how many rows went. */
+  withdrawPerson(userId: string, key: string): Promise<number>;
 }
 
 interface StoredNotification {
   record: NotificationRecord;
   recipient: NotificationAccount;
+  /** Joined notices only: the other server's own timestamp. */
+  sourceTs?: number;
 }
 
 interface NotificationFile {
   version: 2;
   items: StoredNotification[];
   recipients: Array<{ sessionId: string; recipient: NotificationAccount }>;
+  dismissed?: Array<{ userId: string; key: string; sourceTs: number }>;
 }
 
 const isNonEmptyString = (v: unknown): v is string => typeof v === "string" && v.length > 0;
@@ -68,6 +89,10 @@ const accountKey = (account: NotificationAccount): string => `${account.userId}\
 const recipientKey = (sessionId: string, spaceId: string): string => `${spaceId}\0${sessionId}`;
 const sameAccount = (left: NotificationAccount, right: NotificationAccount): boolean =>
   left.userId === right.userId && left.spaceId === right.spaceId;
+const isPersonEntry = (entry: StoredNotification): boolean => entry.recipient.spaceId === PERSON_SCOPE;
+/** An account sees its own Space's rows and its person's joined notices. */
+const visibleTo = (entry: StoredNotification, account: NotificationAccount): boolean =>
+  sameAccount(entry.recipient, account) || (isPersonEntry(entry) && entry.recipient.userId === account.userId);
 const LEGACY_TEST_ACCOUNT: NotificationAccount = { userId: "__isolated_test__", spaceId: "__isolated_test__" };
 
 function validateRecord(raw: unknown): NotificationRecord | null {
@@ -110,11 +135,41 @@ function peopleFields(r: Record<string, unknown>): Pick<NotificationRecord, "aut
   };
 }
 
+const bounded = (value: unknown, max: number): string => typeof value === "string" ? value.slice(0, max) : "";
+
+function joinedSpaceOf(raw: unknown): JoinedNotice["joinedSpace"] | null {
+  const value = raw as { id?: unknown; name?: unknown; serverLabel?: unknown } | null | undefined;
+  if (!value || typeof value !== "object" || !isNonEmptyString(value.id)) return null;
+  return { id: bounded(value.id, 128), name: bounded(value.name, 200), serverLabel: bounded(value.serverLabel, 200) };
+}
+
 function validateStored(raw: unknown): StoredNotification | null {
   if (!raw || typeof raw !== "object") return null;
   const value = raw as Record<string, unknown>;
   const record = validateRecord(value.record);
-  return record && validAccount(value.recipient) ? { record, recipient: value.recipient } : null;
+  if (!record || !validAccount(value.recipient)) return null;
+  const entry = { record, recipient: value.recipient };
+  if (!isPersonEntry(entry)) return entry;
+  const joinedSpace = joinedSpaceOf((value.record as { joinedSpace?: unknown }).joinedSpace);
+  const sourceTs = Number.isSafeInteger(value.sourceTs) ? value.sourceTs as number : 0;
+  return joinedSpace ? { ...entry, record: { ...record, joinedSpace }, sourceTs } : null;
+}
+
+/** Another server's data, rebuilt field by field with bounded text. An access
+ *  request is dropped: it can only be answered on the server that asked. */
+function joinedInput(raw: JoinedNotice): Omit<JoinedNotice, "id" | "ts" | "read"> | null {
+  const joinedSpace = joinedSpaceOf(raw?.joinedSpace);
+  if (!joinedSpace || !KINDS.includes(raw.kind)) return null;
+  const { key, sessionId, projectId } = raw;
+  if (![key, sessionId, projectId].every((id) => isNonEmptyString(id) && id.length <= 512)) return null;
+  const { author, chat } = peopleFields(raw as unknown as Record<string, unknown>);
+  return {
+    key, kind: raw.kind, sessionId, projectId,
+    title: bounded(raw.title, 200), body: bounded(raw.body, 1000),
+    ...(author ? { author: { userId: bounded(author.userId, 128), name: bounded(author.name, 200) } } : {}),
+    ...(chat !== undefined ? { chat: bounded(chat, 200) } : {}),
+    joinedSpace,
+  };
 }
 
 export function createNotificationStore(opts: {
@@ -129,6 +184,16 @@ export function createNotificationStore(opts: {
   const hasAccess = opts.hasAccess ?? (() => true);
   let items: StoredNotification[] = [];
   const recipients = new Map<string, NotificationAccount>();
+  /** userId → joined key → the newest source time that must not come back,
+   *  oldest first. */
+  const dismissed = new Map<string, Map<string, number>>();
+  const dismiss = (userId: string, key: string, sourceTs: number): void => {
+    const keys = dismissed.get(userId) ?? new Map<string, number>();
+    dismissed.set(userId, keys);
+    keys.delete(key);
+    keys.set(key, sourceTs);
+    if (keys.size > DISMISSED_CAP) keys.delete(keys.keys().next().value!);
+  };
   try {
     const raw = JSON.parse(readFileSync(opts.file, "utf8")) as Partial<NotificationFile>;
     // v1 had no trustworthy owner. Never adopt it into any account.
@@ -151,6 +216,11 @@ export function createNotificationStore(opts: {
           recipients.set(recipientKey(candidate.sessionId, candidate.recipient.spaceId), candidate.recipient);
         }
       }
+      for (const candidate of Array.isArray(raw.dismissed) ? raw.dismissed : []) {
+        if (isNonEmptyString(candidate?.userId) && isNonEmptyString(candidate.key) && Number.isSafeInteger(candidate.sourceTs)) {
+          dismiss(candidate.userId, candidate.key, candidate.sourceTs);
+        }
+      }
       const counts = new Map<string, number>();
       items = items.slice().reverse().filter((entry) => {
         const key = accountKey(entry.recipient);
@@ -169,14 +239,18 @@ export function createNotificationStore(opts: {
 
   let lastTs = items.reduce((max, entry) => Math.max(max, entry.record.ts), 0);
   const unreadCount = (account: NotificationAccount): number =>
-    items.reduce((count, entry) => count + (!entry.record.read && sameAccount(entry.recipient, account) ? 1 : 0), 0);
+    items.reduce((count, entry) => count + (!entry.record.read && visibleTo(entry, account) ? 1 : 0), 0);
   const authorized = (account: NotificationAccount): boolean => validAccount(account) && hasAccess(account);
   const snapshotRecipients = () => [...recipients.entries()].map(([key, recipient]) => ({
     sessionId: key.slice(recipient.spaceId.length + 1), recipient,
   }));
   const persist = (nextItems: StoredNotification[]): void => {
     mkdirSync(dirname(opts.file), { recursive: true });
-    const body: NotificationFile = { version: 2, items: nextItems, recipients: snapshotRecipients() };
+    const gone = [...dismissed].flatMap(([userId, keys]) => [...keys].map(([key, sourceTs]) => ({ userId, key, sourceTs })));
+    const body: NotificationFile = {
+      version: 2, items: nextItems, recipients: snapshotRecipients(),
+      ...(gone.length ? { dismissed: gone } : {}),
+    };
     atomicWriteSync(opts.file, `${JSON.stringify(body)}\n`, 0o600);
   };
 
@@ -203,13 +277,13 @@ export function createNotificationStore(opts: {
       const after: number = typeof first === "number" ? first : second;
       if (!authorized(account)) return { items: [], unread: 0 };
       return {
-        items: items.filter((entry) => sameAccount(entry.recipient, account) && entry.record.ts > after).map((entry) => entry.record),
+        items: items.filter((entry) => visibleTo(entry, account) && entry.record.ts > after).map((entry) => entry.record),
         unread: unreadCount(account),
       };
     }),
     get: (account, id) => serialized(() => {
       if (!authorized(account)) return undefined;
-      return items.find((entry) => entry.record.id === id && sameAccount(entry.recipient, account))?.record;
+      return items.find((entry) => entry.record.id === id && visibleTo(entry, account))?.record;
     }),
     add: (first: NotificationAccount | Omit<NotificationRecord, "id" | "ts" | "read">, second?: Omit<NotificationRecord, "id" | "ts" | "read">) => serialized(() => {
       const account = second === undefined ? LEGACY_TEST_ACCOUNT : first as NotificationAccount;
@@ -261,7 +335,7 @@ export function createNotificationStore(opts: {
       const wanted = new Set(ids);
       let updated = 0;
       const nextItems = items.map((entry) => {
-        if (sameAccount(entry.recipient, account) && !entry.record.read && wanted.has(entry.record.id)) {
+        if (visibleTo(entry, account) && !entry.record.read && wanted.has(entry.record.id)) {
           updated++;
           return { ...entry, record: { ...entry.record, read: true } };
         }
@@ -274,7 +348,7 @@ export function createNotificationStore(opts: {
       if (!authorized(account)) return { updated: 0, unread: 0 };
       let updated = 0;
       const nextItems = items.map((entry) => {
-        if (sameAccount(entry.recipient, account) && !entry.record.read) {
+        if (visibleTo(entry, account) && !entry.record.read) {
           updated++;
           return { ...entry, record: { ...entry.record, read: true } };
         }
@@ -285,9 +359,15 @@ export function createNotificationStore(opts: {
     }),
     clear: (account: NotificationAccount = LEGACY_TEST_ACCOUNT) => serialized(() => {
       if (!authorized(account)) return { cleared: 0, unread: 0 };
-      const nextItems = items.filter((entry) => !sameAccount(entry.recipient, account));
+      const nextItems = items.filter((entry) => !visibleTo(entry, account));
       const cleared = items.length - nextItems.length;
-      if (cleared) { persist(nextItems); items = nextItems; }
+      if (cleared) {
+        for (const entry of items) {
+          if (isPersonEntry(entry) && visibleTo(entry, account)) dismiss(account.userId, entry.record.key, entry.sourceTs ?? 0);
+        }
+        persist(nextItems);
+        items = nextItems;
+      }
       return { cleared, unread: 0 };
     }),
     removeAccount: (userId) => serialized(() => {
@@ -301,9 +381,12 @@ export function createNotificationStore(opts: {
         recipientCount++;
       }
       const cleared = items.length - nextItems.length;
-      if (!cleared && !recipientCount) return { cleared: 0, recipients: 0 };
+      const gone = dismissed.get(userId);
+      if (!cleared && !recipientCount && !gone) return { cleared: 0, recipients: 0 };
+      dismissed.delete(userId);
       try { persist(nextItems); }
       catch (error) {
+        if (gone) dismissed.set(userId, gone);
         recipients.clear();
         for (const [key, recipient] of beforeRecipients) recipients.set(key, recipient);
         throw error;
@@ -324,6 +407,35 @@ export function createNotificationStore(opts: {
         throw error;
       }
       return doomed.length;
+    }),
+    deliverPerson: (userId, raw) => serialized(() => {
+      const input = isNonEmptyString(userId) ? joinedInput(raw) : null;
+      if (!input || raw.read === true) return undefined;
+      const sourceTs = Number.isSafeInteger(raw.ts) ? raw.ts : 0;
+      if (sourceTs <= (dismissed.get(userId)?.get(input.key) ?? -1)) return undefined;
+      const account = { userId, spaceId: PERSON_SCOPE };
+      const mine = (entry: StoredNotification): boolean => sameAccount(entry.recipient, account) && entry.record.key === input.key;
+      const previous = items.find(mine);
+      if (previous && sourceTs <= (previous.sourceTs ?? 0)) return undefined;
+      const ts = Math.max(now(), lastTs + 1);
+      const record: NotificationRecord = { id: randomUUID(), ...input, ts, read: false };
+      const added = [...items.filter((entry) => !mine(entry)), { record, recipient: account, sourceTs }];
+      const nextItems = evictFor(added, account);
+      if (nextItems !== added) {
+        const kept = new Set(nextItems);
+        for (const entry of added) if (!kept.has(entry)) dismiss(userId, entry.record.key, entry.sourceTs ?? 0);
+      }
+      persist(nextItems);
+      items = nextItems;
+      lastTs = ts;
+      return record;
+    }),
+    withdrawPerson: (userId, key) => serialized(() => {
+      const nextItems = items.filter((entry) =>
+        !(isPersonEntry(entry) && entry.recipient.userId === userId && entry.record.key === key));
+      const removed = items.length - nextItems.length;
+      if (removed) { persist(nextItems); items = nextItems; }
+      return removed;
     }),
   } as NotificationStore;
 }

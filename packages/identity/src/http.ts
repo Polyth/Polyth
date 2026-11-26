@@ -86,7 +86,7 @@ const statusFor: Readonly<Record<string, number>> = {
   replayed: 409, cancelled: 409, 'uncertain-exchange': 409, 'provider-scope-escalation': 409,
   'private-network-approval-required': 409, 'owner-credential-required': 409,
   'owner-confirmation-required': 403, 'password-change-required': 403,
-  'invalid-input': 400, 'invalid-provider-transaction': 400, 'callback-mismatch': 400,
+  'invalid-input': 400, 'invalid-invitation': 400, 'invalid-provider-transaction': 400, 'callback-mismatch': 400,
   'request-timeout': 408, 'recovery-ack-required': 400, 'body-too-large': 413, 'rate-limited': 429,
   'invalid-provider-response': 502, 'invalid-identity': 502,
   'recovery-required': 503, unavailable: 503, 'provider-unavailable': 503,
@@ -98,6 +98,7 @@ const PASSWORD_CHANGE_ROUTES: ReadonlySet<string> = new Set([
   'GET /api/auth/status', 'GET /api/auth/providers', 'GET /api/auth/me',
   'POST /api/auth/reauthenticate', 'POST /api/auth/password', 'POST /api/auth/logout', 'POST /api/auth/logout-all',
   'POST /api/auth/login', 'POST /api/auth/recover',
+  'POST /api/auth/invitation/preview', 'POST /api/auth/invitation/accept',
   'POST /api/auth/passkeys/authenticate/options', 'POST /api/auth/passkeys/authenticate/complete',
   'POST /api/auth/providers/login/begin', 'POST /api/auth/providers/login/complete',
   'POST /api/auth/cli/device', 'POST /api/auth/cli/device/token', 'POST /api/auth/cli/logout',
@@ -109,6 +110,7 @@ const accountPermissionsPath = /^\/api\/auth\/accounts\/([A-Za-z0-9][A-Za-z0-9_-
 const accountProfilePath = /^\/api\/auth\/accounts\/([A-Za-z0-9][A-Za-z0-9_-]{0,199})\/profile$/;
 const accountPasswordPath = /^\/api\/auth\/accounts\/([A-Za-z0-9][A-Za-z0-9_-]{0,199})\/password$/;
 const accountLoginPath = /^\/api\/auth\/accounts\/([A-Za-z0-9][A-Za-z0-9_-]{0,199})\/login$/;
+const accountInvitationPath = /^\/api\/auth\/accounts\/([A-Za-z0-9][A-Za-z0-9_-]{0,199})\/invitation$/;
 const providerEnabledPath = /^\/api\/auth\/providers\/([a-z0-9][a-z0-9_-]{0,63})\/enabled$/;
 const linkPath = /^\/api\/auth\/links\/(lid_[a-f0-9-]{36})$/;
 const cliTokenPath = /^\/api\/auth\/cli\/tokens\/(tok_[a-f0-9-]{36})$/;
@@ -277,6 +279,15 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
   const administerAccounts = async (
     path: string, method: string, body: Record<string, unknown>, token: string | null,
   ): Promise<unknown | null> => {
+    const invitation = accountInvitationPath.exec(path);
+    if (invitation && (method === 'POST' || method === 'DELETE')) {
+      if (!token) throw controlError('unauthorized', 'Authentication required');
+      if (method === 'DELETE') return identity.invitations.revoke(token, invitation[1]!);
+      const ttl = body.ttlMs;
+      if (ttl !== undefined && typeof ttl !== 'number') throw controlError('invalid-input', 'ttlMs must be a number');
+      const issuedInvite = identity.invitations.issue(token, invitation[1]!, ttl === undefined ? {} : { ttlMs: ttl });
+      return { ...issuedInvite, url: `${origin}/#invite=${issuedInvite.code}` };
+    }
     if (method !== 'POST') return null;
     const session = (): string => {
       if (!token) throw controlError('unauthorized', 'Authentication required');
@@ -478,6 +489,8 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
           }
           else if (path === '/api/auth/me') {
             send(200, meBody(identity.accounts.current(token!)));
+          } else if (accountInvitationPath.test(path)) {
+            send(200, { invitation: identity.invitations.pending(token!, accountInvitationPath.exec(path)![1]!) });
           } else if (accountGuardrailsPath.test(path)) {
             send(200, identity.guardrails.get(token!, accountGuardrailsPath.exec(path)![1]!));
           } else if (accountLimitsPath.test(path)) {
@@ -545,6 +558,10 @@ export function createIdentityHttpAdapter(identity: IdentityService, options: {
           issued(result);
         } else if (req.method === 'POST' && path === '/api/auth/login') {
           issued(await identity.credentials.login({ login: text(body, 'login'), password: text(body, 'password'), address: req.socket.remoteAddress, label: req.headers['user-agent'] }));
+        } else if (req.method === 'POST' && path === '/api/auth/invitation/preview') {
+          send(200, identity.invitations.preview(text(body, 'code'), req.socket.remoteAddress));
+        } else if (req.method === 'POST' && path === '/api/auth/invitation/accept') {
+          issued(await identity.invitations.accept({ code: text(body, 'code'), password: text(body, 'password'), address: req.socket.remoteAddress, label: req.headers['user-agent'] }));
         } else if (req.method === 'POST' && path === '/api/auth/providers/login/begin') {
           if (!secure) throw controlError('unavailable', 'External browser identity requires an HTTPS Polyth origin');
           send(200, await providerLoginService().begin({

@@ -201,6 +201,13 @@ function saveNavigationHint(key: "polyth.activeProjectId" | "polyth.activeSessio
   try { localStorage.setItem(key, value); } catch { /* quota or unavailable storage */ }
 }
 
+/** A Space switch: the remembered project and chat belong to the Space being
+ *  left and name nothing in the next one (here or on another server). */
+export function forgetNavigationHints(): void {
+  saveNavigationHint("polyth.activeProjectId", "");
+  saveNavigationHint("polyth.activeSessionId", "");
+}
+
 export async function hydrateClientNavigation(): Promise<RestoredClientNavigation | null> {
   try {
     const targetScope = clientAccountPersistenceScope();

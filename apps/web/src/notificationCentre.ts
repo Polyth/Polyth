@@ -60,7 +60,10 @@ export function createNotificationCentre(remote: NotificationCentreRemote): Noti
   const mergeRows = (incoming: NotificationRecord[]): NotificationRecord[] => {
     const byId = new Map(state.items.map((r) => [r.id, r]));
     for (const r of incoming) byId.set(r.id, r);
-    return [...byId.values()].sort((a, b) => a.ts - b.ts).slice(-NOTIFICATION_CENTRE_CAP);
+    const rows = [...byId.values()].sort((a, b) => a.ts - b.ts);
+    // Another server's notice is one row per key: a later one replaces it.
+    const latest = new Map(rows.flatMap((r) => r.joinedSpace ? [[r.key, r.id] as const] : []));
+    return rows.filter((r) => !r.joinedSpace || latest.get(r.key) === r.id).slice(-NOTIFICATION_CENTRE_CAP);
   };
 
   const fetchMerge = async (after: number | undefined, showLoading: boolean): Promise<void> => {
@@ -98,9 +101,12 @@ export function createNotificationCentre(remote: NotificationCentreRemote): Noti
 
     append(record) {
       if (state.items.some((r) => r.id === record.id)) return; // WS/REST race
+      const replaced = record.joinedSpace
+        ? state.items.filter((r) => r.joinedSpace && r.key === record.key && !r.read).length
+        : 0;
       set({
         items: mergeRows([record]),
-        unread: state.unread + (record.read ? 0 : 1),
+        unread: state.unread + (record.read ? 0 : 1) - replaced,
       });
     },
 
@@ -261,10 +267,11 @@ export function centreRows(items: NotificationRecord[], historyOn: boolean): Not
 /** A row navigates only when the session registry still contains the target
  *  session AND its project matches the record. Deleted or project-mismatched
  *  sessions stay visible but disabled ("Session no longer available");
- *  archived sessions remain in the registry and stay openable. */
+ *  archived sessions remain in the registry and stay openable. A joined
+ *  Space's session lives on another server, so its row always navigates. */
 export function canOpenNotification(
-  record: Pick<NotificationRecord, "sessionId" | "projectId">,
+  record: Pick<NotificationRecord, "sessionId" | "projectId" | "joinedSpace">,
   sessions: ReadonlyArray<{ id: string; projectId: string }>,
 ): boolean {
-  return sessions.some((s) => s.id === record.sessionId && s.projectId === record.projectId);
+  return record.joinedSpace !== undefined || sessions.some((s) => s.id === record.sessionId && s.projectId === record.projectId);
 }

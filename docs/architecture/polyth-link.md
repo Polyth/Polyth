@@ -310,6 +310,124 @@ has one primary action (Scan QR code, or tapping a known computer). Nearby/code
 pairing are quiet links, network failures render on the affected server card,
 and manual/insecure URLs stay under Advanced. Phones cannot edit grants.
 
+## Pairing for another person
+
+A pairing belongs to the account that created it: the device it admits acts as
+that account (`tunnel_pairing_owner`, `claimPairing`). The one exception is an
+instance owner pairing a teammate's Polyth app, which is how a person without
+a public address invites someone (`POST /api/tunnel/pairing` with
+`forUserId`):
+
+- Only the instance owner may name another account
+  (`requireInstanceOwnerAuthority`), and only a member of the current Space
+  (`tenancy.membership`). Anything else is refused before the Link host is
+  asked.
+- The device joins `forUserId`'s account. Its default is `full-remote`
+  (decided 2026-11-26): full access on a device is bounded by the account
+  it belongs to, so it reaches what that person reaches when signed in here
+  and nothing of the owner's. Owner-only, admin and other people's private
+  data stay behind that account's checks, and a guarded account's ceiling
+  removes full access altogether (`principalHasFullAccess`). The narrower
+  `developer` profile proved too tight for a teammate's own Polyth: people
+  messages, mentions, model and harness lists were outside its route table.
+- The pairing is still the owner's. The owner sees the safety words and
+  approves; the teammate's account can neither read nor approve it.
+- The device records its issuer (`tunnel_device.issued_by`).
+  `GET /api/tunnel/devices/issued` lists the devices an owner paired for
+  others, and the issuer may read, revoke and forget them but not change
+  their grants, while it is still the instance owner. Removing the
+  teammate's account revokes them like any of its devices, and a disabled
+  account's device stops authenticating at once (`canonicalAuth`
+  `accountExists`).
+- Issuing is audited (`tunnel_audit` `pairing-issued-for-account` with
+  issuer, account and profile, never the ticket).
+
+On the Link page the instance owner's Pair device dialog has a **For** choice
+(Me, or a member of the current Space: `widgets/people.ts`, from
+`GET /api/auth/accounts` `canManage` and the active Space's members). For a
+teammate it defaults to Full access (that person's own rights), names whom the device will act as, and
+tells the owner to send the pairing link, which the teammate pastes into
+Polyth Desktop's server list. The settings target
+`{ sectionId: "pair-for", itemId: <accountId> }` opens the dialog with that
+person chosen. Settings → Users → Add user links here. **Devices you connected
+for others** lists the issued devices with Revoke, then Forget.
+
+The ticket keeps the protocol's 2-minute lifetime (`pairing_ttl_ms`, enforced
+by the clients too), so the owner and teammate pair together, for example on
+a call. A longer-lived invitation needs a protocol change and new app builds.
+
+## Joined Spaces
+
+A person here can join a Space on another Polyth server; this server is then
+that person's Link client (`packages/tunnel/src/joined*.ts`, driving one
+`polyth-link-client stdio` process per person; `POLYTH_LINK_CLIENT` overrides
+the binary). The package decides nothing about routing: the host picks the
+requests that follow a joined Space and calls `server.joined-spaces`.
+
+- **Which requests go there** (`packages/server/src/joinedSpaceRouting.ts`).
+  Sign-in, personal preferences, the Space list, the package bundle
+  (`/api/packages`, `/api/package-assets`, `/api/plugins`: the page runs this
+  server's code, never the other server's), Link, the CLI, system and health
+  stay here in the person's own Space. This computer's secrets and its
+  connections to other machines (`/api/secure-safe`, `/api/credential-vault`,
+  `/api/ssh`, `/api/providers/custom`, `/api/mcp`) answer 404
+  `not-available`. Every other `/api` path and `/ws` goes to the other
+  server, which decides what the device may do (a teammate's device has full
+  access, bounded by that person's rights there). An explicit
+  `x-polyth-space` decides alone; a stale joined cookie falls back to the
+  person's own Space. Client caches that hold this server's personal data
+  must not migrate into a joined Space (the Git profile cache reads the
+  `polyth_space` cookie for this).
+
+- **Who.** Every account, for itself only. `/api/tunnel/joined/*` needs a
+  signed-in session (or the verified loopback user) on public HTTP; paired
+  devices, access tokens and internal services are refused, and the routes are
+  not in the paired-device table. Servers, pairing attempts and Space ids
+  (`rmt_` + hash of account, connection and remote Space) answer 404 to anyone
+  else.
+- **Keys.** `<dataDir>/packages/tunnel/joined/<hash of account>/` (mode 0700,
+  outside every Space): the client's device identities and a cached Space list.
+  The client's environment carries no provider credentials. The other server
+  sees the chosen server name, or "Polyth server", never the host name.
+- **Connection.** Opened at package enable for everyone who has one and kept
+  open, with backoff after a lost link or a dead client. Spaces are re-read on
+  connect and every 5 minutes; offline, the last list stays with
+  `online: false`.
+- **Forwarding.** Only `/api/*` and `/ws`, through the client's loopback proxy
+  with its proxy-session cookie. This server's cookies, authorization, CSRF,
+  origin and forwarding headers never cross; Link also drops `Idempotency-Key`
+  and every header outside its allowlist. Bodies are buffered (25 MiB, else
+  413) because the proxy needs `content-length`. Responses lose `set-cookie`
+  and headers that would act on this origin, and gain
+  `Content-Security-Policy: sandbox` and `nosniff`, so the other server cannot
+  run a page as this one. Offline answers 503 without contacting it.
+- **Space choice.** HTTP carries `x-polyth-space`. A WebSocket upgrade carries
+  only path and protocols, so the Space is first activated there, one upgrade
+  at a time per connection until its 101. This needs the device's session
+  control grant unless that Space is already selected. A server (or Link host)
+  too old to pass the header is detected on connect; HTTP for any Space but its
+  selected one then answers 503 asking for an update.
+- **Removal.** Deleting a server runs the client's `forget` (identity
+  included). Removing an account stops its client and deletes its directory.
+  Neither revokes the device on the other server; its owner does that there.
+- **Notifications** (`joinedNotices.ts`). The person's notifications there
+  reach them here whichever Space they have open. Each joined Space gets one
+  `/ws` socket (notification frames are per Space; the Space is selected like
+  any upgrade) and a read of `/api/notifications` on every (re)connect and each
+  minute, which delivers the newest 50 unread rows of the last 24 hours per
+  Space and withdraws rows read or cleared there. An older server is only
+  watched in its selected Space and never switched. Rows the other server
+  itself relays from a third one are skipped. Each goes to
+  `server.person-notices` with the key `rmt:<connection>:<key>` and
+  `joinedSpace`. This server keeps one inbox row per person and key, listed,
+  read and cleared from any of their own Spaces, never in a session's history;
+  a later notice of the key replaces it and a cleared one does not return. The
+  live frame and push legs go to that person only, and while one device is in
+  use only it is alerted. Leaving the server (or its revoking the device)
+  withdraws what was delivered; disabling the package keeps it. Opening one
+  switches to the joined Space and lands on its session URL; the list names the
+  source as "<space> · <server>".
+
 ## Device names
 
 Each phone names itself when it pairs: iOS sends `UIDevice.current.name`

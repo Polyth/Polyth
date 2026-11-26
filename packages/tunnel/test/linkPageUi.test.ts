@@ -33,6 +33,8 @@ Object.assign(globalThis, {
   Element: dom.Element,
   Node: dom.Node,
   location: dom.location,
+  requestAnimationFrame: (callback: FrameRequestCallback) => setTimeout(() => callback(0), 0),
+  cancelAnimationFrame: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
   getComputedStyle: (elt: Element) => (dom as unknown as { getComputedStyle(el: Element): CSSStyleDeclaration }).getComputedStyle(elt),
   WebSocket: class { addEventListener() {} removeEventListener() {} close() {} },
 });
@@ -51,7 +53,21 @@ const device: TunnelDeviceDto = {
 };
 const requests: Array<{ method: string; path: string; body: unknown }> = [];
 let serverName = { name: "", fallback: "studio", editable: true };
-const json = (value: unknown) => new Response(JSON.stringify(value), { status: 200, headers: { "content-type": "application/json" } });
+// The instance owner's view of teammates; off for everyone else.
+let instanceOwner = false;
+let issued: Array<TunnelDeviceDto & { accountId: string }> = [];
+// Joined servers: empty unless a test fills them in.
+let activeSpaceId = "s1";
+let joined: { servers: Array<Record<string, unknown>>; spaces: Array<Record<string, unknown>> } = { servers: [], spaces: [] };
+let beginFailure: { error: string; message: string } | null = null;
+// Holds confirm open, as the other server's owner does until they approve.
+let approval: Promise<void> | null = null;
+const otherServer = { connectionId: "c1", label: "Team box", fingerprint: "ab12…cd34", online: true };
+const otherSpace = {
+  id: "rmt_0123456789abcdef01234567", name: "Design crew", role: "member", memberCount: 3,
+  serverLabel: "Team box", connectionId: "c1", online: true,
+};
+const json = (value: unknown, code = 200) => new Response(JSON.stringify(value), { status: code, headers: { "content-type": "application/json" } });
 globalThis.fetch = async (input, init) => {
   const path = new URL(String(input), "http://127.0.0.1:4400").pathname;
   const method = init?.method ?? "GET";
@@ -64,8 +80,40 @@ globalThis.fetch = async (input, init) => {
     if (method === "PUT") serverName = { ...serverName, name: String((body as { name: string }).name).trim() };
     return json(serverName);
   }
+  if (path === "/api/auth/accounts") return json({ currentAccountId: "owner", canManage: instanceOwner, accounts: [] });
+  if (path === "/api/spaces") return json({ activeSpaceId });
+  if (path === "/api/tunnel/joined") return json(joined);
+  if (path === "/api/tunnel/joined/pair/parse") {
+    return json({ hostLabel: "Team box", fingerprint: "ab12cd34ef56", expiresAt: new Date(Date.now() + 120_000).toISOString() });
+  }
+  if (path === "/api/tunnel/joined/pair/begin") {
+    if (beginFailure) return json(beginFailure, 410);
+    return json({ attemptId: "a1", safetyPhrase: ["amber", "river", "lantern", "moss"] });
+  }
+  if (path === "/api/tunnel/joined/pair/confirm") {
+    await approval;
+    joined = { servers: [otherServer], spaces: [otherSpace] };
+    return json({ server: otherServer, spaces: [otherSpace] });
+  }
+  if (path === "/api/tunnel/joined/c1" && method === "PATCH") {
+    return json({ server: { ...otherServer, label: (body as { label: string }).label } });
+  }
+  if (path === "/api/tunnel/joined/c1" && method === "DELETE") {
+    joined = { servers: [], spaces: [] };
+    activeSpaceId = "s1";
+    return json({ ok: true });
+  }
+  if (path === "/api/spaces/s1/members") {
+    return json([{ userId: "owner", name: "Olena" }, { userId: "sam", name: "Sam Rivers" }]);
+  }
+  if (path === "/api/tunnel/devices/issued") return json(issued);
+  if (path === "/api/tunnel/devices/dev-2/revoke") {
+    issued = issued.map((entry) => entry.id === "dev-2" ? { ...entry, revokedAt: 2 } : entry);
+  }
   if (path === "/api/tunnel/pairing" && method === "POST") {
+    const { forUserId, profile } = (body ?? {}) as { forUserId?: string; profile?: string };
     return json({
+      ...(forUserId ? { forUserId, profile } : {}),
       pairing: { id: "p1", expiresAt: new Date(Date.now() + 120_000).toISOString(), safetyPhrase: null, state: "pending" },
       ticket: "t", qrPayload: "polyth://pair?v=1&t=SECRET-PAYLOAD", qrModules: [[true, false], [false, true]],
     });
@@ -166,4 +214,273 @@ test("the owner names this server for phones on the Link page", async () => {
   assert.equal(field === null, true, "only the owner can change it");
   assert.match(host.querySelector(".pkg-tunnel-hero")?.textContent ?? "", /Name on other devicesHome studio/);
   await act(async () => { member.unmount(); });
+});
+
+async function mountLinkPage(props: Record<string, unknown> = {}) {
+  const { act, createElement } = await import("react");
+  const { createRoot } = await import("react-dom/client");
+  const { default: LinkPage } = await import("../widgets/LinkPage.tsx");
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const flush = async () => { for (let i = 0; i < 12; i += 1) await act(async () => { await Promise.resolve(); }); };
+  const render = async (next: Record<string, unknown>) => {
+    await act(async () => { root.render(createElement(LinkPage, next)); });
+    await flush();
+  };
+  const buttons = () => [...document.querySelectorAll("button")] as unknown as HTMLButtonElement[];
+  const button = (text: string) => buttons().find((el) => el.textContent?.trim() === text);
+  const click = async (element: Element | null | undefined) => {
+    assert.ok(element, "the control to click exists");
+    await act(async () => { (element as HTMLElement).click(); });
+    await flush();
+  };
+  const dialog = () => document.querySelector(".pkg-tunnel-dialog");
+  const unmount = async () => {
+    await act(async () => { root.unmount(); });
+    host.remove();
+  };
+  await render(props);
+  return { host, render, button, click, dialog, flush, unmount };
+}
+
+const pairingPosts = () => requests
+  .filter((entry) => entry.method === "POST" && entry.path === "/api/tunnel/pairing")
+  .map((entry) => entry.body);
+
+test("the instance owner pairs a teammate's app with Full access in that person's own rights", async () => {
+  instanceOwner = true;
+  issued = [];
+  requests.length = 0;
+  const page = await mountLinkPage();
+  await page.click(page.button("Pair device"));
+  assert.deepEqual(pairingPosts(), [{}], "Me stays the default");
+  assert.ok(page.button("Full access"), "the owner's own device may have Full access");
+
+  await page.click(document.querySelector(".pkg-tunnel-for button"));
+  const option = [...document.querySelectorAll('[role="option"]')].find((el) => el.textContent?.includes("Sam Rivers"));
+  assert.equal([...document.querySelectorAll('[role="option"]')].some((el) => el.textContent?.includes("Olena")), false, "the owner is Me, not a teammate");
+  await page.click(option as unknown as Element);
+  assert.deepEqual(pairingPosts().at(-1), { forUserId: "sam", profile: "full-remote" });
+  assert.ok(requests.some((entry) => entry.method === "DELETE" && entry.path === "/api/tunnel/pairing/p1"), "the owner's code is withdrawn");
+  assert.ok(page.button("Full access"), "full access is Sam's own rights, offered and chosen by default");
+  const text = page.dialog()?.textContent ?? "";
+  assert.match(text, /act as Sam Rivers, with that person’s permissions/);
+  assert.match(text, /You have 2 minutes/);
+  assert.ok(page.button("Copy pairing link"));
+
+  await page.click(page.button("Observe"));
+  assert.deepEqual(pairingPosts().at(-1), { forUserId: "sam", profile: "observe" });
+  await page.click(page.button("Cancel"));
+  await page.unmount();
+});
+
+test("a pair-for settings target opens the dialog for that teammate once", async () => {
+  instanceOwner = true;
+  requests.length = 0;
+  const settingsTarget = { sectionId: "pair-for", itemId: "sam" };
+  const page = await mountLinkPage({ settingsTarget });
+  assert.match(page.dialog()?.textContent ?? "", /act as Sam Rivers/);
+  assert.deepEqual(pairingPosts(), [{ forUserId: "sam", profile: "full-remote" }]);
+  await page.click(page.button("Cancel"));
+  await page.render({ settingsTarget });
+  assert.equal(page.dialog(), null);
+  await page.unmount();
+  const again = await mountLinkPage({ settingsTarget });
+  assert.equal(again.dialog(), null, "the same target does not reopen after a remount");
+  await again.unmount();
+
+  instanceOwner = false;
+  requests.length = 0;
+  const member = await mountLinkPage({ settingsTarget: { sectionId: "pair-for", itemId: "sam" } });
+  assert.equal(member.dialog(), null);
+  assert.match(member.host.textContent ?? "", /Only the instance owner can connect a device for another person/);
+  assert.deepEqual(pairingPosts(), []);
+  await member.click(member.button("Pair device"));
+  assert.equal(document.querySelector(".pkg-tunnel-for"), null, "no For choice for anyone else");
+  await member.click(member.button("Cancel"));
+  await member.unmount();
+});
+
+test("devices paired for others are listed by person and can be revoked", async () => {
+  const { resolveAlert } = await import("../../../apps/web/src/alerts.ts");
+  const { act } = await import("react");
+  instanceOwner = true;
+  issued = [
+    { ...device, id: "dev-2", label: "Sam's laptop", platform: "macos", accountId: "sam" },
+    { ...device, id: "dev-3", label: "Old tablet", accountId: "gone" },
+  ];
+  requests.length = 0;
+  const page = await mountLinkPage();
+  assert.match(page.host.textContent ?? "", /Devices you connected for others/);
+  const row = (label: string) => [...page.host.querySelectorAll("li")].find((el) => el.textContent?.includes(label))!;
+  assert.match(row("Sam's laptop").textContent ?? "", /Sam Rivers · macos · Online/);
+  assert.match(row("Old tablet").textContent ?? "", /Teammate/);
+
+  await page.click(row("Sam's laptop").querySelector("button"));
+  await act(async () => { resolveAlert(true); });
+  await page.flush();
+  assert.ok(requests.some((entry) => entry.method === "POST" && entry.path === "/api/tunnel/devices/dev-2/revoke"));
+  await page.click(row("Sam's laptop").querySelector("button"));
+  assert.ok(requests.some((entry) => entry.method === "DELETE" && entry.path === "/api/tunnel/devices/dev-2"), "Forget follows Revoke");
+  await page.unmount();
+  issued = [];
+  instanceOwner = false;
+});
+
+const joinedCalls = () => requests
+  .filter((entry) => entry.method !== "GET" && entry.path.startsWith("/api/tunnel/joined"))
+  .map((entry) => [entry.method, entry.path.slice("/api/tunnel/joined".length), entry.body]);
+
+async function typeInto(input: Element | null, value: string) {
+  const { act } = await import("react");
+  assert.ok(input, "the field exists");
+  const setter = Object.getOwnPropertyDescriptor(dom.HTMLInputElement.prototype, "value")!.set!;
+  await act(async () => {
+    setter.call(input, value);
+    input.dispatchEvent(new dom.Event("input", { bubbles: true }) as never);
+  });
+}
+
+const TICKET = "polyth://pair?v=1&t=abc";
+
+test("joining another server compares the safety words, then lists it with its Spaces", async () => {
+  joined = { servers: [], spaces: [] };
+  let approve!: () => void;
+  approval = new Promise<void>((resolve) => { approve = resolve; });
+  requests.length = 0;
+  const page = await mountLinkPage();
+  assert.match(page.host.textContent ?? "", /Other Polyth servers/);
+  assert.equal(page.button("Join")!.disabled, true, "nothing to join yet");
+
+  await typeInto(page.host.querySelector("input[name='pairing-link']"), TICKET);
+  await page.click(page.button("Join"));
+  const text = () => page.dialog()?.textContent ?? "";
+  assert.match(text(), /Join Team box/);
+  assert.match(text(), /ab12cd34ef56/);
+  assert.match(text(), /amber.*river.*lantern.*moss/);
+  assert.match(text(), /shows these same words/);
+  assert.deepEqual(joinedCalls(), [
+    ["POST", "/pair/parse", { ticket: TICKET }],
+    ["POST", "/pair/begin", { ticket: TICKET }],
+  ], "nothing is confirmed before the person compares the words");
+
+  await page.click(page.button("Words match"));
+  assert.match(text(), /Waiting for the owner of Team box to approve/);
+  assert.match(text(), /amber/, "the words stay up while the owner compares them");
+  assert.ok(page.button("Cancel"));
+  assert.deepEqual(joinedCalls().at(-1), ["POST", "/pair/confirm", { attemptId: "a1" }]);
+
+  approve();
+  await page.flush();
+  assert.equal(page.dialog(), null);
+  assert.match(page.host.textContent ?? "", /You joined Team box.*Space switcher/);
+  assert.match(page.host.querySelector(".pkg-tunnel-server")?.textContent ?? "", /Team box.*Design crew.*Online/);
+  assert.equal((page.host.querySelector("input[name='pairing-link']") as HTMLInputElement).value, "");
+
+  await page.click(page.button("Rename"));
+  await typeInto(page.host.querySelector("input[name='server-label']"), "Studio");
+  await page.click(page.button("Save"));
+  assert.deepEqual(joinedCalls().at(-1), ["PATCH", "/c1", { label: "Studio" }]);
+  assert.match(page.host.querySelector(".pkg-tunnel-server")?.textContent ?? "", /Studio/);
+  approval = null;
+  joined = { servers: [], spaces: [] };
+  await page.unmount();
+});
+
+test("a refused pairing link shows the server's message", async () => {
+  joined = { servers: [], spaces: [] };
+  beginFailure = { error: "pairing-expired", message: "That pairing link has expired." };
+  requests.length = 0;
+  const page = await mountLinkPage();
+  await typeInto(page.host.querySelector("input[name='pairing-link']"), TICKET);
+  await page.click(page.button("Join"));
+  assert.equal(page.dialog(), null);
+  assert.match(page.host.textContent ?? "", /That pairing link has expired\./);
+  assert.equal(joinedCalls().some(([, path]) => path === "/pair/confirm"), false);
+  beginFailure = null;
+  await page.unmount();
+});
+
+test("cancelling a pairing, or leaving the page, drops the attempt", async () => {
+  joined = { servers: [], spaces: [] };
+  requests.length = 0;
+  const page = await mountLinkPage();
+  await typeInto(page.host.querySelector("input[name='pairing-link']"), TICKET);
+  await page.click(page.button("Join"));
+  await page.click(page.button("Cancel"));
+  assert.equal(page.dialog(), null);
+  assert.deepEqual(joinedCalls().at(-1), ["POST", "/pair/cancel", { attemptId: "a1" }]);
+
+  requests.length = 0;
+  await page.click(page.button("Join"));
+  await page.unmount();
+  assert.deepEqual(joinedCalls().at(-1), ["POST", "/pair/cancel", { attemptId: "a1" }]);
+});
+
+test("leaving a server asks first, then removes it", async () => {
+  const { resolveAlert } = await import("../../../apps/web/src/alerts.ts");
+  const { act } = await import("react");
+  joined = { servers: [otherServer], spaces: [otherSpace] };
+  requests.length = 0;
+  const page = await mountLinkPage();
+  const answer = async (value: boolean) => {
+    await act(async () => { resolveAlert(value); });
+    await page.flush();
+  };
+  await page.click(page.button("Leave"));
+  await answer(false);
+  assert.deepEqual(joinedCalls(), [], "declining keeps the server");
+
+  await page.click(page.button("Leave"));
+  assert.deepEqual(joinedCalls(), [], "nothing is removed before the answer");
+  await answer(true);
+  assert.deepEqual(joinedCalls(), [["DELETE", "/c1", undefined]]);
+  assert.equal(page.host.querySelector(".pkg-tunnel-server"), null);
+  await page.unmount();
+});
+
+test("leaving the server whose Space is open says so and reloads", async () => {
+  const { resolveAlert } = await import("../../../apps/web/src/alerts.ts");
+  const { act } = await import("react");
+  joined = { servers: [otherServer], spaces: [otherSpace] };
+  activeSpaceId = otherSpace.id;
+  let reloads = 0;
+  const original = dom.location.reload;
+  Object.defineProperty(dom.location, "reload", { value: () => { reloads += 1; }, configurable: true });
+  const page = await mountLinkPage();
+  await page.click(page.button("Leave"));
+  await act(async () => { resolveAlert(true); });
+  await page.flush();
+  assert.equal(reloads, 0, "the person is told first");
+  await act(async () => { resolveAlert(true); });
+  await page.flush();
+  assert.equal(reloads, 1);
+  Object.defineProperty(dom.location, "reload", { value: original, configurable: true });
+  await page.unmount();
+});
+
+test("a join settings target focuses the pairing link field once", async () => {
+  joined = { servers: [], spaces: [] };
+  const settingsTarget = { sectionId: "join" };
+  const page = await mountLinkPage({ settingsTarget });
+  const field = () => document.querySelector("input[name='pairing-link']");
+  assert.equal(document.activeElement === field(), true);
+  await page.unmount();
+  const again = await mountLinkPage({ settingsTarget });
+  assert.equal(document.activeElement === field(), false, "a remount does not steal focus again");
+  await again.unmount();
+});
+
+test("no teammates are read in another server's Space", async () => {
+  const { loadTeammates } = await import("../widgets/people.ts");
+  const read: string[] = [];
+  const result = await loadTeammates({
+    get: async <T,>(path: string) => {
+      read.push(path);
+      return (path === "/api/spaces" ? { activeSpaceId: otherSpace.id } : { canManage: true }) as T;
+    },
+  });
+  assert.equal(result, null);
+  assert.deepEqual(read, ["/api/auth/accounts", "/api/spaces"]);
 });

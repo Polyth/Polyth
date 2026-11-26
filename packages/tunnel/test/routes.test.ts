@@ -360,7 +360,10 @@ test("the owner names the server for new pairings and connected phones; members 
     publishServerName: async (name) => { published.push(name); },
   });
   const local: AuthPrincipal = { kind: "local-user", trustedLoopback: true };
-  const owner: SpaceContext = { ...SPACE, userId: "usr_owner" };
+  // A canonical install's instance owner has an ordinary account id: the
+  // marker decides, not the legacy `usr_owner`.
+  const owner = { ...SPACE, userId: "usr_alice", instanceOwner: true } as SpaceContext;
+  const memberSpace = { ...SPACE, userId: "usr_member", instanceOwner: false } as SpaceContext;
 
   const initial = request({ path: "/api/tunnel/server-name", principal: local, space: owner });
   assert.equal(await routes(initial.rc), true);
@@ -376,11 +379,11 @@ test("the owner names the server for new pairings and connected phones; members 
   await routes(request({ path: "/api/tunnel/pairing", method: "POST", principal: local, space: owner }).rc);
   assert.equal(created[1]?.label, "Home studio");
 
-  const member = request({ path: "/api/tunnel/server-name", principal: local });
+  const member = request({ path: "/api/tunnel/server-name", principal: local, space: memberSpace });
   assert.equal(await routes(member.rc), true);
   assert.deepEqual(member.bodies, [{ name: "Home studio", fallback: "studio", editable: false }]);
   await assert.rejects(
-    () => routes(request({ path: "/api/tunnel/server-name", method: "PUT", principal: local, body: { name: "Mine" } }).rc),
+    () => routes(request({ path: "/api/tunnel/server-name", method: "PUT", principal: local, space: memberSpace, body: { name: "Mine" } }).rc),
     (error: Error & { code?: string }) => error.code === "forbidden",
   );
   const paired: AuthPrincipal = {

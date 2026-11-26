@@ -517,3 +517,40 @@ test('a password-less owner protects the account over HTTP before adding people 
   assert.equal(login.status, 200);
   assert.equal((await browser.request('/protected')).value.userId, owner.userId);
 });
+
+test('invitation links over HTTP: owner issues with a url, the invitee accepts publicly, Link cannot reach the public routes', async t => {
+  const f = await httpFixture(t), owner = f.browser();
+  await f.setup(owner);
+  const created = await owner.request('/api/auth/accounts', { login: 'olena', name: 'Olena', password: 'member test passphrase' });
+  const id = created.value.id as string;
+  const issued = await owner.request(`/api/auth/accounts/${id}/invitation`, {});
+  assert.equal(issued.status, 200);
+  assert.match(issued.value.code, /^pinv_/);
+  assert.equal(issued.value.url, `${f.origin}/#invite=${issued.value.code}`);
+  assert.equal(typeof issued.value.expiresAt, 'number');
+  assert.deepEqual((await owner.request(`/api/auth/accounts/${id}/invitation`)).value, { invitation: { expiresAt: issued.value.expiresAt } });
+  const guest = f.browser();
+  await guest.request('/api/auth/status');
+  const preview = await guest.request('/api/auth/invitation/preview', { code: issued.value.code });
+  assert.equal(preview.status, 200); assert.equal(preview.value.login, 'olena');
+  assert.equal((await guest.request('/api/auth/invitation/preview', { code: 'pinv_unknown' })).value.error, 'invalid-invitation');
+  const accepted = await guest.request('/api/auth/invitation/accept', { code: issued.value.code, password: 'my own long passphrase' });
+  assert.equal(accepted.status, 200); assert.equal(accepted.cookies.length, 2);
+  assert.equal((await guest.request('/api/auth/me')).value.id, id);
+  assert.equal((await guest.request('/api/auth/invitation/accept', { code: issued.value.code, password: 'my own long passphrase' })).status, 400);
+  const second = await owner.request(`/api/auth/accounts/${id}/invitation`, {});
+  assert.deepEqual((await owner.request(`/api/auth/accounts/${id}/invitation`, {}, {}, 'DELETE')).value, { revoked: 1 });
+  assert.equal((await guest.request('/api/auth/invitation/preview', { code: second.value.code })).status, 400);
+  // A paired device cannot use the public routes.
+  const ownerId = (await owner.request('/api/auth/me')).value.id as string;
+  const paired = async (url: string, body: unknown) => {
+    const res = { statusCode: 0, body: '', setHeader() {}, end(chunk: string) { this.body = chunk; } };
+    const listeners = new Map<string, (...args: never[]) => void>();
+    const req = { method: 'POST', url, headers: { 'content-type': 'application/json' }, socket: { remoteAddress: '127.0.0.1' },
+      on(e: string, h: (...a: never[]) => void) { listeners.set(e, h); }, once(e: string, h: (...a: never[]) => void) { listeners.set(e, h); }, off() {}, resume() {} };
+    setImmediate(() => { listeners.get('data')?.(Buffer.from(JSON.stringify(body)) as never); listeners.get('end')?.(); });
+    return { handled: await f.adapter.handlePaired(req as never, res as never, { userId: ownerId, deviceId: 'dev_phone' }), body: res.body };
+  };
+  assert.equal((await paired('/api/auth/invitation/preview', { code: second.value.code })).handled, false);
+  assert.equal((await paired('/api/auth/invitation/accept', { code: second.value.code, password: 'my own long passphrase' })).handled, false);
+});

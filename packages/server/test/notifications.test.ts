@@ -451,3 +451,18 @@ test("notifications are written compact and a pretty-printed file still loads", 
   writeFileSync(file, `${JSON.stringify(JSON.parse(text), null, 2)}\n`);
   assert.deepEqual(await createNotificationStore({ file }).recipientForSession("ses_a", acct), acct);
 });
+
+test("a joined Space's notice names the other server's project and still lists; an ordinary row from that project does not", async () => {
+  const store = createNotificationStore({ file: tmpFile() });
+  await store.add(input(1, { projectId: "prj_remote" }));
+  const joined = await store.deliverPerson("__isolated_test__", {
+    ...input(2, { projectId: "prj_remote", key: "rmt:conn-1:ses_x:mention:1" }),
+    id: "remote-id", ts: 1, read: false,
+    joinedSpace: { id: "rmt_0123456789abcdef01234567", name: "Design", serverLabel: "Studio" },
+  } as never);
+  assert.ok(joined, "the person's notice is filed");
+  const { call } = routeHarness(store, () => new Set<string>());
+  const listed = (await call("GET", "/api/notifications")).payload as { items: NotificationRecord[]; unread: number };
+  assert.deepEqual(listed.items.map((r) => r.joinedSpace?.serverLabel ?? "local"), ["Studio"]);
+  assert.equal(listed.unread, 1);
+});

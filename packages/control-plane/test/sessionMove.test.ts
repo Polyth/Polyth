@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { digest, openControlPlane, type ControlPlane } from '../src/index.ts';
 import { migrations } from '../src/migrations.ts';
+import { sessionMoveMigration } from '../src/sessionMoveMigration.ts';
 import { createResourceRegistry } from '../src/resources.ts';
 
 const seed = `
@@ -96,7 +97,7 @@ test('an installation from before the move upgrades in place, keeps its rows and
   writeFileSync(join(root, 'installation.json'), JSON.stringify({ version: 1, id }));
   const raw = new DatabaseSync(join(root, 'control.sqlite'));
   raw.exec('PRAGMA foreign_keys=ON; CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, checksum TEXT NOT NULL, applied_at_ms INTEGER NOT NULL) STRICT');
-  migrations.slice(0, -1).forEach((sql, index) => {
+  migrations.slice(0, migrations.indexOf(sessionMoveMigration)).forEach((sql, index) => {
     raw.exec(sql);
     raw.prepare('INSERT INTO schema_migrations VALUES(?,?,0)').run(index + 1, digest(sql));
   });

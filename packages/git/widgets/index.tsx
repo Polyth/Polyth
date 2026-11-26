@@ -31,7 +31,11 @@ import {
   getSourceControlProfileState,
   replaceSourceControlProfileState,
   subscribeSourceControlProfiles,
+  inJoinedSpace,
 } from "./sourceControlProfiles.ts";
+
+/** The account's synced Git profiles, held untouched while a joined Space is open. */
+let heldAccountProfiles: unknown = undefined;
 import {
   peekRepositorySourceControlRemote,
   subscribeRepositorySourceControlRemotes,
@@ -71,11 +75,16 @@ export default defineWebPackage((host) => () => {
       // Profiles and the global default are account-wide. Project-to-profile
       // mappings and learned identities stay local to avoid crossing the
       // project/Space boundary in the account settings blob.
+      // In a joined Space (another server's) the account value only passes
+      // through: the other server's profiles never enter this account's
+      // settings, and this account's never reach that server.
       read: () => {
+        if (inJoinedSpace()) return heldAccountProfiles;
         const state = getSourceControlProfileState();
         return { profiles: state.profiles, globalDefaultProfileId: state.globalDefaultProfileId };
       },
       write: (value) => {
+        if (inJoinedSpace()) { heldAccountProfiles = value; return; }
         const current = getSourceControlProfileState();
         const raw = value && typeof value === "object" ? value as Record<string, unknown> : {};
         replaceSourceControlProfileState({

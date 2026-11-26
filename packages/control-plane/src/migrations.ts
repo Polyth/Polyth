@@ -13,6 +13,7 @@ import { accountPermissionsMigration } from './accountPermissionsMigration.ts';
 import { sharingMigration } from './sharingMigration.ts';
 import { localAccessMigration } from './localAccessMigration.ts';
 import { sessionMoveMigration } from './sessionMoveMigration.ts';
+import { invitationMigration } from './invitationMigration.ts';
 export const migrations = [
   ...v1,
   securityMigration,
@@ -28,4 +29,5 @@ export const migrations = [
   sharingMigration,
   localAccessMigration,
   sessionMoveMigration,
+  invitationMigration,
 ];

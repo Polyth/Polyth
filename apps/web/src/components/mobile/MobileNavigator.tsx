@@ -91,7 +91,7 @@ import {
   SelectIcon,
   SharedIcon,
 } from "../ui/icons.ts";
-import { activeSpace, getSpacesState, loadSpaces, switchSpace, useSpaces } from "../../spaces.ts";
+import { activeJoinedSpace, activeSpace, getSpacesState, loadSpaces, switchSpace, useSpaces } from "../../spaces.ts";
 import { canSwitchMobileServer, switchMobileServer } from "../../nativeConnections.ts";
 import { MobileStatusIcon, type MobileStatusKind } from "./MobileStatusIcon.tsx";
 import { Menu, type MenuEntry } from "../ui/index.ts";
@@ -927,10 +927,10 @@ function NavigatorPlace() {
     if (getSpacesState().status === "idle") void loadSpaces();
   }, []);
   const name = spaces.status === "ready"
-    ? activeSpace(spaces)?.name ?? ""
+    ? activeSpace(spaces)?.name ?? activeJoinedSpace(spaces)?.name ?? ""
     : spaces.status === "error" ? "Polyth" : "";
   const servers = canSwitchMobileServer();
-  const choose = spaces.status === "ready" && spaces.spaces.length > 1;
+  const choose = spaces.status === "ready" && spaces.spaces.length + spaces.joined.length > 1;
   const label = <span className="mobile-nav-place-name" dir="auto">{name}</span>;
   if (!servers && !choose) return <span className="mobile-nav-place">{label}</span>;
   if (!choose) {
@@ -951,6 +951,18 @@ function NavigatorPlace() {
     ...spaces.spaces.map((space): MenuEntry => ({
       id: `space:${space.id}`,
       label: space.name,
+      kind: "radio",
+      checked: space.id === spaces.activeSpaceId,
+      ...(space.color ? { swatch: space.color } : {}),
+      disabled: spaces.switching,
+      onSelect: () => { void switchSpace(space.id); },
+    })),
+    // Spaces joined on other Polyth servers, named with their server.
+    ...(spaces.joined.length ? [{ heading: tr("spaces.joinedHeading") }] : []),
+    ...spaces.joined.map((space): MenuEntry => ({
+      id: `space:${space.id}`,
+      label: space.name,
+      detail: space.online ? space.serverLabel : tr("spaces.joinedOffline", { server: space.serverLabel }),
       kind: "radio",
       checked: space.id === spaces.activeSpaceId,
       ...(space.color ? { swatch: space.color } : {}),

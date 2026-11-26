@@ -73,6 +73,9 @@ test("debug agent access is explicit and restricted to direct public loopback in
   assert.equal(browser.principal.kind, "ui-session");
 
   assert.equal(f.gateway.resolve(f.request(), remote).authenticated, false);
+  // A tunnel on this computer the operator never configured: loopback
+  // socket, forwarding headers. It relays someone else, never the owner.
+  assert.equal(f.gateway.resolve({ ...f.request(), forwarded: true }, loopback).authenticated, false);
   assert.equal(
     f.gateway.resolve(
       f.request(),

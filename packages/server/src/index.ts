@@ -82,6 +82,12 @@ const canonicalPublicOrigin = (raw: string): string => {
   return url.origin;
 };
 const invalidOrigin = (message: string): Error => Object.assign(new Error(message), { code: "invalid-input" });
+/** True when any listed proxy peer is this computer (127.0.0.0/8, ::1, localhost). */
+export const trustsLoopbackProxy = (raw: string | undefined): boolean =>
+  (raw ?? "").split(",").some((entry) => {
+    const value = entry.trim().toLowerCase().replace(/^::ffff:/, "");
+    return value === "::1" || value === "localhost" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(value);
+  });
 
 export async function boot(opts: BootOptions = {}) {
   const port = opts.port ?? Number(process.env.PORT ?? 4400);
@@ -98,6 +104,14 @@ export async function boot(opts: BootOptions = {}) {
     Boolean(publicOrigin) || !isLoopbackListenerHost(hostname) || deploymentProfile !== "local-trusted";
   if (agentBeta && unsafeLocalAgentExposure) {
     throw invalidOrigin("POLYTH_AGENT_BETA requires loopback-only local-trusted deployment with no public origin");
+  }
+  // A proxy trusted at a loopback address is a tunnel or proxy on this very
+  // computer: it delivers internet requests over loopback, the one ingress the
+  // debug override runs as the owner. No warning makes that safe.
+  if (debugAgentAccess && trustsLoopbackProxy(process.env.POLYTH_TRUSTED_PROXIES)) {
+    throw invalidOrigin(
+      "POLYTH_DEBUG_AGENT_ACCESS cannot be combined with a loopback POLYTH_TRUSTED_PROXIES entry: a same-host tunnel would run every internet request as the owner",
+    );
   }
   if (!agentBeta && debugAgentAccess && unsafeLocalAgentExposure) {
     console.warn(
