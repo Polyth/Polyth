@@ -34,7 +34,7 @@ import type {
   RuntimeEndpoint, RuntimeLifecycleNotification, RuntimeObservation, ObservationIngestionInput, ObservationIngestionResult,
   RuntimeSessionBinding, RuntimeSnapshot,
   PermissionDelegatedData, PermissionRequestData,
-  AgentSecretRequest, SecretRequestData, SecretResolvedData, SecureSafeKind, SecureSafeService,
+  AgentSecretRequest, SecretRequestData, SecretResolvedData, SecureSafeKind, SecureSafeService, SpaceContext,
   RuntimeSession, SendResult, SessionDebugEndpointDto, SessionEvent, SessionFolderDto, SessionForkedData, SessionIsolation, SessionOrganizePatch, SessionProjection, SessionRef, SessionWorkspace, MemoryNarrowing,
   SessionService, SessionPersistence, SessionWorkspaceSelection, UserTurnInput, WorkspaceMutationScope, WorkspaceContext,
   Project, SessionMoveBlock, SessionMoveInput, SessionProjectMove, SessionProjectMovedData, SessionReleasedExecution,
@@ -80,7 +80,7 @@ import { canonicalSecurity } from "./runtimeSecurity.ts";
 import { guardrailsForUser } from "./accountGuardrails.ts";
 import type { ProjectService } from "@polyth/contracts";
 import { compactionDue, compactionDueForNextModel, effectiveCompactionPreference, parseCompactionPreference, type CompactionPreference } from "@polyth/contracts/compaction-policy";
-import { extractSecureSafeEnvRefs, secureSafeEnvRef, VAULT_RUN_TOOL_ID } from "@polyth/credential-vault";
+import { extractSecureSafeEnvRefs, runWithSecureSafeSpace, secureSafeEnvRef, VAULT_RUN_TOOL_ID } from "@polyth/credential-vault";
 import { redactSecrets } from "@polyth/plugins";
 import type { SessionStartStep, WorkspaceCheckpointService, WorkspaceCheckpointTurn, WorkspaceRestoreInput } from "@polyth/plugins";
 import type { RewindFilesOutcome, RewindFilesPreview, RewindFilesUnavailableReason, RewindRestorePreview, WorkspaceCheckpointData } from "@polyth/contracts";
@@ -1038,6 +1038,12 @@ export function createSessionService(deps: {
   /** Server-only credential vault. Values enter through replySecret and never
    *  enter session events, runtime question metadata, or public DTOs. */
   secureSafe?: SecureSafeService;
+  /** The trusted Space context for Credential Vault work no HTTP request
+   *  carries (the agent Vault run): the session's own Space, entered as the
+   *  acting person (membership checked) or, without one, as system work that
+   *  sees Space entries only. Throws when that Space does not admit them.
+   *  Without it, `secureSafe` sees only the host's legacy root store. */
+  vaultSpace?: (input: { spaceId: string | undefined; actorUserId?: string }) => SpaceContext;
   /** Bounded composer-shell executor backed by @polyth/terminal. */
   shell?: {
     run(
@@ -4160,6 +4166,20 @@ export function createSessionService(deps: {
   const vaultRunPermission = (request: PermissionDecisionInput): boolean =>
     request.permission === "package-tool" && request.patterns.includes(VAULT_RUN_TOOL_ID);
 
+  /** Vault reads made outside any request (a run's approval level, its card's
+   *  key names): the session's own Space as its acting person, exactly as
+   *  the run itself resolves. Without it the routed Vault sees only the
+   *  host's legacy root store and every key reads as unknown. Throws when
+   *  that Space does not admit the person; callers fail closed. */
+  const readSessionVault = <T,>(projection: SessionProjection | null | undefined, read: () => T): T => {
+    const actorUserId = projection?.actor?.userId;
+    const space = deps.vaultSpace?.({
+      spaceId: projection?.spaceId,
+      ...(actorUserId ? { actorUserId } : {}),
+    });
+    return space ? runWithSecureSafeSpace(space, read) : read();
+  };
+
   const VAULT_APPROVAL_RANK: Record<SecureSafeApproval, number> = { safe: 0, auto: 1, full: 2, always: 3 };
   /** The strictest level among the keys the command names, as the acting
    *  person resolves them (their own entries first, then the Space's). No
@@ -4171,7 +4191,8 @@ export function createSessionService(deps: {
     if (names.length === 0) return "always";
     let entries: Array<{ handle: string; approval?: SecureSafeApproval }> = [];
     try {
-      entries = deps.secureSafe?.listFor?.(projection?.actor?.userId) ?? deps.secureSafe?.list() ?? [];
+      entries = readSessionVault(projection, () =>
+        deps.secureSafe?.listFor?.(projection?.actor?.userId) ?? deps.secureSafe?.list() ?? []);
     } catch {
       return "always";
     }
@@ -4197,7 +4218,8 @@ export function createSessionService(deps: {
       : [];
     let entries: Array<{ handle: string }> = [];
     try {
-      entries = deps.secureSafe?.listFor?.(projection.actor?.userId) ?? deps.secureSafe?.list() ?? [];
+      entries = readSessionVault(projection, () =>
+        deps.secureSafe?.listFor?.(projection.actor?.userId) ?? deps.secureSafe?.list() ?? []);
     } catch {
       entries = [];
     }
@@ -16125,7 +16147,7 @@ export function createSessionService(deps: {
       // Validate under the session lock, but run outside it: the command may
       // take minutes, and Stop/abort and the turn's own events need the lock.
       // ponytail: Stop does not kill the command; it ends at its own timeout.
-      const { proj, project, cmd } = await withSessionLock(input.sessionId, async () => {
+      const { proj, project, cmd, space } = await withSessionLock(input.sessionId, async () => {
         if (agentBetaEnabled()) {
           throw Object.assign(new Error(AGENT_BETA_READ_ONLY_MESSAGE), { code: "forbidden" });
         }
@@ -16150,15 +16172,24 @@ export function createSessionService(deps: {
         }
         const project = await projects.get(proj.projectId);
         if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
-        return { proj, project, cmd };
+        // No HTTP request carries a Space here (the composer shell gets one
+        // from the scoped facade). Enter the session's own Space as the
+        // acting person, so the routed Vault resolves and redacts the same
+        // entries the composer shell would, never the legacy root store.
+        const space = deps.vaultSpace?.({
+          spaceId: proj.spaceId ?? project.spaceId,
+          ...(input.actorUserId ? { actorUserId: input.actorUserId } : {}),
+        });
+        return { proj, project, cmd, space };
       });
-      return runBoundedShellCommand({
+      const run = () => runBoundedShellCommand({
         proj,
         project,
         command: cmd,
         ...(input.actorUserId ? { actorUserId: input.actorUserId } : {}),
         timeoutMs: input.timeoutMs,
       });
+      return space ? runWithSecureSafeSpace(space, run) : run();
     },
 
     async runShell(sessionId, command, person) {

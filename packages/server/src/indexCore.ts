@@ -3024,6 +3024,14 @@ export async function boot(opts: BootOptions = {}) {
       return descriptor?.kind === "tool" ? redactToolInput(input, descriptor.inputSchema) : input;
     },
     projects, runtimes, broadcast, queue: store, org: store, profiles: store, behavior, secureSafe,
+    // The agent Vault run: the session's own Space, entered as its acting
+    // person (membership checked) or as system work with Space entries only.
+    vaultSpace: ({ spaceId, actorUserId }) => {
+      const space = spaceGateway.resolveInternal(spaceId);
+      return actorUserId && !actorUserId.startsWith("system:")
+        ? spaceGateway.resolver.forUser(actorUserId, space.spaceId)
+        : space;
+    },
     startSteps: sessionStartSteps,
     turnContext,
     harnesses: {
