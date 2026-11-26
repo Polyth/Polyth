@@ -509,6 +509,7 @@ export const ptBR: AgentsMessages = {
   "agents.backgroundWork": "Trabalho em segundo plano",
   "agents.waitingSoFarValue": "Esperando · há {duration}",
   "agents.workingWaiting": "Esperando trabalho em segundo plano",
+  "agents.workingRecovering": "Esperando retomar após uma reinicialização",
   "agents.notesOneValue": "{count} nota",
   "agents.notesValue": "{count} notas",
   "agents.remembered": "Anotado",

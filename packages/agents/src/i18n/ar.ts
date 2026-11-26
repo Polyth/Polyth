@@ -509,6 +509,7 @@ export const ar: AgentsMessages = {
   "agents.backgroundWork": "عمل في الخلفية",
   "agents.waitingSoFarValue": "في الانتظار · منذ {duration}",
   "agents.workingWaiting": "ينتظر عملًا في الخلفية",
+  "agents.workingRecovering": "ينتظر الاستئناف بعد إعادة التشغيل",
   "agents.notesOneValue": "الملاحظات: {count}",
   "agents.notesValue": "الملاحظات: {count}",
   "agents.remembered": "تم التدوين",

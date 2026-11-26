@@ -163,8 +163,9 @@ git pull && docker compose build && docker compose up -d   # source build
 docker compose pull && docker compose up -d                # published image (POLYTH_IMAGE)
 ```
 
-Stopping sends SIGTERM; the server drains running agent turns before it exits
-(`stop_grace_period: 60s`). Back up the `polyth-data` volume while the service
+Stopping sends SIGTERM; the server waits for turns running on a shared OpenCode
+runtime before it exits (`stop_grace_period: 60s`), while turns of other harnesses
+are cut and continued after the next start. Back up the `polyth-data` volume while the service
 is stopped. Owner password recovery runs offline against the same volume:
 
 ```bash

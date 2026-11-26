@@ -511,6 +511,7 @@ export const en = {
   "agents.backgroundWork": "Background work",
   "agents.waitingSoFarValue": "Waiting · {duration} so far",
   "agents.workingWaiting": "Waiting on background work",
+  "agents.workingRecovering": "Waiting to resume after a restart",
   "agents.notesOneValue": "{count} note",
   "agents.notesValue": "{count} notes",
   "agents.remembered": "Noted",

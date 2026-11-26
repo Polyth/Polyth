@@ -39,7 +39,10 @@ function phaseLine(task: ScheduleTaskDto, live: AgentLive, now: number, short: b
     case "stopped": return short ? tr("agents.stateTripped") : trippedLine(task);
     // The same clock as the agent's row and its live dock.
     // A run that waits for its background work is still at work, not done.
-    case "working": return live.running!.background
+    // A turn a restart cut is not at work yet: it waits to be continued.
+    case "working": return live.running!.recovering !== undefined
+      ? tr("agents.workingRecovering")
+      : live.running!.background
       ? tr("agents.workingWaiting")
       : tr("agents.workingForValue", { duration: fmtSessionElapsed(now - live.running!.startedAt) });
     case "paused": return tr("agents.statePaused");

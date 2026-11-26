@@ -42,12 +42,17 @@ after the message is in the queue): a stop that found the runtime gone leaves
 the session idle behind a blocked reconciliation barrier, and a sender nobody
 watches (a scheduled agent, a delegated worker) has no one to open the chat,
 so before this its message waited until a person did. The server's own
-resumes (`autoResume`) never start a recovery this way. Startup recovery (`recoverPendingWork`) wires,
+resumes (`autoResume`) never start a recovery this way. Startup recovery (`recoverPendingWork`, scheduled
+only after `packageLifecycle.startEnabled`: harnesses are packages, and before
+them every wiring failed with "Harness … is not registered") wires,
 one at a time, every session whose log still has the turn the restart cut
 open, so its owned-epoch recovery closes that turn (`turn/abort-requested`
 `{reason:"runtime-replaced", source:"runtime-epoch"}`, then `turn/stopped`)
 and continues it at once on a fresh runtime instead of leaving it for the tool
-watchdog. A watchdog that still fires on such a turn hands it to the same
+watchdog. Each step that does not happen says why in the server log: `boot
+recovery of <id> deferred`, `restart-cut turn of <id> not recovered at boot`
+(not an owned epoch: it recovers on its next use), `epoch turn continue
+skipped for <id>: <reason>`. A watchdog that still fires on such a turn hands it to the same
 recovery rather than stopping it as a plain abort; it stops it locally only
 when that recovery cannot replace the runtime. `activate` starts or joins the recovery — also
 for a session that was still wired when its runtime identity broke — and

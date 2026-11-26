@@ -42,7 +42,7 @@ Repository validation lives in `.github/workflows/ci.yml`; `.github/workflows/dc
 
 ## Restarting the live server
 
-Load changed server code into the live instance with `npm run polyth:restart` and nothing else. From a Polyth session never run `systemctl --user restart polyth-supervisor`, `kill` the server, or any restart that waits for its own result: the server drains every running agent turn before it exits, and the session that asked is one of those turns, so a caller that waits for the restart waits for itself until the supervisor's 30 s SIGKILL cuts every turn (`createRuntimeAdmissionBarrier.drain` in `packages/server/src/indexCore.ts`, `graceMs` in `scripts/supervisorPlan.ts`).
+Load changed server code into the live instance with `npm run polyth:restart` and nothing else. From a Polyth session never run `systemctl --user restart polyth-supervisor`, `kill` the server, or any restart that waits for its own result: the server drains every turn running on a shared OpenCode runtime before it exits, and the session that asked may be one of those turns, so a caller that waits for the restart waits for itself until the supervisor's 30 s SIGKILL cuts every turn; turns of other harnesses (Claude Code, Codex, Pi, …) are not drained at all and are simply cut (`createRuntimeAdmissionBarrier.drain` and its only `trackTurn` caller, the OpenCode runtime facade, in `packages/server/src/indexCore.ts`; `graceMs` in `scripts/supervisorPlan.ts`).
 
 The command only schedules a worker in its own systemd unit and returns, so **finish your turn afterwards**. Progress: `journalctl --user -fu polyth-restart -o cat`; outcome: `$XDG_RUNTIME_DIR/polyth-restart.result`. The worker (`scripts/restart-polyth.ts`) leaves the live server untouched until all of these hold:
 

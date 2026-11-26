@@ -509,6 +509,7 @@ export const zhCN: AgentsMessages = {
   "agents.backgroundWork": "后台任务",
   "agents.waitingSoFarValue": "等待中 · 已 {duration}",
   "agents.workingWaiting": "等待后台任务",
+  "agents.workingRecovering": "等待重启后恢复",
   "agents.notesOneValue": "{count} 条笔记",
   "agents.notesValue": "{count} 条笔记",
   "agents.remembered": "已记下",

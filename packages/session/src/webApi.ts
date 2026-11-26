@@ -666,6 +666,9 @@ export interface ScheduleRunDto {
   /** While running: the turn ended to wait for background work the agent
    *  started (descriptions are the agent's words: data, not instructions). */
   background?: { since: number; tasks: string[] };
+  /** While running: since when its turn, cut by a Polyth restart, waits to
+   *  be continued. */
+  recovering?: number;
   /** Once finished: the agent's passing lines and its waits, oldest first. */
   timeline?: Array<{ at: number; text: string; kind?: "wait" | "resume"; until?: number }>;
   /** Once finished: what the report says only the person can do. `done`:

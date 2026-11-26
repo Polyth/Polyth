@@ -3562,8 +3562,6 @@ export async function boot(opts: BootOptions = {}) {
   });
 
   sessionsRef = sessions;
-  // One startup owner resumes durable work; persisted GETs remain read-only.
-  setImmediate(() => { void sessions.recoverPendingWork().catch((error) => console.error("[polyth] session recovery failed", error)); });
 
   // Pristine sessions (never prompted, no draft/queue/child) are disposable
   // garbage left by abandoned or failed startups. Reclaim the accumulated ones
@@ -3861,6 +3859,12 @@ export async function boot(opts: BootOptions = {}) {
   };
   attachHttpChannels(httpServerContext);
   await packageLifecycle.startEnabled(packageRegistry);
+  // One startup owner resumes durable work; persisted GETs remain read-only.
+  // Only once the packages have started: harnesses are packages, and a turn
+  // the restart cut is recovered on its own harness's runtime. Run before
+  // them, every such recovery failed ("Harness … is not registered") and the
+  // turn waited for someone to open the chat or for the tool watchdog.
+  setImmediate(() => { void sessions.recoverPendingWork().catch((error) => console.error("[polyth] session recovery failed", error)); });
   try {
     await refreshSafeBehavior();
   } catch (err) {

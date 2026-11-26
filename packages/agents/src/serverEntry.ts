@@ -1228,13 +1228,21 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       };
     },
     lateReport: async (_task, run) => scanLateReport(await host.store.events(run.sessionId!, run.markerSeq), run.queueId),
-    settle: (task, run, signal, onWaiting, onActivity, onBackground, stopRequested) => settleScheduledRun(run, {
+    settle: (task, run, signal, onWaiting, onActivity, onBackground, stopRequested, recovery) => settleScheduledRun(run, {
       signal,
       events: (sessionId, afterSeq) => host.store.events(sessionId, afterSeq),
       ...(onWaiting ? { onWaiting } : {}),
       ...(onActivity ? { onActivity } : {}),
       ...(onBackground ? { onBackground } : {}),
       ...(stopRequested ? { stopRequested } : {}),
+      ...(recovery ? {
+        carriedOver: recovery.carriedOver,
+        onRecovery: recovery.onRecovery,
+        // A restart leaves a cut turn's session `unknown` (or being
+        // recovered), never `working`: that is how the run tells a turn the
+        // restart cut from one that outlived it.
+        sessionStatus: async () => (await host.store.projection(run.sessionId!))?.status,
+      } : {}),
       ...(run.sessionId ? {
         // The turn was cut under the agent (a restart, an overlong tool
         // call, a failed request) and nothing continued it: the run sends

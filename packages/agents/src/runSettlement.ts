@@ -58,6 +58,17 @@ export interface RunSettlementOptions {
   maxResumes?: number;
   /** Wait before continuation n (the last value serves every later one). */
   resumeDelaysMs?: readonly number[];
+  /** The run was started before this observer (by the Polyth process a
+   *  restart replaced, or before the package was enabled again): the
+   *  restart may have cut its turn without a word in the log. */
+  carriedOver?: boolean;
+  /** The session's status now (`working` while a live turn runs). Read for
+   *  a carried-over run whose turn the log still shows open; without it
+   *  such a run waits for the server to close the turn. */
+  sessionStatus?: () => Promise<string | undefined>;
+  /** The run's turn, cut by a restart or a runtime replacement, waits to be
+   *  continued since `since`; `null`: it goes on again. */
+  onRecovery?: (since: number | null) => void;
 }
 
 /** A run that waits for background work: long enough for a CI run, short
@@ -68,6 +79,12 @@ const WAITING_POLL_MS = 5_000;
  *  continued. The server continues at once after a proven abort or a runtime
  *  replacement; an unproven abort waits for reconciliation first. */
 const WATCHDOG_RESUME_MS = 15 * 60_000;
+/** A runtime replacement (a restart) is continued as soon as the fresh
+ *  runtime is up; a continuation that has not come by then is not coming. */
+const RESTART_RESUME_MS = 2 * 60_000;
+/** How long a run carried over a restart leaves its open turn to the
+ *  server's boot recovery before it continues the turn itself. */
+export const RESTART_RECOVERY_MS = 45_000;
 /** A run continues itself this often after being cut, then asks the person. */
 export const DEFAULT_MAX_RESUMES = 2;
 /** Long enough for a restarting server or a lost connection to settle. */
@@ -264,6 +281,26 @@ export async function settleScheduledRun(
   let resumeSentAt = 0;
   let steered = false;
   let steerSince = 0;
+  // How long a resuming run waits for the server's continuation.
+  let resumeLimit = WATCHDOG_RESUME_MS;
+  // A restart cut the run's turn: since when it waits to be continued (0:
+  // it does not). `movedAt`: the newest sign of a turn going on (a start, or
+  // streamed words; never tool events, which closing a cut turn writes too).
+  const attachedAt = now();
+  let recoverySince = 0;
+  let movedAt = 0;
+  let caughtUp = false;
+  let recoveryChecked = false;
+  const recovering = (since: number): void => {
+    if (recoverySince) return;
+    recoverySince = since;
+    opts.onRecovery?.(since);
+  };
+  const recovered = (): void => {
+    if (!recoverySince) return;
+    recoverySince = 0;
+    opts.onRecovery?.(null);
+  };
   const waitMs = opts.backgroundWaitMs ?? DEFAULT_BACKGROUND_WAIT_MS;
   // Background work the run started (call id → description), and the wakes
   // it has had so far.
@@ -394,6 +431,10 @@ export async function settleScheduledRun(
       } else if (requestId && REQUEST_CLOSED.has(event.type) && open.delete(requestId)) {
         report();
       }
+      if (event.type === "turn/started" || event.type.startsWith("assistant/")) {
+        movedAt = Math.max(movedAt, eventTime(event));
+        if (recoverySince && movedAt >= recoverySince) recovered();
+      }
       if (phase === "waiting") {
         if (event.type === "user/message" && (event.data as JsonObject | undefined)?.hiddenUserMessage === true) {
           // Server work, no person: the background work woke the agent.
@@ -484,7 +525,7 @@ export async function settleScheduledRun(
         resumeSentAt = 0;
         continue;
       }
-      if (phase === "turn" && event.type === "turn/abort-requested") {
+      if ((phase === "turn" || phase === "admitted") && event.type === "turn/abort-requested") {
         abort = { reason: str(event, "reason"), source: str(event, "source") };
         continue;
       }
@@ -514,6 +555,12 @@ export async function settleScheduledRun(
         continue;
       }
       if (event.type !== "turn/stopped") continue;
+      if (phase === "admitted" && abort?.source === "runtime-epoch") {
+        // The server closing the turn a restart cut, after the run sent its
+        // own continuation: that continuation's turn is still to come.
+        abort = undefined;
+        continue;
+      }
       const reason = str(event, "reason");
       if (reason === "completed" && phase === "turn" && waitMs > 0 && launched.size > woken
         && !parseAgentReport(turnText).signal) {
@@ -555,6 +602,8 @@ export async function settleScheduledRun(
           // continues the turn.
           phase = "resuming";
           resumeSince = eventTime(event);
+          resumeLimit = source === "runtime-epoch" ? RESTART_RESUME_MS : WATCHDOG_RESUME_MS;
+          if (source === "runtime-epoch") recovering(resumeSince);
           continue;
         }
         if (abort?.reason === "interrupt") {
@@ -595,7 +644,7 @@ export async function settleScheduledRun(
       if (opts.stopRequested?.()) return result({ status: "failed", stopped: true, cause: "person", error: STOPPED_ERROR });
       // The server's continuation never came (budget spent, session busy,
       // send failed): the run continues itself.
-      if (!events.length && now() - resumeSince >= WATCHDOG_RESUME_MS
+      if (!events.length && now() - resumeSince >= resumeLimit
         && !cutNow("cut", CUT_ERROR, resumeSince, true)) {
         return result({ status: "failed", cause: "cut", error: CUT_ERROR });
       }
@@ -611,6 +660,31 @@ export async function settleScheduledRun(
       // The continuation's turn never started: cut again, or the end.
       resumeSentAt = 0;
       if (!cutNow("cut", CUT_ERROR, now(), true)) return result({ status: "failed", cause: "cut", error: CUT_ERROR });
+    }
+    const turnOpen = at() === "turn" || at() === "admitted";
+    if (!events.length && !caughtUp) {
+      caughtUp = true;
+      // Carried over a restart with its turn (or its prompt) still open and
+      // nothing new since: it waits for that turn to be continued.
+      if (opts.carriedOver && movedAt < attachedAt && (turnOpen || at() === "resuming")) recovering(attachedAt);
+      if (opts.carriedOver && at() === "resuming") {
+        // A continuation the previous process promised went with it.
+        resumeSince = Math.max(resumeSince, attachedAt);
+        resumeLimit = Math.min(resumeLimit, RESTART_RESUME_MS);
+      }
+    }
+    if (turnOpen && recoverySince && opts.carriedOver && opts.sessionStatus && !recoveryChecked
+      && !events.length && !open.size && now() - attachedAt >= RESTART_RECOVERY_MS) {
+      const status = await opts.sessionStatus().catch(() => null);
+      if (status !== null) {
+        recoveryChecked = true;
+        // A live turn outlived the restart (or the package was only enabled
+        // again), or it waits for a person: it goes on. Otherwise nothing
+        // closed or continued the turn the restart cut, so the run continues
+        // it now.
+        if (status === "working" || status === "waiting") recovered();
+        else if (!cutNow("cut", CUT_ERROR, now(), true)) return result({ status: "failed", cause: "cut", error: CUT_ERROR });
+      }
     }
     if (at() === "cut") {
       if (opts.stopRequested?.()) return result({ status: "failed", stopped: true, cause: "person", error: STOPPED_ERROR });

@@ -509,6 +509,7 @@ export const bg: AgentsMessages = {
   "agents.backgroundWork": "Фонова работа",
   "agents.waitingSoFarValue": "Чака · от {duration}",
   "agents.workingWaiting": "Чака фонова работа",
+  "agents.workingRecovering": "Чака възобновяване след рестарт",
   "agents.notesOneValue": "Бележки: {count}",
   "agents.notesValue": "Бележки: {count}",
   "agents.remembered": "Запомнено",

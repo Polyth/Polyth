@@ -509,6 +509,7 @@ export const fr: AgentsMessages = {
   "agents.backgroundWork": "Travail en arrière-plan",
   "agents.waitingSoFarValue": "En attente · depuis {duration}",
   "agents.workingWaiting": "Attend un travail en arrière-plan",
+  "agents.workingRecovering": "Attend de reprendre après un redémarrage",
   "agents.notesOneValue": "{count} note",
   "agents.notesValue": "{count} notes",
   "agents.remembered": "Retenu",

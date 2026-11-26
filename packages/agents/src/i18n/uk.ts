@@ -509,6 +509,7 @@ export const uk: AgentsMessages = {
   "agents.backgroundWork": "Фонова робота",
   "agents.waitingSoFarValue": "Чекає · уже {duration}",
   "agents.workingWaiting": "Чекає на фонову роботу",
+  "agents.workingRecovering": "Чекає на відновлення після перезапуску",
   "agents.notesOneValue": "Нотатки: {count}",
   "agents.notesValue": "Нотатки: {count}",
   "agents.remembered": "Запам’ятав",

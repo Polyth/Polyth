@@ -509,6 +509,7 @@ export const pt: AgentsMessages = {
   "agents.backgroundWork": "Trabalho em segundo plano",
   "agents.waitingSoFarValue": "À espera · há {duration}",
   "agents.workingWaiting": "À espera de trabalho em segundo plano",
+  "agents.workingRecovering": "À espera de retomar após um reinício",
   "agents.notesOneValue": "{count} nota",
   "agents.notesValue": "{count} notas",
   "agents.remembered": "Anotado",

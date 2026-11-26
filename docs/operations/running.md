@@ -119,8 +119,12 @@ shape of GitHub's releases API, for hosts without GitHub access.
 When a systemd or launchd service from `polyth service install` runs this install
 (its command names this install's `bin/polyth.mjs`; a `polyth.service` that runs
 another install is left alone), the update restarts it and waits up to ten minutes
-for the server to answer with the new version. The server drains the turns running
-at SIGTERM before it exits. If it does not come back, the previous release is put
+for the server to answer with the new version. At SIGTERM the server waits only for
+turns running on a shared OpenCode runtime; a turn of any other harness (Claude
+Code, Codex, Pi, …) is cut, and after the restart Polyth closes it and continues
+it on a fresh runtime (a scheduled agent's run continues itself within about a
+minute when nothing else does). `polyth update` does not wait for running turns
+before it restarts the service. If it does not come back, the previous release is put
 back and restarted. Without such a service the update says that the server still
 runs the old release until it is restarted; the running server keeps its files, but
 the web assets it serves already belong to the new release. One update runs at a

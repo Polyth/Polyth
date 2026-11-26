@@ -223,6 +223,10 @@ export interface ScheduleRunRecord {
   /** While running: the turn ended to wait for background work the agent
    *  started; the run goes on when that work wakes it. */
   background?: AgentBackgroundWait;
+  /** While running: since when its turn, cut by a Polyth restart (or a
+   *  runtime replacement), waits to be continued. What comes due meanwhile
+   *  runs once the run has settled, never skipped. */
+  recovering?: number;
   /** Once finished: how the run went, in the agent's own passing words and
    *  its waits, oldest first and bounded. Its final message is the report. */
   timeline?: AgentRunMoment[];
@@ -842,6 +846,10 @@ export interface ScheduleRunner {
     onBackground?: (wait: AgentBackgroundWait | null) => void,
     /** The person asked to stop the run. */
     stopRequested?: () => boolean,
+    /** `carriedOver`: start() found the run running, left by the process a
+     *  restart replaced (or by an earlier enable). `onRecovery`: its turn,
+     *  cut by a restart, waits to be continued (`null`: no longer). */
+    recovery?: { carriedOver: boolean; onRecovery: (since: number | null) => void },
   ): Promise<ScheduleRunSettlement>;
   /** The run's session read again after it settled without a report: the
    *  report it wrote later, if any (`scanLateReport`). Without it, a run's
@@ -1747,6 +1755,7 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
     // The newest step only means something while the run works; the count stays.
     delete rec.activity;
     delete rec.background;
+    delete rec.recovering;
     if (result.status === "ok") delete task.lastError;
     else task.lastError = rec.error ?? "The run's result could not be confirmed.";
     let tripped = false;
@@ -1830,8 +1839,8 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
 
   /** Follow an admitted run to its real end. A stop() detaches the observer
    * without touching the record, so the next start() resumes it. */
-  const observe = (task: ScheduleTask, rec: ScheduleRunRecord): Promise<void> => {
-    const follower = { signal: observers.signal, watched: follow(task, rec) };
+  const observe = (task: ScheduleTask, rec: ScheduleRunRecord, carriedOver = false): Promise<void> => {
+    const follower = { signal: observers.signal, watched: follow(task, rec, carriedOver) };
     watching.set(rec.runId, follower);
     const done = (): void => {
       if (watching.get(rec.runId) === follower) watching.delete(rec.runId);
@@ -1840,7 +1849,7 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
     return follower.watched;
   };
 
-  const follow = async (task: ScheduleTask, rec: ScheduleRunRecord): Promise<void> => {
+  const follow = async (task: ScheduleTask, rec: ScheduleRunRecord, carriedOver: boolean): Promise<void> => {
     const signal = observers.signal;
     inFlight.add(rec.runId);
     try {
@@ -1861,7 +1870,16 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
         if (wait) rec.background = wait;
         else delete rec.background;
         save();
-      }, () => rec.stopped === true);
+      }, () => rec.stopped === true, {
+        carriedOver,
+        onRecovery: (since) => {
+          if (signal.aborted || rec.status !== "running") return;
+          if ((rec.recovering ?? null) === since) return;
+          if (since === null) delete rec.recovering;
+          else rec.recovering = since;
+          save();
+        },
+      });
       if (signal.aborted) {
         inFlight.delete(rec.runId);
         return;
@@ -2017,6 +2035,10 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
     });
     running.set(taskId, tracked);
   };
+
+  /** Its run in progress is a turn a restart cut, still to be continued. */
+  const runRecovering = (task: ScheduleTask): boolean =>
+    (task.history ?? []).some((run) => run.status === "running" && run.recovering !== undefined);
 
   const recordSkip = (task: ScheduleTask, error: string): void => {
     pushHistory(task, {
@@ -2246,6 +2268,17 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
       return;
     }
     const waiting = queuedNext.get(task.id);
+    if (active && policy === "skip" && !waiting && runRecovering(task)) {
+      // The run at work is a turn a restart cut, waiting to be continued:
+      // what comes due meanwhile is not lost, it runs once that run settles
+      // (one at most; any later one is skipped as usual).
+      const entry: WaitingStart = { start, executable: executableTask, messages: [] };
+      queuedNext.set(task.id, entry);
+      waitBehind(task, entry);
+      if (start.trigger !== "event") task.nextRunAt = computeNextRun({ ...task, lastRunAt: now() }, now());
+      save();
+      return;
+    }
     if (active && (policy === "skip" || (policy === "queue" && waiting))) {
       recordSkip(task, policy === "skip"
         ? "previous run still active (overlap policy: skip)"
@@ -3158,13 +3191,13 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
                 if (phase !== "running" || rec.status !== "running") return undefined;
                 // Another restart's chain may have followed it first: wait
                 // for that follower instead.
-                return inFlight.has(rec.runId) ? watching.get(rec.runId)?.watched : observe(t, rec);
+                return inFlight.has(rec.runId) ? watching.get(rec.runId)?.watched : observe(t, rec, true);
               }));
               continue;
             }
             if (inFlight.has(rec.runId)) continue;
             if (opts.runner.settle && rec.sessionId) {
-              track(t.id, observe(t, rec));
+              track(t.id, observe(t, rec, true));
             } else {
               rec.status = "unknown";
               rec.finishedAt = now();

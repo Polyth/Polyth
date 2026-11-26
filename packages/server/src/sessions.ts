@@ -10827,11 +10827,17 @@ export function createSessionService(deps: {
     model?: ModelRef;
   } | null> =>
     withSessionLock(sessionId, async () => {
+      // Every refusal says why: a cut turn nobody continues otherwise sits
+      // until a person writes or the tool watchdog closes it.
+      const skip = (reason: string): null => {
+        console.warn(`[polyth] epoch turn continue skipped for ${sessionId}: ${reason}`);
+        return null;
+      };
       const proj = await store.projection(sessionId);
       if (!proj || proj.status === "archived" || proj.status === "working" || proj.harnessTransition) {
-        return null;
+        return skip(proj?.harnessTransition ? "harness switch pending" : `status ${proj?.status ?? "missing"}`);
       }
-      if (proj.status !== "idle") return null;
+      if (proj.status !== "idle") return skip(`status ${proj.status}`);
       const reconciliation = await durable.reconciliation(sessionId);
       if (
         reconciliation
@@ -10841,15 +10847,15 @@ export function createSessionService(deps: {
           || reconciliation.state === "unknown"
         )
       ) {
-        return null;
+        return skip(`reconciliation ${reconciliation.state}${reconciliation.reason ? ` (${reconciliation.reason})` : ""}`);
       }
       const queued = deps.queue ? await deps.queue.queueList(sessionId) : [];
-      if (queued.some((item) => !item.heldForReview)) return null;
+      if (queued.some((item) => !item.heldForReview)) return skip("a queued message goes first");
       const events = await store.events(sessionId);
       const marker = events.findLast((event) => event.type === "runtime/epoch-replaced");
-      if (!marker) return null;
+      if (!marker) return skip("no runtime/epoch-replaced marker");
       const epoch = Number((marker.data as { new?: { epoch?: unknown } }).new?.epoch);
-      if (!Number.isSafeInteger(epoch) || epoch <= 0) return null;
+      if (!Number.isSafeInteger(epoch) || epoch <= 0) return skip("epoch marker has no valid epoch");
       const alreadyRestored = events.some((event) => {
         if (event.type !== "user/message") return false;
         const metadata = (event.data as {
@@ -13685,10 +13691,21 @@ export function createSessionService(deps: {
           const cutTurn = await turnCutByRestart(projection);
           if (!cutTurn && !needsDelegatedSettlement(projection) && !queued.length && !await historyImportPending(projection)) continue;
           try { await sessionJobs.enqueue(projection.id); }
-          catch { /* durable queue/import state is retained for explicit recovery */ }
+          catch (error) {
+            // Durable queue/import state is retained for explicit recovery;
+            // say why this boot could not do it. `epoch-pending` is the
+            // ordinary way to a restart-cut turn's recovery, which follows.
+            const code = (error as { code?: unknown } | null)?.code;
+            if (code !== "epoch-pending") console.warn(`[polyth] boot recovery of ${projection.id} deferred: ${typeof code === "string" ? `${code}: ` : ""}${error instanceof Error ? error.message : String(error)}`);
+          }
           // One recovery at a time at boot: each may start a native process.
           if (cutTurn && recoverableOwnedEpochs.has(projection.id)) {
             await recoverOwnedEpochIfWorkPending(projection.id);
+          } else if (cutTurn) {
+            // Not an owned epoch the boot can replace: the cut turn waits for
+            // the next use of the session (a send, an open) or the watchdog.
+            const now = await store.projection(projection.id);
+            console.warn(`[polyth] restart-cut turn of ${projection.id} not recovered at boot: status ${now?.status ?? "missing"}, runtime ${now?.runtimeControl ?? "unknown"}`);
           }
         }
       })().finally(() => { recoveryWork = undefined; });
