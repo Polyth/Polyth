@@ -66,22 +66,19 @@ test("a pinned row names its project, and a private room as its project's own", 
   assert.equal(sessionProjectMark(projects, { projectId: "missing" }), undefined);
 });
 
-test("a project without an icon is marked by its initials", () => {
+test("a project without an icon is marked by its initial", () => {
   // A nameless project goes by its folder, not the whole path.
-  assert.equal(sessionProjectMark(projects, { projectId: "beta" })?.monogram, "BC");
+  assert.equal(sessionProjectMark(projects, { projectId: "beta" })?.monogram, "B");
   // A project with an icon draws the icon; a room draws its project's mark.
   assert.equal(sessionProjectMark(projects, { projectId: "alpha-room" })?.monogram, "");
   const cases: Array<[string, string]> = [
-    ["Home Assistant", "HA"],
-    ["polyth-site", "PS"],
-    ["polyth_site.v2", "PS"],
-    ["myProject", "MP"],
-    ["polyth", "P"],
+    ["Home Assistant", "H"],
+    ["polyth-site", "P"],
+    ["myProject", "M"],
     ["c2f4a6976e5b", "C"],
-    ["2026 budget", "2B"],
-    ["🚀 launch plan", "LP"],
-    ["україна дім", "УД"],
-    ["Écoles", "É"],
+    ["2026 budget", "2"],
+    ["🚀 launch plan", "L"],
+    ["україна дім", "У"],
     ["项目管理", "项"],
     ["  ", ""],
     ["🚀", ""],

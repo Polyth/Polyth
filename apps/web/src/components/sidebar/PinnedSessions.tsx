@@ -146,8 +146,11 @@ export default function PinnedSessions({
 
   return (
     <div className="session-org session-pinned session-pinned-above" aria-label={tr("sidebar.sessionlist.pinnedChats")}>
-      <div className="session-date-divider session-pinned-divider" role="separator">
-        <span><Icon.pin />{tr("sidebar.sessionlist.pinnedChats")}</span>
+      {/* A section head like the server zone's, not a day divider: the group
+          sits beside the projects, outside any one list. */}
+      <div className="session-pinned-divider session-pinned-head" role="heading" aria-level={3}>
+        <Icon.pin />
+        <span>{tr("sidebar.sessionlist.pinnedChats")}</span>
       </div>
       {pinned.map((session) => renderNode(session))}
     </div>

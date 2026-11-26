@@ -2361,16 +2361,19 @@ The command palette
   empty. In that group every row is pinned, so the state column carries the
   chat's project glyph (icon and colour, a private room as its project) in
   place of the pin, and its description names the project. A project without
-  an icon shows its initials instead of the default folder, so several such
-  projects stay apart: the first letter or digit of its first two words (of
-  its name, or of its folder when it has none; `projectMonogram`) on a disc
+  an icon shows its initial instead of the default folder, so several such
+  projects stay apart: the first letter or digit of its name (or of its
+  folder when it has none; `projectMonogram`) at `--font-meta` on a disc
   washed with the project's colour, or with the default project ink when it
   has none. Symbols and emoji are skipped; a name without a letter or digit
-  keeps the folder. Live state stays
-  on the glyph the way the project rail marks its icons: a running or
-  reconciling chat turns a thin ring around it, attention (reply, approval,
-  epoch, limit) an amber corner dot, a failure a red one, an unread reply an
-  accent one. The phone navigator does not offer the option yet.
+  keeps the folder. Live state stays on the glyph in the project rail's kind
+  colours (`--status-question`, `--status-permission`, `--status-result` in
+  `tokens.css`): a running or reconciling chat turns a thin ring around it, a
+  reply, an approval or an unread result a corner dot of its kind, a stale
+  epoch or a provider limit an amber one, a failure a red one. The group's
+  head is a dim caption on the navigator's axes (pin in the glyph column, like
+  a server zone's head), with the same air below the group as above it. The
+  phone navigator does not offer the option yet.
 - **Desktop session row geometry:** the open button (`.session-btn`) is an
   empty, full-row hit surface; `.session-row-body` paints above it with
   `pointer-events: none` in three fixed columns — a state mark reserved on

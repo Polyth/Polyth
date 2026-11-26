@@ -224,7 +224,10 @@ the shell and every package stylesheet.
   `--control-disabled-border` and `--control-disabled-ink`; a button a
   package paints itself uses the same tokens. Any other `button:disabled`
   falls back to `opacity: .5; filter: grayscale(1)`, so an accent fill turns
-  gray instead of fading. An answered choice that must stay at full strength
+  gray instead of fading. One exception: the sign-in, recovery and setup
+  card's single primary (`.lock-actions .lock-submit`) stays an accent wash
+  with dimmed accent text while it waits for input, so the one action still
+  reads as the primary; its alternatives are ghost buttons. An answered choice that must stay at full strength
   resets both `opacity` and `filter` explicitly.
 - **`aria-disabled="true"`** keeps a control focusable to explain why it is
   unavailable: its handler ignores activation, and its hover excludes it with

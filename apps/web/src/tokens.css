@@ -62,6 +62,13 @@
   --control-disabled-border: color-mix(in srgb, var(--text) 10%, transparent);
   --control-disabled-ink: color-mix(in srgb, var(--faint) 78%, transparent);
 
+  /* A chat's open request or result, by kind: one colour each wherever a
+     mark or count of it shows (project rail, its tooltip, the Pinned group's
+     corner dots), and none of them for a count of anything else. */
+  --status-question: var(--blue);
+  --status-permission: var(--amber);
+  --status-result: var(--green);
+
   /* accent + signals */
   --accent: #7aa2f7;
   --accent-ink: #0a0f1a;

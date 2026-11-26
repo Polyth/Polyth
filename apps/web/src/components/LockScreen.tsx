@@ -274,14 +274,12 @@ function PasswordLock({ onUnlocked }: { onUnlocked: () => void }) {
               autoComplete="username"
               autoCapitalize="off"
               spellCheck={false}
-              aria-describedby="lock-login-hint"
               disabled={locked || busy}
               onChange={(e) => {
                 setLogin(e.target.value);
                 setError(null);
               }}
             />
-            <small id="lock-login-hint" className="lock-field-hint">{tr("lockscreen.ownerLoginHint")}</small>
           </label>
           {mode === "recovery" && (
             <label className="lock-field" htmlFor="lock-recovery-code">
@@ -338,17 +336,17 @@ function PasswordLock({ onUnlocked }: { onUnlocked: () => void }) {
               {desktopRenew && (
                 // Polyth Desktop showing its own server: the person signed in
                 // to this computer opens it as its owner, no password needed.
-                <Button className="lock-submit lock-submit--secondary" type="button" disabled={busy} onClick={() => void continueOnThisComputer()} block>
+                <Button variant="ghost" className="lock-submit lock-submit--secondary" type="button" disabled={busy} onClick={() => void continueOnThisComputer()} block>
                   {tr("lockscreen.desktopContinue")}
                 </Button>
               )}
               {passkeySupported && (
-                <Button className="lock-submit lock-submit--secondary" type="button" disabled={busy || locked} onClick={() => void signInPasskey()} block>
+                <Button variant="ghost" className="lock-submit lock-submit--secondary" type="button" disabled={busy || locked} onClick={() => void signInPasskey()} block>
                   {tr("lockscreen.signInWithPasskey")}
                 </Button>
               )}
               {providers.map((provider) => (
-                <Button key={provider.id} className="lock-submit lock-submit--secondary" type="button" disabled={busy || locked} onClick={() => void signInProvider(provider)} block>
+                <Button key={provider.id} variant="ghost" className="lock-submit lock-submit--secondary" type="button" disabled={busy || locked} onClick={() => void signInProvider(provider)} block>
                   {tr("lockscreen.signInWithProvider", { provider: providerLabel(provider) })}
                 </Button>
               ))}

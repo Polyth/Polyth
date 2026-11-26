@@ -24,6 +24,10 @@ export function ResetOnThisComputerLink({ onClick, disabled }: { onClick: () => 
   );
 }
 
+/** The dialog runs only in the desktop app on the server's own computer, so
+ *  the browser's platform is that computer's: only a Mac offers Touch ID. */
+const onMac = (): boolean => typeof navigator !== "undefined" && /^mac/i.test(navigator.platform ?? "");
+
 export function DesktopPasswordResetDialog({ onClose }: { onClose: () => void }) {
   const [next, setNext] = useState("");
   const [repeat, setRepeat] = useState("");
@@ -65,7 +69,7 @@ export function DesktopPasswordResetDialog({ onClose }: { onClose: () => void })
       )}
     >
       <form className="users-dialog-form" onSubmit={(event) => { event.preventDefault(); void reset(); }}>
-        <p className="users-dialog-intro">{tr("settings.desktopReset.intro")}</p>
+        <p className="users-dialog-intro">{tr(onMac() ? "settings.desktopReset.introMac" : "settings.desktopReset.intro")}</p>
         <FormField
           label={tr("settings.account.newPassword")}
           hint={tr("settings.account.newPasswordHint", { count: MIN_PASSWORD_LENGTH })}

@@ -237,7 +237,10 @@ test("desktop setup asks only for a name and a password (typed twice), then show
     await typeInto("#setup-password", "correct horse battery");
     await typeInto("#setup-password-repeat", "correct horse batery");
     assert.equal(submitButton()?.disabled, true, "a repeat that differs keeps Continue disabled");
-    assert.ok($("#setup-password-repeat-error"), "and says the two differ");
+    // Half-typed, every repeat differs: the field waits until the person leaves it.
+    assert.equal($("#setup-password-repeat-error"), null, "no mismatch while the repeat is being typed");
+    await act(async () => { $("#setup-password-repeat")!.dispatchEvent(new Event("focusout", { bubbles: true })); });
+    assert.ok($("#setup-password-repeat-error"), "and says the two differ once the person leaves it");
 
     await fillAccount();
     assert.equal($("#setup-password-repeat-error"), null);

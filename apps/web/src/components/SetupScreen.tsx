@@ -161,6 +161,9 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
   // Typed twice: the owner may not type this password again for weeks, and a
   // slip nobody saw then reads as "Polyth forgot my password".
   const [passwordRepeat, setPasswordRepeat] = useState("");
+  // The mismatch waits until the person leaves the repeat field or tries to
+  // continue: half-typed, every repeat is a mismatch.
+  const [repeatChecked, setRepeatChecked] = useState(false);
   const [recovery, setRecovery] = useState<RecoveryState | null>(null);
   const [recoverySaved, setRecoverySaved] = useState(false);
   const [codesRenewed, setCodesRenewed] = useState(false);
@@ -201,7 +204,7 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
   const claimMalformed = normalizedClaim.length > 0 && !claimReady
     && (normalizedClaim.length >= 64 || /[^a-f0-9]/.test(normalizedClaim));
   const passwordReady = [...password].length >= MIN_PASSWORD_LENGTH;
-  const passwordMismatch = passwordRepeat.length > 0 && passwordRepeat !== password;
+  const passwordMismatch = repeatChecked && passwordRepeat.length > 0 && passwordRepeat !== password;
   const accountReady = !!name.trim() && passwordReady && passwordRepeat === password;
   const report = (cause: unknown): void => {
     setProblem(problemFor(errorCode(cause), { desktop: !!desktop, expired: claimExpired(claim.current) }));
@@ -639,7 +642,7 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
                   </small>
                 </div>
                 <div className="lock-field">
-                  <label className="lock-field-label" htmlFor="setup-password-repeat">{tr("lockscreen.passwordChange.repeat")}</label>
+                  <label className="lock-field-label" htmlFor="setup-password-repeat">{tr("setup.account.repeatLabel")}</label>
                   <TextInput
                     id="setup-password-repeat"
                     type="password"
@@ -651,6 +654,10 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
                     invalid={passwordMismatch}
                     aria-describedby={passwordMismatch ? "setup-password-repeat-error" : undefined}
                     onChange={(event) => { setPasswordRepeat(event.target.value); setProblem(null); }}
+                    onBlur={() => setRepeatChecked(true)}
+                    // Continue stays disabled while the two differ, so Enter
+                    // would submit nothing: it checks the repeat instead.
+                    onKeyDown={(event) => { if (event.key === "Enter") setRepeatChecked(true); }}
                   />
                   {passwordMismatch && (
                     <small id="setup-password-repeat-error" className="lock-field-error">{tr("lockscreen.passwordChange.mismatch")}</small>

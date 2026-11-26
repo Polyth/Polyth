@@ -86,12 +86,13 @@ const isManagedIsolationBranch = (branch: string | null | undefined): boolean =>
   branch?.startsWith("polyth/isolate/") === true;
 
 /** Live states the project glyph keeps in sight: a running chat rings it and
- *  the others tint a dot at its corner, as the project rail marks its icons
- *  (attention amber, an unread reply in the accent). */
+ *  the others tint a dot at its corner in the rail's kind colours (a reply,
+ *  an approval, an unread result: `--status-*`); a stale epoch or a provider
+ *  limit is amber, a failure red. */
 const PROJECT_LEAD_RING: ReadonlySet<SessionLeadMark> = new Set(["working", "reconciling", "opening"]);
 const PROJECT_LEAD_DOT: Partial<Record<SessionLeadMark, string>> = {
-  "needs-reply": "attention",
-  "needs-approval": "attention",
+  "needs-reply": "question",
+  "needs-approval": "permission",
   "epoch-pending": "attention",
   "rate-limited": "attention",
   failed: "failed",
@@ -108,13 +109,12 @@ function ProjectLeadMark({ projectMark, mark }: { projectMark: SessionProjectMar
   const dot = mark ? PROJECT_LEAD_DOT[mark] : undefined;
   return (
     <span className="session-lead-project" data-ring={ring} aria-hidden="true">
-      {/* A project without an icon goes by its initials on a disc of its
+      {/* A project without an icon goes by its initial on a disc of its
           colour: every such project would otherwise show the same folder. */}
       {monogram
         ? (
           <span
             className="session-lead-monogram"
-            data-length={monogram.length > 1 ? "2" : undefined}
             style={project.color ? { "--project-mark": project.color } as CSSProperties : undefined}
           >{monogram}</span>
         )

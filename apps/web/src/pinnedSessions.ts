@@ -21,26 +21,18 @@ export function sessionNeedsAttention(session: SessionProjection): boolean {
 export interface SessionProjectMark {
   project: Pick<Project, "icon" | "color" | "remote">;
   name: string;
-  /** Initials drawn for a project without an icon of its own, so several of
-   *  them stay apart in one list instead of all showing the default folder.
-   *  Empty when the name has no letter or digit. */
+  /** The initial drawn for a project without an icon of its own, so several
+   *  of them stay apart in one list instead of all showing the default
+   *  folder. Empty when the name has no letter or digit. */
   monogram: string;
 }
 
-/** A project's initials: the first letter or digit of its first two words, or
- *  of its only word ("Home Assistant" → "HA", "polyth-site" → "PS",
- *  "myProject" → "MP", "polyth" → "P"). Words split on spaces, `-`, `_`, `.`
- *  and lower→upper case changes; symbols and emoji are skipped. */
+/** A project's initial: the first letter or digit of its name ("Home
+ *  Assistant" → "H", "polyth-site" → "P", "🚀 launch" → "L"). One letter, so
+ *  it reads at the navigator's meta size inside the state column's disc; two
+ *  letters there fell to ~7px. Symbols and emoji are skipped. */
 export function projectMonogram(name: string): string {
-  const initials: string[] = [];
-  for (const part of name.normalize("NFC").split(/[\s\-_.·]+/u)) {
-    for (const word of part.split(/(?<=\p{Ll})(?=\p{Lu})/u)) {
-      const initial = word.match(/[\p{L}\p{N}]/u)?.[0];
-      if (initial) initials.push(initial.toLocaleUpperCase());
-      if (initials.length === 2) return initials.join("");
-    }
-  }
-  return initials.join("");
+  return name.normalize("NFC").match(/[\p{L}\p{N}]/u)?.[0]?.toLocaleUpperCase() ?? "";
 }
 
 /** The last segment of a project path, the name a nameless project goes by. */
