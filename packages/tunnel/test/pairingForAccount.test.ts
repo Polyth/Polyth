@@ -1,15 +1,25 @@
 // An instance owner pairs someone else's Polyth app: the device joins that
 // person's account with a narrowed profile, only the owner sees and approves
 // the pairing, and the owner can later revoke the device it issued.
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { REMOTE_CAPABILITY, type AuthPrincipal, type RouteRequest, type SpaceContext } from "@polyth/contracts";
 import { createTunnelStore } from "../src/index.ts";
 import { TunnelEventBus } from "../src/events.ts";
 import { commitPairingDevice, tunnelRoutes } from "../src/serverEntry.ts";
+
+const tempDirs: string[] = [];
+const tempDir = (prefix: string): string => {
+  const dir = mkdtempSync(prefix);
+  tempDirs.push(dir);
+  return dir;
+};
+after(() => {
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 
 const OWNER = "usr_admin";
 const PM = "usr_pm";
@@ -51,7 +61,7 @@ const call = async (
 };
 
 const setup = () => {
-  const store = createTunnelStore(join(mkdtempSync(join(tmpdir(), "polyth-tunnel-for-account-")), "tunnel.db"));
+  const store = createTunnelStore(join(tempDir(join(tmpdir(), "polyth-tunnel-for-account-")), "tunnel.db"));
   const events = new TunnelEventBus();
   const created: Array<Record<string, unknown>> = [];
   let next = 0;

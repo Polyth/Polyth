@@ -2,9 +2,9 @@
 // app joins the invitee's own account, and the host confirms it when the app
 // proves the invite secret. The Node side owns issuance, listing, cancelling,
 // the commit that consumes an invitation and restoring it after a restart.
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type AuthPrincipal, type RouteRequest, type SpaceContext } from "@polyth/contracts";
@@ -16,6 +16,16 @@ import {
   syncInvitations,
   tunnelRoutes,
 } from "../src/serverEntry.ts";
+
+const tempDirs: string[] = [];
+const tempDir = (prefix: string): string => {
+  const dir = mkdtempSync(prefix);
+  tempDirs.push(dir);
+  return dir;
+};
+after(() => {
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 
 const OWNER = "usr_admin";
 const PM = "usr_pm";
@@ -65,7 +75,7 @@ const setup = (opts: {
   shareUrl?: string;
   restore?: (params: Record<string, unknown>) => Record<string, unknown>;
 } = {}) => {
-  const store = createTunnelStore(join(mkdtempSync(join(tmpdir(), "polyth-tunnel-invitations-")), "tunnel.db"));
+  const store = createTunnelStore(join(tempDir(join(tmpdir(), "polyth-tunnel-invitations-")), "tunnel.db"));
   const events = new TunnelEventBus();
   const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
   let next = 0;
@@ -360,7 +370,7 @@ test("restore hands live invitations back and marks the ones the host rejects", 
 });
 
 test("an old host without pairing.restore does not break the trust sync", async () => {
-  const store = createTunnelStore(join(mkdtempSync(join(tmpdir(), "polyth-tunnel-invitations-")), "tunnel.db"));
+  const store = createTunnelStore(join(tempDir(join(tmpdir(), "polyth-tunnel-invitations-")), "tunnel.db"));
   store.claimPairing("pair-1", OWNER, PM);
   store.createInvitation({ pairingId: "pair-1", issuedBy: OWNER, forUserId: PM, profile: "observe", ticket: "t-1", shareUrl: SHARE_URL, expiresAt: Date.now() + 3_600_000 });
   const host = {

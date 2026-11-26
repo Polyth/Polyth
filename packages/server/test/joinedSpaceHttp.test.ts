@@ -2,9 +2,9 @@
 // server's page: requests that follow the Space go to the Link service, the
 // person's own things stay here in their own Space, and everything else is
 // refused rather than answered from this server.
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
@@ -15,6 +15,16 @@ import { spaceCookieHeader } from "../src/spaces.ts";
 import { joinedSpaceRoute } from "../src/joinedSpaceRouting.ts";
 import { CORE_REMOTE_ACCESS } from "../src/remotePolicy.ts";
 import { testTenancy } from "./support/spaces.ts";
+
+const tempDirs: string[] = [];
+const tempDir = (prefix: string): string => {
+  const dir = mkdtempSync(prefix);
+  tempDirs.push(dir);
+  return dir;
+};
+after(() => {
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 
 const JOINED = "rmt_0123456789abcdef01234567";
 const FOREIGN = "rmt_fedcba9876543210fedcba98";
@@ -40,7 +50,7 @@ async function withServer(
     },
     async forwardUpgrade() { /* not exercised over HTTP */ },
   };
-  const webDist = mkdtempSync(join(tmpdir(), "polyth-joined-space-"));
+  const webDist = tempDir(join(tmpdir(), "polyth-joined-space-"));
   writeFileSync(join(webDist, "index.html"), "<html>shell</html>");
   const handler = createHttpHandler({
     spaces: tenancy.gateway,
