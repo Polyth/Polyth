@@ -17,6 +17,11 @@ export interface SpeakableStreamOptions {
   minChars?: number;
   /** A sentence longer than this is split at the last comma/space before it. */
   maxChars?: number;
+  /** Start speaking before a long opening sentence has finished streaming:
+   *  once this many characters of it are waiting, the very first chunk is
+   *  released at its last clause boundary (comma, semicolon, colon, dash).
+   *  Unset: the first chunk is always a whole sentence. */
+  firstClauseChars?: number;
 }
 
 export interface SpeakableStream {
@@ -150,9 +155,30 @@ function splitLong(sentence: string, max: number): string[] {
   return out;
 }
 
+/** A clause shorter than this is not worth starting speech for. */
+const MIN_FIRST_CLAUSE = 24;
+
+/** Where the unfinished line `raw` can be cut after a clause: the index just
+ *  past the last boundary that leaves no markdown span (code, link, emphasis)
+ *  open before it, or -1. A number's comma ("1,000") is not a boundary. */
+function clauseCut(raw: string): number {
+  const pattern = /[,;:，、；：]\s|\s[—–-]\s/gu;
+  let cut = -1;
+  for (let match = pattern.exec(raw); match; match = pattern.exec(raw)) {
+    const end = match.index + match[0].length;
+    const head = raw.slice(0, end);
+    if (head.trim().length < MIN_FIRST_CLAUSE) continue;
+    const count = (token: string) => head.split(token).length - 1;
+    if (count("`") % 2 || count("**") % 2 || count("[") !== count("]") || count("(") !== count(")")) continue;
+    cut = end;
+  }
+  return cut;
+}
+
 export function createSpeakableStream(options: SpeakableStreamOptions = {}): SpeakableStream {
   const minChars = Math.max(1, options.minChars ?? 80);
   const maxChars = Math.max(40, options.maxChars ?? 260);
+  const firstClauseChars = options.firstClauseChars && options.firstClauseChars > 0 ? options.firstClauseChars : 0;
   let raw = "";
   let inFence = false;
   let inTable = false;
@@ -221,6 +247,18 @@ export function createSpeakableStream(options: SpeakableStreamOptions = {}): Spe
           const text = speakableLine(raw.slice(0, boundary));
           if (text) sentences.push(...sentencesOf(text));
           raw = raw.slice(boundary);
+        }
+        // Nothing has been said yet and the opening sentence is still
+        // coming: its first clause is enough to start speaking.
+        if (firstClauseChars && !started && !held.length && !sentences.length && raw.trim().length >= firstClauseChars
+          && !/^\s*(#|>|[-*+]\s|\d+[.)]\s)/.test(raw)) {
+          const cut = clauseCut(raw);
+          const text = cut > 0 ? speakableLine(raw.slice(0, cut)) : "";
+          if (text.length >= MIN_FIRST_CLAUSE) {
+            raw = raw.slice(cut);
+            started = true;
+            return [text];
+          }
         }
       }
       return release(sentences, false);

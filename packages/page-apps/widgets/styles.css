@@ -1,0 +1,131 @@
+/* Apps. Everything is scoped under .pa-* and reads canonical tokens only. */
+
+/* ---- the list ------------------------------------------------------------- */
+.pa-panel {
+  container: pa-panel / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 100%;
+  padding: var(--space-3) var(--screen-gutter, var(--gutter)) var(--space-5);
+}
+.pa-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3) var(--space-1);
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.pa-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pa-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  border-radius: var(--radius-control);
+}
+.pa-item + .pa-item { box-shadow: 0 -1px 0 var(--hair); }
+.pa-row {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: max(52px, var(--hit-min));
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-2) var(--space-1);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .pa-row:hover { background: var(--surface-overlay-hover); }
+}
+.pa-row:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+/* The app's mark: its first letter on a quiet accent tile. */
+.pa-mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  inline-size: 36px;
+  block-size: 36px;
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent-text);
+  font-size: var(--font-label);
+  font-weight: 650;
+  line-height: 1;
+}
+.pa-row-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.pa-row-title {
+  overflow: hidden;
+  font-size: var(--font-label);
+  font-weight: 550;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pa-row-meta {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pa-row-tools { flex: none; display: flex; align-items: center; gap: var(--space-1); }
+.pa-row-tools .ui-icon-btn { color: var(--muted); }
+@media (hover: hover) {
+  .pa-row-tools .ui-icon-btn:hover:where(:not(:disabled)) { color: var(--text); }
+}
+
+/* ---- a running app -------------------------------------------------------- */
+.pa-run {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  block-size: 100%;
+  min-block-size: 0;
+}
+.pa-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+}
+.pa-run > .pa-bar { box-shadow: 0 1px 0 var(--hair); }
+.pa-bar-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--font-label);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pa-bar-tools { flex: none; display: flex; align-items: center; gap: var(--space-1); margin-inline-start: auto; }
+.pa-bar-tools .ui-icon-btn { color: var(--muted); }
+@media (hover: hover) {
+  .pa-bar-tools .ui-icon-btn:hover:where(:not(:disabled)) { color: var(--text); }
+}
+.pa-run > .ui-notice { flex: none; margin: var(--space-2); }
+/* The page fills what is left; it scrolls inside its own frame. */
+.pa-stage { flex: 1 1 auto; min-block-size: 0; display: flex; }
+.pa-frame { flex: 1 1 auto; min-block-size: 0; }

@@ -59,6 +59,12 @@ const BRACKET_SECTIONS = {
   docs: "maintenance", doc: "maintenance", test: "maintenance", tests: "maintenance", ci: "maintenance",
   build: "maintenance", chore: "maintenance", refactor: "maintenance", deps: "maintenance",
   infra: "maintenance", maintenance: "maintenance", release: "maintenance",
+  // Investigation tags name work, not a shipped change: they belong under
+  // "Under the hood", and `[Debug]` is a fix. A tag nobody listed here keeps
+  // its brackets in the title and falls back to the verb/path rules.
+  debug: "fixes", investigate: "maintenance", investigation: "maintenance",
+  analysis: "maintenance", analyse: "maintenance", analyze: "maintenance",
+  research: "maintenance", question: "maintenance", idea: "maintenance",
 };
 const VERB_SECTIONS = [
   ["features", /^(add|adds|added|introduce|introduces|support|supports|implement|implements|create|creates|enable|enables|offer|offers|ship|ships|launch|new|дода\S*|додай)$/i],
@@ -142,6 +148,21 @@ function firstProseParagraph(text) {
   return (prose ?? "").replace(/\s+/g, " ").trim();
 }
 
+/** Periods that end an abbreviation, not the sentence (`(e.g. OpenCode)`). */
+const SENTENCE_ABBREVIATION = /(?:^|[\s(\["'“])(?:e\.g|i\.e|etc|vs|cf|approx|incl|resp|fig|no|dr|mr|mrs|ms|prof|st)\.$/i;
+
+/** The first sentence of a paragraph, skipping abbreviations and decimals. */
+function firstSentence(paragraph) {
+  const enders = /[.!?](?=\s|$)/g;
+  for (let match = enders.exec(paragraph); match; match = enders.exec(paragraph)) {
+    const before = paragraph.slice(0, match.index + 1);
+    if (SENTENCE_ABBREVIATION.test(before)) continue;
+    if (/\d$/.test(before.slice(0, -1)) && /\.\d/.test(before.slice(-3))) continue;
+    return before;
+  }
+  return paragraph;
+}
+
 /** Commit message body without trailers and with the first paragraph's first sentence as the summary. */
 export function commitSummary(body) {
   const text = (body ?? "")
@@ -152,13 +173,18 @@ export function commitSummary(body) {
     .trim();
   const paragraph = firstProseParagraph(text);
   if (!paragraph || /^started by session\b/i.test(paragraph)) return "";
-  const sentence = /^(.+?[.!?])(\s|$)/.exec(paragraph)?.[1] ?? paragraph;
+  const sentence = firstSentence(paragraph);
   if (sentence.length <= SUMMARY_LIMIT) return sentence;
   const cut = sentence.slice(0, SUMMARY_LIMIT);
   let summary = cut.slice(0, Math.max(cut.lastIndexOf(" "), SUMMARY_LIMIT - 40)).replace(/[,;:\s]+$/, "");
   // A cut that lands after "so" or "and" ends in a dangling fragment; drop the connector too.
   for (let match = DANGLING_CONNECTOR.exec(summary); match; match = DANGLING_CONNECTOR.exec(summary)) {
     summary = summary.slice(0, match.index).replace(/[,;:\s]+$/, "");
+  }
+  // A cut inside a parenthetical leaves `(e.g.` or `(see` behind; drop the
+  // unfinished aside instead of publishing half of it.
+  if ((summary.match(/\(/g) ?? []).length > (summary.match(/\)/g) ?? []).length) {
+    summary = summary.slice(0, summary.lastIndexOf("(")).replace(/[\s,;:]+$/, "");
   }
   return `${summary}…`;
 }

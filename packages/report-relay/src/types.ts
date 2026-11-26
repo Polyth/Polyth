@@ -1,10 +1,11 @@
 import type { BugReportResult } from "@polyth/contracts/bug-report";
 
 /** What the relay writes to its log: one line per HTTP request, plus one line
- *  per failed GitHub call. Never a password, report text, contact, settings,
- *  screenshot, install id or source address. */
+ *  per failed GitHub call. Never a password, token, report or feedback
+ *  text, contact, profile, settings, screenshot, install id or source address. */
 export type RelayLogEvent =
   | { route: "report" | "health" | "not-found"; result: BugReportResult["result"] | "ok" | "not-found"; status: number; latencyMs: number }
+  | { route: "feedback" | "inbox"; result: string; status: number; latencyMs: number }
   | { github: string; status: number };
 
 export type RelayLogger = (event: RelayLogEvent) => void;

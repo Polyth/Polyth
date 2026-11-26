@@ -2,12 +2,28 @@
 // Stdio MCP adapter for Polyth package tools. Speaks newline-delimited MCP
 // JSON-RPC (the same framing as packages/polyth-mcp). Secret values never
 // appear here; the bearer token is an opaque handle.
+//
+// With `--cli` first it is `polyth-tools` instead: the same tools from the
+// agent's own shell, under the chat's grant read from the file
+// POLYTH_TOOLS_GRANT_FILE names (rewritten by the server when the grant
+// changes). See docs/dev/cli.md.
 import { createInterface } from "node:readline";
+import { readFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 
-const url = process.env.POLYTH_AGENT_TOOLS_URL ?? "";
-const token = process.env.POLYTH_AGENT_TOOLS_TOKEN ?? "";
+const cliMode = process.argv[2] === "--cli";
+const cliGrant = () => {
+  const file = process.env.POLYTH_TOOLS_GRANT_FILE ?? "";
+  try {
+    const grant = JSON.parse(readFileSync(file, "utf8"));
+    if (typeof grant?.url === "string" && typeof grant?.token === "string") return grant;
+  } catch {}
+  return undefined;
+};
+const grant = cliMode ? cliGrant() : undefined;
+const url = grant ? grant.url : process.env.POLYTH_AGENT_TOOLS_URL ?? "";
+const token = grant ? grant.token : process.env.POLYTH_AGENT_TOOLS_TOKEN ?? "";
 const capabilityIds = new Map();
 const pending = new Map();
 
@@ -93,6 +109,7 @@ async function handle(message, signal) {
   throw new Error(`unsupported method: ${message.method}`);
 }
 
+function serveMcp() {
 const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
 rl.on("line", async (line) => {
   let message;
@@ -125,3 +142,85 @@ rl.on("line", async (line) => {
 const abortPending = () => { for (const request of pending.values()) request.abort(); };
 rl.on("close", abortPending);
 process.stdout.on("error", abortPending);
+}
+
+const CLI_USAGE = `polyth-tools — Polyth's agent tools from the shell (the same tools and grant as this chat's MCP tools)
+
+  polyth-tools list                    every tool, one line each
+  polyth-tools describe <tool>         a tool's description and input schema
+  polyth-tools call <tool> [json|-]    run a tool; arguments as a JSON object, or - to read them from stdin
+
+Example: polyth-tools call polyth '{"action":"session.messages","parameters":{"sessionId":"<id>"}}'
+`;
+
+async function readStdin() {
+  const chunks = [];
+  for await (const chunk of process.stdin) chunks.push(chunk);
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+const firstLine = (text) => String(text ?? "").split("\n")[0].slice(0, 160);
+
+async function runCli(argv) {
+  const [command, name, raw] = argv;
+  if (!command || command === "help" || command === "--help" || command === "-h") {
+    process.stdout.write(CLI_USAGE);
+    return command ? 0 : 2;
+  }
+  if (!grant) {
+    process.stderr.write("polyth-tools: Polyth tools are not available in this shell (no grant for this chat).\n");
+    return 3;
+  }
+  const listed = await call("GET");
+  if (listed.error) {
+    process.stderr.write(`polyth-tools: ${listed.error.message ?? "tools unavailable"}\n`);
+    return 1;
+  }
+  const tools = Array.isArray(listed.tools) ? listed.tools : [];
+  if (command === "list") {
+    for (const tool of tools) process.stdout.write(`${tool.name}\t${firstLine(tool.description)}\n`);
+    return 0;
+  }
+  const tool = tools.find((item) => item.name === name);
+  if (command !== "describe" && command !== "call") {
+    process.stderr.write(`polyth-tools: unknown command "${command}"\n${CLI_USAGE}`);
+    return 2;
+  }
+  if (!tool) {
+    process.stderr.write(`polyth-tools: no tool "${name ?? ""}" here; run polyth-tools list\n`);
+    return 2;
+  }
+  if (command === "describe") {
+    process.stdout.write(`${tool.name}\n\n${tool.description ?? ""}\n\nInput schema:\n${JSON.stringify(tool.inputSchema ?? {}, null, 2)}\n`);
+    return 0;
+  }
+  let args = {};
+  const text = raw === "-" ? await readStdin() : raw;
+  if (text !== undefined && text.trim()) {
+    try { args = JSON.parse(text); } catch {
+      process.stderr.write("polyth-tools: arguments must be one JSON object\n");
+      return 2;
+    }
+    if (!args || typeof args !== "object" || Array.isArray(args)) {
+      process.stderr.write("polyth-tools: arguments must be one JSON object\n");
+      return 2;
+    }
+  }
+  const result = await call("POST", { id: tool.id ?? tool.name, arguments: args });
+  if (result.error) {
+    process.stderr.write(`${result.error.message ?? "tool failed"}\n`);
+    return 1;
+  }
+  const output = String(result.output ?? "");
+  process.stdout.write(output.endsWith("\n") ? output : `${output}\n`);
+  return 0;
+}
+
+// Last, after every declaration above has initialized.
+if (cliMode) {
+  process.exitCode = await runCli(process.argv.slice(3)).catch((error) => {
+    process.stderr.write(`polyth-tools: Polyth did not answer (${error instanceof Error ? error.message : "request failed"})\n`);
+    return 1;
+  });
+}
+else serveMcp();

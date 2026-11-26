@@ -42,7 +42,7 @@ test("settings are revisioned, atomic, and isolated by Space", () => {
 
     const saved = store.save(first, {
       ...DEFAULT_WEB_SEARCH_SETTINGS,
-      provider: "duckduckgo",
+      provider: "keyless",
       maxResults: 5,
       region: "ua-uk",
     }, 0);

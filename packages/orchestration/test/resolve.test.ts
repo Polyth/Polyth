@@ -106,3 +106,21 @@ test("formatBrief: blocked reason, direct mode, no roles, sanitized person text"
   const text = formatBrief(evil, resolveRoles(evil, facts([row(sonnet)]), { now: NOW }), NOW);
   assert.equal(text.split("\n").filter((l) => l.startsWith("- ")).length, 1);
 });
+
+test("a choice saved on a member account kept for a Relay only is followed through that Relay", () => {
+  const p = parsePolicy({ ...DEFAULT_POLICY, mode: "roles", roles: [{
+    id: "explore", models: [flash],
+  }] });
+  // factsFor aliases the saved key to the row Usage re-owned to the Relay.
+  const relayRow: CandidateFact = {
+    harnessId: "antigravity-relay", providerID: "antigravity", modelID: "gemini-3.8-flash",
+    listed: true, favorite: true, available: true, blocked: false,
+  };
+  const f = facts([[modelKey(flash), relayRow]]);
+  const [role] = resolveRoles(p, f, { now: NOW });
+  assert.equal(role!.choices[0]!.status, "ready");
+  assert.equal(role!.pick, 0);
+  assert.deepEqual(role!.choices[0]!.spawn, { harnessId: "antigravity-relay", providerID: "antigravity", modelID: "gemini-3.8-flash" });
+  const text = formatBrief(p, resolveRoles(p, f, { now: NOW }), NOW);
+  assert.match(text, /use antigravity-relay antigravity\/gemini-3\.8-flash \(at most 2 at once\)/);
+});

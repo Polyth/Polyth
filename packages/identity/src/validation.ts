@@ -17,9 +17,17 @@ export function loginName(value: unknown): string {
   if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(name)) throw controlError('invalid-input', 'Login name must contain 1–64 letters, numbers, dots, underscores or hyphens');
   return name;
 }
+/**
+ * A recovery code as a person may enter it: setup shows the 40 hex digits in
+ * groups of four, so people type spaces between groups, and macOS or a notes
+ * app turns hyphens into en/em dashes and spaces into no-break spaces.
+ * Separators carry no entropy, so any whitespace, dash punctuation or
+ * invisible format character is dropped (after NFKC, which folds full-width
+ * digits) before the strict hex check.
+ */
 export function recoveryCode(value: unknown): string | null {
-  if (typeof value !== 'string' || value.length > 80) return null;
-  const code = value.trim().replace(/-/g, '').toLowerCase();
+  if (typeof value !== 'string' || value.length > 160) return null;
+  const code = value.normalize('NFKC').replace(/[\s\p{Pd}\p{Cf}−]/gu, '').toLowerCase();
   return /^[a-f0-9]{40}$/.test(code) ? code : null;
 }
 export function newRecoveryCodes(): string[] {

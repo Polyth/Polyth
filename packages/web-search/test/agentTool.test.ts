@@ -17,7 +17,7 @@ test("agent tool forwards only bounded search fields and returns structured meta
       received = request;
       return {
         query: "Polyth",
-        provider: "duckduckgo",
+        provider: "exa",
         results: [{
           rank: 1,
           title: "Polyth",
@@ -31,10 +31,10 @@ test("agent tool forwards only bounded search fields and returns structured meta
   });
   const result = await tool.execute?.({ query: "Polyth", count: 3, freshness: "week" }, context);
   assert.deepEqual(received, { query: "Polyth", count: 3, freshness: "week" });
-  assert.deepEqual(result?.metadata, { provider: "duckduckgo", count: 1, truncated: false });
+  assert.deepEqual(result?.metadata, { provider: "exa", count: 1, truncated: false });
   assert.deepEqual(JSON.parse(result!.output), {
     query: "Polyth",
-    provider: "duckduckgo",
+    provider: "exa",
     results: [{
       rank: 1,
       title: "Polyth",

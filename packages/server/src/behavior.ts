@@ -59,6 +59,12 @@ export const longRunningWorkBehaviorSection = `## Long-running commands
 
 Polyth may stop a tool call after 10 minutes, and on most harnesses it cannot see a command's output while it runs. Start commands expected to run longer in the background (the harness's own background option, or \`nohup … > file 2>&1 &\`) and check on them; never wait on them blindly.`;
 
+/** Server-owned default for every agent in every harness: Polyth's tools are
+ *  also a shell command in a local chat (`polyth-tools`, agentToolsMcp.mjs). */
+export const shellToolsBehaviorSection = `## Polyth tools from the shell
+
+In a chat on this machine, every Polyth tool in your list (polyth, memory_search and the rest) also runs from your shell, under this chat's own permissions: \`polyth-tools list\`, \`polyth-tools describe <tool>\`, \`polyth-tools call <tool> '<json arguments>'\`. Use it when a tool you need is not in your tool list. If it says the tools are not available in this shell, they are not.`;
+
 export function createBehaviorService(opts: {
   file: string;
   policyFile?: string;
@@ -105,7 +111,7 @@ export function createBehaviorService(opts: {
     await atomicWrite(opts.policyFile, `${JSON.stringify(policy, null, 2)}\n`);
   };
   const effective = async (text: string): Promise<string> => {
-    const sections = [(opts.decorate?.(text) ?? text).trimEnd(), privacyBehaviorSection, longRunningWorkBehaviorSection];
+    const sections = [(opts.decorate?.(text) ?? text).trimEnd(), privacyBehaviorSection, longRunningWorkBehaviorSection, shellToolsBehaviorSection];
     if ((await readPolicy()).enabled) sections.push(favoriteSubagentRoutingSection);
     return `${sections.filter(Boolean).join("\n\n")}\n`;
   };

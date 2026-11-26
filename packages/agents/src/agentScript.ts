@@ -23,7 +23,15 @@ export type ScriptResult =
 /** What a script sees: data only, as plain JSON. */
 export interface ScriptInput {
   events: Array<Pick<AgentEvent, "kind" | "at" | "outcome" | "fields"> & { source?: string }>;
-  agent: { name: string; runsToday: number; lastRunAt: number | null };
+  agent: {
+    name: string;
+    runsToday: number;
+    lastRunAt: number | null;
+    /** Requests to the person still open (the agent's "Needs you" lines). */
+    waitingFor?: string[];
+    /** The newest finished report: what the agent last concluded. */
+    lastReport?: { signal: string; headline: string; at: number } | null;
+  };
 }
 
 let module: Promise<QuickJSWASMModule> | null = null;

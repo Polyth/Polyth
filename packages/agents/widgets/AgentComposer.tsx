@@ -1,7 +1,8 @@
 // The person's composer on an agent's page: Chat's composer material with the
 // controls a conversation with an agent needs — files, where the message goes
-// (on in the current conversation or a new one), queueing behind a run that
-// works, Stop, a kept draft and recall of the last message.
+// (on in the current conversation, a new one, or set aside for the agent's
+// next wake), queueing behind a run that works, Stop, a kept draft and recall
+// of the last message.
 import {
   useEffect, useRef, useState,
   type ClipboardEvent, type KeyboardEvent,
@@ -18,7 +19,7 @@ import { isLargeTextPaste, MAX_PENDING_ATTACHMENTS, PASTED_TEXT_NAME, uploadInbo
 import AttachmentPills from "../../../apps/web/src/components/AttachmentPills.tsx";
 import ImageSizePrompt, { useImageSizeChoice } from "../../../apps/web/src/components/ImageSizePrompt.tsx";
 import {
-  AttachmentIcon, ChevronDownIcon, Icon, IconButton, Menu, NewChatIcon, QueueSendIcon, ReplyIcon, SendIcon,
+  AttachmentIcon, ChevronDownIcon, ClockIcon, Icon, IconButton, Menu, NewChatIcon, QueueSendIcon, ReplyIcon, SendIcon,
   Spinner, StopIcon, Textarea, type MenuEntry,
 } from "../../../apps/web/src/components/ui/index.ts";
 // The box takes no more than the agent keeps, so what was sent is what the
@@ -113,11 +114,16 @@ const REASON_KEYS: Partial<Record<string, Parameters<typeof tr>[0]>> = {
 };
 
 /** The quiet chip under the editor: where the message goes, and the menu to
- *  send it the other way. */
-function ThreadChip({ agent, continuation, onChange }: {
+ *  send it the other way, or to keep it for the agent's next wake. */
+function ThreadChip({ agent, continuation, later, files, onChange, onLater }: {
   agent: ScheduleTaskDto;
   continuation: AgentContinuationDto;
+  /** The message is set aside for the next wake instead of sent now. */
+  later: boolean;
+  /** Files are attached: they go with a message now, never later. */
+  files: boolean;
   onChange: (next: AgentContinuationDto) => void;
+  onLater: () => void;
 }) {
   // The chip changes by itself only when the follow-up window lapses.
   const until = agent.followUp?.until;
@@ -132,16 +138,41 @@ function ThreadChip({ agent, continuation, onChange }: {
   }, [until, agent.followUp?.sessionId]);
   const choice = threadChoice(agent, continuation, now);
   const rolling = agent.target?.mode === "dedicated-session";
+  // An agent that works in one chosen chat has nowhere else to go now.
+  const fixed = agent.target?.mode === "existing-session";
   const when = choice.at ? exchangeLabel(choice.at, now) : "";
-  const label = choice.target === "continue"
-    ? (rolling || !when ? tr("agents.threadContinues") : tr("agents.threadContinuesValue", { time: when }))
-    : tr("agents.threadNew");
-  const why = choice.target === "new" && choice.reason && REASON_KEYS[choice.reason] ? tr(REASON_KEYS[choice.reason]!) : "";
-  const entries: MenuEntry[] = [
+  const label = later ? tr("agents.threadNextWake")
+    : fixed ? tr("agents.threadNow")
+      : choice.target === "continue"
+        ? (rolling || !when ? tr("agents.threadContinues") : tr("agents.threadContinuesValue", { time: when }))
+        : tr("agents.threadNew");
+  const why = !later && !fixed && choice.target === "new" && choice.reason && REASON_KEYS[choice.reason] ? tr(REASON_KEYS[choice.reason]!) : "";
+  const nextWake: MenuEntry = {
+    id: "next-wake",
+    kind: "radio",
+    checked: later,
+    disabled: files,
+    icon: ClockIcon,
+    label: tr("agents.threadNextWakeAction"),
+    detail: files ? tr("agents.threadNextWakeNoFiles") : tr("agents.threadNextWakeDetail"),
+    onSelect: onLater,
+  };
+  const entries: MenuEntry[] = fixed ? [
+    {
+      id: "now",
+      kind: "radio",
+      checked: !later,
+      icon: ReplyIcon,
+      label: tr("agents.threadNowAction"),
+      detail: tr("agents.threadNowDetail"),
+      onSelect: () => onChange("auto"),
+    },
+    nextWake,
+  ] : [
     {
       id: "continue",
       kind: "radio",
-      checked: choice.target === "continue",
+      checked: !later && choice.target === "continue",
       disabled: !choice.canContinue,
       icon: ReplyIcon,
       label: rolling || !when ? tr("agents.threadContinueAction") : tr("agents.threadContinueActionValue", { time: when }),
@@ -151,13 +182,15 @@ function ThreadChip({ agent, continuation, onChange }: {
     {
       id: "new",
       kind: "radio",
-      checked: choice.target === "new",
+      checked: !later && choice.target === "new",
       icon: NewChatIcon,
       label: tr("agents.threadNewAction"),
       detail: tr("agents.threadNewDetail"),
       onSelect: () => onChange("new"),
     },
+    nextWake,
   ];
+  const icon = later ? ClockIcon : fixed || choice.target === "continue" ? ReplyIcon : NewChatIcon;
   return (
     <Menu label={tr("agents.threadMenu")} title={tr("agents.threadMenu")} align="start" entries={entries}>
       {(trigger) => (
@@ -165,11 +198,11 @@ function ThreadChip({ agent, continuation, onChange }: {
           {...trigger}
           type="button"
           className="config-chip agent-thread-chip"
-          data-target={choice.target}
+          data-target={later ? "next-wake" : fixed ? "continue" : choice.target}
           title={why ? `${label} · ${why}` : label}
         >
           <span className="config-chip-icon" aria-hidden="true">
-            <Icon icon={choice.target === "continue" ? ReplyIcon : NewChatIcon} size="sm" />
+            <Icon icon={icon} size="sm" />
           </span>
           <span className="config-chip-text">{label}</span>
           <span className="config-chip-caret" aria-hidden="true"><Icon icon={ChevronDownIcon} size="sm" /></span>
@@ -185,6 +218,8 @@ export interface AgentMessage {
   text: string;
   attachments: AttachmentRef[];
   continuation: AgentContinuationDto;
+  /** Set aside for the agent's next wake: nothing runs now. */
+  later?: boolean;
 }
 
 /** Files dropped on the conversation, for the agent they were dropped on. */
@@ -211,6 +246,7 @@ export default function AgentComposer({ agent, name, placeholder, disabled, runn
   const [attachments, setAttachments] = useState<AttachmentRef[]>([]);
   const [uploading, setUploading] = useState(0);
   const [continuation, setContinuation] = useState<AgentContinuationDto>("auto");
+  const [later, setLater] = useState(false);
   const [sending, setSending] = useState(false);
   const [stopping, setStopping] = useState(false);
   const mounted = useRef(true);
@@ -258,10 +294,17 @@ export default function AgentComposer({ agent, name, placeholder, disabled, runn
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [files]);
 
-  const empty = !text.trim() && attachments.length === 0;
+  // What waits for the next wake is words only: files go with a message now.
+  const empty = later ? !text.trim() : !text.trim() && attachments.length === 0;
   const submit = async (): Promise<void> => {
     if (empty || sending || disabled || uploading > 0) return;
-    const message: AgentMessage = { text: text.trim().slice(0, AGENT_INPUT_LIMIT).trimEnd(), attachments, continuation };
+    if (later && attachments.length) return;
+    const message: AgentMessage = {
+      text: text.trim().slice(0, AGENT_INPUT_LIMIT).trimEnd(),
+      attachments,
+      continuation,
+      ...(later ? { later: true } : {}),
+    };
     const target = agent.id;
     // The feed shows the words from this moment while the server admits the
     // run, so the box empties now. A refused message comes back ahead of
@@ -270,6 +313,7 @@ export default function AgentComposer({ agent, name, placeholder, disabled, runn
     setText("");
     setAttachments([]);
     setContinuation("auto");
+    setLater(false);
     setSending(true);
     const ahead = (current: string) => current.trim() ? `${message.text}\n\n${current}` : message.text;
     try {
@@ -278,6 +322,7 @@ export default function AgentComposer({ agent, name, placeholder, disabled, runn
         setText(ahead);
         setAttachments((current) => [...message.attachments, ...current].slice(0, MAX_PENDING_ATTACHMENTS));
         setContinuation(message.continuation);
+        setLater(!!message.later);
       } else if (message.text) {
         writeAgentDraft(target, ahead(readAgentDraft(target)));
       }
@@ -347,7 +392,7 @@ export default function AgentComposer({ agent, name, placeholder, disabled, runn
     }
   };
 
-  const sendLabel = running ? tr("agents.sendAfterRun") : tr("agents.talkSend");
+  const sendLabel = later ? tr("agents.setAsideSend") : running ? tr("agents.sendAfterRun") : tr("agents.talkSend");
   return (
     <form
       className="agent-composer ui-field-frame"
@@ -404,13 +449,17 @@ export default function AgentComposer({ agent, name, placeholder, disabled, runn
           size={phone ? "lg" : "sm"}
           className="agent-composer-attach"
           label={tr("agents.attachFiles")}
-          disabled={disabled || attachments.length + uploading >= MAX_PENDING_ATTACHMENTS}
+          disabled={disabled || later || attachments.length + uploading >= MAX_PENDING_ATTACHMENTS}
           onClick={() => fileInput.current?.click()}
         />
-        {/* An agent that works in one chosen chat has nowhere else to go. */}
-        {agent.target?.mode !== "existing-session" && (
-          <ThreadChip agent={agent} continuation={continuation} onChange={setContinuation} />
-        )}
+        <ThreadChip
+          agent={agent}
+          continuation={continuation}
+          later={later}
+          files={attachments.length + uploading > 0}
+          onChange={(next) => { setLater(false); setContinuation(next); }}
+          onLater={() => setLater(true)}
+        />
         <span className="agent-composer-actions">
           {running && (
             <IconButton
@@ -424,13 +473,13 @@ export default function AgentComposer({ agent, name, placeholder, disabled, runn
             />
           )}
           <IconButton
-            icon={running ? QueueSendIcon : SendIcon}
+            icon={later ? ClockIcon : running ? QueueSendIcon : SendIcon}
             type="submit"
             className="agent-composer-send"
             label={sendLabel}
             title={sendLabel}
             busy={sending}
-            disabled={disabled || sending || empty || uploading > 0}
+            disabled={disabled || sending || empty || uploading > 0 || (later && attachments.length > 0)}
           />
         </span>
       </div>

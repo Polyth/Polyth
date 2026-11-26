@@ -14,6 +14,8 @@ import {
 import {
   startDirectProvider,
   startStreamingDictation,
+  type Pcm16Capture,
+  type Pcm16CaptureOptions,
   type StreamingDictation,
 } from "@polyth/dictation/voice-runtime";
 import { formatVoiceString, voiceModeStrings } from "../src/strings.ts";
@@ -33,8 +35,9 @@ export interface ListenerEvents {
   onLevel(level: number): void;
   /** The speaker started talking. */
   onSpeechStart(): void;
-  /** The speaker paused long enough to end the turn. */
-  onEndOfTurn(): void;
+  /** The speaker paused long enough to end the turn; `waitedMs` is the
+   *  silence that was waited out. */
+  onEndOfTurn(waitedMs?: number): void;
   /** The recognizer failed; the listener is already released. */
   onError(error: Error): void;
 }
@@ -42,8 +45,18 @@ export interface ListenerEvents {
 export interface ListenerOptions {
   /** Silence that ends the turn. */
   pauseMs: number;
+  /** The silence that ends the turn after these words (shorter once a
+   *  sentence is finished); absent: always `pauseMs`. */
+  pauseFor?(text: string, lang: string): number;
   /** False: never end the turn by itself (tap to send). */
   autoEndpoint: boolean;
+  /** Where a streaming recognizer takes its audio (voice mode's
+   *  conversation-long capture); absent: it opens the microphone itself.
+   *  The browser recognizer always captures on its own. */
+  capture?: (options: Pcm16CaptureOptions) => Promise<Pcm16Capture>;
+  /** The room's loudness, when known: a turn that begins with the user
+   *  already speaking (a barge-in) cannot calibrate on its first moments. */
+  noiseFloor?: number;
 }
 
 export interface Listener {
@@ -141,10 +154,10 @@ function startBrowserListener(
     if (!options.autoEndpoint || closed) return;
     // An unfinished (interim) phrase gets a little longer: the recognizer is
     // usually about to finalize it, and a cut mid-word sends half a sentence.
-    const wait = interim ? options.pauseMs + 450 : options.pauseMs;
+    const wait = interim ? options.pauseMs + 450 : options.pauseFor?.(transcript(), route.lang) ?? options.pauseMs;
     endpoint = setTimeout(() => {
       endpoint = null;
-      if (!closed && transcript().trim()) events.onEndOfTurn();
+      if (!closed && transcript().trim()) events.onEndOfTurn(wait);
     }, wait);
   };
 
@@ -281,7 +294,11 @@ async function startStreamListener(
   events: ListenerEvents,
   options: ListenerOptions,
 ): Promise<Listener> {
-  const vad = createVoiceActivityDetector({ hangoverMs: options.pauseMs });
+  const vad = createVoiceActivityDetector({
+    hangoverMs: options.pauseMs,
+    ...(options.noiseFloor !== undefined ? { initialFloor: options.noiseFloor, calibrationMs: 0 } : {}),
+  });
+  let hangover = options.pauseMs;
   let text = "";
   let closed = false;
   let ended = false;
@@ -289,7 +306,15 @@ async function startStreamListener(
     onPartial: (partial: string) => {
       if (closed) return;
       text = partial;
-      if (partial.trim()) events.onPartial(partial);
+      if (!partial.trim()) return;
+      // The transcript trails the audio, so the pause already running is
+      // judged against the new ending: a sentence the recognizer has just
+      // closed ends the turn sooner, one that goes on waits longer.
+      if (options.pauseFor) {
+        hangover = options.pauseFor(partial, route.language);
+        vad.setHangover(hangover);
+      }
+      events.onPartial(partial);
     },
     onLevel: (rms: number) => {
       if (closed) return;
@@ -300,7 +325,7 @@ async function startStreamListener(
       // so the pause alone ends the turn; an empty result just listens again.
       if (change === "speech-end" && options.autoEndpoint && !ended) {
         ended = true;
-        events.onEndOfTurn();
+        events.onEndOfTurn(hangover);
       }
     },
     onError: (error: unknown) => {
@@ -317,12 +342,14 @@ async function startStreamListener(
       ...(route.model ? { model: route.model } : {}),
       language: route.language,
       context: { language: route.language },
+      ...(options.capture ? { captureFactory: options.capture } : {}),
       ...callbacks,
     });
   } else {
     stream = await startStreamingDictation({
       ...(route.sessionId ? { sessionId: route.sessionId } : {}),
       language: route.language,
+      ...(options.capture ? { captureFactory: options.capture } : {}),
       ...callbacks,
     });
   }

@@ -15,7 +15,7 @@ import { friendlyError } from "../settings.ts";
 import { announce } from "./a11y/live.tsx";
 import { getLocale, tr } from "../i18n/index.ts";
 import { sessionDateGroupLabel } from "../sessionDates.ts";
-import { highlightRanges, segmentHighlights } from "../sessionSearchQuery.ts";
+import { highlightRanges, searchTerms, segmentHighlights } from "../sessionSearchQuery.ts";
 import { useShellMode } from "../responsiveShell.ts";
 import {
   ARCHIVED_ANY_BRANCH,
@@ -39,6 +39,8 @@ import {
   DeleteIcon,
   Icon,
   IconButton,
+  Menu,
+  MoreIcon,
   ResponsiveOverlay,
   RestoreIcon,
   SearchIcon,
@@ -97,7 +99,8 @@ export default function ArchivedSessionsDialog() {
   const listRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const now = useMemo(() => Date.now(), [rows, preset]);
-  const terms = useMemo(() => text.split(/\s+/).filter(Boolean), [text]);
+  // The one chat-search rule, so highlights agree with what the server matched.
+  const terms = useMemo(() => searchTerms(text), [text]);
 
   useEffect(() => {
     const handle = setTimeout(() => setText(q.trim()), DEBOUNCE_MS);
@@ -378,20 +381,23 @@ export default function ArchivedSessionsDialog() {
             {session.branch && (
               <span className="archived-sessions-branch-tag">
                 <Icon icon={BranchIcon} size="sm" />
-                <Highlighted text={session.branch} ranges={highlightRanges(session.branch, terms)} />
+                <span className="archived-sessions-branch-name"><Highlighted text={session.branch} ranges={highlightRanges(session.branch, terms)} /></span>
               </span>
             )}
             {model && <span className="archived-sessions-model"><span className="archived-sessions-model-dot" style={{ background: model.color }} />{model.label}</span>}
             {session.parentId && !session.forkOf && <span className="archived-sessions-tag">{tr("archivedsessions.subagent")}</span>}
             <span className="archived-sessions-created">{tr("archivedsessions.createdOn", { date: dayFormat(session.createdAt) })}</span>
+            {match && entry.messageHits > 1 && <span className="archived-sessions-more">{tr("sessionsearch.moreMatches", { count: entry.messageHits - 1 })}</span>}
           </span>
           {match && (
+            // Up to two lines with the speaker leading inline, so the match
+            // itself stays visible on a phone instead of being cut mid-word.
             <span className="archived-sessions-snippet">
               <span className={`archived-sessions-role archived-sessions-role--${match.role ?? "assistant"}`}>
                 {match.role === "user" ? tr("sessionsearch.you") : tr("sessionsearch.agent")}
+                <span className="sr-only">: </span>
               </span>
-              <span className="archived-sessions-snippet-text"><Highlighted text={match.snippet} ranges={match.ranges ?? []} /></span>
-              {entry.messageHits > 1 && <span className="archived-sessions-more">{tr("sessionsearch.moreMatches", { count: entry.messageHits - 1 })}</span>}
+              <Highlighted text={match.snippet} ranges={match.ranges ?? []} />
             </span>
           )}
         </button>
@@ -399,23 +405,47 @@ export default function ArchivedSessionsDialog() {
           <time className="archived-sessions-time" dateTime={new Date(at).toISOString()} title={tr("archivedsessions.archivedOn", { date: fullFormat.format(at) })}>
             {timeFormat.format(at)}
           </time>
-          <span className="archived-sessions-actions">
-            <IconButton
-              icon={RestoreIcon}
-              size="sm"
-              label={tr("archivedsessions.restoreValue", { title })}
-              busy={busy}
-              onClick={() => void restore([session.id])}
-            />
-            <IconButton
-              icon={DeleteIcon}
-              size="sm"
-              variant="danger"
-              label={tr("archivedsessions.deleteValue", { title })}
-              disabled={busy}
-              onClick={() => void remove([session.id])}
-            />
-          </span>
+          {phone ? (
+            // A phone row has no hover: one ⋯ keeps both verbs a tap away
+            // without spending the title's width on two always-on buttons.
+            <Menu
+              label={tr("mobile.sessionmenu.sessionActions")}
+              title={title}
+              align="end"
+              entries={[
+                { id: "restore", label: tr("common.restore"), icon: RestoreIcon, disabled: busy, onSelect: () => void restore([session.id]) },
+                { id: "delete", label: tr("archivedsessions.deletePermanently"), icon: DeleteIcon, danger: true, disabled: busy, onSelect: () => void remove([session.id]) },
+              ]}
+            >
+              {(trigger) => (
+                <IconButton
+                  {...trigger}
+                  icon={MoreIcon}
+                  className="archived-sessions-more-actions"
+                  label={`${tr("mobile.sessionmenu.sessionActions")}: ${title}`}
+                  busy={busy}
+                />
+              )}
+            </Menu>
+          ) : (
+            <span className="archived-sessions-actions">
+              <IconButton
+                icon={RestoreIcon}
+                size="sm"
+                label={tr("archivedsessions.restoreValue", { title })}
+                busy={busy}
+                onClick={() => void restore([session.id])}
+              />
+              <IconButton
+                icon={DeleteIcon}
+                size="sm"
+                variant="danger"
+                label={tr("archivedsessions.deleteValue", { title })}
+                disabled={busy}
+                onClick={() => void remove([session.id])}
+              />
+            </span>
+          )}
         </span>
       </div>
     );

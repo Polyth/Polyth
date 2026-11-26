@@ -22,7 +22,16 @@ import { isIsolatedSession } from "./sidebarPrefs.ts";
 import { getState, setUiError, upsertSession } from "./store.ts";
 
 type MovableSession = Pick<SessionProjection,
-  "id" | "projectId" | "title" | "status" | "parentId" | "forkOf" | "purpose" | "origin" | "sharing" | "isolation" | "isolationSummary" | "branch">;
+  "id" | "projectId" | "title" | "status" | "parentId" | "forkOf" | "purpose" | "origin" | "sharing" | "isolation" | "isolationSummary" | "branch">
+  & Partial<Pick<SessionProjection, "worktreePath">>;
+
+/** Another checkout of the chat's own project: a linked worktree or the
+ *  project's main checkout. The Git package confirms and performs the move. */
+export type SessionCheckoutTarget = { worktreePath: string } | { main: true };
+
+/** Navigator key of a checkout: the worktree path, or `main`. */
+export const checkoutTargetKey = (target: SessionCheckoutTarget): string =>
+  "main" in target ? "main" : target.worktreePath;
 
 const projectName = (project: Pick<Project, "name" | "path"> | undefined): string =>
   project?.name || project?.path || tr("sessionMove.unknownProject");
@@ -36,14 +45,44 @@ export function sessionMoveTargets(session: Pick<SessionProjection, "projectId">
 /** Whether to offer the move at all. A delegated subagent goes with its chat; a
  *  fork is a chat of its own, which only the sharing view can tell apart. */
 export function canMoveSession(session: MovableSession, projects: readonly Project[]): boolean {
+  if (!canMoveSessionAnywhere(session, projects)) return false;
+  // Per navigator row, per render: no list built just to ask whether it's empty.
+  return projects.some((project) => !project.parentProjectId && !project.remote && project.id !== session.projectId);
+}
+
+/** The chat-level half of {@link canMoveSession}: whether this chat may leave
+ *  where it works at all, to another project or another checkout of its own. */
+export function canMoveSessionAnywhere(session: MovableSession, projects: readonly Project[]): boolean {
   if (!canManageSession(session) || session.status === "archived" || session.purpose || session.origin) return false;
   if (session.parentId && !session.forkOf && session.sharing?.inherited !== false) return false;
   if (isIsolatedSession(session)) return false;
   const source = projects.find((project) => project.id === session.projectId);
-  if (!source || source.parentProjectId || source.remote) return false;
-  // Per navigator row, per render: no list built just to ask whether it's empty.
-  return projects.some((project) => !project.parentProjectId && !project.remote && project.id !== session.projectId);
+  return !!source && !source.parentProjectId && !source.remote;
 }
+
+// ---- a drop on another checkout of the same project ---------------------------
+// The host only notices the drop; the Git package's `session.checkout.move` slot
+// renders the confirmation, which asks the server and words its answer.
+
+export interface PendingCheckoutMove {
+  sessionId: string;
+  projectId: string;
+  target: SessionCheckoutTarget;
+}
+let pendingCheckoutMove: PendingCheckoutMove | null = null;
+const pendingListeners = new Set<() => void>();
+const setPendingCheckoutMove = (next: PendingCheckoutMove | null): void => {
+  pendingCheckoutMove = next;
+  for (const listener of pendingListeners) listener();
+};
+const subscribePending = (listener: () => void): (() => void) => {
+  pendingListeners.add(listener);
+  return () => pendingListeners.delete(listener);
+};
+/** The checkout move waiting for its confirmation, if any. */
+export const usePendingCheckoutMove = (): PendingCheckoutMove | null =>
+  useSyncExternalStore(subscribePending, () => pendingCheckoutMove, () => null);
+export const closePendingCheckoutMove = (): void => setPendingCheckoutMove(null);
 
 const BLOCKED: Readonly<Record<SessionMoveBlockReason, TranslationKey>> = {
   archived: "sessionMove.blocked.archived",
@@ -52,6 +91,7 @@ const BLOCKED: Readonly<Record<SessionMoveBlockReason, TranslationKey>> = {
   isolated: "sessionMove.blocked.isolated",
   "other-machine": "sessionMove.blocked.otherMachine",
   "package-owned": "sessionMove.blocked.packageOwned",
+  "personal-context": "sessionMove.blocked.personalContext",
   private: "sessionMove.blocked.private",
   queued: "sessionMove.blocked.queued",
   "too-large": "sessionMove.blocked.tooLarge",
@@ -83,17 +123,25 @@ export async function requestSessionMove(session: Pick<SessionProjection, "id" |
   const input = { projectId: target.id, expectedProjectId: session.projectId };
   try {
     const preview = await api.previewSessionMove(session.id, input);
-    if (preview.blocked) {
+    // Every other refusal stays a refusal. "Personal notes already read" is the
+    // person's own call, so it is asked for instead (Spaces §14.6).
+    const personalNotes = preview.blocked?.reason === "personal-context";
+    if (preview.blocked && !personalNotes) {
       setUiError(tr(BLOCKED[preview.blocked.reason]) || preview.blocked.message);
       return false;
     }
-    const confirmed = await confirmAlert(sessionMoveMessage(title, from, to, preview), {
-      title: tr("sessionMove.confirmTitle", { project: to }),
-      confirmLabel: tr("sessionMove.confirmAction"),
-      destructive: false,
-    });
+    const confirmed = await confirmAlert(
+      personalNotes ? `${sessionMoveMessage(title, from, to, preview)}\n\n${tr("sessionMove.personalNotes")}` : sessionMoveMessage(title, from, to, preview),
+      {
+        title: tr("sessionMove.confirmTitle", { project: to }),
+        confirmLabel: tr("sessionMove.confirmAction"),
+        destructive: false,
+        // The message already says what changes; the checkbox is the decision.
+        ...(personalNotes ? { acknowledge: { label: tr("sessionMove.personalNotesConfirm") } } : {}),
+      },
+    );
     if (!confirmed) return false;
-    const result = await api.moveSession(session.id, input);
+    const result = await api.moveSession(session.id, personalNotes ? { ...input, acknowledgePersonalContext: true } : input);
     upsertSession(result.session);
     announce(tr("sessionMove.moved", { project: to }));
     return true;
@@ -125,6 +173,46 @@ export function beginSessionMoveDrag(dataTransfer: DataTransfer, session: Movabl
 }
 export const endSessionMoveDrag = (): void => publish(null);
 
+/** The chat being dragged right now, for drop targets that only appear mid-drag. */
+export const useDraggedSession = (): MovableSession | null =>
+  useSyncExternalStore(subscribe, () => dragged, () => null);
+
+// The checkout under the pointer. The one listener lives on the navigator, the
+// checkout rows deep inside each project's chat list, so it is shared here.
+let overCheckoutKey: string | null = null;
+const overListeners = new Set<() => void>();
+const setOverCheckoutKey = (next: string | null): void => {
+  if (overCheckoutKey === next) return;
+  overCheckoutKey = next;
+  for (const listener of overListeners) listener();
+};
+const subscribeOver = (listener: () => void): (() => void) => {
+  overListeners.add(listener);
+  return () => overListeners.delete(listener);
+};
+/** `checkoutTargetKey` of the checkout of `projectId` a chat is dragged over. */
+export function useCheckoutDropOver(projectId: string): string | null {
+  const over = useSyncExternalStore(subscribeOver, () => overCheckoutKey, () => null);
+  const prefix = `${projectId}\n`;
+  return over?.startsWith(prefix) ? over.slice(prefix.length) : null;
+}
+
+const sameCheckout = (session: MovableSession, target: SessionCheckoutTarget): boolean =>
+  "main" in target ? !session.worktreePath : session.worktreePath === target.worktreePath;
+
+/** Read a checkout drop target. An element marks itself with
+ *  `data-session-drop-checkout` (`main` or the worktree path) and
+ *  `data-session-drop-checkout-project`; only the dragged chat's own project,
+ *  and only a checkout other than the one it works in, counts. */
+function checkoutTargetAt(element: Element | null | undefined, session: MovableSession): SessionCheckoutTarget | null {
+  const zone = element?.closest?.("[data-session-drop-checkout]");
+  if (!zone || zone.getAttribute("data-session-drop-checkout-project") !== session.projectId) return null;
+  const key = zone.getAttribute("data-session-drop-checkout");
+  if (!key) return null;
+  const target: SessionCheckoutTarget = key === "main" ? { main: true } : { worktreePath: key };
+  return sameCheckout(session, target) ? null : target;
+}
+
 /**
  * One listener on the navigator rather than one per project row: a row is a
  * tree card or a rail tile deep inside a menu and tooltip, and only the row
@@ -136,15 +224,29 @@ export const endSessionMoveDrag = (): void => publish(null);
 export function useSessionMoveDropZones() {
   const session = useSyncExternalStore(subscribe, () => dragged, () => null);
   const [overProjectId, setOverProjectId] = useState<string | null>(null);
+  const setOverCheckout = (key: string | null): void =>
+    setOverCheckoutKey(key && session ? `${session.projectId}\n${key}` : null);
   useEffect(() => {
-    if (!session) setOverProjectId(null);
+    if (session) return;
+    setOverProjectId(null);
+    setOverCheckoutKey(null);
   }, [session]);
 
-  const targetOf = (event: ReactDragEvent<HTMLElement>): Project | null => {
+  type Target = { kind: "project"; project: Project } | { kind: "checkout"; target: SessionCheckoutTarget };
+  const targetOf = (event: ReactDragEvent<HTMLElement>): Target | null => {
     if (!session || !Array.from(event.dataTransfer.types).includes(SESSION_MOVE_MIME)) return null;
-    const element = (event.target as Element | null)?.closest?.("[data-session-drop-project]");
+    const under = event.target as Element | null;
+    // A checkout sits inside its project's row, so it is asked first.
+    const checkout = checkoutTargetAt(under, session);
+    if (checkout) return { kind: "checkout", target: checkout };
+    const element = under?.closest?.("[data-session-drop-project]");
     const id = element?.getAttribute("data-session-drop-project");
-    return (id && sessionMoveTargets(session, getState().projectRegistry.projects).find((project) => project.id === id)) || null;
+    const project = id ? sessionMoveTargets(session, getState().projectRegistry.projects).find((candidate) => candidate.id === id) : undefined;
+    return project ? { kind: "project", project } : null;
+  };
+  const clear = (): void => {
+    setOverProjectId(null);
+    setOverCheckout(null);
   };
 
   return {
@@ -152,23 +254,26 @@ export function useSessionMoveDropZones() {
     handlers: {
       onDragOver: (event: ReactDragEvent<HTMLElement>) => {
         const target = targetOf(event);
-        setOverProjectId(target?.id ?? null);
+        setOverProjectId(target?.kind === "project" ? target.project.id : null);
+        setOverCheckout(target?.kind === "checkout" ? checkoutTargetKey(target.target) : null);
         if (!target) return;
         event.preventDefault();
         event.dataTransfer.dropEffect = "move";
       },
       onDragLeave: (event: ReactDragEvent<HTMLElement>) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOverProjectId(null);
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) clear();
       },
       onDrop: (event: ReactDragEvent<HTMLElement>) => {
         const target = targetOf(event);
-        setOverProjectId(null);
+        clear();
         if (!target || !session) return;
         event.preventDefault();
         const carried = session;
         endSessionMoveDrag();
         // Drag data is untrusted: it has to name the row that started this drag.
-        if (getDragSessionMove(event.dataTransfer) === carried.id) void requestSessionMove(carried, target);
+        if (getDragSessionMove(event.dataTransfer) !== carried.id) return;
+        if (target.kind === "project") void requestSessionMove(carried, target.project);
+        else setPendingCheckoutMove({ sessionId: carried.id, projectId: carried.projectId, target: target.target });
       },
     },
   };

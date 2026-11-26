@@ -80,8 +80,61 @@ export const currentBrowserLogin = (): string => {
   } catch { /* private mode */ }
   return activeBrowserAccountId() === "usr_owner" ? "owner" : "";
 };
-const rememberLogin = (login: string): void => {
-  try { localStorage.setItem(LAST_LOGIN_KEY, login.trim().toLowerCase()); } catch { /* private mode */ }
+/** An account this browser signed in to before. Only this device knows the
+ *  list: the server never tells an anonymous caller which logins exist. */
+export interface KnownBrowserLogin {
+  login: string;
+  name?: string;
+}
+const KNOWN_LOGINS_KEY = "polyth.knownLogins";
+const MAX_KNOWN_LOGINS = 5;
+const knownLoginName = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+/** Most recent first. Falls back to the single last login older shells kept. */
+export const knownBrowserLogins = (): KnownBrowserLogin[] => {
+  const known: KnownBrowserLogin[] = [];
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(KNOWN_LOGINS_KEY) ?? "[]");
+    if (Array.isArray(raw)) {
+      for (const entry of raw) {
+        const login = typeof entry?.login === "string" ? entry.login.trim().toLowerCase() : "";
+        if (!knownLoginName.test(login) || known.some((item) => item.login === login)) continue;
+        const name = typeof entry.name === "string" ? entry.name.trim().slice(0, 120) : "";
+        known.push(name ? { login, name } : { login });
+        if (known.length >= MAX_KNOWN_LOGINS) break;
+      }
+    }
+  } catch { /* private mode or a damaged entry */ }
+  if (known.length === 0) {
+    let last = "";
+    try { last = localStorage.getItem(LAST_LOGIN_KEY)?.trim().toLowerCase() ?? ""; } catch { /* private mode */ }
+    if (knownLoginName.test(last)) known.push({ login: last });
+  }
+  return known;
+};
+/** Put this login first among the accounts this device knows. */
+export const rememberBrowserLogin = (login: string, name?: string): void => rememberLogin(login, name);
+function rememberLogin(login: string, name?: string): void {
+  const canonical = login.trim().toLowerCase();
+  try {
+    localStorage.setItem(LAST_LOGIN_KEY, canonical);
+    const previous = knownBrowserLogins().find((item) => item.login === canonical);
+    const label = name?.trim() || previous?.name;
+    const next = [label ? { login: canonical, name: label } : { login: canonical },
+      ...knownBrowserLogins().filter((item) => item.login !== canonical)].slice(0, MAX_KNOWN_LOGINS);
+    localStorage.setItem(KNOWN_LOGINS_KEY, JSON.stringify(next));
+  } catch { /* private mode */ }
+}
+/** "Remove from this device": the tile goes, the account itself is untouched. */
+export const forgetBrowserLogin = (login: string): void => {
+  const canonical = login.trim().toLowerCase();
+  try {
+    const next = knownBrowserLogins().filter((item) => item.login !== canonical);
+    localStorage.setItem(KNOWN_LOGINS_KEY, JSON.stringify(next));
+    if (localStorage.getItem(LAST_LOGIN_KEY)?.trim().toLowerCase() === canonical) {
+      if (next[0]) localStorage.setItem(LAST_LOGIN_KEY, next[0].login);
+      else localStorage.removeItem(LAST_LOGIN_KEY);
+    }
+  } catch { /* private mode */ }
 };
 const accountAuthResult = (
   response: Response,
@@ -106,12 +159,14 @@ export async function loginAccount(login: string, password: string): Promise<Acc
   }>("/api/auth/login", { login: canonicalLogin, accountId: legacyAccountId, password });
   if (response.ok) {
     let accountId = legacyAccountId;
+    let displayName: string | undefined;
     try {
-      const me = await request<{ id?: unknown }>("/api/auth/me");
+      const me = await request<{ id?: unknown; displayName?: unknown }>("/api/auth/me");
       if (typeof me.id === "string" && me.id.trim()) accountId = me.id;
+      if (typeof me.displayName === "string") displayName = me.displayName;
     } catch { /* legacy server may not expose canonical /me */ }
     acceptAuthenticatedBrowserAccount(accountId);
-    rememberLogin(canonicalLogin);
+    rememberLogin(canonicalLogin, displayName);
     return { ok: true };
   }
   return accountAuthResult(response, body);
@@ -121,15 +176,21 @@ export async function loginAccount(login: string, password: string): Promise<Acc
  * Consume one recovery code to replace the local password. Recovery deliberately
  * does not authenticate the browser: the caller must perform a fresh login so
  * the new session is minted after the old auth epoch and sessions were revoked.
+ * The code alone identifies the account; the server answers with its login so
+ * the person can sign in (and learns it). `login` is undefined only when an
+ * older server answered without one. `loginHint` (the account picked on this
+ * device) is sent only because a server older than code-only recovery still
+ * requires the field; a current server ignores it.
  */
-export async function recoverAccount(login: string, code: string, password: string): Promise<AccountLoginResult> {
-  const canonicalLogin = login.trim().toLowerCase();
+export async function recoverAccount(code: string, password: string, loginHint?: string): Promise<AccountLoginResult & { login?: string }> {
+  const hint = loginHint?.trim().toLowerCase();
   const { response, body } = await authJson<{
-    ok?: unknown; error?: string; message?: string; retryAfterSec?: number;
-  }>("/api/auth/recover", { login: canonicalLogin, code: code.trim(), password });
+    ok?: unknown; login?: unknown; error?: string; message?: string; retryAfterSec?: number;
+  }>("/api/auth/recover", { ...(hint ? { login: hint } : {}), code: code.trim(), password });
   if (response.ok) {
-    rememberLogin(canonicalLogin);
-    return { ok: true };
+    const login = typeof body.login === "string" && body.login.trim() ? body.login.trim().toLowerCase() : undefined;
+    if (login) rememberLogin(login);
+    return login ? { ok: true, login } : { ok: true };
   }
   return accountAuthResult(response, body);
 }

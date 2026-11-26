@@ -2,6 +2,9 @@
 // Links: http(s) + mailto + in-app #anchors. Images: http(s) or project files
 // served through /api/files/raw (path revalidated server-side). Everything
 // else — javascript:, data:, file:, vbscript:, protocol-relative — is dropped.
+// The renderer never hands a local path link (absolute, relative, file://)
+// to the browser: it opens in Project files (fileReference.ts
+// isLocalLinkHref/parseFileLinkHref) before this policy is consulted.
 
 const SCHEME_RE = /^\s*([a-zA-Z][a-zA-Z0-9+.-]*):/;
 

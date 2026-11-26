@@ -19,7 +19,7 @@ test("desktop stages an exact installed Playwright Chromium and packages it as a
     packages: Record<string, { version?: string }>;
   };
   const installed = lock.packages["apps/desktop/node_modules/playwright-core"] ?? lock.packages["node_modules/playwright-core"];
-  assert.match(pkg.dependencies["playwright-core"], /^\d+\.\d+\.\d+$/);
+  assert.match(pkg.dependencies["playwright-core"] ?? "", /^\d+\.\d+\.\d+$/);
   assert.equal(pkg.dependencies["playwright-core"], installed?.version);
   assert.match(pkg.scripts["stage:chromium"] ?? "", /stage-chromium\.mjs/);
   assert.match(pkg.scripts.dist ?? "", /stage:chromium/);

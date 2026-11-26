@@ -39,11 +39,20 @@ export interface VoiceModePrefs {
   actions: boolean;
   narrationCadence: VoiceNarrationCadence;
   narrator: VoiceNarrator;
+  /** A short spoken "Got it" when a turn is accepted and no reply has begun. */
+  acknowledge: boolean;
+  /** The defaults these settings were last read with (`VOICE_MODE_DEFAULTS`). */
+  defaultsVersion: number;
 }
+
+/** Bumped when a default changes for people who never chose otherwise.
+ *  2: saying what the agent is doing (`actions`) is on by default. */
+export const VOICE_MODE_DEFAULTS = 2;
 
 export const VOICE_MODE_PREFS_KEY = "polyth.voice-mode";
 
-/** Silence that ends a spoken turn, per pause preference. */
+/** Silence that ends a spoken turn whose words have no ending yet, per pause
+ *  preference. `endpoint.ts` shortens it after a finished sentence. */
 export const PAUSE_MS: Readonly<Record<VoicePause, number>> = {
   quick: 650,
   normal: 1_000,
@@ -63,9 +72,11 @@ export function defaultVoiceModePrefs(): VoiceModePrefs {
     commands: true,
     commandPhrases: {},
     thoughts: "off",
-    actions: false,
+    actions: true,
     narrationCadence: "key",
     narrator: "templates",
+    acknowledge: true,
+    defaultsVersion: VOICE_MODE_DEFAULTS,
   };
 }
 
@@ -81,6 +92,14 @@ export function parseVoiceModePrefs(raw: string | null | undefined): VoiceModePr
   } catch {
     return d;
   }
+  const version = typeof data.defaultsVersion === "number" && Number.isFinite(data.defaultsVersion) ? data.defaultsVersion : 0;
+  const thoughts = oneOf(data.thoughts, ["off", "brief", "full"], d.thoughts);
+  let actions = typeof data.actions === "boolean" ? data.actions : d.actions;
+  // Settings saved before the work was narrated by default hold `false`
+  // whether or not the person ever looked at it; with narration untouched
+  // they move to the new default once. Turning it off afterwards sticks,
+  // because the save carries the version.
+  if (version < 2 && thoughts === "off") actions = true;
   const known: VoiceModePrefs = {
     turnTaking: oneOf(data.turnTaking, ["auto", "manual"], d.turnTaking),
     pause: oneOf(data.pause, ["quick", "normal", "patient"], d.pause),
@@ -93,10 +112,12 @@ export function parseVoiceModePrefs(raw: string | null | undefined): VoiceModePr
     feedback: oneOf(data.feedback, ["voice", "silent"], d.feedback),
     commands: typeof data.commands === "boolean" ? data.commands : d.commands,
     commandPhrases: parseCommandPhrases(data.commandPhrases),
-    thoughts: oneOf(data.thoughts, ["off", "brief", "full"], d.thoughts),
-    actions: typeof data.actions === "boolean" ? data.actions : d.actions,
+    thoughts,
+    actions,
     narrationCadence: oneOf(data.narrationCadence, ["key", "every"], d.narrationCadence),
     narrator: oneOf(data.narrator, ["templates", "model"], d.narrator),
+    acknowledge: typeof data.acknowledge === "boolean" ? data.acknowledge : d.acknowledge,
+    defaultsVersion: Math.max(version, VOICE_MODE_DEFAULTS),
   };
   // Keys this client does not know (a newer client's settings) are carried
   // through untouched, so saving here does not erase them on other devices.

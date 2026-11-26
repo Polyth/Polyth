@@ -4,7 +4,8 @@ import test from "node:test";
 import { commentBody, issueBody } from "../src/format.ts";
 import { REPO, report } from "./support.ts";
 
-const context = { repo: REPO, branch: "attachments", fingerprint: "0123456789abcdef", reportJsonPath: "reports/x/report.json" };
+const group = { id: "qa-eu", label: "QA EU", keyId: "qa-eu" };
+const context = { repo: REPO, branch: "attachments", fingerprint: "0123456789abcdef", reportJsonPath: "reports/x/report.json", group };
 
 // Live text outside code: a mention or an issue reference GitHub would act on.
 const liveMentions = (markdown: string): string[] => {
@@ -42,8 +43,8 @@ test("a browser report names its browser and server instead of a desktop build",
     },
   });
   assert.equal(issueTitle(browser), `[${base.app.version}] Sidebar overlaps on the phone · ios Safari 18`);
-  assert.ok(issueLabels(browser).includes("client:browser"));
-  assert.ok(!issueLabels(base).includes("client:browser"));
+  assert.ok(issueLabels(browser, group).includes("client:browser"));
+  assert.ok(!issueLabels(base, group).includes("client:browser"));
   const body = issueBody(browser, context);
   assert.match(body, /\| Client \| browser \|/);
   assert.match(body, /\| Browser \| Safari 18 \|/);

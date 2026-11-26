@@ -1,0 +1,29 @@
+{
+  "name": "@polyth/backend-vibe",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@polyth/backend-acp": "0.1.0",
+    "@polyth/contracts": "1.2.0",
+    "@polyth/harness-runtime": "0.1.0",
+    "@polyth/plugins": "0.1.0"
+  },
+  "polyth": {
+    "editions": ["workstation"],
+    "serverEntry": "./src/serverEntry.ts",
+    "descriptor": {
+      "name": "Mistral Vibe harness",
+      "description": "Mistral Vibe CLI through its native ACP stdio agent (vibe-acp)",
+      "core": false,
+      "enabled": true,
+      "icon": "mistral",
+      "hasSettings": false,
+      "category": "system",
+      "projectAffinity": {}
+    }
+  }
+}

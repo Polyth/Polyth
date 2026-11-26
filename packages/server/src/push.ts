@@ -10,7 +10,7 @@ import {
 import { readFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { atomicWriteSync } from "@polyth/plugins";
-import type { JsonObject, NotificationKind, SessionEvent, SessionProjection } from "@polyth/contracts";
+import type { JsonObject, NotificationKind, RateLimitRetry, SessionEvent, SessionProjection } from "@polyth/contracts";
 import type { NotificationAccount } from "./notifications.ts";
 
 // ---- base64url helpers ---------------------------------------------------------
@@ -251,6 +251,94 @@ export function turnErrorFromTail(tail: readonly SessionEvent[]): string | undef
   return undefined;
 }
 
+/** The data of the newest `turn/stopped` in the tail (its `retry`, `code`). */
+export function turnStopFromTail(tail: readonly SessionEvent[]): JsonObject | undefined {
+  for (let i = tail.length - 1; i >= 0; i--) {
+    if (tail[i]!.type === "turn/stopped") return tail[i]!.data as JsonObject | undefined;
+  }
+  return undefined;
+}
+
+/** A stopped turn that says its provider window is used up: account-wide, so
+ *  every chat on that account meets it at once. Only text that speaks about a
+ *  limit/quota, never a single refused request or an overload blip. */
+const LIMIT_STOP_TEXT = /\b(?:hit|reached|exceeded|exhausted|out of)\b[^.]{0,48}\b(?:limits?|quota|credits?)\b|\b(?:usage|rate)[\s-]?limit\b|\btoo many requests\b|\b429\b/i;
+
+/** How long a limit notice with no stated reset keeps other chats quiet. */
+export const LIMIT_NOTICE_TTL_MS = 30 * 60_000;
+
+/** The identity of one exhausted provider limit an account meets across chats.
+ *  Chats stopping on the same window share `key`, so the person is told once:
+ *  the provider + harness + reset minute when the stop carries a retry hint,
+ *  otherwise the provider's own words. Absent for anything that is not an
+ *  exhausted limit. */
+export function limitEpisode(
+  stop: JsonObject | undefined,
+  error: string | undefined,
+  harnessId?: string,
+  now = Date.now(),
+): { key: string; until: number } | undefined {
+  const retry = stop?.retry && typeof stop.retry === "object" && !Array.isArray(stop.retry)
+    ? stop.retry as unknown as RateLimitRetry : undefined;
+  const code = typeof stop?.code === "string" ? stop.code : undefined;
+  const text = typeof error === "string" && error.trim() !== "" ? error : undefined;
+  // The adapter's classification wins: "overloaded" and a refused single
+  // request are not an exhausted window, whatever the prose says.
+  const limit = retry?.scope
+    ? retry.scope === "rate" || retry.scope === "quota"
+    : code
+      ? code === "rate-limited" || code === "quota-exhausted"
+      : text !== undefined && LIMIT_STOP_TEXT.test(text);
+  if (!limit) return undefined;
+  const harness = harnessId ?? "";
+  const provider = retry?.provider ?? "provider";
+  const reset = retry?.resetAt ?? retry?.resumeAt;
+  if (reset !== undefined && Number.isFinite(reset)) {
+    return {
+      // One window is one episode: the reset minute absorbs per-message jitter.
+      key: `limit:${harness}:${provider}:${Math.floor(reset / 60_000)}`,
+      until: Math.max(reset, now) + 5 * 60_000,
+    };
+  }
+  if (!text) return undefined;
+  return {
+    key: `limit:${harness}:${provider}:${text.toLowerCase().replace(/\s+/g, " ").trim()}`,
+    until: now + LIMIT_NOTICE_TTL_MS,
+  };
+}
+
+/** Remembers which limit episodes one recipient was already told about, so a
+ *  second chat stopping on the same limit adds neither an inbox row nor a push.
+ *  Keyed by the recipient (`userId`+`spaceId`), never globally: two people's
+ *  provider accounts are separate even when they share a Space. */
+export function createLimitAnnouncements(now: () => number = Date.now): {
+  announced(audience: string, episode: string): boolean;
+  remember(audience: string, episode: string, until?: number): void;
+  /** Give the claim back when the notice could not be published, so a later
+   *  chat stopping on the same limit still reaches the person. */
+  release(audience: string, episode: string): void;
+} {
+  const until = new Map<string, number>();
+  const prune = (at: number): void => {
+    for (const [key, expires] of until) if (expires <= at) until.delete(key);
+  };
+  return {
+    announced(audience, episode) {
+      const at = now();
+      prune(at);
+      return (until.get(`${audience}\0${episode}`) ?? 0) > at;
+    },
+    remember(audience, episode, resetAt) {
+      const at = now();
+      const expires = Math.max(resetAt ?? at + LIMIT_NOTICE_TTL_MS, at + 60_000);
+      until.set(`${audience}\0${episode}`, expires);
+    },
+    release(audience, episode) {
+      until.delete(`${audience}\0${episode}`);
+    },
+  };
+}
+
 const PERMISSION_VERBS: Record<string, string> = {
   bash: "Run", shell: "Run", exec: "Run", command: "Run",
   edit: "Edit", write: "Edit", patch: "Edit", multiedit: "Edit",
@@ -311,6 +399,14 @@ export type PushPayload = JsonObject & {
   /** Trusted source project (NTF-01), read from the canonical projection.
    *  Empty only on the keyless test path. */
   projectId: string;
+  /** Server-internal: the provider-limit episode this stop belongs to
+   *  (`limitEpisode`). Chats that hit the same exhausted limit share it, so
+   *  the person is told once instead of once per chat. Never a notification
+   *  action identity. */
+  limitKey?: string;
+  /** When that episode's provider window resets (ms epoch): the sink keeps the
+   *  episode quiet until then. */
+  limitUntil?: number;
   /** Pending request identity. The service worker sends actions only when this
    *  is present; the authenticated session API still validates it is open. */
   requestId?: string;
@@ -371,22 +467,35 @@ export function buildPushPayload(kind: PushKind, opts: {
    *  present it replaces the status text as the body; the title still names
    *  the session. Empty/absent keeps the status body exactly. */
   content?: string;
+  /** The provider-limit episode (`limitEpisode`): a chat-neutral notice keyed
+   *  by the episode, so later chats that hit the same limit replace it instead
+   *  of adding another identical alert. */
+  limitKey?: string;
+  limitUntil?: number;
   test?: boolean;
 }): PushPayload {
   const session = clip(opts.sessionTitle || "Session", MAX_VAR_CHARS);
   const status = clip(opts.statusText ?? STATUS_TEXT[kind], MAX_VAR_CHARS);
   const quickAnswers = kind === "question" ? quickAnswersFor(opts.questions) : [];
+  const limit = opts.limitKey !== undefined;
+  const key = opts.limitKey ?? opts.key ?? "";
   return {
     kind,
     sessionId: opts.sessionId,
-    title: clip(`Polyth — ${session}`, MAX_VAR_CHARS + 10),
-    body: opts.content ? clip(opts.content, MAX_BODY_CHARS) : clip(`${session} — ${status}`, MAX_BODY_CHARS),
+    // A limit is one account-wide condition, not one chat's news: the notice
+    // names the limit once instead of naming each chat it stopped.
+    title: limit ? clip("Polyth — limit reached", MAX_VAR_CHARS + 10) : clip(`Polyth — ${session}`, MAX_VAR_CHARS + 10),
+    body: opts.content
+      ? clip(opts.content, MAX_BODY_CHARS)
+      : clip(limit ? status : `${session} — ${status}`, MAX_BODY_CHARS),
     // The OS/browser tag derives from the stable key when one exists so
     // centre rows and native notifications correlate; the keyless test path
     // keeps the legacy (session, kind) tag.
-    tag: opts.key ? `polyth-${opts.key}` : `polyth-${opts.sessionId}-${kind}`,
-    key: opts.key ?? "",
+    tag: key ? `polyth-${key}` : `polyth-${opts.sessionId}-${kind}`,
+    key,
     projectId: opts.projectId ?? "",
+    ...(opts.limitKey !== undefined ? { limitKey: opts.limitKey } : {}),
+    ...(opts.limitKey !== undefined && opts.limitUntil !== undefined ? { limitUntil: opts.limitUntil } : {}),
     ...(opts.requestId ? { requestId: opts.requestId } : {}),
     ...(quickAnswers.length > 0 ? { quickAnswers } : {}),
     ...(opts.test ? { test: true as const } : {}),
@@ -739,6 +848,13 @@ export function createPushNotifier(deps: {
     plainTextExcerpt(finalReplyFromTail(await tailWindow(sessionId, isReply)), cap);
   const errorExcerpt = async (sessionId: string, cap = MAX_BODY_CHARS): Promise<string> =>
     plainTextExcerpt(turnErrorFromTail(await tailWindow(sessionId, (event) => event.type === "turn/stopped")), cap);
+  /** The error excerpt and the stop that carries the adapter's classification:
+   *  one tail read serves both the notification body and limit detection. */
+  const errorNotice = async (sessionId: string, cap = MAX_BODY_CHARS): Promise<{ text: string; stop?: JsonObject }> => {
+    const tail = await tailWindow(sessionId, (event) => event.type === "turn/stopped");
+    const stop = turnStopFromTail(tail);
+    return { text: plainTextExcerpt(turnErrorFromTail(tail), cap), ...(stop ? { stop } : {}) };
+  };
 
   return {
     attention(sessionId, kind, requestId, questions) {
@@ -830,12 +946,28 @@ export function createPushNotifier(deps: {
           return;
         }
         if (deps.claimed?.(sessionId)) return;
-        const content = reason === "error" ? await errorExcerpt(sessionId) : await replyExcerpt(sessionId);
-        await deps.send(buildPushPayload(reason === "error" ? "failed" : "completed", {
+        if (reason === "error") {
+          const notice = await errorNotice(sessionId);
+          // An exhausted provider limit is one account-wide condition, not
+          // each chat's separate news: the shared episode key lets the sink
+          // tell the person once, however many chats stop on it.
+          const limit = limitEpisode(notice.stop, notice.text, proj.resolvedHarnessId);
+          await deps.send(buildPushPayload("failed", {
+            sessionId,
+            sessionTitle: proj.title,
+            ...(notice.text ? { content: notice.text } : {}),
+            ...(limit ? { limitKey: limit.key, limitUntil: limit.until, statusText: "the provider limit is reached" } : {}),
+            key: `${sessionId}:turn:failed`,
+            projectId: proj.projectId,
+          }));
+          return;
+        }
+        const content = await replyExcerpt(sessionId);
+        await deps.send(buildPushPayload("completed", {
           sessionId,
           sessionTitle: proj.title,
           ...(content ? { content } : {}),
-          key: `${sessionId}:turn:${reason === "error" ? "failed" : "idle"}`,
+          key: `${sessionId}:turn:idle`,
           projectId: proj.projectId,
         }));
       })());

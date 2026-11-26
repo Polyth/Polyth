@@ -17,6 +17,7 @@ import {
   createServerServiceRegistry,
   SERVER_DELEGATION_POLICY,
   SERVER_MODEL_ROUTING,
+  SERVER_RUNTIME_CATALOG,
   SERVER_SESSION_ISOLATION,
   SERVER_SESSION_WATCHES,
   serverServiceKey,
@@ -340,6 +341,22 @@ test("polyth tool can discover projects and autonomously orchestrate canonical c
     title: "Review external project",
     harness: { mode: "pinned", harnessId: "codex" },
   });
+
+  // A standalone chat in the caller's own project is listed on its own, not
+  // filed under the caller as a sub-session.
+  await execute!({
+    action: "session.create",
+    parameters: { title: "Fix: visible to the person", standalone: true },
+  }, toolContext);
+  assert.deepEqual(createdInputs.at(-1), { projectId: "p1", title: "Fix: visible to the person" });
+  await assert.rejects(
+    () => execute!({ action: "agent.spawn", parameters: { title: "Hidden", standalone: true } }, toolContext),
+    /standalone applies only to session.create/,
+  );
+  await assert.rejects(
+    () => execute!({ action: "session.create", parameters: { title: "Odd", standalone: "yes" } }, toolContext),
+    /standalone must be a boolean/,
+  );
 
   const externalList = JSON.parse((await execute!({
     action: "session.list",
@@ -857,6 +874,132 @@ test("session.isolate moves an existing chat into its own worktree through the a
   await registration.dispose();
 });
 
+test("a session an automation started opens only visible chats, never subagents", async () => {
+  const project: Project = { id: "p1", name: "Current", path: "/projects/p1", spaceId: space.spaceId, createdAt: 1 };
+  const rows = new Map<string, SessionProjection>([
+    ["caller", { ...projection("caller", "p1", "Bug triage"), status: "working", origin: { source: "agents", wake: "schedule", label: "Bug triage" } }],
+  ]);
+  const calls: string[] = [];
+  const created: CreateSessionInput[] = [];
+  const starts: CreateSessionInput[] = [];
+  const sessions = {
+    async snapshot(id: string) {
+      const row = rows.get(id);
+      if (!row) throw Object.assign(new Error("not found"), { code: "not-found" });
+      return row;
+    },
+    async create(input: CreateSessionInput) {
+      created.push(input);
+      const id = `chat-${created.length}`;
+      calls.push(`create:${id}`);
+      rows.set(id, { ...projection(id, input.projectId, input.title ?? ""), ...(input.parentId ? { parentId: input.parentId } : {}) });
+      return { id };
+    },
+    async start(input: CreateSessionInput) {
+      starts.push(input);
+      const id = `started-${starts.length}`;
+      calls.push(`start:${id}`);
+      rows.set(id, { ...projection(id, input.projectId, input.title ?? ""), status: "reconciling", ...(input.parentId ? { parentId: input.parentId } : {}) });
+      return { id, queueId: `q-${starts.length}` };
+    },
+    async send(id: string) { calls.push(`send:${id}`); return { turnId: `turn-${id}` }; },
+  } as unknown as SessionService;
+  const isolation = {
+    async createDelegatedSession() { throw new Error("an automation's session has no delegated children"); },
+    async isolateSession(sessionId, options) {
+      calls.push(`isolate:${sessionId}:${options?.sessions === sessions ? "scoped" : "unscoped"}`);
+      const next: SessionProjection = {
+        ...rows.get(sessionId)!,
+        isolation: {
+          kind: "git-worktree",
+          state: "active",
+          createdAt: "now",
+          worktreePath: `/projects/p1-polyth-isolate/${sessionId}`,
+          worktreeBranch: `polyth/isolate/${sessionId}`,
+          targetPath: "/projects/p1",
+          targetBranch: "devel",
+          originPath: "/projects/p1",
+          baseCommit: "d".repeat(40),
+        },
+      };
+      rows.set(sessionId, next);
+      return { ok: true as const, session: next, targetBranch: "devel", originUncommitted: 0 };
+    },
+  } as Partial<ServerSessionIsolationService> as ServerSessionIsolationService;
+  const registry = createCapabilityContributionRegistry();
+  const services = createServerServiceRegistry();
+  services.provide(serverServiceKey("harness.capabilities"), registry);
+  services.provide(SERVER_SESSION_ISOLATION, isolation);
+  const watches: Array<{ sourceSessionId: string; targetSessionId: string }> = [];
+  services.provide(SERVER_SESSION_WATCHES, {
+    async create(_space, input) {
+      watches.push({ sourceSessionId: input.sourceSessionId, targetSessionId: input.targetSessionId });
+      return {
+        id: `watch-${watches.length}`,
+        sourceSessionId: input.sourceSessionId,
+        targetSessionId: input.targetSessionId,
+        events: input.events ?? ["completed", "error", "aborted"],
+        delivery: input.delivery ?? "wake",
+        once: true,
+        createdAt: watches.length,
+      };
+    },
+    async list() { return []; },
+    async remove() { return false; },
+  });
+  const noted: string[] = [];
+  const host = {
+    services,
+    forSpace: () => ({
+      projects: { async list() { return [project]; }, async get() { return project; } } as unknown as ProjectService,
+      sessions,
+    }),
+  } as unknown as ServerPackageHost;
+  const registration = registerPolythSessionControl(host, { delegations: { noteDelegation: (id) => noted.push(id) } });
+  registry.resolve(context);
+  const execute = registry.executor("harness-runtime.polyth-control")!;
+  type Output = { session: { id: string; parentId: string | null }; visibility?: string; workspace?: { mode: string; mergeTarget: string }; next?: string; watch?: unknown };
+
+  // An isolated hand-off is created at rest, isolated, then briefed; it is
+  // the person's chat, so nothing files it under the caller.
+  const isolatedResult = await execute({
+    action: "agent.spawn",
+    parameters: { title: "Fix: link attachment blocks send", prompt: "fix it", isolation: "isolated" },
+  }, toolContext);
+  const isolatedChat = JSON.parse(isolatedResult.output) as Output;
+  assert.deepEqual(calls, ["create:chat-1", "isolate:chat-1:scoped", "send:chat-1"]);
+  assert.equal(created[0]!.parentId, undefined);
+  assert.equal(isolatedChat.session.parentId, null);
+  assert.equal(isolatedChat.visibility, "standalone");
+  assert.deepEqual(isolatedChat.workspace?.mode, "isolated");
+  assert.equal(isolatedChat.workspace?.mergeTarget, "devel");
+  assert.match(isolatedChat.next ?? "", /isolation card/);
+  assert.equal(isolatedResult.metadata?.parentSessionId, undefined);
+  assert.deepEqual(watches, [{ sourceSessionId: "chat-1", targetSessionId: "caller" }], "the automation still hears when it ends");
+  assert.deepEqual(noted, [], "no merge duty lands on the automation");
+
+  // A shared hand-off and a plain session.create are standalone too.
+  const shared = JSON.parse((await execute({
+    action: "agent.spawn",
+    parameters: { title: "Look into it", prompt: "read the logs" },
+  }, toolContext)).output) as Output;
+  assert.equal(shared.session.id, "started-1");
+  assert.equal(starts[0]!.parentId, undefined);
+  assert.equal(shared.visibility, "standalone");
+  const plain = JSON.parse((await execute({
+    action: "session.create",
+    parameters: { title: "Notes" },
+  }, toolContext)).output) as Output;
+  assert.equal(created.at(-1)!.parentId, undefined);
+  assert.equal(plain.session.parentId, null);
+
+  // An ordinary chat still delegates subagents under itself.
+  rows.set("caller", { ...rows.get("caller")!, origin: undefined });
+  await execute({ action: "agent.spawn", parameters: { title: "Worker", prompt: "go" } }, toolContext);
+  assert.equal(starts.at(-1)!.parentId, "caller");
+  await registration.dispose();
+});
+
 test("polyth tool acts for the person who sent the turn and refuses for someone who left", async () => {
   const project: Project = { id: "p1", name: "Current", path: "/projects/p1", spaceId: space.spaceId, createdAt: 1 };
   const used: string[] = [];
@@ -1046,5 +1189,73 @@ test("agent.spawn sends its prompt with the create when the server can start a c
   // A start that already failed is said plainly: no watch will report it.
   startStatus = "failed";
   assert.match((await spawn()).startFailed ?? "", /could not start/);
+  await registration.dispose();
+});
+
+test("agent.spawn refuses a model or thinking level the pinned harness does not offer before any child exists", async () => {
+  const projects: Project[] = [{ id: "p1", name: "Current", path: "/projects/p1", spaceId: space.spaceId, createdAt: 1 }];
+  const rows = new Map<string, SessionProjection>([["caller", projection("caller", "p1", "Parent")], ["child", projection("child", "p1", "Worker")]]);
+  const createdInputs: CreateSessionInput[] = [];
+  const started: unknown[] = [];
+  const sessions = {
+    async create(input: CreateSessionInput) {
+      createdInputs.push(input);
+      return { id: "child" };
+    },
+    async start(input: unknown) {
+      started.push(input);
+      return { id: "child" };
+    },
+    async snapshot(id: string) { return rows.get(id)!; },
+  } as unknown as SessionService;
+  const registry = createCapabilityContributionRegistry();
+  const services = createServerServiceRegistry();
+  services.provide(serverServiceKey("harness.capabilities"), registry);
+  let catalog: Array<Record<string, unknown>> = [
+    { providerID: "opencode-go", modelID: "flash", name: "Flash", harnessId: "pi", variants: [] },
+    { providerID: "opencode-go", modelID: "pro", name: "Pro", harnessId: "pi", variants: ["low", "high"] },
+  ];
+  services.provide(SERVER_RUNTIME_CATALOG, { models: async () => catalog } as never);
+  services.provide(SERVER_SESSION_WATCHES, {
+    async create() { return { id: "w", sourceSessionId: "child", targetSessionId: "caller", events: [], delivery: "wake", once: true, createdAt: 1 }; },
+    async list() { return []; },
+    async remove() { return false; },
+  });
+  const host = {
+    services,
+    forSpace: () => ({
+      projects: { async list() { return projects; }, async get(id: string) { return projects.find((project) => project.id === id); } },
+      sessions,
+    }),
+  } as unknown as ServerPackageHost;
+  const registration = registerPolythSessionControl(host);
+  registry.resolve(context);
+  const execute = registry.executor("harness-runtime.polyth-control")!;
+  const spawn = (model: Record<string, string>, harnessId = "pi") => execute({
+    action: "agent.spawn",
+    parameters: { title: "Worker", prompt: "go", harnessId, model },
+  }, toolContext);
+
+  await assert.rejects(
+    () => spawn({ providerID: "opencode-go", modelID: "flash", variant: "high" }),
+    (error: Error & { code?: string }) => error.code === "invalid-variant" && /does not offer a thinking level/.test(error.message),
+  );
+  await assert.rejects(
+    () => spawn({ providerID: "opencode-go", modelID: "pro", variant: "max" }),
+    (error: Error & { code?: string }) => error.code === "invalid-variant" && /Choose one of: low, high/.test(error.message),
+  );
+  await assert.rejects(
+    () => spawn({ providerID: "opencode-go", modelID: "gone" }),
+    (error: Error & { code?: string }) => error.code === "invalid-model",
+  );
+  assert.deepEqual([createdInputs, started], [[], []], "a refused selection creates no child");
+
+  await spawn({ providerID: "opencode-go", modelID: "pro", variant: "high" });
+  assert.equal(started.length, 1, "an offered selection still starts the child");
+
+  // An unknown catalog for the harness keeps today's behavior.
+  catalog = [];
+  await spawn({ providerID: "opencode-go", modelID: "flash", variant: "high" });
+  assert.equal(started.length, 2);
   await registration.dispose();
 });

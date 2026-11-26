@@ -10,7 +10,7 @@ import type { IdentityUser } from './types.ts';
  *  account, or the operator's break-glass recovery. */
 const ADMIN_SET_PASSWORD = ['identity.local-account-created', 'auth.password-reset', 'auth.break-glass-password-reset'] as const;
 /** The holder chose it themselves. */
-const SELF_SET_PASSWORD = ['auth.password-changed', 'auth.recovery-used', 'auth.owner-credential-established', 'setup.completed'] as const;
+const SELF_SET_PASSWORD = ['auth.password-changed', 'auth.recovery-used', 'auth.owner-credential-established', 'setup.completed', 'auth.desktop-owner-password-reset'] as const;
 const PASSWORD_SETTERS = [...ADMIN_SET_PASSWORD, ...SELF_SET_PASSWORD];
 
 const expected = (revision: number): void => {
@@ -106,7 +106,7 @@ export function createAccounts(control: ControlPlane, passwords: PasswordService
       );
       if (!reset) return undefined;
       const retaken = control.get(
-        "SELECT 1 FROM audit_events WHERE resource_id=? AND actor_id=? AND action='auth.password-changed' AND seq>? LIMIT 1",
+        "SELECT 1 FROM audit_events WHERE resource_id=? AND actor_id=? AND action IN ('auth.password-changed','auth.desktop-owner-password-reset') AND seq>? LIMIT 1",
         userId, userId, reset.seq,
       );
       return retaken ? undefined : reset.at;

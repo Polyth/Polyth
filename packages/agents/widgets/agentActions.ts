@@ -73,6 +73,27 @@ export async function runAgent(
   }
 }
 
+/** Keep the person's words for the agent's next wake; nothing runs now. */
+export async function setAsideForNextWake(agent: ScheduleTaskDto, text: string): Promise<boolean> {
+  try {
+    putAgent(await api.scheduleNextWake(agent.id, text));
+    return true;
+  } catch (cause) {
+    return fail(cause);
+  }
+}
+
+/** Take back a request waiting for the next wake. */
+export async function dropWakeNote(agent: ScheduleTaskDto, noteId: string): Promise<boolean> {
+  const nextWake = (agent.nextWake ?? []).filter((note) => note.id !== noteId);
+  try {
+    await optimistic(agent.id, { nextWake }, () => api.scheduleNextWakeDrop(agent.id, noteId));
+    return true;
+  } catch (cause) {
+    return fail(cause);
+  }
+}
+
 export async function stopAgent(agent: ScheduleTaskDto): Promise<boolean> {
   try {
     await api.scheduleStop(agent.id);

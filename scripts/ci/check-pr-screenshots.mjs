@@ -18,7 +18,16 @@ const NOT_UI = [/(^|\/)tests?\//, /(^|\/)__tests__\//, /\.(test|spec|stories)\.[
 export const visibleUiFiles = (paths) => paths.filter((path) =>
   UI_ROOT.test(path) && UI_FILE.test(path) && !NOT_UI.some((pattern) => pattern.test(path)));
 
-const withoutComments = (body) => (body ?? "").replace(/<!--[\s\S]*?-->/g, "");
+// Repeat until nothing changes: one pass over `<!<!-- -->-- … -->` leaves a
+// comment GitHub still hides.
+const withoutComments = (body) => {
+  let text = body ?? "";
+  for (let previous; previous !== text;) {
+    previous = text;
+    text = text.replace(/<!--[\s\S]*?-->/g, "");
+  }
+  return text;
+};
 
 /** Whether the body shows at least one image (Markdown or HTML). */
 export const bodyHasScreenshot = (body) => {

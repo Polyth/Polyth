@@ -88,6 +88,29 @@ test("create makes an owned, on-demand Polyth Agent with rolling memory, heartbe
   assert.match(listed.output, new RegExp(id));
 });
 
+/** Whether a property schema admits `null`: a harness that validates the
+ *  arguments against it drops an unexpected null before the tool sees it. */
+const allowsNull = (schema: JsonObject | undefined): boolean => {
+  const anyOf = schema?.anyOf as JsonObject[] | undefined;
+  if (anyOf?.some((branch) => branch.type === "null")) return true;
+  return Array.isArray(schema?.type) && (schema.type as string[]).includes("null");
+};
+
+test("update turns a heartbeat off, and the schema admits the null that does it", async (t) => {
+  const { service, tool, call } = fixture(t);
+  const id = String((await call(OTTO)).metadata?.agentId);
+  assert.equal(service.get(id)?.heartbeat?.everyMinutes, 240);
+  const descriptor = tool.descriptor;
+  if (descriptor.kind !== "tool") throw new Error(`expected a tool, got ${descriptor.kind}`);
+  const properties = (descriptor.inputSchema as JsonObject).properties as Record<string, JsonObject>;
+  assert.equal(allowsNull(properties.heartbeat), true);
+  assert.equal(allowsNull(properties.schedule), true);
+
+  await call({ action: "update", agentId: id, heartbeat: null });
+  assert.equal(service.get(id)?.heartbeat, undefined);
+  assert.doesNotMatch((await call({ action: "get", agentId: id })).output, /heartbeat every/);
+});
+
 test("a schedule, updates and wakes go through the owner only", async (t) => {
   const { service, call, woken } = fixture(t);
   const { heartbeat: _heartbeat, ...scheduled } = OTTO;
@@ -102,11 +125,19 @@ test("a schedule, updates and wakes go through the owner only", async (t) => {
   await call({ action: "run", agentId: id, message: "What should I cook?" });
   assert.deepEqual(woken, [{ id, input: "What should I cook?" }]);
 
+  // Kept for the next wake: nothing runs now, and `get` shows what waits.
+  assert.match((await call({ action: "next-wake", agentId: id, message: "Plan Sunday's dinner too" })).output, /its next wake carries it once/);
+  assert.equal(woken.length, 1);
+  assert.deepEqual(service.get(id)?.nextWake?.map((note) => [note.text, note.by]), [["Plan Sunday's dinner too", "user"]]);
+  assert.match((await call({ action: "get", agentId: id })).output, /For the next wake:\n- Plan Sunday's dinner too/);
+  await assert.rejects(call({ action: "next-wake", agentId: id }), /needs a message/);
+
   // Another member neither reads, changes nor wakes it; they learn only that it is not theirs to see.
   const bob = { actorUserId: "usr_bob" };
   await assert.rejects(call({ action: "get", agentId: id }, bob), { code: "not-found" });
   await assert.rejects(call({ action: "update", agentId: id, name: "Hijack" }, bob), { code: "not-found" });
   await assert.rejects(call({ action: "run", agentId: id }, bob), { code: "not-found" });
+  await assert.rejects(call({ action: "next-wake", agentId: id, message: "hijack" }, bob), { code: "not-found" });
   assert.match((await call({ action: "list" }, bob)).output, /No Polyth Agents/);
 });
 
@@ -121,6 +152,41 @@ test("create refuses system turns, viewers, foreign projects and bad input", asy
   await assert.rejects(call({ ...OTTO, icon: "skull" }), { code: "invalid-input" });
   await assert.rejects(call({ ...OTTO, memory: "fresh" }), { code: "invalid-input" });
   assert.equal(service.list().length, 0);
+});
+
+test("event wakes are set, shown, replaced and removed through the tool; webhooks and scripts stay on the Agents page", async (t) => {
+  const { service, call } = fixture(t);
+  const issues = { id: "new-reports", kind: "integration", source: "github", on: ["issue-opened"],
+    filters: [{ field: "repo", op: "equals", value: "Polyth/nightly-reports" }], pace: { quietMs: 60_000, coalesce: "batch", maxPerHour: 12 } };
+  const created = await call({ ...OTTO, heartbeat: undefined, eventTriggers: [issues] } as unknown as JsonObject);
+  const id = (created.metadata as { agentId: string }).agentId;
+  assert.match(created.output, /1 event wake/);
+  assert.deepEqual(service.get(id)!.eventTriggers, [issues]);
+  const shown = await call({ action: "get", agentId: id });
+  assert.match(shown.output, /Event wakes:\n- \{"id":"new-reports","kind":"integration","source":"github"/);
+
+  await assert.rejects(call({ action: "update", agentId: id, eventTriggers: [{ id: "hook", kind: "webhook", on: [] }] } as unknown as JsonObject), { code: "invalid-input" });
+  await assert.rejects(call({ action: "update", agentId: id, eventTriggers: [{ ...issues, script: "return { action: 'run' }" }] } as unknown as JsonObject), { code: "invalid-input" });
+  await assert.rejects(call({ action: "update", agentId: id, eventTriggers: [{ ...issues, on: [] }] } as unknown as JsonObject), { code: "invalid-input" });
+  await assert.rejects(call({ action: "update", agentId: id, eventTriggers: [{ ...issues }] } as unknown as JsonObject, { actorUserId: "usr_bob" }), { code: "not-found" });
+
+  await call({ action: "update", agentId: id, eventTriggers: [{ ...issues, on: ["issue-opened", "push"] }] } as unknown as JsonObject);
+  assert.deepEqual((service.get(id)!.eventTriggers![0] as { on: string[] }).on, ["issue-opened", "push"]);
+  await call({ action: "update", agentId: id, eventTriggers: [] } as unknown as JsonObject);
+  assert.deepEqual(service.get(id)!.eventTriggers ?? [], []);
+});
+
+test("list names the event sources an agent can wake on", async (t) => {
+  const { service } = fixture(t);
+  const tool = createAgentsTool({
+    service,
+    personSpace: (userId, spaceId) => members[`${userId}:${spaceId}`],
+    project: async (space, id) => projects[id]?.spaceId === space.spaceId ? projects[id] : undefined,
+    access: scheduleTaskAccess,
+    sources: () => [{ id: "github", label: "GitHub", types: [{ id: "issue-opened", label: "Issue" }, { id: "push", label: "Commits" }], fields: [{ id: "repo", label: "Repo" }] }],
+  });
+  const listed = await tool.execute!({ action: "list" }, { sessionId: "ses_chat", projectId: "prj_food", cwd: "/food", spaceId: "spc_a", actorUserId: "usr_ada" } as ToolExecutionContext);
+  assert.match(listed.output, /- github \(GitHub\): types issue-opened, push; filter fields repo/);
 });
 
 test("the package registers the skill and tool on enable and removes them on disable", async (t) => {

@@ -445,6 +445,16 @@ html[dir="rtl"] .chat-preview-thought:not([data-open]) svg { transform: scaleX(-
    a gap between the track and the millisecond readout. */
 .chat-hold-field .size-stepper { grid-template-columns: auto minmax(96px, 1fr) auto auto; }
 .chat-hold-field .size-stepper-specimen { display: none; }
+/* "Collapse long messages" sits inline in its row: a short stepped track with
+   a named readout ("4 lines" … "Full"), no size specimen. */
+.chat-fold-field { display: flex; width: min(244px, 100%); min-width: 0; }
+.chat-fold-field .size-stepper.size-stepper {
+  width: 100%;
+  grid-template-columns: auto minmax(64px, 1fr) auto auto;
+}
+.chat-fold-field .size-stepper-specimen { display: none; }
+/* Wide enough for the longest stop name, so the track never jumps. */
+.chat-fold-field .size-stepper-value { min-width: 7.5ch; white-space: nowrap; font-family: inherit; }
 .chat-hold-specimen {
   display: inline-flex;
   flex: none;

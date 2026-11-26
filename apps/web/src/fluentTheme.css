@@ -419,6 +419,23 @@ html[data-theme-style="fluent"] .session-row.active .session-btn::after {
   background: var(--accent);
   pointer-events: none;
 }
+/* The tree's active project row, while none of its chats is lit
+   (styles.css), selects the same way, its pill on the plate's start. */
+html[data-theme-style="fluent"] .project-tree-node:not(:has(.session-row.active)) > .project-card-shell:has(> .project-card.active)::before {
+  background: var(--surface-overlay-hover);
+}
+html[data-theme-style="fluent"] .project-tree-node:not(:has(.session-row.active)) > .project-card-shell:has(> .project-card.active)::after {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  top: calc(50% - var(--fluent-pill-h) / 2);
+  inset-inline-start: calc(var(--nav-indent-project) - var(--nav-pill-air));
+  width: var(--fluent-pill-w);
+  height: var(--fluent-pill-h);
+  border-radius: var(--radius-round);
+  background: var(--accent);
+  pointer-events: none;
+}
 html[data-theme-style="fluent"] .settings-nav-item { font-weight: 400; }
 @media (min-width: 701px) {
   html[data-theme-style="fluent"] .settings-nav-item { min-height: 36px; }

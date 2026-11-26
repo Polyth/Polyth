@@ -16,15 +16,15 @@ import ActivityTicker, { useTickerKey } from "../../../apps/web/src/components/A
 import AttachmentPills from "../../../apps/web/src/components/AttachmentPills.tsx";
 import { ExecutionIcon } from "../../../apps/web/src/components/ExecutionIcon.tsx";
 import {
-  Button, GlassDock, Icon,
-  ChevronRightIcon, ExternalLinkIcon, ClockIcon, SessionIcon, ShieldAlertIcon, TextInput, ThumbsDownIcon, ThumbsUpIcon,
+  Button, GlassDock, Icon, IconButton,
+  ChevronRightIcon, CloseIcon, ExternalLinkIcon, ClockIcon, SessionIcon, ShieldAlertIcon, TextInput, ThumbsDownIcon, ThumbsUpIcon,
 } from "../../../apps/web/src/components/ui/index.ts";
 import { AgentMark } from "./AgentGlyph.tsx";
 import { budgetWords, tokenTotal } from "../src/agentPrompt.ts";
 import { withoutOpenFence } from "../src/agentReport.ts";
 import { useFold } from "./useFold.ts";
 import { newestReportAt, shortDuration, type AgentLive } from "./agentLive.ts";
-import { agentName } from "./agentActions.ts";
+import { agentName, dropWakeNote, setAsideForNextWake } from "./agentActions.ts";
 import { useNow } from "./agentClock.ts";
 import { optimistic } from "./agentsStore.ts";
 import AgentComposer, { type AgentMessage, type DroppedFiles } from "./AgentComposer.tsx";
@@ -292,7 +292,9 @@ function Needs({ needs }: { needs: NonNullable<ScheduleRunDto["needs"]> }) {
                 </span>
                 {need.done && (
                   <span className="agent-need-state">
-                    {need.done.by === "agent" ? tr("agents.need.closedByAgent") : tr("agents.need.done")}
+                    {need.done.by === "agent"
+                      ? tr("agents.need.closedByAgent")
+                      : tr(need.done.answer === "yes" ? "agents.need.approve" : need.done.answer === "no" ? "agents.need.decline" : "agents.need.done")}
                   </span>
                 )}
               </span>
@@ -454,8 +456,15 @@ function Report({ task, run, compact, latest, dated, onFeedback, onOpenSession }
   const events = session ? [] : run.events ?? [];
   const details = (
     <>
-      {run.note || events.length ? (
+      {run.note || events.length || run.carried?.length || run.setAside?.length ? (
         <ul className="agent-report-events">
+          {/* What this wake was asked for, and what a conversation kept for the next one. */}
+          {run.carried?.map((note) => (
+            <li key={note.id} className="agent-report-wake-note" title={note.text}>{tr("agents.carriedValue", { text: note.text })}</li>
+          ))}
+          {run.setAside?.map((text) => (
+            <li key={text} className="agent-report-wake-note" title={text}>{tr("agents.setAsideValue", { text })}</li>
+          ))}
           {/* The wake script's words, which may quote event data: what woke
               the agent, never the person speaking. */}
           {run.note && <li className="agent-report-wake-note" title={run.note}>{tr("agents.wakeNoteValue", { note: run.note })}</li>}
@@ -612,12 +621,15 @@ function QuietFold({ runs, dated }: { runs: ScheduleRunDto[]; dated?: boolean })
   const last = runs.at(-1)!;
   const skipped = runs.filter((run) => run.status === "skipped").length;
   const checks = runs.length - skipped;
+  // Reports that only asked again for what already waits are filed here too.
+  const repeated = runs.filter((run) => run.repeat).length;
   const lone = runs.length === 1;
   const words = (run: ScheduleRunDto) => run.status === "skipped"
     ? (run.error ? budgetWords(run.error) : tr("agents.runSkipped"))
     : run.headline || run.summary?.split("\n").find((line) => line.trim())?.replace(/^#+\s*/, "").trim() || tr("agents.signalQuiet");
   const label = lone ? words(first) : [
     checks ? tr("agents.quietChecksValue", { count: checks }) : "",
+    repeated ? tr("agents.repeatedCountValue", { count: repeated }) : "",
     skipped ? tr("agents.skippedCountValue", { count: skipped }) : "",
   ].filter(Boolean).join(" · ");
   const end = !lone ? `${timeOf(first.startedAt)}–${timeOf(last.startedAt)}`
@@ -844,6 +856,44 @@ function waitLine(task: ScheduleTaskDto, request: WaitingRequest, now: number): 
 }
 
 /** A question the run waits on; it is answered in its session. */
+/** What waits for the agent's next wake: the person's requests and those the
+ *  agent set aside from a conversation, each one the person may take back. */
+function WakeNotes({ task }: { task: ScheduleTaskDto }) {
+  const notes = task.nextWake ?? [];
+  if (!notes.length) return null;
+  const scheduled = task.enabled && !task.manualOnly && typeof task.nextRunAt === "number";
+  return (
+    <GlassDock className="agent-request agent-next-wake" role="group" aria-label={tr("agents.nextWakeTitle")}>
+      <div className="agent-request-head">
+        <span className="agent-request-icon" aria-hidden="true"><Icon icon={ClockIcon} size="sm" /></span>
+        <span className="agent-request-heading">
+          <span className="agent-request-title">{tr("agents.nextWakeTitle")}</span>
+          <span className="agent-request-when">
+            {scheduled ? formatWake(task.nextRunAt!) : tr("agents.nextWakeUnscheduled")}
+          </span>
+        </span>
+      </div>
+      <ul className="agent-next-wake-list">
+        {notes.map((note) => (
+          <li key={note.id} className="agent-next-wake-item">
+            <span className="agent-next-wake-text">
+              {note.text}
+              {note.by === "agent" && <span className="agent-next-wake-by">{tr("agents.nextWakeByAgent")}</span>}
+            </span>
+            <IconButton
+              icon={CloseIcon}
+              size="sm"
+              className="agent-next-wake-drop"
+              label={tr("agents.nextWakeDrop")}
+              onClick={() => void dropWakeNote(task, note.id)}
+            />
+          </li>
+        ))}
+      </ul>
+    </GlassDock>
+  );
+}
+
 function QuestionCard({ task, run, request, onOpenSession }: {
   task: ScheduleTaskDto;
   run: ScheduleRunDto;
@@ -1077,6 +1127,8 @@ export default function AgentConversation({ host, agent, live, onReview, onRun, 
     await optimistic(agent.id, { history }, () => api.scheduleFeedback(agent.id, runId, verdict, note)).catch(() => {});
   };
   const send = async (message: AgentMessage): Promise<boolean> => {
+    // Kept for the next wake: it shows in that list, not as a message now.
+    if (message.later) return setAsideForNextWake(agent, message.text);
     const at = Date.now();
     const files: AgentRunAttachmentDto[] = message.attachments.map((file) => ({
       name: file.name, mime: file.mime, size: file.size,
@@ -1231,6 +1283,7 @@ export default function AgentConversation({ host, agent, live, onReview, onRun, 
               {...(openSession ? { onOpenSession: openSession } : {})}
             />
           ))}
+          <WakeNotes task={agent} />
           <AgentComposer
             key={agent.id}
             agent={agent}

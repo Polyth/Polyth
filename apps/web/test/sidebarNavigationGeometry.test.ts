@@ -18,7 +18,8 @@ test("session rows reserve one status zone and expose an aligned action menu", a
   // identity icons share one trailing edge).
   const body = row.indexOf('<span className="session-row-body">');
   const lead = row.indexOf('<span className="session-lead"', body);
-  const leadStatus = row.indexOf("<LeadMark mark={leadMark} />", lead);
+  // The Pinned group above the projects passes its project's mark into the same slot.
+  const leadStatus = row.indexOf("<LeadMark mark={leadMark} projectMark={projectMark} />", lead);
   const title = row.indexOf('<span className="session-title">', lead);
   const titleText = row.indexOf('className="session-title-text"', title);
   const disclosure = row.indexOf('className="session-subagent-toggle"', titleText);
@@ -121,8 +122,18 @@ test("sidebar geometry links worktree and session type while density controls ro
   // The row's highlight belongs to the shell, which spans the whole row; the
   // card is only the leading track, so a card-scoped surface stopped at the
   // title and left the new-chat and ⋮ controls beside it unlit.
-  assert.match(css, /\.project-card-shell::before,\s*\n\.session-worktree-toggle::before,/,
-    "the project row's highlight is the shell's, not the card's");
+  assert.match(css, /\.project-card-shell::before,\s*\n\.session-worktree-head::before,/,
+    "the project row's highlight is the shell's, not the card's; a worktree heading's is its head's");
+  assert.doesNotMatch(css, /\.session-worktree-toggle[^{,]*::before/,
+    "the worktree toggle never paints a highlight that stops short of its actions");
+  assert.match(css, /\.session-worktree-head:hover:where\(:not\(\[data-session-drop-over="true"\]\)\)::before\s*\{[\s\S]*?background:\s*var\(--elevated\);/,
+    "hovering anywhere on a worktree heading paints its full-width highlight");
+  // Project and worktree highlights take the chat pills' extents, so every
+  // navigator row is equally wide and ends the same distance from the edge.
+  assert.match(css, /\.project-card-shell::before\s*\{\s*inset-inline:\s*calc\(var\(--nav-indent-project\) - var\(--nav-pill-air\)\) calc\(var\(--nav-trailing-inset\) - var\(--nav-pill-air\)\);/,
+    "the project highlight keeps --nav-pill-air on both sides, like the chat pills");
+  assert.match(css, /\.session-worktree-head::before\s*\{\s*inset-inline:\s*calc\(var\(--nav-worktree-row-indent, var\(--nav-indent-worktree\)\) - var\(--nav-pill-air\)\)\s*calc\(var\(--nav-trailing-inset\) - var\(--nav-pill-air\)\);/,
+    "the worktree highlight keeps --nav-pill-air on both sides, like the chat pills");
   assert.match(css, /\.project-card-shell:hover:where\(:not\(\[data-session-drop-over="true"\]\)\)::before\s*\{[\s\S]*?background:\s*var\(--elevated\);/,
     "hovering anywhere on the project row paints that full-width highlight");
   assert.doesNotMatch(css, /\.project-card:hover[^{]*::before/,
@@ -220,6 +231,6 @@ test("the highlight pill hugs the title when the state column is empty, and a re
   assert.doesNotMatch(sessions, /session-pin-icon/, "the trailing pin is gone");
   // data-lead comes from the same decision that renders the mark.
   assert.match(sessions, /data-lead=\{sessionLeadState\(leadMark, selectMode\)\}/);
-  assert.match(sessions, /<LeadMark mark=\{leadMark\} \/>/);
+  assert.match(sessions, /<LeadMark mark=\{leadMark\} projectMark=\{projectMark\} \/>/);
   assert.match(lead, /default:\s*return pinned \? "pin" : null;/, "a pin only shows when no live state does");
 });

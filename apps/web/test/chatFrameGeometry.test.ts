@@ -276,15 +276,15 @@ for (const viewport of VIEWPORTS) {
           return { right: box.right, clipped: el.scrollWidth > el.clientWidth + 1 };
         };
         const block = document.querySelector(".long-title")!.getBoundingClientRect();
-        const title = primary(document.querySelector<HTMLHTMLElement>(".long-title .ui-run-summary-copy strong"));
+        const title = primary(document.querySelector<HTMLElement>(".long-title .ui-run-summary-copy strong"));
         const chevron = document.querySelector(".long-title .ui-run-summary-chevron")!.getBoundingClientRect().left;
         const card = document.querySelector(".detail-rows")!.getBoundingClientRect();
-        const path = primary(document.querySelector<HTMLHTMLElement>(".detail-rows .execution-file-path"));
+        const path = primary(document.querySelector<HTMLElement>(".detail-rows .execution-file-path"));
         const diffStat = document.querySelector(".detail-rows .execution-diff-stat")!.getBoundingClientRect().left;
-        const mcpTitle = primary(document.querySelector<HTMLHTMLElement>(".detail-rows .execution-mcp-list-title > span"));
-        const mcpMeta = document.querySelector<HTMLHTMLElement>(".detail-rows .execution-mcp-list-title small")!.getBoundingClientRect().left;
-        const name = primary(document.querySelector<HTMLHTMLElement>(".detail-rows .execution-subagent-detail strong"));
-        const state = document.querySelector<HTMLHTMLElement>(".detail-rows .execution-subagent-state")!.getBoundingClientRect().left;
+        const mcpTitle = primary(document.querySelector<HTMLElement>(".detail-rows .execution-mcp-list-title > span"));
+        const mcpMeta = document.querySelector<HTMLElement>(".detail-rows .execution-mcp-list-title small")!.getBoundingClientRect().left;
+        const name = primary(document.querySelector<HTMLElement>(".detail-rows .execution-subagent-detail strong"));
+        const state = document.querySelector<HTMLElement>(".detail-rows .execution-subagent-state")!.getBoundingClientRect().left;
         return {
           block: { left: block.left, right: block.right },
           title, chevron,

@@ -3,6 +3,12 @@
 // queue speaks them in order, prefetches server clips one chunk ahead, reports
 // output loudness for visuals and falls back from a failing server voice to
 // the browser voice instead of going silent.
+//
+// A server voice that streams (`audio/pcm`, see `ttsProviders.ts`) is played
+// while it arrives: the first sound comes after a fraction of a second of
+// audio instead of after the whole clip. Short remarks that repeat (voice
+// mode's "Got it", "Running the tests") are kept decoded, so they are instant
+// the second time.
 import { pickVoice } from "../src/speech.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 
@@ -116,12 +122,58 @@ function loadVoices(synth: SpeechSynthesis): Promise<SpeechSynthesisVoice[]> {
 const asError = (error: unknown, fallback: string): Error =>
   error instanceof Error ? error : new Error(typeof error === "string" && error ? error : fallback);
 
+/** PCM samples arriving from the server while (or before) they are played. */
+interface PcmFeed {
+  sampleRate: number;
+  /** Received and not yet handed to the audio graph. */
+  pending: Float32Array[];
+  done: boolean;
+  error: Error | null;
+  /** Called when samples arrive or the stream ends. */
+  onData: (() => void) | null;
+  /** Every sample of a short remark, kept for the cache. */
+  keep: Float32Array[] | null;
+}
+
+type Clip = { kind: "buffer"; buffer: AudioBuffer } | { kind: "pcm"; feed: PcmFeed };
+
 interface QueueItem {
   text: string;
   kind: SpeechChunkKind;
   expiresAt?: number;
-  clip?: Promise<AudioBuffer>;
+  clip?: Promise<Clip>;
   abort?: AbortController;
+}
+
+/** Audio buffered before a stream's first sound, so the start does not stutter. */
+const STREAM_LEAD_S = 0.12;
+/** Later pieces are joined up to this length: fewer seams between buffers. */
+const STREAM_PIECE_S = 0.25;
+/** Remarks up to this length are worth keeping decoded. */
+const CACHE_TEXT_CHARS = 60;
+const CACHE_ENTRIES = 16;
+
+/** Signed 16-bit little-endian PCM → float samples. `carry` is an odd byte
+ *  left over from the previous network chunk. */
+export function pcm16ToFloat(bytes: Uint8Array, carry: number | null): { samples: Float32Array; carry: number | null } {
+  let data = bytes;
+  if (carry !== null) {
+    data = new Uint8Array(bytes.byteLength + 1);
+    data[0] = carry;
+    data.set(bytes, 1);
+  }
+  const count = data.byteLength >> 1;
+  const samples = new Float32Array(count);
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  for (let index = 0; index < count; index++) samples[index] = view.getInt16(index * 2, true) / 32768;
+  return { samples, carry: data.byteLength % 2 ? data[data.byteLength - 1]! : null };
+}
+
+/** `audio/pcm;rate=24000` → 24000; null for anything else. */
+export function pcmStreamRate(contentType: string | null): number | null {
+  if (!contentType || !/^audio\/pcm\b/i.test(contentType.trim())) return null;
+  const rate = Number(/;\s*rate=(\d+)/i.exec(contentType)?.[1]);
+  return Number.isFinite(rate) && rate >= 8_000 && rate <= 96_000 ? rate : null;
 }
 
 let outputs = 0;
@@ -138,6 +190,10 @@ export function createSpeechOutput(
   let generation = 0;
   let serverFailed = false;
   let source: AudioBufferSourceNode | null = null;
+  /** Stops the stream being played (its scheduled pieces). */
+  let stopStream: (() => void) | null = null;
+  /** Decoded short remarks by voice + text, most recently used last. */
+  const cache = new Map<string, { sampleRate: number; samples: Float32Array } | { buffer: AudioBuffer }>();
   let utterance: SpeechSynthesisUtterance | null = null;
   let watchdog: ReturnType<typeof setTimeout> | null = null;
   let frame: number | null = null;
@@ -189,11 +245,73 @@ export function createSpeechOutput(
     watchdog = null;
   };
 
-  const fetchClip = (item: QueueItem): Promise<AudioBuffer> => {
+  /** Short remarks repeat ("Got it", "Running the tests"); the voice they
+   *  were made with is part of the key. */
+  const cacheKey = (item: QueueItem): string | null => {
+    if (item.kind !== "aside" || item.text.length > CACHE_TEXT_CHARS) return null;
+    const prefs = settings();
+    return [prefs.engine, prefs.localVoice ?? "", prefs.localSpeaker ?? "", prefs.lang, prefs.engine === "local" ? prefs.rate : "", item.text].join("\n");
+  };
+
+  const remember = (key: string | null, value: { sampleRate: number; samples: Float32Array } | { buffer: AudioBuffer }) => {
+    if (!key) return;
+    cache.delete(key);
+    cache.set(key, value);
+    while (cache.size > CACHE_ENTRIES) cache.delete(cache.keys().next().value!);
+  };
+
+  /** Read a PCM response into `feed` as it arrives. */
+  const pump = async (response: Response, feed: PcmFeed, key: string | null): Promise<void> => {
+    let carry: number | null = null;
+    try {
+      const reader = response.body!.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value?.byteLength) continue;
+        const converted = pcm16ToFloat(value, carry);
+        carry = converted.carry;
+        if (!converted.samples.length) continue;
+        feed.pending.push(converted.samples);
+        feed.keep?.push(converted.samples);
+        feed.onData?.();
+      }
+      if (feed.keep) {
+        const samples = new Float32Array(feed.keep.reduce((sum, part) => sum + part.length, 0));
+        let offset = 0;
+        for (const part of feed.keep) {
+          samples.set(part, offset);
+          offset += part.length;
+        }
+        if (samples.length) remember(key, { sampleRate: feed.sampleRate, samples });
+      }
+    } catch (error) {
+      // What arrived is still played; a stream cut before any audio falls
+      // back like any other server failure.
+      feed.error = asError(error, tr("dictation.error.speechFailed"));
+    } finally {
+      feed.keep = null;
+      feed.done = true;
+      feed.onData?.();
+    }
+  };
+
+  const fetchClip = (item: QueueItem): Promise<Clip> => {
     if (item.clip) return item.clip;
+    const key = cacheKey(item);
+    const cached = key ? cache.get(key) : undefined;
+    if (key && cached) {
+      // Touch: most recently used last.
+      cache.delete(key);
+      cache.set(key, cached);
+      item.clip = Promise.resolve("buffer" in cached
+        ? { kind: "buffer", buffer: cached.buffer }
+        : { kind: "pcm", feed: { sampleRate: cached.sampleRate, pending: [cached.samples], done: true, error: null, onData: null, keep: null } });
+      return item.clip;
+    }
     const abort = new AbortController();
     item.abort = abort;
-    item.clip = (async () => {
+    item.clip = (async (): Promise<Clip> => {
       const prefs = settings();
       // Built-in voices take the pace server-side, so it never shifts pitch.
       const response = prefs.engine === "local"
@@ -215,6 +333,8 @@ export function createSpeechOutput(
           body: JSON.stringify({
             text: item.text,
             lang: prefs.lang === "auto" && typeof navigator !== "undefined" ? navigator.language : prefs.lang,
+            // Audio as it is generated, where the service and server can.
+            stream: true,
           }),
           signal: abort.signal,
         });
@@ -224,7 +344,15 @@ export function createSpeechOutput(
       }
       const context = speechAudioContext();
       if (!context) throw new Error(tr("dictation.error.webAudioUnavailable"));
-      return context.decodeAudioData(await response.arrayBuffer());
+      const sampleRate = pcmStreamRate(response.headers.get("content-type"));
+      if (sampleRate && response.body) {
+        const feed: PcmFeed = { sampleRate, pending: [], done: false, error: null, onData: null, keep: key ? [] : null };
+        void pump(response, feed, key);
+        return { kind: "pcm", feed };
+      }
+      const buffer = await context.decodeAudioData(await response.arrayBuffer());
+      remember(key, { buffer });
+      return { kind: "buffer", buffer };
     })();
     // A prefetch that fails before it is played must not surface as an
     // unhandled rejection; playback awaits and handles it.
@@ -246,10 +374,107 @@ export function createSpeechOutput(
     void next();
   };
 
+  /** Play a stream while it arrives. Resolves true once it is audible, false
+   *  when it ended without any audio (the caller falls back). Pieces are
+   *  scheduled back to back on the audio clock; a network stall is a gap, not
+   *  a stop. */
+  const playStream = (item: QueueItem, feed: PcmFeed, expected: number, context: AudioContext): Promise<boolean> =>
+    new Promise<boolean>((resolve) => {
+      const prefs = settings();
+      const rate = prefs.engine === "local" ? 1 : Math.max(0.5, Math.min(2, prefs.rate * prefs.pitch));
+      const gain = context.createGain();
+      gain.gain.value = prefs.volume;
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 512;
+      const samples = new Float32Array(analyser.fftSize);
+      gain.connect(analyser);
+      analyser.connect(context.destination);
+      const nodes = new Set<AudioBufferSourceNode>();
+      let nextTime = 0;
+      let started = false;
+      let closed = false;
+
+      const close = () => {
+        if (closed) return false;
+        closed = true;
+        feed.onData = null;
+        if (stopStream === stop) stopStream = null;
+        try { analyser.disconnect(); gain.disconnect(); } catch { /* already detached */ }
+        return true;
+      };
+      function stop(): void {
+        if (!close()) return;
+        for (const node of nodes) {
+          node.onended = null;
+          try { node.stop(); } catch { /* already stopped */ }
+        }
+        nodes.clear();
+        resolve(true);
+      }
+      const settle = () => {
+        if (closed || !feed.done || feed.pending.length || nodes.size) return;
+        close();
+        if (started) finishChunk(expected);
+        else resolve(false);
+      };
+      const schedule = () => {
+        if (closed) return;
+        if (expected !== generation) {
+          stop();
+          return;
+        }
+        const waiting = feed.pending.reduce((sum, part) => sum + part.length, 0);
+        const lead = nextTime - context.currentTime;
+        // The first sound waits for a little audio; later pieces are joined
+        // unless the scheduled audio is about to run out.
+        const enough = feed.done || waiting >= feed.sampleRate * (started ? STREAM_PIECE_S : STREAM_LEAD_S) || (started && lead < 0.1);
+        if (waiting && enough) {
+          const buffer = context.createBuffer(1, waiting, feed.sampleRate);
+          const channel = buffer.getChannelData(0);
+          let offset = 0;
+          for (const part of feed.pending) {
+            channel.set(part, offset);
+            offset += part.length;
+          }
+          feed.pending = [];
+          const node = context.createBufferSource();
+          node.buffer = buffer;
+          node.playbackRate.value = rate;
+          node.connect(gain);
+          const at = Math.max(context.currentTime + 0.02, nextTime);
+          nextTime = at + buffer.duration / rate;
+          nodes.add(node);
+          node.onended = () => {
+            nodes.delete(node);
+            try { node.disconnect(); } catch { /* already detached */ }
+            settle();
+          };
+          node.start(at);
+          if (!started) {
+            started = true;
+            setAudible(true);
+            events.onChunk?.(item.text, item.kind);
+            runLevels(() => {
+              analyser.getFloatTimeDomainData(samples);
+              let sum = 0;
+              for (const sample of samples) sum += sample * sample;
+              return Math.sqrt(sum / samples.length) * 4.5;
+            });
+            prefetch();
+            resolve(true);
+          }
+        }
+        settle();
+      };
+      stopStream = stop;
+      feed.onData = schedule;
+      schedule();
+    });
+
   const playServer = async (item: QueueItem, expected: number): Promise<boolean> => {
-    let buffer: AudioBuffer;
+    let clip: Clip;
     try {
-      buffer = await fetchClip(item);
+      clip = await fetchClip(item);
     } catch (error) {
       if (expected !== generation) return true;
       serverFailed = true;
@@ -260,6 +485,14 @@ export function createSpeechOutput(
     const context = speechAudioContext();
     if (!context) return false;
     if (context.state === "suspended") await context.resume().catch(() => {});
+    if (clip.kind === "pcm") {
+      if (await playStream(item, clip.feed, expected, context)) return true;
+      if (expected !== generation) return true;
+      serverFailed = true;
+      events.onError?.(clip.feed.error ?? new Error(tr("dictation.error.speechFailed")));
+      return false;
+    }
+    const buffer = clip.buffer;
     const prefs = settings();
     const node = context.createBufferSource();
     node.buffer = buffer;
@@ -396,6 +629,7 @@ export function createSpeechOutput(
       try { source.stop(); } catch { /* already stopped */ }
       source = null;
     }
+    stopStream?.();
     if (utterance) {
       utterance.onend = null;
       utterance.onerror = null;
@@ -431,6 +665,7 @@ export function createSpeechOutput(
     cancel,
     dispose() {
       cancel();
+      cache.clear();
       if (typeof window !== "undefined") window.removeEventListener(SPEECH_CLAIM_EVENT, claim);
     },
     get active() { return audible || Boolean(current) || queue.length > 0; },

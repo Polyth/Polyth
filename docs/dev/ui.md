@@ -266,9 +266,12 @@ outcome appears exactly once. Attach sources are one row of equal tiles —
 **Camera** (touch devices only: `capture="environment"`, the platform capture
 sheet in browsers and the native shell), **Photos** (`accept="image/*"`; native
 `FilePicker.pickImages`, transcoded so iOS HEIC arrives as JPEG) and **Files** —
-with one quiet note under them: the `_inbox` destination, or the shared reason
-all three are unavailable (only on a remote project Polyth cannot reach: any
-other format is delivered, by path when the engine cannot take its content).
+with one quiet note under them: the `_inbox` destination (or "open a project
+first" when there is none). The tiles are never disabled by what the agent can
+read or reach: an upload always lands in `_inbox`, and any other format is
+delivered, by path when the engine cannot take its content (named as kept in
+the Polyth workspace when the agent's host cannot reach it). A pending link is
+plain text and never shows an incompatibility note.
 Dragging files: while they are anywhere over the window the composer card
 firms its contour (`is-drop-ready`, an accent border and `--focus-wash`
 outline, so each style recipe keeps its own rim); over the card an opaque
@@ -290,7 +293,7 @@ it off makes every press send at once and removes the "hold to save" hint from
 Send's tooltip, while the chosen length is kept for when it is turned back on.
 The row's summary names the current state ("hold 500 ms" / "no hold") for the
 device the row is read on, and its length row carries a specimen Send that runs
-the composer's own press and ring (`composer/sendHoldPress.ts`), so the
+the composer's own press and ring (`composer/sendPress.ts`), so the
 duration can be felt before leaving Settings.
 The ring around Send winds from the top over the chosen length
 (`--send-hold-ms`), on both Send variants. It is a bordered box in Send's own
@@ -299,9 +302,10 @@ across the corners of a rounded-square Send, and the phone's 18px glyph rule
 once shrank it into Send's corner. The press sets `data-send-hold` on the
 control (`arming` → `full` → `release`) without a React render, and starts the
 ring at the press's real age, so it closes exactly when the hold is reached.
-A quick tap ends before the ring fades in. When the hold is reached with the
-finger still down, the ring stands whole, Send springs back and turns to a
-check; letting go keeps the draft. A release fades the ring where it stood. The
+A quick tap ends before the ring fades in. When the hold is reached, the ring
+stands whole, Send springs back and turns to a check; the draft is kept at the
+release, or a moment later if no release is heard. A release fades the ring
+where it stood. The
 gesture is pointer-only: there is no keyboard
 equivalent for "keep as a draft" yet, and the trial Send is decorative for
 assistive tech because the track announces its value. A draft is an ordinary
@@ -313,27 +317,76 @@ chat's scoped draft record, saves the draft to the server at once
 spawn surface starts. In an open chat the text stays in the composer and is
 saved at once. Once kept, Send keeps its check for a beat; there is no
 notification, because the result is visible in place.
-Every press ends as exactly one of the two, split at the hold length with no
-gap (`sendPressOutcome`): a release before it sends, a release at or after it
-keeps the draft. The release alone decides, measured between the input's own
-time stamps (`inputTime`), never by when a handler ran and never by the timer,
-which only cues. On a page busy after the press (a streaming turn, a long
-render) a quick tap's lift waits in the queue; timed by the handler, or kept
-by a timer that won the race, that tap became a draft instead of a send or a
-new chat. A press that leaves Send or is cancelled keeps a draft only if it had
-already lasted the hold. Touch/pen Send is admitted on
-`pointerup` (pointerdown is cancelled so the editor keeps focus; a finger slid
-off Send does not send), and the click that ends a hold is swallowed. Send has
-`touch-action: none`: with panning allowed, a finger that rolled a few pixels
-while holding was taken for a scroll, the browser cancelled the press, and the
-message was neither sent nor kept. An empty composer or a queued-message edit
-never starts a hold.
+An empty composer or a queued-message edit never starts a hold.
+
+**The Send press.** One controller owns a press on Send from the moment it
+lands to the one thing it does (`attachSendPress`,
+`apps/web/src/composer/sendPress.ts`; both Send variants and the Settings
+specimen attach it through a `ref` and have no pointer, touch or click handler
+of their own). Send is an ordinary button to the platform: nothing cancels
+`pointerdown`, `touchstart` or `touchend`, the tap's click is synthesised as
+for any button, and the editor keeps its focus through the composer's
+`data-keep-keyboard`. The controller listens on `window` in the capture phase,
+where no other listener can hide an event from it, and every press ends in
+exactly one outcome: **send** (released before the hold length, still on
+Send), **draft** (held for the hold length, `sendPressOutcome`) or **none**
+(the finger slid off Send, another press began, or the page went to the
+background). These rules make a lost event harmless, and a change to the press
+must keep all of them:
+
+- Any end is an end. `pointerup`, `touchend` and the tap's `click` each settle
+  an open press; whichever arrive afterwards belong to a spent press. The click
+  of a press that took effect is cancelled at the window
+  (`SEND_TRAILING_CLICK_MS`), also after Send was replaced under it, so it
+  cannot act on what stands there now (Stop).
+- A click with no press behind it sends: the keyboard and assistive path, and
+  the whole of a tap whose other events never came.
+- A hold does not wait for the finger. The cue comes when the hold length has
+  passed, and the draft is kept at the release or `SEND_HOLD_GRACE_MS` after
+  the cue, whichever is first. A release stamped before the hold length still
+  sends and takes the cue back, however late a busy page delivered it: presses
+  are timed between the input's own stamps (`inputTime`), never by when a
+  handler ran.
+- A touch the system takes away (`pointercancel`, `touchcancel`) is a press
+  whose lift will not be heard, not an outcome: its click still sends and its
+  hold is still kept.
+- A new press anywhere ends the one before it.
+
+Send keeps `touch-action: none`: with panning allowed, a finger that rolled a
+few pixels while holding was taken for a scroll and the browser cancelled the
+press. `sendPress.test.ts` states each rule as the exact event sequence a
+device produced; `composerSendTouchTarget.test.ts` runs them with real touches
+in Chromium, with lifts withheld from the page.
+
+History, so the same repairs are not made again. From 2026-09 touch Send acted
+on its own `pointerup` alone, the click was swallowed (later cancelled outright
+with `touchstart`), and from 2026-11-14 a hold was judged only when that
+release arrived. On iPhones the release of a press beside the end of the draft
+did not always reach the page (2026-11-22: Send left on its check with the
+message unsent), so the press did nothing at all, neither a send nor a kept
+draft. Six repairs each fixed a defect reproduced in headless Chromium or read
+from WebKit source (IME gate, dead ring of the touch box, pan cancel, marked
+text beside Send, a window-level end watch) and none was verified on the
+device. Why the iPhone drops that release is still **not device-verified**.
+The controller therefore keeps a trace of the last presses (`sendPressTrace`,
+also in `localStorage["polyth.sendPress.trace"]`): event names, millisecond
+offsets, the outcome, and presses that landed beside Send on something else;
+never the message. If Send fails on a device again, read that trace from the
+device before changing the press. The person copies it from **Settings > Chat >
+Send with > Send diagnostics** (`SendDiagnosticsButton`, `sendPressReport`): the
+trace with the web build id, the browser's user agent and the viewport, on the
+clipboard, to paste to the agent or into a bug report. The trace is carried
+across a reload (`localStorage`), so it can be copied after the app was
+reopened. That row is **temporary**: remove it (with `chat.sendDiagnostics` in
+the settings registry and `CHAT_ROW_ITEMS`, and its four
+`settings.chatPage.sendDiagnostics*` strings) once the phone report is closed,
+or move it to a debug menu when the app has one.
 
 **What counts as on Send.** The disc is 36px; its touch box is larger (the
 `::after` grown to `--hit-min`), and the browser also gives Send a press that
 lands a few pixels outside that box. Since touch Send does not wait for the
 click, `releaseSends` (`apps/web/src/composer/sendRelease.ts`) decides what the
-click would have: a finger that did not travel (`SEND_TAP_SLOP_PX`) sends
+click would have, for every kind of pointer: a finger that did not travel (`SEND_TAP_SLOP_PX`) sends
 wherever the browser let it land, and one that travelled sends if it lifted over
 Send's hit-tested box. Never judge the release against the drawn disc alone:
 that left the ring between the disc and the touch box dead, about 40% of the
@@ -362,24 +415,13 @@ the word and moved it away. Two rules close that. A touch or pen that lands on
 any composer control outside a text field first calls `finishComposition()`
 (`commitComposingWordOnPress`, a capture handler on the composer root), so the
 word is ordinary text before the platform decides what the tap was. Send is
-the exception to that rule: it cancels `touchstart` and `touchend` through a
-listener that is not passive (`ownPrimaryTouch`; React's touch listeners are
-passive, and cancelling `pointerdown` does not withhold a touch from native
-gestures), so the press is the page's, the release sends, no click follows,
-and `send()` commits the word itself. Send does not refocus the field
-mid-touch, because `finishComposition()` blurs and refocuses it, which
-restarts the iOS input session under a finger that is still down. A Send touch
-also never waits on Send's own `pointerup` alone (`watchTouchEnd`): the end of
-the same touch anywhere on the page (`pointerup`/`pointercancel` for its
-pointer, `touchend`/`touchcancel` for its touch) settles the press a task
-later if Send's handler has not. On the iPhone app (2026-11-22) Send was seen left on its hold check with the message unsent, which only an armed
-press whose end never reached Send can produce. A new control that must work
-beside the end of a draft acts on `click` and relies on the first rule; only a
-control that already acts on `pointerup` may cancel the touch.
-`composerSendTouchTarget.test.ts` covers these with real touches, a lift
-withheld from Send or from the page, and a CDP IME composition. The iOS
-classification is read from WebKit source, and which of these causes the
-lost lift on the device is not device-verified. Text the platform writes without
+the exception to that rule: `send()` commits the word itself, and Send does not
+refocus the field mid-touch, because `finishComposition()` blurs and refocuses
+it, which restarts the iOS input session under a finger that is still down.
+Whatever the platform makes of a tap beside marked text, the Send press takes
+any end it reports (above). `composerSendTouchTarget.test.ts` covers this with
+a CDP IME composition; the iOS classification is read from WebKit source and
+is not device-verified. Text the platform writes without
 any `input` event (dictation and some phone keyboards have) is committed at the
 field's next caret move, key release or focus, so Send's enabled state cannot
 stay behind a draft the field visibly holds.
@@ -633,19 +675,51 @@ Both ways end at the same `requestSessionMove`: it asks for the server's preview
 first, words a refusal from its stable reason, and otherwise confirms with
 `confirmAlert`, which says what can't be seen from the navigator: subagents coming
 along, files staying behind, the agent carrying on in the other folder, and who gains
-or loses the chat. The offer (`canMoveSession`) hides what the server would refuse
-anyway; the server still decides.
+or loses the chat. A chat whose agent read the person's personal notes is not refused
+when the move would add readers: `blocked.reason === "personal-context"` turns the
+same confirmation into the person's choice — the reason and the warning in the
+message, plus a checkbox (`confirmAlert`'s `acknowledge`, a `role="checkbox"` button
+because a dialog can swallow a native label's activation) that the confirm button
+waits for. Only a confirmed move sends `acknowledgePersonalContext: true`. A move that
+adds nobody asks nothing. The offer (`canMoveSession`) hides what the server would
+refuse anyway; the server still decides.
 
 The moved chat stays open if it was open, and the workspace follows it
 (`followActiveSessionTo`, on this device and any other), unless the person has already
 gone to another project. The transcript gets a seal, *Moved from A to B*, from the
 names recorded in the event. Mechanics: [architecture](architecture.md#moving-a-chat-to-another-project).
 
+### Moving a chat to another checkout of its project
+
+The same drag onto a worktree's heading in the chat's own project, or onto the
+*Move to the main checkout* strip that appears above the main chats while a chat
+from a worktree is dragged, moves it between checkouts. Those zones carry
+`data-session-drop-checkout` (the worktree path or `main`) and
+`data-session-drop-checkout-project`, are asked before the project row around
+them, and never accept the checkout the chat already works in; another project's
+checkout is that project, a project move as above. A row is draggable for this
+when the project has a linked worktree (`canMoveSessionAnywhere`). The host only
+records the drop (`usePendingCheckoutMove`) and mounts the
+`session.checkout.move` slot; the Git package's contribution renders the
+confirmation (target branch: keep, the chat's own, another, or a new one; and,
+when the chat was the worktree's last, an unchecked *Remove this worktree*), asks
+the server and words its answer. The package's ⋯ item *Move to checkout…* is the
+keyboard and touch way. Server mechanics: [workspace](workspace.md#branch-changes-and-checkout-moves).
+
 The project row's highlight is the whole row — its glyph and title together
 with the new-chat and ⋮ controls beside them — painted by
 `.project-card-shell::before`, not by the card button: the card occupies only
 the leading grid track, so a highlight scoped to it stops at the title and
-leaves those controls on the bare list.
+leaves those controls on the bare list. It takes the chat pills' extents
+(`--nav-pill-air` before the glyph, `--nav-trailing-inset - --nav-pill-air`
+past the row's end), so a project row is exactly as wide as the chat rows under
+it, and its actions end where the ⋮ glyph centres on the chats' trailing column
+(`--session-trailing-axis`). The rail header row (`[data-tools]`) adds its own
+`--nav-gutter` padding to both extents. A worktree heading follows the same
+rule: its highlight is `.session-worktree-head::before` (the whole heading,
++/− sign through its new-chat and delete actions), not the toggle button's,
+with `--nav-pill-air` before the sign and the same trailing extent, and its
+last action glyph centres on `--session-trailing-axis`.
 
 On touch-capable screens (`any-pointer: coarse`) project row actions stay
 hidden at rest, except on the focused project: its new-chat and ⋮ actions stay
@@ -654,6 +728,40 @@ on long-press, so it is their only route to the project menu (New
 conversation, Project settings…, Repositories…, Memory). New chat is a row
 action (and a toolbar or rail-header control); New conversation lives only in
 the menu.
+
+#### Finding chats
+
+There is one chat search, and every place that finds chats uses it with the
+same text rule (`@polyth/session/search-text`): Unicode case, diacritic and
+apostrophe folding; every typed word must occur somewhere among the fields, in
+any order; a word also matches by a conservative stem («пошуків» → «пошук»,
+at least four letters kept); a `"quoted phrase"` stays one exact term. The
+entry points differ only in what they open with:
+
+- **Mod+Shift+O** (`SessionSearch`, overlay `search`) is the full search:
+  titles, branches, labels and message text across projects, archived chats
+  included, facets `is:` / `from:`. `openSessionSearch({ query, projectId })`
+  opens it with a query already typed; server hits on chats the client has not
+  paged in still show.
+- **Mod+K** lists up to six chats from that search (message-only hits show
+  their excerpt) and ends with *All chats and messages for “…”*, which opens
+  the full search with the same query. A chat row shows its title and either
+  project · branch or the matching excerpt; pin, rename and archive live in
+  the row's ⋯ menu (Tab, or the inward arrow at the end of the query, opens it
+  for the active row; Escape returns to the field). Projects, commands and
+  files keep their own palette sources.
+- **The sidebar and phone navigator field** stays a filter of the list it
+  shows (title, branch, worktree; project name/path). The same query asks the
+  chat search in the background: projects holding a server title/branch hit
+  stay visible, and a *Found in messages: N* row
+  (`ChatSearchMessagesRow`) opens the full search for chats that match only in
+  their messages.
+- **The archive view** filters one project's archived chats with the same
+  engine (summaries `query` + transcript hits) because it is a management view
+  with restore/delete selection.
+
+Find in conversation (Mod+F), workspace file search (Mod+Shift+F) and
+previous prompts (Ctrl/Cmd+↑) are separate intents, not chat search.
 
 #### Server zones in the navigator
 
@@ -700,8 +808,8 @@ quiet `Archived` entry under its session list — and `Archived sessions` in the
 phone project menu — opens the per-project archive view
 (`ArchivedSessionsDialog`, overlay `archived-sessions`; dialog on desktop,
 tall sheet on phones). It pages `/api/sessions/summaries?archived=true`
-(server-side title/branch/path `query`) and merges archived transcript hits
-from session search. Archive-date presets (today / past week / past month /
+(server-side title/branch/path `query`, the shared chat-search text rule) and
+merges archived transcript hits from session search. Archive-date presets (today / past week / past month /
 older) and the branch filter apply to loaded rows, using `updatedAt` as the
 archive time, the same clock archive retention uses; paging continues on scroll
 and stops early once a recency window is satisfied. Rows open read-only, and
@@ -804,9 +912,28 @@ stays the authority and refuses anything the UI should not have offered.
   rights it is a read-only "Who has access" view; a delegated subagent only
   explains that it follows its parent and opens the parent's dialog. A name
   wraps to a second line before it truncates.
+- **Personal notes already read**: a chat whose agent read the owner's
+  personal notes (`projection.personalContext`) still says so, but widening it
+  is the person's choice: a wider audience, an added person or a raised level
+  shows a checkbox ("I understand — open this chat to others") and Save stays
+  disabled until it is ticked, sending `acknowledgePersonalContext`. The web
+  mirrors the server's `widens` (audience order, new grant, higher level), so
+  one specific person becoming the whole Space asks again. Narrowing never
+  asks. The server refuses without it (§14.6). A chat in Only me stays private
+  and only explains that.
+- **New shared chat** (`SharedChatDialog.tsx`, from the project menu on
+  desktop and phone): the same audience choice and people list as the share
+  dialog, for a chat that does not exist yet. It reads
+  `GET /api/sharing/new-chat` (people, access levels, allowed audiences, and
+  whether this person may share at all), then creates the chat with
+  `CreateSessionInput.sharing` and opens it ready to type. Because the
+  audience exists before its first message, its agent works with those people
+  from the start and never reaches the creator's personal notes. Nothing is
+  created when the audience is refused.
 - **Entry points**: "Share…" (or "Who has access" below manage) in the
   desktop row menu, the phone recent-row menu and the session overview lines
-  (desktop status popover, phone overview sheet).
+  (desktop status popover, phone overview sheet); "New shared chat" beside
+  "New conversation" and "New chat in Only me" in the project menu.
 - **Navigator marker**: a quiet `SharedIcon` (Lucide `Users`) on a row only
   when `sharing.shared`; its label names the owner of someone else's chat,
   otherwise says whether the Space or specific people can open it. Private
@@ -1089,6 +1216,13 @@ Host-owned (`apps/web`), not a package seam.
   after the start (`TOOL_HARD_HINT_MS`) every call, kept or not, reads "Polyth
   stops it in 5m: commands run at most 60 minutes" with no button, because the
   server's hard ceiling (`TOOL_HARD_STOP_MS`) applies regardless.
+  While a person's card for the call is open (an approval, a question or a
+  Credential Vault form of this session, correlated as the server's
+  `toolAwaitingRequest` does; `apps/web/src/toolAwaiting.ts`), the server
+  pauses both clocks, so the call shows neither countdown nor Keep running:
+  the tail reads `waiting for approval` / `waiting for an answer`, and the
+  expanded line "Waiting for approval · Polyth won't stop it while it waits".
+  Once the card is answered or expires, the ordinary pulse returns.
   The policy sentence ("Polyth stops a command after 10
   minutes with no output.") is the tooltip. The countdown uses the strong ink
   at weight 500, with no colour signal. The pulse uses the summary row's text
@@ -1369,7 +1503,9 @@ the note's `shareProposedAt` is newer than the latest prompt, so ignoring it lea
 nothing to clean up. A chat makes one offer of at most 600 characters; anything else
 stays a plain note. Project settings → Memory → My notes offers the same Share… in
 place under any note in Only me in this project. Alone in a project there is no line
-and no Share…, and My notes appears only with notes in it (`othersHere`).
+and no Share…, and My notes appears only with notes in it (`othersHere`). While the
+records are being searched My notes is hidden (a draft there survives): the search
+does not cover it, so it must not read as more results.
 
 A person's Personal project (`Project.personal`, §3.3) is
 the `personal` kind whatever its composition says (`projectKinds(…, { personal })`,
@@ -1694,12 +1830,18 @@ what cannot be defaulted:
   the foot, "Connect to Polyth on another computer", opens the app's
   [server list](desktop.md#connecting-to-another-polyth). The progress dots
   stay hidden (height kept) for this one-step start. "With other people" shows
-  three dots and continues to the account (name, and a password with a reveal
-  toggle instead of a confirmation field) → recovery codes → automatic restart;
+  three dots and continues to the account (name, a password with a reveal
+  toggle, and "Repeat the new password", which keeps Continue disabled and
+  says so while the two differ: a slip in a password typed once surfaced only
+  weeks later as "Polyth forgot my password") → recovery codes → automatic restart;
   Back from the account returns to the choice. A shell without
   `completeLocalSetup` starts at the account. A standalone server first asks
   for the setup code printed by `npm run setup:claim`, shown with a copy
-  button. The owner login is fixed (`owner`, stated under the form) and the
+  button. Nobody invents a login: it is proposed from the name
+  (`loginFromName` in `apps/web/src/loginName.ts`: lowercase, accents
+  dropped, Cyrillic transliterated, other runs become dots, `owner` when
+  nothing is left), stated under the form as "You'll sign in as …", and
+  "Change" opens the Login field for anyone who wants another. The
   organization defaults to "Personal".
 - **No password, no form.** For a password-less owner (`accessMode: "local"`
   in `/api/auth/status`) a locked Desktop window asks its main process for a
@@ -1709,8 +1851,37 @@ what cannot be defaulted:
   window on another server takes the browser's path on these screens and adds
   "Choose another server" (`DesktopServerExit`), since they show no shell. Settings →
   Users → your account offers "Set a password…" (`SecureAccountDialog`:
-  password → recovery codes → Protect account); "Add user" opens the same
+  password twice → recovery codes → Protect account); "Add user" opens the same
   dialog first, then the add-user flow (§3.6).
+- **The lock screen shows who signs in; only the password is typed.**
+  Accounts this browser signed in to before (`knownBrowserLogins`, at most 5,
+  most recent first, with the display name from `/api/auth/me`) are tiles
+  (monogram, name, login); the first is picked. The server never lists logins
+  to an anonymous caller, so a browser that has not signed in here sees the
+  Login field (prefilled with the best guess); "Use another account" and
+  "Choose a saved account" switch between the two. The server answers the
+  same for an unknown login and a wrong password, so a failure says "Login or
+  password is incorrect".
+- **A recovery code alone recovers the account.** The code (160 bits) is what
+  identifies the account; the recovery form asks only for the code and a new
+  password, `POST /api/auth/recover` accepts `login` but ignores it (older
+  shells send one, a server older than this needs it, so the shell sends the
+  picked login as a hint) and answers with the account's `login`. The shell
+  then signs in with it; if that sign-in fails, the notice (accent, not red)
+  says "Password was reset. Your login is …" and keeps the new password
+  typed. Login and recovery-code fields turn off autocapitalization and
+  spellcheck; the server ignores spaces, dashes (including macOS's en/em dash
+  substitutions) and invisible characters inside a recovery code. In Polyth Desktop on its own server the alternatives under
+  "or" start with "Continue as the owner on this computer"
+  (`renewOwnerSession`, see [Desktop](desktop.md)). Every new-password form
+  (setup, Set a password, Change password, the Desktop reset) asks twice.
+- **A forgotten owner password is reset on this computer.** In Polyth
+  Desktop on its own server, Change password and the owner re-authentication
+  prompt show "Forgot your password? Reset it on this computer" under the
+  password field. It opens "Reset password on this computer" (new password
+  twice); the main process confirms the person with the operating system
+  first, every sign-in ends and the window reloads signed in
+  (`desktopPasswordReset.tsx`).
 - **A claim never strands the flow.** Desktop requests its claim only when the
   person continues, and replaces a claim the server refuses once with
   `requestSetupClaim({ fresh: true })`. A claim that expired while the codes
@@ -2190,6 +2361,35 @@ The command palette
   field) — it outranks the lock while post-merge cleanup is still pending.
   The phone host renders its runtime status, unread mark and resting pin in
   the row's status slot; it must not add a second isolation lock.
+- **Pinned chats above projects:** the desktop navigator's list options menu
+  (Sessions) has a *Pinned chats above projects* checkbox, the account
+  preference `pinnedPlacement` (`"project"` by default, `"top"`;
+  `apps/web/src/sidebarPrefs.ts`, synced as its own preference id
+  `core.sidebar-pinned` so an older client's `core.sidebar` snapshot cannot
+  drop it). With `"top"`, `PinnedSessions`
+  (`components/sidebar/PinnedSessions.tsx`, list rules in
+  `apps/web/src/pinnedSessions.ts`) draws every live pinned chat of the Space
+  in one Pinned chats group above the projects, in pin order, kept by the Needs
+  attention and date filters and hidden while searching (search results keep
+  each project's pinned rows). Project lists then leave their pinned block out
+  (`SessionList pinnedAbove`); their subagents still ride under the pinned
+  parent, and a project whose every chat is pinned says so instead of looking
+  empty. In that group every row is pinned, so the state column carries the
+  chat's project glyph (icon and colour, a private room as its project) in
+  place of the pin, and its description names the project. A project without
+  an icon shows its initial instead of the default folder, so several such
+  projects stay apart: the first letter or digit of its name (or of its
+  folder when it has none; `projectMonogram`) at `--font-meta` on a disc
+  washed with the project's colour, or with the default project ink when it
+  has none. Symbols and emoji are skipped; a name without a letter or digit
+  keeps the folder. Live state stays on the glyph in the project rail's kind
+  colours (`--status-question`, `--status-permission`, `--status-result` in
+  `tokens.css`): a running or reconciling chat turns a thin ring around it, a
+  reply, an approval or an unread result a corner dot of its kind, a stale
+  epoch or a provider limit an amber one, a failure a red one. The group's
+  head is a dim caption on the navigator's axes (pin in the glyph column, like
+  a server zone's head), with the same air below the group as above it. The
+  phone navigator does not offer the option yet.
 - **Desktop session row geometry:** the open button (`.session-btn`) is an
   empty, full-row hit surface; `.session-row-body` paints above it with
   `pointer-events: none` in three fixed columns — a state mark reserved on
@@ -2821,7 +3021,10 @@ before anything leaves the device (`ImageSizePrompt`, `imageUploadSize.ts`;
 Chat and an agent's page alike, by picker, camera, paste or drop). Small, Medium
 and Large are 1024, 1600 and 2560 px on the long edge, each showing its real
 encoded size; Original sends the file untouched. Other files in the batch do not
-wait, and a size that would change nothing is not offered. **Settings → Chat →
+wait, and a size that would change nothing is not offered. In Chat, sending
+before answering is the answer Original: the waiting photos go up untouched and
+the message leaves once they are attached (a photo that fails to attach keeps
+the draft unsent). **Settings → Chat →
 Photo size** (`imageUploadSize`) keeps a standing answer. A reduced copy is a
 canvas re-encode, so it carries no EXIF, and only that copy is uploaded.
 
@@ -3102,6 +3305,27 @@ starts or the wait is cancelled, the session shows its real state again.
 The navigator's summary projection carries `resume`, `runtimeControl` and
 `harnessTransition`, so every one of these marks is correct on the row before
 the session is opened instead of flipping once its full projection loads.
+
+**Waiting chats.** A chat with something armed to wake it
+(`SessionProjection.waits`: a chat it watches with `wake` delivery, a
+`polyth_wait`) resolves to `awaiting`: a calm Lucide `Hourglass` lead mark in
+`--muted` (no disc), drawn at the pin's size in the sidebar and at the running
+ring's 14px on the phone, so it reads quieter than live or attention marks, and
+"Waiting · continues by itself" in the sidebar, phone
+navigator, recent list and phone session header. Attention, live work, a
+rate-limit resume, a failure and a reconnect outrank it; it outranks an unread
+reply, which the project rail still counts as a result. At rest the pending
+stack above the composer shows one `SessionWaitsLine` under the answer-later
+line, built like the suggestion line on the stack's grid (composer card column,
+hourglass on `--composer-stack-mark`, words from `--composer-stack-text` in
+`--font-composer-stack`, no plate): "Continues after «Title»" with the title in
+`--text` at weight 550 as the line's one stronger ink, then faint
+"· until 14:30" for a bounded wait and "· +N more" for several (a
+`polyth_wait` reads "Continues after <label>"). The waited-on chat's title
+comes only from chats this client already holds, otherwise "another chat";
+when it is held the line hugs its words and is a button that opens it
+(cross-project too), with the suggestion line's hover. The line folds away with the other notice rows
+(`ComposerNoticeRow`) once the wait ends or a turn runs.
 
 The same pause covers a provider that refuses the request itself (`4xx invalid
 request`, `RateLimitScope: "request"`). That refusal is usually about the one
@@ -3722,11 +3946,11 @@ run arrives as the person's own message. Paused tasks list after the upcoming
 ones; a finished one-time task has left. While open, the line stays even when
 its last upcoming task is paused; folded, it leaves once nothing is upcoming.
 Escape folds the list and returns focus to the line. Line and list enter and
-leave through `ComposerNoticeRow`. The look follows Chat settings → *Status
-above the composer*: `line` is plateless with a faint tray when open, `tab`
-insets both to the tab's line, `capsule` hugs the folded line in a centred
-hairline pill and frames the open list; outlines and the chevron are inset
-shadows and an icon, so *Hide interface borders* keeps them. Inks come from
+leave through `ComposerNoticeRow`. Folded, the line is plateless text. Open,
+list and line are one faint tray that fades with the fold: the line closes it
+under an inset-shadow hairline (so *Hide interface borders* keeps the seam)
+as the list's own handle, and the rows and closing note start on the line's
+mark column (`--planner-chat-inset`). Inks come from
 the chat frame (wallpaper wash). As an `inline-size` container the line drops
 the cadence at 520 px, and at 360 px the list stacks time over title and
 keeps only the menu. `planner.run-fact` in `session.timeline.event` renders
@@ -3837,6 +4061,14 @@ or clamped text — then remaining request fields in words. Transport fields
 (`ServerName`, raw ids, bookkeeping such as digests and revisions) never
 render; the raw call stays behind "View raw result". Native todo tools and
 `polyth_todo` share the `@polyth/todos` normalizer and the same checklist.
+
+**Code Mode rows:** OpenCode's Code Mode runs one JavaScript script
+(`execute` with `code`) that calls tools as `tools.<namespace>["tool"](…)`.
+`classifyTool` reads it as a Code row, not a shell: the preview lists the
+tools the script calls (`codeModeToolCalls`) or its first line, and the
+expanded row shows the script as highlighted code under "Script". ACP's
+`execute` kind carries `command` and stays a shell row
+(`apps/web/src/execution.ts`, pinned in `apps/web/test/executionUi.test.ts`).
 
 **Session activity details:** the Chat settings row `chat.activityDetails`
 controls the reusable details surface (`SessionActivityDetails.tsx`). `tabs`
@@ -4761,13 +4993,26 @@ drawn. Most urgent first:
   itself.
 - **What its reports asked for.** Every open `Needs you` request across the
   journal (`openNeeds`): the newest wording, since when, a web link when the
-  report gave one, and Done. Done settles the request wherever it was asked;
-  the agent closes one itself with a `Resolved:` line.
+  report gave one, and its answers. A report asks in one of two ways, and
+  the line it wrote says which (`AgentNeed.kind`): `Needs you:` is something
+  the person does themselves, answered only with Done; `Needs your OK:` is a
+  yes or no the agent then acts on (`kind: "decision"`), answered with Go
+  ahead, Decline or Done. A request kept before the two were told apart
+  counts as the person's own. Go ahead
+  and Decline settle the request first, with the answer kept on it
+  (`done.answer`), so the line leaves the list at the tap and the agent is
+  not told it still waits; then they wake the agent with the person's answer
+  as their own message ("Yes, go ahead: …" / "No, do not do this: … Close
+  the request…"). A wake that is refused puts the request back and says why.
+  Done settles the request wherever it was asked, without waking the agent;
+  the agent closes one itself with a `Resolved:` line. A request that could
+  not be saved says so instead of failing silently.
 
 The list shows three lines (two on a phone) and folds the rest behind
 "N more". It is type on the page with a label, never a card or a banner, and
 all lines share one grid so dates and actions keep their columns; on a narrow
-page the action sits beside the words and the date under them.
+page the action sits beside the words and the date under them, except a
+request's answers, which go on their own line under its words.
 
 Under a report, `Needs you` is only the record of what that report asked
 ("Asked you", settled ones struck through): the to-do lives above, never in
@@ -4815,19 +5060,101 @@ live in `apps/web/src/sessionSplit.ts` (pure, tested by
   choosing the companion moves focus; choosing another chat shows it in the
   focused place; a fresh chat keeps the companion beside it. Chats are not
   pruned from the session list (a list page holds only recent chats).
-- **Entry points.** Navigator row menu *Open in split view*, Alt-click a row,
-  drag a row onto the workspace (end half, or onto the companion to replace
-  it; `SESSION_MIME` in `dnd.ts`), `Mod+\` (*split with the previous chat*,
-  toggles), palette commands (toggle, focus the other chat, swap sides, close).
+- **Entry points.** Navigator row menu *Open in split view* (hint
+  *Alt+click*), Alt-click a row, drag a row onto the workspace (end half, or
+  onto the companion to replace it; `SESSION_MIME` in `dnd.ts`), `Mod+\`
+  (*split with the previous chat*, toggles), palette commands (toggle, focus
+  the other chat, swap sides, close).
+- **One title per pane.** While the pair is on screen the host publishes
+  `setSessionSplitPresented(true)` and the shell header drops its chat title
+  (`DesktopSessionStatus` renders only its overview); the focused pane's
+  title is the button that opens that overview. In the `bare` layout a
+  resting title leaves the line over the chat nothing to show, so it reserves
+  no room (`bareBarShown` in `shellLayout.ts`; a Space switcher or a remote
+  computer still keep it) and the overview stays mounted without it; the
+  pane headers then take the line's place, `--shell-bar-top` below the
+  window edge and at least `--shell-bar-h` tall, where a single chat's
+  title sits. The navigator marks the
+  companion's row with a two-column glyph (`.session-place-mark`).
 - **Layout.** Presentation only, tab-scoped (`sessionStorage`); the divider
   position is a remembered preference (`localStorage`). Never on the phone
-  shell; below two 360 px panes the split rests (the focused chat fills the
-  workspace, the pair is kept). The live chat surface never remounts: the host
-  always wraps it, and places are CSS `order`.
+  shell. When the pair does not fit beside the full wide sidebar but would fit
+  with it on its rail, the split asks the sidebar to rest
+  (`splitWantsSidebarRail` → `sidebarLayout.ts` automatic source `"split"`,
+  in memory, never written to the sidebar preference) and holds that until
+  the split closes; expanding the sidebar by hand wins until the next split.
+  Below two 360 px panes otherwise the split rests (the focused chat fills
+  the workspace, the pair is kept). The live chat surface never remounts: the
+  host always wraps it, and places are CSS `order`.
+- **Into a window.** Each pane header has *Open in new window*: that chat
+  moves to a chat window (below) and the split closes around it.
 - **Motion.** Transform/opacity only, on the window clock
   (`--motion-window*`): opening FLIPs the focused chat to its place while the
   companion arrives from the end; closing leaves an exit ghost of the
   companion; swapping sides FLIPs both. Reduced motion turns it all off.
+
+#### Second windows (a chat, or a workspace window, on another screen)
+
+A chat or one workspace window can move to a browser/desktop window of its
+own, so code sits on one screen and the chats on another. Roles, addresses
+and presence live in `apps/web/src/secondWindow.ts` (pure parts tested by
+`apps/web/test/secondWindow.test.ts`); the window header and coordination are
+`components/window/SecondWindow.tsx`.
+
+- **Roles.** The same client with `?window=chat` (the chat the URL names, full
+  width; no navigator, launcher strip or status bar; a file link still opens
+  beside it) or `?window=pane&surface=<id>` (that workspace window as the
+  whole window, through `presentPaneAsWindow`: no pin, fullscreen, dock or
+  Escape transitions; closing it closes the window). The host never names a
+  package: a pane window shows whichever surface it was opened from. The URL
+  sync keeps the role (`withWindowRole`), and a reload keeps it.
+- **A window for one thing.** `?window=pane&surface=<id>&resource=<id>` is the
+  window of that one resource of a surface (a saved app): the surface gets
+  the resource as its `resource` prop, there is one window per surface and
+  resource (target name `polyth-pane-<surface>-<resource>`, so asking again
+  brings it forward and the code window stays), it follows no chat, and its
+  header and title bar carry the name the content reports instead of
+  "project · branch". A resource is an id (`[a-z0-9._:-]`, up to 128
+  characters), never free text. Packages reach it through
+  `host.navigation.openPaneWindow(surfaceId, resource)`,
+  `setPaneWindowTitle(title)` (ignored in every other window) and
+  `paneWindowResource()` (null in every other window). Showing another
+  surface in that window makes it an ordinary pane window again.
+- **Entry points.** Navigator row menu *Open in new window* (hint
+  *Shift+click*), Shift-click a row, a split pane's header, and every docked
+  workspace window's *Open in new window* system action (`ModuleView`
+  `onOpenWindow`), which closes the docked pane so the chat keeps the width.
+  Not on the phone shell. A blocked pop-up says so (`window.blocked`).
+- **Header.** A chat window names the chat, then "project · branch" quietly.
+  A pane window names "project · branch", then "following ‹chat›": it follows
+  the chat of the main window focused last (`leadMainWindow`) until that text
+  is clicked to pin it. *Move back to main window* hands the content back
+  (the main window opens the chat, or reopens the pane) and closes the window;
+  it is offered only while a main window answers. The header is the window's
+  title bar, in flow: the chat or package starts right under its line, with
+  no gap. The full-height layouts' room for the main window's overlaid bar
+  (`--shell-bar-block`, and in Desktop `--desktop-caption-band`) shrinks to
+  the floating inset there (`SecondWindow.css`), so no empty band opens above
+  the content. In Desktop the window has no system title bar: the header is
+  one `--desktop-titlebar-h` band carrying the caption controls and keeping
+  their corner clear (`installDesktopWindowChrome` in `desktop.tsx`, over the
+  window's own bridge; [desktop.md](desktop.md)). A pane window's frame shows
+  no close button (`ModuleView` `closable={false}`): the window's own controls
+  close it.
+- **Presence.** Windows of one origin announce what they show over a
+  `BroadcastChannel` (heartbeat 15 s, expiry 40 s). The main window marks a row
+  whose chat is open in a chat window (`.session-place-mark`). Presentation
+  only: no SessionEvent, no runtime.
+- **The main window's preferences stay its own.** A second window starts
+  with a copy of its opener's `sessionStorage`: it ignores a copied split, and
+  `isSecondaryWindow()` stops it writing navigation hints, restored
+  navigation, the active view, pane and workbench layout.
+- **Desktop.** The shell answers a same-origin `window.open` with a `window=`
+  role (`apps/desktop/src/secondWindows.ts`) with a native window of its own:
+  no preload (desktop IPC answers only the main window), the same session and
+  navigation rule, and the main window's local-server request guard. One
+  window per chat, one pane window and one window per pane resource; asking
+  again brings it forward.
 
 ### 4.4 Capabilities (`host.capabilities.register`)
 
@@ -5072,7 +5399,10 @@ empty or error markup.
   saves at once and an option raises risk, arrows only move focus (Enter,
   Space or a click chooses) and the risky option confirms first.
   A number → `NumberField({ unit, min, max })` (commits on blur/Enter, clamps,
-  Escape reverts); a visual size/scale → `SizeStepper`.
+  Escape reverts); a visual size/scale → `SizeStepper`; an ordered set of
+  named stops (Settings → Chat "Collapse long messages": 4, 6, 8, 12, 20
+  lines, then Full) → `SizeStepper` over the stop index with `format` naming
+  each stop in the readout and `aria-valuetext`.
 - **Sub-pages and states.** A page with sub-views (harness detail, Source
   control) uses `SettingsTabs({ tabs, value, onChange, label })` (wraps
   `ui/Tabs` + `TabPanel` with the settings spacing) — never a `Seg` or custom
@@ -5535,19 +5865,34 @@ projects. A fresh install starts in Tree (`SIDEBAR_VIEW_MODE_DEFAULT`,
 registry with no project, or only the lone Personal project — presents the
 tree whatever was saved, so the left edge is never an empty strip; the layout
 menu then leaves out the Project rail choice until a project exists. Clicking a
-project in the phone navigator, desktop tree, compact drawer rail, or a
+project in the phone navigator, compact drawer (tree or rail), or a
 collapsed Project rail only toggles its sessions; it never activates the
 project, changes the current session, or closes the navigator. In the wide
-expanded Project rail the first click on another project only browses it; a
-second click on the browsed project (its icon or its header row) enters it:
-from the New chat page it opens New chat in that project, and from another
-project's chat it opens that project's latest top-level chat
-(`latestProjectSession`, `Sidebar.tsx`; New chat when it has none). Inside the
-project already, the second click does nothing, and it never collapses the
-sessions column. A double-click's second click does not act again. The rail's
+expanded Project rail and the wide desktop tree one click on a project (its
+icon or its header row) enters it at once, so the main area and the active
+mark follow the click: from the New chat page it opens New chat in that
+project, and from another project's chat it opens that project's latest
+top-level chat (`latestProjectSession`, `Sidebar.tsx`; New chat when it has
+none). A project with no chats yet therefore opens on its own New chat page,
+with its files and panes, in one click. Inside the project already, the rail
+click does nothing and never collapses the sessions column, while the tree
+click opens and closes that project's list (entering a project opens its
+list). A double-click's second click does not act again. The rail's
 browsed project is local presentation state, independent of the active
-workspace. Opening a session or using an explicit project action still
+workspace; only the compact drawer rail and a collapsed rail's peek browse
+without entering. Opening a session or using an explicit project action still
 navigates normally.
+The tree marks the active project the way the rail lights its icon: while no
+chat row inside it is lit (its New chat page, or its list closed), the
+project's row wears the current chat row's selection, the base plate
+(`--surface-overlay-strong`, `styles.css`), Fluent's plate and accent pill, a
+look's `--look-select` plate, Paper's start bar, Editorial's accent underline.
+Once one of its chats is current, that chat row is the only mark, since two
+identical plates would leave the current chat ambiguous. The selectors are
+scoped to `.project-tree-node`, so the rail's focused-project header (the same
+card) stays unlit. Editorial gives its underlined names room below their
+clipped line box (a padding returned by an equal negative margin), without
+which the rule under a current chat or project was cut off.
 Phone project headers are one vertically centred line: the name truncates and
 the status pills keep their own width beside it, expanded or collapsed, so the
 name never moves. Pills run most urgent first (running, waiting, failed,
@@ -5699,11 +6044,15 @@ Project rail hides only the sessions column while keeping the project icons
 visible, then expands back to Project rail. An older collapsed rail without a
 saved return mode restores Tree once when expanded. Only the rail's collapse
 toggle hides the sessions column; clicking the focused project's icon does not.
-A project icon carries one corner mark from `projectRailMark`
-(`sessionStatus.ts`): amber when any chat needs a person (question, approval,
-waiting), the accent colour when a finished top-level chat has a reply the
-reader has not read, green while chats only work. Subagents and archived chats
-never count. The marks of projects that are not open depend on the WS snapshot,
+A project icon carries corner marks from `projectRailStatus`
+(`sessionStatus.ts`, drawn by `sidebar/ProjectRailStatus.tsx`), counting chats
+of the project and its nested projects: questions top-start (blue), permission
+requests top-end (amber), unread results of finished top-level chats or forks
+bottom-end (green; a hollow accent ring there while chats only work). One chat
+shows a glyph or dot, several a count capped at `9+`; bottom-start stays free.
+The tooltip and accessible name carry the breakdown. Subagent requests count,
+their results do not; archived and muted chats never count. Styling:
+`docs/dev/styles.md`. The marks of projects that are not open depend on the WS snapshot,
 which reads `SessionSummaryQuery.railStatus` (internal, never HTTP): every
 working/waiting/open-request chat plus each project's ten newest chats unread by
 the reader's own cursor (a chat without a cursor is read, as in
@@ -5765,12 +6114,20 @@ handler (no state, no re-render) together with `--side-scroll-pad`, the list's
 measured top padding, and `.side-scroll::before` casts the shadow from the
 list's very edge; at the top of the list there is none.
 
-Each project tile carries a live status dot: green while any of that project's
-sessions works, amber when one needs attention. The socket keeps active rows
-from every project current as summary projections, so the dot appears and
-clears without opening that project; after a reconnect it also re-reads the
-rows the client still shows as active, so a turn that ended while the link was
-down clears its dot too.
+Each project tile carries live status marks in its corners (`ProjectRailMarks`,
+`components/sidebar/ProjectRailStatus.tsx`; counts come from
+`projectRailStatus`, the same resolver as the rows): a question at the top
+start, a permission request at the top end, and at the bottom end the unread
+results — one chat as a dot, several as a count — or, without results, a
+hollow ring while one of the project's sessions works. The bottom start corner
+stays free. The socket keeps active rows from every project current as summary
+projections, so a mark appears and clears without opening that project; after a
+reconnect it also re-reads the rows the client still shows as active, so a turn
+that ended while the link was down clears its mark too. Mark boxes are scaled
+by `--rail-scale-left`, which is a percentage (0.9 gives a 7.2px dot); the box
+and the ring snap to whole pixels, because a fractional box rasterizes as 7 or
+8px by the tile's subpixel position and two projects in one state would wear
+differently sized marks.
 
 **Primary workbench profiles.** A package profile opts into the same top-level
 switcher as Chat with `presentation: { navigation: "primary" }`. Profiles without
@@ -6035,7 +6392,7 @@ its revealed chats.
 - `host.errors.recent?()` — the tab's last ten error notices (kind `error`
   only), oldest first, as `{ time, text }`: the notice's copyable report
   (`UiErrorAction.report`, set by `copyErrorAction`) or else its words. Only
-  for a report the person reviews before sending (the nightly bug-report sheet);
+  for a report the person reviews before sending (the feedback sheet);
   never send it anywhere silently.
 - `host.errors.show(message, action?, { kind? })` — the host's one transient
   error (`setUiError(message, action, dedupeKey?, kind?)`). It is drawn as a
@@ -6263,6 +6620,18 @@ code waits for a click everywhere else (files, issue/PR bodies, prompts).
 - Reuse the Markdown URL policy (`sanitizeImageSrc`, `sanitizeLinkHref` from
   `apps/web/src/markdown.tsx`); never render agent-supplied HTML, CSS or
   script.
+- **Actions on blocks.** `host.markdown.registerFenceAction({ id, languages,
+  label, icon, order, run })` lets one package add a button to the blocks
+  another package renders, without either naming the other (the Apps package
+  puts *Save as app* on a `page`). The host only keeps the list
+  (`markdown/fenceRenderers.ts`: unique ids, validated languages, ordered,
+  one stable array per language until the list changes, so
+  `fenceActions(lang)` with `subscribeFenceActions` is a
+  `useSyncExternalStore` pair). The renderer of the language decides where
+  the buttons go and calls `run` only from the person's click, with what the
+  block shows (`title`, `content`, `from`, `context`), not the raw fence
+  text. A renderer may show no actions, so an action is never the only way
+  to a feature.
 
 ### 4.12 Markdown rendering (`MarkdownDoc`)
 
@@ -6397,7 +6766,10 @@ is an adapter over the shared full-screen viewer
 (`components/AttachmentPreview.tsx`), which attachments, tool images and chat
 block pictures also use: close button, pinch / click / wheel / button zoom for
 images, and for several items a counter, arrows, swipe, arrow keys and a
-thumbnail strip.
+thumbnail strip. A picture with a visible title in the chat (a ```ui media tile,
+a card image) passes it as `MarkdownImage.caption`; the viewer repeats it in
+full on a glass island under the stage (AttachmentPreview `caption`), so text
+the tile truncated is readable once the picture is open.
 
 ## 7. Disposal, lifecycle, and failure isolation
 

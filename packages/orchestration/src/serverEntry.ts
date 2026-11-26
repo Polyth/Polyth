@@ -47,6 +47,11 @@ const publicError = (cause: unknown): { status: number; code: string; message: s
 interface HarnessRegistryLike {
   get(id: string): unknown;
   providers?(): Array<{ descriptor: { id: string; name: string; accountLabel?: string } }>;
+  /** Process-free roster: identity, Relay family and Space policy. */
+  roster?(context: { space: SpaceContext; spaceId: string; projectId: string; cwd: string }): Promise<Array<{
+    identity: { id: string; accounts?: { family: string }; relay?: { family: string } };
+    policy: { enabled: boolean };
+  }>>;
 }
 
 /** What the person's policy asks of the ranked list, in either mode: never
@@ -80,6 +85,27 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     return policy;
   };
 
+  /** Process-free roster of the Space's harnesses; the policy read inside it
+   *  uses only the Space context, so the placeholder project fields are never
+   *  consulted. */
+  async function harnessRoster(space: SpaceContext): Promise<Array<{ identity: { id: string; accounts?: { family: string }; relay?: { family: string } }; policy: { enabled: boolean } }>> {
+    const registry = host.services.get(serverServiceKey<HarnessRegistryLike>("harnesses"));
+    return registry?.roster?.({ space, spaceId: space.spaceId, projectId: "orchestration-policy", cwd: "" })
+      .catch((error: unknown) => {
+        console.warn("[orchestration] harness roster unavailable", error);
+        return [];
+      }) ?? [];
+  }
+
+  /** The Relay a member harness kept for a Relay only runs through: its
+   *  family's Relay, when the member is disabled and the Relay is enabled. */
+  const relayFor = (roster: Awaited<ReturnType<typeof harnessRoster>>, harnessId: string): string | undefined => {
+    const member = roster.find((item) => item.identity.id === harnessId);
+    const family = member?.identity.accounts?.family;
+    if (!member || member.policy.enabled || !family || member.identity.relay) return undefined;
+    return roster.find((item) => item.identity.relay?.family === family && item.policy.enabled)?.identity.id;
+  };
+
   /** Live facts for the chain keys of `policy` through the Usage routing service. */
   async function factsFor(space: SpaceContext, policy: RoutingPolicy): Promise<{ facts: RoutingFacts; report?: ServerModelRoutingReport }> {
     const routing = host.services.get(SERVER_MODEL_ROUTING);
@@ -94,6 +120,23 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     for (const row of report?.candidates ?? []) {
       candidates.set(keyOf(row), row);
       if (row.runs && policy.excluded.includes(keyOf(row))) excludedModels.add(sameModelKey(row.harnessId, row.runs));
+    }
+    // Usage re-owns a disabled member's pair to the family Relay, so the
+    // report names the Relay id while the policy keeps the member id it was
+    // saved with. Alias the saved key to the row a spawn must follow.
+    const roster = await harnessRoster(space);
+    for (const raw of chain) {
+      if (candidates.has(raw)) continue;
+      const split = raw.indexOf("::");
+      const slash = raw.indexOf("/");
+      if (split <= 0 || slash <= split) continue;
+      const relayId = relayFor(roster, raw.slice(0, split));
+      if (!relayId) continue;
+      const providerID = raw.slice(split + 2, slash);
+      const modelID = raw.slice(slash + 1);
+      const row = (report?.candidates ?? []).find((candidate) => candidate.harnessId === relayId
+        && candidate.providerID === providerID && candidate.modelID === modelID);
+      if (row) candidates.set(raw, row);
     }
     return {
       facts: {
@@ -125,13 +168,17 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   }
 
   /** Harnesses a rule can name: the registered ones plus any the policy names. */
-  function harnessList(policy: RoutingPolicy): OrchestrationState["harnesses"] {
+  async function harnessList(space: SpaceContext, policy: RoutingPolicy): Promise<OrchestrationState["harnesses"]> {
     const registry = host.services.get(serverServiceKey<HarnessRegistryLike>("harnesses"));
+    const roster = await harnessRoster(space);
+    const enabled = new Map(roster.map((item) => [item.identity.id, item.policy.enabled]));
     const out = new Map<string, OrchestrationState["harnesses"][number]>();
     for (const provider of registry?.providers?.() ?? []) {
       const { id, name, accountLabel } = provider.descriptor;
       const account = accountLabel?.trim();
-      out.set(id, { id, name: account && !name.includes(account) ? `${name} · ${account}` : name, available: true });
+      // A harness the Space turned off stays listable (a policy may keep a
+      // role on an account held for a Relay) but is marked unusable directly.
+      out.set(id, { id, name: account && !name.includes(account) ? `${name} · ${account}` : name, available: enabled.get(id) ?? true });
     }
     for (const id of Object.keys(policy.harnesses)) if (!out.has(id)) out.set(id, { id, name: id, available: false });
     return [...out.values()];
@@ -152,7 +199,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       generatedAt: now,
       roles,
       routingAvailable: Boolean(routing),
-      harnesses: harnessList(draft),
+      harnesses: await harnessList(space, draft),
       shortlist: {
         agentRows: Math.min(AGENT_SHORTLIST_ROWS, rows.length),
         rows: rows.map((row) => ({
@@ -207,6 +254,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         providerID: row.providerID,
         modelID: row.modelID,
         turns: row.turns,
+        failed: row.failed,
         ...(row.runs ? { runs: row.runs } : {}),
       })),
       available: (harnessId) => Boolean(harnesses?.get(harnessId)),
@@ -271,6 +319,20 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       if (policy.mode === "auto") return Object.keys(list).length ? { text: "", ...shaped } : undefined;
       const { roles, now } = await resolved(space, policy, options?.harnessId);
       return { text: formatBrief(policy, roles, now), ...shaped };
+    },
+    async route(space, roleId, options) {
+      if (!active) return undefined;
+      const policy = readSaved(space);
+      if (policy.mode !== "roles") return undefined;
+      const { roles } = await resolved(space, policy);
+      const role = roles.find((entry) => entry.id === roleId);
+      if (!role?.enabled) return undefined;
+      const skip = new Set(options?.exclude ?? []);
+      const choice = role.choices.find((entry) =>
+        (entry.status === "ready" || entry.status === "unverified") && !skip.has(entry.key));
+      return choice
+        ? choice.spawn ?? { harnessId: choice.harnessId, providerID: choice.providerID, modelID: choice.modelID }
+        : undefined;
     },
   });
 

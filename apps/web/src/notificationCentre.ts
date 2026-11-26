@@ -7,7 +7,7 @@
 import { useSyncExternalStore } from "react";
 import type { NotificationKind, NotificationRecord } from "@polyth/contracts";
 import { api } from "@polyth/session/web-api";
-import { tr } from "./i18n/index.ts";
+import { dateTimeFormatter, getLocale, tr } from "./i18n/index.ts";
 
 /** Mirror of the server's retention cap (newest 200 FIFO). */
 export const NOTIFICATION_CENTRE_CAP = 200;
@@ -190,15 +190,53 @@ export function useNotificationCentre(centre: NotificationCentre = notificationC
 // ---- pure presentation helpers (shared by bell + panel, DOM-free tested) ----
 
 /** Human labels so kind is never communicated by color alone. */
+// Getters: a non-English catalog lands after this module loads, so each label
+// is translated when it is read.
 export const NOTIFICATION_KIND_LABELS: Record<NotificationKind, string> = {
-  completed: tr("notificationcentre.completed"),
-  failed: tr("notificationcentre.failed"),
-  question: tr("notificationcentre.question"),
-  permission: tr("notificationcentre.permission"),
-  subagent: tr("notificationcentre.delegatedAgent"),
-  mention: tr("notificationcentre.mention"),
-  message: tr("notificationcentre.message"),
+  get completed() { return tr("notificationcentre.completed"); },
+  get failed() { return tr("notificationcentre.failed"); },
+  get question() { return tr("notificationcentre.question"); },
+  get permission() { return tr("notificationcentre.permission"); },
+  get subagent() { return tr("notificationcentre.delegatedAgent"); },
+  get mention() { return tr("notificationcentre.mention"); },
+  get message() { return tr("notificationcentre.message"); },
 };
+
+/** The server keys a provider-limit notice by its limit window (`limitEpisode`
+ *  in push.ts), not by the chat's turn. Such a row is a limit that was reached,
+ *  not a broken run. */
+export function isLimitNotice(record: Pick<NotificationRecord, "kind" | "key">): boolean {
+  return record.kind === "failed" && record.key.startsWith("limit:");
+}
+
+export function notificationKindLabel(record: Pick<NotificationRecord, "kind" | "key">): string {
+  return isLimitNotice(record) ? tr("notificationcentre.limitReached") : NOTIFICATION_KIND_LABELS[record.kind];
+}
+
+/** Same-day rows show the time; older ones add the date. Both use the locale's
+ *  own clock. */
+export function notificationWhen(ts: number, locale: string = getLocale(), now = Date.now()): string {
+  const sameDay = new Date(ts).toDateString() === new Date(now).toDateString();
+  return dateTimeFormatter(locale, sameDay
+    ? { timeStyle: "short" }
+    : { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(ts);
+}
+
+const MERIDIEM_CLOCK = /\b(1[0-2]|0?[1-9])(?::([0-5]\d))?\s?([ap])(?:\.m\.|m\b)/gi;
+
+/** A provider words its reset on its own 12-hour clock ("resets 8:40pm
+ *  (Europe/Kyiv)"), which put two time formats on one card. In a limit notice
+ *  only that clock reading is rewritten in the reader's format: it is not
+ *  converted, so the zone the provider names after it stays true. */
+export function notificationBody(
+  record: Pick<NotificationRecord, "kind" | "key" | "body">,
+  locale: string = getLocale(),
+): string {
+  if (!isLimitNotice(record)) return record.body;
+  const clock = dateTimeFormatter(locale, { timeStyle: "short", timeZone: "UTC" });
+  return record.body.replace(MERIDIEM_CLOCK, (_, hour: string, minute: string | undefined, half: string) =>
+    clock.format(Date.UTC(2000, 0, 1, (Number(hour) % 12) + (half.toLowerCase() === "p" ? 12 : 0), Number(minute ?? 0))));
+}
 
 /** Accessible bell name always carries the EXACT count, even above 99. */
 export function bellName(unread: number): string {

@@ -21,6 +21,40 @@ const feed = (deltas: readonly string[], options = {}) => {
   return out;
 };
 
+test("a long opening sentence starts at its first clause, when asked to", () => {
+  const stream = createSpeakableStream({ firstClauseChars: 60 });
+  assert.deepEqual(stream.push("I looked at the failing test,"), [], "too little is waiting to cut a sentence for");
+  assert.deepEqual(stream.push(" and the assertion still used the old name of the helper"),
+    ["I looked at the failing test,"], "speech starts at the clause while the sentence is still coming");
+  assert.deepEqual(stream.push(" that was renamed last week. Next"), ["and the assertion still used the old name of the helper that was renamed last week."],
+    "the rest of the sentence follows whole");
+  assert.deepEqual(stream.flush(), ["Next"]);
+
+  const short = createSpeakableStream({ firstClauseChars: 60 });
+  assert.deepEqual(short.push("Yes, it works. The"), ["Yes, it works."], "a sentence that ends first is not cut");
+
+  const off = createSpeakableStream();
+  assert.deepEqual(off.push("I looked at the failing test, and the assertion still used the old name of the helper"), [],
+    "without the option the first chunk is a whole sentence");
+
+  const once = createSpeakableStream({ firstClauseChars: 40 });
+  once.push("Done. ");
+  assert.deepEqual(once.push("After that, the second sentence is long, has commas, and is still streaming along"), [],
+    "only the very first chunk is cut early");
+});
+
+test("an early first clause never splits a number, a code span or a link", () => {
+  const cut = (text: string) => createSpeakableStream({ firstClauseChars: 40 }).push(text);
+  assert.deepEqual(cut("The run finished with 1,000,000 rows processed in total and"), [], "a comma inside a number is not a pause");
+  assert.deepEqual(cut("I changed `matchVoiceCommand(text, phrases)` so that it also"), [], "a comma inside code is not a pause");
+  assert.deepEqual(cut("See [the guide, part two](https://example.com/a, b) for the details and"), [], "…nor one inside a link");
+  assert.deepEqual(cut("I changed `matchVoiceCommand`, so that it also accepts a trailing phrase"),
+    ["I changed matchVoiceCommand,"], "a closed code span before the comma is fine");
+  assert.deepEqual(cut("The short one, and then a much longer tail without any more pauses in it at all"), [],
+    "a clause too short to be worth a breath is not released");
+  assert.deepEqual(cut("```ts, with a comma and enough characters to pass the length check here"), [], "a fence line waits for its end");
+});
+
 test("the first sentence is released while the reply is still streaming", () => {
   const stream = createSpeakableStream();
   assert.deepEqual(stream.push("Sure, I can"), [], "an unfinished sentence waits");

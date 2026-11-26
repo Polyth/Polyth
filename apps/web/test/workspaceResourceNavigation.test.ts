@@ -53,8 +53,13 @@ test("palette groups commands once, ranks label hits, keeps selection across lat
     registerCommand({ id: "t.panels.one", label: "Notifications", group: "Panels", keywords: ["sidebar alerts"], run: () => {} }),
     registerCommand({ id: "t.shell.two", label: "Sidebar density", group: "Shell", run: () => {} }),
   ];
-  const original = api.searchWorkspaces;
-  api.searchWorkspaces = async () => [{ kind: "session", id: "s-late", projectId: "p", title: "Sidebar notes", updatedAt: 1 }];
+  // Chats arrive late from the one chat search (searchWorkspaces now only
+  // contributes projects to a typed query).
+  const original = api.searchSessions;
+  api.searchSessions = (async () => [{
+    sessionId: "s-late", projectId: "p", title: "Sidebar notes", status: "idle", updatedAt: 1, messageHits: 0,
+    matches: [{ field: "title", snippet: "Sidebar notes" }],
+  }]) as typeof api.searchSessions;
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -85,7 +90,7 @@ test("palette groups commands once, ranks label hits, keeps selection across lat
     assert.equal(input.value, "", "first Escape clears the query");
     assert.equal(store.getState().overlay, "palette", "and keeps the palette open");
   } finally {
-    api.searchWorkspaces = original;
+    api.searchSessions = original;
     for (const dispose of disposers) dispose();
     store.setOverlay(null);
     await act(async () => root.unmount());

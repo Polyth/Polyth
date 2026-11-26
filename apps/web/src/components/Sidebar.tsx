@@ -15,12 +15,15 @@ import { useSessionSummaryPages } from "../useSessionSummaryPages.ts";
 import { useElementWidth } from "../useElementWidth.ts";
 import { Icon } from "../icons.tsx";
 import SessionList from "./sidebar/SessionList.tsx";
+import PinnedSessions from "./sidebar/PinnedSessions.tsx";
 import { filterRepositoriesOf, newChatOptions } from "../repositoryFilter.ts";
 import SessionDateFilterControls from "./sidebar/SessionDateFilterControls.tsx";
 import SessionSelectionBar from "./sidebar/SessionSelectionBar.tsx";
 import { useSessionArrangementEntries } from "./sidebar/sessionArrangementEntries.ts";
 import { useShellMode } from "../responsiveShell.ts";
 import { useLaneSessions, useWorkbenchShellPresentation } from "../workbench/profileNavigation.ts";
+import { projectRailStatus } from "../sessionStatus.ts";
+import { ProjectRailMarks, ProjectRailStatusLines, projectRailStatusLabel } from "./sidebar/ProjectRailStatus.tsx";
 import { useModalSurface } from "./a11y/Dialog.tsx";
 import { isImeComposing } from "./input/editorCore.ts";
 import SlotHost, { SlotBoundary, type SlotContext } from "./slots/SlotHost.ts";
@@ -28,8 +31,7 @@ import CustomizeZoneButton from "./CustomizeZoneButton.tsx";
 import { ShellColumnAccount, ShellColumnFoot, ShellColumnHead, ShellDock } from "./ShellDock.tsx";
 import { ProjectRailTools } from "./sidebar/ProjectRailTools.tsx";
 import { OwnServerZoneHeading, ServerZonesRail, ServerZonesTree } from "./sidebar/ServerZones.tsx";
-import { useSessionMoveDropZones } from "../sessionMove.ts";
-import { projectRailMark } from "../sessionStatus.ts";
+import { checkoutTargetKey, closePendingCheckoutMove, usePendingCheckoutMove, useSessionMoveDropZones } from "../sessionMove.ts";
 import { SIDEBAR_RAIL_SLOT } from "../railPlacement.ts";
 import { useSidebarExpanded } from "../sidebarPresentation.ts";
 import { useUiSettings } from "../uiPrefs.ts";
@@ -50,7 +52,7 @@ import { commandHint, listCommands } from "../commands.ts";
 import {
   permuteManualProjects,
   setProjectOrder, setProjectSortMode,
-  setSidebarViewMode, useProjectSortMode,
+  setPinnedPlacement, setSidebarViewMode, usePinnedPlacement, useProjectSortMode,
   useSidebarViewMode, type SidebarViewMode,
   type ProjectSortMode,
 } from "../sidebarPrefs.ts";
@@ -70,6 +72,7 @@ import { useEscape } from "../useEscape.ts";
 import { announce } from "./a11y/live.tsx";
 import ProjectAppearanceDialog from "./ProjectAppearanceDialog.tsx";
 import ConversationCreateDialog from "./ConversationCreateDialog.tsx";
+import SharedChatDialog from "./SharedChatDialog.tsx";
 import SpaceSwitcher from "./SpaceSwitcher.tsx";
 import DesktopServerSwitcher from "./DesktopServerSwitcher.tsx";
 import { tr } from "../i18n/index.ts";
@@ -92,12 +95,16 @@ import { offersPrivateRoom, privateRoomOf, rootProjectId, rootProjects, startPri
 import PrivateRoomGroup, { useRoomChatsListed } from "./PrivateRoomGroup.tsx";
 import { useShellDirection } from "../shellDirection.ts";
 import { listProjectSettings, subscribeProjectSettingsNavigation } from "../projectSettings.ts";
+import { searchTerms } from "@polyth/session/search-text";
+import { metadataHitProjectIds, projectMatchesSearch, sessionMatchesSearch, useChatSearchHits } from "../chatSearchHits.ts";
+import { ChatSearchMessagesRow } from "./ChatSearchMessagesRow.tsx";
 import { ARRANGE_LIST_LIFT_MS, useArrange, type ArrangeItem } from "../workspaceArrange.ts";
 
 /** Grace period an untouched peek keeps after the pointer leaves the sidebar. */
 export const PEEK_LEAVE_MS = 5000;
 
-/** A project's latest top-level chat, the one a second rail click opens. */
+/** A project's latest top-level chat, the one a rail click opens from a chat
+ *  in another project. */
 export function latestProjectSession(
   sessions: readonly SessionProjection[],
   projects: readonly Project[],
@@ -377,6 +384,7 @@ export default function Sidebar() {
   const registry = useStore((s) => s.projectRegistry);
   const projects = rootProjects(registry.projects) as typeof registry.projects;
   const sessionMoveDrops = useSessionMoveDropZones();
+  const pendingCheckoutMove = usePendingCheckoutMove();
   // Only the personal project: chats list flat, with no project row or rail
   // icon, until the person adds a real project.
   const soloPersonal = registry.status === "ready" ? soloPersonalProject(projects) : null;
@@ -414,6 +422,7 @@ export default function Sidebar() {
   const [projectMenuSource, setProjectMenuSource] = useState<"card" | "rail" | null>(null);
   const [appearanceProjectId, setAppearanceProjectId] = useState<string | null>(null);
   const [conversationProjectId, setConversationProjectId] = useState<string | null>(null);
+  const [sharedChatProjectId, setSharedChatProjectId] = useState<string | null>(null);
   const [projectSettingsPage, setProjectSettingsPage] = useState<"menu" | `contribution:${string}`>("menu");
   useEffect(() => subscribeProjectSettingsNavigation((request) => {
     const { contributionId } = request;
@@ -427,6 +436,9 @@ export default function Sidebar() {
     setAppearanceProjectId(projectId);
   }), []);
   const [attentionOnly, setAttentionOnly] = useState(false);
+  // Every pinned chat in one group above the projects, instead of leading
+  // its own project's list.
+  const pinnedAbove = usePinnedPlacement() === "top";
   const navActions = useNavigatorActions();
   const navSections = useNavigatorSections();
   const [dateFilter, setDateFilter] = useState<SessionDateFilter>(EMPTY_SESSION_DATE_FILTER);
@@ -475,19 +487,26 @@ export default function Sidebar() {
     });
   };
   const orderedProjects = useOrderedProjects(projects, latestProjectActivity);
+  const searchTermList = useMemo(() => searchTerms(query), [query]);
+  // The same query asks the one chat search what this list cannot show:
+  // chats not paged in yet, and chats that match only in their messages.
+  const chatHits = useChatSearchHits(query);
+  const serverHitProjects = useMemo(() => {
+    const ids = metadataHitProjectIds(chatHits.results);
+    return new Set([...ids].map((id) => rootProjectId(registry.projects, id)));
+  }, [chatHits.results, registry.projects]);
   const visibleProjects = useMemo(() => {
-    const needle = query.trim().toLowerCase();
     return orderedProjects.filter((candidate) => {
       const candidates = sessions.filter((session) =>
         rootProjectId(registry.projects, session.projectId) === candidate.id && sessionMatchesDateFilter(session, dateFilter));
       if (sessionDateFilterActive(dateFilter) && candidates.length === 0) return false;
       if (attentionOnly && !sessionsNeedAttention(candidates)) return false;
-      if (!needle) return true;
-      if (`${candidate.name} ${candidate.path}`.toLowerCase().includes(needle)) return true;
-      return candidates.some((session) =>
-        `${session.title} ${session.branch ?? ""} ${session.worktreePath ?? ""}`.toLowerCase().includes(needle));
+      if (!searchTermList.length) return true;
+      if (projectMatchesSearch(candidate, searchTermList)) return true;
+      if (serverHitProjects.has(candidate.id)) return true;
+      return candidates.some((session) => sessionMatchesSearch(session, searchTermList));
     });
-  }, [attentionOnly, dateFilter, orderedProjects, query, registry.projects, sessions]);
+  }, [attentionOnly, dateFilter, orderedProjects, searchTermList, serverHitProjects, registry.projects, sessions]);
   // Below the compact seam (COMPACT_MAX_WIDTH) the sidebar is a modal
   // drawer — every portrait tablet and small window included. It never opens by
   // itself when the viewport shrinks — wide visibility is not a persisted
@@ -627,11 +646,12 @@ export default function Sidebar() {
   useEscape(peek !== null && railCollapsed, closePeek);
   // The peek previews the hovered project without stealing the active one.
   const focusProjectId = soloPersonal?.id ?? (railCollapsed ? peek?.projectId : null) ?? railProjectId;
-  /** A second click on the browsed project enters it: the New chat page moves
-   *  to that project, and a chat open in another project gives way to this
-   *  project's latest chat (its New chat when it has none). Inside the
-   *  project already, it does nothing; it never collapses the navigator. */
-  const enterRailProject = (projectId: string) => {
+  /** Entering a project from the wide rail or tree: the New chat page moves to
+   *  that project, and a chat open in another project gives way to this
+   *  project's latest chat (its New chat when it has none), so a project with
+   *  no chats yet still opens with its files and panes. Inside the project
+   *  already, it does nothing; it never collapses the navigator. */
+  const enterProject = (projectId: string) => {
     if (projectId === activeProjectId) return;
     const target = projects.find((candidate) => candidate.id === projectId);
     if (!target) return;
@@ -651,12 +671,25 @@ export default function Sidebar() {
       setPeek((current) => current?.projectId === projectId && current.pinned
         ? null
         : { projectId, pinned: true });
+    } else if (!compact && !projectsOnly) {
+      // The wide expanded rail enters the project on the first click, so the
+      // main area and the active mark never lag the column behind them.
+      setRailProjectId(projectId);
+      enterProject(projectId);
     } else if (railProjectId === projectId) {
-      if (!compact && !projectsOnly) enterRailProject(projectId);
-      else setRailProjectId(null);
+      setRailProjectId(null);
     } else {
       setRailProjectId(projectId);
     }
+  };
+  /** The wide tree enters a project it is not in yet (the active project's
+   *  list opens with it) and opens or closes the list of the project it is
+   *  already in. The compact drawer's tree only browses. */
+  const clickTreeProject = (projectId: string, clickCount: number) => {
+    // A double-click's second click (the rename gesture) does not act again.
+    if (clickCount > 1) return;
+    if (!compact && projectId !== activeProjectId) enterProject(projectId);
+    else toggleTree(projectId);
   };
   const focusedProject = effectiveViewMode === "rail" && query.trim() === ""
     ? visibleProjects.find((candidate) => candidate.id === focusProjectId) ?? null
@@ -1033,6 +1066,13 @@ export default function Sidebar() {
       checked: attentionOnly,
       onSelect: () => setAttentionOnly((value) => !value),
     },
+    {
+      id: "pinned-above",
+      label: tr("sidebar.sessionlist.pinnedAboveProjects"),
+      kind: "checkbox",
+      checked: pinnedAbove,
+      onSelect: () => setPinnedPlacement(pinnedAbove ? "project" : "top"),
+    },
     ...arrangementEntries,
     ...sectionFilterEntries,
   ];
@@ -1171,6 +1211,16 @@ export default function Sidebar() {
       label: tr("conversation.new"),
       onSelect: () => setConversationProjectId(p.id),
     },
+    {
+      // Starts shared: the agent never reaches the creator's personal notes,
+      // which sharing an existing chat can only ask about afterwards (§14.6).
+      id: "shared-chat",
+      label: tr("sharing.newSharedChat"),
+      onSelect: () => {
+        if (p.id !== activeProjectId) activateProject(p.id);
+        setSharedChatProjectId(p.id);
+      },
+    },
     ...(offersPrivateRoom(p) ? [{
       id: "private-chat",
       label: tr("privateRoom.newChat"),
@@ -1230,6 +1280,7 @@ export default function Sidebar() {
           projectId={roomId}
           leadingExclude={leadingExclude(roomId)}
           attentionOnly={attentionOnly}
+          pinnedAbove={pinnedAbove}
           dateFilter={dateFilter}
           selectMode={selectMode}
           selectedSessionIds={selectedSessionIds}
@@ -1280,7 +1331,7 @@ export default function Sidebar() {
           aria-keyshortcuts={reorderable ? "Alt+Shift+ArrowUp Alt+Shift+ArrowDown" : undefined}
           onContextMenu={(event) => onProjectContextMenu(event, p.id, "card")}
           onClick={(event) => {
-            if (effectiveViewMode === "tree") toggleTree(p.id);
+            if (effectiveViewMode === "tree") clickTreeProject(p.id, event.detail);
             else if (railCollapsed) closePeek();
             else toggleRailProject(p.id, event.detail);
           }}
@@ -1381,6 +1432,15 @@ export default function Sidebar() {
         {...sessionMoveDrops.handlers}
       >
         <h2 className="sr-only">{tr("sidebar.projectsAndSessions")}</h2>
+        {/* A chat dropped on another checkout of its project: the Git package
+            confirms (branch, leaving an emptied worktree) and moves it. */}
+        {pendingCheckoutMove && (
+          <SlotHost
+            key={`${pendingCheckoutMove.sessionId}\n${checkoutTargetKey(pendingCheckoutMove.target)}`}
+            slot="session.checkout.move"
+            context={{ ...pendingCheckoutMove, onClose: closePendingCheckoutMove }}
+          />
+        )}
         {fullyCollapsed && (
           <div className="sidebar-collapsed-rail">
             <IconButton
@@ -1437,8 +1497,7 @@ export default function Sidebar() {
               data-arranging={railArrange && arrange.draggingId ? "" : undefined}
             >
               {(soloPersonal ? [] : arrangedOrder(orderedProjects)).map((candidate) => {
-                const candidateSessions = sessions.filter((session) => rootProjectId(registry.projects, session.projectId) === candidate.id);
-                const railMark = projectRailMark(candidateSessions);
+                const railStatus = projectRailStatus(sessions.filter((session) => rootProjectId(registry.projects, session.projectId) === candidate.id));
                 return (
                   <Menu
                     key={candidate.id}
@@ -1468,6 +1527,7 @@ export default function Sidebar() {
                             <span className="sidebar-project-rail-tooltip-copy">
                               <strong>{candidate.name || candidate.path}</strong>
                               {candidate.name && candidate.path !== candidate.name && !candidate.personal && <span>{candidate.path}</span>}
+                              <ProjectRailStatusLines status={railStatus} />
                             </span>
                           </span>
                         )}
@@ -1479,7 +1539,7 @@ export default function Sidebar() {
                           aria-current={candidate.id === activeProjectId ? "true" : undefined}
                           aria-expanded={candidate.id === focusProjectId && (!railCollapsed || peek !== null)}
                           aria-keyshortcuts={reorderable ? "Alt+Shift+ArrowUp Alt+Shift+ArrowDown" : undefined}
-                          aria-label={candidate.name || candidate.path}
+                          aria-label={projectRailStatusLabel(candidate.name || candidate.path, railStatus)}
                           title=""
                           data-arrange-id={reorderable ? candidate.id : undefined}
                           data-session-drop-project={candidate.id}
@@ -1503,9 +1563,7 @@ export default function Sidebar() {
                           }}
                         >
                           <ProjectGlyph project={candidate} />
-                          {railMark && (
-                            <span className={`sidebar-project-rail-status ${railMark}`} aria-hidden="true" />
-                          )}
+                          <ProjectRailMarks status={railStatus} />
                         </button>
                       </Tooltip>
                     )}
@@ -1806,14 +1864,14 @@ export default function Sidebar() {
           {registry.status === "ready" && projects.length > 0 && visibleProjects.length === 0 && (
             <div className="empty side-projects-status" role="status">{tr("sidebar.noMatchingSessions")}</div>
           )}
+          {query.trim() !== "" && <ChatSearchMessagesRow hits={chatHits} className="sidebar-messages-row" />}
           {query.trim() !== "" && (
             <div className="sidebar-search-results" aria-label={tr("sidebar.sessionSearchResults")}>
               {visibleProjects.map((p) => {
-                const needle = query.trim().toLowerCase();
-                const projectMatches = `${p.name} ${p.path}`.toLowerCase().includes(needle);
+                const projectMatches = projectMatchesSearch(p, searchTermList);
                 const room = privateRoomOf(registry.projects, p.id);
                 const roomMatches = room && sessions.some((session) => session.projectId === room.id
-                  && (projectMatches || `${session.title} ${session.branch ?? ""} ${session.worktreePath ?? ""}`.toLowerCase().includes(needle)));
+                  && (projectMatches || sessionMatchesSearch(session, searchTermList)));
                 const results = (projectId: string, name: string) => (
                   <SessionList
                     key={projectId}
@@ -1835,6 +1893,15 @@ export default function Sidebar() {
               })}
             </div>
           )}
+          {query.trim() === "" && pinnedAbove && registry.status === "ready" && (
+            <PinnedSessions
+              attentionOnly={attentionOnly}
+              dateFilter={dateFilter}
+              selectMode={selectMode}
+              selectedSessionIds={selectedSessionIds}
+              onToggleSelected={toggleSelectedSession}
+            />
+          )}
           {/* Beside other servers' zones, this server's projects get its name. */}
           {query.trim() === "" && effectiveViewMode !== "rail" && registry.status === "ready" && <OwnServerZoneHeading />}
           {query.trim() === "" && (effectiveViewMode === "rail"
@@ -1847,6 +1914,7 @@ export default function Sidebar() {
                     projectId={p.id}
                     leadingExclude={leadingExclude(p.id)}
                     attentionOnly={attentionOnly}
+                    pinnedAbove={pinnedAbove}
                     dateFilter={dateFilter}
                     selectMode={selectMode}
                     selectedSessionIds={selectedSessionIds}
@@ -1863,6 +1931,7 @@ export default function Sidebar() {
                     projectId={p.id}
                     leadingExclude={leadingExclude(p.id)}
                     attentionOnly={attentionOnly}
+                    pinnedAbove={pinnedAbove}
                     dateFilter={dateFilter}
                     selectMode={selectMode}
                     selectedSessionIds={selectedSessionIds}
@@ -1871,8 +1940,7 @@ export default function Sidebar() {
                 </div>
               );
             }
-            const projectQuery = query.trim()
-              && `${p.name} ${p.path}`.toLowerCase().includes(query.trim().toLowerCase())
+            const projectQuery = searchTermList.length && projectMatchesSearch(p, searchTermList)
               ? ""
               : query;
             const card = renderProjectCard(p);
@@ -1893,6 +1961,7 @@ export default function Sidebar() {
                       leadingExclude={leadingExclude(p.id)}
                       query={projectQuery}
                       attentionOnly={attentionOnly}
+                      pinnedAbove={pinnedAbove}
                       dateFilter={dateFilter}
                       selectMode={selectMode}
                       selectedSessionIds={selectedSessionIds}
@@ -1955,6 +2024,13 @@ export default function Sidebar() {
           open
           projectId={conversationProjectId}
           onClose={() => setConversationProjectId(null)}
+        />
+      )}
+      {sharedChatProjectId && (
+        <SharedChatDialog
+          open
+          projectId={sharedChatProjectId}
+          onClose={() => setSharedChatProjectId(null)}
         />
       )}
     </>

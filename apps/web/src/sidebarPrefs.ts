@@ -485,6 +485,50 @@ export function setShowDateGroups(show: boolean): void {
   else if (getGroupingMode() === "date") setGroupingMode("none");
 }
 
+// ---- where pinned chats are drawn ---------------------------------------------
+// "project": each project's pinned chats lead its own list (the default).
+// "top": every pinned chat, from all projects, in one group above the projects.
+// Account presentation, synced as its own preference id (`core.sidebar-pinned`)
+// so a client that predates it never drops the choice from `core.sidebar`.
+
+export const PINNED_PLACEMENT_KEY = "polyth.sidebar.pinnedPlacement";
+export type PinnedPlacement = "project" | "top";
+
+export function parsePinnedPlacement(raw: unknown): PinnedPlacement {
+  return raw === "top" ? "top" : "project";
+}
+
+const readPinnedPlacement = (): string | null => {
+  try { return localStorage.getItem(PINNED_PLACEMENT_KEY); } catch { return null; }
+};
+const writePinnedPlacement = (value: PinnedPlacement): void => {
+  try { localStorage.setItem(PINNED_PLACEMENT_KEY, value); } catch { /* private mode */ }
+};
+
+let storedPinnedPlacement: PinnedPlacement = parsePinnedPlacement(readPinnedPlacement());
+const pinnedPlacementListeners = new Set<() => void>();
+
+export function getPinnedPlacement(): PinnedPlacement {
+  return storedPinnedPlacement;
+}
+
+export function setPinnedPlacement(placement: PinnedPlacement): void {
+  const next = parsePinnedPlacement(placement);
+  if (next === storedPinnedPlacement) return;
+  storedPinnedPlacement = next;
+  writePinnedPlacement(next);
+  for (const l of [...pinnedPlacementListeners]) l();
+}
+
+export function subscribePinnedPlacement(listener: () => void): () => void {
+  pinnedPlacementListeners.add(listener);
+  return () => { pinnedPlacementListeners.delete(listener); };
+}
+
+export function usePinnedPlacement(): PinnedPlacement {
+  return useSyncExternalStore(subscribePinnedPlacement, getPinnedPlacement, () => "project" as PinnedPlacement);
+}
+
 // ---- sidebar project ordering (mobile/desktop toolbar) -----------------------
 // The compact drawer replaced its decorative title with a search/sort/filter
 // toolbar. "manual" (shown as "Custom order") is the order the user moved the

@@ -127,7 +127,7 @@ test("the activity details render a localized context sample", async () => {
 test("Stop is the context gauge; a Send never is", async () => {
   const composer = await read("../../../apps/web/src/components/Composer.tsx");
   assert.match(composer, /const contextGauge = useActiveContextGauge\(model\);/);
-  const running = composer.slice(composer.indexOf("{canStop ? ("), composer.indexOf('<button className="send" onPointerDown={onPrimaryPointerDown}'));
+  const running = composer.slice(composer.indexOf("{canStop ? ("), composer.indexOf('<button className="send" ref={sendPressRef}'));
   assert.match(
     running,
     /className="stop composer-stop-primary context-liquid-host"[\s\S]*?<Icon\.stop \/>[\s\S]*?<ContextLiquid key=\{session\?\.id\} gauge=\{contextGauge\}><Icon\.stop \/><\/ContextLiquid>/,
@@ -136,8 +136,8 @@ test("Stop is the context gauge; a Send never is", async () => {
   const split = running.slice(0, running.indexOf('className="stop composer-stop-primary'));
   assert.doesNotMatch(split, /ContextLiquid|context-liquid/, "the running Send is solid: the context pie reports the level there");
   assert.match(running, /title=\{withContextLabel\(tr\("composer\.stopTheCurrentResponse"\)\)\}/);
-  assert.match(running, /title=\{withContextLabel\(runningPrimaryTitle\)\}/);
-  const idle = composer.slice(composer.indexOf('<button className="send" onPointerDown={onPrimaryPointerDown}'));
+  assert.match(running, /title=\{withContextLabel\(`\$\{runningPrimaryTitle\}\$\{holdHint\}`\)\}/);
+  const idle = composer.slice(composer.indexOf('<button className="send" ref={sendPressRef}'));
   assert.doesNotMatch(idle.slice(0, idle.indexOf("</button>")), /context-liquid/, "the idle Send keeps its solid call to action");
 });
 

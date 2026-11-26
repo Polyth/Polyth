@@ -3,14 +3,16 @@
 import { createHash, randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Disposable, JsonObject, SpaceContext, ToolExecutionContext } from "@polyth/contracts";
+import { SESSION_WAIT_ARMED_EVENT, SESSION_WAIT_ENDED_EVENT } from "@polyth/contracts";
+import type { Disposable, JsonObject, SessionWaitChange, SpaceContext, ToolExecutionContext } from "@polyth/contracts";
 import { atomicWriteSync } from "@polyth/plugins/atomic-write";
 import { SESSION_ATTENTION_SERVICE, type ServerPackageHost } from "@polyth/plugins";
 import type { WaitConditionProvider, WaitConditionRegistry } from "./index.ts";
 import { allowedRoots, confineFile, fail, fileAppeared, identifyProcess, processGone, workspaceRoots, type ProcessIdentity } from "./local.ts";
 
-export const WAIT_STARTED_EVENT = "wait/started";
-export const WAIT_ENDED_EVENT = "wait/ended";
+/** A wait is the host's `SessionWait`: the chat's projection lists it. */
+export const WAIT_STARTED_EVENT = SESSION_WAIT_ARMED_EVENT;
+export const WAIT_ENDED_EVENT = SESSION_WAIT_ENDED_EVENT;
 export const MAX_PENDING_PER_CHAT = 8;
 export const MAX_PENDING_PER_SPACE = 200;
 const DEFAULT_TIMEOUT_MINUTES = 120;
@@ -131,10 +133,20 @@ export function createWaitManager(options: WaitManagerOptions): WaitManager {
   const release = (record: WaitRecord): void => {
     if (record.kind === "pid" || record.kind === "file") host.sessions.releaseRuntimeHold?.(record.sessionId, record.id);
   };
+  // The chat shows what it waits for: the host records the change on its
+  // projection (`waits`). A host without that seam still gets the event.
   const append = async (record: WaitRecord, type: string, outcome?: string): Promise<void> => {
-    await host.events.append(record.sessionId, type, {
-      id: record.id, kind: record.kind, label: record.label, ...(outcome ? { outcome } : {}),
-    }, { ignorable: true, producerPlugin: host.pluginId }).catch(() => undefined);
+    const change: SessionWaitChange = type === WAIT_STARTED_EVENT
+      ? { op: "armed", wait: { id: record.id, kind: record.kind, label: record.label, since: record.createdAt, deadline: record.deadline } }
+      : { op: "ended", id: record.id, ...(outcome ? { outcome } : {}) };
+    if (host.sessions.recordWait) {
+      await host.sessions.recordWait(record.sessionId, change).catch(() => undefined);
+      return;
+    }
+    await host.events.append(record.sessionId, type, change.op === "armed"
+      ? { ...change.wait }
+      : { id: change.id, ...(change.outcome ? { outcome: change.outcome } : {}) },
+    { ignorable: true, producerPlugin: host.pluginId }).catch(() => undefined);
   };
 
   const stopTimerIfIdle = (): void => {
@@ -282,6 +294,13 @@ export function createWaitManager(options: WaitManagerOptions): WaitManager {
         if (record.state === "pending") {
           hold(record);
           if (record.kind === "pid") record.target = { ...record.target, resumed: true };
+          // A wait armed before chats listed their waits is shown once.
+          const projection = host.sessions.recordWait
+            ? await host.store.projection(record.sessionId).catch(() => null)
+            : null;
+          if (projection && !projection.waits?.some((wait) => wait.id === record.id)) {
+            await append(record, WAIT_STARTED_EVENT);
+          }
         } else if (record.state === "firing") {
           record.nextAttemptAt = 0;
         }

@@ -11,7 +11,7 @@ import { dirname } from "node:path";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { AttachmentRef, HarnessSelection, HarnessSnapshot, ModelRef, TokenUsage, TurnAdmission } from "@polyth/contracts";
 import { harnessSignInExpiry } from "@polyth/contracts";
-import { atomicWriteSync } from "@polyth/plugins";
+import { atomicWriteSync, type AgentEventSubscription } from "@polyth/plugins";
 import {
   contentTrustMatches,
   issueContentTrustReceipt,
@@ -23,6 +23,7 @@ import type { LoopFileResult } from "./loops.ts";
 import { fallbacksFromFile, fallbacksToFile, type AgentFileSpec } from "./agentFile.ts";
 import { budgetExceeded, failureStreakReached, pendingFeedback, type AgentTrigger, type AgentWake } from "./agentPrompt.ts";
 import { computeNextBeat, validateHeartbeat, type AgentHeartbeat } from "./agentHeartbeat.ts";
+import { eventMarks, heldNote, holdDecision, repeatedReport, type AgentEventMark } from "./agentHold.ts";
 import {
   sameNeed,
   appendToNotebook,
@@ -31,6 +32,7 @@ import {
   NOTEBOOK_LIMIT,
   parseAgentReport,
   type AgentNeed,
+  type NeedAnswer,
   type AgentNotifyPolicy,
   type AgentSignal,
 } from "./agentReport.ts";
@@ -167,6 +169,8 @@ export interface ScheduleRunRecord {
   rotated?: "instructions-changed" | "context-full" | "compacted";
   /** Event wakes: one line per event that started this run. */
   events?: string[];
+  /** Event wakes: what those events said, to tell later news from a repeat. */
+  marks?: AgentEventMark[];
   /** How many agent hops led here (event wakes only); capped at MAX_CHAIN_DEPTH. */
   chainDepth?: number;
   /** Approval requests in this run's session that wait for a person. */
@@ -176,8 +180,17 @@ export interface ScheduleRunRecord {
   signal?: AgentSignal;
   /** One line from the report (or the answer's first line). */
   headline?: string;
+  /** The report only asked again for what already waited, with the same
+   *  figures: filed as quiet. `of` is the run that asked before, `signal` the
+   *  one this report gave. */
+  repeat?: { of: string; signal: "update" | "alert" };
   /** Notes this run added to the notebook. */
   remembered?: string[];
+  /** What was set aside for this wake and the run's prompt carried. They
+   *  left `ScheduleTask.nextWake` once the run started. */
+  carried?: AgentWakeNote[];
+  /** `Next wake:` lines this run (a conversation with the person) set aside. */
+  setAside?: string[];
   /** The person's verdict on this run's report. */
   feedback?: AgentRunFeedback;
   /** The person stopped this run: not a failure of the agent. */
@@ -211,6 +224,10 @@ export interface ScheduleRunRecord {
   /** While running: the turn ended to wait for background work the agent
    *  started; the run goes on when that work wakes it. */
   background?: AgentBackgroundWait;
+  /** While running: since when its turn, cut by a Polyth restart (or a
+   *  runtime replacement), waits to be continued. What comes due meanwhile
+   *  runs once the run has settled, never skipped. */
+  recovering?: number;
   /** Once finished: how the run went, in the agent's own passing words and
    *  its waits, oldest first and bounded. Its final message is the report. */
   timeline?: AgentRunMoment[];
@@ -289,6 +306,23 @@ export interface AgentQueuedMessage {
   sessionId?: string;
 }
 
+/** Something to do at the agent's next wake rather than now. The person sets
+ *  it with their message, or the agent does with a `Next wake:` line when the
+ *  person asked for it in a conversation. The next wake that is not a
+ *  conversation with the person carries it, once. */
+export interface AgentWakeNote {
+  id: string;
+  text: string;
+  at: number;
+  by: "user" | "agent";
+  /** The run whose report set it aside (`by: "agent"`). */
+  runId?: string;
+}
+
+/** How many requests may wait for the next wake, and how long one may be. */
+export const NEXT_WAKE_LIMIT = 8;
+export const NEXT_WAKE_TEXT_LIMIT = AGENT_INPUT_LIMIT;
+
 export interface AgentRunFeedback {
   verdict: "up" | "down";
   /** What to do differently, in the person's words. Data for the agent. */
@@ -318,7 +352,7 @@ export interface AgentEventLogEntry {
   at: number;
   triggerId: string;
   outcome: "fired" | "rate-limited" | "chain-limit" | "budget" | "busy" | "overlap"
-    | "script-skip" | "script-pause" | "script-error";
+    | "script-skip" | "script-pause" | "script-error" | "held";
   /** Number of events behind this entry. */
   count: number;
   text?: string;
@@ -488,6 +522,8 @@ export interface ScheduleTask {
    *  Saved, so a restart sends it later; never dispatched while it is here,
    *  since the save that records its run removes it. */
   queuedStart?: RunStart;
+  /** Requests set aside for the next wake, oldest first. */
+  nextWake?: AgentWakeNote[];
 }
 
 export interface ScheduleTaskInput {
@@ -811,6 +847,10 @@ export interface ScheduleRunner {
     onBackground?: (wait: AgentBackgroundWait | null) => void,
     /** The person asked to stop the run. */
     stopRequested?: () => boolean,
+    /** `carriedOver`: start() found the run running, left by the process a
+     *  restart replaced (or by an earlier enable). `onRecovery`: its turn,
+     *  cut by a restart, waits to be continued (`null`: no longer). */
+    recovery?: { carriedOver: boolean; onRecovery: (since: number | null) => void },
   ): Promise<ScheduleRunSettlement>;
   /** The run's session read again after it settled without a report: the
    *  report it wrote later, if any (`scanLateReport`). Without it, a run's
@@ -916,6 +956,9 @@ export interface ScheduleService {
   takeIssuedWebhookTokens(id: string): Record<string, string>;
   /** Projects with an active agent waking on integration `source`. */
   subscribed(source: string): Array<{ spaceId: string; projectId: string }>;
+  /** Every active agent wake on integration `source`, with its owner,
+   *  types and filters, so the source can watch what the wake names. */
+  subscriptions(source: string): AgentEventSubscription[];
   /** Turn `id` into a repository-defined agent backed by `file`, which the
    *  person just wrote from it (trusted as exactly these bytes). */
   adoptFile(id: string, spaceId: string, file: LoopFileResult): ScheduleTask;
@@ -929,8 +972,15 @@ export interface ScheduleService {
   markSeen(id: string, at?: number): ScheduleTask;
   /** Record (or with `null` clear) the person's verdict on one run's report. */
   setFeedback(id: string, runId: string, feedback: { verdict: "up" | "down"; note?: string } | null): ScheduleTask;
+  /** The person sets something aside for the agent's next wake (no run
+   *  starts now). Refuses empty text and a full list (invalid-input). */
+  setAsideForNextWake(id: string, text: string): ScheduleTask;
+  /** The person takes back a request waiting for the next wake. */
+  dropWakeNote(id: string, noteId: string): ScheduleTask;
   /** The person settles (or reopens) what a report said only they can do. */
-  setNeedDone(id: string, runId: string, index: number, done: boolean): ScheduleTask;
+  /** Settle (or reopen) a request; `answer` records that the person said
+   *  go ahead or declined, rather than did it themselves. */
+  setNeedDone(id: string, runId: string, index: number, done: boolean, answer?: NeedAnswer): ScheduleTask;
   /** The person stops the runs in progress: marks them and returns their
    *  sessions, which the caller aborts. */
   requestStop(id: string): string[];
@@ -1621,6 +1671,26 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
     rec.remembered = added;
   };
 
+  /** `Next wake:` lines of a conversation with the person: only a run that
+   *  carries the person's words relays what they asked for later (a
+   *  scheduled run's lines are ignored). A report read again replaces what
+   *  the same run set aside before. */
+  const setAside = (task: ScheduleTask, rec: ScheduleRunRecord, lines: string[]): void => {
+    if (!rec.input && !rec.attachments?.length) return;
+    const others = (task.nextWake ?? []).filter((note) => note.runId !== rec.runId);
+    const added: AgentWakeNote[] = [];
+    for (const text of lines) {
+      if (others.length + added.length >= NEXT_WAKE_LIMIT) break;
+      if ([...others, ...added].some((note) => sameNeed(note.text, text))) continue;
+      added.push({ id: randomUUID(), text, at: now(), by: "agent", runId: rec.runId });
+    }
+    const next = [...others, ...added];
+    if (next.length) task.nextWake = next;
+    else delete task.nextWake;
+    if (added.length) rec.setAside = added.map((note) => note.text);
+    else delete rec.setAside;
+  };
+
   /** A run's final message, as its record keeps it. The report line and
    *  notes are protocol, not prose: they are kept apart. */
   const applyReport = (task: ScheduleTask, rec: ScheduleRunRecord, text: string, ok: boolean): void => {
@@ -1635,8 +1705,16 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
     else delete rec.headline;
     if (report.needs.length) rec.needs = report.needs;
     else delete rec.needs;
+    // Asking the person again for what already waits, with the same figures,
+    // is not news: filed quietly, so it neither lights up nor notifies.
+    const repeated = ok && !rec.input ? repeatedReport(rec, (task.history ?? []).filter((run) => run !== rec), now()) : undefined;
+    if (repeated) {
+      rec.repeat = repeated;
+      rec.signal = "quiet";
+    } else delete rec.repeat;
     if (ok) {
       remember(task, rec, report.remember);
+      setAside(task, rec, report.nextWake);
       // What the agent says no longer waits is settled wherever it was asked.
       for (const words of report.resolved) {
         for (const run of task.history ?? []) {
@@ -1680,6 +1758,7 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
     // The newest step only means something while the run works; the count stays.
     delete rec.activity;
     delete rec.background;
+    delete rec.recovering;
     if (result.status === "ok") delete task.lastError;
     else task.lastError = rec.error ?? "The run's result could not be confirmed.";
     let tripped = false;
@@ -1763,8 +1842,8 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
 
   /** Follow an admitted run to its real end. A stop() detaches the observer
    * without touching the record, so the next start() resumes it. */
-  const observe = (task: ScheduleTask, rec: ScheduleRunRecord): Promise<void> => {
-    const follower = { signal: observers.signal, watched: follow(task, rec) };
+  const observe = (task: ScheduleTask, rec: ScheduleRunRecord, carriedOver = false): Promise<void> => {
+    const follower = { signal: observers.signal, watched: follow(task, rec, carriedOver) };
     watching.set(rec.runId, follower);
     const done = (): void => {
       if (watching.get(rec.runId) === follower) watching.delete(rec.runId);
@@ -1773,7 +1852,7 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
     return follower.watched;
   };
 
-  const follow = async (task: ScheduleTask, rec: ScheduleRunRecord): Promise<void> => {
+  const follow = async (task: ScheduleTask, rec: ScheduleRunRecord, carriedOver: boolean): Promise<void> => {
     const signal = observers.signal;
     inFlight.add(rec.runId);
     try {
@@ -1794,7 +1873,16 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
         if (wait) rec.background = wait;
         else delete rec.background;
         save();
-      }, () => rec.stopped === true);
+      }, () => rec.stopped === true, {
+        carriedOver,
+        onRecovery: (since) => {
+          if (signal.aborted || rec.status !== "running") return;
+          if ((rec.recovering ?? null) === since) return;
+          if (since === null) delete rec.recovering;
+          else rec.recovering = since;
+          save();
+        },
+      });
       if (signal.aborted) {
         inFlight.delete(rec.runId);
         return;
@@ -1864,7 +1952,7 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
       ...(input ? { input } : {}),
       ...(note ? { note } : {}),
       ...(attachments?.length ? { attachments: attachmentSummary(attachments) } : {}),
-      ...(events?.length ? { events: events.map(describeEvent) } : {}),
+      ...(events?.length ? { events: events.map(describeEvent), marks: eventMarks(events) } : {}),
       ...(chainDepth ? { chainDepth } : {}),
     };
     const wake: AgentWake = {
@@ -1878,6 +1966,13 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
       ...(thread ? { thread } : {}),
       ...(events?.length ? { events } : {}),
     };
+    // Requests set aside for the next wake: the next wake that is not a
+    // conversation with the person carries them; such a conversation is only
+    // told they wait. They leave the list once the run is admitted.
+    const waitingNotes = task.nextWake ?? [];
+    const carried = waitingNotes.length && carriesNextWake(task, start) ? waitingNotes : [];
+    if (carried.length) wake.nextWake = carried;
+    else if (waitingNotes.length && personal(start)) wake.setAside = waitingNotes;
     // Feedback the prompt is about to carry; marked heard once it is admitted.
     const feedbackRuns = pendingFeedback(task.history).map((run) => run.runId);
     if (dequeued) {
@@ -1892,6 +1987,13 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
         const outcome = await admit(executableTask, runId, wake);
         for (const run of task.history ?? []) {
           if (run.feedback && feedbackRuns.includes(run.runId)) run.feedback.delivered = true;
+        }
+        if (carried.length) {
+          const ids = new Set(carried.map((note) => note.id));
+          const left = (task.nextWake ?? []).filter((note) => !ids.has(note.id));
+          if (left.length) task.nextWake = left;
+          else delete task.nextWake;
+          rec.carried = carried;
         }
         if (outcome?.notebookRev !== undefined) task.notebookSentRev = outcome.notebookRev;
         if (outcome?.sessionId) {
@@ -1937,6 +2039,10 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
     running.set(taskId, tracked);
   };
 
+  /** Its run in progress is a turn a restart cut, still to be continued. */
+  const runRecovering = (task: ScheduleTask): boolean =>
+    (task.history ?? []).some((run) => run.status === "running" && run.recovering !== undefined);
+
   const recordSkip = (task: ScheduleTask, error: string): void => {
     pushHistory(task, {
       runId: randomUUID(), startedAt: now(), finishedAt: now(),
@@ -1947,6 +2053,17 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
   /** The person's message: their words and/or files. Only they fill `input`
    *  and `attachments` (an event script's words are its `note`). */
   const personal = (start: RunStart): boolean => Boolean(start.input || start.attachments?.length);
+
+  /** Whether a run is the "next wake" requests wait for: any wake that is
+   *  not a conversation with the person (they would be done in the middle of
+   *  one, and the person's chat would use them up). A heartbeat is a routine
+   *  check between the agent's runs, so it carries them only for an agent
+   *  with no scheduled run ahead. */
+  const carriesNextWake = (task: ScheduleTask, start: RunStart): boolean => {
+    if (personal(start)) return false;
+    if (start.trigger !== "heartbeat") return true;
+    return !(task.enabled && !task.manualOnly && typeof task.nextRunAt === "number");
+  };
 
   /** Run `op` after every earlier one for the same task has finished. */
   const serially = <T>(taskId: string, op: () => Promise<T>): Promise<T> => {
@@ -2154,6 +2271,17 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
       return;
     }
     const waiting = queuedNext.get(task.id);
+    if (active && policy === "skip" && !waiting && runRecovering(task)) {
+      // The run at work is a turn a restart cut, waiting to be continued:
+      // what comes due meanwhile is not lost, it runs once that run settles
+      // (one at most; any later one is skipped as usual).
+      const entry: WaitingStart = { start, executable: executableTask, messages: [] };
+      queuedNext.set(task.id, entry);
+      waitBehind(task, entry);
+      if (start.trigger !== "event") task.nextRunAt = computeNextRun({ ...task, lastRunAt: now() }, now());
+      save();
+      return;
+    }
     if (active && (policy === "skip" || (policy === "queue" && waiting))) {
       recordSkip(task, policy === "skip"
         ? "previous run still active (overlap policy: skip)"
@@ -2250,6 +2378,8 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
       if (event.kind === "webhook" && event.target?.agentId !== task.id) continue;
       if (event.kind === "integration"
         && (task.spaceId !== event.spaceId || (event.projectId && task.projectId !== event.projectId))) continue;
+      // A targeted integration event was read for one agent (its owner's account).
+      if (event.kind === "integration" && event.target && event.target.agentId !== task.id) continue;
       if (event.kind === "agent") {
         const source = tasks.find((candidate) => candidate.id === event.sourceAgentId);
         if (!source || source.spaceId !== task.spaceId) continue;
@@ -2317,7 +2447,23 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
           save();
           continue;
         }
-        let note: string | undefined;
+        // The same news while the agent waits for its person: counted, not run.
+        const held = holdDecision(task.history, result.events, t0);
+        if (held.hold) {
+          const newest = task.eventLog?.[0];
+          if (newest?.outcome === "held" && newest.triggerId === trigger.id && newest.at > held.since) {
+            task.eventLog![0] = { ...newest, count: newest.count + count };
+          } else {
+            logEvent(task, { at: t0, triggerId: trigger.id, outcome: "held", count, text: held.need.slice(0, 300) });
+          }
+          save();
+          continue;
+        }
+        const lastRunAt = (task.history ?? []).find((run) => run.status !== "running")?.startedAt ?? 0;
+        const heldCount = (task.eventLog ?? [])
+          .filter((entry) => entry.outcome === "held" && entry.triggerId === trigger.id && entry.at > lastRunAt)
+          .reduce((sum, entry) => sum + entry.count, 0);
+        let note: string | undefined = heldCount ? heldNote(heldCount) : undefined;
         if (trigger.script) {
           // A script decides; anything but an explicit "run" leaves the agent asleep.
           const scripted: WakeScriptResult = opts.runScript
@@ -2357,7 +2503,8 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
             save();
             continue;
           }
-          note = scripted.decision.action === "run" ? scripted.decision.note : undefined;
+          const scriptNote = scripted.decision.action === "run" ? scripted.decision.note : undefined;
+          note = [note, scriptNote].filter(Boolean).join("\n") || undefined;
         }
         const overBudget = budgetExceeded(task, t0);
         if (overBudget) {
@@ -2477,7 +2624,7 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
       }
       return t;
     },
-    setNeedDone(id, runId, index, done) {
+    setNeedDone(id, runId, index, done, answer) {
       const t = mustGet(id);
       const run = t.history?.find((record) => record.runId === runId);
       const need = run?.needs?.[index];
@@ -2487,7 +2634,7 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
       for (const record of t.history ?? []) {
         for (const other of record.needs ?? []) {
           if (other !== need && !sameNeed(other.text, need.text)) continue;
-          if (done) other.done = { at: now(), by: "user" };
+          if (done) other.done = { at: now(), by: "user", ...(answer ? { answer } : {}) };
           else delete other.done;
         }
       }
@@ -2509,6 +2656,30 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
       save();
       return t;
     },
+    setAsideForNextWake(id, text) {
+      const t = mustGet(id);
+      const words = typeof text === "string" ? text.trim().slice(0, NEXT_WAKE_TEXT_LIMIT).trimEnd() : "";
+      if (!words) throw err("say what to do at the next wake");
+      const notes = t.nextWake ?? [];
+      if (notes.length >= NEXT_WAKE_LIMIT) {
+        throw err(`at most ${NEXT_WAKE_LIMIT} requests can wait for the next wake`);
+      }
+      t.nextWake = [...notes, { id: randomUUID(), text: words, at: now(), by: "user" }];
+      t.updatedAt = now();
+      save();
+      return t;
+    },
+    dropWakeNote(id, noteId) {
+      const t = mustGet(id);
+      const notes = t.nextWake ?? [];
+      if (!notes.some((note) => note.id === noteId)) throw err("request not found", "not-found");
+      const left = notes.filter((note) => note.id !== noteId);
+      if (left.length) t.nextWake = left;
+      else delete t.nextWake;
+      t.updatedAt = now();
+      save();
+      return t;
+    },
     subscribed(source) {
       const out = new Map<string, { spaceId: string; projectId: string }>();
       for (const task of tasks) {
@@ -2518,6 +2689,25 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
         }
       }
       return [...out.values()];
+    },
+    subscriptions(source) {
+      const out: AgentEventSubscription[] = [];
+      for (const task of tasks) {
+        if (!task.spaceId || !wakeable(task)) continue;
+        for (const trigger of task.eventTriggers ?? []) {
+          if (trigger.kind !== "integration" || trigger.source !== source) continue;
+          out.push({
+            spaceId: task.spaceId,
+            projectId: task.projectId,
+            agentId: task.id,
+            triggerId: trigger.id,
+            ...(task.ownerUserId ? { ownerUserId: task.ownerUserId } : {}),
+            types: [...trigger.on],
+            filters: (trigger.filters ?? []).map((filter) => ({ ...filter })),
+          });
+        }
+      }
+      return out;
     },
     list(projectId) {
       const all = [...tasks].sort((a, b) => (a.nextRunAt ?? Infinity) - (b.nextRunAt ?? Infinity));
@@ -3004,13 +3194,13 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
                 if (phase !== "running" || rec.status !== "running") return undefined;
                 // Another restart's chain may have followed it first: wait
                 // for that follower instead.
-                return inFlight.has(rec.runId) ? watching.get(rec.runId)?.watched : observe(t, rec);
+                return inFlight.has(rec.runId) ? watching.get(rec.runId)?.watched : observe(t, rec, true);
               }));
               continue;
             }
             if (inFlight.has(rec.runId)) continue;
             if (opts.runner.settle && rec.sessionId) {
-              track(t.id, observe(t, rec));
+              track(t.id, observe(t, rec, true));
             } else {
               rec.status = "unknown";
               rec.finishedAt = now();

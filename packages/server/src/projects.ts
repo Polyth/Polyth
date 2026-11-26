@@ -172,6 +172,23 @@ function canonicalExistingPath(path: string): string {
   try { return realpathSync(path); } catch { return resolve(path); }
 }
 
+/** macOS and Windows volumes ignore letter case by default, and `realpathSync`
+ *  keeps the caller's spelling (a missing path is not resolved at all), so a
+ *  guard comparing path text folds case there: `<data>/Spaces/x/PERSONAL/…`
+ *  names the same folder as `<data>/spaces/x/personal/…`. Folding on a
+ *  case-sensitive volume of those systems only refuses more, never less. */
+const CASE_INSENSITIVE_PATHS = process.platform === "darwin" || process.platform === "win32";
+
+/** The path of `candidate` inside `root` ("" for the root itself), or
+ *  undefined when it lies outside. With `caseInsensitive` the returned
+ *  relative path is lower-cased. */
+export function pathWithinRoot(root: string, candidate: string, caseInsensitive = CASE_INSENSITIVE_PATHS): string | undefined {
+  const rel = caseInsensitive
+    ? relative(root.toLowerCase(), candidate.toLowerCase())
+    : relative(root, candidate);
+  return rel.startsWith("..") || isAbsolute(rel) ? undefined : rel;
+}
+
 function primaryRepositoryId(project: Project, rows: readonly ProjectRepository[]): string {
   if (project.primaryRepositoryId !== undefined) {
     if (!rows.some((repository) => repository.id === project.primaryRepositoryId)) {
@@ -442,9 +459,14 @@ const publicProject = (project: StoredProject): Project => {
 
 export function createProjectService(
   dataDir: string,
-  opts: { onRemoved?: (project: Project) => void | Promise<void> } = {},
+  opts: {
+    onRemoved?: (project: Project) => void | Promise<void>;
+    /** Defaults to the host platform; tests pin it to cover macOS/Windows. */
+    caseInsensitivePaths?: boolean;
+  } = {},
 ): ProjectRegistry {
   const file = `${dataDir}/projects.json`;
+  const caseInsensitive = opts.caseInsensitivePaths ?? CASE_INSENSITIVE_PATHS;
   const spacesRoots = [...new Set([resolve(dataDir, "spaces"), canonicalExistingPath(resolve(dataDir, "spaces"))])];
   /** `<data>/spaces/<space>/personal/…` holds personal projects only. The
    *  path is derived from a person's id, so letting anyone register it as an
@@ -452,8 +474,8 @@ export function createProjectService(
    *  Refused before any existence check, so the answer never depends on it. */
   const insidePersonalStorage = (abs: string): boolean =>
     [abs, canonicalExistingPath(abs)].some((candidate) => spacesRoots.some((root) => {
-      const rel = relative(root, candidate);
-      return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel) && rel.split(sep)[1] === "personal";
+      const rel = pathWithinRoot(root, candidate, caseInsensitive);
+      return rel !== undefined && rel !== "" && rel.split(sep)[1] === "personal";
     }));
   const dataRoots = [...new Set([resolve(dataDir), canonicalExistingPath(resolve(dataDir))])];
   let items: StoredProject[] = [];
@@ -916,10 +938,8 @@ export function createProjectService(
     spaceOfProject: (id) => items.find((p) => p.id === id)?.spaceId,
     holdsServerData: (path) => {
       const abs = resolve(path);
-      return [abs, canonicalExistingPath(abs)].some((candidate) => dataRoots.some((root) => {
-        const rel = relative(root, candidate);
-        return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
-      }));
+      return [abs, canonicalExistingPath(abs)].some((candidate) =>
+        dataRoots.some((root) => pathWithinRoot(root, candidate, caseInsensitive) !== undefined));
     },
     reservedForPersonal: (path) => insidePersonalStorage(resolve(path)),
     managedProject(spaceId, managedOperation) {

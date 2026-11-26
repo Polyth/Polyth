@@ -20,6 +20,12 @@ import {
   type CatalogCommand,
 } from "@polyth/commands/catalog";
 import { filterSnippets, type AutocompleteItem } from "../utils.ts";
+import {
+  attachmentModality,
+  type AttachmentModality,
+  type AttachmentRef,
+  type FeatureSupport,
+} from "@polyth/contracts";
 import { tr } from "../i18n/index.ts";
 import { promptHistoryShortcutLabel } from "./history.ts";
 import { accessLabel } from "../sessionSharing.ts";
@@ -440,7 +446,6 @@ export function addMenuRows(input: {
   snippets: CatalogState<unknown>;
   /** Available package contributions, already sorted by the host registry. */
   contributions?: readonly AddMenuContributionRow[];
-  uploadDisabledReason?: string;
   /** Protected mode: the server refuses `!` shell, so the row is not offered. */
   shellHidden?: boolean;
   /** The device has a camera the browser or native shell can open directly. */
@@ -449,9 +454,9 @@ export function addMenuRows(input: {
   const needsProject = input.hasProject ? undefined : OPEN_PROJECT_FIRST;
   const shellBlock = needsProject
     ?? (input.draftText.trim() !== "" ? SHELL_DRAFT_BLOCK : undefined);
-  // Every attach source lands in the same project `_inbox`, so one reason
-  // blocks all of them together.
-  const attachBlock = needsProject ?? input.uploadDisabledReason;
+  // Every attach source lands in the same project `_inbox`, so only a missing
+  // project blocks them; an agent that cannot reach the files never does.
+  const attachBlock = needsProject;
   const attach = (id: AddMenuAction, label: string, description: string): AddMenuRow => ({
     id, kind: "item", tile: true, label, description, action: id,
     ...(attachBlock ? { disabledReason: attachBlock } : {}),
@@ -1084,3 +1089,30 @@ export function modelDisplayName(
 
 export const ATTACHMENT_COMPAT_NOTE =
   tr("composer.discovery.attachmentCompatibilityNotReported");
+
+/** Note under pending attachments when the next-turn engine cannot take one.
+ *  A link never warns: it always reaches the agent as text. */
+export function attachmentNote(input: {
+  attachments: readonly AttachmentRef[];
+  support: Partial<Record<AttachmentModality, FeatureSupport>> | undefined;
+}): string | null {
+  if (input.attachments.length === 0) return null;
+  // No capability report is not a claim of incompatibility; only an explicit
+  // unsupported modality is worth interrupting the draft for.
+  if (!input.support) return null;
+  for (const attachment of input.attachments) {
+    if (attachment.kind === "url") continue;
+    const modality = attachmentModality(attachment);
+    if (!modality) continue;
+    const level = input.support[modality];
+    if (level === "native" || level === "emulated") continue;
+    // `level` is now "unsupported" or undefined (not reported for this modality).
+    // A stored file is always delivered, by path when the engine cannot take
+    // its content (or only named as kept in the project when the agent's host
+    // cannot reach it); an unsupported engine is no reason to warn.
+    if (modality !== "image" && attachment.path) continue;
+    if (modality === "image") return tr("composer.discovery.attachmentImagesOmitted");
+    return tr("composer.discovery.currentlyUnavailable");
+  }
+  return null;
+}

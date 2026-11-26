@@ -78,7 +78,7 @@ test("the last Report line sets the signal and headline; Remember lines become n
   assert.match(report.body, /inside a code sample/, "fenced protocol text is content");
   assert.doesNotMatch(report.body, /3 commits landed/);
 
-  assert.deepEqual(parseAgentReport("Report: quiet"), { signal: "quiet", body: "", remember: [], needs: [], resolved: [] });
+  assert.deepEqual(parseAgentReport("Report: quiet"), { signal: "quiet", body: "", remember: [], needs: [], resolved: [], nextWake: [] });
   assert.equal(parseAgentReport("All good.").signal, undefined);
 });
 
@@ -106,6 +106,23 @@ test("Needs you lines become the person's to-dos: what, why and a web link, neve
   assert.doesNotMatch(report.body, /Electron 45|Apple agreement|Rotate/);
   assert.match(report.body, /inside a code sample/, "fenced protocol text is content");
   assert.match(REPORT_INSTRUCTIONS, /Needs you: <what>/);
+  assert.match(REPORT_INSTRUCTIONS, /Needs your OK: <what you will do/);
+});
+
+test("Needs your OK lines are decisions the agent acts on; Needs you lines stay the person's own", () => {
+  const report = parseAgentReport([
+    "Held one upgrade.",
+    "**Needs your OK:** Merge Electron 46 into devel — a major line; CI is green — https://github.com/acme/app/pull/40",
+    "Needs your approval: Dismiss alert #172",
+    "Needs you: Try the nightly on a real phone",
+    "Report: update — one upgrade waits for your yes",
+  ].join("\n"));
+  assert.deepEqual(report.needs, [
+    { text: "Merge Electron 46 into devel", kind: "decision", detail: "a major line; CI is green", url: "https://github.com/acme/app/pull/40" },
+    { text: "Dismiss alert #172", kind: "decision" },
+    { text: "Try the nightly on a real phone" },
+  ]);
+  assert.doesNotMatch(report.body, /Electron 46|alert #172|real phone/);
 });
 
 test("a kept report is cut whole: never inside a code block, a word or after an operator", () => {
@@ -368,7 +385,8 @@ test("a new session's prompt still starts with the charter", () => {
   };
   const text = composeAgentPrompt(task, { trigger: "heartbeat", at: 1 }, { continuing: false });
   assert.ok(text.startsWith("You review merged pull requests.\n\n---\nWake: heartbeat check"));
-  assert.ok(text.trimEnd().endsWith("Keep notes short; they go into your notebook."));
+  assert.ok(text.trimEnd().endsWith("Polyth hands it to your next wake once."));
+  assert.ok(text.includes("Keep notes short; they go into your notebook."));
 });
 
 test("a message sent while the agent works waits for the run instead of being dropped", async (t) => {

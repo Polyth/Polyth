@@ -107,6 +107,11 @@ export interface MenuProps {
   /** Replace the flat entry list while keeping Menu's anchoring, dismissal, and
    *  focus behavior. Used by searchable catalog surfaces. */
   renderContent?: (context: { close: () => void; sheet: boolean }) => ReactNode;
+  /** Leave focus where it is (a selection toolbar over an editor): the menu
+   *  does not take focus, typing outside it dismisses it while the keys reach
+   *  their target, and choosing an entry returns focus to the element that
+   *  held it when the menu opened. Keyboard-opened menus stay focused. */
+  passive?: boolean;
 }
 
 function isHeading(entry: MenuEntry): entry is MenuHeading {
@@ -122,7 +127,7 @@ function roleOf(action: MenuAction): "menuitem" | "menuitemradio" | "menuitemche
 export default function Menu({
   label, title, entries, children, align = "start", className,
   phonePresentation = "popover", open: controlledOpen, onOpenChange, returnFocusRef, anchorRef, header, footer,
-  renderContent,
+  renderContent, passive = false,
 }: MenuProps) {
   const packageWindowOwner = usePackageWindowOwner();
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
@@ -135,6 +140,14 @@ export default function Menu({
   const asSheet = shellMode === "phone" && phonePresentation === "sheet";
   const triggerRef = useRef<HTMLButtonElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
+  // A passive menu hands focus back to whatever held it when it opened.
+  const openerRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!open || !passive || typeof document === "undefined") return;
+    const active = document.activeElement;
+    openerRef.current = active instanceof HTMLElement && active !== document.body ? active : null;
+  }, [open, passive]);
+  const restoreRef = passive ? openerRef : returnFocusRef;
   // The drill-in row whose list is shown; every opening starts at the top.
   const [drillId, setDrillId] = useState<string | null>(null);
   const returnToRef = useRef<string | null>(null);
@@ -170,7 +183,8 @@ export default function Menu({
     open: open && !asSheet,
     menuRef: surfaceRef,
     triggerRef,
-    restoreRef: returnFocusRef,
+    restoreRef,
+    passive,
     onClose: () => setOpen(false),
   });
   const onMenuKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
@@ -212,7 +226,7 @@ export default function Menu({
     if (action.kind !== "checkbox" && action.kind !== "switch") {
       setOpen(false);
       if (!asSheet) {
-        requestAnimationFrame(() => focusUnlessKeyboardHeld(returnFocusRef?.current ?? triggerRef.current));
+        requestAnimationFrame(() => focusUnlessKeyboardHeld(restoreRef?.current ?? triggerRef.current));
       }
     }
     action.onSelect(origin ? { origin } : undefined);
@@ -227,7 +241,7 @@ export default function Menu({
   const close = () => {
     setOpen(false);
     if (!asSheet) {
-      requestAnimationFrame(() => focusUnlessKeyboardHeld(returnFocusRef?.current ?? triggerRef.current));
+      requestAnimationFrame(() => focusUnlessKeyboardHeld(restoreRef?.current ?? triggerRef.current));
     }
   };
 

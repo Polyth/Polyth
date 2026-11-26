@@ -279,6 +279,23 @@ the missing path. An in-flight publication or corrupt record is kept. A live
 checkout or a branch with unmerged commits is kept too: restore the session to
 merge or discard it.
 
+Archiving also releases the isolated checkouts that hold no work. When an archive
+retires an idle session's runtime, every checkout of that session goes through the
+Cleanup release (`releaseArchivedCheckouts`, with `onlyEmpty`) if it is owned, has
+no commit its target branch lacks and a clean `git status --untracked-files=all`
+(ignored files such as `node_modules` do not count), is not merging, publishing or
+corrupt, and a multi-repository session releases only if every row qualifies. It is
+kept, and retried later, when work remains, when another session still depends on
+the checkout, when a non-archived session shares the session's runtime authority
+(a Space-level shared runtime is never stopped to free a checkout), or when a live
+process still has the checkout as its working directory. The release re-reads
+`archived` after the execution proof, so a restore that wins keeps its checkout. A
+release failure is logged and never undoes the archive. The expired-session timer
+repeats the same release for every archived tree regardless of the Cleanup
+"skip isolated" choice, which covers a chat archived mid-turn, before this
+behavior, or whose release failed; it loses nothing, since only checkouts without
+work go.
+
 An active isolate proves its line of work by the recorded base commit in its
 history (`inspectOwned`, `packages/git/src/managedWorktrees.ts`). When the
 target branch itself is rewritten (rebased onto its remote, force-pulled), an
@@ -557,6 +574,20 @@ text, and a deleted file may show its available Git diff. Async navigation is
 fenced against newer opens and Project/session changes. Packages use canonical
 refs through the supported host component seam instead of treating a bare path
 as globally unique.
+
+A Markdown link whose target is a local path never goes to the browser, which
+would ask the Polyth server for `/home/…/INDEX.md` and get "not found". The
+renderer (`apps/web/src/markdown/fileReference.ts`
+`isLocalLinkHref`/`parseFileLinkHref`) turns it into a `ResourceLink` that opens
+Project files:
+an absolute path or `file://` URL inside one of the session's checkouts or the
+Project's registered repositories (`workspaceFileRoots`) becomes that
+repository's relative locator, and the longest root wins. Any other absolute
+path reads as repository-root-relative (`/docs/a.md`). A relative path resolves
+from the previewed file's directory (`MarkdownDoc` `documentPath`) or from the
+workspace root in chat. `#L12`, `#L12-L20` and `:12` select lines, and `?query`
+is dropped. A path that climbs above the root, names a directory, or is a remote
+`file://host/` stays plain text. http(s) and mailto links keep the URL policy.
 
 File and selected-line drag payloads retain repository identity. Editor drops
 open the referenced location; composer drops attach the scoped file/range;
@@ -864,6 +895,45 @@ folder that has `.git` from being reported as *not a Git repository*, `gh` or
 `glab` from looking missing, and an SSH remote from looking unusable, on a
 machine where the tool is installed but absent from `PATH`. A harness child
 launched by Polyth also receives the resolved Git and OpenSSH directories.
+
+### Branch changes and checkout moves
+
+`POST /api/git/branch` creates a branch; with `checkout: true` it runs one
+`git switch -c <name> [from]`, so nothing is left half-made, and the Branches page's
+form offers *Create and switch* (default, remembered in `gitPrefs`) and *Create
+only*. Names are checked with `git check-ref-format --branch` first.
+`/api/git/checkout` and a branch-with-checkout refuse with `session-busy` while any
+chat in that checkout may still be at work: `working`, `waiting`, `reconciling`,
+`unknown`, or `epoch-pending` on a borrowed runtime (no chat is exempt: the request
+does not prove which chat calls). An `epoch-pending` chat whose Polyth-owned runtime
+was replaced has no process left and does not block; the Navigator shows it as
+"reconnects on use". Git's own refusals become typed, not-started errors
+(`classifyGitRefusal`, `packages/git/src/index.ts`): `branch-in-use` (with the
+worktree, only one Git lists for that repository, and the caller's chats in it),
+`worktree-dirty`, `branch-exists`, `branch-not-found`, `invalid-branch-name`. They
+are in `REFUSED` (`packages/server/src/errorDiagnostics.ts`), so the client shows
+Git's reason and an action (*Open* that worktree, *Review changes*) instead of
+"didn't get a confirmation"; the branch list marks a branch checked out in another
+worktree and offers *Open* rather than *Checkout*. After a successful switch the
+server announces the project's worktree topology and moves every live chat's
+`branch` in that checkout along (`renameWorktreeBranch`, no runtime release). The
+topology fingerprint (`worktreeTopology.ts`) stats each `.git/worktrees/*/HEAD` and
+the main `HEAD`, so a checkout in any linked worktree renames its Navigator heading.
+
+`POST /api/git/session-checkout/preview` and `/api/git/session-checkout`
+(`sessionCheckoutMoveServer.ts`, DTOs at `@polyth/git/checkout-move`) move a chat
+to another checkout of its own project: a listed linked worktree or the main
+checkout, never a client path. The chat resolves through the caller's scope
+(foreign Space and missing are the same `not-found`); preview needs `view`, the
+move `manage`. A running or queued chat, an isolated one, a delegated child, a
+chat with a running child or an unmerged isolated child, and a multi-repository
+project are refused. Order: rebind the workspace (`rebindWorkspace`, which releases
+the native leg; the next turn starts in the new folder), then optionally remove
+the emptied source worktree (`force: false`, re-checked clean and unused; its
+branch is deleted only when Polyth owns it and the target already contains it),
+then optionally switch or create the target's branch. A later step's failure is
+reported (`branchError`, `removeError`) with the chat still moved; nothing is
+rolled back by force.
 
 Untracked branch-review content and statistics require Linux kernel directory
 handles. Each parent is pinned without following symlinks before Git reads a

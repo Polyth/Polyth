@@ -87,7 +87,7 @@ test("only the server list holds connection authority", () => {
 });
 
 test("a bug report comes from this computer's page or another server's, never the server list", () => {
-  for (const channel of ["desktop:report:state", "desktop:report:capture", "desktop:report:send"]) {
+  for (const channel of ["desktop:report:state", "desktop:report:capture", "desktop:report:annotate", "desktop:report:send"]) {
     assert.equal(channelAllowed("local", channel), true, channel);
     assert.equal(channelAllowed("remote", channel), true, channel);
     assert.equal(channelAllowed("hub", channel), false, channel);

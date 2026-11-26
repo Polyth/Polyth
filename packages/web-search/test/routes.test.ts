@@ -20,8 +20,8 @@ const snapshot: WebSearchSettingsSnapshot = {
   revision: 2,
   settings: { ...DEFAULT_WEB_SEARCH_SETTINGS },
   providers: [
-    { id: "duckduckgo", name: "DuckDuckGo", available: true, requiresCredential: false, configured: true },
-    { id: "tavily", name: "Tavily", available: false, requiresCredential: true, configured: false },
+    { id: "exa", name: "Exa", available: true, requiresCredential: false, configured: true, keyed: false },
+    { id: "tavily", name: "Tavily", available: true, requiresCredential: false, configured: true, keyed: false },
   ],
   credentialHandles: [],
   vaultAvailable: false,

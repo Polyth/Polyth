@@ -8,7 +8,12 @@ import {
   PAGE_MIN_HEIGHT,
   PAGE_PREAMBLE,
   PAGE_SANDBOX,
+  PAGE_CHANNEL,
+  PAGE_STORAGE_MAX_KEY,
+  PAGE_STORAGE_MAX_KEYS,
+  PAGE_STORAGE_MAX_VALUE_BYTES,
   buildPageDocument,
+  cleanPageStorage,
   pageFileName,
   pageThemeCss,
   parsePageFence,
@@ -126,4 +131,90 @@ test("download names are sanitized", () => {
   assert.equal(pageFileName("../../etc/passwd"), "etc-passwd.html");
   assert.equal(pageFileName("  "), "page.html");
   assert.equal(pageFileName("Сторінка оплати"), "Сторінка-оплати.html");
+  assert.equal(pageFileName("--a  b--"), "a-b.html");
+  assert.equal(pageFileName(`${"x".repeat(59)} y`), `${"x".repeat(59)}.html`);
+  const started = performance.now();
+  assert.equal(pageFileName(`a${"-".repeat(100000)}`), "a.html");
+  assert.ok(performance.now() - started < 1000);
+});
+
+// ---- polyth.storage --------------------------------------------------------
+
+/** Run the bridge the way a frame would, with a recording parent. */
+function runBridge(doc: string) {
+  const script = doc.slice(doc.indexOf("<script>") + 8, doc.indexOf("</script>"));
+  const posted: Array<Record<string, unknown>> = [];
+  const win: { polyth?: { storage: {
+    persistent: boolean;
+    getItem(key: string): string | null;
+    setItem(key: string, value: unknown): void;
+    removeItem(key: string): void;
+    clear(): void;
+    keys(): string[];
+  } } } = {};
+  const scope = {
+    parent: { postMessage: (message: Record<string, unknown>) => { posted.push(message); } },
+    document: { documentElement: { getBoundingClientRect: () => ({ height: 10 }) }, getElementById: () => null },
+    window: win,
+    addEventListener: () => {},
+  };
+  new Function(...Object.keys(scope), script)(...Object.values(scope));
+  return { storage: win.polyth!.storage, changes: () => posted.filter((message) => message.kind === "storage") };
+}
+
+test("the storage seed cannot end the bridge script or escape as markup", () => {
+  const doc = buildPageDocument("<p>x</p>", DEFAULT_PAGE_THEME, {
+    storage: { a: "</script><img src=x onerror=alert(1)>", "line\u2028break": "v", __proto__: "own" } as Record<string, string>,
+  });
+  assert.equal(doc.split("</script>").length, 2, "one script element: the bridge");
+  assert.ok(!doc.slice(0, doc.indexOf("<p>x</p>")).includes("<img"), "the seed is data, not markup");
+  const { storage } = runBridge(doc);
+  assert.equal(storage.getItem("a"), "</script><img src=x onerror=alert(1)>");
+  assert.equal(storage.getItem("line\u2028break"), "v");
+  assert.equal(storage.getItem("toString"), null, "only what was stored is there");
+  assert.equal(storage.persistent, false);
+});
+
+test("a page reads and changes its map like localStorage, and the host hears each change", () => {
+  const { storage, changes } = runBridge(buildPageDocument("", DEFAULT_PAGE_THEME, { storage: { a: "1" }, persistent: true }));
+  assert.equal(storage.persistent, true);
+  assert.deepEqual(storage.keys(), ["a"]);
+  storage.setItem("n", 5);
+  assert.equal(storage.getItem("n"), "5");
+  storage.removeItem("a");
+  storage.removeItem("never-set");
+  assert.deepEqual(changes(), [
+    { kind: "storage", op: "set", key: "n", value: "5", channel: PAGE_CHANNEL },
+    { kind: "storage", op: "remove", key: "a", channel: PAGE_CHANNEL },
+  ]);
+  storage.clear();
+  assert.deepEqual(storage.keys(), []);
+  assert.throws(() => storage.setItem("", "x"), /invalid key/);
+  assert.throws(() => storage.setItem("k".repeat(PAGE_STORAGE_MAX_KEY + 1), "x"), /invalid key/);
+  assert.throws(() => storage.setItem("k", "x".repeat(PAGE_STORAGE_MAX_VALUE_BYTES + 1)), /too large/);
+  for (let index = 0; index < PAGE_STORAGE_MAX_KEYS; index += 1) storage.setItem(`k${index}`, "v");
+  assert.throws(() => storage.setItem("one-more", "v"), /too many keys/);
+  storage.setItem("k0", "again");
+  assert.equal(storage.getItem("k0"), "again", "an existing key can still change");
+});
+
+test("storage messages are validated before a host acts on them", () => {
+  const message = (extra: Record<string, unknown>) => parsePageMessage({ channel: PAGE_CHANNEL, kind: "storage", ...extra });
+  assert.deepEqual(message({ op: "set", key: "k", value: "v" }), { kind: "storage", op: "set", key: "k", value: "v" });
+  assert.deepEqual(message({ op: "remove", key: "k", value: "ignored" }), { kind: "storage", op: "remove", key: "k" });
+  assert.deepEqual(message({ op: "clear", key: 5 }), { kind: "storage", op: "clear" });
+  assert.equal(message({ op: "set", key: "", value: "v" }), null);
+  assert.equal(message({ op: "set", key: "k", value: 5 }), null);
+  assert.equal(message({ op: "set", key: "k".repeat(PAGE_STORAGE_MAX_KEY + 1), value: "v" }), null);
+  assert.equal(message({ op: "set", key: "k", value: "x".repeat(PAGE_STORAGE_MAX_VALUE_BYTES + 1) }), null);
+  assert.equal(message({ op: "set", key: "k", value: "\u00e9".repeat(PAGE_STORAGE_MAX_VALUE_BYTES / 2 + 1) }), null, "the limit is bytes");
+  assert.equal(message({ op: "drop", key: "k" }), null);
+});
+
+test("a stored map is cleaned before it seeds a page", () => {
+  assert.deepEqual({ ...cleanPageStorage({ a: "1", b: 2, c: null, ["k".repeat(PAGE_STORAGE_MAX_KEY + 1)]: "x" }) }, { a: "1" });
+  assert.deepEqual({ ...cleanPageStorage(["a"]) }, {});
+  assert.deepEqual({ ...cleanPageStorage(null) }, {});
+  const many = Object.fromEntries(Array.from({ length: PAGE_STORAGE_MAX_KEYS + 20 }, (_, index) => [`k${index}`, "v"]));
+  assert.equal(Object.keys(cleanPageStorage(many)).length, PAGE_STORAGE_MAX_KEYS);
 });

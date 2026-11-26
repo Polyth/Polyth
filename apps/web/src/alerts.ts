@@ -23,6 +23,10 @@ export type AlertRequest =
     /** Keep a composer-held software keyboard open across the confirmation
      *  (the full-access prompt). See ModalSurfaceOptions.keepKeyboard. */
     keepKeyboard?: boolean;
+    /** A choice the person has to make before confirming, for a consequence
+     *  the message alone cannot carry — e.g. confirming that opening a chat
+     *  shows what its agent already saw of their personal notes. */
+    acknowledge?: { label: string; description?: string };
     origin?: AlertOrigin;
     resolve: (value: boolean) => void;
   }
@@ -55,7 +59,14 @@ function replaceCurrent(): void {
 
 export function confirmAlert(
   message: string,
-  options: { title?: string; confirmLabel?: string; destructive?: boolean; keepKeyboard?: boolean; origin?: AlertOrigin } = {},
+  options: {
+    title?: string;
+    confirmLabel?: string;
+    destructive?: boolean;
+    keepKeyboard?: boolean;
+    origin?: AlertOrigin;
+    acknowledge?: { label: string; description?: string };
+  } = {},
 ): Promise<boolean> {
   replaceCurrent();
   const origin = options.origin;
@@ -67,6 +78,7 @@ export function confirmAlert(
       confirmLabel: options.confirmLabel ?? tr("common.continue"),
       destructive: options.destructive ?? true,
       ...(options.keepKeyboard ? { keepKeyboard: true } : {}),
+      ...(options.acknowledge ? { acknowledge: { ...options.acknowledge } } : {}),
       // A plain copy: a DOMRect's fields are getters on its prototype.
       ...(origin ? { origin: { left: origin.left, top: origin.top, width: origin.width, height: origin.height } } : {}),
       resolve,

@@ -80,44 +80,15 @@ export function matchesSessionSearchFacets(
   return true;
 }
 
-/** Case/diacritic fold used for client-side title/branch matching. */
-export function foldSearchText(s: string): string {
-  return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-}
-
-/**
- * Highlight ranges for every query term inside `text` (case/diacritic
- * insensitive, non-overlapping, merged when adjacent). Folding keeps code-unit
- * length for Latin/Cyrillic combining marks because NFD only strips marks the
- * original string did not have as separate code units; for scripts where the
- * fold changes length the helper falls back to no highlight rather than a
- * misaligned one.
- */
-export function highlightRanges(text: string, terms: readonly string[]): Array<[number, number]> {
-  if (!text) return [];
-  const folded = foldSearchText(text);
-  if (folded.length !== text.length) return [];
-  const hits: Array<[number, number]> = [];
-  for (const raw of terms) {
-    const term = foldSearchText(raw);
-    if (!term) continue;
-    let from = 0;
-    while (from <= folded.length - term.length) {
-      const at = folded.indexOf(term, from);
-      if (at < 0) break;
-      hits.push([at, at + term.length]);
-      from = at + Math.max(1, term.length);
-    }
-  }
-  hits.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-  const merged: Array<[number, number]> = [];
-  for (const [a, b] of hits) {
-    const last = merged[merged.length - 1];
-    if (last && a <= last[1]) last[1] = Math.max(last[1], b);
-    else merged.push([a, b]);
-  }
-  return merged;
-}
+// One text rule for every chat search, shared with the server: Unicode case,
+// diacritic and apostrophe fold; every word somewhere among the fields; a
+// word also matches by its stem (and is highlighted by it).
+export {
+  foldSearchText,
+  matchesSearchTerms,
+  searchHighlightRanges as highlightRanges,
+  searchTerms,
+} from "@polyth/session/search-text";
 
 /** Split `text` into plain/highlighted segments from `[start, end)` ranges. */
 export function segmentHighlights(

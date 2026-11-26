@@ -1,11 +1,12 @@
 // Settings → Voice mode. Only conversation behavior lives here; the voice,
 // speed and recognition engines are the Voice page's, linked from the top.
 // Replies (spoken or silent) is switched in the voice window itself.
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Button, TextInput } from "@polyth/web/ui";
 import { isImeComposing } from "@polyth/web-sdk";
-import { PageHead, Row, Section, Seg, Toggle } from "../../../apps/web/src/components/settings/parts.tsx";
+import { PageHead, ReadonlyRow, Row, Section, Seg, Toggle } from "../../../apps/web/src/components/settings/parts.tsx";
 import { parsePhraseList, type VoiceCommandId, type VoiceCommandPhrases } from "../src/commands.ts";
+import { averageLatency, type VoiceTurnLatency } from "../src/latency.ts";
 import type { NarrationStatus } from "../src/narrateRoutes.ts";
 import type {
   VoiceBargeIn,
@@ -54,8 +55,51 @@ function PhraseField({ id, label, hint, phrases, disabled }: {
   );
 }
 
+/** Milliseconds as seconds with one decimal ("1.4"), in the page's locale. */
+const seconds = (ms: number, strings: VoiceModeStrings): string =>
+  formatVoiceString(strings.latencySeconds, { value: (Math.max(0, ms) / 1000).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) });
+
+/** The steps in one line that wraps between steps, never inside "voice 0.2 s". */
+const breakdown = (entry: Pick<VoiceTurnLatency, "pause" | "recognition" | "sending" | "agent" | "voice">, strings: VoiceModeStrings): string =>
+  formatVoiceString(strings.latencyBreakdown, {
+    pause: seconds(entry.pause, strings),
+    recognition: seconds(entry.recognition, strings),
+    sending: seconds(entry.sending, strings),
+    agent: seconds(entry.agent, strings),
+    voice: seconds(entry.voice, strings),
+  }).split(" · ").map((step) => step.replace(/ /g, "\u00a0")).join(" · ");
+
+/** End of speech → first reply sound, split by step: the last measured turn
+ *  and the mean of the recent ones. Measured in this browser only. */
+function ResponseTime({ strings, latency }: { strings: VoiceModeStrings; latency: LatencySource }) {
+  const list = useSyncExternalStore(latency.subscribe, latency.get, latency.get);
+  const last = list.at(-1);
+  const average = averageLatency(list);
+  return (
+    <Section title={strings.latencyTitle} hint={strings.latencyHint}>
+      {!last || !average ? (
+        <ReadonlyRow label={strings.latencyEmpty} value="" itemId="voice-mode.latency.empty" />
+      ) : (
+        <>
+          <ReadonlyRow label={strings.latencyLast} hint={breakdown(last, strings)} value={seconds(last.total, strings)}
+            itemId="voice-mode.latency.last" />
+          {list.length > 1 && (
+            <ReadonlyRow label={formatVoiceString(strings.latencyAverage, { count: String(list.length) })}
+              hint={breakdown(average, strings)} value={seconds(average.total, strings)} itemId="voice-mode.latency.average" />
+          )}
+        </>
+      )}
+    </Section>
+  );
+}
+
+export interface LatencySource {
+  get(): readonly VoiceTurnLatency[];
+  subscribe(listener: () => void): () => void;
+}
+
 export default function VoiceModeSettings({
-  strings, openVoiceSettings, openSmallModelSettings, loadNarrationStatus, commandPhrases,
+  strings, openVoiceSettings, openSmallModelSettings, loadNarrationStatus, commandPhrases, latency,
 }: {
   strings: VoiceModeStrings;
   openVoiceSettings(): void;
@@ -65,6 +109,8 @@ export default function VoiceModeSettings({
   loadNarrationStatus(): Promise<NarrationStatus | null>;
   /** The phrases in effect (custom or the language defaults). */
   commandPhrases(): VoiceCommandPhrases;
+  /** This device's measured turns. */
+  latency: LatencySource;
 }) {
   const prefs = useVoiceModePrefs();
   const phrases = commandPhrases();
@@ -143,6 +189,10 @@ export default function VoiceModeSettings({
         </Row>
       </Section>
       <Section title={strings.whileWorking} hint={strings.whileWorkingHint}>
+        <Row label={strings.acknowledge} hint={strings.acknowledgeHint} itemId="voice-mode.acknowledge" disabled={prefs.feedback === "silent"}>
+          <Toggle on={prefs.acknowledge && prefs.feedback !== "silent"} disabled={prefs.feedback === "silent"}
+            onChange={(acknowledge) => setVoiceModePrefs({ acknowledge })} label={strings.acknowledge} />
+        </Row>
         <Row label={strings.thoughts} hint={strings.thoughtsHint} itemId="voice-mode.thoughts">
           <Seg<VoiceThoughts>
             value={prefs.thoughts}
@@ -198,6 +248,7 @@ export default function VoiceModeSettings({
           <PhraseField key={id} id={id} label={label} hint={hint} phrases={phrases[id]} disabled={commandsOff} />
         ))}
       </Section>
+      <ResponseTime strings={strings} latency={latency} />
     </div>
   );
 }

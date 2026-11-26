@@ -464,6 +464,28 @@ jobs:
           git commit --message "polyth $VERSION"
           git push origin HEAD
 
+      # winget has no autobump (the desktop cask lives in homebrew/homebrew-cask and
+      # Homebrew's bot follows its livecheck), so every stable release needs a manifest
+      # a person then submits to microsoft/winget-pkgs. Write it from this release's own
+      # installer and attach it, so a submission starts from the release page
+      # (scripts/ci/winget-manifest.mjs, docs/operations/releases.md).
+      - name: Attach the winget manifests
+        if: env.POLYTH_RELEASE_CHANNEL == 'stable'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.feed.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The release was published above, so its date is the ReleaseDate winget records.
+          release_date="$(gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json publishedAt --jq '.publishedAt[0:10]')"
+          # --if-present: a release without a regular Windows installer (the workstation
+          # edition is a separate product) warns and attaches nothing, it never fails.
+          node scripts/ci/winget-manifest.mjs --if-present "$VERSION" "$release_date" "$RUNNER_TEMP/feed" "$RUNNER_TEMP/winget"
+          [ -d "$RUNNER_TEMP/winget/manifests" ] || exit 0
+          tar -czf "$RUNNER_TEMP/polyth-winget-$VERSION.tar.gz" -C "$RUNNER_TEMP/winget" manifests
+          gh release upload "v$VERSION" "$RUNNER_TEMP/polyth-winget-$VERSION.tar.gz" --clobber --repo "$GITHUB_REPOSITORY"
+
       # Temporary: a nightly build's workstation edition replaces the edition assets
       # on the newest stable release, so the edition tracks devel while the app keeps
       # its stable-only feed (updater channel `workstation`). Remove this pair of

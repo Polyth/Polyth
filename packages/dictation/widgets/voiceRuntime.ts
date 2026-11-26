@@ -2,7 +2,7 @@
 // own bundle, so these are the transports and speech output, not shared
 // state: coordination between bundles goes through the window claim events
 // (`MICROPHONE_CLAIM_EVENT`, `SPEECH_CLAIM_EVENT`).
-export { startPcm16Capture, pcm16Rms, type Pcm16Capture } from "./audioCapture.ts";
+export { startPcm16Capture, pcm16Rms, type Pcm16Capture, type Pcm16CaptureOptions } from "./audioCapture.ts";
 export { startStreamingDictation, type StreamingDictation } from "./dictationClient.ts";
 export { canStartDirectProvider, startDirectProvider, type DirectProviderOptions } from "./directProviders.ts";
 export {

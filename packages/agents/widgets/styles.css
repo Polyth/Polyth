@@ -2063,6 +2063,13 @@
   .agents-page .agent-attention-actions,
   .agents-page .agent-attention-item:not(:has(.agent-attention-since)) .agent-attention-actions { grid-column: 2; grid-row: 1 / span 2; }
   .agents-page .agent-attention-detail { -webkit-line-clamp: 1; }
+  /* A request carries three answers: they go under its words, in reading order. */
+  .agents-page .agent-attention-item[data-kind="need"] .agent-attention-actions {
+    grid-column: 1 / -1;
+    grid-row: auto;
+    justify-content: flex-start;
+    margin-block-start: var(--space-1);
+  }
 }
 
 /* How the run went: the full report's account, time by time. */
@@ -2224,6 +2231,43 @@
   justify-content: flex-end;
   gap: var(--space-2);
 }
+
+/* What waits for the next wake: the request card's head over quiet rows,
+   each one the person may take back. */
+.agents-page .agent-next-wake { gap: var(--space-1); padding-block: var(--space-2); }
+.agents-page .agent-next-wake-list {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.agents-page .agent-next-wake-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+  padding-inline-start: calc(var(--icon-md) + var(--space-1) + var(--space-2));
+}
+.agents-page .agent-next-wake-text {
+  display: -webkit-box;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  padding-block-start: 2px;
+  color: var(--text);
+  font-size: var(--font-response);
+  line-height: var(--font-response-lh);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+.agents-page .agent-next-wake-by {
+  margin-inline-start: var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+.agents-page .agent-next-wake-drop { flex: none; margin-inline-end: calc(var(--space-1) * -1); }
 
 /* The message box: Chat's composer material — the editor over one quiet
    row of controls (files, where the message goes, Stop, Send). */

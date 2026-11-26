@@ -41,7 +41,8 @@ const family = (options: { storageDir?: string; deployment?: "local-trusted" | "
     });
     return { registry, accounts, created };
 };
-const ids = (registry: ReturnType<typeof createHarnessRegistry>) => registry.providers().map((item) => item.descriptor.id).toSorted();
+// The family's Relay harness is covered by relay.test.ts; these tests count real accounts.
+const ids = (registry: ReturnType<typeof createHarnessRegistry>) => registry.providers().filter((item) => !item.descriptor.relay).map((item) => item.descriptor.id).toSorted();
 
 test("every account is its own harness with a private directory and live name", async () => {
     const dir = mkdtempSync(join(tmpdir(), "harness-accounts-"));

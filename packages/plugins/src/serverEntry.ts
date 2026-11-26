@@ -19,6 +19,9 @@ import type { PluginConfigService } from "./pluginRouteShared.ts";
 import { readSpaceEnabled } from "./spaceEnabled.ts";
 import { bindTrustedServerSpaceGate } from "./trustedServerEntry.ts";
 import type { RepositoryArchiveDownloader } from "./installSources.ts";
+import type { AgentCapabilityContributionRegistry } from "@polyth/contracts";
+import { createPackagesSkill } from "./agentSkill.ts";
+import { createPackagesAgentTool } from "./agentTool.ts";
 
 export { managedPluginRoutes } from "./managedPluginRoutes.ts";
 export { opencodePluginRoutes } from "./opencodePluginRoutes.ts";
@@ -71,6 +74,10 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   let registry: PluginRegistry | null = null;
   let trustedRouteGate: { dispose(): void } | null = null;
   let autoUpdater: { dispose(): void } | null = null;
+  let agentCapabilities: Array<{ dispose(): void }> = [];
+  const disposeAgentCapabilities = () => {
+    for (const registration of agentCapabilities.splice(0)) registration.dispose();
+  };
 
   const packageSpaces = () => {
     const spaces = host.packageSpaces;
@@ -96,14 +103,16 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
 
       try {
         const pluginsDir = join(host.storageDir, "plugins");
+        const trustedDir = process.env.POLYTH_TRUSTED_PLUGIN_DIR
+          ?? join(host.storageDir, "trusted-plugins");
+        const allowDevPath = process.env.POLYTH_ALLOW_DEV_PACKAGES === "1";
         registry = createPluginRegistry({
           dir: pluginsDir,
-          trustedDir: process.env.POLYTH_TRUSTED_PLUGIN_DIR
-            ?? join(host.storageDir, "trusted-plugins"),
+          trustedDir,
           routes: host.routes,
           root: host.root,
           onChange: (packageId) => host.broadcast.pluginChanged?.(packageId),
-          allowDevPath: process.env.POLYTH_ALLOW_DEV_PACKAGES === "1",
+          allowDevPath,
           managedPackageServices: host.managedPackageServices,
           downloadRepository: ownerRepositoryDownloader(() =>
             host.services.get(serverServiceKey<{ downloadArchive?: RepositoryArchiveDownloader }>("github"))?.downloadArchive),
@@ -141,7 +150,29 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
           }
           return false;
         };
+        // The packages skill and its read-only tool: every agent on every
+        // installation learns where this one keeps package folders.
+        const capabilities = host.services.get(
+          serverServiceKey<AgentCapabilityContributionRegistry>("harness.capabilities"),
+        );
+        if (capabilities) {
+          disposeAgentCapabilities();
+          agentCapabilities = [
+            capabilities.register(host.pluginId, createPackagesSkill(host.pluginId)),
+            capabilities.register(host.pluginId, createPackagesAgentTool(host.pluginId, {
+              trustedDir,
+              allowDevPath,
+              registry: () => registry,
+              spaceStorage: (spaceId) => spaceId && host.packageSpaces
+                ? packageSpaces().find((space) => space.spaceId === spaceId)?.storage
+                : undefined,
+              appendSessionEvent: (sessionId, type, data) =>
+                host.events.append(sessionId, type, data, { ignorable: true, producerPlugin: host.pluginId }),
+            })),
+          ];
+        }
       } catch (cause) {
+        disposeAgentCapabilities();
         autoUpdater?.dispose();
         autoUpdater = null;
         trustedRouteGate?.dispose();
@@ -150,6 +181,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       }
     },
     async onDisable() {
+      disposeAgentCapabilities();
       autoUpdater?.dispose();
       autoUpdater = null;
       try {

@@ -11,6 +11,7 @@ import type {
   DesktopWindowPlacement,
   DesktopKeepAwakeState,
   DesktopLocalSetupResult,
+  DesktopOwnerPasswordResetResult,
   DesktopSettings,
   DesktopSetupClaim,
   DesktopCaptionGeometry,
@@ -62,6 +63,9 @@ const bugReport: PolythDesktopBugReportApi = {
   state: () => ipcRenderer.invoke("desktop:report:state") as Promise<DesktopBugReportState>,
   capture: () => ipcRenderer.invoke("desktop:report:capture") as Promise<DesktopBugReportCapture>,
   send: (draft) => ipcRenderer.invoke("desktop:report:send", draft) as Promise<DesktopBugReportOutcome>,
+  annotate: (captureId, jpeg) =>
+    ipcRenderer.invoke("desktop:report:annotate", captureId, jpeg) as Promise<DesktopBugReportCapture["screenshot"]>,
+  forget: () => ipcRenderer.invoke("desktop:report:forget") as ReturnType<PolythDesktopBugReportApi["forget"]>,
 };
 
 const place = placement();
@@ -78,6 +82,8 @@ const api: PolythDesktopApi = {
   restartAfterSetup: () => ipcRenderer.invoke("desktop:setup:restart") as Promise<void>,
   completeLocalSetup: () => ipcRenderer.invoke("desktop:setup:local") as Promise<DesktopLocalSetupResult>,
   renewOwnerSession: () => ipcRenderer.invoke("desktop:session:renew") as Promise<boolean>,
+  resetOwnerPassword: (password: string) =>
+    ipcRenderer.invoke("desktop:owner:reset-password", password) as Promise<DesktopOwnerPasswordResetResult>,
   confirmOwnerSession: () => ipcRenderer.invoke("desktop:session:confirm") as Promise<boolean>,
   getSettings: () => ipcRenderer.invoke("desktop:settings:get") as Promise<DesktopSettings>,
   setSettings: (patch) =>

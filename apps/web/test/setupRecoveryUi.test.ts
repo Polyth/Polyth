@@ -47,9 +47,9 @@ test("setup asks only for visibly labelled name and password fields", async () =
     assert.match(source, new RegExp(`htmlFor="${id}"`));
     assert.match(source, new RegExp(`id="${id}"`));
   }
-  // Organization defaults, the login is fixed and the password has a reveal
-  // control instead of a confirmation field.
-  for (const removed of ["setup-organization", "setup-confirm", "setup-login"]) {
+  // Organization defaults and the password has a reveal control instead of a
+  // confirmation field. The login field exists only behind "Change".
+  for (const removed of ["setup-organization", "setup-confirm"]) {
     assert.doesNotMatch(source, new RegExp(removed));
   }
   assert.match(source, /const DEFAULT_ORGANIZATION = "Personal";/);
@@ -60,12 +60,14 @@ test("setup asks only for visibly labelled name and password fields", async () =
   assert.match(source, /lock-field-hint/);
 });
 
-test("setup does not ask for a login; the owner login is fixed", async () => {
+test("setup does not ask for a login: it proposes one from the name, and the field opens only on Change", async () => {
   const source = await read("../src/components/SetupScreen.tsx");
 
-  assert.doesNotMatch(source, /setup-login/);
-  assert.match(source, /const OWNER_LOGIN = "owner";/);
-  assert.match(source, /login: OWNER_LOGIN,/);
+  assert.doesNotMatch(source, /OWNER_LOGIN/, "no fixed login");
+  assert.match(source, /loginOverride === null \? loginFromName\(name\)/);
+  assert.match(source, /\{loginOverride !== null && \(\s*<div className="lock-field">\s*<label className="lock-field-label" htmlFor="setup-login">/);
+  assert.match(source, /onClick=\{\(\) => setLoginOverride\(login\)\}/);
+  assert.match(source, /login,\s*password,/);
 });
 
 test("setup errors are translated sentences, not server codes", async () => {

@@ -155,7 +155,9 @@ import {
   type ComposerCommand,
   type InsertPlan,
   type ModelAbsenceGate,
+  attachmentNote,
 } from "../composer/discovery.ts";
+import { carriedRouteModel } from "../composer/relayCarry.ts";
 import { composerPromptSuggestion, visiblePromptSuggestion } from "../composer/promptSuggestion.ts";
 import { isHostOnlyExtensionCommand } from "../composer/extensionCommandGate.ts";
 import { compactBlockReason, isCompactCommand, isNothingToCompactError } from "../composer/compactCommand.ts";
@@ -195,7 +197,6 @@ import {
   subscribeComposerContributions,
 } from "../composer/contributions.ts";
 import { detectModeTrigger, isModeLeaveKey, modeText } from "../composer/modes.ts";
-import { releaseSends } from "../composer/sendRelease.ts";
 import "../composer/composerModes.css";
 import { announce } from "./a11y/live.tsx";
 import { successFeedback, tapFeedback } from "../haptics.ts";
@@ -214,7 +215,7 @@ import {
 import { hiddenModelMatcher } from "@polyth/models";
 import { getUiSettings, setUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { sendHoldMs } from "../sendHold.ts";
-import { createSendHoldPress } from "../composer/sendHoldPress.ts";
+import { attachSendPress } from "../composer/sendPress.ts";
 import { isResizableImage, shouldAskImageSize } from "../imageUploadSize.ts";
 import ImageSizePrompt, { useImageSizeChoice } from "./ImageSizePrompt.tsx";
 import { migrateFavoritesOnce, profilesLoaded, useProfiles } from "../profiles.ts";
@@ -1540,15 +1541,21 @@ function ComposerBody({
   const effectiveProfile = effectiveProfileId
     ? profiles.find((profile) => profile.id === effectiveProfileId)
     : undefined;
-  const priorRoute = useRef({ sessionId: session?.id, harnessId: session?.resolvedHarnessId });
+  const priorRoute = useRef({ sessionId: session?.id, harnessId: session?.resolvedHarnessId, selection: session?.harness });
   useEffect(() => {
     if (!routeCatalog.ready) return;
     if (priorRoute.current.sessionId === session?.id && priorRoute.current.harnessId !== session?.resolvedHarnessId) {
       const harnessId = session?.resolvedHarnessId;
       // Catalog discovery may be partial or unavailable. The explicit route
-      // identity, not membership in that response, decides compatibility.
-      const compatibleModel = cfg.model && (!harnessId
-        || (cfg.model.harnessId ?? "opencode") === harnessId);
+      // identity, not membership in that response, decides compatibility;
+      // a Relay hand-over between member accounts keeps the choice.
+      const compatibleModel = carriedRouteModel({
+        model: cfg.model,
+        previousSelection: priorRoute.current.selection,
+        selection: session?.harness,
+        previousHarnessId: priorRoute.current.harnessId,
+        harnessId,
+      });
       const compatibleAgent = cfg.agent && routeCatalog.agents.some((agent) =>
         agent.name === cfg.agent && (!harnessId || agent.harnessId === harnessId));
       const profileId = cfg.profile.kind === "id" ? cfg.profile.id : undefined;
@@ -1556,15 +1563,15 @@ function ComposerBody({
         profile.id === profileId && (!harnessId || profile.harnessId === harnessId));
       const next: ComposerConfig = {
         profile: compatibleProfile ? cfg.profile : { kind: "inherit" },
-        ...(compatibleModel ? { model: cfg.model } : {}),
+        ...(compatibleModel ? { model: compatibleModel } : {}),
         ...(compatibleAgent ? { agent: cfg.agent } : {}),
         ...(compatibleModel && cfg.thinking !== undefined ? { thinking: cfg.thinking } : {}),
       };
       saveComposerConfig(session?.id, next);
       setCfg(next);
     }
-    priorRoute.current = { sessionId: session?.id, harnessId: session?.resolvedHarnessId };
-  }, [session?.id, session?.resolvedHarnessId, cfg, routeCatalog.ready, routeCatalog.models, routeCatalog.agents, profiles]);
+    priorRoute.current = { sessionId: session?.id, harnessId: session?.resolvedHarnessId, selection: session?.harness };
+  }, [session?.id, session?.resolvedHarnessId, session?.harness, cfg, routeCatalog.ready, routeCatalog.models, routeCatalog.agents, profiles]);
   // The last model the composer displayed for this session. A harness switch
   // clears the selection for correctness (an incompatible model must never be
   // sent), so the chip keeps this display-only anchor until the new route
@@ -2194,6 +2201,7 @@ function ComposerBody({
             reason: r.reason,
           }));
         }
+        return r.ok;
       }),
     })));
   }, [offerImages]);
@@ -2781,6 +2789,8 @@ function ComposerBody({
   // Latest send callback for recovery actions (a transport failure during
   // first-send creation must be retryable without capturing a stale closure).
   const sendRef = useRef<((override?: string, deliveryOverride?: "steer" | "queue" | "interrupt", hiddenUserMessage?: boolean, parkAsDraft?: boolean) => void) | null>(null);
+  /** Set while waiting photos go up as originals ahead of a send. */
+  const imagesSettlingRef = useRef(false);
 
   const send = useCallback((
     override?: string,
@@ -2874,6 +2884,23 @@ function ComposerBody({
         .finally(() => setQueueEditSaving(false));
       return;
     }
+    // A photo still waiting for its size goes with the message as the
+    // original: sending is the answer. The send resumes once every waiting
+    // photo is a pill (and its render has run); a photo that did not attach,
+    // or a move to another chat meanwhile, keeps the draft unsent.
+    if (imageChoice.waiting()) {
+      if (imagesSettlingRef.current) return;
+      imagesSettlingRef.current = true;
+      void imageChoice.choose("original", false).then((attached) => {
+        setTimeout(() => {
+          imagesSettlingRef.current = false;
+          if (!attached || sessionIdRef.current !== target) return;
+          sendRef.current?.(override, deliveryOverride, hiddenUserMessage, parkAsDraft);
+        }, 0);
+      });
+      return;
+    }
+    if (imagesSettlingRef.current) return;
     // A parked draft is text, never a shell command or a host action.
     const command = !noTurn && guardedShellAllowed(getGuardrails()) ? shellCommand(t) : null;
     const hasPills = command === null && attachments.length > 0;
@@ -3591,56 +3618,19 @@ function ComposerBody({
     catalogHarnessId, routeCatalog.harnessName, runtimeFeatures?.capabilities.steering,
     draftExecution, draftRoute, profiles, activeProject?.defaults?.harness, newChatPersonHarness,
     sendPeopleMessage, peopleSendAwaitsAnswer, refreshMentionPeople, submitMode,
+    imageChoice.waiting, imageChoice.choose,
   ]);
   useEffect(() => { sendRef.current = send; }, [send]);
 
-  // Press and hold Send keeps the message as a draft chat instead of sending
-  // it: a ring winds round Send over the hold; once the hold length has passed
-  // with the finger down, Send turns to a check, and letting go keeps the
-  // draft. Only a message that can be kept starts a hold; anything else is a
-  // plain press. Touch/pen Send is admitted on pointerup — once the gesture is
-  // known not to be a hold — and pointerdown is cancelled so the editor keeps
-  // focus and the keyboard stays open for the next message. The delayed click
-  // from the same gesture is consumed so it cannot send twice. Mouse holds
-  // swallow their click; keyboard activation retains the normal click path.
-  // Every press the browser gives to Send sends on release, wherever in its
-  // touch box it landed; only a finger that left Send does not
-  // (composer/sendRelease.ts). The release alone settles the hold, measured
-  // between the input's own time stamps (composer/sendHoldPress.ts): shorter
-  // than the hold length sends, the length or longer keeps the draft, with no
-  // gap between them, however busy the page was meanwhile. Send refuses
-  // panning in CSS, since a pan cancels the press and used to leave a held
-  // message neither sent nor kept.
-  const primaryActivationRef = useRef<{ touch: boolean; keyboard: boolean; staleTouchClick: boolean; ownedTouch: boolean; down: { x: number; y: number } | null }>(
-    { touch: false, keyboard: false, staleTouchClick: false, ownedTouch: false, down: null },
-  );
-  // The identifier of the touch Send owns, so that only its end settles it.
-  const ownedTouchIdRef = useRef<number | null>(null);
-  // A touch that begins on Send belongs to the page. iOS gives a tap within
-  // 66px of a word the keyboard is still composing to its text interaction,
-  // even when the tap lands outside the field (WebKit `isNearMarkedText`), and
-  // Send sits right under the end of the message: with the last word still
-  // marked, the press never became a send. Cancelling `touchstart` is what
-  // withholds a touch from the platform's own gestures, and only a listener
-  // that is not passive may do it (React's are passive). The cancelled touch
-  // has no click: the release sends, and `ownedTouch` says none is coming.
-  const ownPrimaryTouch = useCallback((button: HTMLButtonElement | null) => {
-    if (!button) return;
-    const own = (event: TouchEvent) => {
-      if (!event.cancelable) return;
-      event.preventDefault();
-      if (event.type === "touchstart") {
-        primaryActivationRef.current.ownedTouch = true;
-        ownedTouchIdRef.current = event.changedTouches[0]?.identifier ?? null;
-      }
-    };
-    button.addEventListener("touchstart", own, { passive: false });
-    button.addEventListener("touchend", own, { passive: false });
-    return () => {
-      button.removeEventListener("touchstart", own);
-      button.removeEventListener("touchend", own);
-    };
-  }, []);
+  // Send is pressed through one controller (composer/sendPress.ts): a press
+  // released before the hold length sends, one held for it keeps the message
+  // as a draft chat, and every press ends in exactly one of those however the
+  // platform reported it. The composer only says here what each outcome
+  // means. The button cancels no event and handles none itself: to the
+  // platform it is an ordinary button, and the editor keeps its focus and the
+  // keyboard through the composer's `data-keep-keyboard`, like every other
+  // control of the rail. Only a message that can be kept starts a hold;
+  // anything else is a plain press.
   const canParkRef = useRef<() => boolean>(() => false);
   // People mode sends a person message, never a draft chat: holding Send there
   // must not announce a saved draft while the message goes out to people. The
@@ -3650,42 +3640,35 @@ function ComposerBody({
     && !peopleModeRef.current && !activeModeRef.current && !queueEdit && !creatingSession && !sendPending && !compactPending
     && Boolean(sessionIdRef.current || activeProjectId)
     && ((inputRef.current?.getText() ?? text).trim() !== "" || attachments.length > 0);
-  // `parked` is Send's check: shown as the cue while a full hold is still
-  // down (`holdCueRef`), and for a beat once the draft is kept.
-  // `holdSpentRef` marks a press that kept a draft, so its click cannot send.
+  // `parked` is Send's check: shown as the cue once a hold is reached
+  // (`holdCueRef`), and for a beat once the draft is kept.
   const [parked, setParked] = useState(false);
   const parkedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const holdCueRef = useRef(false);
-  const holdSpentRef = useRef(false);
-  const holdPress = useMemo(() => createSendHoldPress({
-    onFull: () => {
-      if (!canParkRef.current()) return;
-      holdCueRef.current = true;
-      successFeedback();
-      if (parkedTimerRef.current !== null) clearTimeout(parkedTimerRef.current);
-      parkedTimerRef.current = null;
-      setParked(true);
-    },
-  }), []);
   useEffect(() => () => {
-    holdPress.dispose();
     if (parkedTimerRef.current !== null) clearTimeout(parkedTimerRef.current);
-  }, [holdPress]);
-  // A cue for a hold that turned out shorter (its lift was queued behind a
-  // busy page) is taken back: that press sends.
+  }, []);
+  const showHoldCue = useCallback(() => {
+    if (!canParkRef.current()) return;
+    holdCueRef.current = true;
+    successFeedback();
+    if (parkedTimerRef.current !== null) clearTimeout(parkedTimerRef.current);
+    parkedTimerRef.current = null;
+    setParked(true);
+  }, []);
+  // A cue for a press that sends after all (its lift was stamped before the
+  // hold and delivered late) or was abandoned is taken back.
   const dropHoldCue = useCallback(() => {
     if (!holdCueRef.current) return;
     holdCueRef.current = false;
     setParked(false);
   }, []);
-  // A press that lasted the hold keeps the message as a draft. The press is
-  // spent either way: when the message can no longer be kept (a send began
-  // meanwhile), it stays in the field rather than going out as a send the
-  // person held back.
+  // A press that lasted the hold keeps the message as a draft. When the
+  // message can no longer be kept (a send began meanwhile), it stays in the
+  // field rather than going out as a send the person held back.
   const keepHeldDraft = useCallback(() => {
     const cued = holdCueRef.current;
     holdCueRef.current = false;
-    holdSpentRef.current = true;
     if (!canParkRef.current()) {
       if (cued) setParked(false);
       return;
@@ -3700,27 +3683,16 @@ function ComposerBody({
       setParked(false);
     }, SEND_PARKED_MS);
   }, []);
-  const startHold = useCallback((event: PointerEvent<HTMLButtonElement>) => {
-    holdSpentRef.current = false;
-    const holdMs = sendHoldRef.current;
-    if (holdMs <= 0 || !canParkRef.current()) return;
-    holdPress.arm(event.currentTarget, event.timeStamp, holdMs);
-  }, [holdPress]);
-  // The release settles an armed hold. True when the press kept a draft.
-  const settleHold = useCallback((timeStamp: number): boolean => {
-    if (holdPress.release(timeStamp) === "draft") {
-      keepHeldDraft();
-      return true;
-    }
-    dropHoldCue();
-    return false;
-  }, [holdPress, keepHeldDraft, dropHoldCue]);
-  // A press that ends off Send keeps a draft only if it had already lasted
-  // the hold; anything shorter was abandoned and does nothing.
-  const abandonHold = useCallback((timeStamp: number) => {
-    if (holdPress.abandon(timeStamp) === "draft") keepHeldDraft();
-    else dropHoldCue();
-  }, [holdPress, keepHeldDraft, dropHoldCue]);
+  const sendPressRef = useCallback((button: HTMLButtonElement | null) => {
+    if (!button) return;
+    return attachSendPress(button, {
+      holdMs: () => (canParkRef.current() ? sendHoldRef.current : 0),
+      onSend: () => sendRef.current?.(),
+      onDraft: keepHeldDraft,
+      onCue: showHoldCue,
+      onCueDropped: dropHoldCue,
+    });
+  }, [keepHeldDraft, showHoldCue, dropHoldCue]);
   // A finger that lands on a composer control ends the word the keyboard is
   // still composing. The composer keeps its editor focused through such a tap
   // (`data-keep-keyboard`), so the word would stay marked under the finger,
@@ -3734,172 +3706,12 @@ function ComposerBody({
     if (!input?.isComposing()) return;
     const target = event.target as Element | null;
     if (target?.closest?.(FOCUS_TAKING_ENTRY)) return;
-    // Send owns its whole touch (`ownPrimaryTouch`) and ends the composition
-    // itself when it sends. Ending it here moves focus off the field and back
-    // in the middle of the touch, and on iOS that restarts the keyboard's input
-    // session under a finger that is still down. On the iPhone app a Send was
-    // seen left on its check with the message unsent, which only a press whose
-    // end never reached Send can do; this mid-touch refocus is the suspect.
+    // Send ends the composition itself when it sends. Ending it here moves
+    // focus off the field and back in the middle of the touch, and on iOS that
+    // restarts the keyboard's input session under a finger that is still down.
     if (target?.closest?.(".send")) return;
     input.finishComposition();
   }, []);
-  // A touch press on Send ends where the page hears it end. Send's own
-  // pointerup is the usual place; when that never comes, the end of the same
-  // touch anywhere on the page settles it instead (pointerup/pointercancel
-  // for its pointer, touchend/touchcancel), a task later so that Send's own
-  // handler, when it does run, always goes first. Without this a lost lift
-  // left the press armed: Send stuck on its check, the message neither sent
-  // nor kept, until another key did it.
-  const touchEndWatchRef = useRef<(() => void) | null>(null);
-  const stopTouchEndWatch = useCallback(() => {
-    const stop = touchEndWatchRef.current;
-    touchEndWatchRef.current = null;
-    stop?.();
-  }, []);
-  useEffect(() => stopTouchEndWatch, [stopTouchEndWatch]);
-  const finishTouchPress = useCallback((control: HTMLButtonElement, timeStamp: number, x: number, y: number) => {
-    stopTouchEndWatch();
-    const held = settleHold(timeStamp);
-    const activation = primaryActivationRef.current;
-    const down = activation.down;
-    activation.down = null;
-    // No click follows a touch the page took for itself, so nothing is left
-    // to consume: forget it, or it would swallow the next pointerless click.
-    if (activation.ownedTouch) {
-      activation.ownedTouch = false;
-      activation.touch = false;
-    }
-    if (held) return;
-    // A finger that slid off Send before lifting changed its mind. A touch is
-    // captured by the button it began on, so the event's target cannot tell;
-    // the page is hit-tested where the finger lifted instead.
-    const under = control.ownerDocument.elementFromPoint?.(x, y) ?? null;
-    if (releaseSends({
-      down,
-      up: { x, y },
-      rect: control.getBoundingClientRect(),
-      overControl: under ? control.contains(under) : null,
-    })) sendRef.current?.();
-  }, [stopTouchEndWatch, settleHold]);
-  const cancelTouchPress = useCallback((timeStamp: number) => {
-    stopTouchEndWatch();
-    abandonHold(timeStamp);
-    primaryActivationRef.current.touch = false;
-    primaryActivationRef.current.ownedTouch = false;
-    primaryActivationRef.current.down = null;
-  }, [stopTouchEndWatch, abandonHold]);
-  const touchPressEndsRef = useRef({ finish: finishTouchPress, cancel: cancelTouchPress });
-  touchPressEndsRef.current = { finish: finishTouchPress, cancel: cancelTouchPress };
-  const watchTouchEnd = useCallback((control: HTMLButtonElement, pointerId: number) => {
-    stopTouchEndWatch();
-    ownedTouchIdRef.current = null;
-    const win = control.ownerDocument.defaultView;
-    if (!win) return;
-    let timer: number | null = null;
-    const later = (run: () => void) => {
-      if (timer !== null) return;
-      timer = win.setTimeout(() => {
-        timer = null;
-        if (touchEndWatchRef.current === stop) run();
-      }, 0);
-    };
-    const onPointer = (event: globalThis.PointerEvent) => {
-      if (event.pointerId !== pointerId) return;
-      const { type, timeStamp, clientX, clientY } = event;
-      later(() => type === "pointerup"
-        ? touchPressEndsRef.current.finish(control, timeStamp, clientX, clientY)
-        : touchPressEndsRef.current.cancel(timeStamp));
-    };
-    const onTouch = (event: TouchEvent) => {
-      const id = ownedTouchIdRef.current;
-      const touch = Array.from(event.changedTouches).find((item) => id === null || item.identifier === id);
-      if (!touch) return;
-      const { type, timeStamp } = event;
-      const { clientX, clientY } = touch;
-      later(() => type === "touchend"
-        ? touchPressEndsRef.current.finish(control, timeStamp, clientX, clientY)
-        : touchPressEndsRef.current.cancel(timeStamp));
-    };
-    const options = { capture: true, passive: true } as const;
-    const stop = () => {
-      if (timer !== null) win.clearTimeout(timer);
-      timer = null;
-      win.removeEventListener("pointerup", onPointer, options);
-      win.removeEventListener("pointercancel", onPointer, options);
-      win.removeEventListener("touchend", onTouch, options);
-      win.removeEventListener("touchcancel", onTouch, options);
-    };
-    win.addEventListener("pointerup", onPointer, options);
-    win.addEventListener("pointercancel", onPointer, options);
-    win.addEventListener("touchend", onTouch, options);
-    win.addEventListener("touchcancel", onTouch, options);
-    touchEndWatchRef.current = stop;
-  }, [stopTouchEndWatch]);
-  const onPrimaryPointerDown = useCallback((event: PointerEvent<HTMLButtonElement>) => {
-    const activation = primaryActivationRef.current;
-    if (event.pointerType !== "touch" && event.pointerType !== "pen") {
-      activation.touch = false;
-      activation.ownedTouch = false;
-      activation.keyboard = false;
-      activation.staleTouchClick = false;
-      if (event.button === 0) startHold(event);
-      return;
-    }
-    activation.touch = true;
-    // Set again by this touch's own `touchstart`, which follows `pointerdown`.
-    activation.ownedTouch = false;
-    activation.keyboard = false;
-    activation.staleTouchClick = false;
-    activation.down = { x: event.clientX, y: event.clientY };
-    event.preventDefault();
-    watchTouchEnd(event.currentTarget, event.pointerId);
-    startHold(event);
-  }, [startHold, watchTouchEnd]);
-  const onPrimaryPointerUp = useCallback((event: PointerEvent<HTMLButtonElement>) => {
-    if (event.pointerType === "touch" || event.pointerType === "pen") {
-      finishTouchPress(event.currentTarget, event.timeStamp, event.clientX, event.clientY);
-      return;
-    }
-    settleHold(event.timeStamp);
-  }, [finishTouchPress, settleHold]);
-  // Leaving ends a hold; the browser taking the touch for a pan ends the
-  // gesture. No click follows a cancelled touch, so nothing is left to
-  // consume: forget it, or it would swallow the next pointerless click
-  // (an assistive activation). A leave is not that: it precedes the click.
-  const onPrimaryPointerLeave = useCallback((event: PointerEvent<HTMLButtonElement>) => {
-    abandonHold(event.timeStamp);
-  }, [abandonHold]);
-  const onPrimaryPointerCancel = useCallback((event: PointerEvent<HTMLButtonElement>) => {
-    cancelTouchPress(event.timeStamp);
-  }, [cancelTouchPress]);
-  const onPrimaryKeyDown = useCallback((event: KeyboardEvent<HTMLButtonElement>) => {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    const activation = primaryActivationRef.current;
-    activation.staleTouchClick = activation.touch;
-    activation.touch = false;
-    activation.keyboard = true;
-  }, []);
-  const onPrimaryClick = useCallback((event: MouseEvent<HTMLButtonElement>) => {
-    const activation = primaryActivationRef.current;
-    const keyboardClick = event.detail === 0;
-    if (holdSpentRef.current && !keyboardClick) {
-      holdSpentRef.current = false;
-      activation.touch = false;
-      return;
-    }
-    if (activation.staleTouchClick && !keyboardClick) {
-      activation.staleTouchClick = false;
-      return;
-    }
-    if (activation.touch && !keyboardClick) {
-      activation.touch = false;
-      return;
-    }
-    activation.touch = false;
-    activation.keyboard = false;
-    activation.staleTouchClick = false;
-    send();
-  }, [send]);
 
   const retryFailedSend = useCallback(() => {
     const draft = (inputRef.current?.getText() ?? text).trim();
@@ -4511,38 +4323,7 @@ function ComposerBody({
   // keeps the legacy "not reported" line.
   // Where uploads land in the agent's own workspace, every format is
   // deliverable: what the engine cannot take as content is named by path.
-  const attachmentsReferenceable = runtimeFeatures
-    ? runtimeFeatures.remote !== true || runtimeFeatures.materializeAvailable === true
-    : true;
-  const attachNote = (() => {
-    if (attachments.length === 0) return null;
-    // No capability report is not a claim of incompatibility — most providers
-    // simply don't report it, and it works. Only an explicit unsupported
-    // modality is worth interrupting the draft for.
-    if (!composerAttachmentSupport) return null;
-    for (const attachment of attachments) {
-      const modality = attachmentModality(attachment);
-      if (!modality) continue;
-      const level = composerAttachmentSupport[modality];
-      if (level === "native" || level === "emulated") continue;
-      // Any other uploaded file reaches the agent by path (the server's
-      // file-reference plan); the agent opens it or says it cannot.
-      if (attachmentsReferenceable && modality !== "image" && attachment.path) continue;
-      if (modality === "image") return tr("composer.discovery.attachmentImagesOmitted");
-      if (modality === "pdf") return tr("composer.discovery.currentlyUnavailable");
-      if (modality === "audio") return tr("composer.discovery.currentlyUnavailable");
-      if (modality === "file") return tr("composer.discovery.currentlyUnavailable");
-      return tr("composer.discovery.currentlyUnavailable");
-    }
-    return null;
-  })();
-  const uploadDisabledReason = (() => {
-    if (!composerAttachmentSupport || attachmentsReferenceable) return undefined;
-    const anySupported = Object.values(composerAttachmentSupport).some(
-      (level) => level === "native" || level === "emulated",
-    );
-    return anySupported ? undefined : tr("composer.discovery.currentlyUnavailable");
-  })();
+  const attachNote = attachmentNote({ attachments, support: composerAttachmentSupport });
   // A variant remembered for one model can be meaningless on the next. Drop
   // the stale value so the control shows the effective one instead of a
   // preference that would be discarded at send.
@@ -4833,7 +4614,7 @@ function ComposerBody({
     || compactPending
     || queueEditSaving
     || borrowedEpochPending
-    || (queueEdit ? !liveText.trim() : (!liveText.trim() && attachments.length === 0))
+    || (queueEdit ? !liveText.trim() : (!liveText.trim() && attachments.length === 0 && imageChoice.pending.length === 0))
     || (!queueEdit && !shellMode && (modelAbsenceBlocksSend || profileMissing) && !hostOnlyCommandReady);
   const hasDraft = liveText.trim() !== "" || attachments.length > 0 || imageChoice.pending.length > 0;
   // Answer later: a question or approval that arrives while this draft is
@@ -4879,7 +4660,6 @@ function ComposerBody({
       draftText={text}
       commands={commandCatalog}
       snippets={snippetCatalog}
-      {...(uploadDisabledReason ? { uploadDisabledReason } : {})}
       direction="up"
       onUpload={() => openAttachmentPicker("files")}
       onChoosePhotos={() => openAttachmentPicker("photos")}
@@ -4962,14 +4742,8 @@ function ComposerBody({
         <div className="composer-send-split">
           <button
             className={`send composer-delivery${queueEdit ? "" : " composer-running-send"}`}
-            ref={ownPrimaryTouch}
-            onPointerDown={onPrimaryPointerDown}
-            onPointerUp={onPrimaryPointerUp}
-            onPointerCancel={onPrimaryPointerCancel}
-            onPointerLeave={onPrimaryPointerLeave}
+            ref={sendPressRef}
             onContextMenu={(event) => event.preventDefault()}
-            onKeyDown={onPrimaryKeyDown}
-            onClick={onPrimaryClick}
             data-parked={parked || undefined}
             style={sendHoldStyle}
             aria-label={runningPrimaryTitle}
@@ -5025,9 +4799,8 @@ function ComposerBody({
         </button>
       )
             ) : (
-      <button className="send" onPointerDown={onPrimaryPointerDown} onPointerUp={onPrimaryPointerUp} ref={ownPrimaryTouch}
-        onPointerCancel={onPrimaryPointerCancel} onPointerLeave={onPrimaryPointerLeave}
-        onContextMenu={(event) => event.preventDefault()} onKeyDown={onPrimaryKeyDown} onClick={onPrimaryClick}
+      <button className="send" ref={sendPressRef}
+        onContextMenu={(event) => event.preventDefault()}
         data-parked={parked || undefined}
         style={sendHoldStyle}
         title={`${shellMode ? tr("composer.runShellCommand") : tr("composer.sendMessage")} (${sendKey})${holdHint}`}

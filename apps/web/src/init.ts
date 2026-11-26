@@ -9,14 +9,16 @@ import { loadSpaces } from "./spaces.ts";
 import { displaySessionTitle, isPlaceholderTitle, modelToMarkdown } from "./format.ts";
 import { friendlyError } from "./settings.ts";
 import { formatAppUrl, PACKAGES_LINK_PARAMS, packagesLinkFromSearch, parseAppUrl, settingsPageFromSearch } from "./router.ts";
+import { isSecondaryWindow, withWindowRole } from "./secondWindow.ts";
 import { requestPackageInstall } from "./packages/installRequest.ts";
 import * as store from "./store.ts";
 import { successFeedback, warningFeedback } from "./haptics.ts";
 import { resolveActiveProjectId, shouldRefreshProjectsOnSyncOpen } from "./projectRegistry.ts";
 import { claimPersonalProjectAttempt } from "./personalProject.ts";
 import { projectIsolationLevel } from "@polyth/contracts";
+import { creationModelAndAgent } from "./creationDefaults.ts";
 import { CONNECTION_RESTORED_EVENT, setConnectionGate } from "@polyth/contracts/transport-retry";
-import type { AttachmentRef, HarnessSelection, JsonObject, ManagedProjectInput, ModelRef, Project, ProjectCloneInput, ProjectDefaults, ProjectPatch, ResumeTurnOptions, SessionDeleteOptions, SessionEvent, SessionProjection, SessionStartRequest, StartSessionResult, StartWorktreeSessionInput } from "@polyth/contracts";
+import type { AttachmentRef, HarnessSelection, JsonObject, ManagedProjectInput, ModelRef, Project, ProjectCloneInput, ProjectDefaults, ProjectPatch, ResumeTurnOptions, SessionDeleteOptions, SessionCreationSharing, SessionEvent, SessionProjection, SessionStartRequest, StartSessionResult, StartWorktreeSessionInput } from "@polyth/contracts";
 import { suggestWorktreeBranch, temporaryWorktreeBranch } from "./worktreeSessions.ts";
 import { installPushDeepLinks, reconcilePushSubscription, registerServiceWorker } from "./push.ts";
 import { alertPersonMessage, installNotify } from "./notify.ts";
@@ -744,8 +746,13 @@ const historyDepth = (): number => {
  *  URL already matches — popstate navigation never double-pushes. */
 function syncUrl(replace: boolean): void {
   const s = store.getState();
-  const target = formatAppUrl(s.activeProjectId, s.activeSessionId);
-  if (location.pathname === target && !location.search.includes("session=")) return;
+  // A second window keeps its role in the address, so a reload stays a chat
+  // or pane window (secondWindow.ts); its moves never stack history.
+  const secondary = isSecondaryWindow();
+  const target = withWindowRole(formatAppUrl(s.activeProjectId, s.activeSessionId));
+  if (secondary ? `${location.pathname}${location.search}` === target
+    : location.pathname === target && !location.search.includes("session=")) return;
+  if (secondary) replace = true;
   if (replace) history.replaceState({ polyth: true, depth: historyDepth() } satisfies PolythHistoryState, "", target);
   else history.pushState({ polyth: true, depth: historyDepth() + 1 } satisfies PolythHistoryState, "", target);
   if (s.activeSessionId) markSessionPerformance("route_committed", s.activeSessionId);
@@ -1959,6 +1966,19 @@ async function readSessionList(projectId: string): Promise<void> {
   }
 }
 
+let pinnedSessionsRead: Promise<void> | null = null;
+
+/** Every chat the reader pinned in this Space, whatever its project, for the
+ *  navigator's Pinned group above the projects (`pinnedPlacement: "top"`). A
+ *  project's own read covers only the projects whose list was opened. */
+export function refreshPinnedSessions(): Promise<void> {
+  pinnedSessionsRead ??= api.listSessionSummaries({ pinned: true, archived: false, limit: 100 })
+    .then((page) => { store.upsertSessions(page.sessions); })
+    .catch((error: unknown) => { console.warn("list pinned sessions failed", error); })
+    .finally(() => { pinnedSessionsRead = null; });
+  return pinnedSessionsRead;
+}
+
 // Add/Create ordering: the POST response is authoritative for
 // id, name, and canonical path. On success the store applies one atomic
 // upsert-and-activate transition (mutationVersion increments, so any list
@@ -2154,6 +2174,10 @@ export interface CreateSessionOptions {
    *  harness (Spaces §13): send no harness, model or agent and fill no
    *  project/session defaults, so the server pins the chat to it. */
   personDefaultHarnessId?: string;
+  /** Who can open the chat from the moment it exists (Spaces §14.3). Applied
+   *  before its first turn, so its agent knows others are here and never
+   *  reaches the creator's personal notes. A chat with a `start` refuses it. */
+  sharing?: SessionCreationSharing;
 }
 
 export interface IsolatedSessionOptions {
@@ -2174,6 +2198,8 @@ export interface IsolatedSessionOptions {
    *  isolation service, which can't see a person default, so the harness is
    *  named instead (no model or agent: the harness's own default applies). */
   personDefaultHarnessId?: string;
+  /** As for `createSession`. */
+  sharing?: SessionCreationSharing;
 }
 
 /** A create that follows the person default carries no route of its own. */
@@ -2187,21 +2213,18 @@ function compatibleCreationDefaults(
   options: Pick<CreateSessionOptions, "harness" | "model" | "agent">,
 ): { model?: ModelRef; agent?: string } {
   const defaults = getSessionDefaults();
-  const candidateModel = options.model ?? resolveProjectModelDefault(project?.defaults, defaults.defaultModel);
-  const candidateAgent = options.agent ?? project?.defaults?.agent ?? defaults.defaultAgent;
-  const pinnedHarness = options.harness?.mode === "pinned" ? options.harness.harnessId : undefined;
-  if (!pinnedHarness) return {
-    ...(candidateModel ? { model: candidateModel } : {}),
-    ...(candidateAgent ? { agent: candidateAgent } : {}),
-  };
+  const defaultModel = resolveProjectModelDefault(project?.defaults, defaults.defaultModel);
+  const defaultAgent = project?.defaults?.agent ?? defaults.defaultAgent;
   const state = store.getState();
-  const model = candidateModel && state.models.some((item) =>
-    item.harnessId === pinnedHarness
-    && item.providerID === candidateModel.providerID
-    && item.modelID === candidateModel.modelID) ? candidateModel : undefined;
-  const agent = candidateAgent && state.agents.some((item) =>
-    item.harnessId === pinnedHarness && item.name === candidateAgent) ? candidateAgent : undefined;
-  return { ...(model ? { model } : {}), ...(agent ? { agent } : {}) };
+  return creationModelAndAgent({
+    ...(options.harness ? { harness: options.harness } : {}),
+    ...(options.model ? { model: options.model } : {}),
+    ...(options.agent ? { agent: options.agent } : {}),
+    ...(defaultModel ? { defaultModel } : {}),
+    ...(defaultAgent ? { defaultAgent } : {}),
+    models: state.models,
+    agents: state.agents,
+  });
 }
 
 /** Create a session in a Polyth-managed isolated workspace and open it. */
@@ -2235,6 +2258,7 @@ export async function startIsolatedSessionWithStart(
       ...(input.sourceSessionId ? { sourceSessionId: input.sourceSessionId } : {}),
       ...(input.repositoryIds ? { repositoryIds: input.repositoryIds } : {}),
       ...(input.purpose ? { purpose: input.purpose } : {}),
+      ...(input.sharing ? { sharing: input.sharing } : {}),
       ...(start ? { start } : {}),
     };
     // Keyed like createSession: a lost response resolves to the session (and
@@ -2365,6 +2389,7 @@ export async function createSessionWithStart(projectId: string, opts: CreateSess
       ...(opts.agent ? { agent: opts.agent } : {}),
       ...(opts.purpose ? { purpose: opts.purpose } : {}),
       ...(personDefaultHarnessId ? { personDefaultHarnessId } : {}),
+      ...(opts.sharing ? { sharing: opts.sharing } : {}),
       ...(start ? { start } : {}),
       precache,
       ...(activate ? { activate } : {}),
@@ -2382,6 +2407,7 @@ export async function createSessionWithStart(projectId: string, opts: CreateSess
         ...(model ? { model } : {}),
         ...(agent ? { agent } : {}),
         ...(worktreePath ? { worktreePath } : {}),
+        ...(opts.sharing ? { sharing: opts.sharing } : {}),
         ...(start ? { start } : {}),
         clientOperationId,
       }),

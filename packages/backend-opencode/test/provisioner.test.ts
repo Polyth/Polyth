@@ -7,6 +7,7 @@ import {
   createOpenCodeProvisioner,
   peekOpenCodeLaunchOverlay,
   applyOpenCodeLaunchOverlay,
+  openCodeV2Mcp,
   polythSkillId,
 } from "../src/provisioner.ts";
 import type { BackendConfigApplier, McpApplyBatch } from "../src/config.ts";
@@ -459,4 +460,64 @@ test("V2 launch overlay preserves native server options and user skill sources",
   assert.equal(env.OPENCODE_CONFIG_CONTENT, JSON.stringify(existing));
   const merged = JSON.parse(result.OPENCODE_CONFIG_CONTENT!);
   assert.deepEqual(merged, { ...existing, mcp: { ...existing.mcp, servers: { ...existing.mcp.servers, generated: { type: "local", command: ["node", "probe"], disabled: false } } } });
+});
+
+test("V2 launch stages MCP servers natively: startup budget only, Polyth tools outside Code Mode", async (t) => {
+  const provisioner = createOpenCodeProvisioner({} as BackendConfigApplier);
+  const context = { spaceId: "v2-space", projectId: "v2-project", cwd: tmp() };
+  t.after(() => provisioner.release?.(context));
+  await provisioner.apply(context, {
+    harnessId: "opencode",
+    desiredRevision: "v2-rev",
+    items: [{
+      capability: {
+        id: "polyth.agent-tools",
+        kind: "mcp-server",
+        owner: "polyth",
+        scope: "project",
+        revision: "tools-1",
+        name: "polyth-agent-tools",
+        enabled: true,
+        transport: { kind: "stdio", command: "node", args: ["bridge.mjs"], envKeys: ["POLYTH_AGENT_TOOLS_TOKEN"] },
+      },
+      mode: "config",
+      mutability: "requires-restart",
+    }, plan("linear").items[0]!],
+  }, { mcpSecrets: () => ({ POLYTH_AGENT_TOOLS_TOKEN: "token" }) });
+  const overlay = peekOpenCodeLaunchOverlay(context)!;
+  const startupOnly = { startup: 30_000, catalog: 30_000 };
+
+  // V2 turns a V1 numeric `timeout` into an execution limit as well, which
+  // failed every Polyth tool call (approval waits included) at 30 s.
+  const fresh = JSON.parse(applyOpenCodeLaunchOverlay({}, overlay, "v2").OPENCODE_CONFIG_CONTENT!);
+  assert.deepEqual(Object.keys(fresh.mcp), ["servers"]);
+  assert.deepEqual(fresh.mcp.servers["polyth-agent-tools"].timeout, startupOnly);
+  assert.equal(fresh.mcp.servers["polyth-agent-tools"].codemode, false);
+  assert.equal(fresh.mcp.servers["polyth-agent-tools"].disabled, false);
+  assert.equal("enabled" in fresh.mcp.servers["polyth-agent-tools"], false);
+  assert.deepEqual(fresh.mcp.servers.linear.timeout, startupOnly);
+  assert.equal("codemode" in fresh.mcp.servers.linear, false, "other MCP servers keep OpenCode's Code Mode default");
+
+  const merged = JSON.parse(applyOpenCodeLaunchOverlay({
+    OPENCODE_CONFIG_CONTENT: JSON.stringify({ mcp: { linear: { type: "remote", url: "https://old.example" }, user: { type: "local", command: ["u"] } } }),
+  }, overlay, "v2").OPENCODE_CONFIG_CONTENT!);
+  assert.deepEqual(Object.keys(merged.mcp).sort(), ["servers", "user"], "a staged server replaces the same-named V1 entry");
+  assert.equal(merged.mcp.servers.linear.url, "https://a.example");
+  assert.deepEqual(merged.mcp.servers["polyth-agent-tools"].timeout, startupOnly);
+
+  // The remote V2 launch stages its reverse-loopback bridge the same way.
+  assert.deepEqual(openCodeV2Mcp({
+    "polyth-agent-tools": { type: "remote", url: "http://127.0.0.1:1/internal/agent-tools/mcp", headers: { Authorization: "Bearer x" }, enabled: true, timeout: 30_000 },
+  }, "polyth-agent-tools"), { servers: { "polyth-agent-tools": {
+    type: "remote", url: "http://127.0.0.1:1/internal/agent-tools/mcp", headers: { Authorization: "Bearer x" }, disabled: false, timeout: startupOnly, codemode: false,
+  } } });
+
+  // 1.x knows neither the V2 form nor `codemode`; its launch is unchanged.
+  for (const env of [{}, { OPENCODE_CONFIG_CONTENT: JSON.stringify({ theme: "keep" }) }]) {
+    const legacy = JSON.parse(applyOpenCodeLaunchOverlay(env, overlay, "legacy").OPENCODE_CONFIG_CONTENT!);
+    assert.equal(legacy.mcp["polyth-agent-tools"].timeout, 30_000);
+    assert.equal(legacy.mcp["polyth-agent-tools"].enabled, true);
+    assert.equal("codemode" in legacy.mcp["polyth-agent-tools"], false);
+    assert.equal(legacy.mcp.servers, undefined);
+  }
 });

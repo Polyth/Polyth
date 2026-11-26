@@ -114,7 +114,10 @@ const menuActionLabels = () => [...document.querySelectorAll<HTMLButtonElement>(
 
 const project = (id: string): Project => ({ id, path: `/work/${id}`, name: id, createdAt: 1 });
 
-for (const presentation of ["phone", "tree", "rail", "collapsed rail", "compact rail"] as const) {
+// The wide expanded rail and the wide tree enter the clicked project instead
+// (covered by the tests at the end of this file), so they are not among these
+// browsing presentations.
+for (const presentation of ["phone", "compact tree", "collapsed rail", "compact rail"] as const) {
   test(`${presentation}: project clicks toggle sessions while preserving the open chat`, async () => {
     const ticket = store.beginProjectListRequest();
     store.publishProjectList(ticket, [project("alpha"), project("beta")]);
@@ -127,7 +130,7 @@ for (const presentation of ["phone", "tree", "rail", "collapsed rail", "compact 
     localStorage.setItem("polyth.sidebar.expandedProjects", '["alpha"]');
     setSidebarViewMode(presentation.includes("rail") ? "rail" : "tree");
     setSidebarLayout({ collapsed: presentation === "collapsed rail", restoreViewMode: "rail" });
-    shellWidth = presentation === "phone" ? 390 : presentation === "compact rail" ? 700 : 1400;
+    shellWidth = presentation === "phone" ? 390 : presentation.startsWith("compact") ? 700 : 1400;
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root = createRoot(container);
@@ -135,15 +138,13 @@ for (const presentation of ["phone", "tree", "rail", "collapsed rail", "compact 
       await act(async () => { root.render(createElement(presentation === "phone" ? MobileNavigator : Sidebar)); });
       const selector = presentation === "phone"
         ? '[data-project-id="beta"] .mobile-nav-project-main'
-        : presentation === "tree"
+        : presentation === "compact tree"
           ? '[data-project-id="beta"] .project-card'
           : '.sidebar-project-rail-item[aria-label="beta"]';
       const button = container.querySelector<HTMLButtonElement>(selector)!;
       assert.ok(button);
       assert.equal(button.getAttribute("aria-expanded"), "false");
-      // A wide rail's second click enters the project (covered below), so
-      // only its first click browses here.
-      for (const expanded of presentation === "rail" ? [true] : [true, false, true]) {
+      for (const expanded of [true, false, true]) {
         await act(async () => { click(button); });
         assert.equal(button.getAttribute("aria-expanded"), String(expanded));
         assert.equal(store.getState().activeProjectId, "alpha", "browsing another project preserves the workspace");
@@ -552,9 +553,10 @@ test("tree mode nests sessions under project worktrees", async () => {
     assert.ok(betaRail);
     await act(async () => { click(betaRail!); });
     await act(async () => { await Promise.resolve(); });
-    assert.equal(betaRail?.getAttribute("aria-current"), null, "browsing beta does not activate it");
+    assert.equal(betaRail?.getAttribute("aria-current"), "true", "one click on beta enters it");
     assert.equal(betaRail?.getAttribute("aria-expanded"), "true");
-    assert.equal(store.getState().activeProjectId, "alpha");
+    assert.equal(store.getState().activeProjectId, "beta");
+    assert.equal(store.getState().newSessionIntent?.projectId, "beta", "the main area shows beta's New chat");
     assert.equal(container.querySelector(".sidebar-focused-project .project-name")?.textContent, "beta");
     assert.match(container.querySelector(".sidebar-focused-sessions")?.textContent ?? "", /Beta session/);
 
@@ -1263,7 +1265,7 @@ test("compact drawers offer the project rail, its customize pencil and the layou
 // boot restoration, whose session fetch the shared mock answers with an empty
 // page — harmless here, but it must not disturb the exact-count assertions
 // above.
-test("a second click on a rail project enters it instead of collapsing the sessions", async () => {
+test("one click on a rail project enters it instead of collapsing the sessions", async () => {
   const ticket = store.beginProjectListRequest();
   store.publishProjectList(ticket, [project("alpha"), project("beta")]);
   store.activateProject("alpha");
@@ -1288,28 +1290,27 @@ test("a second click on a rail project enters it instead of collapsing the sessi
 
     // The focused project's icon on its own New chat page does nothing.
     await press(railItem("alpha"));
-    assert.equal(getSidebarLayout().collapsed, false, "a second click never collapses the sessions");
+    assert.equal(getSidebarLayout().collapsed, false, "a click never collapses the sessions");
     assert.equal(container.querySelector(".sidebar--rail-collapsed"), null);
     assert.equal(store.getState().activeProjectId, "alpha");
 
-    // On the New chat page, the first click browses another project and the
-    // second moves the New chat page there.
+    // On the New chat page, the first click on another project moves the New
+    // chat page there, and the active mark follows it.
     await press(railItem("beta"));
-    assert.equal(store.getState().activeProjectId, "alpha", "the first click only browses");
-    assert.match(container.querySelector(".sidebar-focused-sessions")?.textContent ?? "", /Beta session/);
-    await press(railItem("beta"));
-    assert.equal(store.getState().activeProjectId, "beta", "the second click opens New chat in the project");
+    assert.equal(store.getState().activeProjectId, "beta", "the first click opens New chat in the project");
     assert.equal(store.getState().activeSessionId, null);
+    assert.match(container.querySelector(".sidebar-focused-sessions")?.textContent ?? "", /Beta session/);
+    assert.equal(railItem("beta").classList.contains("active"), true, "the clicked project carries the active mark");
+    assert.equal(railItem("beta").getAttribute("aria-current"), "true");
+    assert.equal(railItem("alpha").classList.contains("active"), false, "the previous project loses it");
     assert.equal(container.querySelector(".sidebar--rail-collapsed"), null);
 
-    // A double-click only browses: its second click does not act again.
-    await press(railItem("alpha"));
+    // A double-click enters once: its second click does not act again.
     await press(railItem("alpha"), 2);
-    assert.equal(store.getState().activeProjectId, "beta", "a double-click does not enter the project");
-    assert.equal(railItem("alpha").getAttribute("aria-expanded"), "true");
+    assert.equal(store.getState().activeProjectId, "beta", "a double-click's second click does not enter again");
 
-    // With another project's chat open, the second click opens the project's
-    // latest chat.
+    // With another project's chat open, one click opens the project's latest
+    // chat.
     // A first open's reads never answer here: only its start is observed.
     await act(async () => { store.activateSession("b1"); });
     globalThis.fetch = (() => new Promise(() => {})) as typeof fetch;
@@ -1324,6 +1325,72 @@ test("a second click on a rail project enters it instead of collapsing the sessi
     store.setOpeningSession(null);
     store.activateSession(null);
     setSidebarLayout({ collapsed: false });
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
+test("one click on a wide tree project enters it, even one with no chats yet", async () => {
+  const ticket = store.beginProjectListRequest();
+  store.publishProjectList(ticket, [project("alpha"), project("beta"), project("empty")]);
+  store.activateProject("alpha");
+  store.activateSession(null);
+  store.setSessions("alpha", sessionsByProject.alpha!);
+  store.setSessions("beta", sessionsByProject.beta!);
+  store.setSessions("empty", []);
+  localStorage.setItem("polyth.sidebar.expandedProjects", '["alpha"]');
+  setSidebarViewMode("tree");
+  setSidebarLayout({ collapsed: false, width: 332 });
+
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const press = async (element: Element, detail = 1) => {
+    await act(async () => {
+      element.dispatchEvent(new MouseEventCtor("click", { bubbles: true, detail }));
+    });
+  };
+  const card = (id: string) => container.querySelector<HTMLButtonElement>(`[data-project-id="${id}"] .project-card`)!;
+  const realFetch = globalThis.fetch;
+  try {
+    await act(async () => { root.render(createElement(Sidebar)); });
+    assert.equal(card("empty").getAttribute("aria-expanded"), "false");
+
+    // A project with no chats opens on its own New chat page, so its files
+    // and panes are one click away; its (empty) list opens with it.
+    await press(card("empty"));
+    assert.equal(store.getState().activeProjectId, "empty", "the first click enters the project");
+    assert.equal(store.getState().activeSessionId, null);
+    assert.equal(store.getState().newSessionIntent?.projectId, "empty", "New chat moves to the project");
+    assert.equal(card("empty").classList.contains("active"), true, "the clicked project carries the active mark");
+    assert.equal(card("empty").getAttribute("aria-current"), "true");
+    assert.equal(card("empty").getAttribute("aria-expanded"), "true");
+    assert.equal(card("alpha").classList.contains("active"), false, "the previous project loses it");
+
+    // Inside the project already, clicks close and reopen its list without
+    // leaving it.
+    await press(card("empty"));
+    assert.equal(card("empty").getAttribute("aria-expanded"), "false");
+    assert.equal(store.getState().activeProjectId, "empty");
+    await press(card("empty"));
+    assert.equal(card("empty").getAttribute("aria-expanded"), "true");
+
+    // A double-click's second click does not act again (it renames).
+    await press(card("beta"), 2);
+    assert.equal(store.getState().activeProjectId, "empty", "a double-click's second click does not enter");
+
+    // With another project's chat open, one click opens the project's latest
+    // chat. A first open's reads never answer here: only its start is observed.
+    await act(async () => { store.activateSession("b1"); });
+    globalThis.fetch = (() => new Promise(() => {})) as typeof fetch;
+    await press(card("alpha"));
+    const opened = store.getState().openingSessionId ?? store.getState().activeSessionId;
+    assert.ok(opened === "a1" || opened === "a2", "the project's latest chat opens");
+  } finally {
+    globalThis.fetch = realFetch;
+    store.setOpeningSession(null);
+    store.activateSession(null);
+    localStorage.removeItem("polyth.sidebar.expandedProjects");
     await act(async () => { root.unmount(); });
     container.remove();
   }

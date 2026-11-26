@@ -3,7 +3,8 @@
 // and workspace.right.tabs) — App.tsx, Header.tsx, and ContextRail.tsx are
 // never edited and never enumerate them. All merge/mutation logic lives in
 // ../notificationCentre.ts; records are the server's canonical, already
-// redacted payloads and are rendered as-is (never re-templated here).
+// redacted payloads and are rendered as-is (never re-templated here), except
+// that a limit notice reads as a reached limit on the reader's own clock.
 import { useState } from "react";
 import type { NotificationKind as CentreKind, NotificationRecord } from "@polyth/contracts";
 import { registerSlot } from "../slots.ts";
@@ -11,11 +12,11 @@ import { toggleRailPlugin, useStore } from "../store.ts";
 import { openSession } from "../init.ts";
 import { useUiSettings } from "../uiPrefs.ts";
 import {
-  NOTIFICATION_KIND_LABELS, bellBadge, bellName, canOpenNotification, centreRows,
-  notificationCentre, useNotificationCentre, type NotificationCentre,
+  bellBadge, bellName, canOpenNotification, centreRows, notificationBody, notificationCentre,
+  notificationKindLabel, notificationWhen, useNotificationCentre, type NotificationCentre,
 } from "../notificationCentre.ts";
 import { defineWidgetPlugin, registerWidgetPlugin } from "../widgets/catalog.ts";
-import { getLocale, tr } from "../i18n/index.ts";
+import { tr } from "../i18n/index.ts";
 import { RAIL_ICONS } from "../railIcons.ts";
 import { Button, BellIcon, IconButton } from "./ui/index.ts";
 import NotificationGlyph from "../notify/NotificationGlyph.tsx";
@@ -61,15 +62,6 @@ export function NotificationBell({ centre = notificationCentre }: { centre?: Not
   );
 }
 
-/** Same-day timestamps show the time; older ones add the date. The semantic
- *  <time dateTime> always carries the full ISO instant. */
-function fmtWhen(ts: number): string {
-  const d = new Date(ts);
-  return d.toDateString() === new Date().toDateString()
-    ? d.toLocaleTimeString(getLocale(), { hour: "2-digit", minute: "2-digit" })
-    : d.toLocaleString(getLocale(), { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-}
-
 function NotificationRow({
   record, alive, onActivate,
 }: {
@@ -101,11 +93,11 @@ function NotificationRow({
             no-wrap date takes ~100px and leaves the title a sliver of a narrow rail panel. */}
         <span className="ntc-main">
           <span className="ntc-title">{record.title}</span>
-          {record.body !== "" && <span className="ntc-body">{record.body}</span>}
+          {record.body !== "" && <span className="ntc-body">{notificationBody(record)}</span>}
           <span className="ntc-meta">
-            <span className={`ntc-kind kind-${record.kind}`}>{NOTIFICATION_KIND_LABELS[record.kind]}</span>
+            <span className={`ntc-kind kind-${record.kind}`}>{notificationKindLabel(record)}</span>
             {!record.read && <span className="sr-only">{tr("notificationcentre.unread")}</span>}
-            <time className="ntc-time" dateTime={new Date(record.ts).toISOString()}>{fmtWhen(record.ts)}</time>
+            <time className="ntc-time" dateTime={new Date(record.ts).toISOString()}>{notificationWhen(record.ts)}</time>
           </span>
           {!alive && <span className="ntc-gone">{tr("notificationcentre.sessionNoLongerAvailable")}</span>}
         </span>
@@ -141,12 +133,14 @@ export function NotificationCentrePanel({
       <div className="ntc-toolbar">
         <Button
           size="sm"
+          variant="ghost"
           disabled={state.unread === 0}
           onClick={() => void centre.markAllRead()}
         >{tr("notificationcentre.markAllRead")}</Button>
         {!confirmClear && (
           <Button
             size="sm"
+            variant="ghost"
             disabled={state.items.length === 0}
             onClick={() => setConfirmClear(true)}
           >{tr("notificationcentre.clearNotifications")}</Button>
@@ -159,7 +153,7 @@ export function NotificationCentrePanel({
               className="ntc-confirm"
               onClick={() => { setConfirmClear(false); void centre.clear(); }}
             >{tr("notificationcentre.confirmClear")}</Button>
-            <Button size="sm" onClick={() => setConfirmClear(false)}>{tr("common.cancel")}</Button>
+            <Button size="sm" variant="ghost" onClick={() => setConfirmClear(false)}>{tr("common.cancel")}</Button>
           </>
         )}
       </div>

@@ -33,6 +33,7 @@ import { resolveModelContextLimit } from "@polyth/contracts/model-context";
 import { chatOverflowsModel } from "./chatFit.ts";
 import { hiddenModelMatcher, isFavorite, modelKey, orderProviders, providerPreferenceKey } from "@polyth/models";
 import {
+  getLastHarnessModels,
   reorderModelFavorites,
   noteModelUsed,
   reorderModelProviders,
@@ -361,10 +362,95 @@ export default function ModelPicker({
   const pickerShellRef = useRef<HTMLDivElement>(null);
   const openRequestRef = useRef(0);
   const touchTriggerActivationRef = useRef(false);
+  const popHeightFloorRef = useRef(0);
+  // Rows the largest *other* catalog reachable from the header's harness tabs
+  // shows right after a switch: favorites, recents, provider headings and the
+  // rows of providers that open expanded (remembered open, or holding the
+  // model the switch selects), as the list below renders them. Only a picker
+  // with a header can switch harness in place, so only it reserves that height.
+  const switchableRowCount = useMemo(() => {
+    if (!header || multi || !otherHarnesses?.length) return 0;
+    const ownHarnessId = harnessId ?? unanimousHarnessId(models);
+    const lastModels = getLastHarnessModels();
+    const expandedKeys = new Set(prefs.expandedProviders);
+    let most = 0;
+    for (const group of otherHarnesses) {
+      if (group.harnessId === ownHarnessId) continue;
+      const shown = pickerCatalogModels(group.models, group.harnessId)
+        .filter((model) => !isHidden(model, group.harnessId));
+      let rows = shown.length;
+      if (!flatModelCatalog(shown, group.harnessId)) {
+        const last = lastModels[group.harnessId];
+        const providerRows = new Map<string, number>();
+        rows = 0;
+        for (const model of shown) {
+          const key = modelKey(model);
+          if (isFavorite(prefs, key) || prefs.recents.includes(key)) rows += 1;
+          else providerRows.set(model.providerID, (providerRows.get(model.providerID) ?? 0) + 1);
+          if (!providerRows.has(model.providerID)) providerRows.set(model.providerID, 0);
+        }
+        for (const [providerID, count] of providerRows) {
+          const open = expandedKeys.has(providerPreferenceKey(group.harnessId, providerID))
+            || last?.providerID === providerID;
+          rows += 1 + (open ? count : 0);
+        }
+      }
+      most = Math.max(most, Math.min(rows, MAX_RENDERED_MODELS) + (emptyLabel ? 1 : 0));
+    }
+    return most;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [Boolean(header), multi, otherHarnesses, harnessId, models, isHidden, emptyLabel, prefs]);
 
   useEffect(() => () => {
     openRequestRef.current += 1;
   }, []);
+
+  // The surface hugs its catalog (CSS caps it), but while it is open it never
+  // shrinks: the tallest natural height seen so far is pinned inline, so a
+  // query, a collapsed group or a sparser harness only changes the list's
+  // overflow. Runs after every render because every catalog change re-renders.
+  useLayoutEffect(() => {
+    if (!open) {
+      popHeightFloorRef.current = 0;
+      return;
+    }
+    const pop = pickerShellRef.current?.closest<HTMLElement>(".model-pop");
+    if (!pop) return;
+    // The popover's inline max-height is only the room beside the trigger and
+    // overrides the CSS cap, so read the cap with it lifted for a moment.
+    const room = pop.style.maxHeight;
+    pop.style.maxHeight = "";
+    const cap = parseFloat(window.getComputedStyle(pop).maxHeight) || Infinity;
+    pop.style.maxHeight = room;
+    if (phone && detail) {
+      // Phone details replace the list inside the surface: give them the cap.
+      if (cap < Infinity) pop.style.height = `${cap}px`;
+      return;
+    }
+    const list = listRef.current;
+    if (!list) return;
+    const chrome = pop.offsetHeight - list.clientHeight;
+    const natural = Math.ceil(chrome + list.scrollHeight);
+    // Switching harness from the tab strip must not grow the surface either,
+    // so it opens tall enough for the largest switchable catalog: that one's
+    // full row count (every provider expanded) at this list's row pitch. The
+    // CSS cap clamps it, so any large catalog simply opens at the cap.
+    let switchable = 0;
+    if (switchableRowCount > 0) {
+      let pitch = 0;
+      for (const element of list.querySelectorAll<HTMLElement>(".model-picker-row, .model-provider-head")) {
+        pitch = Math.max(pitch, element.offsetHeight);
+      }
+      if (pitch > 0) {
+        const style = window.getComputedStyle(list);
+        const padding = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+        switchable = Math.ceil(chrome + padding + switchableRowCount * pitch);
+      }
+    }
+    popHeightFloorRef.current = Math.max(popHeightFloorRef.current, natural, switchable);
+    popHeightFloorRef.current = Math.min(popHeightFloorRef.current, cap);
+    if (popHeightFloorRef.current > 0) pop.style.height = `${popHeightFloorRef.current}px`;
+  });
 
   const current = value
     ? models.find((model) => pickerModelMatches(model, value))

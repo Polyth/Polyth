@@ -15,8 +15,8 @@ import {
 
 import type { JsonObject, SessionEvent, SessionProjection } from "@polyth/contracts";
 import {
-  b64u, b64uDecode, buildPushPayload, createPushNotifier, createPushService,
-  encryptWebPush, generateVapidKeys, plainTextExcerpt, vapidAuthorization, type PushPayload,
+  b64u, b64uDecode, buildPushPayload, createLimitAnnouncements, createPushNotifier, createPushService,
+  encryptWebPush, generateVapidKeys, limitEpisode, plainTextExcerpt, vapidAuthorization, type PushPayload,
 } from "../src/push.ts";
 import { pushRoutes } from "../src/routes/push.ts";
 
@@ -749,6 +749,95 @@ test("a reply on the newest page needs one read even without turn/started in it"
   await new Promise((r) => setTimeout(r, 10));
   assert.equal(sent[0]!.body, "All green.");
   assert.equal(calls.length, 1, "the walk stops at the page that already holds the reply");
+});
+
+test("a provider limit is one account-wide episode, however many chats stop on it", () => {
+  const now = 1_000_000_000_000;
+  const resetAt = now + 2 * 60 * 60_000;
+  // Same provider window reached from two chats: per-millisecond jitter must
+  // not make them two episodes.
+  const a = limitEpisode(
+    { retry: { scope: "rate", provider: "anthropic", resetAt, resumeAt: resetAt, attempt: 1 } },
+    "You've hit your 5-hour limit · resets 8:40pm (Europe/Kyiv)", "claude", now,
+  );
+  const b = limitEpisode(
+    { retry: { scope: "rate", provider: "anthropic", resetAt: resetAt + 700, resumeAt: resetAt + 700, attempt: 1 } },
+    "You've hit your 5-hour limit · resets 8:40pm (Europe/Kyiv)", "claude", now,
+  );
+  assert.ok(a && b);
+  assert.equal(a.key, b.key);
+  assert.equal(a.key, `limit:claude:anthropic:${Math.floor(resetAt / 60_000)}`);
+  assert.equal(a.until, resetAt + 5 * 60_000);
+
+  // A different window and a different provider stay separate notices.
+  const otherWindow = limitEpisode(
+    { retry: { scope: "quota", provider: "anthropic", resetAt: resetAt + 86_400_000, resumeAt: resetAt, attempt: 1 } }, undefined, "claude", now,
+  );
+  assert.notEqual(otherWindow?.key, a.key);
+
+  // Without a retry hint the provider's own words identify the episode, and it
+  // is quiet for a bounded window rather than forever.
+  const text = limitEpisode(undefined, "Usage limit reached. Resets at 8:40pm.", undefined, now);
+  assert.equal(text?.key, "limit::provider:usage limit reached. resets at 8:40pm.");
+  assert.equal(text?.until, now + 30 * 60_000);
+
+  // A single refused request or an overload blip is not an exhausted window.
+  assert.equal(limitEpisode({ retry: { scope: "overloaded", provider: "anthropic", resumeAt: now } }, "Service overloaded", "claude", now), undefined);
+  assert.equal(limitEpisode({ retry: { scope: "request", resumeAt: now } }, "rate limit exceeded", "claude", now), undefined);
+  assert.equal(limitEpisode({ code: "context-full" }, "context full", "claude", now), undefined);
+  assert.equal(limitEpisode(undefined, "boom", undefined, now), undefined);
+});
+
+test("one limit notice per recipient and window; another person is told separately", () => {
+  let now = 5_000;
+  const announcements = createLimitAnnouncements(() => now);
+  assert.equal(announcements.announced("alice\0space", "limit:claude:anthropic:10"), false);
+  announcements.remember("alice\0space", "limit:claude:anthropic:10", now + 60_000);
+  assert.equal(announcements.announced("alice\0space", "limit:claude:anthropic:10"), true);
+  // A notice that could not be published gives the claim back.
+  announcements.release("alice\0space", "limit:claude:anthropic:10");
+  assert.equal(announcements.announced("alice\0space", "limit:claude:anthropic:10"), false);
+  announcements.remember("alice\0space", "limit:claude:anthropic:10", now + 60_000);
+  // Bob's account is separate even in the same Space.
+  assert.equal(announcements.announced("bob\0space", "limit:claude:anthropic:10"), false);
+  // The next provider window is news again.
+  assert.equal(announcements.announced("alice\0space", "limit:claude:anthropic:11"), false);
+  // The episode stops being suppressed when the window resets.
+  now += 61_000;
+  assert.equal(announcements.announced("alice\0space", "limit:claude:anthropic:10"), false);
+});
+
+test("notifier: a limit stop is a chat-neutral notice keyed by the episode", async () => {
+  const resetAt = Date.now() + 60 * 60_000;
+  const sent: PushPayload[] = [];
+  const projections = new Map<string, SessionProjection>([
+    ["a", { id: "a", projectId: "p", title: "Chat A", status: "idle", resolvedHarnessId: "claude", createdAt: 1, updatedAt: 1 } as SessionProjection],
+    ["b", { id: "b", projectId: "p", title: "Chat B", status: "idle", resolvedHarnessId: "claude", createdAt: 1, updatedAt: 1 } as SessionProjection],
+  ]);
+  const stop = (turn: number) => ev(1, "turn/stopped", {
+    turnId: `t${turn}`,
+    reason: "error",
+    error: "You've hit your 5-hour limit · resets 8:40pm (Europe/Kyiv)",
+    retry: { scope: "rate", provider: "anthropic", resetAt, resumeAt: resetAt, attempt: 1 },
+  });
+  const notifier = createPushNotifier({
+    send: async (p) => { sent.push(p); },
+    projection: async (id) => projections.get(id),
+    tail: async (id) => [stop(id === "a" ? 1 : 2)],
+  });
+  const settle = () => new Promise((r) => setTimeout(r, 10));
+  notifier.turnStopped("a", "error");
+  await settle();
+  notifier.turnStopped("b", "error");
+  await settle();
+
+  assert.equal(sent.length, 2, "each stop still reaches the sink, which decides about the person");
+  assert.equal(sent[0]!.title, "Polyth — limit reached");
+  assert.equal(sent[0]!.body, "You've hit your 5-hour limit · resets 8:40pm (Europe/Kyiv)");
+  assert.equal(sent[0]!.limitKey, sent[1]!.limitKey, "both chats share one episode");
+  assert.equal(sent[0]!.key, sent[0]!.limitKey);
+  assert.equal(sent[0]!.tag, `polyth-${sent[0]!.limitKey}`);
+  assert.equal(sent[0]!.limitUntil, resetAt + 5 * 60_000);
 });
 
 test("web push goes only to the subscription of the device in use; a test push goes to all", async () => {

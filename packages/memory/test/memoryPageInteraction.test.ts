@@ -254,6 +254,31 @@ test("deleting one of My notes asks first", async () => {
   host.remove();
 });
 
+test("a search hides My notes, which it does not cover, and keeps a draft", async () => {
+  const saved = personalMemoryApi.page;
+  personalMemoryApi.page = async () => ({
+    here: [{ id: "note-1", title: "My hours", snippet: "From ten.", revision: 1 } as never], aboutMe: [], proposals: [], review: [], mode: "auto",
+  });
+  const page = await mount();
+  const mine = () => page.$<HTMLElement>(".memory-mine")!;
+  assert.equal(mine().hidden, false);
+  await click(page.byText(".memory-mine .memory-section-head button", "Add note") ?? page.$$(".memory-mine .memory-section-head button")[0]);
+  const draft = page.$<HTMLInputElement>(".memory-mine-editor input")!;
+  await setValue(draft, "Unsaved note");
+
+  const search = page.$<HTMLInputElement>(".memory-search-input")!;
+  await setValue(search, "Record 2");
+  assert.equal(mine().hidden, true, "unfiltered notes never read as more results");
+  await setValue(search, "nothing matches this");
+  await settle(200);
+  assert.equal(mine().hidden, true, "also when nothing is found");
+  await setValue(search, "   ");
+  assert.equal(mine().hidden, false, "a blank query is no search");
+  assert.equal(page.$<HTMLInputElement>(".memory-mine-editor input")!.value, "Unsaved note");
+  await page.unmount();
+  personalMemoryApi.page = saved;
+});
+
 test.after(async () => {
   globalThis.fetch = originalFetch;
   await dom.happyDOM.close();

@@ -33,6 +33,8 @@ import {
   useUsageLimitsPrefs,
 } from "./limitsPrefs.ts";
 import { useUsageLimits, type UsageLimitSnapshotDto } from "./limitsClient.ts";
+import { RelayPoolCard } from "./RelayPoolCard.tsx";
+import { relayBadgeFor, useUsageRelays, type UsageRelay } from "./relayClient.ts";
 
 export { classifyLimitPace, formatLimitPaceBudget, formatLimitReset, pacePressure, paceProjection };
 
@@ -126,6 +128,7 @@ function ProviderCard({
   held,
   reorderable,
   onMove,
+  relayBadge,
 }: {
   provider: UsageLimitSnapshotDto;
   now: number;
@@ -135,6 +138,7 @@ function ProviderCard({
   held: boolean;
   reorderable: boolean;
   onMove(id: string, delta: -1 | 1): void;
+  relayBadge?: ReturnType<typeof relayBadgeFor>;
 }) {
   const [refreshing, setRefreshing] = useState(false);
   const label = limitSourceName(provider);
@@ -170,7 +174,7 @@ function ProviderCard({
     >
       <header className="usage-limit-provider-head">
         <div className="usage-limit-provider-copy">
-          <h3>{label}</h3>
+          <h3>{label}{relayBadge ? <span className="usage-relay-badge" data-state={relayBadge.state}>{tr(relayBadge.state === "now" ? "usage.relayBadgeNow" : relayBadge.state === "next" ? "usage.relayBadgeNext" : "usage.relayBadge", { n: relayBadge.n })}</span> : null}</h3>
           <p>
             {provider.accountLabel ? <span>{provider.accountLabel}</span> : null}
             {provider.fetchedAt > 0 ? <span>{tr("usage.limitUpdatedWhen", { when: relativeTime(provider.fetchedAt, now) })}</span> : <span>{tr("usage.limitNotFetched")}</span>}
@@ -237,6 +241,7 @@ function SummaryStat({
 
 export function LimitsView(): ReactNode {
   const limits = useUsageLimits();
+  const relays = useUsageRelays();
   const prefs = useUsageLimitsPrefs();
   const now = Date.now();
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -372,6 +377,8 @@ export function LimitsView(): ReactNode {
         />
       </div>
 
+      {relays.map((relay: UsageRelay) => <RelayPoolCard key={relay.id} relay={relay} now={now} />)}
+
       {visible.length ? (
         <div
           ref={listElement}
@@ -391,6 +398,7 @@ export function LimitsView(): ReactNode {
                 held={arrange.draggingId === arrangeId}
                 reorderable={visible.length > 1}
                 onMove={moveSourceBy}
+                relayBadge={relayBadgeFor(relays, provider.account?.harnessId ?? provider.providerId)}
               />
             );
           })}

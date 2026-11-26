@@ -189,33 +189,26 @@ test("queued native commands retain native invocation after the active turn", as
   await f.store.close();
 });
 
-test("declared attachment modalities fail closed before runtime admission", async () => {
+test("a link the declared modalities cannot take is delivered as prompt text, never refused", async () => {
   const f = fixture({
     attachments: { modalities: { image: "unsupported", url: "unsupported" } },
   });
   const { id } = await f.sessions.create({ projectId: "p", title: "T" });
-  await assert.rejects(
-    f.sessions.send(id, {
-      text: "look",
-      attachments: [{
-        id: "link",
-        name: "image",
-        mime: "text/uri-list",
-        size: 0,
-        kind: "url",
-        url: "https://example.com/image.png",
-      }],
-    }),
-    (error: Error & { code?: string }) => {
-      // A modality the harness declares unsupported is `unsupported` — the
-      // engine cannot do it. `invalid-attachment` is reserved for a ref that
-      // is itself unusable. The message names the engine, not the adapter.
-      assert.equal(error.code, "unsupported");
-      assert.match(error.message, /Link attachments are not supported by the .* engine\./);
-      return true;
-    },
-  );
-  assert.equal(f.requests.length, 0);
+  await f.sessions.send(id, {
+    text: "look",
+    attachments: [{
+      id: "link",
+      name: "image",
+      mime: "text/uri-list",
+      size: 0,
+      kind: "url",
+      url: "https://example.com/image.png",
+    }],
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(f.requests.length, 1);
+  assert.equal(f.requests[0]?.attachments?.some((a) => a.kind === "url") ?? false, false);
+  assert.ok(JSON.stringify(f.requests[0]).includes("https://example.com/image.png"));
   await f.store.close();
 });
 

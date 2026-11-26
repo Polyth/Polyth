@@ -168,10 +168,16 @@ test("a password-less first run and its owner session stay in-process", async ()
   assert.match(preloadSource, /renewOwnerSession: \(\) => ipcRenderer\.invoke\("desktop:session:renew"\)/);
   // The token goes straight into the window's cookie jar, never to the page.
   assert.match(mainSource, /session\.defaultSession\.cookies\.set\(\{[\s\S]*?httpOnly: true,[\s\S]*?sameSite: "strict"/);
-  assert.doesNotMatch(preloadSource, /issueLocalOwnerSession|cookieName/);
+  assert.doesNotMatch(preloadSource, /issueLocalOwnerSession|issueDesktopOwnerSession|cookieName/);
   assert.match(serverSource, /opts\.desktopOwnerChannel === true/);
   // No HTTP route can finish setup without a credential or mint that session.
-  assert.doesNotMatch(identityHttp, /completeLocal|issueLocalOwnerSession/);
+  assert.doesNotMatch(identityHttp, /completeLocal|issueLocalOwnerSession|issueDesktopOwnerSession|desktopOwnerResetPassword/);
+  // A forgotten owner password: trusted IPC only, the operating system asks
+  // the person first, and the server refuses it with a public origin.
+  assert.match(mainSource, /trustedHandle\("desktop:owner:reset-password", resetDesktopOwnerPassword\)/);
+  assert.match(mainSource, /const resetDesktopOwnerPassword[\s\S]*?if \(!\(await confirmPersonAtComputer\(\)\)\) return \{ ok: false, error: "cancelled" \}[\s\S]*?reset\.call\(/);
+  assert.match(mainSource, /systemPreferences\.promptTouchID\(/);
+  assert.match(serverSource, /async resetDesktopOwnerPassword\(token: string, password: string\)[\s\S]*?if \(publicOrigin\) throw/);
 });
 
 test("desktop chrome keeps native macOS/Windows controls and renderer actions clickable", async () => {
@@ -186,7 +192,7 @@ test("desktop chrome keeps native macOS/Windows controls and renderer actions cl
   assert.match(desktopSource, /dataset\.desktopPlatform = platform/);
   // Native platforms get only the caption zone (an empty box the layouts keep
   // clear), never Polyth's own buttons.
-  assert.match(desktopSource, /if \(NATIVE_CONTROL_PLATFORMS\.has\(info\.platform\)\) return captionZone;/);
+  assert.match(desktopSource, /if \(NATIVE_CONTROL_PLATFORMS\.has\(platform\)\) return captionZone;/);
   assert.match(styles, /body\.desktop-app :is\([\s\S]*?\.scrim,[\s\S]*?\)\s*\{[^}]*-webkit-app-region:\s*no-drag/s);
   assert.match(styles, /\.desktop-window-controls\s*\{[^}]*pointer-events:\s*none/s);
   assert.match(styles, /\.desktop-window-button\s*\{[^}]*pointer-events:\s*auto/s);

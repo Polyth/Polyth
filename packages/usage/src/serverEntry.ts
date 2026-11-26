@@ -422,6 +422,30 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       const now = Date.now();
       const windowDays = options.windowDays ?? DEFAULT_ROUTING_WINDOW_DAYS;
       const harnesses = host.services.get(serverServiceKey<HarnessRegistry>("harnesses"));
+      // Process-free roster: which harnesses this Space has enabled. The
+      // policy read inside it uses only the Space context, so the placeholder
+      // project fields are never consulted.
+      const roster = await harnesses?.roster({
+        space,
+        spaceId: space.spaceId,
+        projectId: "delegation-shortlist",
+        cwd: "",
+      }).catch((error: unknown) => {
+        console.warn("[usage] harness roster unavailable for delegation routing", error);
+        return undefined;
+      });
+      const rosterById = new Map((roster ?? []).map((item) => [item.identity.id, item]));
+      // A member account the Space keeps for a family Relay only (disabled
+      // while the Relay is enabled) is named by the Relay a spawn must pin.
+      const relayHarness = (harnessId: string): string | undefined => {
+        const member = rosterById.get(harnessId);
+        const family = member?.identity.accounts?.family;
+        if (!member || member.policy.enabled || !family || member.identity.relay) return undefined;
+        for (const item of roster ?? []) {
+          if (item.identity.relay?.family === family && item.policy.enabled) return item.identity.id;
+        }
+        return undefined;
+      };
       const [observations, catalog] = await Promise.all([
         analytics.observations(space, now - windowDays * 86_400_000),
         // The catalog spawn validates against, never an old copy of it: a
@@ -439,7 +463,8 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         snapshots: limits.snapshots(),
         favorites: host.services.get(SERVER_MODEL_FAVORITES)?.favorites(space.userId) ?? [],
         ...(catalog ? { catalog } : {}),
-        available: (harnessId) => Boolean(harnesses?.get(harnessId)),
+        available: (harnessId) => rosterById.get(harnessId)?.policy.enabled ?? Boolean(harnesses?.get(harnessId)),
+        ...(roster ? { relayHarness } : {}),
         now,
         windowDays,
         ...(options.limit !== undefined ? { limit: options.limit } : {}),

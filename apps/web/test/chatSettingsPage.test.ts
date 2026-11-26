@@ -35,7 +35,7 @@ register("./tsxHooks.mjs", import.meta.url);
 
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
-const { UI_DEFAULTS, getUiSettings, setUiSettings } = await import("../src/uiPrefs.ts");
+const { UI_DEFAULTS, getUiSettings, parsePromptFoldLines, setUiSettings } = await import("../src/uiPrefs.ts");
 const { searchSettingsItems } = await import("../src/settings/registry.ts");
 const { registerSlot } = await import("../src/slots.ts");
 const {
@@ -552,6 +552,50 @@ test("a reveal change and the master switch still write the same preferences", a
     resetPrefs();
     await unmount();
   }
+});
+
+test("the long-message fold is a stepped slider on the conversation group: 4 to 20 lines, then Full", async () => {
+  const { container, unmount } = await mount();
+  try {
+    const row = () => container.querySelector('[data-settings-item="chat.collapseLongPrompts"]');
+    const track = () => row()?.querySelector<HTMLInputElement>('input[type="range"]');
+    const readout = () => row()?.querySelector(".size-stepper-value")?.textContent;
+    const [less, more] = Array.from(row()?.querySelectorAll<HTMLButtonElement>(".size-stepper-nudge") ?? []);
+    assert.ok(track() && less && more, "the slider sits on the page itself");
+    assert.equal(getUiSettings().collapseLongPrompts, true, "long messages fold by default");
+    assert.equal(getUiSettings().collapsePromptLines, 4, "to the original four lines");
+    assert.equal(readout(), "4 lines");
+    assert.equal(track()?.getAttribute("aria-valuetext"), "4 lines");
+    assert.equal(less.disabled, true, "four is the shortest fold");
+
+    const seen: string[] = [];
+    for (let step = 0; step < 5; step += 1) {
+      await click(more);
+      seen.push(readout() ?? "");
+    }
+    assert.deepEqual(seen, ["6 lines", "8 lines", "12 lines", "20 lines", "Full"], "the stops are 6, 8, 12, 20, then never fold");
+    assert.equal(getUiSettings().collapseLongPrompts, false, "the last stop turns the fold off");
+    assert.equal(getUiSettings().collapsePromptLines, 20, "and keeps the last count for the way back");
+    assert.equal(more.disabled, true);
+
+    await click(less);
+    assert.equal(getUiSettings().collapseLongPrompts, true);
+    assert.equal(getUiSettings().collapsePromptLines, 20);
+  } finally {
+    setUiSettings({ collapseLongPrompts: true, collapsePromptLines: 4 });
+    await unmount();
+  }
+});
+
+test("a stored fold line count snaps to the nearest stop", () => {
+  assert.equal(parsePromptFoldLines(undefined), 4, "a profile from before the slider keeps four lines");
+  assert.equal(parsePromptFoldLines("12"), 4, "only numbers count");
+  assert.equal(parsePromptFoldLines(Number.NaN), 4);
+  assert.equal(parsePromptFoldLines(12), 12);
+  assert.equal(parsePromptFoldLines(10), 8, "a tie keeps the shorter fold");
+  assert.equal(parsePromptFoldLines(15), 12);
+  assert.equal(parsePromptFoldLines(500), 20);
+  assert.equal(parsePromptFoldLines(-3), 4);
 });
 
 test("a row reports it has opened only once its panel has finished growing", async () => {

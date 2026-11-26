@@ -40,6 +40,7 @@ Object.defineProperty(globalThis, "location", {
   value: {
     href: "http://127.0.0.1:4400/",
     origin: "http://127.0.0.1:4400",
+    search: "",
     reload: () => { reloads += 1; },
     replace: (url: string) => { replaced.push(url); },
   },
@@ -204,6 +205,7 @@ const codesShown = (): string[] =>
 async function fillAccount() {
   await typeInto("#setup-name", "Ida Lindqvist");
   await typeInto("#setup-password", "correct horse battery");
+  await typeInto("#setup-password-repeat", "correct horse battery");
 }
 
 test.beforeEach(() => {
@@ -217,7 +219,7 @@ test.afterEach(() => {
   delete (dom as unknown as { polythDesktop?: unknown }).polythDesktop;
 });
 
-test("desktop setup asks only for a name and a password, then shows recovery codes", async () => {
+test("desktop setup asks only for a name and a password (typed twice), then shows recovery codes", async () => {
   const desktop = installDesktop();
   const view = await mount();
   try {
@@ -230,7 +232,18 @@ test("desktop setup asks only for a name and a password, then shows recovery cod
     assert.equal(desktop.requests.length, 0, "no claim is issued before the person continues");
     assert.equal(submitButton()?.disabled, true, "Continue waits for both fields");
 
+    // A slip in a password typed once surfaces only weeks later, at sign-in.
+    await typeInto("#setup-name", "Ida Lindqvist");
+    await typeInto("#setup-password", "correct horse battery");
+    await typeInto("#setup-password-repeat", "correct horse batery");
+    assert.equal(submitButton()?.disabled, true, "a repeat that differs keeps Continue disabled");
+    // Half-typed, every repeat differs: the field waits until the person leaves it.
+    assert.equal($("#setup-password-repeat-error"), null, "no mismatch while the repeat is being typed");
+    await act(async () => { $("#setup-password-repeat")!.dispatchEvent(new Event("focusout", { bubbles: true })); });
+    assert.ok($("#setup-password-repeat-error"), "and says the two differ once the person leaves it");
+
     await fillAccount();
+    assert.equal($("#setup-password-repeat-error"), null);
     assert.equal(submitButton()?.disabled, false);
     await click(submitButton());
 
@@ -244,7 +257,7 @@ test("desktop setup asks only for a name and a password, then shows recovery cod
 
     const complete = server.calls.find((call) => call.path === "/api/auth/setup/complete");
     assert.ok(complete, "setup completed");
-    assert.equal(complete.body.login, "owner");
+    assert.equal(complete.body.login, "ida.lindqvist", "the login comes from the name; nobody invents one");
     assert.equal(complete.body.organizationName, "Personal");
     assert.equal(complete.body.name, "Ida Lindqvist");
     assert.equal(complete.body.recoveryAcknowledged, true);
@@ -316,7 +329,7 @@ test("\"with other people\" continues to the owner account; Back returns to the 
     assert.equal(codesShown().length, 8);
     await click($(".lock-agree input"));
     await click(submitButton());
-    assert.equal(server.calls.find((call) => call.path === "/api/auth/setup/complete")?.body.login, "owner");
+    assert.equal(server.calls.find((call) => call.path === "/api/auth/setup/complete")?.body.login, "ida.lindqvist");
     assert.equal(desktop.localSetups, 0, "people always get a password");
     assert.equal(desktop.restarts, 1);
   } finally {

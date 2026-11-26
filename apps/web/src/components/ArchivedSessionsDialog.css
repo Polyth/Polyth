@@ -86,6 +86,12 @@
   scrollbar-width: none;
 }
 .archived-sessions-toolbar::-webkit-scrollbar { display: none; }
+/* On a phone the date presets scroll sideways: fade the end edge so a cut
+   chip reads as "more this way", not as a layout bug. */
+@media (max-width: 480px) {
+  .archived-sessions-toolbar { mask-image: linear-gradient(to right, #000 calc(100% - var(--space-6)), transparent); }
+  .archived-sessions-toolbar:dir(rtl) { mask-image: linear-gradient(to left, #000 calc(100% - var(--space-6)), transparent); }
+}
 .archived-sessions-presets {
   display: inline-flex;
   flex: none;
@@ -147,6 +153,7 @@
 .archived-sessions-check .ui-checkbox-text { display: none; }
 .archived-sessions-check .ui-checkbox-box { margin-top: 0; }
 .archived-sessions-open {
+  container: archived-row / inline-size;
   display: flex;
   flex: 1;
   min-width: 0;
@@ -182,6 +189,14 @@
 .archived-sessions-sub > span + span::before { content: "·"; margin-inline-end: var(--space-2); color: var(--faint); }
 .archived-sessions-sub > .archived-sessions-branch-tag { display: inline-flex; align-items: center; gap: 3px; flex: 0 1 auto; min-width: 0; font-family: var(--mono); }
 .archived-sessions-branch-tag .ui-icon { flex: none; width: 13px; height: 13px; color: var(--faint); }
+/* The branch keeps a readable stub and ellipsizes; the creation date gives
+   way first, and a narrow row drops date and model so the branch survives. */
+.archived-sessions-sub > .archived-sessions-branch-tag { min-width: min(12ch, 100%); }
+.archived-sessions-branch-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.archived-sessions-sub > .archived-sessions-created { flex: 0 1 auto; min-width: 0; }
+@container archived-row (max-width: 420px) {
+  .archived-sessions-sub > :is(.archived-sessions-created, .archived-sessions-model) { display: none; }
+}
 .archived-sessions-model { display: inline-flex; align-items: center; gap: 5px; }
 .archived-sessions-model-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; }
 .archived-sessions-tag {
@@ -194,30 +209,30 @@
 }
 .archived-sessions-created { color: var(--faint); }
 .archived-sessions-snippet {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
   min-width: 0;
   margin-top: 2px;
   padding-inline-start: var(--space-2);
-  border-inline-start: 1px solid var(--hair-strong);
+  border-inline-start: 2px solid var(--hair-strong);
   color: var(--text-dim);
   font-size: var(--font-meta);
   line-height: var(--font-meta-lh);
+  overflow-wrap: anywhere;
 }
+/* Same quiet speaker label as the full chat search, leading the excerpt. */
 .archived-sessions-role {
-  flex: none;
-  padding: 0 6px;
-  border-radius: var(--radius-round);
-  font-size: calc(var(--font-meta) * .85);
+  margin-inline-end: .45em;
   font-weight: 600;
-  letter-spacing: .02em;
-  text-transform: uppercase;
 }
-.archived-sessions-role--user { background: var(--blue-wash); color: var(--blue); }
-.archived-sessions-role--assistant { background: var(--purple-wash); color: var(--purple); }
-.archived-sessions-snippet-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.archived-sessions-more { flex: none; color: var(--muted); }
+.archived-sessions-role--user { color: var(--blue); }
+.archived-sessions-role--assistant { color: var(--muted); }
+/* The extra-hits count follows whatever is left of the line, never a "·"
+   whose left neighbour a narrow row has hidden. */
+.archived-sessions-sub > .archived-sessions-more { color: var(--muted); }
+.archived-sessions-sub > .archived-sessions-more::before { content: none; }
 .archived-sessions-mark {
   margin: 0 -1px;
   padding: 0 1px;

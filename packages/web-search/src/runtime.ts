@@ -20,7 +20,9 @@ import {
   parseWebSearchCount,
   parseWebSearchFreshness,
   parseWebSearchSettings,
+  WEB_SEARCH_KEYLESS_CHAIN,
   WEB_SEARCH_SETTINGS_VERSION,
+  type WebSearchProviderId,
   type WebSearchSettings,
 } from "./settings.ts";
 import type { WebSearchSettingsStore } from "./settingsStore.ts";
@@ -31,6 +33,13 @@ import type {
   WebSearchRequest,
   WebSearchResponse,
 } from "./types.ts";
+
+interface ProviderOutcome {
+  provider: WebSearchProviderId;
+  results: RawSearchResult[];
+  /** The first service that was tried and failed before `provider` answered. */
+  fallbackFrom?: WebSearchProviderId;
+}
 
 export interface WebSearchRuntimeDependencies {
   spaceForId(spaceId: string): SpaceContext;
@@ -56,14 +65,15 @@ const providerStatus = (
   settings: WebSearchSettings,
   vault: SecureSafeService | undefined,
 ): WebSearchProviderStatus => {
-  const configured = !provider.requiresCredential
-    || hasGlobalHandle(vault, settings.tavilyCredentialHandle);
+  const hasKey = hasGlobalHandle(vault, settings.tavilyCredentialHandle);
+  const configured = !provider.requiresCredential || hasKey;
   return {
     id: provider.id,
     name: provider.name,
-    available: !provider.requiresCredential || configured,
+    available: configured,
     requiresCredential: provider.requiresCredential,
     configured,
+    keyed: hasKey && (provider.requiresCredential || provider.acceptsCredential === true),
   };
 };
 
@@ -196,33 +206,47 @@ export class WebSearchRuntime {
     projectId: string,
     settings: WebSearchSettings,
     request: ProviderSearchRequest,
-  ): Promise<{ provider: "duckduckgo" | "tavily"; results: RawSearchResult[]; fallbackFrom?: "tavily" }> {
-    const duckDuckGo = this.#providers.get("duckduckgo");
+  ): Promise<ProviderOutcome> {
     const tavily = this.#providers.get("tavily");
-    if (!duckDuckGo) throw webSearchError("provider-unavailable", "DuckDuckGo search is unavailable");
-    if (settings.provider === "duckduckgo") {
-      return { provider: "duckduckgo", results: await duckDuckGo.search(request) };
-    }
     if (settings.provider === "tavily") {
       if (!tavily) throw webSearchError("provider-unavailable", "Tavily search is unavailable");
       return { provider: "tavily", results: await this.#searchTavily(space, projectId, settings, request, tavily) };
     }
-
-    let fallbackFrom: "tavily" | undefined;
-    if (tavily && settings.tavilyCredentialHandle) {
+    if (settings.provider === "auto" && tavily && settings.tavilyCredentialHandle) {
       try {
         const results = await this.#searchTavily(space, projectId, settings, request, tavily);
         return { provider: "tavily", results };
       } catch (cause) {
         if (!isAutomaticFallbackError(cause)) throw cause;
-        fallbackFrom = "tavily";
+        return this.#searchKeyless(request, "tavily");
       }
     }
-    return {
-      provider: "duckduckgo",
-      results: await duckDuckGo.search(request),
-      ...(fallbackFrom ? { fallbackFrom } : {}),
-    };
+    return this.#searchKeyless(request);
+  }
+
+  /** Tries each free service in order; a provider that fails for its own reasons hands over to the next. */
+  async #searchKeyless(request: ProviderSearchRequest, failedBefore?: WebSearchProviderId): Promise<ProviderOutcome> {
+    let fallbackFrom = failedBefore;
+    const failures: unknown[] = [];
+    for (const id of WEB_SEARCH_KEYLESS_CHAIN) {
+      const provider = this.#providers.get(id);
+      // A service whose keyed call just failed is not asked again without the key.
+      if (!provider || id === failedBefore) continue;
+      try {
+        const results = await provider.search(request);
+        return { provider: id, results, ...(fallbackFrom ? { fallbackFrom } : {}) };
+      } catch (cause) {
+        if (!isAutomaticFallbackError(cause)) throw cause;
+        failures.push(cause);
+        fallbackFrom ??= id;
+      }
+    }
+    if (failures.length === 0) throw webSearchError("provider-unavailable", "no free search service is available");
+    const reasons = failures.map((cause) => (cause as Error).message).join("; ");
+    throw webSearchError(
+      failures.every((cause) => webSearchErrorCode(cause) === "rate-limited") ? "rate-limited" : "provider-unavailable",
+      `no free search service answered (${reasons})`,
+    );
   }
 
   async #searchTavily(

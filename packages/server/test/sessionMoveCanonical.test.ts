@@ -240,16 +240,21 @@ test("a private chat keeps its audience wherever it goes", async (t) => {
   assert.equal(sessionAccess("usr_member", "spc_home", id), undefined, "still only its owner's");
 });
 
-test("a chat where the agent read personal notes can't move where others could read it", async (t) => {
+test("a chat where the agent read personal notes moves where others can read it only once the person confirms", async (t) => {
   const f = fixture(t);
   const sessions = owner(f);
   const id = await inheriting(f, "prj_secret");
   f.projections.set(id, { ...f.projections.get(id)!, personalContext: true });
   const preview = await sessions.previewMoveToProject!(id, { projectId: "prj_one" });
-  assert.equal(preview.blocked?.reason, "private");
+  assert.equal(preview.blocked?.reason, "personal-context");
   await assert.rejects(sessions.moveToProject!(id, { projectId: "prj_one" }), (error: { code?: string; reason?: string }) =>
-    error.code === "conflict" && error.reason === "private");
+    error.code === "conflict" && error.reason === "personal-context");
   assert.equal(f.domainState.calls, 0);
+  // The same move, confirmed: the person may always take their chat with them.
+  const confirmedPreview = await sessions.previewMoveToProject!(id, { projectId: "prj_one", acknowledgePersonalContext: true });
+  assert.equal(confirmedPreview.blocked, undefined);
+  await sessions.moveToProject!(id, { projectId: "prj_one", acknowledgePersonalContext: true });
+  assert.equal(f.security.resources.resource(id)?.parentId, "prj_one");
   // Nobody new reads it there: narrowing is always allowed.
   const staysPrivate = await sessions.create({ projectId: "prj_secret" });
   f.projections.set(staysPrivate.id, { ...f.projections.get(staysPrivate.id)!, personalContext: true });

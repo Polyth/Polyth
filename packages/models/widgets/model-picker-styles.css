@@ -8,11 +8,16 @@ max-width: 310px; min-height: max(30px, var(--hit-min)); gap: 6px;
 .model-trigger-logo {
 flex: none; color: var(--text-dim);
 }
-/* Desktop popover (chrome from .ui-popover): search on top, one scroll list. */
+/* Desktop popover (chrome from .ui-popover): search on top, one scroll list.
+   The surface hugs its catalog up to the cap, so a short catalog leaves no
+   empty well. ModelPicker pins an inline `height` while it is open: at least
+   the largest catalog its harness tabs can switch to, and never less than the
+   tallest height reached, so switching harness, filtering or collapsing a
+   group never resizes it. */
 .model-pop {
   width: min(360px, calc(100vw - var(--space-6)));
   min-width: min(360px, calc(100vw - var(--space-6)));
-  height: min(560px, 72vh);
+  height: auto;
   max-height: min(560px, 72vh);
   padding: var(--space-1);
   display: flex;
@@ -23,7 +28,7 @@ flex: none; color: var(--text-dim);
   .model-pop {
     width: min(360px, calc(100vw - 2 * var(--screen-gutter) - var(--safe-left) - var(--safe-right)));
     min-width: 0;
-    height: min(560px, calc(var(--visual-vh, 100dvh) * 0.52));
+    height: auto;
     max-height: min(560px, calc(var(--visual-vh, 100dvh) * 0.52));
     border-radius: var(--radius-surface);
     padding: var(--space-2);

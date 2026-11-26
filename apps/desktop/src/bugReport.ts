@@ -1,10 +1,10 @@
-// Nightly bug reports (docs/dev/desktop.md#bug-reports-nightly). The renderer's
-// report sheet asks for a capture, shows the person exactly what goes, and
-// hands back a draft; this module adds what only the desktop knows (build,
-// desktop settings, the daily install id), validates the whole report against
-// the shared wire shape and sends it to the report relay with the tester
-// password. Nothing here imports Electron: main.ts passes the screenshot,
-// OS encryption and `net.fetch` in, so the logic is unit-tested.
+// Feedback (docs/dev/desktop.md#feedback). The renderer's sheet asks for a
+// capture, shows the person exactly what goes, and hands back a draft; this
+// module adds what only the desktop knows (build, desktop settings, the two
+// pseudonyms), validates the whole feedback against the shared wire shape
+// (`composeFeedback`) and sends it to the intake: no password, no account.
+// Nothing here imports Electron: main.ts passes the screenshot and `net.fetch`
+// in, so the logic is unit-tested.
 
 import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -12,32 +12,36 @@ import { join } from "node:path";
 
 import {
   BUG_REPORT_LIMITS,
-  BUG_REPORT_VERSION,
-  isTesterPassword,
-  parseBugReport,
   type BugReportDesktopApp,
-  type BugReportPayload,
   type BugReportSettingValue,
 } from "@polyth/contracts/bug-report";
 import type { PolythEdition } from "@polyth/contracts/edition";
+import {
+  FEEDBACK_EXPERIENCE,
+  FEEDBACK_ROLES,
+  composeFeedback,
+  parseFeedback,
+  type FeedbackPayload,
+  type FeedbackProfile,
+} from "@polyth/contracts/feedback";
 
 import type { DesktopBugReportCapture, DesktopBugReportOutcome, DesktopBugReportState } from "./types.ts";
 
 export const DEFAULT_BUG_REPORT_ORIGIN = "https://reports.polyth.app";
 const MINUTE = 60_000;
-/** Reports kept waiting for the relay at most; the oldest goes first. */
+/** Feedback kept waiting for the intake at most; the oldest goes first. */
 const OUTBOX_MAX = 10;
 const OUTBOX_RETRY_MS = 15 * MINUTE;
 const CAPTURE_TTL_MS = 15 * MINUTE;
 const SEND_TIMEOUT_MS = 30_000;
 const JPEG_QUALITIES = [80, 70, 60, 50] as const;
 
-/** Where reports go, or null when this build sends none. Only nightly builds
- *  report; `POLYTH_BUG_REPORT=1` turns it on for a development build of the
- *  standard edition (the relay still refuses an unpublished version). A stable
- *  workstation build never reports, whatever the environment says
- *  (docs/security/workstation-edition.md). `POLYTH_BUG_REPORT_ORIGIN` points
- *  at another relay, `off` turns it off. */
+/** Where feedback goes, or null when this build sends none. Every build sends
+ *  it, stable or nightly, in both editions, and only when the person presses
+ *  Send on the sheet that shows them the exact bytes.
+ *  `POLYTH_BUG_REPORT_ORIGIN` points at another intake (`https:` or loopback
+ *  `http:`); `off` turns the whole feature off, for an administrator who wants
+ *  no outbound call at all (docs/security/workstation-edition.md). */
 export function bugReportOrigin(input: {
   version: string;
   edition: PolythEdition;
@@ -45,8 +49,6 @@ export function bugReportOrigin(input: {
 }): string | null {
   const raw = input.env.POLYTH_BUG_REPORT_ORIGIN?.trim();
   if (raw === "off") return null;
-  const nightly = input.version.endsWith("-nightly");
-  if (!nightly && (input.edition === "workstation" || input.env.POLYTH_BUG_REPORT !== "1")) return null;
   if (!raw) return DEFAULT_BUG_REPORT_ORIGIN;
   try {
     const url = new URL(raw);
@@ -59,8 +61,8 @@ export function bugReportOrigin(input: {
   }
 }
 
-/** 32 hex that change every UTC day: the relay can count one computer's
- *  reports per day, and nobody can link two days of reports to it. */
+/** 32 hex that change every UTC day: nobody can link two days of anonymous
+ *  feedback to one computer. */
 export function dailyInstallId(secretHex: string, now: number): string {
   const day = new Date(now).toISOString().slice(0, 10);
   return createHmac("sha256", Buffer.from(secretHex, "hex")).update(day).digest("hex").slice(0, 32);
@@ -72,6 +74,10 @@ export interface CapturedImage {
   resize(options: { width: number; height: number; quality: "good" }): CapturedImage;
   toJPEG(quality: number): Buffer;
 }
+
+/** A marked-up screenshot from the sheet is at most the wire's 1600 px at
+ *  high JPEG quality; anything far larger is refused before it is decoded. */
+export const MARKED_SCREENSHOT_MAX_BYTES = 8_000_000;
 
 export interface EncodedScreenshot {
   jpeg: Buffer;
@@ -99,10 +105,11 @@ export function encodeScreenshot(image: CapturedImage): EncodedScreenshot | null
 }
 
 interface StoreFile {
-  /** 64 hex: the secret the daily install id is derived from. */
+  /** 64 hex: the secret the daily pseudonym is derived from. */
   secret: string;
-  /** The tester password as the OS encryption returned it (base64). */
-  password?: string;
+  /** 32 hex: the pseudonym the person can reset. */
+  person: string;
+  profile?: FeedbackProfile;
 }
 
 export interface BugReportClientOptions {
@@ -113,10 +120,6 @@ export interface BugReportClientOptions {
   locale: () => string;
   /** What the desktop adds to the settings: `desktop.*` keys. */
   desktopSettings: () => Record<string, BugReportSettingValue>;
-  /** OS encryption (Electron `safeStorage`); null when unavailable, and the
-   *  password then lives only for this run. */
-  encrypt: (plain: string) => string | null;
-  decrypt: (stored: string) => string | null;
   fetch: typeof fetch;
   now?: () => number;
   log: (message: string, error?: unknown) => void;
@@ -125,7 +128,13 @@ export interface BugReportClientOptions {
 export interface BugReportClient {
   state(): DesktopBugReportState;
   capture(screenshot: EncodedScreenshot | null): DesktopBugReportCapture;
+  /** The person's marked-up screenshot (already re-encoded by main) replaces
+   *  the held capture's; null when that capture is gone or nothing decoded. */
+  annotate(captureId: unknown, screenshot: EncodedScreenshot | null): DesktopBugReportCapture["screenshot"];
   send(draft: unknown): Promise<DesktopBugReportOutcome>;
+  /** Erases what this computer sent under its resettable pseudonym and starts
+   *  a new one. */
+  forget(): Promise<{ result: "forgotten"; count: number } | { result: "unavailable" }>;
   flushOutbox(): Promise<void>;
   dispose(): void;
 }
@@ -133,15 +142,20 @@ export interface BugReportClient {
 const isPlain = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-type RelayAnswer = DesktopBugReportOutcome | { result: "retry" };
+const asProfile = (value: unknown): FeedbackProfile | undefined =>
+  isPlain(value)
+  && (FEEDBACK_ROLES as readonly unknown[]).includes(value.role)
+  && (FEEDBACK_EXPERIENCE as readonly unknown[]).includes(value.experience)
+    ? { role: value.role as FeedbackProfile["role"], experience: value.experience as FeedbackProfile["experience"] }
+    : undefined;
+
+type Answer = DesktopBugReportOutcome | { result: "retry" };
 
 export function createBugReportClient(options: BugReportClientOptions): BugReportClient {
   const now = options.now ?? Date.now;
   const storePath = join(options.dir, "bug-report.json");
   const outboxDir = join(options.dir, "bug-reports");
   let store = readStore();
-  /** The password for this run: typed now or decrypted from the store. */
-  let password: string | null = store.password ? options.decrypt(store.password) : null;
   let capture: { id: string; screenshot: EncodedScreenshot | null; at: number } | null = null;
   let retryTimer: NodeJS.Timeout | null = null;
   let flushing: Promise<void> | null = null;
@@ -150,13 +164,15 @@ export function createBugReportClient(options: BugReportClientOptions): BugRepor
     try {
       const raw = JSON.parse(readFileSync(storePath, "utf8")) as unknown;
       if (isPlain(raw) && typeof raw.secret === "string" && /^[0-9a-f]{64}$/.test(raw.secret)) {
+        const profile = asProfile(raw.profile);
         return {
           secret: raw.secret,
-          ...(typeof raw.password === "string" && raw.password ? { password: raw.password } : {}),
+          person: typeof raw.person === "string" && /^[0-9a-f]{32}$/.test(raw.person) ? raw.person : randomBytes(16).toString("hex"),
+          ...(profile ? { profile } : {}),
         };
       }
     } catch { /* first run, or an unreadable file: start again */ }
-    return { secret: randomBytes(32).toString("hex") };
+    return { secret: randomBytes(32).toString("hex"), person: randomBytes(16).toString("hex") };
   }
 
   function writeStore(): void {
@@ -166,23 +182,7 @@ export function createBugReportClient(options: BugReportClientOptions): BugRepor
       writeFileSync(temp, `${JSON.stringify(store)}\n`, { encoding: "utf8", mode: 0o600 });
       renameSync(temp, storePath);
     } catch (error) {
-      options.log("Could not save the bug report state", error);
-    }
-  }
-
-  function rememberPassword(value: string): void {
-    password = value;
-    const sealed = options.encrypt(value);
-    if (sealed) store.password = sealed;
-    else delete store.password;
-    writeStore();
-  }
-
-  function forgetPassword(): void {
-    password = null;
-    if (store.password) {
-      delete store.password;
-      writeStore();
+      options.log("Could not save the feedback state", error);
     }
   }
 
@@ -198,17 +198,17 @@ export function createBugReportClient(options: BugReportClientOptions): BugRepor
     try { return statSync(join(outboxDir, name)).mtimeMs; } catch { return 0; }
   }
 
-  function enqueue(report: BugReportPayload): void {
+  function enqueue(feedback: FeedbackPayload): void {
     try {
       mkdirSync(outboxDir, { recursive: true, mode: 0o700 });
-      const path = join(outboxDir, `${report.reportId}.json`);
+      const path = join(outboxDir, `${feedback.feedbackId}.json`);
       const temp = `${path}.${process.pid}.tmp`;
-      writeFileSync(temp, JSON.stringify(report), { encoding: "utf8", mode: 0o600 });
+      writeFileSync(temp, JSON.stringify(feedback), { encoding: "utf8", mode: 0o600 });
       renameSync(temp, path);
       const files = outboxFiles();
       for (const name of files.slice(0, Math.max(0, files.length - OUTBOX_MAX))) rmSync(join(outboxDir, name), { force: true });
     } catch (error) {
-      options.log("Could not keep the bug report for later", error);
+      options.log("Could not keep the feedback for later", error);
     }
     scheduleRetry();
   }
@@ -222,29 +222,33 @@ export function createBugReportClient(options: BugReportClientOptions): BugRepor
     retryTimer.unref?.();
   }
 
-  async function post(report: BugReportPayload, secret: string): Promise<RelayAnswer> {
-    if (!options.origin) return { result: "unavailable" };
-    let response: Response;
+  async function post(path: string, body: unknown): Promise<{ status: number; body: unknown } | null> {
+    if (!options.origin) return null;
     try {
-      response = await options.fetch(new URL("/v1/report", options.origin).toString(), {
+      const response = await options.fetch(new URL(path, options.origin).toString(), {
         method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${secret}` },
-        body: JSON.stringify(report),
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
         signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
       });
+      let parsed: unknown = null;
+      try { parsed = await response.json(); } catch { /* answered below by status */ }
+      return { status: response.status, body: parsed };
     } catch (error) {
-      options.log("The bug report relay could not be reached", error instanceof Error ? error.name : undefined);
-      return { result: "retry" };
+      options.log("The feedback intake could not be reached", error instanceof Error ? error.name : undefined);
+      return null;
     }
-    let body: unknown = null;
-    try { body = await response.json(); } catch { /* answered below by status */ }
-    const result = isPlain(body) ? body.result : undefined;
-    const issue = isPlain(body) && Number.isInteger(body.issue) && (body.issue as number) > 0 ? body.issue as number : 0;
-    if (response.status === 200 && (result === "created" || result === "added") && issue) return { result, issue };
-    if (response.status === 401) return { result: "password" };
-    if (response.status === 422) return { result: "version" };
-    if (response.status === 400) return { result: "invalid" };
-    // A limit, an overloaded relay or GitHub being down: it goes later.
+  }
+
+  async function sendOne(feedback: FeedbackPayload): Promise<Answer> {
+    if (!options.origin) return { result: "unavailable" };
+    const answer = await post("/v1/feedback", feedback);
+    if (!answer) return { result: "retry" };
+    const ref = isPlain(answer.body) && Number.isInteger(answer.body.ref) && (answer.body.ref as number) > 0 ? answer.body.ref as number : 0;
+    if (answer.status === 200 && isPlain(answer.body) && answer.body.result === "received" && ref) return { result: "received", ref };
+    if (answer.status === 400) return { result: "invalid" };
+    if (answer.status === 429) return { result: "rate" };
+    // An overloaded or unavailable intake: it goes later.
     return { result: "retry" };
   }
 
@@ -253,14 +257,12 @@ export function createBugReportClient(options: BugReportClientOptions): BugRepor
     flushing = (async () => {
       for (const name of outboxFiles()) {
         const path = join(outboxDir, name);
-        let report: BugReportPayload | null = null;
-        try { report = parseBugReport(JSON.parse(readFileSync(path, "utf8")) as unknown, now()); } catch { report = null; }
-        if (!report) { rmSync(path, { force: true }); continue; }
-        if (!password) break;
-        const answer = await post(report, password);
-        if (answer.result === "retry") break;
-        if (answer.result === "password") { forgetPassword(); break; }
-        // Sent, or refused for good (an unpublished version, a stale shape).
+        let feedback: FeedbackPayload | null = null;
+        try { feedback = parseFeedback(JSON.parse(readFileSync(path, "utf8")) as unknown, now()); } catch { feedback = null; }
+        if (!feedback) { rmSync(path, { force: true }); continue; }
+        const answer = await sendOne(feedback);
+        if (answer.result === "retry" || answer.result === "rate") break;
+        // Sent, or refused for good (a stale shape).
         rmSync(path, { force: true });
       }
     })().finally(() => {
@@ -273,8 +275,10 @@ export function createBugReportClient(options: BugReportClientOptions): BugRepor
   function base(at: number) {
     return {
       app: appInfo(),
-      install: dailyInstallId(store.secret, at),
       settings: options.desktopSettings(),
+      installDaily: dailyInstallId(store.secret, at),
+      installPerson: store.person,
+      savedProfile: store.profile ?? null,
     };
   }
 
@@ -286,6 +290,23 @@ export function createBugReportClient(options: BugReportClientOptions): BugRepor
     };
   }
 
+  /** The profile the person shared is kept, so the next sheet opens with it. */
+  function remember(feedback: FeedbackPayload): void {
+    if (feedback.profile && JSON.stringify(store.profile) !== JSON.stringify(feedback.profile)) {
+      store = { ...store, profile: feedback.profile };
+      writeStore();
+    }
+  }
+
+  const screenshotView = (screenshot: EncodedScreenshot | null): DesktopBugReportCapture["screenshot"] => screenshot
+    ? {
+      dataUrl: `data:image/jpeg;base64,${screenshot.jpeg.toString("base64")}`,
+      width: screenshot.width,
+      height: screenshot.height,
+      bytes: screenshot.jpeg.length,
+    }
+    : null;
+
   function liveCapture(at: number) {
     if (capture && at - capture.at > CAPTURE_TTL_MS) capture = null;
     return capture;
@@ -296,81 +317,88 @@ export function createBugReportClient(options: BugReportClientOptions): BugRepor
   return {
     state: () => ({
       available: options.origin !== null,
-      needsPassword: password === null,
       queued: outboxFiles().length,
     }),
 
     capture(screenshot) {
       const at = now();
       capture = { id: randomUUID(), screenshot, at };
-      return {
-        captureId: capture.id,
-        screenshot: screenshot
-          ? {
-            dataUrl: `data:image/jpeg;base64,${screenshot.jpeg.toString("base64")}`,
-            width: screenshot.width,
-            height: screenshot.height,
-            bytes: screenshot.jpeg.length,
-          }
-          : null,
-        base: base(at),
-        needsPassword: password === null,
-        passwordStorage: options.encrypt("probe") === null ? "session" : "keychain",
-      };
+      return { captureId: capture.id, screenshot: screenshotView(screenshot), base: base(at) };
+    },
+
+    annotate(captureId, screenshot) {
+      const held = liveCapture(now());
+      if (!screenshot || !held || typeof captureId !== "string" || held.id !== captureId) return null;
+      held.screenshot = screenshot;
+      return screenshotView(screenshot);
     },
 
     async send(draft) {
       if (!options.origin) return { result: "unavailable" };
       if (!isPlain(draft)) return { result: "invalid" };
-      const typed = typeof draft.password === "string" ? draft.password.trim() : "";
-      // The relay could never take it (a header carries printable ASCII only).
-      if (typed && !isTesterPassword(typed)) return { result: "password" };
-      const secret = typed || password;
-      if (!secret) return { result: "password" };
       const at = now();
       const held = liveCapture(at);
       const wantsScreenshot = typeof draft.captureId === "string" && draft.captureId !== "";
       if (wantsScreenshot && (!held || held.id !== draft.captureId)) return { result: "invalid" };
       const shot = wantsScreenshot ? held!.screenshot : null;
-      const fromWeb = isPlain(draft.settings) ? draft.settings : {};
-      const report = parseBugReport({
-        version: BUG_REPORT_VERSION,
-        reportId: randomUUID(),
-        ...base(at),
-        createdAt: new Date(at).toISOString(),
-        web: draft.web,
-        // Renderer settings are `ui.*`; only the desktop speaks for `desktop.*`.
-        settings: {
-          ...Object.fromEntries(Object.entries(fromWeb).filter(([key]) => key.startsWith("ui."))),
-          ...options.desktopSettings(),
-        },
-        packages: draft.packages,
-        errors: draft.errors,
-        text: typeof draft.text === "string" ? draft.text.trim() : draft.text,
-        contact: typeof draft.contact === "string" ? draft.contact.trim().replace(/^@/, "") : draft.contact,
+      const technical = isPlain(draft.technical) ? draft.technical : null;
+      const fromWeb = technical && isPlain(technical.settings) ? technical.settings : {};
+      const app = appInfo();
+      const feedback = composeFeedback({
+        now: at,
+        feedbackId: randomUUID(),
+        kind: draft.kind,
+        text: draft.text,
+        contact: draft.contact,
+        basics: { version: app.version, channel: app.channel, edition: app.edition, locale: app.locale },
+        technical: technical
+          ? {
+            app,
+            web: technical.web,
+            // Renderer settings are `ui.*`; only the desktop speaks for `desktop.*`.
+            settings: {
+              ...Object.fromEntries(Object.entries(fromWeb).filter(([key]) => key.startsWith("ui."))),
+              ...options.desktopSettings(),
+            },
+            packages: technical.packages,
+            errors: technical.errors,
+          }
+          : null,
+        profile: draft.profile ?? null,
         screenshot: shot ? { type: "image/jpeg", width: shot.width, height: shot.height, data: shot.jpeg.toString("base64") } : null,
-      }, at);
-      if (!report) return { result: "invalid" };
-      const answer = await post(report, secret);
-      if (answer.result === "password") {
-        // A stored password the relay no longer takes is dropped; a typed one
-        // was never kept.
-        if (!typed) forgetPassword();
-        return answer;
-      }
+        dailyInstall: dailyInstallId(store.secret, at),
+        personInstall: store.person,
+      });
+      if (!feedback) return { result: "invalid" };
+      const answer = await sendOne(feedback);
       if (answer.result === "retry") {
-        // Unverified, but the queued report needs it to go later.
-        if (typed && typed !== password) rememberPassword(typed);
-        enqueue(report);
+        enqueue(feedback);
+        remember(feedback);
         if (held?.id === draft.captureId) capture = null;
         return { result: "queued" };
       }
-      if (answer.result === "created" || answer.result === "added") {
-        if (typed && typed !== password) rememberPassword(typed);
+      if (answer.result === "received") {
+        remember(feedback);
         if (held?.id === draft.captureId) capture = null;
         void flushOutbox();
       }
       return answer;
+    },
+
+    async forget() {
+      const answer = await post("/v1/feedback/forget", { version: 1, install: store.person });
+      if (!answer || answer.status !== 200 || !isPlain(answer.body) || answer.body.result !== "forgotten") return { result: "unavailable" };
+      const count = Number.isInteger(answer.body.count) ? answer.body.count as number : 0;
+      // Feedback still waiting under the old pseudonym goes with it.
+      for (const name of outboxFiles()) {
+        try {
+          const waiting = JSON.parse(readFileSync(join(outboxDir, name), "utf8")) as { install?: unknown };
+          if (waiting.install === store.person) rmSync(join(outboxDir, name), { force: true });
+        } catch { /* unreadable: the flush drops it */ }
+      }
+      store = { secret: store.secret, person: randomBytes(16).toString("hex") };
+      writeStore();
+      return { result: "forgotten", count };
     },
 
     flushOutbox,

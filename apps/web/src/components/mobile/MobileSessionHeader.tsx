@@ -182,6 +182,7 @@ function statusLabel(status: SessionRowStatus): string {
     case "needs-reply": return tr("sidebar.sessionlist.replyNeeded");
     case "failed": return tr("common.error");
     case "rate-limited": return tr("sessionStatus.resumesAfterLimit");
+    case "awaiting": return tr("sessionStatus.awaiting");
     case "epoch-pending": return tr("sessionStatus.runtimeChanged");
     case "resume-ready": return tr("sessionStatus.reconnectOnUse");
     case "reconciling": return tr("header.reconnecting");

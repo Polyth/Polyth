@@ -4,12 +4,76 @@ import { test } from "node:test";
 import assert from "node:assert";
 import { parseMarkdown, parseInline, collectImages, holdBackStreamingTail, splitFrontmatter } from "../src/markdown/parse.ts";
 import { sanitizeLinkHref, sanitizeImageSrc, isVideoSource } from "../src/markdown/sanitize.ts";
-import { parseFileRef, findFileRefs } from "../src/markdown/fileReference.ts";
+import { parseFileRef, findFileRefs, isLocalLinkHref, parseFileLinkHref } from "../src/markdown/fileReference.ts";
 
 test("file references retain Unicode repository-relative names and ranges", () => {
   assert.deepEqual(parseFileRef("документи/опис.md:3-8"), { path: "документи/опис.md", startLine: 3, endLine: 8 });
   assert.deepEqual(findFileRefs("See 資料/説明.ts:7.").filter((part) => part.kind === "ref").map((part) => part.loc.path), ["資料/説明.ts"]);
   assert.equal(parseFileRef("документи/../опис.md"), null);
+});
+
+// ---------------------------------------------------------------- link hrefs
+
+test("link hrefs: local paths are told apart from web addresses", () => {
+  for (const href of ["/home/polyth/workspace/Business1/INDEX.md", "departments/ceo/AGENTS.md", "./a.md", "file:///srv/a.md", "FILE:///srv/a.md", "a.html?x=1"]) {
+    assert.equal(isLocalLinkHref(href), true, href);
+  }
+  for (const href of ["https://x.dev/a.md", "http://x.dev", "mailto:a@b.c", "#section", "//evil.example/a.md", "javascript:alert(1)", "data:text/html,x", "polyth://session/abc", ""]) {
+    assert.equal(isLocalLinkHref(href), false, href);
+  }
+});
+
+test("link hrefs: an absolute path inside a workspace checkout becomes its relative path", () => {
+  const roots = [
+    { repositoryId: "primary", path: "/home/polyth/workspace/Business1" },
+    { repositoryId: "docs", path: "/home/polyth/workspace/Business1/vendor/docs/" },
+  ];
+  assert.deepEqual(parseFileLinkHref("/home/polyth/workspace/Business1/INDEX.md", { roots }), { path: "INDEX.md", repositoryId: "primary" });
+  assert.deepEqual(parseFileLinkHref("/home/polyth/workspace/Business1/departments/ceo/AGENTS.md", { roots }), { path: "departments/ceo/AGENTS.md", repositoryId: "primary" });
+  // The longest root wins: a nested checkout owns its own files.
+  assert.deepEqual(parseFileLinkHref("/home/polyth/workspace/Business1/vendor/docs/guide.md", { roots }), { path: "guide.md", repositoryId: "docs" });
+  assert.deepEqual(parseFileLinkHref("file:///home/polyth/workspace/Business1/INDEX.md", { roots }), { path: "INDEX.md", repositoryId: "primary" });
+  assert.deepEqual(parseFileLinkHref("file://localhost/home/polyth/workspace/Business1/INDEX.md", { roots }), { path: "INDEX.md", repositoryId: "primary" });
+  // A sibling directory that merely shares the prefix is not inside the root.
+  assert.deepEqual(parseFileLinkHref("/home/polyth/workspace/Business10/INDEX.md", { roots }), { path: "home/polyth/workspace/Business10/INDEX.md" });
+});
+
+test("link hrefs: other absolute paths read as repository-root-relative", () => {
+  assert.deepEqual(parseFileLinkHref("/apps/web/src/mobileViewport.ts"), { path: "apps/web/src/mobileViewport.ts" });
+  assert.deepEqual(parseFileLinkHref("/docs/./a/../b.md"), { path: "docs/b.md" });
+});
+
+test("link hrefs: relative paths resolve from the previewed document's directory", () => {
+  assert.deepEqual(parseFileLinkHref("departments/ceo/AGENTS.md"), { path: "departments/ceo/AGENTS.md" });
+  assert.deepEqual(parseFileLinkHref("./INDEX.md"), { path: "INDEX.md" });
+  assert.deepEqual(parseFileLinkHref("guide.md", { baseDir: "docs/dev" }), { path: "docs/dev/guide.md" });
+  assert.deepEqual(parseFileLinkHref("../README.md", { baseDir: "docs/dev/" }), { path: "docs/README.md" });
+  assert.deepEqual(parseFileLinkHref("%D0%BE%D0%BF%D0%B8%D1%81%20v2.md"), { path: "опис v2.md" });
+});
+
+test("link hrefs: line fragments and suffixes select lines; queries are dropped", () => {
+  assert.deepEqual(parseFileLinkHref("src/a.ts#L12"), { path: "src/a.ts", startLine: 12 });
+  assert.deepEqual(parseFileLinkHref("src/a.ts#L12-L20"), { path: "src/a.ts", startLine: 12, endLine: 20 });
+  assert.deepEqual(parseFileLinkHref("src/a.ts#L12C4"), { path: "src/a.ts", startLine: 12, column: 4 });
+  assert.deepEqual(parseFileLinkHref("src/a.ts:7"), { path: "src/a.ts", startLine: 7 });
+  assert.deepEqual(parseFileLinkHref("src/a.ts:7-9"), { path: "src/a.ts", startLine: 7, endLine: 9 });
+  assert.deepEqual(parseFileLinkHref("docs/a.md#install"), { path: "docs/a.md" });
+  assert.deepEqual(parseFileLinkHref("site/index.html?v=2#top"), { path: "site/index.html" });
+});
+
+test("link hrefs: paths that cannot name a workspace file are refused", () => {
+  assert.equal(parseFileLinkHref("../../etc/passwd"), null);
+  assert.equal(parseFileLinkHref("../a.md", { baseDir: "docs/../" }), null);
+  assert.equal(parseFileLinkHref("/../../a.md"), null);
+  assert.equal(parseFileLinkHref("/"), null);
+  assert.equal(parseFileLinkHref("decisions/"), null);
+  assert.equal(parseFileLinkHref("file://remote-host/srv/a.md"), null);
+  assert.equal(parseFileLinkHref("file:a.md"), null);
+  assert.equal(parseFileLinkHref("docs\\a.md"), null);
+  assert.equal(parseFileLinkHref("a%00.md"), null);
+  assert.equal(parseFileLinkHref("https://x.dev/a.md"), null);
+  // The checkout directory itself is not a file.
+  assert.equal(parseFileLinkHref("/home/polyth/workspace/Business1", { roots: [{ repositoryId: "primary", path: "/home/polyth/workspace/Business1" }] }), null);
 });
 import { mergeThinking, messageJson, promptIndex } from "../src/utils.ts";
 import type { AssistantMsg, RenderMessage, ToolMsg, UserMsg } from "../src/reduce.ts";

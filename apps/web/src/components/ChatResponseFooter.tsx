@@ -17,7 +17,7 @@ import {
   type ActionAnnounceAnchor,
 } from "../messageActions.ts";
 import type { ResponseActionId } from "../messageActionLayout.ts";
-import type { AssistantMsg, RenderModel } from "../reduce.ts";
+import { answerModelRef, type AssistantMsg, type RenderModel } from "../reduce.ts";
 import { applyEventWithPendingSend, endPendingSend, setUiError, useStore } from "../store.ts";
 import { useTimelineProjectId, useTimelineSessionId } from "../timelineSession.ts";
 import { beginRegenerateMotion, cancelRewindMotion } from "../rewindMotion.ts";
@@ -76,7 +76,10 @@ export default function ChatResponseFooter({
   turn,
   segmentStartedAt,
   regeneratePrompt,
+  inFlight = false,
 }: {
+  /** The answer belongs to the working turn: the live selection may label it. */
+  inFlight?: boolean;
   m: AssistantMsg;
   announce?: (text: string, anchor?: ActionAnnounceAnchor) => void;
   turn?: RenderModel["turn"];
@@ -119,8 +122,13 @@ export default function ChatResponseFooter({
     if (!prefs.showAnswerQuickActions) setMetadataOpen(false);
   }, [prefs.showAnswerQuickActions]);
 
-  const modelRef = turn?.model ?? m.model ?? sessionModel;
+  // A finalized answer keeps the model recorded for it (its message, then its
+  // turn). The session's current selection only labels an answer still in
+  // flight; otherwise a later model switch would re-label every older answer.
+  const modelRef = answerModelRef(m, turn, sessionModel, inFlight);
   const harnessId = m.harnessId ?? turn?.harnessId ?? sessionHarnessId;
+  // A Relay chat's turn records the member account that ran it ("via Iryna").
+  const viaAccount = m.viaAccount ?? turn?.viaAccount;
   const presentation = resolveModelPresentation(modelRef, models, harnessId);
   const descriptor = presentation.descriptor;
   const modelName = presentation.name;
@@ -338,6 +346,11 @@ export default function ChatResponseFooter({
           className="chat-response-logo"
         />
         <span className="chat-response-model" title={modelName}>{modelName}</span>
+        {viaAccount && (
+          <span className="chat-response-account" title={tr("timeline.viaAccount", { name: viaAccount })}>
+            ({viaAccount})
+          </span>
+        )}
         {duration && <span className="chat-response-duration">{duration}</span>}
       </div>
 

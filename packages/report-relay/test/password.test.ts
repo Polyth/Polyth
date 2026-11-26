@@ -63,5 +63,8 @@ test("an empty password is refused", () => {
 test("the module and the CLI use the same record format", () => {
   const source = readFileSync(new URL("../src/cli.ts", import.meta.url), "utf8");
   assert.match(source, /hashPassword/);
-  assert.match(source, /process\.argv\[2\] === "hash-password"/);
+  assert.match(source, /command === "hash-password"/);
+  // The password is read from stdin, never from an argument.
+  assert.match(source, /readPassword\(\)/);
+  assert.doesNotMatch(source, /process\.argv\.includes\("hash-password"\)|argv\[0\] === "hash-password"/);
 });

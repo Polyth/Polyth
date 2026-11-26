@@ -552,6 +552,7 @@ function AssistantView({
           m={m}
           announce={announce}
           turn={turn}
+          inFlight={live}
           segmentStartedAt={segmentStartedAt}
           regeneratePrompt={regeneratePrompt}
         />
@@ -892,7 +893,7 @@ export function ActivityGroupView({
 
 /** True while the element is taller than its clamp. Measured only while the
  *  clamp is on, so expanding never erases the control that collapses it. */
-function useClipped(ref: RefObject<HTMLElement | null>, clamped: boolean): boolean {
+function useClipped(ref: RefObject<HTMLElement | null>, clamped: boolean, lines: number): boolean {
   const [clipped, setClipped] = useState(false);
   useEffect(() => {
     const element = ref.current;
@@ -903,19 +904,26 @@ function useClipped(ref: RefObject<HTMLElement | null>, clamped: boolean): boole
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [ref, clamped]);
+  }, [ref, clamped, lines]);
   return clipped;
 }
 
-/** A sent prompt is a record, not a wall of text: the log keeps four lines and
- *  the rest stays one tap away. */
+/** A sent prompt is a record, not a wall of text: the log keeps a few lines
+ *  (four by default; Settings → Chat picks 4–20) and the rest stays one tap
+ *  away. The same setting can turn the fold off, and then every prompt shows
+ *  in full with no control. */
 export function UserPrompt({ text, id, resourceContext }: { text: string; id: string; resourceContext?: TimelineResourceContext }) {
+  const { collapseLongPrompts: collapse, collapsePromptLines: lines } = useUiSettings();
   const [open, setOpen] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
-  const clipped = useClipped(bodyRef, !open);
+  const clipped = useClipped(bodyRef, collapse && !open, lines) && collapse;
   return (
     <>
-      <div className={`user-prompt${open ? " open" : clipped ? " clipped" : ""}`} ref={bodyRef}>
+      <div
+        className={`user-prompt${!collapse || open ? " open" : clipped ? " clipped" : ""}`}
+        style={{ "--prompt-fold-lines": lines } as CSSProperties}
+        ref={bodyRef}
+      >
         {renderMarkdown(text, id, resourceContext ? { resourceContext } : {})}
       </div>
       {clipped && (

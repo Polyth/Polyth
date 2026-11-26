@@ -15,6 +15,7 @@ import { getMarketSymbol, selectMarketSymbol, subscribeMarketSymbol } from "./se
 import { useMarketWatchlists } from "./watchlistHooks.ts";
 import { isImeComposing } from "@polyth/web-sdk";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
+import { Menu } from "../../../apps/web/src/components/ui/index.ts";
 import { formatCompact, formatDecimal, formatMarketDateTime, formatMarketPrice, formatPercent, formatPercentValue } from "./format.ts";
 import { assetTypeLabel, freshnessLabel } from "./labels.ts";
 
@@ -174,9 +175,10 @@ export default function MarketsSurface({ active = true, handoffOptions = [] }: M
         });
       }
       await option.send(buildMarketHandoffText(context));
-      setHandoffOpen(false);
     } catch (cause) {
+      // The menu closed on the choice; reopen it to show why the send failed.
       setHandoffError(errorMessage(cause));
+      setHandoffOpen(true);
     } finally {
       setHandoffBusy(false);
     }
@@ -242,28 +244,31 @@ export default function MarketsSurface({ active = true, handoffOptions = [] }: M
           >
             {watching ? "★" : "☆"}
           </button>
-          <div className="markets-handoff">
-            <button
-              className="markets-ask"
-              type="button"
-              disabled={handoffOptions.length === 0 || handoffBusy}
-              title={handoffOptions.length === 0 ? tr("markets.research.handoffDisabled") : undefined}
-              aria-expanded={handoffOpen}
-              onClick={() => setHandoffOpen((value) => !value)}
-            >
-              <span aria-hidden="true">↗</span> <span className="markets-ask-label">{tr("markets.common.askPolyth")}</span>
-            </button>
-            {handoffOpen && handoffOptions.length > 0 && (
-              <div className="markets-handoff-menu" role="menu" aria-label={tr("markets.research.handoffMenuAria")}>
-                {handoffOptions.map((option) => (
-                  <button key={option.id} type="button" role="menuitem" onClick={() => void sendHandoff(option)}>
-                    {option.label}
-                  </button>
-                ))}
-                {handoffError && <small className="markets-handoff-error" role="status">{handoffError}</small>}
-              </div>
+          <Menu
+            label={tr("markets.research.handoffMenuAria")}
+            align="end"
+            open={handoffOpen && handoffOptions.length > 0}
+            onOpenChange={setHandoffOpen}
+            entries={handoffOptions.map((option) => ({
+              id: option.id,
+              label: option.label,
+              disabled: handoffBusy,
+              onSelect: () => void sendHandoff(option),
+            }))}
+            footer={handoffError ? <small className="markets-handoff-error" role="status">{handoffError}</small> : undefined}
+          >
+            {(trigger) => (
+              <button
+                {...trigger}
+                className="markets-ask"
+                type="button"
+                disabled={handoffOptions.length === 0 || handoffBusy}
+                title={handoffOptions.length === 0 ? tr("markets.research.handoffDisabled") : undefined}
+              >
+                <span aria-hidden="true">↗</span> <span className="markets-ask-label">{tr("markets.common.askPolyth")}</span>
+              </button>
             )}
-          </div>
+          </Menu>
           <button className="markets-refresh" type="button" onClick={() => setRefresh((value) => value + 1)}>
             {tr("markets.common.refresh")}
           </button>

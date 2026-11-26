@@ -12,9 +12,24 @@ Hard rule: delegation is owned by Polyth. Create workers only with the Polyth co
 
 ## 1. Decide whether to delegate
 
-Delegate when at least two workstreams are genuinely independent, or a bounded question needs more search than the parent should spend, or parallel writers shorten wall-clock time. Keep it yourself when a single tool call, one file, or one sequential boundary is involved — spawn cost plus a duplicate context read makes that slower and dearer, not cheaper.
+What a worker costs is its context size multiplied by its model calls, not its answer: over 723 delegated sessions measured on 2026-11-23, 97% of all tokens were the context being read again on each call and under 1% were output. A child starts at 30–45k tokens before it does anything, and the sessions that delegated recorded about twice the spend of all their children together. So the saving is whatever bulky work stays out of the parent, and the waste is anything read twice.
+
+- Delegate when the next step needs about eight or more tool calls or produces bulky raw output (search, logs, test loops, screenshots), when at least two workstreams are independent, or when parallel writers shorten wall-clock time.
+- Keep it yourself when it is a single tool call, one file or one sequential boundary: the child's start-up context plus your packet and its report cost more than the work.
+- Never repeat a worker's search in the parent. Check only what your decision rests on, by reading narrow line ranges.
 
 Add the orchestration itself to the plan/todo list and keep exactly one item in progress.
+
+### A workflow template instead of hand-driven workers
+
+When the task has the shape of a saved template (a bounded change that deserves an independent review; work that splits into two or three non-overlapping scopes), run the template with the `polyth_workflow` tool instead of spawning and reviewing each worker yourself. The engine runs the units and their review rounds, so you spend no turns relaying reports, and it wakes you when the run settles or waits.
+
+- `run` takes the same packet you would write for a worker as `input`, and your located `path:line` lines as `facts`; units pass on what they locate, so later units do not search again.
+- Units with a routing role take their model from the person's routing policy; a refused model moves to the role's next one.
+- Check the result yourself (section 6 still applies: a finished run is evidence, not proof), then record `outcome`: accepted, reworked or discarded. `stats` shows those counts per template, which is the evidence for choosing a template again.
+- Keep it out of a workflow when it is a few tool calls, one file, or a T2 decision one strong session should own: every unit starts with tens of thousands of tokens of its own.
+
+Contract and limits: [workflows](../../../docs/dev/workflows.md#agent-tools).
 
 ## 2. Shortlist the fleet once
 
@@ -36,6 +51,12 @@ Match the smallest model that is *adequate*, not the smallest that exists:
 | **T1 — bounded implementation:** one package/boundary, named acceptance test | cheapest mid/small favorite that can pass | middle or the model default | `isolated` when writers run in parallel, `shared` when sequential |
 | **T2 — consequential reasoning:** shared contracts, authz/Space security, concurrency, migrations, architecture, ambiguous debugging, integration review | strongest available favorite, or keep it in the parent | highest advertised | `shared`, read-only for review |
 
+What the same history shows about routing (same date; the classes did not receive the same tasks, so read it as cost and reliability, not as a quality ranking):
+
+- Top-tier workers were a fifth of the children and four fifths of the recorded child spend; a median top-tier child cost about eight times a mid-tier one and was sent a follow-up message more often (30% of them against 19%). Use the top tier as a worker only for T2, preferably as a read-only reviewer of a finished diff, and give T1 to the mid tier by default.
+- Nine of ten children that stopped on an error stopped on a rate or quota limit, not on bad work, and a quarter of the top-tier children hit one. Read the quota lines before every fan-out, spread children across providers, and do not put more than two children on one 5-hour window that is already above half.
+- Skip a row whose 30-day failure share is 30% or more while another adequate row exists.
+
 Name heuristics are a hint, not truth: `pro`/`opus`/`max`/`ultra` usually cost more, but verify against observed turns, failures and quota rather than the label. `agent.models` does not expose price; rank cost by (1) smallest adequate class, (2) quota headroom, (3) turn/failure history, (4) an already-warm harness.
 
 ### Thinking effort (`variant`)
@@ -48,25 +69,39 @@ Name heuristics are a hint, not truth: `pro`/`opus`/`max`/`ultra` usually cost m
 
 ## 4. Spawn a bounded packet
 
-One child per write set; never two writers on the same boundary. Give the child facts, not the repository:
+One child per write set; never two writers on the same boundary. Give the child facts, not the repository. Packet length did not predict whether a child needed a follow-up; these fields did:
 
 ```
-Goal:        <one sentence>
-State:       <branch/HEAD, dirty files it must not touch>
-Own skill:   <repo-relative SKILL.md to read>
-Files:       <exact paths/symbols>
-Writes:      <exact allowed paths>
-Must not:    <invariants, contracts, security rules>
-Verify:      <one exact command>
-Evidence:    status, changed paths, command outcome, unresolved risk
-Isolation:   shared | isolated
+Goal:      <one sentence, and the observable result that means done>
+State:     <branch/HEAD, dirty files it must not touch>
+Facts:     <path:line — what you already located; the child does not search for these again>
+Read:      <exact files, line ranges, and doc sections by heading; own skill: repo-relative SKILL.md>
+Writes:    <exact allowed paths, or "read-only">
+Must not:  <invariants, contracts, security rules>
+Verify:    <one exact command per touched package, memory-capped, under 10 minutes>
+Stop:      <when to stop: the question answered / the check green / N tool calls spent; blocked or missing a permission → report, do not explore or wait>
+Report:    <at most 40 lines of `path:line — fact`, changed paths, command outcome, unresolved risk; longer material in .scratch/<task>/<name>.md, return its path>
+Isolation: shared | isolated
 ```
 
-Pass `watchCaller: true` so you are woken once when the child settles. Children return compact evidence and `polyth_peer` observations; never copy transcripts between sessions.
+End every packet with these standing lines:
+
+- Bound every command's output (`rg -n --max-count`, `sed -n 'a,bp'`, `| head -n 60`, `git diff --stat` before a full diff) and read line ranges, not whole files. One call in eight produced about two thirds of all tool output in the measured sessions, and all of it is read again on every later call.
+- Read the named section of a large guide, never the whole file: `docs/dev/ui.md` alone is over 100k tokens.
+- Do not spawn subagents. Run heavy checks one at a time through the shared lock and memory cap ([bounded verification](../../../docs/agents/verification.md#bounded-local-verification)); no single command may run over 10 minutes.
+- Parallel isolated children never write a shared document: return the text in the report and the parent adds it after merging.
+
+Over half of every worker's shell calls were search and file reads, at any model tier. `Facts` and `Read` are what remove them. When you have not located the code yourself, do not pay an implementer to find it: send a T0 scout first, have it write `.scratch/<task>/map.md` (at most 60 lines of `path:line — fact`), and give the implementer that path in `Read`. The map goes from worker to worker without passing through your context; you read only the lines your decision needs.
+
+When parallel children share a contract (a DTO, a route, a document format), write and commit it yourself before spawning them.
+
+Pass `watchCaller: true` so you are woken when the child's turn ends. Children return compact evidence and `polyth_peer` observations; never copy transcripts between sessions.
 
 ## 5. Drive event-driven, then integrate
 
 - Wait on the `watchCaller` wake or `session.watch` (`events: ["completed","error","aborted"]`). Never poll `session.get` in a loop.
+- After the first spawn of a fan-out, check that child once with `session.debug` (working, no recent errors) before spawning the rest: a returned session id does not prove the worker started.
+- A wake means a turn ended, not that the task is done. Read the child's last message; if it is not the report, re-arm with `session.watch` and do not merge, because merging removes a worktree its background checks may still use.
 - Message a child with `session.send`; `delivery` picks how it lands on a busy chat: `queue` (default, after its current turn), `interrupt` (stop that turn, run this next) or `steer` (join the running turn). Read bounded state with `session.messages`/`session.debug`; exchange findings with `polyth_peer`.
 - Parallel writers get `isolation: "isolated"` with non-overlapping write sets; commit your own overlapping edits before merging.
 - Read the actual diff and run the owning check on the **integrated** result — a green child branch is not integrated success.
@@ -75,12 +110,29 @@ Pass `watchCaller: true` so you are woken once when the child settles. Children 
 - To keep an existing shared child apart after the fact, `session.isolate` it while it is at rest; it then owes an `agent.merge` like any isolated child.
 - Clean up a child that produced no assistant/tool/request evidence and no delivered prompt, per the canonical cleanup rule; preserve and report any child with real evidence or uncertainty.
 
+## 6. Check the result, cheapest check first
+
+A worker's "all green" covers only the checks it chose. Run the gates in this order and stop at the first that fails:
+
+1. **Deterministic guards, run by the parent.** `git diff --stat` stays inside the write set; no weakened assertions (`git diff -- '*.test.*'` for loosened patterns, deleted cases, `skip`); the full test directory of every touched package, plus the host suite for UI work; for added CSS, every `var(--x)` has a definition. For a mechanical sweep, state the guard in the packet (for example "every removed line contains the label").
+2. **Diff review by the parent** for T1: every hunk, against the packet's `Must not`.
+3. **An independent read-only reviewer** only for T2 or a diff too large to read: a different model family from the author, given the diff range, the contract and the `Must not` list, not the history. It returns findings as `- [blocker] path:line — what is wrong and what done looks like` or `- [note] …`, then one last line `Verdict: approved` or `Verdict: changes requested` (the format the workflow engine's review loop reads).
+
+Rounds:
+
+- Send blockers back to the **same** child session with `session.send`: its context is already paid for, and a fresh child would read everything again. Send only the findings and the failing output, a few lines each.
+- At most two rounds. A child that fails the same gate twice does not get a third: take the remaining fix yourself or reroute it one class up with the findings as `Facts`. Never rerun the same harness/model pair after an error stop, and never silently move a consequential task to a cheaper model.
+- A visible UI change is not accepted on tests: look at its before/after screenshots.
+
 ## Cost and quality controls
 
 - A small model must never guess an unknown contract: one strong turn beats a weak model looping on an interface it cannot see. Route ambiguity upward; route mechanics downward.
-- Bound every packet (exact files, owning skill, one verification command). Never paste the repo, full logs or chat history into a child.
-- Reuse verified context: hand over facts you already established instead of making the child rediscover them.
+- Reuse verified context: hand over facts you already established instead of making the child rediscover them. Never paste the repo, full logs or chat history into a child.
 - Fan-out width: ≤3 concurrent children by default, ≤6 only for an explicitly max-effort task. When two children disagree, consolidate instead of adding a third.
-- On a stall, error or unusable result: `session.cancel`, pick a different row, spawn a replacement. Never retry the same failing harness/model pair, and never silently downgrade a consequential task to a cheaper model.
+- Make long work resumable: one output file per chunk, so a quota stop loses nothing.
 - Raise the parent's own effort only for the decisions that matter; delegate the rest.
-- When you finish, report the spend signals: children created, their harness/model/variant, cancellations, which results were merged, and what each verification actually covered.
+- When you finish, report the spend signals: children created, their harness/model/variant, cancellations, rounds, which results were merged, and what each verification actually covered.
+
+## What this cannot promise
+
+No routing rule makes a worker's result flawless. A workflow run records its outcome (accepted as delivered, kept after rework, discarded) when someone sets it; a child spawned with `agent.spawn` has no such record, so the routing above rests on cost, failure and follow-up counts plus reviewed samples. Quality comes from the gates in section 6, and those cost tokens: delegation lowers the cost of a unit of work only where it removes repeated reading, unbounded output, failed starts and top-tier workers on mechanical work. For T2 work the cheaper option is usually one strong session, not a pipeline.

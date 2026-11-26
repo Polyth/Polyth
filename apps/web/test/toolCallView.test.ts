@@ -147,7 +147,7 @@ test("search tools render their results as a readable list", () => {
     input: { query: "fx login config", count: 6 },
     output: JSON.stringify([{ type: "text", text: JSON.stringify({
       query: "fx login config",
-      provider: "duckduckgo",
+      provider: "exa",
       results: [{ rank: 1, title: "fx.sh", url: "https://fx.sh/docs/auth.md", snippet: "Set FX_NO_OPEN_BROWSER=1 before fx login.", publishedAt: null }],
       truncated: false,
     }) }]),

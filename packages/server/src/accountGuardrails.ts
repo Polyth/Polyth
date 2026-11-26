@@ -85,7 +85,9 @@ export function guardedSessionService(base: SessionService, guardrails: AccountG
           harness: { mode: "pinned", harnessId: guardrails.models[0].harnessId } as HarnessSelection,
         }
       : {};
-  guarded.create = async (input) => base.create({ ...input, ...createRoute(input) });
+  guarded.create = async (input, admission) => admission
+    ? base.create({ ...input, ...createRoute(input) }, admission)
+    : base.create({ ...input, ...createRoute(input) });
   if (base.start) {
     const start = base.start.bind(base);
     guarded.start = async (input, admission) => start({ ...input, ...createRoute(input) }, admission);

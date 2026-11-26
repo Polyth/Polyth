@@ -267,6 +267,19 @@ test("a request is settled by the person or by the agent's own Resolved line, wh
   assert.equal(openNeeds(svc.runsOf(task.id), 5_000).length, 2, "reopened everywhere too");
   assert.throws(() => svc.setNeedDone(task.id, first.runId, 9, true), /request not found/);
 
+  // An answer (Go ahead / Decline) settles it too, and is kept on every copy:
+  // the line leaves the person's list at the tap, before the agent has run.
+  svc.setNeedDone(task.id, second.runId, 0, true, "yes");
+  assert.deepEqual(
+    svc.runsOf(task.id).flatMap((run) => run.needs ?? []).filter((need) => need.done).map((need) => need.done!.answer),
+    ["yes", "yes"],
+  );
+  assert.deepEqual(openNeeds(svc.runsOf(task.id), 5_000).map((need) => need.text), ["Rotate the deploy key"]);
+  // A wake that was refused puts it back, with no answer left behind.
+  svc.setNeedDone(task.id, second.runId, 0, false);
+  assert.equal(openNeeds(svc.runsOf(task.id), 5_000).length, 2);
+  assert.ok(svc.runsOf(task.id).flatMap((run) => run.needs ?? []).every((need) => !need.done));
+
   // The agent closes the other itself.
   await report("Key rotated by you.\nResolved: Rotate the deploy key\nReport: quiet");
   const key = svc.runsOf(task.id).flatMap((run) => run.needs ?? []).find((need) => need.text === "Rotate the deploy key")!;

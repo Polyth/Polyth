@@ -49,14 +49,14 @@ reload lands on the setup server's ready state). Standalone/headless server setu
 keeps the explicit `npm run setup:claim` operator flow. The screen contract is in
 [UI §3.5](ui.md#35-first-run-setup-and-sign-in-screens).
 
-Desktop boots the server with `desktopOwnerChannel: true`, which adds two
-in-process lifecycle methods. When the person chooses "just me" or "me, from my
+Desktop boots the server with `desktopOwnerChannel: true`, which adds
+in-process lifecycle methods (never HTTP routes). When the person chooses "just me" or "me, from my
 phone too", `desktop:setup:local` → `completeLocalSetup({ name })` finishes
 setup without a password (`src/osDisplayName.ts` takes the name from the OS:
 macOS `id -F`, the Linux GECOS field, otherwise the login name; renamed later in
-Settings → Users → your account). While that owner has no password, every
-server start (`startServer`) and `desktop:session:renew` call
-`issueLocalOwnerSession()` and write the session with
+Settings → Users → your account). Every server start (`startServer`) and
+`desktop:session:renew` call `issueDesktopOwnerSession(current)` with the
+window's present cookie and write the session it returns with
 `session.defaultSession.cookies.set` (httpOnly, SameSite=Strict, no expiry, so
 it never rests in the profile's cookie database) for the window's loopback
 origin; each call replaces the previous Desktop session. Protecting the
@@ -66,9 +66,35 @@ elevates that session for five minutes. The
 token never crosses the bridge, so a browser or another app on the machine
 stays at the sign-in screen. Cookies ignore ports, so the main process keeps
 each `polyth_auth_*` cookie on the server it belongs to
-(`src/sessionCookieGuard.ts`, `webRequest.onBeforeSendHeaders`). Once the owner sets a password the method returns
-null and the window signs in like any browser. See
+(`src/sessionCookieGuard.ts`, `webRequest.onBeforeSendHeaders`). The method
+returns a session while the owner has no password, and also once they have
+one on a loopback-only server (no `POLYTH_PUBLIC_ORIGIN`): whoever is signed
+in to the computer that runs Polyth already holds its files and could run
+break-glass, so the window opens as the owner instead of locking them out
+every time a 30-day session ends. It answers "kept" when the window's cookie
+is still a live session (the owner's, or another account someone signed in
+to here), and the new session is never elevated: elevated steps still ask
+for the password. Behind a public origin the owner signs in like anyone
+else. See
 [Spaces §3.1](../architecture/spaces-and-tenancy.md#31-access-modes-accounts-or-a-password-less-desktop-owner).
+
+A forgotten owner password is reset on the same computer:
+`desktop:owner:reset-password` (trusted IPC, page passes only the new
+password) reads the window's own cookie, asks the operating system first
+(`systemPreferences.promptTouchID` on a Mac that has it, otherwise a native
+`dialog.showMessageBox` no page can answer), then calls
+`resetDesktopOwnerPassword(token, password)` →
+`credentials.desktopOwnerResetPassword`: the instance owner only, audited as
+`auth.desktop-owner-password-reset`, every session revoked (the outbox treats
+it like any password change), refused behind a public origin. The main
+process then reopens the window's owner session.
+
+Offline recovery needs no Node.js either: the build bundles
+`scripts/break-glass-password.ts` as `resources/cli/break-glass.mjs` beside
+the CLI, and `polyth --target desktop server break-glass [inspect]` runs it
+with the app binary in Node mode on the Desktop data directory
+([CLI](cli.md)). It refuses while Polyth runs (the data directory's writer
+lease).
 
 ## Connecting to another Polyth
 
@@ -192,9 +218,9 @@ that server, so treat it as untrusted code in this window.
   permission: it is the Edit menu's native paste.
 - Reveal-in-file-manager stays off (`localDesktopBridge`): those paths name files
   over there.
-- On a nightly build it may open the bug-report sheet (`desktop:report:*`, see
-  [Bug reports](#bug-reports-nightly)): the capture is its own window, and the main
-  process holds the tester password, which no page ever reads back.
+- It may open the feedback sheet (`desktop:report:*`, see
+  [Feedback](#feedback)): the capture is its own window, and the main
+  process holds the pseudonym secret, which no page ever reads back.
 
 Known limit: two servers opened by address on one host name (two tunnels on
 `127.0.0.1`) share a cookie jar, as they would in any browser, so each receives the
@@ -371,6 +397,11 @@ GitHub Actions separates smoke artifacts from real releases.
 
 The default electron-builder provider is `Polyth/Polyth`; external-builder packages are rebuilt against the builder's own repository. `electron-updater` consumes the published GitHub Release metadata (`latest.yml`, `latest-mac.yml`, `latest-linux.yml`, plus architecture-specific channels). Automatic updates are enabled by default in Desktop settings: the app checks shortly after startup and every six hours, automatically downloads an available release when that setting is enabled, and installs the downloaded update on quit/restart. Manual check/download/install remains available when automatic updates are disabled.
 
+Package-manager channels for this app — the Homebrew cask pending in `homebrew/homebrew-cask`
+(autobumped from the release feed once accepted) and the winget manifests `nightly.yml`
+generates and attaches — are described in
+[Desktop package managers](../operations/releases.md#desktop-package-managers-homebrew-cask-and-winget).
+
 macOS updater releases require Developer ID signing and notarization; the release workflow remains strict and fails if those credentials are missing. `electron-updater` selects the matching x64/arm64 file from the shared `latest-mac.yml` feed. Manual `mac-dmg` builds use the same credentials when available. If they are absent, the manual workflow uses electron-builder ad-hoc signing (`mac.identity=-`) and disables notarization only for that smoke artifact. Ad-hoc DMGs are not trusted distribution artifacts and may require local Gatekeeper approval; they must never be published as a release of the signed `Polyth/Polyth` channel.
 
 **Update channel** (Settings → Desktop; `updateChannel` in `settings.json`) picks Stable or Nightly builds from the release feed. A missing value defaults to the channel in the running build's version (`X.Y.N`, `X.Y.N-nightly`); a stored `test` choice and a `-beta` build from the retired Test channel follow Stable. `src/updaterChannel.ts` maps the choice onto electron-updater (`allowPrerelease` + `channel`), and `allowDowngrade` stays off after every switch. See [Release channels](../operations/releases.md#release-channels).
@@ -525,8 +556,7 @@ control inert.
 ### Native menus
 
 The application menu (macOS menu bar; Windows/Linux keep accelerators without an in-window
-menu bar) carries Settings, New Chat, Search Chats, and Command Palette, and on nightly
-builds **Help → Report a Bug…** ([Bug reports](#bug-reports-nightly)). Their shortcuts are
+menu bar) carries Settings, New Chat, Search Chats, and Command Palette, and **Help → Send Feedback…** ([Feedback](#feedback)). Their shortcuts are
 displayed with `registerAccelerator: false`: the renderer keymap (`@polyth/hotkeys`, which
 honours remapping) stays the single owner, and a menu click sends a `desktop:command` that
 the renderer maps to the shell's `cmd.*` commands. Electron draws no context menu by itself,
@@ -636,95 +666,117 @@ xvfb-run -a node apps/desktop/test/appimage-profile.mjs \
   low-resource
 ```
 
-## Bug reports (nightly)
+## Feedback
 
-Nightly builds of both editions (`X.Y.N-nightly`; `bugReportOrigin` in
-`src/bugReport.ts`) send bug reports to the team's private GitHub repository through
-the report relay ([`packages/report-relay`](../../packages/report-relay/README.md),
-`https://reports.polyth.app`); the report's `app.edition` says which. Stable builds
-have no hotkey, menu item or network call for it, and a stable workstation build
-ignores `POLYTH_BUG_REPORT=1` ([workstation network behaviour](../security/workstation-edition.md#network-behaviour)).
-In the workstation edition only the shell sends: the server route stays off there.
+Every build, stable or nightly, in both editions, can send the team feedback: a bug, an
+idea, "this is awkward", "this is good". Nothing is sent unless the person presses Send in
+the sheet; there is no background call, no telemetry and no account anywhere. It goes to the
+feedback intake of the report relay
+([`packages/report-relay`](../../packages/report-relay/README.md#feedback-intake),
+`https://reports.polyth.app`, `bugReportOrigin` in `src/bugReport.ts`), which keeps it in
+its own store for the team's inbox. `POLYTH_BUG_REPORT_ORIGIN=off` turns it off for an
+administrator ([workstation network behaviour](../security/workstation-edition.md#network-behaviour)).
+In the workstation edition only the shell sends: the server route stays off there. The
+nightly bug-report path (`POST /v1/report`, tester password, GitHub issues) is no longer
+used by the app; the relay still answers it for older nightlies.
 
 - **Opening.** ⌘⇧B / Ctrl+Shift+B (`reportBug` in `@polyth/hotkeys`, remappable),
-  **Help → Report a Bug…** (a `report-bug` desktop command), or the command palette all
-  run `capability.bug-report`, which the `@polyth/bug-report` package registers only
-  when `bugReport.state().available` says so.
+  **Help → Send Feedback…** (a `report-bug` desktop command), or the command palette all run
+  `capability.bug-report` (the capability and package id keep their legacy names), which the
+  `@polyth/bug-report` package registers only when `bugReport.state().available` says so.
 - **Capture first.** The sheet asks `desktop:report:capture` before it renders, so the
-  screenshot shows the window as it was: `webContents.capturePage()` of this window
-  only (no screen-recording permission, no other app), downscaled to 1600 px and
-  re-encoded as JPEG until it is at most 1.5 MB (`encodeScreenshot`).
-- **The sheet** shows the screenshot (with a switch), the tab's last error notices
-  (`errors.recent()` on the web host, home folders replaced by `~`), an optional note
-  and GitHub username, and the exact JSON that goes, minus the image bytes.
-- **What goes** is the shared wire shape (`@polyth/contracts/bug-report`, exact fields;
-  the relay rejects anything else): build and OS, the web build and server version, the
-  view name (never a session or project id), viewport, allowlisted `ui.*` settings from
-  the page and `desktop.*` settings from main (`bugReportDesktopSettings`), enabled
-  package ids, recent errors, the note and the screenshot. Never paths, server
-  addresses, names, chat text outside the screenshot, tokens or Vault values. The
-  install id is an HMAC of a local secret and the UTC date: one computer's reports
-  group within a day and cannot be linked across days.
-- **Tester password.** Asked once, at the first send; kept only after the relay accepts
-  it, sealed by `safeStorage` (the OS keychain). On Linux without a keyring it lasts the
-  run, the sheet says so (`passwordStorage: "session"`), and reports queued offline wait
-  until it is entered again. A send while the relay is unreachable keeps the typed
-  password unverified so the queued report can go later; a `401` at that point forgets
-  it and the sheet asks again. It travels only in the
-  `Authorization` header and is printable ASCII without spaces (`isTesterPassword`).
-- **From a browser.** A page opened in a browser has no desktop shell, so the Polyth
-  server that served it sends instead (`@polyth/bug-report` server routes
-  `GET /api/bug-report/state` and `POST /api/bug-report/send`, `src/sender.ts`). It is on
-  when the server's version is `X.Y.N-nightly` (a checkout reports one with
-  `POLYTH_RELEASE_CHANNEL=nightly`, `packages/server/src/version.ts`; or `POLYTH_BUG_REPORT=1`), the edition is
-  standard and the deployment is not `multi-tenant-sandboxed`; `POLYTH_BUG_REPORT_ORIGIN`
-  works as for the desktop. A desktop window keeps using its shell when the shell reports,
-  and falls back to the server when it does not (a stable app showing a nightly server).
+  screenshot shows the window as it was: `webContents.capturePage()` of this window only (no
+  screen-recording permission, no other app), downscaled to 1600 px and re-encoded as JPEG
+  until it is at most 1.5 MB (`encodeScreenshot`).
+- **The sheet** (`widgets/ReportSheet.tsx`): a kind (Bug, Idea, Awkward, Good), the person's
+  text (required), then one switch per optional part, each shown in the exact JSON preview
+  ("What will be sent", minus the image bytes):
+  - *Technical details*: build, OS, the web build and server version, view name (never a
+    session or project id), viewport, allowlisted `ui.*` settings from the page and
+    `desktop.*` from main (`bugReportDesktopSettings`), enabled package ids and the tab's
+    recent error notices (home folders replaced by `~`). Default on for Bug and Awkward.
+  - *Screenshot* of this window. Default on for Bug and Awkward, off for Idea and Good.
+  - *About me*: a role from a short list and how used they are to AI tools; saved on this
+    computer to prefill the next sheet. Off until the person turns it on.
+  - *Email or handle* for a reply (`isFeedbackContact`): a part of the feedback only when
+    typed and valid.
+
+  The wire always carries `basics` (version, channel, edition, language) so a remark can be
+  tied to a build; everything else is present exactly when its `consent.*` flag is (the
+  contract `@polyth/contracts/feedback` rejects any mismatch and any unknown field). Never
+  paths, server addresses, names, chat text outside the screenshot, tokens or Vault values.
+- **Marking up.** **Mark up** (or a click on the thumbnail) grows the same dialog into an
+  editor (`widgets/ScreenshotEditor.tsx`): crop, pen, box and arrow in six colours, with undo
+  (⌘Z / Ctrl+Z). Marks live in the screenshot's own pixels over the unmarked original
+  (`src/annotate.ts`). **Done** burns them into a JPEG and hands it to the bridge
+  (`annotate`): in the desktop shell `desktop:report:annotate` decodes it with `nativeImage`,
+  refuses anything over 8 MB or not an image, re-encodes it with `encodeScreenshot` and
+  replaces the held capture; in a browser it goes the way an attached image does. A shell
+  without `annotate` gets no editor rather than send the unmarked image.
+- **Identity.** Two pseudonyms, both 32 hex and neither derived from anything about the
+  person. Anonymous feedback carries an HMAC of a local secret and the UTC date, so the team
+  cannot link two days. When the person turns on *About me* or gives a contact, it carries
+  the second one, stable until they press **Forget my earlier feedback** in the sheet
+  (`desktop:report:forget`, bridge `forget`): the relay deletes everything stored under it
+  (`POST /v1/feedback/forget`), the computer drops waiting copies and starts a new one.
+- **From a browser.** A page opened in a browser has no desktop shell, so the Polyth server
+  that served it sends instead (`@polyth/bug-report` server routes
+  `GET /api/bug-report/state`, `POST /api/bug-report/send` and `POST /api/bug-report/forget`,
+  `src/sender.ts`). It is on in the standard edition when the deployment is not
+  `multi-tenant-sandboxed` and `POLYTH_BUG_REPORT_ORIGIN` is not `off`; the pseudonyms,
+  profile and outbox belong to the server (`state.json`, mode 0600, in the package data
+  folder), so everyone who sends from one server shares them. A desktop window keeps using its
+  shell when the shell is on and falls back to the server when it is not.
   - *Screenshot:* in desktop Chromium the page asks for this tab with
-    `getDisplayMedia({ preferCurrentTab })` straight from the key press or click, takes
-    one frame and stops the capture; a window or a whole screen picked instead is
-    dropped. Elsewhere (Safari, Firefox, phones), or when the person declines, the sheet
-    takes a pasted (Ctrl/⌘+V) or attached image. The page downscales and re-encodes it to
-    the same JPEG limits.
-  - *What goes:* the browser variant of `app` (`client: "browser"`, the server's version
-    and OS, the browser's OS family and `Name major` such as `Safari 18`, never the raw
-    user agent) and only `ui.*` settings. The relay labels it `client:browser`.
-  - *Password and outbox:* the server keeps one tester password for everyone who reports
-    from it (`state.json`, mode 0600, in the package data folder). It is kept only after
-    the relay accepts it, or while a queued report needs it and none is kept yet (an
-    unverified one never replaces a kept one), and a `401` forgets it. The
-    outbox (`outbox/`, the same 10 reports for 7 days, retried every 15 minutes) and the
-    daily install id belong to the server.
-  - *Access:* the routes follow the normal sign-in; paired devices reach them only with
-    full access.
-- **Limits and outbox.** A computer sends as many reports as the tester needs; neither the
-  shell nor the relay caps them per computer or address (the relay keeps only its
-  service-wide daily budget and the failed-password lockout). A relay that
-  cannot be reached, or answers `429`/`503`, leaves the report in
-  `<userData>/desktop/bug-reports/` (at most 10, each dropped after 7 days); it goes at
-  the next start or every 15 minutes. `POLYTH_BUG_REPORT_ORIGIN` points at another relay
-  (`https:` or loopback `http:`) or `off`; `POLYTH_BUG_REPORT=1` turns reports on for a
-  development build; the relay still refuses a version that is not a nightly or is newer
-  than every published one.
-- **Verified:** unit tests (`apps/desktop/test/bugReport.test.ts`, the contract, package
-  and relay tests), a browser render of the real sheet on the real web host, and an
-  unpackaged Electron run on Linux under Xvfb against a local relay with a fake GitHub
-  (shortcut, capture, send, rate limit, wrong password, offline queue and delivery; no
-  keyring on that host). Not yet: a packaged nightly, a keychain-sealed password, and the
-  relay against real GitHub. Browser reports: unit tests for the server sender, its
-  routes and the browser facts, and a render of the sheet in browser mode; not yet a live
-  `getDisplayMedia` capture or a send from a deployed nightly server.
+    `getDisplayMedia({ preferCurrentTab })` straight from the key press or click, takes one
+    frame and stops the capture; a window or a whole screen picked instead is dropped.
+    Elsewhere (Safari, Firefox, phones), or when the person declines, the sheet takes a
+    pasted (Ctrl/⌘+V) or attached image, downscaled and re-encoded to the same JPEG limits.
+  - *What goes:* with technical details, the browser variant of `app` (`client: "browser"`,
+    the server's version and OS, the browser's OS family and `Name major` such as
+    `Safari 18`, never the raw user agent) and only `ui.*` settings.
+  - *Access:* the routes follow the normal sign-in; paired devices reach them only with full
+    access.
+- **Limits and outbox.** Stage 1 limits what it must, not who: neither the shell nor the
+  intake caps feedback per computer or address. The intake keeps one service-wide daily
+  budget (2 000 by default); when it is spent the sheet says to try later and keeps nothing.
+  An intake that cannot be reached, or answers `503`, leaves the feedback in
+  `<userData>/desktop/bug-reports/` (at most 10, each dropped after 7 days); it goes at the
+  next start or every 15 minutes. Stage 2 (per-install quotas, proof of work, or a verified
+  contact) is deliberately not built yet: it needs the volume to be known first. The legacy
+  nightly path (`POST /v1/report`) still takes a tester password or a group token
+  ([the relay](../../packages/report-relay/README.md#authentication)) and its own caps.
+- **Verified:** unit tests (`apps/desktop/test/bugReport.test.ts`, `packages/bug-report`,
+  `packages/contracts`, `packages/report-relay`); not yet a packaged build, a render of the
+  sheet on a deployed server, or the intake behind the production proxy.
 
 ## Security boundary
 
 - Renderer: `sandbox: true`, `contextIsolation: true`, no Node integration.
 - Preload: a fixed API for settings, window actions/state, title-bar overlay colors,
-  native menu commands, updates, absolute local paths, the server list and nightly bug
-  reports.
+  native menu commands, updates, absolute local paths, the server list and feedback.
 - IPC: decided per channel from the sender frame's own origin
   (see [What another server's page may do](#what-another-servers-page-may-do)).
 - Navigation: a page stays on its own origin, and only the server list may hand the
   window to a server it connected; allowlisted HTTP(S)/mailto links open in the system browser.
+- Second windows: a page's `window.open` of its own origin with a `window=chat|pane`
+  role (a chat or a workspace window on another screen, [ui.md](ui.md#second-windows-a-chat-or-a-workspace-window-on-another-screen))
+  opens a native window from `src/secondWindows.ts`; every other `window.open` is an
+  external link. It wears the main window's chrome (`desktopChromeOptions`: no system
+  title bar; traffic lights, the Windows caption overlay or Polyth's Linux buttons in
+  the page's header) through its own least-privilege preload,
+  `src/secondWindowPreload.ts` → `window.polythDesktopWindow`: that window's caption
+  controls (state, minimize/maximize/close, traffic-light placement, overlay colours)
+  and the five caption-related settings (`secondWindowSettings`), on the
+  `desktop:second-window:*` channels (`src/secondWindowChrome.ts`). Main answers them
+  only from a second window's top frame and acts only on that window; every other
+  desktop channel still answers only the main window, so a second window has no
+  `polythDesktop` bridge. It shares the session and navigation rule, and its
+  requests pass the same local-server guard as the main window's. One window per chat,
+  one pane window, and one per pane resource (`surface` plus `resource`, a saved app's
+  own window); asking again focuses it. Source-inspected and unit-tested
+  (`test/secondWindows.test.ts`, `test/secondWindowChrome.test.ts`; renderer side
+  `apps/web/test/desktopWindowChrome.test.ts`); not yet run in a packaged app.
 - Permissions: only audio capture (not camera/video), notifications and clipboard read
   for the top page. Another server asks once for the microphone and once for the clipboard.
 - Server: binds to `127.0.0.1` in desktop mode.

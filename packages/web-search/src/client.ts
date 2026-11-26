@@ -1,5 +1,6 @@
 import {
   parseWebSearchSettings,
+  WEB_SEARCH_PROVIDER_IDS,
   WEB_SEARCH_SETTINGS_VERSION,
   type WebSearchProviderId,
   type WebSearchSettings,
@@ -18,6 +19,8 @@ export interface WebSearchProviderStatus {
   available: boolean;
   requiresCredential: boolean;
   configured: boolean;
+  /** A stored key is in use for this service; without one it runs keyless. */
+  keyed: boolean;
 }
 
 export interface WebSearchSettingsSnapshot {
@@ -58,7 +61,7 @@ export function parseWebSearchSettingsSnapshot(value: unknown): WebSearchSetting
   const providers: WebSearchProviderStatus[] = (providerRows as unknown[]).map((value: unknown, index: number) => {
     const provider = object(value);
     const id = string(provider.id, `providers[${index}].id`);
-    if (id !== "duckduckgo" && id !== "tavily") invalid(`providers[${index}].id is unsupported`);
+    if (!WEB_SEARCH_PROVIDER_IDS.includes(id as WebSearchProviderId)) invalid(`providers[${index}].id is unsupported`);
     const available = provider.available;
     const requiresCredential = provider.requiresCredential;
     const configured = provider.configured;
@@ -71,6 +74,8 @@ export function parseWebSearchSettingsSnapshot(value: unknown): WebSearchSetting
       available: available as boolean,
       requiresCredential: requiresCredential as boolean,
       configured: configured as boolean,
+      // Absent in snapshots from a server older than keyless Tavily.
+      keyed: provider.keyed === true,
     };
   });
 

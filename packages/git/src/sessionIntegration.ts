@@ -62,6 +62,7 @@ import type {
   ServerDelegatedSessionCreated,
   ServerDelegatedSessionInput,
 } from "@polyth/plugins";
+import { liveProcessInside } from "./liveCwd.ts";
 import { buildLocalConflictResolutionPrompt, type GitMergeConflicts, type GitService } from "./index.ts";
 import type { GitActor } from "./actingPerson.ts";
 import { currentGitCommitIdentity } from "./sourceControlAccounts.ts";
@@ -1618,6 +1619,41 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
     });
   };
 
+  /** True only when every isolated checkout of the session provably holds
+   *  nothing its target branch lacks: owned, no commit beyond the target, and a
+   *  clean tree (gitignored files do not count). Anything unreadable, missing,
+   *  mid-merge or unowned keeps its checkout, so this never guesses. */
+  const holdsNoWork = async (session: SessionProjection): Promise<boolean> => {
+    const rows = isolationWorkspaceRows(session);
+    if (rows.length === 0) return false;
+    // A runtime another live session also executes through (a Space-level shared
+    // one) is never stopped to free a checkout, and no directory a live process
+    // still stands in is removed: both wait for a later pass.
+    const authorityId = session.runtimeBinding?.authorityId;
+    if (authorityId && (await deps.sessions.list()).some((other) => other.id !== session.id
+      && other.status !== "archived" && other.runtimeBinding?.authorityId === authorityId)) {
+      return false;
+    }
+    for (const row of rows) {
+      const isolation = row.isolation;
+      try {
+        if (liveProcessInside(isolation.worktreePath) !== null) return false;
+        const { state } = normalizeIsolationContract(isolation);
+        if (state === "merging" || state === "publishing" || state === "corrupt") return false;
+        if (!await filesystemPathExists(isolation.worktreePath)) return false;
+        const source = await inspectSource(session.id, isolation);
+        if (source.status !== "owned") return false;
+        if (!(await git.status(isolation.worktreePath)).clean) return false;
+        const head = await git.revParse(isolation.worktreePath, "HEAD");
+        const target = await git.revParse(isolation.targetPath, isolation.targetBranch);
+        if (!await git.isAncestor(isolation.worktreePath, head, target)) return false;
+      } catch {
+        return false;
+      }
+    }
+    return true;
+  };
+
   const releaseArchivedMember = async (
     sessionId: string,
     tree: readonly SessionProjection[],
@@ -1658,6 +1694,10 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
       if (directory && released.some((isolation) => samePath(isolation.worktreePath, directory))) {
         await releaseExecution(member.id, directory, member.id === session.id ? {} : { sharer: true });
       }
+    }
+    // A restore that won while the execution was being released keeps its checkout.
+    if ((await deps.sessions.snapshot(session.id)).status !== "archived") {
+      throw err("conflict", "only an archived session's checkouts can be released");
     }
     // These chats stay readable, so what they show must outlive the checkout.
     for (const entry of inspected) {
@@ -2608,6 +2648,7 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
         ...(input.title ? { title: input.title } : {}),
         ...(input.model ? { model: input.model } : {}),
         ...(input.agent ? { agent: input.agent } : {}),
+        ...(input.sharing ? { sharing: input.sharing } : {}),
         worktreePath: execution.path,
         workspace,
         // Keep the scalar projection bound to the canonical execution
@@ -3263,9 +3304,41 @@ export function createIsolationService(deps: IsolationIntegrationDeps) {
     async releaseArchivedCheckouts(
       rootSessionId: string,
       releaseExecution: ReleaseArchivedExecution,
+      options: { onlyEmpty?: boolean } = {},
     ): Promise<void> {
       const root = await deps.sessions.snapshot(rootSessionId);
       const tree = subtreeDeepestFirst(root.id, await deps.sessions.list(root.projectId));
+      if (options.onlyEmpty) {
+        // Archiving is the person's intent and loses nothing here: only
+        // archived members whose checkouts hold no work go, each on its own so
+        // one that keeps its checkout (work, a dependent, a restore) never
+        // holds back the rest. A failure is logged and the next pass retries.
+        const archived = tree.filter((member) => member.status === "archived");
+        // A member that keeps its checkout still depends on its target: it is
+        // not a leaving sharer, so the member releasing next must see it as
+        // an outside dependent (and be kept) rather than relocate it.
+        const kept = new Set<string>();
+        for (const member of archived) {
+          await withSession(member.id, async () => {
+            try {
+              const current = await deps.sessions.snapshot(member.id);
+              if (current.status !== "archived" || !await holdsNoWork(current)) {
+                kept.add(member.id);
+                return;
+              }
+              await releaseArchivedMember(member.id, archived.filter((candidate) => !kept.has(candidate.id)), releaseExecution);
+            } catch (error) {
+              kept.add(member.id);
+              isolationLog("archived-empty-release-kept", {
+                sessionId: member.id,
+                code: String((error as { code?: unknown } | null)?.code ?? "internal"),
+                message: error instanceof Error ? error.message : String(error),
+              });
+            }
+          });
+        }
+        return;
+      }
       for (const member of tree) {
         await withSession(member.id, () => releaseArchivedMember(member.id, tree, releaseExecution));
       }

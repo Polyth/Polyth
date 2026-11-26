@@ -68,6 +68,16 @@ export const en = {
   "securesafecard.saveTo": "Save to",
   "securesafecard.saveToMe": "Only me",
   "securesafecard.saveToSpace": "This Space",
+  "settings.securesafepage.approval": "When agents use it",
+  "settings.securesafepage.approvalHint": "How an agent run that uses this credential is approved. A command that uses several credentials follows the strictest level.",
+  "settings.securesafepage.approvalLevelSafe": "Fully safe",
+  "settings.securesafepage.approvalLevelSafeDetail": "Never asks; any agent run may use it.",
+  "settings.securesafepage.approvalLevelAuto": "Safe with Auto-approve",
+  "settings.securesafepage.approvalLevelAutoDetail": "Runs unasked when the chat uses Auto-approve or Full access.",
+  "settings.securesafepage.approvalLevelFull": "Full access only",
+  "settings.securesafepage.approvalLevelFullDetail": "Runs unasked only when the chat uses Full access.",
+  "settings.securesafepage.approvalLevelAlways": "Always ask",
+  "settings.securesafepage.approvalLevelAlwaysDetail": "Every use asks, even under Full access.",
 } as const;
 
 export type SecureSafeMessageKey = keyof typeof en;

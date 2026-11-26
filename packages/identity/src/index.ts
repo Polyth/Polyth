@@ -147,6 +147,17 @@ export function createIdentityService(control: ControlPlane, opts: {
     );
     return credential ? null : userId;
   };
+  const issueLocalOwnerSession = (label: string): IssuedSession | null => control.transaction(() => {
+    const userId = credentialLessOwner();
+    if (!userId) return null;
+    const replaced = control.run('DELETE FROM auth_sessions WHERE user_id=? AND label=?', userId, label);
+    if (Number(replaced.changes) > 0) control.bumpEpoch();
+    const issued = sessions.issue(userId, label);
+    // A launch proves nothing fresh: only `confirmLocalOwnerSession`
+    // (the Desktop main process again) elevates this session.
+    control.run('UPDATE auth_sessions SET elevated_at_ms=NULL WHERE id=?', issued.session.id);
+    return { token: issued.token, session: { ...issued.session, elevatedAt: null } };
+  });
   return {
     setup: createSetup(control, passwords, sessions, now, () => passkeys.available()),
     sessions,
@@ -182,16 +193,31 @@ export function createIdentityService(control: ControlPlane, opts: {
      * label, so launches never pile up sessions. Null once the owner has a
      * credential, before setup, or without an active owner.
      */
-    issueLocalOwnerSession(label: string): IssuedSession | null {
+    issueLocalOwnerSession,
+    /**
+     * The Polyth Desktop window's own owner session in either access mode,
+     * asked in-process by the Desktop main process (never over HTTP).
+     * `local`: exactly `issueLocalOwnerSession`. `accounts`: the person signed
+     * in to the computer that runs this Polyth is its owner in this window, as
+     * they already are for its files; every other browser, device and person
+     * still signs in, and every elevated step still asks for the password.
+     * `current` is the window's present cookie: a live session in it (the
+     * owner's or another account's) is kept, so someone who signed in as
+     * another account on this computer stays that account across relaunches.
+     * Like launch sessions in `local`, the new session is never elevated.
+     */
+    issueDesktopOwnerSession(label: string, current: string | null): IssuedSession | 'kept' | null {
+      if (accessMode(control) === 'local') return issueLocalOwnerSession(label);
       return control.transaction(() => {
-        const userId = credentialLessOwner();
+        if (control.installation().state !== 'ready') return null;
+        const userId = accounts.activeOwnerUserId();
         if (!userId) return null;
+        if (current && sessions.resolve(current)) return 'kept';
         const replaced = control.run('DELETE FROM auth_sessions WHERE user_id=? AND label=?', userId, label);
         if (Number(replaced.changes) > 0) control.bumpEpoch();
         const issued = sessions.issue(userId, label);
-        // A launch proves nothing fresh: only `confirmLocalOwnerSession`
-        // (the Desktop main process again) elevates this session.
         control.run('UPDATE auth_sessions SET elevated_at_ms=NULL WHERE id=?', issued.session.id);
+        control.audit(userId, 'auth.desktop-owner-session', issued.session.id);
         return { token: issued.token, session: { ...issued.session, elevatedAt: null } };
       });
     },

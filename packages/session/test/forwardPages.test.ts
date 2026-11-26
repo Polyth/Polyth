@@ -41,8 +41,10 @@ test("summaries page stable ties, query the whole Space, and never disclose runt
     const second = await store.summaries!({ spaceId: "a", projectId: "p", cursor: first.next });
     assert.equal(second.sessions[0]?.id, "s069");
     assert.equal(second.revision, first.revision);
-    const search = await store.summaries!({ spaceId: "a", query: "Chat 0" });
+    // Words match in any order; a quoted phrase stays one exact term.
+    const search = await store.summaries!({ spaceId: "a", query: '"Chat 0"' });
     assert.deepEqual(search.sessions.map((r) => r.id), ["s000"]);
+    assert.deepEqual((await store.summaries!({ spaceId: "a", query: "119 chat" })).sessions.map((r) => r.id), ["s119"]);
     assert.equal(search.sessions[0]?.resume?.attempt, 1);
     assert.equal(search.sessions[0]?.runtimeControl, "owned");
     assert.equal(search.sessions[0]?.harnessTransition?.phase, "requested");
@@ -57,5 +59,17 @@ test("summaries page stable ties, query the whole Space, and never disclose runt
     assert.equal((await store.summaries!({ spaceId: "a", ids: [] })).sessions.length, 0, "no ids, no rows");
     await store.patchProjection!("s000", (row) => ({ ...row, updatedAt: 2 }));
     await assert.rejects(async () => store.summaries!({ spaceId: "a", cursor: first.next, revision: first.revision }), { code: "catalog-changed" });
+  } finally { await store.close(); }
+});
+
+test("summary search folds Cyrillic case and matches words across title, branch and path", async () => {
+  const store = createStore(":memory:");
+  try {
+    await store.upsertProjection({ id: "uk", spaceId: "a", projectId: "p", title: "Пошук у чатах", branch: "fix/search", status: "idle", createdAt: 1, updatedAt: 1 });
+    await store.upsertProjection({ id: "other", spaceId: "a", projectId: "p", title: "Інше", status: "idle", createdAt: 1, updatedAt: 2 });
+    await store.upsertProjection({ id: "foreign", spaceId: "b", projectId: "p", title: "ПОШУК", status: "idle", createdAt: 1, updatedAt: 3 });
+    assert.deepEqual((await store.summaries!({ spaceId: "a", query: "ПОШУКІВ" })).sessions.map((r) => r.id), ["uk"]);
+    assert.deepEqual((await store.summaries!({ spaceId: "a", query: "search пошук" })).sessions.map((r) => r.id), ["uk"]);
+    assert.deepEqual((await store.summaries!({ spaceId: "a", query: "пошук deploy" })).sessions.map((r) => r.id), []);
   } finally { await store.close(); }
 });

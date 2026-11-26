@@ -2,15 +2,20 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   desktopBridge,
+  desktopWindowBridge,
   type DesktopCaptionButton,
   type DesktopCaptionGeometry,
   type DesktopCommand,
   type DesktopInfo,
+  type DesktopSecondWindowSettings,
   type DesktopSettings,
   type DesktopSystemControls,
   type DesktopTitleBarAppearance,
   type DesktopUpdateState,
+  type DesktopWindowAction,
   type DesktopWindowState,
+  type PolythDesktopApi,
+  type PolythDesktopWindowApi,
 } from "./desktopBridge.ts";
 import { REPORT_BUG_COMMAND, runCommand } from "./commands.ts";
 import { registerSlot } from "./slots.ts";
@@ -89,9 +94,13 @@ export function desktopControlLayout(
   return { side, buttons: [...MANUAL_ORDER[side]] };
 }
 
+/** The settings the window chrome follows: a second window gets only these
+ *  (DesktopSecondWindowSettings), the main window all of DesktopSettings. */
+type DesktopChromeSettings = DesktopSecondWindowSettings & Partial<Pick<DesktopSettings, "closeToTray">>;
+
 /** The last settings and system layout the chrome was applied from: window
  *  state events bring the system layout separately from settings. */
-let chromeSettings: DesktopSettings | null = null;
+let chromeSettings: DesktopChromeSettings | null = null;
 let chromeSystemControls: DesktopSystemControls | null | undefined;
 
 const applyControlLayout = (): void => {
@@ -101,7 +110,7 @@ const applyControlLayout = (): void => {
   document.body.style.setProperty("--desktop-controls-count", String(layout.buttons.length));
 };
 
-const applyDesktopChrome = (settings: DesktopSettings): void => {
+const applyDesktopChrome = (settings: DesktopChromeSettings): void => {
   markDesktopApp(true);
   chromeSettings = settings;
   applyControlLayout();
@@ -117,7 +126,7 @@ const applyDesktopChrome = (settings: DesktopSettings): void => {
   applyCaptionSide();
 };
 
-const applyDesktopPlatform = (platform: DesktopInfo["platform"]): void => {
+const applyDesktopPlatform = (platform: string): void => {
   document.body.dataset.desktopPlatform = platform;
   applyCaptionSide();
 };
@@ -294,11 +303,41 @@ export const sampleTitleBarAppearance = (app: HTMLElement): DesktopTitleBarAppea
   };
 };
 
+/** What the caption controls need from the shell: the main window's full
+ *  bridge, or a second window's own small one (secondWindowPreload.ts). */
+interface CaptionControlsApi {
+  load(): Promise<{ settings: DesktopChromeSettings; platform: string; state: DesktopWindowState }>;
+  onSettingsChanged(listener: (settings: DesktopChromeSettings) => void): () => void;
+  onWindowState(listener: (state: DesktopWindowState) => void): () => void;
+  windowAction(action: DesktopWindowAction): Promise<DesktopWindowState>;
+  setTitleBarAppearance(appearance: DesktopTitleBarAppearance): Promise<void>;
+  syncCaptionControls?(band: number): Promise<DesktopCaptionGeometry | null>;
+}
+
+const mainWindowCaptionApi = (api: PolythDesktopApi): CaptionControlsApi => ({
+  load: () => Promise.all([api.getSettings(), api.getInfo(), api.getWindowState()])
+    .then(([settings, info, state]) => ({ settings, platform: info.platform, state })),
+  onSettingsChanged: (listener) => api.onSettingsChanged(listener),
+  onWindowState: (listener) => api.onWindowState(listener),
+  windowAction: (action) => api.windowAction(action),
+  setTitleBarAppearance: (appearance) => api.setTitleBarAppearance(appearance),
+  // An older shell has no caption sync; the zone keeps its fixed width there.
+  ...(api.syncCaptionControls ? { syncCaptionControls: (band: number) => api.syncCaptionControls!(band) } : {}),
+});
+
+const secondWindowCaptionApi = (api: PolythDesktopWindowApi): CaptionControlsApi => ({
+  load: () => api.getChrome(),
+  onSettingsChanged: (listener) => api.onSettingsChanged(listener),
+  onWindowState: (listener) => api.onWindowState(listener),
+  windowAction: (action) => api.windowAction(action),
+  setTitleBarAppearance: (appearance) => api.setTitleBarAppearance(appearance),
+  syncCaptionControls: (band) => api.syncCaptionControls(band),
+});
+
 /** Windows draws its own caption buttons (Window Controls Overlay). Keep its
  *  glyphs in Polyth's caption ink across theme, glass, density, and zoom
  *  changes. Renders nothing. */
-function NativeTitleBarSync() {
-  const api = desktopBridge()!;
+function NativeTitleBarSync({ api }: { api: CaptionControlsApi }) {
   useEffect(() => {
     let frame = 0;
     let last = "";
@@ -352,8 +391,7 @@ function NativeTitleBarSync() {
  *  zoom, while the header band does. Main centres them on the band in DIP and
  *  reports where they landed; the caption zone takes that real extent instead
  *  of a fixed 86 px that was wrong at any zoom but 100 %. Renders nothing. */
-function MacCaptionSync() {
-  const api = desktopBridge()!;
+function MacCaptionSync({ api }: { api: CaptionControlsApi }) {
   useEffect(() => {
     const syncControls = api.syncCaptionControls;
     if (!syncControls) return undefined;
@@ -404,10 +442,9 @@ const applyMacCaptionGeometry = (geometry: DesktopCaptionGeometry | null): void 
   else document.body.style.setProperty("--desktop-macos-titlebar-inset", `${inset}px`);
 };
 
-function WindowControls() {
-  const api = desktopBridge()!;
-  const [settings, setSettings] = useState(DEFAULTS);
-  const [info, setInfo] = useState<DesktopInfo | null>(null);
+function WindowControls({ api }: { api: CaptionControlsApi }) {
+  const [settings, setSettings] = useState<DesktopChromeSettings>(DEFAULTS);
+  const [platform, setPlatform] = useState<string | null>(null);
   const [windowState, setWindowState] = useState<DesktopWindowState>({
     maximized: false,
     fullscreen: false,
@@ -416,12 +453,12 @@ function WindowControls() {
   });
 
   useEffect(() => {
-    void Promise.all([api.getSettings(), api.getInfo(), api.getWindowState()]).then(([next, desktopInfo, state]) => {
+    void api.load().then(({ settings: next, platform: shellPlatform, state }) => {
       setSettings(next);
-      setInfo(desktopInfo);
+      setPlatform(shellPlatform);
       setWindowState(state);
       applyDesktopChrome(next);
-      applyDesktopPlatform(desktopInfo.platform);
+      applyDesktopPlatform(shellPlatform);
     });
     const offSettings = api.onSettingsChanged((next) => {
       setSettings(next);
@@ -438,10 +475,10 @@ function WindowControls() {
   // known: styles.css sizes it once data-desktop-caption names its side.
   const zone = <div className="desktop-caption-zone" aria-hidden="true" />;
   const captionZone = typeof document === "undefined" ? zone : createPortal(zone, document.body);
-  if (!info) return captionZone;
-  if (info.platform === "win32") return <>{captionZone}<NativeTitleBarSync /></>;
-  if (info.platform === "darwin") return <>{captionZone}<MacCaptionSync /></>;
-  if (NATIVE_CONTROL_PLATFORMS.has(info.platform)) return captionZone;
+  if (!platform) return captionZone;
+  if (platform === "win32") return <>{captionZone}<NativeTitleBarSync api={api} /></>;
+  if (platform === "darwin") return <>{captionZone}<MacCaptionSync api={api} /></>;
+  if (NATIVE_CONTROL_PLATFORMS.has(platform)) return captionZone;
 
   const layout = desktopControlLayout(settings, windowState.systemControls);
   const minimize = (
@@ -803,6 +840,7 @@ const DESKTOP_COMMANDS: Readonly<Record<DesktopCommand, string>> = {
 export function installDesktopIntegration(): () => void {
   const api = desktopBridge();
   if (!api) return () => {};
+  const captionApi = mainWindowCaptionApi(api);
   markDesktopApp(true);
   void Promise.all([api.getSettings(), api.getInfo(), api.getWindowState()]).then(([next, desktopInfo, state]) => {
     applyDesktopChrome(next);
@@ -819,7 +857,7 @@ export function installDesktopIntegration(): () => void {
   const unregisterControls = registerSlot(
     "app.window.controls",
     "desktop.window-controls",
-    () => <WindowControls />,
+    () => <WindowControls api={captionApi} />,
     1_000,
   );
   // Desktop chrome like the window controls: portaled into <body>, so it shows
@@ -871,6 +909,45 @@ export function installDesktopIntegration(): () => void {
     overlay?.removeEventListener?.("geometrychange", applyCaptionSide);
     unregisterSettings();
     unregisterUpdateNotice();
+    unregisterControls();
+    clearWindowState();
+    markDesktopApp(false);
+    delete document.body.dataset.desktopPlatform;
+  };
+}
+
+/** A Desktop second window (`window=chat|pane`): the main window's chrome —
+ *  hidden title bar, caption controls in the page's header — through the
+ *  window's own small bridge. Nothing else of the desktop integration (settings
+ *  page, commands, keep-awake, updates) runs here: those belong to the main
+ *  window, whose bridge this window does not have. */
+export function installDesktopWindowChrome(): () => void {
+  const api = desktopWindowBridge();
+  if (!api) return () => {};
+  const captionApi = secondWindowCaptionApi(api);
+  markDesktopApp(true);
+  let live = true;
+  void captionApi.load().then(({ settings, platform, state }) => {
+    if (!live) return;
+    applyDesktopChrome(settings);
+    applyDesktopPlatform(platform);
+    applyWindowState(state);
+  }).catch(() => { /* a closing window */ });
+  const offWindowState = captionApi.onWindowState(applyWindowState);
+  const offSettings = captionApi.onSettingsChanged(applyDesktopChrome);
+  const overlay = windowControlsOverlay();
+  overlay?.addEventListener?.("geometrychange", applyCaptionSide);
+  const unregisterControls = registerSlot(
+    "app.window.controls",
+    "desktop.window-controls",
+    () => <WindowControls api={captionApi} />,
+    1_000,
+  );
+  return () => {
+    live = false;
+    offWindowState();
+    offSettings();
+    overlay?.removeEventListener?.("geometrychange", applyCaptionSide);
     unregisterControls();
     clearWindowState();
     markDesktopApp(false);

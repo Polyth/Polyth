@@ -8,6 +8,7 @@ import {
   type SessionMoveHooks,
   type SessionMoveInput,
   type SessionMovePreview,
+  type SessionAccessLevel,
   type SessionMoveResult,
   type SessionPerson,
   type SessionProjection,
@@ -20,6 +21,7 @@ import {
   type TurnAdmission,
 } from "@polyth/contracts";
 import type { CanonicalResource } from "@polyth/control-plane/resources";
+import type { SessionCreationAudience, SessionSharingService as SessionServiceSharing } from "./sessionSharing.ts";
 import { canonicalSecurity } from "./runtimeSecurity.ts";
 import { defaultSessionVisibility, projectAudience, sessionAudience, spaceMemberMayWiden } from "./sessionSharing.ts";
 
@@ -56,6 +58,9 @@ export function canonicalSessionService(
   ctx: SpaceContext,
   base: SessionService,
   projects: ProjectService,
+  /** The Space's sharing service: checks a creation-time audience with the
+   *  same rules a later widening obeys, before anything is created. */
+  sharing?: Pick<SessionServiceSharing, "creationAudience" | "applyCreationAudience">,
 ): SessionService {
   const security = canonicalSecurity();
   if (!security) return base;
@@ -255,7 +260,7 @@ export function canonicalSessionService(
     return projection;
   };
 
-  const create: SessionService["create"] = async (input): Promise<SessionRef> => {
+  const create: SessionService["create"] = async (input, admission): Promise<SessionRef> => {
     requireMutation();
     const project = await projects.get(input.projectId);
     if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
@@ -263,7 +268,22 @@ export function canonicalSessionService(
     // Preserve that internal identity so the resource row, projection, marker,
     // and branch all describe the same canonical session.
     const sessionId = input.id?.trim() || randomUUID();
-    return provisionResource(sessionId, project.id, input.parentId, () => base.create({ ...input, id: sessionId }));
+    // A chat the person chose to share before it existed: the audience is
+    // checked before anything is created and applied before the chat is
+    // readable, so its agent knows who reads it from the first turn (§14.3).
+    const { sharing: creation, ...rest } = input;
+    const audience = creation
+      ? sharing
+        ? sharing.creationAudience(ctx, project.id, creation)
+        : (() => { throw Object.assign(new Error("sharing unavailable"), { code: "unsupported" }); })()
+      : undefined;
+    return provisionResource(
+      sessionId,
+      project.id,
+      input.parentId,
+      () => admission ? base.create({ ...rest, id: sessionId }, admission) : base.create({ ...rest, id: sessionId }),
+      audience,
+    );
   };
 
   /** A start provisions its resource exactly as a create does. A resend
@@ -273,6 +293,13 @@ export function canonicalSessionService(
     admission?: Parameters<NonNullable<SessionService["start"]>>[1],
   ): Promise<StartSessionResult> => {
     requireMutation();
+    if (input.sharing) {
+      // Its first turn could be admitted before the audience is applied.
+      throw Object.assign(
+        new Error("A shared chat is created first; send its first message once it exists"),
+        { code: "invalid-input" },
+      );
+    }
     const project = await projects.get(input.projectId);
     if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
     const sessionId = input.id?.trim() || randomUUID();
@@ -288,6 +315,7 @@ export function canonicalSessionService(
     projectId: string,
     accessParentId: string | undefined,
     run: () => Promise<T>,
+    audience?: SessionCreationAudience,
   ): Promise<T> => {
     const operationId = randomUUID();
     // A delegated subagent follows its parent chat's sharing; any other new
@@ -302,7 +330,7 @@ export function canonicalSessionService(
       ...(accessParentId ? { accessParentId } : {}),
       ownerPrincipalId: ctx.userId,
       createdBy: ctx.userId,
-      visibility: accessParentId ? "inherit" : defaultSessionVisibility(ctx),
+      visibility: accessParentId ? "inherit" : (audience?.visibility ?? defaultSessionVisibility(ctx)),
     });
     try {
       const result = await run();
@@ -312,6 +340,13 @@ export function canonicalSessionService(
       const current = resource(sessionId);
       if (!current) throw recovery();
       security.resources.activate(operationId, current.revision);
+      if (audience) {
+        // The row started with the chosen audience; the people list and its
+        // effects belong to the sharing service, which tells the readers this
+        // chat just reached (its own projection went out with nobody on it).
+        if (!sharing) throw Object.assign(new Error("sharing unavailable"), { code: "unsupported" });
+        await sharing.applyCreationAudience(ctx, sessionId, audience);
+      }
       return result;
     } catch (cause) {
       const projection = await projectionIfPresent(sessionId).catch(() => undefined);
@@ -374,10 +409,13 @@ export function canonicalSessionService(
     }
     const audience = moveAudience(projection, row, target.id);
     if (audience.gains.length > 0) {
-      if (projection.personalContext) {
+      // Moving a chat where more people can open it exposes what its agent
+      // already saw, like sharing it there; the person may still do it as
+      // their own confirmed choice (Spaces §14.6).
+      if (projection.personalContext && input.acknowledgePersonalContext !== true) {
         return { projection, row, target, audience, block: {
-          reason: "private" as const,
-          message: "The agent has read your personal notes in this chat, so it can't move where others could read it.",
+          reason: "personal-context" as const,
+          message: "The agent has read your personal notes in this chat. Moving it there shows them to people who cannot open it here; confirm that you mean to.",
         } };
       }
       if (!spaceMemberMayWiden(ctx)) {

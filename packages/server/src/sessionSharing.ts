@@ -12,6 +12,7 @@ import {
   SESSION_ACCESS_LEVELS,
   sessionAccessAtLeast,
   type SessionAccessLevel,
+  type SessionCreationSharing,
   type SessionMentionCandidateDto,
   type ChatMentionCandidateDto,
   MAX_SESSION_MENTIONS,
@@ -713,8 +714,27 @@ export interface SessionSharingService {
    *  subagent's chat opens through the chat it follows. People who can already
    *  open it and ids that are not active members change nothing. */
   addPeople(ctx: SpaceContext, sessionId: string, people: readonly PersonMessageShare[]): Promise<void>;
+  /** The audience a person chose for a chat that does not exist yet, checked
+   *  under the same rules a later widening obeys (Spaces §14.3). Throws before
+   *  anything is created, so a refused choice leaves no half-shared chat. */
+  creationAudience(
+    ctx: SpaceContext,
+    projectId: string,
+    input: SessionCreationSharing,
+  ): SessionCreationAudience;
+  /** Applies a checked `creationAudience` to the chat that now exists, with the
+   *  same side effects as `update`: this is the only owner of that change, so
+   *  the people it reaches hear about it exactly as they do for a later share
+   *  (the create's own projection went out before the people list existed). */
+  applyCreationAudience(ctx: SpaceContext, sessionId: string, audience: SessionCreationAudience): Promise<void>;
   policy(ctx: SpaceContext): SpaceSharingPolicyDto;
   setPolicy(ctx: SpaceContext, input: Record<string, unknown>): SpaceSharingPolicyDto;
+}
+
+/** An audience checked for a chat that does not exist yet. */
+export interface SessionCreationAudience {
+  visibility: "restricted" | "space";
+  grants: Array<{ principalId: string; access: SessionAccessLevel }>;
 }
 
 export function createSessionSharingService(deps: SessionSharingDeps): SessionSharingService {
@@ -808,6 +828,9 @@ export function createSessionSharingService(deps: SessionSharingDeps): SessionSh
     if (input.visibility !== undefined && !isSessionVisibility(input.visibility)) throw invalid("Invalid audience");
     if (input.expectedRevision !== undefined
       && (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1)) throw invalid("Invalid revision");
+    if (input.acknowledgePersonalContext !== undefined && typeof input.acknowledgePersonalContext !== "boolean") {
+      throw invalid("Invalid acknowledgement");
+    }
     let requested: Map<string, SessionAccessLevel> | undefined;
     if (input.grants !== undefined) {
       if (!Array.isArray(input.grants)) throw invalid("Invalid people list");
@@ -842,14 +865,16 @@ export function createSessionSharingService(deps: SessionSharingDeps): SessionSh
     const projection = await deps.projection(row.id);
     if (!projection || projection.spaceId !== ctx.spaceId) throw notFound();
     // The harness's own context of such a chat holds what the agent saw, and
-    // opening the chat would let it repeat that in front of others. Narrowing
-    // is always allowed; a summary can be published instead (Spaces §14.6).
+    // every widening lets it repeat that in front of more people — a second
+    // person, a higher level or the whole Space alike. The person may still
+    // widen it, as their own confirmed choice; narrowing never asks
+    // (Spaces §14.6).
     if (change.audience || change.raised.length > 0) {
       if (deps.isPrivateRoom?.(projection.projectId)) {
         throw Object.assign(conflict("A chat in Only me stays private. Share a note from My notes instead."), { reason: "private-room" });
       }
-      if (projection.personalContext) {
-        throw Object.assign(conflict("The agent has read your personal notes in this chat, so it can't be opened to others. Share a note from My notes instead."), { reason: "personal-context" });
+      if (projection.personalContext && input.acknowledgePersonalContext !== true) {
+        throw Object.assign(conflict("The agent has read your personal notes in this chat, so opening it shows others what it saw. Confirm that you mean to share it."), { reason: "personal-context" });
       }
     }
 
@@ -937,12 +962,18 @@ export function createSessionSharingService(deps: SessionSharingDeps): SessionSh
   const mentionAccess = async (ctx: SpaceContext, sessionId: string): Promise<SessionMentionOutsidersDto> => {
     const answer = outsiders(ctx, sessionId);
     if (answer.action === "none") return answer;
-    const { root } = rootRules(ctx, readable(ctx, sessionId));
-    return (await deps.projection(root.id))?.personalContext ? { people: answer.people, action: "none", levels: [] } : answer;
+    const access = readable(ctx, sessionId);
+    const { root } = rootRules(ctx, access);
+    // A chat whose agent already read personal notes opens through the share
+    // dialog, where the person confirms what others will see (§14.6). A
+    // mention carries no such confirmation, so it never opens one — however
+    // wide the chat already is.
+    const projection = await deps.projection(root.id);
+    return projection?.personalContext ? { people: answer.people, action: "none", levels: [] } : answer;
   };
 
   const newChatPeople = (ctx: SpaceContext, projectId: string): NewChatPeopleDto => {
-    if (!canonicalSecurity()) return { people: [], inside: [], action: "none", levels: [] };
+    if (!canonicalSecurity()) return { people: [], inside: [], action: "none", levels: [], visibilities: [] };
     const projectAccess = (userId: string) => {
       const result = resourceAccessOf(userId, ctx.spaceId, projectId);
       return result?.resource.kind === "project" ? result : undefined;
@@ -963,15 +994,73 @@ export function createSessionSharingService(deps: SessionSharingDeps): SessionSh
     }
     // Its owner-to-be holds `manage`, and with nobody else inside there is
     // nobody to ask if they may not share it. A chat in Only me stays private.
-    const { mayWiden, maxGrant } = rulesFor(ctx, "manage", false);
-    if (!mayWiden || !maxGrant || deps.isPrivateRoom?.(projectId)) return { people, inside, action: "none", levels: [] };
+    const { mayWiden, maxGrant, allowedVisibilities } = rulesFor(ctx, "manage", false);
+    const visibilities = allowedVisibilities.filter((visibility) => visibility !== "private");
+    if (!mayWiden || !maxGrant || deps.isPrivateRoom?.(projectId)) {
+      return { people, inside, action: "none", levels: [], visibilities: [] };
+    }
     return {
       people,
       inside,
       action: "share",
       levels: SESSION_ACCESS_LEVELS.filter((level) => sessionAccessAtLeast(maxGrant, level)),
+      visibilities,
+      ...(deps.hasPersonalMcpServers?.(ctx.userId) ? { hasPersonalMcpServers: true } : {}),
       ...(startsPrivate && deps.hasPersonalMcpServers?.(ctx.userId) ? { personalMcpDetachedOnShare: true } : {}),
     };
+  };
+
+  const creationAudience: SessionSharingService["creationAudience"] = (ctx, projectId, input): SessionCreationAudience => {
+    const { mayWiden, maxGrant, allowedVisibilities } = rulesFor(ctx, "manage", false);
+    if (!mayWiden || !maxGrant) throw forbidden("You can't share chats in this Space");
+    if (input === null || typeof input !== "object") throw invalid("Invalid sharing");
+    if (input.visibility !== "restricted" && input.visibility !== "space") throw invalid("Invalid audience");
+    if (!allowedVisibilities.includes(input.visibility)) {
+      throw forbidden(input.visibility === "space"
+        ? "This Space doesn't allow sharing chats with everyone"
+        : "You can't share chats in this Space");
+    }
+    if (deps.isPrivateRoom?.(projectId)) {
+      throw Object.assign(conflict("A chat in Only me stays private."), { reason: "private-room" });
+    }
+    const members = new Set(spaceMembers(ctx.spaceId).map((member) => member.userId));
+    const grants = new Map<string, SessionAccessLevel>();
+    for (const grant of Array.isArray(input.grants) ? input.grants : []) {
+      if (!grant || typeof grant.userId !== "string" || !grant.userId || !isSessionAccessLevel(grant.access)) {
+        throw invalid("Invalid person in the people list");
+      }
+      if (grant.userId === ctx.userId) throw invalid("You can't share a chat with yourself");
+      if (!members.has(grant.userId)) throw invalid("A person in the people list is not a member of this Space");
+      if (grants.has(grant.userId)) throw invalid("A person is listed twice");
+      if (!sessionAccessAtLeast(maxGrant, grant.access)) throw forbidden("You can't give that much access in this Space");
+      grants.set(grant.userId, grant.access);
+    }
+    if (input.visibility === "restricted" && grants.size === 0) throw invalid("A shared chat needs at least one person");
+    return {
+      visibility: input.visibility,
+      grants: [...grants].map(([principalId, access]) => ({ principalId, access })),
+    };
+  };
+
+  const applyCreationAudience: SessionSharingService["applyCreationAudience"] = async (ctx, sessionId, audience) => {
+    const security = authority();
+    const orgId = orgOfSpace(ctx.spaceId);
+    if (!orgId) throw notFound();
+    security.sharing.share({
+      resourceId: sessionId,
+      orgId,
+      spaceId: ctx.spaceId,
+      actor: ctx.userId,
+      visibility: audience.visibility,
+      grants: audience.grants,
+    });
+    // The chat's projection was broadcast by its create with nobody but its
+    // owner able to open it; its readers are told now, like a later share.
+    const projection = await deps.projection(sessionId);
+    if (!projection || projection.spaceId !== ctx.spaceId) throw notFound();
+    // Before this change the chat reached nobody but its owner.
+    const owner = sessionAccess(ctx.userId, ctx.spaceId, sessionId)?.resource.ownerPrincipalId ?? ctx.userId;
+    deps.accessChanged?.([{ ...projection }], new Map([[sessionId, new Set([owner])]]));
   };
 
   const addPeople = async (ctx: SpaceContext, sessionId: string, people: readonly PersonMessageShare[]): Promise<void> => {
@@ -1010,6 +1099,8 @@ export function createSessionSharingService(deps: SessionSharingDeps): SessionSh
     mentionAccess,
     newChatPeople,
     addPeople,
+    creationAudience,
+    applyCreationAudience,
     policy: policyDto,
     setPolicy(ctx, input) {
       if (!canonicalSecurity()) {

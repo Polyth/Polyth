@@ -11,10 +11,10 @@ import {
   powerMonitor,
   powerSaveBlocker,
   protocol,
-  safeStorage,
   screen,
   session,
   shell,
+  systemPreferences,
   Tray,
   type ContextMenuParams,
   type IpcMainInvokeEvent,
@@ -27,7 +27,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { boot } from "@polyth/server";
-import { bugReportOrigin, createBugReportClient, encodeScreenshot, type BugReportClient } from "./bugReport.ts";
+import { bugReportOrigin, createBugReportClient, encodeScreenshot, MARKED_SCREENSHOT_MAX_BYTES, type BugReportClient } from "./bugReport.ts";
 import { cliLauncherPlan, installCliLauncher, openPathFromArgv } from "./cliInstall.ts";
 import { setLinuxAutostartEnabled } from "./linuxAutostart.ts";
 import { validateAbsoluteLocalPath } from "./localPath.ts";
@@ -77,6 +77,7 @@ import type {
   DesktopInfo,
   DesktopKeepAwakeState,
   DesktopLocalSetupResult,
+  DesktopOwnerPasswordResetResult,
   DesktopOpenServer,
   DesktopServerAnchor,
   DesktopServerInfo,
@@ -128,6 +129,8 @@ import {
   type HubOptions,
   type WindowOrigins,
 } from "./windowSurface.ts";
+import { secondWindowRequest, type SecondWindowRequest } from "./secondWindows.ts";
+import { SECOND_WINDOW_CHANNELS, secondWindowSettings } from "./secondWindowChrome.ts";
 
 declare const __POLYTH_OPENCODE_VERSION__: string;
 declare const __POLYTH_DESKTOP_FLAVOR__: string;
@@ -145,7 +148,7 @@ const edition = desktopEdition(__POLYTH_DESKTOP_FLAVOR__);
 const workstation = edition === "workstation";
 /** A feed the build is pinned to whatever the chosen channel; null = the chosen channel. */
 const pinnedUpdates = pinnedUpdaterChannel(__POLYTH_DESKTOP_FLAVOR__, process.platform, process.getSystemVersion());
-/** Where nightly bug reports go; null on builds that send none (src/bugReport.ts). */
+/** Where feedback goes; null when an administrator turned it off (src/bugReport.ts). */
 const reportOrigin = bugReportOrigin({ version: app.getVersion(), edition, env: process.env });
 
 interface SavedWindowState {
@@ -370,13 +373,20 @@ const refreshSystemControls = (): Promise<void> => {
   return systemControlsReading;
 };
 
-const windowState = (): DesktopWindowState => ({
-  maximized: mainWindow?.isMaximized() ?? false,
-  fullscreen: mainWindow?.isFullScreen() ?? false,
-  visible: mainWindow?.isVisible() ?? false,
-  focused: mainWindow?.isFocused() ?? false,
-  ...(process.platform === "linux" ? { systemControls } : {}),
-});
+/** Open second windows by request key (openSecondWindow below). */
+const secondWindows = new Map<string, BrowserWindow>();
+
+const windowStateOf = (window: BrowserWindow | null): DesktopWindowState => {
+  const live = window && !window.isDestroyed() ? window : null;
+  return {
+    maximized: live?.isMaximized() ?? false,
+    fullscreen: live?.isFullScreen() ?? false,
+    visible: live?.isVisible() ?? false,
+    focused: live?.isFocused() ?? false,
+    ...(process.platform === "linux" ? { systemControls } : {}),
+  };
+};
+const windowState = (): DesktopWindowState => windowStateOf(mainWindow);
 
 const sendToRenderer = (channel: string, value: unknown): void => {
   if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return;
@@ -401,7 +411,17 @@ const broadcastUpdateState = (): void => {
   }
 };
 
-const broadcastWindowState = (): void => sendToRenderer("desktop:window:state", windowState());
+/** A second window's own state, on its own channel (secondWindowChrome.ts). */
+const sendSecondWindowState = (window: BrowserWindow): void => {
+  if (window.isDestroyed() || window.webContents.isDestroyed()) return;
+  window.webContents.send(SECOND_WINDOW_CHANNELS.state, windowStateOf(window));
+};
+
+const broadcastWindowState = (): void => {
+  sendToRenderer("desktop:window:state", windowState());
+  // The Linux caption layout is shared: every second window follows it too.
+  for (const window of secondWindows.values()) sendSecondWindowState(window);
+};
 
 const sendCommand = (command: DesktopCommand): void => {
   showWindow();
@@ -492,6 +512,10 @@ const persistSettings = async (patch: unknown): Promise<DesktopSettings> => {
   refreshAutomaticUpdateSchedule();
   await writeDesktopSettings(settingsPath, settings);
   sendToRenderer("desktop:settings:changed", settings);
+  const chromeSettings = secondWindowSettings(settings);
+  for (const window of secondWindows.values()) {
+    if (!window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send(SECOND_WINDOW_CHANNELS.settings, chromeSettings);
+  }
   rebuildTrayMenu();
   return settings;
 };
@@ -1373,10 +1397,10 @@ const installApplicationMenu = (): void => {
       { type: "separator" }, { role: "togglefullscreen" },
     ] },
     { role: "windowMenu" },
-    // Nightly builds only: the report sheet belongs to the page, which owns
-    // ⌘⇧B / Ctrl+Shift+B through its remappable keymap (`reportBug`).
+    // The feedback sheet belongs to the page, which owns ⌘⇧B / Ctrl+Shift+B
+    // through its remappable keymap (`reportBug`).
     ...(reportOrigin ? [{ role: "help" as const, submenu: [
-      { label: "Report a Bug…", ...rendererShortcut("CommandOrControl+Shift+B"), click: () => sendCommand("report-bug") },
+      { label: "Send Feedback…", ...rendererShortcut("CommandOrControl+Shift+B"), click: () => sendCommand("report-bug") },
     ] }] : []),
   ]));
 };
@@ -1463,6 +1487,85 @@ const firstWindowUrl = (): string => {
   return hubUrl(plan.connect ? { open: plan.connect } : {});
 };
 
+// A chat or a workspace window in a window of its own (apps/web
+// secondWindow.ts). It is the web client in the main window's chrome (hidden
+// title bar, caption controls in the page header) with its own small bridge:
+// the caption controls of that window and nothing else
+// (secondWindowPreload.ts); every other desktop channel answers only the main
+// window. The same session and cookies, the same navigation rule. One window
+// per chat and one pane window; asking again brings it forward. The map
+// (`secondWindows`) is declared with the window state helpers above.
+const isSecondWindowContents = (contents: WebContents): boolean => {
+  for (const window of secondWindows.values()) {
+    if (!window.isDestroyed() && window.webContents === contents) return true;
+  }
+  return false;
+};
+const openSecondWindow = (parent: BrowserWindow, request: SecondWindowRequest): void => {
+  const existing = secondWindows.get(request.key);
+  if (existing && !existing.isDestroyed()) {
+    if (existing.webContents.getURL() !== request.url) void existing.loadURL(request.url).catch(() => {});
+    existing.show();
+    existing.focus();
+    return;
+  }
+  const bounds = parent.getBounds();
+  const child = new BrowserWindow({
+    width: 1200,
+    height: 860,
+    ...visibleSecondWindowPosition(bounds),
+    minWidth: 480,
+    minHeight: 360,
+    // The main window's chrome (windowChrome.ts): no system title bar; the
+    // page's header carries the caption controls, through a bridge that
+    // reaches only this window's own controls (secondWindowPreload.ts).
+    ...desktopChromeOptions(process.platform, nativeTheme.shouldUseDarkColors, process.getSystemVersion()),
+    roundedCorners: true,
+    show: false,
+    title: "Polyth",
+    icon: appIconPath(),
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: join(import.meta.dirname, "second-window-preload.cjs"),
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+      webSecurity: true,
+      spellcheck: !startupLowResourceMode,
+      backgroundThrottling: true,
+    },
+  });
+  child.webContents.setUserAgent(parent.webContents.getUserAgent());
+  if (process.platform !== "darwin") child.setMenuBarVisibility(false);
+  child.webContents.on("context-menu", (_event, params) => showContextMenu(child, params));
+  child.webContents.setWindowOpenHandler(({ url }) => {
+    const next = secondWindowRequest(child.webContents.getURL(), url);
+    if (next) openSecondWindow(child, next);
+    else if (safeExternalUrl(url)) void shell.openExternal(url);
+    return { action: "deny" };
+  });
+  child.webContents.on("will-navigate", (event, url) => {
+    if (navigationAllowed(child.webContents.getURL(), url, windowOrigins())) return;
+    event.preventDefault();
+    if (safeExternalUrl(url)) void shell.openExternal(url);
+  });
+  child.once("ready-to-show", () => child.show());
+  const sendState = () => sendSecondWindowState(child);
+  for (const event of ["maximize", "unmaximize", "enter-full-screen", "leave-full-screen", "blur"] as const) child.on(event as "maximize", sendState);
+  child.on("focus", () => { sendState(); void refreshSystemControls(); });
+  child.on("closed", () => { if (secondWindows.get(request.key) === child) secondWindows.delete(request.key); });
+  secondWindows.set(request.key, child);
+  void child.loadURL(request.url).catch((error: unknown) => log(`Could not open a second window: ${String(error)}`));
+};
+
+/** Just below and beside the window it came from, on that window's screen. */
+const visibleSecondWindowPosition = (from: { x: number; y: number; width: number; height: number }): { x: number; y: number } => {
+  const area = screen.getDisplayMatching(from).workArea;
+  const x = Math.min(from.x + 48, area.x + Math.max(0, area.width - 1200));
+  const y = Math.min(from.y + 48, area.y + Math.max(0, area.height - 860));
+  return { x: Math.max(area.x, x), y: Math.max(area.y, y) };
+};
+
 const createWindow = async (startUrl = firstWindowUrl()): Promise<void> => {
   const saved = readSavedWindowState();
   const bounds = visibleBounds(saved.bounds);
@@ -1508,7 +1611,12 @@ const createWindow = async (startUrl = firstWindowUrl()): Promise<void> => {
   // With the stall log above this tells a frozen server from a frozen page.
   window.on("unresponsive", () => log("Window page stopped responding"));
   window.on("responsive", () => log("Window page is responding again"));
-  window.webContents.setWindowOpenHandler(({ url }) => { if (safeExternalUrl(url)) void shell.openExternal(url); return { action: "deny" }; });
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    const second = secondWindowRequest(window.webContents.getURL(), url);
+    if (second) openSecondWindow(window, second);
+    else if (safeExternalUrl(url)) void shell.openExternal(url);
+    return { action: "deny" };
+  });
   window.webContents.on("will-navigate", (event, url) => {
     if (navigationAllowed(window.webContents.getURL(), url, windowOrigins())) return;
     event.preventDefault();
@@ -1614,18 +1722,29 @@ const updateWindowHandle = <Args extends unknown[], Result>(channel: string, han
 };
 
 /**
- * While the owner has no password ("only me" first run), the server opens an
- * owner session only through this in-process channel and the main process
- * puts it straight into this window's cookie jar: the page never sees the
- * token, and another browser or app on this machine stays at the sign-in
- * screen. A no-op once the owner protected the account.
+ * The window's owner session comes only from this in-process channel; the main
+ * process puts it straight into this window's cookie jar, so the page never
+ * sees the token and another browser or app on this machine stays at the
+ * sign-in screen. While the owner has no password that is the one way in.
+ * Once they have one, a loopback-only server still opens the window as its
+ * owner (whoever is signed in to this computer already holds Polyth's files),
+ * unless the window holds a live session already, such as another account
+ * someone signed in to here. Elevated steps keep asking for the password.
  */
 let ownerCookieName: string | null = null;
+const windowSessionCookie = async (lifecycle: NonNullable<typeof serverLifecycle>): Promise<{ name: string; value: string | null } | null> => {
+  const name = "localSessionCookieName" in lifecycle ? lifecycle.localSessionCookieName : undefined;
+  if (typeof name !== "string" || !baseUrl) return null;
+  const [cookie] = await session.defaultSession.cookies.get({ url: baseUrl, name });
+  return { name, value: cookie?.value ?? null };
+};
 const ensureDesktopOwnerSession = async (): Promise<boolean> => {
   const lifecycle = serverLifecycle;
-  const issue = lifecycle && "issueLocalOwnerSession" in lifecycle ? lifecycle.issueLocalOwnerSession : undefined;
-  if (typeof issue !== "function" || !baseUrl) return false;
-  const owner = issue.call(lifecycle);
+  const issue = lifecycle && "issueDesktopOwnerSession" in lifecycle ? lifecycle.issueDesktopOwnerSession : undefined;
+  if (!lifecycle || typeof issue !== "function" || !baseUrl) return false;
+  const present = await windowSessionCookie(lifecycle);
+  const owner = issue.call(lifecycle, present?.value ?? null);
+  if (owner === "kept") return true;
   if (!owner) return false;
   // No expiry: a memory-only cookie. Every launch opens a new session, so the
   // token never needs to rest in the profile's cookie database.
@@ -1641,6 +1760,57 @@ const ensureDesktopOwnerSession = async (): Promise<boolean> => {
   ownerCookieName = owner.cookieName;
   log("Opened the owner session for this window");
   return true;
+};
+
+/** The person at this computer, now: Touch ID where the Mac has it, otherwise
+ *  a native confirmation, which no page can answer for them. */
+const confirmPersonAtComputer = async (): Promise<boolean> => {
+  if (process.platform === "darwin" && systemPreferences.canPromptTouchID()) {
+    try {
+      await systemPreferences.promptTouchID("reset the Polyth owner password");
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  const options = {
+    type: "warning" as const,
+    buttons: ["Reset Password", "Cancel"],
+    defaultId: 1,
+    cancelId: 1,
+    message: "Reset the Polyth owner password?",
+    detail: "Polyth on this computer opens as its owner again. Every other sign-in ends, and other browsers and devices need the new password.",
+  };
+  const { response } = await (mainWindow && !mainWindow.isDestroyed()
+    ? dialog.showMessageBox(mainWindow, options)
+    : dialog.showMessageBox(options));
+  return response === 0;
+};
+
+/** A forgotten owner password, reset at the computer that runs Polyth. The
+ *  new password crosses only this IPC and the in-process call, never a log. */
+const resetDesktopOwnerPassword = async (_event: IpcMainInvokeEvent, password: unknown): Promise<DesktopOwnerPasswordResetResult> => {
+  if (typeof password !== "string" || !password || password.length > 1024) return { ok: false, error: "invalid-input" };
+  const lifecycle = serverLifecycle;
+  const reset = lifecycle && "resetDesktopOwnerPassword" in lifecycle ? lifecycle.resetDesktopOwnerPassword : undefined;
+  if (!lifecycle || typeof reset !== "function") return { ok: false, error: "unavailable" };
+  const present = await windowSessionCookie(lifecycle);
+  if (!present?.value) return { ok: false, error: "forbidden" };
+  if (!(await confirmPersonAtComputer())) return { ok: false, error: "cancelled" };
+  let login: string;
+  try {
+    ({ login } = await reset.call(lifecycle, present.value, password));
+  } catch (error) {
+    const code = (error as { code?: unknown } | null)?.code;
+    if (code === "invalid-input") return { ok: false, error: "invalid-input" };
+    if (code === "forbidden" || code === "invalid-transition" || code === "unauthorized" || code === "invalid-credentials") return { ok: false, error: "forbidden" };
+    log("Owner password reset on this computer failed", code ?? "error");
+    return { ok: false, error: "unavailable" };
+  }
+  log("Owner password was reset on this computer");
+  // Every session ended with the change, this window's too: open it again.
+  await ensureDesktopOwnerSession().catch((error: unknown) => log("Could not reopen the owner session", error));
+  return { ok: true, login };
 };
 
 /** Protecting the account (choosing the owner's first password) needs this
@@ -1786,17 +1956,6 @@ const createDesktopBugReports = (desktopDir: string): BugReportClient => createB
   },
   locale: () => app.getLocale(),
   desktopSettings: bugReportDesktopSettings,
-  // The OS keychain seals the tester password; without one it lasts this run.
-  encrypt: (plain) => {
-    try {
-      if (!safeStorage.isEncryptionAvailable()) return null;
-      if (process.platform === "linux" && safeStorage.getSelectedStorageBackend() === "basic_text") return null;
-      return safeStorage.encryptString(plain).toString("base64");
-    } catch { return null; }
-  },
-  decrypt: (stored) => {
-    try { return safeStorage.decryptString(Buffer.from(stored, "base64")); } catch { return null; }
-  },
   fetch: (input, init) => net.fetch(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, init),
   log,
 });
@@ -1851,13 +2010,28 @@ const installIpc = (): void => {
     if (!window || !nativeWebViews) throw new Error("no browser pages here");
     nativeWebViews.place(window, id, rect);
   });
-  trustedHandle("desktop:report:state", () => bugReports?.state() ?? { available: false, needsPassword: true, queued: 0 });
+  trustedHandle("desktop:report:state", () => bugReports?.state() ?? { available: false, queued: 0 });
   trustedHandle("desktop:report:capture", async () => {
-    if (!bugReports?.state().available) throw new Error("Bug reports are off on this build");
+    if (!bugReports?.state().available) throw new Error("Feedback is off on this build");
     return bugReports.capture(await captureForBugReport());
+  });
+  // The sheet's marked-up screenshot: decoded here and re-encoded to the
+  // wire's limits, so the renderer cannot put anything but a sized JPEG in a report.
+  trustedHandle("desktop:report:annotate", (_event, captureId: unknown, jpeg: unknown) => {
+    if (!bugReports || typeof captureId !== "string" || !(jpeg instanceof Uint8Array)) return null;
+    if (jpeg.byteLength === 0 || jpeg.byteLength > MARKED_SCREENSHOT_MAX_BYTES) return null;
+    try {
+      const image = nativeImage.createFromBuffer(Buffer.from(jpeg.buffer, jpeg.byteOffset, jpeg.byteLength));
+      return image.isEmpty() ? null : bugReports.annotate(captureId, encodeScreenshot(image));
+    } catch (error) {
+      log("Could not read the marked-up bug report screenshot", error);
+      return null;
+    }
   });
   trustedHandle("desktop:report:send", async (_event, draft: unknown) =>
     bugReports ? bugReports.send(draft) : { result: "unavailable" as const });
+  trustedHandle("desktop:report:forget", async () =>
+    bugReports ? bugReports.forget() : { result: "unavailable" as const });
   trustedHandle("desktop:servers:open", async (_event, target: unknown): Promise<DesktopServersResult<void>> => {
     const wanted = target as { kind?: unknown; url?: unknown; path?: unknown } | null;
     try {
@@ -1918,6 +2092,7 @@ const installIpc = (): void => {
   trustedHandle("desktop:setup:restart", async () => { await restartDesktopSetupServer(); });
   trustedHandle("desktop:setup:local", completeLocalSetup);
   trustedHandle("desktop:session:renew", ensureDesktopOwnerSession);
+  trustedHandle("desktop:owner:reset-password", resetDesktopOwnerPassword);
   trustedHandle("desktop:session:confirm", confirmDesktopOwnerSession);
   trustedHandle("desktop:settings:get", () => settings);
   trustedHandle("desktop:settings:set", (event, patch: unknown) => persistSettings(settingsPatchFor(senderSurface(event), patch)));
@@ -1948,6 +2123,39 @@ const installIpc = (): void => {
     else if (action === "close") mainWindow.close();
     else throw new Error("Unknown window action");
     return windowState();
+  });
+  // A second window's own caption controls (secondWindowChrome.ts): asked by
+  // that window's top frame, acting on that window and never another one.
+  const secondWindowHandle = <Args extends unknown[], Result>(channel: string, handler: (window: BrowserWindow, ...args: Args) => Result | Promise<Result>): void => {
+    ipcMain.handle(channel, (event, ...args: Args) => {
+      const window = BrowserWindow.fromWebContents(event.sender);
+      if (!window || window === mainWindow || !isSecondWindowContents(event.sender) || event.senderFrame !== event.sender.mainFrame) {
+        throw new Error("Untrusted second window IPC sender");
+      }
+      return handler(window, ...args);
+    });
+  };
+  secondWindowHandle(SECOND_WINDOW_CHANNELS.get, async (window) => {
+    await Promise.race([refreshSystemControls(), new Promise((resolve) => setTimeout(resolve, 400).unref?.())]);
+    return { platform: process.platform, settings: secondWindowSettings(settings), state: windowStateOf(window) };
+  });
+  secondWindowHandle(SECOND_WINDOW_CHANNELS.action, (window, action: unknown) => {
+    if (action === "minimize") window.minimize();
+    else if (action === "toggle-maximize") { if (window.isMaximized()) window.unmaximize(); else window.maximize(); }
+    else if (action === "close") window.close();
+    else throw new Error("Unknown window action");
+    return windowStateOf(window);
+  });
+  secondWindowHandle(SECOND_WINDOW_CHANNELS.caption, (window, band: unknown) => {
+    if (process.platform !== "darwin") return null;
+    const zoom = window.webContents.getZoomFactor();
+    const group = macTrafficLightGroup(process.getSystemVersion());
+    window.setWindowButtonPosition(macTrafficLightPosition(band, zoom, group));
+    return macCaptionGeometry(window.getWindowButtonPosition(), zoom, group);
+  });
+  secondWindowHandle(SECOND_WINDOW_CHANNELS.titlebar, (window, appearance: unknown) => {
+    if (process.platform !== "win32") return;
+    window.setTitleBarOverlay(normalizeTitleBarAppearance(appearance, window.webContents.getZoomFactor()));
   });
   trustedHandle("desktop:path:reveal", async (_event, path: unknown) => {
     const target = await validateAbsoluteLocalPath(path);
@@ -2240,8 +2448,11 @@ async function start(): Promise<void> {
   }
   // Only this computer's own page may call this computer's server.
   session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
-    const contents = mainWindow?.webContents;
-    const fromWindow = contents !== undefined && details.webContents === contents;
+    // A second window (a chat or pane window) is held to the main window's rule.
+    const contents = details.webContents !== undefined && (details.webContents === mainWindow?.webContents || isSecondWindowContents(details.webContents))
+      ? details.webContents
+      : undefined;
+    const fromWindow = contents !== undefined;
     callback({ cancel: fromWindow && (
       blockedFromLocalServer(details, details.frame?.url ?? contents.getURL(), windowOrigins())
       // The workstation window talks to this computer's server only: no

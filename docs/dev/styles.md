@@ -292,6 +292,21 @@ both lists scroll and would clip an outside ring. Touch widens the gap to 8px
 (project tiles then sit on a `--tap` pitch) and a transparent `::after` reaches
 `--hit-min`.
 
+A project tile carries its status in its corners (`ProjectRailStatus.tsx`,
+counted by `projectRailStatus` in `sessionStatus.ts`), one corner per kind:
+question at the top start (blue), permission at the top end (amber), finished
+unread result at the bottom end (green); the colours are the
+`--status-question`/`--status-permission`/`--status-result` tokens, shared
+with the Pinned group's corner dots, and no other count (the launcher strip's
+neutral `.strip-badge`) uses them. A count is 12px and a dot 8px (times
+`--rail-scale-left`), so the 22px glyph's corners stay mostly clear. The bottom
+start corner is free for a later kind. Marks count chats: one question or permission shows `?` or `!`,
+several show a number up to `9+`; one result is a dot, several a number. A hollow
+accent ring at the bottom end means the project is working and has no result to
+show. Marks stay inside the tile, because the scrolling list clips past it, use
+`--panel` as their cut-out and pick black or white ink from the tone's lightness.
+The tooltip and the button's accessible name list every count.
+
 | Token | Purpose |
 | --- | --- |
 | `--rail-scale-left` | Left project-rail icon and track scale (default 1). |
@@ -448,7 +463,10 @@ and the accent-tinted user message sets it to `--accent-on-wash` (macOS styles:
 under the pointer, and keyboard focus gets the `--focus-ring` outline. A bare
 URL (`.md-link-url`) breaks anywhere instead of widening the bubble, and its
 `https://` / `www.` (`.md-link-scheme`) steps back in ink while staying in the
-copied text.
+copied text. A Markdown link to a workspace file is a `ResourceLink` button
+(`.resource-link.file-ref.md-file-link`) that opens Project files. It keeps this
+same link look (prose face, `--link` ink, hairline, wash and focus ring), not
+the monospace look of a prose file reference.
 
 A Markdown table is a grid, not a paragraph that happens to have rules. It
 must read correctly at any width and with any cell text, so the renderer wraps
@@ -620,7 +638,7 @@ paints `--look-overlay-solid` (the look's overlay material, opaque; default
 | `air` | Soft islands with diffuse shadows and pill shapes, and no lines. |
 | `monolith` | Chrome on a deep backdrop; the conversation is one raised sheet with a short, light shadow. Over a wallpaper the backdrop is the tinted image and the sheet frosts as a canvas does (`--look-veil`). |
 | `monolith-reverse` | A lit chrome plane with the conversation recessed into it. Raised pieces (composer, prompt, cards) are made of the plane; navigator selection is carved down to the well. Fields and control strips are a shallower cut (`--look-cut`: halfway to the well in dark, the well's gray in light). In dark mode the plane is `--bg` lit by a tenth of white, so quiet ink keeps 4.5:1 on it. Over a wallpaper the plane and its raised pieces are lit glass on `--look-veil-soft`, and the well and every cut and selection veil as the well does (`--look-veil`), so nothing on the glass is an opaque slot. |
-| `obsidian` | Rimmed glass with gradient edges, an aurora backdrop and a glowing composer. In light mode it reads as pearl. |
+| `obsidian` | Rimmed glass with gradient edges, an aurora backdrop and a glowing composer. In light mode it reads as pearl. A surface written into the conversation — a prompt, a code block, an in-flow card — keeps the rim and the top highlight and takes a short, quiet drop (`--look-glass-inline-shadow`); the wide drop (`--look-glass-shadow`) belongs to the chrome and to the floating windows that really hover. |
 | `editorial` | Source Serif 4 titles and prompts, a small-caps index navigator and a letter-field composer on warm paper. |
 
 Six workspace backgrounds in `backgrounds.ts` were drawn alongside the looks.
@@ -684,7 +702,7 @@ class strength joins a role instead of getting a rule of its own:
 | --- | --- | --- | --- |
 | 1 Flatten | No base glass, fill, shadow or border | columns, composer, the status bar, a kept top-rail slab, quiet icon buttons, a code block's header band, Fluent's dialog footer band | — |
 | 1a Rules | The dividers a look keeps where it flattened a slab; islands and sheets keep none, the ruled looks (Paper, Line, Editorial) draw their line | status bar top, top-rail foot, package pane head, code block header, dialog head and foot | `--look-rule` |
-| 1b Selection | One "you are here", hover, press and segmented language; keyboard focus on a menu row keeps `--look-focus-ring` | session rows, rails, mode switch, host tabs and `.seg` (a package's own tabs inside its window or page keep the package's grammar), menu rows (checked; destructive rows stay red), Settings' current page, the model picker's current model; the base and Fluent accent bars beside a current row are removed | `--look-select*`, `--look-hover`, `--look-segment*`, `--look-control*`, `--look-focus-ring` |
+| 1b Selection | One "you are here", hover, press and segmented language; keyboard focus on a menu row keeps `--look-focus-ring` | session rows, rails, mode switch, host tabs and `.seg` (a package's own tabs inside its window or page keep the package's grammar), menu rows (checked; destructive rows stay red), Settings' current page, the model picker's current model; the base and Fluent accent bars beside a current row are removed. The current project on the left rail is the plate alone, with no ring or carved shadow around its icon (`--look-rail-select-edge: none`); Line, whose plate is clear, keeps its hairline there, and a plate that only read through its edge is deepened in `--look-rail-select` so it still outweighs the hover wash (Monolith Reverse light, Obsidian dark). The icon covers most of a project tile, so its hover is `--look-rail-hover`: the look's hover, deepened to the well in Monolith Reverse light, where the 5% wash was lost round the icon on the near-white plane | `--look-select*`, `--look-rail-select*`, `--look-rail-hover`, `--look-hover`, `--look-segment*`, `--look-control*`, `--look-focus-ring` |
 | 1c Options and buttons | Quiet chips; the default (quiet) button is an option and the destructive one its red wash; a disabled button keeps the base's neutral look | queue chips, attachments, New-session Shortcuts, prompt suggestion, add-menu tiles, `.ui-btn--quiet`, `.ui-btn--danger` | `--look-option*` |
 | 1f Fields | Every text field and select; a field well is the field and its input stays bare | navigator search, picker filter well, `.ui-field-well`, `.ui-input`, `.ui-textarea`, `.sel select`, the theme picker | `--look-field`, `--look-field-edge`, `--look-field-rule`, `--look-field-radius`, `--look-focus-ring` |
 | 1g Corners | One radius role per control | rows, menu items, icon buttons, segments → `--look-select-radius`; push buttons, chips, wells → `--look-control-radius` | — |
@@ -863,11 +881,17 @@ at ≥ 6.6:1.
   an island (`--look-rail-island`, `--package-window-foot`). Only its width
   resizes, from the inline-start edge (ui.md).
 - A pinned (docked) window is part of the rail column (shellLooks.css §1e):
-  the host, still the idle frame, grows around it, so the window has no
+  the host, still the idle frame, grows around it, so the window adds no
   material of its own. It sits in the rail's fill, edge and shadow (none by
   default, so it sits on the canvas as the idle rail does; Line and Editorial
   keep the rail's hairline down the window's start; Air and Obsidian keep
-  their island around window and strip).
+  their island around window and strip). A look whose idle rail has no fill
+  of its own — Line, Editorial and Paper draw a line on the page or a bare
+  sheet — paints the look's column material on the docked pane instead
+  (`--look-rail`, `--look-rail-clip`, `--look-rail-blur`, the same ladder as
+  the floating window), inside the host's frame, so the pane never shows the
+  conversation through it. Looks whose host already paints one, or whose
+  window is a plane of its own (the Monoliths), are untouched.
   The Monoliths are the exception, because there work lies on a plane of its
   own and only chrome on the backdrop: the pane itself is a second plane in
   the conversation's material (`--look-work`, `--look-work-shadow`,

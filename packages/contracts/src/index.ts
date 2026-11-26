@@ -802,6 +802,52 @@ export interface SessionPauseEndedData {
   source?: string;
 }
 
+/** Something armed to wake this chat later. A durable session watch with
+ *  `wake` delivery is `kind: "session"` and names the chat it waits on in
+ *  `sourceSessionId`; a package wait (`polyth_wait`) carries its own kind
+ *  (`pid`, `file`, `seconds`, `github-run`…) and label. `SessionProjection.waits`
+ *  keeps the armed ones, folded from `session/wait-armed` and
+ *  `session/wait-ended` by `foldSessionWaits`. Polyth-originated: not runtime
+ *  turn content, not model-visible. Old reducers ignore both types. */
+export interface SessionWait {
+  id: string;
+  kind: string;
+  /** The producer's short label ("the process 123 (node)", a CI run). A
+   *  `session` wait has none: a reader resolves the waited-on chat's title
+   *  from the chats it may read, so no title crosses a sharing boundary. */
+  label?: string;
+  sourceSessionId?: string;
+  sourceProjectId?: string;
+  /** ms epoch it was armed. */
+  since: number;
+  /** ms epoch after which it ends as timed out, when it is bounded. */
+  deadline?: number;
+}
+export const SESSION_WAIT_ARMED_EVENT = "session/wait-armed" as const;
+export const SESSION_WAIT_ENDED_EVENT = "session/wait-ended" as const;
+export interface SessionWaitEndedData {
+  id: string;
+  /** fired, cancelled, timed-out, removed… — informational only. */
+  outcome?: string;
+}
+export type SessionWaitChange =
+  | { op: "armed"; wait: SessionWait }
+  | { op: "ended"; id: string; outcome?: string };
+/** At most this many armed waits are kept on one projection; the oldest go first. */
+export const SESSION_WAITS_MAX = 16;
+
+/** The projection's armed waits after one change. Re-arming an id replaces
+ *  it; ending an unknown id changes nothing. Returns undefined for none, so
+ *  the field disappears instead of lingering as an empty list. */
+export function foldSessionWaits(
+  waits: readonly SessionWait[] | undefined,
+  change: SessionWaitChange,
+): SessionWait[] | undefined {
+  const kept = (waits ?? []).filter((wait) => wait.id !== (change.op === "armed" ? change.wait.id : change.id));
+  const next = change.op === "armed" ? [...kept, change.wait].slice(-SESSION_WAITS_MAX) : kept;
+  return next.length > 0 ? next : undefined;
+}
+
 /** `tool/keep-running`: a person (or, when nobody answered, an enabled
  *  Judgment use) told Polyth that one open call is just slow and silent, so
  *  its silence stop is off (the hard execution ceiling stays).
@@ -1125,6 +1171,13 @@ export interface WorkflowNodeDto {
    * harness differs from the launch harness, the model stays unset so the
    * selected harness chooses its own default. */
   allowedModels?: ModelRef[];
+  /** Routing role from the launcher's delegation policy (Settings →
+   * Orchestration): `explore`, `implement`, `verify`, `review`, `vision`,
+   * `write` or a `custom-…` id. While that person routes By role, the unit
+   * runs on the role's first usable model, chosen when the unit starts. In
+   * Auto mode, for system runs and when no model of the role is usable, the
+   * unit keeps the route this node resolves to without the role. */
+  routingRole?: string;
   agent?: string;
   /** Absent preserves the project's existing harness selection. */
   harness?: HarnessSelection;
@@ -1187,6 +1240,52 @@ export interface WorkflowLaunchOptionsDto {
   model?: ModelRef;
   harness?: HarnessSelection;
   agent?: string;
+  /** What the launcher already located, one line each (`path:line — fact`).
+   * Every unit receives them and is told not to search for them again. */
+  facts?: string[];
+  /** Wake the parent chat's agent when the run settles or waits for a fix or
+   * a review decision. Set by the workflow agent tool. */
+  wake?: boolean;
+}
+
+/** How the result of a settled run was used. `accepted`: as delivered;
+ * `reworked`: kept after more work outside the run; `discarded`: not used. */
+export type WorkflowRunOutcomeValue = "accepted" | "reworked" | "discarded";
+
+export interface WorkflowRunOutcomeDto {
+  value: WorkflowRunOutcomeValue;
+  note?: string;
+  at: number;
+  /** Who recorded it: the person, or the parent chat's agent. Never an id. */
+  by: "person" | "agent";
+}
+
+export interface WorkflowOutcomeInputDto {
+  value: WorkflowRunOutcomeValue;
+  note?: string;
+}
+
+/** Settled runs of one template, counted for comparing routes of work. */
+export interface WorkflowOutcomeSummaryDto {
+  workflowId: string;
+  name: string;
+  runs: number;
+  done: number;
+  error: number;
+  stopped: number;
+  accepted: number;
+  reworked: number;
+  discarded: number;
+  /** Settled runs nobody recorded an outcome for. */
+  unrecorded: number;
+  /** Units that ran, and how many of them a review sent back at least once. */
+  units: number;
+  reworkedUnits: number;
+}
+
+export interface WorkflowRunOutcomeData {
+  runId: string;
+  outcome: WorkflowRunOutcomeDto;
 }
 
 export interface WorkflowRunContextDto {
@@ -1257,6 +1356,9 @@ export interface WorkflowRunNodeDto {
   model?: ModelRef;
   agent?: string;
   harness?: HarnessSelection;
+  /** The routing role that chose `model` and `harness` for this pass; absent
+   * when the unit runs on its own route. */
+  routedRole?: string;
   group?: string;
   attempt?: number;
   /** Only true when the server can prove that restarting this unit is safe. */
@@ -1312,6 +1414,13 @@ export interface WorkflowRunDto {
   finishedAt?: number;
   layers: string[][];
   nodes: WorkflowRunNodeDto[];
+  /** Code locations the launcher and the finished units reported, one line
+   * each. Later units receive them instead of searching again. */
+  facts?: string[];
+  /** How the settled run's result was used, once someone records it. */
+  outcome?: WorkflowRunOutcomeDto;
+  /** The parent chat's agent is woken when the run settles or waits. */
+  wake?: boolean;
 }
 
 export interface WorkflowRunStartedData {
@@ -1329,6 +1438,8 @@ export interface WorkflowRunStartedData {
   startedAt: number;
   layers: string[][];
   nodes: WorkflowRunNodeDto[];
+  /** The parent chat's agent started the run and is woken to steer it. */
+  wake?: boolean;
 }
 
 export interface WorkflowNodeProgressData {
@@ -1575,7 +1686,22 @@ export interface CreateSessionInput {
   isolation?: SessionIsolation;
   /** Existing OpenCode session to adopt rather than create. Internal adapter seam. */
   backendSessionId?: string;
+  /** The audience a person chose for this chat before it existed (Spaces
+   *  §14.3), applied under their sharing rights before anyone reads it, so the
+   *  agent knows from its first turn that others are here and never reaches
+   *  that person's personal notes. A plain create only: `SessionStartRequest`
+   *  refuses it, since its first turn could be admitted before the change. */
+  sharing?: SessionCreationSharing;
 }
+
+/** How a new chat is shared from the moment it exists. */
+export interface SessionCreationSharing {
+  /** `private` is the default and needs no entry here. */
+  visibility: "restricted" | "space";
+  /** People given access by name, each at most the creator's `maxGrant`. */
+  grants?: readonly { userId: string; access: SessionAccessLevel }[];
+}
+
 export interface SessionRef { id: string }
 /** What a new chat does once it exists. Sent with its create so the server
  *  owns the whole start: no later client request is needed, and a client that
@@ -1908,6 +2034,12 @@ export interface SessionMentionOutsidersDto {
 export interface NewChatPeopleDto extends SessionMentionOutsidersDto {
   /** Those the chat reaches as soon as it exists, by the Space's default audience. */
   inside: SessionMentionCandidateDto[];
+  /** Audiences the owner-to-be may pick when the chat is created, as their
+   *  sharing rights and the Space policy allow (never `private`, the default). */
+  visibilities: SessionVisibility[];
+  /** The owner-to-be has personal MCP servers, so a chat that starts shared
+   *  runs without them (Spaces §14.6). */
+  hasPersonalMcpServers?: true;
 }
 
 /** Package-free purpose of a people-first session: no runtime, no agent;
@@ -2063,6 +2195,10 @@ export interface SessionSharingUpdate {
   visibility?: SessionVisibility;
   grants?: Array<{ userId: string; access: SessionAccessLevel }>;
   expectedRevision?: number;
+  /** The person confirmed that opening this chat lets others read what the
+   *  agent already saw of their personal notes (`personalContext`). Without
+   *  it, widening such a chat is refused; narrowing never needs it. */
+  acknowledgePersonalContext?: boolean;
 }
 
 /** A Space's sharing policy, set by its admins (`GET/PUT /api/sharing/policy`). */
@@ -2561,6 +2697,9 @@ export interface CreateIsolatedSessionInput {
   sourceSessionId?: string;
   /** Local branch that is currently checked out; merge-back returns to that workspace. */
   targetBranch?: string;
+  /** As `CreateSessionInput.sharing`: the audience chosen before the chat
+   *  existed (Spaces §14.3). Refused together with a `start`. */
+  sharing?: SessionCreationSharing;
 }
 
 /** `POST /api/worktrees/sessions`: start a chat in a linked worktree the
@@ -2830,6 +2969,7 @@ export type SessionMoveBlockReason =
   | "isolated"
   | "other-machine"
   | "package-owned"
+  | "personal-context"
   | "private"
   | "queued"
   | "too-large"
@@ -2845,6 +2985,11 @@ export interface SessionMoveInput {
   projectId: string;
   /** Refuses the move when the chat has meanwhile left this project. */
   expectedProjectId?: string;
+  /** The person confirmed that moving this chat where more people can open it
+   *  shows them what its agent already saw of their personal notes. Required
+   *  for any move that adds a reader to such a chat; never for a move that
+   *  does not widen it (Spaces §14.6). */
+  acknowledgePersonalContext?: boolean;
 }
 
 /** What a move would do, without doing it. */
@@ -2924,10 +3069,12 @@ export interface SessionProjection {
    *  never need a project join. Backfilled by session-store migration v10. */
   spaceId?: string;
   /** The person this session currently acts for: the author of its latest
-   *  admitted human message. A delegated child inherits its parent's at
-   *  creation; agent/system prompts never change it. Tools, credentials and
-   *  outside services must act as this person and nobody else. Absent on
-   *  sessions no person has written to since authorship shipped. */
+   *  admitted human message, or the authenticated person who created it (that
+   *  is recorded before its runtime exists, so a Relay can resolve its member
+   *  accounts). A delegated child inherits its parent's at creation;
+   *  agent/system prompts never change it. Tools, credentials and outside
+   *  services must act as this person and nobody else. Absent on sessions no
+   *  person has written to or created since authorship shipped. */
   actor?: SessionPerson;
   /** The agent of this chat, or one of its subagents, has read someone's
    *  personal notes. The harness's own context now holds them, so the chat can
@@ -2999,6 +3146,9 @@ export interface SessionProjection {
    *  Stop that ends it). Its status is idle meanwhile. Agents may not continue
    *  it, and wakes addressed to it wait until the pause ends. */
   paused?: SessionPauseState;
+  /** What is armed to wake this chat later (see `SessionWait`). Absent when
+   *  nothing is; written only through `SessionService.recordWait`. */
+  waits?: SessionWait[];
   /** Durable counter for a bounded provider-error auto-retry chain, keyed to
    *  the prompt the chain replays (`anchorSeq` is the original user message,
    *  so an auto-resume resend keeps it). It outlives the pending wait, which
@@ -3208,6 +3358,9 @@ export interface SessionService {
      *  passes the model/agent its own first turn will use, so a launch-locked
      *  runtime is created with that selection instead of its default. */
     launch?: RuntimeLaunchSelection,
+    /** Server-only: a Relay hand-over between member accounts. Never taken
+     *  from an HTTP body. */
+    relay?: HarnessRelayHandover,
   ): Promise<SessionProjection>;
   /** Cancel is valid only while the previous runtime still owns authority. */
   cancelHarnessSwitch?(sessionId: string): Promise<SessionProjection>;
@@ -3216,7 +3369,11 @@ export interface SessionService {
    *  replacement happens without release proof; a pending transition is
    *  continued instead of starting another. */
   restartRuntime?(sessionId: string): Promise<SessionProjection>;
-  create(input: CreateSessionInput): Promise<SessionRef>;
+  /** Create a chat. `admission.author` is the authenticated person creating
+   *  it; the server records them as the chat's actor before any runtime is
+   *  acquired, so per-person harness selection (a Relay's member accounts)
+   *  already acts for the right person while the first turn is still queued. */
+  create(input: CreateSessionInput, admission?: TurnAdmission): Promise<SessionRef>;
   /** Create a chat and own its whole start. Resolves once the canonical row
    *  and the first turn's queue row are durable — before the runtime exists.
    *  Runtime creation and delivery continue on the server, survive a restart,
@@ -3353,7 +3510,8 @@ export interface SessionService {
   /** Record a verified in-place branch rename without resetting the runtime:
    * the checkout path and execution authority are unchanged. */
   renameWorktreeBranch?(sessionId: string, input: {
-    worktreePath: string;
+    /** The linked checkout; absent for a chat on the project's own checkout. */
+    worktreePath?: string;
     from: string;
     to: string;
   }): Promise<SessionProjection>;
@@ -3361,7 +3519,12 @@ export interface SessionService {
    *  and everything else Polyth made for it; the sessions stay archived on the
    *  checkouts their work targeted. Host-only cleanup: no Space or package facade
    *  exposes it, and a caller checks access by archiving the tree first. */
-  releaseArchivedCheckouts?(sessionId: string): Promise<void>;
+  releaseArchivedCheckouts?(sessionId: string, options?: {
+    /** Release only the archived members whose checkouts hold no work (nothing
+     *  beyond the target branch, a clean tree) and keep every other one; a
+     *  member that cannot be released is skipped instead of failing the call. */
+    onlyEmpty?: boolean;
+  }): Promise<void>;
   /** What moving this chat to another project of its Space would do. Reads
    *  only: a blocked move is reported, not thrown. */
   previewMoveToProject?(sessionId: string, input: SessionMoveInput): Promise<SessionMovePreview>;
@@ -3403,6 +3566,11 @@ export interface SessionService {
    *  hold; in memory only, so the owner re-applies it after a restart. */
   holdRuntime?(sessionId: string, holdId: string, untilMs: number): void;
   releaseRuntimeHold?(sessionId: string, holdId: string): void;
+  /** Server-owned: records that something was armed to wake this chat, or
+   *  that it ended — a durable `session/wait-armed` / `session/wait-ended`
+   *  event, then `waits` on the projection (navigator and chat show it).
+   *  A no-op for an unknown chat or an end that changes nothing. */
+  recordWait?(sessionId: string, change: SessionWaitChange): Promise<void>;
   /** Temporarily holds the queue head while it is edited in the composer. */
   queueEditStart?(sessionId: string, queueId: string): Promise<QueueItemDto>;
   queueEdit?(sessionId: string, queueId: string, text: string): Promise<QueueItemDto>;
@@ -3558,7 +3726,7 @@ export interface SessionReplayPage {
  * the correct icon before it is opened: without `resume`, `runtimeControl`
  * and `harnessTransition` a summary row misreads a provider-limit pause as a
  * failure and a dormant owned epoch as an unexpected runtime change. */
-export const SESSION_SUMMARY_FIELDS = ["id", "spaceId", "projectId", "parentId", "forkOf", "purpose", "origin", "title", "titleSource", "status", "createdAt", "updatedAt", "lastTurnAt", "model", "agent", "resolvedHarnessId", "folderId", "labelIds", "pinned", "branch", "worktreeId", "worktreePath", "autoAcceptSetting", "autoAccept", "autoAcceptAll", "attention", "resume", "paused", "runtimeControl", "harnessTransition", "historyImport", "backgroundWork", "goal", "isolationSummary", "isolationMerge", "sharing", "draftPreview", "repositoryScope"] as const satisfies readonly (keyof SessionProjection)[];
+export const SESSION_SUMMARY_FIELDS = ["id", "spaceId", "projectId", "parentId", "forkOf", "purpose", "origin", "title", "titleSource", "status", "createdAt", "updatedAt", "lastTurnAt", "model", "agent", "resolvedHarnessId", "folderId", "labelIds", "pinned", "branch", "worktreeId", "worktreePath", "autoAcceptSetting", "autoAccept", "autoAcceptAll", "attention", "resume", "paused", "waits", "runtimeControl", "harnessTransition", "historyImport", "backgroundWork", "goal", "isolationSummary", "isolationMerge", "sharing", "draftPreview", "repositoryScope"] as const satisfies readonly (keyof SessionProjection)[];
 
 /** Unread top-level chats per project the rail query returns; enough to show "9+". */
 export const RAIL_STATUS_UNREAD_PER_PROJECT = 10;
@@ -4792,6 +4960,11 @@ export interface HarnessDescriptor {
   accountAllowedUserIds?: readonly string[];
   /** A shared account limited to these Spaces; absent = every Space. */
   accountAllowedSpaceIds?: readonly string[];
+  /** Present only on a family's Relay harness (`<family>-relay`): it runs no
+   *  native process of its own. Resolving it picks one of the acting person's
+   *  member accounts (`HarnessProvider.relay`), and the chat runs on that
+   *  account's harness while its selection stays pinned to the Relay. */
+  relay?: HarnessRelayRef;
   /** How this harness's CLI is found and installed on a POSIX machine Polyth
    *  reaches over SSH. Absent means it can only be set up there by hand. */
   remoteHost?: HarnessRemoteHostSupport;
@@ -4849,7 +5022,7 @@ export interface HarnessAppearanceIdentity {
 }
 /** Stable, process-free presentation metadata for the harness picker. */
 export interface HarnessRosterItem {
-  identity: Pick<HarnessDescriptor, "id" | "name" | "integration" | "accountLabel" | "accounts"> & HarnessAppearanceIdentity;
+  identity: Pick<HarnessDescriptor, "id" | "name" | "integration" | "accountLabel" | "accounts" | "relay"> & HarnessAppearanceIdentity;
   policy: {
     enabled: boolean;
     priority: number;
@@ -5071,6 +5244,21 @@ export interface HarnessContext {
    * Polyth's canonical history still keeps it. The runtime pool sets it only
    * for a provider whose descriptor declares `privateSessions`. */
   privateSession?: true;
+  /** Set by the runtime pool on the context it hands `createRuntime`: what a
+   * local process launched for this chat adds to its environment so the
+   * agent's own shell reaches Polyth's tools (`polyth-tools`). Backends apply
+   * it with `withLaunchEnv` from `@polyth/harness-runtime`, never to a remote
+   * launch. Holds a file path, never a credential. */
+  launchEnv?: HarnessLaunchEnv;
+}
+
+/** See {@link HarnessContext.launchEnv}. */
+export interface HarnessLaunchEnv {
+  /** Variables to set (names never contain KEY, TOKEN or SECRET, which some
+   *  harnesses strip from their shell). */
+  env: Readonly<Record<string, string>>;
+  /** Directories put in front of PATH. */
+  pathPrepend: readonly string[];
 }
 
 /** What Polyth wants an agent to have. Distinct from RuntimeCapabilities, which
@@ -5116,6 +5304,12 @@ export interface AgentCapabilitySupport {
   configScope?: AgentCapabilityScope;
   /** For skill support only: the harness can enforce per-skill tool exclusions. */
   skillDisallowedTools?: boolean;
+  /** For tool support only: how Polyth's own agent tools reach a local
+   * runtime. `stdio` (default) launches the bridge process; `http` hands the
+   * harness the loopback MCP endpoint directly, for a harness that takes HTTP
+   * servers per session but stdio servers only at process launch. A remote
+   * runtime always uses HTTP. */
+  agentToolsTransport?: "stdio" | "http";
 }
 
 /** Who owns volatile application state. Independent of `configScope`. */
@@ -5411,6 +5605,48 @@ export interface HarnessProvider {
    * server's own login. `request.model` is required. Absent: use a project
    * runtime's `completeSmallModel`. */
   completeUtility?(request: SmallModelCompletionRequest): Promise<SmallModelCompletionResult>;
+  /** Only on a Relay harness (`descriptor.relay`). `createRuntime` of a Relay
+   *  is never called: the registry resolves it to a member's provider. */
+  relay?: HarnessRelayPolicy;
+}
+
+/** Identifies a family's Relay harness in the roster. */
+export interface HarnessRelayRef {
+  /** The account family (`HarnessAccountsRef.family`) whose logins it spends. */
+  family: string;
+}
+/** Why a Relay chat moved from one member account to another. */
+export type HarnessRelayCause =
+  /** The running account fell to the person's hand-over level in a limit window. */
+  | "limit"
+  /** The provider refused a turn for rate limits or quota. */
+  | "rate-limited"
+  /** The running account stopped being usable (signed out, removed, access withdrawn). */
+  | "unavailable";
+/** Server-only annotation of a Relay hand-over, kept on the transition and
+ *  copied into its `harness/switched` event for the timeline divider. */
+export interface HarnessRelayHandover {
+  relayId: string;
+  cause: HarnessRelayCause;
+  /** When the account it left refills, if known (epoch ms). */
+  refillsAt?: number;
+}
+/** What a Relay may run right now for one acting person. */
+export interface HarnessRelayPlan {
+  /** Member harness ids in the order to try. The sticky member comes first
+   *  while it still qualifies. Already limited to accounts the context's actor
+   *  may use in the context's Space. Empty when none can run now. */
+  candidates: string[];
+  /** With no candidate: the earliest time a member is expected to refill. */
+  exhaustedUntil?: number;
+}
+export interface HarnessRelayPolicy {
+  /** Never starts a process or a model turn. `stickyId` is the member the
+   *  chat runs on now, if any. */
+  plan(context: HarnessContext, stickyId?: string): Promise<HarnessRelayPlan>;
+  /** A member refused a turn for limits: skip it until `until` (or a
+   *  conservative default when the provider stated no time). */
+  refused(harnessId: string, until?: number): void;
 }
 export interface HarnessRegistry {
   register(provider: HarnessProvider): Disposable;
@@ -5479,6 +5715,8 @@ export type HarnessTransition = {
   /** Submit-time intent for the target leg. Absent means no selection was
    *  stated and the target runtime resolves its own default. */
   launch?: RuntimeLaunchSelection;
+  /** Set when a Relay moved the chat between its member accounts. */
+  relay?: HarnessRelayHandover;
 } & (
   | { phase: "requested"; attempt?: number; lastAttemptAt?: number }
   | { phase: "released"; released: ExecutionReleaseProof; attempt?: number; lastAttemptAt?: number }
@@ -6815,6 +7053,11 @@ export const UI_SLOTS = [
   // (CodeBlockActionSlotMeta) limits it to those fence languages.
   "session.code.actions",
   "sidebar.project.actions", "sidebar.session.actions",
+  // A chat dropped on another checkout of its own project in the navigator.
+  // The host mounts it only while that drop waits for its confirmation, which
+  // the contribution renders. Context: sessionId, projectId, target
+  // ({ worktreePath } | { main: true }), onClose().
+  "session.checkout.move",
   // Package actions for the sessions selected in the navigator, rendered as
   // menu items in the selection bar's menu. Context: sessionIds (string[]),
   // closeMenu(), done() — ends the selection and refreshes the lists — and
@@ -7563,6 +7806,15 @@ export type SecureSafeKind = "env" | "token" | "password";
 export type SecureSafeScope = "global" | "project";
 
 /** Public metadata only. Secret values never cross this contract boundary. */
+/** When an agent's run of a command that uses this key skips the person's
+ *  card. `safe`: always; `auto`: under Auto-Approve or Full access; `full`:
+ *  only under Full access (the default); `always`: never, every use asks,
+ *  even under Full access or an allow rule. A command naming several keys
+ *  takes the strictest. */
+export type SecureSafeApproval = "safe" | "auto" | "full" | "always";
+export const SECURE_SAFE_APPROVALS: readonly SecureSafeApproval[] = ["safe", "auto", "full", "always"];
+export const DEFAULT_SECURE_SAFE_APPROVAL: SecureSafeApproval = "full";
+
 export interface SecureSafeEntryDto {
   id: string;
   handle: string;
@@ -7570,6 +7822,8 @@ export interface SecureSafeEntryDto {
   purpose: string;
   kind: SecureSafeKind;
   scope: SecureSafeScope;
+  /** Absent on entries saved before levels existed: `full`. */
+  approval?: SecureSafeApproval;
   projectId?: string;
   revision: number;
   createdAt: number;
@@ -7628,6 +7882,7 @@ export interface SecureSafeCreateInput {
   purpose?: string;
   kind?: SecureSafeKind;
   scope?: SecureSafeScope;
+  approval?: SecureSafeApproval;
   projectId?: string;
   value: string;
 }
@@ -7638,6 +7893,7 @@ export interface SecureSafePatchInput {
   purpose?: string;
   kind?: SecureSafeKind;
   scope?: SecureSafeScope;
+  approval?: SecureSafeApproval;
   projectId?: string | null;
   /** Missing or blank retains the current write-only value. */
   value?: string;
@@ -7863,7 +8119,11 @@ export type BrowserAction =
   /** Resolve the DOM element under a revisioned screenshot point without
    * interacting with it. Used by the user-facing element picker. */
   | { kind: "point"; target: Extract<BrowserTarget, { point: unknown }> }
+  /** Replace the target's value (fill semantics). */
   | { kind: "type"; target: BrowserTarget; text: string; submit?: boolean }
+  /** Insert text at the caret of the focused element, as live keyboard input
+   * does. Unlike `type`, it never clears the existing value. */
+  | { kind: "insert-text"; text: string }
   | { kind: "press"; key: string }
   | { kind: "scroll"; x?: number; y?: number; target?: BrowserTarget }
   | { kind: "select"; target: BrowserTarget; value: string }

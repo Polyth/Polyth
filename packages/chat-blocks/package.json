@@ -5,6 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/parse.ts",
+    "./page": "./src/page.ts",
+    "./page-surface": "./widgets/PageSurface.tsx",
     "./rule": "./src/rule.ts",
     "./widgets": "./widgets/index.tsx"
   },

@@ -20,10 +20,14 @@ import { compactionRequestState } from "./compactionProgress.ts";
 import { canExecute, useHarnesses } from "./harnessData.ts";
 import { HarnessSettings } from "./HarnessSettingsPage.tsx";
 import { harnessDisplayName, harnessProfileName, harnessTint as tint } from "./presentation.ts";
+import { refillTime } from "./relayModel.ts";
+import { getRelayPrefs, RELAY_PREFS_ID, replaceRelayPrefs, subscribeRelayPrefs, useRelayPrefs } from "./relayPrefs.ts";
 
 export { HarnessSettings };
 
 const api = createApiTransport();
+/** Up to this many runnable harnesses, picker tabs show names beside logos. */
+const NAMED_HARNESS_TABS_MAX = 3;
 
 /** Fills `{token}` placeholders of a message with elements (a logo beside a
  *  name) while the translator keeps word order: the message is translated
@@ -206,16 +210,22 @@ export function HarnessTabs({
   const activeTab = requestedTab && visibleRows.some((row) => row.identity.id === requestedTab)
     ? requestedTab
     : "";
-  const tabs = visibleRows.map((row) => ({
-    id: row.identity.id,
-    label: <Tooltip content={harnessProfileName(row.identity)}>
-      <span className="pkg-harnesses-tab-mark" data-tinted={row.identity.color || row.identity.accountLabel ? "true" : undefined} style={tint(row.identity)}>
-        <ProviderLogo providerID={row.identity.id} providerName={row.identity.defaultName ?? row.identity.name} size="compact" />
-        <span className="sr-only">{harnessProfileName(row.identity)}</span>
-      </span>
-    </Tooltip>,
-    disabled: activeTab !== row.identity.id && busy,
-  }));
+  // A logo alone does not say what the strip is: a lone harness read as an
+  // unlabeled button that did nothing. While a few harnesses share the row each
+  // tab names its harness; a crowded row falls back to logos with tooltips.
+  const namedTabs = visibleRows.length <= NAMED_HARNESS_TABS_MAX;
+  const tabs = visibleRows.map((row) => {
+    const name = harnessProfileName(row.identity);
+    const mark = <span className="pkg-harnesses-tab-mark" data-tinted={row.identity.color || row.identity.accountLabel ? "true" : undefined} style={tint(row.identity)}>
+      <ProviderLogo providerID={row.identity.id} providerName={row.identity.defaultName ?? row.identity.name} size="compact" />
+      <span className={namedTabs ? "pkg-harnesses-tab-name" : "sr-only"}>{name}</span>
+    </span>;
+    return {
+      id: row.identity.id,
+      label: namedTabs ? mark : <Tooltip content={name}>{mark}</Tooltip>,
+      disabled: activeTab !== row.identity.id && busy,
+    };
+  });
   // A session or pin can still point at a harness that became unusable. Its
   // tab is gone, so keep the recovery path without naming the hidden harness:
   // the next turn can move to any visible tab, and Settings can finish setup.
@@ -362,8 +372,47 @@ export function isVisibleHarnessSwitch(from: string, to: string): boolean {
   return from.length > 0 && to.length > 0 && from !== to;
 }
 
-function SwitchMarker({ event, host }: { event: SessionEvent; host: WebPackageHost }) {
+/** The Relay annotation of a `harness/switched` event, if well formed. */
+export function relayHandover(value: unknown): { relayId: string; cause: "limit" | "rate-limited" | "unavailable"; refillsAt?: number } | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const { relayId, cause, refillsAt } = value as Record<string, unknown>;
+  if (typeof relayId !== "string" || !relayId) return undefined;
+  if (cause !== "limit" && cause !== "rate-limited" && cause !== "unavailable") return undefined;
+  return { relayId, cause, ...(typeof refillsAt === "number" && Number.isFinite(refillsAt) ? { refillsAt } : {}) };
+}
+
+/** Why Relay left the previous account, as one clause. */
+export function relayDividerReason(
+  relay: NonNullable<ReturnType<typeof relayHandover>>,
+  from: string,
+  time: string | undefined,
+  t: (key: string, values?: Record<string, string | number>) => string,
+): string {
+  if (relay.cause === "unavailable") return t("harnessruntime.relay.divider.unavailable", { from });
+  const base = relay.cause === "limit" ? "limit" : "rateLimited";
+  return time
+    ? t(`harnessruntime.relay.divider.${base}`, { from, time })
+    : t(`harnessruntime.relay.divider.${base}Unknown`, { from });
+}
+
+export function RelayDivider({ host, event, relay, memberLabel, fromLabel }: { host: WebPackageHost; event: SessionEvent; relay: NonNullable<ReturnType<typeof relayHandover>>; memberLabel: string; fromLabel: string }) {
+  const translate = host.ui.locale.translate;
+  const locale = host.ui.locale.get();
+  const refills = relay.refillsAt !== undefined && relay.refillsAt > event.time ? relay.refillsAt : undefined;
+  const time = refills === undefined ? undefined : refillTime(refills, event.time, locale);
+  const reason = relayDividerReason(relay, fromLabel, time, translate);
+  return <div className="pkg-harnesses-relay-divider" role="separator" aria-label={translate("harnessruntime.relay.divider.aria")}>
+    <span className="pkg-harnesses-relay-divider-text">
+      <strong>{translate("harnessruntime.relay.divider.moved", { member: memberLabel })}</strong>
+      <span>{reason}</span>
+      <span>{translate("harnessruntime.relay.divider.nocache")}</span>
+    </span>
+  </div>;
+}
+
+export function SwitchMarker({ event, host }: { event: SessionEvent; host: WebPackageHost }) {
   const t = hostTranslate(host.ui.locale.translate);
+  const showRelay = useRelayPrefs().showHandovers;
   if (event.type !== "harness/switched") return null;
   const from = String(event.data.from || "");
   const to = String(event.data.to || "");
@@ -372,6 +421,10 @@ function SwitchMarker({ event, host }: { event: SessionEvent; host: WebPackageHo
   if (!isVisibleHarnessSwitch(from, to)) return null;
   const fromLabel = harnessDisplayName(from) || t("runtime.previousHarness");
   const toLabel = harnessDisplayName(to) || t("runtime.newHarness");
+  const relay = relayHandover(event.data.relay);
+  // A Relay hand-over is invisible unless the person opted in (no row, no spacing).
+  if (relay && !showRelay) return null;
+  if (relay) return <RelayDivider host={host} event={event} relay={relay} memberLabel={toLabel} fromLabel={fromLabel} />;
   const closed = event.data.closedLeg as Record<string, unknown> | undefined;
   const leg = event.data.leg as Record<string, unknown> | undefined;
   return <details className="pkg-harnesses-switch-marker">
@@ -503,6 +556,7 @@ export function CompactionProgress({ event, host, sessionId }: { event: SessionE
 
 export default defineWebPackage((host) => () => {
   const off = [
+    host.preferences.register(RELAY_PREFS_ID, { read: getRelayPrefs, write: replaceRelayPrefs, subscribe: subscribeRelayPrefs }),
     host.settings.registerPage({ id: "harnesses", packageId: "harness-runtime", label: "Harnesses", group: "Engineering", order: 15, icon: "cpu", component: ({ settingsTarget }) => <HarnessSettings host={host} settingsTarget={settingsTarget}/> }),
     host.slots.register({ id: "harnesses.model-tabs", slot: "modelPicker.header", order: 10, render: (props) => <HarnessTabs host={host} spaceId={props.spaceId as string | undefined} projectId={props.projectId as string | undefined} sessionId={props.sessionId as string | undefined} harnessSelection={props.harnessSelection as HarnessSelection | undefined} resolvedHarnessId={props.resolvedHarnessId as string | undefined} transition={props.harnessTransition as HarnessTransition | undefined} pendingHarnessSelection={props.pendingHarnessSelection as HarnessSelection | undefined} onSelectHarness={props.onSelectHarness as ((selection: HarnessSelection) => void) | undefined} projectHarnessDefault={props.projectHarnessDefault as HarnessSelection | null | undefined} /> }),
     host.slots.register({ id: "harnesses.transition", slot: "session.composer.before", order: 10, render: (props) => <HarnessTransitionStatus host={host} sessionId={props.sessionId as string | undefined} resolvedHarnessId={props.resolvedHarnessId as string | undefined} transition={props.harnessTransition as HarnessTransition | undefined} /> }),

@@ -112,17 +112,19 @@ test("recovery replaces credentials without changing the browser account namespa
       }
       assert.equal(path, "/api/auth/recover");
       assert.equal((init?.headers as Record<string, string>)["x-polyth-csrf"], csrfToken);
+      // The code identifies the account; the picked login rides along only
+      // for servers older than code-only recovery.
       assert.deepEqual(JSON.parse(String(init?.body)), {
         login: "alice",
         code: "recovery-code",
         password: "replacement passphrase",
       });
-      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      return new Response(JSON.stringify({ ok: true, login: "alice.b" }), { status: 200 });
     };
 
     assert.deepEqual(
-      await recoverAccount(" Alice ", " recovery-code ", "replacement passphrase"),
-      { ok: true },
+      await recoverAccount(" recovery-code ", "replacement passphrase", " Alice "),
+      { ok: true, login: "alice.b" },
     );
     assert.deepEqual(seen, ["/api/auth/status", "/api/auth/recover"]);
     assert.equal(activeBrowserAccountId(), "usr_owner");

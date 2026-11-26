@@ -135,8 +135,8 @@ export default function WebSearchSettingsPage({ host }: { host: WebPackageHost }
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(snapshot.settings);
   const missingTavilyKey = draft.provider === "tavily" && !draft.tavilyCredentialHandle;
-  const providerHint = draft.provider === "duckduckgo"
-    ? copy.providerDuckDuckGoHint
+  const providerHint = draft.provider === "keyless"
+    ? copy.providerFreeHint
     : draft.provider === "tavily" ? copy.providerTavilyHint : copy.providerDescription;
 
   return (
@@ -152,7 +152,7 @@ export default function WebSearchSettingsPage({ host }: { host: WebPackageHost }
             value={draft.provider}
             label={copy.provider}
             disabled={busy}
-            options={[["auto", copy.providerAuto], ["duckduckgo", "DuckDuckGo"], ["tavily", "Tavily"]]}
+            options={[["auto", copy.providerAuto], ["keyless", copy.providerFree], ["tavily", "Tavily"]]}
             onChange={(value) => update("provider", value)}
           />
         </Row>
@@ -218,7 +218,7 @@ export default function WebSearchSettingsPage({ host }: { host: WebPackageHost }
           <Row
             key={provider.id}
             label={provider.name}
-            hint={!provider.requiresCredential ? copy.keyless : provider.configured ? copy.configured : copy.notConfigured}
+            hint={provider.keyed ? copy.configured : provider.requiresCredential ? copy.notConfigured : copy.keyless}
           >
             <Badge tone={provider.available ? "success" : "neutral"} dot>
               {provider.available ? copy.available : copy.unavailable}

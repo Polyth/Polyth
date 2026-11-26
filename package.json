@@ -12,6 +12,7 @@
     "!packages/backend-copilot",
     "!packages/backend-deepseek",
     "!packages/backend-pi",
+    "!packages/backend-vibe",
     "apps/*"
   ],
   "overrides": {

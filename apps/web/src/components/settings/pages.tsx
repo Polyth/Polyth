@@ -26,6 +26,7 @@ import { desktopBridge, onServerHostSurface } from "../../desktopBridge.ts";
 import { confirmAlert } from "../../alerts.ts";
 import { CheckGroup, EmptyState, ErrorState, PageHead, ResetLink, Row, SaveBar, Section, Seg, SizeStepper, Toggle } from "./parts.tsx";
 import CompactShortcutsEditor, { CompactShortcutsReset } from "./CompactShortcutsEditor.tsx";
+import AccentColorPicker from "./AccentColorPicker.tsx";
 import { ShellLayoutSection, SHELL_LAYOUT_ITEMS } from "./ShellLayoutSection.tsx";
 import { blocksOnDevice, OtherDevicesSection, useSettingsDevice, type DeviceBlock } from "./OtherDevicesSection.tsx";
 import {
@@ -366,7 +367,8 @@ function ThemeSection() {
   const [jsonWarning, setJsonWarning] = useState("");
   const [jsonPreviewing, setJsonPreviewing] = useState(false);
   const skinFileRef = useRef<HTMLInputElement>(null);
-  const accentInputRef = useRef<HTMLInputElement>(null);
+  const accentTriggerRef = useRef<HTMLButtonElement>(null);
+  const [accentPickerOpen, setAccentPickerOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
   const phone = useShellMode() === "phone";
@@ -558,17 +560,17 @@ function ThemeSection() {
     setPickerOpen(false);
     endPreview();
   };
-  // A colour well reports every drag step as `input` (previewed) and the
-  // final colour as a native `change` (saved).
-  const commitCustomAccent = useRef(pickAccent);
-  commitCustomAccent.current = pickAccent;
-  useEffect(() => {
-    const input = accentInputRef.current;
-    if (!input) return;
-    const commit = () => commitCustomAccent.current(input.value.toLowerCase());
-    input.addEventListener("change", commit);
-    return () => input.removeEventListener("change", commit);
-  }, []);
+  // The custom colour previews while it is edited and is saved only by the
+  // picker's Select button; closing the picker any other way restores the
+  // saved accent.
+  const closeAccentPicker = () => {
+    setAccentPickerOpen(false);
+    endPreview();
+  };
+  const selectCustomAccent = (accentColor: string) => {
+    setAccentPickerOpen(false);
+    pickAccent(accentColor);
+  };
   const swatches = ACCENT_SWATCHES[currentStyle];
   const shownAccent = (source: string) => accentRoles(source, currentEffective.appearance, currentStyle).accent;
   const customAccent = settings.accentColor && !swatches.some((swatch) => swatch.source === settings.accentColor)
@@ -701,21 +703,38 @@ function ThemeSection() {
               onMouseLeave={endPreview}
             />
           ))}
-          <label
+          <button
+            ref={accentTriggerRef}
+            type="button"
             className={`theme-accent-swatch is-custom${customAccent ? " is-set" : ""}`}
+            aria-label={tr("settings.pages.accentCustom")}
             title={tr("settings.pages.accentCustom")}
+            aria-haspopup="dialog"
+            aria-expanded={accentPickerOpen}
             style={customAccent ? { "--theme-accent-swatch": shownAccent(customAccent) } as CSSProperties : undefined}
-          >
-            <input
-              ref={accentInputRef}
-              type="color"
-              className="sr-only"
-              aria-label={tr("settings.pages.accentCustom")}
-              value={customAccent || currentEffective.tokens.accent}
-              onChange={(event) => previewAccent(event.target.value.toLowerCase())}
-            />
-          </label>
+            onClick={() => (accentPickerOpen ? closeAccentPicker() : setAccentPickerOpen(true))}
+          />
         </div>
+        {accentPickerOpen && (
+          <Popover
+            open
+            onClose={closeAccentPicker}
+            anchorRef={accentTriggerRef}
+            side="down"
+            align="end"
+            compact={phone}
+            ariaLabel={tr("settings.pages.accentCustom")}
+            className="accent-picker-pop"
+            initialFocus=".accent-picker-field"
+          >
+            <AccentColorPicker
+              initial={customAccent || currentEffective.tokens.accent}
+              onPreview={previewAccent}
+              onSelect={selectCustomAccent}
+              rolesFor={(hex) => accentRoles(hex, currentEffective.appearance, currentStyle)}
+            />
+          </Popover>
+        )}
       </Row>
       {customs.length > 0 && (
         <div className="theme-custom-list">

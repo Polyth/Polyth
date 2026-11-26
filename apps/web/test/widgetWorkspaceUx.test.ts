@@ -233,7 +233,7 @@ test("macOS and Windows keep native caption controls without stealing renderer c
   assert.match(chrome, /return \{ frame: false, transparent: true/);
   assert.match(desktop, /dataset\.desktopPlatform = platform/);
   assert.match(desktop, /NATIVE_CONTROL_PLATFORMS = new Set\(\["darwin", "win32"\]\)/);
-  assert.match(desktop, /if \(info\.platform === "win32"\) return <>\{captionZone\}<NativeTitleBarSync \/><\/>/);
+  assert.match(desktop, /if \(platform === "win32"\) return <>\{captionZone\}<NativeTitleBarSync api=\{api\} \/><\/>/);
   assert.match(desktop, /\{info && !NATIVE_CONTROL_PLATFORMS\.has\(info\.platform\) && \(/);
   assert.match(
     styles,

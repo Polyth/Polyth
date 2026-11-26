@@ -27,8 +27,15 @@ export const WEB_SEARCH_REGIONS = [
 ] as const;
 
 export type WebSearchRegion = (typeof WEB_SEARCH_REGIONS)[number];
-export type WebSearchProviderChoice = "auto" | "duckduckgo" | "tavily";
-export type WebSearchProviderId = "duckduckgo" | "tavily";
+/** `keyless` is the free chain: each service in `WEB_SEARCH_KEYLESS_CHAIN`, in order. */
+export type WebSearchProviderChoice = "auto" | "keyless" | "tavily";
+export type WebSearchProviderId = "exa" | "parallel" | "firecrawl" | "tavily" | "bing";
+export const WEB_SEARCH_PROVIDER_IDS: readonly WebSearchProviderId[] = ["exa", "parallel", "firecrawl", "tavily", "bing"];
+/**
+ * Free services that need no key, tried in this order until one answers.
+ * Tavily is called here in its keyless mode; Bing is the last resort.
+ */
+export const WEB_SEARCH_KEYLESS_CHAIN: readonly WebSearchProviderId[] = ["exa", "parallel", "firecrawl", "tavily", "bing"];
 export type WebSearchSafeSearch = "strict" | "moderate" | "off";
 export type WebSearchFreshness = "day" | "week" | "month" | "year";
 
@@ -49,7 +56,9 @@ export const DEFAULT_WEB_SEARCH_SETTINGS: Readonly<WebSearchSettings> = Object.f
   maxResults: 8,
 });
 
-const PROVIDER_CHOICES = new Set<WebSearchProviderChoice>(["auto", "duckduckgo", "tavily"]);
+const PROVIDER_CHOICES = new Set<WebSearchProviderChoice>(["auto", "keyless", "tavily"]);
+/** Choices saved before the keyless chain replaced the single DuckDuckGo provider. */
+const LEGACY_PROVIDER_CHOICES: ReadonlyMap<string, WebSearchProviderChoice> = new Map([["duckduckgo", "keyless"]]);
 const SAFE_SEARCH_VALUES = new Set<WebSearchSafeSearch>(["strict", "moderate", "off"]);
 const REGION_VALUES = new Set<string>(WEB_SEARCH_REGIONS);
 const HANDLE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
@@ -67,9 +76,10 @@ export function parseWebSearchSettings(value: unknown): WebSearchSettings {
   const input = record(value);
   const enabled = input.enabled;
   if (typeof enabled !== "boolean") return invalid("enabled must be a boolean");
-  if (typeof input.provider !== "string" || !PROVIDER_CHOICES.has(input.provider as WebSearchProviderChoice)) {
-    return invalid("provider must be auto, duckduckgo, or tavily");
-  }
+  const provider = typeof input.provider === "string"
+    ? LEGACY_PROVIDER_CHOICES.get(input.provider) ?? input.provider as WebSearchProviderChoice
+    : undefined;
+  if (!provider || !PROVIDER_CHOICES.has(provider)) return invalid("provider must be auto, keyless, or tavily");
   if (typeof input.region !== "string" || !REGION_VALUES.has(input.region)) return invalid("region is not supported");
   if (typeof input.safeSearch !== "string" || !SAFE_SEARCH_VALUES.has(input.safeSearch as WebSearchSafeSearch)) {
     return invalid("safeSearch must be strict, moderate, or off");
@@ -85,7 +95,7 @@ export function parseWebSearchSettings(value: unknown): WebSearchSettings {
   }
   return {
     enabled,
-    provider: input.provider as WebSearchProviderChoice,
+    provider,
     region: input.region as WebSearchRegion,
     safeSearch: input.safeSearch as WebSearchSafeSearch,
     maxResults,

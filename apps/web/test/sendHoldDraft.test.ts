@@ -16,7 +16,6 @@ import {
   inputTime,
   sendPressOutcome,
 } from "../src/sendHold.ts";
-import { SEND_HOLD_RELEASE_MS, createSendHoldPress } from "../src/composer/sendHoldPress.ts";
 import { UI_DEFAULTS, parseUiSettings } from "../src/uiPrefs.ts";
 
 const read = (path: string) => readFileSync(new URL(`../src/${path}`, import.meta.url), "utf8");
@@ -60,11 +59,8 @@ test("the composer arms the hold for the chosen length, or not at all when it is
     "the pointer callbacks read the live preference, not a value frozen at mount");
   const canPark = composer.slice(composer.indexOf("canParkRef.current = () =>"), composer.indexOf("const [parked, setParked]"));
   assert.match(canPark, /sendHoldRef\.current > 0/, "an off gesture can never park a message");
-  const startHold = composer.slice(composer.indexOf("const startHold = useCallback"), composer.indexOf("const onPrimaryPointerDown"));
-  assert.match(startHold, /const holdMs = sendHoldRef\.current;\n\s*if \(holdMs <= 0 \|\| !canParkRef\.current\(\)\) return;/,
-    "an off gesture starts no ring and no timer");
-  assert.match(startHold, /holdPress\.arm\(event\.currentTarget, event\.timeStamp, holdMs\);/,
-    "the press is armed for the person's length, from the press's own time stamp");
+  assert.match(composer, /holdMs: \(\) => \(canParkRef\.current\(\) \? sendHoldRef\.current : 0\),/,
+    "the press is armed for the person's length, and for none when the message cannot be kept");
   assert.doesNotMatch(composer, /SEND_HOLD_MS/, "no hardcoded hold survives in the composer");
 });
 
@@ -85,105 +81,13 @@ test("a press is timed by its input stamps, on the performance clock", () => {
   assert.equal(inputTime(1_763_000_000_000, 1_900), 1_900, "an epoch stamp is not on this clock");
 });
 
-type FakeControl = HTMLElement & { props: Record<string, string> };
-function fakeControl(): FakeControl {
-  const props: Record<string, string> = {};
-  return {
-    props,
-    dataset: {} as DOMStringMap,
-    offsetWidth: 36,
-    style: {
-      setProperty: (name: string, value: string) => { props[name] = value; },
-      removeProperty: (name: string) => { const value = props[name] ?? ""; delete props[name]; return value; },
-    },
-  } as unknown as FakeControl;
-}
-
-test("a quick tap whose lift waited out a busy page still sends", (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
-  let clock = 1_000;
-  let cues = 0;
-  const press = createSendHoldPress({ onFull: () => { cues += 1; }, now: () => clock });
-  const control = fakeControl();
-  press.arm(control, 1_000, 500);
-  // The page is busy for 700 ms after the press; the 60 ms lift waits in the
-  // queue behind it, and the cue's timer may even run first.
-  clock = 1_700;
-  t.mock.timers.tick(700);
-  assert.equal(cues, 1, "the timer only cues");
-  assert.equal(press.release(1_060), "send", "the lift's own stamp says 60 ms: it sends");
-  assert.equal(control.dataset.sendHold, "release");
-});
-
-test("a full hold keeps the draft even when its cue never ran", (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
-  let clock = 1_000;
-  const press = createSendHoldPress({ now: () => clock });
-  press.arm(fakeControl(), 1_000, 500);
-  clock = 1_600;
-  assert.equal(press.release(1_500), "draft", "the hold length itself keeps the draft");
-  assert.equal(press.release(1_600), null, "a press is judged once");
-});
-
-test("the cue comes when the hold is reached, and the ring starts at the press's real age", (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
-  let clock = 1_100;
-  let cues = 0;
-  const press = createSendHoldPress({ onFull: () => { cues += 1; }, now: () => clock });
-  const control = fakeControl();
-  // The pointerdown handler ran 100 ms after the finger touched.
-  press.arm(control, 1_000, 500);
-  assert.equal(control.dataset.sendHold, "arming");
-  assert.equal(control.props["--send-hold-age"], "-100ms", "the ring is drawn from the touch, not the handler");
-  clock = 1_499;
-  t.mock.timers.tick(399);
-  assert.equal(cues, 0, "not before the hold length");
-  clock = 1_500;
-  t.mock.timers.tick(1);
-  assert.equal(cues, 1);
-  assert.equal(control.dataset.sendHold, "full");
-});
-
-test("a press abandoned off Send keeps a draft only once it lasted the hold", (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
-  const press = createSendHoldPress({ now: () => 2_000 });
-  press.arm(fakeControl(), 1_000, 500);
-  assert.equal(press.abandon(1_200), null, "slid off before the hold: nothing");
-  press.arm(fakeControl(), 1_000, 500);
-  assert.equal(press.abandon(1_700), "draft", "left after the hold: the draft is kept");
-  assert.equal(press.release(1_800), null, "nothing is armed any more");
-});
-
-test("a released ring fades where it stood, and the next press starts it over", (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
-  let clock = 1_000;
-  const press = createSendHoldPress({ now: () => clock });
-  const control = fakeControl();
-  press.arm(control, 1_000, 500);
-  clock = 1_200;
-  press.release(1_200);
-  assert.equal(control.dataset.sendHold, "release");
-  t.mock.timers.tick(SEND_HOLD_RELEASE_MS - 1);
-  press.arm(control, 1_300, 500);
-  assert.equal(control.dataset.sendHold, "arming", "a press during the fade arms afresh");
-  t.mock.timers.tick(1);
-  assert.equal(control.dataset.sendHold, "arming", "the old fade cannot clear the new press");
-  clock = 1_350;
-  press.release(1_350);
-  t.mock.timers.tick(SEND_HOLD_RELEASE_MS);
-  assert.equal(control.dataset.sendHold, undefined);
-  assert.equal(control.props["--send-hold-age"], undefined);
-});
-
-test("every Send release is settled from its own stamp before anything else", () => {
+test("Send is one press controller that judges every press from its own input stamps", () => {
   const composer = read("components/Composer.tsx");
-  const up = composer.slice(composer.indexOf("const onPrimaryPointerUp = useCallback"), composer.indexOf("const onPrimaryPointerLeave"));
-  assert.match(up, /finishTouchPress\(event\.currentTarget, event\.timeStamp, event\.clientX, event\.clientY\);\n\s*return;\n\s*\}\n\s*settleHold\(event\.timeStamp\);/,
-    "a mouse release is settled from its own stamp; a touch release goes to the one touch settler with its stamp");
-  const touch = composer.slice(composer.indexOf("const finishTouchPress = useCallback"), composer.indexOf("const cancelTouchPress"));
-  assert.match(touch, /stopTouchEndWatch\(\);\n\s*const held = settleHold\(timeStamp\);/,
-    "a touch release is settled from its own stamp before anything else");
+  assert.match(composer, /return attachSendPress\(button, \{[\s\S]*?onSend: \(\) => sendRef\.current\?\.\(\),\s*onDraft: keepHeldDraft,\s*onCue: showHoldCue,\s*onCueDropped: dropHoldCue,/,
+    "the composer hands the controller its send, draft and cue handlers");
+  assert.equal(composer.match(/ref=\{sendPressRef\}/g)?.length, 2, "both Send buttons carry the one controller");
   assert.doesNotMatch(composer, /performance\.now\(\) - hold/, "no handler-time measurement decides a press");
+  assert.doesNotMatch(composer, /onPrimaryPointer|onPrimaryClick|watchTouchEnd|settleHold/, "no per-handler press logic is left on the buttons");
 });
 
 test("the browser cannot pan a held Send away, which used to drop the press entirely", () => {
@@ -213,7 +117,7 @@ test("the ring is drawn for the chosen length, and its hint disappears when the 
   assert.doesNotMatch(composer, /<circle /, "the ring is a box in Send's own shape, not an SVG circle");
   assert.match(styles, /border-radius: calc\(var\(--send-hold-radius, var\(--radius-round\)\) \+ 4px\);/);
   const field = read("components/settings/SendHoldField.tsx");
-  assert.match(field, /createSendHoldPress\(/, "the settings trial runs the composer's own press");
+  assert.match(field, /attachSendPress\(/, "the settings trial runs the composer's own press");
   assert.match(field, /className="send-hold-ring"/, "and draws the composer's own ring");
   assert.doesNotMatch(read("components/settings/ChatSettingsPage.css"), /chat-hold-ring/,
     "no second copy of the ring drifts out of step with the composer's");
@@ -242,6 +146,8 @@ test("the chat settings model and search know both new rows", async () => {
   assert.equal(chatRowOfItem("chat.sendHoldDuration"), "send");
   assert.ok(CHAT_ROW_ITEMS.send.includes("chat.sendHoldDraft"));
   assert.ok(CHAT_ROW_ITEMS.send.includes("chat.sendHoldDuration"));
+  // Temporary row: the Send press trace is copied from here (sendPress.ts).
+  assert.equal(chatRowOfItem("chat.sendDiagnostics"), "send");
   assert.equal(UI_DEFAULTS.sendHoldDraft, true);
   assert.equal(UI_DEFAULTS.sendHoldDraftMs, SEND_HOLD_DEFAULT_MS);
 });

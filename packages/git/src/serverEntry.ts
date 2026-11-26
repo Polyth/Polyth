@@ -2,8 +2,9 @@ import { createCommitSettingsStore } from "./commitSettingsStore.ts";
 import { isDefaultCommitStyle, type CommitSettings, type CommitStyle } from "./commitSettings.ts";
 import { applyAnonymous, applySigningKey, applySshKey, createSourceControlProfilesStore, getAnonymous, getSigningKey, getSshKey, listSshKeys, profileSshKey, testSshKey } from "./sourceControlProfilesStore.ts";
 import { readManagedMarker, isManagedBranch } from "./managedWorktrees.ts";
+import { createSessionCheckoutMove } from "./sessionCheckoutMoveServer.ts";
 import { rmSync } from "node:fs";
-import { posix, resolve } from "node:path";
+import { basename, posix, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import type {
   AgentRuntime,
@@ -16,8 +17,9 @@ import type {
   SessionProjection,
   SpaceContext,
 } from "@polyth/contracts";
+import type { SessionCheckoutInput } from "./sessionCheckoutMove.ts";
 import type { CreateSessionInput, ProjectService, RouteHandler, SessionAccessLevel, SessionEvent, SessionPersistence, SessionService, SessionStartRequest, StartSessionResult } from "@polyth/contracts";
-import { REMOTE_CAPABILITY, roleAtLeast, sessionAccessAtLeast } from "@polyth/contracts";
+import { REMOTE_CAPABILITY, delegatedChildRunning, roleAtLeast, sessionAccessAtLeast } from "@polyth/contracts";
 import {
   SOURCE_CONTROL_CREDENTIAL_REGISTRY,
   parseSourceControlRemoteUrl,
@@ -359,6 +361,89 @@ export function gitRoutes(deps: {
     await topology.settle(projectId, root);
     deps.worktreesChanged?.(projectId);
   };
+  // ---- branch changes: typed refusals, busy guard, label sync ----
+  const REFUSAL_STATUS: Record<string, number> = {
+    "branch-in-use": 409, "worktree-dirty": 409, "branch-exists": 409, "session-busy": 409,
+    "branch-not-found": 404, "invalid-branch-name": 400,
+  };
+  /** The chats (not archived, in the caller's Space) working in checkout `root`
+   *  of `projectId`, newest first. Only the caller's Space is ever listed. */
+  const sessionsInCheckout = async (
+    projectId: string, root: string, space: import("@polyth/contracts").SpaceContext,
+  ): Promise<SessionProjection[]> => {
+    const project = await projectOf(projectId);
+    const here = resolve(root);
+    const isMain = here === resolve(project.path);
+    return (await deps.sessions.list(projectId))
+      .filter((session) => session.status !== "archived"
+        && (session.spaceId === undefined || session.spaceId === space.spaceId)
+        && (session.worktreePath ? resolve(session.worktreePath) === here : isMain))
+      .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+  };
+  /** A chat whose agent may still be changing the checkout's files. A chat
+   *  whose Polyth-owned runtime was replaced (`epoch-pending` + `owned`) has no
+   *  process left: it is dormant until it is next opened or sent to, and the
+   *  Navigator shows it as "reconnects on use", so it must not block either. */
+  const chatMayBeWorking = (session: SessionProjection): boolean =>
+    delegatedChildRunning(session.status)
+    && !(session.status === "epoch-pending" && session.runtimeControl === "owned");
+  /** A running chat in the checkout must not have its files swapped under it.
+   *  Nothing in the request proves which chat is calling (an agent and a person
+   *  both send the viewed `sessionId`), so no chat is exempt. */
+  const assertCheckoutIdle = async (projectId: string, root: string, space: import("@polyth/contracts").SpaceContext): Promise<void> => {
+    const busy = (await sessionsInCheckout(projectId, root, space)).filter(chatMayBeWorking);
+    if (busy.length) {
+      throw Object.assign(new Error("A chat is running in this checkout. Wait for it to finish before switching branches."), {
+        code: "session-busy", sessionIds: busy.map((session) => session.id),
+      });
+    }
+  };
+  /** Typed refusal -> response body; `null` for anything else (caller rethrows). */
+  const refusalBody = async (
+    error: unknown, projectId: string, root: string, space: import("@polyth/contracts").SpaceContext,
+  ): Promise<{ status: number; body: Record<string, unknown> } | null> => {
+    const refusal = error as Error & { code?: string; branch?: string; worktreePath?: string; count?: number; files?: string[]; sessionIds?: string[] };
+    const status = REFUSAL_STATUS[refusal.code ?? ""];
+    if (!status) return null;
+    const details: Record<string, unknown> = {};
+    if (refusal.branch !== undefined) details.branch = refusal.branch;
+    if (refusal.code === "worktree-dirty") { details.count = refusal.count ?? 0; details.files = refusal.files ?? []; }
+    if (refusal.code === "session-busy") details.sessionIds = refusal.sessionIds ?? [];
+    if (refusal.code === "branch-in-use" && refusal.worktreePath) {
+      // Only a checkout Git lists for this repository is ever echoed back.
+      const listed = (await deps.git.worktrees.list(root).catch(() => [])).find((item) => resolve(item.path) === resolve(refusal.worktreePath!));
+      if (listed) {
+        details.worktreePath = listed.path;
+        details.worktreeLabel = basename(listed.path);
+        details.sessionIds = (await sessionsInCheckout(projectId, listed.path, space).catch(() => [])).map((session) => session.id);
+      }
+    }
+    return { status, body: {
+      error: refusal.code, message: refusal.message, mutationOutcome: "not-started", component: "validation",
+      retryability: "never", refusal: details,
+    } };
+  };
+  /** After the checkout's branch changed: tell the Navigator and bring each
+   *  chat's `branch` scalar along. The cwd is unchanged, so no runtime is released. */
+  const afterBranchChange = async (projectId: string, root: string, space: import("@polyth/contracts").SpaceContext): Promise<void> => {
+    await announceTopology(projectId, (await projectOf(projectId)).path);
+    const rename = deps.sessions.renameWorktreeBranch?.bind(deps.sessions);
+    if (!rename) return;
+    const now = (await deps.git.status(root).catch(() => null))?.branch;
+    if (!now) return;
+    const project = await projectOf(projectId);
+    const isMain = resolve(root) === resolve(project.path);
+    for (const session of await sessionsInCheckout(projectId, root, space)) {
+      if (!session.branch || session.branch === now) continue;
+      try {
+        await rename(session.id, {
+          ...(isMain ? {} : { worktreePath: root }), from: session.branch, to: now,
+        });
+      } catch (error) {
+        console.error("[polyth] session branch label not updated after checkout", error);
+      }
+    }
+  };
   const projectOf = async (projectId: string | null | undefined) => {
     if (!projectId) throw Object.assign(new Error("projectId required"), { code: "invalid-path" });
     const project = await deps.projects.get(String(projectId));
@@ -366,6 +451,10 @@ export function gitRoutes(deps: {
     return project;
   };
   const projectRootOf = async (projectId: string | null | undefined): Promise<string> => (await projectOf(projectId)).path;
+  const checkoutMove = createSessionCheckoutMove({
+    sessions: deps.sessions, ...(deps.scopedSessions ? { scopedSessions: deps.scopedSessions } : {}), git, projectOf, sessionsInCheckout, assertCheckoutIdle, refusalBody,
+    afterBranchChange, announceTopology, ownedBranchForWorktree,
+  });
 
   // One keyed start at a time: a resend that overtakes the original waits for
   // it and then finds its chat instead of allocating a second worktree.
@@ -1019,6 +1108,14 @@ export function gitRoutes(deps: {
       return true;
     }
 
+    if (method === "POST" && (path === "/api/git/session-checkout" || path === "/api/git/session-checkout/preview")) {
+      const request = await body() as unknown as SessionCheckoutInput;
+      if (path.endsWith("/preview")) { json(200, await checkoutMove.preview(request, rc.space)); return true; }
+      const moved = await checkoutMove.move(request, rc.space);
+      json(moved.status, moved.body as Record<string, unknown>);
+      return true;
+    }
+
     if (method !== "POST") return false;
     if (path === "/api/git/identity") {
       requireIdentityAuthority(rc.space);
@@ -1079,9 +1176,23 @@ export function gitRoutes(deps: {
         json(200, { message: await deps.commitMessage(root, rc.space.userId, rc.space) });
         return true;
       case "/api/git/branch":
-        await git.createBranch(root, String(input.name ?? ""), input.from ? String(input.from) : undefined);
+      case "/api/git/checkout": {
+        const name = String(input.name ?? "");
+        const switching = path === "/api/git/checkout" || input.checkout === true;
+        try {
+          if (switching) await assertCheckoutIdle(projectId, root, rc.space);
+          if (path === "/api/git/checkout") await git.checkout(root, name);
+          else await git.createBranch(root, name, input.from ? String(input.from) : undefined, { checkout: input.checkout === true });
+        } catch (error) {
+          const refused = await refusalBody(error, projectId, root, rc.space);
+          if (!refused) throw error;
+          json(refused.status, refused.body);
+          return true;
+        }
+        if (switching) await afterBranchChange(projectId, root, rc.space);
+        if (path === "/api/git/branch") { json(200, { ok: true, branch: name }); return true; }
         break;
-      case "/api/git/checkout": await git.checkout(root, String(input.name ?? "")); break;
+      }
       case "/api/git/stash":
         json(200, await withGitCommitIdentity(commitIdentity, () => git.stashPush(root, input.message ? String(input.message) : undefined)));
         return true;
@@ -1296,6 +1407,9 @@ export function isolationRoutes(deps: {
         ...(typeof input.agent === "string" ? { agent: input.agent } : {}),
         ...(typeof input.sourceSessionId === "string" ? { sourceSessionId: input.sourceSessionId } : {}),
         ...(typeof input.targetBranch === "string" ? { targetBranch: input.targetBranch } : {}),
+        // An audience chosen before the chat exists; the session authority
+        // checks it under the person's own sharing rights.
+        ...(input.sharing && typeof input.sharing === "object" ? { sharing: input.sharing as CreateIsolatedSessionInput["sharing"] } : {}),
         // Its shape is validated by the session service's `start`.
         ...(startRequestInput(input.start) ? { start: startRequestInput(input.start)! } : {}),
         ...(requestedOperationId ? { clientOperationId: accountScopedClientOperationId(requestedOperationId, space.userId) } : {}),
@@ -1474,6 +1588,8 @@ export const GIT_REMOTE_ACCESS: RemoteAccessPolicy = {
     { methods: ["POST"], path: "/api/git/identity", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/worktrees", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/worktrees/remove", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/git/session-checkout", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
+    { methods: ["POST"], path: "/api/git/session-checkout/preview", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/worktrees/sessions", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/isolation/sessions", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },
     { methods: ["POST"], path: "/api/isolation/:sessionId/merge", capability: REMOTE_CAPABILITY.gitWrite, mutation: true },

@@ -114,6 +114,32 @@ test("interface styles keep quiet text readable and speak one selection language
   assert.match(css, /\.session-row \.session-btn::before \{\s*background: transparent !important;/);
 });
 
+test("the current project on the left rail is the look's plate alone, unless that plate is clear", async () => {
+  const css = stripComments(await read("../src/shellLooks.css"));
+  const shared = 'body[data-shell-look]:not([data-shell-look="standard"]):not(#\\#)';
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({ sel: m[1]!.trim(), body: m[2]! }));
+  const tile = rules.filter((r) => r.sel.includes(".sidebar-project-rail-item.active") && /box-shadow:(?!\s*none\b)/.test(r.body));
+  assert.deepEqual(tile.map((r) => r.sel), [`${shared} .sidebar-project-rail-item.active`], "one shared rule draws the tile's edge");
+  assert.match(tile[0]!.body, /background: var\(--look-rail-select\) !important;/);
+  assert.match(tile[0]!.body, /box-shadow: var\(--look-rail-select-edge\) !important;/);
+  // No ring or carved shadow around the icon by default, on the look's own plate…
+  assert.match(css, /--look-rail-select: var\(--look-select\);\s*--look-rail-select-edge: none;/);
+  // …but a look whose plate is clear keeps its edge, or nothing marks the project.
+  for (const look of SHELL_LOOKS) {
+    const block = rules.find((r) => r.sel === `body[data-shell-look="${look}"]:not(#\\#)`)?.body ?? "";
+    const edge = block.match(/--look-select-edge:\s*([^;]+);/)?.[1]?.trim();
+    if (/--look-select:\s*transparent;/.test(block) && edge && edge !== "none") {
+      assert.match(block, /--look-rail-select-edge: var\(--look-select-edge\);/, `${look}'s rail project would carry no mark`);
+    }
+  }
+  // A project tile hovers in the rail's own hover, the look's hover unless a look deepens it…
+  assert.match(css, /--look-rail-select-edge: none;\s*--look-rail-hover: var\(--look-hover\);/);
+  assert.match(rules.find((r) => r.sel === `${shared} .sidebar-project-rail-item`)?.body ?? "", /^\s*--look-hover: var\(--look-rail-hover\);\s*$/);
+  // …as Monolith Reverse light does: its 5% wash was lost round the icon on the near-white plane.
+  const reverseLight = rules.filter((r) => r.sel === 'html.light body[data-shell-look="monolith-reverse"]:not(#\\#)').map((r) => r.body).join("");
+  assert.match(reverseLight, /--look-rail-hover: var\(--look-well\);/);
+});
+
 test("the suggested prompt stays a line in every look, in its quiet ink", async () => {
   const css = stripComments(await read("../src/shellLooks.css"));
   const shared = 'body[data-shell-look]:not([data-shell-look="standard"]):not(#\\#)';
@@ -207,9 +233,12 @@ test("the launcher column keeps its idle frame under a window, and a docked wind
   // a border there would nudge every launcher.
   assert.match(css, new RegExp(`${prefix} \\.railbar > \\.plugin-strip::before \\{\\s*background: var\\(--look-rail-seam\\);`));
   assert.equal(/plugin-strip \{[^}]*border-inline-start: 1px/.test(css), false, "the strip draws its seam as a border again");
-  // A docked window needs no material: it sits in the frame the rail has idle.
+  // By default a docked window adds no material: it sits in the frame the rail
+  // has idle. A look whose idle rail is a line or a bare sheet has no host
+  // fill, so it paints its own column material (--look-rail) on the pane.
   assert.match(css, new RegExp(`${dock} > \\.rail \\{[^}]*background: transparent !important;[^}]*backdrop-filter: var\\(--look-shell-blur, none\\) !important;[^}]*border: 0 !important;`));
   assert.equal(css.includes("--look-dock"), false, "the docked window has a material of its own again");
+  assert.match(css, /body:is\(\[data-shell-look="line"\], \[data-shell-look="editorial"\], \[data-shell-look="paper"\]\):not\(#\\#\):not\(#\\#\) \.railbar:[^{]*> \.rail:[^{]*\{\s*background: var\(--look-rail\) !important;/);
   // An island's end padding sits on the strip, so the strip fills the frame.
   for (const look of ["air", "obsidian"]) {
     assert.match(css, new RegExp(`body\\[data-shell-look="${look}"\\]:not\\(#\\\\#\\) \\{[^}]*--look-strip-pad: \\d+px;[^}]*--look-strip-card: `), look);
@@ -463,6 +492,32 @@ test("Obsidian's project marks are glass in the project's own colour, never the 
   assert.doesNotMatch(css, new RegExp(`${look} [^{]*\\.project-glyph[^{]*\\{[^}]*\\scolor:`));
 });
 
+test("Obsidian's conversation stays in the flow: the deep drop belongs to the chrome and to floating windows", async () => {
+  const css = stripComments(await read("../src/shellLooks.css"));
+  const look = 'body\\[data-shell-look="obsidian"\\]:not\\(#\\\\#\\)';
+  const tokens = css.match(new RegExp(`${look} \\{[^}]*\\}`))?.[0] ?? "";
+  const inline = tokens.match(/--look-glass-inline-shadow:\s*([^;]+);/)?.[1] ?? "";
+  // A short drop, not the chrome's wide one and not none at all.
+  assert.match(inline, /^var\(--look-glass-highlight\), 0 10px 24px -20px /);
+  assert.equal(inline.includes("--look-glass-drop"), false, "the conversation took the chrome's drop");
+  // The rimmed-glass role list still gives every surface the same edge, but a
+  // surface inside the conversation takes the theme's own card step: a code
+  // block and a prompt are written on the canvas, not lifted off it.
+  const rules = [...css.matchAll(new RegExp(`${look} ([^{}]*)\\{([^{}]*)\\}`, "g"))].map((match) => ({ selector: match[1]!, body: match[2]! }));
+  const role = rules.find((rule) => rule.selector.includes(".md-code-block") && rule.body.includes("--look-glass-inline-shadow")) ?? { selector: "", body: "" };
+  assert.match(role.body, /box-shadow: var\(--look-glass-inline-shadow\) !important;/);
+  for (const member of [".md-code-block", ".msg.user .bubble", ".question-card", ".isolation-card", ".turn-rate-limit"]) {
+    assert.ok(role.selector.includes(member), `${member} is not an in-flow glass surface`);
+  }
+  for (const floating of [".sidebar", ".railbar", ".ui-popover"]) {
+    assert.equal(role.selector.includes(floating), false, `${floating} hovers; it keeps the drop`);
+  }
+  // The chrome and the floating surfaces keep the deep drop.
+  const chrome = rules.find((rule) => rule.selector.includes(".desktop-session-status-trigger"));
+  assert.ok(chrome, "the chrome lost its glass role");
+  assert.match(chrome.body, /box-shadow: var\(--look-glass-shadow\) !important;/);
+});
+
 test("Send and Stop share each look's corner, with no glow or ring", async () => {
   const css = stripComments(await read("../src/shellLooks.css"));
   for (const look of ["paper", "editorial"]) {
@@ -471,4 +526,31 @@ test("Send and Stop share each look's corner, with no glow or ring", async () =>
   assert.match(css, /body\[data-shell-look="line"\]:not\(#\\#\) :is\(\.send, \.stop\) \{[^}]*--look-r/);
   assert.doesNotMatch(css, /\.send:not\(:disabled\) \{[^}]*box-shadow:\s*0 /, "no Send glows");
   assert.doesNotMatch(css, /transform:\s*scale\(0\.82\)/, "Send keeps its size");
+});
+
+test("the tree lights the active project's row in every style until one of its chats is current", async () => {
+  const [base, fluent, looks] = await Promise.all([
+    read("../src/styles.css").then(stripComments),
+    read("../src/fluentTheme.css").then(stripComments),
+    read("../src/shellLooks.css").then(stripComments),
+  ]);
+  const row = ".project-tree-node:not(:has(.session-row.active)) > .project-card-shell";
+  const plate = `${row}:has(> .project-card.active)::before`;
+  const rule = (css: string, selector: string) => [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+    .filter((m) => m[1]!.split(/,(?![^(]*\))/).some((part) => part.trim().endsWith(selector)))
+    .map((m) => m[2]!).join("\n");
+  // Scoped to the tree: the rail's focused-project header is the same card.
+  assert.match(rule(base, plate), /background: var\(--surface-overlay-strong\);[^]*opacity: 1;/, "base plate");
+  assert.match(rule(fluent, plate), /background: var\(--surface-overlay-hover\)/, "Fluent plate");
+  assert.match(rule(fluent, `${row}:has(> .project-card.active)::after`), /background: var\(--accent\)/, "Fluent pill");
+  assert.match(rule(looks, plate), /background: var\(--look-select\) !important;/, "a look's plate");
+  assert.match(rule(looks, `${row} > .project-card.active::before`), /background: var\(--text\)/, "Paper's bar");
+  const editorial = rule(looks, `${row} > .project-card.active .project-name`);
+  assert.match(editorial, /text-decoration: underline;/, "Editorial's underline");
+  // The underline sits below the clipped one-line box: it needs room inside the
+  // clip, given back to the row by an equal negative margin.
+  for (const name of [`${row} > .project-card.active .project-name`, ".session-row.active .session-title-text"]) {
+    const room = rule(looks, name);
+    assert.match(room, /padding-block-end: (\d+)px;\s*margin-block-end: -\1px;/, `Editorial clips the rule under ${name}`);
+  }
 });

@@ -119,8 +119,12 @@ shape of GitHub's releases API, for hosts without GitHub access.
 When a systemd or launchd service from `polyth service install` runs this install
 (its command names this install's `bin/polyth.mjs`; a `polyth.service` that runs
 another install is left alone), the update restarts it and waits up to ten minutes
-for the server to answer with the new version. The server drains the turns running
-at SIGTERM before it exits. If it does not come back, the previous release is put
+for the server to answer with the new version. At SIGTERM the server waits only for
+turns running on a shared OpenCode runtime; a turn of any other harness (Claude
+Code, Codex, Pi, …) is cut, and after the restart Polyth closes it and continues
+it on a fresh runtime (a scheduled agent's run continues itself within about a
+minute when nothing else does). `polyth update` does not wait for running turns
+before it restarts the service. If it does not come back, the previous release is put
 back and restarted. Without such a service the update says that the server still
 runs the old release until it is restarted; the running server keeps its files, but
 the web assets it serves already belong to the new release. One update runs at a
@@ -278,6 +282,9 @@ with `npm run build:mobile`, then `npm run mobile:open:android` or
   requests act as the active owner without signing in. It never applies to Polyth Link
   ingress, and identity and setup endpoints keep their CSRF and origin checks.
 - `npm run auth:break-glass -- --help` is offline owner password recovery for a stopped
-  server.
+  server. `inspect` lists the installation ID and the local logins (read-only);
+  run with only `--data-dir DIR` on a terminal, it asks for the login, a typed
+  `RESET` and the new password twice. Polyth Desktop ships the same tool:
+  `polyth --target desktop server break-glass` with the app quit.
 - [`polyth`](../dev/cli.md) is a command-line client for a running server or Polyth
   Desktop.

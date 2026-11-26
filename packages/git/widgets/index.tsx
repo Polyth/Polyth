@@ -2,6 +2,7 @@ import "./styles.css";
 import "./source-control.css";
 import "./source-control-settings.css";
 import "./source-control-phone.css";
+import "./move-to-checkout.css";
 import { createElement } from "react";
 import { resolveSourceControlContext } from "@polyth/contracts/source-control";
 import type { SessionStatus } from "@polyth/contracts";
@@ -17,6 +18,8 @@ import ProjectGitIdentity from "./ProjectGitIdentity.tsx";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { IsolationCard, IsolationListBadge, IsolationLock } from "./IsolationCard.tsx";
 import { IsolationMenuAction } from "./IsolationMenuAction.tsx";
+import MoveToCheckoutDialog from "./MoveToCheckoutDialog.tsx";
+import { MoveToCheckoutLayer, MoveToCheckoutMenuAction } from "./MoveToCheckoutLayer.tsx";
 import { IsolationBulkAction, type BulkReport } from "./IsolationBulkAction.tsx";
 import {
   gitContextSnapshot,
@@ -35,6 +38,13 @@ import {
 } from "./sourceControlRemote.ts";
 import { reconcileSourceControlIdentity } from "./sourceControlRuntime.ts";
 import { getGitPrefs, replaceGitPrefs, subscribeGitPrefs } from "./gitPrefs.ts";
+
+function moveTargetOf(value: unknown): { worktreePath: string } | { main: true } | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as { worktreePath?: unknown; main?: unknown };
+  if (raw.main === true) return { main: true };
+  return typeof raw.worktreePath === "string" && raw.worktreePath ? { worktreePath: raw.worktreePath } : null;
+}
 
 export default defineWebPackage((host) => () => {
   // The store notifies on every applied event batch, so an unfiltered listener
@@ -117,6 +127,30 @@ export default defineWebPackage((host) => () => {
           ...(typeof closeMenu === "function" ? { closeMenu: closeMenu as () => void } : {}),
         })
         : null,
+    }),
+    host.slots.register({
+      slot: "sidebar.session.actions",
+      id: "git-move-to-checkout",
+      order: 21,
+      render: ({ sessionId, closeMenu }) => typeof sessionId === "string"
+        ? createElement(MoveToCheckoutMenuAction, {
+          key: sessionId,
+          sessionId,
+          ...(typeof closeMenu === "function" ? { closeMenu: closeMenu as () => void } : {}),
+        })
+        : null,
+    }),
+    host.slots.register({ slot: "app.layers", id: "git-move-to-checkout-layer", order: 20, render: () => createElement(MoveToCheckoutLayer, { host }) }),
+    host.slots.register({
+      slot: "session.checkout.move",
+      id: "git-checkout-move",
+      order: 10,
+      render: ({ sessionId, projectId, target, onClose }) => {
+        const dest = moveTargetOf(target);
+        return typeof sessionId === "string" && typeof projectId === "string" && dest && typeof onClose === "function"
+          ? createElement(MoveToCheckoutDialog, { key: sessionId, sessionId, projectId, target: dest, onClose: onClose as () => void, host })
+          : null;
+      },
     }),
     host.slots.register({
       slot: "sidebar.sessions.bulk.actions",

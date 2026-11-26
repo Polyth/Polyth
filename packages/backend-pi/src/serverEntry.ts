@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { HarnessContext, HarnessProvider, HarnessRegistry, RuntimeSessionBinding, SmallModelCompletionRequest } from "@polyth/contracts";
-import { agentBetaEnabled, captureCapabilityLaunch, provisioningTarget, releaseHarnessProcessExecution } from "@polyth/harness-runtime";
+import { agentBetaEnabled, captureCapabilityLaunch, provisioningTarget, releaseHarnessProcessExecution, withLaunchEnv } from "@polyth/harness-runtime";
 import { discoverHarnessExecutable, harnessExecutableChildEnv } from "@polyth/harness-runtime/executable-discovery";
 import { npmCliInstallCommand } from "@polyth/harness-runtime/installers";
 import { probeRemoteHarness, readRemoteFileBytes, remoteHarnessConfigSource, remoteHarnessLaunch, resolveRemoteHarnessHost, type RemoteProcessHost } from "@polyth/harness-runtime/remote-host";
@@ -107,7 +107,8 @@ const connectPi = async (
     return { rpc: createPiCapabilitySync(context, rpc, harnessId), command: PI_REMOTE_BINARY, env: {} as NodeJS.ProcessEnv };
   }
   const command = await resolvePiBinary();
-  const env = await piEnv(command, options.account);
+  // The chat's shell gets `polyth-tools` (HarnessContext.launchEnv).
+  const env = withLaunchEnv(await piEnv(command, options.account), context);
   const staged = piOverlays.peek(context, harnessId);
   const toolProjection = staged
     && options.workerPath

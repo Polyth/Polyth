@@ -25,6 +25,11 @@ import {
 import {
     allowsInteractiveProviderAuth,
     harnessUsableByUser,
+    type HarnessContext,
+    type HarnessDescriptor,
+    type HarnessDiscovery,
+    type HarnessProbe,
+    type HarnessRelayPlan,
     normalizeHarnessAccessList,
     type DeploymentProfile,
     type Disposable,
@@ -33,6 +38,21 @@ import {
     type HarnessRegistry,
     type RouteHandler,
 } from "@polyth/contracts";
+import {
+    chooseRelayMembers,
+    defaultRelaySettings,
+    judgeMember,
+    readRelayHeadroom,
+    RELAY_DEFAULT_REFUSAL_MS,
+    RELAY_HANDOVER_LEVELS,
+    RELAY_MAX_MEMBERS,
+    RELAY_MIN_MEMBERS,
+    RELAY_ORDERS,
+    tightestWindow,
+    type RelayMemberView,
+    type RelaySettings,
+    type RelayView,
+} from "./relay.ts";
 
 export interface HarnessAccount {
     /** Directory slug; also the suffix of the harness id. */
@@ -64,6 +84,19 @@ export interface HarnessAccountStatus {
      *  report; signed-in logins only, absent when the CLI does not say. */
     expiresAt?: number;
 }
+
+/** A stored or submitted Relay setting, repaired to a valid one. */
+export const normalizeRelaySettings = (value: unknown): RelaySettings => {
+    const raw = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+    const members = Array.isArray(raw.members)
+        ? [...new Set(raw.members.filter((id): id is string => typeof id === "string" && id.length <= 64))].slice(0, RELAY_MAX_MEMBERS)
+        : [];
+    return {
+        members,
+        order: raw.order === "manual" ? "manual" : "expire-first",
+        handoverAt: RELAY_HANDOVER_LEVELS.includes(raw.handoverAt as number) ? raw.handoverAt as number : 0.05,
+    };
+};
 
 const ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
 const MAX_ACCOUNTS = 16;
@@ -110,20 +143,34 @@ export function createHarnessAccountStore(options: {
         return next;
     };
     const dir = (account: Pick<HarnessAccount, "id">) => join(root, account.id);
-    const list = async (): Promise<ResolvedHarnessAccount[]> => {
+    // The file is the account array; once anyone saves Relay settings it is
+    // `{ accounts, relays }`. Both shapes load, unknown fields are ignored.
+    const readShape = async (): Promise<{ rows: unknown[]; relays: Record<string, RelaySettings> }> => {
         let parsed: unknown;
         try {
             parsed = JSON.parse(await readFile(file, "utf8"));
         } catch {
-            return [];
+            return { rows: [], relays: {} };
         }
-        if (!Array.isArray(parsed)) return [];
+        if (Array.isArray(parsed)) return { rows: parsed, relays: {} };
+        if (!parsed || typeof parsed !== "object") return { rows: [], relays: {} };
+        const shape = parsed as { accounts?: unknown; relays?: unknown };
+        const relays: Record<string, RelaySettings> = {};
+        if (shape.relays && typeof shape.relays === "object" && !Array.isArray(shape.relays)) {
+            for (const [userId, value] of Object.entries(shape.relays)) {
+                if (OWNER.test(userId)) relays[userId] = normalizeRelaySettings(value);
+            }
+        }
+        return { rows: Array.isArray(shape.accounts) ? shape.accounts : [], relays };
+    };
+    const list = async (): Promise<ResolvedHarnessAccount[]> => {
+        const parsed = (await readShape()).rows;
         const seen = new Set<string>();
         return parsed.flatMap((row): ResolvedHarnessAccount[] => {
             const id = (row as { id?: unknown })?.id;
             const name = normalizeAccountName((row as { name?: unknown })?.name);
             const owner = (row as { ownerUserId?: unknown })?.ownerUserId;
-            if (typeof id !== "string" || !ID.test(id) || id === "default" || !name || seen.has(id)) return [];
+            if (typeof id !== "string" || !ID.test(id) || id === "default" || id === "relay" || !name || seen.has(id)) return [];
             // A malformed owner must never turn a private login into a shared one.
             if (owner !== undefined && (typeof owner !== "string" || !OWNER.test(owner))) return [];
             // Nor may a malformed allowlist open a restricted one to everyone.
@@ -138,16 +185,20 @@ export function createHarnessAccountStore(options: {
         });
     };
     const save = async (accounts: readonly HarnessAccount[]) => {
+        await writeAll(accounts, (await readShape()).relays);
+    };
+    const writeAll = async (accounts: readonly HarnessAccount[], relays: Record<string, RelaySettings>) => {
         await mkdir(storageDir, { recursive: true });
         const tmp = `${file}.${process.pid}.tmp`;
-        await writeFile(tmp, JSON.stringify(accounts.map(({ id, name, ownerUserId, allowedUserIds, allowedSpaceIds }) => ({
+        const rows = (accounts.map(({ id, name, ownerUserId, allowedUserIds, allowedSpaceIds }) => ({
             id,
             name,
             ...(ownerUserId ? { ownerUserId } : {
                 ...(allowedUserIds?.length ? { allowedUserIds } : {}),
                 ...(allowedSpaceIds?.length ? { allowedSpaceIds } : {}),
             }),
-        })), null, 2), { mode: 0o600 });
+        })));
+        await writeFile(tmp, JSON.stringify(Object.keys(relays).length ? { accounts: rows, relays } : rows, null, 2), { mode: 0o600 });
         await rename(tmp, file);
     };
     /** Whose login a (possibly removed) account directory holds: `null` for
@@ -163,7 +214,7 @@ export function createHarnessAccountStore(options: {
         const base = slugBase(name);
         for (let n = 1; ; n++) {
             const id = n === 1 ? base : `${base}-${n}`;
-            if (taken.has(id) || id === "default") continue;
+            if (taken.has(id) || id === "default" || id === "relay") continue;
             const owner = await directoryOwner(id);
             if (owner === null || owner === (ownerUserId ?? "")) return id;
         }
@@ -184,6 +235,14 @@ export function createHarnessAccountStore(options: {
         family,
         list,
         dir,
+        /** One person's Relay settings (defaults when none are stored). */
+        relay: async (userId: string): Promise<RelaySettings> => (await readShape()).relays[userId] ?? defaultRelaySettings(),
+        setRelay: (userId: string, settings: RelaySettings) => serial(async () => {
+            if (!OWNER.test(userId)) throw coded("Invalid person", "invalid-input");
+            const { relays } = await readShape();
+            await writeAll(await list(), { ...relays, [userId]: normalizeRelaySettings(settings) });
+            return normalizeRelaySettings(settings);
+        }),
         add: (name: string, apply: () => Promise<void>, ownerUserId?: string) => serial(async () => {
             const accounts = await list();
             if (accounts.length >= MAX_ACCOUNTS) throw coded(`Too many ${label} accounts`, "invalid-input");
@@ -224,6 +283,13 @@ export function createHarnessAccountStore(options: {
             const accounts = await list();
             if (!accounts.some((row) => row.id === id)) throw coded(`${label} account not found`, "not-found");
             await commit(accounts, accounts.filter((row) => row.id !== id), apply);
+            // The account leaves every person's Relay.
+            const gone = `${family}-${id}`;
+            const { relays } = await readShape();
+            if (Object.values(relays).some((settings) => settings.members.includes(gone))) {
+                await writeAll(await list(), Object.fromEntries(Object.entries(relays).map(([userId, settings]) =>
+                    [userId, { ...settings, members: settings.members.filter((member) => member !== gone) }])));
+            }
         }),
     };
 }
@@ -351,6 +417,25 @@ export interface HarnessAccountsRow extends HarnessAccount {
     status: HarnessAccountStatus;
 }
 
+/** What the harness package's `/api/harnesses/relays` routes need of a family. */
+export interface RelayFamilyHandle {
+    id: string;
+    family: string;
+    label: string;
+    view(actor: RelayActor, context: HarnessContext): Promise<RelayView>;
+    save(actor: RelayActor, body: Record<string, unknown>, context: HarnessContext): Promise<RelayView>;
+    /** The actor's Relay has `RELAY_MIN_MEMBERS` members they may use, so the
+     *  harness list and the picker show it to them. Cheap: no member probes. */
+    listed(actor: RelayActor): Promise<boolean>;
+}
+export interface RelayActor {
+    userId: string;
+    spaceId: string;
+    allowedHarnesses: readonly string[] | null;
+}
+/** Families whose Relay is live in this process, by Relay id. */
+export const relayFamilies = new Map<string, RelayFamilyHandle>();
+
 /** Give a provider its account identity without changing how it runs. */
 const decorate = (
     provider: HarnessProvider,
@@ -419,7 +504,161 @@ export function createHarnessAccountFamily(options: HarnessAccountFamilyOptions)
     const ref: HarnessAccountsRef = { family, endpoint };
     const registrations = new Map<string, { account?: ResolvedHarnessAccount; registration: Disposable }>();
     let enabled = false;
-    const register = (account?: ResolvedHarnessAccount) => {
+    const relayId = `${family}-relay`;
+    const refusedUntil = new Map<string, number>();
+    const actorOf = (context: HarnessContext): RelayActor | undefined => {
+        const userId = context.actorUserId ?? context.space?.userId;
+        return userId ? {
+            userId,
+            spaceId: context.spaceId,
+            allowedHarnesses: (context.space as { allowedHarnesses?: readonly string[] | null } | undefined)?.allowedHarnesses ?? null,
+        } : undefined;
+    };
+    /** A registered harness of this family the actor may use here. */
+    const accessible = (id: string, actor: RelayActor): HarnessDescriptor | undefined => {
+        if (id === relayId) return undefined;
+        const descriptor = options.registry().get(id)?.descriptor;
+        if (!descriptor || descriptor.accounts?.family !== family) return undefined;
+        return harnessUsableByUser(descriptor, actor.userId, actor.allowedHarnesses, actor.spaceId) ? descriptor : undefined;
+    };
+    const probeReady = (probe: HarnessProbe) => probe.installed && probe.healthy && probe.authenticated !== false
+        && !["starting", "auth-required", "setup-required", "partially-configured", "incompatible", "offline", "not-installed"].includes(probe.state ?? "");
+    /** Which of `ids` are accessible, and of those which are signed in and
+     *  healthy. Without `probe`, every accessible member counts as ready: the
+     *  hot paths (a plan on every Relay send, the Relay's own probe) must not
+     *  run member CLIs; the registry's cached readiness check rejects a
+     *  signed-out member when it resolves the plan's candidates. */
+    const usableOf = async (ids: readonly string[], actor: RelayActor, context: HarnessContext, probe = false) => {
+        const open = ids.filter((id) => accessible(id, actor));
+        if (!probe) return { open: new Set(open), ready: new Set(open) };
+        const ready = new Set<string>();
+        await Promise.all(open.map(async (id) => {
+            try {
+                if (probeReady(await options.registry().get(id)!.probe(context))) ready.add(id);
+            } catch { /* unreadable = not usable */ }
+        }));
+        return { open: new Set(open), ready };
+    };
+    const evaluate = async (context: HarnessContext, actor: RelayActor, settings: RelaySettings, sticky?: string, probe = false) => {
+        const { open, ready } = await usableOf(settings.members, actor, context, probe);
+        const members = settings.members.filter((id) => open.has(id));
+        const headroom = await readRelayHeadroom(members);
+        const input = { members, headroom, refusedUntil, usable: ready, ...(sticky ? { sticky } : {}), order: settings.order, handoverAt: settings.handoverAt, now: Date.now() };
+        return { input, open, members, plan: chooseRelayMembers(input) };
+    };
+    const planFor = async (context: HarnessContext, stickyId?: string): Promise<HarnessRelayPlan> => {
+        const actor = actorOf(context);
+        if (!actor || !store) return { candidates: [] };
+        return (await evaluate(context, actor, await store.relay(actor.userId), stickyId)).plan;
+    };
+    const relayProvider = (): HarnessProvider => ({
+        descriptor: {
+            id: relayId,
+            name: `${options.label} · Relay`,
+            integration: "relay",
+            priority: 1000,
+            autoSelect: false,
+            relay: { family },
+        },
+        relay: {
+            plan: planFor,
+            refused: (harnessId, until) => { refusedUntil.set(harnessId, until ?? Date.now() + RELAY_DEFAULT_REFUSAL_MS); },
+        },
+        probe: async (context): Promise<HarnessProbe> => {
+            const actor = actorOf(context);
+            const settings = actor && store ? await store.relay(actor.userId) : undefined;
+            const usable = actor && settings ? (await usableOf(settings.members, actor, context)).ready.size : 0;
+            return usable > 0
+                ? { harnessId: relayId, installed: true, authenticated: true, healthy: true, state: "ready" }
+                : { harnessId: relayId, installed: true, authenticated: "unknown", healthy: true, state: "setup-required", message: "Add accounts to Relay in Settings" };
+        },
+        // The picker's model catalog is the first member Relay would run on now.
+        discover: async (context): Promise<HarnessDiscovery> => {
+            const actor = actorOf(context);
+            if (!actor || !store) return {};
+            const settings = await store.relay(actor.userId);
+            const { plan, members } = await evaluate(context, actor, settings);
+            const first = plan.candidates[0] ?? members[0];
+            const target = first ? options.registry().get(first) : undefined;
+            if (!target?.discover) return {};
+            const discovery = await target.discover(context);
+            // The picker keeps only models owned by the harness it shows, so a
+            // member's catalog is re-owned by the Relay; the member runtime
+            // resolves the chosen model against its own catalog.
+            const models = discovery.catalog?.models;
+            return models
+                ? { ...discovery, catalog: { ...discovery.catalog, models: models.map((model) => ({ ...model, harnessId: relayId })) } }
+                : discovery;
+        },
+        createRuntime: async () => { throw coded(`${options.label} Relay resolves to one of its member accounts and runs no runtime of its own`, "runtime-unavailable"); },
+    });
+    const viewFor = async (actor: RelayActor, context: HarnessContext): Promise<RelayView> => {
+        const accounts = await store!.list();
+        const rows = [{ harnessId: family, ownerUserId: undefined as string | undefined }, ...accounts]
+            .filter((row) => accessible(row.harnessId, actor));
+        const settings = await store!.relay(actor.userId);
+        // Settings and Usage read this on demand: probing shows signed-out members.
+        const { input, open, members, plan } = await evaluate(context, actor, settings, undefined, true);
+        const headroom = input.headroom;
+        const position = new Map(members.map((id, index) => [id, index + 1] as const));
+        const order = new Map(plan.candidates.map((id, index) => [id, index] as const));
+        const memberViews: RelayMemberView[] = rows.map((row): RelayMemberView => {
+            const id = row.harnessId;
+            const included = open.has(id) && settings.members.includes(id);
+            const judgement = judgeMember(input, id);
+            const reading = headroom.get(id);
+            const tightest = tightestWindow(reading);
+            const rank = order.get(id);
+            return {
+                harnessId: id,
+                name: options.registry().get(id)?.descriptor.name ?? id,
+                included,
+                ...(included ? { position: position.get(id)! } : {}),
+                state: !included ? "skipped"
+                    : rank === 0 ? "now" : rank === 1 ? "next" : rank !== undefined ? "queued"
+                    : judgement.reason === "signed-out" ? "skipped" : "exhausted",
+                ...(included && !judgement.eligible && judgement.reason ? { reason: judgement.reason } : {}),
+                ...(tightest ? { tightest } : {}),
+                ...(included && judgement.until !== undefined ? { refillsAt: judgement.until } : {}),
+                owner: row.ownerUserId === actor.userId ? "mine" : "shared",
+            };
+        });
+        return {
+            id: relayId,
+            family,
+            label: options.label,
+            settings: { ...settings, members },
+            limitsAvailable: headroom.size > 0,
+            ...(plan.candidates.length === 0 && plan.exhaustedUntil !== undefined ? { exhaustedUntil: plan.exhaustedUntil } : {}),
+            members: memberViews,
+        };
+    };
+    const relayHandle: RelayFamilyHandle = {
+        id: relayId,
+        family,
+        label: options.label,
+        view: viewFor,
+        save: async (actor, body, context) => {
+            const bad = (message: string) => coded(message, "invalid-input");
+            if (!Array.isArray(body.members) || body.members.length > RELAY_MAX_MEMBERS || body.members.some((id) => typeof id !== "string")) throw bad("members must be a list of up to 16 accounts");
+            const members = body.members as string[];
+            if (new Set(members).size !== members.length) throw bad("members must not repeat an account");
+            // Unknown, foreign and forbidden accounts are indistinguishable.
+            if (members.some((id) => !accessible(id, actor))) throw bad("Unknown or unavailable account");
+            if (!RELAY_ORDERS.includes(body.order as never)) throw bad("order must be expire-first or manual");
+            if (!RELAY_HANDOVER_LEVELS.includes(body.handoverAt as number)) throw bad("handoverAt must be 0.02, 0.05 or 0.1");
+            await store!.setRelay(actor.userId, { members, order: body.order as RelaySettings["order"], handoverAt: body.handoverAt as number });
+            return viewFor(actor, context);
+        },
+        listed: async (actor) => store !== undefined
+            && (await store.relay(actor.userId)).members.filter((id) => accessible(id, actor)).length >= RELAY_MIN_MEMBERS,
+    };
+    const register = (account?: ResolvedHarnessAccount, relay = false) => {
+        if (relay) {
+            const relayed = relayProvider();
+            Object.defineProperty(relayed.descriptor, "accounts", { value: ref, enumerable: true, configurable: true });
+            return options.registry().register(relayed);
+        }
         const provider = decorate(
             options.createProvider(account),
             ref,
@@ -436,6 +675,7 @@ export function createHarnessAccountFamily(options: HarnessAccountFamilyOptions)
         if (!enabled) return;
         const wanted = new Map<string, ResolvedHarnessAccount | undefined>([[family, undefined]]);
         for (const account of await store?.list() ?? []) wanted.set(account.harnessId, account);
+        if (store) wanted.set(relayId, undefined);
         const failures: unknown[] = [];
         for (const [id, entry] of registrations) {
             const account = wanted.get(id);
@@ -460,7 +700,7 @@ export function createHarnessAccountFamily(options: HarnessAccountFamilyOptions)
             if (registrations.has(id)) continue;
             try {
                 if (account) await options.prepare?.(account);
-                registrations.set(id, { ...(account ? { account } : {}), registration: register(account) });
+                registrations.set(id, { ...(account ? { account } : {}), registration: register(account, id === relayId) });
             } catch (error) {
                 failures.push(error);
             }
@@ -617,6 +857,7 @@ export function createHarnessAccountFamily(options: HarnessAccountFamilyOptions)
          *  never keeps the default harness from registering. */
         onEnable(): Promise<void> {
             enabled = true;
+            if (store) relayFamilies.set(relayId, relayHandle);
             if (!registrations.has(family)) registrations.set(family, { registration: register() });
             if (!store) return Promise.resolve();
             return sync().catch((error) => {
@@ -625,6 +866,7 @@ export function createHarnessAccountFamily(options: HarnessAccountFamilyOptions)
         },
         async onDisable() {
             enabled = false;
+            if (relayFamilies.get(relayId) === relayHandle) relayFamilies.delete(relayId);
             await syncing;
             const failures: unknown[] = [];
             for (const [id, entry] of registrations) {
@@ -639,6 +881,7 @@ export function createHarnessAccountFamily(options: HarnessAccountFamilyOptions)
                 // Package lifecycle keeps an enabled descriptor when disable
                 // fails; stay enabled so a retry can finish the job.
                 enabled = true;
+                if (store) relayFamilies.set(relayId, relayHandle);
                 throw failures.length === 1 ? failures[0] : new AggregateError(failures, `Some ${options.label} harnesses could not be unregistered`);
             }
         },

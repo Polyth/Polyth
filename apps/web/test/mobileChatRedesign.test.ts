@@ -452,7 +452,7 @@ test("the composer is adaptive, with one primary action at a time", async () => 
   assert.match(modelPicker, /className="model-pop"/, "model picker uses the compact glass popover on every form factor");
   assert.doesNotMatch(modelPicker, /className=\{phone \? "model-sheet"/, "phone model picker no longer defaults to a tall sheet");
   assert.ok(
-    composer.includes('onClick={onPrimaryClick}'),
+    /className=\{`send composer-delivery[\s\S]{0,120}?ref=\{sendPressRef\}/.test(composer) && composer.includes("onSend: () => sendRef.current?.()"),
     "the primary active-run action retains the configured queue behavior",
   );
   assert.ok(

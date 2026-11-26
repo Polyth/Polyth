@@ -26,6 +26,7 @@ import { applySettingsToDom, loadSettings, saveSettings, type PolythSettings } f
 import { getRailPrefs, setRailLastOpen } from "./railPrefs.ts";
 import { loadActiveView, saveActiveView } from "./viewPrefs.ts";
 import { isWorkspaceSurface, listSurfaces } from "./surfaces.ts";
+import { isSecondaryWindow, windowRole } from "./secondWindow.ts";
 import { getPage, pagesVersion, subscribePages } from "./pages.ts";
 import {
   getWorkspacePanePrefs,
@@ -177,6 +178,7 @@ export interface RestoredClientNavigation {
 }
 
 function persistClientNavigation(projectId: string | null, sessionId: string | null): void {
+  if (isSecondaryWindow()) return;
   const targetScope = clientAccountPersistenceScope();
   if (!projectId) {
     removeClientRecord(RESTORED_NAVIGATION, targetScope);
@@ -194,6 +196,8 @@ function persistClientNavigation(projectId: string | null, sessionId: string | n
 
 /** Legacy browser navigation hints are optional; full/private storage must not block navigation. */
 function saveNavigationHint(key: "polyth.activeProjectId" | "polyth.activeSessionId", value: string): void {
+  // A chat or pane window must not change where the main window reopens.
+  if (isSecondaryWindow()) return;
   try { localStorage.setItem(key, value); } catch { /* quota or unavailable storage */ }
 }
 
@@ -617,6 +621,9 @@ export interface AppState {
   worktreeSessionRequest: WorktreeSessionRequest | null;
   /** Project whose archive the "archived-sessions" overlay shows. */
   archivedSessionsProjectId: string | null;
+  /** What the "search" overlay opens with: a typed query carried over from
+   *  the palette, the sidebar or an archive, and the project it narrows to. */
+  sessionSearchSeed: SessionSearchSeed | null;
   /** Chat whose audience the "session-sharing" overlay shows. */
   sharingSessionId: string | null;
   /** Chat the "session-move" overlay picks a project for. */
@@ -679,6 +686,7 @@ let state: AppState = {
   overlay: null,
   worktreeSessionRequest: null,
   archivedSessionsProjectId: null,
+  sessionSearchSeed: null,
   sharingSessionId: null,
   movingSessionId: null,
   newSessionIntent: null,
@@ -1249,6 +1257,7 @@ export function setOverlay(overlay: Overlay): void {
     ...(overlay === "palette" ? { paletteMode: "all" as PaletteMode } : {}),
     ...(overlay !== "worktree-session" ? { worktreeSessionRequest: null } : {}),
     ...(overlay !== "archived-sessions" ? { archivedSessionsProjectId: null } : {}),
+    sessionSearchSeed: null,
     ...(overlay !== "session-sharing" ? { sharingSessionId: null } : {}),
     ...(overlay !== "session-move" ? { movingSessionId: null } : {}),
   });
@@ -1258,6 +1267,15 @@ export function openSessionSharing(sessionId: string): void {
 }
 export function openSessionMove(sessionId: string): void {
   set({ overlay: "session-move", movingSessionId: sessionId, worktreeSessionRequest: null, archivedSessionsProjectId: null, sharingSessionId: null });
+}
+export interface SessionSearchSeed {
+  query: string;
+  /** Narrow to this project; absent searches every project. */
+  projectId?: string;
+}
+/** Open the one chat search with a query already typed (and a project scope). */
+export function openSessionSearch(seed: SessionSearchSeed): void {
+  set({ overlay: "search", sessionSearchSeed: seed, worktreeSessionRequest: null, archivedSessionsProjectId: null, sharingSessionId: null, movingSessionId: null });
 }
 export function openArchivedSessions(projectId: string): void {
   set({ overlay: "archived-sessions", archivedSessionsProjectId: projectId, worktreeSessionRequest: null });
@@ -1475,6 +1493,9 @@ function applyPaneModeTransition(
   restoreFocus = true,
 ): boolean {
   if (paneSurfaceOf(state.railPlugin) === null) return false;
+  // A pane window is the pane: it has no chat to dock beside, so Escape,
+  // pin and fullscreen leave it as it is (secondWindow.ts).
+  if (windowRole() === "pane") return false;
   const surfaceId = state.railPlugin;
   if (transition.type === "toggle-fullscreen") workbenchToggleFullscreen(surfaceId);
   else if (transition.type === "toggle-pin") workbenchTogglePin(surfaceId);
@@ -1513,6 +1534,25 @@ export function closePaneFromOutside(): void {
 /** Returns true when Escape changed mode or closed the package window. */
 export function handlePaneEscape(): boolean {
   return applyPaneModeTransition({ type: "escape" });
+}
+
+/** A pane window (secondWindow.ts) shows `surfaceId` as the whole window: the
+ *  full-screen layer, never written to the project's pane preference. False
+ *  until the surface is registered. */
+export function presentPaneAsWindow(surfaceId: string, resource?: string | null): boolean {
+  const surface = paneSurfaceOf(surfaceId);
+  if (surface === null) return false;
+  // A window opened for one thing keeps showing it: a project move drops the
+  // transient pane resource, and the window asks for its own again.
+  const wanted = resource ?? undefined;
+  const shown = state.paneResource?.surfaceId === surfaceId ? state.paneResource.resource : undefined;
+  if (state.railPlugin !== surfaceId || (wanted !== undefined && shown !== wanted)) {
+    if (!openWorkspacePane(surfaceId, wanted)) return false;
+  }
+  if (state.paneMode !== "fullscreen" || state.panePreviousMode !== "pinned") {
+    set({ paneMode: "fullscreen", panePreviousMode: "pinned" });
+  }
+  return true;
 }
 
 /** Pane-host presentation truth (never persisted as user intent). */
@@ -2275,9 +2315,14 @@ const keepVisible = (sessionId: string): boolean =>
 
 /** An empty zombie: creation failed before any user turn and nothing of the
  *  person's is in it. A chat holding a draft is not one: a failed start puts
- *  its first prompt back there, and the navigator lists it as a draft. */
+ *  its first prompt back there, and the navigator lists it as a draft.
+ *  Dropping a row here is as good as deleting it for the person, so the
+ *  "Delete failed startup sessions" choice governs it exactly as it governs
+ *  the server-side cleanup: with the choice off, a failed startup row stays
+ *  listed with its error even when it holds nothing else. */
 const isEmptyZombie = (p: SessionProjection): boolean =>
-  !p.historyImport && (p.status === "failed" || p.status === "unknown") && p.lastTurnAt == null
+  state.settings.autoDeleteFailedStartupSessions
+  && !p.historyImport && (p.status === "failed" || p.status === "unknown") && p.lastTurnAt == null
   && !sessionDraftLine(p) && !keepVisible(p.id);
 
 /** The project the open chat just moved to, here or on another device. A row

@@ -10,7 +10,7 @@ import {
   type DictationSessionDto,
 } from "@polyth/dictation";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
-import { startPcm16Capture, type Pcm16Capture } from "./audioCapture.ts";
+import { startPcm16Capture, type Pcm16Capture, type Pcm16CaptureOptions } from "./audioCapture.ts";
 
 export interface DictationTransportMetrics {
   startedAt: number;
@@ -64,6 +64,9 @@ export async function startStreamingDictation(opts: {
   onPartial?: (text: string) => void;
   onLevel?: (rms: number) => void;
   onError?: (message: string) => void;
+  /** Where the audio comes from; absent: this session opens the microphone
+   *  itself. Voice mode passes its conversation-long capture. */
+  captureFactory?: (options: Pcm16CaptureOptions) => Promise<Pcm16Capture>;
 }): Promise<StreamingDictation> {
   const startedAt = performance.now();
   const metrics: DictationTransportMetrics = {
@@ -216,7 +219,7 @@ export async function startStreamingDictation(opts: {
   connect();
 
   try {
-    capture = await startPcm16Capture({
+    capture = await (opts.captureFactory ?? startPcm16Capture)({
       targetSampleRate: DICTATION_FORMAT.sampleRate,
       chunkMs: 40,
       ...(opts.onLevel ? { onLevel: opts.onLevel } : {}),

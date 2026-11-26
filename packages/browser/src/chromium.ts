@@ -546,6 +546,13 @@ export function createChromiumDriver(executablePath: string): BrowserDriver {
             throw wrapContextError(error);
           }
         },
+        async insertText(text) {
+          try {
+            if (text) await page.keyboard.insertText(text);
+          } catch (error) {
+            throw wrapContextError(error);
+          }
+        },
         async press(key) {
           try {
             await page.keyboard.press(key);

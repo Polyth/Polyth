@@ -7,6 +7,23 @@ milestones are named after what shipped.
 
 ---
 
+## Unreleased — Mistral Vibe as a harness
+
+### Added
+
+- Mistral Vibe is a harness. Install it from Settings → Harnesses on Linux,
+  macOS or Windows, sign in with `vibe --setup` (an API key, or your Mistral AI
+  Studio account in the browser), and pick any model Vibe offers, with its
+  thinking level. Chats stream, ask before running commands or changing files,
+  resume after a restart, take images and files, count tokens per turn and
+  can use Polyth's tools. Several Mistral accounts can be added side by side,
+  and earlier Vibe sessions of a project can be imported. Vibe's own
+  subagents, background processes, scheduled prompts and goals are switched
+  off, so delegation and scheduling stay with Polyth, and Vibe does not sign
+  commits. Vibe runs on this machine only, not on SSH hosts.
+
+---
+
 ## Unreleased — focus timer
 
 ### Added

@@ -22,6 +22,17 @@
 // never waits in front of the reply or the user — either one drops what is
 // still queued — and one that waited too long is skipped unheard.
 //
+// Two things keep the wait from feeling like a hang. The pause that ends a
+// turn follows what was said (`src/endpoint.ts`), and once the agent's turn
+// has really started a short "Got it" is said if no reply has begun — never
+// before, so it cannot promise work that was not accepted. Each turn's wait is
+// measured step by step (`src/latency.ts`).
+//
+// Where talking over a reply is on, streaming recognizers share one
+// microphone capture for the whole conversation (`sharedCapture.ts`): the
+// microphone itself never closes, so a turn does not wait for it to open and
+// words spoken over a reply are replayed to the recognizer instead of lost.
+//
 // Audio, recognition and the host are injected so the state machine is tested
 // without a microphone.
 import type { DictationError } from "@polyth/dictation";
@@ -36,6 +47,8 @@ import {
 } from "../src/narration.ts";
 import type { NarrationPhrases } from "../src/narrationPhrases.ts";
 import { createReplyTracker, sameUtterance, type ReplyActivity, type TrackedEvent } from "../src/replyTracker.ts";
+import { endpointPauseMs } from "../src/endpoint.ts";
+import { createLatencyTracker, type VoiceTurnLatency } from "../src/latency.ts";
 import { PAUSE_MS, type VoiceModePrefs, type VoiceRecognitionChoice } from "../src/prefs.ts";
 import type { VoiceModeStrings } from "../src/strings.ts";
 import type { Listener, ListenerEvents, ListenerOptions, RecognitionRoute } from "./listener.ts";
@@ -44,6 +57,7 @@ import type { Earcon } from "./earcons.ts";
 import type { NarrateOutcome } from "./narrateClient.ts";
 import type { NarrateRequest } from "../src/narrateRoutes.ts";
 import type { RouteResolution } from "./route.ts";
+import type { SharedCapture } from "./sharedCapture.ts";
 
 /** What the microphone side is doing. */
 export type VoicePhase =
@@ -123,6 +137,9 @@ export interface VoiceModeDeps {
   createOutput(settings: () => SpeechOutputSettings, events: SpeechOutputEvents): SpeechOutput;
   primeOutput(): void;
   startMicMonitor(events: MicMonitorEvents): Promise<MicMonitor>;
+  /** Open the conversation-long microphone capture streaming recognizers
+   *  share. Absent: every turn opens the microphone itself. */
+  startSharedCapture?(): Promise<SharedCapture>;
   bargeIn(): boolean;
   earcon(kind: Earcon): void;
   claimMicrophone(owner: string): void;
@@ -139,6 +156,13 @@ export interface VoiceModeDeps {
   onVisibilityChange?(listener: (visible: boolean) => void): () => void;
   wakeLock?(): Promise<(() => void) | null>;
   haptic?(): void;
+  /** Tell the server whether this person hears the conversation's replies
+   *  (null: a New chat not sent yet). Renewed while it holds. */
+  announceLive?(state: { sessionId: string | null; live: boolean }): void;
+  /** How often the announcement is renewed. */
+  liveRenewMs?: number;
+  /** Measured turns kept on this device (times only, no words). */
+  latencyStore?: { load(): readonly VoiceTurnLatency[]; save(list: readonly VoiceTurnLatency[]): void };
   now(): number;
 }
 
@@ -147,6 +171,9 @@ export interface VoiceModeController {
   subscribe(listener: () => void): () => void;
   getLevels(): VoiceLevels;
   subscribeLevels(listener: (levels: VoiceLevels) => void): () => void;
+  /** End of speech → first reply sound, per measured turn (oldest first). */
+  getLatency(): readonly VoiceTurnLatency[];
+  subscribeLatency(listener: () => void): () => void;
   start(): void;
   stop(): void;
   toggle(): void;
@@ -188,6 +215,17 @@ const NOTICE_MS = 3_500;
 const ASIDE_FRESH_MS = 6_000;
 /** Failed small-model remarks in a row before the conversation keeps to phrases. */
 const NARRATOR_FAILURES = 2;
+/** A turn that starts this long after the words were sent is not answered
+ *  with an acknowledgement: it would come out of nowhere. */
+const ACK_WINDOW_MS = 8_000;
+/** How long a started turn may stay silent before it is acknowledged; a reply
+ *  that begins sooner needs no "Got it". */
+const ACK_DELAY_MS = 300;
+/** An acknowledgement that could not be said by then is not worth saying. */
+const ACK_FRESH_MS = 2_500;
+/** Audio replayed to the recognizer that starts after a barge-in: the onset
+ *  that was needed to notice it, and the breath before. */
+const BARGE_PREROLL_MS = 700;
 const RETRY_MIN_MS = 1_000;
 const RETRY_MAX_MS = 15_000;
 
@@ -217,6 +255,8 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
   let output: SpeechOutput | null = null;
   let monitor: MicMonitor | null = null;
   let monitorToken = 0;
+  let shared: SharedCapture | null = null;
+  let sharedStarting: Promise<SharedCapture | null> | null = null;
   let unsubscribers: Array<() => void> = [];
   let releaseWakeLock: (() => void) | null = null;
   let pending: { text: string; at: number } | null = null;
@@ -252,6 +292,25 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
   let narratorFailures = 0;
   /** The small model is out for this conversation: phrases only. */
   let narratorOff = false;
+  /** When this conversation's last utterance went to an agent that will
+   *  answer it next (not queued behind a running turn). */
+  let sentAt: number | null = null;
+  let ackTimer: ReturnType<typeof setTimeout> | null = null;
+  let acks = 0;
+  let liveTimer: ReturnType<typeof setInterval> | null = null;
+  /** The conversation last announced as spoken (undefined: none). */
+  let announced: string | null | undefined;
+  /** This turn's reply has reached the speaker. */
+  let replyBegun = false;
+  const latencyListeners = new Set<() => void>();
+  const latency = createLatencyTracker({
+    now: () => deps.now(),
+    initial: deps.latencyStore?.load() ?? [],
+    onChange: (list) => {
+      deps.latencyStore?.save(list);
+      for (const listener of [...latencyListeners]) listener();
+    },
+  });
 
   const tracker = createReplyTracker({
     get codePlaceholder() { return deps.strings().codeOmitted; },
@@ -314,16 +373,61 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
 
   const speaking = () => snapshot.phase === "speaking";
 
+  const isMicDenied = (error: unknown): boolean =>
+    (error as Partial<DictationError> | null)?.code === "mic_denied";
+
+  /** Give the microphone back entirely (mute, another owner, the end). */
+  const releaseShared = () => {
+    sharedStarting = null;
+    shared?.stop();
+    shared = null;
+  };
+
+  /** The conversation-long capture for a streaming route, where talking over
+   *  a reply is on. Null: the recognizer opens the microphone itself. A
+   *  denied microphone throws, like a recognizer that cannot start. Answers
+   *  at once unless the capture has to be opened first. */
+  const openShared = (route: RecognitionRoute): SharedCapture | null | Promise<SharedCapture | null> => {
+    if (route.kind === "browser" || !deps.startSharedCapture || !deps.bargeIn()) {
+      // The browser recognizer captures by itself: do not hold a second one.
+      releaseShared();
+      return null;
+    }
+    if (shared && !shared.dead) return shared;
+    shared = null;
+    const currentEpoch = epoch;
+    const starting = sharedStarting ??= deps.startSharedCapture().then((started) => {
+      if (sharedStarting !== starting || currentEpoch !== epoch) {
+        started.stop();
+        return null;
+      }
+      sharedStarting = null;
+      shared = started;
+      return started;
+    }, (error: unknown) => {
+      if (sharedStarting === starting) sharedStarting = null;
+      if (isMicDenied(error)) throw error;
+      return null;
+    });
+    return starting;
+  };
+
   /** While the agent speaks, talking over it interrupts. */
   const startMonitor = () => {
     if (monitor || snapshot.muted || !deps.bargeIn() || !speaking()) return;
     const token = ++monitorToken;
+    const onSpeech = () => {
+      if (token !== monitorToken) return;
+      deps.haptic?.();
+      interrupt(true);
+    };
+    // The open capture already hears the room: no second microphone.
+    if (shared && !shared.dead) {
+      monitor = shared.watch({ onSpeech });
+      return;
+    }
     void deps.startMicMonitor({
-      onSpeech: () => {
-        if (token !== monitorToken) return;
-        deps.haptic?.();
-        interrupt();
-      },
+      onSpeech,
     }).then((started) => {
       if (token !== monitorToken) started.stop();
       else monitor = started;
@@ -365,9 +469,6 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
     current?.cancel();
     setLevels({ input: 0 });
   };
-
-  const isMicDenied = (error: unknown): boolean =>
-    (error as Partial<DictationError> | null)?.code === "mic_denied";
 
   /** Recognition failed on every route. Show it and try again later — a
    *  hands-free conversation must not need a tap to come back. */
@@ -426,7 +527,9 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
     }, COMMAND_SETTLE_MS);
   };
 
-  async function listen(): Promise<void> {
+  /** Open the microphone for a turn. `prerollMs`: the user is already
+   *  talking (a barge-in), so that much earlier audio belongs to the turn. */
+  async function listen(prerollMs = 0): Promise<void> {
     if (snapshot.phase === "off") return;
     if (!routes.length) {
       recover();
@@ -470,7 +573,7 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
         dropAsides();
         set({ phase: "hearing" });
       },
-      onEndOfTurn: () => { if (!stale()) void commit(); },
+      onEndOfTurn: (waitedMs) => { if (!stale()) void commit(waitedMs ?? PAUSE_MS[prefs.pause]); },
       onError: (error) => {
         if (stale()) return;
         listener = null;
@@ -491,11 +594,24 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
         retryLater(error.message || deps.strings().unavailable);
       },
     };
+    // Fixed before anything is awaited: the turn's audio starts here, however
+    // long the recognizer takes to connect.
+    const open = shared && !shared.dead ? shared : null;
+    const taken = open ? { capture: open.factory(prerollMs), floor: open.noiseFloor() } : null;
     for (let index = routeIndex; index < routes.length; index++) {
       try {
-        const started = await deps.startListener(routes[index]!, events, {
+        const route = routes[index]!;
+        const opening = openShared(route);
+        const capture = opening instanceof Promise ? await opening : opening;
+        if (stale()) return;
+        // A capture opened just now has nothing earlier to replay.
+        const source = capture && (capture === open && taken ? taken : { capture: capture.factory(0), floor: undefined });
+        const started = await deps.startListener(route, events, {
           pauseMs: PAUSE_MS[prefs.pause],
+          pauseFor: (text, lang) => endpointPauseMs(text, prefs.pause, lang),
           autoEndpoint: prefs.turnTaking === "auto",
+          ...(source ? { capture: source.capture } : {}),
+          ...(source?.floor !== undefined && prerollMs > 0 ? { noiseFloor: source.floor } : {}),
         });
         if (stale()) {
           started.cancel();
@@ -520,7 +636,9 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
     retryLater(deps.strings().unavailable);
   }
 
-  async function commit(): Promise<void> {
+  /** End the turn. `waitedMs` is the silence waited out before it (0: a tap
+   *  or a command, which did not wait for a pause). */
+  async function commit(waitedMs = 0): Promise<void> {
     const current = listener;
     if (!current) return;
     listener = null;
@@ -529,6 +647,7 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
     const currentEpoch = epoch;
     set({ phase: "sending" });
     setLevels({ input: 0 });
+    latency.endOfTurn(waitedMs);
     let text = "";
     try {
       text = (await current.stop()).trim();
@@ -536,12 +655,15 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
       text = snapshot.userText.trim();
     }
     if (currentEpoch !== epoch) return;
+    latency.transcript();
     const command = deps.prefs().commands ? matchVoiceCommand(text, deps.commandPhrases()) : null;
     if (command) {
+      latency.discard();
       await runCommand(command.command, command.rest);
       return;
     }
     if (!text) {
+      latency.discard();
       releaseSpan();
       void listen();
       return;
@@ -556,6 +678,15 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
     sound("send");
     deps.haptic?.();
     set({ userText: text });
+    // A queued message waits behind the running turn: that wait is not this
+    // turn's latency, and its start much later is not acknowledged.
+    if (delivery === "queue") latency.discard();
+    sentAt = delivery === "queue" ? null : deps.now();
+    const refused = (notice: string) => {
+      latency.discard();
+      sentAt = null;
+      notify(notice);
+    };
     // A reply still being spoken while the user talks is superseded by an
     // interrupting send; a queued message lets it finish.
     if (delivery === "interrupt") dropReply();
@@ -573,24 +704,24 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
         return;
       }
       // The draft keeps the words; nothing is sent twice.
-      notify(deps.strings().notSent);
+      refused(deps.strings().notSent);
       return;
     }
     releaseSpan();
     const target = targetSessionId;
     const send = deps.host.conversation.send;
     if (!target || !send) {
-      notify(deps.strings().noComposer);
+      refused(deps.strings().noComposer);
       return;
     }
     busy = true;
     const currentEpoch = epoch;
     void send(target, text, { delivery }).then((ok) => {
       if (currentEpoch !== epoch) return;
-      if (!ok) notify(deps.strings().notSent);
+      if (!ok) refused(deps.strings().notSent);
       else if (delivery === "queue" && snapshot.agent !== "idle") notify(deps.strings().queued);
     }).catch(() => {
-      if (currentEpoch === epoch) notify(deps.strings().notSent);
+      if (currentEpoch === epoch) refused(deps.strings().notSent);
     });
   }
 
@@ -602,6 +733,8 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
       pendingTimer = null;
       if (currentEpoch !== epoch || !pending) return;
       pending = null;
+      latency.discard();
+      sentAt = null;
       notify(deps.strings().notSent);
     }, SEND_CONFIRM_MS);
   }
@@ -666,6 +799,7 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
     speakTurn = false;
     held = [];
     idleTimer = clear(idleTimer);
+    ackTimer = clear(ackTimer);
     output?.cancel();
     replyWaiting = 0;
     playing = null;
@@ -705,12 +839,33 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
     });
   }
 
+  /** Keep the server's "replies are heard" lease in step: held for the
+   *  pinned conversation while replies are spoken, dropped otherwise. */
+  function syncLive(): void {
+    const on = snapshot.phase !== "off" && !silent();
+    if (!on) {
+      if (liveTimer) clearInterval(liveTimer);
+      liveTimer = null;
+      if (announced !== undefined) deps.announceLive?.({ sessionId: announced, live: false });
+      announced = undefined;
+      return;
+    }
+    // A New chat that got its conversation: the server moves the lease.
+    announced = targetSessionId;
+    deps.announceLive?.({ sessionId: announced, live: true });
+    if (!deps.announceLive || liveTimer) return;
+    liveTimer = setInterval(() => {
+      if (announced !== undefined) deps.announceLive?.({ sessionId: announced, live: true });
+    }, deps.liveRenewMs ?? 30_000);
+  }
+
   /** Switching to silent drops the reply being spoken and gives the
    *  microphone back; switching to spoken takes the speaker and voices the
    *  next turn (one already running is not joined mid-sentence). */
   function applyFeedback(): void {
     if (snapshot.phase === "off" || silent() === silentNow) return;
     silentNow = silent();
+    syncLive();
     if (silentNow) {
       const wasSpeaking = speaking();
       dropReply();
@@ -720,7 +875,9 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
     }
   }
 
-  function interrupt(): void {
+  /** Stop the speech and listen. `spoke`: the user's voice did it, so the
+   *  turn has already begun. */
+  function interrupt(spoke = false): void {
     if (!speaking()) return;
     if (playing === "aside" && replyWaiting === 0) {
       // Talking over a remark silences it; the reply to come is still spoken.
@@ -732,7 +889,7 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
     } else {
       dropReply();
     }
-    void listen();
+    void listen(spoke ? BARGE_PREROLL_MS : 0);
   }
 
   /** Reply words held while the user talked are spoken once they finish. */
@@ -753,6 +910,9 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
     // The reply comes first: remarks still waiting are dropped.
     dropAsides();
     takeSpeaker();
+    ackTimer = clear(ackTimer);
+    replyBegun = true;
+    latency.firstText();
     spoken += chunks.length;
     replyWaiting += chunks.length;
     for (const chunk of chunks) output.enqueue(chunk);
@@ -775,16 +935,42 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
    *  one waiting before it is replaced: only fresh news is worth hearing. */
   function speakAside(cues: readonly NarrationCue[]): void {
     const cue = cues.at(-1);
-    if (!cue || !output || !speakTurn || silent()) return;
-    if (deps.now() - cue.at > ASIDE_FRESH_MS) return;
-    if (snapshot.phase === "hearing" || snapshot.phase === "sending" || held.length) return;
-    if (replyWaiting > 0 || playing === "reply") return;
+    if (!cue || deps.now() - cue.at > ASIDE_FRESH_MS) return;
+    sayAside(cue.text, cue.at + ASIDE_FRESH_MS);
+  }
+
+  /** One short remark beside the reply. Resolves false when it is not said. */
+  function sayAside(text: string, expiresAt: number): boolean {
+    if (!text || !output || !speakTurn || silent()) return false;
+    if (snapshot.phase === "hearing" || snapshot.phase === "sending" || held.length) return false;
+    if (replyWaiting > 0 || playing === "reply") return false;
     output.dropAsides();
     takeSpeaker();
     spoken++;
-    output.enqueue(cue.text, { kind: "aside", expiresAt: cue.at + ASIDE_FRESH_MS });
+    output.enqueue(text, { kind: "aside", expiresAt });
     if (snapshot.phase !== "paused") set({ phase: "speaking", error: null });
     startMonitor();
+    return true;
+  }
+
+  /** The agent's turn has started for words just spoken: if it stays silent
+   *  for a moment, say so. Only ever after `turn/started` — the words were
+   *  accepted — and never once the reply itself has begun. */
+  function scheduleAcknowledgement(): void {
+    ackTimer = clear(ackTimer);
+    const at = sentAt;
+    sentAt = null;
+    if (at === null || deps.now() - at > ACK_WINDOW_MS) return;
+    if (!deps.prefs().acknowledge || !speakTurn || silent()) return;
+    const currentEpoch = epoch;
+    ackTimer = setTimeout(() => {
+      ackTimer = null;
+      if (currentEpoch !== epoch || replyBegun || !busy) return;
+      const phrases = deps.spokenPhrases().acknowledgements.split("|").map((phrase) => phrase.trim()).filter(Boolean);
+      if (!phrases.length) return;
+      // In turn rather than at random: the same words twice in a row sound canned.
+      if (sayAside(phrases[acks % phrases.length]!, deps.now() + ACK_FRESH_MS)) acks++;
+    }, ACK_DELAY_MS);
   }
 
   /** A remark worded by the small model when the person chose it; the
@@ -868,6 +1054,7 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
         return;
       case "done":
         busy = false;
+        ackTimer = clear(ackTimer);
         set({ agent: "idle", tool: null, action: null });
         if (value.reason === "error" && speakTurn && !silent()) speak([deps.strings().turnFailed]);
         output?.end();
@@ -884,6 +1071,7 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
         if (!targetSessionId) {
           targetSessionId = event.sessionId;
           set({ sessionId: targetSessionId });
+          syncLive();
         }
         clearPending();
         if (event.type === "queue/enqueued" && event.sessionId === targetSessionId) notify(deps.strings().queued);
@@ -898,6 +1086,9 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
       // Every turn that starts while voice mode is on is answered aloud; one
       // already running when it started is not (it would begin mid-sentence).
       speakTurn = !silent();
+      replyBegun = false;
+      latency.turnStarted();
+      scheduleAcknowledgement();
     }
     if (REQUEST_SETTLED.has(event.type) && snapshot.agent === "needs-input") set({ agent: "working" });
     const update = tracker.accept(event);
@@ -934,16 +1125,20 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
       held = [];
       replyWaiting = 0;
       playing = null;
+      ackTimer = clear(ackTimer);
       narrator.dropPending();
       cancelNarrating();
       stopMonitor();
       cancelListener();
+      releaseShared();
       releaseSpan();
       set({ phase: "paused", muted: true });
     },
     onLevel: (level) => setLevels({ output: level }),
     onChunk: (text, kind) => {
       playing = kind;
+      if (kind === "reply") latency.audible();
+      else latency.sound();
       if (kind === "reply") replyWaiting = Math.max(0, replyWaiting - 1);
       set({ assistantText: text });
       if (speaking()) startMonitor();
@@ -1015,6 +1210,9 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
     playing = null;
     narratorFailures = 0;
     narratorOff = false;
+    sentAt = null;
+    replyBegun = false;
+    latency.discard();
     set({
       ...OFF,
       phase: "starting",
@@ -1028,6 +1226,8 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
       // Another microphone owner (the dictation mic) taking over pauses us.
       deps.onMicrophoneClaimed((owner) => {
         if (owner === deps.owner || snapshot.phase === "off") return;
+        stopMonitor();
+        releaseShared();
         if (LISTEN_PHASES.has(snapshot.phase) || snapshot.phase === "error") {
           cancelListener();
           releaseSpan();
@@ -1045,6 +1245,7 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
       deps.onVisibilityChange?.(onVisible) ?? (() => {}),
     ];
     deps.host.navigation.setActiveView("session");
+    syncLive();
     sound("start");
     acquireWakeLock();
     recover();
@@ -1057,6 +1258,7 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
     releaseSpan();
     runId = "";
     stopMonitor();
+    releaseShared();
     output?.dispose();
     output = null;
     for (const off of unsubscribers) off();
@@ -1068,6 +1270,9 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
     idleTimer = clear(idleTimer);
     noticeTimer = clear(noticeTimer);
     narrationTimer = clear(narrationTimer);
+    ackTimer = clear(ackTimer);
+    sentAt = null;
+    latency.discard();
     cancelNarrating();
     narrator.reset();
     replyWaiting = 0;
@@ -1078,6 +1283,7 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
     sound("end");
     setLevels({ input: 0, output: 0 });
     set({ ...OFF, immersive: snapshot.immersive });
+    syncLive();
   }
 
   return {
@@ -1090,6 +1296,11 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
     subscribeLevels(listener) {
       levelListeners.add(listener);
       return () => { levelListeners.delete(listener); };
+    },
+    getLatency: () => latency.recent(),
+    subscribeLatency(listener) {
+      latencyListeners.add(listener);
+      return () => { latencyListeners.delete(listener); };
     },
     start,
     stop,
@@ -1104,7 +1315,7 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
           return;
         case "listening":
         case "hearing":
-          void commit();
+          void commit(0);
           return;
         case "speaking":
           interrupt();
@@ -1129,6 +1340,8 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
       set({ muted });
       if (muted) {
         stopMonitor();
+        // Muted means the microphone is closed, not merely unused.
+        releaseShared();
         if (LISTEN_PHASES.has(snapshot.phase) || snapshot.phase === "error") {
           cancelListener();
           releaseSpan();
@@ -1148,6 +1361,7 @@ export function createVoiceModeController(deps: VoiceModeDeps): VoiceModeControl
       stop();
       listeners.clear();
       levelListeners.clear();
+      latencyListeners.clear();
     },
   };
 }

@@ -6,6 +6,7 @@ import {
   archivePurgePreference,
   autoCleanupPreference,
   createExpiredSessionPolicy,
+  releaseEmptyArchivedCheckouts,
   sessionsKeptByPeople,
   startExpiredSessionCleanup,
   sweepExpiredSessions,
@@ -590,5 +591,49 @@ test("turning it off never starts a pass, and stop ends the schedule", async () 
   } finally {
     await cleanup.stop();
     restore();
+  }
+});
+
+test("the empty-checkout pass visits each archived tree with an isolated checkout once, whatever the Cleanup choice", async () => {
+  const rows = [
+    row("top", { status: "archived", isolation: isolation() }),
+    row("child", { status: "archived", parentId: "top", isolation: isolation() }),
+    row("plain", { status: "archived" }),
+    row("live", { status: "idle", isolation: isolation() }),
+    row("under-live", { status: "archived", parentId: "live", isolation: isolation() }),
+    row("failing", { status: "archived", isolation: isolation() }),
+  ];
+  const visited: string[] = [];
+  const result = await releaseEmptyArchivedCheckouts({
+    sessions: source({ rows }),
+    releaseEmpty: async (id) => {
+      visited.push(id);
+      if (id === "failing") throw Object.assign(new Error("kept"), { code: "conflict" });
+    },
+  });
+  assert.deepEqual(visited, ["top", "under-live", "failing"]);
+  assert.deepEqual(result.released, ["top", "under-live"]);
+  assert.deepEqual(result.failed, [{ id: "failing", code: "conflict" }]);
+});
+
+test("the schedule releases empty archived checkouts even with Cleanup off", async () => {
+  const sessions = source({ rows: [row("old", { status: "archived", isolation: isolation() })] });
+  const released: string[] = [];
+  const cleanup = startExpiredSessionCleanup({
+    spaceIds: () => ["space-1"],
+    sessionsFor: () => sessions,
+    releaseEmptyCheckouts: async (id) => { released.push(id); },
+    policy: createExpiredSessionPolicy(accounts({ settings: {} })),
+    keep: () => new Set(),
+    stopped: () => false,
+    firstDelayMs: 1,
+    intervalMs: 60_000,
+    pause: async () => {},
+  });
+  try {
+    await waitFor(() => released.length === 1);
+    assert.deepEqual(released, ["old"]);
+  } finally {
+    await cleanup.stop();
   }
 });

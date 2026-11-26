@@ -847,7 +847,9 @@ export default function MemorySettings({ projectId, project, locale, translate, 
               </div>
             )}
           </section>
-          <MyNotes projectId={projectId} project={project} translate={t} notify={notify} />
+          {/* Search covers the shared records only: unfiltered notes under the
+              results would read as more of them. Hidden, so a draft survives. */}
+          <MyNotes projectId={projectId} project={project} translate={t} notify={notify} hidden={!!query.trim()} />
         </TabPane>
 
         {!writesBlocked && (

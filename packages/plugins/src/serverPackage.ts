@@ -328,6 +328,9 @@ export interface AgentEventSourceDescriptor {
   id: string;
   label: string;
   types: Array<{ id: string; label: string }>;
+  /** Event fields the source fills that a wake can filter on (besides
+   *  `title` and `text`), e.g. `repo`. Optional for older sources. */
+  fields?: Array<{ id: string; label: string }>;
 }
 
 export interface AgentEventPublication {
@@ -339,8 +342,28 @@ export interface AgentEventPublication {
   projectId?: string;
   /** Short human title. Event text is data for agents, never instructions. */
   title: string;
-  /** Extra filterable facts; `text` is shown to the agent (bounded). */
+  /** Extra filterable facts; `text` is shown to the agent (bounded), and
+   *  `url` is shown as its link. */
   fields?: Record<string, string>;
+  /** The one agent wake this event is for (see {@link AgentEventSubscription}),
+   *  e.g. because it was read with that agent owner's account. No other
+   *  agent sees it, and only that owner sees it in previews. */
+  target?: { agentId: string; triggerId: string };
+}
+
+/** One active agent wake on a source, with what it asked for. Lets a source
+ *  watch exactly the things a wake names (a repository in a `repo` filter)
+ *  and act as the agent's owner. */
+export interface AgentEventSubscription {
+  spaceId: string;
+  projectId: string;
+  agentId: string;
+  triggerId: string;
+  /** The person the agent acts for; absent for an agent nobody owns. */
+  ownerUserId?: string;
+  /** Event types the wake listens to. */
+  types: string[];
+  filters: Array<{ field: string; op: "equals" | "not-equals" | "contains" | "not-contains"; value: string }>;
 }
 
 /** Provided by the Agents package. Sources register once and publish events;
@@ -350,6 +373,8 @@ export interface AgentEventSources {
   publish(event: AgentEventPublication): void;
   /** Projects (per Space) with an active agent waking on `source`. */
   subscribed(source: string): Array<{ spaceId: string; projectId: string }>;
+  /** Every active agent wake on `source`. Optional for older hosts. */
+  subscriptions?(source: string): AgentEventSubscription[];
 }
 
 export const AGENT_EVENT_SOURCES =
@@ -367,8 +392,17 @@ export interface ServerSessionAttention {
    *  for approvals and answers still notify as usual. Optional for older hosts. */
   claimTurnNotifications?(owns: (sessionId: string) => boolean): Disposable;
   /** One notification about a session the caller owns. A later call with the
-   *  same `key` replaces it. Delivery only: it changes no session state. */
-  notify?(sessionId: string, input: { kind: "completed" | "failed"; statusText: string; key: string }): void;
+   *  same `key` replaces it. Delivery only: it changes no session state.
+   *  `recipient` names the person a session started by server work (an
+   *  agent's run) acts for: it becomes the session's notification owner when
+   *  none is recorded yet, only while that person is a member of the
+   *  session's Space. A recorded owner is never replaced. */
+  notify?(sessionId: string, input: {
+    kind: "completed" | "failed";
+    statusText: string;
+    key: string;
+    recipient?: { userId: string };
+  }): void;
 }
 export const SESSION_ATTENTION_SERVICE =
   serverServiceKey<ServerSessionAttention>("session.attention");
@@ -704,6 +738,18 @@ export interface ServerDelegationPolicyService {
   /** Undefined when the person behind `space` leaves routing entirely to
    *  Polyth's automatic ranking. `harnessId` narrows the brief to one harness. */
   brief(space: SpaceContext, options?: { harnessId?: string }): Promise<ServerDelegationPolicyBrief | undefined>;
+  /** The model the person behind `space` routes `roleId` work to right now:
+   *  the first usable one of that role's chain whose `harness::provider/model`
+   *  key is not in `exclude`. Undefined in Auto mode, for an unknown, disabled
+   *  or empty role, and when nothing in the chain is usable. Optional: older
+   *  providers answer only `brief`. */
+  route?(space: SpaceContext, roleId: string, options?: { exclude?: readonly string[] }): Promise<ServerDelegationRoute | undefined>;
+}
+
+export interface ServerDelegationRoute {
+  harnessId: string;
+  providerID: string;
+  modelID: string;
 }
 
 export const SERVER_DELEGATION_POLICY =

@@ -718,3 +718,87 @@ test("the terminal event freezes live background work and only for a completed t
   const stops = await h.store.sessionWatchStopsAfter(child.id, 0);
   assert.equal(stops[1]?.data.background, undefined);
 });
+
+function waitsRig(t: { after(fn: () => Promise<void> | void): void }) {
+  const h = harness();
+  const published: SessionProjection[] = [];
+  const real = createSessionService({
+    store: h.store,
+    queue: h.store,
+    projects: {
+      get: async () => ({ id: "project-watch", name: "Watch", path: tmpdir(), createdAt: 1 }),
+    } as ProjectService,
+    permissions: { evaluate: () => "ask", addRule() {}, rules: () => [] } as unknown as PermissionService,
+    broadcast: { event() {}, projection(p) { published.push(p); } },
+    runtimes: { forProject: async () => { throw new Error("showing a wait must not launch a runtime"); } },
+  });
+  const coordinator = createSessionWatchCoordinator({
+    store: h.store,
+    sessions: () => ({
+      recordWait: real.recordWait,
+      async send(sessionId: string, input: UserTurnInput) {
+        h.sends.push({ sessionId, input });
+        return { turnId: `turn-${sessionId}-${h.sends.length}` };
+      },
+    }) as unknown as SessionService,
+    broadcast: { event() {} },
+  });
+  t.after(async () => {
+    await coordinator.close();
+    await h.coordinator.close();
+    real.dispose();
+    await h.store.close();
+  });
+  return { ...h, coordinator, published };
+}
+
+test("the chat a wake watch will wake lists it until it fires or is removed", async (t) => {
+  const h = waitsRig(t);
+  await seed(h.store, "source", "target", "observed");
+  const watch = await h.coordinator.create(space, { sourceSessionId: "source", targetSessionId: "target" });
+  // An observe link wakes nothing, so it is not a wait.
+  await h.coordinator.create(space, { sourceSessionId: "observed", targetSessionId: "target", delivery: "observe" });
+  const armed = (await h.store.projection("target"))?.waits;
+  assert.deepEqual(armed?.map((wait) => [wait.id, wait.kind, wait.sourceSessionId, wait.sourceProjectId, wait.label]),
+    [[watch.id, "session", "source", "project-watch", undefined]]);
+  assert.ok(h.published.some((p) => p.id === "target" && p.waits?.length === 1), "the navigator hears of it");
+  const armedEvent = (await h.store.events("target")).find((event) => event.type === "session/wait-armed");
+  assert.equal(armedEvent?.ignorable, true);
+  assert.equal(armedEvent?.data.id, watch.id);
+
+  await h.store.append("source", "turn/stopped", { reason: "completed" });
+  await h.coordinator.kick("source");
+  assert.equal(h.sends.length, 1);
+  assert.equal((await h.store.projection("target"))?.waits, undefined, "a fired one-shot watch is no longer listed");
+  assert.ok((await h.store.events("target")).some((event) => event.type === "session/wait-ended" && event.data.id === watch.id));
+
+  const repeating = await h.coordinator.create(space, { sourceSessionId: "source", targetSessionId: "target", once: false });
+  assert.equal((await h.store.projection("target"))?.waits?.length, 1);
+  assert.equal(await h.coordinator.remove(space, repeating.id), true);
+  assert.equal((await h.store.projection("target"))?.waits, undefined, "an unwatched watch is no longer listed");
+});
+
+test("boot recovery lists a watch armed before chats listed waits, and a later change clears a stale one", async (t) => {
+  const h = waitsRig(t);
+  await seed(h.store, "source", "target", "other");
+  await h.store.createSessionWatch({
+    id: "watch-legacy",
+    spaceId: space.spaceId,
+    sourceSessionId: "source",
+    targetSessionId: "target",
+    events: ["completed", "error", "aborted"],
+    delivery: "wake",
+    once: true,
+    cursorSeq: await h.store.latestSeq("source"),
+    createdAt: 5,
+  });
+  await h.coordinator.recover();
+  assert.deepEqual((await h.store.projection("target"))?.waits?.map((wait) => [wait.id, wait.since]), [["watch-legacy", 5]]);
+  await h.coordinator.recover();
+  assert.equal((await h.store.events("target")).filter((event) => event.type === "session/wait-armed").length, 1, "recovery is idempotent");
+
+  // Deleted behind the coordinator's back: the target's next change clears it.
+  await h.store.deleteSessionWatch("watch-legacy");
+  const next = await h.coordinator.create(space, { sourceSessionId: "other", targetSessionId: "target" });
+  assert.deepEqual((await h.store.projection("target"))?.waits?.map((wait) => wait.id), [next.id]);
+});

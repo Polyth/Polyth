@@ -1,4 +1,4 @@
-/* Nightly bug-report sheet. Every rule is scoped under .bug-report-*; sizes,
+/* Feedback sheet. Every rule is scoped under .bug-report-*; sizes,
    colours and type come from the canonical tokens. */
 
 .bug-report-sheet {
@@ -12,6 +12,30 @@
   margin: 0;
   color: var(--text-dim);
   font-size: var(--font-meta);
+}
+
+/* The four kinds sit in one row; they wrap on a narrow window. */
+.bug-report-sheet__kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* "About me": the switch, and its two choices only while it is on. */
+.bug-report-sheet__about {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.bug-report-sheet__forget {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.bug-report-sheet__forget .bug-report-sheet__hint {
+  margin: 0;
 }
 
 .bug-report-sheet__field {
@@ -59,13 +83,33 @@
    picker the button opens; it is never shown. */
 .bug-report-sheet__attach {
   display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
   justify-self: start;
 }
 .bug-report-sheet__file {
   display: none;
 }
 
-/* The capture as it will be sent: whole, never cropped. */
+/* The capture as it will be sent: whole, never cropped. Where marks can be
+   drawn, the whole thumbnail opens the editor. */
+.bug-report-sheet__shot {
+  position: relative;
+  min-width: 0;
+}
+.bug-report-sheet__shot-open {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  cursor: zoom-in;
+}
+.bug-report-sheet__shot-open:hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+
 .bug-report-sheet__image {
   display: block;
   width: 100%;
@@ -137,4 +181,122 @@
   display: flex;
   justify-content: flex-end;
   gap: var(--space-2);
+}
+
+/* The mark-up editor, in the same dialog grown to full size: a floating tool
+   pill over the screenshot on the media field, the image as large as fits. */
+.bug-report-dialog--editor .ui-dialog-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.bug-report-editor-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 0;
+}
+.bug-report-editor {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--scrim-media);
+}
+
+.bug-report-editor__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  max-width: 100%;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-island);
+  background: var(--elevated);
+  box-shadow: var(--shadow-md);
+}
+.bug-report-editor__group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.bug-report-editor__divider {
+  width: 1px;
+  height: 20px;
+  background: var(--surface-divider);
+}
+
+/* A colour: a filled disc; the chosen one ringed in the focus colour. White
+   and black keep a hairline so they read on any surface. */
+.bug-report-editor__swatch {
+  box-sizing: border-box;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--hair-strong);
+  border-radius: var(--radius-circle);
+  background: var(--bug-report-swatch);
+  cursor: pointer;
+  transition: transform var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
+}
+.bug-report-editor__swatch:hover:not(:disabled) {
+  transform: scale(1.1);
+}
+.bug-report-editor__swatch[aria-pressed="true"] {
+  box-shadow: 0 0 0 2px var(--elevated), 0 0 0 4px var(--focus-ring);
+}
+.bug-report-editor__swatch:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+.bug-report-editor__swatch:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.bug-report-editor__stage {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.bug-report-editor__frame {
+  position: relative;
+  flex: none;
+  box-shadow: var(--shadow-lg);
+}
+.bug-report-editor__image,
+.bug-report-editor__canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  user-select: none;
+}
+.bug-report-editor__canvas {
+  cursor: crosshair;
+  touch-action: none;
+}
+
+/* On the media field, which is near-black in every theme. */
+.bug-report-editor__hint {
+  margin: 0;
+  color: rgb(255 255 255 / 0.72);
+  font-size: var(--font-meta);
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bug-report-editor__swatch { transition: none; }
 }

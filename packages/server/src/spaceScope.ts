@@ -35,8 +35,9 @@ import { canonicalSecurity } from "./runtimeSecurity.ts";
 const notFound = (): Error =>
   Object.assign(new Error("session not found"), { code: "not-found" });
 
-/** The part of the sharing service a person message needs. */
-export type SessionPeopleOpener = Pick<SessionSharingService, "addPeople">;
+/** The part of the sharing service a person message and a new chat's
+ *  creation-time audience need. */
+export type SessionPeopleOpener = Pick<SessionSharingService, "addPeople" | "creationAudience" | "applyCreationAudience">;
 
 /** Everything the guard needs from the durable store. */
 export interface SpaceOwnershipSource {
@@ -249,10 +250,14 @@ function scopeSessions(
       const page = await base.summaries!({ ...query, spaceId: ctx.spaceId, ...(personScope ? { personId: personScope.userId } : {}) });
       return { ...page, sessions: mine(page.sessions) };
     }) } : {}),
-    async create(input) {
+    async create(input, admission) {
       const project = await projects.get(input.projectId);
       if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
-      return runWithSecureSafeSpace(ctx, () => base.create(input));
+      // The creator is the authenticated person, stamped server-side exactly
+      // like a send's author, so a Relay can resolve their member accounts
+      // before the chat's runtime exists.
+      const author = admittedAuthor(ctx, admission?.author, people?.directory);
+      return runWithSecureSafeSpace(ctx, () => author ? base.create(input, { author }) : base.create(input));
     },
     switchHarness: base.switchHarness ? (sessionId, selection, timing, launch) => guarded(() => base.switchHarness!(g(sessionId), selection, timing, launch)) : undefined,
     cancelHarnessSwitch: base.cancelHarnessSwitch ? (sessionId) => guarded(() => base.cancelHarnessSwitch!(g(sessionId))) : undefined,
@@ -311,6 +316,8 @@ function scopeSessions(
     const release = base.releaseRuntimeHold.bind(base);
     scoped.releaseRuntimeHold = (sessionId, holdId) => release(g(sessionId), holdId);
   }
+  // A package's wait (polyth_wait) is shown on a chat of its own Space only.
+  assign("recordWait", bySession(base.recordWait));
   assign("cancelResume", bySession(base.cancelResume));
   assign("setResumeCompact", bySession(base.setResumeCompact));
   assign("resumeNow", bySession(base.resumeNow));
@@ -521,7 +528,7 @@ export function createSpaceServices(deps: {
 }): (ctx: SpaceContext) => SpaceServices {
   return (ctx) => {
     const projects = canonicalProjectService(ctx, deps.registry);
-    const canonicalSessions = canonicalSessionService(ctx, deps.sessions(), projects);
+    const canonicalSessions = canonicalSessionService(ctx, deps.sessions(), projects, deps.sharing?.());
     const sessions = accessControlledSessionService(ctx, canonicalSessions);
     return {
       ctx,

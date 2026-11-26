@@ -317,3 +317,20 @@ test("phone drops the global status bar entirely", async () => {
   const app = await read("../src/App.tsx");
   assert.match(app, /shellMode !== "phone" && <StatusBar \/>/, "StatusBar is not mounted on phone");
 });
+
+test("a frame that is the whole window (closable: false) shows no close button of its own", async () => {
+  const { container, unmount } = await mount(ModuleView, {
+    id: "pane-window",
+    title: "Source control",
+    variant: "rail",
+    closable: false,
+    onClose: () => {},
+    children: createElement("p", null, "content"),
+  });
+  try {
+    assert.equal(container.querySelector(".module-view-close"), null, "the window's own controls close it");
+    assert.equal(container.querySelector(".module-view-head h1.module-view-title")?.textContent, "Source control");
+  } finally {
+    await unmount();
+  }
+});

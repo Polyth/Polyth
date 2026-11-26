@@ -717,11 +717,11 @@ async function waitForSaved(page: Page): Promise<void> {
   );
 }
 
-async function openTemplate(page: Page, name: string, tab: "Run" | "Edit" = "Edit", openLabel = `Open ${name}`): Promise<void> {
+// A template's page is its settings and editor; the Workflows window holds no run.
+async function openTemplate(page: Page, name: string, openLabel = `Open ${name}`): Promise<void> {
   await page.locator(".workflow-card")
     .locator(`.workflow-card-main[aria-label="${openLabel}"]`).click();
   await page.locator('.workflow-page[data-page="workflow"]').waitFor({ state: "visible" });
-  await page.getByRole("tab", { name: tab, exact: true }).click();
 }
 
 test("workflow preset library supports first use, customization, autosave, grouped workers, and undo", async () => {
@@ -730,15 +730,20 @@ test("workflow preset library supports first use, customization, autosave, group
     await openWorkflowFromSwitcher(page);
     await page.locator('.workflow-page[data-page="library"]').getByRole("heading", { name: "Templates" }).waitFor({ state: "visible" });
 
-    await openTemplate(page, "Build + Review", "Run");
-    await page.getByRole("dialog").getByRole("button", { name: "Customize", exact: true }).click();
+    await openTemplate(page, "Build + Review");
+    // The template page leads with its editor; there is no Run tab and no run form.
     await page.locator(".workflow-canvas").waitFor({ state: "visible" });
-    await page.getByRole("dialog").getByRole("button", { name: "Customize", exact: true }).waitFor({ state: "detached" });
+    assert.equal(await page.locator(".workflow-page").getByRole("tab", { name: /^(Run|Edit)$/ }).count(), 0, "no Run/Edit tabs");
+    assert.equal(await page.locator(".workflow-run-form, .workflow-run-results").count(), 0);
+    const customize = page.locator(".workflow-detail-header").getByRole("button", { name: "Customize", exact: true });
+    await customize.click();
+    await customize.waitFor({ state: "detached" });
 
     await page.getByRole("button", { name: "All workflows", exact: true }).click();
-    await openTemplate(page, "Development", "Run");
-    await page.getByRole("dialog").getByRole("button", { name: "Customize", exact: true }).click();
-    await page.getByRole("dialog").getByRole("button", { name: "Customize", exact: true }).waitFor({ state: "detached" });
+    await openTemplate(page, "Development");
+    const customizeDevelopment = page.locator(".workflow-detail-header").getByRole("button", { name: "Customize", exact: true });
+    await customizeDevelopment.click();
+    await customizeDevelopment.waitFor({ state: "detached" });
     const groupControls = page.locator('[aria-label="implementation worker count"]');
     await groupControls.waitFor({ state: "visible" });
     assert.equal((await groupControls.locator('[aria-live="polite"]').textContent())?.trim(), "2");
@@ -804,16 +809,13 @@ test("workflow human approval opens the child session and exposes its permission
     await timeline.locator(".needs-human").waitFor({ state: "visible" });
     assert.match((await timeline.locator(".workflow-timeline-summary").textContent()) ?? "", /waiting/i);
 
-    await timeline.getByRole("button", { name: "View workflow", exact: true }).click();
-    // The waiting unit leads the run, ahead of the request text and stages.
-    const review = page.locator(".workflow-run-results > .workflow-run-requests").getByRole("button", { name: /Review.*respond/i });
+    // The waiting unit's own chat opens from the run's card, in the chat the run came from.
+    const review = timeline.getByRole("button", { name: /Review.*respond/i });
     await review.waitFor({ state: "visible" });
-    // Measure once the workflow window has finished its entrance.
-    await waitForAnimations(page, '[data-package-window-owner="workflow"]');
     const reviewBox = await review.boundingBox();
-    // Touch targets grow only on coarse pointers; this desktop run keeps the
-    // compact control height.
-    assert.ok(reviewBox && reviewBox.width > 0 && reviewBox.height >= 32);
+    // The card's own small button: touch targets grow only on coarse pointers,
+    // so this desktop run keeps the theme's compact control height (28px+).
+    assert.ok(reviewBox && reviewBox.width > 0 && reviewBox.height >= 28);
     await review.click();
     await page.waitForSelector(".perm-banner", { state: "visible", timeout: 8_000 });
     assert.match(page.url(), new RegExp("/s/" + MANUAL_CHILD + "$"));
@@ -829,34 +831,24 @@ test("workflow failure stays fenced to the failed run without a full retry", asy
   try {
     const timeline = page.locator(".workflow-timeline-card.status-error");
     await timeline.waitFor({ state: "visible" });
-    assert.match((await timeline.textContent()) ?? "", /Synthetic deploy check failed/);
     assert.equal(await timeline.getByRole("button", { name: /Retry full workflow/i }).count(), 0);
     assert.equal(await timeline.locator(".workflow-timeline-result p").textContent(), COMPACT_PROGRESS,
       "recorded blank gaps never become empty screens in chat");
 
-    await timeline.getByRole("button", { name: "View workflow", exact: true }).click();
-    const results = page.locator(".workflow-run-results");
-    await page.locator(".workflow-page").waitFor({ state: "visible" });
-    await results.waitFor({ state: "visible" });
-    assert.match((await results.locator(".form-error").textContent()) ?? "", /exit code 17/);
-    assert.equal(await results.locator(".workflow-retry-controls").count(), 0);
-    assert.equal(await results.locator(".workflow-run-heading > .workflow-status.status-error").count(), 1);
-    assert.equal(await results.locator(".workflow-run-result").textContent(), COMPACT_PROGRESS);
-    assert.equal(await results.locator(".workflow-node-output").textContent(), COMPACT_PROGRESS);
-
-    // "View workflow" on a run leads with that run, not the preset gallery.
-    assert.equal(await page.locator(".workflow-page").getAttribute("data-page"), "workflow");
-    await page.waitForFunction(() => {
-      const box = document.querySelector(".workflow-run-results")?.getBoundingClientRect();
-      return !!box && box.top >= 0 && box.top < innerHeight;
-    }, undefined, { timeout: 4_000 });
-    // A failed run is never replayed in one click; the next run is an explicit request.
+    // The card is the whole run surface: the failure, the compact result and no
+    // one-click replay of a failed run. It folds to its result until opened.
+    assert.match((await timeline.textContent()) ?? "", /Synthetic deploy check failed/, "a failed run says why without being opened");
+    await timeline.locator(".workflow-timeline-toggle").click();
+    assert.match((await timeline.textContent()) ?? "", /Synthetic deploy check failed/);
+    assert.match((await timeline.locator(".workflow-timeline-nodes").textContent()) ?? "", /Synthetic deploy check failed|Failed|Error/i);
     assert.equal(await page.getByRole("button", { name: "Run again", exact: true }).count(), 0);
-    const form = page.locator(".workflow-run-form");
-    await form.waitFor({ state: "visible" });
-    assert.equal(await form.locator("textarea").inputValue(), errorRun.input);
-    await page.waitForTimeout(250);
-    assert.equal(await results.locator(".workflow-status.status-running").count(), 0);
+    assert.equal(await timeline.locator(".workflow-run-usage").count(), 1, "a settled run asks how its result was used");
+    // "Workflow settings" opens the template's settings page: no run, no form.
+    await timeline.getByRole("button", { name: "Workflow settings", exact: true }).click();
+    await page.locator('.workflow-page[data-page="workflow"]').waitFor({ state: "visible" });
+    await page.locator(".workflow-canvas").waitFor({ state: "visible" });
+    assert.equal(await page.locator(".workflow-run-results, .workflow-run-form, .workflow-status.status-running").count(), 0);
+    await waitForAnimations(page, '[data-package-window-owner="workflow"]');
     await page.screenshot({ path: join(ARTIFACTS, "workflow_failed_fenced.png"), fullPage: false });
   } finally {
     await closePage(page);
@@ -1004,7 +996,6 @@ test("workflow light theme, reduced motion, RTL, and safe-area geometry remain s
     await rtl.locator(".workflow-card")
       .locator('.workflow-card-main[aria-label="فتح التطوير"]').click();
     await rtl.locator('.workflow-page[data-page="workflow"]').waitFor({ state: "visible" });
-    await rtl.locator("#workflow-detail-tab-edit").click();
     const arrow = rtl.locator(".workflow-canvas-connector").first();
     const direction = () => arrow.evaluate((element) => {
       const matrix = new DOMMatrix(getComputedStyle(element).transform);
@@ -1278,6 +1269,7 @@ test("composer runs the bundled Build + Review through the fake provider and the
     assert.ok(prompted?.recoveryContext?.includes(result), "the follow-up prompt carried the workflow result to the parent agent");
     await page.screenshot({ path: join(ARTIFACTS, "workflow_build_review_provider_result.png"), fullPage: false });
     await page.getByRole("button", { name: "Expand: Subagents: 2", exact: true }).click();
+    if (await timeline.locator(".workflow-timeline-toggle").getAttribute("aria-expanded") !== "true") await timeline.locator(".workflow-timeline-toggle").click();
     await timeline.getByRole("button", { name: `Open ${node.role} child session`, exact: true }).click();
     await page.waitForURL(`**/s/${node.sessionId}`);
     const activeTitle = page.locator('.session-row.active .session-title-text');
@@ -1338,7 +1330,7 @@ test("completed verification unlocks the finalizer and displays its result after
   }
 });
 
-test("workflow view starts a run, repeats it, and repeats it again after a reload", async () => {
+test("a run's card starts it again in its chat, and again after a reload", async () => {
   const page = await openApp({ width: 1280, height: 900, sessionId: VISUAL_SESSION });
   try {
     const setup = await page.evaluate(async ({ projectId }) => {
@@ -1349,15 +1341,19 @@ test("workflow view starts a run, repeats it, and repeats it again after a reloa
         if (!response.ok) throw new Error(`${path}: HTTP ${response.status}`);
         return response.json();
       };
-      const parent = await post("/api/sessions", { projectId, title: "Workflow view run parent" });
+      const parent = await post("/api/sessions", { projectId, title: "Workflow card run parent" });
       const workflow = await post("/api/workflows", {
-        projectId, name: "View run check",
+        projectId, name: "Card run check",
         nodes: [{
           id: "agent", role: "Agent", prompt: "Reply briefly.",
           harness: { mode: "pinned", harnessId: "opencode" },
           model: { providerID: "synthetic", modelID: "fable-mini" },
         }],
         edges: [],
+      });
+      await post(`/api/workflows/${workflow.id}/run`, {
+        sessionId: parent.id, input: "Check the card run path",
+        launch: { clientOperationId: "card-run-first" },
       });
       return { parentId: parent.id as string, workflowId: workflow.id as string };
     }, { projectId: PROJECT_ID });
@@ -1372,30 +1368,26 @@ test("workflow view starts a run, repeats it, and repeats it again after a reloa
       const mine = all.filter((run) => run.workflowId === workflowId);
       return mine.length === count && mine.every((run) => run.status === "done");
     }, { projectId: PROJECT_ID, workflowId: setup.workflowId, count }, { timeout: 30_000 });
-    const openView = async () => {
+    const openChat = async () => {
       await page.goto(`${BASE}/p/${PROJECT_ID}/s/${setup.parentId}`, { waitUntil: "load" });
       await page.waitForSelector(".composer-card", { state: "visible" });
-      await openWorkflowFromSwitcher(page);
-      await page.locator('.workflow-card-main[aria-label="Open View run check"]').click();
     };
 
-    await openView();
-    // Choosing a saved workflow opens its page on the Run tab.
-    assert.equal(await page.locator(".workflow-page").getAttribute("data-page"), "workflow");
-    await page.locator(".workflow-run-form textarea").fill("Check the view run path");
-    await page.locator(".workflow-run-footer").getByRole("button", { name: "Run workflow", exact: true }).click();
     await waitForRuns(1);
-    await page.locator(".workflow-run-results .workflow-run-heading .workflow-status.status-done").waitFor({ state: "visible" });
-
-    await page.locator(".workflow-run-results").getByRole("button", { name: "Run again", exact: true }).click();
+    await openChat();
+    const done = page.locator(".workflow-timeline-card.status-done");
+    await done.last().waitFor({ state: "visible", timeout: 12_000 });
+    await done.last().locator(".workflow-timeline-toggle").click();
+    await done.last().getByRole("button", { name: "Run again", exact: true }).click();
     await waitForRuns(2);
 
-    // After a reload no hand-off carries the request, yet Run again still repeats it.
-    await openView();
-    await page.locator(".workflow-run-results").waitFor({ state: "visible" });
-    await page.locator(".workflow-run-results").getByRole("button", { name: "Run again", exact: true }).click();
+    // After a reload the card replays from the chat's history, and Run again still repeats the request.
+    await openChat();
+    await page.waitForFunction(() => document.querySelectorAll(".workflow-timeline-card.status-done").length === 2, undefined, { timeout: 12_000 });
+    await done.last().locator(".workflow-timeline-toggle").click();
+    await done.last().getByRole("button", { name: "Run again", exact: true }).click();
     await waitForRuns(3);
-    assert.deepEqual((await runs()).map((run) => run.input), Array(3).fill("Check the view run path"));
+    assert.deepEqual((await runs()).map((run) => run.input), Array(3).fill("Check the card run path"));
   } finally {
     await closePage(page);
   }

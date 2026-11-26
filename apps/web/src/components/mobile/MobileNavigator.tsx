@@ -40,9 +40,13 @@ import ProjectGlyph from "../ProjectGlyph.tsx";
 import { ServerZonesTree } from "../sidebar/ServerZones.tsx";
 import { soloPersonalProject } from "../../personalProject.ts";
 import { chatReadByOthers, offersPrivateRoom, privateRoomOf, rootProjectId, rootProjects, startPrivateChat } from "../../privateRoom.ts";
+import { searchTerms } from "@polyth/session/search-text";
+import { projectMatchesSearch, sessionMatchesSearch, useChatSearchHits } from "../../chatSearchHits.ts";
+import { ChatSearchMessagesRow } from "../ChatSearchMessagesRow.tsx";
 import PrivateRoomGroup, { useRoomChatsListed } from "../PrivateRoomGroup.tsx";
 import ProjectAppearanceDialog from "../ProjectAppearanceDialog.tsx";
 import ConversationCreateDialog from "../ConversationCreateDialog.tsx";
+import SharedChatDialog from "../SharedChatDialog.tsx";
 import { getLocale, tr } from "../../i18n/index.ts";
 import { friendlyError } from "../../settings.ts";
 import { useSessionSummaryPages } from "../../useSessionSummaryPages.ts";
@@ -283,6 +287,8 @@ function leadMark(mark: SessionLeadMark | null) {
       return <span className="mobile-nav-session-state is-failed">{statusIcon(mark)}</span>;
     case "rate-limited":
       return <span className="mobile-nav-session-state is-limited">{statusIcon(mark)}</span>;
+    case "awaiting":
+      return <span className="mobile-nav-session-state is-awaiting">{statusIcon(mark)}</span>;
     case "unread":
       return <span className="mobile-nav-unread-dot" />;
     case "pin":
@@ -1099,6 +1105,7 @@ export default function MobileNavigator() {
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [appearanceProjectId, setAppearanceProjectId] = useState<string | null>(null);
   const [conversationProjectId, setConversationProjectId] = useState<string | null>(null);
+  const [sharedChatProjectId, setSharedChatProjectId] = useState<string | null>(null);
   // The project-name field while one is open. A project menu closing hands
   // focus back here instead of to its ⋮, which would blur the field it just
   // opened and save the unchanged name at once.
@@ -1333,8 +1340,11 @@ export default function MobileNavigator() {
     });
   }, [dateFilter, frequentProjects, projectOrder, projectSessions, projects, sort]);
 
+  const searchTermList = useMemo(() => searchTerms(query), [query]);
+  // The same query asks the one chat search for chats that match only in
+  // their messages; the list offers them as one row into that search.
+  const chatHits = useChatSearchHits(query);
   const visibleProjects = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase();
     return orderedProjects.filter((project) => {
       const room = privateRoomOf(registry.projects, project.id);
       const list = [...projectSessions.get(project.id) ?? [], ...(room ? projectSessions.get(room.id) ?? [] : [])];
@@ -1342,11 +1352,11 @@ export default function MobileNavigator() {
       if (sessionDateFilterActive(dateFilter) && dated.length === 0) return false;
       const hasAttention = dated.some((session) => statusPriority(session) <= 1 || (session.attention?.unread ?? 0) > 0);
       if (attentionOnly && !hasAttention) return false;
-      if (!needle) return true;
-      if (`${project.name} ${project.path}`.toLocaleLowerCase().includes(needle)) return true;
-      return dated.some((session) => `${session.title} ${session.branch ?? ""} ${session.worktreePath ?? ""}`.toLocaleLowerCase().includes(needle));
+      if (!searchTermList.length) return true;
+      if (projectMatchesSearch(project, searchTermList)) return true;
+      return dated.some((session) => sessionMatchesSearch(session, searchTermList));
     });
-  }, [attentionOnly, dateFilter, orderedProjects, projectSessions, query, registry.projects]);
+  }, [attentionOnly, dateFilter, orderedProjects, projectSessions, searchTermList, registry.projects]);
 
   // Projects move by direct manipulation (workspaceArrange.ts, the engine the
   // Workspace editor uses): a still press lifts a project's row, the copy
@@ -1669,11 +1679,11 @@ export default function MobileNavigator() {
           {visibleProjects.length === 0 && (
             <div className="mobile-nav-empty">{tr("sidebar.noMatchingSessions")}</div>
           )}
+          {searchMode && query.trim() !== "" && <ChatSearchMessagesRow hits={chatHits} className="mobile-nav-messages-row" />}
           {shownProjects.map((project) => {
             const roomSessions = projectSessions.get(privateRoomOf(registry.projects, project.id)?.id ?? "") ?? [];
             // A search reaches the private chats; otherwise they keep to their row.
             const all = [...projectSessions.get(project.id) ?? [], ...(searchMode ? roomSessions : [])];
-            const needle = query.trim().toLocaleLowerCase();
             // A repository chip narrows this project's own chats; a delegated
             // child follows its parent, and the project's status pills still
             // count every chat, so work under another chip is never hidden.
@@ -1689,9 +1699,9 @@ export default function MobileNavigator() {
             };
             const datedAll = all.filter((session) => sessionMatchesDateFilter(session, dateFilter));
             const dated = activeRepository ? datedAll.filter(inRepository) : datedAll;
-            const projectMatches = `${project.name} ${project.path}`.toLocaleLowerCase().includes(needle);
-            const matchingAll = needle && !projectMatches
-              ? datedAll.filter((session) => `${session.title} ${session.branch ?? ""} ${session.worktreePath ?? ""}`.toLocaleLowerCase().includes(needle))
+            const projectMatches = projectMatchesSearch(project, searchTermList);
+            const matchingAll = searchTermList.length && !projectMatches
+              ? datedAll.filter((session) => sessionMatchesSearch(session, searchTermList))
               : datedAll;
             const matching = activeRepository ? matchingAll.filter(inRepository) : matchingAll;
             const pinned = matching.filter((session) => session.pinned !== undefined);
@@ -1798,6 +1808,13 @@ export default function MobileNavigator() {
                 id: "conversation",
                 label: tr("conversation.new"),
                 onSelect: () => setConversationProjectId(project.id),
+              },
+              {
+                // Shared from its first message, so the agent never reaches
+                // the creator's personal notes (Spaces §14.6).
+                id: "shared-chat",
+                label: tr("sharing.newSharedChat"),
+                onSelect: () => setSharedChatProjectId(project.id),
               },
               ...(offersPrivateRoom(project) ? [{
                 id: "private-chat",
@@ -2067,6 +2084,13 @@ export default function MobileNavigator() {
           open
           projectId={conversationProjectId}
           onClose={() => setConversationProjectId(null)}
+        />
+      )}
+      {sharedChatProjectId && (
+        <SharedChatDialog
+          open
+          projectId={sharedChatProjectId}
+          onClose={() => setSharedChatProjectId(null)}
         />
       )}
     </>

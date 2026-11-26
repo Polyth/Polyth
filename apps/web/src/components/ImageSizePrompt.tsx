@@ -9,7 +9,6 @@ import {
   IMAGE_UPLOAD_PRESET_IDS,
   imageSizeOptions,
   isResizableImage,
-  recommendedImageSize,
   shouldAskImageSize,
   type ImageUploadSize,
   type ImageVariantEncoder,
@@ -22,8 +21,8 @@ import "./ImageSizePrompt.css";
 export interface ImageUploadRequest {
   file: File;
   /** Uploads the copy to keep (`file` itself when nothing was reduced) and
-   *  reports its own failure. */
-  commit(chosen: File): void | Promise<void>;
+   *  reports its own failure; `false` says it did not attach. */
+  commit(chosen: File): void | boolean | Promise<void | boolean>;
 }
 
 interface PendingImage extends Partial<ImageVariants> {
@@ -34,7 +33,11 @@ export interface ImageSizeChoice {
   pending: readonly PendingImage[];
   /** Hands over a batch; each file goes up at once or waits for the question. */
   offer(requests: readonly ImageUploadRequest[]): void;
-  choose(size: ImageUploadSize, remember: boolean): void;
+  /** Commits every waiting photo at `size`; resolves once all have gone up,
+   *  `false` when any of them did not attach. */
+  choose(size: ImageUploadSize, remember: boolean): Promise<boolean>;
+  /** Whether a photo still waits, read now rather than from the last render. */
+  waiting(): boolean;
   cancel(): void;
 }
 
@@ -94,17 +97,20 @@ export function useImageSizeChoice({ scopeKey, onScopeChanged, encode = encodeIm
     const items = pendingRef.current;
     update(() => []);
     if (remember) setUiSettings({ imageUploadSize: size });
-    void (async () => {
+    return (async () => {
+      let attached = true;
       for (const { request, variants } of items) {
         const { file } = request;
         const chosen = size === "original"
           ? file
           : variants?.[size] ?? (await encodeRef.current(file, [size])).variants[size] ?? file;
-        await request.commit(chosen);
+        if (await request.commit(chosen) === false) attached = false;
       }
+      return attached;
     })();
   }, [update]);
 
+  const waiting = useCallback(() => pendingRef.current.length > 0, []);
   const cancel = useCallback(() => update(() => []), [update]);
 
   const scopeRef = useRef(scopeKey);
@@ -116,7 +122,7 @@ export function useImageSizeChoice({ scopeKey, onScopeChanged, encode = encodeIm
     onScopeChangedRef.current();
   }, [scopeKey, update]);
 
-  return { pending, offer, choose, cancel };
+  return { pending, offer, choose, waiting, cancel };
 }
 
 const SIZE_LABELS: Record<ImageUploadSize, TranslationKey> = {
@@ -140,7 +146,6 @@ function ImageSizeQuestion({ choice }: { choice: ImageSizeChoice }) {
   const [remember, setRemember] = useState(false);
   const { pending } = choice;
   const options = useMemo(() => imageSizeOptions(pending.map((item) => ({ ...item, file: item.request.file }))), [pending]);
-  const recommended = recommendedImageSize(options);
   const locale = getLocale();
   const totalBytes = pending.reduce((total, item) => total + item.request.file.size, 0);
   const first = pending[0]!.request.file;
@@ -163,8 +168,8 @@ function ImageSizeQuestion({ choice }: { choice: ImageSizeChoice }) {
           <Button
             key={option.id}
             className="image-size-prompt-option"
-            variant={option.id === recommended ? "primary" : "quiet"}
-            onClick={() => choice.choose(option.id, remember)}
+            variant="quiet"
+            onClick={() => { void choice.choose(option.id, remember); }}
           >
             <span className="image-size-prompt-option-name">{tr(SIZE_LABELS[option.id])}</span>
             <span className="image-size-prompt-option-detail">

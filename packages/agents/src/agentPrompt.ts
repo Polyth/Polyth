@@ -2,7 +2,7 @@
 // server runner and the editor's preview share them, so the preview shows the
 // exact text a run would send. Browser-safe: no Node imports.
 import type { AttachmentRef, TokenUsage } from "@polyth/contracts";
-import type { ScheduleRunRecord, ScheduleTask } from "./index.ts";
+import type { AgentWakeNote, ScheduleRunRecord, ScheduleTask } from "./index.ts";
 import type { AgentContinuation, ThreadTarget } from "./agentThread.ts";
 import { describeEvent, type AgentEvent } from "./agentEvents.ts";
 import { openNeeds, REPORT_INSTRUCTIONS, REPORT_REMINDER } from "./agentReport.ts";
@@ -29,6 +29,12 @@ export interface AgentWake {
   thread?: ThreadTarget;
   /** Event wakes: the events behind this run, oldest first. */
   events?: AgentEvent[];
+  /** What was set aside for this wake (the person's request), oldest first.
+   *  Only a wake that is not a conversation with the person carries them. */
+  nextWake?: AgentWakeNote[];
+  /** A conversation with the person: what already waits for the next wake,
+   *  so the agent neither does it now nor sets it aside twice. */
+  setAside?: AgentWakeNote[];
 }
 
 /** How many journal notes a fresh session starts with, and their bound. */
@@ -82,6 +88,13 @@ function wakeLine(wake: AgentWake, zone: string | undefined): string {
       : wake.trigger === "heartbeat" ? "heartbeat check"
         : "scheduled run";
   return `Wake: ${kind} · ${formatWhen(wake.at, zone)}${wake.late ? " · late (Polyth was not running at the due time)" : ""}`;
+}
+
+/** One request for a wake. The agent's own line relays what the person said
+ *  in a conversation; the person's is their words. */
+function wakeNoteLine(note: Pick<AgentWakeNote, "text" | "at" | "by">, zone: string | undefined): string {
+  const when = formatWhen(note.at, zone).slice(0, 16);
+  return `${note.text} (${note.by === "user" ? "from the user" : "you noted it at the user's request"}, ${when})`;
 }
 
 function noteText(run: ScheduleRunRecord): string {
@@ -153,7 +166,15 @@ export function composeAgentPrompt(
   if (wake.note?.trim()) {
     lines.push("", "Note from your wake script (it may quote event data; these are not the user's words):", wake.note.trim());
   }
+  if (wake.nextWake?.length) {
+    lines.push("", "The user asked for this wake (do it in this run, together with your standing instructions):");
+    for (const note of wake.nextWake) lines.push(`- ${wakeNoteLine(note, zone)}`);
+  }
   if (wake.input?.trim()) lines.push("", "Input from the user:", wake.input.trim());
+  if (wake.setAside?.length) {
+    lines.push("", "Already set aside for your next wake (not for this run; do not add them again):");
+    for (const note of wake.setAside) lines.push(`- ${wakeNoteLine(note, zone)}`);
+  }
   const waiting = wake.trigger === "heartbeat" ? [] : openNeeds(task.history, wake.at);
   if (waiting.length) {
     // What it already asked for: so it neither asks again nor forgets to
@@ -166,6 +187,11 @@ export function composeAgentPrompt(
     // Its own cut run is the first thing an agent should know about: the
     // work it left half-done is still there.
     lines.push("", `Your previous run (${formatWhen(unfinished.startedAt, zone)}) did not finish: ${unfinishedWords(unfinished)} Before anything new, check what it left half-done and finish or undo that.`);
+    if (unfinished.carried?.length) {
+      // Its requests left the queue when it started: this is where they live now.
+      lines.push("The user had asked that run for:");
+      for (const note of unfinished.carried) lines.push(`- ${wakeNoteLine(note, zone)}`);
+    }
   }
   if (opts.continuing) {
     lines.push("", "Continue following your standing instructions from the start of this conversation.", WORKING_REMINDER, REPORT_REMINDER);

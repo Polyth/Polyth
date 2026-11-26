@@ -64,6 +64,8 @@ export interface AssistantMsg {
   harnessId?: string;
   runtimeLegId?: string;
   profileId?: string;
+  /** The Relay member account that ran this answer's turn. */
+  viaAccount?: string;
   tokens?: TokenUsage;
   cost?: number;
   undone?: boolean;
@@ -401,6 +403,7 @@ export interface TurnState {
   harnessId?: string;
   runtimeLegId?: string;
   profileId?: string;
+  viaAccount?: string;
   reason?: string;
   error?: string;
   /** The harness refused this turn because the conversation no longer fits;
@@ -621,6 +624,19 @@ export function contextTokensUsed(model: Partial<Pick<RenderModel, "contextUsage
   const tokens = estimatedContextTokens(model.messages, model.contextEstimateAfterSeq);
   contextEstimateCache.set(model, { version: model.version, tokens });
   return tokens;
+}
+
+/** The model an answer's footer names: what was recorded for the answer, then
+ *  for its turn. The session's current selection only labels an answer still
+ *  in flight; a settled answer without a record stays unrecorded (the footer
+ *  then says "Auto") so a later model switch cannot re-label it. */
+export function answerModelRef(
+  m: Pick<AssistantMsg, "model">,
+  turn: Pick<TurnState, "model"> | null | undefined,
+  sessionModel: ModelRef | undefined,
+  inFlight: boolean,
+): ModelRef | undefined {
+  return m.model ?? turn?.model ?? (inFlight ? sessionModel : undefined);
 }
 
 export interface ContextIdentity { model?: ModelRef; harnessId?: string }
@@ -1250,6 +1266,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           ...(model.turn?.harnessId ? { harnessId: model.turn.harnessId } : {}),
           ...(model.turn?.runtimeLegId ? { runtimeLegId: model.turn.runtimeLegId } : {}),
           ...(model.turn?.profileId ? { profileId: model.turn.profileId } : {}),
+          ...(model.turn?.viaAccount ? { viaAccount: model.turn.viaAccount } : {}),
           ...turnTiming(model),
         };
         pushAssistant(model, m);
@@ -1290,6 +1307,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           ...(model.turn?.harnessId ? { harnessId: model.turn.harnessId } : {}),
           ...(model.turn?.runtimeLegId ? { runtimeLegId: model.turn.runtimeLegId } : {}),
           ...(model.turn?.profileId ? { profileId: model.turn.profileId } : {}),
+          ...(model.turn?.viaAccount ? { viaAccount: model.turn.viaAccount } : {}),
           ...turnTiming(model),
         };
         pushAssistant(model, m);
@@ -1299,6 +1317,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       if (!m.harnessId && model.turn?.harnessId) m.harnessId = model.turn.harnessId;
       if (!m.runtimeLegId && model.turn?.runtimeLegId) m.runtimeLegId = model.turn.runtimeLegId;
       if (!m.profileId && model.turn?.profileId) m.profileId = model.turn.profileId;
+      if (!m.viaAccount && model.turn?.viaAccount) m.viaAccount = model.turn.viaAccount;
       // Chunks make an answer visible before its canonical message row exists.
       // Actions such as pinning must nevertheless target that final row: the
       // server deliberately rejects transient `assistant/chunk` events.
@@ -1735,6 +1754,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         harnessId: str(d, "harnessId"),
         runtimeLegId: str(d, "runtimeLegId"),
         profileId: str(d, "profileId"),
+        viaAccount: str(d, "viaAccount"),
         startedAt: ev.time,
       };
       // Same-model samples remain useful. Never manufacture a zero sample or
@@ -1810,6 +1830,15 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         model.totals.cacheWrite += t.cacheWrite ?? 0;
         const usageModel = (obj(d, "model") as ModelRef | undefined) ?? model.turn?.model;
         const usageHarness = str(d, "harnessId") ?? model.turn?.harnessId;
+        // Auto may report no model at turn start; the concrete one arriving
+        // with the turn's usage belongs to that turn's answers.
+        const reportedModel = obj(d, "model") as ModelRef | undefined;
+        if (reportedModel && model.turn && !model.turn.model) {
+          model.turn.model = reportedModel;
+          for (const msg of model.messages) {
+            if (msg.kind === "assistant" && !msg.model && msg.turnStartedAt === model.turn.startedAt) msg.model = reportedModel;
+          }
+        }
         // Overwrite (not accumulate): each request re-sends the whole
         // conversation, so the newest sample already reflects the full live
         // context. Summing would double-count history every turn. A sample
@@ -1975,6 +2004,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         ...(obj(d, "options")
           ? { options: obj(d, "options") as unknown as Required<WorkflowRunOptionsDto> }
           : {}),
+        ...(d.wake === true ? { wake: true } : {}),
         status: "running",
         startedAt: num(d, "startedAt") ?? ev.time,
         layers,
@@ -2020,6 +2050,20 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       run.finishedAt = num(d, "finishedAt") ?? ev.time;
       if (typeof d.result === "string") run.result = d.result;
       if (typeof d.interrupted === "boolean") run.interrupted = d.interrupted;
+      break;
+    }
+    case "workflow/run-outcome": {
+      const run = model.workflowRun;
+      if (!run || run.id !== (str(d, "runId") ?? run.id)) break;
+      const raw = obj(d, "outcome");
+      const value = raw ? str(raw, "value") : undefined;
+      if (!raw || (value !== "accepted" && value !== "reworked" && value !== "discarded")) break;
+      run.outcome = {
+        value,
+        ...(str(raw, "note") ? { note: str(raw, "note") } : {}),
+        at: num(raw, "at") ?? ev.time,
+        by: str(raw, "by") === "agent" ? "agent" : "person",
+      };
       break;
     }
     case "fusion/started": {

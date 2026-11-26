@@ -116,7 +116,7 @@ test("access text and request body: everyone is null, selections need a choice",
   assert.equal(accessProblem({ people: "everyone", userIds: [], spaces: "everyone", spaceIds: [] }, accountsT), null);
 });
 
-test("a person with their own accounts sees Your/Shared groups and always adds a private account", async () => {
+test("a person sees their own and shared accounts in one list and always adds a private account", async () => {
   accountList = {
     label: "Claude", manageable: true, canAddShared: false, canEditAccess: false,
     accounts: [
@@ -126,7 +126,13 @@ test("a person with their own accounts sees Your/Shared groups and always adds a
   };
   const view = await mountAccounts();
   try {
-    assert.deepEqual(headings(view.container), ["Your accounts", "Shared accounts"]);
+    assert.deepEqual(headings(view.container), [], "one list, no group headings");
+    const list = view.container.querySelector<HTMLElement>('ul[aria-label="Claude accounts"]')!;
+    const rows = [...list.querySelectorAll<HTMLElement>('[data-testid="account-row"]')];
+    assert.deepEqual(rows.map((row) => row.querySelector("strong")?.textContent), ["Default", "Work"]);
+    assert.match(rows[1]!.textContent ?? "", /Only you/, "a private account says so in its row");
+    assert.match(rows[0]!.textContent ?? "", /Shared/);
+    assert.equal(view.container.querySelector('[data-testid="relay-switch"]'), null, "no Relay on a server without it");
     assert.equal(buttons(view.container, "Shared with others").length, 0, "only the owner chooses shared");
     assert.equal(buttons(view.container, "Access").length, 0);
     assert.match(view.container.textContent ?? "", /every agent still runs as the same system user/);
@@ -151,7 +157,9 @@ test("the owner chooses shared or only-me, sees unusable rows quietly and edits 
   };
   const view = await mountAccounts();
   try {
-    assert.deepEqual(headings(view.container), ["Your accounts", "Shared accounts", "Other people's accounts"]);
+    assert.deepEqual(headings(view.container), ["Other people's accounts"], "only other people's private logins stay apart");
+    const own = view.container.querySelector<HTMLElement>('ul[aria-label="Claude accounts"]')!;
+    assert.deepEqual([...own.querySelectorAll("strong")].map((name) => name.textContent), ["Default", "Team"]);
     const team = [...view.container.querySelectorAll<HTMLElement>(".pkg-harnesses-accounts-row")].find((row) => row.textContent?.includes("Team"))!;
     assert.equal(team.getAttribute("data-usable"), "false");
     assert.match(team.textContent ?? "", /Not available to you/);

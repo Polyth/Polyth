@@ -520,6 +520,8 @@
         "scripts/ci/update-feed.mjs",
         "scripts/ci/mac-legacy.mjs",
         "scripts/ci/release-notes.mjs",
+        "scripts/community-metrics.mjs",
+        "scripts/community-metrics-server.mjs",
         "scripts/release-version.mjs",
         "scripts/bump-version.mjs",
         "Cargo.toml",
@@ -530,6 +532,7 @@
         "docs/agents/commands.md",
         "docs/agents/verification.md",
         "docs/operations/releases.md",
+        "docs/operations/community-metrics.md",
         "docs/operations/docker.md",
         "docs/operations/running.md"
       ],
@@ -539,7 +542,9 @@
         "scripts/test/release-notes.test.ts",
         "scripts/test/checkCoAuthors.test.ts",
         "scripts/test/bump-version.test.ts",
-        "scripts/test/release-quality-gates.test.ts"
+        "scripts/test/release-quality-gates.test.ts",
+        "scripts/test/community-metrics.test.ts",
+        "scripts/test/community-metrics-server.test.ts"
       ],
       "risk": "high"
     },

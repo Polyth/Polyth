@@ -330,10 +330,13 @@ export function parseModelRef(value: string): { providerID: string; modelID: str
 const EPOCH_IDENTITY_RE = /epoch-pending|confirmation-required|binding-mismatch|epoch-proof-required/i;
 
 /** The write may or may not have happened: the server (or the client, after a
- *  lost response) could not prove either outcome. */
+ *  lost response) could not prove either outcome. An explicit outcome wins
+ *  over the code: opening a chat whose own start is uncertain answers
+ *  `outcome-unknown`, yet the open itself is `not-applicable`. */
 export function isMutationOutcomeUnknown(err: unknown): boolean {
   const diagnostic = readErrorDiagnostics(err);
-  return diagnostic.mutationOutcome === "unknown" || diagnostic.code === "outcome-unknown";
+  if (diagnostic.mutationOutcome) return diagnostic.mutationOutcome === "unknown";
+  return diagnostic.code === "outcome-unknown";
 }
 
 /** True for a banner built from an unknown write outcome. Such a banner is

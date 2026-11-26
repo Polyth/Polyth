@@ -22,7 +22,7 @@ import { Icon } from "../icons.tsx";
 import { getLocale, tr } from "../i18n/index.ts";
 import { highlight, langOf } from "../highlight.ts";
 import { MarkdownDoc } from "../markdown.tsx";
-import { registerMarkdownFence } from "../markdown/fenceRenderers.ts";
+import { markdownFenceActions, registerMarkdownFence, registerMarkdownFenceAction, subscribeMarkdownFenceActions } from "../markdown/fenceRenderers.ts";
 import { requestComposerDictation, requestComposerInsert, requestComposerSubmit } from "../composerInsert.ts";
 import { openSession } from "../init.ts";
 import { requestConversationReveal } from "../conversationReveal.ts";
@@ -65,6 +65,7 @@ import {
   upsertSession,
   workspaceProjectId,
 } from "../store.ts";
+import { openPaneWindow, setWindowContentTitle, windowResource } from "../secondWindow.ts";
 import { listSlots, registerSlot } from "../slots.ts";
 import { notifications } from "../notify/store.ts";
 import { claimSessionListing } from "../sessionListing.ts";
@@ -244,6 +245,9 @@ export const webPackageHost: WebPackageHost = {
   },
   markdown: {
     registerFence: registerMarkdownFence,
+    registerFenceAction: registerMarkdownFenceAction,
+    fenceActions: markdownFenceActions,
+    subscribeFenceActions: subscribeMarkdownFenceActions,
   },
   projectSettings: {
     open: openProjectSettings,
@@ -320,6 +324,12 @@ export const webPackageHost: WebPackageHost = {
     openSettingsPage,
     openWorkspacePane,
     closeWorkspacePane,
+    openPaneWindow: (surfaceId, resource) => {
+      const state = getState();
+      return openPaneWindow(workspaceProjectId(state), state.activeSessionId, surfaceId, resource);
+    },
+    setPaneWindowTitle: setWindowContentTitle,
+    paneWindowResource: windowResource,
     openPage: (pageId, resource, options) => openPage(pageId, resource ?? null, options ?? {}),
     closePage,
     openRailSurface: setRailPlugin,

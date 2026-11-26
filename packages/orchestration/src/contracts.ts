@@ -166,6 +166,9 @@ export interface ResolvedChoice extends ModelChoice {
   quotaUsed?: number;
   quotaWindow?: QuotaWindowRef;
   blockedUntil?: number;
+  /** The Relay-pinned selection a spawn must name when the saved choice names
+   *  a member account the Space keeps for a family Relay only. */
+  spawn?: { harnessId: string; providerID: string; modelID: string };
 }
 
 export interface ResolvedRole {
@@ -262,6 +265,8 @@ export interface ModelOption {
   favoriteIndex?: number;
   /** Turns in the usage window. */
   turns: number;
+  /** Failed turns among them; absent when unknown. */
+  failed?: number;
   /** The catalog says the model reads images. */
   vision: boolean;
   context?: number;

@@ -22,6 +22,8 @@ export interface UsedRow {
   providerID: string;
   modelID: string;
   turns: number;
+  /** Failed turns among them. */
+  failed?: number;
   runs?: string;
 }
 
@@ -57,6 +59,7 @@ export function buildModelOptions(input: {
       favorite: index !== undefined,
       ...(index !== undefined ? { favoriteIndex: index } : {}),
       turns: usage?.turns ?? 0,
+      ...(usage?.failed ? { failed: usage.failed } : {}),
       vision: row.capabilities?.includes("input:image") ?? false,
       ...(row.context ? { context: row.context } : {}),
       tier: tierOf(row.name ?? "", row.modelID),

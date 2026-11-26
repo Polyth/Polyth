@@ -812,19 +812,91 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.sidebar-project-rail-status {
+/* Status marks: each kind owns a corner of the tile (ProjectRailStatus.tsx).
+   They stay inside the tile because the scrolling list clips anything past it.
+   The ink is black or white by the tone's own lightness: every theme sets its
+   signal colours differently, and neither --panel nor --text holds on all.
+   Each kind keeps its --status-* colour (tokens.css) everywhere it shows. A
+   12px count and an 8px dot leave the 22px glyph's corners mostly clear.
+   The rail scale is a percentage, so 0.9 gives a 7.2px dot that the browser
+   rasterizes as 7 or 8px depending on the tile's subpixel position: two
+   projects in the same state then wear differently sized marks. The box and
+   its ring snap to whole pixels (the plain calc stays as the fallback). */
+.sidebar-project-rail-mark {
+  --rail-mark-base: 12px;
+  --rail-mark: calc(var(--rail-mark-base) * var(--rail-scale-left, 1));
+  --rail-mark: round(calc(var(--rail-mark-base) * var(--rail-scale-left, 1)), 1px);
+  --rail-mark-ring: calc(2px * var(--rail-scale-left, 1));
+  --rail-mark-ring: round(calc(2px * var(--rail-scale-left, 1)), 1px);
+  --rail-mark-tone: var(--status-result);
   position: absolute;
-  inset-inline-end: 1px;
-  bottom: 1px;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  min-width: var(--rail-mark);
+  height: var(--rail-mark);
+  padding-inline: var(--rail-mark-ring);
+  border-radius: var(--radius-round);
+  background: var(--rail-mark-tone);
+  box-shadow: 0 0 0 1px var(--panel);
+  color: var(--panel);
+  font-size: max(8px, calc(9px * var(--rail-scale-left, 1)));
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  pointer-events: none;
+}
+@supports (color: oklch(from red l c h)) {
+  .sidebar-project-rail-mark { color: oklch(from var(--rail-mark-tone) calc((0.56 - l) * 1000) 0 0); }
+}
+.sidebar-project-rail-mark.is-question { --rail-mark-tone: var(--status-question); top: 0; inset-inline-start: 0; }
+.sidebar-project-rail-mark.is-permission { --rail-mark-tone: var(--status-permission); top: 0; inset-inline-end: 0; }
+.sidebar-project-rail-mark:is(.is-result, .is-working) { bottom: 0; inset-inline-end: 0; }
+.sidebar-project-rail-mark.is-dot {
+  --rail-mark-base: 8px;
+  min-width: var(--rail-mark);
+  padding: 0;
+}
+/* Working is a hollow ring: it shares the result's corner, and a green accent
+   must not make the two read the same. */
+.sidebar-project-rail-mark.is-working {
+  background: var(--panel);
+  box-shadow: inset 0 0 0 var(--rail-mark-ring) var(--accent), 0 0 0 1px var(--panel);
+}
+.sidebar-project-rail-tooltip-copy > .sidebar-project-rail-tooltip-status {
+  display: grid;
+  gap: 2px;
+  margin-block-start: var(--space-1);
+  direction: inherit;
+  font-family: inherit;
+}
+.sidebar-project-rail-tooltip-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.sidebar-project-rail-tooltip-swatch {
+  --rail-mark-tone: var(--status-result);
+  flex: none;
   width: 8px;
   height: 8px;
-  border: 2px solid var(--panel);
-  border-radius: var(--radius-circle);
-  background: var(--green);
+  border-radius: var(--radius-round);
+  background: var(--rail-mark-tone);
 }
-.sidebar-project-rail-status.attention { background: var(--amber); }
-/* A finished chat with a reply you have not read. */
-.sidebar-project-rail-status.result { background: var(--accent); }
+.sidebar-project-rail-tooltip-swatch.is-question { --rail-mark-tone: var(--status-question); }
+.sidebar-project-rail-tooltip-swatch.is-permission { --rail-mark-tone: var(--status-permission); }
+.sidebar-project-rail-tooltip-swatch.is-working {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.sidebar-project-rail-tooltip-count {
+  color: var(--text);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
 /* Every rail control is one tile with one glyph size. The toggle and Settings
    are IconButtons, whose own md box (later in this sheet) and 16px service-bar
    glyph would otherwise win. */
@@ -1416,6 +1488,27 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   box-shadow: inset 0 0 0 1px var(--accent-line);
 }
 .project-card-shell[data-session-drop-over="true"] { border-radius: var(--radius-card); }
+/* The same, for another checkout of the chat's own project: a worktree's
+   heading, or the main-checkout strip that appears only mid-drag. */
+.session-worktree-head[data-session-drop-over="true"],
+.session-checkout-drop[data-session-drop-over="true"] {
+  background: var(--accent-wash);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+  border-radius: var(--radius-control);
+}
+.session-checkout-drop {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: var(--nav-row-branch);
+  margin: 2px 0;
+  padding: 0 6px 0 var(--nav-worktree-row-indent, var(--nav-indent-worktree));
+  border: 1px dashed var(--accent-line);
+  border-radius: var(--radius-control);
+  color: var(--text-muted);
+  font-size: var(--font-meta);
+}
+.session-checkout-drop > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Moving projects in the tree (workspaceArrange.ts): a press on a project's
    row lifts a copy of the row; the project's own place stays behind as a
    quiet well, its sessions folded, and travels through the list. */
@@ -1496,9 +1589,10 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 }
 /* The row's highlight lives on the shell, not on the card button: the card is
    only the leading grid column, so its own surface stopped at the title and
-   left the actions beside it unlit. The shell spans the whole row. */
+   left the actions beside it unlit. The shell spans the whole row; a
+   worktree heading's highlight lives on its head for the same reason. */
 .project-card-shell::before,
-.session-worktree-toggle::before,
+.session-worktree-head::before,
 .session-btn::before {
   content: "";
   position: absolute;
@@ -1511,7 +1605,18 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   pointer-events: none;
   transition: opacity var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease);
 }
-.project-card-shell::before { left: calc(var(--nav-indent-project) - var(--nav-glyph-inset)); }
+/* The project highlight takes the chat pills' extents: --nav-pill-air before
+   the glyph and after the trailing inset, so it is as wide as the rows under
+   it instead of stopping short of the trailing gutter. */
+.project-card-shell::before {
+  inset-inline: calc(var(--nav-indent-project) - var(--nav-pill-air)) calc(var(--nav-trailing-inset) - var(--nav-pill-air));
+}
+/* The rail header row pads its content in from the sidebar edge itself. */
+.sidebar-focused-project[data-tools] > .project-card-shell::before {
+  inset-inline:
+    calc(var(--nav-gutter) + var(--nav-glyph-inset) - var(--nav-pill-air))
+    calc(var(--nav-gutter) + var(--nav-trailing-inset) - var(--nav-pill-air));
+}
 /* The glyph column ends where the text axis starts; the 17px folder (or a
    19px project image) sits at its start. */
 .project-card > .project-glyph {
@@ -1528,6 +1633,16 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
     opacity: 1;
   }
 }
+/* The tree's "you are here": the active project's row carries the current
+   chat row's plate (.session-row.active below) while no chat row inside it
+   is lit — on its New chat page, or with its list closed — the way the rail
+   lights the active project's icon. One mark at a time: two identical plates
+   made the current chat ambiguous. Interface styles restyle it with the chat
+   row (fluentTheme.css, shellLooks.css). */
+.project-tree-node:not(:has(.session-row.active)) > .project-card-shell:has(> .project-card.active)::before {
+  background: var(--surface-overlay-strong);
+  opacity: 1;
+}
 /* Project actions are contextual: two quiet controls (new session + overflow
    menu) that reveal on row hover/focus with fine pointers and stay persistent
    on coarse pointers and drawer layouts. Opacity — not display — keeps them
@@ -1540,6 +1655,9 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   display: inline-flex;
   align-items: center;
   flex: none;
+  /* The ⋮ glyph centres on the chat rows' trailing column
+     (--session-trailing-axis), not 16px in from the row's edge. */
+  margin-inline-end: calc(var(--nav-trailing-inset) + (var(--icon-sm) - 2px) / 2 - 16px);
 }
 .project-new-session,
 .project-menu-btn {
@@ -1749,11 +1867,17 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   font-weight: 600;
   text-align: left;
 }
-.session-worktree-toggle::before { inset-inline: calc(var(--nav-worktree-row-indent, var(--nav-indent-worktree)) - var(--nav-glyph-inset)) 4px; }
+/* Same extents as the project row and the chat pills under it: --nav-pill-air
+   before the +/− sign and after the trailing inset. */
+.session-worktree-head::before {
+  inset-inline:
+    calc(var(--nav-worktree-row-indent, var(--nav-indent-worktree)) - var(--nav-pill-air))
+    calc(var(--nav-trailing-inset) - var(--nav-pill-air));
+}
 .session-worktree-toggle > * { position: relative; z-index: 1; }
 @media (hover: hover) {
   .session-worktree-toggle:hover:where(:not(:disabled)) { color: var(--text); background: transparent; }
-  .session-worktree-toggle:hover:where(:not(:disabled))::before { background: var(--elevated); opacity: 1; }
+  .session-worktree-head:hover:where(:not([data-session-drop-over="true"]))::before { background: var(--elevated); opacity: 1; }
 }
 .session-worktree-toggle > svg { width: 14px; height: 14px; flex: none; color: var(--session-blue, var(--accent)); }
 .session-worktree-toggle-sign {
@@ -1772,6 +1896,9 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   display: flex;
   gap: 2px;
   flex: none;
+  /* The last glyph centres on the chat rows' trailing column
+     (--session-trailing-axis), not 18px in from the heading's edge. */
+  margin-inline-end: calc(var(--nav-trailing-inset) + (var(--icon-sm) - 2px) / 2 - 18px);
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--motion-fast) var(--motion-ease);
@@ -2017,6 +2144,11 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 /* A provider-limit pause is a timer, not an alert: no badge disc. */
 .session-lead-mark.rate-limited { background: none; box-shadow: none; color: var(--amber); }
 .session-lead-mark.rate-limited svg { width: 100%; height: 100%; }
+/* Armed to wake by itself (a watched chat, a polyth_wait): calm, not
+   attention. A quiet glyph at the pin's size, lighter than the spinner, the
+   unread dot or the amber marks it yields to; no disc. */
+.session-lead-mark.awaiting { background: none; box-shadow: none; color: var(--muted); }
+.session-lead-mark.awaiting svg { width: calc(var(--icon-sm) - 3px); height: calc(var(--icon-sm) - 3px); }
 /* Approval is a shield on its own, like the reply and timer marks. */
 .session-lead-mark.approval { background: none; box-shadow: none; }
 .session-lead-mark.approval svg { width: 100%; height: 100%; }
@@ -2040,6 +2172,81 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   border-radius: 50%;
   background: var(--session-blue, var(--accent));
 }
+/* A row of the navigator's Pinned group above the projects
+   (PinnedSessions.tsx): its project's glyph, in the project's own colour,
+   stands in the state column, so the chat says where it lives without a
+   second line. Live state stays in sight on the glyph, as the project rail
+   marks its icons: a running chat turns a thin ring around it, the others
+   tint a dot at its corner. */
+.session-lead-project {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+}
+.session-lead-project .project-glyph {
+  width: 100%;
+  height: 100%;
+  font-size: calc(var(--session-lead-size) * .8);
+}
+.session-lead-project .project-glyph > svg,
+.session-lead-project .project-glyph img,
+.session-lead-project .project-glyph-mask {
+  width: calc(var(--session-lead-size) * .86);
+  height: calc(var(--session-lead-size) * .86);
+}
+.session-lead-project .project-remote-marker { display: none; }
+/* A project without an icon goes by its initial (pinnedSessions.ts
+   projectMonogram) on a disc washed with its colour, or with the default
+   project glyph ink when it has none. A disc, like an avatar, so the running
+   ring stays concentric with it; it reaches a little past the slot, and the
+   letter is the system's smallest text size, never smaller. */
+.session-lead-monogram {
+  --monogram-ink: var(--project-mark, var(--session-blue, var(--accent)));
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: calc(var(--session-lead-size) * 1.14);
+  height: calc(var(--session-lead-size) * 1.14);
+  border-radius: var(--radius-circle);
+  background: color-mix(in srgb, var(--monogram-ink) 16%, transparent);
+  color: var(--monogram-ink);
+  font: 650 var(--font-meta)/1 var(--ui-font-family);
+  user-select: none;
+}
+.session-lead-project[data-ring]::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  box-sizing: border-box;
+  border: 1.5px solid color-mix(in srgb, var(--session-blue, var(--accent)) 18%, transparent);
+  border-top-color: var(--session-blue, var(--accent));
+  border-radius: 50%;
+  animation: session-lead-spin .9s linear infinite;
+}
+.session-lead-project[data-ring="reconciling"]::after {
+  border-color: color-mix(in srgb, var(--amber) 18%, transparent);
+  border-top-color: var(--amber);
+  animation-duration: 1.6s;
+}
+.session-lead-project-dot {
+  position: absolute;
+  inset-inline-end: -3px;
+  bottom: -3px;
+  width: 7px;
+  height: 7px;
+  box-sizing: content-box;
+  border: 1.5px solid var(--panel);
+  border-radius: 50%;
+}
+/* A reply, an approval and an unread result take the rail's kind colours. */
+.session-lead-project-dot.question { background: var(--status-question); }
+.session-lead-project-dot.permission { background: var(--status-permission); }
+.session-lead-project-dot.result { background: var(--status-result); }
+.session-lead-project-dot.attention { background: var(--amber); }
+.session-lead-project-dot.failed { background: var(--red); }
+.session-lead-project-dot.unknown { background: var(--muted); }
 
 /* Column 2 — title, with the subagent disclosure right after its text. */
 .session-row.archived .session-title { color: var(--muted); }
@@ -2173,6 +2380,17 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   color: var(--muted);
 }
 .session-shared-icon svg { width: 100%; height: 100%; }
+/* Where else the chat is on screen: beside the focused chat, or in a window
+   of its own (sessionSplit.ts, secondWindow.ts). The sharing mark's weight. */
+.session-place-mark {
+  display: inline-grid;
+  width: calc(var(--icon-sm) - 2px);
+  height: calc(var(--icon-sm) - 2px);
+  flex: none;
+  place-items: center;
+  color: var(--muted);
+}
+.session-place-mark svg { width: 100%; height: 100%; }
 /* Someone mentioned the reader: the same quiet weight as the sharing mark. */
 .session-mention-badge {
   display: inline-grid;
@@ -2339,7 +2557,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .repository-filter-chip[aria-pressed="true"] {
   background: color-mix(in srgb, var(--accent) 17%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 34%, transparent);
-  color: var(--accent-text, var(--accent));
+  color: var(--accent);
   font-weight: 650;
 }
 .repository-filter-chip:focus-visible {
@@ -2937,12 +3155,13 @@ body[data-desktop-low-resource="true"] .timeline > .rewind-leaving { animation: 
    appearance. chatMotion owns its single entrance; the echo must not pulse or
    blink when the durable event replaces it. */
 
-/* A sent prompt keeps four lines in the log; the rest is one tap away. The
-   fade only appears once the text really is taller than the clamp. */
-.user-prompt { max-height: 4lh; overflow: hidden; }
+/* A sent prompt keeps --prompt-fold-lines lines in the log (Settings → Chat,
+   4 by default); the rest is one tap away. The fade covers the last line
+   whatever the clamp, and only appears once the text really is taller. */
+.user-prompt { max-height: calc(var(--prompt-fold-lines, 4) * 1lh); overflow: hidden; }
 .user-prompt.clipped {
-  -webkit-mask-image: linear-gradient(to bottom, #000 74%, transparent 100%);
-  mask-image: linear-gradient(to bottom, #000 74%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 1lh), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 1lh), transparent 100%);
 }
 .user-prompt.open { max-height: none; }
 .user-prompt > :first-child { margin-block-start: 0; }
@@ -3105,6 +3324,24 @@ body[data-desktop-low-resource="true"] .timeline > .rewind-leaving { animation: 
 .hero-open-project { margin-top: var(--space-4); }
 /* Registry loading/failure never claim "no projects". */
 .side-projects-status { padding: 24px 12px; font-size: 12px; }
+/* A filtered chat list's way into the one chat search: chats that match only
+   in their messages. Quiet like a session row, accent ink like a link. */
+.chat-search-messages-row {
+  display: flex; align-items: center; gap: var(--control-gap);
+  inline-size: 100%; min-block-size: var(--nav-row-session, var(--control-h-sm));
+  padding-block: 0; padding-inline: var(--nav-indent-session, var(--space-3)) var(--space-3);
+  border: 0; border-radius: var(--radius-control); background: transparent;
+  color: var(--accent); font: inherit; font-size: var(--font-meta); text-align: start; cursor: pointer;
+}
+.chat-search-messages-row:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.chat-search-messages-row:focus-visible { outline: 2px solid var(--focus-ring, var(--accent)); outline-offset: -2px; }
+.chat-search-messages-label { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-search-messages-row > .ui-icon { flex: none; }
+.chat-search-messages-go { color: var(--faint); }
+.chat-search-messages-go:dir(rtl) { transform: scaleX(-1); }
+@media (hover: hover) {
+  .chat-search-messages-row:hover .chat-search-messages-go { color: var(--accent); }
+}
 .hero-retry-projects { margin-top: var(--space-4); }
 .hero-status { margin-top: 14px; max-width: 470px; font-size: var(--font-meta); color: var(--faint); overflow-wrap: anywhere; }
 /* Registry loading sits on the same canvas as the fresh-chat hero
@@ -4732,7 +4969,7 @@ border-color: var(--accent); color: var(--accent); background: var(--accent-wash
 .session-search-sub > span + span::before { content: "·"; margin-inline-end: var(--space-2); color: var(--faint); }
 .session-search-branch { font-family: var(--mono); font-size: var(--font-meta); }
 .session-search-label { color: var(--text-dim); }
-.session-search-archived { text-transform: uppercase; letter-spacing: .04em; font-size: calc(var(--font-meta) * .9); color: var(--faint); }
+.session-search-archived { color: var(--faint); }
 .session-search-row-meta { display: flex; flex: none; align-items: center; gap: var(--space-2); color: var(--faint); font-size: var(--font-meta); font-variant-numeric: tabular-nums; }
 .session-search-more { color: var(--muted); }
 .session-search-time { flex: none; color: var(--faint); font-size: var(--font-meta); font-variant-numeric: tabular-nums; }
@@ -4746,19 +4983,14 @@ border-color: var(--accent); color: var(--accent); background: var(--accent-wash
   color: var(--text-dim);
 }
 .session-search-row--message.active { border-inline-start-color: var(--accent); box-shadow: none; }
+/* Who said it: a quiet speaker label leading the excerpt inline (weight,
+   not colour alone, carries the distinction). */
 .session-search-role {
-  flex: none;
-  min-width: 3.2em;
-  padding: 1px 7px;
-  border-radius: var(--radius-round);
-  font-size: calc(var(--font-meta) * .9);
+  margin-inline-end: .45em;
   font-weight: 600;
-  letter-spacing: .02em;
-  text-align: center;
-  text-transform: uppercase;
 }
-.session-search-role--user { background: var(--blue-wash); color: var(--blue); }
-.session-search-role--assistant { background: var(--purple-wash); color: var(--purple); }
+.session-search-role--user { color: var(--blue); }
+.session-search-role--assistant { color: var(--muted); }
 .session-search-snippet {
   flex: 1;
   min-width: 0;
@@ -4854,37 +5086,32 @@ border-color: var(--accent); color: var(--accent); background: var(--accent-wash
   text-align: start;
   cursor: default;
 }
-.palette-session-actions {
-  display: flex;
-  flex: none;
-  gap: var(--space-1);
-  visibility: hidden;
-}
-.palette-session.active .palette-session-actions,
-.palette-session:has(:focus-visible) .palette-session-actions,
-.palette-session:has([aria-expanded="true"]) .palette-session-actions,
-.sheet.palette .palette-session-actions {
-  visibility: visible;
-}
-.palette-session-action {
-  min-height: max(26px, var(--hit-min));
-  padding-inline: var(--space-2);
-  border: 0;
-  border-radius: calc(var(--radius-control) - 2px);
-  background: transparent;
+/* A chat row's verbs sit behind one quiet ⋯ trigger at the trailing edge. The
+   slot always keeps its width, so titles never reflow as the selection moves;
+   the glyph shows where it would act (selected, pointed at, focused, open). */
+.palette-session-more.ui-icon-btn {
   color: var(--muted);
-  font: inherit;
-  font-size: var(--font-meta);
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--motion-ease), background-color var(--motion-fast) var(--motion-ease);
 }
-.palette-session-action.active {
+.palette-session.active .palette-session-more,
+.palette-session-more:is(:focus-visible, [aria-expanded="true"]) {
+  opacity: 1;
+}
+.palette-session-more[aria-expanded="true"] {
   background: var(--surface-overlay-strong);
   color: var(--text);
 }
 @media (hover: hover) {
-  .palette-session-action:hover:where(:not(:disabled)) {
-    background: var(--surface-overlay-strong);
-    color: var(--text);
-  }
+  .palette-session:hover .palette-session-more { opacity: 1; }
+  .palette-session-more:hover:where(:not(:disabled)) { background: var(--surface-overlay-strong); color: var(--text); }
+}
+/* Touch has no hover: the trigger stays visible with a full tap target. */
+.sheet.palette .palette-session-more.ui-icon-btn {
+  inline-size: max(var(--control-h-sm), var(--hit-min));
+  block-size: max(var(--control-h-sm), var(--hit-min));
+  margin-inline-end: calc(var(--space-2) * -1);
+  opacity: 1;
 }
 .palette-hint { color: var(--muted); font-size: var(--font-meta); }
 .palette-empty { color: var(--muted); font-size: var(--font-meta); text-align: center; padding: var(--space-5) 0; }
@@ -4951,6 +5178,24 @@ body[data-desktop-low-resource="true"] :is(.sync-catch-up, .sync-catch-up[data-s
 .alert-dialog-body { display: flex; flex-direction: column; gap: var(--space-3); }
 .alert-dialog-body p { margin: 0; color: var(--text-dim); line-height: 1.5; white-space: pre-line; }
 .alert-dialog-body input { width: 100%; }
+/* A confirmation gate (e.g. a chat that read personal notes moving where more
+   people can open it): a real control, so it reads as one. */
+.alert-acknowledge {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay);
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.alert-acknowledge[aria-checked="true"] .ui-checkbox-box {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+}
 /* Anchored confirmation. Phone widths show dialogs as bottom sheets; a
    confirmation asked from a control on screen (confirmAlert's `origin`, e.g.
    Delete in a session row's menu) is a card over that control instead, placed
@@ -5161,6 +5406,12 @@ body[data-hide-borders="true"] .lock-card .ui-checkbox input:checked + .ui-check
   font-size: var(--font-meta);
   line-height: var(--font-meta-lh);
 }
+/* Good news in the same slot (a password was reset): not alarming red. */
+.lock-error.lock-error--notice {
+  color: var(--text);
+  background: var(--accent-wash);
+  border-color: var(--accent-line);
+}
 .lock-actions {
   display: grid;
   gap: var(--space-2);
@@ -5191,22 +5442,92 @@ body[data-hide-borders="true"] .lock-card .ui-checkbox input:checked + .ui-check
   flex: 1;
   background: var(--surface-divider);
 }
-.lock-submit--secondary {
-  background: var(--material-glass);
-  border-color: var(--material-glass-border);
-  color: var(--text);
-}
-@media (hover: hover) {
-  .lock-submit--secondary:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--material-glass) 72%, var(--accent-wash));
-    border-color: var(--accent-line);
-  }
+/* One filled action per card: the other ways in (LockScreen.tsx) are ghost
+   buttons. The primary keeps its accent while it waits for input, washed back
+   and flat, so the one action still reads as the one action instead of
+   turning the neutral gray every other disabled button takes (design-system.md
+   "Buttons"). Busy keeps the full variant. */
+.lock-actions .lock-submit.ui-btn--primary:disabled:not([aria-busy="true"]) {
+  background: color-mix(in srgb, var(--accent) 16%, transparent) !important;
+  border-color: color-mix(in srgb, var(--accent) 22%, transparent) !important;
+  color: color-mix(in srgb, var(--accent-text) 70%, transparent) !important;
 }
 .lock-recovery,
 .setup-back {
   align-self: center;
   min-height: max(var(--control-h-sm), var(--hit-min));
   margin-top: var(--space-3);
+}
+/* Accounts this browser signed in to: who is signing in, so only the
+   password is typed. The picked tile sits in the field well with an accent
+   edge; the others stay quiet rows. */
+.lock-accounts {
+  display: grid;
+  gap: var(--space-1);
+  animation: lock-field-in var(--motion-normal) var(--motion-ease) both;
+}
+.lock-account {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: max(48px, var(--hit-min));
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease);
+}
+.lock-account[aria-checked="true"] {
+  background: var(--lock-well);
+  border-color: var(--accent-line);
+}
+@media (hover: hover) {
+  .lock-account:hover:not(:disabled):not([aria-checked="true"]) {
+    background: color-mix(in srgb, var(--lock-well) 60%, transparent);
+  }
+}
+.lock-account:focus-visible {
+  outline: 0;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus-wash);
+}
+.lock-account:disabled { cursor: default; opacity: .7; }
+.lock-account-mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-circle);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: color-mix(in srgb, var(--accent) 82%, var(--text));
+  font-weight: 650;
+}
+.lock-account-text {
+  min-width: 0;
+  display: grid;
+}
+.lock-account-name,
+.lock-account-login {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lock-account-name { font-weight: 600; }
+.lock-account-login {
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.lock-account-switch {
+  justify-self: start;
+  min-height: max(var(--control-h-sm), var(--hit-min));
+  margin-top: calc(var(--space-2) * -1);
 }
 
 /* ---------- first-run setup ---------- */
@@ -5538,7 +5859,8 @@ body[data-desktop-low-resource="true"] .lock-mark-frame {
 }
 .palette-list > .palette-group:first-child { padding-top: var(--space-2); }
 .palette-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: -0.005em; }
-.palette-label mark {
+.palette-label mark,
+.palette-excerpt mark {
   background: none;
   color: inherit;
   font-weight: 650;
@@ -5584,7 +5906,11 @@ body[data-desktop-low-resource="true"] .lock-mark-frame {
 .palette-sub { display: block; font-size: var(--font-meta); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .palette-check { flex: none; color: var(--accent); font-size: var(--font-meta); font-weight: 700; }
 .palette-status { font-size: var(--font-meta); font-weight: 600; letter-spacing: 0.02em; }
-.palette-status.archived { color: var(--muted); border: 1px solid var(--border-soft); border-radius: var(--radius-control); padding: 0 var(--space-1); margin-inline-start: var(--space-1); }
+.palette-status.archived { flex: none; color: var(--muted); border: 1px solid var(--border-soft); border-radius: var(--radius-control); padding: 0 var(--space-1); line-height: 1.4; }
+/* A chat title ellipsizes before its status badge, which always stays whole. */
+.palette-title-line { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+/* Phone rows show every verb at once: the row's own label wins the width. */
+.sheet.palette .palette-meta { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .palette-project .palette-label { font-weight: 600; }
 .palette-item .palette-label.mono { font-size: calc(var(--font-label) * .92); letter-spacing: 0; }
 .palette-item .palette-sub.mono { font-size: var(--font-meta); }
@@ -5679,7 +6005,10 @@ body[data-desktop-low-resource="true"] .lock-mark-frame {
 .strip-btn.active { color: var(--accent); background: var(--accent-wash); }
 .strip-badge {
   position: absolute; top: 0; inset-inline-end: 0; min-width: 13px; height: 13px; padding: 0 3px;
-  border-radius: calc(var(--radius-control) - 1px); background: var(--accent); color: var(--accent-ink);
+  border-radius: calc(var(--radius-control) - 1px);
+  /* A launcher's count (changes, items) is no chat status: neutral ink, so
+     it never borrows the accent or a --status-* kind colour. */
+  background: color-mix(in srgb, var(--text) 62%, transparent); color: var(--panel);
   font: 700 9px/13px var(--mono); text-align: center;
 }
 /* Shift-key customization mode: the rail edit control overlays the strip,
@@ -6274,6 +6603,9 @@ html[data-density="compact"] .set-row { padding: 6px 0; }
 }
 .user-detail-savebar .settings-save-bar { border-top: 1px solid var(--hair); }
 .users-dialog-form { display: flex; flex-direction: column; gap: var(--space-4); margin: 0; }
+/* "Forgot your password?" sits under the password it answers, not as a
+   full-width row between fields. */
+.users-dialog-form > .desktop-reset-link { align-self: flex-start; margin-block-start: calc(-1 * var(--space-3)); }
 .users-dialog-intro { margin: 0; font-size: var(--font-label); line-height: 1.55; color: var(--muted); }
 .users-passphrase { display: flex; align-items: center; gap: var(--space-1); min-width: 0; }
 .users-passphrase > .ui-input { flex: 1 1 auto; min-width: 0; font-family: var(--mono); }
@@ -7124,6 +7456,24 @@ li > .md-quote { margin-block: calc(var(--prose-gap) * 0.6); }
    reads by its host: the scheme stays in the copied text, one step quieter. */
 .md-link-url { overflow-wrap: anywhere; word-break: normal; }
 .md-link-scheme { opacity: 0.62; }
+/* A markdown link to a workspace file is a ResourceLink button that opens it
+   in Project files. It keeps the markdown link's look (prose face, link ink,
+   the same hairline), not the monospace look of a prose file reference. */
+.resource-link.file-ref.md-file-link {
+  --md-link-ink: var(--link, var(--chat-ink-accent, var(--accent-text)));
+  font-family: inherit;
+  color: var(--md-link-ink);
+  text-align: start;
+  text-decoration-color: color-mix(in srgb, var(--md-link-ink) 40%, transparent);
+  text-decoration-thickness: max(1px, 0.07em);
+  text-underline-offset: 0.22em;
+  border-radius: min(var(--radius-control), 0.25em);
+}
+@media (hover: hover) {
+  .resource-link.file-ref.md-file-link:hover:where(:not(:disabled)) { text-decoration-color: currentColor; background-color: color-mix(in srgb, var(--md-link-ink) 8%, transparent); }
+}
+.resource-link.file-ref.md-file-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; text-decoration-color: currentColor; }
+.resource-link-missing.md-file-link { font-family: inherit; }
 /* The reader's own message is accent-tinted: its links take the accent that
    holds 4.5:1 on its own wash. */
 .msg.user .bubble { --link: var(--accent-on-wash); }
@@ -7436,6 +7786,35 @@ img.attachment-preview-media[data-zoom-settling] { transition: transform var(--m
 .attachment-preview-frame[data-zoom-settling] { transition: transform var(--motion-surface) var(--motion-ease); }
 .attachment-preview-content[data-gestures-off] :is(.attachment-preview-frame, img.attachment-preview-media) { cursor: default; }
 
+/* Caption: the tile's title the reader saw in the chat, in full, on one glass
+   island under the stage. Long text scrolls inside a three-line band. */
+.attachment-preview-caption {
+  flex: none; position: relative; z-index: 2; align-self: center;
+  box-sizing: border-box;
+  max-width: min(720px, calc(100% - 2 * var(--space-4) - var(--safe-left) - var(--safe-right)));
+  max-height: calc(3lh + 2 * var(--space-2));
+  margin: var(--space-2) 0 0; padding: var(--space-2) var(--space-4);
+  overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y;
+  border: 1px solid var(--material-glass-border);
+  border-radius: var(--radius-island);
+  background: var(--material-glass-strong);
+  color: var(--text);
+  box-shadow: var(--material-glass-highlight), var(--shadow-md);
+  font-size: var(--font-body); line-height: 1.45; text-align: center;
+  overflow-wrap: anywhere; white-space: pre-line;
+  animation: fade var(--motion-fast) var(--motion-ease);
+}
+.attachment-preview-dialog:not(:has(.attachment-preview-strip, .attachment-preview-actions)) .attachment-preview-caption {
+  margin-bottom: calc(var(--space-4) + var(--safe-bottom));
+}
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  body:not([data-glass="off"]):not([data-desktop-low-resource="true"]) .attachment-preview-caption {
+    background: color-mix(in srgb, var(--material-glass-strong) var(--material-glass-readable-fill), transparent);
+    -webkit-backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
+    backdrop-filter: blur(var(--material-glass-blur)) saturate(var(--material-glass-saturation));
+  }
+}
+
 /* Package controls: a centred row of glass islands under the stage. */
 .attachment-preview-actions {
   flex: none; position: relative; z-index: 2;
@@ -7459,14 +7838,15 @@ img.attachment-preview-media[data-zoom-settling] { transition: transform var(--m
   --preview-aside: clamp(260px, 30vw, 360px);
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--preview-aside);
-  grid-template-rows: minmax(0, 1fr) auto auto;
+  grid-template-rows: minmax(0, 1fr) auto auto auto;
 }
 .attachment-preview-content[data-aside] > .attachment-preview-stage { grid-column: 1; grid-row: 1; }
-.attachment-preview-content[data-aside] > .attachment-preview-actions { grid-column: 1; grid-row: 2; }
-.attachment-preview-content[data-aside] > .attachment-preview-strip { grid-column: 1; grid-row: 3; justify-self: center; }
+.attachment-preview-content[data-aside] > .attachment-preview-caption { grid-column: 1; grid-row: 2; justify-self: center; }
+.attachment-preview-content[data-aside] > .attachment-preview-actions { grid-column: 1; grid-row: 3; }
+.attachment-preview-content[data-aside] > .attachment-preview-strip { grid-column: 1; grid-row: 4; justify-self: center; }
 .attachment-preview-aside {
   position: relative; z-index: 2;
-  grid-column: 2; grid-row: 1 / span 3;
+  grid-column: 2; grid-row: 1 / span 4;
   min-height: 0; overflow: auto; overscroll-behavior: contain; touch-action: pan-y;
   margin: calc(var(--control-h-lg) + var(--space-5) + var(--safe-top)) calc(var(--space-4) + var(--safe-right)) calc(var(--space-4) + var(--safe-bottom)) 0;
   padding: var(--space-4);
@@ -7623,13 +8003,13 @@ img.attachment-preview-media[data-zoom-settling] { transition: transform var(--m
   .attachment-preview-media { border-radius: var(--radius-control); }
   .attachment-preview-doc { width: 100%; }
   /* The aside stacks under the controls and scrolls inside a bounded band. */
-  .attachment-preview-content[data-aside] { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto auto auto; }
+  .attachment-preview-content[data-aside] { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto auto auto auto; }
   .attachment-preview-content[data-aside] > .attachment-preview-aside {
-    grid-column: 1; grid-row: 3;
+    grid-column: 1; grid-row: 4;
     max-height: 38dvh;
     margin: var(--space-2) calc(var(--space-3) + var(--safe-right)) 0 calc(var(--space-3) + var(--safe-left));
   }
-  .attachment-preview-content[data-aside] > .attachment-preview-strip { grid-row: 4; }
+  .attachment-preview-content[data-aside] > .attachment-preview-strip { grid-row: 5; }
   .attachment-preview-dialog:not(:has(.attachment-preview-strip)) .attachment-preview-aside { margin-bottom: calc(var(--space-3) + var(--safe-bottom)); }
 }
 
@@ -8138,6 +8518,30 @@ body[data-glass="clear"] .prompt-nav-panel { --prompt-nav-panel-blur: 22px; }
 .session-pinned-divider::before,
 .session-pinned-divider::after { background: var(--accent-line); }
 .session-pinned-divider svg { width: var(--icon-sm); height: var(--icon-sm); }
+/* The Pinned group above the projects (PinnedSessions.tsx) is a section of
+   the navigator, so its head is a dim caption on the navigator's axes, as a
+   server zone's head is (ServerZones.css): pin in the glyph column, name on
+   the text axis, no rule. */
+.session-pinned-head {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 28px;
+  padding-inline: var(--nav-indent-project) 4px;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  font-weight: 600;
+  line-height: var(--font-meta-lh);
+  white-space: nowrap;
+}
+.session-pinned-head > svg {
+  flex: none;
+  margin-inline-end: calc(var(--nav-text-inset) - var(--nav-glyph-inset) - var(--icon-sm));
+}
+.session-pinned-head > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The same air closes the group as opens it above its head, so Planner,
+   Pinned and the first project fall on one even rhythm. */
+.session-pinned.session-pinned-above { padding-bottom: var(--space-3); }
 
 .ui-menu.session-filter-menu { min-width: min(292px, calc(100vw - 2 * var(--screen-gutter))); }
 .session-date-filter {
@@ -9485,7 +9889,8 @@ button.theme-accent-swatch, .theme-accent-swatch {
   cursor: pointer;
 }
 @media (hover: hover) {
-  button.theme-accent-swatch:hover:where(:not(:disabled)) { background: var(--theme-accent-swatch); transform: scale(1.1); }
+  button.theme-accent-swatch:hover:where(:not(:disabled)) { transform: scale(1.1); }
+  button.theme-accent-swatch:not(.is-custom):hover:where(:not(:disabled)) { background: var(--theme-accent-swatch); }
   button.theme-accent-swatch.is-scheme:hover:where(:not(:disabled)) {
     background: radial-gradient(circle, var(--theme-accent-swatch) 0 52%, color-mix(in srgb, var(--text) 26%, transparent) 56%);
   }
@@ -9505,7 +9910,104 @@ button.theme-accent-swatch.is-scheme[aria-pressed="true"] { outline-color: color
   background: radial-gradient(circle, var(--theme-accent-swatch) 0 52%, transparent 56%),
     conic-gradient(#ff3b30, #ffcc00, #34c759, #00c7be, #007aff, #af52de, #ff2d55, #ff3b30);
 }
-.theme-accent-swatch.is-custom:has(> input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-accent-swatch.is-custom:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Custom accent picker (AccentColorPicker.tsx): edits preview live, only
+   Select saves. The button wears the accent the colour will be drawn as. */
+.accent-picker { display: grid; gap: 10px; width: 236px; padding: 10px; }
+.accent-picker-field {
+  position: relative;
+  height: 148px;
+  border-radius: var(--radius-control);
+  background: linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, var(--accent-picker-hue));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 12%, transparent);
+  cursor: crosshair;
+  touch-action: none;
+}
+.accent-picker-field:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.accent-picker-thumb {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  background: var(--accent-picker-color);
+  box-shadow: 0 0 0 2px #fff, 0 0 0 3px rgba(0, 0, 0, .35), 0 1px 4px rgba(0, 0, 0, .3);
+  pointer-events: none;
+}
+.accent-picker-row { display: flex; align-items: center; gap: 8px; }
+.accent-picker-dropper {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.accent-picker-dropper svg { width: 16px; height: 16px; }
+@media (hover: hover) {
+  .accent-picker-dropper:hover:where(:not(:disabled)) { background: color-mix(in srgb, var(--text) 8%, transparent); }
+}
+.accent-picker-preview {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent-picker-color);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 16%, transparent);
+}
+.accent-picker-hue {
+  flex: 1;
+  min-width: 0;
+  height: 12px;
+  margin: 0;
+  border-radius: var(--radius-round);
+  background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+.accent-picker-hue::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent-picker-hue);
+  box-shadow: 0 0 0 2px #fff, 0 0 0 3px rgba(0, 0, 0, .35);
+  appearance: none;
+  -webkit-appearance: none;
+}
+.accent-picker-hue::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent-picker-hue);
+  box-shadow: 0 0 0 2px #fff, 0 0 0 3px rgba(0, 0, 0, .35);
+}
+.accent-picker-hue:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.accent-picker-rgb { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.accent-picker-rgb label { display: grid; gap: 4px; justify-items: center; color: var(--muted); font-size: 11px; }
+.accent-picker-rgb input.ui-input { width: 100%; min-width: 0; text-align: center; font-variant-numeric: tabular-nums; }
+.accent-picker-select {
+  height: var(--control-h);
+  padding: 0 var(--control-pad-x);
+  border: 0;
+  border-radius: var(--radius-control);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .08);
+}
+.accent-picker-select:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+@media (hover: hover) {
+  .accent-picker-select:hover:where(:not(:disabled)) { filter: brightness(1.06); }
+}
+.accent-picker-select:active:where(:not(:disabled)) { filter: brightness(.94); }
 @media (pointer: coarse) {
   .theme-accent-swatches { gap: var(--space-3); }
   button.theme-accent-swatch, .theme-accent-swatch { width: 32px; height: 32px; }
@@ -10180,15 +10682,16 @@ body:not([data-glass="off"]) .turn-rate-limit .turn-rate-limit-model .picker-chi
 .send-plane { display: inline-grid; place-items: center; }
 .send-plane svg { width: 19px; height: 19px; }
 /* Press and hold Send keeps the message as a draft chat
-   (composer/sendHoldPress.ts, which sets `data-send-hold` on the control
+   (composer/sendPress.ts, which sets `data-send-hold` on the control
    without a React render). A hairline ring in Send's own shape winds round
    it from the top over the person's hold length (`--send-hold-ms`), started
    at the press's real age (`--send-hold-age`) so that it closes exactly when
    the hold is reached, while the button settles a touch. A quick tap ends
    before the ring fades in. Once the hold is reached with the finger still
    down (`full`), the ring stands whole, the button springs back and its glyph
-   turns to a check (`data-parked`): letting go keeps the draft. A release
-   (`release`) fades the ring out where it stood.
+   turns to a check (`data-parked`): the draft is kept at the release, or a
+   moment later if no release is heard. A release (`release`) fades the ring
+   out where it stood.
    The ring is a bordered box masked by a turning cone, not an SVG circle: it
    takes each theme's corner radius, where a circle cut across the corners of a
    rounded-square Send, and no `.send svg` sizing rule can shrink it (the phone
@@ -11301,12 +11804,13 @@ min-height: var(--tap);
 }
 
 .notification-centre { display: flex; flex-direction: column; gap: 10px; }
-/* The actions are the panel's one fixed row: the rail body is the scrollport,
-   so the bar sticks to its top, paints the panel surface over the body's
-   gutter (the module content padding) and keeps both buttons reachable however
-   far the list scrolls. They share one line: the panel opens at a width that
-   fits both labels (RAIL_WIDTH_DEFAULTS in railPrefs.ts), and the row wraps
-   only in a pane narrowed below that — never a forced column. */
+/* The actions are the panel's header row: the rail body is the scrollport, so
+   the row sticks to its top, paints the panel surface over the body's gutter
+   (the module content padding) and keeps both actions reachable however far
+   the list scrolls. They are quiet text at the inline end, so the notices
+   outweigh them. They share one line: the panel opens at a width that fits
+   both labels (RAIL_WIDTH_DEFAULTS in railPrefs.ts), and the row wraps only in
+   a pane narrowed below that — never a forced column. */
 .ntc-toolbar {
   --ntc-gutter-block: var(--module-content-block, var(--space-3));
   --ntc-gutter-inline: var(--module-content-inline, var(--space-3));
@@ -11315,12 +11819,16 @@ min-height: var(--tap);
   z-index: 2;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  justify-content: flex-end;
+  gap: var(--space-1);
   margin: calc(-1 * var(--ntc-gutter-block)) calc(-1 * var(--ntc-gutter-inline)) 0;
-  padding: var(--ntc-gutter-block) var(--ntc-gutter-inline);
+  padding: var(--ntc-gutter-block) var(--ntc-gutter-inline) 0;
   background: var(--panel);
 }
-.ntc-toolbar > button { flex: 1 1 auto; }
+.ntc-toolbar > .ui-btn--ghost { padding-inline: var(--space-2); color: var(--muted); font-weight: 500; }
+@media (hover: hover) {
+  .ntc-toolbar > .ui-btn--ghost:hover:not(:disabled) { color: var(--text); }
+}
 .ntc-error { display: flex; align-items: center; gap: 8px; font-size: var(--font-meta); color: var(--red, #e5534b); }
 .ntc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 
@@ -12540,18 +13048,24 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   font-size: var(--font-input);
 }
 .sheet-search input::-webkit-search-cancel-button { display: none; }
+/* A bare × at the field's end edge, like the desktop search fields: no fill,
+   no disc. The button keeps the full 44px touch target, pulled into the
+   field's end padding so the glyph sits near the edge. */
 .sheet-search-clear {
   flex: none;
   width: var(--tap);
   height: var(--tap);
+  margin-inline-end: calc(var(--space-3) * -1);
   display: inline-grid;
   place-items: center;
+  padding: 0;
   border: 0;
-  border-radius: var(--radius-round);
-  background: var(--elevated);
+  background: transparent;
   color: var(--muted);
   cursor: pointer;
 }
+.sheet-search-clear:active { color: var(--text); }
+.sheet-search-clear .ui-icon { width: 16px; height: 16px; }
 .sheet-body {
   flex: 1;
   min-height: 0;

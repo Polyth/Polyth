@@ -34,6 +34,8 @@ import { LiveRegion } from "./components/a11y/live.tsx";
 import WorktreeSessionDialog from "./components/WorktreeSessionDialog.tsx";
 import "./builtinCapabilities.ts";
 import Header from "./components/Header.tsx";
+import { SecondWindowHeader, useWindowCoordination } from "./components/window/SecondWindow.tsx";
+import { windowRole } from "./secondWindow.ts";
 import AlertDialog from "./components/AlertDialog.tsx";
 import { useWorkspaceMode } from "./widgets/workspaceMode.ts";
 import { useShellMode, useViewportBelow } from "./responsiveShell.ts";
@@ -58,6 +60,10 @@ export default function App() {
   const activeView = useStore((s) => s.activeView);
   const workspaceMode = useWorkspaceMode();
   const shellMode = useShellMode();
+  // A chat or pane window (secondWindow.ts) is the same client with less
+  // chrome: no navigator, no status bar, one work surface.
+  const role = windowRole();
+  useWindowCoordination();
   const paneMode = useStore((s) => s.paneMode);
   const railPlugin = useStore((s) => s.railPlugin);
   const shellPresentation = useWorkbenchShellPresentation();
@@ -158,11 +164,11 @@ export default function App() {
   }, [introSuspended, overlay]);
 
   useEffect(() => {
-    if (surface === "project-picker" && overlay === null && introAdmission === "done") {
+    if (role === "main" && surface === "project-picker" && overlay === null && introAdmission === "done") {
       markAutoPickerOffered();
       setOverlay("project-picker");
     }
-  }, [surface, overlay, introAdmission]);
+  }, [role, surface, overlay, introAdmission]);
 
   return (
     <div
@@ -170,19 +176,24 @@ export default function App() {
       data-workspace-focus={focusedMode ? "true" : undefined}
       data-workspace-split={focusedSplit ? "true" : undefined}
       data-shell-mirror={shellDirection.mirrored ? "true" : undefined}
+      data-window-role={role === "main" ? undefined : role}
     >
-      <Header />
+      {role === "main" ? <Header /> : <SecondWindowHeader />}
       <div className="app-shell" dir={shellDirection.frameDir}>
-        <Navigation />
+        {role === "main" && <Navigation />}
         {/* While a workspace surface covers the workspace, Chat
             stays mounted underneath but is inert and out of the a11y tree — it
             consumes no hit area and cannot retain sequential focus. */}
         <div className="workspace" dir={shellDirection.contentDir} inert={paneFullscreen} aria-hidden={paneFullscreen || undefined}>
-          <ViewErrorBoundary resetKey={viewResetKey}>
-            <Main />
-          </ViewErrorBoundary>
-          {shellMode !== "phone" && <StatusBar />}
+          {/* A pane window's pane covers the workspace; no chat runs under it. */}
+          {role !== "pane" && (
+            <ViewErrorBoundary resetKey={viewResetKey}>
+              <Main />
+            </ViewErrorBoundary>
+          )}
+          {role === "main" && shellMode !== "phone" && <StatusBar />}
         </div>
+        {/* Still in a chat window: a file link the chat opens shows beside it. */}
         <ContextRail />
       </div>
       <BackgroundQuickPicker />
@@ -199,7 +210,7 @@ export default function App() {
       {overlay === "project-picker" && <ProjectSetupFlowDialog onClose={() => setOverlay(null)} />}
       {overlay === "worktree-session" && <WorktreeSessionDialog />}
       <SettingsModal open={overlay === "settings"} onClose={() => setOverlay(null)} />
-      <ShellIntroTour />
+      {role === "main" && <ShellIntroTour />}
       <LiveRegion />
     </div>
   );

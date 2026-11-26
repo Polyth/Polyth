@@ -37,7 +37,6 @@ const {
   isResizableImage,
   parseImageUploadPreference,
   presetKeepsOriginal,
-  recommendedImageSize,
   reducedImageName,
   shouldAskImageSize,
 } = await import("../src/imageUploadSize.ts");
@@ -103,10 +102,9 @@ test("a size that would change nothing disappears", () => {
   assert.equal(options[1]!.edge, 1200, "medium cannot scale the photo up");
   assert.equal(options[2]!.edge, 1200);
   assert.equal(options[0]!.edge, 1024);
-  assert.equal(recommendedImageSize(options), "medium");
 });
 
-test("a preset that saves nothing is not offered, and the recommendation moves", () => {
+test("a preset that saves nothing is not offered", () => {
   const file = { size: 2 * MB } as File;
   const options = imageSizeOptions([{
     file,
@@ -114,7 +112,6 @@ test("a preset that saves nothing is not offered, and the recommendation moves",
     variants: { small: { size: 400_000 } as File, medium: file, large: file },
   }]);
   assert.deepEqual(options.map((option) => option.id), ["small", "original"]);
-  assert.equal(recommendedImageSize(options), "small");
 });
 
 test("a batch extrapolates from what is measured, then states the exact total", () => {
@@ -197,6 +194,11 @@ test("a heavy photo waits for the answer while the rest of the batch goes up", a
   assert.deepEqual(committed, [["note.txt", 10], ["light.jpg", 1000]]);
   assert.equal(harness.choice.pending.length, 1);
   assert.ok(harness.host.querySelector(".image-size-prompt"));
+  assert.equal(
+    harness.host.querySelector(".image-size-prompt-option.ui-btn--primary"),
+    null,
+    "no size looks chosen before the person picks one",
+  );
 
   act(() => { buttonLabelled(harness.host, "Medium").click(); });
   await settle();
@@ -224,6 +226,40 @@ test("Original sends the very same file, and Cancel sends nothing", async () => 
   await settle();
   assert.equal(sent.length, 1, "cancelled photo was not uploaded");
   assert.equal(harness.choice.pending.length, 0);
+  harness.unmount();
+});
+
+test("a send before any answer takes the originals and waits until they attach", async () => {
+  setUiSettings({ imageUploadSize: "ask" });
+  const harness = mount(halving);
+  const sent: File[] = [];
+  let finishUpload: (ok: boolean) => void = () => {};
+  const first = photo("first.jpg", 2 * MB);
+  act(() => {
+    harness.choice.offer([{
+      file: first,
+      commit: (chosen) => new Promise<boolean>((resolve) => { sent.push(chosen); finishUpload = resolve; }),
+    }]);
+  });
+  assert.equal(harness.choice.waiting(), true);
+  let settled: boolean | undefined;
+  act(() => { void harness.choice.choose("original", false).then((attached) => { settled = attached; }); });
+  assert.equal(harness.choice.waiting(), false, "the question is answered at once");
+  await settle();
+  assert.deepEqual(sent, [first]);
+  assert.equal(settled, undefined, "still uploading");
+  finishUpload(true);
+  await settle();
+  assert.equal(settled, true);
+  assert.equal(getUiSettings().imageUploadSize, "ask");
+
+  act(() => {
+    harness.choice.offer([{ file: photo("second.jpg", 2 * MB), commit: () => Promise.resolve(false) }]);
+  });
+  let failed: boolean | undefined;
+  act(() => { void harness.choice.choose("original", false).then((attached) => { failed = attached; }); });
+  await settle();
+  assert.equal(failed, false, "a photo that did not attach holds the send");
   harness.unmount();
 });
 

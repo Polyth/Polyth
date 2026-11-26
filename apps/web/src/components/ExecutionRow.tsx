@@ -285,25 +285,31 @@ function ImageDetail({ path, name }: { path: string; name: string }) {
 
 const FRAGMENT_PREVIEW_LINES = 14;
 
-/** Read output rendered as what it is — source, with a real gutter and the
- *  file's own syntax colour. */
-function CodeFragment({ text, path, onOpenFull }: {
+/** Code rendered as what it is — source, with a real gutter and its own
+ *  syntax colour: a file read's contents or, with `script`, the JavaScript a
+ *  Code Mode call ran. */
+function CodeFragment({ text, path, script = false, onOpenFull }: {
   text: string;
   path?: string;
+  script?: boolean;
   onOpenFull: () => void;
 }) {
   const [showAll, setShowAll] = useState(false);
-  const { code, startLine } = useMemo(() => readFragment(text), [text]);
-  const lines = useMemo(() => highlightLines(code, langOf(path ?? "")), [code, path]);
+  const { code, startLine } = useMemo(() => script ? { code: text, startLine: 1 } : readFragment(text), [text, script]);
+  const lines = useMemo(() => highlightLines(code, script ? "js" : langOf(path ?? "")), [code, path, script]);
   const shown = showAll ? lines : lines.slice(0, FRAGMENT_PREVIEW_LINES);
   return (
     <section className="execution-detail-section">
-      <DetailHeading label={tr("execution.contents")} copy={code} copyLabel={tr("execution.copyContents")} />
+      <DetailHeading
+        label={script ? tr("execution.script") : tr("execution.contents")}
+        copy={code}
+        copyLabel={script ? tr("execution.copyScript") : tr("execution.copyContents")}
+      />
       <div
         className={`execution-code${showAll ? " expanded" : ""}`}
         tabIndex={0}
         role="group"
-        aria-label={path ? tr("execution.contentsOf", { path }) : tr("execution.contentsOfFile")}
+        aria-label={script ? tr("execution.script") : path ? tr("execution.contentsOf", { path }) : tr("execution.contentsOfFile")}
       >
         {shown.map((line, index) => (
           <div key={startLine + index} className="execution-code-line">
@@ -1146,9 +1152,10 @@ export function ExecutionRow({
     const label = presentation.label.toLowerCase();
     return normalizedInputEntries(message.input).filter((entry) =>
       !(shown && isPathDetailKey(entry.key))
+      && !(presentation.code !== undefined && entry.key === "code")
       && !(presentation.kind === "read" && /^(?:offset|limit)$/i.test(entry.key))
       && !(/^(?:title|description)$/i.test(entry.key) && entry.value.toLowerCase() === label));
-  }, [message, message.rev, presentation.files, presentation.path, presentation.kind, presentation.label]);
+  }, [message, message.rev, presentation.files, presentation.path, presentation.kind, presentation.label, presentation.code]);
   const inputJson = useMemo(() => JSON.stringify(message.input, null, 2), [message, message.rev]);
   const raw = useMemo(() => JSON.stringify({
     tool: message.tool,
@@ -1289,6 +1296,9 @@ export function ExecutionRow({
                     onOpenFull={(file) => openViewer(`${presentation.label} ${file.path}`, file.diff, "diff")}
                     resource={canonicalFileResource}
                   />
+                )}
+                {presentation.code !== undefined && (
+                  <CodeFragment script text={presentation.code} onOpenFull={() => openViewer(presentation.label, presentation.code ?? "")} />
                 )}
                 {presentation.mcp ? <McpCallDetail view={presentation.mcp} settled={status === "done"} />
                   : todoItems && todoItems.length > 0 ? <TodoChecklist items={todoItems} />

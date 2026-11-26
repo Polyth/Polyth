@@ -20,6 +20,7 @@ import {
   thoughtHeadlines,
   type NarrationSettings,
 } from "../src/index.ts";
+import { VOICE_MODE_DEFAULTS } from "../src/prefs.ts";
 
 const en = narrationPhrases("en");
 
@@ -161,10 +162,11 @@ test("every locale has the narration phrases, and speech languages map to them",
   assert.equal(narrationLocale("ja-JP", "de"), "de", "a language Polyth has no catalog for uses the UI's");
 });
 
-test("narration is off by default, and settings a client does not know survive a save", () => {
+test("the agent's steps are narrated by default at key moments, and settings a client does not know survive a save", () => {
   const defaults = defaultVoiceModePrefs();
   assert.equal(defaults.thoughts, "off");
-  assert.equal(defaults.actions, false);
+  assert.equal(defaults.actions, true, "the agent says what it is doing while it works");
+  assert.equal(defaults.acknowledge, true);
   assert.equal(defaults.narrationCadence, "key");
   const parsed = parseVoiceModePrefs(JSON.stringify({ thoughts: "full", actions: true, narrationCadence: "every", narrator: "model", replyVoice: "soft" }));
   assert.equal(parsed.thoughts, "full");
@@ -175,4 +177,20 @@ test("narration is off by default, and settings a client does not know survive a
   assert.equal((parsed as unknown as Record<string, unknown>).replyVoice, "soft",
     "a newer client's key is carried through, not erased");
   assert.equal(parseVoiceModePrefs(JSON.stringify({ thoughts: "loud", narrationCadence: 3 })).thoughts, "off");
+});
+
+test("settings saved before narration was on by default move to it once, and a later choice sticks", () => {
+  const old = parseVoiceModePrefs(JSON.stringify({ thoughts: "off", actions: false, pause: "quick" }));
+  assert.equal(old.actions, true, "an untouched `false` cannot be told from the old default");
+  assert.equal(old.pause, "quick");
+  assert.equal(old.defaultsVersion, VOICE_MODE_DEFAULTS);
+  const turnedOff = parseVoiceModePrefs(JSON.stringify({ ...old, actions: false }));
+  assert.equal(turnedOff.actions, false, "switching it off after the move is a choice and is kept");
+  const chose = parseVoiceModePrefs(JSON.stringify({ thoughts: "brief", actions: false }));
+  assert.equal(chose.actions, false, "someone who set narration up themselves keeps exactly that");
+  assert.equal(parseVoiceModePrefs(JSON.stringify({ acknowledge: false })).acknowledge, false);
+  assert.equal(parseVoiceModePrefs(null).actions, true);
+  const newer = parseVoiceModePrefs(JSON.stringify({ defaultsVersion: 9, actions: false }));
+  assert.equal(newer.defaultsVersion, 9, "a newer client's version is never lowered");
+  assert.equal(newer.actions, false);
 });

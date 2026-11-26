@@ -19,6 +19,13 @@ a non-held queued prompt. A quiet idle chat starts no native process.
 and starts the runtime for an imminent turn. The client warms the chat on
 screen after 20 s of visible dwell or as soon as the person types into its
 focused composer, at most once a minute per chat (`apps/web/src/sessionRuntimeWarm.ts`).
+Whatever the intent, activation is a no-op for a conversation, an archived chat
+(it runs no further turn; restore re-materializes the runtime lazily) and a chat
+that is still starting, including the start's own queued first turn (its
+provisioning flight delivers it). A failed activation answers
+`mutationOutcome: "not-applicable"`, `retryability: "safe"`
+(`lifecyclePassError`, `packages/server/src/errorDiagnostics.ts`): opening a
+chat is never presented as a write that "may have worked anyway".
 Sending wires the runtime on demand either way. A session lifecycle job owner
 provides single-flight activation, two concurrent jobs, a 128-job admission
 bound and shutdown cancellation. Each active job owns a cancellation signal;
@@ -35,12 +42,17 @@ after the message is in the queue): a stop that found the runtime gone leaves
 the session idle behind a blocked reconciliation barrier, and a sender nobody
 watches (a scheduled agent, a delegated worker) has no one to open the chat,
 so before this its message waited until a person did. The server's own
-resumes (`autoResume`) never start a recovery this way. Startup recovery (`recoverPendingWork`) wires,
+resumes (`autoResume`) never start a recovery this way. Startup recovery (`recoverPendingWork`, scheduled
+only after `packageLifecycle.startEnabled`: harnesses are packages, and before
+them every wiring failed with "Harness … is not registered") wires,
 one at a time, every session whose log still has the turn the restart cut
 open, so its owned-epoch recovery closes that turn (`turn/abort-requested`
 `{reason:"runtime-replaced", source:"runtime-epoch"}`, then `turn/stopped`)
 and continues it at once on a fresh runtime instead of leaving it for the tool
-watchdog. A watchdog that still fires on such a turn hands it to the same
+watchdog. Each step that does not happen says why in the server log: `boot
+recovery of <id> deferred`, `restart-cut turn of <id> not recovered at boot`
+(not an owned epoch: it recovers on its next use), `epoch turn continue
+skipped for <id>: <reason>`. A watchdog that still fires on such a turn hands it to the same
 recovery rather than stopping it as a plain abort; it stops it locally only
 when that recovery cannot replace the runtime. `activate` starts or joins the recovery — also
 for a session that was still wired when its runtime identity broke — and
@@ -183,8 +195,15 @@ A recency page never guarantees a pinned chat, so `pinned=true` filters the
 catalog to the reader's pinned rows (their own pin, else the shared pre-v21
 one; `pin_position -1` is an explicit unpin). The WS navigator snapshot and the
 web client's project refresh read it next to the newest page, so an old pinned
-chat stays in the Pinned group after a reload or reconnect. `updatedAt` is
-session activity: derived maintenance (runtime wiring, reconciliation,
+chat stays in the Pinned group after a reload or reconnect. With the
+navigator's *Pinned chats above projects* (`pinnedPlacement: "top"`) the web
+client also reads `pinned=true` without a `projectId` (`refreshPinnedSessions`,
+`apps/web/src/init.ts`, at most 100 rows), because that group lists the pinned
+chats of projects whose own list was never opened. The WS snapshot also reads the rows the project rail counts (`railStatus`, internal, not an HTTP
+filter): every chat that is working or waiting on a person, however old, and
+each project's ten newest unread top-level chats. Unread chats pile up, so a
+Space-wide newest page can hold nothing else. Rows are filtered by access above
+the store, so a person with restricted access can see fewer than the true count. `updatedAt` is session activity: derived maintenance (runtime wiring, reconciliation,
 Auto-Approve/Full access flag sweeps after a Space or project policy change or
 at boot) writes the projection without touching it, so such a sweep cannot
 reorder the whole catalog.

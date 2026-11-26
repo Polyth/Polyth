@@ -271,6 +271,58 @@ test("Claude falls back to a paced resume when a rate_limit message comes with n
     }
 });
 
+test("Claude resumes a turn the provider overloaded (529) instead of showing it as an answer", async () => {
+    const f = await openRuntime();
+    const notice = "API Error: 529 Overloaded. This is a server-side issue, usually temporary — try again in a moment. If it persists, check https://status.claude.com.";
+    try {
+        await f.begin("turn-1");
+        f.push({
+            type: "assistant",
+            uuid: "synthetic",
+            parent_tool_use_id: null,
+            error: "overloaded",
+            message: { model: "<synthetic>", content: [{ type: "text", text: notice }] },
+        });
+        f.push({ type: "result", uuid: "result-1", is_error: true, subtype: "success" });
+        await flush();
+        assert.equal(f.events.some((event) => event.type === "assistant/message"), false, "overload is not an answer");
+        const stopped = f.events.find((event) => event.type === "turn/stopped");
+        assert.equal(stopped?.type === "turn/stopped" && stopped.code, "overloaded");
+        assert.deepEqual(stopped?.type === "turn/stopped" && stopped.retry, {
+            scope: "overloaded",
+            provider: "anthropic",
+            retryable: true,
+        });
+        assert.equal(stopped?.type === "turn/stopped" && stopped.error, notice);
+    } finally {
+        await f.runtime.dispose();
+    }
+});
+
+test("Claude classifies a 529 that only arrives in the result error", async () => {
+    const f = await openRuntime();
+    try {
+        await f.begin("turn-1");
+        f.push({
+            type: "result",
+            uuid: "result-1",
+            is_error: true,
+            subtype: "error_during_execution",
+            errors: ["API Error: 529 {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}"],
+        });
+        await flush();
+        const stopped = f.events.find((event) => event.type === "turn/stopped");
+        assert.equal(stopped?.type === "turn/stopped" && stopped.code, "overloaded");
+        assert.deepEqual(stopped?.type === "turn/stopped" && stopped.retry, {
+            scope: "overloaded",
+            provider: "anthropic",
+            retryable: true,
+        });
+    } finally {
+        await f.runtime.dispose();
+    }
+});
+
 test("Claude still shows its own message when the turn has no resume plan", async () => {
     const f = await openRuntime();
     try {

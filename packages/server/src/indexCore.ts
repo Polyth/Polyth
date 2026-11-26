@@ -135,9 +135,10 @@ import { authRequestLike, createAuthService, publicHttpIngress } from "./auth.ts
 import { createSessionEventWaiters } from "./sessionEventWaiters.ts";
 import { createServerApplicationSurface } from "./applicationSurface.ts";
 import { authRoutes } from "./routes/auth.ts";
-import { createPushNotifier, createPushService, plainTextExcerpt, type PushPayload } from "./push.ts";
+import { createLimitAnnouncements, createPushNotifier, createPushService, plainTextExcerpt, type PushPayload } from "./push.ts";
 import { pushRoutes } from "./routes/push.ts";
 import { createNotificationStore, type NotificationAccount } from "./notifications.ts";
+import { createPackageNotify } from "./packageNotify.ts";
 import { resolveSessionAccount } from "./sessionAccount.ts";
 import { notificationRoutes } from "./routes/notifications.ts";
 import { apnsFromDir, createNativePushService, nativePushRoutes, relaySender } from "./nativePush.ts";
@@ -266,8 +267,11 @@ export interface BootOptions {
   /**
    * Polyth Desktop only. Exposes, in-process and never over HTTP, the first-run
    * `completeLocalSetup` (an owner without a credential) and
-   * `issueLocalOwnerSession` (the Desktop window's owner session while that
-   * owner has no credential). Other hosts leave it unset.
+   * `issueDesktopOwnerSession` (the Desktop window's owner session: always
+   * while that owner has no credential, and on a loopback-only server also
+   * once they have a password) and `resetDesktopOwnerPassword` (a forgotten
+   * owner password, after Desktop asked the operating system). Other hosts
+   * leave it unset.
    */
   desktopOwnerChannel?: boolean;
   /** Told about each event-loop stall as well. A packaged desktop app has no
@@ -1931,6 +1935,9 @@ export async function boot(opts: BootOptions = {}) {
     async beforeCreate(provider, context) {
       if (!capabilityController) return;
       await capabilityController.reconcile(provider, context);
+      // The chat's shell reaches the same tools through `polyth-tools`.
+      const launchEnv = capabilityController.launchEnv(context);
+      return launchEnv ? { launchEnv } : undefined;
     },
     allowProviderUnregistration: isShuttingDown,
   });
@@ -2347,6 +2354,7 @@ export async function boot(opts: BootOptions = {}) {
     },
     tools: agentTools,
     toolsEndpoint: () => `http://127.0.0.1:${port}${AGENT_TOOLS_PATH}`,
+    shellToolsDir: `${dataDir}/runtime/agent-tools`,
   });
   provideService("harness.provisioning", {
     status: (context: import("@polyth/contracts").HarnessContext, harnessId?: string) =>
@@ -2479,6 +2487,9 @@ export async function boot(opts: BootOptions = {}) {
       }),
     ]);
   };
+  // One provider-limit notice per recipient and limit window, however many
+  // chats stop on it (read by the notifier's send sink below).
+  const limitAnnouncements = createLimitAnnouncements();
   // A `person/message`: named people get kind `mention`; a conversation's
   // other participants get kind `message`. Access and mute are rechecked at
   // delivery, so a person who can no longer open the chat is never told.
@@ -2557,6 +2568,24 @@ export async function boot(opts: BootOptions = {}) {
       }
       const recipient = await notifications.recipientForSession(payload.sessionId, { spaceId: target.spaceId });
       if (!recipient) return;
+      // An exhausted provider limit reaches every chat on that account at
+      // once. One notice per recipient and limit window: later chats stopping
+      // on it add neither an inbox row nor a push. Keyed by the recipient so
+      // two people who share a Space are never silenced for each other. The
+      // episode is claimed before anything is awaited, so two chats stopping
+      // together cannot both publish it.
+      const audience = `${recipient.userId}\0${recipient.spaceId}`;
+      if (payload.limitKey !== undefined) {
+        if (limitAnnouncements.announced(audience, payload.limitKey)) return;
+        limitAnnouncements.remember(audience, payload.limitKey, payload.limitUntil);
+        try {
+          await deliverToRecipient(recipient, payload);
+        } catch (error) {
+          limitAnnouncements.release(audience, payload.limitKey);
+          throw error;
+        }
+        return;
+      }
       await deliverToRecipient(recipient, payload);
     },
     projection: (sessionId) => store.projection(sessionId),
@@ -2705,13 +2734,23 @@ export async function boot(opts: BootOptions = {}) {
   const turnCompletedListeners = new Set<
     (event: { sessionId: string; assistantText: string; userId?: string }) => void | Promise<void>
   >();
+  const packageNotify = createPackageNotify({
+    projection: (sessionId) => store.projection(sessionId),
+    registerSessionRecipient: (sessionId, recipient) => notifications.registerSessionRecipient(sessionId, recipient),
+    recipientForSession: (sessionId, account) => notifications.recipientForSession(sessionId, account),
+    report: (sessionId, kind, statusText, key) => pushNotifier.report(sessionId, kind, statusText, key),
+  });
   services.provide(SESSION_ATTENTION_SERVICE, {
     waitingForPerson: (sessionId) => pushNotifier.waitingForPerson(sessionId),
     claimTurnNotifications(owns) {
       turnNotificationClaims.add(owns);
       return { dispose: () => { turnNotificationClaims.delete(owns); } };
     },
-    notify: (sessionId, input) => pushNotifier.report(sessionId, input.kind, input.statusText, input.key),
+    notify: (sessionId, input) => {
+      void packageNotify(sessionId, input).catch((error: unknown) => {
+        console.error(`[polyth] package notification for ${sessionId} failed`, error);
+      });
+    },
   });
   services.provide(SERVER_TURN_COMPLETION_BUS, {
     subscribe(listener) {
@@ -2992,6 +3031,15 @@ export async function boot(opts: BootOptions = {}) {
         harnesses.providers().find((provider) => provider.descriptor.id === harnessId)?.staticFeatures,
       displayName: (harnessId) =>
         harnesses.providers().find((provider) => provider.descriptor.id === harnessId)?.descriptor.name,
+      relay: (harnessId) => {
+        const provider = harnesses.providers().find((candidate) => candidate.descriptor.id === harnessId);
+        return provider?.descriptor.relay ? provider.relay : undefined;
+      },
+      accountName: (harnessId) => {
+        const descriptor = harnesses.providers().find((provider) => provider.descriptor.id === harnessId)?.descriptor;
+        // The family's default login has no account label; Settings calls it "Default".
+        return descriptor ? descriptor.accountLabel || (descriptor.accounts ? "Default" : descriptor.name) : undefined;
+      },
     },
     admission: admissionBarrier,
     isShuttingDown,
@@ -3087,11 +3135,12 @@ export async function boot(opts: BootOptions = {}) {
       }
       await isolation.cleanupForSessionDelete(projection, releaseExecution);
     },
-    releaseArchivedCheckouts: async ({ sessionId, releaseExecution }) => {
+    releaseArchivedCheckouts: async ({ sessionId, releaseExecution, onlyEmpty }) => {
       const isolation = svc<{
         releaseArchivedCheckouts(
           sessionId: string,
           release: (sessionId: string, cwd: string, options?: { sharer?: boolean }) => Promise<void>,
+          options?: { onlyEmpty?: boolean },
         ): Promise<void>;
       }>("isolation");
       if (!isolation) {
@@ -3099,7 +3148,7 @@ export async function boot(opts: BootOptions = {}) {
           code: "unsupported",
         });
       }
-      await isolation.releaseArchivedCheckouts(sessionId, releaseExecution);
+      await isolation.releaseArchivedCheckouts(sessionId, releaseExecution, onlyEmpty ? { onlyEmpty: true } : {});
     },
     updateIsolatedWorkspace: async (sessionId, selection) => {
       const isolation = svc<{ updateIsolatedWorkspace: NonNullable<SessionDeps["updateIsolatedWorkspace"]> }>("isolation");
@@ -3463,16 +3512,17 @@ export async function boot(opts: BootOptions = {}) {
   };
   // "Clean up automatically" in Settings → Projects → Cleanup. Nothing here runs before
   // its first timer, well after boot recovery.
-  const releaseArchivedCheckouts = (sessionId: string): Promise<void> => {
+  const releaseArchivedCheckouts = (sessionId: string, options?: { onlyEmpty?: boolean }): Promise<void> => {
     if (!sessionsImpl?.releaseArchivedCheckouts) {
       throw Object.assign(new Error("isolated workspace cleanup is unavailable"), { code: "unsupported" });
     }
-    return sessionsImpl.releaseArchivedCheckouts(sessionId);
+    return sessionsImpl.releaseArchivedCheckouts(sessionId, options);
   };
   const expiredSessionCleanup = startExpiredSessionCleanup({
     spaceIds: () => spaceGateway.store.allSpaces().map((space) => space.id),
     sessionsFor: (spaceId) => spaceServices(spaceGateway.resolveInternal(spaceId)).sessions,
     releaseCheckouts: releaseArchivedCheckouts,
+    releaseEmptyCheckouts: (sessionId) => releaseArchivedCheckouts(sessionId, { onlyEmpty: true }),
     policy: createExpiredSessionPolicy({
       ...sessionAccounts,
       settingsProjectOf: (projectId) => projects.parentOfRoom(projectId) ?? projectId,
@@ -3512,8 +3562,6 @@ export async function boot(opts: BootOptions = {}) {
   });
 
   sessionsRef = sessions;
-  // One startup owner resumes durable work; persisted GETs remain read-only.
-  setImmediate(() => { void sessions.recoverPendingWork().catch((error) => console.error("[polyth] session recovery failed", error)); });
 
   // Pristine sessions (never prompted, no draft/queue/child) are disposable
   // garbage left by abandoned or failed startups. Reclaim the accumulated ones
@@ -3811,6 +3859,12 @@ export async function boot(opts: BootOptions = {}) {
   };
   attachHttpChannels(httpServerContext);
   await packageLifecycle.startEnabled(packageRegistry);
+  // One startup owner resumes durable work; persisted GETs remain read-only.
+  // Only once the packages have started: harnesses are packages, and a turn
+  // the restart cut is recovered on its own harness's runtime. Run before
+  // them, every such recovery failed ("Harness … is not registered") and the
+  // turn waited for someone to open the chat or for the tool watchdog.
+  setImmediate(() => { void sessions.recoverPendingWork().catch((error) => console.error("[polyth] session recovery failed", error)); });
   try {
     await refreshSafeBehavior();
   } catch (err) {

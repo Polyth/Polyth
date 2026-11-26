@@ -86,6 +86,7 @@ import type {
   WorkflowRetryInputDto,
   WorkspaceLabel,
   CreateIsolatedSessionInput,
+  SessionCreationSharing,
   SessionStartRequest,
   StartSessionResult,
   StartWorktreeSessionInput,
@@ -162,6 +163,7 @@ export type BrowserActionDto =
   | { kind: "click"; target: BrowserTargetDto }
   | { kind: "point"; target: Extract<BrowserTargetDto, { point: unknown }> }
   | { kind: "type"; target: BrowserTargetDto; text: string; submit?: boolean }
+  | { kind: "insert-text"; text: string }
   | { kind: "press"; key: string }
   | { kind: "scroll"; x?: number; y?: number; target?: BrowserTargetDto }
   | { kind: "select"; target: BrowserTargetDto; value: string }
@@ -212,6 +214,9 @@ export interface SessionSearchMatch {
   seq?: number;
   role?: "user" | "assistant";
   time?: number;
+  /** Broadened message hit: `chat` — the words are spread over the chat's
+   *  messages; `substring` — a word occurs inside a longer word. */
+  via?: "chat" | "substring";
 }
 
 export interface SessionSearchResult {
@@ -316,9 +321,11 @@ export async function sessionFetch<T>(path: string, init?: RequestInit): Promise
     let field: string | undefined;
     let changes: number | undefined;
     let sessionId: string | undefined;
+    let refusal: Record<string, unknown> | undefined;
     let diagnostics = {};
     try {
-      const parsed = JSON.parse(body) as { error?: unknown; message?: unknown; details?: unknown; field?: unknown; changes?: unknown; sessionId?: unknown };
+      const parsed = JSON.parse(body) as { error?: unknown; message?: unknown; details?: unknown; field?: unknown; changes?: unknown; sessionId?: unknown; refusal?: unknown };
+      if (parsed.refusal && typeof parsed.refusal === "object") refusal = parsed.refusal as Record<string, unknown>;
       diagnostics = readErrorDiagnostics(parsed);
       if (typeof parsed.error === "string") code = parsed.error;
       if (typeof parsed.message === "string") message = parsed.message;
@@ -354,6 +361,7 @@ export async function sessionFetch<T>(path: string, init?: RequestInit): Promise
         ...(field !== undefined ? { field } : {}),
         ...(changes !== undefined ? { changes } : {}),
         ...(sessionId !== undefined ? { sessionId } : {}),
+        ...(refusal !== undefined ? { refusal } : {}),
       },
     );
   }
@@ -389,6 +397,12 @@ const emptyOnNotFound = <T>(request: Promise<T>, empty: T): Promise<T> =>
   request.catch((error) => httpStatusOf(error) === 404 || errorCodeOf(error) === "not-found"
     ? empty
     : Promise.reject(error));
+
+/** The typed details of a refused Git branch change (`branch-in-use`, `worktree-dirty`, …). */
+export const errorRefusalOf = (err: unknown): Record<string, unknown> => {
+  const refusal = (err as { refusal?: unknown })?.refusal;
+  return refusal && typeof refusal === "object" ? refusal as Record<string, unknown> : {};
+};
 
 /** Dirty-worktree refusal may include a porcelain change count for the confirm copy. */
 export const errorChangesOf = (err: unknown): number =>
@@ -621,8 +635,16 @@ export interface ScheduleRunDto {
   /** What the run's report says: quiet (filed silently), update, alert. */
   signal?: AgentSignalDto;
   headline?: string;
+  /** The report only asked again for what already waited, with the same
+   *  figures, so it was filed as quiet: `of` asked first, `signal` is what
+   *  this report said. */
+  repeat?: { of: string; signal: "update" | "alert" };
   /** Notes this run added to the notebook. */
   remembered?: string[];
+  /** What was set aside for this wake and the run carried. */
+  carried?: AgentWakeNoteDto[];
+  /** What this conversation with the person set aside for the next wake. */
+  setAside?: string[];
   /** The person's verdict on this run's report. */
   feedback?: { verdict: "up" | "down"; note?: string; at: number; delivered?: boolean };
   /** The person stopped this run. */
@@ -644,11 +666,14 @@ export interface ScheduleRunDto {
   /** While running: the turn ended to wait for background work the agent
    *  started (descriptions are the agent's words: data, not instructions). */
   background?: { since: number; tasks: string[] };
+  /** While running: since when its turn, cut by a Polyth restart, waits to
+   *  be continued. */
+  recovering?: number;
   /** Once finished: the agent's passing lines and its waits, oldest first. */
   timeline?: Array<{ at: number; text: string; kind?: "wait" | "resume"; until?: number }>;
   /** Once finished: what the report says only the person can do. `done`:
    *  settled by the person, or by a later report of the agent. */
-  needs?: Array<{ text: string; detail?: string; url?: string; done?: { at: number; by: "user" | "agent" } }>;
+  needs?: Array<{ text: string; kind?: "decision"; detail?: string; url?: string; done?: { at: number; by: "user" | "agent"; answer?: "yes" | "no" } }>;
   /** Why a run that did not finish ended. `person`: someone stopped it;
    *  `cut`: its turn was cut under it and its own continuations ran out;
    *  `route`: its model refused (sign-in, quota, the model itself);
@@ -659,6 +684,17 @@ export interface ScheduleRunDto {
   resumed?: number;
   /** A person's message in the run's session redirected it. */
   steered?: boolean;
+}
+
+/** Something to do at the agent's next wake rather than now: set by the
+ *  person, or by the agent relaying what the person asked in a conversation.
+ *  The next wake that is not a conversation with the person carries it once. */
+export interface AgentWakeNoteDto {
+  id: string;
+  text: string;
+  at: number;
+  by: "user" | "agent";
+  runId?: string;
 }
 
 /** What the person asked for with a message: `auto` lets the agent judge. */
@@ -812,6 +848,8 @@ export interface AgentEventSourceDto {
   id: string;
   label: string;
   types: Array<{ id: string; label: string }>;
+  /** Extra fields a wake on this source can filter on. */
+  fields?: Array<{ id: string; label: string }>;
 }
 export interface AgentApprovalPolicyDto {
   timeoutMinutes: number;
@@ -820,7 +858,7 @@ export interface AgentApprovalPolicyDto {
 export interface AgentEventLogEntryDto {
   at: number;
   triggerId: string;
-  outcome: "fired" | "rate-limited" | "chain-limit" | "budget" | "busy" | "overlap" | "script-skip" | "script-pause" | "script-error";
+  outcome: "fired" | "rate-limited" | "chain-limit" | "budget" | "busy" | "overlap" | "script-skip" | "script-pause" | "script-error" | "held";
   count: number;
   text?: string;
 }
@@ -889,6 +927,8 @@ export interface ScheduleTaskDto extends AgentFieldsDto {
   followUp?: AgentFollowUpDto;
   /** Owner view only: the person's messages waiting for the run in progress. */
   queued?: AgentQueuedMessageDto[];
+  /** Owner view only: requests set aside for the next wake, oldest first. */
+  nextWake?: AgentWakeNoteDto[];
 }
 export interface ScheduleLoopErrorDto {
   path: string;
@@ -1119,7 +1159,7 @@ export const api = {
     jfetch<SessionProjection>(`/api/sessions/${encodeURIComponent(sessionId)}/workspace`, json("PUT", selection)),
   /** `clientOperationId` makes the create idempotent: a resend with the same
    *  key returns the session the first request made instead of a second one. */
-  createSession: (input: { projectId: string; repositoryIds?: readonly string[]; harness?: HarnessSelection; title?: string; purpose?: string; model?: ModelRef; agent?: string; worktreePath?: string; clientOperationId?: string; start?: SessionStartRequest }) =>
+  createSession: (input: { projectId: string; repositoryIds?: readonly string[]; harness?: HarnessSelection; title?: string; purpose?: string; model?: ModelRef; agent?: string; worktreePath?: string; clientOperationId?: string; start?: SessionStartRequest; sharing?: SessionCreationSharing }) =>
     jfetch<StartSessionResult>("/api/sessions", json("POST", input)),
   /** Outcome of one keyed create whose response was lost. Servers without
    *  idempotent create answer 404, which callers must treat as unresolvable. */
@@ -1326,8 +1366,12 @@ export const api = {
   /** Spec-named probe — same reachability check, stores status/lastError. */
   mcpProbe: (id: string) => jfetch<{ ok: boolean; message: string }>(`/api/mcp/servers/${encodeURIComponent(id)}/probe`, json("POST", {})),
   pluginsList: () => jfetch<InstalledPluginDto[]>("/api/plugins").catch((): InstalledPluginDto[] => []),
-  pluginsInstall: (source: string, options: { fork?: { strategy: PackageForkStrategy }; autoUpdate?: boolean } = {}) =>
+  pluginsInstall: (source: string, options: { fork?: { strategy: PackageForkStrategy }; autoUpdate?: boolean; expectManifestSha256?: string } = {}) =>
     jfetch<InstalledPluginDto>("/api/plugins/install", json("POST", { source, ...options })),
+  /** What the caller may do here, by the checks install and enable run. */
+  pluginsInstallAccess: () =>
+    jfetch<{ install: boolean; enable: boolean }>("/api/plugins/install-access")
+      .catch(() => ({ install: false, enable: false })),
   /** Uploaded .zip archive (base64). Installing an id that is already present
    *  stages the uploaded release as an update instead of failing. */
   pluginsInstallArchive: (archive: string, filename: string) =>
@@ -1573,8 +1617,8 @@ export const api = {
       jfetch<GitBranches>(`/api/git/branches?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}${repositoryId ? `&repositoryId=${encodeURIComponent(repositoryId)}` : ""}`),
       { current: "", branches: [] },
     ),
-  gitBranch: (projectId: string, name: string, from?: string, sessionId?: string, repositoryId?: string) =>
-    jfetch<{ ok: true }>(`/api/git/branch`, json("POST", { projectId, name, from, ...(sessionId ? { sessionId } : {}), ...(repositoryId ? { repositoryId } : {}) })),
+  gitBranch: (projectId: string, name: string, from?: string, sessionId?: string, repositoryId?: string, checkout?: boolean) =>
+    jfetch<{ ok: true; branch?: string }>(`/api/git/branch`, json("POST", { projectId, name, from, ...(checkout ? { checkout: true } : {}), ...(sessionId ? { sessionId } : {}), ...(repositoryId ? { repositoryId } : {}) })),
   gitCheckout: (projectId: string, name: string, sessionId?: string, repositoryId?: string) =>
     jfetch<{ ok: true }>(`/api/git/checkout`, json("POST", { projectId, name, ...(sessionId ? { sessionId } : {}), ...(repositoryId ? { repositoryId } : {}) })),
   gitLog: (projectId: string, limit = 20, sessionId?: string, repositoryId?: string) =>
@@ -1969,6 +2013,14 @@ export const api = {
         ...(options?.attachments?.length ? { attachments: options.attachments } : {}),
       })
       : { method: "POST" }),
+  /** Set something aside for the agent's next wake; no run starts now. */
+  scheduleNextWake: (id: string, text: string) =>
+    jfetch<ScheduleTaskDto>(`/api/schedule/${encodeURIComponent(id)}/next-wake`, json("POST", { text })),
+  scheduleNextWakeDrop: (id: string, noteId: string) =>
+    jfetch<ScheduleTaskDto>(
+      `/api/schedule/${encodeURIComponent(id)}/next-wake/${encodeURIComponent(noteId)}`,
+      { method: "DELETE" },
+    ),
   scheduleContext: (id: string) => jfetch<AgentContextDto>(`/api/schedule/${encodeURIComponent(id)}/context`),
   scheduleContextAction: (id: string, action: "new-session" | "compact") =>
     jfetch<unknown>(`/api/schedule/${encodeURIComponent(id)}/context`, json("POST", { action })),
@@ -1990,10 +2042,10 @@ export const api = {
     jfetch<ScheduleTaskDto>(`/api/schedule/${encodeURIComponent(id)}/seen`, json("POST", at !== undefined ? { at } : {})),
   scheduleStop: (id: string) =>
     jfetch<{ stopped: number }>(`/api/schedule/${encodeURIComponent(id)}/stop`, { method: "POST" }),
-  scheduleNeedDone: (id: string, runId: string, index: number, done: boolean) =>
+  scheduleNeedDone: (id: string, runId: string, index: number, done: boolean, answer?: "yes" | "no") =>
     jfetch<ScheduleTaskDto>(
       `/api/schedule/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/needs/${index}`,
-      json("POST", { done }),
+      json("POST", { done, ...(done && answer ? { answer } : {}) }),
     ),
   scheduleFeedback: (id: string, runId: string, verdict: "up" | "down" | null, note?: string) =>
     jfetch<ScheduleTaskDto>(

@@ -386,6 +386,43 @@ test("workspace search and labels never cross a Space boundary", async () => {
   assert.deepEqual((await call(h.home, "/api/labels") as Array<{ name: string }>).map((l) => l.name), ["Secret"]);
 });
 
+test("session search ranks one-message hits before spread ones, folds Cyrillic titles and stays in its Space", async () => {
+  const h = await harness();
+  const store = createStore(join(h.dataDir, "sessions.db"));
+  const alpha = await h.seed(h.home, "alpha");
+  const beta = await h.seed(h.work, "beta");
+  const together = await h.gateway.services(h.home).sessions.create({ projectId: alpha.projectId, title: "Пошук у чатах" });
+  await store.append(alpha.sessionId, "user/message", { text: "draft the deploy plan" });
+  await store.append(alpha.sessionId, "assistant/message", { text: "rollback is ready too" });
+  await store.append(together.id, "user/message", { text: "deploy then rollback" });
+  await store.append(beta.sessionId, "user/message", { text: "deploy rollback Пошук" });
+
+  const call = async (ctx: SpaceContext, path: string) => {
+    let payload: unknown;
+    const url = new URL(`http://x${path}`);
+    await orgRoutes({ spaces: h.gateway.services, store })({
+      req: {}, res: {}, space: ctx, url, path: url.pathname, method: "GET",
+      body: async () => ({}),
+      json: (_code: number, value: unknown) => { payload = value; },
+    } as never);
+    return payload as Array<{ sessionId: string; matches: Array<{ field: string; via?: string; snippet: string; ranges?: Array<[number, number]> }> }>;
+  };
+
+  const words = await call(h.home, "/api/search/sessions?q=deploy%20rollback");
+  assert.deepEqual(words.map((r) => r.sessionId), [together.id, alpha.sessionId]);
+  assert.equal(words[0]!.matches[0]!.via, undefined);
+  assert.ok(words[1]!.matches.every((m) => m.via === "chat"));
+
+  const title = await call(h.home, `/api/search/sessions?q=${encodeURIComponent("ПОШУКІВ")}`);
+  assert.deepEqual(title.map((r) => r.sessionId), [together.id]);
+  const hit = title[0]!.matches[0]!;
+  assert.equal(hit.field, "title");
+  assert.deepEqual(hit.ranges?.map(([a, b]) => hit.snippet.slice(a, b)), ["Пошук"]);
+
+  const foreign = await call(h.work, "/api/search/sessions?q=deploy%20rollback");
+  assert.deepEqual(foreign.map((r) => r.sessionId), [beta.sessionId]);
+});
+
 // ---- HTTP gateway --------------------------------------------------------------
 
 test("the HTTP gateway scopes by the active Space and refuses an unauthorized switch", async () => {

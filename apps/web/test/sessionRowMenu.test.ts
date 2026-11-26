@@ -1283,12 +1283,15 @@ test("palette session verbs reuse sidebar handlers and never expose delete", asy
     assert.ok(list.includes(handler), `sidebar calls shared ${handler}`);
     assert.ok(actions.includes(`function ${handler}`), `${handler} has one implementation`);
   }
+  // The verbs sit in the row's ⋯ menu (least destructive first); Tab or the
+  // inward arrow opens it for the active row and a menu entry runs the verb.
   assert.match(
     palette,
-    /SESSION_PALETTE_VERBS:[\s\S]*\[\s*"archive",\s*"pin",\s*"rename",?\s*\]/,
+    /SESSION_PALETTE_VERBS:[\s\S]*\[\s*"pin",\s*"rename",\s*"archive",?\s*\]/,
   );
-  assert.match(palette, /e\.key === "Tab" \|\| e\.key === "ArrowRight"/);
-  assert.match(palette, /e\.key === "Enter"[\s\S]*runSessionVerb/);
+  assert.match(palette, /e\.key === "Tab" \|\| \(e\.key === inwardArrow\(/);
+  assert.match(palette, /setMenuFor\(selectedSession\.id\)/);
+  assert.match(palette, /onSelect: \(\) => void runSessionVerb\(entry, verb\)/);
   assert.doesNotMatch(
     palette.slice(
       palette.indexOf("const SESSION_PALETTE_VERBS"),

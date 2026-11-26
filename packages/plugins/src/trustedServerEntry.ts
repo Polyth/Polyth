@@ -1,4 +1,4 @@
-import { readFile, realpath, stat } from "node:fs/promises";
+import { realpath, stat } from "node:fs/promises";
 import { resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import type {
@@ -9,7 +9,7 @@ import type {
   RouteHandler,
 } from "@polyth/contracts";
 import { loadPlugin } from "@polyth/kernel";
-import { parseManifest } from "./managedManifest.ts";
+import { loadCanonicalManifest } from "./canonical.ts";
 
 export interface TrustedServerPluginHost {
   pluginId: string;
@@ -57,11 +57,15 @@ export async function loadServerEntry(opts: {
   host: TrustedServerPluginHost;
 }): Promise<Disposable> {
   const installDir = await realpath(opts.installDir);
-  const manifestPath = await realpath(resolve(installDir, "polyth-plugin.json"));
+  // The same manifest install read: polyth-package.json (runtime.server), a
+  // package.json `polyth` object, or the legacy polyth-plugin.json
+  // (entries.server). Its real file must stay inside the install directory.
+  const found = loadCanonicalManifest(installDir);
+  const manifestPath = await realpath(found.path);
   if (!inside(installDir, manifestPath)) {
     throw new Error("plugin manifest escapes the plugin install directory");
   }
-  const manifest = parseManifest(await readFile(manifestPath, "utf8"));
+  const manifest = found.legacy;
   if (manifest.id !== opts.host.pluginId) {
     throw new Error(
       `installed manifest id "${manifest.id}" does not match package id "${opts.host.pluginId}"`,

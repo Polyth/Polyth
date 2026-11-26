@@ -852,7 +852,7 @@
 .isolation-target-tag {
   flex: none;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-round);
   background: color-mix(in srgb, var(--text) 7%, transparent);
   color: var(--text-dim);
   font-size: calc(var(--font-meta) * 0.92);

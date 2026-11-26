@@ -32,6 +32,8 @@ import {
     requireHarnessManagerAuthority,
     requireInstanceOwnerAuthority,
 } from "@polyth/contracts/instance-authority";
+import { relayFamilies } from "./accounts.ts";
+import { relayHost, type RelayLimitsSource } from "./relay.ts";
 import { localOnlyRemoteAccess, packageDataDir, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { discoverHarnessExecutable, harnessExecutableChildEnv, windowsCmdShimFile, windowsCmdWrapperTarget } from "./executableDiscovery.ts";
 import { createHarnessRegistry, type HarnessPreferences, harnessError } from "./index.ts";
@@ -45,6 +47,14 @@ import { createHarnessUpdateChecker, harnessUpdateStatus, type HarnessUpdateChec
 import { createHarnessAutoUpdater, type AutoUpdateRelease, type HarnessAutoUpdater } from "./autoUpdate.ts";
 import { editionUnavailable, workstationEdition } from "./edition.ts";
 import { pruneHarnessVersions, type HarnessVersionPrune } from "./versionStore.ts";
+
+/** Paired devices may read the person's Relays (Settings group, Usage pool):
+ *  member account names and limit headroom only, the same names a chat reader
+ *  already sees under each answer. Every other harness route stays local-only. */
+export const HARNESS_REMOTE_ACCESS = {
+    ...localOnlyRemoteAccess(["harnesses"]),
+    http: [{ methods: ["GET"] as const, path: "/api/harnesses/relays", capability: "core.sessions.read", mutation: false }],
+};
 
 const MAX_HARNESS_SYSTEM_PROMPT = 64 * 1024;
 type StoredHarnessPreference = {
@@ -538,6 +548,22 @@ export function harnessRoutes(
             harnessUsableByUser(descriptor, request.space.userId, allowedHarnesses, request.space.spaceId);
         const visibleId = (harnessId: string) => visible(registry.get(harnessId)?.descriptor ?? { id: harnessId });
         const providers = () => registry.providers().filter((provider) => visible(provider.descriptor));
+        // A Relay with fewer than two members this caller may use has nothing
+        // to rotate, so the harness list and the picker leave it out for them.
+        // An exact `harnessId` read (a chat already pinned to it) still answers.
+        let unlistedRelays: Promise<ReadonlySet<string>> | undefined;
+        const unlisted = () => unlistedRelays ??= (async () => {
+            const actor = { userId: request.space.userId, spaceId: request.space.spaceId, allowedHarnesses };
+            const hidden = new Set<string>();
+            await Promise.all([...relayFamilies.values()].map(async (handle) => {
+                if (!await handle.listed(actor).catch(() => false)) hidden.add(handle.id);
+            }));
+            return hidden;
+        })();
+        const listed = async <T>(rows: T[], idOf: (row: T) => string): Promise<T[]> => {
+            const hidden = await unlisted();
+            return hidden.size ? rows.filter((row) => !hidden.has(idOf(row))) : rows;
+        };
         // Same account-owned filter as `/api/models`: a provider turned off in
         // Providers & Models is not offered by the picker (the draft/preview
         // catalog comes from this route), even before the physical
@@ -580,9 +606,12 @@ export function harnessRoutes(
             const input = await request.body();
             const existing = await readPreferences(preferenceFile);
             const preferences: StoredHarnessPreferences = {};
+            const hidden = await unlisted();
             for (const provider of registry.providers()) {
-                // Keep what the caller cannot see exactly as it was.
-                if (!visible(provider.descriptor)) {
+                // Keep what the caller cannot see exactly as it was, including
+                // a Relay their lists leave out (its name and colour survive a
+                // reorder made while it was out of sight).
+                if (!visible(provider.descriptor) || hidden.has(provider.descriptor.id)) {
                     if (existing[provider.descriptor.id]) preferences[provider.descriptor.id] = existing[provider.descriptor.id]!;
                     continue;
                 }
@@ -613,14 +642,42 @@ export function harnessRoutes(
                 throw harnessError("not-found", "project not found");
             return { space: request.space, spaceId: request.space.spaceId, projectId: project?.id ?? "__default__", cwd: project?.path ?? process.cwd(), remote: Boolean(project?.remote) };
         };
+        // Relay settings are per person: the actor is the gateway-validated
+        // `request.space`, never the body. A paired device may only read them
+        // (`HARNESS_REMOTE_ACCESS`); saving stays local or full access.
+        if (request.path === "/api/harnesses/relays" || request.path.startsWith("/api/harnesses/relays/")) {
+            const actor = { userId: request.space.userId, spaceId: request.space.spaceId, allowedHarnesses: allowedHarnessesFor(request) };
+            const context = await contextForRequest();
+            const handles = [...relayFamilies.values()].filter((handle) => visibleId(handle.id));
+            try {
+                if (request.path === "/api/harnesses/relays" && request.method === "GET") {
+                    request.json(200, { relays: await Promise.all(handles.map((handle) => handle.view(actor, context))) });
+                    return true;
+                }
+                const relayId = request.path.slice("/api/harnesses/relays/".length);
+                if (request.method === "PUT" && relayId && !relayId.includes("/")) {
+                    const handle = handles.find((candidate) => candidate.id === relayId);
+                    if (!handle) { request.json(404, { error: "Relay not found" }); return true; }
+                    request.json(200, await handle.save(actor, await request.body(), context));
+                    return true;
+                }
+            } catch (error) {
+                const code = (error as { code?: unknown }).code;
+                request.json(code === "invalid-input" ? 400 : code === "not-found" ? 404 : 500, { error: error instanceof Error ? error.message : String(error) });
+                return true;
+            }
+            request.json(404, { error: "Not found" });
+            return true;
+        }
         if (request.path === "/api/harnesses/roster" && request.method === "GET") {
             const roster = await registry.roster(await contextForRequest());
-            request.json(200, roster.filter((row) => visibleId(row.identity.id)));
+            request.json(200, await listed(roster.filter((row) => visibleId(row.identity.id)), (row) => row.identity.id));
             return true;
         }
         if (request.path === "/api/harnesses/snapshots" && request.method === "GET") {
             const context = await contextForRequest();
-            let harnessId = request.url.searchParams.get("harnessId") ?? undefined;
+            const requested = request.url.searchParams.get("harnessId") ?? undefined;
+            let harnessId = requested;
             if (harnessId && !providers().some((provider) => provider.descriptor.id === harnessId))
                 throw harnessError("not-found", "harness not found");
             const verify = request.url.searchParams.get("verify") === "1";
@@ -638,18 +695,19 @@ export function harnessRoutes(
                     return true;
                 }
             }
-            request.json(200, visibleSnapshots(await registry.snapshots(context, {
+            const rows = visibleSnapshots(await registry.snapshots(context, {
                 ...(harnessId ? { harnessId } : {}),
                 detail,
                 force,
                 ...(verify ? { verify } : {}),
-            })));
+            }));
+            request.json(200, requested ? rows : await listed(rows, (row) => row.identity.id));
             return true;
         }
         if (request.path === "/api/harnesses" && request.method === "GET") {
             const context = await contextForRequest();
             const [probes, preferences] = await Promise.all([registry.probe(context), readPreferences(preferenceFile)]);
-            request.json(200, providers().map((provider) => ({ ...provider.descriptor, enabled: preferences[provider.descriptor.id]?.enabled ?? true, priority: preferences[provider.descriptor.id]?.priority ?? provider.descriptor.priority, ...probes.find((p) => p.harnessId === provider.descriptor.id) })));
+            request.json(200, (await listed(providers(), (provider) => provider.descriptor.id)).map((provider) => ({ ...provider.descriptor, enabled: preferences[provider.descriptor.id]?.enabled ?? true, priority: preferences[provider.descriptor.id]?.priority ?? provider.descriptor.priority, ...probes.find((p) => p.harnessId === provider.descriptor.id) })));
             return true;
         }
         if (request.path === "/api/harnesses/capabilities" && request.method === "GET") {
@@ -1207,9 +1265,10 @@ export default function registerPackage(host: ServerPackageHost) {
     });
     return {
         routes: harnessRoutes(host, installs, { installContainment, updateChecker, autoUpdates }),
-        remoteAccess: localOnlyRemoteAccess(["harnesses"]),
+        remoteAccess: HARNESS_REMOTE_ACCESS,
         onEnable() {
             active = true;
+            relayHost.limits = () => host.services.get(serverServiceKey<RelayLimitsSource>("usage-limits"));
             // The workstation edition runs no updater, so it schedules none.
             if (!workstationEdition()) autoUpdates.start();
             // An installer a crashed Polyth left running is released, never adopted.
@@ -1224,6 +1283,7 @@ export default function registerPackage(host: ServerPackageHost) {
         },
         async onDisable() {
             active = false;
+            relayHost.limits = () => undefined;
             autoUpdates.stop();
             // No installer outlives the package that started it.
             await installs.interruptAll();

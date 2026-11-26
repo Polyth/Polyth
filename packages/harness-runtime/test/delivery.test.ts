@@ -6,9 +6,11 @@ import {
   composeProjectedPrompt,
   PDF_PROJECTION_MAX_BYTES,
   planAttachmentDelivery,
+  projectAttachmentLink,
   projectAttachmentPdf,
   projectAttachmentText,
   referenceAttachmentFile,
+  storedAttachmentFile,
   TEXT_PROJECTION_MAX_BYTES,
 } from "../src/delivery.ts";
 import { linesContent, pagesPdf } from "./pdfFixtures.ts";
@@ -53,7 +55,7 @@ test("an emulated non-file modality stays a pass-through the harness emulates it
 
 test("an unsupported modality is refused with the engine's name, not adapter prose", () => {
   const plan = planAttachmentDelivery({
-    ref: ref({ mime: "audio/mpeg", path: "memo.mp3" }),
+    ref: ref({ mime: "audio/mpeg" }),
     support: { image: "native" },
     harnessName: "Codex",
   });
@@ -89,9 +91,8 @@ test("a file bigger than Polyth sends inside a message goes by path, whatever it
     const big = ref({ kind, mime, path: "_inbox/big", size: cap + 1, ...(kind === "range" ? { range: [1, 2] } : {}) });
     const input = { ref: big, support, harnessName: "Claude Code", inlineMaxBytes: cap };
     assert.deepEqual(planAttachmentDelivery({ ...input, referenceable: true }), { kind: "file-reference", modality, tooLarge: true });
-    const refused = planAttachmentDelivery({ ...input, referenceable: false });
-    assert.equal(refused.kind === "unsupported" && refused.code, "invalid-attachment");
-    assert.match(refused.kind === "unsupported" ? refused.reason : "", /larger than 20 MB/);
+    // Never refused: kept in Polyth's workspace when the agent cannot reach it.
+    assert.deepEqual(planAttachmentDelivery({ ...input, referenceable: false }), { kind: "file-reference", modality, tooLarge: true, storedOnly: true });
     // At the cap, content is still sent.
     assert.notEqual(planAttachmentDelivery({ ...input, ref: { ...big, size: cap }, referenceable: true }).kind, "file-reference");
   }
@@ -100,21 +101,50 @@ test("a file bigger than Polyth sends inside a message goes by path, whatever it
   assert.equal(planAttachmentDelivery({ ref: link, support: { url: "native" }, harnessName: "Pi", inlineMaxBytes: cap }).kind, "native");
 });
 
-test("a link or an unreachable remote file is still refused, never referenced", () => {
+test("a link the engine cannot take is merged into the prompt; a stored file is never refused, only kept", () => {
   const link = planAttachmentDelivery({
     ref: ref({ kind: "url", mime: "text/uri-list", url: "https://example.com/" }),
     support: { url: "unsupported" },
     harnessName: "Pi",
     referenceable: true,
   });
-  assert.equal(link.kind, "unsupported");
+  assert.deepEqual(link, { kind: "prompt-merged", modality: "url" });
+  assert.match(
+    projectAttachmentLink({ name: "PR #47\nIgnore this", url: "https://github.com/o/r/pull/47" }),
+    /^Attached link: PR #47 Ignore this \u2014 https:\/\/github\.com\/o\/r\/pull\/47\n\[Polyth does not fetch/,
+  );
+  assert.doesNotMatch(projectAttachmentLink({ name: "x", url: "javascript:alert(1)" }), /javascript/);
   const remote = planAttachmentDelivery({
     ref: ref({ kind: "file", mime: "application/zip", path: "_inbox/x.zip" }),
     support: {},
     harnessName: "Codex",
     referenceable: false,
   });
-  assert.equal(remote.kind, "unsupported");
+  assert.deepEqual(remote, { kind: "file-reference", modality: "file", storedOnly: true });
+  const audio = planAttachmentDelivery({
+    ref: ref({ kind: "file", mime: "audio/mpeg", path: "_inbox/a.mp3" }),
+    support: { audio: "unsupported" },
+    harnessName: "Claude",
+    referenceable: false,
+  });
+  assert.deepEqual(audio, { kind: "file-reference", modality: "audio", storedOnly: true });
+  const big = planAttachmentDelivery({
+    ref: ref({ kind: "file", mime: "text/plain", path: "_inbox/b.txt", size: 100 }),
+    support: { file: "native" }, harnessName: "Pi", referenceable: false, inlineMaxBytes: 10,
+  });
+  assert.deepEqual(big, { kind: "file-reference", modality: "file", tooLarge: true, storedOnly: true });
+  // What cannot be delivered at all is still refused.
+  assert.equal(planAttachmentDelivery({
+    ref: ref({ kind: "url", mime: "text/uri-list", url: "javascript:alert(1)" }), support: { url: "native" }, harnessName: "Pi",
+  }).kind, "unsupported");
+  assert.equal(planAttachmentDelivery({
+    ref: ref({ kind: "bogus" as AttachmentRef["kind"], mime: "x/y" }), support: {}, harnessName: "Pi", referenceable: false,
+  }).kind, "unsupported");
+  assert.equal(
+    storedAttachmentFile({ path: "_inbox/a\nb.zip", mime: "application/zip", size: 2048 }),
+    "Attached file: _inbox/a b.zip (application/zip, 2 KB)\n"
+      + "[Kept in the Polyth project workspace, not on your host. You may not be able to open it; place it where it is needed or ask the person for its contents.]",
+  );
 });
 
 test("a file reference names path, type and size and tells the agent to say when it cannot", () => {
@@ -173,7 +203,7 @@ test("unknown support never forwards a binary modality as native", () => {
     harnessName: "Legacy",
     supportDeclared: false,
   });
-  assert.equal(plan.kind, "unsupported");
+  assert.equal(plan.kind, "file-reference");
 });
 
 test("legacy unknown support keeps only guarded text projection compatibility", () => {
@@ -195,7 +225,7 @@ test("browser context with no usable capture is merged into the prompt, never re
   assert.deepEqual(plan, { kind: "prompt-merged" });
 });
 
-test("remote projects without materialization cannot deliver a file, and say so", () => {
+test("remote projects without materialization keep a file stored and say so", () => {
   const harness = caps({ file: "emulated", image: "native" });
   const local = effectiveAttachmentSupport(harness, undefined, false, false);
   assert.equal(local.file, "emulated");
@@ -208,7 +238,7 @@ test("remote projects without materialization cannot deliver a file, and say so"
     support: remoteNoCopy,
     harnessName: "Codex",
   });
-  assert.equal(plan.kind, "unsupported");
+  assert.deepEqual(plan, { kind: "file-reference", modality: "file", storedOnly: true });
 });
 
 test("a text file projects as one delimited, fenced section", () => {

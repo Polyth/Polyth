@@ -126,7 +126,7 @@ const ZONE_CHANNELS = [
  *  process holds the tester password, so another server's page may report
  *  too (people use the desktop app with a server elsewhere). The server list
  *  has no report sheet. */
-const REPORT_CHANNELS = ["desktop:report:state", "desktop:report:capture", "desktop:report:send"] as const;
+const REPORT_CHANNELS = ["desktop:report:state", "desktop:report:capture", "desktop:report:annotate", "desktop:report:send"] as const;
 const REMOTE_CHANNELS = new Set<string>([
   ...WINDOW_CHANNELS,
   ...LEAVE_CHANNELS,

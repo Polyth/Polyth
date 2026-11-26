@@ -37,6 +37,8 @@ import { announce } from "../a11y/live.tsx";
 import { worktreeLabel } from "../../worktreeSessions.ts";
 import SlotHost from "../slots/SlotHost.ts";
 import SessionHoverCard from "./SessionHoverCard.tsx";
+import ProjectGlyph from "../ProjectGlyph.tsx";
+import { sessionNeedsAttention, type SessionProjectMark } from "../../pinnedSessions.ts";
 import {
   Button, Checkbox, Dialog, EmptyState, Menu, ResponsiveOverlay, TextInput,
   type MenuEntry,
@@ -51,7 +53,7 @@ import {
 import { Icon } from "../../icons.tsx";
 import UiIcon from "../ui/Icon.tsx";
 import Badge from "../ui/Badge.tsx";
-import { ArchiveIcon, ChevronRightIcon, MentionIcon, PeopleIcon, SharedIcon, ShieldAlertIcon, TimerIcon } from "../ui/icons.ts";
+import { ArchiveIcon, ChevronRightIcon, MentionIcon, NewWindowIcon, PeopleIcon, SharedIcon, HourglassIcon, ShieldAlertIcon, SplitViewIcon, TimerIcon } from "../ui/icons.ts";
 import { getLocale, tr } from "../../i18n/index.ts";
 import {
   arrangeSessions, getVisibleSessionCount, isIsolatedSession, sessionGroupsOf, setVisibleSessionCount,
@@ -61,9 +63,10 @@ import { errorFeedback, successFeedback, tapFeedback } from "../../haptics.ts";
 import { horizontalDistance, SESSION_SWIPE_REVEAL, type GesturePoint } from "../../mobileGestures.ts";
 import { useShiftArmed } from "../../useShiftArmed.ts";
 import { useShellMode } from "../../responsiveShell.ts";
-import { openSessionInSplit } from "../../sessionSplit.ts";
+import { companionSessionId, openSessionInSplit, useSessionSplit, useSessionSplitPresented } from "../../sessionSplit.ts";
+import { isSecondaryWindow, openChatWindow, useChatWindowSessions } from "../../secondWindow.ts";
 import { setDragSession } from "../../dnd.ts";
-import { beginSessionMoveDrag, canMoveSession, endSessionMoveDrag } from "../../sessionMove.ts";
+import { beginSessionMoveDrag, canMoveSession, canMoveSessionAnywhere, endSessionMoveDrag, useCheckoutDropOver, useDraggedSession } from "../../sessionMove.ts";
 import { useInlineRename } from "../input/inlineRename.ts";
 import { useLaneSessions } from "../../workbench/profileNavigation.ts";
 import { childrenByParent, isNavigatorRoot, listedAncestors } from "../../sessionTree.ts";
@@ -71,6 +74,8 @@ import { useSessionParentPending } from "../../sessionParents.ts";
 import { sessionActivityState, subagentActivity, subagentActivityTone, type SubagentActivity } from "../../subagentActivity.ts";
 import { SubagentCount, subagentActivityLabel } from "./SubagentCount.tsx";
 import { RepositoryFilterChips, RepositoryMark, repositoryMarkLabel } from "./RepositoryFilter.tsx";
+import { searchTerms } from "@polyth/session/search-text";
+import { sessionMatchesSearch } from "../../chatSearchHits.ts";
 import {
   filterRepositoriesOf, sessionMatchesRepositoryFilter, sessionRepositoryMark, useRepositoryFilter,
   type FilterRepository,
@@ -80,11 +85,51 @@ const INLINE_LABEL_LIMIT = 6;
 const isManagedIsolationBranch = (branch: string | null | undefined): boolean =>
   branch?.startsWith("polyth/isolate/") === true;
 
+/** Live states the project glyph keeps in sight: a running chat rings it and
+ *  the others tint a dot at its corner in the rail's kind colours (a reply,
+ *  an approval, an unread result: `--status-*`); a stale epoch or a provider
+ *  limit is amber, a failure red. */
+const PROJECT_LEAD_RING: ReadonlySet<SessionLeadMark> = new Set(["working", "reconciling", "opening"]);
+const PROJECT_LEAD_DOT: Partial<Record<SessionLeadMark, string>> = {
+  "needs-reply": "question",
+  "needs-approval": "permission",
+  "epoch-pending": "attention",
+  "rate-limited": "attention",
+  failed: "failed",
+  unknown: "unknown",
+  unread: "result",
+};
+
+/** Every row of the Pinned group is pinned, so its pin would say nothing: the
+ *  state column carries the project's glyph instead. Decorative; the row's
+ *  description names the project and its state. */
+function ProjectLeadMark({ projectMark, mark }: { projectMark: SessionProjectMark; mark: SessionLeadMark | null }) {
+  const { project, monogram } = projectMark;
+  const ring = mark !== null && PROJECT_LEAD_RING.has(mark) ? mark : undefined;
+  const dot = mark ? PROJECT_LEAD_DOT[mark] : undefined;
+  return (
+    <span className="session-lead-project" data-ring={ring} aria-hidden="true">
+      {/* A project without an icon goes by its initial on a disc of its
+          colour: every such project would otherwise show the same folder. */}
+      {monogram
+        ? (
+          <span
+            className="session-lead-monogram"
+            style={project.color ? { "--project-mark": project.color } as CSSProperties : undefined}
+          >{monogram}</span>
+        )
+        : <ProjectGlyph project={project} />}
+      {dot && <span className={`session-lead-project-dot ${dot}`} />}
+    </span>
+  );
+}
+
 /** Leading state mark. Every row reserves this one fixed slot so titles
  *  align down the list whatever the state; an idle row leaves it empty and a
  *  pinned one at rest shows its pin. `mark` comes from sessionLeadMark, the
  *  same decision that sets the row's `data-lead`. */
-function LeadMark({ mark }: { mark: SessionLeadMark | null }) {
+function LeadMark({ mark, projectMark }: { mark: SessionLeadMark | null; projectMark?: SessionProjectMark }) {
+  if (projectMark) return <ProjectLeadMark projectMark={projectMark} mark={mark} />;
   switch (mark) {
     case "people":
       return <span className="session-lead-mark people" aria-hidden="true"><UiIcon icon={PeopleIcon} size="sm" /></span>;
@@ -105,6 +150,8 @@ function LeadMark({ mark }: { mark: SessionLeadMark | null }) {
       return <span className="session-lead-mark unknown" aria-hidden="true">?</span>;
     case "rate-limited":
       return <span className="session-lead-mark rate-limited" aria-hidden="true"><UiIcon icon={TimerIcon} size="sm" /></span>;
+    case "awaiting":
+      return <span className="session-lead-mark awaiting" aria-hidden="true"><UiIcon icon={HourglassIcon} size="sm" /></span>;
     case "unread":
       return <span className="session-lead-dot" aria-hidden="true" />;
     case "pin":
@@ -130,14 +177,40 @@ function ElapsedBadge({ status }: { status: SessionRowStatus }) {
   return <span className="session-elapsed" aria-hidden="true">{fmtSessionElapsed(status.elapsedMs)}</span>;
 }
 
-interface SubagentDisclosure {
+export interface SubagentDisclosure {
   /** Listed direct children and what their subtrees are doing. */
   activity: SubagentActivity;
   expanded: boolean;
   onToggle: () => void;
 }
 
-interface RowProps {
+/** Chats titled by their first user message, by id. Narrow subscription: rows
+ *  only need each session's derived title, so the fingerprint changes only
+ *  when a derived title appears or changes. Selecting the whole events map
+ *  re-rendered every list on each streamed chunk of every session (the
+ *  per-array WeakMap cache keeps the selector cheap, and the store LRU bounds
+ *  the entry count). */
+export function useEventsTitles(): ReadonlyMap<string, string> {
+  const titlesFingerprint = useStore((st) => {
+    let out = "";
+    for (const id in st.events) {
+      const text = firstUserTextCached(st.events[id]);
+      if (text !== undefined) out += `${id}\u0000${text}\u0001`;
+    }
+    return out;
+  });
+  return useMemo(() => {
+    const events = getState().events;
+    const titles = new Map<string, string>();
+    for (const id in events) {
+      const text = firstUserTextCached(events[id]);
+      if (text !== undefined) titles.set(id, text);
+    }
+    return titles;
+  }, [titlesFingerprint]);
+}
+
+export interface RowProps {
   s: SessionProjection;
   activeSessionId: string | null;
   labels: WorkspaceLabel[];
@@ -162,16 +235,24 @@ interface RowProps {
   /** A subset session's repositories (absent for a whole-project session);
    *  `active` is the chip the list is narrowed to, if any. */
   repositoryMark?: { repositories: FilterRepository[]; active?: string };
+  /** The project has another checkout (a linked worktree or its main one) the
+   *  chat could be dragged to. */
+  otherCheckouts?: boolean;
+  /** A row of the navigator's Pinned group above the projects: its project's
+   *  glyph takes the state column. */
+  projectMark?: SessionProjectMark;
 }
 
-function SessionRow({
+export function SessionRow({
   s, activeSessionId, labels, eventsTitle, opening, selectMode, selected,
   onToggleSelect, onChanged, onOpen, onTogglePin,
   projectName, branch, workspacePath, contextLabel, pinnedWorktreeLabel, shiftQuick, subagents, repositoryMark,
+  otherCheckouts = false, projectMark,
 }: RowProps) {
   const statusId = useId();
   const repositoryMarkId = useId();
   const pinnedId = useId();
+  const projectMarkId = useId();
   const [menuOpen, setMenuOpen] = useState(false);
   const [labelPickerOpen, setLabelPickerOpen] = useState(false);
   const [labelQuery, setLabelQuery] = useState("");
@@ -193,6 +274,17 @@ function SessionRow({
   const rowStatus = resolveSessionStatus(s, now);
   // Split view needs room for two chats; the phone shell never offers it.
   const splitAvailable = useShellMode() !== "phone" && s.id !== activeSessionId;
+  // A chat in a window of its own is a desktop/browser affordance: a phone
+  // would only open another tab of the same app.
+  const windowAvailable = useShellMode() !== "phone" && !isSecondaryWindow();
+  // Where else this chat is on screen: beside the focused chat, or in a
+  // window of its own (secondWindow.ts presence).
+  const splitCompanion = companionSessionId(useSessionSplit());
+  const besideMark = useSessionSplitPresented() && splitCompanion === s.id;
+  const windowMark = useChatWindowSessions().has(s.id);
+  const openInWindow = () => {
+    if (!openChatWindow(s.id, s.projectId ?? null)) setUiError(tr("window.blocked"));
+  };
   // Dragging a row is a mouse gesture; touch keeps its long-press menu.
   const rowDragPointer = useShellMode() !== "phone"
     && typeof matchMedia === "function" && matchMedia("(pointer: fine)").matches;
@@ -393,7 +485,9 @@ function SessionRow({
   // Rename, archive, delete and sharing changes need manage access; a chat
   // shared with less offers only what the reader may do.
   const manage = canManageSession(s);
-  const movable = canMoveSession(s, getState().projectRegistry.projects);
+  const projects = getState().projectRegistry.projects;
+  // To another project, or to another checkout of this one.
+  const movable = canMoveSession(s, projects) || (otherCheckouts && canMoveSessionAnywhere(s, projects));
   // Moving works from the open chat's row too, which can't open beside itself.
   const moveDraggable = movable && !selectMode && rowDragPointer;
   // A conversation is shared by nature; its lead mark already says so.
@@ -415,6 +509,13 @@ function SessionRow({
       id: "split",
       label: tr("split.openBeside"),
       onSelect: () => { prefetchSessionTail(s.id); openSessionInSplit(s.id); },
+      ...(rowDragPointer ? { detail: tr("split.altClickHint") } : {}),
+    } satisfies MenuEntry] : []),
+    ...(windowAvailable ? [{
+      id: "new-window",
+      label: tr("window.openChat"),
+      onSelect: openInWindow,
+      ...(rowDragPointer ? { detail: tr("window.shiftClickHint") } : {}),
     } satisfies MenuEntry] : []),
     ...(movable ? [{
       id: "move",
@@ -501,7 +602,7 @@ function SessionRow({
           <button
             ref={sessionBtnRef}
             className="session-btn"
-            aria-describedby={[leadDescription ? statusId : "", s.pinned ? pinnedId : "", repositoryMark ? repositoryMarkId : ""].filter(Boolean).join(" ") || undefined}
+            aria-describedby={[leadDescription ? statusId : "", s.pinned ? pinnedId : "", projectMark ? projectMarkId : "", repositoryMark ? repositoryMarkId : ""].filter(Boolean).join(" ") || undefined}
             aria-current={s.id === activeSessionId ? "true" : undefined}
             aria-expanded={swipeRevealed}
             aria-busy={opening || undefined}
@@ -531,7 +632,13 @@ function SessionRow({
                 onToggleSelect(s.id);
                 return;
               }
-              // Alt-click shows the chat beside the open one instead.
+              // Shift-click opens the chat in a window of its own, as a
+              // browser opens a link; Alt-click shows it beside the open one.
+              if (event.shiftKey && windowAvailable) {
+                event.preventDefault();
+                openInWindow();
+                return;
+              }
               if (event.altKey && splitAvailable) {
                 event.preventDefault();
                 prefetchSessionTail(s.id);
@@ -579,11 +686,12 @@ function SessionRow({
         <span className="session-row-body">
           <span className="session-lead" id={statusId}>
             {leadDescription && <span className="sr-only">{leadDescription}</span>}
-            <LeadMark mark={leadMark} />
+            <LeadMark mark={leadMark} projectMark={projectMark} />
           </span>
           {/* Pinned-ness is named here whatever the state column shows, since
               live state hides the lead pin. */}
           {s.pinned && <span className="sr-only" id={pinnedId}>{pinnedLabel}</span>}
+          {projectMark && <span className="sr-only" id={projectMarkId}>{tr("sidebar.sessionlist.projectValue", { name: projectMark.name })}</span>}
           <span className="session-title">
             <span className="session-title-text">{displayTitle}</span>
             {subagents && (
@@ -617,6 +725,16 @@ function SessionRow({
               <RepositoryMark id={repositoryMarkId} repositories={repositoryMark.repositories} active={repositoryMark.active} />
             )}
             {!conversation && <ElapsedBadge status={rowStatus} />}
+            {besideMark && (
+              <span className="session-place-mark" role="img" title={tr("split.markBeside")} aria-label={tr("split.markBeside")}>
+                <UiIcon icon={SplitViewIcon} size="sm" />
+              </span>
+            )}
+            {windowMark && (
+              <span className="session-place-mark" role="img" title={tr("window.markOpen")} aria-label={tr("window.markOpen")}>
+                <UiIcon icon={NewWindowIcon} size="sm" />
+              </span>
+            )}
             {draftMark && <span aria-hidden="true" className="session-draft-slot"><Badge tone="accent" className="session-draft-mark">{draftLabel}</Badge></span>}
             <span className="session-identity">
               <SlotHost
@@ -770,6 +888,7 @@ export default function SessionList({
   searchProjectName = "",
   dateFilter = EMPTY_SESSION_DATE_FILTER,
   leadingExclude,
+  pinnedAbove = false,
 }: {
   projectId: string;
   query?: string;
@@ -783,6 +902,11 @@ export default function SessionList({
   /** `sidebar.project.leading` contributions not drawn here (hidden, or
    *  shown under their action row). */
   leadingExclude?: readonly string[];
+  /** The navigator draws every pinned chat in its Pinned group above the
+   *  projects (`PinnedSessions`), so this list leaves its own out. They still
+   *  count as listed, so their subagents stay with them instead of turning
+   *  into rows of this list. Search results keep theirs. */
+  pinnedAbove?: boolean;
 }) {
   const sessionsRaw = useStore((st) => st.sessions);
   const pendingSends = useStore((st) => st.pendingSends);
@@ -803,28 +927,7 @@ export default function SessionList({
   const activeRepository = filterRepositories.length > 0 ? storedRepositoryFilter : undefined;
   const projectRepositoryIds = useMemo(() => filterRepositories.map((repository) => repository.id), [filterRepositories]);
   const openingSessionId = useStore((st) => st.openingSessionId);
-  // Narrow subscription: rows only need each session's derived title (its
-  // first user message). Selecting the whole events map re-rendered the whole
-  // list on EVERY streamed chunk of every session; this fingerprint changes
-  // only when a derived title appears or changes (the per-array WeakMap cache
-  // keeps the selector cheap, and the store LRU bounds the entry count).
-  const titlesFingerprint = useStore((st) => {
-    let out = "";
-    for (const id in st.events) {
-      const text = firstUserTextCached(st.events[id]);
-      if (text !== undefined) out += `${id}\u0000${text}\u0001`;
-    }
-    return out;
-  });
-  const eventsTitles = useMemo(() => {
-    const events = getState().events;
-    const titles = new Map<string, string>();
-    for (const id in events) {
-      const text = firstUserTextCached(events[id]);
-      if (text !== undefined) titles.set(id, text);
-    }
-    return titles;
-  }, [titlesFingerprint]);
+  const eventsTitles = useEventsTitles();
   const relativeTime = useStore((st) => st.settings.relativeTime);
   const defaultVisibleSessionCount = useStore((st) => st.settings.defaultVisibleSessionCount);
   const grouping = useSessionGrouping();
@@ -911,25 +1014,26 @@ export default function SessionList({
     () => new Map(projectSessions.map((session) => [session.id, session])),
     [projectSessions],
   );
-  const needle = query.trim().toLowerCase();
+  const terms = useMemo(() => searchTerms(query), [query]);
   const matchesFilters = (session: SessionProjection) => {
-    if (
-      needle
-      && !`${session.title} ${session.branch ?? ""} ${session.worktreePath ?? ""}`.toLowerCase().includes(needle)
-    ) return false;
+    if (terms.length && !sessionMatchesSearch(session, terms)) return false;
     if (activeRepository && !sessionMatchesRepositoryFilter(session, activeRepository, projectRepositoryIds, projectSessionsById)) return false;
     if (!sessionMatchesDateFilter(session, dateFilter)) return false;
-    if (!attentionOnly) return true;
-    return session.status === "working"
-      || session.status === "waiting"
-      || session.status === "reconciling"
-      || session.status === "unknown"
-      || resolveSessionStatus(session).kind === "epoch-pending"
-      || (session.attention?.questions ?? 0) > 0
-      || (session.attention?.permissions ?? 0) > 0;
+    return !attentionOnly || sessionNeedsAttention(session);
   };
   const matchingActive = projectSessions.filter((s) => s.status !== "archived" && matchesFilters(s));
   const mainWorktree = worktrees.find((worktree) => worktree.isMain);
+  const linkedWorktrees = worktrees.filter((worktree) => !worktree.isMain && !isManagedIsolationBranch(worktree.branch)).length;
+  // A chat of this project dragged from a worktree may land on the main
+  // checkout even when no chat lives there yet: the drop strip shows mid-drag.
+  const draggedSession = useDraggedSession();
+  const checkoutDropOver = useCheckoutDropOver(projectId);
+  const mainDropOffered = !!draggedSession && draggedSession.projectId === projectId && !!draggedSession.worktreePath;
+  const checkoutDropProps = (key: string) => ({
+    "data-session-drop-checkout": key,
+    "data-session-drop-checkout-project": projectId,
+    "data-session-drop-over": checkoutDropOver === key ? "true" : undefined,
+  });
   const worktreeKey = (session: SessionProjection): string =>
     !session.worktreePath || session.worktreePath === mainWorktree?.path || isIsolatedSession(session)
       ? SESSION_MAIN_WORKTREE_KEY
@@ -1105,6 +1209,7 @@ export default function SessionList({
         shiftQuick={shiftQuick}
         subagents={subagents}
         repositoryMark={markedRepositories ? { repositories: markedRepositories, active: activeRepository } : undefined}
+        otherCheckouts={linkedWorktrees > 0}
       />
     );
   };
@@ -1261,14 +1366,14 @@ export default function SessionList({
         context={{
           projectId,
           activeSessionId: currentSessionId,
-          query: needle,
+          query: query.trim().toLowerCase(),
           attentionOnly,
           placement: "project",
           // As a chat row does, an opened row closes the compact drawer.
           onNavigate: () => { if (getState().sidebarOpen) setSidebarOpen(false); },
         }}
       />
-      {pinned.length > 0 && (
+      {pinned.length > 0 && !pinnedAbove && (
         <div className="session-pinned" aria-label={tr("sidebar.sessionlist.pinnedChats")}>
           <div className="session-date-divider session-pinned-divider" role="separator">
             <span><Icon.pin />{tr("sidebar.sessionlist.pinnedChats")}</span>
@@ -1278,6 +1383,14 @@ export default function SessionList({
             undefined,
             isIsolatedSession(session) ? undefined : worktreeNameForSession(session),
           ))}
+        </div>
+      )}
+      {mainDropOffered && (
+        <div className="session-checkout-drop" {...checkoutDropProps("main")}>
+          <Icon.branch />
+          <span>{tr("sidebar.sessionlist.moveToMainCheckout", {
+            branch: mainWorktree?.branch || tr("sidebar.sessionlist.mainWorktree"),
+          })}</span>
         </div>
       )}
       {(mainSessions.length > 0 || pages.hasMore) && (
@@ -1292,7 +1405,11 @@ export default function SessionList({
           || group.sessions.some(isIsolatedSession);
         return (
           <div key={group.key} className="session-worktree-group" data-worktree={group.key}>
-            <div className="session-worktree-head">
+            <div
+              className="session-worktree-head"
+              // A chat dragged here moves into this worktree (the Git package confirms).
+              {...(group.worktree && !group.worktree.isMain && !managedIsolation ? checkoutDropProps(group.key) : {})}
+            >
               <button
                 className="session-worktree-toggle"
                 aria-expanded={!isCollapsed}
@@ -1344,6 +1461,9 @@ export default function SessionList({
         );
       })}
 
+      {pinnedAbove && pinned.length > 0 && unpinnedRoots.length === 0 && !pages.hasMore && (
+        <div className="empty session-list-empty">{tr("sidebar.sessionlist.allPinnedAbove")}</div>
+      )}
       {matchingActive.length === 0 && (
         <div className="empty session-list-empty">
           {/* A first chat is not a filter miss. */}

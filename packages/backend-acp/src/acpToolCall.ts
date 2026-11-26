@@ -4,6 +4,8 @@ import { isTodoToolName } from "@polyth/todos";
 export interface AcpToolCallState {
     toolCallId: string;
     tool?: string;
+    /** The agent's own tool name, read by {@link AcpToolCallOptions.nativeToolName}. */
+    nativeName?: string;
     title?: string;
     status?: string;
     rawInput?: JsonObject;
@@ -60,6 +62,13 @@ const SELF_DESCRIBING_KEYS = [
 export interface AcpToolCallOptions {
     /** The agent's `title` is its own tool name and `kind` is generic. */
     toolNameFromTitle?: boolean;
+    /**
+     * The agent names its tool in a field of its own (for example `_meta`)
+     * rather than in `title`: read that name from one `tool_call` /
+     * `tool_call_update`, already in the form Polyth reports tools under.
+     * Like a title name, it is used only when `kind` is absent or `other`.
+     */
+    nativeToolName?(update: Record<string, unknown>): string | undefined;
 }
 
 /** A bare tool identifier (`bash`, `todo_write`, `mcp__server__tool`), as
@@ -67,7 +76,8 @@ export interface AcpToolCallOptions {
 const TOOL_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_.:-]{0,63}$/;
 
 /** The tool name a call is reported under. */
-export function acpToolName(state: Pick<AcpToolCallState, "tool" | "title">, options: AcpToolCallOptions = {}): string {
+export function acpToolName(state: Pick<AcpToolCallState, "tool" | "title" | "nativeName">, options: AcpToolCallOptions = {}): string {
+    if (state.nativeName && (!state.tool || state.tool === "other")) return state.nativeName;
     if (options.toolNameFromTitle && state.title && TOOL_IDENTIFIER.test(state.title)
         && (!state.tool || state.tool === "other")) return state.title;
     return state.tool ?? "tool";
@@ -387,6 +397,8 @@ export function eventsFromAcpToolCallUpdate(
         states.set(toolCallId, state);
     }
     mergeAcpToolCallUpdate(state, update);
+    const nativeName = options.nativeToolName?.(update);
+    if (nativeName) state.nativeName = nativeName;
     const events: RuntimeEvent[] = [];
     const tool = acpToolName(state, options);
     const input = formatAcpToolInput(state, options);

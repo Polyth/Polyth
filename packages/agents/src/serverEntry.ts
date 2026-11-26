@@ -29,6 +29,8 @@ import {
   type ServerPackageHost,
 } from "@polyth/plugins";
 import { checkWakeScript, runWakeScript, scriptEvents } from "./agentScript.ts";
+import { lastReportOf } from "./agentHold.ts";
+import { openNeeds } from "./agentReport.ts";
 import { cacheTelemetry, KEEP_ALIVE_PROMPT, planWarm, runCacheStats } from "./agentCache.ts";
 import { promptLayers } from "./agentPrompt.ts";
 import { DRAFT_SYSTEM_PROMPT, draftPrompt, parseAgentDraft, type AgentDraft } from "./agentDraft.ts";
@@ -676,8 +678,11 @@ export function scheduleRoutes(deps: {
       if (trigger.kind === "session") {
         events = await deps.recentSessionEvents?.(owned.id, spaceId, since) ?? [];
       } else if (trigger.kind === "integration") {
+        // A targeted event was fetched for one agent with its owner's
+        // account: only that owner may see it, whatever agent id is asked.
         events = deps.recentIntegrationEvents?.(spaceId, trigger.source, since)
-          .filter((event) => !event.projectId || event.projectId === owned.id) ?? [];
+          .filter((event) => !event.projectId || event.projectId === owned.id)
+          .filter((event) => !event.target || deps.schedule.get(event.target.agentId)?.ownerUserId === rc.space.userId) ?? [];
       } else if (trigger.kind === "agent") {
         const source = deps.schedule.get(trigger.agentId);
         if (source && inSpace(source) && accessOf(source) === "own" && (await project(source.projectId))) {
@@ -848,7 +853,12 @@ export function scheduleRoutes(deps: {
         json(400, { error: "invalid-input", message: "done must be true or false" });
         return true;
       }
-      json(200, await view(deps.schedule.setNeedDone(task.id, needMatch[2]!, Number(needMatch[3]), input.done)));
+      const answer: unknown = input.answer;
+      if (answer !== undefined && answer !== "yes" && answer !== "no") {
+        json(400, { error: "invalid-input", message: "answer must be yes or no" });
+        return true;
+      }
+      json(200, await view(deps.schedule.setNeedDone(task.id, needMatch[2]!, Number(needMatch[3]), input.done, input.done ? answer : undefined)));
       return true;
     }
 
@@ -866,6 +876,28 @@ export function scheduleRoutes(deps: {
       json(200, await view(deps.schedule.setFeedback(task.id, feedbackMatch[2]!, verdict === null
         ? null
         : { verdict, ...(typeof input.note === "string" ? { note: input.note } : {}) })));
+      return true;
+    }
+
+    // Requests set aside for the agent's next wake: the owner's, like a message.
+    const wakeMatch = path.match(/^\/api\/schedule\/([^/]+)\/next-wake(?:\/([^/]+))?$/);
+    if (wakeMatch && ((method === "POST" && !wakeMatch[2]) || (method === "DELETE" && wakeMatch[2]))) {
+      const task = await allowedTask(wakeMatch[1]!);
+      if (task === null) return true;
+      if (!task) { json(404, { error: "not-found" }); return true; }
+      try {
+        if (method === "POST") {
+          const input = await body().catch(() => ({} as Record<string, unknown>));
+          json(200, await view(deps.schedule.setAsideForNextWake(task.id, typeof input.text === "string" ? input.text : "")));
+        } else {
+          json(200, await view(deps.schedule.dropWakeNote(task.id, wakeMatch[2]!)));
+        }
+      } catch (error) {
+        const code = (error as { code?: unknown })?.code;
+        const status = code === "invalid-input" ? 400 : code === "not-found" ? 404 : undefined;
+        if (!status) throw error;
+        json(status, { error: code, message: error instanceof Error ? error.message : String(error) });
+      }
       return true;
     }
 
@@ -1201,13 +1233,21 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       };
     },
     lateReport: async (_task, run) => scanLateReport(await host.store.events(run.sessionId!, run.markerSeq), run.queueId),
-    settle: (task, run, signal, onWaiting, onActivity, onBackground, stopRequested) => settleScheduledRun(run, {
+    settle: (task, run, signal, onWaiting, onActivity, onBackground, stopRequested, recovery) => settleScheduledRun(run, {
       signal,
       events: (sessionId, afterSeq) => host.store.events(sessionId, afterSeq),
       ...(onWaiting ? { onWaiting } : {}),
       ...(onActivity ? { onActivity } : {}),
       ...(onBackground ? { onBackground } : {}),
       ...(stopRequested ? { stopRequested } : {}),
+      ...(recovery ? {
+        carriedOver: recovery.carriedOver,
+        onRecovery: recovery.onRecovery,
+        // A restart leaves a cut turn's session `unknown` (or being
+        // recovered), never `working`: that is how the run tells a turn the
+        // restart cut from one that outlived it.
+        sessionStatus: async () => (await host.store.projection(run.sessionId!))?.status,
+      } : {}),
       ...(run.sessionId ? {
         // The turn was cut under the agent (a restart, an overlong tool
         // call, a failed request) and nothing continued it: the run sends
@@ -1338,6 +1378,8 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       name: task.title ?? "",
       runsToday: spendInLastDay(task.history, Date.now()).runs,
       lastRunAt: task.lastRunAt ?? null,
+      waitingFor: openNeeds(task.history, Date.now()).map((need) => need.text),
+      lastReport: lastReportOf(task.history),
     },
   });
 
@@ -1377,6 +1419,9 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         spaceId: input.spaceId,
         source: input.source,
         outcome: input.type,
+        ...(input.target && typeof input.target.agentId === "string" && typeof input.target.triggerId === "string"
+          ? { target: { agentId: input.target.agentId, triggerId: input.target.triggerId } }
+          : {}),
         chainDepth: 0,
         fields: {
           ...Object.fromEntries(Object.entries(input.fields ?? {}).map(([key, value]) => [key, String(value).slice(0, 2_000)])),
@@ -1389,6 +1434,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       schedule?.dispatchEvent(event);
     },
     subscribed: (source) => schedule?.subscribed(source) ?? [],
+    subscriptions: (source) => schedule?.subscriptions(source) ?? [],
   });
   const recentIntegrationEvents = (spaceId: string, source: string, since: number): AgentEvent[] =>
     recentIntegration.filter((event) => event.spaceId === spaceId && event.source === source && event.at >= since);
@@ -1478,16 +1524,20 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     const attention = host.services.get(SESSION_ATTENTION_SERVICE);
     const sessionId = run.sessionId ?? task.lastSessionId;
     if (!attention?.notify || !sessionId) return;
+    // The run's session was started by server work, not typed by a person,
+    // so it has no notification owner of its own: the agent's owner is told.
+    const recipient = task.ownerUserId ? { recipient: { userId: task.ownerUserId } } : {};
     if (reason === "tripped") {
       attention.notify(sessionId, {
         kind: "failed",
         statusText: `stopped and will not wake until you resume it: ${failureWords(run)}`,
         key: `tripped:${run.runId}`,
+        ...recipient,
       });
       return;
     }
     if (reason === "failed") {
-      attention.notify(sessionId, { kind: "failed", statusText: `did not finish: ${failureWords(run)}`, key: `failed:${run.runId}` });
+      attention.notify(sessionId, { kind: "failed", statusText: `did not finish: ${failureWords(run)}`, key: `failed:${run.runId}`, ...recipient });
       return;
     }
     const headline = run.headline ?? "has an update";
@@ -1495,6 +1545,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       kind: "completed",
       statusText: run.signal === "alert" ? `needs you: ${headline}` : headline,
       key: run.runId,
+      ...recipient,
     });
   };
   /** The person stops the agent's runs; they are marked first so the abort
@@ -1513,6 +1564,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     personSpace: (userId, spaceId) => host.personSpaceContext?.(userId, spaceId),
     project: (space, projectId) => host.forSpace(space).projects.get(projectId),
     access: scheduleTaskAccess,
+    sources: () => [...sources.values()],
   });
   let capabilities: Disposable[] = [];
   let routes: RouteHandler | null = null;

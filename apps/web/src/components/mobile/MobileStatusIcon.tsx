@@ -4,6 +4,7 @@ import {
   ChatIcon,
   ErrorIcon,
   HelpIcon,
+  HourglassIcon,
   RefreshIcon,
   ShieldIcon,
   SuccessIcon,
@@ -32,6 +33,8 @@ export function MobileStatusIcon({ kind }: { kind: MobileStatusKind }) {
       return <UiIcon icon={ErrorIcon} size="sm" className="mobile-nav-state-icon" />;
     case "rate-limited":
       return <UiIcon icon={TimerIcon} size="sm" className="mobile-nav-state-icon" />;
+    case "awaiting":
+      return <UiIcon icon={HourglassIcon} size="sm" className="mobile-nav-state-icon" />;
     case "epoch-pending":
       return <UiIcon icon={WarningIcon} size="sm" className="mobile-nav-state-icon" />;
     case "reconciling":

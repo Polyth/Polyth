@@ -10,7 +10,7 @@ import { createProjectService } from "../src/projects.ts";
 import { canonicalProjectService } from "../src/projectResourceAuthority.ts";
 import { limitedProjectsForActor, setPrivateRoomParentLookup } from "../src/accountLimits.ts";
 
-function fixture(t: test.TestContext, opts: { canonical?: boolean } = {}) {
+function fixture(t: test.TestContext, opts: { canonical?: boolean; caseInsensitivePaths?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), "polyth-personal-project-"));
   const storageDir = join(root, "spaces", "home");
   let dispose = () => {};
@@ -37,7 +37,7 @@ function fixture(t: test.TestContext, opts: { canonical?: boolean } = {}) {
   }
   // After the security bootstrap: it refuses to initialize over existing state.
   mkdirSync(storageDir, { recursive: true });
-  const registry = createProjectService(root);
+  const registry = createProjectService(root, opts.caseInsensitivePaths === undefined ? {} : { caseInsensitivePaths: opts.caseInsensitivePaths });
   setPrivateRoomParentLookup((id) => registry.parentOfRoom(id));
   const ctx = (userId: string, role: SpaceContext["role"] = "member"): SpaceContext => ({
     spaceId: "spc_home",
@@ -138,6 +138,27 @@ test("nobody can register a personal folder as an ordinary project", async t => 
   await assert.rejects(member.add(join(f.storageDir, "personal", "0".repeat(32)), "Probe"), refused);
   await assert.rejects(owner.add(join(mine.path, "inner"), "Inner"), refused);
   assert.deepEqual((await member.list()).map((row) => row.id), []);
+});
+
+test("on a case-insensitive volume another spelling of a personal or data folder is refused too", async t => {
+  const f = fixture(t, { caseInsensitivePaths: true });
+  const owner = canonicalProjectService(f.ctx("usr_owner", "owner"), f.registry);
+  const mine = await owner.ensurePersonal!();
+  const member = canonicalProjectService(f.ctx("usr_member"), f.registry);
+  const refused = (error: { code?: string; message?: string }) =>
+    error.code === "invalid-path" && error.message === "this folder is reserved for a personal project";
+  const respell = (path: string) => path.slice(0, f.root.length) + path.slice(f.root.length).toUpperCase();
+  await assert.rejects(member.add(respell(mine.path), "Squat"), refused);
+  await assert.rejects(member.add(join(f.root, "Spaces", "HOME", "Personal", "0".repeat(32)), "Probe"), refused);
+  assert.equal(f.registry.reservedForPersonal(respell(mine.path)), true);
+  assert.equal(f.registry.holdsServerData(join(f.root, "SPACES")), true);
+  assert.deepEqual((await member.list()).map((row) => row.id), []);
+});
+
+test("a case-sensitive volume keeps other spellings apart", async t => {
+  const f = fixture(t, { caseInsensitivePaths: false });
+  assert.equal(f.registry.reservedForPersonal(join(f.root, "spaces", "home", "PERSONAL", "x")), false);
+  assert.equal(f.registry.reservedForPersonal(join(f.root, "spaces", "home", "personal", "x")), true);
 });
 
 test("nobody can register the server's data folder; a parent of it is an ordinary project", async t => {

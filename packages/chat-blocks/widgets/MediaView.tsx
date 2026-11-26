@@ -79,7 +79,7 @@ export default function MediaView({ doc, t, context, selected, toggle, locked, s
       )}
       {open !== null && viewable.length > 0 && (
         <ImageLightbox
-          images={viewable.map((tile) => ({ src: tile.src!, alt: tile.item.title }))}
+          images={viewable.map((tile) => ({ src: tile.src!, alt: tile.item.title, caption: tile.item.title }))}
           start={open}
           onClose={() => setOpen(null)}
         />

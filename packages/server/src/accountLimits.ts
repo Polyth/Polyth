@@ -139,14 +139,15 @@ export function limitedSessionService(
   // next sign-in.
   const current = (): AccountLimits | null => authority.forUser(userId);
 
-  limited.create = async (input) => {
+  limited.create = async (input, admission) => {
     const limits = current();
     if (limits && !accountMayUseProject(limits, input.projectId)) throw notFound();
     const harness = limits?.harnesses
       ? input.harness ? checkSelection(allowed, limits, input.harness) : defaultHarness(limits)
       : input.harness;
+    const next = { ...input, ...(harness ? { harness } : {}) };
     return counted(authority, userId, limits, "chats", () =>
-      base.create({ ...input, ...(harness ? { harness } : {}) }));
+      admission ? base.create(next, admission) : base.create(next));
   };
   if (base.start) {
     const start = base.start.bind(base);

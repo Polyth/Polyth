@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, posix } from "node:path";
 import type { HarnessContext, HarnessProvider, HarnessRegistry, RuntimeSessionBinding, SmallModelCompletionRequest } from "@polyth/contracts";
-import { releaseHarnessProcessExecution } from "@polyth/harness-runtime";
+import { releaseHarnessProcessExecution, withLaunchEnv } from "@polyth/harness-runtime";
 import { harnessExecutableChildEnv } from "@polyth/harness-runtime/executable-discovery";
 import { npmCliInstallCommand } from "@polyth/harness-runtime/installers";
 import {
@@ -349,7 +349,8 @@ export function createCommandCodeProvider(host: ServerPackageHost, account?: Res
         bindingIo = remoteBindingIo(remote);
       } else {
         const local = command as string;
-        childEnv = { ...await harnessExecutableChildEnv(local), ...env };
+        // The chat's shell gets `polyth-tools` (HarnessContext.launchEnv).
+        childEnv = withLaunchEnv({ ...await harnessExecutableChildEnv(local), ...env }, context);
         await materialize(context);
         rpc = await createCommandCodeRpc({
           workerPath: p.worker,

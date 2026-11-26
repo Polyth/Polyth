@@ -7,8 +7,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStore } from "@polyth/session";
 
+import { after } from "node:test";
+import { rmSync } from "node:fs";
+
+const tempDirs: string[] = [];
+const tempDir = (prefix: string): string => {
+  const dir = mkdtempSync(prefix);
+  tempDirs.push(dir);
+  return dir;
+};
+after(() => {
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
 test("another person's prompts never come back, per chat or Space-wide", async () => {
-  const store = createStore(join(mkdtempSync(join(tmpdir(), "polyth-ph-priv-")), "s.db"));
+  const store = createStore(join(tempDir(join(tmpdir(), "polyth-ph-priv-")), "s.db"));
   try {
     await store.upsertProjection({ id: "shared", projectId: "p", spaceId: "sp", title: "shared", status: "idle", createdAt: 1, updatedAt: 1 });
     await store.append("shared", "user/message", { text: "Ann private idea", author: { userId: "usr_ann" } });

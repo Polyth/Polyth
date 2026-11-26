@@ -29,10 +29,20 @@ export const NPM_PACKAGE = "@github/copilot";
  */
 export const COPILOT_NATIVE_AGENT_TOOLS = ["task", "read_agent", "list_agents", "write_agent", "run_dynamic_workflow", "dynamic_workflows_manage"] as const;
 /**
+ * Copilot's SQL over its own session store. That store holds only native
+ * legs and Polyth's utility prompts (titles, commit messages), never the
+ * canonical chat history, so a model that searched it reported other chats
+ * as unreadable instead of using Polyth's `polyth` tool (session.messages).
+ */
+export const COPILOT_NATIVE_HISTORY_TOOLS = ["session_store_sql"] as const;
+/**
  * `--no-auto-update`: Polyth offers the update in Settings and replaces the
  * binary only when no chat runs it; the CLI must not swap itself underneath.
  */
-export const COPILOT_ACP_ARGS = ["--acp", "--stdio", "--no-auto-update", `--excluded-tools=${COPILOT_NATIVE_AGENT_TOOLS.join(",")}`];
+export const COPILOT_ACP_ARGS = [
+    "--acp", "--stdio", "--no-auto-update",
+    `--excluded-tools=${[...COPILOT_NATIVE_AGENT_TOOLS, ...COPILOT_NATIVE_HISTORY_TOOLS].join(",")}`,
+];
 
 const windowsShim = (command: string) => process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command);
 const run = (command: string, args: string[], env: NodeJS.ProcessEnv, timeout: number) =>
@@ -133,6 +143,12 @@ export function createCopilotProfile(account?: ResolvedHarnessAccount): Register
         // Copilot refuses stdio MCP servers on `session/new`; they are given
         // to the process it starts instead (see launchMcp.ts).
         launchStdioMcp: writeCopilotLaunchMcp,
+        // Polyth's own tools do not ride on that launch file: they go to every
+        // session/new and session/load as the loopback HTTP endpoint, which
+        // Copilot accepts (`mcpCapabilities.http`). No bridge process has to
+        // start inside Copilot (on a desktop build that is the app binary run
+        // as Node), and a grant re-minted after launch still arrives.
+        agentToolsOverHttp: true,
         // An MCP tool call has kind `other` and its qualified name
         // (`<server>-<tool>`) as the title; built-in tools keep their kind.
         toolNameFromTitle: true,

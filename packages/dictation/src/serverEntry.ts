@@ -42,7 +42,7 @@ import { localVoiceCatalog, type LocalVoiceDescriptor } from "./localVoiceCatalo
 import { createLocalTts } from "./localTts.ts";
 import { localVoiceRoutes } from "./localVoiceRoutes.ts";
 import { ttsProviderInfo, type TtsProviderId } from "./ttsCatalog.ts";
-import { synthesizeSpeech } from "./ttsProviders.ts";
+import { streamsPcm, synthesizeSpeech, synthesizeSpeechStream } from "./ttsProviders.ts";
 
 interface VoiceEngineSettings {
   baseUrl: string;
@@ -233,6 +233,10 @@ export function dictationRoutes(dictation: DictationService, selection?: () => D
 
 /** Whether the server voice can be attempted: a server URL for an
  *  OpenAI-compatible server, the resolved key (pair) for a hosted service. */
+/** Content type of a streamed reply: headerless signed 16-bit little-endian
+ *  mono PCM, with the sample rate as a `rate` parameter. */
+export const TTS_PCM_TYPE = "audio/pcm";
+
 const ttsConfigured = (voice: VoiceSettingsService): boolean => {
   const tts = voice.get().tts;
   const info = ttsProviderInfo(tts.provider ?? "openai-compatible");
@@ -470,22 +474,73 @@ export function voiceRoutes(deps: {
       }
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 30_000);
+      const synthesis = {
+        settings: {
+          provider,
+          baseUrl: settings.baseUrl,
+          model: String(input.model ?? "").slice(0, 200) || settings.model,
+          voice: voiceOverride || settings.voice,
+          region: settings.region ?? "",
+        },
+        text,
+        ...(input.lang ? { lang: String(input.lang).slice(0, 35) } : {}),
+        ...(deps.voice.resolveKey("tts") ? { key: deps.voice.resolveKey("tts")! } : {}),
+        ...(deps.voice.resolveTtsSecret?.() ? { secret: deps.voice.resolveTtsSecret()! } : {}),
+        fetchFn,
+        signal: controller.signal,
+      };
+      // A client that can play audio while it arrives asks for the stream;
+      // services without one, and older clients, get the whole clip.
+      if (input.stream === true && streamsPcm(provider)) {
+        const res = request.res;
+        // The listener stopped the reply (or left): stop paying for it.
+        const gone = () => controller.abort();
+        res.on("close", gone);
+        try {
+          const audio = await synthesizeSpeechStream(synthesis);
+          res.writeHead(200, {
+            "content-type": `${TTS_PCM_TYPE};rate=${audio.sampleRate}`,
+            "cache-control": "no-store",
+            "x-accel-buffering": "no",
+          });
+          const reader = audio.body.getReader();
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            // Respect a slow listener instead of buffering the clip in memory.
+            if (value?.byteLength && !res.write(value)) {
+              await new Promise<void>((resolve) => {
+                const settle = () => {
+                  res.off("drain", settle);
+                  res.off("close", settle);
+                  resolve();
+                };
+                res.once("drain", settle);
+                res.once("close", settle);
+              });
+            }
+            if (res.destroyed) {
+              void reader.cancel().catch(() => {});
+              break;
+            }
+          }
+          if (!res.destroyed) res.end();
+        } catch (error) {
+          // Before any audio the caller can still fall back; afterwards the
+          // only honest signal left is a cut connection.
+          if (!res.headersSent) {
+            json(502, { error: "upstream", message: error instanceof Error ? error.message : String(error) });
+          } else {
+            res.destroy();
+          }
+        } finally {
+          clearTimeout(timer);
+          res.off("close", gone);
+        }
+        return true;
+      }
       try {
-        const clip = await synthesizeSpeech({
-          settings: {
-            provider,
-            baseUrl: settings.baseUrl,
-            model: String(input.model ?? "").slice(0, 200) || settings.model,
-            voice: voiceOverride || settings.voice,
-            region: settings.region ?? "",
-          },
-          text,
-          ...(input.lang ? { lang: String(input.lang).slice(0, 35) } : {}),
-          ...(deps.voice.resolveKey("tts") ? { key: deps.voice.resolveKey("tts")! } : {}),
-          ...(deps.voice.resolveTtsSecret?.() ? { secret: deps.voice.resolveTtsSecret()! } : {}),
-          fetchFn,
-          signal: controller.signal,
-        });
+        const clip = await synthesizeSpeech(synthesis);
         request.res.writeHead(200, {
           "content-type": clip.contentType,
           "content-length": clip.audio.byteLength,

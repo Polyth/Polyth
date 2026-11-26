@@ -9,6 +9,7 @@
 // Deliberately NOT migrated from the global polyth.railPrefs: that record is
 // browser-global, and copying its widths into every project record on first
 // load would replicate one project's layout everywhere (forbidden by spec).
+import { isSecondaryWindow } from "../secondWindow.ts";
 import {
   markProjectPresentationChanged,
   PROJECT_PRESENTATION_HYDRATED_EVENT,
@@ -226,6 +227,9 @@ function read(projectId: string): WorkspacePanePrefs {
 
 function write(projectId: string, prefs: WorkspacePanePrefs): void {
   cache.set(projectId, prefs);
+  // A chat or pane window (secondWindow.ts) keeps its pane in memory: the
+  // main window's pane preference is the person's, not this window's.
+  if (isSecondaryWindow()) return;
   try {
     localStorage.setItem(workspacePaneKey(projectId), serializeWorkspacePanePrefs(prefs));
     markProjectPresentationChanged(projectId, "workspacePane");

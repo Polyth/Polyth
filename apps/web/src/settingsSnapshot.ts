@@ -36,7 +36,7 @@ export const LOOK_UI_KEYS = [
   // message chrome, the rails and the shell layout.
   "mobileSessionTitle", "mobileShortcuts", "showTechnicalButtons", "showDictate", "showAutoApprove", "showGoals",
   "showQuickActions", "activityBlockStyle", "thinkingDisplayMode", "actionGrouping",
-  "statusBar", "showMessageActions", "showAnswerQuickActions", "pinLatestPrompt", "promptBookmarkDesktop",
+  "statusBar", "showMessageActions", "collapseLongPrompts", "collapsePromptLines", "showAnswerQuickActions", "pinLatestPrompt", "promptBookmarkDesktop",
   "promptNavigator", "promptNavigatorSide", "topRailAlignment", "topRailSurface", "shellLayout",
   "shellBarStyle", "floatingColumns", "shellToolsDock", "shellActionsDock", "shellTitle", "topRailSize",
   "rightRailSize", "leftRailSize", "railSpacing",

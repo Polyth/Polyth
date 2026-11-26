@@ -799,6 +799,13 @@ body[data-desktop-low-resource="true"] .mobile-nav-search {
   display: none;
 }
 
+/* Phone: a full tap-height row on the screen gutter. */
+.chat-search-messages-row.mobile-nav-messages-row {
+  min-block-size: var(--tap);
+  padding-inline: var(--screen-gutter);
+  font-size: var(--font-body);
+}
+
 .mobile-nav-empty {
   padding: var(--space-6) var(--space-4);
   color: var(--muted);
@@ -1928,6 +1935,17 @@ body[data-hide-borders="true"] .mobile-nav-running-ring {
 
 .mobile-nav-session-state.is-limited {
   color: var(--amber);
+}
+
+/* Armed to wake by itself: calm, not attention. The glyph matches the
+   running ring's 14px footprint so the column stays even. */
+.mobile-nav-session-state.is-awaiting {
+  color: var(--muted);
+}
+
+.mobile-nav-session-state.is-awaiting .mobile-nav-state-icon {
+  width: calc(var(--icon-sm) - 2px);
+  height: calc(var(--icon-sm) - 2px);
 }
 
 .mobile-nav-unread-dot {

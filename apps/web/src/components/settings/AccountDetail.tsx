@@ -29,6 +29,7 @@ import { isImeComposing } from "../input/editorCore.ts";
 import { EmptyState, FormField, ItemList, ItemRow, ReadonlyRow, Row, Section } from "./parts.tsx";
 import { LinkedSignIns } from "./ExternalIdentitySettings.tsx";
 import { isReauthCancelled, type WithReauth } from "./ownerReauth.tsx";
+import { DesktopPasswordResetDialog, ResetOnThisComputerLink } from "./desktopPasswordReset.tsx";
 import SecureAccountDialog from "./SecureAccountDialog.tsx";
 import { accountErrorText, initials, MIN_PASSWORD_LENGTH, roleText } from "./usersModel.ts";
 
@@ -417,10 +418,13 @@ export default function AccountDetail({ account, name, spaceAccess, withReauth, 
 function ChangePasswordDialog({ accountId, onClose }: { accountId: string; onClose: () => void }) {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
+  const [repeat, setRepeat] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [forgot, setForgot] = useState(false);
   const tooShort = next.length > 0 && [...next].length < MIN_PASSWORD_LENGTH;
-  const ready = !!current && [...next].length >= MIN_PASSWORD_LENGTH;
+  const mismatch = repeat.length > 0 && repeat !== next;
+  const ready = !!current && [...next].length >= MIN_PASSWORD_LENGTH && repeat === next;
 
   const save = async () => {
     if (!ready || busy) return;
@@ -436,6 +440,7 @@ function ChangePasswordDialog({ accountId, onClose }: { accountId: string; onClo
     }
   };
 
+  if (forgot) return <DesktopPasswordResetDialog onClose={onClose} />;
   return (
     <Dialog
       title={tr("settings.account.changePassword")}
@@ -456,6 +461,7 @@ function ChangePasswordDialog({ accountId, onClose }: { accountId: string; onClo
             <TextInput {...field} type="password" value={current} autoComplete="current-password" disabled={busy} onChange={(event) => setCurrent(event.target.value)} />
           )}
         </FormField>
+        <ResetOnThisComputerLink disabled={busy} onClick={() => setForgot(true)} />
         <FormField
           label={tr("settings.account.newPassword")}
           hint={tr("settings.account.newPasswordHint", { count: MIN_PASSWORD_LENGTH })}
@@ -472,6 +478,12 @@ function ChangePasswordDialog({ accountId, onClose }: { accountId: string; onClo
               invalid={tooShort}
               onChange={(event) => setNext(event.target.value)}
             />
+          )}
+        </FormField>
+        <FormField label={tr("lockscreen.passwordChange.repeat")} {...(mismatch ? { error: tr("lockscreen.passwordChange.mismatch") } : {})}>
+          {(field) => (
+            <TextInput {...field} type="password" value={repeat} autoComplete="new-password" spellCheck={false} disabled={busy} invalid={mismatch}
+              onChange={(event) => setRepeat(event.target.value)} />
           )}
         </FormField>
         {error && <Notice tone="error" role="alert">{error}</Notice>}

@@ -3,8 +3,9 @@
 //
 //   npm run polyth:restart [-- <flags>]        (flags: see USAGE)
 //
-// Why it detaches: the server drains every running agent turn before it exits,
-// and the session that asked for the restart is one of those turns. A caller
+// Why it detaches: the server drains the turns of its shared OpenCode runtimes
+// before it exits (other harnesses' turns are cut), and the session that asked
+// for the restart may be one of those turns. A caller
 // that waits for the restart waits for itself, and the supervisor's 30 s
 // SIGKILL ends the stalemate by cutting every turn. So the launcher only
 // schedules a worker in its own systemd unit and returns; the worker outlives

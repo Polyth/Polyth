@@ -12,6 +12,7 @@ import type { RelayGitHub, RelayLogEvent } from "../src/types.ts";
 /** Test fixtures. Every directory this file creates is removed by `cleanup`,
  *  which also satisfies scripts/test/tempHygiene.test.ts. */
 export const PASSWORD = "tester-password-123";
+export const INBOX_TOKEN = "inbox-token-456";
 export const REPO = "Polyth/private-nightly-reports";
 
 export interface Fixture {
@@ -28,6 +29,7 @@ export function fixture(): Fixture {
   mkdirSync(keys);
   mkdirSync(data);
   writeFileSync(join(keys, "password.scrypt"), `${hashPassword(PASSWORD)}\n`);
+  writeFileSync(join(keys, "inbox.scrypt"), `${hashPassword(INBOX_TOKEN)}\n`);
   writeFileSync(join(keys, "github.json"), JSON.stringify({ repo: REPO, branch: "attachments" }));
   writeFileSync(join(keys, "github-token"), "github_pat_test_token_1234567890");
   return { dir, keys, data, cleanup: () => rmSync(dir, { recursive: true, force: true }) };

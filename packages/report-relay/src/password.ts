@@ -76,8 +76,8 @@ export function verifyPassword(record: ScryptRecord, password: string): boolean 
 /** Reads `<dir>/password.scrypt`, re-read when its mtime changes so rotating
  *  the password needs no restart. Absent or unusable files mean "no password
  *  configured", which the relay answers as unavailable rather than accepting. */
-export function passwordFromDir(dir: string): () => ScryptRecord | null {
-  const file = join(dir, "password.scrypt");
+export function passwordFromDir(dir: string, name = "password.scrypt"): () => ScryptRecord | null {
+  const file = join(dir, name);
   let stamp = "";
   let record: ScryptRecord | null = null;
   return () => {

@@ -7,6 +7,8 @@ import { EDITION_UNAVAILABLE_CODE } from "@polyth/contracts/edition";
 // after an earlier step already wrote.
 const REFUSED = new Set([
   "not-found", "conflict", "draft-conflict", "history-mismatch", "catalog-changed", "worktree-dirty",
+  // Git refused a branch change before touching anything (packages/git classifyGitRefusal).
+  "branch-in-use", "branch-exists", "branch-not-found", "invalid-branch-name", "session-busy",
   "payload-too-large", "unsupported", "capability-unsupported",
   "runtime-unavailable", "backend-not-ready", "discovery-unavailable", "memory-required",
   // The runtime fence refuses before any effect: a retry is safe.
@@ -17,6 +19,19 @@ const REFUSED = new Set([
   // workstation edition): refused before anything starts.
   EDITION_UNAVAILABLE_CODE,
 ]);
+
+/** A failure of an idempotent lifecycle pass (opening or warming a chat): not
+ *  a write the caller made, so nothing waits to be checked before trying
+ *  again and it never reports an unknown outcome, whatever it failed on. A
+ *  copy keeps a shared (cached) error's own tags intact for its other callers. */
+export function lifecyclePassError(error: unknown): unknown {
+  if (!error || typeof error !== "object") return error;
+  return Object.assign(
+    new Error(error instanceof Error ? error.message : String(error), { cause: error }),
+    error,
+    { mutationOutcome: "not-applicable", retryability: "safe" },
+  );
+}
 
 export function httpErrorDiagnostics(error: unknown, method: string, requestId: string): ErrorDiagnostics {
   const typed = readErrorDiagnostics(error);

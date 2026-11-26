@@ -46,5 +46,7 @@ export interface SearchProvider {
   id: WebSearchProviderId;
   name: string;
   requiresCredential: boolean;
+  /** Works without a credential and uses one when the Space has it configured. */
+  acceptsCredential?: boolean;
   search(request: ProviderSearchRequest, credential?: string): Promise<RawSearchResult[]>;
 }

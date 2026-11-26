@@ -6,7 +6,7 @@ import { BUG_REPORT_LIMITS } from "@polyth/contracts/bug-report";
 import { acceptedVersion } from "../src/index.ts";
 import { PASSWORD, REPO, report, screenshot, serve, uuid } from "./support.ts";
 
-const ISSUE_MARKER = /<!-- polyth-report fp=[0-9a-f]{16} id=[0-9a-f-]{36} -->/;
+const ISSUE_MARKER = /<!-- polyth-report fp=[0-9a-f]{16} id=[0-9a-f-]{36} group=default key=default -->/;
 
 test("the exact wire shape is required and a created report files issue plus attachments", async (t) => {
   const setup = await serve();
@@ -32,7 +32,7 @@ test("the exact wire shape is required and a created report files issue plus att
   const issue = setup.github.issue(100);
   assert.ok(issue);
   assert.equal(issue.title, "[1.2.3-nightly] It froze when I opened a session · darwin arm64");
-  assert.deepEqual(issue.labels, ["nightly-report", "v1.2.3-nightly", "platform:darwin"]);
+  assert.deepEqual(issue.labels, ["nightly-report", "v1.2.3-nightly", "platform:darwin", "group:default"]);
   assert.match(issue.body, ISSUE_MARKER);
   assert.match(issue.body, /Release: https:\/\/github\.com\/Polyth\/Polyth\/releases\/tag\/v1\.2\.3-nightly/);
   assert.match(issue.body, new RegExp(`Report data: \\[report\\.json\\]\\(https://github\\.com/${REPO}/blob/attachments/`));

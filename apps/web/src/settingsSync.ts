@@ -58,8 +58,12 @@ import {
 } from "./backgrounds.ts";
 import { getSidebarLayout, parseSidebarLayout, setSidebarLayout, subscribeSidebarLayout } from "./sidebarLayout.ts";
 import {
+  getPinnedPlacement,
   getSidebarPrefsSnapshot,
+  parsePinnedPlacement,
   replaceSidebarPrefs,
+  setPinnedPlacement,
+  subscribePinnedPlacement,
   subscribeSidebarPrefs,
 } from "./sidebarPrefs.ts";
 import { getRailPrefs, replaceRailPrefs, subscribeRailPrefs } from "./railPrefs.ts";
@@ -858,6 +862,15 @@ function registerCorePreferences(): void {
     read: getSidebarPrefsSnapshot,
     write: replaceSidebarPrefs,
     subscribe: subscribeSidebarPrefs,
+  });
+  // Its own id, not a `core.sidebar` field: a client that predates it would
+  // write its snapshot back without the choice.
+  register("core.sidebar-pinned", {
+    read: () => ({ placement: getPinnedPlacement() }),
+    write: (value) => setPinnedPlacement(parsePinnedPlacement(
+      value && typeof value === "object" ? (value as { placement?: unknown }).placement : undefined,
+    )),
+    subscribe: subscribePinnedPlacement,
   });
   register("core.rail", {
     read: () => ({ widths: getRailPrefs().widths }),

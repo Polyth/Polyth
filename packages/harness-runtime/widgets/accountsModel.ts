@@ -91,6 +91,22 @@ export function accessProblem(draft: AccessDraft, t: AccountsTranslate): string 
   return null;
 }
 
+/** The body of `PUT /api/harnesses/preferences` that shows or hides one
+ *  harness in the picker and leaves every other row as the roster has it. The
+ *  route drops a listed harness the body leaves out, so every row is sent. */
+export function pickerPreferences(
+  roster: readonly { identity: { id: string }; policy: { enabled: boolean; priority: number } }[],
+  harnessId: string,
+  enabled: boolean,
+): { preferences: Record<string, { enabled: boolean; priority: number }> } {
+  return {
+    preferences: Object.fromEntries(roster.map((row) => [row.identity.id, {
+      enabled: row.identity.id === harnessId ? enabled : row.policy.enabled,
+      priority: row.policy.priority,
+    }])),
+  };
+}
+
 export const accessBody = (draft: AccessDraft): HarnessAccountAccessUpdate => ({
   allowedUserIds: draft.people === "selected" && draft.userIds.length ? draft.userIds : null,
   allowedSpaceIds: draft.spaces === "selected" && draft.spaceIds.length ? draft.spaceIds : null,

@@ -652,6 +652,28 @@ test("opening a quiet idle chat starts no runtime; a warm, or work that needs on
   }
 });
 
+test("opening or warming an archived chat wires no runtime", async () => {
+  // 2026-11-26: opening an archived Claude chat wired it, met the runtime
+  // authority gone since the archive and answered 409 `epoch-pending`.
+  const { sessions, ensureWiredCount } = fixture(undefined, {
+    idleSessionRuntimes: { sweepMs: 0 },
+    retireSession: async () => {},
+  });
+  try {
+    const archived = await sessions.create({ projectId: "p" });
+    assert.deepEqual(await sessions.releaseRuntimeIfIdle!(archived.id), { released: true });
+    await sessions.archive(archived.id);
+    const before = ensureWiredCount();
+    await sessions.activate!(archived.id, { intent: "open" });
+    await sessions.activate!(archived.id, { intent: "warm" });
+    await sessions.activate!(archived.id);
+    assert.equal(ensureWiredCount(), before, "an archived chat is read, never wired");
+    assert.equal((await sessions.debug!(archived.id)).runtime.attached, false);
+  } finally {
+    sessions.dispose?.();
+  }
+});
+
 test("a runtime that ran no turn idles out on the short unused age; one that ran a turn keeps the ordinary floor", async () => {
   const retired: string[] = [];
   let releasable = false;

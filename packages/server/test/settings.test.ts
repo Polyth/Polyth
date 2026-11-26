@@ -6,7 +6,7 @@ import { mkdtempSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RouteRequest, SpaceContext } from "@polyth/contracts";
-import { behaviorRevision, createBehaviorSectionRegistry, createBehaviorService, favoriteSubagentRoutingSection, longRunningWorkBehaviorSection, privacyBehaviorSection } from "../src/behavior.ts";
+import { behaviorRevision, createBehaviorSectionRegistry, createBehaviorService, favoriteSubagentRoutingSection, longRunningWorkBehaviorSection, privacyBehaviorSection, shellToolsBehaviorSection } from "../src/behavior.ts";
 import { createClientSettings } from "../src/clientSettings.ts";
 import { createMcpConfigService, mcpEntriesFromBackendConfig } from "../src/mcp.ts";
 import { settingsRoutes } from "../src/routes/settings.ts";
@@ -148,8 +148,9 @@ test("behavior: the privacy default is always model-visible and neither editable
   assert.ok((await svc.effectiveText()).includes(privacyBehaviorSection));
   assert.ok((await svc.current())?.digest);
   const bare = createBehaviorService({ file: join(tmp(), "behavior.md") });
-  assert.equal(await bare.effectiveText(), `${privacyBehaviorSection}\n\n${longRunningWorkBehaviorSection}\n`);
+  assert.equal(await bare.effectiveText(), `${privacyBehaviorSection}\n\n${longRunningWorkBehaviorSection}\n\n${shellToolsBehaviorSection}\n`);
   assert.match(longRunningWorkBehaviorSection, /10 minutes[\s\S]*background[\s\S]*nohup/);
+  assert.match(shellToolsBehaviorSection, /polyth-tools list[\s\S]*polyth-tools call/);
 
   // It follows the person's own text and is not part of what they edit.
   const saved = await svc.put("Be brief.\n", behaviorRevision(""));

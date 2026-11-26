@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import type { SecureSafeEntryDto, SecureSafePartition } from "@polyth/contracts";
+import { DEFAULT_SECURE_SAFE_APPROVAL, type SecureSafeApproval, type SecureSafeEntryDto, type SecureSafePartition } from "@polyth/contracts";
 import { api } from "@polyth/session/web-api";
 import { confirmAlert } from "../../../apps/web/src/alerts.ts";
 import { EmptyState, ErrorState, FormField, PageHead, Row, Section } from "../../../apps/web/src/components/settings/parts.tsx";
@@ -9,6 +9,20 @@ import { vaultApi, type VaultAccess } from "./vaultApi.ts";
 
 // Mirrors the server's handle rule so the form can explain it before submit.
 const HANDLE_PATTERN = /^[A-Za-z][A-Za-z0-9_.-]*$/;
+
+// Approval level of agent runs that use the key, strictest wins across a
+// command. Absent means `full` (entries saved before levels existed).
+const APPROVAL_LEVELS = [
+  { value: "safe", label: "settings.securesafepage.approvalLevelSafe", detail: "settings.securesafepage.approvalLevelSafeDetail" },
+  { value: "auto", label: "settings.securesafepage.approvalLevelAuto", detail: "settings.securesafepage.approvalLevelAutoDetail" },
+  { value: "full", label: "settings.securesafepage.approvalLevelFull", detail: "settings.securesafepage.approvalLevelFullDetail" },
+  { value: "always", label: "settings.securesafepage.approvalLevelAlways", detail: "settings.securesafepage.approvalLevelAlwaysDetail" },
+] as const satisfies readonly { value: SecureSafeApproval; label: string; detail: string }[];
+
+const approvalOf = (entry: Pick<SecureSafeEntryDto, "approval">): SecureSafeApproval => entry.approval ?? DEFAULT_SECURE_SAFE_APPROVAL;
+
+const approvalLabel = (level: SecureSafeApproval): string =>
+  tr(APPROVAL_LEVELS.find((option) => option.value === level)!.label);
 
 interface Editing {
   entry: SecureSafeEntryDto;
@@ -24,6 +38,7 @@ export default function CredentialVaultPage() {
   const [handle, setHandle] = useState("");
   const [label, setLabel] = useState("");
   const [purpose, setPurpose] = useState("");
+  const [approval, setApproval] = useState<SecureSafeApproval>(DEFAULT_SECURE_SAFE_APPROVAL);
   const [value, setValue] = useState("");
   const [editing, setEditing] = useState<Editing | null>(null);
   const [busy, setBusy] = useState(false);
@@ -58,6 +73,7 @@ export default function CredentialVaultPage() {
     setHandle("");
     setLabel("");
     setPurpose("");
+    setApproval(DEFAULT_SECURE_SAFE_APPROVAL);
     setValue("");
   };
 
@@ -70,10 +86,12 @@ export default function CredentialVaultPage() {
     setError("");
     try {
       if (editing) {
+        const changedApproval = approval !== approvalOf(editing.entry);
         const patch = {
           handle: handle.trim(),
           label: label.trim(),
           purpose: purpose.trim(),
+          ...(changedApproval ? { approval } : {}),
           ...(writeOnlyValue ? { value: writeOnlyValue } : {}),
         };
         if (editing.partition === "personal") await vaultApi.updatePersonal(editing.entry.id, patch);
@@ -83,6 +101,7 @@ export default function CredentialVaultPage() {
           handle: handle.trim(),
           label: label.trim(),
           ...(purpose.trim() ? { purpose: purpose.trim() } : {}),
+          approval,
           value: writeOnlyValue,
         };
         if (target === "personal") await vaultApi.savePersonal(input);
@@ -109,6 +128,7 @@ export default function CredentialVaultPage() {
     setHandle(entry.handle);
     setLabel(entry.label);
     setPurpose(entry.purpose);
+    setApproval(approvalOf(entry));
     setValue("");
     setError("");
   };
@@ -141,6 +161,7 @@ export default function CredentialVaultPage() {
       label={entry.label}
       hint={<>
         <span className="credential-vault-handle mono">{entry.handle}</span>
+        <span className="credential-vault-approval">{approvalLabel(approvalOf(entry))}</span>
         {entry.purpose && <span className="credential-vault-purpose">{entry.purpose}</span>}
       </>}
     >
@@ -243,6 +264,22 @@ export default function CredentialVaultPage() {
               <TextInput {...field} value={purpose} placeholder={tr("settings.securesafepage.usedForProductionDeployments")} onChange={(event) => setPurpose(event.target.value)} />
             )}
           </FormField>
+          <div className="settings-field">
+            <span className="settings-field-label" aria-hidden="true">{tr("settings.securesafepage.approval")}</span>
+            <Select
+              label={tr("settings.securesafepage.approval")}
+              ariaLabel={tr("settings.securesafepage.approval")}
+              value={approval}
+              searchable={false}
+              options={APPROVAL_LEVELS.map((option) => ({
+                value: option.value,
+                label: tr(option.label),
+                detail: tr(option.detail),
+              }))}
+              onChange={(next) => setApproval(next === "safe" || next === "auto" || next === "always" ? next : "full")}
+            />
+            <span className="settings-field-hint">{tr("settings.securesafepage.approvalHint")}</span>
+          </div>
           <FormField
             label={tr("settings.securesafepage.credentialValue")}
             hint={editing ? tr("settings.securesafepage.leaveBlankToKeepCurrentValue") : tr("settings.securesafepage.theValueIsClearedAsSoonAs")}

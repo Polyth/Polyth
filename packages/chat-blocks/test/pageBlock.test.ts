@@ -258,3 +258,54 @@ test("full screen falls back to the Dialog when the API is unavailable", async (
     fs.restore();
   }
 });
+
+test("a page in a chat keeps nothing: storage messages never become a reply", async () => {
+  const { container, sent } = await mount("Mock\n<p>x</p>", true);
+  const frame = container.querySelector("iframe")! as unknown as { contentWindow: unknown; getAttribute(name: string): string };
+  assert.ok(frame.getAttribute("srcdoc").includes("persistent:false"), "the page is told its map does not last");
+  await act(async () => {
+    (dom as unknown as { dispatchEvent(event: unknown): boolean }).dispatchEvent(Object.assign(new dom.Event("message"), {
+      source: frame.contentWindow,
+      data: { channel: "polyth-page-v1", kind: "storage", op: "set", key: "k", value: "v" },
+    }));
+  });
+  assert.equal(container.querySelector(".chat-block-page-pending"), null);
+  assert.deepEqual(sent, []);
+});
+
+test("another package's action is a button on the page, run only by the click with what the page shows", async () => {
+  const runs: unknown[] = [];
+  const listeners = new Set<() => void>();
+  let actions: readonly unknown[] = [];
+  const set = async (next: readonly unknown[]) => { await act(async () => { actions = next; for (const listener of [...listeners]) listener(); }); };
+  const host = {
+    ui: { locale: { get: () => "en" } },
+    conversation: { send: async () => true, insert: () => {} },
+    markdown: {
+      registerFence: () => () => {},
+      fenceActions: (lang: string) => (lang === "page" ? actions : []),
+      subscribeFenceActions: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    },
+  } as never;
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const context = { blockKey: `pg${++seq}`, projectId: "p1", sessionId: "s1", conversation: true };
+  await act(async () => {
+    root.render(createElement(PageBlock, { lang: "page", text: "Budget\n<p>x</p>", info: "Budget", closed: true, source: null, context, host }));
+  });
+  const tools = () => [...container.querySelectorAll(".chat-block-tools button")].map((button) => button.getAttribute("aria-label"));
+  assert.deepEqual(tools(), ["Full screen", "Download .html", "View source"], "no actions: the page's own three buttons");
+
+  await set([{ id: "apps.save", languages: ["page"], label: () => "Save as app", icon: () => null, run: (input: unknown) => { runs.push(input); } }]);
+  assert.deepEqual(tools(), ["Save as app", "Full screen", "Download .html", "View source"]);
+  assert.deepEqual(runs, [], "registering an action runs nothing");
+  const button = container.querySelector('.chat-block-tools button[aria-label="Save as app"]') as unknown as HTMLElement;
+  await act(async () => { button.click(); });
+  assert.deepEqual(runs, [{ lang: "page", title: "Budget", content: "<p>x</p>", context }]);
+
+  await set([]);
+  assert.deepEqual(tools(), ["Full screen", "Download .html", "View source"], "a disabled package takes its button with it");
+  await act(async () => { root.unmount(); });
+  assert.equal(listeners.size, 0);
+});

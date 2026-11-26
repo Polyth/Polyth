@@ -9,6 +9,13 @@ export const Activity: IconNode = [
   ["path", { d: "M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2", key: "169zse" }],
 ];
 
+export const AppWindow: IconNode = [
+  ["rect", { x: "2", y: "4", width: "20", height: "16", rx: "2", key: "rect-0" }],
+  ["path", { d: "M10 4v4", key: "path-1" }],
+  ["path", { d: "M2 8h20", key: "path-2" }],
+  ["path", { d: "M6 4v4", key: "path-3" }],
+];
+
 export const Archive: IconNode = [
   ["rect", { width: "20", height: "5", x: "2", y: "3", rx: "1", key: "1wp1u1" }],
   ["path", { d: "M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8", key: "1s80jp" }],
@@ -577,6 +584,13 @@ export const History: IconNode = [
   ["path", { d: "M12 7v5l4 2", key: "1fdv2h" }],
 ];
 
+export const Hourglass: IconNode = [
+  ["path", { d: "M5 22h14", key: "path-0" }],
+  ["path", { d: "M5 2h14", key: "path-1" }],
+  ["path", { d: "M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22", key: "path-2" }],
+  ["path", { d: "M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2", key: "path-3" }],
+];
+
 export const House: IconNode = [
   ["path", { d: "M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8", key: "5wwlr5" }],
   ["path", { d: "M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z", key: "r6nss1" }],
@@ -836,9 +850,20 @@ export const Pencil: IconNode = [
   ["path", { d: "m15 5 4 4", key: "1mk7zo" }],
 ];
 
+export const PictureInPicture2: IconNode = [
+  ["path", { d: "M21 9V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10c0 1.1.9 2 2 2h4", key: "path-0" }],
+  ["rect", { width: "10", height: "7", x: "12", y: "13", rx: "2", key: "rect-1" }],
+];
+
 export const Pin: IconNode = [
   ["path", { d: "M12 17v5", key: "bb1du9" }],
   ["path", { d: "M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z", key: "1nkz8b" }],
+];
+
+export const Pipette: IconNode = [
+  ["path", { d: "m12 9-8.414 8.414A2 2 0 0 0 3 18.828v1.344a2 2 0 0 1-.586 1.414A2 2 0 0 1 3.828 21h1.344a2 2 0 0 0 1.414-.586L15 12", key: "path-0" }],
+  ["path", { d: "m18 9 .4.4a1 1 0 1 1-3 3l-3.8-3.8a1 1 0 1 1 3-3l.4.4 3.4-3.4a1 1 0 1 1 3 3z", key: "path-1" }],
+  ["path", { d: "m2 22 .414-.414", key: "path-2" }],
 ];
 
 export const Play: IconNode = [
@@ -1251,4 +1276,3 @@ export const ZoomOut: IconNode = [
   ["line", { x1: "21", x2: "16.65", y1: "21", y2: "16.65", key: "13gj7c" }],
   ["line", { x1: "8", x2: "14", y1: "11", y2: "11", key: "durymu" }],
 ];
-

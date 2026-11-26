@@ -265,7 +265,7 @@ test("composer active-run controls and mobile actions stay direct", async () => 
   assert.ok(composer.includes('tr("composer.sendNow")'), "active options expose immediate delivery");
   // The primary segment follows the configured follow-up mode (its glyph
   // shows queue vs send); immediate delivery is the explicit menu entry.
-  assert.ok(composer.includes("onClick={onPrimaryClick}"), "the primary segment uses the configured delivery");
+  assert.ok(/className=\{`send composer-delivery[\s\S]{0,120}?ref=\{sendPressRef\}/.test(composer) && composer.includes("onSend: () => sendRef.current?.()"), "the primary segment uses the configured delivery");
   assert.match(composer, /id: "send-now",[\s\S]*?onSelect: \(\) => send\(undefined, "interrupt"\)/, "Send now interrupts explicitly");
   assert.ok(composer.includes('id: "stop"'), "active options expose stop");
   assert.ok(composer.includes("composer-stop-primary"), "active sends become a primary stop control");
@@ -602,4 +602,30 @@ test("automatic sidebar rail: shell sources only publish/release it, never write
   assert.match(sidebar, /if \(collapsed && !layout\.collapsed\) \{\s*releaseAutomaticSidebarRail\(\);/);
   assert.match(sidebar, /collapsed = !compact && !projectsOnly && \(layout\.collapsed \|\| automaticRail\)/);
   assert.match(header, /sidebarLayout\.collapsed \|\| sidebarAutoRail \? 46/);
+});
+
+test("automatic sidebar rail: a split and a profile ask independently; a new asker clears a release", async () => {
+  const values = new Map<string, string>();
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: {
+      getItem(key: string) { return values.get(key) ?? null; },
+      setItem(key: string, value: string) { values.set(key, value); },
+      removeItem(key: string) { values.delete(key); },
+    },
+  });
+  const layoutModule = await import(`../src/sidebarLayout.ts?rail-sources=${Date.now()}`) as typeof import("../src/sidebarLayout.ts");
+  layoutModule.setAutomaticSidebarRailSource("split", true);
+  assert.equal(layoutModule.isAutomaticSidebarRailApplied(), true, "a split that needs room rests the sidebar");
+  assert.deepEqual(layoutModule.getAutomaticSidebarRail().sources, ["split"]);
+  layoutModule.releaseAutomaticSidebarRail();
+  assert.equal(layoutModule.isAutomaticSidebarRailApplied(), false, "expanding by hand wins");
+  layoutModule.setAutomaticSidebarRailSource("profile", true);
+  assert.equal(layoutModule.isAutomaticSidebarRailApplied(), true, "a newly asking source collapses again");
+  layoutModule.setAutomaticSidebarRailSource("split", false);
+  assert.equal(layoutModule.isAutomaticSidebarRailApplied(), true, "the profile still asks");
+  layoutModule.setAutomaticSidebarRailSource("profile", false);
+  assert.equal(layoutModule.getAutomaticSidebarRail().active, false);
+  assert.equal(layoutModule.getAutomaticSidebarRail().released, false);
+  assert.equal(values.size, 0, "never written");
 });

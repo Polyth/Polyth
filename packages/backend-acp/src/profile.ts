@@ -150,7 +150,11 @@ export function createAcpProvider(host: ServerPackageHost, profile: RegisteredAc
     };
     return {
         descriptor,
-        staticFeatures: profile.reportsUsage ? { ...ACP_STATIC_FEATURES, usage: true } : ACP_STATIC_FEATURES,
+        staticFeatures: {
+            ...ACP_STATIC_FEATURES,
+            ...(profile.reportsUsage ? { usage: true } : {}),
+            ...(profile.nativeTitles === false ? { title: "unsupported" as const } : {}),
+        },
         probe: probeProfile,
         ...(profile.source ? { source: profile.source } : {}),
         ...(profile.versionStore ? { versionStore: profile.versionStore } : {}),
@@ -161,7 +165,10 @@ export function createAcpProvider(host: ServerPackageHost, profile: RegisteredAc
         },
         // Stage HTTP entries, then require the actual initialize
         // advertisement before sending any native session request.
-        provisioner: createAcpProvisioner(profile.descriptor.id, true, profile.absoluteMcpCommands ? { absoluteMcpCommands: true } : {}),
+        provisioner: createAcpProvisioner(profile.descriptor.id, true, {
+            ...(profile.absoluteMcpCommands ? { absoluteMcpCommands: true } : {}),
+            ...(profile.agentToolsOverHttp ? { agentToolsOverHttp: true } : {}),
+        }),
         async discover(context) {
             const key = contextKey(context);
             const catalogEntry = catalogs.get(key) ?? {};
@@ -247,6 +254,9 @@ export function createAcpProvider(host: ServerPackageHost, profile: RegisteredAc
                         ...(profile.modelIdCodec ? { modelIdCodec: profile.modelIdCodec } : {}),
                         ...(profile.classifyPromptFailure ? { classifyPromptFailure: profile.classifyPromptFailure } : {}),
                         ...(profile.toolNameFromTitle ? { toolNameFromTitle: true } : {}),
+                        ...(profile.nativeToolName ? { nativeToolName: profile.nativeToolName } : {}),
+                        ...(profile.observeSessionUpdate ? { observeSessionUpdate: profile.observeSessionUpdate } : {}),
+                        ...(profile.nativeTitles === false ? { nativeTitles: false } : {}),
                         // The agent's durable record lives on this machine;
                         // a remote leg has none to read.
                         ...(profile.settleTurn && !launch ? { settleTurn: profile.settleTurn, reportsUsage: profile.reportsUsage === true } : {}),

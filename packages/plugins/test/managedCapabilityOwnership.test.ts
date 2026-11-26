@@ -15,6 +15,9 @@ import registerPlugins from "../src/serverEntry.ts";
 import type { PluginRegistry } from "../src/managedRegistry.ts";
 import { testSpaceStorage } from "./helpers.ts";
 
+// The package manager's own capabilities: a sentinel plus its packages skill and tool.
+const MANAGER_CAPABILITIES = ["plugins.keep", "plugins.packages", "plugins.skill.polyth-packages"];
+
 async function fixture(capabilityId = "home-assistant.agent-read", delegateAs?: string) {
   const dir = mkdtempSync(join(tmpdir(), "polyth-managed-owner-"));
   const source = join(dir, "trusted-plugins", "home-assistant");
@@ -107,10 +110,12 @@ test("managed activation owns capabilities by installed id through an owner-boun
         ["home-assistant.agent-read", "home-assistant"],
         ["home-assistant.skill", "home-assistant"],
         ["plugins.keep", "plugins"],
+        ["plugins.packages", "plugins"],
+        ["plugins.skill.polyth-packages", "plugins"],
       ]);
       assert.equal((await f.capabilities.executor("home-assistant.agent-read")!({}, {} as never)).output, "ready");
       await f.registry.disable("home-assistant", f.storage);
-      assert.deepEqual(f.capabilities.list().map(item => item.descriptor.id), ["plugins.keep"]);
+      assert.deepEqual(f.capabilities.list().map(item => item.descriptor.id), MANAGER_CAPABILITIES);
     }
     assert.deepEqual(f.delegations, ["home-assistant", "home-assistant"]);
   } finally { await f.dispose(); }
@@ -121,7 +126,7 @@ test("managed entries cannot register capabilities under the package manager's n
   try {
     await assert.rejects(() => f.registry.enable("home-assistant", f.storage), /namespaced by owner home-assistant/);
     assert.equal(f.registry.isEnabled("home-assistant", f.storage), false);
-    assert.deepEqual(f.capabilities.list().map(item => item.descriptor.id), ["plugins.keep"]);
+    assert.deepEqual(f.capabilities.list().map(item => item.descriptor.id), MANAGER_CAPABILITIES);
     assert.deepEqual(f.delegations, ["home-assistant"]);
   } finally { await f.dispose(); }
 });
@@ -131,6 +136,6 @@ test("managed activation rejects delegated services bound to another package", a
   try {
     await assert.rejects(() => f.registry.enable("home-assistant", f.storage), /services for "home-assistant" are bound to "plugins"/);
     assert.equal(f.registry.isEnabled("home-assistant", f.storage), false);
-    assert.deepEqual(f.capabilities.list().map(item => item.descriptor.id), ["plugins.keep"]);
+    assert.deepEqual(f.capabilities.list().map(item => item.descriptor.id), MANAGER_CAPABILITIES);
   } finally { await f.dispose(); }
 });

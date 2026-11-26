@@ -1,0 +1,37 @@
+{
+  "name": "@polyth/page-apps",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./i18n": "./src/i18n/index.ts",
+    "./i18n/*": "./src/i18n/*.ts",
+    "./widgets": "./widgets/index.tsx"
+  },
+  "polyth": {
+    "editions": ["workstation"],
+    "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Apps",
+      "description": "Keep a page an agent drew as an app: it opens from the Workspace or in a window of its own and remembers its data. Personal, outside git, on all your devices.",
+      "core": false,
+      "enabled": true,
+      "settingsGroup": "Customize",
+      "icon": "layout-grid",
+      "hasSettings": false,
+      "category": "workspace",
+      "projectAffinity": {}
+    }
+  },
+  "dependencies": {
+    "@polyth/chat-blocks": "0.1.0",
+    "@polyth/contracts": "1.2.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

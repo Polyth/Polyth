@@ -18,6 +18,8 @@ import { DesktopServerExit } from "./DesktopServerSwitcher.tsx";
 import { getLocaleSnapshot, subscribeLocale, tr, type TranslationKey } from "../i18n/index.ts";
 import { copyText } from "../utils.ts";
 import { MIN_PASSWORD_LENGTH } from "./settings/usersModel.ts";
+import { rememberBrowserLogin } from "../accounts.ts";
+import { LOGIN_PATTERN, loginFromName, normalizeLogin } from "../loginName.ts";
 import {
   Button,
   Checkbox,
@@ -35,9 +37,6 @@ import { MonitorIcon, PeopleIcon, SmartphoneIcon } from "./ui/icons.ts";
 import { POLYTH_MARK_SRC } from "../brandAsset.ts";
 import LanguagePicker from "./LanguagePicker.tsx";
 
-// The first account is always the owner; its login is fixed rather than asked
-// for, and the sign-in screen is prefilled with it.
-const OWNER_LOGIN = "owner";
 // Not asked during setup; the owner's organization starts as "Personal".
 const DEFAULT_ORGANIZATION = "Personal";
 const SETUP_CLAIM_COMMAND = "npm run setup:claim";
@@ -120,10 +119,10 @@ function problemFor(code: string, context: { desktop: boolean; expired: boolean 
 }
 
 /** Renders a sentence whose `{login}` placeholder becomes the owner login chip. */
-function withLogin(key: TranslationKey): ReactNode {
+function withLogin(key: TranslationKey, login: string): ReactNode {
   const marker = "\u0000";
   const [before = "", after = ""] = tr(key, { login: marker }).split(marker);
-  return <>{before}<code className="setup-owner-login">{OWNER_LOGIN}</code>{after}</>;
+  return <>{before}<code className="setup-owner-login">{login}</code>{after}</>;
 }
 
 const USAGE_OPTIONS: readonly { id: Usage; icon: typeof MonitorIcon; title: TranslationKey; detail: TranslationKey; foot: TranslationKey }[] = [
@@ -157,7 +156,16 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
   );
   const [claimInput, setClaimInput] = useState("");
   const [name, setName] = useState("");
+  // The login is proposed from the name; "Change" opens the field for anyone
+  // who wants a different one. Nobody has to invent it.
+  const [loginOverride, setLoginOverride] = useState<string | null>(null);
   const [password, setPassword] = useState("");
+  // Typed twice: the owner may not type this password again for weeks, and a
+  // slip nobody saw then reads as "Polyth forgot my password".
+  const [passwordRepeat, setPasswordRepeat] = useState("");
+  // The mismatch waits until the person leaves the repeat field or tries to
+  // continue: half-typed, every repeat is a mismatch.
+  const [repeatChecked, setRepeatChecked] = useState(false);
   const [recovery, setRecovery] = useState<RecoveryState | null>(null);
   const [recoverySaved, setRecoverySaved] = useState(false);
   const [codesRenewed, setCodesRenewed] = useState(false);
@@ -198,7 +206,10 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
   const claimMalformed = normalizedClaim.length > 0 && !claimReady
     && (normalizedClaim.length >= 64 || /[^a-f0-9]/.test(normalizedClaim));
   const passwordReady = [...password].length >= MIN_PASSWORD_LENGTH;
-  const accountReady = !!name.trim() && passwordReady;
+  const passwordMismatch = repeatChecked && passwordRepeat.length > 0 && passwordRepeat !== password;
+  const login = loginOverride === null ? loginFromName(name) : normalizeLogin(loginOverride);
+  const loginReady = LOGIN_PATTERN.test(login);
+  const accountReady = !!name.trim() && loginReady && passwordReady && passwordRepeat === password;
   const report = (cause: unknown): void => {
     setProblem(problemFor(errorCode(cause), { desktop: !!desktop, expired: claimExpired(claim.current) }));
   };
@@ -332,7 +343,7 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
         claimToken: claim.current.token,
         name: name.trim(),
         organizationName: DEFAULT_ORGANIZATION,
-        login: OWNER_LOGIN,
+        login,
         password,
         recoverySetId: recovery.setId,
         recoveryAcknowledged: true,
@@ -366,8 +377,9 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
       }
       return;
     }
-    try { localStorage.setItem("polyth.lastLogin", OWNER_LOGIN); } catch { /* private mode */ }
+    rememberBrowserLogin(login, name.trim());
     setPassword("");
+    setPasswordRepeat("");
     if (desktop) {
       setView("finishing");
       return;
@@ -420,7 +432,7 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
     const contents = [
       tr("setup.recovery.fileTitle"),
       "",
-      tr("setup.recovery.fileUsage", { login: OWNER_LOGIN }),
+      tr("setup.recovery.fileUsage", { login }),
       tr("setup.recovery.fileKeepSafe"),
       "",
       ...recovery.codes,
@@ -477,7 +489,7 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
       <div className="lock-card lock-card--setup setup-status">
         <SetupMark />
         <h1>{tr("setup.done.title")}</h1>
-        <p className="lock-hint">{withLogin("setup.done.body")}</p>
+        <p className="lock-hint">{withLogin("setup.done.body", login)}</p>
         <div className="lock-actions">
           <Button variant="primary" className="lock-submit" block onClick={() => location.reload()}>
             {tr("setup.done.open")}
@@ -615,6 +627,26 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
                     onChange={(event) => { setName(event.target.value); setProblem(null); }}
                   />
                 </div>
+                {loginOverride !== null && (
+                  <div className="lock-field">
+                    <label className="lock-field-label" htmlFor="setup-login">{tr("settings.users.login")}</label>
+                    <TextInput
+                      id="setup-login"
+                      value={loginOverride}
+                      autoComplete="username"
+                      autoCapitalize="off"
+                      spellCheck={false}
+                      maxLength={64}
+                      disabled={busy}
+                      invalid={!loginReady}
+                      aria-describedby="setup-login-hint"
+                      onChange={(event) => { setLoginOverride(event.target.value); setProblem(null); }}
+                    />
+                    <small id="setup-login-hint" className={loginReady ? "lock-field-hint" : "lock-field-error"}>
+                      {tr("setup.account.loginHint")}
+                    </small>
+                  </div>
+                )}
                 <div className="lock-field">
                   <label className="lock-field-label" htmlFor="setup-password">{tr("setup.account.passwordLabel")}</label>
                   <TextInput
@@ -633,13 +665,42 @@ export default function SetupScreen({ restartRequired = false }: { restartRequir
                     {tr("setup.account.passwordHint", { count: MIN_PASSWORD_LENGTH })}
                   </small>
                 </div>
+                <div className="lock-field">
+                  <label className="lock-field-label" htmlFor="setup-password-repeat">{tr("setup.account.repeatLabel")}</label>
+                  <TextInput
+                    id="setup-password-repeat"
+                    type="password"
+                    value={passwordRepeat}
+                    autoComplete="new-password"
+                    autoCapitalize="off"
+                    spellCheck={false}
+                    disabled={busy}
+                    invalid={passwordMismatch}
+                    aria-describedby={passwordMismatch ? "setup-password-repeat-error" : undefined}
+                    onChange={(event) => { setPasswordRepeat(event.target.value); setProblem(null); }}
+                    onBlur={() => setRepeatChecked(true)}
+                    // Continue stays disabled while the two differ, so Enter
+                    // would submit nothing: it checks the repeat instead.
+                    onKeyDown={(event) => { if (event.key === "Enter") setRepeatChecked(true); }}
+                  />
+                  {passwordMismatch && (
+                    <small id="setup-password-repeat-error" className="lock-field-error">{tr("lockscreen.passwordChange.mismatch")}</small>
+                  )}
+                </div>
               </div>
               <div className="lock-actions">
                 <Button variant="primary" className="lock-submit" type="submit" busy={busy} disabled={!accountReady} block>
                   {tr("common.continue")}
                 </Button>
               </div>
-              <p className="setup-signin">{withLogin("setup.account.signInAs")}</p>
+              {loginOverride === null && (
+                <p className="setup-signin">
+                  {withLogin("setup.account.signInAs", login)}{" "}
+                  <Button variant="ghost" size="sm" className="setup-login-change" type="button" disabled={busy} onClick={() => setLoginOverride(login)}>
+                    {tr("setup.account.changeLogin")}
+                  </Button>
+                </p>
+              )}
             </>
           )}
 

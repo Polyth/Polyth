@@ -160,6 +160,44 @@ test("integration events reach agents in their Space, and sources learn who list
   registration.dispose();
 });
 
+test("a targeted integration event wakes only its one agent wake, and previews show it only to that agent's owner", async (t) => {
+  const { agents, call, services, sent, settle } = await harness(t);
+  const sources = services.get(AGENT_EVENT_SOURCES.id) as AgentEventSources;
+  const registration = sources.register({ id: "github", label: "GitHub", types: [{ id: "issue-opened", label: "Issue" }], fields: [{ id: "repo", label: "Repo" }] });
+  const trigger = { kind: "integration", source: "github", on: ["issue-opened"], pace: instant, filters: [{ field: "repo", op: "equals", value: "o/r" }] } as const;
+  const mine = agents.create({
+    projectId: "prj", spaceId: "spc", ownerUserId: "u", prompt: "You triage issues.", kind: "every", everyMinutes: 60, manualOnly: true, title: "Mine",
+    eventTriggers: [{ id: "issues", ...trigger, filters: [...trigger.filters] }],
+  });
+  const theirs = agents.create({
+    projectId: "prj", spaceId: "spc", ownerUserId: "someone-else", prompt: "You also triage issues.", kind: "every", everyMinutes: 60, manualOnly: true, title: "Theirs",
+    eventTriggers: [{ id: "issues", ...trigger, filters: [...trigger.filters] }],
+  });
+  assert.deepEqual(sources.subscriptions!("github").map((sub) => [sub.agentId, sub.triggerId, sub.ownerUserId, sub.types, sub.filters]), [
+    [mine.id, "issues", "u", ["issue-opened"], [{ field: "repo", op: "equals", value: "o/r" }]],
+    [theirs.id, "issues", "someone-else", ["issue-opened"], [{ field: "repo", op: "equals", value: "o/r" }]],
+  ]);
+
+  // Read with the other person's account, for their agent alone.
+  sources.publish({ source: "github", type: "issue-opened", spaceId: "spc", projectId: "prj", title: "#7 Private bug", fields: { repo: "o/r", url: "https://github.com/o/r/issues/7" }, target: { agentId: theirs.id, triggerId: "issues" } });
+  await settle();
+  assert.equal(sent.length, 1, "only the targeted agent woke");
+  assert.match(sent[0]!.text, /github · issue-opened: #7 Private bug <https:\/\/github\.com\/o\/r\/issues\/7>/);
+  assert.equal(sent[0]!.sessionId.includes("prj"), true);
+
+  // The requester ("u") previews their own wake: the other owner's event is not theirs to see.
+  const preview = await call("/api/schedule/trigger-preview", "POST", { projectId: "prj", agentId: theirs.id, trigger: { id: "issues", ...trigger } });
+  assert.equal(preview.status, 200);
+  assert.doesNotMatch(JSON.stringify(preview.payload), /Private bug/);
+
+  sources.publish({ source: "github", type: "issue-opened", spaceId: "spc", projectId: "prj", title: "#8 Mine", fields: { repo: "o/r" }, target: { agentId: mine.id, triggerId: "issues" } });
+  await settle();
+  assert.equal(sent.length, 2);
+  const mineSeen = await call("/api/schedule/trigger-preview", "POST", { projectId: "prj", agentId: mine.id, trigger: { id: "issues", ...trigger } });
+  assert.match(JSON.stringify(mineSeen.payload), /#8 Mine/);
+  registration.dispose();
+});
+
 test("webhook bodies become a title, the sender's event name and compact text", () => {
   assert.deepEqual(webhookInput('{"subject":"Build failed","event":"ci"}', {}), {
     title: "Build failed", event: "ci", text: '{"subject":"Build failed","event":"ci"}',

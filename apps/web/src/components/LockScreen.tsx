@@ -4,7 +4,7 @@
 // account-bound session cookie.
 import { useEffect, useRef, useState } from "react";
 import { reloadBehindVeil } from "../launchVeil.ts";
-import { currentBrowserLogin, loginAccount, recoverAccount, type AccountLoginResult } from "../accounts.ts";
+import { currentBrowserLogin, knownBrowserLogins, loginAccount, recoverAccount, type AccountLoginResult, type KnownBrowserLogin } from "../accounts.ts";
 import { fetchAuthStatus } from "../authClient.ts";
 import { localDesktopBridge } from "../desktopBridge.ts";
 import { DesktopServerExit } from "./DesktopServerSwitcher.tsx";
@@ -86,13 +86,59 @@ export default function LockScreen({ onUnlocked, localOwner }: { onUnlocked: () 
   return <PasswordLock onUnlocked={onUnlocked} />;
 }
 
+/** First letter of what a tile shows, for its monogram. */
+const accountInitial = (account: KnownBrowserLogin): string =>
+  (Array.from((account.name ?? account.login).trim())[0] ?? "?").toLocaleUpperCase();
+
+/** Accounts this browser signed in to before, most recent first. The server
+ *  never lists logins to an anonymous caller, so a tile exists only where the
+ *  person already signed in; anywhere else the login field shows. */
+function AccountTiles({ accounts, selected, disabled, onSelect }: {
+  accounts: KnownBrowserLogin[];
+  selected: string;
+  disabled: boolean;
+  onSelect: (login: string) => void;
+}) {
+  return (
+    <div className="lock-accounts" role="radiogroup" aria-label={tr("lockscreen.accountsOnDevice")}>
+      {accounts.map((account) => (
+        <button
+          key={account.login}
+          type="button"
+          role="radio"
+          aria-checked={account.login === selected}
+          className="lock-account"
+          disabled={disabled}
+          onClick={() => onSelect(account.login)}
+        >
+          <span className="lock-account-mark" aria-hidden="true">{accountInitial(account)}</span>
+          <span className="lock-account-text">
+            <span className="lock-account-name">{account.name ?? account.login}</span>
+            {account.name && <span className="lock-account-login">{account.login}</span>}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function PasswordLock({ onUnlocked }: { onUnlocked: () => void }) {
   const [mode, setMode] = useState<LockMode>("password");
-  const [login, setLogin] = useState(currentBrowserLogin);
+  const [known] = useState(knownBrowserLogins);
+  // No saved account on this device: the login field, prefilled with the best guess.
+  const [otherAccount, setOtherAccount] = useState(known.length === 0);
+  const [login, setLogin] = useState(() => known[0]?.login ?? currentBrowserLogin());
   const [password, setPassword] = useState("");
   const [recoveryCode, setRecoveryCode] = useState("");
   const [providers, setProviders] = useState<LoginProvider[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setErrorText] = useState<string | null>(null);
+  // The same slot carries good news after a reset; it must not read as an
+  // error. Any other message (or clearing it) drops the notice look.
+  const [notice, setNotice] = useState(false);
+  const setError = (message: string | null): void => {
+    setErrorText(message);
+    setNotice(false);
+  };
   const [retryAt, setRetryAt] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [tick, setTick] = useState(0);
@@ -118,7 +164,7 @@ function PasswordLock({ onUnlocked }: { onUnlocked: () => void }) {
   const locked = secondsLeft > 0;
   const complete = mode === "password"
     ? !!login.trim() && !!password
-    : !!login.trim() && !!recoveryCode.trim() && !!password;
+    : !!recoveryCode.trim() && !!password;
   const passkeySupported = browserSupportsPasskeys();
 
   const unlock = (): void => {
@@ -178,6 +224,7 @@ function PasswordLock({ onUnlocked }: { onUnlocked: () => void }) {
     setBusy(true);
     setError(null);
     let passwordWasRecovered = false;
+    let recoveredLogin = "";
     try {
       if (mode === "password") {
         const result = await loginAccount(login, password);
@@ -185,12 +232,14 @@ function PasswordLock({ onUnlocked }: { onUnlocked: () => void }) {
           unlock();
           return;
         }
-        showFailure(result, tr("lockscreen.wrongPassword"));
+        // The server answers the same for an unknown login and a wrong
+        // password; saying "wrong password" sent people hunting the wrong field.
+        showFailure(result, tr("lockscreen.wrongCredentials"));
         setPassword("");
         return;
       }
 
-      const recovered = await recoverAccount(login, recoveryCode, password);
+      const recovered = await recoverAccount(recoveryCode, password, login);
       if (!recovered.ok) {
         showFailure(
           recovered,
@@ -203,29 +252,71 @@ function PasswordLock({ onUnlocked }: { onUnlocked: () => void }) {
         return;
       }
       passwordWasRecovered = true;
+      // The code told the server whose account this is; from here on the
+      // person signs in as that login, whatever was picked or typed before.
+      recoveredLogin = recovered.login ?? login.trim().toLowerCase();
+      setLogin(recoveredLogin);
 
       // Recovery intentionally revokes every old session. Mint the replacement
       // session through the normal login path rather than treating recovery as
       // authentication or reusing stale browser account authority.
-      const signedIn = await loginAccount(login, password);
+      const signedIn = recoveredLogin ? await loginAccount(recoveredLogin, password) : { ok: false };
       if (signedIn.ok) {
         unlock();
         return;
       }
-      setMode("password");
-      setRecoveryCode("");
-      showFailure(signedIn, tr("lockscreen.passwordReset"));
+      showReset(recoveredLogin);
     } catch {
       if (passwordWasRecovered) {
-        setMode("password");
-        setRecoveryCode("");
-        setError(tr("lockscreen.passwordReset"));
+        showReset(recoveredLogin);
       } else {
         setError(tr("lockscreen.couldnTReachTheServer"));
       }
     } finally {
       setBusy(false);
     }
+  };
+
+  /** After a reset the person may not know their login: say it. */
+  const showReset = (recoveredLogin: string): void => {
+    setMode("password");
+    setRecoveryCode("");
+    // The new password stays typed: Unlock is one press away.
+    setOtherAccount(!known.some((account) => account.login === recoveredLogin));
+    setError(recoveredLogin ? tr("lockscreen.passwordResetLogin", { login: recoveredLogin }) : tr("lockscreen.passwordReset"));
+    setNotice(true);
+  };
+
+  const pickAccount = (next: string): void => {
+    setLogin(next);
+    setError(null);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
+  const useAnotherAccount = (): void => {
+    setOtherAccount(true);
+    setLogin("");
+    setError(null);
+  };
+
+  const backToSavedAccounts = (): void => {
+    setOtherAccount(false);
+    setLogin(known[0]!.login);
+    setError(null);
+  };
+
+  const desktopRenew = localDesktopBridge()?.renewOwnerSession;
+  const continueOnThisComputer = async (): Promise<void> => {
+    if (!desktopRenew || busy) return;
+    setBusy(true);
+    setError(null);
+    const renewed = await desktopRenew().catch(() => false);
+    if (renewed) {
+      reloadBehindVeil();
+      return;
+    }
+    setError(tr("setup.error.generic"));
+    setBusy(false);
   };
 
   const switchMode = (): void => {
@@ -249,20 +340,32 @@ function PasswordLock({ onUnlocked }: { onUnlocked: () => void }) {
             : tr("lockscreen.recoveryHint")}
         </p>
         <div className="lock-fields">
-          <label className="lock-field" htmlFor="lock-login">
-            <span>{tr("settings.users.login")}</span>
-            <TextInput
-              id="lock-login"
-              value={login}
-              placeholder="owner"
-              autoComplete="username"
-              disabled={locked || busy}
-              onChange={(e) => {
-                setLogin(e.target.value);
-                setError(null);
-              }}
-            />
-          </label>
+          {mode === "password" && !otherAccount && (
+            <AccountTiles accounts={known} selected={login} disabled={locked || busy} onSelect={pickAccount} />
+          )}
+          {mode === "password" && otherAccount && (
+            <label className="lock-field" htmlFor="lock-login">
+              <span>{tr("settings.users.login")}</span>
+              <TextInput
+                id="lock-login"
+                value={login}
+                placeholder="owner"
+                autoComplete="username"
+                autoCapitalize="off"
+                spellCheck={false}
+                disabled={locked || busy}
+                onChange={(e) => {
+                  setLogin(e.target.value);
+                  setError(null);
+                }}
+              />
+            </label>
+          )}
+          {mode === "password" && known.length > 0 && (
+            <Button variant="ghost" size="sm" className="lock-account-switch" type="button" disabled={busy} onClick={otherAccount ? backToSavedAccounts : useAnotherAccount}>
+              {otherAccount ? tr("lockscreen.savedAccounts") : tr("lockscreen.otherAccount")}
+            </Button>
+          )}
           {mode === "recovery" && (
             <label className="lock-field" htmlFor="lock-recovery-code">
               <span>{tr("lockscreen.recoveryCode")}</span>
@@ -272,6 +375,8 @@ function PasswordLock({ onUnlocked }: { onUnlocked: () => void }) {
                 value={recoveryCode}
                 placeholder={tr("lockscreen.recoveryCode")}
                 autoComplete="one-time-code"
+                autoCapitalize="off"
+                spellCheck={false}
                 disabled={locked || busy}
                 onChange={(e) => {
                   setRecoveryCode(e.target.value);
@@ -298,7 +403,7 @@ function PasswordLock({ onUnlocked }: { onUnlocked: () => void }) {
           </label>
         </div>
         {error && (
-          <p className="lock-error" role="alert">
+          <p className={notice ? "lock-error lock-error--notice" : "lock-error"} role={notice ? "status" : "alert"}>
             {error}{locked && ` ${tr("lockscreen.tryAgainIn", { seconds: secondsLeft })}`}
           </p>
         )}
@@ -310,16 +415,23 @@ function PasswordLock({ onUnlocked }: { onUnlocked: () => void }) {
                 ? tr("lockscreen.lockedValueS", { secondsLeft })
                 : mode === "password" ? tr("lockscreen.unlock") : tr("lockscreen.recoverAndSignIn")}
           </Button>
-          {mode === "password" && (passkeySupported || providers.length > 0) && (
+          {mode === "password" && (passkeySupported || providers.length > 0 || desktopRenew) && (
             <div className="lock-alternatives">
               <span className="lock-divider" aria-hidden="true">{tr("lockscreen.or")}</span>
+              {desktopRenew && (
+                // Polyth Desktop showing its own server: the person signed in
+                // to this computer opens it as its owner, no password needed.
+                <Button variant="ghost" className="lock-submit lock-submit--secondary" type="button" disabled={busy} onClick={() => void continueOnThisComputer()} block>
+                  {tr("lockscreen.desktopContinue")}
+                </Button>
+              )}
               {passkeySupported && (
-                <Button className="lock-submit lock-submit--secondary" type="button" disabled={busy || locked} onClick={() => void signInPasskey()} block>
+                <Button variant="ghost" className="lock-submit lock-submit--secondary" type="button" disabled={busy || locked} onClick={() => void signInPasskey()} block>
                   {tr("lockscreen.signInWithPasskey")}
                 </Button>
               )}
               {providers.map((provider) => (
-                <Button key={provider.id} className="lock-submit lock-submit--secondary" type="button" disabled={busy || locked} onClick={() => void signInProvider(provider)} block>
+                <Button key={provider.id} variant="ghost" className="lock-submit lock-submit--secondary" type="button" disabled={busy || locked} onClick={() => void signInProvider(provider)} block>
                   {tr("lockscreen.signInWithProvider", { provider: providerLabel(provider) })}
                 </Button>
               ))}

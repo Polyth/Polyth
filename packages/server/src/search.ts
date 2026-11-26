@@ -2,6 +2,7 @@
 // Searches metadata only: project name/path, session title/branch/labels/
 // agent/status. Transcript bodies never leave the session search endpoint.
 import type { Project, SessionProjection, WorkspaceLabel, WorkspaceSearchItem } from "@polyth/contracts";
+import { matchesSearchTerms, searchTerms } from "@polyth/session/search-text";
 
 export interface MatchWorkspacesInput {
   projects: Project[];
@@ -13,15 +14,12 @@ export interface MatchWorkspacesInput {
   archived?: boolean;
 }
 
-/** Case/diacritic fold ("Café" → "cafe"). */
-export function foldText(s: string): string {
-  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-}
-
 const MAX_LIMIT = 100;
 
 export function matchWorkspaces(input: MatchWorkspacesInput): WorkspaceSearchItem[] {
-  const q = foldText(input.q.trim());
+  // The shared chat-search rule: every word somewhere among the fields.
+  const terms = searchTerms(input.q);
+  const q = terms.length > 0;
   const archivedOnly = input.archived === true;
   // Empty query is only meaningful behind is:archived (recent archived list).
   if (!q && !archivedOnly) return [];
@@ -32,7 +30,7 @@ export function matchWorkspaces(input: MatchWorkspacesInput): WorkspaceSearchIte
 
   for (const p of input.projects) {
     if (archivedOnly) break; // projects have no archived state; is:archived is session-only
-    if (q && !foldText(p.name).includes(q) && !foldText(p.path).includes(q)) continue;
+    if (q && !matchesSearchTerms([p.name, p.path], terms)) continue;
     out.push({
       kind: "project",
       id: p.id,
@@ -50,7 +48,7 @@ export function matchWorkspaces(input: MatchWorkspacesInput): WorkspaceSearchIte
     if (archivedOnly ? !isArchived : isArchived) continue;
     const labels = (s.labelIds ?? []).map((id) => labelName.get(id)).filter((n): n is string => !!n);
     const haystacks = [s.title, s.branch ?? "", s.agent ?? "", ...labels];
-    if (q && !haystacks.some((h) => h && foldText(h).includes(q))) continue;
+    if (q && !matchesSearchTerms(haystacks, terms)) continue;
     const subtitle = [project.name, s.branch, s.status].filter(Boolean).join(" · ");
     out.push({
       kind: "session",

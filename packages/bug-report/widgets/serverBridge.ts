@@ -1,11 +1,12 @@
-// Reports from a page opened in a browser: the page captures this tab itself
+// Feedback from a page opened in a browser: the page captures this tab itself
 // (desktop Chromium, after the browser's own "share this tab" prompt) or takes
-// a pasted or attached image, and its Polyth server adds the build facts,
-// keeps the tester password and sends (`/api/bug-report/*`, src/sender.ts).
+// a pasted or attached image, and its Polyth server adds the build facts and
+// sends (`/api/bug-report/*`, src/sender.ts).
 import { BUG_REPORT_LIMITS, type BugReportScreenshot } from "@polyth/contracts/bug-report";
 import type { ApiTransport } from "@polyth/web-sdk";
 import { browserClient, canCaptureThisTab, type BrowserClient } from "../src/browserClient.ts";
-import type { ReportBridge, ReportCapture, ReportDraft, ReportOutcome, ReportState } from "./bridge.ts";
+import type { FeedbackProfile } from "@polyth/contracts/feedback";
+import type { ForgetOutcome, ReportBridge, ReportCapture, ReportDraft, ReportOutcome, ReportState } from "./bridge.ts";
 
 type Shot = NonNullable<ReportCapture["screenshot"]>;
 
@@ -15,7 +16,9 @@ interface ServerState extends ReportState {
     channel: "nightly" | "stable";
     serverPlatform: "darwin" | "win32" | "linux";
     serverArch: string;
-    install: string;
+    installDaily: string;
+    installPerson: string;
+    savedProfile: FeedbackProfile | null;
   } | null;
 }
 
@@ -134,21 +137,27 @@ const newId = () => (typeof crypto !== "undefined" && typeof crypto.randomUUID =
 export function serverReportBridge(api: ApiTransport): ReportBridge {
   let held: { id: string; shot: Shot | null; client: BrowserClient } | null = null;
   const state = () => api.get<ServerState>("/api/bug-report/state");
+  const attach = async (captureId: string, file: Blob) => {
+    if (!held || held.id !== captureId) return null;
+    const shot = await encodeFile(file);
+    if (shot && held?.id === captureId) held.shot = shot;
+    return shot;
+  };
 
   return {
     async state() {
       const current = await state();
-      return { available: current.available === true, needsPassword: current.needsPassword === true, queued: Number(current.queued) || 0 };
+      return { available: current.available === true, queued: Number(current.queued) || 0 };
     },
 
     async capture() {
       // The tab first, inside the gesture, while it still shows what went wrong.
       const shot = await captureThisTab();
       const current = await state();
-      if (!current.available || !current.base) throw new Error("bug reports are off on this server");
+      if (!current.available || !current.base) throw new Error("feedback is off on this server");
       const client = browserClient(navigatorFacts());
       held = { id: newId(), shot, client };
-      const { install, ...server } = current.base;
+      const { installDaily, installPerson, savedProfile, ...server } = current.base;
       return {
         captureId: held.id,
         screenshot: shot,
@@ -164,20 +173,19 @@ export function serverReportBridge(api: ApiTransport): ReportBridge {
             serverArch: server.serverArch,
             locale: client.locale,
           },
-          install,
           settings: {},
+          installDaily,
+          installPerson,
+          savedProfile,
         },
-        needsPassword: current.needsPassword === true,
-        passwordStorage: "server",
       };
     },
 
-    async attach(captureId: string, file: Blob) {
-      if (!held || held.id !== captureId) return null;
-      const shot = await encodeFile(file);
-      if (shot) held.shot = shot;
-      return shot;
-    },
+    attach,
+
+    // Marks come burnt into a JPEG; it goes the same way as an attached image.
+    annotate: (captureId: string, jpeg: Uint8Array) =>
+      attach(captureId, new Blob([jpeg as Uint8Array<ArrayBuffer>], { type: "image/jpeg" })),
 
     async send(draft: ReportDraft): Promise<ReportOutcome> {
       const shot = held && draft.captureId === held.id ? held.shot : null;
@@ -187,8 +195,10 @@ export function serverReportBridge(api: ApiTransport): ReportBridge {
         client: held?.client ?? browserClient(navigatorFacts()),
         screenshot: shot ? wireScreenshot(shot) : null,
       });
-      if (outcome.result === "created" || outcome.result === "added" || outcome.result === "queued") held = null;
+      if (outcome.result === "received" || outcome.result === "queued") held = null;
       return outcome;
     },
+
+    forget: () => api.post<ForgetOutcome>("/api/bug-report/forget", {}),
   };
 }

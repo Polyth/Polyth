@@ -79,6 +79,13 @@ export function useShellLayout(): ShellLayoutState {
   return resolveShellLayout(ui, mode);
 }
 
+/** Whether the `bare` layout draws its line over the chat (and reserves room
+ *  for it): the chat title, unless two chats share the workspace and each
+ *  pane names its own; a Space to switch to; another computer's Polyth. */
+export function bareBarShown(state: { title: boolean; splitPresented: boolean; multiSpace: boolean; remote: boolean }): boolean {
+  return (state.title && !state.splitPresented) || state.multiSpace || state.remote;
+}
+
 /** The groups a column holds in the `bare` layout. */
 export function shellColumnGroups(
   state: ShellLayoutState,

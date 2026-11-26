@@ -47,6 +47,20 @@ test("recommend fills roles from favorites and use, keeps thresholds and custom 
   assert.deepEqual(recommendPolicy(saved, options), out);
 });
 
+test("recommend puts a model that failed often in the person's own history after every reliable one", () => {
+  const options = [
+    opt("a", "fast-flash", { favorite: true, favoriteIndex: 0, turns: 40, failed: 20 }),
+    opt("b", "fast-lite", { favorite: true, favoriteIndex: 1, turns: 40, failed: 2 }),
+    opt("a", "mid", { favorite: true, favoriteIndex: 2 }),
+    opt("c", "fast-new", { favorite: true, favoriteIndex: 3, turns: 4, failed: 4 }),
+  ];
+  const ids = (id: string) => recommendPolicy(DEFAULT_POLICY, options).roles.find((r) => r.id === id)!.models.map((c) => c.modelID);
+  // Too few turns to judge fast-new; fast-flash failed half of forty.
+  assert.deepEqual(ids("explore"), ["fast-lite", "fast-new", "mid"]);
+  assert.deepEqual(ids("implement"), ["mid", "fast-lite", "fast-new"]);
+  assert.equal(recommendPolicy(DEFAULT_POLICY, [options[0]!]).roles[0]!.models[0]!.modelID, "fast-flash", "still offered when nothing else exists");
+});
+
 test("model options order: favorites, used, rest; hides disconnected and harness-less rows", () => {
   const res = buildModelOptions({
     catalog: [

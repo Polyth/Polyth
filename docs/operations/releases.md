@@ -182,6 +182,56 @@ Required desktop signing secrets (used by both `Build apps → mac-dmg` and `Rel
 - macOS: `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`
 - Windows: `WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD`
 
+### Desktop package managers: Homebrew cask and winget
+
+Both package managers read the published release assets, so the asset names are a
+contract: `Polyth-<version>-mac-<arm64|x64>.dmg`, `Polyth-<version>-win-<arch>.exe`,
+`Polyth-<version>-linux-<arch>.AppImage`. The `mac-legacy-x64` macOS 12 build is a
+separate Intel-only product and belongs to neither of them.
+
+**Homebrew cask (macOS).** The cask (`Casks/p/polyth.rb`, token `polyth`) is submitted to
+`homebrew/homebrew-cask`, not kept in this repository; this repository's tap carries only
+the server formula. It installs the regular macOS DMG, `depends_on macos: ">= :ventura"`
+and `auto_updates true`, because the app updates itself through electron-updater. Once the
+cask is accepted, `livecheck` with `:github_latest` lets Homebrew's autobump bot move
+`version` and both `sha256`s when a release is published, so a stable release needs **no
+per-release work here**; before that, the cask is a pending pull request and a release
+changes nothing for it.
+Re-check the cask only when an asset name, the `v<version>` tag form, the macOS minimum,
+`productName`/`appId`, or the app's data paths (`~/Library/Application Support/Polyth`,
+`~/Library/Caches/com.polyth.desktop*`, `~/Library/Preferences/com.polyth.desktop.plist`)
+change. Linux desktop stays on the AppImage: a cask can describe a Linux `app_image`, but
+that needs a newer Homebrew than the tooling here runs.
+
+**winget (Windows).** winget has no autobump, so the release job writes the three manifests
+from the release it just published: `nightly.yml`'s `publish` job for a stable update-feed
+run, and `release.yml`'s `publish` job for a manual `master` release (skipped for a
+prerelease version; a draft release takes the build day as its `ReleaseDate`).
+
+```sh
+node scripts/ci/winget-manifest.mjs [--if-present] <version> <release-date> <assets dir> <out dir> [owner/repo]
+```
+
+It reads every `Polyth-<version>-win-<arch>.exe` in the feed (skipping `-workstation`,
+which is a different product), takes the sha256 of each installer's bytes and writes
+`Polyth.Polyth.yaml`, `Polyth.Polyth.installer.yaml` and
+`Polyth.Polyth.locale.en-US.yaml` for manifest schema 1.28.0: `InstallerType: nullsoft`,
+`Scope: user`, `UpgradeBehavior: install`, `Platform: Windows.Desktop`, `ReleaseDate` from
+the release's `publishedAt`. Only stable releases become manifests (a prerelease
+version is refused), a version that declares no Windows architecture fails instead of
+guessing one, and with `--if-present` a release without a regular Windows installer gets a
+`::warning::` and no manifests — a release is already public by then, so that can never
+block it. The three files are attached to the release as
+`polyth-winget-<version>.tar.gz`.
+
+Submitting stays a person's step: `wingetcreate submit` / `wingetcreate update` against
+`microsoft/winget-pkgs`, where `winget validate` and the `--new` notability checks run too
+(both are Windows-only). `Polyth.Polyth` is not in that repository yet, so until the first
+submission is accepted the archive on the release is the only copy of the manifests. The manifests deliberately carry no `ProductCode` and no
+`AppsAndFeaturesEntries`: the NSIS uninstall GUID can only be read on Windows, and a wrong
+value breaks `winget upgrade` detection. Invariants are covered by
+`scripts/test/wingetManifest.test.ts`.
+
 ### Android
 
 When the `android` input is enabled, Release builds a signed release APK and AAB.
@@ -302,21 +352,28 @@ own runners; no deploy key or second repository is involved.
   downgrade; every dispatched run, skipped or not, consumes a run number.
 - **Publication.** Only a full (`all`) run publishes: draft, upload, then public prerelease, never
   marked Latest. The three newest nightlies are kept; stable releases are never pruned.
-- **Bug reports.** Nightly desktop builds send ⌘⇧B / Ctrl+Shift+B reports (screenshot,
-  build, allowlisted settings, a note) with a shared tester password to the report relay,
-  which files them as issues in the team's private reports repository and drops data and
-  screenshots after 30 days ([desktop](../dev/desktop.md#bug-reports-nightly),
-  [relay](../../packages/report-relay/README.md)). The relay accepts a published nightly
-  or an older one, never a version newer than the newest nightly. The reports repository
+- **Feedback.** Every desktop build, stable or nightly, sends ⌘⇧B / Ctrl+Shift+B feedback
+  (a kind, a note, and only the parts the person switched on: technical details, a screenshot,
+  a profile, a contact) to the report relay's feedback intake, which keeps it in its own store
+  for the team's inbox for 90 days; a team member can file one as an issue in the private
+  reports repository from there ([desktop](../dev/desktop.md#feedback),
+  [relay](../../packages/report-relay/README.md#feedback-intake)). The feedback intake takes
+  any build (the sheet's `basics` name the version); only the legacy `POST /v1/report`
+  path used by older nightlies still checks the version and the tester password
+  (`sudo polyth-reports-password`) or a group token (`polyth-report-relay token --group <slug>`,
+  attributing reports through the `group:<slug>` label and the `stats/YYYY-MM-DD.md` file), and only that path needs the reports repository's token
+  to file issues. The reports repository
   is `Polyth/nightly-reports` (private). Setting the relay up needs a fine-grained token
   limited to that repository (Issues and Contents read/write, Metadata read), placed with
-  `sudo polyth-reports-token`, and the tester password, placed with
-  `sudo polyth-reports-password`; without both it answers every report `503`. Rotating the
-  password is running the helper again; every tester is asked at their next send. The
+  `sudo polyth-reports-token`; without it the legacy path answers `503` and "file as an
+  issue" in the inbox is unavailable. The
   **Nightly bug triage** agent template (Agents → Templates) works through new reports
   every night at 01:45, before the captain: it merges duplicates, ties each report to its
   source commit through the release marker and turns real bugs into public issues written
-  without the reporter's data, or into bounded fixes.
+  without the reporter's data, or into bounded fixes. Each fix runs in a visible chat of its
+  own in the project (`session.create` with `standalone: true`, then isolated), never in a
+  hidden subagent of the agent's session, and the person merges it from that chat's
+  isolation card.
 - **Stable.** A manual run with `channel` `stable` (set `ref` to `master`) builds
   the same way and publishes `vX.Y.N` (marked **Latest**, never pruned), sharing the
   build-number sequence, so every channel's build is
@@ -499,3 +556,7 @@ Exports:
 6. Choose Android Play and npm publication explicitly.
 7. Leave `draft=false` for a real release; this is the moment desktop auto-update becomes visible.
 8. Monitor the nightly run (the external builder's until the cutover) and TestFlight processing; promote with a manual `stable` run.
+9. A stable run attaches `polyth-winget-<version>.tar.gz` to the release
+   ([Desktop package managers](#desktop-package-managers-homebrew-cask-and-winget)); submit it
+   to `microsoft/winget-pkgs` with `wingetcreate update`. The desktop cask needs nothing here:
+   Homebrew's autobump follows the release once the cask is merged.

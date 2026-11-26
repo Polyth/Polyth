@@ -34,6 +34,9 @@ const AUDIENCE: Record<SessionVisibility, { label: () => string; hint: () => str
   space: { label: () => tr("sharing.space"), hint: () => tr("sharing.spaceHint") },
 };
 
+/** Audience order for telling a widening from a narrowing. */
+const WIDENS_AUDIENCE: readonly SessionVisibility[] = ["private", "restricted", "space"];
+
 const initials = (name: string): string =>
   name.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("") || "?";
 
@@ -94,6 +97,9 @@ export default function ShareSessionDialog() {
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
+  // Opening a chat whose agent already read personal notes is the person's own
+  // choice; it is asked once per widening, never merely refused (Spaces §14.6).
+  const [personalConfirmed, setPersonalConfirmed] = useState(false);
   const audienceId = useId();
 
   // Another chat (the parent's sharing) starts clean; a reload keeps showing
@@ -101,6 +107,7 @@ export default function ShareSessionDialog() {
   useEffect(() => {
     setDto(null);
     setNotice(null);
+    setPersonalConfirmed(false);
   }, [sessionId]);
   useEffect(() => {
     if (!sessionId) return;
@@ -120,8 +127,8 @@ export default function ShareSessionDialog() {
     ...(dto?.grants ?? []).map((grant) => [grant.userId, grant.name] as const),
   ]), [dto]);
 
-  // Once the agent has read personal notes in a chat, or the chat lives in Only
-  // me, it stays with its owner; the server refuses anything wider (§14.6).
+  // A chat in Only me stays with its owner (§14.6). A chat whose agent read
+  // personal notes can still be opened: it asks the person to confirm.
   const staysPrivate = useStore((state) => {
     const row = state.sessions.find((candidate) => candidate.id === sessionId);
     if (!row) return null;
@@ -142,8 +149,20 @@ export default function ShareSessionDialog() {
       </Button>
     )
     : null;
-  const editable = !!dto && dto.canShare && !dto.inherited && staysPrivate === null;
+  const editable = !!dto && dto.canShare && !dto.inherited && staysPrivate !== "room";
   const dirty = !!dto && (visibility !== dto.visibility || (visibility !== "private" && !sameGrants(grants, dto.grants)));
+  // The agent saw this person's notes while the chat was theirs alone; every
+  // widening now shows more people what it saw, so that has to be said out
+  // loud first. Narrowing never asks (Spaces §14.6).
+  const personal = staysPrivate === "personal";
+  // Exactly the server's `widens`: a wider audience, a person added, or a
+  // level raised. A lower level, a removed person or `private` is narrowing.
+  const widening = !!dto && (WIDENS_AUDIENCE.indexOf(visibility) > WIDENS_AUDIENCE.indexOf(dto.visibility)
+    || (visibility !== "private" && grants.some((grant) => {
+      const before = dto.grants.find((existing) => existing.userId === grant.userId);
+      return before === undefined || (grant.access !== before.access && sessionAccessAtLeast(grant.access, before.access));
+    })));
+  const needsConfirmation = editable && personal && widening;
   const levels = SESSION_ACCESS_LEVELS.filter((level) => dto?.maxGrant && sessionAccessAtLeast(dto.maxGrant, level));
   const granted = new Set(grants.map((grant) => grant.userId));
   const addable = (dto?.people ?? []).filter((person) => !granted.has(person.userId));
@@ -158,6 +177,7 @@ export default function ShareSessionDialog() {
         visibility,
         grants: visibility === "private" ? [] : grants.map(({ userId, access }) => ({ userId, access })),
         expectedRevision: dto.revision,
+        ...(needsConfirmation && personalConfirmed ? { acknowledgePersonalContext: true } : {}),
       });
       announce(tr("sharing.saved"));
       close();
@@ -186,7 +206,13 @@ export default function ShareSessionDialog() {
     <>
       {continueAway}
       <Button size="sm" onClick={close}>{tr("common.cancel")}</Button>
-      <Button size="sm" variant="primary" disabled={!dirty} busy={saving} onClick={() => void save()}>{tr("common.save")}</Button>
+      <Button
+        size="sm"
+        variant="primary"
+        disabled={!dirty || (needsConfirmation && !personalConfirmed)}
+        busy={saving}
+        onClick={() => void save()}
+      >{tr("common.save")}</Button>
     </>
   ) : <>{continueAway}<Button size="sm" onClick={close}>{tr("common.close")}</Button></>;
 
@@ -313,12 +339,32 @@ export default function ShareSessionDialog() {
         {dto.personalMcpDetachedOnShare && (editable ? visibility : dto.visibility) !== "private" && (
           <p className="session-sharing-note" data-sharing-mcp-detached="true">{tr("sharing.personalMcpDetached")}</p>
         )}
-        {staysPrivate && (
-          <p className="session-sharing-note" data-sharing-stays-private={staysPrivate}>
-            {tr(staysPrivate === "room" ? "sharing.privateRoomBlocked" : "sharing.personalContextBlocked")}
-          </p>
+        {personal && editable && (needsConfirmation || dto.visibility === "private") && (needsConfirmation ? (
+          // A button with checkbox semantics, not a native input: a sheet or
+          // dialog may swallow a label's default activation, and this is the
+          // one control that must always answer a tap.
+          <button
+            type="button"
+            role="checkbox"
+            aria-checked={personalConfirmed}
+            className="ui-checkbox session-sharing-confirm"
+            onClick={() => setPersonalConfirmed((value) => !value)}
+          >
+            <span className="ui-checkbox-box" aria-hidden="true">
+              {personalConfirmed && <Icon icon={CheckIcon} size="sm" />}
+            </span>
+            <span className="ui-checkbox-text">
+              <span className="ui-checkbox-label">{tr("sharing.personalContextConfirm")}</span>
+              <span className="ui-checkbox-desc">{tr("sharing.personalContextWarning")}</span>
+            </span>
+          </button>
+        ) : (
+          <p className="session-sharing-note">{tr("sharing.personalContextWarning")}</p>
+        ))}
+        {staysPrivate === "room" && (
+          <p className="session-sharing-note" data-sharing-stays-private="room">{tr("sharing.privateRoomBlocked")}</p>
         )}
-        {!editable && !staysPrivate && <p className="session-sharing-note">{tr("sharing.readOnly")}</p>}
+        {!editable && staysPrivate !== "room" && <p className="session-sharing-note">{tr("sharing.readOnly")}</p>}
       </>
     );
   };

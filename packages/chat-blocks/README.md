@@ -178,8 +178,8 @@ the host supplies it (an older host without it still falls back to the
 API path as data files (same path rules, 512 KB cap); inline pages are capped at
 256 KB and show a "too large" notice beyond it.
 
-- `src/page.ts` — pure, browser-safe: fence parsing, `buildPageDocument`, the
-  message protocol, download name. The document is `<!doctype html>`, charset,
+- `src/page.ts` (exported as `@polyth/chat-blocks/page`) — pure, browser-safe:
+  fence parsing, `buildPageDocument`, the message protocol, download name. The document is `<!doctype html>`, charset,
   a Content-Security-Policy meta (no network, no frames, no forms, inline
   script/style and `data:`/`blob:` media only) and a no-referrer meta, then the
   host's theme style and bridge script, then the agent's content untouched
@@ -209,6 +209,31 @@ API path as data files (same path rules, 512 KB cap); inline pages are capped at
   sends: the frame shows `Send: “…”` with Send and Dismiss, and only the click
   sends through `host.conversation.send` (a draft insert when there is no session
   or the send is refused).
+- `window.polyth.storage` is a string map shaped like `localStorage`
+  (`getItem`, `setItem`, `removeItem`, `clear`, `keys()`, `persistent`), because
+  a sandboxed frame has no storage of its own. The bridge is seeded with a map
+  at build time (`buildPageDocument(content, theme, { storage, persistent })`;
+  the seed travels as JSON inside the bridge script with `<` and the line
+  separators escaped, so it can neither end the script nor become markup) and
+  posts every change as `{kind:"storage", op:"set"|"remove"|"clear"}`. Limits
+  live in `src/page.ts` (`PAGE_STORAGE_MAX_KEYS` 200, `PAGE_STORAGE_MAX_KEY`
+  128 characters, `PAGE_STORAGE_MAX_VALUE_BYTES` 64 KB, `PAGE_STORAGE_MAX_BYTES`
+  256 KB): the bridge throws on a key or value over them, `parsePageMessage`
+  drops such a message, and `cleanPageStorage` filters a stored map before it
+  seeds a page. **The chat block keeps nothing**: it ignores storage messages,
+  so the map lasts one load and `persistent` is false. A holder that persists
+  it (the Apps package) enforces the same limits again on its server.
+- Other packages add buttons to the page's tools through the host's fence
+  action seam (`host.markdown.registerFenceAction`, `docs/dev/ui.md` §4.11):
+  `PageBlock` draws `host.markdown.fenceActions("page")` before its own three
+  buttons and runs one only from the click, with the block's title, the HTML it
+  shows and the `from=` path. This package never names the package behind a
+  button.
+- `widgets/PageSurface.tsx` (exported as `@polyth/chat-blocks/page-surface`)
+  shows a page full size outside a chat with the same frame, policy and
+  navigation guard (`widgets/pageFrame.tsx` holds the parts both share). Its
+  holder passes the storage map a load starts with and hears every change; it
+  ignores `height` and `send`.
 - Only an agent's answer in the conversation runs at once
   (`MarkdownFenceContext.conversation`). The same fence anywhere else — a
   project Markdown file, an issue or pull request body, a user prompt — is

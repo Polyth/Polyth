@@ -241,10 +241,27 @@ interface OnDeviceRecognitionStatics {
   install?(options: { langs: string[]; processLocally: boolean }): Promise<boolean>;
 }
 
+/** True inside an Android System WebView (the Polyth Android app's shell).
+ *  Android WebView exposes the `SpeechRecognition` constructor and its
+ *  on-device statics, but the browser process registers no binder for
+ *  `media.mojom.OnDeviceSpeechRecognition`: calling `available()`/`install()`
+ *  there is a bad IPC, Chromium kills the renderer and Android then kills the
+ *  host app. The user agent is the only signal before touching the API: the
+ *  `; wv)` token, or Android's legacy `Version/4.0 Chrome/` WebView form.
+ *  Plain Chrome for Android has neither. */
+export function embeddedWebView(w: unknown): boolean {
+  const ua = ((w ?? {}) as { navigator?: { userAgent?: unknown } }).navigator?.userAgent;
+  if (typeof ua !== "string" || !/\bAndroid\b/.test(ua)) return false;
+  return /;\s*wv\)/.test(ua) || /\bVersion\/\d+(?:\.\d+)*\s+Chrome\//.test(ua);
+}
+
 /** On-device availability of browser speech recognition for `lang`
  *  (`SpeechRecognition.available`, on-device Web Speech). Browsers without the API, or
- *  that throw for the tag, report "unavailable" — never a guess. */
+ *  that throw for the tag, report "unavailable" — never a guess. An embedded
+ *  Android WebView is "unavailable" without calling the API at all (see
+ *  `embeddedWebView`). */
 export async function onDeviceSpeechAvailability(w: unknown, lang: string): Promise<OnDeviceSpeechAvailability> {
+  if (embeddedWebView(w)) return "unavailable";
   const ctor = recognitionCtor(w) as unknown as OnDeviceRecognitionStatics | null;
   if (!ctor || typeof ctor.available !== "function" || !lang || lang === "auto") return "unavailable";
   try {
@@ -255,8 +272,10 @@ export async function onDeviceSpeechAvailability(w: unknown, lang: string): Prom
   }
 }
 
-/** Download the on-device recognizer for `lang`. Must run from a user gesture. */
+/** Download the on-device recognizer for `lang`. Must run from a user gesture.
+ *  Never called inside an embedded Android WebView (see `embeddedWebView`). */
 export async function installOnDeviceSpeech(w: unknown, lang: string): Promise<boolean> {
+  if (embeddedWebView(w)) return false;
   const ctor = recognitionCtor(w) as unknown as OnDeviceRecognitionStatics | null;
   if (!ctor || typeof ctor.install !== "function" || !lang || lang === "auto") return false;
   try {

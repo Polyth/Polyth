@@ -37,6 +37,10 @@ function harness(options: {
   describe?: boolean;
   /** The small-model narrator's answers, in order; absent: no narrator. */
   narrate?: Array<NarrateOutcome | "hang">;
+  /** A clock the test moves; absent: the real one. */
+  now?: () => number;
+  /** The conversation-long capture is available (streaming routes use it). */
+  shared?: boolean | "denied" | "broken";
 } = {}) {
   const dictated: Array<{ runId: string; text: string; final: boolean; discard?: boolean }> = [];
   const submits: Array<{ delivery?: string } | undefined> = [];
@@ -89,7 +93,14 @@ function harness(options: {
     dropAsides: 0, ended: 0, cancelled: 0, speaking: false, events: null as SpeechOutputEvents | null,
   };
   const monitors: Array<{ events: MicMonitorEvents; stopped: boolean }> = [];
-  const prefs: VoiceModePrefs = { ...defaultVoiceModePrefs(), ...options.prefs };
+  // Narration and the acknowledgement are their own tests' subject: everything
+  // else runs with both off, so the speaker holds only what the test names.
+  const prefs: VoiceModePrefs = { ...defaultVoiceModePrefs(), actions: false, acknowledge: false, ...options.prefs };
+  const stored: { latency: unknown[] } = { latency: [] };
+  const live: Array<{ sessionId: string | null; live: boolean }> = [];
+  type Capture = { stopped: boolean; dead: boolean; prerolls: number[]; watchers: Array<{ events: MicMonitorEvents; stopped: boolean }>; floor: number | undefined };
+  const captures: Capture[] = [];
+  const startOptions: Array<{ capture: boolean; noiseFloor: number | undefined }> = [];
 
   const deps: VoiceModeDeps = {
     host,
@@ -99,9 +110,10 @@ function harness(options: {
     commandPhrases: () => defaultCommandPhrases(["en", "uk"]),
     outputSettings: () => ({ engine: "browser", lang: "en-US", rate: 1, pitch: 1, volume: 1 }),
     resolveRoutes: async () => ({ routes: options.routes ?? [{ kind: "browser", lang: "en-US", onDevice: false, punctuation: true }] }),
-    startListener: async (route, events) => {
+    startListener: async (route, events, listenerOptions) => {
       const error = options.startError?.();
       if (error) throw error;
+      startOptions.push({ capture: !!listenerOptions.capture, noiseFloor: listenerOptions.noiseFloor });
       const entry = { events, final: "", stopped: false, cancelled: false, route };
       listeners.push(entry);
       const listener: Listener = {
@@ -161,6 +173,28 @@ function harness(options: {
       monitors.push(entry);
       return { stop: () => { entry.stopped = true; } };
     },
+    ...(options.shared ? {
+      startSharedCapture: async () => {
+        if (options.shared === "denied") throw Object.assign(new Error("denied"), { code: "mic_denied" });
+        if (options.shared === "broken") throw new Error("no audio worklet");
+        const entry: Capture = { stopped: false, dead: false, prerolls: [], watchers: [], floor: 0.004 };
+        captures.push(entry);
+        return {
+          get dead() { return entry.dead; },
+          factory(prerollMs = 0) {
+            entry.prerolls.push(prerollMs);
+            return async () => ({ sampleRate: 16_000, channels: 1 as const, pause: async () => {}, resume: async () => {}, stop() {} });
+          },
+          noiseFloor: () => entry.floor,
+          watch(events: MicMonitorEvents) {
+            const watcher = { events, stopped: false };
+            entry.watchers.push(watcher);
+            return { stop: () => { watcher.stopped = true; } };
+          },
+          stop() { entry.stopped = true; entry.dead = true; },
+        };
+      },
+    } : {}),
     bargeIn: () => options.bargeIn ?? true,
     earcon: (kind) => { earcons.push(kind); },
     claimMicrophone: (owner) => { claims.push(owner); },
@@ -180,24 +214,27 @@ function harness(options: {
       visibilityListener = listener;
       return () => { visibilityListener = null; };
     },
-    now: () => Date.now(),
+    latencyStore: { load: () => [], save: (list) => { stored.latency = [...list]; } },
+    announceLive: (state) => { live.push(state); },
+    liveRenewMs: 40,
+    now: options.now ?? (() => Date.now()),
   };
   const controller = createVoiceModeController(deps);
   let seq = 0;
   const emit = (type: string, data: Record<string, unknown>, sessionId = "s1") =>
     eventListener?.({ sessionId, seq: ++seq, type, data });
   /** Say something and pause: the recognizer ends the turn. */
-  const say = async (text: string) => {
+  const say = async (text: string, waitedMs?: number) => {
     const turn = listeners.at(-1)!;
     turn.events.onSpeechStart();
     turn.events.onPartial(text);
     turn.final = text;
-    turn.events.onEndOfTurn();
+    turn.events.onEndOfTurn(waitedMs);
     await flush();
   };
   return {
     controller, narrations, dictated, submits, sent, stopped, sentNow, earcons, claims, speakerClaims, listeners, output, monitors,
-    emit, say,
+    emit, say, stored, live, captures, startOptions,
     /** The playing chunk ends: the next one plays, or the speaker goes idle. */
     finishChunk: () => {
       const next = output.queue.shift();
@@ -823,4 +860,286 @@ test("a refusal on the first route still reads as a blocked microphone", async (
   await flush();
   assert.equal(h.controller.getSnapshot().error, strings.micDenied);
   h.controller.stop();
+});
+
+test("a started turn that stays silent is acknowledged once — never before it has started", async () => {
+  const h = harness({ prefs: { acknowledge: true } });
+  h.controller.start();
+  await flush();
+  await h.say("Fix the failing test.");
+  h.emit("user/message", { text: "Fix the failing test." });
+  await wait(360);
+  assert.equal(h.output.items.length, 0, "an accepted message is not yet a turn that runs: nothing is promised");
+  h.emit("turn/started", { turnId: "t1" });
+  assert.equal(h.output.items.length, 0, "a reply that begins at once would make it redundant");
+  await wait(360);
+  assert.deepEqual(h.output.items, [{ text: "Got it.", kind: "aside", expiresAt: h.output.items[0]!.expiresAt }]);
+  assert.equal(h.controller.getSnapshot().agent, "working");
+  h.emit("assistant/chunk", { partId: "p1", text: "The assertion used the old name. " });
+  assert.deepEqual(h.output.items.map((item) => item.kind), ["aside", "reply"], "the reply follows; it is not acknowledged again");
+  h.emit("turn/stopped", { reason: "completed" });
+
+  h.output.events?.onDone?.();
+  await flush();
+  await h.say("And run the tests.");
+  h.emit("user/message", { text: "And run the tests." });
+  h.emit("turn/started", { turnId: "t2" });
+  await wait(360);
+  assert.equal(h.output.items.at(-1)!.text, "On it.", "the next turn uses the next phrase");
+  h.controller.stop();
+});
+
+test("no acknowledgement when the reply begins first, for a queued message, in silent mode or when switched off", async () => {
+  const fast = harness({ prefs: { acknowledge: true } });
+  fast.controller.start();
+  await flush();
+  await fast.say("What time is it?");
+  fast.emit("user/message", { text: "What time is it?" });
+  fast.emit("turn/started", { turnId: "t1" });
+  fast.emit("assistant/chunk", { partId: "p1", text: "It is noon. " });
+  await wait(360);
+  assert.deepEqual(fast.output.items.map((item) => item.kind), ["reply"]);
+  fast.controller.stop();
+
+  const queued = harness({ prefs: { acknowledge: true }, status: "working" });
+  queued.controller.start();
+  await flush();
+  await queued.say("Then update the docs.");
+  assert.equal(queued.sent[0]!.delivery, "queue");
+  queued.emit("turn/started", { turnId: "t2" });
+  await wait(360);
+  assert.deepEqual(queued.output.items, [], "its turn starts whenever the queue drains: no remark out of nowhere");
+  queued.controller.stop();
+
+  for (const prefs of [{ acknowledge: true, feedback: "silent" as const }, { acknowledge: false }]) {
+    const h = harness({ prefs });
+    h.controller.start();
+    await flush();
+    await h.say("Fix it.");
+    h.emit("user/message", { text: "Fix it." });
+    h.emit("turn/started", { turnId: "t1" });
+    await wait(360);
+    assert.deepEqual(h.output.items, []);
+    h.controller.stop();
+  }
+});
+
+test("a turn that ended before the acknowledgement was due is not acknowledged", async () => {
+  const h = harness({ prefs: { acknowledge: true } });
+  h.controller.start();
+  await flush();
+  await h.say("Never mind.");
+  h.emit("user/message", { text: "Never mind." });
+  h.emit("turn/started", { turnId: "t1" });
+  h.emit("turn/stopped", { reason: "aborted" });
+  await wait(360);
+  assert.deepEqual(h.output.items, []);
+  h.controller.stop();
+});
+
+test("each spoken turn is measured from the end of speech to the first reply sound", async () => {
+  let now = 50_000;
+  const h = harness({ now: () => now, prefs: { acknowledge: false } });
+  let changes = 0;
+  h.controller.subscribeLatency(() => { changes++; });
+  h.controller.start();
+  await flush();
+  await h.say("Fix the failing test.", 550);
+  now += 80;
+  h.emit("user/message", { text: "Fix the failing test." });
+  now += 220;
+  h.emit("turn/started", { turnId: "t1" });
+  now += 1_400;
+  h.emit("assistant/chunk", { partId: "p1", text: "Found it. " });
+  assert.deepEqual(h.controller.getLatency(), [{
+    at: 51_700, pause: 550, recognition: 0, sending: 300, agent: 1_400, voice: 0, total: 2_250,
+  }]);
+  assert.equal(changes, 1);
+  assert.deepEqual(h.stored.latency, h.controller.getLatency(), "kept on the device: times only");
+  h.emit("assistant/chunk", { partId: "p1", text: "The name was wrong. " });
+  assert.equal(h.controller.getLatency().length, 1, "later sentences of the same reply are not new measurements");
+  h.controller.stop();
+});
+
+test("queued turns, commands and refused sends are not measured", async () => {
+  let now = 1_000;
+  const busy = harness({ now: () => now, status: "working" });
+  busy.controller.start();
+  await flush();
+  await busy.say("Then update the docs.");
+  busy.emit("turn/started", { turnId: "t2" });
+  busy.emit("assistant/chunk", { partId: "p1", text: "Done. " });
+  assert.deepEqual(busy.controller.getLatency(), [], "a queued message waited behind another turn");
+  busy.controller.stop();
+
+  const refused = harness({ now: () => now, submit: false });
+  refused.controller.start();
+  await flush();
+  await refused.say("Fix it.");
+  refused.emit("turn/started", { turnId: "t1" });
+  refused.emit("assistant/chunk", { partId: "p1", text: "Done. " });
+  assert.deepEqual(refused.controller.getLatency(), [], "the composer refused it: that turn is not this message's");
+  refused.controller.stop();
+
+  const command = harness({ now: () => now });
+  command.controller.start();
+  await flush();
+  await command.say("stop");
+  command.emit("turn/started", { turnId: "t1" });
+  command.emit("assistant/chunk", { partId: "p1", text: "Done. " });
+  assert.deepEqual(command.controller.getLatency(), []);
+  command.controller.stop();
+  now += 1;
+});
+
+test("the server is told while replies are heard: on start, renewed, moved to a New chat's conversation, dropped on silent and at the end", async () => {
+  const h = harness({ activeSessionId: null });
+  h.controller.start();
+  assert.deepEqual(h.live, [{ sessionId: null, live: true }], "a New chat is spoken before it has a conversation");
+  await flush();
+  await wait(100);
+  assert.ok(h.live.length >= 3 && h.live.every((state) => state.live && state.sessionId === null), "renewed while it holds");
+  await h.say("Start a new project.");
+  h.emit("user/message", { text: "Start a new project." }, "new-1");
+  assert.deepEqual(h.live.at(-1), { sessionId: "new-1", live: true }, "the first message names the conversation");
+
+  h.setPrefs({ feedback: "silent" });
+  h.controller.applyFeedback();
+  assert.deepEqual(h.live.at(-1), { sessionId: "new-1", live: false }, "silent replies are read, not heard");
+  const quiet = h.live.length;
+  await wait(100);
+  assert.equal(h.live.length, quiet, "nothing is renewed while silent");
+  h.setPrefs({ feedback: "voice" });
+  h.controller.applyFeedback();
+  assert.deepEqual(h.live.at(-1), { sessionId: "new-1", live: true });
+  h.controller.stop();
+  assert.deepEqual(h.live.at(-1), { sessionId: "new-1", live: false });
+  const ended = h.live.length;
+  await wait(100);
+  assert.equal(h.live.length, ended, "ending voice mode stops the renewals");
+
+  const silent = harness({ prefs: { feedback: "silent" } });
+  silent.controller.start();
+  await flush();
+  silent.controller.stop();
+  assert.deepEqual(silent.live, [], "a silent conversation is never announced");
+});
+
+const STREAM: RecognitionRoute[] = [{ kind: "server", language: "en" }];
+
+test("a streaming recognizer shares one microphone for the whole conversation", async () => {
+  const h = harness({ routes: STREAM, shared: true });
+  h.controller.start();
+  await flush();
+  assert.equal(h.captures.length, 1, "opened with the first turn");
+  assert.deepEqual(h.startOptions, [{ capture: true, noiseFloor: undefined }], "the recognizer takes its audio from it");
+  await h.say("Fix the failing test.");
+  h.emit("user/message", { text: "Fix the failing test." });
+  h.emit("turn/started", { turnId: "t1" });
+  h.emit("assistant/chunk", { partId: "p1", text: "I found the problem. " });
+  assert.equal(h.controller.getSnapshot().phase, "speaking");
+  assert.equal(h.listeners.at(-1)!.cancelled, true, "no recognizer listens to the reply");
+  assert.equal(h.captures[0]!.stopped, false, "…but the microphone itself stays open");
+  assert.equal(h.monitors.length, 0, "noticing a barge-in needs no second microphone");
+  assert.equal(h.captures[0]!.watchers.length, 1);
+  h.output.events?.onDone?.();
+  await flush();
+  assert.equal(h.captures.length, 1, "the next turn reuses it");
+  assert.deepEqual(h.captures[0]!.prerolls, [0, 0, 0], "an ordinary turn replays nothing from before");
+  assert.equal(h.captures[0]!.watchers[0]!.stopped, true);
+  h.controller.stop();
+  assert.equal(h.captures[0]!.stopped, true, "ending the conversation closes the microphone");
+});
+
+test("talking over a reply hands the recognizer the words already spoken and the room's loudness", async () => {
+  const h = harness({ routes: STREAM, shared: true });
+  h.controller.start();
+  await flush();
+  h.emit("turn/started", { turnId: "t1" });
+  h.emit("assistant/chunk", { partId: "p1", text: "Here is a long explanation. " });
+  const before = h.listeners.length;
+  h.captures[0]!.watchers[0]!.events.onSpeech();
+  await flush();
+  assert.equal(h.output.cancelled, 1, "the reply stops");
+  assert.equal(h.controller.getSnapshot().phase, "listening");
+  assert.equal(h.listeners.length, before + 1);
+  assert.equal(h.captures[0]!.prerolls.at(-1), 700, "the recognizer first hears the moment before the interruption");
+  assert.deepEqual(h.startOptions.at(-1), { capture: true, noiseFloor: 0.004 },
+    "it cannot learn the room from audio that begins with speech, so it is told");
+
+  h.emit("assistant/chunk", { partId: "p1", text: "More of the same reply. " });
+  h.controller.primary();
+  h.controller.stop();
+});
+
+test("a tap to interrupt replays nothing: nobody was speaking yet", async () => {
+  const h = harness({ routes: STREAM, shared: true });
+  h.controller.start();
+  await flush();
+  h.emit("turn/started", { turnId: "t1" });
+  h.emit("assistant/chunk", { partId: "p1", text: "Here is a long explanation. " });
+  h.controller.primary();
+  await flush();
+  assert.equal(h.captures[0]!.prerolls.at(-1), 0);
+  assert.equal(h.startOptions.at(-1)!.noiseFloor, undefined);
+  h.controller.stop();
+});
+
+test("mute and another microphone owner close the shared microphone; it reopens when listening resumes", async () => {
+  const h = harness({ routes: STREAM, shared: true });
+  h.controller.start();
+  await flush();
+  h.controller.toggleMute();
+  assert.equal(h.captures[0]!.stopped, true, "muted means closed, not merely unused");
+  h.controller.toggleMute();
+  await flush();
+  assert.equal(h.captures.length, 2);
+  assert.equal(h.controller.getSnapshot().phase, "listening");
+  h.claimMic("dictation");
+  assert.equal(h.captures[1]!.stopped, true, "the dictation mic takes the microphone, all of it");
+  assert.equal(h.controller.getSnapshot().phase, "paused");
+  h.controller.stop();
+});
+
+test("the shared microphone is only for streaming recognizers with barge-in on, and failing to open it is not fatal", async () => {
+  const browser = harness({ shared: true });
+  browser.controller.start();
+  await flush();
+  assert.equal(browser.captures.length, 0, "the browser recognizer captures by itself");
+  assert.deepEqual(browser.startOptions, [{ capture: false, noiseFloor: undefined }]);
+  browser.controller.stop();
+
+  const off = harness({ routes: STREAM, shared: true, bargeIn: false });
+  off.controller.start();
+  await flush();
+  assert.equal(off.captures.length, 0, "where an open microphone hurts playback (iPhone), each turn opens its own");
+  off.controller.stop();
+
+  const broken = harness({ routes: STREAM, shared: "broken" });
+  broken.controller.start();
+  await flush();
+  assert.equal(broken.controller.getSnapshot().phase, "listening", "the recognizer opens the microphone itself");
+  assert.deepEqual(broken.startOptions, [{ capture: false, noiseFloor: undefined }]);
+  broken.controller.stop();
+
+  const denied = harness({ routes: STREAM, shared: "denied" });
+  denied.controller.start();
+  await flush();
+  assert.equal(denied.controller.getSnapshot().phase, "error");
+  assert.equal(denied.controller.getSnapshot().error, strings.micDenied, "a blocked microphone is said plainly");
+  assert.equal(denied.listeners.length, 0);
+  denied.controller.stop();
+});
+
+test("a shared microphone that died is replaced on the next turn", async () => {
+  const h = harness({ routes: STREAM, shared: true });
+  h.controller.start();
+  await flush();
+  h.captures[0]!.dead = true;
+  await h.say("Fix it.");
+  await flush();
+  assert.equal(h.captures.length, 2);
+  assert.equal(h.controller.getSnapshot().phase, "listening");
+  h.controller.stop();
+  assert.equal(h.captures[1]!.stopped, true);
 });

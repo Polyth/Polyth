@@ -60,6 +60,16 @@
   --look-hover: color-mix(in srgb, var(--text) 5%, transparent);
   --look-select: color-mix(in srgb, var(--text) 8%, transparent);
   --look-select-edge: none;
+  /* The current project on the left rail is the plate alone: no ring or
+     carved shadow around its icon. A look whose plate is clear keeps its
+     edge here, or nothing would mark the project; a look whose plate only
+     read through its edge deepens it here, so it still outweighs the hover
+     wash on the next project. The icon covers most of a project tile, so a
+     wash shows only as a thin margin round it: a look whose hover is lost
+     there takes a deeper one in --look-rail-hover. */
+  --look-rail-select: var(--look-select);
+  --look-rail-select-edge: none;
+  --look-rail-hover: var(--look-hover);
   --look-select-ink: var(--text);
   --look-select-weight: 600;
   --look-select-radius: calc(8px * var(--look-round));
@@ -224,9 +234,18 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .session-row.ac
   box-shadow: var(--look-select-edge) !important;
 }
 
+/* The tree's active project row, while none of its chats is lit
+   (styles.css), wears the same plate in the look's row corner. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .project-tree-node:not(:has(.session-row.active)) > .project-card-shell:has(> .project-card.active)::before {
+  background: var(--look-select) !important;
+  box-shadow: var(--look-select-edge) !important;
+  border-radius: var(--look-select-radius) !important;
+}
+
 /* The look's plate is the only selection mark: the accent bars and pills the
    base and Fluent draw beside a current row go. */
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .session-row.active .session-btn::after,
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .project-card-shell::after,
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .settings-nav-item.active::before {
   content: none !important;
 }
@@ -255,10 +274,21 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .session-pinned
   background: var(--look-line);
 }
 
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.sidebar-project-rail-item.active, .view-icon.active, .rail-icon.active, .sidebar-filter .ui-icon-btn.active, .sidebar-list-options.active, .ui-menu-item--checked, .settings-nav-item.active, .model-picker-row.current) {
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.view-icon.active, .rail-icon.active, .sidebar-filter .ui-icon-btn.active, .sidebar-list-options.active, .ui-menu-item--checked, .settings-nav-item.active, .model-picker-row.current) {
   background: var(--look-select) !important;
   box-shadow: var(--look-select-edge) !important;
   border-radius: var(--look-select-radius) !important;
+}
+
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .sidebar-project-rail-item.active {
+  background: var(--look-rail-select) !important;
+  box-shadow: var(--look-rail-select-edge) !important;
+  border-radius: var(--look-select-radius) !important;
+}
+
+/* The shared hover below paints a project tile in the rail's own hover. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .sidebar-project-rail-item {
+  --look-hover: var(--look-rail-hover);
 }
 
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.view-switcher-pill .view-icon.active, .mobile-shortcut-track > .mobile-shortcut.active) {
@@ -648,6 +678,20 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .railbar:is([da
   border-start-start-radius: max(0px, calc(var(--look-rail-island) * var(--look-rail-radius) - 1px)) !important;
   border-end-start-radius: max(0px, calc(var(--look-rail-island) * var(--look-rail-radius) - 1px)) !important;
   clip-path: none !important;
+}
+
+/* Line, Editorial and Paper draw their idle rail as a line on the page or as
+   a bare sheet, not as a filled column, so the host has no material for a
+   docked window to sit in: the flattened column showed the conversation
+   through the pane (Standard's glass host, Air and Obsidian's island and the
+   Monoliths' plane do paint one, so they are untouched). Those looks paint
+   their own column material (--look-rail) on the docked pane instead, inside
+   the host's hairline frame, with the same transparency ladder as the
+   floating window (--look-rail*). */
+body:is([data-shell-look="line"], [data-shell-look="editorial"], [data-shell-look="paper"]):not(#\#):not(#\#) .railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]) > .rail:not(.rail-dynamic):not(.rail-fullscreen):not(.rail-dock-bottom):not(.rail-pinned-narrow) {
+  background: var(--look-rail) !important;
+  background-clip: var(--look-rail-clip, border-box) !important;
+  backdrop-filter: var(--look-rail-blur) !important;
 }
 
 body[data-shell-look]:not([data-shell-look="standard"]):not(#\#):not(#\#) .railbar:is([data-rail-motion="open"], [data-rail-motion="exiting"]):has(> .rail:not(.rail-dynamic):not(.rail-fullscreen):not(.rail-dock-bottom):not(.rail-pinned-narrow)) > .plugin-strip {
@@ -1276,6 +1320,20 @@ body[data-shell-look="paper"]:not(#\#) .sidebar-project-rail-item.active::after 
   background: var(--text);
 }
 
+/* Paper's plate is clear, so the tree's active project row (while none of
+   its chats is lit) takes the rail's bar, on the plate's start edge. */
+body[data-shell-look="paper"]:not(#\#) .project-tree-node:not(:has(.session-row.active)) > .project-card-shell > .project-card.active::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: calc(var(--nav-indent-project) - var(--nav-pill-air));
+  top: 50%;
+  width: 3px;
+  height: 14px;
+  margin-top: -7px;
+  border-radius: calc(3px * var(--look-round));
+  background: var(--text);
+}
+
 body[data-shell-look="paper"]:not(#\#) :is(.sidebar-service-bar, .sidebar-project-rail-actions, .sidebar-rail-switch) .ui-icon-btn {
   color: var(--look-ink-dim);
 }
@@ -1415,6 +1473,7 @@ body[data-shell-look="line"]:not(#\#) {
   --look-hover: color-mix(in srgb, var(--text) 4%, transparent);
   --look-select: transparent;
   --look-select-edge: inset 0 0 0 1px var(--look-line-strong);
+  --look-rail-select-edge: var(--look-select-edge);
   --look-select-radius: var(--look-r);
   --look-control-edge: inset 0 0 0 1px var(--look-line);
   --look-control-radius: var(--look-r);
@@ -2283,6 +2342,11 @@ html.light body[data-shell-look="monolith-reverse"]:not(#\#) {
   --look-plane-solid: color-mix(in srgb, var(--bg) 40%, white);
   --look-well-solid: color-mix(in srgb, var(--bg) 88%, var(--text) 9%);
   --look-cut-solid: var(--look-well-solid);
+  /* On the near-white plane the 5% hover wash was lost in the thin margin
+     round a project icon: a hovered tile in the rail sinks to the well, and
+     the current project, which has no carve there, a step deeper. */
+  --look-rail-hover: var(--look-well);
+  --look-rail-select: color-mix(in srgb, color-mix(in srgb, var(--text) 8%, var(--look-well-solid)) var(--look-veil), transparent);
   --look-raise: 0 0 0 1px var(--look-edge), 0 3px 10px -6px rgba(0, 0, 0, 0.14);
   --look-float-shadow: 0 10px 28px -16px rgba(0, 0, 0, 0.22);
 }
@@ -2476,6 +2540,13 @@ body[data-shell-look="obsidian"]:not(#\#) {
   --look-glass-highlight: 0 1px 0 0 color-mix(in srgb, white 7%, transparent) inset;
   --look-glass-drop: 0 18px 40px -24px rgba(0, 0, 0, 0.6);
   --look-glass-shadow: var(--look-glass-highlight), var(--look-glass-drop);
+  /* A surface in the conversation sits in the flow, not above it: the code
+     block, a person's turn and the in-flow cards keep the rim and the top
+     highlight and take a short, quiet drop instead of the chrome's wide one.
+     The deep drop belongs to the chrome and to floating windows, which really
+     do hover; in the pearl (light) canvas the wide one laid a grey band under
+     every block. */
+  --look-glass-inline-shadow: var(--look-glass-highlight), 0 10px 24px -20px rgba(0, 0, 0, 0.5);
   --look-float-radius: calc(18px * var(--look-round));
   --look-scrim: color-mix(in srgb, black 40%, transparent);
   --look-scrim-blur: blur(10px) saturate(1.2);
@@ -2483,6 +2554,10 @@ body[data-shell-look="obsidian"]:not(#\#) {
   --look-option-edge: color-mix(in srgb, var(--text) 8%, transparent);
   --look-select: color-mix(in srgb, var(--accent) 13%, transparent);
   --look-select-edge: inset 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent);
+  /* Dark: without its accent edge the 13% wash is as light as the hover
+     wash, so the rail's current project takes a fuller tint (light keeps
+     the shared one). */
+  --look-rail-select: color-mix(in srgb, var(--accent) 22%, transparent);
   --look-select-radius: var(--look-pill-radius);
   --look-control-radius: var(--look-pill-radius);
   /* A floating window is rimmed glass like the rail it extends, so their
@@ -2520,6 +2595,7 @@ body[data-shell-look="obsidian"]:not(#\#) {
 
 /* Pearl: the phone layers are the light canvas. */
 html.light body[data-shell-look="obsidian"]:not(#\#) {
+  --look-rail-select: var(--look-select);
   --look-phone-layer: color-mix(in srgb, var(--bg) var(--look-overlay-a), transparent);
   --look-widget-shadow: 0 1px 0 0 color-mix(in srgb, white 60%, transparent) inset, 0 14px 30px -22px rgba(0, 0, 0, 0.3);
 }
@@ -2568,6 +2644,12 @@ body[data-shell-look="obsidian"]:not(#\#) :is(.sidebar, .railbar, .view-switcher
   background: linear-gradient(var(--look-fill), var(--look-fill)) padding-box, var(--look-rim) border-box !important;
   backdrop-filter: var(--look-glass-blur) !important;
   box-shadow: var(--look-glass-shadow) !important;
+}
+
+/* Rimmed glass in the conversation: the same edge, the chat's own elevation. */
+
+body[data-shell-look="obsidian"]:not(#\#) :is(.md-code-block, .msg.user .bubble, .question-card, .isolation-card, .turn-rate-limit) {
+  box-shadow: var(--look-glass-inline-shadow) !important;
 }
 
 body[data-shell-look="obsidian"]:not(#\#) :is(.notify-card, .ui-popover, .ui-tooltip, .dialog-panel, .modal.settings-shell, .perm-banner) {
@@ -2834,11 +2916,20 @@ body[data-shell-look="editorial"]:not(#\#) .project-path {
 
 /* Selection is ink plus a fine accent rule under the words. */
 
-body[data-shell-look="editorial"]:not(#\#) :is(.session-row.active .session-title-text, .workspace-mode-switch button.active) {
+body[data-shell-look="editorial"]:not(#\#) :is(.session-row.active .session-title-text, .workspace-mode-switch button.active),
+body[data-shell-look="editorial"]:not(#\#) .project-tree-node:not(:has(.session-row.active)) > .project-card-shell > .project-card.active .project-name {
   text-decoration: underline;
   text-decoration-color: var(--accent);
   text-decoration-thickness: 1.5px;
   text-underline-offset: 5px;
+}
+
+/* The navigator's names are one clipped line (overflow: hidden), and the rule
+   sits below that line box: room for it inside the clip, none in the row. */
+body[data-shell-look="editorial"]:not(#\#) .session-row.active .session-title-text,
+body[data-shell-look="editorial"]:not(#\#) .project-tree-node:not(:has(.session-row.active)) > .project-card-shell > .project-card.active .project-name {
+  padding-block-end: 8px;
+  margin-block-end: -8px;
 }
 
 body[data-shell-look="editorial"]:not(#\#) .sidebar-project-rail-item .project-glyph {

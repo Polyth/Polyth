@@ -18,6 +18,7 @@ export {
 } from "./authority.ts";
 export { releaseHarnessProcessExecution } from "./processAuthority.ts";
 export { createStdioRpc, type RpcPeer } from "./rpc.ts";
+export { withLaunchEnv } from "./launchEnv.ts";
 export {
   acknowledgeCapabilityApplication,
   captureCapabilityLaunch,
@@ -73,6 +74,8 @@ export {
   projectAttachmentText,
   projectAttachmentPdf,
   referenceAttachmentFile,
+  projectAttachmentLink,
+  storedAttachmentFile,
   materializeAttachmentText,
   PDF_PROJECTION_MAX_BYTES,
   TEXT_PROJECTION_MAX_BYTES,
@@ -91,6 +94,7 @@ import type {
     HarnessAvailabilityState,
     HarnessContext,
     HarnessDescriptor,
+    HarnessLaunchEnv,
     HarnessProbe,
     HarnessProvider,
     HarnessRegistry,
@@ -181,8 +185,9 @@ type ReadinessEvidence = {
     version?: string;
 };
 /** Account presentation fields; a descriptor may compute them on read. */
-const accountIdentity = (descriptor: HarnessDescriptor): Pick<HarnessDescriptor, "accountLabel" | "accounts"> => ({
+const accountIdentity = (descriptor: HarnessDescriptor): Pick<HarnessDescriptor, "accountLabel" | "accounts" | "relay"> => ({
     ...(descriptor.accountLabel ? { accountLabel: descriptor.accountLabel } : {}),
+    ...(descriptor.relay ? { relay: { family: descriptor.relay.family } } : {}),
     ...(descriptor.accounts ? { accounts: { family: descriptor.accounts.family, endpoint: descriptor.accounts.endpoint } } : {}),
 });
 export function createHarnessRegistry() {
@@ -221,6 +226,10 @@ export function createHarnessRegistry() {
         context.cwd,
         context.remote ?? false,
         harnessId,
+        // A Relay resolves per person (its member accounts are that person's),
+        // so its readiness and catalog must never be shared between the people
+        // of a Space. Every other harness reads the same for everyone.
+        providers.get(harnessId)?.descriptor.relay ? context.actorUserId ?? context.space?.userId ?? "" : "",
     ]);
     const list = () => [...providers.values()]
         .filter((provider) => !unregistering.has(provider))
@@ -614,12 +623,38 @@ export function createHarnessRegistry() {
             // A private session never reaches a harness that would save it.
             if (context.privateSession && selection.mode === "pinned") {
                 const pinned = ordered.find((p) => p.descriptor.id === id);
-                if (pinned && pinned.descriptor.privateSessions !== true) throw privateSessionUnsupported(pinned.descriptor.name);
+                if (pinned && !pinned.descriptor.relay && pinned.descriptor.privateSessions !== true) throw privateSessionUnsupported(pinned.descriptor.name);
             }
-            const candidates = (selection.mode === "pinned"
+            const wanted = (selection.mode === "pinned"
                 ? ordered.filter((p) => p.descriptor.id === id)
-                : [...ordered.filter((p) => p.descriptor.id === id), ...ordered.filter((p) => p.descriptor.id !== id)].filter((p) => p.descriptor.autoSelect !== false))
-                .filter((p) => !context.privateSession || p.descriptor.privateSessions === true);
+                : [...ordered.filter((p) => p.descriptor.id === id), ...ordered.filter((p) => p.descriptor.id !== id)].filter((p) => p.descriptor.autoSelect !== false));
+            // A Relay runs on one of the acting person's member accounts: it is
+            // replaced by the members its policy would try now, in order. Auto
+            // never reaches one (`autoSelect: false`), and a persisted route
+            // is an exact lookup that never comes through here.
+            let relayed: HarnessProvider | undefined;
+            let relayUntil: number | undefined;
+            const expanded: HarnessProvider[] = [];
+            for (const provider of wanted) {
+                if (selection.mode !== "pinned" || !provider.descriptor.relay || !provider.relay) {
+                    expanded.push(provider);
+                    continue;
+                }
+                relayed = provider;
+                const plan = await provider.relay.plan(context, stickyId);
+                relayUntil = plan.exhaustedUntil;
+                for (const memberId of plan.candidates) {
+                    const member = providers.get(memberId);
+                    // The person's Relay membership is its own opt-in: a member
+                    // `enabled: false` in Harness Settings is hidden from the
+                    // direct picker and Auto (how a Space keeps an account for
+                    // Relay only), not banned from running through the Relay
+                    // the person deliberately added it to. Account access rules
+                    // were already applied by the family's own plan.
+                    if (member && !member.descriptor.relay && !unregistering.has(member)) expanded.push(member);
+                }
+            }
+            const candidates = expanded.filter((p) => !context.privateSession || p.descriptor.privateSessions === true);
             // Why the last candidate was passed over; a pinned selection reports it
             // instead of an anonymous "unavailable".
             let why = "";
@@ -704,6 +739,8 @@ export function createHarnessRegistry() {
                 if (runnable(probe))
                     return provider;
             }
+            if (relayed)
+                throw harnessError("runtime-unavailable", `Every account in ${relayed.descriptor.name} is out of limits or unavailable${relayUntil !== undefined ? ` until ${new Date(relayUntil).toISOString()}` : ""}${why ? ` (${why.slice(0, 200)})` : ""}`);
             throw harnessError("runtime-unavailable", selection.mode === "pinned" ? `Selected harness ${selection.harnessId} is unavailable${why ? ` (${why.slice(0, 200)})` : ""}`
                 : context.privateSession ? "No harness that can run a private session is ready. Open Harnesses in Settings to set one up."
                     : "No compatible harness is ready. Open Harnesses in Settings to set one up.");
@@ -745,8 +782,9 @@ export function createHarnessPool(options: {
     registry: HarnessRegistry;
     context(projectId: string, cwd?: string, sessionId?: string): Promise<HarnessContext>;
     legacyHarnessId: string;
-    /** Runs before a new runtime is constructed. Provisioning uses this hook. */
-    beforeCreate?: (provider: HarnessProvider, context: HarnessContext) => Promise<void>;
+    /** Runs before a new runtime is constructed. Provisioning uses this hook;
+     *  what it returns is added to the context `createRuntime` receives. */
+    beforeCreate?: (provider: HarnessProvider, context: HarnessContext) => Promise<void | { launchEnv?: HarnessLaunchEnv }>;
     /** Physical owners can refine factory reuse with per-acquisition evidence. */
     acquisitionInfo?: (provider: HarnessProvider, context: HarnessContext, runtime: AgentRuntime) => RuntimeAcquisitionInfo | undefined;
     /** Physical owner may retain a shared runtime with other bindings/executions. */
@@ -835,10 +873,12 @@ export function createHarnessPool(options: {
                 pending: Promise.resolve(undefined as unknown as AgentRuntime),
             };
             created.pending = (async () => {
-                await options.beforeCreate?.(provider, context);
+                const prepared = await options.beforeCreate?.(provider, context);
                 if (options.registry.get(provider.descriptor.id) !== provider)
                     throw harnessError("runtime-unavailable", `Harness ${provider.descriptor.id} is no longer registered`);
-                const runtime = enforceDelegation(await provider.createRuntime(context));
+                const runtime = enforceDelegation(await provider.createRuntime(
+                    prepared?.launchEnv ? { ...context, launchEnv: prepared.launchEnv } : context,
+                ));
                 if (disposals.has(runtime)) {
                     throw harnessError("runtime-unavailable", "Provider returned a released runtime");
                 }

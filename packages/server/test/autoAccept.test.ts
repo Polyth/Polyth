@@ -54,6 +54,8 @@ function harness(opts: {
   approvalDefaults?: ApprovalDefaultsService;
   redactToolInput?: (tool: string, input: Record<string, unknown>) => Record<string, unknown>;
   permissionScopeCheck?: PermissionScopeCheck;
+  /** Credential Vault entries the acting person resolves (metadata only). */
+  vault?: Array<{ handle: string; approval?: string }>;
   /** Fails wiring a runtime for this project, as a replaced runtime does. */
   unwirableProject?: string;
 } = {}) {
@@ -103,6 +105,7 @@ function harness(opts: {
     autoAccept: createAutoAcceptStore(join(dir, "auto-accept.json")),
     ...(opts.approvalDefaults ? { approvalDefaults: opts.approvalDefaults } : {}),
     ...(opts.permissionScopeCheck ? { permissionScopeCheck: () => opts.permissionScopeCheck } : {}),
+    ...(opts.vault ? { secureSafe: { list: () => opts.vault, listFor: () => opts.vault } as never } : {}),
     notify: {
       attention: (sessionId, kind) => attention.push({ sessionId, kind }),
       turnStopped: (sessionId, reason) => stopped.push({ sessionId, reason }),
@@ -1340,66 +1343,127 @@ test("the Judgment second opinion can only leave an automatic answer for a perso
   assert.equal((await store.projection(id))?.status, "waiting");
 });
 
-test("a Credential Vault run is never auto-answered by Auto-Approve, Full access or Judgment", async () => {
-  let judged = 0;
-  const { sessions, store } = harness({
-    permission: "ask",
-    permissionScopeCheck: {
-      review: async () => { judged += 1; return { hold: false, reason: "allowed" }; },
-    } as unknown as PermissionScopeCheck,
-  });
-  const { id } = await sessions.create({ projectId: "p1", title: "T" });
-  await sessions.autoAcceptSet!(id, "all");
-  await sessions.send(id, { text: "use the vault" });
-  await flush();
+const vaultRunRequest = async (sessions: ReturnType<typeof harness>["sessions"], store: ReturnType<typeof harness>["store"], id: string, refs = ["POLYTH_SAFE_DEPLOY"]) => {
   const grant = {
     spaceId: "space-a",
     projectId: "p1",
     cwd: (await store.projection(id))?.runtimeBinding?.location.directory ?? "",
     harnessId: "opencode",
   };
-  const pending = sessions.requestAgentToolPermission({
+  return sessions.requestAgentToolPermission({
     ...grant,
     toolId: VAULT_RUN_TOOL_ID,
     toolName: "polyth_credential_vault_run",
     owner: "secure-safe",
     metadata: {
-      command: "deploy $POLYTH_SAFE_DEPLOY",
-      handles: ["POLYTH_SAFE_DEPLOY"],
+      command: `deploy ${refs.map((ref) => `$${ref}`).join(" ")}`,
+      handles: refs,
       purpose: "Publish",
       cwd: grant.cwd,
     },
   });
+};
+
+/** Start a session at `level`, ask a Vault run, and say whether it ran
+ *  without a card (the card, if any, is rejected to settle the call). */
+const vaultRunOutcome = async (
+  level: "off" | "on" | "all",
+  vault: Array<{ handle: string; approval?: string }>,
+  refs = ["POLYTH_SAFE_DEPLOY"],
+  extra: Parameters<typeof harness>[0] = {},
+): Promise<"unasked" | "card"> => {
+  const { sessions, store } = harness({ permission: "ask", vault, ...extra });
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  if (level !== "off") await sessions.autoAcceptSet!(id, level);
+  await sessions.send(id, { text: "use the vault" });
+  await flush();
+  const pending = vaultRunRequest(sessions, store, id, refs);
   await flush();
   const request = (await store.events(id)).find((event) => event.type === "permission/requested"
     && (event.data as { permission?: string }).permission === "package-tool");
-  assert.ok(request, "the run waits for a person even with Full access");
-  assert.equal(judged, 0, "Judgment never answers a Vault run");
-  const card = request.data as { preview: { lines: string[] }; manual?: boolean; allowedScopes?: string[] };
-  assert.ok(card.preview.lines.some((line) => line.includes("deploy $POLYTH_SAFE_DEPLOY")));
+  if (!request) {
+    assert.equal(await pending, "allow");
+    return "unasked";
+  }
+  const card = request.data as { manual?: boolean; allowedScopes?: string[]; metadata?: { handles?: string[] } };
   // Clients hide requests their auto-accept flags would answer; `manual`
-  // keeps this card (and the waiting status) visible under Full access.
+  // keeps this card visible. Its keys travel with it for a later re-check.
   assert.equal(card.manual, true);
   assert.deepEqual(card.allowedScopes, ["once"]);
+  // Known refs read as their handle names on the card.
+  assert.equal(card.metadata?.handles?.length, refs.length);
+  await sessions.replyPermission(id, (request.data as { requestId: string }).requestId, "reject");
+  assert.equal(await pending, "deny");
+  return "card";
+};
+
+test("each Vault key's own level decides when a run of it skips the card", async () => {
+  const key = (approval?: string) => [{ handle: "DEPLOY", ...(approval ? { approval } : {}) }];
+  // Fully safe: nobody is asked, at any level.
+  assert.equal(await vaultRunOutcome("off", key("safe")), "unasked");
+  // Safe for Auto-Approve: Auto-Approve and Full access answer it, Ask does not.
+  assert.equal(await vaultRunOutcome("off", key("auto")), "card");
+  assert.equal(await vaultRunOutcome("on", key("auto")), "unasked");
+  assert.equal(await vaultRunOutcome("all", key("auto")), "unasked");
+  // Full access only (also every key saved before levels existed).
+  for (const level of [key("full"), key()]) {
+    assert.equal(await vaultRunOutcome("on", level), "card");
+    assert.equal(await vaultRunOutcome("all", level), "unasked");
+  }
+  // Always ask: even Full access leaves it on a card.
+  assert.equal(await vaultRunOutcome("all", key("always")), "card");
+});
+
+test("a Vault run takes its strictest key; an unknown key or level asks", async () => {
+  const two = [{ handle: "DEPLOY", approval: "safe" }, { handle: "NPM", approval: "full" }];
+  assert.equal(await vaultRunOutcome("on", two, ["POLYTH_SAFE_DEPLOY", "POLYTH_SAFE_NPM"]), "card");
+  assert.equal(await vaultRunOutcome("all", two, ["POLYTH_SAFE_DEPLOY", "POLYTH_SAFE_NPM"]), "unasked");
+  assert.equal(await vaultRunOutcome("all", two, ["POLYTH_SAFE_DEPLOY", "POLYTH_SAFE_GONE"]), "card", "a key the Vault does not know");
+  assert.equal(await vaultRunOutcome("all", [{ handle: "DEPLOY", approval: "someday" }]), "card", "a level this server does not know");
+  assert.equal(await vaultRunOutcome("all", [{ handle: "DEPLOY", approval: "safe" }], []), "card", "a run that names no key");
+});
+
+test("a guarded Space and Judgment still hold Vault runs their keys would let through", async () => {
+  assert.equal(await vaultRunOutcome("off", [{ handle: "DEPLOY", approval: "safe" }], undefined, { guardedSpace: true }), "card");
+  const held = { permissionScopeCheck: { review: async () => ({ hold: true, reason: "outside-task", probability: 0.9 }) } as unknown as PermissionScopeCheck };
+  assert.equal(await vaultRunOutcome("all", [{ handle: "DEPLOY", approval: "full" }], undefined, held), "card");
+  // A fully safe key needs no second opinion.
+  assert.equal(await vaultRunOutcome("off", [{ handle: "DEPLOY", approval: "safe" }], undefined, held), "unasked");
+});
+
+test("switching to Full access answers a waiting Vault card its keys allow", async () => {
+  const { sessions, store } = harness({ permission: "ask", vault: [{ handle: "DEPLOY", approval: "full" }] });
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await sessions.send(id, { text: "use the vault" });
+  await flush();
+  const pending = vaultRunRequest(sessions, store, id);
+  await flush();
+  assert.ok((await store.events(id)).some((event) => event.type === "permission/requested"));
+  await sessions.autoAcceptSet!(id, "all");
+  assert.equal(await pending, "allow");
+  const resolved = (await store.events(id)).find((event) => event.type === "permission/resolved");
+  assert.equal((resolved?.data as { auto?: boolean } | undefined)?.auto, true);
+});
+
+test("an always-ask key is not answered by a person's allow rule either", async () => {
+  const { sessions, store } = harness({ permission: "allow", vault: [{ handle: "DEPLOY", approval: "always" }] });
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await sessions.send(id, { text: "use the vault" });
+  await flush();
+  const pending = vaultRunRequest(sessions, store, id);
+  await flush();
+  const request = (await store.events(id)).find((event) => event.type === "permission/requested");
+  assert.ok(request, "the card is shown despite the allow rule");
   await sessions.replyPermission(id, (request.data as { requestId: string }).requestId, "reject");
   assert.equal(await pending, "deny");
 });
 
 test("a person's explicit allow rule still answers a Credential Vault run", async () => {
-  const { sessions, store } = harness({ permission: "allow" });
+  const { sessions, store } = harness({ permission: "allow", vault: [{ handle: "DEPLOY" }] });
   const { id } = await sessions.create({ projectId: "p1", title: "T" });
   await sessions.send(id, { text: "use the vault" });
   await flush();
-  const decision = await sessions.requestAgentToolPermission({
-    spaceId: "space-a",
-    projectId: "p1",
-    cwd: (await store.projection(id))?.runtimeBinding?.location.directory ?? "",
-    harnessId: "opencode",
-    toolId: VAULT_RUN_TOOL_ID,
-    toolName: "polyth_credential_vault_run",
-    owner: "secure-safe",
-  });
-  assert.equal(decision, "allow");
+  assert.equal(await vaultRunRequest(sessions, store, id), "allow");
   assert.equal((await store.events(id)).some((event) => event.type === "permission/requested"), false);
 });
 

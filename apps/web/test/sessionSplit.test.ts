@@ -139,3 +139,27 @@ test("a background chat stays cached while a split view shows it", () => {
   assert.equal(store.getState().events["other-0"], undefined, "unpinned chats still age out");
   release();
 });
+
+test("an open split asks the wide sidebar to rest only when that makes the pair fit", () => {
+  const { splitWantsSidebarRail } = split;
+  const narrow = SPLIT_PANE_MIN_PX * 2 - 100;
+  const base = { open: true, wide: true, widthPx: narrow, sidebarSavingPx: 280, holding: false };
+  assert.equal(splitWantsSidebarRail(base), true, "too narrow, and the sidebar frees enough room");
+  assert.equal(splitWantsSidebarRail({ ...base, sidebarSavingPx: 40 }), false, "collapsing would not help");
+  assert.equal(splitWantsSidebarRail({ ...base, widthPx: SPLIT_PANE_MIN_PX * 2 }), false, "the pair already fits");
+  assert.equal(splitWantsSidebarRail({ ...base, wide: false }), false, "compact shells keep their drawer");
+  assert.equal(splitWantsSidebarRail({ ...base, open: false }), false, "no split, no request");
+  assert.equal(splitWantsSidebarRail({ ...base, widthPx: 0 }), false, "unmeasured host");
+  // Once asked, the freed width must not undo the request that freed it.
+  assert.equal(splitWantsSidebarRail({ ...base, widthPx: 2000, sidebarSavingPx: 0, holding: true }), true);
+  assert.equal(splitWantsSidebarRail({ ...base, open: false, holding: true }), false, "closing the split gives the sidebar back");
+});
+
+test("the split host publishes whether the pair is on screen", () => {
+  assert.equal(split.isSessionSplitPresented(), false);
+  split.setSessionSplitPresented(true);
+  split.setSessionSplitPresented(true);
+  assert.equal(split.isSessionSplitPresented(), true);
+  split.setSessionSplitPresented(false);
+  assert.equal(split.isSessionSplitPresented(), false);
+});

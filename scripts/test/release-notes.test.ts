@@ -62,6 +62,9 @@ test("commits group by conventional type, leading verb and touched paths", () =>
     ["[Chore] Bump the docker images group", ["package.json"], "maintenance", "Bump the docker images group"],
     ["[Security] Bound chat-mention token regexes (CodeQL #154, #155)", ["packages/server/src/a.ts"], "fixes", "Bound chat-mention token regexes (CodeQL #154, #155)"],
     ["[Unmatched] Keep the brackets", ["apps/web/src/a.tsx"], "improvements", "[Unmatched] Keep the brackets"],
+    ["[Debug] Polyth app crash after server linking", ["apps/web/src/a.tsx"], "fixes", "Polyth app crash after server linking"],
+    ["[Investigate] Auto-stop did not trigger", ["apps/web/src/a.tsx"], "maintenance", "Auto-stop did not trigger"],
+    ["[Analysis] Prioritize ideas worth implementing", ["apps/web/src/a.tsx"], "maintenance", "Prioritize ideas worth implementing"],
     ["Pin the native bridge", ["packages/link/Cargo.lock"], "maintenance", "Pin the native bridge"],
   ];
   for (const [subject, files, section, title] of cases) {
@@ -86,6 +89,13 @@ test("the summary is the body's first sentence without trailers", () => {
   const dangling = commitSummary(`${"A squash-merged pull request starts its commit body with the branch's own titles, so ".repeat(3)}end.`);
   assert.ok(dangling.endsWith("…"), dangling);
   assert.ok(!/[\s,](?:and|or|but|so|because|which|that|with|for|to|the|its)$/.test(dangling.slice(0, -1)), dangling);
+  // A cut inside a parenthetical drops the unfinished aside rather than publishing `…catalog (e.g.…`.
+  const parenthetical = commitSummary(`${"Providers of other harnesses were counted as expanded, so a large catalog ".repeat(4)}(e.g. twenty rows) grows.`);
+  assert.ok(parenthetical.endsWith("…"), parenthetical);
+  assert.ok(!parenthetical.includes("("), parenthetical);
+  // `e.g.` inside a parenthetical ends an abbreviation, not the sentence.
+  const abbreviated = commitSummary("The popover counted every provider as expanded, so a large catalog (e.g. OpenCode) asked for hundreds of rows. The cap now holds.");
+  assert.equal(abbreviated, "The popover counted every provider as expanded, so a large catalog (e.g. OpenCode) asked for hundreds of rows.");
 });
 
 test("contributors merge identities and skip bots and AI agents", () => {

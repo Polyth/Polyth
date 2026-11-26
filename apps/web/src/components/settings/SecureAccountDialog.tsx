@@ -34,6 +34,7 @@ export default function SecureAccountDialog({ reason, onClose, onSecured }: {
 }) {
   const [stage, setStage] = useState<Stage>("password");
   const [password, setPassword] = useState("");
+  const [repeat, setRepeat] = useState("");
   const [recovery, setRecovery] = useState<{ setId: string; codes: string[] } | null>(null);
   const [saved, setSaved] = useState(false);
   const [renewed, setRenewed] = useState(false);
@@ -41,7 +42,9 @@ export default function SecureAccountDialog({ reason, onClose, onSecured }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const tooShort = password.length > 0 && [...password].length < MIN_PASSWORD_LENGTH;
-  const passwordReady = [...password].length >= MIN_PASSWORD_LENGTH;
+  // Typed twice: a password typed once is only ever checked again weeks later.
+  const mismatch = repeat.length > 0 && repeat !== password;
+  const passwordReady = [...password].length >= MIN_PASSWORD_LENGTH && repeat === password;
 
   const fail = (cause: unknown): void => setError(
     (cause as { code?: unknown } | null)?.code === "invalid-transition"
@@ -174,6 +177,12 @@ export default function SecureAccountDialog({ reason, onClose, onSecured }: {
                 invalid={tooShort}
                 onChange={(event) => { setPassword(event.target.value); setError(null); }}
               />
+            )}
+          </FormField>
+          <FormField label={tr("lockscreen.passwordChange.repeat")} {...(mismatch ? { error: tr("lockscreen.passwordChange.mismatch") } : {})}>
+            {(field) => (
+              <TextInput {...field} type="password" value={repeat} autoComplete="new-password" spellCheck={false} disabled={busy} invalid={mismatch}
+                onChange={(event) => { setRepeat(event.target.value); setError(null); }} />
             )}
           </FormField>
           {error && <Notice tone="error" role="alert">{error}</Notice>}

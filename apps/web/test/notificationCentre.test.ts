@@ -9,6 +9,7 @@ import type { NotificationRecord } from "@polyth/contracts";
 import {
   NOTIFICATION_CENTRE_CAP, NOTIFICATION_KIND_LABELS,
   bellBadge, bellName, canOpenNotification, centreRows, createNotificationCentre,
+  notificationBody, notificationKindLabel, notificationWhen,
   type NotificationCentre, type NotificationCentreRemote,
 } from "../src/notificationCentre.ts";
 
@@ -327,3 +328,31 @@ test("every canonical kind has a non-color textual label", () => {
 // Type-only sanity: the exported factory returns the public interface.
 const _typecheck: (remote: NotificationCentreRemote) => NotificationCentre = createNotificationCentre;
 void _typecheck;
+
+test("a reached limit reads as reached; a real failure keeps its own label", () => {
+  const limit = rec({ id: "l", ts: 1, kind: "failed", key: "limit:claude:provider:29000000" });
+  const broken = rec({ id: "f", ts: 1, kind: "failed", key: "s1:turn:failed" });
+  assert.equal(notificationKindLabel(limit), "Limit reached");
+  assert.equal(notificationKindLabel(broken), "Failed");
+  assert.equal(notificationKindLabel(rec({ id: "c", ts: 1 })), "Completed");
+});
+
+test("a limit notice shows the provider's clock reading in the card's own time format", () => {
+  const now = new Date(2026, 10, 26, 21, 0).getTime();
+  const reset = new Date(2026, 10, 26, 20, 40).getTime();
+  const record = rec({
+    id: "l", ts: reset, kind: "failed", key: "limit:claude:provider:29000000",
+    body: "You've hit your 5-hour limit · resets 8:40pm (Europe/Kyiv)",
+  });
+  for (const locale of ["en", "uk"]) {
+    // The zone the provider names stays: the reading is reworded, not converted.
+    assert.equal(
+      notificationBody(record, locale),
+      `You've hit your 5-hour limit · resets ${notificationWhen(reset, locale, now)} (Europe/Kyiv)`,
+    );
+  }
+  assert.equal(notificationBody({ ...record, body: "resets 12am. Try at 9 a.m. in 5-hour windows" }, "uk"),
+    "resets 00:00. Try at 09:00 in 5-hour windows");
+  // Anything but a limit notice is the server's payload as written.
+  assert.equal(notificationBody({ ...record, key: "s1:turn:failed" }, "uk"), record.body);
+});

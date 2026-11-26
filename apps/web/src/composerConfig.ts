@@ -11,7 +11,7 @@ import {
   accountStorageSet,
 } from "./accountStorage.ts";
 
-type ComposerModelRef = ModelRef & { harnessId?: string };
+export type ComposerModelRef = ModelRef & { harnessId?: string };
 
 /** `inherit`: no local choice — the session's stored preset (if any) applies.
  *  `none`: explicit None — the send clears the stored preset.

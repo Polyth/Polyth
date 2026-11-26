@@ -13,7 +13,10 @@ import { createWebSearchAgentTool } from "./agentTool.ts";
 import { webSearchSkill } from "./agentSkill.ts";
 import { WebFetchRuntime } from "./fetchRuntime.ts";
 import { createWebFetchAgentTool } from "./fetchTool.ts";
-import { createDuckDuckGoProvider } from "./providers/duckduckgo.ts";
+import { createBingProvider } from "./providers/bing.ts";
+import { createExaProvider } from "./providers/exa.ts";
+import { createFirecrawlProvider } from "./providers/firecrawl.ts";
+import { createParallelProvider } from "./providers/parallel.ts";
 import { createTavilyProvider } from "./providers/tavily.ts";
 import { webSearchRoutes } from "./routes.ts";
 import { WebSearchRuntime } from "./runtime.ts";
@@ -24,7 +27,8 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   const settings = createWebSearchSettingsStore((space) => host.spaceStorage(space));
   const runtime = new WebSearchRuntime({
     settings,
-    providers: [createDuckDuckGoProvider(), createTavilyProvider()],
+    // Listed in the order the settings page shows them: the free chain, in order.
+    providers: [createExaProvider(), createParallelProvider(), createFirecrawlProvider(), createTavilyProvider(), createBingProvider()],
     spaceForId: (spaceId) => host.systemSpaceContext(spaceId),
     secureSafeForSpace: (space) => host.services.get(SPACE_SECURE_SAFE)?.forSpace(space),
     projectExists: async (space, projectId) => Boolean(await host.forSpace(space).projects.get(projectId)),

@@ -15,6 +15,7 @@ import * as nodes from "./iconNodes.ts";
 // alias list preserves the extra legacy classes Lucide emits for renamed icons.
 const Activity = createIcon("activity", nodes.Activity);
 const Archive = createIcon("archive", nodes.Archive);
+const AppWindow = createIcon("app-window", nodes.AppWindow);
 const ArchiveRestore = createIcon("archive-restore", nodes.ArchiveRestore);
 const ArrowDown = createIcon("arrow-down", nodes.ArrowDown);
 const ArrowDownToLine = createIcon("arrow-down-to-line", nodes.ArrowDownToLine);
@@ -103,6 +104,7 @@ const Heading = createIcon("heading", nodes.Heading);
 const Heart = createIcon("heart", nodes.Heart);
 const HeartPulse = createIcon("heart-pulse", nodes.HeartPulse);
 const History = createIcon("rotate-ccw-clock", nodes.History, ["history"]);
+const Hourglass = createIcon("hourglass", nodes.Hourglass);
 const House = createIcon("house", nodes.House, ["home"]);
 const Image = createIcon("image", nodes.Image);
 const Info = createIcon("info", nodes.Info);
@@ -143,7 +145,9 @@ const PanelRight = createIcon("panel-right", nodes.PanelRight);
 const Paperclip = createIcon("paperclip", nodes.Paperclip);
 const Pause = createIcon("pause", nodes.Pause);
 const Pencil = createIcon("pencil", nodes.Pencil);
+const PictureInPicture2 = createIcon("picture-in-picture-2", nodes.PictureInPicture2);
 const Pin = createIcon("pin", nodes.Pin);
+const Pipette = createIcon("pipette", nodes.Pipette);
 const Play = createIcon("play", nodes.Play);
 const Plug = createIcon("plug", nodes.Plug);
 const Plus = createIcon("plus", nodes.Plus);
@@ -262,6 +266,7 @@ export {
   SquareCheckBig as SelectIcon,
   CircleCheck as SuccessIcon,
   Timer as TimerIcon,
+  Hourglass as HourglassIcon,
   CircleAlert as ErrorIcon,
   TriangleAlert as WarningIcon,
   Info as InfoIcon,
@@ -323,6 +328,7 @@ export {
   Scan as ScanIcon,
   Target as TargetIcon,
   Pin as PinIcon,
+  Pipette as PipetteIcon,
   Bookmark as BookmarkIcon,
   Star as FavoriteIcon,
   Send as SendIcon,
@@ -389,6 +395,10 @@ export {
   SlidersHorizontal as ViewOptionsIcon,
   WrapText as WrapIcon,
   Columns2 as SplitViewIcon,
+  // A chat or the code in a window of its own, and the way back into the
+  // main window (secondWindow.ts).
+  AppWindow as NewWindowIcon,
+  PictureInPicture2 as ReturnToWindowIcon,
   Rows2 as UnifiedViewIcon,
   Workflow as WorkflowIcon,
   User as SessionIcon,

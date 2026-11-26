@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -183,7 +183,7 @@ const make = (root: string, options: { durableRelease?: boolean } = {}) => {
   const cwds: string[] = [];
   const released: string[] = [];
   const closed: string[] = [];
-  const ctrl: FakeControl & { failClose: boolean; failCreate: string | false } = {
+  const ctrl: FakeControl & { failClose: boolean; failCreate: string | false; beforeRelease?: () => Promise<void> } = {
     failClose: false,
     failRelease: false,
     failCreate: false as string | false,
@@ -205,6 +205,7 @@ const make = (root: string, options: { durableRelease?: boolean } = {}) => {
       ...(options.durableRelease ? {
         releaseSessionExecution: async (_projection: unknown, binding: RuntimeSessionBinding, operationId: string) => {
           released.push(binding.location.directory);
+          await ctrl.beforeRelease?.();
           if (ctrl.failRelease) return { kind: "unknown" as const, operationId, message: "release failed" };
           return {
             kind: "confirmed" as const,
@@ -213,7 +214,8 @@ const make = (root: string, options: { durableRelease?: boolean } = {}) => {
         },
       } : {}),
     },
-    releaseArchivedCheckouts: ({ sessionId, releaseExecution }) => isolation.releaseArchivedCheckouts(sessionId, releaseExecution),
+    releaseArchivedCheckouts: ({ sessionId, releaseExecution, onlyEmpty }) =>
+      isolation.releaseArchivedCheckouts(sessionId, releaseExecution, onlyEmpty ? { onlyEmpty: true } : {}),
   });
   const isolation: ReturnType<typeof createIsolationService> = createIsolationService({
     git,
@@ -1292,6 +1294,13 @@ test("an rm -rf checkout whose branch still holds unmerged work keeps its record
   assert.equal((await after.sessions.snapshot(created.id)).isolation?.worktreePath, record.worktreePath);
 });
 
+/** A commit its target branch lacks: archiving no longer releases such a checkout by itself. */
+const commitWork = (worktreePath: string) => {
+  writeFileSync(join(worktreePath, "work.txt"), "work\n");
+  runGit(worktreePath, "add", ".");
+  runGit(worktreePath, "commit", "-qm", "unmerged work");
+};
+
 /** Everything Git and the filesystem hold for managed checkouts of this repository. */
 const leftovers = (root: string) => ({
   worktrees: runGit(root, "worktree", "list", "--porcelain").split("\n").filter((line) => line.startsWith("worktree ")).length - 1,
@@ -1392,6 +1401,7 @@ test("an execution that cannot be proven ended keeps the checkout, and a retry f
   const { isolation, sessions, ctrl } = make(root, { durableRelease: true });
   const owner = await isolation.createIsolatedSession({ projectId: "p1" });
   const record = (await sessions.snapshot(owner.id)).isolation!;
+  commitWork(record.worktreePath);
   await sessions.archive(owner.id);
   ctrl.failRelease = true;
 
@@ -1411,6 +1421,7 @@ test("an execution that already left the checkout is not released from the proje
   const { isolation, sessions, store, released } = make(root, { durableRelease: true });
   const owner = await isolation.createIsolatedSession({ projectId: "p1" });
   const record = (await sessions.snapshot(owner.id)).isolation!;
+  commitWork(record.worktreePath);
   await sessions.archive(owner.id);
   const current = (await store.projection(owner.id))!;
   const { worktreePath: _worktreePath, ...moved } = current;
@@ -1439,6 +1450,7 @@ test("the core refuses to release a project checkout through the cleanup's proof
   const root = repo();
   const { isolation, sessions, released, store } = make(root, { durableRelease: true });
   const owner = await isolation.createIsolatedSession({ projectId: "p1" });
+  commitWork((await sessions.snapshot(owner.id)).isolation!.worktreePath);
   await sessions.archive(owner.id);
   const current = (await store.projection(owner.id))!;
   await store.upsertProjection({
@@ -1463,6 +1475,7 @@ test("a merge that has not settled keeps its checkout and evidence", async () =>
   const { isolation, sessions, store } = make(root, { durableRelease: true });
   const owner = await isolation.createIsolatedSession({ projectId: "p1" });
   const record = (await sessions.snapshot(owner.id)).isolation!;
+  commitWork(record.worktreePath);
   await sessions.archive(owner.id);
   await store.upsertProjection({
     ...(await store.projection(owner.id))!,
@@ -1493,6 +1506,186 @@ test("every repository of a multi-repository session is released together", asyn
     after.workspace?.repositories.map((row) => [row.repositoryId, resolve(row.path), row.isolation]),
     [["app", resolve(root), undefined], ["api", resolve(secondary), undefined]],
   );
+});
+
+test("archiving an idle session releases its empty checkout and the chat stays restorable", async () => {
+  const root = repo();
+  const { isolation, sessions, released } = make(root, { durableRelease: true });
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const worktreePath = (await sessions.snapshot(created.id)).isolation!.worktreePath;
+  // Ignored dependency folders and caches are not work.
+  writeFileSync(join(root, ".gitignore"), "node_modules/\n");
+  runGit(root, "add", ".gitignore");
+  runGit(root, "commit", "-qm", "ignore");
+  runGit(worktreePath, "merge", "-q", "--ff-only", "main");
+  mkdirSync(join(worktreePath, "node_modules"));
+  writeFileSync(join(worktreePath, "node_modules", "dep.js"), "x\n");
+
+  await sessions.archive(created.id);
+
+  assert.deepEqual(leftovers(root), CLEAN);
+  assert.equal(existsSync(worktreePath), false);
+  assert.ok(released.includes(worktreePath), "its execution was proven gone first");
+  const after = await sessions.snapshot(created.id);
+  assert.equal(after.status, "archived");
+  assert.equal(after.isolation, undefined);
+  await sessions.restore(created.id);
+  assert.equal((await sessions.snapshot(created.id)).status, "idle");
+});
+
+test("archiving keeps a checkout that holds a commit, an untracked file or an edit", async () => {
+  const root = repo();
+  const { isolation, sessions } = make(root, { durableRelease: true });
+  const committed = await isolation.createIsolatedSession({ projectId: "p1" });
+  const untracked = await isolation.createIsolatedSession({ projectId: "p1" });
+  const edited = await isolation.createIsolatedSession({ projectId: "p1" });
+  const pathOf = async (id: string) => (await sessions.snapshot(id)).isolation!.worktreePath;
+  commitWork(await pathOf(committed.id));
+  writeFileSync(join(await pathOf(untracked.id), "scratch.txt"), "x\n");
+  writeFileSync(join(await pathOf(edited.id), "README.md"), "changed\n");
+
+  for (const session of [committed, untracked, edited]) {
+    const worktreePath = await pathOf(session.id);
+    await sessions.archive(session.id);
+    assert.equal(existsSync(worktreePath), true, "work is kept");
+    assert.equal((await sessions.snapshot(session.id)).isolation?.state, "active");
+    // The sweep's release keeps it too.
+    await sessions.releaseArchivedCheckouts!(session.id, { onlyEmpty: true });
+    assert.equal(existsSync(worktreePath), true, "work is kept by the sweep");
+  }
+});
+
+test("a release that throws never fails the archive, and a later pass retries it", async () => {
+  const root = repo();
+  const { isolation, sessions, ctrl } = make(root, { durableRelease: true });
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const worktreePath = (await sessions.snapshot(created.id)).isolation!.worktreePath;
+  ctrl.failClose = true;
+
+  await sessions.archive(created.id);
+
+  assert.equal((await sessions.snapshot(created.id)).status, "archived");
+  assert.equal(existsSync(worktreePath), true, "kept, still retryable");
+  ctrl.failClose = false;
+  await sessions.releaseArchivedCheckouts!(created.id, { onlyEmpty: true });
+  assert.deepEqual(leftovers(root), CLEAN);
+  assert.equal((await sessions.snapshot(created.id)).status, "archived");
+});
+
+test("a host release that rejects is swallowed by the archive", async () => {
+  const root = repo();
+  const { isolation, sessions, store } = make(root, { durableRelease: true });
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const throwing = createSessionService({
+    store,
+    projects: { list: async () => [], get: async () => ({ id: "p1", path: root, name: "p", createdAt: 1 }), add: async () => { throw new Error("unused"); }, create: async () => { throw new Error("unused"); }, remove: async () => {} },
+    permissions: { evaluate: () => "allow", addRule: () => {}, rules: () => [] } as unknown as PermissionService,
+    broadcast: { event: () => {}, projection: () => {} },
+    queue: store,
+    runtimes: { forProject: async () => { throw new Error("unused"); } },
+    releaseArchivedCheckouts: () => { throw new Error("release exploded"); },
+  });
+  await throwing.archive(created.id);
+  assert.equal((await sessions.snapshot(created.id)).status, "archived");
+});
+
+test("the sweep's release frees a checkout archived earlier and keeps one that holds work", async () => {
+  const root = repo();
+  const { isolation, sessions, ctrl } = make(root, { durableRelease: true });
+  const empty = await isolation.createIsolatedSession({ projectId: "p1" });
+  const worked = await isolation.createIsolatedSession({ projectId: "p1" });
+  const emptyPath = (await sessions.snapshot(empty.id)).isolation!.worktreePath;
+  const workedPath = (await sessions.snapshot(worked.id)).isolation!.worktreePath;
+  commitWork(workedPath);
+  ctrl.failClose = true; // the archive-time release did not finish
+  await sessions.archive(empty.id);
+  await sessions.archive(worked.id);
+  ctrl.failClose = false;
+  assert.equal(existsSync(emptyPath), true);
+
+  await sessions.releaseArchivedCheckouts!(empty.id, { onlyEmpty: true });
+  await sessions.releaseArchivedCheckouts!(worked.id, { onlyEmpty: true });
+
+  assert.equal(existsSync(emptyPath), false);
+  assert.equal(existsSync(workedPath), true);
+  assert.equal((await sessions.snapshot(empty.id)).isolation, undefined);
+  assert.equal((await sessions.snapshot(worked.id)).isolation?.state, "active");
+});
+
+test("archiving keeps a checkout whose runtime another live session shares", async () => {
+  const root = repo();
+  const { isolation, sessions, store, released } = make(root, { durableRelease: true });
+  const owner = await isolation.createIsolatedSession({ projectId: "p1" });
+  const record = (await sessions.snapshot(owner.id)).isolation!;
+  const binding = (await store.projection(owner.id))!.runtimeBinding!;
+  const other = await sessions.create({ projectId: "p1" });
+  await store.upsertProjection({ ...(await store.projection(other.id))!, status: "idle", runtimeBinding: binding });
+
+  await sessions.archive(owner.id);
+
+  assert.equal(existsSync(record.worktreePath), true, "the shared runtime keeps serving the other session");
+  assert.deepEqual(released, [], "no shared execution was released");
+});
+
+test("archiving keeps a checkout a live process still stands in", async () => {
+  const root = repo();
+  const { isolation, sessions } = make(root, { durableRelease: true });
+  const owner = await isolation.createIsolatedSession({ projectId: "p1" });
+  const record = (await sessions.snapshot(owner.id)).isolation!;
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { cwd: record.worktreePath, stdio: "ignore" });
+  try {
+    await sessions.archive(owner.id);
+    assert.equal(existsSync(record.worktreePath), true);
+    child.kill();
+    await new Promise((done) => child.once("exit", done));
+    await sessions.releaseArchivedCheckouts!(owner.id, { onlyEmpty: true });
+    assert.deepEqual(leftovers(root), CLEAN, "released once nothing stands in it");
+  } finally {
+    child.kill();
+  }
+});
+
+test("an empty parent checkout stays while an archived nested child holding work still targets it", async () => {
+  const root = repo();
+  const { isolation, sessions } = make(root, { durableRelease: true });
+  const parent = await isolation.createIsolatedSession({ projectId: "p1", title: "Parent" });
+  const parentCheckout = (await sessions.snapshot(parent.id)).isolation!.worktreePath;
+  const child = await isolation.createDelegatedSession({ parentSessionId: parent.id, title: "Worker" });
+  const childCheckout = child.isolation.worktreePath;
+  assert.equal((await sessions.snapshot(child.id)).isolation?.originPath, resolve(parentCheckout));
+  commitWork(childCheckout);
+
+  await sessions.archive(child.id);
+  await sessions.archive(parent.id);
+  await sessions.releaseArchivedCheckouts!(parent.id, { onlyEmpty: true });
+
+  assert.equal(existsSync(childCheckout), true, "the child's work is kept");
+  assert.equal(existsSync(parentCheckout), true, "its merge target is kept with it");
+  const after = await sessions.snapshot(child.id);
+  assert.equal(after.isolation?.state, "active");
+  assert.equal(resolve(after.isolation!.originPath!), resolve(parentCheckout));
+  assert.equal((await sessions.snapshot(parent.id)).isolation?.state, "active");
+});
+
+test("a restore that wins the race keeps its checkout", async () => {
+  const root = repo();
+  const { isolation, sessions, store, ctrl } = make(root, { durableRelease: true });
+  const created = await isolation.createIsolatedSession({ projectId: "p1" });
+  const worktreePath = (await sessions.snapshot(created.id)).isolation!.worktreePath;
+  ctrl.failClose = true;
+  await sessions.archive(created.id);
+  ctrl.failClose = false;
+  // The restore lands while the execution release is in flight.
+  ctrl.beforeRelease = async () => {
+    await store.upsertProjection({ ...(await store.projection(created.id))!, status: "idle" });
+  };
+
+  await sessions.releaseArchivedCheckouts!(created.id, { onlyEmpty: true });
+
+  assert.equal(existsSync(worktreePath), true);
+  const after = await sessions.snapshot(created.id);
+  assert.equal(after.status, "idle");
+  assert.equal(after.isolation?.state, "active");
 });
 
 test("a host without isolation cleanup says so", async () => {

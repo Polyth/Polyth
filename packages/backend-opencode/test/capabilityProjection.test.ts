@@ -138,8 +138,15 @@ test("OpenCode projects package-owned MCP descriptors from the canonical plan", 
     timeout: 30_000,
   });
   const v2 = applyOpenCodeLaunchOverlay({}, overlay, "v2");
-  // Released V2 performs its own backwards-compatible normalization.
-  assert.deepEqual(JSON.parse(v2.OPENCODE_CONFIG_CONTENT ?? "{}"), config);
+  // Released V2 would normalize the V1 numeric timeout into an execution
+  // limit too; its launch gets the native form with the startup budget only.
+  // A package MCP keeps OpenCode's Code Mode default.
+  assert.deepEqual(JSON.parse(v2.OPENCODE_CONFIG_CONTENT ?? "{}"), { mcp: { servers: { "package-helper": {
+    type: "local",
+    command: ["package-helper", "--stdio"],
+    disabled: false,
+    timeout: { startup: 30_000, catalog: 30_000 },
+  } } } });
 });
 
 test("browser capability uses the generic agent-tools MCP projection", async (t) => {

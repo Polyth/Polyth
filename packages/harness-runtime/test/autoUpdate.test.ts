@@ -8,6 +8,19 @@ import { createServerServiceRegistry, serverServiceKey, type ServerPackageHost }
 import { createHarnessAutoUpdater, type AutoUpdateHarness, type AutoUpdateRun } from "../src/autoUpdate.ts";
 import { harnessRoutes } from "../src/serverEntry.ts";
 
+import { after } from "node:test";
+import { rmSync } from "node:fs";
+
+const tempDirs: string[] = [];
+const tempDir = (prefix: string): string => {
+  const dir = mkdtempSync(prefix);
+  tempDirs.push(dir);
+  return dir;
+};
+after(() => {
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
 const descriptor = (id: string, extra: Partial<HarnessDescriptor> = {}): HarnessDescriptor =>
     ({ id, name: id, integration: "test", priority: 0, updateCommand: ["codex", "update"], ...extra }) as HarnessDescriptor;
 
@@ -27,7 +40,7 @@ function rig(harnesses: AutoUpdateHarness[], options: { release?: boolean; updat
     const versions = { installed: "1.0.0", latest: "1.1.0" };
     const runs: AutoUpdateRun[] = [];
     const clock = { now: 1_000_000 };
-    const file = join(mkdtempSync(join(tmpdir(), "harness-auto-update-")), "auto-update.json");
+    const file = join(tempDir(join(tmpdir(), "harness-auto-update-")), "auto-update.json");
     const updater = createHarnessAutoUpdater({
         file,
         harnesses: () => harnesses,
@@ -84,7 +97,7 @@ test("chats still on the old build are restarted on later passes, and never befo
     const clock = { now: 5_000_000 };
     const versions = { installed: "1.0.0" };
     const updater = createHarnessAutoUpdater({
-        file: join(mkdtempSync(join(tmpdir(), "harness-auto-restart-")), "auto-update.json"),
+        file: join(tempDir(join(tmpdir(), "harness-auto-restart-")), "auto-update.json"),
         harnesses: () => [codex],
         async status() {
             return { harnessId: "codex", current: versions.installed, latest: "2.0.0", available: versions.installed !== "2.0.0", canUpdate: true };
@@ -260,7 +273,7 @@ async function call(routes: ReturnType<typeof harnessRoutes>, method: string, pa
 test("only the instance owner switches automatic updates; everyone who sees the harness sees whether it is on", async () => {
     const host = routeHost();
     const autoUpdates = createHarnessAutoUpdater({
-        file: join(mkdtempSync(join(tmpdir(), "harness-auto-route-")), "auto-update.json"),
+        file: join(tempDir(join(tmpdir(), "harness-auto-route-")), "auto-update.json"),
         harnesses: () => [{ descriptor: descriptor("codex") }],
         async status() { return { harnessId: "codex", available: false, canUpdate: true }; },
         async update() { return { ok: true, exitCode: 0, output: "" }; },

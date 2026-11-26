@@ -189,6 +189,43 @@ test("exit codes are stable for scripts", () => {
   assert.equal(exitCodeFor(Object.assign(new Error("t"), { code: "timeout" })), 7);
 });
 
+test("Polyth Desktop's CLI runs its bundled break-glass on the Desktop data directory", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-cli-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const cli = join(dir, "cli");
+  mkdirSync(cli);
+  const record = join(dir, "args.json");
+  writeFileSync(join(cli, "break-glass.mjs"), `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(record)}, JSON.stringify({ args: process.argv.slice(2), node: process.env.ELECTRON_RUN_AS_NODE }));\n`);
+  const saved = { argv1: process.argv[1], env: { ...process.env } };
+  t.after(() => {
+    process.argv[1] = saved.argv1!;
+    for (const key of ["POLYTH_DESKTOP_USER_DATA", "POLYTH_DESKTOP_EXECUTABLE", "ELECTRON_RUN_AS_NODE"]) {
+      if (saved.env[key] === undefined) delete process.env[key];
+      else process.env[key] = saved.env[key];
+    }
+  });
+  process.env.POLYTH_DESKTOP_USER_DATA = join(dir, "desktop");
+  delete process.env.ELECTRON_RUN_AS_NODE;
+  // Not the Desktop launcher: no bundled tool to run.
+  delete process.env.POLYTH_DESKTOP_EXECUTABLE;
+  process.argv[1] = join(cli, "polyth.cjs");
+  const errors: string[] = [];
+  const originalErr = process.stderr.write.bind(process.stderr);
+  process.stderr.write = ((chunk: string) => { errors.push(String(chunk)); return true; }) as typeof process.stderr.write;
+  try {
+    assert.equal(await main(["--target", "desktop", "server", "break-glass"]), 2);
+  } finally {
+    process.stderr.write = originalErr;
+  }
+  assert.match(errors.join(""), /update Polyth Desktop/);
+  process.env.POLYTH_DESKTOP_EXECUTABLE = process.execPath;
+  assert.equal(await main(["--target", "desktop", "server", "break-glass", "inspect"]), 0);
+  assert.deepEqual(JSON.parse(readFileSync(record, "utf8")), {
+    args: ["inspect", "--data-dir", join(dir, "desktop", "data")],
+    node: "1",
+  });
+});
+
 test("help, version and completion run without a server", async () => {
   const writes: string[] = [];
   const original = process.stdout.write.bind(process.stdout);
