@@ -853,7 +853,12 @@ export function scheduleRoutes(deps: {
         json(400, { error: "invalid-input", message: "done must be true or false" });
         return true;
       }
-      json(200, await view(deps.schedule.setNeedDone(task.id, needMatch[2]!, Number(needMatch[3]), input.done)));
+      const answer: unknown = input.answer;
+      if (answer !== undefined && answer !== "yes" && answer !== "no") {
+        json(400, { error: "invalid-input", message: "answer must be yes or no" });
+        return true;
+      }
+      json(200, await view(deps.schedule.setNeedDone(task.id, needMatch[2]!, Number(needMatch[3]), input.done, input.done ? answer : undefined)));
       return true;
     }
 

@@ -4,7 +4,8 @@ import type { WebPackageHost } from "@polyth/web-sdk";
 import { getLocale, tr } from "../../../apps/web/src/i18n/index.ts";
 import { useShellMode } from "../../../apps/web/src/responsiveShell.ts";
 import { Button } from "../../../apps/web/src/components/ui/index.ts";
-import { sameNeed } from "../src/agentReport.ts";
+import { sameNeed, type NeedAnswer } from "../src/agentReport.ts";
+import { setUiError } from "../../../apps/web/src/store.ts";
 import { pauseAgent, runAgent } from "./agentActions.ts";
 import { agentAttention, failureTitle, type AttentionItem } from "./agentFailure.ts";
 import { pinnedHarnessOf } from "./agentSignIn.tsx";
@@ -33,20 +34,43 @@ const webLink = (url: string | undefined): string | undefined =>
 const harnessOfRun = (agent: ScheduleTaskDto, run: ScheduleRunDto): string | undefined =>
   (run.backup ? agent.fallbackModels?.[run.backup - 1]?.harnessId : undefined) ?? pinnedHarnessOf(agent);
 
-/** Settle (or reopen) a request wherever the agent's reports asked it. */
-export async function settleNeed(agent: ScheduleTaskDto, runId: string, index: number, done: boolean): Promise<void> {
+/** Settle (or reopen) a request wherever the agent's reports asked it.
+ *  `answer`: the person said go ahead or declined, rather than did it. False
+ *  when it could not be saved; the page then shows the request again. */
+export async function settleNeed(agent: ScheduleTaskDto, runId: string, index: number, done: boolean, answer?: NeedAnswer): Promise<boolean> {
   const asked = agent.history?.find((run) => run.runId === runId)?.needs?.[index];
-  if (!asked) return;
+  if (!asked) return false;
   const at = Date.now();
   const history = (agent.history ?? []).map((run) => !run.needs?.some((need) => sameNeed(need.text, asked.text)) ? run : {
     ...run,
     needs: run.needs.map((need) => {
       if (!sameNeed(need.text, asked.text)) return need;
       const { done: _was, ...open } = need;
-      return done ? { ...open, done: { at, by: "user" as const } } : open;
+      return done ? { ...open, done: { at, by: "user" as const, ...(answer ? { answer } : {}) } } : open;
     }),
   });
-  await optimistic(agent.id, { history }, () => api.scheduleNeedDone(agent.id, runId, index, done)).catch(() => {});
+  try {
+    await optimistic(agent.id, { history }, () => api.scheduleNeedDone(agent.id, runId, index, done, answer));
+    return true;
+  } catch (cause) {
+    setUiError(cause instanceof Error ? cause.message : String(cause));
+    return false;
+  }
+}
+
+/** Answer a request: it stops waiting at once (so the tap shows, and the
+ *  agent is not told it still waits), then the agent wakes with the person's
+ *  words. A wake that was refused puts the request back. */
+export async function answerNeed(
+  agent: ScheduleTaskDto,
+  need: { runId: string; index: number },
+  answer: NeedAnswer,
+  message: string,
+): Promise<boolean> {
+  if (!await settleNeed(agent, need.runId, need.index, true, answer)) return false;
+  if (await runAgent(agent, message)) return true;
+  await settleNeed(agent, need.runId, need.index, false);
+  return false;
 }
 
 /** What waits for the person, above the agent's conversation: why it no
@@ -123,11 +147,12 @@ export default function AgentAttention({ host, agent, onOpenSession }: {
     }
     const { need } = item;
     const url = webLink(need.url);
-    // The answer goes to the agent as the person's words, so it acts on it
-    // now and closes the request itself.
-    const answer = (message: string) => {
+    // Only a request the agent waits on for a yes or no can be answered
+    // from here; what the person does themselves is theirs to call done.
+    const decision = need.kind === "decision";
+    const answer = (verdict: NeedAnswer, message: string) => {
       setBusy(item.key);
-      void runAgent(agent, message).finally(() => setBusy(""));
+      void answerNeed(agent, need, verdict, message).finally(() => setBusy(""));
     };
     return {
       title: need.text,
@@ -140,12 +165,14 @@ export default function AgentAttention({ host, agent, onOpenSession }: {
               {/\/pull\/\d+/.test(url) ? tr("agents.openPr") : tr("agents.openLink")}
             </a>
           )}
+          {decision && (
+            <>
           <Button
             size="sm"
             variant="primary"
             className="agent-attention-approve"
             disabled={busy === item.key}
-            onClick={() => answer(tr("agents.need.approveMessageValue", { need: need.text }))}
+            onClick={() => answer("yes", tr("agents.need.approveMessageValue", { need: need.text }))}
           >
             {tr("agents.need.approve")}
           </Button>
@@ -154,13 +181,15 @@ export default function AgentAttention({ host, agent, onOpenSession }: {
             variant="ghost"
             className="agent-attention-decline"
             disabled={busy === item.key}
-            onClick={() => answer(tr("agents.need.declineMessageValue", { need: need.text }))}
+            onClick={() => answer("no", tr("agents.need.declineMessageValue", { need: need.text }))}
           >
             {tr("agents.need.decline")}
           </Button>
+            </>
+          )}
           <Button
             size="sm"
-            variant="ghost"
+            {...(decision ? { variant: "ghost" as const } : {})}
             className="agent-attention-done"
             disabled={busy === item.key}
             onClick={() => {

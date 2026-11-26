@@ -292,7 +292,9 @@ function Needs({ needs }: { needs: NonNullable<ScheduleRunDto["needs"]> }) {
                 </span>
                 {need.done && (
                   <span className="agent-need-state">
-                    {need.done.by === "agent" ? tr("agents.need.closedByAgent") : tr("agents.need.done")}
+                    {need.done.by === "agent"
+                      ? tr("agents.need.closedByAgent")
+                      : tr(need.done.answer === "yes" ? "agents.need.approve" : need.done.answer === "no" ? "agents.need.decline" : "agents.need.done")}
                   </span>
                 )}
               </span>

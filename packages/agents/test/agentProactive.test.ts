@@ -106,6 +106,23 @@ test("Needs you lines become the person's to-dos: what, why and a web link, neve
   assert.doesNotMatch(report.body, /Electron 45|Apple agreement|Rotate/);
   assert.match(report.body, /inside a code sample/, "fenced protocol text is content");
   assert.match(REPORT_INSTRUCTIONS, /Needs you: <what>/);
+  assert.match(REPORT_INSTRUCTIONS, /Needs your OK: <what you will do/);
+});
+
+test("Needs your OK lines are decisions the agent acts on; Needs you lines stay the person's own", () => {
+  const report = parseAgentReport([
+    "Held one upgrade.",
+    "**Needs your OK:** Merge Electron 46 into devel — a major line; CI is green — https://github.com/acme/app/pull/40",
+    "Needs your approval: Dismiss alert #172",
+    "Needs you: Try the nightly on a real phone",
+    "Report: update — one upgrade waits for your yes",
+  ].join("\n"));
+  assert.deepEqual(report.needs, [
+    { text: "Merge Electron 46 into devel", kind: "decision", detail: "a major line; CI is green", url: "https://github.com/acme/app/pull/40" },
+    { text: "Dismiss alert #172", kind: "decision" },
+    { text: "Try the nightly on a real phone" },
+  ]);
+  assert.doesNotMatch(report.body, /Electron 46|alert #172|real phone/);
 });
 
 test("a kept report is cut whole: never inside a code block, a word or after an operator", () => {

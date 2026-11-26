@@ -673,7 +673,7 @@ export interface ScheduleRunDto {
   timeline?: Array<{ at: number; text: string; kind?: "wait" | "resume"; until?: number }>;
   /** Once finished: what the report says only the person can do. `done`:
    *  settled by the person, or by a later report of the agent. */
-  needs?: Array<{ text: string; detail?: string; url?: string; done?: { at: number; by: "user" | "agent" } }>;
+  needs?: Array<{ text: string; kind?: "decision"; detail?: string; url?: string; done?: { at: number; by: "user" | "agent"; answer?: "yes" | "no" } }>;
   /** Why a run that did not finish ended. `person`: someone stopped it;
    *  `cut`: its turn was cut under it and its own continuations ran out;
    *  `route`: its model refused (sign-in, quota, the model itself);
@@ -2042,10 +2042,10 @@ export const api = {
     jfetch<ScheduleTaskDto>(`/api/schedule/${encodeURIComponent(id)}/seen`, json("POST", at !== undefined ? { at } : {})),
   scheduleStop: (id: string) =>
     jfetch<{ stopped: number }>(`/api/schedule/${encodeURIComponent(id)}/stop`, { method: "POST" }),
-  scheduleNeedDone: (id: string, runId: string, index: number, done: boolean) =>
+  scheduleNeedDone: (id: string, runId: string, index: number, done: boolean, answer?: "yes" | "no") =>
     jfetch<ScheduleTaskDto>(
       `/api/schedule/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/needs/${index}`,
-      json("POST", { done }),
+      json("POST", { done, ...(done && answer ? { answer } : {}) }),
     ),
   scheduleFeedback: (id: string, runId: string, verdict: "up" | "down" | null, note?: string) =>
     jfetch<ScheduleTaskDto>(

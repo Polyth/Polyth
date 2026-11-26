@@ -14,22 +14,29 @@ export const AGENT_SIGNALS: readonly AgentSignal[] = ["quiet", "update", "alert"
 export type AgentNotifyPolicy = "alerts" | "updates" | "off";
 
 /** Something only the person can do: a decision, a review, a sign-in. */
+/** What the person said to a request: go ahead, or do not. */
+export type NeedAnswer = "yes" | "no";
+
 export interface AgentNeed {
   text: string;
+  /** "decision": the agent waits for a yes or no and acts on it itself
+   *  (`Needs your OK:`). Absent: something the person does themselves
+   *  (`Needs you:`), which only they can call done. */
+  kind?: "decision";
   /** Why, or what to do. */
   detail?: string;
   /** Where to do it (http/https only). */
   url?: string;
-  /** Settled: the person marked it done, or a later report of the agent
-   *  said it no longer waits (`Resolved:`). */
-  done?: { at: number; by: "user" | "agent" };
+  /** Settled: the person marked it done or answered it (`answer`), or a
+   *  later report of the agent said it no longer waits (`Resolved:`). */
+  done?: { at: number; by: "user" | "agent"; answer?: NeedAnswer };
 }
 
 export interface AgentReport {
   /** Absent when the message carries no Report line. */
   signal?: AgentSignal;
   headline?: string;
-  /** The message without its Report, Remember and Needs you lines. */
+  /** The message without its Report, Remember and Needs you / Needs your OK lines. */
   body: string;
   /** Durable notes, in the order written. */
   remember: string[];
@@ -57,7 +64,9 @@ export const NOTEBOOK_LIMIT = 6_000;
 const DECOR = "[\\s>*_`~-]*";
 const REPORT_LINE = new RegExp(`^${DECOR}report${DECOR}:${DECOR}(quiet|update|alert)\\b${DECOR}(?:[—–:|·-]+\\s*)?(.*)$`, "i");
 const REMEMBER_LINE = new RegExp(`^${DECOR}remember${DECOR}:${DECOR}(.+)$`, "i");
-const NEEDS_LINE = new RegExp(`^${DECOR}needs[ \\t]+you${DECOR}:${DECOR}(.+)$`, "i");
+// "Needs you: …" is the person's own to-do; "Needs your OK: …" asks for a yes
+// or no the agent then acts on (group 1 says which).
+const NEEDS_LINE = new RegExp(`^${DECOR}needs[ \\t]+you(r[ \\t]+(?:ok|okay|approval|decision))?${DECOR}:${DECOR}(.+)$`, "i");
 const RESOLVED_LINE = new RegExp(`^${DECOR}resolved${DECOR}:${DECOR}(.+)$`, "i");
 export const RESOLVED_PER_RUN = 6;
 const NEXT_WAKE_LINE = new RegExp(`^${DECOR}next[ \\t]+wake${DECOR}:${DECOR}(.+)$`, "i");
@@ -79,7 +88,7 @@ const clean = (text: string, limit: number): string => {
 
 /** "<what> — <why> — <link>": the link may stand anywhere, or be a
  *  Markdown link around the words. */
-function parseNeed(raw: string): AgentNeed | undefined {
+function parseNeed(raw: string, decision = false): AgentNeed | undefined {
   let text = raw;
   let url: string | undefined;
   const markdown = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/i.exec(text);
@@ -99,6 +108,7 @@ function parseNeed(raw: string): AgentNeed | undefined {
   const detail = clean(parts.slice(1).join(" — "), NEED_DETAIL_LIMIT);
   return {
     text: what,
+    ...(decision ? { kind: "decision" as const } : {}),
     ...(detail ? { detail } : {}),
     ...(url && url.length <= URL_LIMIT ? { url } : {}),
   };
@@ -142,7 +152,7 @@ export function parseAgentReport(text: string | undefined): AgentReport {
     const need = NEEDS_LINE.exec(line);
     if (need) {
       protocolAt.add(index);
-      const value = parseNeed(need[1]!);
+      const value = parseNeed(need[2]!, Boolean(need[1]));
       if (value && needs.length < NEEDS_PER_RUN && !needs.some((known) => known.text === value.text)) needs.push(value);
       return;
     }
@@ -312,7 +322,8 @@ export const REPORT_INSTRUCTIONS = [
   "- quiet: nothing new that deserves the user's time; the run is filed silently.",
   "- update: a result worth reading.",
   "- alert: something needs the user's attention soon.",
-  "For anything only the user can do (a decision, a review, a sign-in), add a line \"Needs you: <what> — <why or what to do> — <link>\" (the link is optional). It stays on your page as the user's to-do until they mark it done or you close it, so ask once, name the exact action, and never use it for something you can do yourself.",
+  "For anything only the user can do themselves (a review, a sign-in, a test on a real device), add a line \"Needs you: <what> — <why or what to do> — <link>\" (the link is optional). It stays on your page as the user's to-do until they mark it done or you close it, so ask once, name the exact action, and never use it for something you can do yourself.",
+  "When you only wait for the user's yes or no and will then do the work yourself (a risky upgrade, an irreversible or outward-facing step), write it as \"Needs your OK: <what you will do once they agree> — <why it needs them> — <link>\" instead: the user answers with one tap and you are woken with their answer. Never use it for something the user has to do themselves.",
   "When a request you made earlier no longer waits (the user did it, or it stopped mattering), close it with a line \"Resolved: <the same words>\".",
   "If you start background work and end your turn to wait for it, leave out the Report line until the final message: a message without it while that work runs is not your report.",
   "For anything later runs should know (a preference, a decision, a state to track), add a line \"Remember: <note>\". Keep notes short; they go into your notebook.",
@@ -321,4 +332,4 @@ export const REPORT_INSTRUCTIONS = [
 
 /** The same protocol, as a reminder in a continuing session. */
 export const REPORT_REMINDER =
-  "Finish with \"Report: quiet|update|alert — <headline>\" (shown above your message: do not restate it there; only in your final message, not while background work you wait for runs); add \"Remember: <note>\" lines for anything later runs should know, \"Needs you: <what> — <why> — <link>\" lines for what only the user can do, and \"Resolved: <the same words>\" for an earlier request that no longer waits; when the user asks for something at your next wake rather than now, do not do it now: add \"Next wake: <what to do>\".";
+  "Finish with \"Report: quiet|update|alert — <headline>\" (shown above your message: do not restate it there; only in your final message, not while background work you wait for runs); add \"Remember: <note>\" lines for anything later runs should know, \"Needs you: <what> — <why> — <link>\" lines for what only the user can do themselves, \"Needs your OK: <what you will do> — <why> — <link>\" lines for a yes or no you then act on, and \"Resolved: <the same words>\" for an earlier request that no longer waits; when the user asks for something at your next wake rather than now, do not do it now: add \"Next wake: <what to do>\".";

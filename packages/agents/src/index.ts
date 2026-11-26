@@ -32,6 +32,7 @@ import {
   NOTEBOOK_LIMIT,
   parseAgentReport,
   type AgentNeed,
+  type NeedAnswer,
   type AgentNotifyPolicy,
   type AgentSignal,
 } from "./agentReport.ts";
@@ -977,7 +978,9 @@ export interface ScheduleService {
   /** The person takes back a request waiting for the next wake. */
   dropWakeNote(id: string, noteId: string): ScheduleTask;
   /** The person settles (or reopens) what a report said only they can do. */
-  setNeedDone(id: string, runId: string, index: number, done: boolean): ScheduleTask;
+  /** Settle (or reopen) a request; `answer` records that the person said
+   *  go ahead or declined, rather than did it themselves. */
+  setNeedDone(id: string, runId: string, index: number, done: boolean, answer?: NeedAnswer): ScheduleTask;
   /** The person stops the runs in progress: marks them and returns their
    *  sessions, which the caller aborts. */
   requestStop(id: string): string[];
@@ -2621,7 +2624,7 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
       }
       return t;
     },
-    setNeedDone(id, runId, index, done) {
+    setNeedDone(id, runId, index, done, answer) {
       const t = mustGet(id);
       const run = t.history?.find((record) => record.runId === runId);
       const need = run?.needs?.[index];
@@ -2631,7 +2634,7 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
       for (const record of t.history ?? []) {
         for (const other of record.needs ?? []) {
           if (other !== need && !sameNeed(other.text, need.text)) continue;
-          if (done) other.done = { at: now(), by: "user" };
+          if (done) other.done = { at: now(), by: "user", ...(answer ? { answer } : {}) };
           else delete other.done;
         }
       }

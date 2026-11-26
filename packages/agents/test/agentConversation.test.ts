@@ -564,7 +564,7 @@ test("nights read as one row each; the newest report says when and how long, and
         runId: "r3", ago: 70 * MIN, finishedAt: now - 12 * MIN, sessionId: "s-3", signal: "update",
         headline: "devel fixed; 2 PRs merged", summary: "Security is clear and devel is green.\n\n| PR | Result |\n| - | - |\n| #31 | merged |",
         needs: [
-          { text: "Electron 45 · PR #32", detail: "waits for your smoke test", url: "https://github.com/acme/app/pull/32" },
+          { text: "Electron 45 · PR #32", kind: "decision", detail: "waits for your smoke test", url: "https://github.com/acme/app/pull/32" },
           { text: "Rotate the deploy key", url: "javascript:alert(1)" },
         ],
         timeline: [
@@ -616,6 +616,11 @@ test("nights read as one row each; the newest report says when and how long, and
   assert.match(record.textContent ?? "", /Electron 45 · PR #32.*Rotate the deploy key/);
   assert.equal(record.querySelectorAll("a").length, 1, "the record links only to the web too");
   assert.equal(record.querySelector("button"), null, "the record carries no action");
+  // A yes or no the agent acts on is answered here; what the person does
+  // themselves can only be called done.
+  const answers = (item: Element) => [...item.querySelectorAll("button")].map((button) => button.textContent);
+  assert.deepEqual(answers(asks[0]!), ["Go ahead", "Decline", "Done"]);
+  assert.deepEqual(answers(asks[1]!), ["Done"]);
   // Settling one takes it off the list at once, wherever it was asked.
   await act(async () => { buttonNamed(asks[1]!, "Done")!.click(); await delay(20); });
   assert.deepEqual(
