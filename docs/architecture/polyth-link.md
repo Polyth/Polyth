@@ -299,8 +299,9 @@ See `packages/server/src/remotePolicy.ts` and each package `serverEntry`.
 The desktop Link page (`packages/tunnel/widgets`) shows the device list and
 host status only. Pair device creates the invitation immediately (QR, numeric
 code when the host issues one, a copyable pairing link for a computer, safety
-words). An optional "Access"
-disclosure picks a narrower preset, which reissues the invitation. Each device's
+words); an expired QR fades back so it never looks scannable until New code.
+An optional "Access" disclosure picks a narrower preset (an even 2×2 control in
+the dialog), which reissues the invitation. Each device's
 Permissions disclosure holds the Full access switch; switching it off keeps the
 device's other grants and reveals presets plus per-capability toggles
 (`widgets/permissions.ts` names every capability, pinned by test). Fingerprint,

@@ -312,15 +312,27 @@
   letter-spacing: 0.06em;
 }
 
+/* The box carries the size: a percentage width on the svg alone resolves
+   against the svg's 300px default, leaving the code off-centre. */
+.pkg-tunnel-qr {
+  width: min(100%, 240px);
+}
+
 .pkg-tunnel-qr svg {
   display: block;
-  width: min(100%, 240px);
+  width: 100%;
   height: auto;
   border-radius: var(--radius-card);
   /* QR stays dark-on-light in every theme so phone cameras read it. */
   background: #fff;
   fill: #111;
   box-shadow: 0 0 0 1px var(--border-soft), var(--shadow-sm);
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+
+/* An expired code must not look scannable: it fades back until "New code". */
+.pkg-tunnel-qr.is-expired svg {
+  opacity: 0.22;
 }
 
 .pkg-tunnel-access {
@@ -330,16 +342,55 @@
 }
 
 .pkg-tunnel-access > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
   width: fit-content;
   margin-inline: auto;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-control);
+  list-style: none;
   cursor: pointer;
 }
 
-.pkg-tunnel-access[open] {
+.pkg-tunnel-access > summary::-webkit-details-marker {
+  display: none;
+}
+
+.pkg-tunnel-access > summary svg {
+  flex: none;
+  transition: transform var(--motion-fast) var(--motion-ease);
+}
+
+.pkg-tunnel-access[open] > summary svg {
+  transform: rotate(180deg);
+}
+
+@media (hover: hover) {
+  .pkg-tunnel-access > summary:hover {
+    color: var(--text);
+  }
+}
+
+.pkg-tunnel-access-body {
   display: flex;
   flex-direction: column;
-  align-items: center;
   gap: var(--space-2);
+  width: 100%;
+  margin-top: var(--space-2);
+}
+
+/* Four presets in a 420px dialog: an even 2×2 grid in every locale, never
+   the settings row's right-aligned wrap that left 3 + 1 with a hole. */
+.pkg-tunnel-access .seg {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
+}
+
+.pkg-tunnel-access .seg button {
+  min-width: 0;
+  justify-content: center;
 }
 
 .pkg-tunnel-access .pkg-tunnel-meta {
@@ -471,7 +522,9 @@
 
 @media (prefers-reduced-motion: reduce) {
   .pkg-tunnel-device,
-  .pkg-tunnel-disclose svg {
+  .pkg-tunnel-disclose svg,
+  .pkg-tunnel-qr svg,
+  .pkg-tunnel-access > summary svg {
     transition: none;
   }
 }

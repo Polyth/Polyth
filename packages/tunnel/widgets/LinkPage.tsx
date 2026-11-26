@@ -122,9 +122,9 @@ function CopyPairingLink({ link, t }: { link: string; t: Translate }) {
   );
 }
 
-function QrMatrix({ modules, t }: { modules: boolean[][]; t: Translate }) {
+function QrMatrix({ modules, expired, t }: { modules: boolean[][]; expired: boolean; t: Translate }) {
   return (
-    <div className="pkg-tunnel-qr" role="img" aria-label={t("tunnel.permissions.qrAria")}>
+    <div className={`pkg-tunnel-qr${expired ? " is-expired" : ""}`} role="img" aria-label={t("tunnel.permissions.qrAria")}>
       <svg viewBox={`-2 -2 ${modules.length + 4} ${modules.length + 4}`} aria-hidden="true" shapeRendering="crispEdges">
         {modules.flatMap((row, y) => row.map((on, x) => on
           ? <rect key={`${x}-${y}`} x={x} y={y} width={1} height={1} />
@@ -832,18 +832,22 @@ export default function LinkPage({ host, settingsTarget }: {
           )}
           {offer && !phrase && (
             <div className="pkg-tunnel-pair">
-              {offer.qrModules && offer.qrModules.length > 0 && <QrMatrix modules={offer.qrModules} t={t} />}
+              {offer.qrModules && offer.qrModules.length > 0 && <QrMatrix modules={offer.qrModules} expired={expired} t={t} />}
               <p className="pkg-tunnel-lead">
                 {expired
                   ? t("tunnel.dialog.expired")
                   : forUserId ? t("tunnel.for.send", { name: forName }) : t("tunnel.dialog.scan")}
               </p>
-              <p className="pkg-tunnel-meta">
-                {offer.numericCode && numericSeconds !== 0 && (
-                  <>{t("tunnel.dialog.sameNetwork", { code: offer.numericCode })} </>
-                )}
-                {offerSeconds !== null && offerSeconds > 0 && <>{t("tunnel.dialog.expiresIn", { time: clock(offerSeconds) })}</>}
-              </p>
+              {/* The countdown line keeps its height while a code is live; an
+                  expired code has nothing to count, so no blank line is left. */}
+              {!expired && (
+                <p className="pkg-tunnel-meta">
+                  {offer.numericCode && numericSeconds !== 0 && (
+                    <>{t("tunnel.dialog.sameNetwork", { code: offer.numericCode })} </>
+                  )}
+                  {offerSeconds !== null && offerSeconds > 0 && <>{t("tunnel.dialog.expiresIn", { time: clock(offerSeconds) })}</>}
+                </p>
+              )}
               {!expired && offer.qrPayload && (
                 <p className="pkg-tunnel-computer">
                   <span>{t("tunnel.dialog.computer")}</span>
@@ -851,9 +855,16 @@ export default function LinkPage({ host, settingsTarget }: {
                 </p>
               )}
               <details className="pkg-tunnel-access">
-                <summary>{t("tunnel.dialog.accessSummary", { access: accessOptions.find(([id]) => id === access)?.[1] ?? "" })}</summary>
-                <Seg label={t("tunnel.dialog.accessAria")} value={access} options={accessOptions} disabled={busy} onChange={changeAccess} />
-                <p className="pkg-tunnel-meta">{t(forUserId ? "tunnel.for.accessHint" : "tunnel.dialog.accessHint")}</p>
+                <summary>
+                  <span>{t("tunnel.dialog.accessSummary", { access: accessOptions.find(([id]) => id === access)?.[1] ?? "" })}</span>
+                  <Icon icon={ChevronDownIcon} size="sm" />
+                </summary>
+                {/* Its own box: engines wrap <details> content in a slot, so the
+                    control's full width and spacing cannot hang off <details>. */}
+                <div className="pkg-tunnel-access-body">
+                  <Seg label={t("tunnel.dialog.accessAria")} value={access} options={accessOptions} disabled={busy} onChange={changeAccess} />
+                  <p className="pkg-tunnel-meta">{t(forUserId ? "tunnel.for.accessHint" : "tunnel.dialog.accessHint")}</p>
+                </div>
               </details>
             </div>
           )}
