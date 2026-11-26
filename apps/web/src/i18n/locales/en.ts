@@ -820,6 +820,7 @@ export const en = {
   "notificationcentre.couldNotUpdateNotifications": "Couldn’t update notifications. Check the connection and retry.",
   "notificationcentre.delegatedAgent": "Delegated agent",
   "notificationcentre.failed": "Failed",
+  "notificationcentre.limitReached": "Limit reached",
   "notificationcentre.loadingNotifications": "Loading notifications…",
   "notificationcentre.markAllRead": "Mark all read",
   "notificationcentre.nothingHereYetCompletionFailureQuestionAnd": "Nothing here yet — completion, failure, question, and permission notices will collect in this inbox.",

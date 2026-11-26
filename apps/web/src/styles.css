@@ -11688,12 +11688,13 @@ min-height: var(--tap);
 }
 
 .notification-centre { display: flex; flex-direction: column; gap: 10px; }
-/* The actions are the panel's one fixed row: the rail body is the scrollport,
-   so the bar sticks to its top, paints the panel surface over the body's
-   gutter (the module content padding) and keeps both buttons reachable however
-   far the list scrolls. They share one line: the panel opens at a width that
-   fits both labels (RAIL_WIDTH_DEFAULTS in railPrefs.ts), and the row wraps
-   only in a pane narrowed below that — never a forced column. */
+/* The actions are the panel's header row: the rail body is the scrollport, so
+   the row sticks to its top, paints the panel surface over the body's gutter
+   (the module content padding) and keeps both actions reachable however far
+   the list scrolls. They are quiet text at the inline end, so the notices
+   outweigh them. They share one line: the panel opens at a width that fits
+   both labels (RAIL_WIDTH_DEFAULTS in railPrefs.ts), and the row wraps only in
+   a pane narrowed below that — never a forced column. */
 .ntc-toolbar {
   --ntc-gutter-block: var(--module-content-block, var(--space-3));
   --ntc-gutter-inline: var(--module-content-inline, var(--space-3));
@@ -11702,12 +11703,16 @@ min-height: var(--tap);
   z-index: 2;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  justify-content: flex-end;
+  gap: var(--space-1);
   margin: calc(-1 * var(--ntc-gutter-block)) calc(-1 * var(--ntc-gutter-inline)) 0;
-  padding: var(--ntc-gutter-block) var(--ntc-gutter-inline);
+  padding: var(--ntc-gutter-block) var(--ntc-gutter-inline) 0;
   background: var(--panel);
 }
-.ntc-toolbar > button { flex: 1 1 auto; }
+.ntc-toolbar > .ui-btn--ghost { padding-inline: var(--space-2); color: var(--muted); font-weight: 500; }
+@media (hover: hover) {
+  .ntc-toolbar > .ui-btn--ghost:hover:not(:disabled) { color: var(--text); }
+}
 .ntc-error { display: flex; align-items: center; gap: 8px; font-size: var(--font-meta); color: var(--red, #e5534b); }
 .ntc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 

@@ -817,6 +817,7 @@ export const bg: AppMessages = {
   "notificationcentre.couldNotUpdateNotifications": "Неуспешно актуализиране на известията. Проверете връзката и опитайте отново.",
   "notificationcentre.delegatedAgent": "Делегиран агент",
   "notificationcentre.failed": "Неуспешно",
+  "notificationcentre.limitReached": "Достигнат лимит",
   "notificationcentre.loadingNotifications": "Зареждане на известия…",
   "notificationcentre.markAllRead": "Отбелязване на всички като прочетени",
   "notificationcentre.nothingHereYetCompletionFailureQuestionAnd": "Все още няма нищо тук — известия за завършване, неуспех, въпроси и разрешения ще се събират в тази пощенска кутия.",

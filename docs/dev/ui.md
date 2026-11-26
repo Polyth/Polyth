@@ -1503,7 +1503,9 @@ the note's `shareProposedAt` is newer than the latest prompt, so ignoring it lea
 nothing to clean up. A chat makes one offer of at most 600 characters; anything else
 stays a plain note. Project settings → Memory → My notes offers the same Share… in
 place under any note in Only me in this project. Alone in a project there is no line
-and no Share…, and My notes appears only with notes in it (`othersHere`).
+and no Share…, and My notes appears only with notes in it (`othersHere`). While the
+records are being searched My notes is hidden (a draft there survives): the search
+does not cover it, so it must not read as more results.
 
 A person's Personal project (`Project.personal`, §3.3) is
 the `personal` kind whatever its composition says (`projectKinds(…, { personal })`,

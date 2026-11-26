@@ -128,8 +128,9 @@
   color: var(--text);
   font-weight: 600;
 }
-/* Rows of chips leave room for the taller press targets between them. */
-.memory-chips:not(.memory-filter) { row-gap: max(var(--space-2), calc(var(--hit-min) - var(--control-h-sm))); }
+/* Rows of chips leave room for the taller press targets between them. A narrow
+   container wraps them, so no choice is cut off at an edge. */
+.memory-chips { row-gap: max(var(--space-2), calc(var(--hit-min) - var(--control-h-sm))); }
 .pkg-memory .memory-chip:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .pkg-memory .memory-chip:disabled { opacity: .55; cursor: default; }
 @media (hover: hover) {
@@ -192,6 +193,10 @@
 /* A row's age sits at its end, so a wrapped line never starts with a dot. */
 .memory-meta > .memory-meta-age { margin-inline-start: auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .memory-meta > .memory-meta-age::before { content: none; }
+/* The row's menu sits beside its first lines only, so the meta line runs on
+   under it (the menu's 24px, the row gap and the row's own end padding) and the
+   age keeps to the facts' line where the container is wide enough. */
+.memory-row-main:not(:last-child) .memory-meta { margin-inline-end: calc(-24px - var(--space-1) - var(--space-2)); }
 
 .memory-bulk-bar,
 .memory-import-stage {
@@ -414,28 +419,12 @@
   .memory-reflect-confirm .memory-actions > * { flex: 1 1 auto; }
 }
 
-/* ---- Narrow containers (a phone sheet): the filter is one row that scrolls
-   sideways instead of a second and third line of chips. */
-@container pkg-memory (max-width: 519px) {
-  .pkg-memory .memory-filter {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
-    scrollbar-width: none;
-    /* Room inside the scroller for the focus ring and the chips' taller
-       press targets, which it would otherwise clip. */
-    --memory-filter-room: max(3px, calc((var(--hit-min) - var(--control-h-sm)) / 2));
-    padding: var(--memory-filter-room) 3px;
-    margin: calc(-1 * var(--memory-filter-room)) -3px;
-  }
-  .pkg-memory .memory-filter::-webkit-scrollbar { display: none; }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .pkg-memory * { scroll-behavior: auto; }
 }
 
 /* ---- My notes: personal memory beside the shared records */
+.memory-mine[hidden] { display: none; }
 .memory-mine-group { display: grid; gap: var(--space-2); }
 .memory-mine-group h4 { margin: 0; font-size: var(--font-label); font-weight: 600; }
 .memory-mine-empty { color: var(--muted); font-size: var(--font-meta); }

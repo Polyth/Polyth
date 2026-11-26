@@ -129,7 +129,7 @@ function NoteList({ title, hint, notes, translate, onShare, openId, renderOpen, 
   );
 }
 
-export default function MyNotes({ projectId, project, translate, notify }: { projectId: string; project: Readonly<Project>; translate: Translate; notify?: Notify | undefined }) {
+export default function MyNotes({ projectId, project, translate, notify, hidden }: { projectId: string; project: Readonly<Project>; translate: Translate; notify?: Notify | undefined; hidden?: boolean }) {
   const [page, setPage] = useState<PersonalMemoryPage | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -201,7 +201,7 @@ export default function MyNotes({ projectId, project, translate, notify }: { pro
     </div>
   );
   return (
-    <section className="memory-section memory-mine" aria-labelledby="memory-mine-heading">
+    <section className="memory-section memory-mine" aria-labelledby="memory-mine-heading" hidden={hidden}>
       <div className="memory-section-head">
         <div>
           <h3 id="memory-mine-heading">{translate("memory.mine.title")}</h3>

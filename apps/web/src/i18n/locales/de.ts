@@ -817,6 +817,7 @@ export const de: AppMessages = {
   "notificationcentre.couldNotUpdateNotifications": "Benachrichtigungen konnten nicht aktualisiert werden. Überprüfen Sie die Verbindung und versuchen Sie es erneut.",
   "notificationcentre.delegatedAgent": "Delegierter Agent",
   "notificationcentre.failed": "Fehlgeschlagen",
+  "notificationcentre.limitReached": "Limit erreicht",
   "notificationcentre.loadingNotifications": "Benachrichtigungen werden geladen…",
   "notificationcentre.markAllRead": "Alle als gelesen markieren",
   "notificationcentre.nothingHereYetCompletionFailureQuestionAnd": "Hier ist noch nichts – Abschluss-, Fehler-, Frage- und Berechtigungsbenachrichtigungen werden in diesem Posteingang gesammelt.",

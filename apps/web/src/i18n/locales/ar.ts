@@ -817,6 +817,7 @@ export const ar: AppMessages = {
   "notificationcentre.couldNotUpdateNotifications": "تعذر تحديث الإشعارات. تحقق من الاتصال وأعد المحاولة.",
   "notificationcentre.delegatedAgent": "الوكيل المفوض",
   "notificationcentre.failed": "فشل",
+  "notificationcentre.limitReached": "تم بلوغ الحد",
   "notificationcentre.loadingNotifications": "جارٍ تحميل الإشعارات...",
   "notificationcentre.markAllRead": "تحديد الكل كمقروء",
   "notificationcentre.nothingHereYetCompletionFailureQuestionAnd": "لا يوجد شيء هنا حتى الآن - ستتجمع إشعارات الإكمال والفشل والأسئلة والإذن في صندوق الوارد هذا.",

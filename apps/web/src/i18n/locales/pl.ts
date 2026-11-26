@@ -817,6 +817,7 @@ export const pl: AppMessages = {
   "notificationcentre.couldNotUpdateNotifications": "Nie można zaktualizować powiadomień. Sprawdź połączenie i spróbuj ponownie.",
   "notificationcentre.delegatedAgent": "Agent delegowany",
   "notificationcentre.failed": "Niepowodzenie",
+  "notificationcentre.limitReached": "Osiągnięto limit",
   "notificationcentre.loadingNotifications": "Ładowanie powiadomień…",
   "notificationcentre.markAllRead": "Oznacz wszystkie jako przeczytane",
   "notificationcentre.nothingHereYetCompletionFailureQuestionAnd": "Na razie nic tu nie ma — powiadomienia o ukończeniu zadania, niepowodzeniu, pytaniach i pozwoleniach będą zbierane w tej skrzynce odbiorczej.",

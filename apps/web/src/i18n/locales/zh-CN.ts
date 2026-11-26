@@ -817,6 +817,7 @@ export const zhCN: AppMessages = {
   "notificationcentre.couldNotUpdateNotifications": "无法更新通知。请检查连接并重试。",
   "notificationcentre.delegatedAgent": "委派的代理",
   "notificationcentre.failed": "失败",
+  "notificationcentre.limitReached": "已达上限",
   "notificationcentre.loadingNotifications": "正在加载通知…",
   "notificationcentre.markAllRead": "全部标记为已读",
   "notificationcentre.nothingHereYetCompletionFailureQuestionAnd": "这里目前还没有任何内容——完成、失败、提问和权限通知将收集在此收件箱中。",

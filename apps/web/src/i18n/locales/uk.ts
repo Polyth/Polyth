@@ -817,6 +817,7 @@ export const uk: AppMessages = {
   "notificationcentre.couldNotUpdateNotifications": "Не вдалося оновити сповіщення. Перевірте підключення та повторіть спробу.",
   "notificationcentre.delegatedAgent": "Делегований агент",
   "notificationcentre.failed": "Помилка",
+  "notificationcentre.limitReached": "Ліміт вичерпано",
   "notificationcentre.loadingNotifications": "Завантаження сповіщень…",
   "notificationcentre.markAllRead": "Позначити все як прочитане",
   "notificationcentre.nothingHereYetCompletionFailureQuestionAnd": "Тут поки що нічого немає — сповіщення про завершення, збої, запитання й дозволи збиратимуться тут.",

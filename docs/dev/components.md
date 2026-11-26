@@ -136,7 +136,9 @@ pass `icon`, `excerpt`, `actions` and `data-*` hooks instead. Status that
 belongs to its control (a form error, "Saved" beside a toolbar button) stays
 inline. A list of notification records (the notification centre) draws its
 kind with the same `NotificationGlyph` (`apps/web/src/notify/`), never a
-second icon/colour map. Cards are not live regions — the stack announces —
+second icon/colour map. Its panel actions are quiet `ghost` buttons; a provider
+limit row (record key `limit:…`) reads *Limit reached*, not *Failed*, and the
+provider's 12-hour reset reading is shown in the reader's time format. Cards are not live regions — the stack announces —
 so do not add `role="alert"`/`aria-live` to notification content. Contract
 and defaults: [ui.md §4.8](ui.md#notifications).
 

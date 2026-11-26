@@ -817,6 +817,7 @@ export const fr: AppMessages = {
   "notificationcentre.couldNotUpdateNotifications": "Impossible de mettre à jour les notifications. Vérifiez la connexion et réessayez.",
   "notificationcentre.delegatedAgent": "Agent délégué",
   "notificationcentre.failed": "Échec",
+  "notificationcentre.limitReached": "Limite atteinte",
   "notificationcentre.loadingNotifications": "Chargement des notifications…",
   "notificationcentre.markAllRead": "Marquer tout comme lu",
   "notificationcentre.nothingHereYetCompletionFailureQuestionAnd": "Rien ici pour le moment — les notifications de réussite, d'échec, de question et d'autorisation seront regroupées dans cette boîte de réception.",
