@@ -13,6 +13,7 @@ export type SessionLeadMark =
   | "epoch-pending"
   | "unknown"
   | "rate-limited"
+  | "awaiting"
   | "unread"
   | "pin";
 
@@ -42,6 +43,7 @@ export function sessionLeadMark({ status, opening, conversation, pinned }: Sessi
     case "epoch-pending":
     case "unknown":
     case "rate-limited":
+    case "awaiting":
     case "unread":
       return status.kind;
     default:

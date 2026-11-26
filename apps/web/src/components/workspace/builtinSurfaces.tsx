@@ -45,6 +45,7 @@ import { useSessionSummaryPages } from "../../useSessionSummaryPages.ts";
 import { ago, displaySessionTitle, isPlaceholderTitle } from "../../format.ts";
 import { conversationUnread, unreadBadgeText } from "../../sessionPeople.ts";
 import AgentLiveStatusDock from "../AgentLiveStatusDock.tsx";
+import SessionWaitsLine from "../SessionWaitsLine.tsx";
 import AnswerLaterLine from "../AnswerLaterLine.tsx";
 import SessionActivityPanelHost from "../SessionActivityPanel.tsx";
 import SubagentActivityDock, { SubagentBranchIsland, SubagentBranchScope } from "../SubagentActivityDock.tsx";
@@ -333,8 +334,8 @@ function RecentSessions({ projectId }: { projectId: string | null }) {
                     <span className="ui-spinner ui-spinner--sm" aria-hidden />
                   ) : done ? (
                     <span className="hero-recent-check" aria-hidden>✓</span>
-                  ) : status.kind === "rate-limited" ? (
-                    <span className="hero-recent-icon" aria-hidden><MobileStatusIcon kind="rate-limited" /></span>
+                  ) : status.kind === "rate-limited" || status.kind === "awaiting" ? (
+                    <span className="hero-recent-icon" aria-hidden><MobileStatusIcon kind={status.kind} /></span>
                   ) : status.kind === "needs-approval" ? (
                     // Not a check: that mark already means a finished chat here.
                     <UiIcon icon={ShieldAlertIcon} size="sm" />
@@ -831,6 +832,8 @@ function ChatSessionSurface() {
             <div ref={setLatestRevealAnchor} className="timeline-latest-reveal-anchor" />
             {/* Questions and approvals folded for later wait here as one line. */}
             <AnswerLaterLine sessionId={sessionId} model={model} />
+            {/* What wakes this chat later: a chat it watches, a polyth_wait. */}
+            <SessionWaitsLine waits={session?.waits} idle={!working && !startupDock} />
             <SlotHost slot="session.composer.before" context={composerBeforeContext} customizable />
             {/* The area renders nothing while empty, so its pencil lives in a
                 zero-height zone that only takes space in edit mode. */}

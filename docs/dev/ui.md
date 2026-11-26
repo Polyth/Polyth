@@ -3290,6 +3290,27 @@ The navigator's summary projection carries `resume`, `runtimeControl` and
 `harnessTransition`, so every one of these marks is correct on the row before
 the session is opened instead of flipping once its full projection loads.
 
+**Waiting chats.** A chat with something armed to wake it
+(`SessionProjection.waits`: a chat it watches with `wake` delivery, a
+`polyth_wait`) resolves to `awaiting`: a calm Lucide `Hourglass` lead mark in
+`--muted` (no disc), drawn at the pin's size in the sidebar and at the running
+ring's 14px on the phone, so it reads quieter than live or attention marks, and
+"Waiting · continues by itself" in the sidebar, phone
+navigator, recent list and phone session header. Attention, live work, a
+rate-limit resume, a failure and a reconnect outrank it; it outranks an unread
+reply, which the project rail still counts as a result. At rest the pending
+stack above the composer shows one `SessionWaitsLine` under the answer-later
+line, built like the suggestion line on the stack's grid (composer card column,
+hourglass on `--composer-stack-mark`, words from `--composer-stack-text` in
+`--font-composer-stack`, no plate): "Continues after «Title»" with the title in
+`--text` at weight 550 as the line's one stronger ink, then faint
+"· until 14:30" for a bounded wait and "· +N more" for several (a
+`polyth_wait` reads "Continues after <label>"). The waited-on chat's title
+comes only from chats this client already holds, otherwise "another chat";
+when it is held the line hugs its words and is a button that opens it
+(cross-project too), with the suggestion line's hover. The line folds away with the other notice rows
+(`ComposerNoticeRow`) once the wait ends or a turn runs.
+
 The same pause covers a provider that refuses the request itself (`4xx invalid
 request`, `RateLimitScope: "request"`). That refusal is usually about the one
 call, not the conversation, so the server retries it on a short backoff ladder

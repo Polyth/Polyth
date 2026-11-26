@@ -287,6 +287,8 @@ function leadMark(mark: SessionLeadMark | null) {
       return <span className="mobile-nav-session-state is-failed">{statusIcon(mark)}</span>;
     case "rate-limited":
       return <span className="mobile-nav-session-state is-limited">{statusIcon(mark)}</span>;
+    case "awaiting":
+      return <span className="mobile-nav-session-state is-awaiting">{statusIcon(mark)}</span>;
     case "unread":
       return <span className="mobile-nav-unread-dot" />;
     case "pin":

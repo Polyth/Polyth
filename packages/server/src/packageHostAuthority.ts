@@ -19,7 +19,7 @@ const SESSION_METHODS = new Set<PropertyKey>([
   "unpinContext", "autoAcceptGet", "autoAcceptSet", "confirmBorrowedRuntimeEpoch", "saveDraft",
   "markRead", "postPersonMessage", "decidePersonAccess", "mentionCandidates", "chatMentionCandidates", "setPersonMute",
   "runtimeFeatures", "renameWorktreeBranch", "patchIsolation", "rebindWorkspace",
-  "switchHarness", "cancelHarnessSwitch", "restartRuntime", "debug",
+  "switchHarness", "cancelHarnessSwitch", "restartRuntime", "debug", "recordWait",
 ]);
 const BLOCKED_STORE_MUTATIONS = new Set<PropertyKey>([
   "appendBatch", "appendBatches", "copyTo", "upsertProjection", "publishChildSession", "deleteSession",

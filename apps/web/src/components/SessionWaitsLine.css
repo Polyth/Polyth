@@ -1,0 +1,59 @@
+/* "Continues after «Title»" (SessionWaitsLine.tsx): one plateless line of the
+   pending stack above the composer (docs/dev/ui.md "Waiting chats"). It is
+   the suggestion line's anatomy on the stack's grid: the composer card's
+   column (as the answer-later line above it), the hourglass centred on
+   --composer-stack-mark, the words from --composer-stack-text in the stack's
+   type and wash-aware inks. The waited-on title is the line's one stronger
+   ink; time and "+N more" trail in the faint ink. No plate, border or shadow
+   at rest in any look; hover is the suggestion line's own. */
+.session-waits {
+  min-inline-size: 0; box-sizing: border-box;
+  inline-size: min(var(--chat-measure), calc(100% - 2 * var(--gutter)));
+  margin: 0 auto var(--space-1);
+  padding-inline-end: var(--composer-stack-end);
+  color: var(--chat-ink-dim);
+  font-size: var(--font-composer-stack);
+}
+.session-waits-row {
+  display: flex; align-items: center;
+  max-inline-size: 100%; min-inline-size: 0; box-sizing: border-box;
+  --session-waits-gap: calc(var(--composer-stack-text) - var(--composer-stack-mark) - var(--icon-sm) / 2);
+  gap: var(--session-waits-gap);
+  min-block-size: max(var(--composer-stack-row), var(--hit-min));
+  margin: 0;
+  padding: var(--space-1) var(--space-2) var(--space-1) calc(var(--composer-stack-mark) - var(--icon-sm) / 2);
+  border: 0; border-radius: var(--radius-control);
+  background: none; color: inherit; text-align: start;
+  font: inherit; line-height: 1.35;
+}
+/* Hugs its words, so the hover tint never runs the full measure. */
+button.session-waits-row {
+  inline-size: fit-content;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color var(--motion-fast) var(--motion-ease);
+}
+.session-waits-mark { flex: none; color: var(--chat-ink-muted); }
+.session-waits-text {
+  flex: 0 1 auto; min-inline-size: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.session-waits-object { color: var(--text); font-weight: 550; }
+.session-waits-meta {
+  flex: none;
+  /* Sentence · time · more: the dot sits a word space from either side. */
+  margin-inline-start: calc(var(--space-2) - var(--session-waits-gap));
+  color: var(--chat-ink-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.session-waits-meta::before { content: "·"; margin-inline-end: var(--space-2); }
+@media (hover: hover) {
+  /* The suggestion line's hover: tint plus its quiet ring (3:1 in both themes). */
+  button.session-waits-row:hover {
+    background: var(--surface-overlay-hover);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 55%, transparent);
+  }
+}
+button.session-waits-row:active { background: var(--surface-overlay-hover); }
+button.session-waits-row:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }

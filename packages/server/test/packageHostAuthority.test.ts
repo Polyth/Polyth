@@ -284,6 +284,39 @@ test("package runtime holds reach the session's own Space service, in call order
   assert.deepEqual(unhandled, []);
 });
 
+test("a package's recorded wait reaches only a chat of its own Space", async () => {
+  const foreign = { ...projection, id: "ses_foreign", projectId: "prj_foreign", spaceId: "spc_foreign" };
+  const calls: string[] = [];
+  const rawCalls: string[] = [];
+  const host = {
+    pluginId: "wait", deployment: "local-trusted",
+    sessions: { async recordWait() { rawCalls.push("recordWait"); } },
+    store: {
+      async projection(id: string) {
+        return id === projection.id ? projection : id === foreign.id ? foreign : undefined;
+      },
+    },
+    projects: { async get(id: string) {
+      return { id, spaceId: id === projection.projectId ? projection.spaceId : foreign.spaceId };
+    } },
+    systemSpaceContext(spaceId: string) { return { spaceId, userId: RUNTIME_SYSTEM_PRINCIPAL_ID, deployment: "local-trusted", storageDir: `/tmp/spaces/${spaceId}` }; },
+    forSpace(ctx: SpaceContext) {
+      return { sessions: {
+        async recordWait(id: string, change: { op: string }) {
+          if (ctx.spaceId !== projection.spaceId || id !== projection.id) throw Object.assign(new Error("not found"), { code: "not-found" });
+          calls.push(`${change.op}:${id}`);
+        },
+      } };
+    },
+  } as unknown as ServerPackageHost;
+  const sessions = governPackageHost(host).sessions;
+  await sessions.recordWait!(projection.id, { op: "armed", wait: { id: "w1", kind: "seconds", since: 1 } });
+  await assert.rejects(sessions.recordWait!(foreign.id, { op: "ended", id: "w1" }));
+  await assert.rejects(sessions.recordWait!("ses_missing", { op: "ended", id: "w1" }));
+  assert.deepEqual(calls, [`armed:${projection.id}`]);
+  assert.deepEqual(rawCalls, []);
+});
+
 test("package store forwards profile management methods to the underlying store", async () => {
   const profileCalls: string[] = [];
   const fakeProfile = { id: "prof_1", name: "Prof", providerID: "p", modelID: "m", features: {}, revision: 1, createdAt: 1, updatedAt: 1 };

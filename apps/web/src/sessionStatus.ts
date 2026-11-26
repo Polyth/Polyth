@@ -11,6 +11,7 @@ export type SessionStatusKind =
   | "resume-ready"
   | "reconciling"
   | "unknown"
+  | "awaiting"
   | "unread"
   | "regular";
 
@@ -131,6 +132,12 @@ export function resolveSessionStatus(
   if (session.status === "unknown") {
     return { kind: "unknown", glyph: "?", label: tr("sessionStatus.statusUnknown") };
   }
+  // Something is armed to wake it (a watched chat, a polyth_wait): it is not
+  // done, it continues by itself. Outranks an unread reply, which the rail
+  // still counts (projectRailStatus).
+  if (session.waits?.length && session.status !== "archived") {
+    return { kind: "awaiting", glyph: "⧗", label: tr("sessionStatus.awaiting") };
+  }
   if ((session.attention?.unread ?? 0) > 0) {
     return { kind: "unread", glyph: "●", label: tr("sessionStatus.unreadActivity") };
   }
@@ -159,7 +166,10 @@ export function projectRailStatus(
     if (kind === "needs-approval") status.permissions += 1;
     else if (kind === "needs-reply") status.questions += 1;
     else if (kind === "working" || kind === "reconciling") status.working += 1;
-    else if (kind === "unread" && (!session.parentId || session.forkOf) && !session.muted) status.results += 1;
+    // A waiting chat's row shows the hourglass, but its unread reply is still
+    // a result to read.
+    else if ((kind === "unread" || (kind === "awaiting" && (session.attention?.unread ?? 0) > 0))
+      && (!session.parentId || session.forkOf) && !session.muted) status.results += 1;
   }
   return status;
 }

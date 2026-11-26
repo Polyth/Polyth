@@ -26,6 +26,8 @@ const REASONS = ["completed", "error", "aborted", "paused"] as const satisfies r
 // of pauses (wants).
 const DEFAULT_EVENTS = ["completed", "error", "aborted"] as const satisfies readonly ServerSessionWatchReason[];
 const DELIVERIES = ["observe", "wake"] as const satisfies readonly ServerSessionWatchDelivery[];
+/** `SessionWait.kind` of a wake watch shown on the chat it wakes. */
+export const SESSION_WATCH_WAIT_KIND = "session";
 
 export interface SessionWatchCoordinator extends ServerSessionWatchService {
   /** Event-driven kick from the canonical turnStopped seam. */
@@ -213,9 +215,55 @@ export function createSessionWatchCoordinator(deps: {
     });
   };
 
+  // The target's projection lists the wake watches armed on it (`waits`, kind
+  // "session"), so the navigator and the chat can show that it waits. One
+  // diff against the durable rows covers every way a watch ends — fired once,
+  // unwatched, its chat gone — and a watch armed before `waits` existed.
+  const targetTails = new Map<string, Promise<void>>();
+  const reconcileTargetNow = async (targetSessionId: string): Promise<void> => {
+    const sessions = deps.sessions();
+    if (!sessions.recordWait) return;
+    const target = await deps.store.projection(targetSessionId);
+    if (!target) return;
+    const shown = new Set((target.waits ?? [])
+      .filter((wait) => wait.kind === SESSION_WATCH_WAIT_KIND)
+      .map((wait) => wait.id));
+    const armed = (await deps.store.sessionWatches({ targetSessionId }))
+      .filter((watch) => watch.delivery === "wake");
+    for (const watch of armed) {
+      if (shown.has(watch.id)) continue;
+      const source = await deps.store.projection(watch.sourceSessionId);
+      await sessions.recordWait(targetSessionId, {
+        op: "armed",
+        wait: {
+          id: watch.id,
+          kind: SESSION_WATCH_WAIT_KIND,
+          sourceSessionId: watch.sourceSessionId,
+          ...(source?.projectId ? { sourceProjectId: source.projectId } : {}),
+          since: watch.createdAt,
+        },
+      });
+    }
+    const live = new Set(armed.map((watch) => watch.id));
+    for (const id of shown) {
+      if (!live.has(id)) await sessions.recordWait(targetSessionId, { op: "ended", id });
+    }
+  };
+  /** Never fails its caller: what a chat shows must not stop a delivery. */
+  const reconcileTarget = async (targetSessionId: string): Promise<void> => {
+    const previous = targetTails.get(targetSessionId) ?? Promise.resolve();
+    const run = previous.then(() => reconcileTargetNow(targetSessionId)).catch((error) => {
+      console.warn("[polyth] session watch display update failed", error);
+    });
+    targetTails.set(targetSessionId, run);
+    await run;
+    if (targetTails.get(targetSessionId) === run) targetTails.delete(targetSessionId);
+  };
+
   const settle = async (watch: DurableSessionWatch, seq: number): Promise<void> => {
     if (watch.once) {
       await deps.store.deleteSessionWatch(watch.id);
+      await reconcileTarget(watch.targetSessionId);
       return;
     }
     await deps.store.updateSessionWatch(watch.id, {
@@ -241,12 +289,14 @@ export function createSessionWatchCoordinator(deps: {
       const target = await deps.store.projection(watch.targetSessionId);
       if (!source || !target) {
         await deps.store.deleteSessionWatch(watch.id);
+        if (target) await reconcileTarget(watch.targetSessionId);
         return;
       }
       const sourceSpace = sessionSpace(source);
       const targetSpace = sessionSpace(target);
       if (!sourceSpace || sourceSpace !== watch.spaceId || targetSpace !== watch.spaceId) {
         await deps.store.deleteSessionWatch(watch.id);
+        await reconcileTarget(watch.targetSessionId);
         return;
       }
 
@@ -331,6 +381,7 @@ export function createSessionWatchCoordinator(deps: {
         createdAt: now(),
       });
       await serialized(persisted.watch.id);
+      await reconcileTarget(input.targetSessionId);
       return dto((await deps.store.sessionWatch(persisted.watch.id)) ?? persisted.watch);
     },
 
@@ -346,10 +397,13 @@ export function createSessionWatchCoordinator(deps: {
     async remove(space, id, targetSessionId) {
       open();
       if (!id) return false;
-      return deps.store.deleteSessionWatch(id, {
+      const watch = await deps.store.sessionWatch(id);
+      const removed = await deps.store.deleteSessionWatch(id, {
         spaceId: space.spaceId,
         ...(targetSessionId ? { targetSessionId } : {}),
       });
+      if (removed && watch) await reconcileTarget(watch.targetSessionId);
+      return removed;
     },
 
     async kick(sourceSessionId) {
@@ -386,12 +440,18 @@ export function createSessionWatchCoordinator(deps: {
           console.error("[polyth] session watch recovery failed", error);
         }
       }
+      // Watches armed before chats listed them, or settled while the server
+      // was down, are shown (or cleared) once.
+      for (const targetSessionId of new Set(watches.map((watch) => watch.targetSessionId))) {
+        if (closing) return;
+        await reconcileTarget(targetSessionId);
+      }
     },
 
     async close() {
       if (closing) return;
       closing = true;
-      await Promise.allSettled([...tails.values()]);
+      await Promise.allSettled([...tails.values(), ...targetTails.values()]);
     },
   };
 }

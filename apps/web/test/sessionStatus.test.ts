@@ -342,3 +342,18 @@ test("a reconnect re-reads every row still shown as working or waiting, most urg
     session({ id: "b", status: "working", updatedAt: 2 }),
   ], 1), ["a"], "bounded");
 });
+
+test("a chat armed to wake by itself resolves as awaiting, below live work and above an unread reply", () => {
+  const waits = [{ id: "w1", kind: "session", sourceSessionId: "child", since: NOW - 1000 }];
+  assert.deepEqual(resolveSessionStatus(session({ waits }), NOW), {
+    kind: "awaiting",
+    glyph: "⧗",
+    label: "Waiting · continues by itself",
+  });
+  assert.equal(resolveSessionStatus(session({ waits, attention: { questions: 0, permissions: 0, unread: 1 } }), NOW).kind, "awaiting");
+  assert.equal(resolveSessionStatus(session({ waits, status: "working" }), NOW).kind, "working");
+  assert.equal(resolveSessionStatus(session({ waits, status: "failed" }), NOW).kind, "failed");
+  assert.equal(resolveSessionStatus(session({ waits, attention: { questions: 1, permissions: 0, unread: 0 } }), NOW).kind, "needs-reply");
+  assert.equal(resolveSessionStatus(session({ waits, status: "archived" }), NOW).kind, "regular");
+  assert.ok((SESSION_SUMMARY_FIELDS as readonly string[]).includes("waits"), "the navigator row gets waits before the chat opens");
+});

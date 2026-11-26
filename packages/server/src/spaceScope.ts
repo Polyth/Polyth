@@ -316,6 +316,8 @@ function scopeSessions(
     const release = base.releaseRuntimeHold.bind(base);
     scoped.releaseRuntimeHold = (sessionId, holdId) => release(g(sessionId), holdId);
   }
+  // A package's wait (polyth_wait) is shown on a chat of its own Space only.
+  assign("recordWait", bySession(base.recordWait));
   assign("cancelResume", bySession(base.cancelResume));
   assign("setResumeCompact", bySession(base.setResumeCompact));
   assign("resumeNow", bySession(base.resumeNow));

@@ -2136,6 +2136,11 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 /* A provider-limit pause is a timer, not an alert: no badge disc. */
 .session-lead-mark.rate-limited { background: none; box-shadow: none; color: var(--amber); }
 .session-lead-mark.rate-limited svg { width: 100%; height: 100%; }
+/* Armed to wake by itself (a watched chat, a polyth_wait): calm, not
+   attention. A quiet glyph at the pin's size, lighter than the spinner, the
+   unread dot or the amber marks it yields to; no disc. */
+.session-lead-mark.awaiting { background: none; box-shadow: none; color: var(--muted); }
+.session-lead-mark.awaiting svg { width: calc(var(--icon-sm) - 3px); height: calc(var(--icon-sm) - 3px); }
 /* Approval is a shield on its own, like the reply and timer marks. */
 .session-lead-mark.approval { background: none; box-shadow: none; }
 .session-lead-mark.approval svg { width: 100%; height: 100%; }

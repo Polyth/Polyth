@@ -584,6 +584,13 @@ export const History: IconNode = [
   ["path", { d: "M12 7v5l4 2", key: "1fdv2h" }],
 ];
 
+export const Hourglass: IconNode = [
+  ["path", { d: "M5 22h14", key: "path-0" }],
+  ["path", { d: "M5 2h14", key: "path-1" }],
+  ["path", { d: "M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22", key: "path-2" }],
+  ["path", { d: "M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2", key: "path-3" }],
+];
+
 export const House: IconNode = [
   ["path", { d: "M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8", key: "5wwlr5" }],
   ["path", { d: "M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z", key: "r6nss1" }],

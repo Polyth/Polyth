@@ -39,6 +39,15 @@ test("nothing that needs no person reaches the icon", () => {
   ]), { permissions: 0, questions: 0, results: 0, working: 0 });
 });
 
+test("a chat armed to wake by itself shows an hourglass, but its unread reply is still a result", () => {
+  const waits = [{ id: "w1", kind: "session" as const, sourceSessionId: "child", since: 1 }];
+  assert.deepEqual(projectRailStatus([
+    session({ waits, attention: attention({ unread: 1 }) }),
+    session({ waits }),
+    session({ waits, muted: true, attention: attention({ unread: 1 }) }),
+  ]), { permissions: 0, questions: 0, results: 1, working: 0 });
+});
+
 test("a fork's unread reply is its own result, unlike a subagent's", () => {
   assert.equal(projectRailStatus([
     session({ parentId: "root", forkOf: "root", attention: attention({ unread: 1 }) } as Partial<SessionProjection>),

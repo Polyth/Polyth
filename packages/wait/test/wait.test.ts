@@ -92,7 +92,7 @@ test("a pid wait wakes exactly once with outcome exited, and holds then releases
     assert.match(r.sent[0]!.id!, /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     assert.equal(manager.records("s1")[0]!.outcome, "exited");
     assert.deepEqual(r.releases, [`c1:${id}`]);
-    assert.deepEqual(r.events.map((e) => e.type), ["wait/started", "wait/ended"]);
+    assert.deepEqual(r.events.map((e) => e.type), ["session/wait-armed", "session/wait-ended"]);
   } finally { manager.dispose(); r.cleanup(); }
 });
 
@@ -318,4 +318,28 @@ test("a process started outside the chat's workspace cannot be waited on, nor it
     manager.dispose();
     r.cleanup();
   }
+});
+
+test("a host that lists waits records the start and the end on the chat", async () => {
+  const r = rig();
+  const changes: Array<{ sessionId: string; change: Record<string, unknown> }> = [];
+  (r.host.sessions as unknown as Record<string, unknown>).recordWait = async (sessionId: string, change: Record<string, unknown>) => {
+    changes.push({ sessionId, change });
+  };
+  const manager = createWaitManager({ host: r.host, tickMs: 3_600_000 });
+  try {
+    const answer = await manager.runTool({ seconds: 600, note: "check the deploy" }, r.ctx());
+    const id = /id (w_\w+)/.exec(answer)![1]!;
+    assert.equal(changes.length, 1);
+    const armed = changes[0]!.change as { op: string; wait: { id: string; kind: string; label: string; since: number; deadline: number } };
+    assert.equal(changes[0]!.sessionId, "c1");
+    assert.equal(armed.op, "armed");
+    assert.equal(armed.wait.id, id);
+    assert.equal(armed.wait.kind, "seconds");
+    assert.ok(armed.wait.label);
+    assert.ok(armed.wait.deadline > armed.wait.since);
+    await manager.runTool({ action: "cancel", id }, r.ctx());
+    assert.deepEqual(changes[1], { sessionId: "c1", change: { op: "ended", id, outcome: "cancelled" } });
+    assert.deepEqual(r.events, [], "the host records the events itself");
+  } finally { manager.dispose(); r.cleanup(); }
 });

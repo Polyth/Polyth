@@ -70,7 +70,7 @@ const DESCRIPTION =
   + "Polyth owns delegation: never use a harness-native Agent, Task, task, agent, invoke_subagent, or equivalent spawn surface. Use agent.spawn instead. "
   + "Before agent.spawn, call agent.models once: a few lines ranking the user's favorite and most-used harness/model pairs, named as each harness's live model catalog lists them, with live quota headroom; pass the chosen row's harnessId and model to agent.spawn exactly. "
   + "agent.spawn always creates a canonical child Session of the calling Session, so every delegated worker has a durable parentId and appears as a Polyth sub-session. "
-  + "session.create in your own project also files the new chat under you as a sub-session; pass parameters.standalone=true when the person asked for chats they can see and steer themselves: it becomes a chat of its own in the project's session list, with no parent. "
+  + "session.create in your own project also files the new chat under you as a sub-session; pass parameters.standalone=true when the person asked for chats they can see and steer themselves: it becomes a chat of its own in the project's session list, with no parent. If your work waits on a chat you create, pass parameters.watchCaller=true (or session.watch it): nothing else wakes you, and your chat then shows the person what it waits for. "
   + "A session an automation started (a Polyth Agent's run, a monitoring chat) has no subagents: there agent.spawn and session.create always open a standalone chat the person sees in the project's session list, isolated when you ask, which the person reviews and merges from its isolation card; agent.merge does not apply to it. "
   + "Choose each child's workspace with parameters.isolation: shared (default) runs it in your checkout, where it sees your uncommitted files; isolated gives it its own git worktree branched from your last commit, so parallel or risky edits cannot collide. "
   + "Isolated work reaches your checkout only through agent.merge (agent.resolve for conflicts, agent.discard to drop it on purpose); merge or discard every isolated child before you finish. "
@@ -213,7 +213,7 @@ const inputSchema: JsonObject = {
         once: { type: "boolean" },
         watchCaller: {
           type: "boolean",
-          description: "For agent.spawn, wake the calling session once when the child terminates.",
+          description: "For agent.spawn (and session.create), wake the calling session once when the new chat terminates. Pass it whenever your work waits on that chat: nothing else wakes you.",
         },
       },
     },
@@ -618,8 +618,11 @@ export function registerPolythSessionControl(
           : undefined;
         // An isolated child's result is unusable until merged, so its
         // delegator is woken by default when it terminates.
-        const watchCaller = action === "agent.spawn"
-          && (parameters.watchCaller === true || (mode === "isolated" && parameters.watchCaller !== false));
+        // A chat it created for the person (session.create) wakes it only
+        // when asked: then a chat that waits on it shows that it waits.
+        const watchCaller = Boolean(ctx.sessionId) && (action === "agent.spawn"
+          ? parameters.watchCaller === true || (mode === "isolated" && parameters.watchCaller !== false)
+          : parameters.watchCaller === true);
         let spawnWatch: ServerSessionWatchDto | undefined;
         if (watchCaller) {
           spawnWatch = await watchService().create(space, {

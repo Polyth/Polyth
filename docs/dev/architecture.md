@@ -216,6 +216,11 @@ starts Node or OpenCode. See `docs/mobile/architecture.md`.
     releases keep their call order, and a refused session gets no hold.
   - An always-on instruction tells every agent never to end a turn promising
     to wait without one.
+  - The chat shows what it waits for: a started wait is recorded through
+    `SessionService.recordWait` (`session/wait-armed`, its end
+    `session/wait-ended`) into `SessionProjection.waits`, the same list wake
+    watches on that chat fill (see `docs/agents/architecture.md`, session
+    watches; UI in `docs/dev/ui.md`, "Waiting chats").
 
   Covered by `packages/server/test/nativeBackgroundTasks.test.ts`.
   `ScheduleWakeup` is disallowed: a firing wake is a plain queued prompt with no

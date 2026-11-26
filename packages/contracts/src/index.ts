@@ -802,6 +802,52 @@ export interface SessionPauseEndedData {
   source?: string;
 }
 
+/** Something armed to wake this chat later. A durable session watch with
+ *  `wake` delivery is `kind: "session"` and names the chat it waits on in
+ *  `sourceSessionId`; a package wait (`polyth_wait`) carries its own kind
+ *  (`pid`, `file`, `seconds`, `github-run`…) and label. `SessionProjection.waits`
+ *  keeps the armed ones, folded from `session/wait-armed` and
+ *  `session/wait-ended` by `foldSessionWaits`. Polyth-originated: not runtime
+ *  turn content, not model-visible. Old reducers ignore both types. */
+export interface SessionWait {
+  id: string;
+  kind: string;
+  /** The producer's short label ("the process 123 (node)", a CI run). A
+   *  `session` wait has none: a reader resolves the waited-on chat's title
+   *  from the chats it may read, so no title crosses a sharing boundary. */
+  label?: string;
+  sourceSessionId?: string;
+  sourceProjectId?: string;
+  /** ms epoch it was armed. */
+  since: number;
+  /** ms epoch after which it ends as timed out, when it is bounded. */
+  deadline?: number;
+}
+export const SESSION_WAIT_ARMED_EVENT = "session/wait-armed" as const;
+export const SESSION_WAIT_ENDED_EVENT = "session/wait-ended" as const;
+export interface SessionWaitEndedData {
+  id: string;
+  /** fired, cancelled, timed-out, removed… — informational only. */
+  outcome?: string;
+}
+export type SessionWaitChange =
+  | { op: "armed"; wait: SessionWait }
+  | { op: "ended"; id: string; outcome?: string };
+/** At most this many armed waits are kept on one projection; the oldest go first. */
+export const SESSION_WAITS_MAX = 16;
+
+/** The projection's armed waits after one change. Re-arming an id replaces
+ *  it; ending an unknown id changes nothing. Returns undefined for none, so
+ *  the field disappears instead of lingering as an empty list. */
+export function foldSessionWaits(
+  waits: readonly SessionWait[] | undefined,
+  change: SessionWaitChange,
+): SessionWait[] | undefined {
+  const kept = (waits ?? []).filter((wait) => wait.id !== (change.op === "armed" ? change.wait.id : change.id));
+  const next = change.op === "armed" ? [...kept, change.wait].slice(-SESSION_WAITS_MAX) : kept;
+  return next.length > 0 ? next : undefined;
+}
+
 /** `tool/keep-running`: a person (or, when nobody answered, an enabled
  *  Judgment use) told Polyth that one open call is just slow and silent, so
  *  its silence stop is off (the hard execution ceiling stays).
@@ -3100,6 +3146,9 @@ export interface SessionProjection {
    *  Stop that ends it). Its status is idle meanwhile. Agents may not continue
    *  it, and wakes addressed to it wait until the pause ends. */
   paused?: SessionPauseState;
+  /** What is armed to wake this chat later (see `SessionWait`). Absent when
+   *  nothing is; written only through `SessionService.recordWait`. */
+  waits?: SessionWait[];
   /** Durable counter for a bounded provider-error auto-retry chain, keyed to
    *  the prompt the chain replays (`anchorSeq` is the original user message,
    *  so an auto-resume resend keeps it). It outlives the pending wait, which
@@ -3517,6 +3566,11 @@ export interface SessionService {
    *  hold; in memory only, so the owner re-applies it after a restart. */
   holdRuntime?(sessionId: string, holdId: string, untilMs: number): void;
   releaseRuntimeHold?(sessionId: string, holdId: string): void;
+  /** Server-owned: records that something was armed to wake this chat, or
+   *  that it ended — a durable `session/wait-armed` / `session/wait-ended`
+   *  event, then `waits` on the projection (navigator and chat show it).
+   *  A no-op for an unknown chat or an end that changes nothing. */
+  recordWait?(sessionId: string, change: SessionWaitChange): Promise<void>;
   /** Temporarily holds the queue head while it is edited in the composer. */
   queueEditStart?(sessionId: string, queueId: string): Promise<QueueItemDto>;
   queueEdit?(sessionId: string, queueId: string, text: string): Promise<QueueItemDto>;
@@ -3672,7 +3726,7 @@ export interface SessionReplayPage {
  * the correct icon before it is opened: without `resume`, `runtimeControl`
  * and `harnessTransition` a summary row misreads a provider-limit pause as a
  * failure and a dormant owned epoch as an unexpected runtime change. */
-export const SESSION_SUMMARY_FIELDS = ["id", "spaceId", "projectId", "parentId", "forkOf", "purpose", "origin", "title", "titleSource", "status", "createdAt", "updatedAt", "lastTurnAt", "model", "agent", "resolvedHarnessId", "folderId", "labelIds", "pinned", "branch", "worktreeId", "worktreePath", "autoAcceptSetting", "autoAccept", "autoAcceptAll", "attention", "resume", "paused", "runtimeControl", "harnessTransition", "historyImport", "backgroundWork", "goal", "isolationSummary", "isolationMerge", "sharing", "draftPreview", "repositoryScope"] as const satisfies readonly (keyof SessionProjection)[];
+export const SESSION_SUMMARY_FIELDS = ["id", "spaceId", "projectId", "parentId", "forkOf", "purpose", "origin", "title", "titleSource", "status", "createdAt", "updatedAt", "lastTurnAt", "model", "agent", "resolvedHarnessId", "folderId", "labelIds", "pinned", "branch", "worktreeId", "worktreePath", "autoAcceptSetting", "autoAccept", "autoAcceptAll", "attention", "resume", "paused", "waits", "runtimeControl", "harnessTransition", "historyImport", "backgroundWork", "goal", "isolationSummary", "isolationMerge", "sharing", "draftPreview", "repositoryScope"] as const satisfies readonly (keyof SessionProjection)[];
 
 /** Unread top-level chats per project the rail query returns; enough to show "9+". */
 export const RAIL_STATUS_UNREAD_PER_PROJECT = 10;

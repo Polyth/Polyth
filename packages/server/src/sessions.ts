@@ -61,6 +61,11 @@ import {
   SESSION_PURPOSE_CONVERSATION,
   CONVERSATION_SESSION_STARTED_EVENT,
   SESSION_PAUSE_ENDED_EVENT,
+  SESSION_WAIT_ARMED_EVENT,
+  SESSION_WAIT_ENDED_EVENT,
+  foldSessionWaits,
+  type SessionWait,
+  type SessionWaitChange,
   TOOL_KEEP_RUNNING_EVENT,
   TURN_INCOMPLETE_EVENT,
   SESSION_PROJECT_MOVED_EVENT,
@@ -2662,6 +2667,48 @@ export function createSessionService(deps: {
     await applyProjection(sessionId, ({ paused: _paused, ...rest }) => rest);
     deps.notify?.pauseEnded?.(sessionId, outcome);
     return true;
+  };
+
+  // Armed wakes (session watches, package waits): one durable event, then the
+  // projection's `waits`. Serialized per chat so an end never folds before
+  // the arm it ends.
+  const waitTails = new Map<string, Promise<void>>();
+  const clipWaitText = (value: unknown, max: number): string | undefined =>
+    typeof value === "string" && value.trim() ? value.trim().slice(0, max) : undefined;
+  const withWaits = (projection: SessionProjection, waits: SessionWait[] | undefined): SessionProjection => {
+    const { waits: _previous, ...rest } = projection;
+    return waits ? { ...rest, waits } : rest;
+  };
+  const recordWaitNow = async (sessionId: string, change: SessionWaitChange): Promise<void> => {
+    const current = await store.projection(sessionId);
+    if (!current) return;
+    if (change.op === "ended") {
+      if (!current.waits?.some((wait) => wait.id === change.id)) return;
+      const outcome = clipWaitText(change.outcome, 40);
+      await appendAndBroadcast(sessionId, SESSION_WAIT_ENDED_EVENT, {
+        id: change.id,
+        ...(outcome ? { outcome } : {}),
+      }, { ignorable: true });
+      await applyProjection(sessionId, (latest) => withWaits(latest, foldSessionWaits(latest.waits, change)));
+      return;
+    }
+    const id = clipWaitText(change.wait.id, 200);
+    const kind = clipWaitText(change.wait.kind, 40);
+    if (!id || !kind) return;
+    const label = clipWaitText(change.wait.label, 200);
+    const sourceSessionId = clipWaitText(change.wait.sourceSessionId, 200);
+    const sourceProjectId = clipWaitText(change.wait.sourceProjectId, 200);
+    const wait: SessionWait = {
+      id,
+      kind,
+      since: Number.isFinite(change.wait.since) ? change.wait.since : Date.now(),
+      ...(label ? { label } : {}),
+      ...(sourceSessionId ? { sourceSessionId } : {}),
+      ...(sourceProjectId ? { sourceProjectId } : {}),
+      ...(Number.isFinite(change.wait.deadline) ? { deadline: change.wait.deadline } : {}),
+    };
+    await appendAndBroadcast(sessionId, SESSION_WAIT_ARMED_EVENT, { ...wait }, { ignorable: true });
+    await applyProjection(sessionId, (latest) => withWaits(latest, foldSessionWaits(latest.waits, { op: "armed", wait })));
   };
 
   // Projection patches operate on the latest committed row (one store
@@ -14007,6 +14054,18 @@ export function createSessionService(deps: {
       const holds = runtimeHolds.get(sessionId);
       holds?.delete(holdId);
       if (holds && !holds.size) runtimeHolds.delete(sessionId);
+    },
+
+    async recordWait(sessionId, change) {
+      const previous = waitTails.get(sessionId) ?? Promise.resolve();
+      const run = previous.catch(() => undefined).then(() => recordWaitNow(sessionId, change));
+      const settled = run.then(() => undefined, () => undefined);
+      waitTails.set(sessionId, settled);
+      try {
+        await run;
+      } finally {
+        if (waitTails.get(sessionId) === settled) waitTails.delete(sessionId);
+      }
     },
 
     releaseRuntimeIfIdle(sessionId) {

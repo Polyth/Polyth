@@ -104,6 +104,7 @@ const Heading = createIcon("heading", nodes.Heading);
 const Heart = createIcon("heart", nodes.Heart);
 const HeartPulse = createIcon("heart-pulse", nodes.HeartPulse);
 const History = createIcon("rotate-ccw-clock", nodes.History, ["history"]);
+const Hourglass = createIcon("hourglass", nodes.Hourglass);
 const House = createIcon("house", nodes.House, ["home"]);
 const Image = createIcon("image", nodes.Image);
 const Info = createIcon("info", nodes.Info);
@@ -265,6 +266,7 @@ export {
   SquareCheckBig as SelectIcon,
   CircleCheck as SuccessIcon,
   Timer as TimerIcon,
+  Hourglass as HourglassIcon,
   CircleAlert as ErrorIcon,
   TriangleAlert as WarningIcon,
   Info as InfoIcon,
