@@ -817,9 +817,17 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
    The ink is black or white by the tone's own lightness: every theme sets its
    signal colours differently, and neither --panel nor --text holds on all.
    Each kind keeps its --status-* colour (tokens.css) everywhere it shows. A
-   12px count and an 8px dot leave the 22px glyph's corners mostly clear. */
+   12px count and an 8px dot leave the 22px glyph's corners mostly clear.
+   The rail scale is a percentage, so 0.9 gives a 7.2px dot that the browser
+   rasterizes as 7 or 8px depending on the tile's subpixel position: two
+   projects in the same state then wear differently sized marks. The box and
+   its ring snap to whole pixels (the plain calc stays as the fallback). */
 .sidebar-project-rail-mark {
-  --rail-mark: calc(12px * var(--rail-scale-left, 1));
+  --rail-mark-base: 12px;
+  --rail-mark: calc(var(--rail-mark-base) * var(--rail-scale-left, 1));
+  --rail-mark: round(calc(var(--rail-mark-base) * var(--rail-scale-left, 1)), 1px);
+  --rail-mark-ring: calc(2px * var(--rail-scale-left, 1));
+  --rail-mark-ring: round(calc(2px * var(--rail-scale-left, 1)), 1px);
   --rail-mark-tone: var(--status-result);
   position: absolute;
   display: grid;
@@ -827,7 +835,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   box-sizing: border-box;
   min-width: var(--rail-mark);
   height: var(--rail-mark);
-  padding-inline: calc(2px * var(--rail-scale-left, 1));
+  padding-inline: var(--rail-mark-ring);
   border-radius: var(--radius-round);
   background: var(--rail-mark-tone);
   box-shadow: 0 0 0 1px var(--panel);
@@ -845,7 +853,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .sidebar-project-rail-mark.is-permission { --rail-mark-tone: var(--status-permission); top: 0; inset-inline-end: 0; }
 .sidebar-project-rail-mark:is(.is-result, .is-working) { bottom: 0; inset-inline-end: 0; }
 .sidebar-project-rail-mark.is-dot {
-  --rail-mark: calc(8px * var(--rail-scale-left, 1));
+  --rail-mark-base: 8px;
   min-width: var(--rail-mark);
   padding: 0;
 }
@@ -853,7 +861,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
    must not make the two read the same. */
 .sidebar-project-rail-mark.is-working {
   background: var(--panel);
-  box-shadow: inset 0 0 0 calc(2px * var(--rail-scale-left, 1)) var(--accent), 0 0 0 1px var(--panel);
+  box-shadow: inset 0 0 0 var(--rail-mark-ring) var(--accent), 0 0 0 1px var(--panel);
 }
 .sidebar-project-rail-tooltip-copy > .sidebar-project-rail-tooltip-status {
   display: grid;

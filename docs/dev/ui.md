@@ -6104,12 +6104,20 @@ handler (no state, no re-render) together with `--side-scroll-pad`, the list's
 measured top padding, and `.side-scroll::before` casts the shadow from the
 list's very edge; at the top of the list there is none.
 
-Each project tile carries a live status dot: green while any of that project's
-sessions works, amber when one needs attention. The socket keeps active rows
-from every project current as summary projections, so the dot appears and
-clears without opening that project; after a reconnect it also re-reads the
-rows the client still shows as active, so a turn that ended while the link was
-down clears its dot too.
+Each project tile carries live status marks in its corners (`ProjectRailMarks`,
+`components/sidebar/ProjectRailStatus.tsx`; counts come from
+`projectRailStatus`, the same resolver as the rows): a question at the top
+start, a permission request at the top end, and at the bottom end the unread
+results — one chat as a dot, several as a count — or, without results, a
+hollow ring while one of the project's sessions works. The bottom start corner
+stays free. The socket keeps active rows from every project current as summary
+projections, so a mark appears and clears without opening that project; after a
+reconnect it also re-reads the rows the client still shows as active, so a turn
+that ended while the link was down clears its mark too. Mark boxes are scaled
+by `--rail-scale-left`, which is a percentage (0.9 gives a 7.2px dot); the box
+and the ring snap to whole pixels, because a fractional box rasterizes as 7 or
+8px by the tile's subpixel position and two projects in one state would wear
+differently sized marks.
 
 **Primary workbench profiles.** A package profile opts into the same top-level
 switcher as Chat with `presentation: { navigation: "primary" }`. Profiles without

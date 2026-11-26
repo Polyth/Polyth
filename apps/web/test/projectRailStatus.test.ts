@@ -84,6 +84,21 @@ test("the button's name carries every count", () => {
   assert.equal(projectRailStatusLabel("Polyth", { permissions: 0, questions: 0, results: 0, working: 0 }), "Polyth");
 });
 
+test("a mark's box and ring snap to whole pixels", () => {
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const block = css.slice(css.indexOf(".sidebar-project-rail-mark {"), css.indexOf(".sidebar-project-rail-tooltip-copy > .sidebar-project-rail-tooltip-status"));
+  // The rail scale is a percentage: at 0.9 an 8px dot is 7.2px long, and the
+  // browser rasterizes that as 7 or 8px by the tile's subpixel position, so two
+  // projects in the same state wore differently sized marks. Each size is a
+  // rounded second declaration over the plain calc, which stays as the fallback.
+  assert.match(block, /--rail-mark: calc\(var\(--rail-mark-base\) \* var\(--rail-scale-left, 1\)\);/);
+  assert.match(block, /--rail-mark: round\(calc\(var\(--rail-mark-base\) \* var\(--rail-scale-left, 1\)\), 1px\);/);
+  assert.match(block, /--rail-mark-ring: round\(calc\(2px \* var\(--rail-scale-left, 1\)\), 1px\);/);
+  assert.match(block, /\.sidebar-project-rail-mark\.is-dot \{\n {2}--rail-mark-base: 8px;/);
+  assert.match(block, /inset 0 0 0 var\(--rail-mark-ring\) var\(--accent\)/);
+  assert.doesNotMatch(block, /--rail-mark: calc\(8px \* var\(--rail-scale-left/);
+});
+
 test("each kind owns its corner and the bottom start stays free", () => {
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.match(css, /\.sidebar-project-rail-mark\.is-question \{[^}]*top: 0; inset-inline-start: 0;/);
