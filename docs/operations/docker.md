@@ -16,7 +16,7 @@ by default, the Polyth Link host. Compose files and the entrypoint live in
 | Build argument | Default | Meaning |
 |---|---|---|
 | `POLYTH_UID` / `POLYTH_GID` | `1000` | Account the server runs as. Match the owner of the mounted workspace, or Git refuses the repositories as "dubious ownership" and writes fail. |
-| `POLYTH_LINK` | `host` | `host` compiles `polyth-link-host` (Rust, slow first build); `none` omits Polyth Link. |
+| `POLYTH_LINK` | `host` | `host` compiles `polyth-link-host` and `polyth-link-client` (Rust, slow first build); `none` omits Polyth Link, including joining other Polyth servers. |
 | `GH_CLI` | `1` | `0` leaves out the GitHub CLI. |
 | `POLYTH_WEB_BUILD_ID` | timestamp | Web bundle build id. |
 
@@ -132,7 +132,8 @@ host names). The proxy must forward the original `Host` and set
 
 ## Pairing phones through Polyth Link
 
-The default image contains `polyth-link-host`. Link prefers direct
+The default image contains `polyth-link-host`, and `polyth-link-client` for
+joining other Polyth servers (`POLYTH_LINK_CLIENT`). Link prefers direct
 peer-to-peer connections; with host networking (mode 1) the host's addresses
 are visible to it. On a bridge network (mode 2) it sees only the container
 address, so direct LAN discovery and connectivity are limited. The Link host

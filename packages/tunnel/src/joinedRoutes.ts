@@ -18,6 +18,9 @@ const CLIENT_ERRORS: Readonly<Record<string, readonly [number, string]>> = {
   "host-identity-mismatch": [409, "The server that answered is not the one in the pairing link."],
   "device-unknown": [404, "unknown server"],
   "device-revoked": [409, "The other server revoked this connection."],
+  // The client runs here: these are this server's problem, not the other one's.
+  "link-client-start-failed": [503, "The Polyth Link client on this server could not start. It may be older than this Polyth: update or rebuild it, then try again."],
+  "link-client-exited": [503, "The Polyth Link client on this server stopped. Try again."],
 };
 
 const fail = (code: string, message: string): Error => Object.assign(new Error(message), { code });

@@ -29,6 +29,7 @@ docker run --rm --entrypoint sh "$IMAGE" -ec '
   test -x "packages/harness-runtime/native/bin/linux-$(node -p process.arch)/polyth-supervisor"
   test -s apps/web/dist/index.html
   if [ -e "$POLYTH_LINK_HOST" ]; then echo "polyth-link-host: present"; else echo "polyth-link-host: omitted"; fi
+  if [ -e "$POLYTH_LINK_CLIENT" ]; then echo "polyth-link-client: present"; else echo "polyth-link-client: omitted"; fi
   if command -v gh >/dev/null; then gh --version | head -n1; fi
   if [ -n "${POLYTH_CHROMIUM_PATH:-}" ]; then "$POLYTH_CHROMIUM_PATH" --version; fi
 '

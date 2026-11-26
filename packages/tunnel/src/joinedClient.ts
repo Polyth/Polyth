@@ -4,7 +4,7 @@
 // A process that ends is started again by the next request; deciding when to
 // ask again (backoff) belongs to the caller.
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { Readable, Writable } from "node:stream";
 
@@ -27,10 +27,22 @@ export interface ClientBinaryLookup {
   resourcesDir?: string;
   repoRoot?: string;
   exists?: (path: string) => boolean;
+  /** When a file was last written, in ms; 0 when unknown. */
+  modifiedAt?: (path: string) => number;
 }
 
+const modifiedAt = (path: string): number => {
+  try {
+    return statSync(path).mtimeMs;
+  } catch {
+    return 0;
+  }
+};
+
 /** Resolve the `polyth-link-client` executable: the `POLYTH_LINK_CLIENT`
- *  override, a packaged `<resources>/polyth-link/` copy, then a local build. */
+ *  override, a packaged `<resources>/polyth-link/` copy, then the newer of the
+ *  local release and debug builds. A release build left over from months ago
+ *  must not shadow today's debug build: an old client lacks the `stdio` mode. */
 export function resolveClientBinary(opts: ClientBinaryLookup = {}): string | null {
   const platform = opts.platform ?? process.platform;
   const env = opts.env ?? process.env;
@@ -41,13 +53,16 @@ export function resolveClientBinary(opts: ClientBinaryLookup = {}): string | nul
   const resourcesDir = opts.resourcesDir
     ?? env.POLYTH_RESOURCES_DIR
     ?? (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+  const packaged = resourcesDir ? join(resourcesDir, "polyth-link", name) : null;
+  if (packaged && exists(packaged)) return packaged;
   const root = opts.repoRoot ?? join(import.meta.dirname, "../../..");
-  const candidates = [
-    ...(resourcesDir ? [join(resourcesDir, "polyth-link", name)] : []),
-    join(root, "target", "release", name),
-    join(root, "target", "debug", name),
-  ];
-  return candidates.find((candidate) => exists(candidate)) ?? null;
+  const written = opts.modifiedAt ?? modifiedAt;
+  const builds = [join(root, "target", "release", name), join(root, "target", "debug", name)]
+    .filter((candidate) => exists(candidate));
+  // On a tie the release build, listed first, stays.
+  return builds.reduce<string | null>((best, candidate) => (
+    best === null || written(candidate) > written(best) ? candidate : best
+  ), null);
 }
 
 /** The variables the client needs to run, resolve names and reach a proxy. It
@@ -117,10 +132,18 @@ export function createLinkClientProcess(options: {
       env: linkClientEnv(options.env ?? process.env),
       windowsHide: true,
     }) as Child;
-    const ended = (): void => {
+    // A client that ends before its first line never ran: usually one built
+    // before this server, which answers `stdio` with "unknown command".
+    let answered = false;
+    const ended = (code?: unknown, signal?: unknown): void => {
       if (child !== started) return;
       child = null;
-      rejectPending(closed ? "link-client-closed" : "link-client-exited");
+      if (!closed && !answered) {
+        const how = code instanceof Error ? (code as NodeJS.ErrnoException).code ?? "spawn error"
+          : code === null ? `signal ${String(signal)}` : `exit code ${String(code)}`;
+        console.error(`[polyth-link] the Link client ${options.binary} ended before answering (${how})`);
+      }
+      rejectPending(closed ? "link-client-closed" : answered ? "link-client-exited" : "link-client-start-failed");
       if (closed) return;
       for (const listener of [...exitListeners]) listener(Date.now() - startedAt);
     };
@@ -140,6 +163,7 @@ export function createLinkClientProcess(options: {
         if (newline < 0) break;
         const line = buffer.slice(0, newline);
         buffer = buffer.slice(newline + 1);
+        answered = true;
         handleLine(line);
       }
       if (buffer.length > MAX_LINE_CHARS) {

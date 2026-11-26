@@ -176,6 +176,8 @@ export const ptBR: TunnelMessages = {
   "tunnel.joined.linkLabel": "Link de pareamento",
   "tunnel.joined.linkHint": "Peça um link de pareamento ao proprietário desse servidor. Ele vale por 2 minutos, e o proprietário aprova o pedido do lado dele.",
   "tunnel.joined.join": "Entrar",
+  "tunnel.joined.joinFailed": "Não foi possível entrar nesse servidor",
+  "tunnel.joined.leaveFailed": "Não foi possível sair de {server}",
   "tunnel.joined.dialogTitle": "Entrar em {server}",
   "tunnel.joined.dialogTitleUnnamed": "Entrar em um servidor",
   "tunnel.joined.connecting": "Contatando o servidor…",

@@ -31,7 +31,8 @@ everything in `POLYTH_DATA_DIR`.
 | `POLYTH_PUBLIC_ORIGIN` | none | HTTPS origin when published behind a TLS proxy (requires `POLYTH_TRUSTED_PROXIES`) |
 | `POLYTH_TRUSTED_PROXIES` | none | Comma-separated exact proxy addresses allowed to report forwarded TLS |
 | `POLYTH_CHROMIUM_PATH` | auto | Chromium executable for the built-in browser |
-| `POLYTH_LINK_HOST` | auto | `polyth-link-host` executable (otherwise `target/release` after `npm run build:link`) |
+| `POLYTH_LINK_HOST` | auto | `polyth-link-host` executable (otherwise `target/release`, then `target/debug`; `npm run build:link` makes debug builds) |
+| `POLYTH_LINK_CLIENT` | auto | `polyth-link-client` executable for joining other Polyth servers (otherwise the newer of `target/release` and `target/debug`) |
 | `POLYTH_DEBUG_AGENT_ACCESS` | none | `1` allows loopback API access without sign-in, see [debug modes](#debug-and-disposable-modes) |
 
 ## Packaged server

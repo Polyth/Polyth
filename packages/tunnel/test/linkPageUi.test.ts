@@ -397,6 +397,8 @@ test("a refused pairing link shows the server's message", async () => {
   await page.click(page.button("Join"));
   assert.equal(page.dialog(), null);
   assert.match(page.host.textContent ?? "", /That pairing link has expired\./);
+  // The page loaded; it is the join that failed.
+  assert.equal(page.host.querySelector(".settings-error-title")?.textContent, "Couldn’t join that server");
   assert.equal(joinedCalls().some(([, path]) => path === "/pair/confirm"), false);
   beginFailure = null;
   await page.unmount();

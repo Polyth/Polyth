@@ -181,6 +181,44 @@ test("the client binary override wins and a missing one resolves to nothing", ()
   );
 });
 
+test("the newer local build wins, so a months-old release build cannot shadow today's debug build", () => {
+  const release = join("/repo", "target", "release", "polyth-link-client");
+  const debug = join("/repo", "target", "debug", "polyth-link-client");
+  const lookup = (times: Record<string, number>, resourcesDir?: string) => resolveClientBinary({
+    env: {}, platform: "linux", repoRoot: "/repo", ...(resourcesDir ? { resourcesDir } : {}),
+    exists: (path) => path in times, modifiedAt: (path) => times[path] ?? 0,
+  });
+  assert.equal(lookup({ [release]: 100, [debug]: 200 }), debug);
+  assert.equal(lookup({ [release]: 300, [debug]: 200 }), release);
+  assert.equal(lookup({ [release]: 200, [debug]: 200 }), release);
+  assert.equal(lookup({ [debug]: 200 }), debug);
+  const packaged = join("/res", "polyth-link", "polyth-link-client");
+  assert.equal(lookup({ [packaged]: 1, [release]: 100, [debug]: 200 }, "/res"), packaged);
+});
+
+test("a client that ends before answering is this server's problem, not the other server's", async (t) => {
+  const root = rootFor(t);
+  // What a client built before `stdio` existed does.
+  const stale = join(root, "stale-link-client");
+  writeFileSync(stale, "#!/bin/sh\necho \"unknown command $1\" >&2\nexit 2\n", { mode: 0o755 });
+  const joined = createJoinedSpaces({
+    rootDir: () => join(root, "joined"),
+    deviceLabel: () => "Home server",
+    env: { ...process.env, POLYTH_LINK_CLIENT: stale },
+  });
+  joined.start();
+  t.after(() => joined.stop());
+  const logged: unknown[][] = [];
+  t.mock.method(console, "error", (...args: unknown[]) => { logged.push(args); });
+
+  const answer = await call(joined, "POST", "/api/tunnel/joined/pair/parse", { body: { ticket: ticket({ port: 1 }) } });
+  assert.equal(answer.status, 503);
+  assert.equal(answer.body.error, "link-client-start-failed");
+  assert.match(answer.body.message, /Link client on this server could not start/);
+  assert.doesNotMatch(answer.body.message, /not reachable/);
+  assert.match(String(logged.at(-1)?.[0]), /ended before answering \(exit code 2\)/);
+});
+
 test("pairing lists the other server's Spaces under derived ids", async (t) => {
   const remote = await remoteServer(t);
   const root = rootFor(t);

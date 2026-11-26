@@ -176,6 +176,8 @@ export const de: TunnelMessages = {
   "tunnel.joined.linkLabel": "Kopplungslink",
   "tunnel.joined.linkHint": "Bitte den Eigentümer dieses Servers um einen Kopplungslink. Er gilt 2 Minuten, und der Eigentümer bestätigt die Anfrage auf seiner Seite.",
   "tunnel.joined.join": "Beitreten",
+  "tunnel.joined.joinFailed": "Beitritt zum Server fehlgeschlagen",
+  "tunnel.joined.leaveFailed": "{server} konnte nicht verlassen werden",
   "tunnel.joined.dialogTitle": "{server} beitreten",
   "tunnel.joined.dialogTitleUnnamed": "Einem Server beitreten",
   "tunnel.joined.connecting": "Server wird kontaktiert…",

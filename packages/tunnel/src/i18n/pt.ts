@@ -176,6 +176,8 @@ export const pt: TunnelMessages = {
   "tunnel.joined.linkLabel": "Ligação de emparelhamento",
   "tunnel.joined.linkHint": "Peça uma ligação de emparelhamento ao proprietário desse servidor. É válida durante 2 minutos e o proprietário aprova o pedido do lado dele.",
   "tunnel.joined.join": "Juntar-se",
+  "tunnel.joined.joinFailed": "Não foi possível aderir a esse servidor",
+  "tunnel.joined.leaveFailed": "Não foi possível sair de {server}",
   "tunnel.joined.dialogTitle": "Juntar-se a {server}",
   "tunnel.joined.dialogTitleUnnamed": "Juntar-se a um servidor",
   "tunnel.joined.connecting": "A contactar o servidor…",

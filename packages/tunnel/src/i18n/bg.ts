@@ -176,6 +176,8 @@ export const bg: TunnelMessages = {
   "tunnel.joined.linkLabel": "Връзка за сдвояване",
   "tunnel.joined.linkHint": "Помолете собственика на този сървър за връзка за сдвояване. Тя важи 2 минути, а собственикът одобрява заявката от своя страна.",
   "tunnel.joined.join": "Присъединяване",
+  "tunnel.joined.joinFailed": "Неуспешно присъединяване към сървъра",
+  "tunnel.joined.leaveFailed": "Неуспешно напускане на {server}",
   "tunnel.joined.dialogTitle": "Присъединяване към {server}",
   "tunnel.joined.dialogTitleUnnamed": "Присъединяване към сървър",
   "tunnel.joined.connecting": "Свързване със сървъра…",

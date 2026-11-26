@@ -176,6 +176,8 @@ export const fr: TunnelMessages = {
   "tunnel.joined.linkLabel": "Lien d’association",
   "tunnel.joined.linkHint": "Demandez un lien d’association au propriétaire de ce serveur. Il est valable 2 minutes, et le propriétaire approuve la demande de son côté.",
   "tunnel.joined.join": "Rejoindre",
+  "tunnel.joined.joinFailed": "Impossible de rejoindre ce serveur",
+  "tunnel.joined.leaveFailed": "Impossible de quitter {server}",
   "tunnel.joined.dialogTitle": "Rejoindre {server}",
   "tunnel.joined.dialogTitleUnnamed": "Rejoindre un serveur",
   "tunnel.joined.connecting": "Connexion au serveur…",

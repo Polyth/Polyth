@@ -176,6 +176,8 @@ export const zhCN: TunnelMessages = {
   "tunnel.joined.linkLabel": "配对链接",
   "tunnel.joined.linkHint": "请向该服务器的所有者索取配对链接。链接 2 分钟内有效，所有者需要在其一侧批准请求。",
   "tunnel.joined.join": "加入",
+  "tunnel.joined.joinFailed": "无法加入该服务器",
+  "tunnel.joined.leaveFailed": "无法退出 {server}",
   "tunnel.joined.dialogTitle": "加入 {server}",
   "tunnel.joined.dialogTitleUnnamed": "加入服务器",
   "tunnel.joined.connecting": "正在连接服务器…",

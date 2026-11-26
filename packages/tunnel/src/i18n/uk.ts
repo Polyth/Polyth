@@ -176,6 +176,8 @@ export const uk: TunnelMessages = {
   "tunnel.joined.linkLabel": "Посилання для створення пари",
   "tunnel.joined.linkHint": "Попросіть у власника того сервера посилання для створення пари. Воно діє 2 хвилини, а власник схвалює запит на своєму боці.",
   "tunnel.joined.join": "Приєднатися",
+  "tunnel.joined.joinFailed": "Не вдалося приєднатися до сервера",
+  "tunnel.joined.leaveFailed": "Не вдалося вийти з {server}",
   "tunnel.joined.dialogTitle": "Приєднання до «{server}»",
   "tunnel.joined.dialogTitleUnnamed": "Приєднання до сервера",
   "tunnel.joined.connecting": "З’єднання із сервером…",

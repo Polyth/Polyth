@@ -178,6 +178,8 @@ export const en = {
   "tunnel.joined.linkLabel": "Pairing link",
   "tunnel.joined.linkHint": "Ask the owner of that server for a pairing link. It works for 2 minutes, and the owner approves it on their side.",
   "tunnel.joined.join": "Join",
+  "tunnel.joined.joinFailed": "Couldn’t join that server",
+  "tunnel.joined.leaveFailed": "Couldn’t leave {server}",
   "tunnel.joined.dialogTitle": "Join {server}",
   "tunnel.joined.dialogTitleUnnamed": "Join a server",
   "tunnel.joined.connecting": "Contacting the server…",

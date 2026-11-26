@@ -140,7 +140,8 @@ export default function JoinedServers({ api, settingsTarget, t }: {
   const [overview, setOverview] = useState<Overview | "unavailable" | null>(null);
   const [link, setLink] = useState("");
   const [flow, setFlow] = useState<Flow | null>(null);
-  const [error, setError] = useState("");
+  // A title says which action failed; none means the list did not load.
+  const [error, setError] = useState<{ text: string; title?: string } | null>(null);
   const [joined, setJoined] = useState("");
   const [leaving, setLeaving] = useState("");
   // Bumped whenever the pairing on screen is abandoned: late answers are stale.
@@ -160,7 +161,7 @@ export default function JoinedServers({ api, settingsTarget, t }: {
         return;
       }
       setOverview((previous) => previous ?? { servers: [], spaces: [] });
-      setError(errorText(cause));
+      setError({ text: errorText(cause) });
     }
   }, [api]);
   useEffect(() => { void reload(); }, [reload]);
@@ -190,7 +191,7 @@ export default function JoinedServers({ api, settingsTarget, t }: {
   const fail = (cause: unknown) => {
     unconfirmedRef.current = null;
     setFlow(null);
-    setError(errorText(cause));
+    setError({ text: errorText(cause), title: t("tunnel.joined.joinFailed") });
   };
 
   /** The host's Space switcher re-reads the list (apps/web/src/spaces.ts). */
@@ -233,7 +234,7 @@ export default function JoinedServers({ api, settingsTarget, t }: {
     const ticket = link.trim();
     if (!ticket || flow) return;
     const run = ++runRef.current;
-    setError("");
+    setError(null);
     setJoined("");
     setFlow({ stage: "reading" });
     try {
@@ -290,7 +291,7 @@ export default function JoinedServers({ api, settingsTarget, t }: {
       confirmLabel: t("tunnel.joined.leave"),
     })) return;
     setLeaving(server.connectionId);
-    setError("");
+    setError(null);
     setJoined("");
     try {
       const before = await activeSpaceId();
@@ -309,7 +310,7 @@ export default function JoinedServers({ api, settingsTarget, t }: {
         location.reload();
       }
     } catch (cause) {
-      setError(errorText(cause));
+      setError({ text: errorText(cause), title: t("tunnel.joined.leaveFailed", { server: server.label }) });
     } finally {
       setLeaving("");
     }
@@ -341,7 +342,7 @@ export default function JoinedServers({ api, settingsTarget, t }: {
               spellCheck={false}
               onChange={(event) => {
                 setLink(event.target.value);
-                setError("");
+                setError(null);
               }}
             />
             <Button variant="primary" type="submit" disabled={!link.trim() || flow !== null}>
@@ -350,7 +351,7 @@ export default function JoinedServers({ api, settingsTarget, t }: {
           </div>
           <p className="pkg-tunnel-meta">{t("tunnel.joined.linkHint")}</p>
         </form>
-        {error && <ErrorState compact error={error} />}
+        {error && <ErrorState compact title={error.title} error={error.text} />}
         {joined && <p className="pkg-tunnel-for-notice pkg-tunnel-joined-done" role="status">{t("tunnel.joined.success", { server: joined })}</p>}
         {overview.servers.length > 0 && (
           <ul className="pkg-tunnel-devices">

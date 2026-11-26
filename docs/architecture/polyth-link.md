@@ -362,7 +362,12 @@ a call. A longer-lived invitation needs a protocol change and new app builds.
 A person here can join a Space on another Polyth server; this server is then
 that person's Link client (`packages/tunnel/src/joined*.ts`, driving one
 `polyth-link-client stdio` process per person; `POLYTH_LINK_CLIENT` overrides
-the binary). The package decides nothing about routing: the host picks the
+the binary, then a packaged copy, then the newer of the `target/release` and
+`target/debug` builds, so a stale release build from before `stdio` existed
+cannot shadow a fresh `npm run build:link`). A client that ends before its
+first answer is reported as `link-client-start-failed` ("could not start … may
+be older than this Polyth"), not as the other server being unreachable. The
+package decides nothing about routing: the host picks the
 requests that follow a joined Space and calls `server.joined-spaces`.
 
 - **Which requests go there** (`packages/server/src/joinedSpaceRouting.ts`).

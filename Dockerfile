@@ -45,7 +45,9 @@ RUN POLYTH_WEB_BUILD_ID="${POLYTH_WEB_BUILD_ID}" npm run build \
  && rm -rf apps/desktop/resources apps/desktop/build
 
 # ---------------------------------------------------------------------------
-# Polyth Link host (remote/mobile access). Selected by POLYTH_LINK.
+# Polyth Link (remote/mobile access, joining other servers). Selected by
+# POLYTH_LINK. The host serves this server's devices; the client lets the
+# people here join another Polyth server.
 FROM rust:1.91.0-bookworm@sha256:e187887ec511b3d93e45c0231d2f0fd59f1347526c58aa86343aa83c74f3e1a9 AS link-host
 WORKDIR /src
 # The image already pins the toolchain; rust-toolchain.toml would only add
@@ -54,8 +56,9 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target,sharing=locked \
-    cargo build --locked --release -p polyth-link-host \
- && install -D -m 0755 target/release/polyth-link-host /out/polyth-link-host
+    cargo build --locked --release -p polyth-link-host -p polyth-link-client \
+ && install -D -m 0755 target/release/polyth-link-host /out/polyth-link-host \
+ && install -D -m 0755 target/release/polyth-link-client /out/polyth-link-client
 
 FROM busybox:stable@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662 AS link-none
 RUN mkdir -p /out
@@ -96,6 +99,7 @@ ENV NODE_ENV=production \
     PORT=4400 \
     POLYTH_DATA_DIR=/data \
     POLYTH_LINK_HOST=/usr/local/lib/polyth-link/polyth-link-host \
+    POLYTH_LINK_CLIENT=/usr/local/lib/polyth-link/polyth-link-client \
     HOME=/home/node \
     SHELL=/bin/bash
 WORKDIR /opt/polyth

@@ -176,6 +176,8 @@ export const it: TunnelMessages = {
   "tunnel.joined.linkLabel": "Link di abbinamento",
   "tunnel.joined.linkHint": "Chiedi un link di abbinamento al proprietario di quel server. Vale per 2 minuti e il proprietario approva la richiesta dalla sua parte.",
   "tunnel.joined.join": "Unisciti",
+  "tunnel.joined.joinFailed": "Impossibile unirsi al server",
+  "tunnel.joined.leaveFailed": "Impossibile lasciare {server}",
   "tunnel.joined.dialogTitle": "Unisciti a {server}",
   "tunnel.joined.dialogTitleUnnamed": "Unisciti a un server",
   "tunnel.joined.connecting": "Connessione al server…",

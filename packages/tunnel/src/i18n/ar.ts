@@ -176,6 +176,8 @@ export const ar: TunnelMessages = {
   "tunnel.joined.linkLabel": "رابط الاقتران",
   "tunnel.joined.linkHint": "اطلب رابط اقتران من مالك ذلك الخادم. يعمل الرابط لمدة دقيقتين، ويوافق المالك على الطلب من جهته.",
   "tunnel.joined.join": "انضمام",
+  "tunnel.joined.joinFailed": "تعذّر الانضمام إلى هذا الخادم",
+  "tunnel.joined.leaveFailed": "تعذّر مغادرة {server}",
   "tunnel.joined.dialogTitle": "الانضمام إلى {server}",
   "tunnel.joined.dialogTitleUnnamed": "الانضمام إلى خادم",
   "tunnel.joined.connecting": "جارٍ الاتصال بالخادم…",

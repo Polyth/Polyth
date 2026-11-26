@@ -176,6 +176,8 @@ export const pl: TunnelMessages = {
   "tunnel.joined.linkLabel": "Link parowania",
   "tunnel.joined.linkHint": "Poproś właściciela tamtego serwera o link parowania. Działa przez 2 minuty, a właściciel zatwierdza prośbę po swojej stronie.",
   "tunnel.joined.join": "Dołącz",
+  "tunnel.joined.joinFailed": "Nie udało się dołączyć do serwera",
+  "tunnel.joined.leaveFailed": "Nie udało się opuścić {server}",
   "tunnel.joined.dialogTitle": "Dołączanie do {server}",
   "tunnel.joined.dialogTitleUnnamed": "Dołączanie do serwera",
   "tunnel.joined.connecting": "Łączenie z serwerem…",
