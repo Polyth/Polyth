@@ -260,3 +260,99 @@ test("without Polyth Link, or for an account outside the Space, Done offers no p
   assert.equal(view.panel().querySelector(".user-wizard-connect"), null);
   await view.unmount();
 });
+
+// A package's way in besides the browser (`settings.users.invite.methods`).
+async function withInviteMethod(meta: Record<string, unknown>, run: () => Promise<void>) {
+  const { registerSlot } = await import("../src/slots.ts");
+  const off = registerSlot("settings.users.invite.methods", "test.app", () => null, 10, { inviteMethod: meta }, "test");
+  try { await run(); } finally { off(); }
+}
+
+test("with a way in besides the browser, step 3 asks how they connect and hands over that link", async () => {
+  const issued: unknown[] = [];
+  await withInviteMethod({
+    label: "Polyth app",
+    detail: "Over Polyth Link.",
+    available: ({ member }: { member: boolean }) => member ? true : "Only for Space members.",
+    preferred: () => true,
+    issue: async (input: unknown) => {
+      issued.push(input);
+      return { url: "https://polyth.app/join#v=1&t=abc", expiresAt: Date.UTC(2026, 11, 3), message: "Hi Iryna! Open https://polyth.app/join#v=1&t=abc", note: "Works once." };
+    },
+  }, async () => {
+    const view = await mount();
+    assert.match(view.panel().textContent ?? "", /Step 1 of 3/);
+    const [name] = [...view.panel().querySelectorAll<HTMLInputElement>(".user-wizard-body input")];
+    await view.type(name!, "Iryna Petrenko");
+    await view.click(view.submit());
+    assert.match(view.panel().textContent ?? "", /Step 2 of 3/);
+    await view.click(view.submit());
+
+    assert.match(view.panel().textContent ?? "", /Step 3 of 3/);
+    assert.match(view.panel().textContent ?? "", /How will Iryna connect\?/);
+    const methods = [...view.panel().querySelectorAll<HTMLElement>(".user-wizard-preset")].map((row) => row.dataset.method);
+    assert.deepEqual(methods, ["test.app", "browser"]);
+    // The preferred, available method is chosen; the browser names this address.
+    assert.ok(view.panel().querySelector('.user-wizard-preset[data-method="test.app"][data-selected]'));
+    assert.match(view.panel().querySelector('[data-method="browser"]')?.textContent ?? "", /https:\/\/polyth\.example\.org/);
+    await view.click(view.submit());
+
+    assert.deepEqual(issued, [{ member: true, shareableAddress: "https://polyth.example.org", accountId: "usr_new", name: "Iryna Petrenko" }]);
+    assert.equal(calls.some((call) => call.path === "/api/auth/accounts/usr_new/invitation"), false, "no web link is made beside it");
+    const text = view.panel().textContent ?? "";
+    assert.match(text, /Connection link/);
+    assert.ok(text.includes("https://polyth.app/join#v=1&t=abc"));
+    assert.match(text, /Works once\./);
+    assert.match(text, /Polyth on their device connects to this server/);
+    assert.equal(view.panel().querySelector(".user-wizard-connect"), null, "no second Link offer");
+    await view.unmount();
+  });
+});
+
+test("a way in that doesn't fit the person stays visible but disabled, and the browser is chosen", async () => {
+  await withInviteMethod({
+    label: "Polyth app",
+    detail: "Over Polyth Link.",
+    available: ({ member }: { member: boolean }) => member ? true : "Only for Space members.",
+    preferred: () => true,
+    issue: async () => { throw new Error("must not be asked"); },
+  }, async () => {
+    const view = await mount();
+    const [name] = [...view.panel().querySelectorAll<HTMLInputElement>(".user-wizard-body input")];
+    await view.type(name!, "Iryna Petrenko");
+    await view.click(view.submit());
+    await view.click(view.panel().querySelector('.user-wizard-preset[data-preset="account"] input')!);
+    await view.click(view.submit());
+
+    const app = view.panel().querySelector<HTMLElement>('.user-wizard-preset[data-method="test.app"]')!;
+    assert.equal(app.querySelector<HTMLInputElement>("input")!.disabled, true);
+    assert.match(app.textContent ?? "", /Only for Space members\./);
+    assert.ok(view.panel().querySelector('.user-wizard-preset[data-method="browser"][data-selected]'));
+    await view.click(view.submit());
+    assert.match(view.panel().textContent ?? "", /can sign in now/);
+    await view.unmount();
+  });
+});
+
+test("when the chosen way in fails, the person is still created and gets the password", async () => {
+  await withInviteMethod({
+    label: "Polyth app",
+    detail: "Over Polyth Link.",
+    preferred: () => true,
+    issue: async () => { throw Object.assign(new Error("Polyth Link isn't running on this server."), { code: "unavailable" }); },
+  }, async () => {
+    const view = await mount();
+    const [name] = [...view.panel().querySelectorAll<HTMLInputElement>(".user-wizard-body input")];
+    await view.type(name!, "Iryna Petrenko");
+    const password = view.panel().querySelectorAll<HTMLInputElement>(".user-wizard-body input")[2]!.value;
+    await view.click(view.submit());
+    await view.click(view.submit());
+    await view.click(view.submit());
+
+    const text = view.panel().textContent ?? "";
+    assert.match(text, /the Polyth app invitation couldn’t be made/);
+    assert.ok(text.includes(password), "the temporary password is the way in");
+    assert.ok(calls.some((call) => call.path === "/api/auth/accounts/usr_new/invitation"), "the web link is still tried");
+    await view.unmount();
+  });
+});

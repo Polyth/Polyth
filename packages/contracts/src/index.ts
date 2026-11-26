@@ -7074,6 +7074,11 @@ export const UI_SLOTS = [
   "settings.packages.content",
   "session.footer",
   "settings.users.invite.notice",
+  // Settings → Users → Add user: more ways for the new person to reach this
+  // server than its web address (the Polyth app over Polyth Link). Data only:
+  // `meta.inviteMethod` (InviteMethodSlotMeta in @polyth/web-sdk); the flow
+  // lists each as a choice and never mounts `render`.
+  "settings.users.invite.methods",
   // Fresh-session widgets (starters, recents, or a plugin replacement). This
   // is deliberately a slot rather than a SessionHero import: idle-screen
   // information density is user-configurable and plugins can replace it.

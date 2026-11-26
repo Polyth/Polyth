@@ -355,7 +355,43 @@ for others** lists the issued devices with Revoke, then Forget.
 
 The ticket keeps the protocol's 2-minute lifetime (`pairing_ttl_ms`, enforced
 by the clients too), so the owner and teammate pair together, for example on
-a call. A longer-lived invitation needs a protocol change and new app builds.
+a call. A one-time invitation instead carries an invitation ticket with a
+lifetime of up to 7 days.
+
+### One-time invitations
+
+An invitation is a ticket marked `invitation: true` that the person can open
+later, without the owner and teammate being online together. Its lifetime is
+up to 7 days and it expires by wall clock.
+
+- Issuing: `POST /api/tunnel/invitations` `{forUserId, profile?, ttlMs?}`.
+  `forUserId` must be another member of the current Space; the profile
+  defaults to `full-remote` and the TTL to 7 days (1 hour … 7 days allowed).
+  A new invitation cancels the issuer's earlier pending one for that person,
+  and an older Link host answers `501 unsupported`. The answer carries
+  `{id, forUserId, profile, url, link, expiresAt, qrModules}`.
+- Listing and cancelling: `GET /api/tunnel/invitations` returns the caller's
+  pending invitations, and `DELETE /api/tunnel/invitations/:id` cancels one,
+  answering the same 404 for an unknown id, someone else's invitation and a
+  no-longer-pending one. These routes are local/full-access only (not in
+  `TUNNEL_REMOTE_ACCESS`); each requires `tunnelPairingManage` and instance
+  owner authority.
+- Storage: the `tunnel_invitation` table in `tunnel.db` keeps the pairing id,
+  issuer, `for_user_id`, profile, ticket, share URL, label, created and
+  expiry times, state (`pending|used|cancelled|expired`) and device id. The
+  ticket is kept so the host can be given it back after a restart, which makes
+  the link a bearer credential until it is used or expires. Audit rows and
+  events carry only ids, never the ticket or URL.
+- Commit: when a committing pairing belongs to an invitation, the device is
+  stored in `forUserId`'s account with `issuedBy` the owner, the row becomes
+  `used`, and `invitation-used` is audited and emitted as
+  `tunnel/invitation-used` to the issuer. A cancelled, used or expired
+  invitation stores nothing (`pairing.storage_failed`).
+- Restart: after every trust sync Node sends its pending invitations to the
+  Link host with `pairing.restore`; rejected entries become `expired` or
+  `cancelled`. Identity rotation cancels all pending invitations.
+- The Link page section **Invitations not opened yet** lists the owner's
+  pending invitations with Copy link and Cancel.
 
 ## Joined Spaces
 

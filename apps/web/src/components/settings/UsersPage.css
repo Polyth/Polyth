@@ -186,6 +186,9 @@
 .user-wizard-preset[data-selected] { background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .user-wizard-preset:has(input:focus-visible) { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 .user-wizard-preset:has(input:disabled) { cursor: default; }
+/* A way in that can't be offered for this person: dimmed, its reason kept legible. */
+.user-wizard-preset[data-unavailable] .user-wizard-preset-icon,
+.user-wizard-preset[data-unavailable] .user-wizard-preset-title { opacity: 0.55; }
 .user-wizard-preset:first-child { border-start-start-radius: inherit; border-start-end-radius: inherit; }
 .user-wizard-preset:last-child { border-end-start-radius: inherit; border-end-end-radius: inherit; }
 .user-wizard-preset-icon {

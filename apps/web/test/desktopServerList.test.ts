@@ -136,6 +136,24 @@ test("a build without the Link client refuses a pairing link instead of pretendi
   await unmount();
 });
 
+test("an https invitation link pasted with its message pairs with the same canonical link", async () => {
+  const { servers, calls } = fakeServers({
+    link: (method) => method === "pairing.parse"
+      ? { ok: true, result: { hostLabel: "Team box", hostFingerprint: "ab12…cd34", expiresAt: "1" } }
+      : method === "pairing.begin"
+        ? { ok: true, result: { attemptId: "a1", state: "pending", safetyPhrase: ["amber", "river", "stone", "moss"] } }
+        : { ok: false, code: "unavailable" },
+  });
+  const { host, unmount } = await mount(servers);
+  await submitAdd(host, "You are invited. Join here: https://polyth.app/join#v=1&t=abc_DEF-123 It expires in 7 days.");
+  const canonical = "polyth://pair?v=1&t=abc_DEF-123";
+  const parse = calls.find((call) => call.method === "link" && call.args[0] === "pairing.parse");
+  assert.deepEqual((parse?.args[1] as { ticket: string } | undefined)?.ticket, canonical);
+  const begin = calls.find((call) => call.method === "link" && call.args[0] === "pairing.begin");
+  assert.deepEqual((begin?.args[1] as { ticket: string } | undefined)?.ticket, canonical);
+  await unmount();
+});
+
 test("nearby pairing is refused: the desktop app has no local discovery", async () => {
   const { servers } = fakeServers();
   await assert.rejects(desktopLinkAdapter(servers as never).beginNumericPairing({ code: "123456" } as never), { code: "unavailable" });

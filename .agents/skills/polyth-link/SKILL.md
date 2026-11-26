@@ -19,6 +19,8 @@ Treat Link as application-layer access to canonical HTTP/WS, not a VPN, arbitrar
 
 Before changing a handshake or Rust FFI surface, read the current protocol owner and pinned Cargo dependencies. Ticket parsing does not implement secure identity storage, pairing confirmation, proxy lifecycle or native reconnect. Do not guess cryptographic parameters from historical prose. Keep private keys and pairing secrets out of JS, logs, diagnostics and generated examples.
 
+A short-lived pairing ticket and a one-time invitation are different kinds: an invitation is a bearer share link valid for up to 7 days and is restored to the host after a restart. Read [Pairing for another person](../../../docs/architecture/polyth-link.md#pairing-for-another-person) before changing either.
+
 Remote routes are default-deny. Review the package's route scopes and allowed methods/capabilities; privileged local administration must not become remotely reachable via a generic API forwarder. Recheck grants on upgraded sockets and actively terminate affected connections on revoke. Partial revocation must remain a partial/error result, not optimistic success.
 
 Test invalid/expired/replayed tickets, cancellation, host substitution, incorrect safety confirmation, direct-to-relay changes, paired request authorization, revoked HTTP and WS, and unknown routes. Use the current `select-tests.mjs polyth-link` owner set rather than inventing a second list. Run relevant Rust and native tests when their layers change. Never call mobile production pairing complete from TypeScript mocks or ticket-parse FFI tests.

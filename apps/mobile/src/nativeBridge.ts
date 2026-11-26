@@ -12,6 +12,7 @@ import {
   isNativeMobile,
   isPairingDeepLink,
   mobileDeepLinkPath,
+  pairingLinkFromText,
   returnToMobileConnectionHub,
 } from "./runtime.ts";
 import { installNativePolythLink } from "./nativePolythLink.ts";
@@ -362,7 +363,8 @@ export function installNativeMobileIntegration(callbacks: NativeMobileCallbacks)
   }));
 
   retainNativeListener(generation, App.addListener("appUrlOpen", ({ url }) => {
-    if (isPairingDeepLink(url) || mobileDeepLinkPath(url)) {
+    const paired = pairingLinkFromText(url) ?? url;
+    if (isPairingDeepLink(paired) || mobileDeepLinkPath(url)) {
       // The native layer has already captured the raw OS URL in process memory.
       // Never apply an ambiguous external link to whichever server happens to
       // be active; reload the bundled Connection Hub and resolve the server there.

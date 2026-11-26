@@ -35,6 +35,21 @@ export interface TunnelDeviceRecord {
   issuedBy: string | null;
 }
 
+export interface TunnelInvitationRecord {
+  pairingId: string;
+  issuedBy: string;
+  forUserId: string;
+  profile: string;
+  ticket: string;
+  shareUrl: string;
+  label: string | null;
+  createdAt: number;
+  expiresAt: number;
+  state: "pending" | "used" | "cancelled" | "expired";
+  deviceId: string | null;
+  finishedAt: number | null;
+}
+
 export function grantsForProfile(profile: GrantProfileId): string[] {
   const grants = [...GRANT_PROFILE_PRESETS[profile]];
   // Voice input is an interactive capability: it belongs with session
@@ -104,6 +119,20 @@ export class TunnelStore {
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS tunnel_invitation (
+        pairing_id TEXT PRIMARY KEY,
+        issued_by TEXT NOT NULL,
+        for_user_id TEXT NOT NULL,
+        profile TEXT NOT NULL,
+        ticket TEXT NOT NULL,
+        share_url TEXT NOT NULL,
+        label TEXT,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('pending','used','cancelled','expired')),
+        device_id TEXT,
+        finished_at INTEGER
+      );
     `);
     this.db.exec("INSERT OR IGNORE INTO tunnel_meta(key, value) VALUES ('schema', 1)");
     const columns = new Set((this.db.prepare("PRAGMA table_info(tunnel_device)").all() as Array<{ name: string }>).map((row) => row.name));
@@ -119,7 +148,8 @@ export class TunnelStore {
     this.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS tunnel_device_pairing_id ON tunnel_device(pairing_id) WHERE pairing_id IS NOT NULL");
     this.db.exec("CREATE INDEX IF NOT EXISTS tunnel_device_owner ON tunnel_device(owner_user_id)");
     this.db.exec("CREATE INDEX IF NOT EXISTS tunnel_device_issuer ON tunnel_device(issued_by) WHERE issued_by IS NOT NULL");
-    this.db.exec("UPDATE tunnel_meta SET value = 3 WHERE key = 'schema'");
+    this.db.exec("CREATE INDEX IF NOT EXISTS tunnel_invitation_issuer ON tunnel_invitation(issued_by, state)");
+    this.db.exec("UPDATE tunnel_meta SET value = 4 WHERE key = 'schema'");
   }
 
   close(): void {
@@ -174,6 +204,79 @@ export class TunnelStore {
 
   releasePairingOwner(pairingId: string): void {
     this.db.prepare("DELETE FROM tunnel_pairing_owner WHERE pairing_id = ?").run(pairingId);
+  }
+
+  /** A one-time Link invitation: a pairing the host confirmed automatically,
+   *  sent as one shareable link instead of a QR code. */
+  createInvitation(input: {
+    pairingId: string;
+    issuedBy: string;
+    forUserId: string;
+    profile: string;
+    ticket: string;
+    shareUrl: string;
+    label?: string | null;
+    expiresAt: number;
+    createdAt?: number;
+  }): TunnelInvitationRecord {
+    this.db.prepare(
+      "INSERT INTO tunnel_invitation(pairing_id, issued_by, for_user_id, profile, ticket, share_url, label, created_at, expires_at, state, device_id, finished_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL)",
+    ).run(
+      input.pairingId,
+      input.issuedBy,
+      input.forUserId,
+      input.profile,
+      input.ticket,
+      input.shareUrl,
+      input.label ?? null,
+      input.createdAt ?? Date.now(),
+      input.expiresAt,
+    );
+    return this.invitation(input.pairingId)!;
+  }
+
+  invitation(pairingId: string): TunnelInvitationRecord | undefined {
+    const row = this.db.prepare("SELECT * FROM tunnel_invitation WHERE pairing_id = ?").get(pairingId) as Record<string, unknown> | undefined;
+    return row ? hydrateInvitation(row) : undefined;
+  }
+
+  /** An issuer's live invitations: still pending and not past their expiry. */
+  invitationsByIssuer(userId: string, now = Date.now()): TunnelInvitationRecord[] {
+    const rows = this.db.prepare(
+      "SELECT * FROM tunnel_invitation WHERE issued_by = ? AND state = 'pending' AND expires_at > ? ORDER BY created_at DESC",
+    ).all(userId, now) as Record<string, unknown>[];
+    return rows.map(hydrateInvitation);
+  }
+
+  /** Every live invitation, for restoring them into a restarted host. */
+  pendingInvitations(now = Date.now()): TunnelInvitationRecord[] {
+    const rows = this.db.prepare(
+      "SELECT * FROM tunnel_invitation WHERE state = 'pending' AND expires_at > ? ORDER BY created_at ASC",
+    ).all(now) as Record<string, unknown>[];
+    return rows.map(hydrateInvitation);
+  }
+
+  /** Moves a pending invitation out of `pending`; nothing else moves it.
+   *  Releasing the pairing's owner row is what makes it unrecoverable. */
+  finishInvitation(pairingId: string, state: "used" | "cancelled" | "expired", deviceId?: string): boolean {
+    const result = this.db.prepare(
+      "UPDATE tunnel_invitation SET state = ?, device_id = COALESCE(?, device_id), finished_at = ? WHERE pairing_id = ? AND state = 'pending'",
+    ).run(state, deviceId ?? null, Date.now(), pairingId);
+    if (result.changes === 0) return false;
+    this.releasePairingOwner(pairingId);
+    return true;
+  }
+
+  /** Expires live invitations whose time is up; returns how many it swept. */
+  sweepInvitations(now = Date.now()): number {
+    const rows = this.db.prepare(
+      "SELECT pairing_id FROM tunnel_invitation WHERE state = 'pending' AND expires_at <= ?",
+    ).all(now) as Array<{ pairing_id: string }>;
+    let swept = 0;
+    for (const row of rows) {
+      if (this.finishInvitation(row.pairing_id, "expired")) swept += 1;
+    }
+    return swept;
   }
 
   commitDevice(input: {
@@ -532,6 +635,24 @@ export class TunnelStore {
       issuedBy: typeof row.issued_by === "string" && row.issued_by ? row.issued_by : null,
     };
   }
+}
+
+function hydrateInvitation(row: Record<string, unknown>): TunnelInvitationRecord {
+  const state = row.state === "used" || row.state === "cancelled" || row.state === "expired" ? row.state : "pending";
+  return {
+    pairingId: String(row.pairing_id),
+    issuedBy: String(row.issued_by),
+    forUserId: String(row.for_user_id),
+    profile: String(row.profile),
+    ticket: String(row.ticket),
+    shareUrl: String(row.share_url),
+    label: row.label == null ? null : String(row.label),
+    createdAt: Number(row.created_at),
+    expiresAt: Number(row.expires_at),
+    state,
+    deviceId: row.device_id == null ? null : String(row.device_id),
+    finishedAt: row.finished_at == null ? null : Number(row.finished_at),
+  };
 }
 
 export function createTunnelStore(path: string): TunnelStore {

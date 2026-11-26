@@ -1,4 +1,5 @@
 import { App } from "@capacitor/app";
+import { pairingLinkFromText } from "@polyth/pairing-qr";
 import { Capacitor, CapacitorHttp } from "@capacitor/core";
 import { Preferences } from "@capacitor/preferences";
 import { consumeNativePendingUrl, nativeNavigationAvailable } from "./nativeNavigation.ts";
@@ -14,6 +15,7 @@ import {
 } from "./nativePolythLink.ts";
 
 export type { ServerZone, ServerZoneProject, ServerZonesView } from "./nativePolythLink.ts";
+export { pairingLinkFromText };
 
 const HOSTS_KEY = "polyth.mobile.hosts.v1";
 const PENDING_DEEP_LINK_KEY = "polyth.mobile.pending-deep-link.v1";
@@ -397,7 +399,7 @@ export async function prepareMobileLaunch(): Promise<MobileLaunch> {
     ? await consumeNativePendingUrl().catch(() => undefined)
     : (await App.getLaunchUrl().catch(() => undefined))?.url;
   const deepLinkPath = (opened ? mobileDeepLinkPath(opened) : undefined) ?? pendingPath;
-  const launchPair = opened && isPairingDeepLink(opened) ? opened : undefined;
+  const launchPair = opened ? pairingLinkFromText(opened) ?? undefined : undefined;
 
   if (launchPair) {
     return {

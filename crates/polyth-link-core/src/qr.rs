@@ -102,6 +102,7 @@ mod tests {
                 policy: "direct-preferred".into(),
             }],
             profile: "interact".into(),
+            invitation: false,
         })
         .unwrap();
         let modules = ticket_qr_modules(&ticket).unwrap();

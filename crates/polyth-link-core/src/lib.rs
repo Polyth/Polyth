@@ -34,7 +34,8 @@ pub use numeric_pairing::{
 pub use numeric_wire::{NumericWireMessage, POLYTH_NUMERIC_ALPN};
 pub use pairing::{HostPairing, PairingEvent};
 pub use ticket::{
-    clean_label, decode_invite_secret, parse_pairing_ticket, PairingTicket, POLYTH_LINK_ALPN,
+    clean_label, decode_invite_secret, parse_pairing_ticket, share_link, PairingTicket,
+    POLYTH_LINK_ALPN, SHARE_LINK_PREFIX,
 };
 pub use transport::TransportPolicy;
 

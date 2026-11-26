@@ -1920,7 +1920,8 @@ feature CSS in `settings/UsersPage.css`, list and detail rules in
   state and carries Add user. Once anyone else is listed it leaves the page and
   opens on demand from "How it works" beside Add user (`aria-expanded`). On a
   phone both buttons drop under the section hint as one row, Add user filling it.
-- **Add user** is a three-step dialog in the new-project flow's grammar: step
+- **Add user** is a three-step dialog (two when no invite method is
+  registered) in the new-project flow's grammar: step
   label and X, title, hint, a progress hairline along the head's bottom edge
   (half, full, then green), one scroll region and a pinned footer with the way
   back first and the one primary last. On a desktop all steps share one
@@ -1939,7 +1940,20 @@ feature CSS in `settings/UsersPage.css`, list and detail rules in
      `createAccount` → guardrails (when Protected) → `grantSpaceMember`, in that
      order: if Protected mode can't be set, no Space access is granted and the
      done step says so.
-  3. *Done*, with an invitation link: Create user also issues a one-time link
+  3. *How will {name} connect?* — only when a package registers an invite
+     method in `settings.users.invite.methods`. Each registered method is one
+     choice with its `label` and `detail`, disabled with the reason its
+     `available` returns, and the built-in Browser choice is always last, its
+     detail naming the shareable address or saying the server opens only on
+     this computer. The default is the first available method whose
+     `preferred` is true, else Browser.
+  4. *Done*. Create user runs the chosen method's `issue` instead of making a
+     web invitation link, and the step shows the method's *Connection link*
+     and message for "Copy invitation" plus its note, with the temporary
+     password behind the existing disclosure. If `issue` fails, a problem
+     notice is shown and the flow falls back to the web invitation link and
+     password. The Browser choice, and any flow without a method, makes the
+     invitation link: Create user also issues a one-time link
      (`inviteAccount` → `POST /api/auth/accounts/:id/invitation`). When the
      server's address or this page's is shareable (`invitationUrl`), the step
      shows the link and the access, "Copy invitation"/"Share…" send a message
@@ -2690,6 +2704,15 @@ Quote and Copy in the floating toolbar and the touch dock. It is data only
 runs it on its own copy of the selection (`text`, `markdown`, `eventSeq`,
 `messageRole`, `sessionId`, `projectId`, from `selectionSnapshot.ts`), then clears
 the selection. The contribution's `render` is never mounted.
+
+`settings.users.invite.methods` adds one way of connecting a person to the
+Add user wizard (see *Settings → Users*). It is data only
+(`meta.inviteMethod`, `InviteMethodSlotMeta`): `label`, `detail`, `icon`,
+`available(context)` returning `true` or the reason the choice is disabled,
+`preferred(context)`, and `issue({member, shareableAddress, accountId, name})`
+returning `{url, expiresAt, message, note?}`. The host lists the methods,
+chooses the default and calls `issue` when the wizard creates the person; the
+contribution's `render` is never mounted.
 
 `host.conversation.revealEvent` takes an optional `passage`: text inside the
 message to land on and light for a moment with the CSS Custom Highlight API,

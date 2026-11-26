@@ -1,12 +1,15 @@
-// Settings → Users → Add user: a three-step flow that a non-technical owner can
+// Settings → Users → Add user: a short flow that a non-technical owner can
 // follow without knowing what a Space role or a guardrail is, and that a
 // professional can finish with Enter, Enter:
 //   1. Who: name, login (suggested from the name) and a generated temporary
 //      password, already filled in.
 //   2. What they can do: one preset (Teammate, Protected, Viewer, Admin,
 //      Account only), each a Space role with or without Protected mode.
-//   3. Done: the sign-in details and a ready-made invitation to send. The
-//      temporary password is shown here for the last time.
+//   3. How they connect, when a package offers a way besides the browser
+//      (`settings.users.invite.methods`: the Polyth app over Polyth Link for
+//      a server nobody else can open by address).
+//   4. Done: the link and a ready-made invitation to send. The temporary
+//      password is shown here for the last time.
 // Projects, assistants and daily limits are fine-tuned on the person's page.
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { GUARDRAIL_DEFAULT_GRANTS } from "@polyth/contracts";
@@ -32,6 +35,7 @@ import {
   CloseIcon,
   CopiedIcon,
   CopyIcon,
+  GlobeIcon,
   KeyIcon,
   PeopleIcon,
   SessionIcon,
@@ -44,6 +48,7 @@ import {
 import { FormField } from "./parts.tsx";
 import { PassphraseField } from "./UserDetail.tsx";
 import { buildGuardrails } from "./accountGuardrailsModel.ts";
+import { checkedInvitation, listInviteMethods, type InviteMethod } from "./inviteMethods.ts";
 import { isReauthCancelled, type WithReauth } from "./ownerReauth.tsx";
 import {
   accountErrorText,
@@ -63,7 +68,10 @@ import {
 } from "./usersModel.ts";
 import { tr } from "../../i18n/index.ts";
 
-type Step = "who" | "access" | "done";
+type Step = "who" | "access" | "connect" | "done";
+
+/** The built-in way in: this server's web address. */
+const BROWSER = "browser";
 
 const PRESET_ICONS: Record<UserPreset, LucideIcon> = {
   teammate: PeopleIcon,
@@ -78,8 +86,11 @@ interface Created {
   name: string;
   login: string;
   password: string;
-  /** A one-time sign-in link, when this server could issue one at a shareable address. */
-  invitation: { url: string; expiresAt: number } | null;
+  /** A one-time link: a web sign-in link at a shareable address, or what the
+   *  chosen invite method made (then with its own message and note). */
+  invitation: { url: string; expiresAt: number; message?: string; note?: string } | null;
+  /** How the person connects: `browser`, or an invite method's id. */
+  method: string;
   /** Joined the current Space, so the owner can pair their Polyth app. */
   member: boolean;
   preset: UserPreset;
@@ -125,6 +136,15 @@ export default function AddUserWizard({ spaceAccess, withReauth, onClose, onCrea
   const whoReady = !!name.trim() && loginValid && passwordValid;
   const displayName = name.trim();
   const choices = useMemo(() => presetChoices(canManageMembers), [canManageMembers]);
+  // Ways in besides the browser, from packages (the Polyth app over Polyth Link).
+  const slotsAt = useSlotVersion();
+  const methods = useMemo(() => listInviteMethods(), [slotsAt]);
+  const [method, setMethod] = useState<string>(BROWSER);
+  const [methodChosen, setMethodChosen] = useState(false);
+  /** Per method id: true, a reason it can't be offered, or absent while asked. */
+  const [availability, setAvailability] = useState<Record<string, true | string>>({});
+  const address = useMemo(() => shareableAddress(typeof location === "undefined" ? "" : location.origin), []);
+  const willBeMember = !!presetPlan(preset, canManageMembers).role && !!spaceAccess;
 
   // Each step announces itself: focus its title (step 2: the chosen option,
   // so arrow keys and Enter work at once). The first step keeps the dialog's
@@ -132,7 +152,7 @@ export default function AddUserWizard({ spaceAccess, withReauth, onClose, onCrea
   useEffect(() => {
     if (firstStep.current) { firstStep.current = false; return; }
     bodyRef.current?.scrollTo?.({ top: 0 });
-    const radio = step === "access" ? bodyRef.current?.querySelector<HTMLInputElement>("input[type=radio]:checked") : null;
+    const radio = step === "access" || step === "connect" ? bodyRef.current?.querySelector<HTMLInputElement>("input[type=radio]:checked") : null;
     (radio ?? titleRef.current)?.focus({ preventScroll: true });
   }, [step]);
 
@@ -142,6 +162,31 @@ export default function AddUserWizard({ spaceAccess, withReauth, onClose, onCrea
     if (!whoReady || busy) return;
     setError(null);
     setStep("access");
+  };
+
+  // Step 3 asks each method whether it fits this person, then picks the one
+  // that will work: a preferred method that is available, else the browser.
+  useEffect(() => {
+    if (step !== "connect") return undefined;
+    let live = true;
+    const context = { member: willBeMember, shareableAddress: address };
+    void Promise.all(methods.map(async (entry) => [entry.id, await entry.available(context)] as const)).then((answers) => {
+      if (!live) return;
+      const next = Object.fromEntries(answers);
+      setAvailability(next);
+      if (methodChosen && (method === BROWSER || next[method] === true)) return;
+      const preferred = methods.find((entry) => next[entry.id] === true && entry.preferred(context));
+      setMethod(preferred?.id ?? BROWSER);
+    });
+    return () => { live = false; };
+    // Asked again each time the step opens: the preset decides membership.
+  }, [step]);
+
+  const toConnect = () => {
+    if (!whoReady || busy) return;
+    setError(null);
+    if (methods.length === 0) { void create(); return; }
+    setStep("connect");
   };
 
   const create = async () => {
@@ -182,12 +227,28 @@ export default function AddUserWizard({ spaceAccess, withReauth, onClose, onCrea
       // The link is the easy way in; the temporary password stays as a fallback
       // (an older server, or one reachable only on this computer).
       let invitation: Created["invitation"] = null;
-      try {
-        const issued = await withReauth(() => inviteAccount(account.id));
-        const url = invitationUrl(issued.url, typeof location === "undefined" ? "" : location.origin, shareableAddress);
-        if (url) invitation = { url, expiresAt: issued.expiresAt };
-      } catch { /* the password below still works */ }
-      setCreated({ account, name: shownName, login: account.login ?? normalizedLogin, password, invitation, member, preset, problems });
+      let via = BROWSER;
+      const chosen: InviteMethod | undefined = method === BROWSER || availability[method] !== true
+        ? undefined
+        : methods.find((entry) => entry.id === method);
+      if (chosen) {
+        try {
+          const made = checkedInvitation(await chosen.issue({ member, shareableAddress: address, accountId: account.id, name: shownName }));
+          if (!made) throw new Error(tr("settings.users.wizard.methodUnavailable"));
+          invitation = made;
+          via = chosen.id;
+        } catch (cause) {
+          problems.push(tr("settings.users.createdInviteFailed", { name: shownName, method: chosen.label, reason: accountErrorText(cause) }));
+        }
+      }
+      if (!invitation) {
+        try {
+          const issued = await withReauth(() => inviteAccount(account.id));
+          const url = invitationUrl(issued.url, typeof location === "undefined" ? "" : location.origin, shareableAddress);
+          if (url) invitation = { url, expiresAt: issued.expiresAt };
+        } catch { /* the password below still works */ }
+      }
+      setCreated({ account, name: shownName, login: account.login ?? normalizedLogin, password, invitation, method: via, member, preset, problems });
       setStep("done");
       onCreated(account);
     } catch (cause) {
@@ -197,8 +258,8 @@ export default function AddUserWizard({ spaceAccess, withReauth, onClose, onCrea
     }
   };
 
-  const total = 2;
-  const index = step === "who" ? 1 : step === "access" ? 2 : 3;
+  const total = methods.length > 0 ? 3 : 2;
+  const index = step === "who" ? 1 : step === "access" ? 2 : step === "connect" ? 3 : total + 1;
 
   return (
     <Dialog
@@ -220,12 +281,17 @@ export default function AddUserWizard({ spaceAccess, withReauth, onClose, onCrea
         <h2 className="user-wizard-title" ref={titleRef} tabIndex={-1}>
           {step === "who" && tr("settings.users.wizard.whoTitle")}
           {step === "access" && tr("settings.users.wizard.accessTitle", { name: displayName })}
+          {step === "connect" && tr("settings.users.wizard.connectTitle", { name: displayName.split(/\s+/)[0] || displayName })}
           {step === "done" && created && tr("settings.users.wizard.doneTitle", { name: created.name })}
         </h2>
         <p className="user-wizard-hint">
           {step === "who" && tr("settings.users.wizard.whoHint")}
           {step === "access" && tr("settings.users.wizard.accessHint")}
-          {step === "done" && created && tr("settings.users.wizard.doneHint", { name: created.name.split(/\s+/)[0] ?? created.name })}
+          {step === "connect" && tr("settings.users.wizard.connectHint")}
+          {step === "done" && created && tr(
+            created.method === BROWSER ? "settings.users.wizard.doneHint" : "settings.users.wizard.doneHintLink",
+            { name: created.name.split(/\s+/)[0] ?? created.name },
+          )}
         </p>
         {/* Progress along the head's bottom edge: half, full, then done. */}
         <span className="user-wizard-progress" aria-hidden="true">
@@ -295,7 +361,7 @@ export default function AddUserWizard({ spaceAccess, withReauth, onClose, onCrea
       )}
 
       {step === "access" && (
-        <form className="user-wizard-form" onSubmit={(event) => { event.preventDefault(); void create(); }}>
+        <form className="user-wizard-form" onSubmit={(event) => { event.preventDefault(); toConnect(); }}>
           <div className="user-wizard-body" ref={bodyRef}>
             {!canManageMembers && (
               <Notice tone="info">{spaceAccess ? tr("settings.users.cannotManageMembers") : tr("settings.users.spaceUnavailable")}</Notice>
@@ -336,6 +402,43 @@ export default function AddUserWizard({ spaceAccess, withReauth, onClose, onCrea
           </div>
           <footer className="user-wizard-foot">
             <Button type="button" variant="ghost" iconStart={BackIcon} disabled={busy} onClick={() => { setError(null); setStep("who"); }}>{tr("common.back")}</Button>
+            {methods.length > 0
+              ? <Button type="submit" variant="primary" iconEnd={ChevronRightIcon}>{tr("common.continue")}</Button>
+              : <Button type="submit" variant="primary" busy={busy}>{tr("settings.users.createUser")}</Button>}
+          </footer>
+        </form>
+      )}
+
+      {step === "connect" && (
+        <form className="user-wizard-form" onSubmit={(event) => { event.preventDefault(); void create(); }}>
+          <div className="user-wizard-body" ref={bodyRef}>
+            <div className="user-wizard-presets" role="radiogroup" aria-label={tr("settings.users.wizard.connectTitle", { name: displayName })}>
+              {methods.map((entry) => (
+                <MethodChoice
+                  key={entry.id}
+                  id={entry.id}
+                  icon={entry.icon}
+                  label={entry.label}
+                  detail={typeof availability[entry.id] === "string" ? availability[entry.id] as string : entry.detail}
+                  selected={method === entry.id}
+                  disabled={busy || availability[entry.id] !== true}
+                  onChoose={() => { setMethod(entry.id); setMethodChosen(true); }}
+                />
+              ))}
+              <MethodChoice
+                id={BROWSER}
+                icon={GlobeIcon}
+                label={tr("settings.users.wizard.methodBrowser")}
+                detail={address ? tr("settings.users.wizard.methodBrowserDetail", { address }) : tr("settings.users.wizard.methodBrowserLocal")}
+                selected={method === BROWSER}
+                disabled={busy}
+                onChoose={() => { setMethod(BROWSER); setMethodChosen(true); }}
+              />
+            </div>
+            {error && <Notice tone="error" role="alert">{error}</Notice>}
+          </div>
+          <footer className="user-wizard-foot">
+            <Button type="button" variant="ghost" iconStart={BackIcon} disabled={busy} onClick={() => { setError(null); setStep("access"); }}>{tr("common.back")}</Button>
             <Button type="submit" variant="primary" busy={busy}>{tr("settings.users.createUser")}</Button>
           </footer>
         </form>
@@ -365,10 +468,13 @@ function DoneStep({ created, space, canManageMembers, bodyRef, onDone, onOpenAcc
 }) {
   const address = useMemo(() => shareableAddress(typeof location === "undefined" ? "" : location.origin), []);
   const link = created.invitation;
+  const viaMethod = created.method !== BROWSER;
   const until = link ? new Date(link.expiresAt).toLocaleDateString(undefined, { day: "numeric", month: "long" }) : "";
-  const invitation = link
-    ? invitationLinkText({ name: created.name, url: link.url, until })
-    : invitationText({ name: created.name, login: created.login, password: created.password, address });
+  const invitation = link?.message
+    ? link.message
+    : link
+      ? invitationLinkText({ name: created.name, url: link.url, until })
+      : invitationText({ name: created.name, login: created.login, password: created.password, address });
   const [copied, setCopied] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
@@ -383,7 +489,7 @@ function DoneStep({ created, space, canManageMembers, bodyRef, onDone, onOpenAcc
   // Without an internet address the link reaches no one outside this network:
   // Polyth Link pairs their own Polyth app instead (the Link page, owner side).
   const slotsAt = useSlotVersion();
-  const linkPairing = useMemo(() => created.member && listSlots("settings.pages").some((page) => page.id === "tunnel"), [slotsAt, created.member]);
+  const linkPairing = useMemo(() => !viaMethod && created.member && listSlots("settings.pages").some((page) => page.id === "tunnel"), [slotsAt, created.member, viaMethod]);
   const remote = !link || !link.url.startsWith("https:");
   const connectApp = () => {
     onDone();
@@ -400,7 +506,14 @@ function DoneStep({ created, space, canManageMembers, bodyRef, onDone, onOpenAcc
       <div className="user-wizard-body" ref={bodyRef}>
         {link && (
           <dl className="user-wizard-credentials">
-            <CredentialRow label={tr("settings.users.wizard.invitationLink")} value={link.url} mono copyLabel={tr("settings.users.wizard.copyLink")} copied={copied === "link"} onCopy={() => copy("link", link.url)} />
+            <CredentialRow
+              label={tr(viaMethod ? "settings.users.wizard.connectLink" : "settings.users.wizard.invitationLink")}
+              value={link.url}
+              mono
+              copyLabel={tr("settings.users.wizard.copyLink")}
+              copied={copied === "link"}
+              onCopy={() => copy("link", link.url)}
+            />
             <div className="user-wizard-credential">
               <dt>{tr("settings.users.wizard.access")}</dt>
               <dd><span className="user-wizard-credential-value">{access}</span></dd>
@@ -432,7 +545,9 @@ function DoneStep({ created, space, canManageMembers, bodyRef, onDone, onOpenAcc
             </Button>
           )}
         </div>
-        <p className="user-wizard-note">{link ? tr("settings.users.wizard.linkOnce", { date: until }) : tr("settings.users.wizard.passwordOnce")}</p>
+        <p className="user-wizard-note">
+          {link?.note ?? (link ? tr("settings.users.wizard.linkOnce", { date: until }) : tr("settings.users.wizard.passwordOnce"))}
+        </p>
         {link && (
           <details className="user-wizard-fallback">
             <summary>{tr("settings.users.wizard.passwordInstead")}</summary>
@@ -460,6 +575,41 @@ function DoneStep({ created, space, canManageMembers, bodyRef, onDone, onOpenAcc
         <Button variant="primary" onClick={onDone}>{tr("common.done")}</Button>
       </footer>
     </>
+  );
+}
+
+/** One way in on the "How will they connect?" step, drawn like a preset. */
+function MethodChoice({ id, icon, label, detail, selected, disabled, onChoose }: {
+  id: string;
+  icon: LucideIcon;
+  label: string;
+  detail: string;
+  selected: boolean;
+  disabled: boolean;
+  onChoose: () => void;
+}) {
+  const detailId = `user-wizard-method-${id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+  return (
+    <label className="user-wizard-preset" data-method={id} data-selected={selected || undefined} data-unavailable={disabled && !selected ? true : undefined}>
+      <input
+        type="radio"
+        name="user-wizard-method"
+        value={id}
+        className="sr-only"
+        checked={selected}
+        disabled={disabled}
+        aria-describedby={detailId}
+        onChange={onChoose}
+      />
+      <span className="user-wizard-preset-icon" aria-hidden="true"><Icon icon={icon} size="md" /></span>
+      <span className="user-wizard-preset-text">
+        <span className="user-wizard-preset-title">{label}</span>
+        {detail && <span className="user-wizard-preset-detail" id={detailId}>{detail}</span>}
+      </span>
+      <span className="user-wizard-radio" aria-hidden="true">
+        {selected && <Icon icon={CheckIcon} size="sm" />}
+      </span>
+    </label>
   );
 }
 

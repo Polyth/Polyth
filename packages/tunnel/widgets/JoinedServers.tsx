@@ -4,6 +4,7 @@ import { ApiError, type ApiTransport, type SettingsNavigationTarget } from "@pol
 import { ErrorState, Section } from "../../../apps/web/src/components/settings/parts.tsx";
 import { Badge, Button, Dialog, Spinner, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 import { confirmAlert } from "../../../apps/web/src/alerts.ts";
+import { pairingLinkFromText } from "@polyth/pairing-qr";
 import type { Translate } from "./i18n.ts";
 
 // The wire shapes of `/api/tunnel/joined` (src/joinedRoutes.ts).
@@ -20,6 +21,8 @@ interface Overview {
 interface Preview {
   hostLabel: string;
   fingerprint: string;
+  /** A one-time invitation: nobody is at the other end to compare words. */
+  invitation?: boolean;
 }
 
 /** The pairing in progress: reading the link, comparing words, awaiting approval. */
@@ -28,6 +31,7 @@ interface Flow {
   preview?: Preview;
   attemptId?: string;
   words?: string[];
+  invitation?: boolean;
 }
 
 const BASE = "/api/tunnel/joined";
@@ -231,7 +235,8 @@ export default function JoinedServers({ api, settingsTarget, t }: {
   };
 
   const join = async () => {
-    const ticket = link.trim();
+    const typed = link.trim();
+    const ticket = pairingLinkFromText(typed) ?? typed;
     if (!ticket || flow) return;
     const run = ++runRef.current;
     setError(null);
@@ -246,10 +251,12 @@ export default function JoinedServers({ api, settingsTarget, t }: {
         await cancelAttempt(begun.attemptId);
         return;
       }
-      const words = begun.safetyPhrase ?? [];
-      const pending = { stage: "words" as const, preview, attemptId: begun.attemptId, words };
-      // With no words to compare there is nothing to ask.
-      if (words.length === 0) {
+      const invitation = preview.invitation === true;
+      const words = invitation ? [] : begun.safetyPhrase ?? [];
+      const pending = { stage: "words" as const, preview, attemptId: begun.attemptId, words, invitation };
+      // Live pairing with no words has nothing to ask. An invitation always
+      // gets one confirmation of the host, without words to compare.
+      if (!invitation && words.length === 0) {
         await confirm(pending);
         return;
       }
@@ -384,7 +391,7 @@ export default function JoinedServers({ api, settingsTarget, t }: {
               <Button onClick={cancel}>{t("tunnel.dialog.cancel")}</Button>
               {flow.stage === "words" && flow.attemptId && (
                 <Button variant="primary" onClick={() => void confirm({ ...flow, attemptId: flow.attemptId! })}>
-                  {t("tunnel.joined.wordsMatch")}
+                  {t(flow.invitation ? "tunnel.joined.join" : "tunnel.joined.wordsMatch")}
                 </Button>
               )}
             </>
@@ -396,7 +403,7 @@ export default function JoinedServers({ api, settingsTarget, t }: {
                 {flow.words.map((word, index) => <li key={`${index}-${word}`} dir="auto">{word}</li>)}
               </ol>
             )}
-            {flow.stage === "words" && <p className="pkg-tunnel-lead">{t("tunnel.joined.checkWords")}</p>}
+            {flow.stage === "words" && !flow.invitation && <p className="pkg-tunnel-lead">{t("tunnel.joined.checkWords")}</p>}
             {flow.stage !== "words" && (
               <div className="pkg-tunnel-join-progress" role="status">
                 <Spinner />

@@ -226,6 +226,8 @@ test("pairing lists the other server's Spaces under derived ids", async (t) => {
 
   const parsed = await joined.parse(MAYA, ticket({ port: remote.port }));
   assert.equal(parsed.hostLabel, "Studio");
+  assert.equal(parsed.invitation, false, "a live ticket compares words");
+  assert.equal((await joined.parse(MAYA, ticket({ port: remote.port, invitation: true }))).invitation, true);
   const begun = await joined.begin(MAYA, ticket({ port: remote.port }));
   assert.deepEqual(begun.safetyPhrase, ["amber", "river", "stone"]);
   assert.equal(JSON.stringify(begun).includes("fake:"), false);

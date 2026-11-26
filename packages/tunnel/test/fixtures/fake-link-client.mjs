@@ -137,7 +137,7 @@ const parse = (ticket) => {
 const methods = {
   "pairing.parse": ({ ticket }) => {
     const parsed = parse(ticket);
-    return { hostLabel: parsed.label, hostFingerprint: `${parsed.id.slice(0, 4)}…${parsed.id.slice(-4)}`, expiresAt: 4102444800000 };
+    return { hostLabel: parsed.label, hostFingerprint: `${parsed.id.slice(0, 4)}…${parsed.id.slice(-4)}`, expiresAt: 4102444800000, invitation: parsed.invitation === true };
   },
   "pairing.begin": ({ ticket, label }) => {
     const parsed = parse(ticket);

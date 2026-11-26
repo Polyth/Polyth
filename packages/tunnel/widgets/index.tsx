@@ -3,6 +3,9 @@ import { createApiTransport } from "@polyth/web-sdk";
 import type { TunnelStatusDto } from "@polyth/contracts";
 import { createElement } from "react";
 import LinkPage from "./LinkPage.tsx";
+import { createTranslate } from "./i18n.ts";
+import { tunnelInviteMethod } from "./inviteMethod.ts";
+import { SmartphoneIcon } from "../../../apps/web/src/components/ui/index.ts";
 import {
   applyTunnelStatusToCapability,
   polythLinkCapabilityAvailable,
@@ -98,6 +101,14 @@ export default defineWebPackage((host) => () => {
       icon: "qr",
       order: 42,
       component: ({ settingsTarget }) => createElement(LinkPage, { host, ...(settingsTarget ? { settingsTarget } : {}) }),
+    }),
+    // Add user → "How will they connect?": the Polyth app over Polyth Link.
+    host.slots.register({
+      slot: "settings.users.invite.methods",
+      id: "tunnel.invite-app",
+      order: 10,
+      render: () => null,
+      meta: { inviteMethod: tunnelInviteMethod(api, createTranslate(host), SmartphoneIcon, () => host.ui.locale.get?.()) },
     }),
     () => {
       unsubAvailability();

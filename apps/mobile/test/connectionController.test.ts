@@ -478,3 +478,27 @@ test("renaming a saved server changes only its name on this phone", async () => 
   await controller.rename("b", "");
   assert.equal(controller.state.trusted.find((item) => item.id === "b")?.hostLabel, "Server B");
 });
+
+test("an invitation link asks once to join instead of comparing words", async () => {
+  const adapter = native({
+    parsePairingTicket: async () => ({
+      hostLabel: "Team server",
+      hostFingerprint: "fingerprint",
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+      invitation: true,
+    }),
+  });
+  const controller = await loadedController(adapter);
+  const attempt = await controller.beginPairing("polyth://pair?v=1&t=ticket");
+
+  assert.equal(controller.state.phase, "safety-confirmation");
+  assert.deepEqual(attempt?.safetyPhrase, [], "no words to compare");
+  assert.deepEqual(attempt?.invitation, { hostLabel: "Team server" });
+});
+
+test("a live pairing still shows the host's words", async () => {
+  const controller = await loadedController(native());
+  const attempt = await controller.beginPairing("polyth://pair?v=1&t=ticket");
+  assert.deepEqual(attempt?.safetyPhrase, ["amber", "river"]);
+  assert.equal(attempt?.invitation, undefined);
+});

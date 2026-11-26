@@ -477,9 +477,25 @@ async fn dispatch(
                 .as_ref()
                 .map(polyth_link_core::net::current_direct_addresses);
             let host_endpoint = state.identity.endpoint_id();
-            let invitation = state
-                .pairing
-                .create(
+            let invitation_kind = params
+                .get("invitation")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let ttl_ms = params.get("ttlMs").and_then(Value::as_u64);
+            let invitation = if invitation_kind {
+                state.pairing.create_invitation(
+                    &host_endpoint,
+                    label.as_deref(),
+                    profile,
+                    grants,
+                    relays,
+                    direct,
+                    policy,
+                    Instant::now(),
+                    ttl_ms,
+                )
+            } else {
+                state.pairing.create(
                     &host_endpoint,
                     label.as_deref(),
                     profile,
@@ -489,15 +505,30 @@ async fn dispatch(
                     policy,
                     Instant::now(),
                 )
-                .map_err(|e| e.code())?;
-            let numeric =
+            }
+            .map_err(|e| e.code())?;
+            let numeric = if invitation.invitation {
+                None
+            } else {
                 match conn::create_code(&host_endpoint, &invitation.pairing_id, Instant::now()) {
-                    Ok(code) => code,
+                    Ok(code) => Some(code),
                     Err(error) => {
                         let _ = state.pairing.cancel(&invitation.pairing_id);
                         return Err(error.code());
                     }
-                };
+                }
+            };
+            let share_url = if invitation.invitation {
+                match polyth_link_core::share_link(&invitation.ticket) {
+                    Ok(url) => Some(url),
+                    Err(error) => {
+                        let _ = state.pairing.cancel(&invitation.pairing_id);
+                        return Err(error.code());
+                    }
+                }
+            } else {
+                None
+            };
             let qr = ticket_qr_modules(&invitation.ticket).unwrap_or_default();
             // A JSON boolean array costs ~5-6x the raw module count in bytes,
             // which can push an otherwise-legal QR past `control_message_bytes`
@@ -508,7 +539,7 @@ async fn dispatch(
             let _ = state
                 .events
                 .send(json!({"type":"tunnel/pairing-created","pairingId": invitation.pairing_id}));
-            Ok(json!({
+            let mut response = json!({
                 "pairing": {
                     "id": invitation.pairing_id,
                     "expiresAt": invitation.expires_at,
@@ -518,9 +549,61 @@ async fn dispatch(
                 "ticket": invitation.ticket,
                 "qrPayload": invitation.ticket,
                 "qrModulesPacked": { "size": qr_size, "bits": qr_bits },
-                "numericCode": format!("{} {}", &numeric.code[..3], &numeric.code[3..]),
-                "numericExpiresAt": numeric.expires_at,
-            }))
+                "numericCode": numeric.as_ref().map(|code| format!("{} {}", &code.code[..3], &code.code[3..])),
+                "numericExpiresAt": numeric.as_ref().map(|code| code.expires_at.clone()),
+            });
+            // A live code's response stays byte-for-byte what it was; only an
+            // invitation link adds its kind and its shareable form.
+            if let Some(share_url) = share_url {
+                response["invitation"] = json!(true);
+                response["shareUrl"] = json!(share_url);
+            }
+            Ok(response)
+        }
+        "pairing.restore" => {
+            let mut state = state.lock().await;
+            let entries = params
+                .get("invitations")
+                .and_then(Value::as_array)
+                .ok_or("pairing-invalid")?;
+            if entries.len() > polyth_link_core::Limits::v1().active_long_invitations {
+                return Err("request-too-large");
+            }
+            let host_endpoint = state.identity.endpoint_id();
+            let mut restored = Vec::new();
+            let mut rejected = Vec::new();
+            for (index, entry) in entries.iter().enumerate() {
+                let Some(ticket) = entry.get("ticket").and_then(Value::as_str) else {
+                    rejected.push(json!({"index": index, "code": "pairing-invalid"}));
+                    continue;
+                };
+                let grants: Vec<String> = entry
+                    .get("grants")
+                    .and_then(Value::as_array)
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_string)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let label = entry
+                    .get("label")
+                    .and_then(Value::as_str)
+                    .and_then(polyth_link_core::clean_label);
+                match state.pairing.restore(
+                    ticket,
+                    &host_endpoint,
+                    grants,
+                    label.as_deref(),
+                    Instant::now(),
+                ) {
+                    Ok(pairing_id) => restored.push(pairing_id),
+                    Err(error) => rejected.push(json!({"index": index, "code": error.code()})),
+                }
+            }
+            Ok(json!({ "restored": restored, "rejected": rejected }))
         }
         "pairing.get" => {
             let mut state = state.lock().await;
@@ -540,6 +623,7 @@ async fn dispatch(
                 "hostConfirmed": invitation.host_confirmed,
                 "safetyPhrase": invitation.safety_phrase,
                 "requestedGrants": invitation.grants,
+                "invitation": invitation.invitation,
                 "device": invitation.device_label.as_ref().map(|label| json!({
                     "label": label,
                     "platform": invitation.device_platform,
@@ -805,6 +889,7 @@ pub(crate) fn maybe_emit_committing(state: &HostState, pairing_id: &str) {
             "label": invitation.device_label,
             "platform": invitation.device_platform,
             "grants": invitation.grants,
+            "invitation": invitation.invitation,
         }));
     }
     let _ = state.events.send(json!({

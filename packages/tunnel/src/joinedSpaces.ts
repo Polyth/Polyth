@@ -713,6 +713,9 @@ export function createJoinedSpaces(options: {
         hostLabel: text(parsed.hostLabel),
         fingerprint: text(parsed.hostFingerprint),
         expiresAt: parsed.expiresAt,
+        // An invitation ticket has nobody on the other side to compare words
+        // with; the inviting server confirms it by itself.
+        invitation: parsed.invitation === true,
       };
     },
 

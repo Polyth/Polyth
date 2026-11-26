@@ -60,6 +60,8 @@ let issued: Array<TunnelDeviceDto & { accountId: string }> = [];
 let activeSpaceId = "s1";
 let joined: { servers: Array<Record<string, unknown>>; spaces: Array<Record<string, unknown>> } = { servers: [], spaces: [] };
 let beginFailure: { error: string; message: string } | null = null;
+// A one-time invitation ticket: no words, only the host and one confirmation.
+let invitation = false;
 // Holds confirm open, as the other server's owner does until they approve.
 let approval: Promise<void> | null = null;
 const otherServer = { connectionId: "c1", label: "Team box", fingerprint: "ab12…cd34", online: true };
@@ -84,7 +86,7 @@ globalThis.fetch = async (input, init) => {
   if (path === "/api/spaces") return json({ activeSpaceId });
   if (path === "/api/tunnel/joined") return json(joined);
   if (path === "/api/tunnel/joined/pair/parse") {
-    return json({ hostLabel: "Team box", fingerprint: "ab12cd34ef56", expiresAt: new Date(Date.now() + 120_000).toISOString() });
+    return json({ hostLabel: "Team box", fingerprint: "ab12cd34ef56", expiresAt: new Date(Date.now() + 120_000).toISOString(), invitation });
   }
   if (path === "/api/tunnel/joined/pair/begin") {
     if (beginFailure) return json(beginFailure, 410);
@@ -383,6 +385,36 @@ test("joining another server compares the safety words, then lists it with its S
   await page.click(page.button("Save"));
   assert.deepEqual(joinedCalls().at(-1), ["PATCH", "/c1", { label: "Studio" }]);
   assert.match(page.host.querySelector(".pkg-tunnel-server")?.textContent ?? "", /Studio/);
+  approval = null;
+  joined = { servers: [], spaces: [] };
+  await page.unmount();
+});
+
+test("an invitation link skips the words and asks for one confirmation", async () => {
+  joined = { servers: [], spaces: [] };
+  invitation = true;
+  let approve!: () => void;
+  approval = new Promise<void>((resolve) => { approve = resolve; });
+  requests.length = 0;
+  const page = await mountLinkPage();
+  const link = "https://polyth.app/join#v=1&t=abc";
+  await typeInto(page.host.querySelector("input[name='pairing-link']"), link);
+  await page.click(page.button("Join"));
+  const text = () => page.dialog()?.textContent ?? "";
+  assert.match(text(), /Join Team box/);
+  assert.doesNotMatch(text(), /amber|shows these same words/);
+  assert.deepEqual(joinedCalls(), [
+    ["POST", "/pair/parse", { ticket: TICKET }],
+    ["POST", "/pair/begin", { ticket: TICKET }],
+  ]);
+  assert.equal(page.button("Words match"), undefined);
+  const confirm = [...page.dialog()!.querySelectorAll("button")].find((item) => item.textContent?.trim() === "Join") as HTMLButtonElement;
+  await page.click(confirm);
+  assert.deepEqual(joinedCalls().at(-1), ["POST", "/pair/confirm", { attemptId: "a1" }]);
+  approve();
+  await page.flush();
+  assert.match(page.host.textContent ?? "", /You joined Team box/);
+  invitation = false;
   approval = null;
   joined = { servers: [], spaces: [] };
   await page.unmount();

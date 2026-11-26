@@ -392,16 +392,22 @@ export class ConnectionController {
   async beginPairing(raw: string, label?: string): Promise<PairingAttempt | undefined> {
     const epoch = this.#intent("validating-pairing", { pairingAttempt: null });
     try {
-      await this.#native.parsePairingTicket(raw);
+      const preview = await this.#native.parsePairingTicket(raw);
       if (!this.#current(epoch)) return undefined;
       this.#set({ phase: "preparing-pairing" });
-      const attempt = await this.#native.beginPairing(raw, label);
+      const begun = await this.#native.beginPairing(raw, label);
       if (!this.#current(epoch)) {
-        await this.#native.cancelPairing(attempt.attemptId).catch(() => undefined);
+        await this.#native.cancelPairing(begun.attemptId).catch(() => undefined);
         return undefined;
       }
+      // An invitation link was sent by the server's owner and is confirmed by
+      // that server: nobody on the other side reads words to compare, so the
+      // person is asked once whether to join instead.
+      const attempt: PairingAttempt = preview?.invitation === true
+        ? { ...begun, safetyPhrase: [], invitation: { hostLabel: preview.hostLabel } }
+        : begun;
       this.#set({
-        phase: attempt.safetyPhrase?.length ? "safety-confirmation" : "pairing",
+        phase: attempt.safetyPhrase?.length || attempt.invitation ? "safety-confirmation" : "pairing",
         pairingAttempt: attempt,
       });
       return attempt;

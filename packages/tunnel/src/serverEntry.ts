@@ -37,6 +37,12 @@ import { joinedRoutes } from "./joinedRoutes.ts";
 
 const OWNER_USER_ID = "usr_owner";
 
+/** A Link invitation lives one hour to seven days; seven by default. */
+const INVITATION_TTL_MIN = 3_600_000;
+const INVITATION_TTL_MAX = 604_800_000;
+const INVITATION_TTL_DEFAULT = INVITATION_TTL_MAX;
+const INVITATION_URL_PREFIX = "https://polyth.app/join#";
+
 const principalUserId = (principal: AuthPrincipal): string | undefined => {
   const userId = (principal as AuthPrincipal & { userId?: unknown }).userId;
   return typeof userId === "string" && userId ? userId : undefined;
@@ -74,6 +80,17 @@ export async function commitPairingDevice(input: {
   host: LinkHostClient;
   events: TunnelEventBus;
 }): Promise<void> {
+  // An invitation is one-time and short-lived: a commit that arrives after it
+  // was cancelled, used or expired stores nothing, exactly like a commit the
+  // store could not persist.
+  const invitation = deps.store.invitation(input.pairingId);
+  if (invitation && (invitation.state !== "pending" || invitation.expiresAt <= Date.now())) {
+    if (invitation.state === "pending") deps.store.finishInvitation(input.pairingId, "expired");
+    try {
+      await deps.host.request("pairing.storage_failed", { id: input.pairingId });
+    } catch { /* the host may already have finalized it */ }
+    return;
+  }
   let device: ReturnType<TunnelStore["prepareDevice"]> | undefined;
   let activated = false;
   try {
@@ -113,6 +130,57 @@ export async function commitPairingDevice(input: {
   }
   if (activated) {
     deps.events.emit("tunnel/device-added", { id: device.id, deviceId: device.id }, device.ownerUserId);
+    if (invitation) {
+      deps.store.finishInvitation(input.pairingId, "used", device.id);
+      deps.store.audit("invitation-used", {
+        metadata: { pairingId: input.pairingId, forUserId: invitation.forUserId, deviceId: device.id },
+      });
+      deps.events.emit("tunnel/invitation-used", {
+        id: input.pairingId,
+        forUserId: invitation.forUserId,
+        deviceId: device.id,
+        label: device.label,
+        platform: device.platform,
+      }, invitation.issuedBy);
+    }
+  }
+}
+
+/** Wraps restore for the trust sync: a host too old to know
+ *  `pairing.restore` must not fail the sync that already succeeded. */
+export async function syncInvitations(store: TunnelStore, host: LinkHostClient): Promise<void> {
+  try {
+    await restoreInvitations(store, host);
+  } catch (error) {
+    const code = (error as { code?: unknown })?.code;
+    console.warn("[polyth-link] invitation restore skipped", typeof code === "string" ? code : "restore-failed");
+  }
+}
+
+const RESTORE_CHUNK = 64;
+
+/** Hands live invitations back to a host that forgot them on restart. The
+ *  host's answer decides each one: a pairing it no longer honors is dead. */
+export async function restoreInvitations(store: TunnelStore, host: LinkHostClient): Promise<void> {
+  store.sweepInvitations();
+  const pending = store.pendingInvitations();
+  for (let start = 0; start < pending.length; start += RESTORE_CHUNK) {
+    const chunk = pending.slice(start, start + RESTORE_CHUNK);
+    const result = await host.request("pairing.restore", {
+      invitations: chunk.map((invitation) => ({
+        ticket: invitation.ticket,
+        grants: grantsForProfile(invitation.profile as GrantProfileId),
+        label: invitation.label ?? undefined,
+      })),
+    });
+    const rejected = Array.isArray(result.rejected) ? result.rejected : [];
+    for (const entry of rejected) {
+      const item = entry as { index?: unknown; code?: unknown };
+      const index = typeof item.index === "number" ? item.index : -1;
+      const invitation = chunk[index];
+      if (!invitation) continue;
+      store.finishInvitation(invitation.pairingId, item.code === "pairing-expired" ? "expired" : "cancelled");
+    }
   }
 }
 
@@ -287,6 +355,159 @@ export function tunnelRoutes(deps: {
       if (forUserId) deps.store.audit("pairing-issued-for-account", { metadata: { pairingId, profile, issuedBy: request.space.userId, forUserId } });
       json(200, forUserId ? { ...result, forUserId, profile } : result);
       return true;
+    }
+
+    if (path === "/api/tunnel/invitations" && method === "POST") {
+      request.requireCapability(REMOTE_CAPABILITY.tunnelPairingManage);
+      requireInstanceOwnerAuthority(request, "only the instance owner can invite a teammate's app");
+      const body = await request.body();
+      if (typeof body.forUserId !== "string" || !body.forUserId) {
+        json(400, { error: "invalid-input", message: "forUserId must be an account id" });
+        return true;
+      }
+      const forUserId = body.forUserId;
+      if (forUserId === request.space.userId) {
+        json(400, { error: "invalid-input", message: "an invitation is for another person's app; pair your own from this page" });
+        return true;
+      }
+      if (!deps.isSpaceMember?.(forUserId, request.space.spaceId)) {
+        json(400, { error: "invalid-input", message: "that person is not a member of this Space" });
+        return true;
+      }
+      let profile: GrantProfileId = "full-remote";
+      if (body.profile !== undefined) {
+        if (body.profile !== "observe" && body.profile !== "interact" && body.profile !== "developer" && body.profile !== "full-remote") {
+          json(400, { error: "invalid-input", message: "profile must be observe, interact, developer or full-remote" });
+          return true;
+        }
+        profile = body.profile;
+      }
+      let ttlMs = INVITATION_TTL_DEFAULT;
+      if (body.ttlMs !== undefined) {
+        if (typeof body.ttlMs !== "number" || !Number.isInteger(body.ttlMs)
+          || body.ttlMs < INVITATION_TTL_MIN || body.ttlMs > INVITATION_TTL_MAX) {
+          json(400, { error: "invalid-input", message: "ttlMs must be a whole number of milliseconds from one hour to seven days" });
+          return true;
+        }
+        ttlMs = body.ttlMs;
+      }
+      const host = deps.ensureHost ? await deps.ensureHost() : deps.host();
+      if (!host?.available) {
+        json(503, { error: "unavailable", message: "Polyth Link host is not ready. Check host status and try again." });
+        return true;
+      }
+      // One live link per person: an older one must not keep working.
+      for (const earlier of deps.store.invitationsByIssuer(request.space.userId)) {
+        if (earlier.forUserId !== forUserId) continue;
+        try { await host.request("pairing.cancel", { id: earlier.pairingId }); } catch { /* the row is ours to close anyway */ }
+        deps.store.finishInvitation(earlier.pairingId, "cancelled");
+      }
+      const invitationLabel = typeof body.label === "string" && body.label.trim() ? body.label : deps.store.serverName() || fallbackName;
+      const result = await host.request("pairing.create", {
+        profile,
+        mode: "direct-preferred",
+        label: invitationLabel,
+        grants: grantsForProfile(profile),
+        invitation: true,
+        ttlMs,
+      });
+      const shareUrl = typeof result.shareUrl === "string" ? result.shareUrl : "";
+      const pairingId = typeof (result.pairing as { id?: unknown })?.id === "string"
+        ? (result.pairing as { id: string }).id
+        : "";
+      if (result.invitation !== true || !shareUrl.startsWith(INVITATION_URL_PREFIX) || !pairingId) {
+        if (pairingId) {
+          try { await host.request("pairing.cancel", { id: pairingId }); } catch { /* nothing to release locally */ }
+        }
+        json(501, {
+          error: "unsupported",
+          message: "This server's Polyth Link is too old for invitations. Update Polyth.",
+        });
+        return true;
+      }
+      const packedModules = result.qrModulesPacked as { size?: unknown; bits?: unknown } | undefined;
+      delete result.qrModulesPacked;
+      if (typeof packedModules?.size === "number" && typeof packedModules.bits === "string") {
+        result.qrModules = unpackQrModules({ size: packedModules.size, bits: packedModules.bits });
+      }
+      const parsedExpiry = typeof (result.pairing as { expiresAt?: unknown })?.expiresAt === "string"
+        ? Date.parse((result.pairing as { expiresAt: string }).expiresAt)
+        : Number.NaN;
+      const expiresAt = Number.isFinite(parsedExpiry) ? parsedExpiry : Date.now() + ttlMs;
+      try {
+        deps.store.claimPairing(pairingId, request.space.userId, forUserId);
+      } catch (error) {
+        try { await host.request("pairing.cancel", { id: pairingId }); } catch { /* fail closed locally */ }
+        throw error;
+      }
+      deps.store.createInvitation({
+        pairingId,
+        issuedBy: request.space.userId,
+        forUserId,
+        profile,
+        ticket: String(result.ticket ?? ""),
+        shareUrl,
+        label: invitationLabel,
+        expiresAt,
+      });
+      // Audit and events carry the identifiers only: never the ticket or the
+      // share URL, which together let whoever holds them join the account.
+      deps.store.audit("invitation-issued", {
+        metadata: { pairingId, forUserId, profile, expiresAt, issuedBy: request.space.userId },
+      });
+      deps.events.emit("tunnel/invitation-created", { id: pairingId, forUserId }, request.space.userId);
+      json(200, {
+        id: pairingId,
+        forUserId,
+        profile,
+        url: shareUrl,
+        link: String(result.ticket ?? ""),
+        expiresAt,
+        qrModules: result.qrModules,
+      });
+      return true;
+    }
+
+    if (path === "/api/tunnel/invitations" && method === "GET") {
+      request.requireCapability(REMOTE_CAPABILITY.tunnelPairingManage);
+      // Only the instance owner can invite, so only the owner has a list; a
+      // 403 also tells the Add user flow not to offer the Polyth app.
+      requireInstanceOwnerAuthority(request, "only the instance owner can invite a teammate's app");
+      deps.store.sweepInvitations();
+      json(200, {
+        invitations: deps.store.invitationsByIssuer(request.space.userId).map((invitation) => ({
+          id: invitation.pairingId,
+          forUserId: invitation.forUserId,
+          profile: invitation.profile,
+          url: invitation.shareUrl,
+          expiresAt: invitation.expiresAt,
+          createdAt: invitation.createdAt,
+        })),
+      });
+      return true;
+    }
+
+    const invitationMatch = path.match(/^\/api\/tunnel\/invitations\/([^/]+)$/);
+    if (invitationMatch) {
+      request.requireCapability(REMOTE_CAPABILITY.tunnelPairingManage);
+      if (method === "DELETE") {
+        deps.store.sweepInvitations();
+        const id = invitationMatch[1]!;
+        // Unknown, someone else's, already used, cancelled or expired: one
+        // answer, so the route never says whether an id exists.
+        const invitation = deps.store.invitation(id);
+        if (!invitation || invitation.issuedBy !== request.space.userId || invitation.state !== "pending") {
+          throw notFound("unknown invitation");
+        }
+        const host = deps.host();
+        if (host?.available) {
+          try { await host.request("pairing.cancel", { id }); } catch { /* the row still closes */ }
+        }
+        deps.store.finishInvitation(id, "cancelled");
+        deps.store.audit("invitation-cancelled", { metadata: { pairingId: id, forUserId: invitation.forUserId } });
+        json(200, { ok: true });
+        return true;
+      }
     }
 
     if (path === "/api/tunnel/server-name" && (method === "GET" || method === "PUT")) {
@@ -506,6 +727,12 @@ export function tunnelRoutes(deps: {
       for (const id of revokedIds) dropDevicePrincipals(id);
       try {
         const result = await host.request("identity.rotate");
+        // The host forgets the invitations and their tickets name the old
+        // identity, so every live one is cancelled here. No host call: it has
+        // nothing left to cancel.
+        for (const invitation of deps.store.pendingInvitations()) {
+          deps.store.finishInvitation(invitation.pairingId, "cancelled");
+        }
         deps.events.emit("tunnel/identity-rotated", { revoked: revokedIds.length });
         json(200, result);
       } catch (error) {
@@ -591,6 +818,8 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       });
     }
     await linkHost.request("trust.sync_finish");
+    // Invitations live only in memory in the host; a restart forgets them.
+    await syncInvitations(store, linkHost);
   };
 
   let eventsEnabled = false;

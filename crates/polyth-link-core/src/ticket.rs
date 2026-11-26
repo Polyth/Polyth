@@ -10,6 +10,12 @@ pub const POLYTH_LINK_ALPN: &str = "polyth-link/1";
 pub const TICKET_VERSION: u32 = 1;
 pub const TICKET_KIND: &str = "polyth-link-pair";
 
+/// A one-time invitation is sent as a plain https link a messenger can make
+/// clickable; the ticket itself travels in the fragment, so it never reaches
+/// a server in a request line or a referrer.
+pub const SHARE_LINK_PREFIX: &str = "https://polyth.app/join#";
+const SHARE_LINK_PREFIX_SLASH: &str = "https://polyth.app/join/#";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PairingCandidate {
     pub kind: String,
@@ -44,6 +50,14 @@ pub struct PairingTicket {
     pub candidates: Vec<PairingCandidate>,
     #[serde(default = "default_profile")]
     pub profile: String,
+    /// `true` for a long-lived, one-time invitation link. Live tickets keep
+    /// their bytes: the key is absent when it is `false`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub invitation: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 fn default_profile() -> String {
@@ -76,6 +90,19 @@ pub fn encode_pairing_ticket(ticket: &PairingTicket) -> Result<String, LinkError
     Ok(format!("polyth://pair?v=1&t={payload}"))
 }
 
+/// `polyth://pair?v=1&t=X` → `https://polyth.app/join#v=1&t=X`, the form a
+/// person can paste into a messenger. Anything that is not exactly our own
+/// encoded ticket is refused.
+pub fn share_link(ticket_uri: &str) -> Result<String, LinkError> {
+    let query = url_query(ticket_uri)?;
+    let (version, payload) = parse_query(&query)?;
+    if version != "1" {
+        return Err(LinkError::TransportVersionUnsupported);
+    }
+    decode_payload(&payload, Limits::v1())?;
+    Ok(format!("{SHARE_LINK_PREFIX}v=1&t={payload}"))
+}
+
 /// Standards-based URL parser plus a fallback string parser for WebView custom schemes.
 pub fn parse_pairing_ticket(raw: &str) -> Result<PairingTicket, LinkError> {
     parse_with_limits(raw, Limits::v1())
@@ -97,10 +124,23 @@ pub fn parse_with_limits(raw: &str, limits: Limits) -> Result<PairingTicket, Lin
 }
 
 fn extract_query(raw: &str) -> Result<String, LinkError> {
+    if let Some(rest) = share_query(raw) {
+        return Ok(rest.to_string());
+    }
     if let Ok(url) = url_query(raw) {
         return Ok(url);
     }
     fallback_query(raw)
+}
+
+/// The share form keeps everything in the fragment, so a `?` query, userinfo,
+/// a port or any other host never reaches the ticket parser: the prefix must
+/// match exactly.
+fn share_query(raw: &str) -> Option<&str> {
+    let trimmed = raw.trim();
+    trimmed
+        .strip_prefix(SHARE_LINK_PREFIX)
+        .or_else(|| trimmed.strip_prefix(SHARE_LINK_PREFIX_SLASH))
 }
 
 fn url_query(raw: &str) -> Result<String, LinkError> {
@@ -245,13 +285,21 @@ fn validate_ticket_time(ticket: &PairingTicket, limits: Limits) -> Result<(), Li
     if expires <= issued {
         return Err(LinkError::PairingInvalid);
     }
-    if expires - issued > limits.pairing_ttl_ms {
+    if expires - issued > max_lifetime_ms(ticket, limits) {
         return Err(LinkError::PairingInvalid);
     }
     if crate::timefmt::now_unix_ms() >= expires {
         return Err(LinkError::PairingExpired);
     }
     Ok(())
+}
+
+fn max_lifetime_ms(ticket: &PairingTicket, limits: Limits) -> u64 {
+    if ticket.invitation {
+        limits.invitation_ttl_ms
+    } else {
+        limits.pairing_ttl_ms
+    }
 }
 
 fn validate_ticket_candidates(ticket: &PairingTicket) -> Result<(), LinkError> {
@@ -357,7 +405,107 @@ mod tests {
                 policy: "direct-preferred".into(),
             }],
             profile: "interact".into(),
+            invitation: false,
         }
+    }
+
+    fn with_lifetime(kind_invitation: bool, lifetime_ms: u64) -> PairingTicket {
+        let mut ticket = sample();
+        let issued = crate::timefmt::now_unix_ms();
+        let expires = issued + lifetime_ms;
+        ticket.invitation = kind_invitation;
+        ticket.issued_at = crate::timefmt::unix_ms_to_rfc3339(issued).unwrap();
+        ticket.expires_at = crate::timefmt::unix_ms_to_rfc3339(expires).unwrap();
+        ticket
+    }
+
+    #[test]
+    fn invitation_may_live_days_but_a_live_code_may_not() {
+        let week = Limits::v1().invitation_ttl_ms;
+        let parsed =
+            parse_pairing_ticket(&encode_pairing_ticket(&with_lifetime(true, week)).unwrap())
+                .unwrap();
+        assert!(parsed.invitation);
+        assert!(parse_pairing_ticket(
+            &encode_pairing_ticket(&with_lifetime(false, 121_000)).unwrap()
+        )
+        .is_err());
+        assert!(parse_pairing_ticket(
+            &encode_pairing_ticket(&with_lifetime(false, 120_000)).unwrap()
+        )
+        .is_ok());
+        // One second is under the RFC3339 second resolution the ticket keeps.
+        assert_eq!(
+            parse_pairing_ticket(
+                &encode_pairing_ticket(&with_lifetime(true, week + 5_000)).unwrap()
+            )
+            .unwrap_err(),
+            LinkError::PairingInvalid
+        );
+    }
+
+    #[test]
+    fn share_link_round_trips_both_prefixes() {
+        let ticket = with_lifetime(true, 60_000);
+        let encoded = encode_pairing_ticket(&ticket).unwrap();
+        let link = share_link(&encoded).unwrap();
+        assert_eq!(
+            link,
+            format!(
+                "{}{}",
+                SHARE_LINK_PREFIX,
+                encoded.strip_prefix("polyth://pair?").unwrap()
+            )
+        );
+        assert_eq!(
+            parse_pairing_ticket(&link).unwrap(),
+            parse_pairing_ticket(&encoded).unwrap()
+        );
+        let slashed = link.replace("polyth.app/join#", "polyth.app/join/#");
+        assert_eq!(
+            parse_pairing_ticket(&slashed).unwrap(),
+            parse_pairing_ticket(&encoded).unwrap()
+        );
+        assert_eq!(
+            parse_pairing_ticket(&format!("  {link}  ")).unwrap(),
+            parse_pairing_ticket(&link).unwrap()
+        );
+        assert!(share_link(&link).is_err());
+        assert!(share_link("https://polyth.app/join#v=1&t=x").is_err());
+        assert!(share_link("v=1&t=x").is_err());
+    }
+
+    #[test]
+    fn foreign_share_links_are_rejected() {
+        let encoded = encode_pairing_ticket(&with_lifetime(true, 60_000)).unwrap();
+        let query = encoded.strip_prefix("polyth://pair?").unwrap();
+        for bad in [
+            format!("http://polyth.app/join#{query}"),
+            format!("https://polyth.app.evil.example/join#{query}"),
+            format!("https://evil.example/join#{query}"),
+            format!("https://polyth.app/other#{query}"),
+            format!("https://polyth.app/join?{query}#tail"),
+            format!("https://polyth.app/join#{query}#tail"),
+            format!("https://polyth.app/join/?{query}"),
+            format!("https://user@polyth.app/join#{query}"),
+            format!("https://polyth.app:443/join#{query}"),
+            format!("HTTPS://polyth.app/join#{query}"),
+            format!("https://polyth.app/join#{query}&v=1"),
+        ] {
+            assert_eq!(
+                parse_pairing_ticket(&bad).unwrap_err(),
+                LinkError::PairingInvalid,
+                "accepted {bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn live_ticket_json_has_no_invitation_key() {
+        let value = serde_json::to_value(sample()).unwrap();
+        assert!(value.get("invitation").is_none());
+        let value = serde_json::to_value(with_lifetime(true, 60_000)).unwrap();
+        assert_eq!(value.get("invitation"), Some(&Value::Bool(true)));
     }
 
     #[test]
@@ -365,6 +513,7 @@ mod tests {
         let encoded = encode_pairing_ticket(&sample()).unwrap();
         let parsed = parse_pairing_ticket(&encoded).unwrap();
         assert_eq!(parsed.host.endpoint_id, sample().host.endpoint_id);
+        assert!(!parsed.invitation);
     }
 
     #[test]

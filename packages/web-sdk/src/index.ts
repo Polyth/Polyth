@@ -186,6 +186,58 @@ export interface CodeBlockActionSlotMeta {
   languages?: readonly string[];
 }
 
+/** What the Add user flow knows when it asks an invite method about the new
+ *  person. The account does not exist yet when `available` and `preferred`
+ *  are asked; it does when `issue` is. */
+export interface InviteMethodContext {
+  /** The person will be a member of the current Space (their preset gives a
+   *  Space role). */
+  member: boolean;
+  /** This server's address as others can open it in a browser, or null when
+   *  the page was opened through an address that only works here
+   *  (`localhost`, a desktop shell). */
+  shareableAddress: string | null;
+}
+
+/** The invitation an invite method made for a new account. */
+export interface InviteMethodInvitation {
+  /** The link to send; the flow shows it with Copy. */
+  url: string;
+  /** When the link stops working, epoch milliseconds. */
+  expiresAt: number;
+  /** The whole message to send, link included, in the viewer's language. */
+  message: string;
+  /** One short line under the link: how it works and when it ends. */
+  note?: string;
+}
+
+/** `meta.inviteMethod` on a `settings.users.invite.methods` contribution: one
+ *  more way for a new person to reach this server besides its web address.
+ *  The Add user flow lists it as a choice ("How will Maria connect?") beside
+ *  the browser, and on Create asks it for the invitation instead of a web
+ *  link. The contribution's `render` is never mounted. */
+export interface InviteMethodSlotMeta {
+  label: string | (() => string);
+  /** One line under the label. */
+  detail: string | (() => string);
+  /** Glyph beside the choice (a host `ui` icon). */
+  icon?: ComponentType<{ className?: string; strokeWidth?: number }>;
+  /** Whether the method can be offered for this person: true, or a short
+   *  sentence saying why not (shown under the disabled choice). Asked when the
+   *  choice step opens; a throw counts as unavailable. */
+  available?: (context: InviteMethodContext) => true | string | Promise<true | string>;
+  /** Choose this method before the browser, e.g. because it works where the
+   *  server's address does not. */
+  preferred?: (context: InviteMethodContext) => boolean;
+  /** Make the invitation for the account just created. A throw is shown as a
+   *  problem and the flow falls back to the temporary password. */
+  issue: (input: InviteMethodContext & {
+    accountId: string;
+    /** The name the person was added with. */
+    name: string;
+  }) => Promise<InviteMethodInvitation>;
+}
+
 /** Context the host gives every `session.code.actions` contribution. Render a
  *  small ghost `Button` (size "sm"), or nothing when the action does not apply.
  *  `sessionId` is absent when the block is shown outside a chat. The host never

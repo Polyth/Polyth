@@ -4,12 +4,16 @@ export interface PairingPreview {
   hostLabel: string;
   hostFingerprint: string;
   expiresAt: string;
+  /** A one-time invitation link: the server confirms it by itself. */
+  invitation?: boolean;
 }
 
 export interface PairingAttempt {
   attemptId: string;
   safetyPhrase?: string[];
   state: string;
+  /** Set for an invitation: there are no words to compare, only "Join?". */
+  invitation?: { hostLabel: string };
 }
 
 export interface NumericPairingInput {

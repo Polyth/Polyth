@@ -13,7 +13,7 @@ import {
 } from "@polyth/mobile/connection-controller";
 import { bootstrapUrlWithNext, LAUNCH_STALL_MS, RESUME_COOLDOWN_MS } from "@polyth/mobile/connection-ui";
 import type { ConnectionMetadata, PolythLinkNative, ProxyLaunch } from "@polyth/mobile/link";
-import { isPairingDeepLink } from "@polyth/mobile/runtime";
+import { isPairingDeepLink, pairingLinkFromText } from "@polyth/mobile/runtime";
 import { applyBackgroundToDom } from "../backgrounds.ts";
 import { POLYTH_MARK_SRC } from "../brandAsset.ts";
 import { installDesktopIntegration } from "../desktop.tsx";
@@ -249,8 +249,9 @@ function DesktopServerList({ servers, query }: { servers: PolythDesktopServersAp
 
   const submitAdd = (event: FormEvent): void => {
     event.preventDefault();
-    const value = input.trim();
-    if (!value) return;
+    const typed = input.trim();
+    if (!typed) return;
+    const value = pairingLinkFromText(typed) ?? typed;
     setOwnError(null);
     if (isPairingDeepLink(value)) {
       if (view?.linkAvailable === false) {

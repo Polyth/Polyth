@@ -27,7 +27,7 @@ import {
   startNativeDiscovery,
 } from "./nativeDiscovery.ts";
 import { nativeTapFeedback } from "./haptics.ts";
-import { isPairingLink } from "@polyth/pairing-qr";
+import { isPairingLink, pairingLinkFromText } from "@polyth/pairing-qr";
 import {
   autoReconnectCandidate,
   bootstrapUrlWithNext,
@@ -482,10 +482,11 @@ function ConnectionScreen({ launch, veil }: { launch: ConnectLaunch; veil: Launc
   const startPair = async (raw: string) => {
     stopCamera();
     setPreferNumericDiscovery(false);
-    rememberPendingPairingLink(raw);
+    const value = pairingLinkFromText(raw) ?? raw;
+    rememberPendingPairingLink(value);
     if (!controller) return;
-    const pairing = await controller.beginPairing(raw);
-    if (pairing && !pairing.safetyPhrase?.length) await finishPairing();
+    const pairing = await controller.beginPairing(value);
+    if (pairing && !pairing.safetyPhrase?.length && !pairing.invitation) await finishPairing();
   };
 
   useEffect(() => {
@@ -520,9 +521,10 @@ function ConnectionScreen({ launch, veil }: { launch: ConnectLaunch; veil: Launc
   useEffect(() => {
     let handle: { remove: () => Promise<void> } | undefined;
     void App.addListener("appUrlOpen", ({ url: opened }) => {
-      if (isPairingDeepLink(opened)) {
-        rememberPendingPairingLink(opened);
-        setTicket(opened);
+      const paired = pairingLinkFromText(opened) ?? opened;
+      if (isPairingDeepLink(paired)) {
+        rememberPendingPairingLink(paired);
+        setTicket(paired);
         return;
       }
       if (mobileDeepLinkPath(opened)) {
@@ -552,11 +554,12 @@ function ConnectionScreen({ launch, veil }: { launch: ConnectLaunch; veil: Launc
 
     if (nativePairingScannerAvailable()) {
       try {
-        const raw = await scanNativePairingQr();
-        if (!raw) {
+        const scanned = await scanNativePairingQr();
+        if (!scanned) {
           controller.cancelQrScan(scanEpoch);
           return;
         }
+        const raw = pairingLinkFromText(scanned) ?? scanned;
         if (!isPairingLink(raw)) {
           controller.failQrScan(scanEpoch, new Error("This QR code is not a Polyth pairing code."));
           return;
@@ -565,7 +568,7 @@ function ConnectionScreen({ launch, veil }: { launch: ConnectLaunch; veil: Launc
         rememberPendingPairingLink(raw);
         setTicket(raw);
         const pairing = await controller.acceptQrResult(scanEpoch, raw);
-        if (pairing && !pairing.safetyPhrase?.length) await finishPairing();
+        if (pairing && !pairing.safetyPhrase?.length && !pairing.invitation) await finishPairing();
       } catch (cause) {
         const detail = cause instanceof Error ? cause.message : String(cause);
         const denied = /denied|permission|not authorized/i.test(detail);
@@ -622,13 +625,17 @@ function ConnectionScreen({ launch, veil }: { launch: ConnectLaunch; veil: Launc
       const started = Date.now();
       while (!cancelled && Date.now() - started < 20_000) {
         const codes = await detector.detect(video);
-        const raw = codes.find((code) => code.rawValue && isPairingLink(code.rawValue))?.rawValue;
+        const raw = codes
+          .map((code) => code.rawValue)
+          .filter((value): value is string => Boolean(value))
+          .map((value) => pairingLinkFromText(value) ?? value)
+          .find((value) => isPairingLink(value));
         if (raw) {
           rememberPendingPairingLink(raw);
           setTicket(raw);
           stopCamera();
           const pairing = await controller.acceptQrResult(scanEpoch, raw);
-          if (pairing && !pairing.safetyPhrase?.length) await finishPairing();
+          if (pairing && !pairing.safetyPhrase?.length && !pairing.invitation) await finishPairing();
           return;
         }
         await new Promise((resolve) => setTimeout(resolve, 250));
@@ -670,7 +677,7 @@ function ConnectionScreen({ launch, veil }: { launch: ConnectLaunch; veil: Launc
   const submitNumericCode = async () => {
     if (!controller || !numericCodeValid) return;
     const pairing = await controller.submitNumericCode(normalizedNumericCode);
-    if (pairing && !pairing.safetyPhrase?.length) await finishPairing();
+    if (pairing && !pairing.safetyPhrase?.length && !pairing.invitation) await finishPairing();
   };
 
   useEffect(() => {
@@ -1133,8 +1140,12 @@ function ConnectionScreen({ launch, veil }: { launch: ConnectLaunch; veil: Launc
             {attempt && connectionState?.phase !== "awaiting-host-approval" && (
               <section className="mobile-connect-verify" aria-labelledby="mobile-verify-title">
                 <span className="mobile-connect-eyebrow">Security check</span>
-                <h2 id="mobile-verify-title">{phrase?.length ? "Do these words match?" : "Ready to pair"}</h2>
-                {phrase?.length ? (
+                <h2 id="mobile-verify-title">
+                  {attempt.invitation ? `Join ${attempt.invitation.hostLabel || "this server"}?` : phrase?.length ? "Do these words match?" : "Ready to pair"}
+                </h2>
+                {attempt.invitation ? (
+                  <p>You opened an invitation. This phone joins your own account on that server.</p>
+                ) : phrase?.length ? (
                   <>
                     <ol className="mobile-connect-phrase">
                       {phrase.map((word) => <li key={word}>{word}</li>)}
@@ -1146,7 +1157,7 @@ function ConnectionScreen({ launch, veil }: { launch: ConnectLaunch; veil: Launc
                 )}
                 <div className="mobile-connect-inline-actions">
                   <button type="button" className="mobile-connect-primary is-compact" disabled={busy} onClick={() => void finishPairing()}>
-                    {phrase?.length ? "The words match" : "Continue pairing"}
+                    {attempt.invitation ? "Join" : phrase?.length ? "The words match" : "Continue pairing"}
                   </button>
                   <button type="button" className="mobile-connect-quiet-action" disabled={busy} onClick={() => controller?.cancelPairing()}>
                     Cancel
@@ -1207,14 +1218,15 @@ function ConnectionScreen({ launch, veil }: { launch: ConnectLaunch; veil: Launc
                     value={ticket}
                     onChange={(event) => {
                       setTicket(event.target.value);
-                      if (isPairingDeepLink(event.target.value)) rememberPendingPairingLink(event.target.value);
+                      const link = pairingLinkFromText(event.target.value) ?? event.target.value;
+                      if (isPairingDeepLink(link)) rememberPendingPairingLink(link);
                     }}
                   />
                 </label>
                 <button
                   type="button"
                   className="mobile-connect-secondary"
-                  disabled={busy || !isPairingLink(ticket)}
+                  disabled={busy || !isPairingLink(pairingLinkFromText(ticket) ?? ticket)}
                   onClick={() => void startPair(ticket)}
                 >
                   Use pairing link

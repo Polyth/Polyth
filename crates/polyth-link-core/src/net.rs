@@ -135,6 +135,7 @@ mod tests {
                 policy: "direct-preferred".into(),
             }],
             profile: "interact".into(),
+            invitation: false,
         };
         assert!(endpoint_addr_from_ticket(&ticket).is_ok());
         ticket.candidates[0].direct_addresses = Some(vec!["not-an-addr".into()]);

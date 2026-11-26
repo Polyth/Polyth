@@ -116,6 +116,36 @@ fn validate_connection_hello(message: ControlMessage, peer: &str) -> Result<(), 
 async fn serve_pairing(
     state: Arc<Mutex<HostState>>,
     connection: Connection,
+    send: SendStream,
+    recv: RecvStream,
+    peer: String,
+    hello: ControlMessage,
+) -> Result<(), LinkError> {
+    let pairing_id = match &hello {
+        ControlMessage::PairingHello { pairing_id, .. } => Some(pairing_id.clone()),
+        _ => None,
+    };
+    let result = serve_pairing_stream(state.clone(), connection, send, recv, peer.clone(), hello).await;
+    // The device's side of an invitation can go away on any path — a dropped
+    // connection, a cancel, a protocol error. Unless the invitation reached
+    // committing, hand the claim back so the person can open the same link
+    // again. Live codes and committed invitations are never released.
+    if let Some(pairing_id) = pairing_id {
+        let mut guard = state.lock().await;
+        if guard.pairing.release_claim(&pairing_id, &peer) {
+            let _ = guard.events.send(json!({
+                "type": "tunnel/pairing-updated",
+                "pairingId": pairing_id,
+                "state": "created",
+            }));
+        }
+    }
+    result
+}
+
+async fn serve_pairing_stream(
+    state: Arc<Mutex<HostState>>,
+    connection: Connection,
     mut send: SendStream,
     mut recv: RecvStream,
     peer: String,

@@ -331,6 +331,7 @@ async fn dispatch(
                 "hostLabel": ticket.host.label,
                 "hostFingerprint": fingerprint(&ticket.host.endpoint_id),
                 "expiresAt": ticket.expires_at,
+                "invitation": ticket.invitation,
             }))
         }
         "pairing.begin" => begin_pairing(state, params).await,

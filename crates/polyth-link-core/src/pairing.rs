@@ -11,8 +11,8 @@ use zeroize::Zeroize;
 use crate::errors::LinkError;
 use crate::limits::Limits;
 use crate::ticket::{
-    encode_pairing_ticket, PairingCandidate, PairingTicket, TicketHost, TicketProtocol,
-    POLYTH_LINK_ALPN,
+    decode_invite_secret, encode_pairing_ticket, parse_pairing_ticket, PairingCandidate,
+    PairingTicket, TicketHost, TicketProtocol, POLYTH_LINK_ALPN,
 };
 use crate::timefmt::{constant_eq, now_unix_ms, unix_ms_to_rfc3339};
 use crate::words::safety_phrase;
@@ -61,6 +61,8 @@ pub struct Invitation {
     pub label: String,
     pub state: HostPairingState,
     pub created: Instant,
+    /// A one-time invitation link rather than a two-minute on-screen code.
+    pub invitation: bool,
     pub claimant: Option<String>,
     pub transcript_hash: Option<[u8; 32]>,
     pub safety_phrase: Option<[String; 4]>,
@@ -124,14 +126,72 @@ impl HostPairing {
         policy: &str,
         now: Instant,
     ) -> Result<Invitation, LinkError> {
+        self.create_kind(
+            host_endpoint,
+            host_label,
+            profile,
+            grants,
+            relay_urls,
+            direct_addresses,
+            policy,
+            now,
+            false,
+            None,
+        )
+    }
+
+    /// A one-time invitation link that may wait days for the person it was sent
+    /// to. Its lifetime is clamped to the invitation window and it is confirmed
+    /// by the host once the device proves the invite secret, so nobody has to
+    /// press Approve.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_invitation(
+        &mut self,
+        host_endpoint: &str,
+        host_label: Option<&str>,
+        profile: &str,
+        grants: Vec<String>,
+        relay_urls: Vec<String>,
+        direct_addresses: Option<Vec<String>>,
+        policy: &str,
+        now: Instant,
+        ttl_ms: Option<u64>,
+    ) -> Result<Invitation, LinkError> {
+        self.create_kind(
+            host_endpoint,
+            host_label,
+            profile,
+            grants,
+            relay_urls,
+            direct_addresses,
+            policy,
+            now,
+            true,
+            ttl_ms,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn create_kind(
+        &mut self,
+        host_endpoint: &str,
+        host_label: Option<&str>,
+        profile: &str,
+        grants: Vec<String>,
+        relay_urls: Vec<String>,
+        direct_addresses: Option<Vec<String>>,
+        policy: &str,
+        now: Instant,
+        invitation: bool,
+        ttl_ms: Option<u64>,
+    ) -> Result<Invitation, LinkError> {
         self.expire(now);
-        if self
-            .invitations
-            .values()
-            .filter(|inv| !is_terminal(inv.state))
-            .count()
-            >= self.limits.active_invitations
-        {
+        let cap = if invitation {
+            self.limits.active_long_invitations
+        } else {
+            self.limits.active_invitations
+        };
+        if self.active_count(invitation, now) >= cap {
             return Err(LinkError::RequestRateLimited);
         }
         let mut pairing_id = [0u8; 16];
@@ -139,7 +199,14 @@ impl HostPairing {
         rand::thread_rng().fill_bytes(&mut pairing_id);
         rand::thread_rng().fill_bytes(&mut invite_secret);
         let issued_ms = now_unix_ms();
-        let expires_ms = issued_ms.saturating_add(self.limits.pairing_ttl_ms);
+        let ttl = if invitation {
+            ttl_ms
+                .unwrap_or(self.limits.invitation_ttl_ms)
+                .clamp(60_000, self.limits.invitation_ttl_ms)
+        } else {
+            self.limits.pairing_ttl_ms
+        };
+        let expires_ms = issued_ms.saturating_add(ttl);
         let issued_at = unix_ms_to_rfc3339(issued_ms).map_err(|_| LinkError::PairingInvalid)?;
         let expires_at = unix_ms_to_rfc3339(expires_ms).map_err(|_| LinkError::PairingInvalid)?;
         let ticket = PairingTicket {
@@ -175,9 +242,10 @@ impl HostPairing {
                 policy: policy.to_string(),
             }],
             profile: profile.to_string(),
+            invitation,
         };
         let encoded = encode_pairing_ticket(&ticket)?;
-        let invitation = Invitation {
+        let invitation_entry = Invitation {
             pairing_id: ticket.pairing_id.clone(),
             ticket: encoded,
             profile: profile.to_string(),
@@ -185,6 +253,7 @@ impl HostPairing {
             label: host_label.unwrap_or("").to_string(),
             state: HostPairingState::Created,
             created: now,
+            invitation,
             claimant: None,
             transcript_hash: None,
             safety_phrase: None,
@@ -200,9 +269,11 @@ impl HostPairing {
             pending_nonces: HashMap::new(),
             invite_secret,
         };
-        self.invitations
-            .insert(invitation.pairing_id.clone(), invitation.clone());
-        Ok(invitation)
+        self.invitations.insert(
+            invitation_entry.pairing_id.clone(),
+            invitation_entry.clone(),
+        );
+        Ok(invitation_entry)
     }
 
     pub fn get(&self, pairing_id: &str) -> Option<&Invitation> {
@@ -217,11 +288,15 @@ impl HostPairing {
         now: Instant,
     ) -> Result<[u8; 32], LinkError> {
         self.expire(now);
+        let limits = self.limits;
         let invitation = self
             .invitations
             .get_mut(pairing_id)
             .ok_or(LinkError::PairingInvalid)?;
-        if is_terminal(invitation.state) || invitation.state == HostPairingState::Expired {
+        if is_terminal(invitation.state)
+            || invitation.state == HostPairingState::Expired
+            || expired(invitation, now, limits)
+        {
             return Err(LinkError::PairingExpired);
         }
         if let Some(claimant) = &invitation.claimant {
@@ -266,15 +341,27 @@ impl HostPairing {
     }
 
     pub fn expire(&mut self, now: Instant) {
-        let ttl = self.limits.pairing_ttl_ms;
+        let limits = self.limits;
         for invitation in self.invitations.values_mut() {
-            if !is_terminal(invitation.state)
-                && now.duration_since(invitation.created).as_millis() as u64 >= ttl
-            {
+            if !is_terminal(invitation.state) && expired(invitation, now, limits) {
                 invitation.state = HostPairingState::Expired;
                 invitation.invite_secret.zeroize();
             }
         }
+    }
+
+    /// Non-terminal, unexpired entries of one kind; the two caps never share
+    /// a slot.
+    fn active_count(&self, invitation: bool, now: Instant) -> usize {
+        let limits = self.limits;
+        self.invitations
+            .values()
+            .filter(|inv| {
+                inv.invitation == invitation
+                    && !is_terminal(inv.state)
+                    && !expired(inv, now, limits)
+            })
+            .count()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -307,7 +394,7 @@ impl HostPairing {
             .invitations
             .get_mut(pairing_id)
             .ok_or(LinkError::PairingInvalid)?;
-        if invitation.state == HostPairingState::Expired {
+        if invitation.state == HostPairingState::Expired || expired(invitation, now, self.limits) {
             return Err(LinkError::PairingExpired);
         }
         if is_terminal(invitation.state) {
@@ -353,6 +440,12 @@ impl HostPairing {
         invitation.transcript_hash = Some(transcript);
         invitation.safety_phrase = Some(phrase.clone());
         invitation.state = HostPairingState::ProofVerified;
+        // An invitation link carries its authority in the invite secret the
+        // person chose to send, so proving it is the host's confirmation. A
+        // live code still waits for the owner to press Approve.
+        if invitation.invitation {
+            invitation.host_confirmed = true;
+        }
         Ok(phrase)
     }
 
@@ -426,6 +519,92 @@ impl HostPairing {
         invitation.state = HostPairingState::Cancelled;
         invitation.invite_secret.zeroize();
         Ok(())
+    }
+
+    /// Give a one-time invitation back to `created` when the device that
+    /// claimed it went away before committing, so the person can open the same
+    /// link again. `proof_attempts` survives, so a released link cannot be
+    /// brute-forced by reconnecting. Live codes and committing invitations are
+    /// never released.
+    pub fn release_claim(&mut self, pairing_id: &str, endpoint: &str) -> bool {
+        let Some(invitation) = self.invitations.get_mut(pairing_id) else {
+            return false;
+        };
+        if !invitation.invitation
+            || invitation.state == HostPairingState::Committing
+            || is_terminal(invitation.state)
+            || invitation.claimant.as_deref() != Some(endpoint)
+        {
+            return false;
+        }
+        invitation.claimant = None;
+        invitation.transcript_hash = None;
+        invitation.safety_phrase = None;
+        invitation.device_confirmed = false;
+        invitation.host_confirmed = false;
+        invitation.pending_nonces.clear();
+        invitation.device_label = None;
+        invitation.device_platform = None;
+        invitation.device_app_version = None;
+        invitation.state = HostPairingState::Created;
+        true
+    }
+
+    /// Re-admit an invitation link this host issued earlier (for example after
+    /// a host restart). The ticket is fully revalidated, so an expired link
+    /// stays expired; the profile and secret come from the ticket itself.
+    pub fn restore(
+        &mut self,
+        ticket: &str,
+        host_endpoint_id: &str,
+        grants: Vec<String>,
+        label: Option<&str>,
+        now: Instant,
+    ) -> Result<String, LinkError> {
+        let parsed = parse_pairing_ticket(ticket)?;
+        if !parsed.invitation || parsed.host.endpoint_id != host_endpoint_id {
+            return Err(LinkError::PairingInvalid);
+        }
+        if self.invitations.contains_key(&parsed.pairing_id) {
+            return Ok(parsed.pairing_id);
+        }
+        self.expire(now);
+        if self.active_count(true, now) >= self.limits.active_long_invitations {
+            return Err(LinkError::RequestRateLimited);
+        }
+        let invite_secret = decode_invite_secret(&parsed)?;
+        let expires_at_ms = crate::timefmt::parse_rfc3339_to_unix_ms(&parsed.expires_at)?;
+        let encoded = encode_pairing_ticket(&parsed)?;
+        let restored = Invitation {
+            pairing_id: parsed.pairing_id.clone(),
+            ticket: encoded,
+            profile: parsed.profile.clone(),
+            grants,
+            label: label
+                .map(str::to_string)
+                .or_else(|| parsed.host.label.clone())
+                .unwrap_or_default(),
+            state: HostPairingState::Created,
+            created: now,
+            invitation: true,
+            claimant: None,
+            transcript_hash: None,
+            safety_phrase: None,
+            device_confirmed: false,
+            host_confirmed: false,
+            device_label: None,
+            device_platform: None,
+            device_app_version: None,
+            proof_attempts: 0,
+            expires_at_ms,
+            issued_at: parsed.issued_at.clone(),
+            expires_at: parsed.expires_at.clone(),
+            pending_nonces: HashMap::new(),
+            invite_secret,
+        };
+        let pairing_id = restored.pairing_id.clone();
+        self.invitations.insert(pairing_id.clone(), restored);
+        Ok(pairing_id)
     }
 
     pub fn mark_committed(&mut self, pairing_id: &str) -> Result<(), LinkError> {
@@ -514,6 +693,17 @@ fn is_terminal(state: HostPairingState) -> bool {
             | HostPairingState::Rejected
             | HostPairingState::Failed
     )
+}
+
+/// One expiry decision for every check. An invitation link lives on the wall
+/// clock, so an entry restored after a restart expires when its ticket says it
+/// does; a live on-screen code keeps the monotonic clock it was created on.
+fn expired(invitation: &Invitation, now: Instant, limits: Limits) -> bool {
+    if invitation.invitation {
+        now_unix_ms() >= invitation.expires_at_ms
+    } else {
+        now.duration_since(invitation.created).as_millis() as u64 >= limits.pairing_ttl_ms
+    }
 }
 
 pub fn transcript_hash(
@@ -845,6 +1035,368 @@ mod tests {
             )
             .unwrap_err();
         assert_ne!(err, LinkError::RequestRateLimited);
+    }
+
+    fn live(now: Instant) -> (HostPairing, Invitation, String) {
+        let mut host = HostPairing::new();
+        let invitation = host
+            .create(
+                &"aa".repeat(32),
+                Some("Desk"),
+                "interact",
+                vec!["core.sessions.read".into()],
+                vec!["https://relay.example/".into()],
+                None,
+                "direct-preferred",
+                now,
+            )
+            .unwrap();
+        (host, invitation, "bb".repeat(32))
+    }
+
+    fn invited(now: Instant, ttl_ms: Option<u64>) -> (HostPairing, Invitation, String) {
+        let mut host = HostPairing::new();
+        let invitation = host
+            .create_invitation(
+                &"aa".repeat(32),
+                Some("Desk"),
+                "interact",
+                vec!["core.sessions.read".into()],
+                vec!["https://relay.example/".into()],
+                None,
+                "direct-preferred",
+                now,
+                ttl_ms,
+            )
+            .unwrap();
+        (host, invitation, "bb".repeat(32))
+    }
+
+    fn prove(host: &mut HostPairing, invitation: &Invitation, device: &str, now: Instant) {
+        let client_nonce = [3u8; 32];
+        let secret = decode_secret(&invitation.ticket);
+        let server_nonce = host
+            .challenge(&invitation.pairing_id, device, client_nonce, now)
+            .unwrap();
+        let proof = client_proof(
+            &secret,
+            &invitation.pairing_id,
+            &"aa".repeat(32),
+            device,
+            &client_nonce,
+            &server_nonce,
+            "interact",
+        );
+        host.verify_proof(
+            &invitation.pairing_id,
+            &"aa".repeat(32),
+            device,
+            &client_nonce,
+            &server_nonce,
+            &proof,
+            now,
+        )
+        .unwrap();
+    }
+
+    fn wrong_proof(host: &mut HostPairing, pairing_id: &str, device: &str, now: Instant) {
+        let client_nonce = [7u8; 32];
+        let server_nonce = host
+            .challenge(pairing_id, device, client_nonce, now)
+            .unwrap();
+        let _ = host.verify_proof(
+            pairing_id,
+            &"aa".repeat(32),
+            device,
+            &client_nonce,
+            &server_nonce,
+            &[9u8; 32],
+            now,
+        );
+    }
+
+    #[test]
+    fn invitation_commits_after_proof_and_device_confirmation_only() {
+        let now = Instant::now();
+        let (mut host, invitation, device) = invited(now, Some(3_600_000));
+        assert!(invitation.invitation);
+        prove(&mut host, &invitation, &device, now);
+        assert!(host.get(&invitation.pairing_id).unwrap().host_confirmed);
+        host.confirm_device(&invitation.pairing_id, &device, now)
+            .unwrap();
+        assert_eq!(
+            host.get(&invitation.pairing_id).unwrap().state,
+            HostPairingState::Committing
+        );
+        host.mark_committed(&invitation.pairing_id).unwrap();
+        assert_eq!(
+            host.get(&invitation.pairing_id).unwrap().state,
+            HostPairingState::Committed
+        );
+    }
+
+    #[test]
+    fn live_code_still_waits_for_the_owner() {
+        let now = Instant::now();
+        let (mut host, invitation, device) = live(now);
+        prove(&mut host, &invitation, &device, now);
+        assert!(!host.get(&invitation.pairing_id).unwrap().host_confirmed);
+        host.confirm_device(&invitation.pairing_id, &device, now)
+            .unwrap();
+        assert_eq!(
+            host.get(&invitation.pairing_id).unwrap().state,
+            HostPairingState::WaitingHostConfirmation
+        );
+        assert!(!host.release_claim(&invitation.pairing_id, &device));
+    }
+
+    #[test]
+    fn a_dropped_device_releases_its_invitation_claim() {
+        let now = Instant::now();
+        let (mut host, invitation, device) = invited(now, None);
+        prove(&mut host, &invitation, &device, now);
+        let other = "cc".repeat(32);
+        assert!(!host.release_claim(&invitation.pairing_id, &other));
+        assert!(host.release_claim(&invitation.pairing_id, &device));
+        let released = host.get(&invitation.pairing_id).unwrap();
+        assert_eq!(released.state, HostPairingState::Created);
+        assert!(released.claimant.is_none());
+        assert!(released.transcript_hash.is_none());
+        assert!(released.safety_phrase.is_none());
+        assert!(!released.host_confirmed && !released.device_confirmed);
+        assert!(released.device_label.is_none());
+        assert_eq!(released.proof_attempts, 1);
+        // The same link can then be claimed by another device.
+        prove(&mut host, &invitation, &other, now);
+        assert_eq!(
+            host.get(&invitation.pairing_id)
+                .unwrap()
+                .claimant
+                .as_deref(),
+            Some(other.as_str())
+        );
+        // Committing is past the point of no return.
+        let (mut host, invitation, device) = invited(now, None);
+        prove(&mut host, &invitation, &device, now);
+        host.confirm_device(&invitation.pairing_id, &device, now)
+            .unwrap();
+        assert!(!host.release_claim(&invitation.pairing_id, &device));
+        assert_eq!(
+            host.get(&invitation.pairing_id).unwrap().state,
+            HostPairingState::Committing
+        );
+    }
+
+    #[test]
+    fn brute_force_cap_survives_a_release() {
+        let now = Instant::now();
+        let (mut host, invitation, device) = invited(now, None);
+        prove(&mut host, &invitation, &device, now);
+        wrong_proof(&mut host, &invitation.pairing_id, &device, now);
+        wrong_proof(&mut host, &invitation.pairing_id, &device, now);
+        assert_eq!(host.get(&invitation.pairing_id).unwrap().proof_attempts, 3);
+        assert!(host.release_claim(&invitation.pairing_id, &device));
+        assert_eq!(host.get(&invitation.pairing_id).unwrap().proof_attempts, 3);
+        wrong_proof(&mut host, &invitation.pairing_id, &device, now);
+        assert_eq!(host.get(&invitation.pairing_id).unwrap().proof_attempts, 4);
+        wrong_proof(&mut host, &invitation.pairing_id, &device, now);
+        assert_eq!(host.get(&invitation.pairing_id).unwrap().proof_attempts, 5);
+        wrong_proof(&mut host, &invitation.pairing_id, &device, now);
+        assert_eq!(
+            host.get(&invitation.pairing_id).unwrap().state,
+            HostPairingState::Failed
+        );
+    }
+
+    #[test]
+    fn invitation_and_live_caps_are_independent() {
+        let now = Instant::now();
+        let host_endpoint = "aa".repeat(32);
+        let relays = || vec!["https://relay.example/".to_string()];
+        let mut host = HostPairing::new();
+        for _ in 0..Limits::v1().active_invitations {
+            host.create(
+                &host_endpoint,
+                Some("Desk"),
+                "interact",
+                Vec::new(),
+                relays(),
+                None,
+                "direct-preferred",
+                now,
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            host.create(
+                &host_endpoint,
+                Some("Desk"),
+                "interact",
+                Vec::new(),
+                relays(),
+                None,
+                "direct-preferred",
+                now,
+            )
+            .unwrap_err(),
+            LinkError::RequestRateLimited
+        );
+        // A long invitation does not consume a live slot and vice versa.
+        host.create_invitation(
+            &host_endpoint,
+            Some("Desk"),
+            "interact",
+            Vec::new(),
+            relays(),
+            None,
+            "direct-preferred",
+            now,
+            None,
+        )
+        .unwrap();
+        let mut fresh = HostPairing::new();
+        for _ in 0..Limits::v1().active_long_invitations {
+            fresh
+                .create_invitation(
+                    &host_endpoint,
+                    Some("Desk"),
+                    "interact",
+                    Vec::new(),
+                    relays(),
+                    None,
+                    "direct-preferred",
+                    now,
+                    None,
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            fresh
+                .create_invitation(
+                    &host_endpoint,
+                    Some("Desk"),
+                    "interact",
+                    Vec::new(),
+                    relays(),
+                    None,
+                    "direct-preferred",
+                    now,
+                    None,
+                )
+                .unwrap_err(),
+            LinkError::RequestRateLimited
+        );
+        fresh
+            .create(
+                &host_endpoint,
+                Some("Desk"),
+                "interact",
+                Vec::new(),
+                relays(),
+                None,
+                "direct-preferred",
+                now,
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn invitation_ttl_is_clamped() {
+        let now = Instant::now();
+        let (_, short, _) = invited(now, Some(1_000));
+        let (_, long, _) = invited(now, Some(u64::MAX));
+        let lifetime = |ticket: &str| {
+            let parsed = crate::ticket::parse_pairing_ticket(ticket).unwrap();
+            assert!(parsed.invitation);
+            crate::timefmt::parse_rfc3339_to_unix_ms(&parsed.expires_at).unwrap()
+                - crate::timefmt::parse_rfc3339_to_unix_ms(&parsed.issued_at).unwrap()
+        };
+        // RFC3339 keeps whole seconds, so a boundary reads one second short.
+        assert!((59_000..=60_000).contains(&lifetime(&short.ticket)));
+        assert!(
+            (Limits::v1().invitation_ttl_ms - 1_000..=Limits::v1().invitation_ttl_ms)
+                .contains(&lifetime(&long.ticket))
+        );
+    }
+
+    #[test]
+    fn invitations_expire_on_the_wall_clock() {
+        let now = Instant::now();
+        let (mut host, invitation, device) = invited(now, None);
+        // Move the entry's wall-clock expiry into the past, as a restored
+        // invitation would be once its ticket runs out.
+        host.invitations
+            .get_mut(&invitation.pairing_id)
+            .unwrap()
+            .expires_at_ms = now_unix_ms() - 1;
+        host.expire(now);
+        let expired = host.get(&invitation.pairing_id).unwrap();
+        assert_eq!(expired.state, HostPairingState::Expired);
+        assert!(expired.invite_secret.iter().all(|byte| *byte == 0));
+        assert_eq!(
+            host.challenge(&invitation.pairing_id, &device, [1u8; 32], now)
+                .unwrap_err(),
+            LinkError::PairingExpired
+        );
+        assert!(!host.release_claim(&invitation.pairing_id, &device));
+    }
+
+    #[test]
+    fn restore_revalidates_invitation_tickets() {
+        let now = Instant::now();
+        let (_, invitation, _) = invited(now, Some(3_600_000));
+        let host_endpoint = "aa".repeat(32);
+        let mut host = HostPairing::new();
+        let id = host
+            .restore(
+                &invitation.ticket,
+                &host_endpoint,
+                vec!["core.sessions.read".into()],
+                Some("Desk"),
+                now,
+            )
+            .unwrap();
+        assert_eq!(id, invitation.pairing_id);
+        let restored = host.get(&id).unwrap();
+        assert!(restored.invitation);
+        assert_eq!(restored.state, HostPairingState::Created);
+        assert_eq!(restored.profile, "interact");
+        assert_eq!(restored.grants, vec!["core.sessions.read".to_string()]);
+        // Restoring twice is idempotent.
+        assert_eq!(
+            host.restore(&invitation.ticket, &host_endpoint, Vec::new(), None, now)
+                .unwrap(),
+            id
+        );
+        // A foreign host id and a live ticket are refused.
+        assert_eq!(
+            host.restore(&invitation.ticket, &"cd".repeat(32), Vec::new(), None, now)
+                .unwrap_err(),
+            LinkError::PairingInvalid
+        );
+        let (_, live_ticket, _) = live(now);
+        assert_eq!(
+            host.restore(&live_ticket.ticket, &host_endpoint, Vec::new(), None, now)
+                .unwrap_err(),
+            LinkError::PairingInvalid
+        );
+        // An expired ticket stays expired.
+        let mut old = crate::ticket::parse_pairing_ticket(&invitation.ticket).unwrap();
+        old.issued_at = "2020-01-01T00:00:00Z".into();
+        old.expires_at = "2020-01-02T00:00:00Z".into();
+        assert_eq!(
+            host.restore(
+                &crate::ticket::encode_pairing_ticket(&old).unwrap(),
+                &host_endpoint,
+                Vec::new(),
+                None,
+                now
+            )
+            .unwrap_err(),
+            LinkError::PairingExpired
+        );
+        host.invalidate_all();
+        assert!(host.get(&id).is_none());
     }
 
     #[test]

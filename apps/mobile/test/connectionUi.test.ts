@@ -96,6 +96,17 @@ test("pending pairing tickets stay in process memory", () => {
 });
 
 
+test("an https invitation link received by the app is kept in its canonical form", () => {
+  clearPendingPairingLink();
+  assert.equal(
+    rememberPendingPairingLink("Join the team: https://polyth.app/join#v=1&t=abc_DEF-123\nIt expires soon."),
+    "polyth://pair?v=1&t=abc_DEF-123",
+  );
+  assert.equal(peekPendingPairingLink(), "polyth://pair?v=1&t=abc_DEF-123");
+  assert.equal(rememberPendingPairingLink("https://polyth.app.evil.example/join#v=1&t=abc"), undefined);
+  clearPendingPairingLink();
+});
+
 test("preferred trusted connection chooses the newest usable secure server", () => {
   const picked = preferredTrustedConnection([
     {

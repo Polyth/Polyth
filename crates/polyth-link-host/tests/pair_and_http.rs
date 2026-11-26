@@ -578,3 +578,146 @@ async fn revoked_device_pairs_again_with_the_same_identity() {
         .unwrap();
     get_health(&link.conn).await;
 }
+
+/// An invitation is one link the owner sends ahead of time. Proving the invite
+/// secret is the host's confirmation, so the device pairs without anybody
+/// pressing `pairing.approve`, and the response carries a shareable https link
+/// instead of a two-minute numeric code.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn invitation_pairs_without_owner_approval() {
+    let mut host = start_host().await;
+    let rpc_stream = &mut host.rpc;
+    let created = rpc(
+        rpc_stream,
+        40,
+        "pairing.create",
+        json!({
+            "profile": "interact",
+            "mode": "direct-preferred",
+            "label": "Desk",
+            "grants": ["core.sessions.read"],
+            "invitation": true,
+            "ttlMs": 3_600_000,
+        }),
+    )
+    .await;
+    assert_eq!(created.get("invitation"), Some(&json!(true)));
+    assert!(created.get("numericCode").unwrap().is_null());
+    assert!(created.get("numericExpiresAt").unwrap().is_null());
+    let share = created
+        .get("shareUrl")
+        .and_then(Value::as_str)
+        .expect("shareUrl")
+        .to_string();
+    assert!(share.starts_with("https://polyth.app/join#"), "{share}");
+    let ticket = parse_pairing_ticket(&share).unwrap();
+    assert!(ticket.invitation);
+    let pairing_id = created["pairing"]["id"].as_str().unwrap().to_string();
+
+    let device_dir = tempfile::tempdir().unwrap();
+    let device = identity::load_or_create(device_dir.path().join("identity")).unwrap();
+    let device_task = pair_device(ticket, &device).await;
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    let mut endpoint_id = String::new();
+    while std::time::Instant::now() < deadline {
+        let status = rpc(rpc_stream, 41, "pairing.get", json!({"id": pairing_id})).await;
+        assert_eq!(status.get("invitation"), Some(&json!(true)));
+        if status.get("state").and_then(Value::as_str) == Some("committing") {
+            endpoint_id = status
+                .get("endpointId")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(
+        !endpoint_id.is_empty(),
+        "an invitation never reached committing"
+    );
+    rpc(
+        rpc_stream,
+        42,
+        "trust.upsert",
+        json!({
+            "endpointId": endpoint_id,
+            "deviceId": "dev-invite",
+            "grants": ["core.sessions.read"],
+            "grantRevision": 1,
+            "revoked": false
+        }),
+    )
+    .await;
+    rpc(rpc_stream, 43, "pairing.finish", json!({"id": pairing_id})).await;
+
+    let link = timeout(Duration::from_secs(15), device_task)
+        .await
+        .expect("invitation pairing timeout")
+        .unwrap();
+    get_health(&link.conn).await;
+}
+
+/// A restored invitation link is accepted once and re-validated: a live ticket,
+/// a foreign host id and a duplicate entry are refused or idempotent.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pairing_restore_revalidates_invitation_links() {
+    let mut host = start_host().await;
+    let rpc_stream = &mut host.rpc;
+    let created = rpc(
+        rpc_stream,
+        50,
+        "pairing.create",
+        json!({
+            "profile": "interact",
+            "mode": "direct-preferred",
+            "label": "Desk",
+            "grants": ["core.sessions.read"],
+            "invitation": true,
+        }),
+    )
+    .await;
+    let share = created["shareUrl"].as_str().unwrap().to_string();
+    let pairing_id = created["pairing"]["id"].as_str().unwrap().to_string();
+    // Restoring what is already live is an idempotent acceptance.
+    let restored = rpc(
+        rpc_stream,
+        51,
+        "pairing.restore",
+        json!({"invitations": [
+            {"ticket": share, "grants": ["core.sessions.read"], "label": "Desk"},
+            {"ticket": "not-a-ticket", "grants": [], "label": null},
+        ]}),
+    )
+    .await;
+    assert_eq!(restored.get("restored"), Some(&json!([pairing_id])));
+    let rejected = restored["rejected"].as_array().unwrap();
+    assert_eq!(rejected.len(), 1);
+    assert_eq!(rejected[0]["index"], json!(1));
+    assert_eq!(rejected[0]["code"], json!("pairing-invalid"));
+    // A live two-minute code is not an invitation.
+    let live = rpc(
+        rpc_stream,
+        52,
+        "pairing.create",
+        json!({"profile": "interact", "mode": "direct-preferred", "label": "Desk"}),
+    )
+    .await;
+    assert!(live.get("invitation").is_none());
+    assert!(live.get("shareUrl").is_none());
+    assert!(live.get("numericCode").and_then(Value::as_str).is_some());
+    let ticket = live["ticket"].as_str().unwrap().to_string();
+    let rejected_live = rpc(
+        rpc_stream,
+        53,
+        "pairing.restore",
+        json!({"invitations": [{"ticket": ticket, "grants": [], "label": null}]}),
+    )
+    .await;
+    assert_eq!(rejected_live.get("restored"), Some(&json!([])));
+    assert_eq!(
+        rejected_live["rejected"][0]["code"],
+        json!("pairing-invalid")
+    );
+}

@@ -325,6 +325,37 @@ function IssuedDeviceRow({ device, person, onRevoke, onForget, t, locale }: {
   );
 }
 
+interface PendingInvitation {
+  id: string;
+  forUserId: string;
+  url: string;
+  expiresAt: number;
+}
+
+/** A one-time invitation the owner sent and nobody has opened yet. */
+function InvitationRow({ invitation, person, onCancel, t, locale }: {
+  invitation: PendingInvitation;
+  person: string;
+  onCancel: () => void;
+  t: Translate;
+  locale: string;
+}) {
+  const until = new Date(invitation.expiresAt).toLocaleDateString(locale, { day: "numeric", month: "long" });
+  return (
+    <li className="pkg-tunnel-device" data-invitation={invitation.id}>
+      <div className="pkg-tunnel-device-head">
+        <span className="pkg-tunnel-dot" aria-hidden="true" />
+        <div className="pkg-tunnel-device-copy">
+          <strong>{person}</strong>
+          <span>{t("tunnel.invitations.until", { date: until })}</span>
+        </div>
+        <CopyButton text={invitation.url} label={t("tunnel.invitations.copy")} />
+        <Button size="sm" variant="ghost" onClick={onCancel}>{t("tunnel.invitations.cancel")}</Button>
+      </div>
+    </li>
+  );
+}
+
 export default function LinkPage({ host, settingsTarget }: {
   host?: WebPackageHost;
   settingsTarget?: SettingsNavigationTarget;
@@ -344,6 +375,8 @@ export default function LinkPage({ host, settingsTarget }: {
   const [signInRequired, setSignInRequired] = useState<boolean | null>(null);
   const [serverName, setServerName] = useState<TunnelServerNameDto | null>(null);
   const [issued, setIssued] = useState<IssuedDevice[]>([]);
+  // The instance owner's unopened invitations; empty for everyone else.
+  const [invitations, setInvitations] = useState<PendingInvitation[]>([]);
   // Null until known, and for everyone but the instance owner.
   const [teammates, setTeammates] = useState<Teammate[] | null>(null);
   // Empty pairs the owner's own device.
@@ -374,13 +407,15 @@ export default function LinkPage({ host, settingsTarget }: {
 
   const reload = useCallback(async () => {
     try {
-      const [, nextDevices, nextIssued] = await Promise.all([
+      const [, nextDevices, nextIssued, nextInvitations] = await Promise.all([
         refreshStatus(),
         api.get<TunnelDeviceDto[]>("/api/tunnel/devices").catch(() => [] as TunnelDeviceDto[]),
         api.get<IssuedDevice[]>("/api/tunnel/devices/issued").catch(() => [] as IssuedDevice[]),
+        api.get<{ invitations?: PendingInvitation[] }>("/api/tunnel/invitations").catch(() => ({ invitations: [] })),
       ]);
       setDevices(nextDevices);
       setIssued(Array.isArray(nextIssued) ? nextIssued : []);
+      setInvitations(Array.isArray(nextInvitations.invitations) ? nextInvitations.invitations : []);
       setError("");
     } catch (cause) {
       setError(errorText(cause));
@@ -459,7 +494,7 @@ export default function LinkPage({ host, settingsTarget }: {
           }).catch(() => {});
         }
       }
-      if (type.startsWith("tunnel/device") || type.startsWith("tunnel/grants") || type === "tunnel/identity-rotated") {
+      if (type.startsWith("tunnel/device") || type.startsWith("tunnel/grants") || type.startsWith("tunnel/invitation") || type === "tunnel/identity-rotated") {
         void reload();
       }
       if (type === "tunnel/server-name-changed") void refreshServerName();
@@ -489,6 +524,15 @@ export default function LinkPage({ host, settingsTarget }: {
     }, 5_000);
     return () => clearInterval(timer);
   }, [offer?.pairing.id, reload]);
+
+  const cancelInvitation = async (invitation: PendingInvitation) => {
+    try {
+      await api.delete(`/api/tunnel/invitations/${encodeURIComponent(invitation.id)}`);
+    } catch (cause) {
+      setError(errorText(cause));
+    }
+    await reload();
+  };
 
   const personName = (id: string): string =>
     teammates?.find((person) => person.id === id)?.name || t("tunnel.for.teammate");
@@ -719,6 +763,23 @@ export default function LinkPage({ host, settingsTarget }: {
           </ul>
         )}
       </Section>
+
+      {invitations.length > 0 && (
+        <Section title={t("tunnel.invitations.title")} hint={t("tunnel.invitations.hint")}>
+          <ul className="pkg-tunnel-devices">
+            {invitations.map((invitation) => (
+              <InvitationRow
+                key={invitation.id}
+                invitation={invitation}
+                person={personName(invitation.forUserId)}
+                onCancel={() => void cancelInvitation(invitation)}
+                t={t}
+                locale={locale}
+              />
+            ))}
+          </ul>
+        </Section>
+      )}
 
       {issued.length > 0 && (
         <Section title={t("tunnel.issued.title")} hint={t("tunnel.issued.hint")}>

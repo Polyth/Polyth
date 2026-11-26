@@ -1,10 +1,10 @@
-import { isPairingDeepLink } from "./runtime.ts";
+import { isPairingDeepLink, pairingLinkFromText } from "./runtime.ts";
 
 let pending: string | undefined;
 const listeners = new Set<(url: string) => void>();
 
 export function rememberPendingPairingLink(raw: string): string | undefined {
-  const value = raw.trim();
+  const value = pairingLinkFromText(raw.trim()) ?? raw.trim();
   if (!isPairingDeepLink(value)) return undefined;
   pending = value;
   for (const listener of listeners) listener(value);

@@ -18,7 +18,9 @@ pub struct Limits {
     pub per_stream_buffered_bytes: usize,
     pub aggregate_buffered_bytes: usize,
     pub pairing_ttl_ms: u64,
+    pub invitation_ttl_ms: u64,
     pub active_invitations: usize,
+    pub active_long_invitations: usize,
     pub proof_attempts: usize,
     pub header_read_timeout_ms: u64,
     pub iroh_open_timeout_ms: u64,
@@ -50,7 +52,9 @@ impl Limits {
             per_stream_buffered_bytes: 4 * 1024 * 1024,
             aggregate_buffered_bytes: 32 * 1024 * 1024,
             pairing_ttl_ms: 120_000,
+            invitation_ttl_ms: 7 * 24 * 60 * 60 * 1000,
             active_invitations: 3,
+            active_long_invitations: 64,
             proof_attempts: 5,
             header_read_timeout_ms: 10_000,
             iroh_open_timeout_ms: 10_000,
@@ -79,6 +83,12 @@ mod tests {
         assert!(limits.ticket_raw_bytes <= 16 * 1024);
         assert!(limits.concurrent_http_streams <= 64);
         assert_eq!(limits.pairing_ttl_ms, 120_000);
+        // A one-time invitation is a messenger link: it may wait for days,
+        // while a live on-screen code stays a two-minute secret.
+        assert_eq!(limits.invitation_ttl_ms, 604_800_000);
+        assert!(limits.invitation_ttl_ms > limits.pairing_ttl_ms);
+        assert_eq!(limits.active_invitations, 3);
+        assert_eq!(limits.active_long_invitations, 64);
         assert_eq!(limits.active_connections_per_device, 2);
         // A local server's answer may take far longer than a browser's request
         // head; the response wait is its own, longer bound.
