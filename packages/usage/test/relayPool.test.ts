@@ -6,7 +6,7 @@ register("./tsxHooks.mjs", import.meta.url);
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { RelayPoolCard, relayPoolSentence } = await import("../widgets/usage/RelayPoolCard.tsx");
-const { relayBadgeFor, nextRefill, includedMembers, withDefaultName } = await import("../widgets/usage/relayClient.ts");
+const { relayBadgeFor, nextRefill, includedMembers, relayMemberHarnesses, withDefaultName } = await import("../widgets/usage/relayClient.ts");
 
 const now = new Date(2026, 10, 25, 12, 0).getTime();
 const relay = {
@@ -27,15 +27,36 @@ test("pool members sort by plan position and the sentence names now, next and th
   assert.equal(nextRefill(relay)?.member.harnessId, "claude-max");
 });
 
-test("pool card renders one segment per included member, marks unknown readings and renders nothing without members", () => {
+test("pool card lists included members as a queue in plan order, marks unknown readings and renders nothing without members", () => {
   const html = renderToStaticMarkup(createElement(RelayPoolCard, { relay, now }));
   assert.match(html, /Claude Code · Relay/);
-  assert.equal((html.match(/usage-relay-seg"/g) ?? []).length, 3);
+  assert.match(html, /3 accounts, in turn/);
+  assert.deepEqual([...html.matchAll(/data-member="([^"]+)"/g)].map((match) => match[1]), ["claude", "claude-iryna", "claude-max"]);
   assert.match(html, /data-state="now"/);
   assert.match(html, /no reading/);
   assert.match(html, /62% left/);
   assert.match(html, /refills /);
+  // The meter fills as the account is spent, like every limit bar on the page;
+  // an exhausted account reads full.
+  assert.match(html, /data-member="claude"[\s\S]*?inline-size:38%/);
+  assert.match(html, /data-member="claude-max"[\s\S]*?inline-size:100%/);
+  // Rows say who runs and who follows; the sentence speaks only when nobody can.
+  assert.doesNotMatch(html, /usage-relay-sentence/);
+  // Without the members' own readings there is nothing to open.
+  assert.doesNotMatch(html, /aria-expanded/);
   assert.equal(renderToStaticMarkup(createElement(RelayPoolCard, { relay: { ...(relay as object), members: [] } as never, now })), "");
+});
+
+test("with every account out the card says so and names the next refill", () => {
+  const out = { ...(relay as object), members: (relay as { members: object[] }).members.map((member) => ({ ...member, state: "exhausted" })) } as never;
+  const html = renderToStaticMarkup(createElement(RelayPoolCard, { relay: out, now }));
+  assert.match(html, /usage-relay-sentence">Every account is out of limit · Max refills /);
+});
+
+test("only the included members of a rotating Relay fold into its card", () => {
+  assert.deepEqual([...relayMemberHarnesses([relay])].sort(), ["claude", "claude-iryna", "claude-max"]);
+  const lone = { ...(relay as object), members: [{ harnessId: "codex", name: "Codex", included: true, position: 1, state: "now" }] } as never;
+  assert.equal(relayMemberHarnesses([lone]).size, 0);
 });
 
 test("per-account cards get a Relay badge only for included members", () => {

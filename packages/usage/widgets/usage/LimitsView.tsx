@@ -34,7 +34,7 @@ import {
 } from "./limitsPrefs.ts";
 import { useUsageLimits, type UsageLimitSnapshotDto } from "./limitsClient.ts";
 import { RelayPoolCard } from "./RelayPoolCard.tsx";
-import { relayBadgeFor, useUsageRelays, type UsageRelay } from "./relayClient.ts";
+import { relayBadgeFor, relayMemberHarnesses, useUsageRelays, type UsageRelay } from "./relayClient.ts";
 
 export { classifyLimitPace, formatLimitPaceBudget, formatLimitReset, pacePressure, paceProjection };
 
@@ -119,6 +119,47 @@ function LimitWindowRow({
   );
 }
 
+/** A source's readings: its error, balances and windows. A source card and an
+ *  opened Relay member row show the same thing. */
+function SourceLimits({ provider, now }: { provider: UsageLimitSnapshotDto; now: number }) {
+  return (
+    <>
+      {provider.error ? (
+        <div className="usage-limit-source-error" role="status">{provider.error.message}</div>
+      ) : null}
+
+      {provider.balances.length ? (
+        <div className="usage-limit-balances">
+          {provider.balances.map((balance) => (
+            <div className="usage-limit-balance" key={balance.id}>
+              <span>{balance.label}</span>
+              <strong>{balanceValue(balance)}</strong>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {provider.windows.length ? (
+        <div className="usage-limit-windows">
+          {provider.windows.map((window) => (
+            <LimitWindowRow
+              key={window.id}
+              window={window}
+              pace={provider.pace?.[window.id]}
+              now={now}
+            />
+          ))}
+        </div>
+      ) : provider.balances.length === 0 ? (
+        <div className="usage-limit-empty">{tr("usage.limitNoWindows")}</div>
+      ) : null}
+    </>
+  );
+}
+
+/** The harness a source's account runs on; a family's own login is its id. */
+const sourceHarness = (provider: UsageLimitSnapshotDto): string => provider.account?.harnessId ?? provider.providerId;
+
 function ProviderCard({
   provider,
   now,
@@ -188,35 +229,7 @@ function ProviderCard({
         </div>
       </header>
 
-      {provider.error ? (
-        <div className="usage-limit-source-error" role="status">{provider.error.message}</div>
-      ) : null}
-
-      {provider.balances.length ? (
-        <div className="usage-limit-balances">
-          {provider.balances.map((balance) => (
-            <div className="usage-limit-balance" key={balance.id}>
-              <span>{balance.label}</span>
-              <strong>{balanceValue(balance)}</strong>
-            </div>
-          ))}
-        </div>
-      ) : null}
-
-      {provider.windows.length ? (
-        <div className="usage-limit-windows">
-          {provider.windows.map((window) => (
-            <LimitWindowRow
-              key={window.id}
-              window={window}
-              pace={provider.pace?.[window.id]}
-              now={now}
-            />
-          ))}
-        </div>
-      ) : provider.balances.length === 0 ? (
-        <div className="usage-limit-empty">{tr("usage.limitNoWindows")}</div>
-      ) : null}
+      <SourceLimits provider={provider} now={now} />
     </section>
   );
 }
@@ -254,12 +267,27 @@ export function LimitsView(): ReactNode {
     () => allOrdered.filter((provider) => isLimitSourceVisible(provider.providerId, prefs)),
     [allOrdered, prefs],
   );
+  // An account in a Relay shows inside the Relay's card; its own card is
+  // listed only when the person asks for it in Settings.
+  const relayAccounts = useMemo(() => relayMemberHarnesses(relays), [relays]);
+  const listed = useMemo(
+    () => prefs.showRelayMembers ? visible : visible.filter((provider) => !relayAccounts.has(sourceHarness(provider))),
+    [visible, relayAccounts, prefs.showRelayMembers],
+  );
+  const sourcesByHarness = useMemo(
+    () => new Map(limits.providers.map((provider) => [sourceHarness(provider), provider])),
+    [limits.providers],
+  );
+  const refreshSources = useCallback(
+    async (providerIds: string[]) => { await Promise.all(providerIds.map((id) => limits.refreshProvider(id))); },
+    [limits.refreshProvider],
+  );
   const arrangeItems = useMemo<ArrangeItem[]>(
-    () => visible.map((provider) => ({ id: sourceId(provider.providerId), shape: "row" })),
-    [visible],
+    () => listed.map((provider) => ({ id: sourceId(provider.providerId), shape: "row" })),
+    [listed],
   );
   const commitOrder = useCallback((next: readonly string[], id: string) => {
-    const visibleBefore = visible.map((provider) => sourceId(provider.providerId));
+    const visibleBefore = listed.map((provider) => sourceId(provider.providerId));
     // Hidden panels keep their slots: showing one again returns it where it was.
     setLimitSourceOrder(mergeLimitSourceOrder(
       allOrdered.map((provider) => sourceId(provider.providerId)),
@@ -272,10 +300,10 @@ export function LimitsView(): ReactNode {
       position: next.indexOf(id) + 1,
       count: next.length,
     }));
-  }, [allOrdered, visible]);
+  }, [allOrdered, listed]);
   const arrange = useArrange({
     items: arrangeItems,
-    enabled: visible.length > 1,
+    enabled: listed.length > 1,
     // A still press lifts a panel, exactly like a project row in the navigator;
     // a tap or a scroll still belongs to the page.
     touchLiftMs: ARRANGE_LIST_LIFT_MS,
@@ -284,7 +312,7 @@ export function LimitsView(): ReactNode {
     onCommit: (next, id) => commitOrder(next, id),
   });
   const moveSourceBy = (id: string, delta: -1 | 1) => {
-    const shown = visible.map((provider) => sourceId(provider.providerId));
+    const shown = listed.map((provider) => sourceId(provider.providerId));
     const index = shown.indexOf(id);
     const target = index + delta;
     if (index < 0 || target < 0 || target >= shown.length) return;
@@ -297,10 +325,10 @@ export function LimitsView(): ReactNode {
     arrange.engine.listRef(element);
   }, [arrange.engine]);
   const shownProviders = useMemo(() => {
-    if (!arrange.draggingId) return visible;
-    const byId = new Map(visible.map((provider) => [sourceId(provider.providerId), provider]));
+    if (!arrange.draggingId) return listed;
+    const byId = new Map(listed.map((provider) => [sourceId(provider.providerId), provider]));
     return arrange.order.flatMap((id) => byId.get(id) ?? []);
-  }, [arrange.draggingId, arrange.order, visible]);
+  }, [arrange.draggingId, arrange.order, listed]);
 
   const summary = useMemo(() => {
     const measurable = visible.flatMap((provider) =>
@@ -377,9 +405,18 @@ export function LimitsView(): ReactNode {
         />
       </div>
 
-      {relays.map((relay: UsageRelay) => <RelayPoolCard key={relay.id} relay={relay} now={now} />)}
+      {relays.map((relay: UsageRelay) => (
+        <RelayPoolCard
+          key={relay.id}
+          relay={relay}
+          now={now}
+          sources={sourcesByHarness}
+          renderSource={(source) => <SourceLimits provider={source} now={now} />}
+          onRefresh={refreshSources}
+        />
+      ))}
 
-      {visible.length ? (
+      {listed.length ? (
         <div
           ref={listElement}
           className="usage-limit-provider-list"
@@ -396,14 +433,14 @@ export function LimitsView(): ReactNode {
                 arrangeId={arrangeId}
                 engine={arrange.engine}
                 held={arrange.draggingId === arrangeId}
-                reorderable={visible.length > 1}
+                reorderable={listed.length > 1}
                 onMove={moveSourceBy}
-                relayBadge={relayBadgeFor(relays, provider.account?.harnessId ?? provider.providerId)}
+                relayBadge={relayBadgeFor(relays, sourceHarness(provider))}
               />
             );
           })}
         </div>
-      ) : (
+      ) : visible.length ? null : (
         <EmptyState
           variant="panel"
           title={tr(limits.providers.length ? "usage.limitsAllHidden" : "usage.limitsNoneDetected")}

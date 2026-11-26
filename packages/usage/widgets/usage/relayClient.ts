@@ -70,6 +70,19 @@ export function nextRefill(relay: UsageRelay): { at: number; member: UsageRelayM
   return candidates.sort((a, b) => a.at - b.at)[0];
 }
 
+/** Harnesses whose accounts a Relay card already shows: the included members
+ *  of every Relay that rotates (two or more included accounts). A Relay of one
+ *  account rotates nothing, so that account keeps its own card. */
+export function relayMemberHarnesses(relays: readonly UsageRelay[]): Set<string> {
+  const ids = new Set<string>();
+  for (const relay of relays) {
+    const members = includedMembers(relay);
+    if (members.length < 2) continue;
+    for (const member of members) ids.add(member.harnessId);
+  }
+  return ids;
+}
+
 /** Badge data for the per-account card of one harness. */
 export function relayBadgeFor(relays: readonly UsageRelay[], harnessId: string): { n: number; state: UsageRelayMember["state"] } | undefined {
   for (const relay of relays) {

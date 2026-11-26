@@ -178,7 +178,7 @@ export default defineWebPackage((host) => () => {
         pageId: "usage",
         label: translate("usage.limitSources"),
         description: translate("usage.limitSourcesDescription"),
-        keywords: ["usage", "limits", "provider", "harness", "balance"],
+        keywords: ["usage", "limits", "provider", "harness", "balance", "relay", "accounts"],
         focusTarget: "usage.limits.sources",
       },
     ]),

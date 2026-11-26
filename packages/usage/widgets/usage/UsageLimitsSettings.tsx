@@ -6,6 +6,7 @@ import { sourceProblem } from "./alertsModel.ts";
 import { limitSourceName, orderLimitSources } from "./limitsModel.ts";
 import { useUsageLimits, type UsageLimitSnapshotDto } from "./limitsClient.ts";
 import { UsageAlertsSections } from "./UsageAlertsSettings.tsx";
+import { relayMemberHarnesses, useUsageRelays } from "./relayClient.ts";
 import {
   LIMIT_BAR_COLORS,
   isLimitSourceVisible,
@@ -74,6 +75,8 @@ const barColorLabel = (color: LimitBarColor): string => tr(({
 export function UsageLimitsSettings(): ReactNode {
   const prefs = useUsageLimitsPrefs();
   const limits = useUsageLimits();
+  // The choice only means something while a Relay rotates two or more accounts.
+  const hasRelayAccounts = relayMemberHarnesses(useUsageRelays()).size > 0;
   const [refreshingSource, setRefreshingSource] = useState<string | null>(null);
 
   const refreshSource = async (providerId: string) => {
@@ -192,6 +195,16 @@ export function UsageLimitsSettings(): ReactNode {
         )}
       >
         {limits.error ? <div className="usage-limit-source-error" role="status">{limits.error}</div> : null}
+
+        {hasRelayAccounts ? (
+          <Row label={tr("usage.setRelayAccounts")} hint={tr("usage.setRelayAccountsHint")}>
+            <Toggle
+              on={prefs.showRelayMembers}
+              onChange={(showRelayMembers) => updateUsageLimitsPrefs({ showRelayMembers })}
+              label={tr("usage.setRelayAccounts")}
+            />
+          </Row>
+        ) : null}
 
         <div className="usage-limits-source-settings">
           {orderLimitSources(limits.providers, prefs.sourceOrder).map((provider) => {

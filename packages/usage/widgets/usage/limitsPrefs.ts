@@ -25,6 +25,8 @@ export interface UsageLimitsPrefs {
   /** Remaining share below which a `percent` bar turns red instead of amber. */
   criticalRemainingPercent: number;
   hiddenSources: string[];
+  /** Also list a Relay member's own card; off, the Relay's card shows the account. */
+  showRelayMembers: boolean;
   /** Normalized provider ids in the order the user dragged the Limits panels. */
   sourceOrder: string[];
 }
@@ -43,6 +45,7 @@ export const DEFAULT_USAGE_LIMITS_PREFS: UsageLimitsPrefs = {
   barColor: "accent",
   criticalRemainingPercent: 2,
   hiddenSources: [],
+  showRelayMembers: false,
   sourceOrder: [],
 };
 
@@ -90,6 +93,7 @@ const sanitize = (value: unknown): UsageLimitsPrefs => {
     barColor: isLimitBarColor(raw.barColor) ? raw.barColor : DEFAULT_USAGE_LIMITS_PREFS.barColor,
     criticalRemainingPercent: Math.min(critical, threshold),
     hiddenSources,
+    showRelayMembers: raw.showRelayMembers === true,
     sourceOrder,
   };
 };
