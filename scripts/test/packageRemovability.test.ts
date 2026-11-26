@@ -80,6 +80,7 @@ const SHARED_ROOT_WRITERS: Readonly<Record<string, string>> = {
   "backend-grok": "passes the root to harness-runtime",
   "backend-omp": "passes the root to harness-runtime",
   "backend-pi": "passes the root to harness-runtime",
+  "backend-vibe": "passes the root to harness-runtime",
   dictation: "lists legacy root entries once to adopt its own into packageDataDir",
   workflow: "imports the legacy shared workflows.json once",
 };

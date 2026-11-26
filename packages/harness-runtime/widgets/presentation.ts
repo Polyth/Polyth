@@ -193,6 +193,7 @@ const harnessDisplayLabels: Readonly<Record<string, string>> = {
   omp: "OMP",
   opencode: "OpenCode",
   pi: "Pi",
+  vibe: "Vibe",
 };
 
 const titleCase = (value: string) => value.replace(/[-_]+/g, " ").replace(/\b[a-z]/g, (letter) => letter.toUpperCase());

@@ -58,7 +58,7 @@ import {
     type AcpSessionConfig,
 } from "./sessionConfig.ts";
 import { createTodoSnapshotTracker, normalizeTodoItems, todoItemsFromToolInput } from "@polyth/todos";
-import { acpToolName, eventsFromAcpToolCallUpdate, type AcpToolCallState } from "./acpToolCall.ts";
+import { acpToolName, eventsFromAcpToolCallUpdate, type AcpToolCallOptions, type AcpToolCallState } from "./acpToolCall.ts";
 export interface AcpProfile {
     descriptor: HarnessDescriptor;
     command: string;
@@ -116,6 +116,12 @@ export interface AcpProfile {
     agentToolsOverHttp?: boolean;
     /** See {@link AcpRuntimeOptions.agentNotice}. */
     agentNotice?: AcpRuntimeOptions["agentNotice"];
+    /** See {@link AcpRuntimeOptions.nativeToolName}. */
+    nativeToolName?: AcpRuntimeOptions["nativeToolName"];
+    /** See {@link AcpRuntimeOptions.observeSessionUpdate}. */
+    observeSessionUpdate?: AcpRuntimeOptions["observeSessionUpdate"];
+    /** See {@link AcpRuntimeOptions.nativeTitles}. */
+    nativeTitles?: boolean;
     /**
      * For an agent that takes stdio MCP servers only from its own launch
      * configuration and refuses them on `session/new`. Called before each
@@ -125,6 +131,17 @@ export interface AcpProfile {
      * The file is removed when the runtime is disposed.
      */
     launchStdioMcp?(input: { servers: AcpStdioMcpServer[]; file: string }): Promise<string[]>;
+}
+
+/** What {@link AcpRuntimeOptions.settleTurn} is told about a finished turn. */
+export interface AcpSettleTurnInput {
+    backendSessionId: string;
+    turnId: string;
+    /** The agent's `session/prompt` answer, as sent (absent for a turn that
+     *  failed with an error answer). */
+    promptResult?: Record<string, unknown>;
+    /** The Polyth model id selected in the session when the turn ended. */
+    modelId?: string;
 }
 
 /** A definite JSON-RPC error answer to `session/prompt`, as the agent sent it. */
@@ -279,9 +296,26 @@ export interface AcpRuntimeOptions {
      * admission), read from the agent's own durable record before the turn is
      * closed. Bounded by the runtime; a slow or failing read yields nothing.
      */
-    settleTurn?(input: { backendSessionId: string; turnId: string }): Promise<RuntimeEvent[]>;
+    settleTurn?(input: AcpSettleTurnInput): Promise<RuntimeEvent[]>;
     /** Whether `settleTurn` publishes per-response `usage/recorded`. */
     reportsUsage?: boolean;
+    /** See {@link AcpToolCallOptions.nativeToolName}. */
+    nativeToolName?: AcpToolCallOptions["nativeToolName"];
+    /**
+     * `false` for an agent whose `session_info_update` title is not a title
+     * Polyth should show (for example the raw first prompt, Polyth's own
+     * context blocks included). Its titles are ignored and the runtime
+     * reports `title: "unsupported"`, so Polyth names the chat itself.
+     */
+    nativeTitles?: boolean;
+    /**
+     * Sees every `session/update` the agent sends, keyed by the session it
+     * names, before any is translated: also the ones Polyth does not show
+     * (`usage_update`, replayed history) and the ones a session sends while
+     * `session/new` / `session/load` is still unanswered. For bookkeeping
+     * only: it cannot change or drop an update, and a throw is ignored.
+     */
+    observeSessionUpdate?(input: { backendSessionId: string; update: Record<string, unknown> }): void;
     /**
      * For agents that send only committed messages (no deltas), so a long
      * first model response leaves the wire silent: polled while a sent
@@ -459,7 +493,10 @@ export function createAcpRuntime(
     };
     const nativeCommands: RuntimeCommandDescriptor[] = [];
     const acpToolCalls = new Map<string, AcpToolCallState>();
-    const toolCallOptions = { toolNameFromTitle: options.toolNameFromTitle === true };
+    const toolCallOptions = {
+        toolNameFromTitle: options.toolNameFromTitle === true,
+        ...(options.nativeToolName ? { nativeToolName: options.nativeToolName } : {}),
+    };
     const listeners = new Set<(sid: string, event: RuntimeEvent) => void>();
     // Route events to the canonical session named by the operation. A runtime
     // created for a workspace (no session at creation, e.g. utility work) would
@@ -595,6 +632,11 @@ export function createAcpRuntime(
             applyClientTranslation(method, params);
             return;
         }
+        // Before the session filter: an agent may report a session it is
+        // still creating or loading before it answers with that session's id.
+        if (options.observeSessionUpdate && typeof params.sessionId === "string" && params.update && typeof params.update === "object") {
+            try { options.observeSessionUpdate({ backendSessionId: params.sessionId, update: params.update as Record<string, unknown> }); } catch { /* bookkeeping only */ }
+        }
         if (params.sessionId !== nativeId) return;
         touchPromptWatchdog();
         const update = params.update;
@@ -638,6 +680,7 @@ export function createAcpRuntime(
             return;
         }
         if (update.sessionUpdate === "session_info_update") {
+            if (options.nativeTitles === false) return;
             const title = typeof update.title === "string" ? update.title.trim() : "";
             if (title && !/^new session|^untitled|^acp session$/i.test(title)) {
                 lastTitle = title;
@@ -948,7 +991,7 @@ export function createAcpRuntime(
         capabilities: async () => ({
             streaming: true, permissions: true, questions: false, compaction: false, subagents: false,
             steering: false, usage: options.reportsUsage === true, cost: false, fork: false, mcp: true,
-            title: "native",
+            title: options.nativeTitles === false ? "unsupported" : "native",
             attachments: { modalities: attachmentModalitySupport(agentCapabilities) },
             commands: { discovery: "native", invoke: "raw-native-input" },
             contextOccupancy: "unknown",
@@ -1102,12 +1145,18 @@ export function createAcpRuntime(
                 const backendSessionId = nativeId;
                 /** The agent's own record of a finished turn, bounded so a
                  * slow read cannot hold the turn open. */
-                const settled = async (): Promise<RuntimeEvent[]> => {
+                const settled = async (promptResult?: Record<string, unknown>): Promise<RuntimeEvent[]> => {
                     if (!options.settleTurn) return [];
                     let timer: ReturnType<typeof setTimeout> | undefined;
+                    const modelId = currentModelId(sessionConfig);
                     try {
                         return await Promise.race([
-                            options.settleTurn({ backendSessionId, turnId: operationId }).catch(() => []),
+                            options.settleTurn({
+                                backendSessionId,
+                                turnId: operationId,
+                                ...(promptResult ? { promptResult } : {}),
+                                ...(modelId ? { modelId } : {}),
+                            }).catch(() => []),
                             new Promise<RuntimeEvent[]>((resolve) => { timer = setTimeout(() => resolve([]), SETTLE_TURN_TIMEOUT_MS); timer.unref?.(); }),
                         ]);
                     } finally {
@@ -1140,7 +1189,7 @@ export function createAcpRuntime(
                     clearPromptWatchdog();
                     markAccepted();
                     finishMessagePart();
-                    const extra = await settled();
+                    const extra = await settled(result && typeof result === "object" ? result as unknown as Record<string, unknown> : undefined);
                     if (!active || turnId !== operationId) return;
                     for (const event of extra) emit(event);
                     active = false;

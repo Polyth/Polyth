@@ -78,5 +78,7 @@ test("Secure Safe's canonical deployment skill has a projection in every shipped
     // Grok and DeepSeek.
     copilot: "prompt",
     omp: "prompt",
+    // backend-vibe is an ACP profile as well.
+    vibe: "prompt",
   });
 });

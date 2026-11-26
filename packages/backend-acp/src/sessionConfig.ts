@@ -56,8 +56,14 @@ export interface AcpSessionConfig {
   currentModeId?: string;
 }
 
+/** Categories some agents publish for the thinking select instead of ACP's
+ *  `thought_level` (Mistral Vibe 3.x sends `thinking`). */
+const THOUGHT_LEVEL_CATEGORY_ALIASES = new Set(["thinking"]);
+
 const classified = (option: AcpConfigSelect, kind: "model" | "thought_level"): boolean =>
-  option.category === kind || (option.category === undefined && option.id === kind);
+  option.category === kind
+  || (kind === "thought_level" && option.category !== undefined && THOUGHT_LEVEL_CATEGORY_ALIASES.has(option.category))
+  || (option.category === undefined && option.id === kind);
 
 const str = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim() ? value : undefined;

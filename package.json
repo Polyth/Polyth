@@ -14,6 +14,7 @@
     "!packages/backend-grok",
     "!packages/backend-omp",
     "!packages/backend-pi",
+    "!packages/backend-vibe",
     "apps/*"
   ],
   "overrides": {

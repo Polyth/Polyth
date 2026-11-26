@@ -55,6 +55,7 @@ const KNOWN_HARNESSES: Readonly<Record<string, string>> = {
   omp: "OMP",
   opencode: "OpenCode",
   pi: "Pi",
+  vibe: "Mistral Vibe",
 };
 
 const prettify = (id: string): string => id

@@ -3,7 +3,7 @@
 The workstation edition is a build of Polyth Desktop for a managed work
 computer. It is a local shell for the coding-agent CLIs the person already uses
 (Claude Code, Codex, Cursor, OpenCode, Pi, Antigravity, DeepSeek, GitHub Copilot,
-Command Code).
+Mistral Vibe, Command Code).
 It has no remote access of any kind, and the app makes no network connection of
 its own apart from checking for its own updates and sending feedback the person
 chose to send.
@@ -117,6 +117,7 @@ is always present.
 - backend-deepseek
 - backend-opencode
 - backend-pi
+- backend-vibe
 - bookmarks
 - browser
 - btw

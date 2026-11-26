@@ -23,11 +23,12 @@ const HARNESS_PROVIDER_IDS = new Set([
   "omp",
   "opencode",
   "pi",
+  "vibe",
 ]);
 
 /** Harnesses whose extra native logins register as `<family>-<account>`; an
  * ACP account catalog uses that harness id as its provider id. */
-const ACCOUNT_HARNESS_FAMILIES = new Set(["antigravity", "claude", "codex", "commandcode", "copilot", "cursor", "deepseek", "grok", "omp", "pi"]);
+const ACCOUNT_HARNESS_FAMILIES = new Set(["antigravity", "claude", "codex", "commandcode", "copilot", "cursor", "deepseek", "grok", "omp", "pi", "vibe"]);
 /** The harness provider id a provider id stands for (`grok-work` → `grok`). */
 const harnessProviderId = (providerID: string): string => {
   const normalized = providerID.trim().toLowerCase();
@@ -127,6 +128,8 @@ const providerCandidates = (providerID: string, modelID: string): string[] => {
     copilot: "github-copilot",
     cursor: inferred,
     grok: "xai",
+    // Mistral Vibe runs Mistral's own models under their catalog aliases.
+    vibe: "mistral",
     "google-antigravity": "google",
     "openai-codex": "openai",
   };
