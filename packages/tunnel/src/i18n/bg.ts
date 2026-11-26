@@ -150,6 +150,8 @@ export const bg: TunnelMessages = {
   "tunnel.invite.message": "Здравейте, {name}! Добавих ви в Polyth.\nОтворете тази връзка, за да се свържете в приложението Polyth: {url}\nАко още нямате приложението, страницата предлага да го инсталирате. Връзката работи веднъж, до {date}.",
   "tunnel.invite.messageNamed": "Здравейте, {name}! Добавих ви в Polyth.\nОтворете тази връзка, за да се свържете със „{server}“ в приложението Polyth: {url}\nАко още нямате приложението, страницата предлага да го инсталирате. Връзката работи веднъж, до {date}.",
   "tunnel.invite.note": "Работи веднъж, до {date}. Приложението Polyth на човека веднага се включва в собствения му профил; можете да го изключите от страницата Polyth Link.",
+  "tunnel.invite.joinedTitle": "{name} вече е в Polyth",
+  "tunnel.invite.joinedBody": "Поканата е приета в приложението Polyth на {device}",
   "tunnel.invitations.title": "Покани, които още не са отворени",
   "tunnel.invitations.hint": "Всяка връзка работи веднъж. Щом човекът я отвори, приложението му Polyth ще се появи сред устройствата, свързани за други.",
   "tunnel.invitations.until": "Валидна до {date}",

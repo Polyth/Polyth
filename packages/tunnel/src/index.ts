@@ -53,6 +53,8 @@ export interface TunnelInvitationRecord {
   spaceId: string | null;
   /** The name the person was added with, for that notice. */
   forName: string | null;
+  /** The issuer's app language when inviting: the notice is written in it. */
+  locale: string | null;
 }
 
 export function grantsForProfile(profile: GrantProfileId): string[] {
@@ -152,6 +154,7 @@ export class TunnelStore {
     const invitationColumns = new Set((this.db.prepare("PRAGMA table_info(tunnel_invitation)").all() as Array<{ name: string }>).map((row) => row.name));
     if (!invitationColumns.has("space_id")) this.db.exec("ALTER TABLE tunnel_invitation ADD COLUMN space_id TEXT");
     if (!invitationColumns.has("for_name")) this.db.exec("ALTER TABLE tunnel_invitation ADD COLUMN for_name TEXT");
+    if (!invitationColumns.has("locale")) this.db.exec("ALTER TABLE tunnel_invitation ADD COLUMN locale TEXT");
     this.db.prepare("UPDATE tunnel_device SET owner_user_id = ? WHERE owner_user_id IS NULL OR owner_user_id = ''").run(LEGACY_OWNER_USER_ID);
     this.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS tunnel_device_pairing_id ON tunnel_device(pairing_id) WHERE pairing_id IS NOT NULL");
     this.db.exec("CREATE INDEX IF NOT EXISTS tunnel_device_owner ON tunnel_device(owner_user_id)");
@@ -228,9 +231,10 @@ export class TunnelStore {
     createdAt?: number;
     spaceId?: string | null;
     forName?: string | null;
+    locale?: string | null;
   }): TunnelInvitationRecord {
     this.db.prepare(
-      "INSERT INTO tunnel_invitation(pairing_id, issued_by, for_user_id, profile, ticket, share_url, label, created_at, expires_at, state, device_id, finished_at, space_id, for_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, ?, ?)",
+      "INSERT INTO tunnel_invitation(pairing_id, issued_by, for_user_id, profile, ticket, share_url, label, created_at, expires_at, state, device_id, finished_at, space_id, for_name, locale) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, ?, ?, ?)",
     ).run(
       input.pairingId,
       input.issuedBy,
@@ -243,6 +247,7 @@ export class TunnelStore {
       input.expiresAt,
       input.spaceId ?? null,
       input.forName ?? null,
+      input.locale ?? null,
     );
     return this.invitation(input.pairingId)!;
   }
@@ -676,6 +681,7 @@ function hydrateInvitation(row: Record<string, unknown>): TunnelInvitationRecord
     finishedAt: row.finished_at == null ? null : Number(row.finished_at),
     spaceId: row.space_id == null ? null : String(row.space_id),
     forName: row.for_name == null ? null : String(row.for_name),
+    locale: row.locale == null ? null : String(row.locale),
   };
 }
 

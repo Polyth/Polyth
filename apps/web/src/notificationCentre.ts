@@ -215,7 +215,8 @@ export function isLimitNotice(record: Pick<NotificationRecord, "kind" | "key">):
   return record.kind === "failed" && record.key.startsWith("limit:");
 }
 
-export function notificationKindLabel(record: Pick<NotificationRecord, "kind" | "key">): string {
+export function notificationKindLabel(record: Pick<NotificationRecord, "kind" | "key" | "settings">): string {
+  if (record.settings?.pageId === "users") return tr("settingsview.users");
   return isLimitNotice(record) ? tr("notificationcentre.limitReached") : NOTIFICATION_KIND_LABELS[record.kind];
 }
 

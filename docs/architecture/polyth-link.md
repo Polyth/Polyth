@@ -364,7 +364,7 @@ An invitation is a ticket marked `invitation: true` that the person can open
 later, without the owner and teammate being online together. Its lifetime is
 up to 7 days and it expires by wall clock.
 
-- Issuing: `POST /api/tunnel/invitations` `{forUserId, name?, profile?, ttlMs?}`.
+- Issuing: `POST /api/tunnel/invitations` `{forUserId, name?, locale?, profile?, ttlMs?}`.
   `forUserId` must be another member of the current Space; the profile
   defaults to `full-remote` and the TTL to 7 days (1 hour … 7 days allowed).
   A new invitation cancels the issuer's earlier pending one for that person,
@@ -380,7 +380,8 @@ up to 7 days and it expires by wall clock.
 - Storage: the `tunnel_invitation` table in `tunnel.db` keeps the pairing id,
   issuer, `for_user_id`, profile, ticket, share URL, label, created and
   expiry times, state (`pending|used|cancelled|expired`), device id, the
-  issuing `space_id` and the name the person was added with (`for_name`). The
+  issuing `space_id`, the name the person was added with (`for_name`) and the
+  issuer's `locale`. The
   ticket is kept so the host can be given it back after a restart, which makes
   the link a bearer credential until it is used or expires. Audit rows and
   events carry only ids, never the ticket or URL.
@@ -389,7 +390,9 @@ up to 7 days and it expires by wall clock.
   `used`, and `invitation-used` is audited and emitted as
   `tunnel/invitation-used` to the issuer. The issuer also gets a notice in the
   Space they invited from (`server.person-notices` `notify`: inbox row, live
-  card and push, kind `message`, the person's monogram, "<name> joined Polyth");
+  card and push, kind `message`, the person's monogram), written in the
+  language the owner invited in (`locale`, one of the package catalogs; English
+  otherwise) because the server knows no other;
   opening it shows the person in Settings → Users. Invitations made before
   `space_id` was kept send no notice. A cancelled, used or expired
   invitation stores nothing (`pairing.storage_failed`).

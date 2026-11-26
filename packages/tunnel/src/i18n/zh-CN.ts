@@ -150,6 +150,8 @@ export const zhCN: TunnelMessages = {
   "tunnel.invite.message": "{name}，你好！我已将你添加到 Polyth。\n打开此链接，在 Polyth 应用中连接：{url}\n如果还没有应用，页面会提示安装。链接只能使用一次，有效期至 {date}。",
   "tunnel.invite.messageNamed": "{name}，你好！我已将你添加到 Polyth。\n打开此链接，在 Polyth 应用中连接到“{server}”：{url}\n如果还没有应用，页面会提示安装。链接只能使用一次，有效期至 {date}。",
   "tunnel.invite.note": "只能使用一次，有效期至 {date}。对方的 Polyth 应用会立即加入其自己的账户；你可以在 Polyth Link 页面断开。",
+  "tunnel.invite.joinedTitle": "{name} 已加入 Polyth",
+  "tunnel.invite.joinedBody": "已在 {device} 上的 Polyth 应用中接受邀请",
   "tunnel.invitations.title": "尚未打开的邀请",
   "tunnel.invitations.hint": "每个链接只能使用一次。对方打开后，其 Polyth 应用会出现在“你为他人连接的设备”中。",
   "tunnel.invitations.until": "有效期至 {date}",

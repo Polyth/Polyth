@@ -67,7 +67,7 @@ export function tunnelInviteMethod(
     },
     preferred: ({ shareableAddress }) => linkPreferred(shareableAddress),
     issue: async ({ accountId, name }) => {
-      const issued = await api.post<TunnelInvitationDto>("/api/tunnel/invitations", { forUserId: accountId, name });
+      const issued = await api.post<TunnelInvitationDto>("/api/tunnel/invitations", { forUserId: accountId, name, locale: locale() });
       let server = "";
       try {
         server = (await api.get<TunnelServerNameDto>("/api/tunnel/server-name")).name.trim();

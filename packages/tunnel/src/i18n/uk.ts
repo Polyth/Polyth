@@ -150,6 +150,8 @@ export const uk: TunnelMessages = {
   "tunnel.invite.message": "Привіт, {name}! Вас додано в Polyth.\nВідкрийте це посилання, щоб підключитися в застосунку Polyth: {url}\nЯкщо застосунку ще немає, сторінка запропонує його встановити. Посилання одноразове й діє до {date}.",
   "tunnel.invite.messageNamed": "Привіт, {name}! Вас додано в Polyth.\nВідкрийте це посилання, щоб підключитися до сервера «{server}» у застосунку Polyth: {url}\nЯкщо застосунку ще немає, сторінка запропонує його встановити. Посилання одноразове й діє до {date}.",
   "tunnel.invite.note": "Діє один раз, до {date}. Застосунок Polyth людини одразу ввійде в її обліковий запис; відключити його можна на сторінці Polyth Link.",
+  "tunnel.invite.joinedTitle": "{name} тепер у Polyth",
+  "tunnel.invite.joinedBody": "Запрошення прийнято в застосунку Polyth на пристрої {device}",
   "tunnel.invitations.title": "Запрошення, які ще не відкрили",
   "tunnel.invitations.hint": "Кожне посилання діє один раз. Щойно людина його відкриє, її застосунок Polyth з’явиться серед пристроїв, підключених для інших.",
   "tunnel.invitations.until": "Діє до {date}",

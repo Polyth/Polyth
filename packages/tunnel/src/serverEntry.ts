@@ -26,6 +26,7 @@ import {
   type ServerPersonNotices,
 } from "@polyth/plugins";
 import { createTunnelStore, grantsForProfile, type TunnelStore } from "./index.ts";
+import { tunnelLocales } from "./i18n/index.ts";
 import { startLinkHost, randomIngressSecret, unpackQrModules, type LinkHostClient } from "./host.ts";
 import { createLinkHostLifecycle } from "./hostLifecycle.ts";
 import { attachTunnelEventsWs, TunnelEventBus } from "./events.ts";
@@ -146,11 +147,14 @@ export async function commitPairingDevice(input: {
         platform: device.platform,
       }, invitation.issuedBy);
       if (invitation.spaceId) {
-        const name = invitation.forName || "Your teammate";
+        // In the language the owner invited in: the server knows no other.
+        const messages = (invitation.locale && tunnelLocales[invitation.locale as keyof typeof tunnelLocales]) || tunnelLocales.en;
+        const fill = (text: string, values: Record<string, string>) => text.replace(/\{(\w+)\}/g, (match, key: string) => values[key] ?? match);
+        const name = invitation.forName || invitation.forUserId;
         deps.notify?.({ userId: invitation.issuedBy, spaceId: invitation.spaceId }, {
           key: `tunnel-invitation-used:${input.pairingId}`,
-          title: `${name} joined Polyth`,
-          body: `Accepted your invitation in the Polyth app on ${device.label}`,
+          title: fill(messages["tunnel.invite.joinedTitle"], { name }),
+          body: fill(messages["tunnel.invite.joinedBody"], { device: device.label }),
           author: { userId: invitation.forUserId, name },
           settings: { pageId: "users", itemId: invitation.forUserId },
         });
@@ -464,6 +468,7 @@ export function tunnelRoutes(deps: {
         expiresAt,
         spaceId: request.space.spaceId,
         forName: typeof body.name === "string" && body.name.trim() ? body.name.trim().slice(0, 200) : null,
+        locale: typeof body.locale === "string" && Object.hasOwn(tunnelLocales, body.locale) ? body.locale : null,
       });
       // Audit and events carry the identifiers only: never the ticket or the
       // share URL, which together let whoever holds them join the account.

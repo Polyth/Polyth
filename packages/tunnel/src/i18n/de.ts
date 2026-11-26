@@ -150,6 +150,8 @@ export const de: TunnelMessages = {
   "tunnel.invite.message": "Hallo {name}! Ich habe dich zu Polyth hinzugefügt.\nÖffne diesen Link, um dich in der Polyth-App zu verbinden: {url}\nWenn du die App noch nicht hast, bietet die Seite an, sie zu installieren. Der Link funktioniert einmal, bis {date}.",
   "tunnel.invite.messageNamed": "Hallo {name}! Ich habe dich zu Polyth hinzugefügt.\nÖffne diesen Link, um dich in der Polyth-App mit „{server}“ zu verbinden: {url}\nWenn du die App noch nicht hast, bietet die Seite an, sie zu installieren. Der Link funktioniert einmal, bis {date}.",
   "tunnel.invite.note": "Funktioniert einmal, bis {date}. Die Polyth-App der Person tritt sofort ihrem eigenen Konto bei; du kannst sie auf der Polyth-Link-Seite trennen.",
+  "tunnel.invite.joinedTitle": "{name} ist jetzt bei Polyth",
+  "tunnel.invite.joinedBody": "Einladung in der Polyth-App auf {device} angenommen",
   "tunnel.invitations.title": "Noch nicht geöffnete Einladungen",
   "tunnel.invitations.hint": "Jeder Link funktioniert einmal. Sobald die Person ihn öffnet, erscheint ihre Polyth-App unter den Geräten, die du für andere verbunden hast.",
   "tunnel.invitations.until": "Gültig bis {date}",

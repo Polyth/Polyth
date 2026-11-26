@@ -233,7 +233,7 @@ test("DELETE works only for the issuer and gives one answer for everything else"
 
 test("committing a live invitation creates the invitee's device, marks it used and tells the issuer", async () => {
   const { store, events, host, issued, calls, routes } = setup();
-  await issued({ profile: "interact", name: "Pat Morgan" });
+  await issued({ profile: "interact", name: "Pat Morgan", locale: "uk" });
   const seen: Array<{ type: string; data: Record<string, unknown> }> = [];
   events.subscribe((event) => seen.push({ type: event.type, data: event.data as Record<string, unknown> }));
   const notices: Array<{ account: unknown; notice: Record<string, unknown> }> = [];
@@ -269,8 +269,8 @@ test("committing a live invitation creates the invitee's device, marks it used a
     account: { userId: OWNER, spaceId: SPACE_ID },
     notice: {
       key: "tunnel-invitation-used:pair-1",
-      title: "Pat Morgan joined Polyth",
-      body: "Accepted your invitation in the Polyth app on PM phone",
+      title: "Pat Morgan тепер у Polyth",
+      body: "Запрошення прийнято в застосунку Polyth на пристрої PM phone",
       author: { userId: PM, name: "Pat Morgan" },
       settings: { pageId: "users", itemId: PM },
     },
