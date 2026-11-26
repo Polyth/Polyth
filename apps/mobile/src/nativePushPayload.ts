@@ -8,6 +8,12 @@ export interface NativePushOpen {
 export const OPAQUE_NATIVE_PUSH_ID = /^[A-Za-z0-9._:-]{1,160}$/u;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
+/** The id a workspace page claims in place: nothing but the canonical UUID. */
+export function parseNativePushOpenId(value: { notificationId?: unknown } | null | undefined): string | undefined {
+  const id = value?.notificationId;
+  return typeof id === "string" && UUID.test(id) ? id.toLowerCase() : undefined;
+}
+
 export function parseNativePushOpen(value: Partial<NativePushOpen>): NativePushOpen | undefined {
   if (!value || !OPAQUE_NATIVE_PUSH_ID.test(value.connectionId ?? "") || !OPAQUE_NATIVE_PUSH_ID.test(value.accountId ?? "")
     || !UUID.test(value.notificationId ?? "")) return undefined;

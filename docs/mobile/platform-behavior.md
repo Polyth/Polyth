@@ -408,22 +408,48 @@ APNs/FCM can reach it. Users set up nothing beyond allowing notifications.
 Provider data is strictly limited to version, subscription id, notification
 UUID, kind, and opaque tag. Receipt validates and displays an OS notification
 but never writes navigation state. A user tap persists one bounded trusted
-connection/account/notification mapping, returns to the bundled Connection Hub,
-and reconnects that saved server before the authenticated server looks up the
-canonical notification. It never turns provider data into a URL or assumes a
-session/project. Exact foreground mapping suppresses the OS alert so canonical
-WebSocket/in-app delivery wins; a different trusted server/account retains its
-OS notification.
+connection/account/notification mapping. It never turns provider data into a
+URL or assumes a session/project. Exact foreground mapping suppresses the OS
+alert so canonical WebSocket/in-app delivery wins; a different trusted
+server/account retains its OS notification.
+
+Where a tap goes depends on the page on screen:
+
+- **The workspace page of the tap's own server** keeps running. The native app
+  raises `polythNativePushOpen` on its `window` (the event carries nothing);
+  the page claims the id with its account (`claimPendingOpen`), asks its
+  server for that inbox row and opens the row's chat where it is. A chat that
+  is already the one on screen is brought to the front and not opened again
+  (`focusSession`, `apps/web/src/init.ts`); the live subscription keeps its
+  transcript current. Native hands out the notification id alone, only to the
+  exact active Link proxy of the tap's connection and only for the tap's
+  account, and a claim removes nothing: a page of another server can neither
+  read nor discard the tap. The page releases the tap when it is done
+  (`settlePendingOpen`), so a page that is loaded again in between (its
+  process was ended in the background, the connection was rebuilt) claims it
+  once more while it boots (`claimNativePushOpenAtBoot`).
+- **Everything else** (the app was not running, the hub or another server's
+  page is on screen) returns to the bundled Connection Hub, which consumes the
+  mapping and reconnects that saved server before the authenticated server
+  looks up the canonical notification. So does a page that does not claim
+  within 3 s; on iOS a page that is loading at that moment gets 8 s more.
+
+Sending every tap through the hub replaced a live page with a reconnect and a
+second full page load, to arrive at a chat that was often already open.
 
 The hub hands the id to the workspace in its landing address
 (`/?nativePushOpen=<id>`). The page reads it while it loads
 (`landedNativePushOpen`, `apps/web/src/nativePushOpen.ts`): boot restoration
 rewrites the address to the chat it restored before hydration ends, so a later
-read finds nothing and the tap would open whatever the app showed last. After
-hydration the page asks its server for that inbox row and opens the row's
-chat. The app has only just reconnected at that point, so a registration check
-or inbox read that fails is tried again (after 1, 3 and 6 s) before the tap is
-given up; a row the server refuses ends it at once.
+read finds nothing and the tap would open whatever the app showed last. With
+this device's registration confirmed during the launch, the page asks its
+server for that inbox row while the launch loads, and boot restoration lands
+on the row's chat instead of the remembered one (`startNativePushOpen`; it
+waits at most 1.2 s, and a launch without a tap does not wait). A slower
+answer shows the remembered chat first and moves to the tapped one after
+hydration. The app has only just reconnected at that point, so a registration
+check or inbox read that fails is tried again (after 1, 3 and 6 s) before the
+tap is given up; a row the server refuses ends it at once.
 
 The app uses `polyth_activity` for completed/subagent activity and
 `polyth_attention` for failed/question/permission events. Existing local and

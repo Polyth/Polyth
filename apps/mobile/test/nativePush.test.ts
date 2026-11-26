@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { parseNativePushClaim } from "../src/nativePush.ts";
-import { parseNativePushOpen } from "../src/nativePushPayload.ts";
+import { parseNativePushOpen, parseNativePushOpenId } from "../src/nativePushPayload.ts";
 
 test("native push bridge exposes only the token for the page's own server and pending-open values", async () => {
   const source = await readFile(new URL("../src/nativePush.ts", import.meta.url), "utf8");
@@ -176,7 +176,7 @@ test("a foreign-server foreground notification retains the intent for the bundle
   assert.match(screen, /bootstrapUrlWithNext\(next\.bootstrapUrl, nextPath\)/);
   assert.doesNotMatch(web, /consumeNativePushOpen/);
   assert.match(web, /fetch\(`\/api\/notifications\/\$\{encodeURIComponent\(id\)\}`/);
-  assert.match(web, /open: \(sessionId\) => openSession\(sessionId\)[\s\S]*\/api\/notifications\/read/);
+  assert.match(web, /open: \(sessionId\) => focusSession\(sessionId\)[\s\S]*\/api\/notifications\/read/);
   assert.match(activity, /recordTap[\s\S]*https:\/\/localhost/);
   assert.match(swift, /recordTapped[\s\S]*returnToConnectionHub/);
   assert.match(android, /consumePendingOpen\(PluginCall call\) \{[\s\S]*?requireBundled\(call\)/);
@@ -265,4 +265,90 @@ test("refreshNativePushStatus keeps the content key inside the registration, nev
   const claim = { subscriptionId: `sub_${"s".repeat(22)}`, providerToken: "ab".repeat(32), environment: "production" };
   const key = { p256dh: Buffer.alloc(65, 4).toString("base64url"), auth: Buffer.alloc(16, 1).toString("base64url") };
   assert.deepEqual(parseNativePushClaim({ ...claim, contentKey: key })?.contentKey, key, "a valid key stays on the registration");
+});
+
+test("the page of the tap's own server takes the tap in place; every other page leaves it for the hub", async () => {
+  const [swift, android, activity, bridge, web] = await Promise.all([
+    readFile(new URL("../ios/App/App/AppDelegate.swift", import.meta.url), "utf8"),
+    readFile(new URL("../android/app/src/main/java/com/polyth/mobile/PolythPushPlugin.java", import.meta.url), "utf8"),
+    readFile(new URL("../android/app/src/main/java/com/polyth/mobile/MainActivity.java", import.meta.url), "utf8"),
+    readFile(new URL("../src/nativePush.ts", import.meta.url), "utf8"),
+    readFile(new URL("../../web/src/nativePush.ts", import.meta.url), "utf8"),
+  ]);
+  const between = (source: string, from: string, to: string): string => {
+    const start = source.indexOf(from);
+    const end = source.indexOf(to, start + from.length);
+    assert.ok(start >= 0 && end > start, `${from} … ${to}`);
+    return source.slice(start, end);
+  };
+
+  // iOS. Offered only to the exact active proxy of the connection the tap
+  // belongs to; a page that does not claim in time goes to the hub after all.
+  const offer = between(swift, "private func offerToLivePage", "private func returnToHubUnlessClaimed");
+  assert.match(offer, /guard PolythLinkPlugin\.ownsCurrentProxy\(self\.webView\?\.url\),\s*UserDefaults\.standard\.string\(forKey: "polyth-link\.last-connection-id"\) == pending\.connectionId else \{\s*self\.returnToConnectionHub\(\); return/);
+  assert.match(offer, /triggerWindowJSEvent\(eventName: Self\.pendingOpenEvent\)/);
+  assert.doesNotMatch(offer, /notificationId"|data:/, "the event carries nothing");
+  const fallback = between(swift, "private func returnToHubUnlessClaimed", "private func returnToConnectionHub");
+  assert.match(fallback, /guard self\.claimedOpen != notificationId,[\s\S]*self\.returnToConnectionHub\(\)/);
+  assert.match(swift, /recordTapped[\s\S]*?secureSet\(JSONEncoder\(\)\.encode\(pending\), account: Self\.pendingKey\)\s*self\.claimedOpen = nil\s*self\.offerToLivePage\(pending\)/);
+  // The claim hands out the id alone, to that proxy and account, and removes
+  // nothing: a foreign page can neither read nor discard another server's tap.
+  const claim = between(swift, "@objc func claimPendingOpen", "@objc func settlePendingOpen");
+  assert.match(claim, /PolythLinkPlugin\.ownsCurrentProxy\(self\.webView\?\.url\)/);
+  assert.match(claim, /pending\.connectionId == connectionId, pending\.accountId == account/);
+  assert.match(claim, /call\.resolve\(\["notificationId": pending\.notificationId\.lowercased\(\)\]\)/);
+  assert.doesNotMatch(claim, /secureRemove|"connectionId":|"accountId":/);
+  const settle = between(swift, "@objc func settlePendingOpen", "@objc func setForeground");
+  assert.match(settle, /requireSemanticReader\(call\)/);
+  assert.match(settle, /if self\.claimedOpen == settled \{[\s\S]*pending\.notificationId\.lowercased\(\) == settled \{\s*self\.secureRemove\(Self\.pendingKey\)/);
+
+  // Android, the same contract.
+  const androidOffer = between(android, "static boolean offerPendingOpenToLivePage", "private static boolean livePageServes");
+  assert.match(androidOffer, /!livePageServes\(context, bridge, pending\.optString\("connectionId"\)\)\) return false;/);
+  assert.match(androidOffer, /bridge\.triggerWindowJSEvent\(PENDING_OPEN_EVENT\);/);
+  assert.match(androidOffer, /if \(id\.equals\(CLAIMED_OPEN\.get\(\)\)\) return;[\s\S]*returnToHub\.run\(\)/);
+  const serves = between(android, "private static boolean livePageServes", "\n    }\n");
+  assert.match(serves, /PolythLinkPlugin\.ownsCurrentProxy\(context, PolythLinkOrigin\.currentUrl\(bridge\)\)/);
+  assert.match(serves, /connectionId\.equals\([\s\S]*"last_connection_id"/);
+  const androidClaim = between(android, "public void claimPendingOpen(PluginCall call)", "public void settlePendingOpen(PluginCall call)");
+  assert.match(androidClaim, /livePageServes\(getContext\(\), getBridge\(\), pending\.optString\("connectionId"\)\)/);
+  assert.match(androidClaim, /accountId\.equals\(pending\.optString\("accountId"\)\)/);
+  assert.doesNotMatch(androidClaim, /secure\.take|secure\.remove|result\.put\("connectionId"|result\.put\("accountId"/);
+  const androidSettle = between(android, "public void settlePendingOpen(PluginCall call)", "public void setForeground(PluginCall call)");
+  assert.match(androidSettle, /requireSemanticReader\(call\)/);
+  assert.match(androidSettle, /CLAIMED_OPEN\.compareAndSet\(settled, null\)[\s\S]*secure\.remove\(KEY_PENDING\)/);
+  assert.match(activity, /offerPendingOpenToLivePage\(getApplicationContext\(\), getBridge\(\), returnToHub\)\) returnToHub\.run\(\)/);
+
+  // One event name on both platforms and in the page.
+  assert.match(swift, /pendingOpenEvent = "polythNativePushOpen"/);
+  assert.match(android, /PENDING_OPEN_EVENT = "polythNativePushOpen"/);
+  assert.match(bridge, /export const NATIVE_PUSH_OPEN_EVENT = "polythNativePushOpen";/);
+  // The page listens once it is hydrated, claims with its own account, and
+  // releases the tap when it is done with it.
+  assert.match(web, /window\.addEventListener\(NATIVE_PUSH_OPEN_EVENT, \(\) => \{ void taps\.take\(\); \}\)/);
+  assert.match(web, /claimNativePushOpen\(\{ accountId: activeBrowserAccountId\(\) \}\)/);
+  assert.match(web, /settle: \(notificationId\) => settleNativePushOpen\(notificationId\)/);
+});
+
+test("a claimed tap reaches the page as a canonical notification id and nothing else", () => {
+  const id = "3F2B1C4D-5E6F-4A7B-8C9D-0E1F2A3B4C5D";
+  assert.equal(parseNativePushOpenId({ notificationId: id }), id.toLowerCase());
+  assert.equal(parseNativePushOpenId({}), undefined);
+  assert.equal(parseNativePushOpenId(undefined), undefined);
+  assert.equal(parseNativePushOpenId({ notificationId: "https://example.test/x" }), undefined);
+  assert.equal(parseNativePushOpenId({ notificationId: 7 }), undefined);
+});
+
+test("a tapped notification's chat is looked up before the launch restores anything", async () => {
+  const [web, bootstrap, init] = await Promise.all([
+    readFile(new URL("../../web/src/nativePush.ts", import.meta.url), "utf8"),
+    readFile(new URL("../../web/src/bootstrap.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../../web/src/init.ts", import.meta.url), "utf8"),
+  ]);
+  // Only with this device's registration already confirmed: the inbox is
+  // never read on the word of a landing address alone.
+  assert.match(web, /export function startNativePushOpen\(\): void \{[\s\S]*?!nativePushLocalProjectionEnabled\(\)\) return;[\s\S]*?offerNativePushBootTarget\(/);
+  assert.match(bootstrap, /startNativePushOpen\(\);\s*const hydrated = init\(\);/);
+  assert.match(bootstrap, /const tapClaimed = claimNativePushOpenAtBoot\(\)[\s\S]*?await reconcileNativePushForeground\(true\)[\s\S]*?await tapClaimed;/);
+  assert.match(init, /const tappedSessionId = fromUrl\.sessionId \? undefined : await takeNativePushBootTarget\(\);/);
 });

@@ -37,12 +37,17 @@ public class MainActivity extends BridgeActivity {
         return PENDING_URL.getAndSet(null);
     }
 
-    /** A locally-generated notification tap never carries a URL. Route it to
-     * the bundled hub, which alone consumes the validated native pending id
-     * and reconnects the saved mapping. */
+    /** A locally-generated notification tap never carries a URL. The page of
+     * the tap's own server, when it is the one on screen, claims the validated
+     * native pending id and opens the chat in place. Every other tap goes to
+     * the bundled hub, which consumes the id and reconnects the saved mapping. */
     private void routeNativePushOpen(Intent intent) {
         if (intent == null || getBridge() == null || !PolythPushPlugin.recordTap(getApplicationContext(), intent)) return;
-        getBridge().getWebView().loadUrl("https://localhost");
+        Runnable returnToHub = () -> {
+            if (isDestroyed() || getBridge() == null) return;
+            getBridge().getWebView().loadUrl("https://localhost");
+        };
+        if (!PolythPushPlugin.offerPendingOpenToLivePage(getApplicationContext(), getBridge(), returnToHub)) returnToHub.run();
     }
 
     @Override

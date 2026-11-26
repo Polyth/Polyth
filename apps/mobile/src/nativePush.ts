@@ -1,5 +1,5 @@
 import { Capacitor, registerPlugin } from "@capacitor/core";
-import { OPAQUE_NATIVE_PUSH_ID, parseNativePushOpen, type NativePushOpen } from "./nativePushPayload.ts";
+import { OPAQUE_NATIVE_PUSH_ID, parseNativePushOpen, parseNativePushOpenId, type NativePushOpen } from "./nativePushPayload.ts";
 
 /** Values which may cross the WebView bridge. The page carries the device's
  * APNs or FCM token to its own server over Polyth Link; that server sends
@@ -39,13 +39,20 @@ export interface NativePushContentKey {
   auth: string;
 }
 
-export { parseNativePushOpen, type NativePushOpen } from "./nativePushPayload.ts";
+export { parseNativePushOpen, parseNativePushOpenId, type NativePushOpen } from "./nativePushPayload.ts";
+
+/** Raised on `window` by the native app when a tapped notification belongs to
+ * the server whose page is on screen (iOS `offerToLivePage`, Android
+ * `offerPendingOpenToLivePage`). It carries nothing: the page claims the id. */
+export const NATIVE_PUSH_OPEN_EVENT = "polythNativePushOpen";
 
 interface NativePushPlugin {
   getStatus(): Promise<NativePushStatus>;
   enable(options: NativePushEnableInput): Promise<NativePushClaim>;
   disable(options: Pick<NativePushEnableInput, "accountId">): Promise<{ ok: boolean }>;
   consumePendingOpen(): Promise<Partial<NativePushOpen>>;
+  claimPendingOpen(options: Pick<NativePushEnableInput, "accountId">): Promise<{ notificationId?: unknown }>;
+  settlePendingOpen(options: { notificationId: string }): Promise<void>;
   setForeground(options: Pick<NativePushEnableInput, "accountId"> & { active: boolean }): Promise<void>;
 }
 
@@ -144,6 +151,23 @@ export async function disableNativePush(input: Pick<NativePushEnableInput, "acco
 export async function consumeNativePushOpen(): Promise<NativePushOpen | undefined> {
   if (!nativePushAvailable()) return undefined;
   return parseNativePushOpen(await NativePush.consumePendingOpen());
+}
+
+/** A workspace page takes the tap meant for its own server and account
+ * without leaving for the hub. Native hands out only the notification id, and
+ * only to the exact active proxy of the tap's connection; anything else gets
+ * `undefined` and the tap stays for the hub. The tap stays stored until
+ * `settleNativePushOpen`, so a page loaded again in between can claim it once more. */
+export async function claimNativePushOpen(input: Pick<NativePushEnableInput, "accountId">): Promise<string | undefined> {
+  if (!nativePushAvailable()) return undefined;
+  assertOpaque(input.accountId, "account id");
+  return parseNativePushOpenId(await NativePush.claimPendingOpen(input));
+}
+
+/** The page is done with the tap it claimed: its chat is open, or the tap was given up. */
+export async function settleNativePushOpen(notificationId: string): Promise<void> {
+  if (!nativePushAvailable()) return;
+  await NativePush.settlePendingOpen({ notificationId });
 }
 
 export async function setNativePushForeground(

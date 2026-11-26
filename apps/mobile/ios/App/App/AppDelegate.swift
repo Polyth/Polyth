@@ -1507,6 +1507,8 @@ final class PolythPushPlugin: CAPPlugin, CAPBridgedPlugin, UNUserNotificationCen
         CAPPluginMethod(name: "enable", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "disable", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "consumePendingOpen", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "claimPendingOpen", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "settlePendingOpen", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "setForeground", returnType: CAPPluginReturnPromise),
     ]
 
@@ -1518,6 +1520,12 @@ final class PolythPushPlugin: CAPPlugin, CAPBridgedPlugin, UNUserNotificationCen
     private static let contentGroupSuffix = "com.polyth.mobile.push-content"
     private static let mappingIndex = "polyth-native-push.mapping-index"
     private static let pendingKey = "pending-open"
+    /** Raised on the page's `window` when a tap is its to claim. It carries nothing. */
+    private static let pendingOpenEvent = "polythNativePushOpen"
+    /** How long the page on screen has to claim a tap before the hub takes it. */
+    private static let livePageClaimWindow: TimeInterval = 3
+    /** One longer wait for a page that is being loaded again as the tap lands. */
+    private static let livePageReloadWindow: TimeInterval = 8
     private static let seenKey = "polyth-native-push.seen-notifications"
     private static let installMarker = "polyth-native-push.install-v1"
     private static let bindingDomain = "polyth-native-push-binding-v1\u{0}"
@@ -1525,6 +1533,8 @@ final class PolythPushPlugin: CAPPlugin, CAPBridgedPlugin, UNUserNotificationCen
     private var pendingEnable: (call: CAPPluginCall, input: PushInput)?
     private var latestProviderToken: String?
     private var foregroundMapping: String?
+    /** The tapped notification a workspace page has claimed and not yet settled. */
+    private var claimedOpen: String?
     private weak var forwardedNotificationDelegate: UNUserNotificationCenterDelegate?
 
     private struct PushInput: Codable {
@@ -1910,6 +1920,46 @@ final class PolythPushPlugin: CAPPlugin, CAPBridgedPlugin, UNUserNotificationCen
         }
     }
 
+    /** The workspace page of the tapped notification's own server reads the id
+     * where it is, with no trip through the hub. Only the id leaves, and only
+     * to the exact active proxy of the connection the tap belongs to, for the
+     * account it names: any other page gets nothing and cannot discard the
+     * tap, which stays for the hub. The tap stays stored until the page
+     * settles it, so a page that is loaded again meanwhile can ask once more. */
+    @objc func claimPendingOpen(_ call: CAPPluginCall) {
+        guard let account = call.getString("accountId"), opaque(account) else { call.reject("push-binding-invalid", "push-binding-invalid"); return }
+        DispatchQueue.main.async {
+            guard PolythLinkPlugin.ownsCurrentProxy(self.webView?.url),
+                  let connectionId = UserDefaults.standard.string(forKey: "polyth-link.last-connection-id") else { call.resolve([:]); return }
+            self.queue.async {
+                guard let data = try? self.secureGet(Self.pendingKey),
+                      let pending = try? JSONDecoder().decode(PendingOpen.self, from: data),
+                      pending.connectionId == connectionId, pending.accountId == account,
+                      self.notificationID(pending.notificationId) != nil else { call.resolve([:]); return }
+                self.claimedOpen = pending.notificationId.lowercased()
+                call.resolve(["notificationId": pending.notificationId.lowercased()])
+            }
+        }
+    }
+
+    /** The page is done with the tap it claimed (its chat is open, or the
+     * server refused the row). Only that tap is forgotten: one stored since,
+     * or one this page was never handed, stays. */
+    @objc func settlePendingOpen(_ call: CAPPluginCall) {
+        guard requireSemanticReader(call) else { return }
+        guard let settled = notificationID(call.getString("notificationId"))?.uuidString.lowercased() else { call.reject("push-binding-invalid", "push-binding-invalid"); return }
+        queue.async {
+            if self.claimedOpen == settled {
+                self.claimedOpen = nil
+                if let data = try? self.secureGet(Self.pendingKey),
+                   let pending = try? JSONDecoder().decode(PendingOpen.self, from: data), pending.notificationId.lowercased() == settled {
+                    self.secureRemove(Self.pendingKey)
+                }
+            }
+            call.resolve()
+        }
+    }
+
     @objc func setForeground(_ call: CAPPluginCall) {
         guard requireSemanticReader(call), let account = call.getString("accountId"), opaque(account) else {
             if opaque(call.getString("accountId")) == false { call.reject("push-binding-invalid", "push-binding-invalid") }
@@ -2051,7 +2101,43 @@ final class PolythPushPlugin: CAPPlugin, CAPBridgedPlugin, UNUserNotificationCen
             guard !self.seen(push.notificationId), let item = try? self.mappings().first(where: { $0.subscriptionId == push.subscriptionId }) else { return }
             let pending = PendingOpen(connectionId: item.connectionId, accountId: item.accountId, notificationId: push.notificationId)
             try? self.secureSet(JSONEncoder().encode(pending), account: Self.pendingKey)
-            self.returnToConnectionHub()
+            self.claimedOpen = nil
+            self.offerToLivePage(pending)
+        }
+    }
+
+    /** A tap for the server whose workspace page is on screen is offered to
+     * that page, which claims the id and opens the chat in place. Replacing a
+     * live page with the hub cost a reconnect and a second full page load to
+     * arrive at the same chat. Any other page, and a page that does not claim
+     * in time, goes to the hub as before. */
+    private func offerToLivePage(_ pending: PendingOpen) {
+        DispatchQueue.main.async {
+            guard PolythLinkPlugin.ownsCurrentProxy(self.webView?.url),
+                  UserDefaults.standard.string(forKey: "polyth-link.last-connection-id") == pending.connectionId else {
+                self.returnToConnectionHub(); return
+            }
+            self.bridge?.triggerWindowJSEvent(eventName: Self.pendingOpenEvent)
+            self.returnToHubUnlessClaimed(pending.notificationId.lowercased(), after: Self.livePageClaimWindow, mayExtend: true)
+        }
+    }
+
+    private func returnToHubUnlessClaimed(_ notificationId: String, after delay: TimeInterval, mayExtend: Bool) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            // A page whose process the system ended in the background is being
+            // loaded again and claims while it boots: that one load gets longer.
+            let reloading = mayExtend && self.webView?.isLoading == true && PolythLinkPlugin.ownsCurrentProxy(self.webView?.url)
+            self.queue.async {
+                guard self.claimedOpen != notificationId,
+                      let data = try? self.secureGet(Self.pendingKey),
+                      let pending = try? JSONDecoder().decode(PendingOpen.self, from: data),
+                      pending.notificationId.lowercased() == notificationId else { return }
+                if reloading {
+                    self.returnToHubUnlessClaimed(notificationId, after: Self.livePageReloadWindow, mayExtend: false)
+                } else {
+                    self.returnToConnectionHub()
+                }
+            }
         }
     }
 

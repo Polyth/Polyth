@@ -8,6 +8,8 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 import android.util.Base64;
@@ -15,6 +17,7 @@ import android.util.Base64;
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 
+import com.getcapacitor.Bridge;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
@@ -69,6 +72,12 @@ public final class PolythPushPlugin extends Plugin {
     private static final int MAX_TAG_LENGTH = 128;
     private static final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor();
     private static final AtomicReference<String> FOREGROUND_MAPPING = new AtomicReference<>();
+    /** Raised on the page's `window` when a tap is its to claim. It carries nothing. */
+    private static final String PENDING_OPEN_EVENT = "polythNativePushOpen";
+    /** How long the page on screen has to claim a tap before the hub takes it. */
+    private static final long LIVE_PAGE_CLAIM_MS = 3_000;
+    /** The tapped notification a workspace page has claimed and not yet settled. */
+    private static final AtomicReference<String> CLAIMED_OPEN = new AtomicReference<>();
     private static final AtomicReference<String> LATEST_PROVIDER_TOKEN = new AtomicReference<>();
     private final AtomicReference<JSONObject> permissionInput = new AtomicReference<>();
 
@@ -278,6 +287,45 @@ public final class PolythPushPlugin extends Plugin {
         } catch (Exception ignored) { call.resolve(new JSObject()); }
     }
 
+    /** The workspace page of the tapped notification's own server reads the id
+     * where it is, with no trip through the hub. Only the id leaves, and only
+     * to the exact active proxy of the connection the tap belongs to, for the
+     * account it names: any other page gets nothing and cannot discard the
+     * tap, which stays for the hub. The tap stays stored until the page
+     * settles it, so a page that is loaded again meanwhile can ask once more. */
+    @PluginMethod public void claimPendingOpen(PluginCall call) {
+        String accountId = call.getString("accountId");
+        if (!opaque(accountId)) { call.reject("push-binding-invalid", "push-binding-invalid"); return; }
+        JSObject result = new JSObject();
+        try {
+            JSONObject pending = secure.get(KEY_PENDING);
+            if (pending != null && livePageServes(getContext(), getBridge(), pending.optString("connectionId"))
+                && accountId.equals(pending.optString("accountId")) && notificationId(pending.optString("notificationId"))) {
+                String id = pending.optString("notificationId").toLowerCase(java.util.Locale.ROOT);
+                CLAIMED_OPEN.set(id);
+                result.put("notificationId", id);
+            }
+        } catch (Exception ignored) { }
+        call.resolve(result);
+    }
+
+    /** The page is done with the tap it claimed (its chat is open, or the
+     * server refused the row). Only that tap is forgotten: one stored since,
+     * or one this page was never handed, stays. */
+    @PluginMethod public void settlePendingOpen(PluginCall call) {
+        if (!requireSemanticReader(call)) return;
+        String id = call.getString("notificationId");
+        if (!notificationId(id)) { call.reject("push-binding-invalid", "push-binding-invalid"); return; }
+        String settled = id.toLowerCase(java.util.Locale.ROOT);
+        try {
+            if (CLAIMED_OPEN.compareAndSet(settled, null)) {
+                JSONObject pending = secure.get(KEY_PENDING);
+                if (pending != null && settled.equals(pending.optString("notificationId"))) secure.remove(KEY_PENDING);
+            }
+        } catch (Exception ignored) { }
+        call.resolve();
+    }
+
     @PluginMethod public void setForeground(PluginCall call) {
         if (!requireSemanticReader(call)) return;
         String accountId = call.getString("accountId");
@@ -411,8 +459,37 @@ public final class PolythPushPlugin extends Plugin {
                 .put("connectionId", mapping.getString("connectionId"))
                 .put("accountId", mapping.getString("accountId"))
                 .put("notificationId", id.toLowerCase(java.util.Locale.ROOT)));
+            CLAIMED_OPEN.set(null);
             return true;
         } catch (Exception ignored) { return false; }
+    }
+
+    /** A tap for the server whose workspace page is on screen is offered to
+     * that page, which claims the id and opens the chat in place. Replacing a
+     * live page with the hub cost a reconnect and a second full page load to
+     * arrive at the same chat. False when the page on screen is not that
+     * server's; a page that does not claim in time goes to the hub after all. */
+    static boolean offerPendingOpenToLivePage(Context context, Bridge bridge, Runnable returnToHub) {
+        try {
+            JSONObject pending = new SecureStore(context).get(KEY_PENDING);
+            if (pending == null || !livePageServes(context, bridge, pending.optString("connectionId"))) return false;
+            String id = pending.optString("notificationId");
+            bridge.triggerWindowJSEvent(PENDING_OPEN_EVENT);
+            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                try {
+                    if (id.equals(CLAIMED_OPEN.get())) return;
+                    JSONObject still = new SecureStore(context).get(KEY_PENDING);
+                    if (still != null && id.equals(still.optString("notificationId"))) returnToHub.run();
+                } catch (Exception ignored) { returnToHub.run(); }
+            }, LIVE_PAGE_CLAIM_MS);
+            return true;
+        } catch (Exception ignored) { return false; }
+    }
+
+    private static boolean livePageServes(Context context, Bridge bridge, String connectionId) {
+        return opaque(connectionId)
+            && PolythLinkPlugin.ownsCurrentProxy(context, PolythLinkOrigin.currentUrl(bridge))
+            && connectionId.equals(context.getSharedPreferences("polyth_link_state", Context.MODE_PRIVATE).getString("last_connection_id", null));
     }
 
     /** Called by the native Link forget path, before its identity is erased.

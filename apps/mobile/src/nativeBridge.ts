@@ -26,6 +26,8 @@ import {
 import { refreshNativePushStatus } from "./nativePush.ts";
 
 export {
+  NATIVE_PUSH_OPEN_EVENT,
+  claimNativePushOpen,
   consumeNativePushOpen,
   disableNativePush,
   enableNativePush,
@@ -34,6 +36,7 @@ export {
   refreshNativePushStatus,
   setNativePushAuthoritativeProjection,
   setNativePushForeground,
+  settleNativePushOpen,
   type NativePushClaim,
   type NativePushEnableInput,
   type NativePushOpen,

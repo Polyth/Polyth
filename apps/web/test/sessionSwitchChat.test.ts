@@ -72,7 +72,7 @@ const eventFixtures = new Map<string, unknown[]>();
 };
 
 const store = await import("../src/store.ts");
-const { createSession, openSession, pollSessionTail, prefetchSessionTail } = await import("../src/init.ts");
+const { createSession, focusSession, openSession, pollSessionTail, prefetchSessionTail } = await import("../src/init.ts");
 const { registerSurface } = await import("../src/surfaces.ts");
 const { setClientPersistenceBackend } = await import("../src/clientPersistence.ts");
 const { getWorkspacePanePrefs, workspacePaneKey } = await import("../src/workspace/panePrefs.ts");
@@ -696,4 +696,37 @@ test("a warmed chat whose local draft read waits for a socket claims the loading
     setClientPersistenceBackend(null);
     eventFixtures.delete(sessionId);
   }
+});
+
+const sessionReads = (sessionId: string): number =>
+  requestedPaths.filter((path) => path.startsWith(`/api/sessions/${sessionId}`)).length;
+
+test("a notification for the chat on screen lands on it without opening it again", { timeout: 5_000 }, async () => {
+  store.activateProject("p1");
+  await openSession("focus-1");
+  // Let the open's own background revalidation and backfill finish.
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  store.setOverlay("settings");
+  setWorkspaceMode("widgets");
+  const before = sessionReads("focus-1");
+
+  await focusSession("focus-1");
+  await new Promise((resolve) => setTimeout(resolve, 300));
+
+  assert.equal(sessionReads("focus-1"), before, "its draft, record and history are not read a second time");
+  const s = store.getState();
+  assert.equal(s.activeSessionId, "focus-1");
+  assert.equal(s.openingSessionId, null, "no loading layer over the chat that is already there");
+  assert.equal(s.overlay, null, "the chat is brought to the front");
+  assert.equal(getWorkspaceMode(), "chat");
+});
+
+test("a notification for another chat opens that chat", async () => {
+  store.activateProject("p1");
+  await openSession("focus-2");
+
+  await focusSession("focus-3");
+
+  assert.equal(store.getState().activeSessionId, "focus-3");
+  assert.ok(sessionReads("focus-3") > 0, "a chat that is not on screen is opened as usual");
 });

@@ -25,6 +25,32 @@ export function withoutNativePushOpen(href: string): string | undefined {
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
+/** How long boot restoration waits for the chat of a tapped notification
+ *  before it restores the remembered one. The inbox read starts before boot
+ *  does, on a connection that has just answered; past this the remembered
+ *  chat shows first and the tap moves to its own once the answer arrives. */
+export const NATIVE_PUSH_BOOT_WAIT_MS = 1_200;
+
+let bootTarget: Promise<string | undefined> | undefined;
+
+/** The chat a tapped notification names, for boot restoration to land on.
+ *  Restoring the remembered chat first showed one chat and then opened
+ *  another over it; when both were the same chat it was loaded twice. */
+export function offerNativePushBootTarget(sessionId: Promise<string | undefined>): void {
+  bootTarget = sessionId.catch(() => undefined);
+}
+
+/** Taken once, by boot restoration. `undefined` when no tap is waiting or its
+ *  chat is not known within `NATIVE_PUSH_BOOT_WAIT_MS`. */
+export async function takeNativePushBootTarget(
+  wait: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+): Promise<string | undefined> {
+  const target = bootTarget;
+  bootTarget = undefined;
+  if (!target) return undefined;
+  return await Promise.race([target, wait(NATIVE_PUSH_BOOT_WAIT_MS).then(() => undefined)]);
+}
+
 export interface NativePushOpenDeps {
   /** Whether this device's registration is confirmed by the signed-in server. */
   registered(): Promise<boolean>;
@@ -66,4 +92,46 @@ export async function openNativePushTarget(notificationId: string, deps: NativeP
     if (delay === undefined) return "dropped";
     await deps.wait(delay);
   }
+}
+
+export interface NativePushTapDeps {
+  /** The tap the native app holds for this page's server and account, if any.
+   *  Claiming does not remove it: `settle` does. */
+  claim(): Promise<string | undefined>;
+  /** Opens the tap's chat; resolves when the attempt is over either way. */
+  open(notificationId: string): Promise<unknown>;
+  settle(notificationId: string): Promise<void>;
+}
+
+/** Taps reaching a page that is already running, one at a time.
+ *
+ *  The native app keeps a tap until the page settles it, so a page that is
+ *  loaded again mid-open claims it once more; within one page a tap is opened
+ *  once, however many times it is announced. The claim itself is not queued
+ *  behind an open in flight: the native side sends an unclaimed tap through
+ *  the hub after a few seconds, and that reloads the page. */
+export function nativePushTaps(deps: NativePushTapDeps): {
+  /** A tap already in hand: the landing address, or a claim made during boot. */
+  open(notificationId: string): Promise<void>;
+  /** The native app announced a tap, or one may have arrived unannounced. */
+  take(): Promise<void>;
+} {
+  const handled = new Set<string>();
+  let chain: Promise<void> = Promise.resolve();
+  const run = (id: Promise<string | undefined>): Promise<void> => {
+    chain = chain.then(async () => {
+      const notificationId = await id.catch(() => undefined);
+      if (!notificationId) return;
+      if (!handled.has(notificationId)) {
+        handled.add(notificationId);
+        await deps.open(notificationId).catch(() => undefined);
+      }
+      await deps.settle(notificationId).catch(() => undefined);
+    });
+    return chain;
+  };
+  return {
+    open: (notificationId) => run(Promise.resolve(notificationId)),
+    take: () => run(deps.claim()),
+  };
 }

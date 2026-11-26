@@ -22,6 +22,7 @@ import type { AttachmentRef, HarnessSelection, JsonObject, ManagedProjectInput, 
 import { suggestWorktreeBranch, temporaryWorktreeBranch } from "./worktreeSessions.ts";
 import { installPushDeepLinks, reconcilePushSubscription, registerServiceWorker } from "./push.ts";
 import { openNotifiedSession } from "./notificationTarget.ts";
+import { takeNativePushBootTarget } from "./nativePushOpen.ts";
 import { alertPersonMessage, installNotify } from "./notify.ts";
 import { notificationCentre } from "./notificationCentre.ts";
 import { applyComposerSeed, hydrateComposerDraft } from "./drafts.ts";
@@ -1131,7 +1132,16 @@ async function restoreBootSelection(): Promise<void> {
     localSavedProjectId,
   });
   if (initial && initial !== store.getState().activeProjectId) store.activateProject(initial);
-  if (fromUrl.sessionId) {
+  // The chat of a tapped phone notification, when its inbox row answered in
+  // time, is the one to land on: restoring the remembered chat first showed
+  // that one and then opened the tapped one over it. A chat that cannot be
+  // opened falls back to the remembered one below.
+  const tappedSessionId = fromUrl.sessionId ? undefined : await takeNativePushBootTarget();
+  const tappedOpened = tappedSessionId !== undefined
+    && await openSession(tappedSessionId, { showChat: false }).then(() => true, () => false);
+  if (tappedOpened) {
+    // Landed on the tapped chat; its owning project came with it.
+  } else if (fromUrl.sessionId) {
     // A valid session deep link resolves its owning project and wins.
     // Boot restoration must not close the restored workspace pane.
     try {
@@ -1757,6 +1767,25 @@ async function loadSessionForOpen(sessionId: string): Promise<SessionProjection>
       throw firstError;
     }
   }
+}
+
+/** Lands on a chat the way opening it does, without opening it again when it
+ *  is the one already loaded and selected. A notification tapped for the chat
+ *  on screen must not reload it: the live subscription keeps its transcript
+ *  current, and a second open re-read its draft, its record and its replay. */
+export async function focusSession(sessionId: string): Promise<void> {
+  const state = store.getState();
+  const active = state.activeSessionId === null
+    ? undefined
+    : state.sessions.find((session) => session.id === state.activeSessionId);
+  if (active && (active.id === sessionId || active.backendSessionId === sessionId)
+    && state.openingSessionId === null && state.newSessionIntent === null
+    && hydratedSessions.has(active.id) && state.events[active.id] !== undefined) {
+    store.showSessionChat();
+    markActiveSessionRead();
+    return;
+  }
+  await openSession(sessionId);
 }
 
 export async function openSession(

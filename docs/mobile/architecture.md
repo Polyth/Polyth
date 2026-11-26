@@ -140,7 +140,9 @@ canonical `--safe-*` tokens. Native keyboard height feeds
 Native push is owned by the single native controller, not by ordinary web code.
 The narrow app-owned plugin (not the generic Capacitor push plugin) keeps the
 registration and the private content key in Keychain/Keystore-backed storage
-and exposes status, enable/disable, and one bounded pending-open record. The
+and exposes status, enable/disable, and one bounded pending-open record (the
+hub consumes it; the workspace page of the tap's own server may claim its
+notification id in place). The
 page receives the device's APNs/FCM token only to register it with its own
 server over Polyth Link; that server sends through Polyth's push service
 ([notifications](platform-behavior.md#notifications)). The app enables it

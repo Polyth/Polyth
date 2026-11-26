@@ -65,7 +65,13 @@ import { isNativeMobile, isPolythLinkLoopbackOrigin } from "@polyth/mobile/runti
 import { handleNativeBack } from "./nativeMobile.ts";
 import { applyBackgroundToDom } from "./backgrounds.ts";
 import { restoreCustomWallpaper } from "./customWallpaperMemory.ts";
-import { autoEnableNativePush, openPendingNativePushAfterHydration, reconcileNativePushForeground } from "./nativePush.ts";
+import {
+  autoEnableNativePush,
+  claimNativePushOpenAtBoot,
+  openPendingNativePushAfterHydration,
+  reconcileNativePushForeground,
+  startNativePushOpen,
+} from "./nativePush.ts";
 import { installLiveActivity } from "./nativeLiveActivity.ts";
 import { isClientSettingsSettled, restoreRememberedLook, subscribeClientSettingsSettled } from "./settingsSync.ts";
 import { launchVeil, reloadBehindVeil } from "./launchVeil.ts";
@@ -176,6 +182,9 @@ const bootOnce = (): void => {
   booted = true;
   void bootPackages().catch((error: unknown) =>
     console.error("[polyth] web package boot failed", error)).finally(noteLaunchPackagesSettled);
+  // A tapped notification's chat is looked up while the launch loads, so the
+  // launch lands on it instead of the remembered one.
+  startNativePushOpen();
   const hydrated = init();
   // The veil lifts on the first restored screen, the remembered navigator's
   // included; what follows waits for the server's own answer.
@@ -228,7 +237,11 @@ function Root() {
           await hydrateNavigatorState(clientAccountPersistenceScope());
           if (await lookRestored) noteLaunchLookRestored();
           if (cancelled || invalidated) return;
+          // A tap the native app kept for this page is claimed ahead of the
+          // foreground reconcile's round trips: unclaimed, it goes to the hub.
+          const tapClaimed = claimNativePushOpenAtBoot().catch(() => undefined);
           await reconcileNativePushForeground(true).catch(() => undefined);
+          await tapClaimed;
         }
         if (!cancelled && !invalidated) setPhase(nextPhase);
       })

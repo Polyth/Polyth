@@ -4,9 +4,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  NATIVE_PUSH_BOOT_WAIT_MS,
   NATIVE_PUSH_OPEN_RETRY_MS,
   landedNativePushOpen,
+  nativePushTaps,
+  offerNativePushBootTarget,
   openNativePushTarget,
+  takeNativePushBootTarget,
   withoutNativePushOpen,
   type NativePushOpenDeps,
 } from "../src/nativePushOpen.ts";
@@ -101,4 +105,95 @@ test("a chat that can no longer be opened leaves the restored screen and its row
   const { all, log } = deps({ open: async () => { throw new Error("not found"); } });
   assert.equal(await openNativePushTarget(ID, all), "opened");
   assert.deepEqual(log, []);
+});
+
+const never = (): Promise<void> => new Promise(() => {});
+
+test("the launch lands on the tapped chat when its inbox row answers in time", async () => {
+  offerNativePushBootTarget(Promise.resolve("chat-9"));
+  assert.equal(await takeNativePushBootTarget(never), "chat-9");
+  assert.equal(await takeNativePushBootTarget(never), undefined, "taken once");
+});
+
+test("a launch without a tap restores at once", async () => {
+  const waits: number[] = [];
+  assert.equal(await takeNativePushBootTarget(async (ms) => { waits.push(ms); }), undefined);
+  assert.deepEqual(waits, [], "an ordinary launch never waits for a tap");
+});
+
+test("a slow inbox row does not hold the launch", async () => {
+  const waits: number[] = [];
+  offerNativePushBootTarget(new Promise(() => {}));
+  assert.equal(await takeNativePushBootTarget(async (ms) => { waits.push(ms); }), undefined);
+  assert.deepEqual(waits, [NATIVE_PUSH_BOOT_WAIT_MS]);
+});
+
+test("a failed inbox read leaves the launch on the remembered chat", async () => {
+  offerNativePushBootTarget(Promise.reject(new Error("offline")));
+  assert.equal(await takeNativePushBootTarget(never), undefined);
+});
+
+const OTHER = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
+
+test("a tap announced to the running page is claimed, opened once and settled", async () => {
+  const log: string[] = [];
+  let held: string | undefined = ID;
+  const taps = nativePushTaps({
+    claim: async () => held,
+    open: async (id) => { log.push(`open ${id}`); },
+    settle: async (id) => { log.push(`settle ${id}`); held = undefined; },
+  });
+  // Announced by the native event and found again by the check after boot.
+  await Promise.all([taps.take(), taps.take()]);
+  assert.deepEqual(log.filter((line) => line.startsWith("open")), [`open ${ID}`]);
+  assert.equal(log.at(-1), `settle ${ID}`);
+  await taps.take();
+  assert.equal(log.filter((line) => line.startsWith("open")).length, 1, "a settled tap is not held any more");
+});
+
+test("a second tap is claimed while the first is still opening", async () => {
+  const log: string[] = [];
+  const held = [ID, OTHER];
+  let release = (): void => {};
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const taps = nativePushTaps({
+    claim: async () => { const id = held.shift(); log.push(`claim ${id}`); return id; },
+    open: async (id) => { log.push(`open ${id}`); if (id === ID) await gate; },
+    settle: async (id) => { log.push(`settle ${id}`); },
+  });
+  const first = taps.take();
+  await new Promise((resolve) => setImmediate(resolve));
+  const second = taps.take();
+  await new Promise((resolve) => setImmediate(resolve));
+  // Unclaimed, the native app would send the second tap through the hub.
+  assert.deepEqual(log, [`claim ${ID}`, `open ${ID}`, `claim ${OTHER}`]);
+  release();
+  await Promise.all([first, second]);
+  assert.deepEqual(log.slice(3), [`settle ${ID}`, `open ${OTHER}`, `settle ${OTHER}`]);
+});
+
+test("a tap in hand from the landing address is opened and settled without a claim", async () => {
+  const log: string[] = [];
+  const taps = nativePushTaps({
+    claim: async () => { log.push("claim"); return undefined; },
+    open: async (id) => { log.push(`open ${id}`); },
+    settle: async (id) => { log.push(`settle ${id}`); },
+  });
+  await taps.open(ID);
+  assert.deepEqual(log, [`open ${ID}`, `settle ${ID}`]);
+});
+
+test("nothing held opens nothing, and a failed open still releases the tap", async () => {
+  const log: string[] = [];
+  let held: string | undefined;
+  const taps = nativePushTaps({
+    claim: async () => held,
+    open: async () => { throw new Error("no such chat"); },
+    settle: async (id) => { log.push(`settle ${id}`); },
+  });
+  await taps.take();
+  assert.deepEqual(log, []);
+  held = ID;
+  await taps.take();
+  assert.deepEqual(log, [`settle ${ID}`]);
 });
