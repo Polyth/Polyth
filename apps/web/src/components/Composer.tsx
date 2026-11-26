@@ -157,6 +157,7 @@ import {
   type ModelAbsenceGate,
   attachmentNote,
 } from "../composer/discovery.ts";
+import { carriedRouteModel } from "../composer/relayCarry.ts";
 import { composerPromptSuggestion, visiblePromptSuggestion } from "../composer/promptSuggestion.ts";
 import { isHostOnlyExtensionCommand } from "../composer/extensionCommandGate.ts";
 import { compactBlockReason, isCompactCommand, isNothingToCompactError } from "../composer/compactCommand.ts";
@@ -1540,15 +1541,21 @@ function ComposerBody({
   const effectiveProfile = effectiveProfileId
     ? profiles.find((profile) => profile.id === effectiveProfileId)
     : undefined;
-  const priorRoute = useRef({ sessionId: session?.id, harnessId: session?.resolvedHarnessId });
+  const priorRoute = useRef({ sessionId: session?.id, harnessId: session?.resolvedHarnessId, selection: session?.harness });
   useEffect(() => {
     if (!routeCatalog.ready) return;
     if (priorRoute.current.sessionId === session?.id && priorRoute.current.harnessId !== session?.resolvedHarnessId) {
       const harnessId = session?.resolvedHarnessId;
       // Catalog discovery may be partial or unavailable. The explicit route
-      // identity, not membership in that response, decides compatibility.
-      const compatibleModel = cfg.model && (!harnessId
-        || (cfg.model.harnessId ?? "opencode") === harnessId);
+      // identity, not membership in that response, decides compatibility;
+      // a Relay hand-over between member accounts keeps the choice.
+      const compatibleModel = carriedRouteModel({
+        model: cfg.model,
+        previousSelection: priorRoute.current.selection,
+        selection: session?.harness,
+        previousHarnessId: priorRoute.current.harnessId,
+        harnessId,
+      });
       const compatibleAgent = cfg.agent && routeCatalog.agents.some((agent) =>
         agent.name === cfg.agent && (!harnessId || agent.harnessId === harnessId));
       const profileId = cfg.profile.kind === "id" ? cfg.profile.id : undefined;
@@ -1556,15 +1563,15 @@ function ComposerBody({
         profile.id === profileId && (!harnessId || profile.harnessId === harnessId));
       const next: ComposerConfig = {
         profile: compatibleProfile ? cfg.profile : { kind: "inherit" },
-        ...(compatibleModel ? { model: cfg.model } : {}),
+        ...(compatibleModel ? { model: compatibleModel } : {}),
         ...(compatibleAgent ? { agent: cfg.agent } : {}),
         ...(compatibleModel && cfg.thinking !== undefined ? { thinking: cfg.thinking } : {}),
       };
       saveComposerConfig(session?.id, next);
       setCfg(next);
     }
-    priorRoute.current = { sessionId: session?.id, harnessId: session?.resolvedHarnessId };
-  }, [session?.id, session?.resolvedHarnessId, cfg, routeCatalog.ready, routeCatalog.models, routeCatalog.agents, profiles]);
+    priorRoute.current = { sessionId: session?.id, harnessId: session?.resolvedHarnessId, selection: session?.harness };
+  }, [session?.id, session?.resolvedHarnessId, session?.harness, cfg, routeCatalog.ready, routeCatalog.models, routeCatalog.agents, profiles]);
   // The last model the composer displayed for this session. A harness switch
   // clears the selection for correctness (an incompatible model must never be
   // sent), so the chip keeps this display-only anchor until the new route

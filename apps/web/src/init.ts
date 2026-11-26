@@ -16,6 +16,7 @@ import { successFeedback, warningFeedback } from "./haptics.ts";
 import { resolveActiveProjectId, shouldRefreshProjectsOnSyncOpen } from "./projectRegistry.ts";
 import { claimPersonalProjectAttempt } from "./personalProject.ts";
 import { projectIsolationLevel } from "@polyth/contracts";
+import { creationModelAndAgent } from "./creationDefaults.ts";
 import { CONNECTION_RESTORED_EVENT, setConnectionGate } from "@polyth/contracts/transport-retry";
 import type { AttachmentRef, HarnessSelection, JsonObject, ManagedProjectInput, ModelRef, Project, ProjectCloneInput, ProjectDefaults, ProjectPatch, ResumeTurnOptions, SessionDeleteOptions, SessionCreationSharing, SessionEvent, SessionProjection, SessionStartRequest, StartSessionResult, StartWorktreeSessionInput } from "@polyth/contracts";
 import { suggestWorktreeBranch, temporaryWorktreeBranch } from "./worktreeSessions.ts";
@@ -2212,21 +2213,18 @@ function compatibleCreationDefaults(
   options: Pick<CreateSessionOptions, "harness" | "model" | "agent">,
 ): { model?: ModelRef; agent?: string } {
   const defaults = getSessionDefaults();
-  const candidateModel = options.model ?? resolveProjectModelDefault(project?.defaults, defaults.defaultModel);
-  const candidateAgent = options.agent ?? project?.defaults?.agent ?? defaults.defaultAgent;
-  const pinnedHarness = options.harness?.mode === "pinned" ? options.harness.harnessId : undefined;
-  if (!pinnedHarness) return {
-    ...(candidateModel ? { model: candidateModel } : {}),
-    ...(candidateAgent ? { agent: candidateAgent } : {}),
-  };
+  const defaultModel = resolveProjectModelDefault(project?.defaults, defaults.defaultModel);
+  const defaultAgent = project?.defaults?.agent ?? defaults.defaultAgent;
   const state = store.getState();
-  const model = candidateModel && state.models.some((item) =>
-    item.harnessId === pinnedHarness
-    && item.providerID === candidateModel.providerID
-    && item.modelID === candidateModel.modelID) ? candidateModel : undefined;
-  const agent = candidateAgent && state.agents.some((item) =>
-    item.harnessId === pinnedHarness && item.name === candidateAgent) ? candidateAgent : undefined;
-  return { ...(model ? { model } : {}), ...(agent ? { agent } : {}) };
+  return creationModelAndAgent({
+    ...(options.harness ? { harness: options.harness } : {}),
+    ...(options.model ? { model: options.model } : {}),
+    ...(options.agent ? { agent: options.agent } : {}),
+    ...(defaultModel ? { defaultModel } : {}),
+    ...(defaultAgent ? { defaultAgent } : {}),
+    models: state.models,
+    agents: state.agents,
+  });
 }
 
 /** Create a session in a Polyth-managed isolated workspace and open it. */
