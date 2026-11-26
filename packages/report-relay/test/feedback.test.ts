@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
 import type { FeedbackPayload } from "@polyth/contracts/feedback";
@@ -209,4 +210,24 @@ test("what is older than the retention goes, except what the team marked keep", 
   now += 2 * 86_400_000;
   assert.equal(intake.prune(), 2, "the two unmarked old ones go");
   assert.deepEqual(intake.list(new URLSearchParams())!.items.map((item) => item.ref), [4, 2]);
+});
+
+test("the inbox page is served with a CSP that allows only its own script and style", async (t) => {
+  const setup = await serve();
+  t.after(() => setup.close());
+  const response = await fetch(`${setup.url}/inbox`);
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type") ?? "", /^text\/html/);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal(response.headers.get("x-frame-options"), "DENY");
+  const csp = response.headers.get("content-security-policy") ?? "";
+  for (const part of ["default-src 'none'", "connect-src 'self'", "img-src blob:", "frame-ancestors 'none'"]) assert.ok(csp.includes(part), part);
+  const html = await response.text();
+  const hash = (text: string) => `'sha256-${createHash("sha256").update(text).digest("base64")}'`;
+  const script = /<script>([\s\S]*)<\/script>/.exec(html)?.[1] ?? "";
+  const style = /<style>([\s\S]*)<\/style>/.exec(html)?.[1] ?? "";
+  assert.ok(csp.includes(`script-src ${hash(script)}`), "script hash matches");
+  assert.ok(csp.includes(`style-src ${hash(style)}`), "style hash matches");
+  assert.doesNotMatch(script, /innerHTML|outerHTML|insertAdjacentHTML|document\.write/, "untrusted text never becomes markup");
+  assert.equal((await fetch(`${setup.url}/inbox`, { method: "POST" })).status, 404);
 });

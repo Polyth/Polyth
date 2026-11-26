@@ -203,8 +203,8 @@ docker run -d --name polyth-reports --restart unless-stopped \
 The production deployment (`reports.polyth.app`) follows this shape: the bundle in
 `/opt/polyth-reports/app`, keys in `/opt/polyth-reports/keys`, state in
 `/opt/polyth-reports/data`, container `polyth-reports` on `127.0.0.1:8788`, and an
-Apache vhost that forwards only `/v1/report`, `/v1/health`, `/v1/feedback` and
-`/v1/feedback/forget` (the inbox is not forwarded; body limit
+Apache vhost that forwards only `/v1/report`, `/v1/health`, `/v1/feedback`,
+`/v1/feedback/forget`, the inbox page `/inbox` and `/v1/inbox/*` (body limit
 2 400 000 bytes, 40 s timeout, no client addresses in its access log). Root-owned
 helpers place the secrets from stdin only, never from arguments, and print only
 `saved` or a validation error; the relay re-reads them without a restart:
@@ -248,8 +248,14 @@ result. Answers: `received` 200 with the `ref` shown to the person, `invalid` 40
   (status `new|seen|planned|done|dropped|keep` and a team note) and
   `POST /v1/inbox/<ref>/github` (files that feedback as an issue in the private reports
   repository; the text is quoted and `@`/`#` neutralised as for bug reports). The proxy
-  must forward `/v1/feedback`, `/v1/feedback/forget` and `/v1/inbox/*` in addition to
-  `/v1/report` and `/v1/health`; the inbox should be reachable only by the team.
+  must forward `/v1/feedback`, `/v1/feedback/forget`, `/inbox` and `/v1/inbox/*` in
+  addition to `/v1/report` and `/v1/health`; the token is the only lock on the inbox.
+- **Inbox page.** `GET /inbox` (`src/inboxPage.ts`) is one self-contained page over that
+  API: totals, filters, the list, a detail with the screenshot, status, note and "File to
+  GitHub". It holds no data; the token is typed on the page and kept in the tab's
+  `sessionStorage` only. Feedback text is untrusted, so the page builds every node with
+  `textContent`, and its CSP allows only its own script and style (by hash), same-origin
+  fetches and `blob:` images, with no framing (`test/feedback.test.ts` checks both).
 - **Privacy.** The intake logs `{route, result, status, latencyMs}` only: never text,
   contact, profile, screenshot, pseudonym or source address.
 

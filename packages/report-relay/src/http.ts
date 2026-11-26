@@ -4,6 +4,7 @@ import { BUG_REPORT_LIMITS, bugReportStatus } from "@polyth/contracts/bug-report
 import { FEEDBACK_LIMITS, feedbackStatus } from "@polyth/contracts/feedback";
 
 import type { ReportRelay } from "./index.ts";
+import { INBOX_PAGE, INBOX_PAGE_HEADERS } from "./inboxPage.ts";
 
 const JSON_TYPE = /^application\/json(?:\s*;\s*charset=utf-8)?$/i;
 
@@ -67,6 +68,15 @@ async function route(relay: ReportRelay, options: ReportRelayHttpOptions, reques
     if (request.method === "GET" && path === "/v1/health") {
       respond(response, 200, relay.health());
       relay.logRequest("health", "ok", 200, elapsed());
+      return;
+    }
+    if (request.method === "GET" && path === "/inbox") {
+      // The page itself is public and holds nothing; every read it makes needs the token.
+      for (const [name, value] of Object.entries(INBOX_PAGE_HEADERS)) response.setHeader(name, value);
+      response.statusCode = 200;
+      response.setHeader("content-length", INBOX_PAGE.length);
+      response.end(INBOX_PAGE);
+      relay.logRequest("inbox", "page", 200, elapsed());
       return;
     }
     if (path === "/v1/feedback" || path === "/v1/feedback/forget") {
