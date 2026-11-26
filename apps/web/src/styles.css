@@ -857,11 +857,21 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   min-width: var(--rail-mark);
   padding: 0;
 }
-/* Working is a hollow ring: it shares the result's corner, and a green accent
-   must not make the two read the same. */
-.sidebar-project-rail-mark.is-working {
-  background: var(--panel);
-  box-shadow: inset 0 0 0 var(--rail-mark-ring) var(--accent), 0 0 0 1px var(--panel);
+/* Working is a solid accent dot that breathes. It shares the result's corner,
+   so the motion, not only the colour, tells it from a result under a green
+   accent. It breathes inside its own box (scale never above 1, transform and
+   opacity only): the list clips past the tile, and a grown box would stretch
+   the list's scroll range on every beat. Reduced motion and low-resource mode
+   hold it still at full size (the global rules near the top). The tooltip's
+   swatch beats on the same clock. */
+.sidebar-project-rail-mark.is-working,
+.sidebar-project-rail-tooltip-swatch.is-working {
+  --rail-mark-tone: var(--accent);
+  animation: rail-working-breathe 2.4s cubic-bezier(0.37, 0, 0.63, 1) infinite;
+}
+@keyframes rail-working-breathe {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(0.75); opacity: 0.6; }
 }
 .sidebar-project-rail-tooltip-copy > .sidebar-project-rail-tooltip-status {
   display: grid;
@@ -872,26 +882,32 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 }
 .sidebar-project-rail-tooltip-line {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: var(--space-1);
   color: var(--text-dim);
   font-size: var(--font-meta);
   line-height: var(--font-meta-lh);
 }
+/* The swatch sits in the band of the lowercase letters beside it ("1
+   Working"), like a round letter: centred on half the x-height, a 7px dot
+   overshoots the baseline and the x-height by a hair each, in any interface
+   font and text size. Centred on the line box, or on the digits' cap height,
+   it hung above the word, which is what the eye reads; an 8px dot there sank
+   below the bold count. With no text of its own, the swatch's baseline is its
+   bottom edge; the offset moves it from there. */
 .sidebar-project-rail-tooltip-swatch {
   --rail-mark-tone: var(--status-result);
+  --rail-swatch: 7px;
+  position: relative;
+  top: calc(var(--rail-swatch) / 2 - 0.5ex);
   flex: none;
-  width: 8px;
-  height: 8px;
+  width: var(--rail-swatch);
+  height: var(--rail-swatch);
   border-radius: var(--radius-round);
   background: var(--rail-mark-tone);
 }
 .sidebar-project-rail-tooltip-swatch.is-question { --rail-mark-tone: var(--status-question); }
 .sidebar-project-rail-tooltip-swatch.is-permission { --rail-mark-tone: var(--status-permission); }
-.sidebar-project-rail-tooltip-swatch.is-working {
-  background: transparent;
-  box-shadow: inset 0 0 0 2px var(--accent);
-}
 .sidebar-project-rail-tooltip-count {
   color: var(--text);
   font-weight: 650;

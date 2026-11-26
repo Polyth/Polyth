@@ -6073,7 +6073,7 @@ A project icon carries corner marks from `projectRailStatus`
 (`sessionStatus.ts`, drawn by `sidebar/ProjectRailStatus.tsx`), counting chats
 of the project and its nested projects: questions top-start (blue), permission
 requests top-end (amber), unread results of finished top-level chats or forks
-bottom-end (green; a hollow accent ring there while chats only work). One chat
+bottom-end (green; a solid, breathing accent dot there while chats only work). One chat
 shows a glyph or dot, several a count capped at `9+`; bottom-start stays free.
 The tooltip and accessible name carry the breakdown. Subagent requests count,
 their results do not; archived and muted chats never count. Styling:
@@ -6144,7 +6144,7 @@ Each project tile carries live status marks in its corners (`ProjectRailMarks`,
 `projectRailStatus`, the same resolver as the rows): a question at the top
 start, a permission request at the top end, and at the bottom end the unread
 results — one chat as a dot, several as a count — or, without results, a
-hollow ring while one of the project's sessions works. The bottom start corner
+solid accent dot that breathes while one of the project's sessions works. The bottom start corner
 stays free. The socket keeps active rows from every project current as summary
 projections, so a mark appears and clears without opening that project; after a
 reconnect it also re-reads the rows the client still shows as active, so a turn

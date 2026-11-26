@@ -301,11 +301,18 @@ with the Pinned group's corner dots, and no other count (the launcher strip's
 neutral `.strip-badge`) uses them. A count is 12px and a dot 8px (times
 `--rail-scale-left`), so the 22px glyph's corners stay mostly clear. The bottom
 start corner is free for a later kind. Marks count chats: one question or permission shows `?` or `!`,
-several show a number up to `9+`; one result is a dot, several a number. A hollow
-accent ring at the bottom end means the project is working and has no result to
-show. Marks stay inside the tile, because the scrolling list clips past it, use
-`--panel` as their cut-out and pick black or white ink from the tone's lightness.
-The tooltip and the button's accessible name list every count.
+several show a number up to `9+`; one result is a dot, several a number. A solid
+accent dot that breathes (`rail-working-breathe`: scale and opacity, never above
+its resting size) at the bottom end means the project is working and has no
+result to show; the motion, not only the colour, tells it from a result under a
+green accent, and reduced motion holds it still. Marks stay inside the tile,
+because the scrolling list clips past it (an animation must not grow a mark
+either), use `--panel` as their cut-out and pick black or white ink from the
+tone's lightness. The tooltip and the button's accessible name list every
+count; a tooltip swatch is a 7px dot that hangs from the text baseline and
+centres on half the x-height (`0.5ex`), so it sits in the band of the word
+beside it in any interface font (centred on the line box or the cap height it
+hung above the word).
 
 | Token | Purpose |
 | --- | --- |

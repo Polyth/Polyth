@@ -95,8 +95,36 @@ test("a mark's box and ring snap to whole pixels", () => {
   assert.match(block, /--rail-mark: round\(calc\(var\(--rail-mark-base\) \* var\(--rail-scale-left, 1\)\), 1px\);/);
   assert.match(block, /--rail-mark-ring: round\(calc\(2px \* var\(--rail-scale-left, 1\)\), 1px\);/);
   assert.match(block, /\.sidebar-project-rail-mark\.is-dot \{\n {2}--rail-mark-base: 8px;/);
-  assert.match(block, /inset 0 0 0 var\(--rail-mark-ring\) var\(--accent\)/);
   assert.doesNotMatch(block, /--rail-mark: calc\(8px \* var\(--rail-scale-left/);
+});
+
+test("working is a solid accent dot that breathes inside its own box", () => {
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const rule = /\.sidebar-project-rail-mark\.is-working,\n\.sidebar-project-rail-tooltip-swatch\.is-working \{([^}]*)\}/.exec(css);
+  assert.ok(rule, "the rail mark and its tooltip swatch share one working rule");
+  assert.match(rule[1], /--rail-mark-tone: var\(--accent\);/, "solid accent fill, not a hollow ring");
+  assert.doesNotMatch(rule[1], /inset|transparent|background: var\(--panel\)/);
+  const animation = /animation: (rail-working-breathe) [^;]* infinite;/.exec(rule[1]);
+  assert.ok(animation, "it pulses for as long as the project works");
+  const keyframes = /@keyframes rail-working-breathe \{([\s\S]*?)\n\}/.exec(css);
+  assert.ok(keyframes);
+  // The list clips past the tile and a grown box would stretch its scroll
+  // range on every beat: the dot never scales above its resting size, and only
+  // compositor properties move.
+  for (const [, factor] of keyframes[1].matchAll(/scale\(([\d.]+)\)/g)) assert.ok(Number(factor) <= 1);
+  assert.doesNotMatch(keyframes[1], /box-shadow|width|height|inset|top|left/);
+});
+
+test("a tooltip swatch sits in the lowercase band of the text beside it", () => {
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const line = /\.sidebar-project-rail-tooltip-line \{([^}]*)\}/.exec(css);
+  assert.match(line?.[1] ?? "", /align-items: baseline;/, "the swatch hangs from the text baseline, not the line box centre");
+  const swatch = /\.sidebar-project-rail-tooltip-swatch \{([^}]*)\}/.exec(css)?.[1] ?? "";
+  // Centred on the line box or on the cap height it hung above the word.
+  assert.match(swatch, /--rail-swatch: 7px;/);
+  assert.match(swatch, /top: calc\(var\(--rail-swatch\) \/ 2 - 0\.5ex\);/, "centred on half the x-height");
+  assert.match(swatch, /position: relative;/);
+  assert.doesNotMatch(swatch, /cap\)/);
 });
 
 test("each kind owns its corner and the bottom start stays free", () => {
