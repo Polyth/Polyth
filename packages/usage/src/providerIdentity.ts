@@ -127,6 +127,7 @@ export function displayProvider(providerId: string): string {
     alibaba: "Alibaba Coding Plan",
     "alibaba-coding-plan": "Alibaba Coding Plan",
     "alibaba-token-plan": "Alibaba Personal Token Plan",
+    vibe: "Mistral Vibe",
   };
   return known[normalized] ?? providerId
     .replace(/[-_]+/g, " ")

@@ -254,6 +254,8 @@ export default function registerPackage(host: ServerPackageHost) {
             [vibeCliBeside(knownVibeAcpCommand ?? "vibe-acp"), "--setup"],
             account ? { VIBE_HOME: account.dir } : {},
         ),
+        // Usage reads each added login's own `VIBE_HOME/.env` for its Limits.
+        limitsFamily: "vibe",
     });
     return {
         remoteAccess: localOnlyRemoteAccess(["backend-vibe"]),

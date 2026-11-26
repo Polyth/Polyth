@@ -32,6 +32,9 @@ no paid turn was involved. macOS and Windows have not been run.
   valid is proven by the first turn.
 - Accounts: each extra login runs with its own `VIBE_HOME` and without the
   server's `MISTRAL_API_KEY`, which would otherwise win over the account's key.
+- Limits: the provider family is `vibe` (`limitsFamily`), so Usage shows each
+  login's monthly Vibe Code budget as its own Limits source; see
+  [Usage › Limits semantics](../usage/README.md#limits-semantics).
 
 ## What Polyth changes in Vibe
 

@@ -9,6 +9,7 @@ import { createClaudeProvider } from "./claude.ts";
 import { createCommandCodeProvider } from "./commandcode.ts";
 import { createAlibabaTokenPlanProvider } from "./alibabaTokenPlan.ts";
 import { createOpenCodeZenProvider } from "./opencodeZen.ts";
+import { createVibeProvider } from "./vibe.ts";
 import { createXaiProvider } from "./xai.ts";
 
 const registry = (opts: QuotaDiscoveryOptions = {}): DiscoverableProvider[] => {
@@ -20,6 +21,7 @@ const registry = (opts: QuotaDiscoveryOptions = {}): DiscoverableProvider[] => {
     createAlibabaTokenPlanProvider(runtime),
     createOpenCodeZenProvider(runtime),
     ...createStandardProviders(runtime).filter((provider) => provider.id !== "command-code"),
+    createVibeProvider(runtime),
     createXaiProvider(runtime),
   ];
 };
@@ -51,3 +53,4 @@ export { createAntigravityProvider } from "./antigravity.ts";
 export { createAlibabaTokenPlanProvider, parseAlibabaTokenPlanUsage, resolveAlibabaTokenPlanBinary } from "./alibabaTokenPlan.ts";
 export { createCodexProvider, loadCodexCredential } from "./codex.ts";
 export { createOpenCodeZenProvider } from "./opencodeZen.ts";
+export { createVibeProvider, loadVibeCredential } from "./vibe.ts";

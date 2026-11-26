@@ -8,6 +8,7 @@ import { resolveQuotaRuntime, type QuotaDiscoveryOptions, type QuotaRuntime } fr
 import { createAntigravityProvider } from "./providers/antigravity.ts";
 import { createClaudeProvider } from "./providers/claude.ts";
 import { createCodexProvider } from "./providers/codex.ts";
+import { createVibeProvider } from "./providers/vibe.ts";
 
 type AccountSourceFactory = (
   runtime: QuotaRuntime,
@@ -19,6 +20,7 @@ const ACCOUNT_SOURCES: Readonly<Record<string, AccountSourceFactory>> = {
   claude: createClaudeProvider,
   codex: createCodexProvider,
   antigravity: createAntigravityProvider,
+  vibe: createVibeProvider,
 };
 
 export interface HarnessAccountLimitsOptions {
