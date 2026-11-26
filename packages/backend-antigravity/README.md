@@ -217,6 +217,19 @@ macOS/Windows retain the shared portable authority's explicit crash-fence limits
   `invoke_subagent`, `define_subagent`, `manage_subagents`, `manage_task` and
   `browser_subagent`, observed in CLI 1.2.11's `init` frame. The model is
   directed to Polyth `agent.spawn`; a hook or bridge failure denies the call.
+  The CLI cannot take these tools out of the main agent's list (see the
+  1.5.18 probe below), so the model is also told up front: the prompt
+  projection that carries Polyth's instructions ends with a fixed section
+  naming the whole set as switched off, with `agent.spawn` (or doing the work
+  itself) as the path, and the deny reason names the same set so a refused
+  call is not retried through a sibling. The native scheduling, workflow and
+  messaging tools CLI 1.5.18 added — `schedule`, `run_workflow`,
+  `send_message` and `manage_inbox` — are denied the same way, before any
+  approval and by exact name, because Polyth owns scheduled work (Agents),
+  workflows and messages between sessions; the up-front section and their own
+  deny reason point the model at `polyth_agents`, `polyth_workflow` and
+  `session.send`/`polyth_peer`. Only their names are verified, not their
+  native semantics.
   Names ending in `*_agent(s)` or `*_subagent(s)` are also denied, but different
   tool names in future releases require another protocol review. Only the
   names were verified live: `manage_task` is conservatively denied without a
@@ -325,7 +338,8 @@ revokes any older proof for the same scope, and an older in-flight catalog
 cannot restore proof after invalidation. A sign-in failure also surfaces the `auth-required`
 state without leaving a cached claim behind. The
 runtime fixture denies each native delegation surface the CLI advertises and
-proves ordinary tools that merely mention agents still pass.
+each native scheduling, workflow and messaging tool without raising an
+approval, and proves ordinary tools that merely mention agents still pass.
 Fixtures are not a live Google account verification.
 No provider login, paid prompt, physical-device test or live model turn is
 claimed. MCP discovery was live-checked against Antigravity CLI 1.2.7 with a
@@ -374,6 +388,16 @@ all advertised, which is why the bridge denies the whole set. The
 unchanged — 36 skills parsed — and `agy models` still returns a non-empty
 catalog whose effort-suffixed IDs pass the parser and the conflicting-effort
 refusal.
+
+On 2026-11-26, CLI 1.5.18, again with no model turn (the content-less probe
+returns `init` and a `num_turns: 0` result): the `init` tool list still holds
+all five delegation tools, plus `schedule`, `run_workflow`, `send_message` and
+`manage_inbox`, which the bridge now denies as Polyth-owned surfaces. Neither `--settings` with `permissions.deny` naming the
+delegation tools (bare or as `tool(*)`) nor a workspace custom agent
+(`.agents/agents/<name>.md` with a `tools:` list, launched with `--agent`;
+`init` reported that agent) changed that list. Whether the model is actually
+sent a different set in either case is not verified, so the adapter relies on
+the up-front note and the hook deny instead.
 
 Protocol reference, checked 2026-09-19:
 - https://antigravity.google/docs/cli/headless

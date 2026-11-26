@@ -20,7 +20,7 @@ import {
 import type { HarnessProcessAuthority } from "@polyth/harness-runtime/process-authority";
 import { stageAgyAttachments, type AgyInjectedStep, type AgyStagedAttachments } from "./attachments.ts";
 import {
-  classifyAgyPermission, isNativeDelegationTool, parseAgyHookRequest, NATIVE_DELEGATION_DENY_REASON,
+  classifyAgyPermission, parseAgyHookRequest, polythOwnedNativeToolDenial,
   type AgyHookDecision, type AgyHookHandler, type AgyHookRequest, type AgyInvocationResult, type AgyStopResult,
   type AntigravityPermissionBridge,
 } from "./permissions.ts";
@@ -298,11 +298,11 @@ export function createAntigravityRuntime(options: AntigravityRuntimeOptions): Ag
     }
     const turnId = active.id;
     // This deny is evaluated before any approval and covers every native spawn
-    // surface the CLI advertises, not just `invoke_subagent`. Delegated work
-    // must be a canonical Polyth child session created through agent.spawn.
-    if (isNativeDelegationTool(request.tool)) {
-      return { decision: "deny", reason: NATIVE_DELEGATION_DENY_REASON };
-    }
+    // surface the CLI advertises, not just `invoke_subagent` (delegated work
+    // must be a canonical Polyth child session created through agent.spawn),
+    // and the native scheduling, workflow and messaging tools Polyth owns.
+    const ownedByPolyth = polythOwnedNativeToolDenial(request.tool);
+    if (ownedByPolyth) return { decision: "deny", reason: ownedByPolyth };
     if (request.tool === "ask_question") return askUser(request, turnId);
     // The native CLI runs headless, so this hook is the hard workspace mutation
     // boundary in beta mode rather than a UI prompt the model could bypass.

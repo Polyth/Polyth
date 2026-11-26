@@ -12,6 +12,7 @@ import {
   type LaunchOverlayStore,
 } from "@polyth/harness-runtime";
 import { renderCapabilityText } from "@polyth/harness-runtime/capability-text";
+import { ANTIGRAVITY_TOOL_BOUNDARY_TEXT } from "./permissions.ts";
 
 export interface AntigravityLaunchOverlay {
   mcpServers?: Record<string, JsonObject>;
@@ -135,7 +136,12 @@ export function createAntigravityProvisioner(harnessId = "antigravity"): Harness
         .map((item) => item.capabilityId);
       const promptText = promptCapabilityIds.length ? renderCapabilityText(plan) : undefined;
       if (promptText?.trim()) {
-        overlay.prompt = { text: promptText, capabilityIds: promptCapabilityIds };
+        // The CLI keeps its delegation tools in the model's list, so Polyth's
+        // instructions name them before the model can reach for one.
+        overlay.prompt = {
+          text: `${promptText.trimEnd()}\n\n${ANTIGRAVITY_TOOL_BOUNDARY_TEXT}`,
+          capabilityIds: promptCapabilityIds,
+        };
       }
       overlay.launchCapabilityIds = records
         .filter((item) => item.status === "pending" && item.kind !== "instruction" && item.kind !== "context")

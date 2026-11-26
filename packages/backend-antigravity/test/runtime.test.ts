@@ -11,7 +11,7 @@ import { test, type TestContext } from "node:test";
 import type { HarnessCapabilityApplicationReceipt, RuntimeCommandDescriptor, RuntimeEvent } from "@polyth/contracts";
 import { setCapabilityReceiptSink } from "@polyth/harness-runtime";
 import type { HarnessProcessAuthority } from "@polyth/harness-runtime/process-authority";
-import { isNativeDelegationTool, NATIVE_DELEGATION_DENY_REASON, type AgyHookDecision, type AgyHookHandler, type AgyInvocationResult, type AgyStopResult } from "../src/permissions.ts";
+import { isNativeDelegationTool, isNativeOrchestrationTool, NATIVE_DELEGATION_DENY_REASON, NATIVE_ORCHESTRATION_DENY_REASON, NATIVE_ORCHESTRATION_TOOL_NAMES, type AgyHookDecision, type AgyHookHandler, type AgyInvocationResult, type AgyStopResult } from "../src/permissions.ts";
 import { antigravityOverlays } from "../src/provisioner.ts";
 import { createAntigravityRuntime } from "../src/runtime.ts";
 import type { AntigravityTitleReader } from "../src/title.ts";
@@ -361,18 +361,46 @@ test("every native spawn surface the CLI advertises is denied, not only invoke_s
   }
 });
 
+test("native scheduling, workflow and messaging tools are denied before any approval", async (t) => {
+  // CLI 1.5.18 lists these in its `init` frame. Polyth owns scheduled work,
+  // workflows and messages between sessions, so each is refused with a reason
+  // that names the whole set, even under the permission bypass.
+  assert.deepEqual([...NATIVE_ORCHESTRATION_TOOL_NAMES], ["schedule", "run_workflow", "send_message", "manage_inbox"]);
+  assert.equal(isNativeOrchestrationTool(" Send_Message "), true, "native names are compared case-insensitively");
+  for (const tool of NATIVE_ORCHESTRATION_TOOL_NAMES) {
+    assert.ok(NATIVE_ORCHESTRATION_DENY_REASON.includes(tool), `${tool} must be named in the deny reason`);
+    const f = fixture(t, { bypass: true });
+    try {
+      await f.runtime.createSessionOperation!(request, "create-a");
+      const admission = f.start(); await flush(); f.inputStep(); await admission;
+      assert.equal(isNativeDelegationTool(tool), false, `${tool} is not a delegation tool`);
+      assert.deepEqual(await f.hook(tool, { Message: "hi" }), {
+        decision: "deny",
+        reason: NATIVE_ORCHESTRATION_DENY_REASON,
+      }, `${tool} must be denied`);
+      assert.equal(f.events.some((event) => event.type === "permission/requested"), false,
+        `${tool} must never reach an approval`);
+    } finally { await f.runtime.dispose?.(); }
+  }
+  // Exact names only: tools that merely contain the words still pass.
+  for (const tool of ["schedule_reminder", "run_workflows", "message_send", "inbox"]) {
+    assert.equal(isNativeOrchestrationTool(tool), false, `${tool} must not be treated as a Polyth-owned surface`);
+  }
+});
+
 test("the delegation deny does not swallow ordinary tools that merely mention agents", async (t) => {
-  for (const tool of ["ask_question", "manage_inbox", "read_resource", "run_command", "agent_ask", "taskboard"]) {
+  for (const tool of ["ask_question", "read_resource", "run_command", "agent_ask", "taskboard"]) {
     assert.equal(isNativeDelegationTool(tool), false, `${tool} must not be treated as native delegation`);
+    assert.equal(isNativeOrchestrationTool(tool), false, `${tool} must not be treated as a Polyth-owned surface`);
   }
   const f = fixture(t, { bypass: true });
   await f.runtime.createSessionOperation!(request, "create-a");
   const admission = f.start(); await flush(); f.inputStep(); await admission;
   // An ordinary tool is not denied as delegation; it goes to Polyth's policy.
-  const decision = f.hook("manage_inbox", {});
+  const decision = f.hook("read_resource", {});
   await flush();
   const requested = f.events.find((event): event is Extract<RuntimeEvent, { type: "permission/requested" }> =>
-    event.type === "permission/requested" && event.permission === "manage_inbox");
+    event.type === "permission/requested" && event.permission === "read_resource");
   assert.ok(requested);
   assert.equal((await f.runtime.replyPermissionOperation!(context.sessionId, requested.requestId, "once", "permission-a")).kind, "confirmed");
   assert.deepEqual(await decision, { decision: "allow" });

@@ -70,25 +70,79 @@ const SAFE_CONTROL_TOOLS = new Set(["finish", "wait", "wait_5_seconds", "command
  * denied as a conservative boundary rather than as a claim about what it does.
  * A deny is a boundary, not a re-route: the reason names the Polyth path and
  * claims nothing about an unverified Polyth feature. */
-const NATIVE_DELEGATION_TOOLS = new Set([
+export const NATIVE_DELEGATION_TOOL_NAMES: readonly string[] = [
   "invoke_subagent",
   "define_subagent",
   "manage_subagents",
   "manage_task",
   "browser_subagent",
-]);
+];
+const NATIVE_DELEGATION_TOOLS = new Set(NATIVE_DELEGATION_TOOL_NAMES);
 /** Also deny names ending in `<verb>_agent(s)` / `<verb>_subagent(s)`.
  * Other naming conventions require a new protocol review; this pattern alone
  * does not prove that all future native delegation tools will be blocked. */
 const NATIVE_DELEGATION_PATTERN = /(?:^|[_:.-])(?:subagents?|agents?)$/i;
 
+const NATIVE_DELEGATION_LIST = NATIVE_DELEGATION_TOOL_NAMES.join(", ");
+const POLYTH_DELEGATION_PATH =
+  "the polyth tool of the polyth-agent-tools MCP server with action agent.spawn";
+
+/** What the model reads when it calls one anyway: the whole switched-off set,
+ * so it does not retry a sibling, and the path that works. */
 export const NATIVE_DELEGATION_DENY_REASON =
-  "Native Antigravity delegation is disabled in Polyth; use agent.spawn";
+  `Antigravity's own delegation tools (${NATIVE_DELEGATION_LIST}) are switched off in Polyth and every call is refused. `
+  + `Do the work yourself, or delegate through ${POLYTH_DELEGATION_PATH}.`;
 
 export const isNativeDelegationTool = (tool: string): boolean => {
   const normalized = tool.trim().toLowerCase();
   return NATIVE_DELEGATION_TOOLS.has(normalized) || NATIVE_DELEGATION_PATTERN.test(normalized);
 };
+
+/** Native scheduling, workflow and agent-messaging surfaces, first listed by
+ * CLI 1.5.18's `init` frame. Polyth owns scheduled work (Agents), workflows
+ * and messages between sessions, so these are denied before any approval,
+ * like Claude's native scheduling tools are disallowed at launch. Only the
+ * names are verified; their exact native semantics are not, so they are
+ * denied as a boundary, matched by exact name rather than by a pattern
+ * (`schedule` alone would otherwise catch unrelated tools). */
+export const NATIVE_ORCHESTRATION_TOOL_NAMES: readonly string[] = [
+  "schedule",
+  "run_workflow",
+  "send_message",
+  "manage_inbox",
+];
+const NATIVE_ORCHESTRATION_TOOLS = new Set(NATIVE_ORCHESTRATION_TOOL_NAMES);
+const NATIVE_ORCHESTRATION_LIST = NATIVE_ORCHESTRATION_TOOL_NAMES.join(", ");
+const POLYTH_ORCHESTRATION_PATH =
+  "Polyth's own tools: polyth_agents for scheduled work, polyth_workflow for workflows, "
+  + "and the polyth tool's session.send or polyth_peer for other sessions";
+
+export const NATIVE_ORCHESTRATION_DENY_REASON =
+  `Antigravity's own scheduling, workflow and messaging tools (${NATIVE_ORCHESTRATION_LIST}) are switched off in Polyth and every call is refused. `
+  + `Use ${POLYTH_ORCHESTRATION_PATH} when they are available; otherwise do the work yourself or tell the user.`;
+
+export const isNativeOrchestrationTool = (tool: string): boolean =>
+  NATIVE_ORCHESTRATION_TOOLS.has(tool.trim().toLowerCase());
+
+/** The deny reason for a native tool Polyth owns, or undefined for any other. */
+export const polythOwnedNativeToolDenial = (tool: string): string | undefined =>
+  isNativeDelegationTool(tool) ? NATIVE_DELEGATION_DENY_REASON
+    : isNativeOrchestrationTool(tool) ? NATIVE_ORCHESTRATION_DENY_REASON
+      : undefined;
+
+/** Told to the model up front, with Polyth's instructions. CLI 1.5.18 cannot
+ * remove a built-in tool from the main agent: neither `permissions.deny` in
+ * `--settings` nor a custom `--agent` with a `tools:` list changed the `init`
+ * tool list (probed without a model turn), so the tools stay visible and only
+ * this note keeps the model from reaching for them. */
+export const ANTIGRAVITY_TOOL_BOUNDARY_TEXT = [
+  "## Antigravity tools that Polyth switches off",
+  `Polyth refuses every call to these built-in Antigravity tools: ${NATIVE_DELEGATION_LIST}, ${NATIVE_ORCHESTRATION_LIST}. `
+    + "They remain in your tool list only because the CLI cannot hide them; never call them. "
+    + `To hand work to another agent, use ${POLYTH_DELEGATION_PATH}; otherwise do the work yourself. `
+    + "To work with a web page, use the browser tools directly instead of browser_subagent. "
+    + `For scheduled work, workflows or messages to other sessions, use ${POLYTH_ORCHESTRATION_PATH}, when available.`,
+].join("\n");
 
 /** Tool arguments can carry a whole file (`write_to_file`), so the request
  * ceiling is generous; an oversized request still fails closed. */

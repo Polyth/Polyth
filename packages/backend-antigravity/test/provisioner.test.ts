@@ -23,8 +23,12 @@ import {
   isBrowserTool,
 } from "../src/index.ts";
 import {
+  ANTIGRAVITY_TOOL_BOUNDARY_TEXT,
   classifyAgyPermission,
   createAntigravityPermissionBridge,
+  NATIVE_DELEGATION_DENY_REASON,
+  NATIVE_DELEGATION_TOOL_NAMES,
+  NATIVE_ORCHESTRATION_TOOL_NAMES,
   parseAgyHookRequest,
 } from "../src/permissions.ts";
 import { createAntigravityRuntime } from "../src/runtime.ts";
@@ -113,6 +117,40 @@ test("Antigravity delivers a Secure Safe skill through its prompt overlay", asyn
   const overlay = antigravityOverlays.peek(context, "antigravity")?.value;
   assert.equal(overlay?.prompt?.capabilityIds[0], "secure-safe.skill.polyth-secure-safe");
   assert.match(overlay?.prompt?.text ?? "", /never ask for a secret in chat/);
+  provisioner.release?.(context);
+});
+
+test("Antigravity's instructions name every native delegation tool before the model can call one", async () => {
+  // The CLI cannot hide its built-in delegation tools, so the prompt projection
+  // is what keeps the model from reaching for them in the first place.
+  const context = contextOf("space-a", "session-boundary");
+  const provisioner = createAntigravityProvisioner();
+  await provisioner.apply(context, {
+    harnessId: "antigravity",
+    desiredRevision: "behavior-r1",
+    items: [{
+      capability: {
+        id: "polyth.behavior",
+        kind: "instruction",
+        owner: "polyth",
+        scope: "deployment",
+        revision: "1",
+        text: "Delegate with agent.spawn.",
+      },
+      mode: "prompt",
+      mutability: "immediate",
+    }],
+  }, { mcpSecrets: () => ({}) });
+  const text = antigravityOverlays.peek(context, "antigravity")?.value.prompt?.text ?? "";
+  assert.ok(text.endsWith(ANTIGRAVITY_TOOL_BOUNDARY_TEXT), "the boundary follows Polyth's own instructions");
+  for (const tool of NATIVE_DELEGATION_TOOL_NAMES) {
+    assert.ok(text.includes(tool), `${tool} must be named up front`);
+    assert.ok(NATIVE_DELEGATION_DENY_REASON.includes(tool), `${tool} must be named in the deny reason`);
+  }
+  for (const tool of NATIVE_ORCHESTRATION_TOOL_NAMES) {
+    assert.ok(text.includes(tool), `${tool} must be named up front`);
+  }
+  assert.match(text, /agent\.spawn/);
   provisioner.release?.(context);
 });
 
