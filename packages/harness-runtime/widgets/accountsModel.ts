@@ -58,6 +58,17 @@ export type Named = { id: string; name: string };
 /** Looks a message up under `harnessruntime.accounts.` in the active locale. */
 export type AccountsTranslate = (key: string, values?: Record<string, string | number>) => string;
 
+/** The name a new account gets when the person leaves the field blank: the
+ *  first "Account N" no listed account uses yet. The default login counts as
+ *  the first, so numbering starts at 2. */
+export function nextAccountName(rows: readonly Pick<AccountRow, "name">[], t: AccountsTranslate): string {
+  const taken = new Set(rows.map((row) => row.name));
+  for (let n = 2; ; n++) {
+    const name = t("autoName", { n });
+    if (!taken.has(name)) return name;
+  }
+}
+
 const listText = (ids: readonly string[] | undefined, known: readonly Named[], one: string, many: string, everyone: string, t: AccountsTranslate): string => {
   if (!ids?.length) return everyone;
   if (ids.length === 1) return known.find((entry) => entry.id === ids[0])?.name ?? t(one);

@@ -57,7 +57,7 @@ const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { default: HarnessAccounts } = await import("../widgets/HarnessAccounts.tsx");
 const { HarnessSettings } = await import("../widgets/runtime.tsx");
-const { accessBody, accessProblem, accessSummary, groupAccounts } = await import("../widgets/accountsModel.ts");
+const { accessBody, accessProblem, accessSummary, groupAccounts, nextAccountName } = await import("../widgets/accountsModel.ts");
 
 const flush = async (rounds = 6) => {
   for (let index = 0; index < rounds; index++) await act(async () => { await Promise.resolve(); });
@@ -141,6 +141,39 @@ test("a person sees their own and shared accounts in one list and always adds a 
     await flush();
     const post = requests.find((request) => request.method === "POST");
     assert.deepEqual(post?.body, { name: "Home" });
+  } finally {
+    await view.unmount();
+  }
+});
+
+test("a blank name adds the next free numbered account; its sign-in details tell it apart", async () => {
+  assert.equal(nextAccountName([{ name: "" }], accountsT), "Account 2", "the default login is the first");
+  assert.equal(nextAccountName([{ name: "" }, { name: "Account 2" }, { name: "Work" }], accountsT), "Account 3");
+  assert.equal(nextAccountName([{ name: "" }, { name: "Account 3" }], accountsT), "Account 2", "a freed number is reused");
+  accountList = {
+    label: "Codex", manageable: true, canAddShared: true, canEditAccess: false,
+    accounts: [
+      { id: "default", harnessId: "codex", name: "", removable: false, usable: true, status: { loggedIn: true, email: "home@example.com", plan: "plus" } },
+      { id: "2", harnessId: "codex-2", name: "Account 2", removable: true, usable: true, status: { loggedIn: true, email: "work@example.com", plan: "pro" } },
+    ],
+  };
+  const view = await mountAccounts();
+  try {
+    const rows = [...view.container.querySelectorAll<HTMLElement>('[data-testid="account-row"]')];
+    assert.match(rows[1]!.textContent ?? "", /work@example\.com · Pro plan/);
+    const input = view.container.querySelector<HTMLInputElement>('input[aria-label="Account name"]')!;
+    assert.equal(input.placeholder, "Name (optional)");
+    const add = buttons(view.container, "Add account")[0]!;
+    assert.equal(add.disabled, false, "no name is needed to add an account");
+    await act(async () => { add.click(); });
+    await flush();
+    assert.deepEqual(requests.find((request) => request.method === "POST")?.body, { name: "Account 3" });
+    // A name typed with only spaces counts as blank too.
+    requests.length = 0;
+    await typeInto(input, "   ");
+    await act(async () => { buttons(view.container, "Add account")[0]!.click(); });
+    await flush();
+    assert.deepEqual(requests.find((request) => request.method === "POST")?.body, { name: "Account 3" });
   } finally {
     await view.unmount();
   }

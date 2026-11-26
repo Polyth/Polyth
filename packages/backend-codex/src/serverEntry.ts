@@ -11,6 +11,7 @@ import { probeRemoteHarness, remoteHarnessLaunch, resolveRemoteHarnessHost, type
 import { createHarnessAccountFamily, harnessCommandLine, type HarnessAccountStatus, type ResolvedHarnessAccount } from "@polyth/harness-runtime/accounts";
 import { localOnlyRemoteAccess, serverServiceKey, type ServerPackageHost } from "@polyth/plugins";
 import { createCodexRuntime, CODEX_CAPABILITIES, type Thread } from "./index.ts";
+import { readCodexAccountIdentity } from "./accountIdentity.ts";
 import { createFolderSkillManager, nativeSkillFolders } from "@polyth/harness-runtime/native-skills";
 import { createCodexNativePlugins } from "./nativePlugins.ts";
 import { createCodexProvisioner } from "./provisioner.ts";
@@ -41,6 +42,10 @@ const resolveCodexBinary = async () => {
 /** `CODEX_HOME` holds one login's `auth.json`, config and native threads. */
 const accountEnv = (account?: ResolvedHarnessAccount): Record<string, string> =>
     account ? { CODEX_HOME: account.dir } : {};
+
+/** The `CODEX_HOME` the CLI uses for this login. */
+const codexHomeOf = (account?: ResolvedHarnessAccount): string =>
+    account?.dir ?? (process.env.CODEX_HOME?.trim() || join(homedir(), ".codex"));
 
 const codexEnv = async (command: string, account?: ResolvedHarnessAccount): Promise<NodeJS.ProcessEnv> =>
     ({ ...await harnessExecutableChildEnv(command), ...accountEnv(account) });
@@ -100,6 +105,14 @@ const codexAccountStatus = async (
     }
     if (/not logged in/i.test(result.text)) return { loggedIn: false };
     return { loggedIn: "unknown" };
+};
+
+/** The accounts list's report: the CLI's sign-in answer, plus the email and
+ *  ChatGPT plan of a signed-in login so accounts can be told apart. */
+export const codexAccountListStatus = async (account?: ResolvedHarnessAccount): Promise<HarnessAccountStatus> => {
+    const status = await codexAccountStatus(account);
+    if (status.loggedIn !== true) return status;
+    return { ...status, ...await readCodexAccountIdentity(codexHomeOf(account)) };
 };
 
 export function createCodexProvider(host: ServerPackageHost, account?: ResolvedHarnessAccount): HarnessProvider {
@@ -214,7 +227,7 @@ export function createCodexProvider(host: ServerPackageHost, account?: ResolvedH
             harnessId,
             harnessName: "Codex",
             folders: (context) => {
-                const codexHome = account?.dir ?? (process.env.CODEX_HOME?.trim() || join(homedir(), ".codex"));
+                const codexHome = codexHomeOf(account);
                 return nativeSkillFolders(context, {
                     project: [join(".agents", "skills")],
                     user: [join(codexHome, "skills"), join(homedir(), ".agents", "skills")],
@@ -283,7 +296,7 @@ export default function registerPackage(host: ServerPackageHost) {
         deployment: host.deployment,
         registry: () => host.services.require(serverServiceKey<HarnessRegistry>("harnesses")),
         createProvider: (account) => createCodexProvider(host, account),
-        status: codexAccountStatus,
+        status: codexAccountListStatus,
         signInCommand: (account) => harnessCommandLine([knownCodexCommand ?? "codex", "login"], accountEnv(account)),
         // `codex login` waits for a callback on this machine's localhost:1455;
         // a browser elsewhere can only finish the device-code flow.

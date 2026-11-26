@@ -16,6 +16,7 @@ import {
   accessProblem,
   accessSummary,
   groupAccounts,
+  nextAccountName,
   rowUsable,
   type AccessDraft,
   type AccountList,
@@ -266,12 +267,15 @@ function AccountList({ host, accounts, projectId, kit }: { host: WebPackageHost;
       {list.manageable
         ? <form className="pkg-harnesses-accounts-add" onSubmit={(event) => {
             event.preventDefault();
-            void run("add", t("action.add"), () => api.post(base, { name: newName, ...(list.canAddShared && newPrivate ? { private: true } : {}) })).then((ok) => { if (ok) setNewName(""); });
+            // The name is optional: the row's sign-in details (email, plan)
+            // tell accounts apart, and it can be renamed later.
+            const name = newName.trim() || nextAccountName(list.accounts, t);
+            void run("add", t("action.add"), () => api.post(base, { name, ...(list.canAddShared && newPrivate ? { private: true } : {}) })).then((ok) => { if (ok) setNewName(""); });
           }}>
             <div className="pkg-harnesses-accounts-add-fields">
               <TextInput uiSize="sm" aria-label={t("nameAria")} placeholder={t("namePlaceholder")} value={newName} maxLength={60} onChange={(event) => setNewName(event.target.value)} />
               {list.canAddShared && <Seg label={t("whoGroup")} value={newPrivate ? "private" : "shared"} disabled={Boolean(busy)} options={[["shared", t("scope.shared")], ["private", t("scope.private")]]} onChange={(value) => setNewPrivate(value === "private")} />}
-              <Button size="sm" type="submit" iconStart={AddIcon} busy={busy === "add"} disabled={Boolean(busy) || !newName.trim()}>{t("add")}</Button>
+              <Button size="sm" type="submit" iconStart={AddIcon} busy={busy === "add"} disabled={Boolean(busy)}>{t("add")}</Button>
             </div>
             <p className="pkg-harnesses-accounts-help">
               {addsPrivate ? t("addPrivateHint") : t("addSharedHint")}
