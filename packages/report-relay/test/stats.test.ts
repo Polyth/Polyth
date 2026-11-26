@@ -201,3 +201,12 @@ test("renderMarkdown is stable for the same input", () => {
   assert.equal(renderMarkdown("2026-11-24", [day], 7), renderMarkdown("2026-11-24", [day], 7));
   assert.ok(renderMarkdown("2026-11-24", [day], 7).includes("No reports in the window"));
 });
+
+test("a group name cannot break out of its table cell", (t) => {
+  const base = scratch();
+  t.after(base.cleanup);
+  const stats = new ReportStats(base.file, () => AT);
+  stats.record(entry({ group: "evil\\|x" }));
+  const { markdown } = stats.render(AT, 7);
+  assert.ok(markdown.includes("| evil\\\\\\|x |"), "backslash and pipe both escaped");
+});

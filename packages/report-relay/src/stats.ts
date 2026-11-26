@@ -280,7 +280,8 @@ interface Totals {
   platforms: Record<string, number>;
 }
 
-const cell = (value: string): string => value.replace(/\|/g, "\\|");
+// Backslash first: a value ending in `\` would otherwise escape the escape and reopen the cell.
+const cell = (value: string): string => value.replace(/[\\|]/g, "\\$&");
 const percent = (part: number, whole: number): string =>
   whole > 0 ? `${Math.round((part / whole) * 100)}%` : "—";
 const perInstall = (reports: number, installDays: number): string =>
