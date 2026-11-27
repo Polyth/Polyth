@@ -838,7 +838,7 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.session-bt
   border-radius: var(--look-select-radius) !important;
 }
 
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.workspace-mode-switch, .view-switcher-pill, .mobile-shortcut-track, .desktop-session-status-trigger, .ui-tabs:not(:is(.module-view, .rail-body, .panel-sheet) *), .seg:not(:is(.module-view, .rail-body, .panel-sheet) *), .ui-btn, .config-chip, .starter-chip, .hero-zone-bar, .composer-suggestion, .add-menu-tile) {
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.workspace-mode-switch, .view-switcher-pill, .mobile-shortcut-track, .desktop-session-status-trigger, .ui-tabs:not(:is(.module-view, .rail-body, .panel-sheet) *), .seg:not(:is(.module-view, .rail-body, .panel-sheet) *), .ui-btn, .config-chip, .starter-chip, .hero-zone-bar, .composer-suggestion:not([data-stack-preview]), .add-menu-tile) {
   border-radius: var(--look-control-radius) !important;
 }
 

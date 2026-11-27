@@ -246,22 +246,27 @@ test("the fold control lights every line it would fold, as one run on the card's
     });
     assert.deepEqual(await lit(), [], "nothing is lit at rest");
 
-    await page.hover(".pending-stack-fold");
-    let shown = await lit();
-    assert.deepEqual(shown.map((line) => line.name), ["session-waits", "queue-list", "composer-suggestion"], "every line that folds, in stack order");
-    assert.deepEqual(shown.map((line) => line.edge), ["start", "mid", "end"], "one run, rounded at its ends");
-    for (const line of shown) {
-      assert.ok(Math.abs(line.start) <= 0.75 && Math.abs(line.end) <= 0.75,
-        `${line.name} lights its box on the card's column (${line.start}, ${line.end})`);
-      assert.notEqual(line.wash, "rgba(0, 0, 0, 0)", `${line.name} is washed`);
-      const top = line.edge === "start" || line.edge === "both";
-      const bottom = line.edge === "end" || line.edge === "both";
-      assert.deepEqual(line.corners, [top, top, bottom, bottom],
-        `${line.name} (${line.edge}) is rounded only at the run's ends, whatever radius it has of its own`);
+    // A look forces its own radius on some lines (the suggestion's, with
+    // !important): the run stays one band in the standard look and in a look.
+    let shown: Awaited<ReturnType<typeof lit>> = [];
+    for (const look of [null, "paper"]) {
+      await page.evaluate((name) => { if (name) document.body.dataset.shellLook = name; }, look);
+      await page.hover(".pending-stack-fold");
+      shown = await lit();
+      assert.deepEqual(shown.map((line) => line.name), ["session-waits", "queue-list", "composer-suggestion"], "every line that folds, in stack order");
+      assert.deepEqual(shown.map((line) => line.edge), ["start", "mid", "end"], "one run, rounded at its ends");
+      for (const line of shown) {
+        assert.ok(Math.abs(line.start) <= 0.75 && Math.abs(line.end) <= 0.75,
+          `${line.name} lights its box on the card's column (${line.start}, ${line.end})`);
+        assert.notEqual(line.wash, "rgba(0, 0, 0, 0)", `${line.name} is washed`);
+        const top = line.edge === "start" || line.edge === "both";
+        const bottom = line.edge === "end" || line.edge === "both";
+        assert.deepEqual(line.corners, [top, top, bottom, bottom],
+          `${line.name} (${line.edge}, look ${look ?? "standard"}) is rounded only at the run's ends, whatever radius it has of its own`);
+      }
+      await page.mouse.move(1, 1);
+      assert.deepEqual(await lit(), [], "the light leaves with the pointer");
     }
-
-    await page.mouse.move(1, 1);
-    assert.deepEqual(await lit(), [], "the light leaves with the pointer");
 
     await page.hover(".pending-stack-fold");
     await page.click(".pending-stack-fold");
