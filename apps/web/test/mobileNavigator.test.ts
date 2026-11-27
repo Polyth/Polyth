@@ -22,7 +22,8 @@ test("the native app's server menu opens from the navigator's title, not a separ
   assert.match(place, /const servers = canSwitchMobileServer\(\);/);
   assert.match(place, /aria-haspopup="menu"[\s\S]*?switchMobileServer\(event\.currentTarget\)[\s\S]*?tr\("sidebar\.switchServer"\)/,
     "with one Space the title itself opens the native menu and still names the action");
-  assert.match(place, /\.\.\.\(servers \? \["separator" as const, \{[\s\S]*?label: tr\("sidebar\.switchServer"\)[\s\S]*?switchMobileServer\(buttonRef\.current\)/,
+  // spaceMenuEntries puts the extra actions after a separator, last in the menu.
+  assert.match(place, /spaceMenuEntries\(spaces, servers \? \[\{[\s\S]*?label: tr\("sidebar\.switchServer"\)[\s\S]*?switchMobileServer\(buttonRef\.current\)/,
     "with several Spaces the server menu is the last entry of the Space menu, opened at the title");
   const toolbar = source.slice(source.indexOf('className="mobile-nav-tools"'), source.indexOf('id="mobile-nav-search"'));
   assert.doesNotMatch(toolbar, /ServerIcon|switchServer|sidebar\.addProject/, "the toolbar keeps four tools: search, select, settings, close");
