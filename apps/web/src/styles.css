@@ -6189,12 +6189,14 @@ body[data-desktop-low-resource="true"] .lock-mark-frame {
 .combo { display: flex; gap: 4px; }
 .combo .kbd { font-size: var(--font-meta); padding: 4px 7px; color: var(--text-dim); background: var(--elevated); border-color: var(--hair-strong); }
 
-/* Density changes vertical rhythm while the hierarchy anchors stay stable. */
+/* Density changes vertical rhythm while the hierarchy anchors stay stable.
+   Compact is a real step down, not 2px off Balanced: a chat row keeps only
+   a few pixels of air around its one line of title. */
 html[data-density="compact"] .sidebar,
 body[data-density="compact"] .sidebar {
-  --nav-row-project: 36px;
-  --nav-row-branch: 32px;
-  --nav-row-session: 30px;
+  --nav-row-project: 32px;
+  --nav-row-branch: 28px;
+  --nav-row-session: 26px;
 }
 html[data-density="compact"] .sidebar .side-scroll,
 body[data-density="compact"] .sidebar .side-scroll { padding-block: 6px 2px; padding-inline: var(--nav-gutter); }
@@ -9084,8 +9086,9 @@ body[data-glass="clear"] .prompt-nav-panel { --prompt-nav-panel-blur: 22px; }
     color: var(--text-dim);
   }
   /* Drawer rows keep the shared type roles; only row density changes. */
+  /* Compact stays one step below Balanced here too (it used to sit above it). */
   :is(html, body)[data-density="compact"] .sidebar {
-    --nav-row-project: 34px; --nav-row-branch: 30px; --nav-row-session: 28px;
+    --nav-row-project: 31px; --nav-row-branch: 27px; --nav-row-session: 25px;
   }
   :is(html, body)[data-density="balanced"] .sidebar {
     /* Balanced on a phone was almost comfortable — pull the rhythm in so it

@@ -2069,7 +2069,11 @@ body[data-hide-borders="true"] .mobile-nav-running-ring {
 
 /* Interface density: the same preference the desktop navigator honours. */
 :is(html, body)[data-density="balanced"] .mobile-navigator { --nav-row-session: 38px; }
-:is(html, body)[data-density="compact"] .mobile-navigator { --nav-row-session: 34px; }
+:is(html, body)[data-density="compact"] .mobile-navigator { --nav-row-session: 30px; }
+/* Compact day captions keep their air above, but less of it. */
+:is(html, body)[data-density="compact"] .mobile-nav-date-divider {
+  padding-block: var(--space-2) 2px;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .mobile-nav-running-ring,

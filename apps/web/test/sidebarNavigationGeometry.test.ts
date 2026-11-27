@@ -145,7 +145,7 @@ test("sidebar geometry links worktree and session type while density controls ro
   for (const density of ["compact", "balanced", "comfortable"]) {
     assert.match(css, new RegExp(`(?:html|body)\\[data-density="${density}"\\] \\.sidebar`));
   }
-  assert.match(css, /html\[data-density="compact"\] \.sidebar,[\s\S]*?--nav-row-project:\s*36px;[\s\S]*?--nav-row-branch:\s*32px;[\s\S]*?--nav-row-session:\s*30px;/,
+  assert.match(css, /html\[data-density="compact"\] \.sidebar,[\s\S]*?--nav-row-project:\s*32px;[\s\S]*?--nav-row-branch:\s*28px;[\s\S]*?--nav-row-session:\s*26px;/,
     "compact density substantially tightens every row in the project tree");
   assert.match(css, /html\[data-density="balanced"\] \.sidebar,[\s\S]*?--nav-row-project:\s*38px;[\s\S]*?--nav-row-branch:\s*34px;[\s\S]*?--nav-row-session:\s*32px;/,
     "balanced density remains compact");

@@ -66,10 +66,17 @@ test("the compact-shell drawer nav reacts to typography and density", async () =
   const comfortable = css.match(
     /:is\(html, body\)\[data-density="comfortable"\] \.sidebar \{[^}]*--nav-row-session:\s*(\d+)px/s,
   );
-  assert.ok(balanced && comfortable, "both density steps set the drawer session-row height");
+  const compact = css.match(
+    /:is\(html, body\)\[data-density="compact"\] \.sidebar \{[^}]*--nav-row-session:\s*(\d+)px/s,
+  );
+  assert.ok(compact && balanced && comfortable, "every density step sets the drawer session-row height");
   assert.ok(
     Number(balanced![1]) < Number(comfortable![1]),
     "balanced density is denser than comfortable in the drawer",
+  );
+  assert.ok(
+    Number(compact![1]) < Number(balanced![1]),
+    "compact density is denser than balanced in the drawer",
   );
   assert.match(
     css,
