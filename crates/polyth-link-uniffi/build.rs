@@ -7,5 +7,8 @@ fn main() {
     // SONAME so the packaged libpolyth_link_uniffi.so stays loadable.
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("android") {
         println!("cargo:rustc-cdylib-link-arg=-Wl,-soname,libpolyth_link_uniffi.so");
+        // Google Play requires 16 KB page alignment; NDKs before r28 default
+        // to 4 KB.
+        println!("cargo:rustc-cdylib-link-arg=-Wl,-z,max-page-size=16384");
     }
 }

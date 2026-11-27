@@ -289,6 +289,16 @@ jobs:
           CERTIFICATE_PRIVATE_KEY: ${{ matrix.target == 'ios-app' && secrets.CERTIFICATE_PRIVATE_KEY || '' }}
           APP_STORE_APPLE_ID: ${{ matrix.target == 'ios-app' && secrets.APP_STORE_APPLE_ID || '' }}
           POLYTH_IOS_XCODE_VERSION: ${{ vars.POLYTH_IOS_XCODE_VERSION || '27.1' }}
+          # Release-signed App Bundle and Google Play upload, scoped to the
+          # Android job; unset = debug APK only. The variables override the
+          # channel's track and release status.
+          ANDROID_KEYSTORE_BASE64: ${{ matrix.target == 'android-apk' && secrets.ANDROID_KEYSTORE_BASE64 || '' }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ matrix.target == 'android-apk' && secrets.ANDROID_KEYSTORE_PASSWORD || '' }}
+          ANDROID_KEY_ALIAS: ${{ matrix.target == 'android-apk' && secrets.ANDROID_KEY_ALIAS || '' }}
+          ANDROID_KEY_PASSWORD: ${{ matrix.target == 'android-apk' && secrets.ANDROID_KEY_PASSWORD || '' }}
+          GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ matrix.target == 'android-apk' && secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON || '' }}
+          POLYTH_ANDROID_PLAY_STATUS: ${{ vars.POLYTH_ANDROID_PLAY_STATUS || '' }}
+          POLYTH_ANDROID_PLAY_TRACK: ${{ vars.POLYTH_ANDROID_PLAY_TRACK || '' }}
         run: |
           set +e
           # Stream as well as capture: a hung step still shows its progress, and

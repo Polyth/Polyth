@@ -34,6 +34,13 @@ def polythVersionCode = project.hasProperty('polythVersionCode')
     : defaultVersionCode
 def googleServicesFile = file('google-services.json')
 def polythFirebaseConfigured = googleServicesFile.isFile() && googleServicesFile.length() > 0
+// The debug build installs beside the release one under its own id, and gets
+// Firebase only when google-services.json also registers that id.
+def polythDebugIdSuffix = '.dev'
+def polythDebugFirebaseConfigured = polythFirebaseConfigured &&
+    new groovy.json.JsonSlurper().parse(googleServicesFile).client.any {
+        it.client_info?.android_client_info?.package_name == "com.polyth.mobile${polythDebugIdSuffix}".toString()
+    }
 
 def polythRustBuild = tasks.register('buildPolythLinkRust', Exec) {
     commandLine 'bash', file('../../scripts/build-polyth-link-android.sh').absolutePath
@@ -87,6 +94,11 @@ android {
         }
     }
     buildTypes {
+        debug {
+            applicationIdSuffix polythDebugIdSuffix
+            versionNameSuffix "-dev"
+            buildConfigField 'boolean', 'POLYTH_FCM_CONFIGURED', polythDebugFirebaseConfigured.toString()
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
@@ -139,4 +151,11 @@ try {
     }
 } catch(Exception e) {
     logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}
+
+// The google-services plugin fails any variant whose id has no client entry.
+if (!polythDebugFirebaseConfigured) {
+    tasks.matching { it.name == 'processDebugGoogleServices' }.configureEach {
+        enabled = false
+    }
 }

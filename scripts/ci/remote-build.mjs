@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { closeSync, cpSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, cpSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { electronBuilderFeedArgs, macPartialMetadataName, resolveFeedRepository } from "./update-feed.mjs";
@@ -43,6 +44,21 @@ const SIGNED_IOS = IOS_SIGN_VARS.every((name) => (process.env[name] ?? "").lengt
 if (!SIGNED_IOS && IOS_SIGN_VARS.some((name) => (process.env[name] ?? "").length > 0)) {
   fail(`Partial iOS signing secrets: set all of ${IOS_SIGN_VARS.join(", ")} or none`);
 }
+// A release-signed Android App Bundle needs the upload key; unset = debug APK
+// only, as before. The secrets leave process.env here so that npm scripts, cargo
+// and the debug build never see them.
+const ANDROID_SIGN_VARS = ["ANDROID_KEYSTORE_BASE64", "ANDROID_KEYSTORE_PASSWORD", "ANDROID_KEY_ALIAS",
+  "ANDROID_KEY_PASSWORD"];
+const SIGNED_ANDROID = ANDROID_SIGN_VARS.every((name) => (process.env[name] ?? "").length > 0);
+if (!SIGNED_ANDROID && ANDROID_SIGN_VARS.some((name) => (process.env[name] ?? "").length > 0)) {
+  fail(`Partial Android signing secrets: set all of ${ANDROID_SIGN_VARS.join(", ")} or none`);
+}
+const ANDROID_SECRETS = Object.fromEntries([...ANDROID_SIGN_VARS, "GOOGLE_PLAY_SERVICE_ACCOUNT_JSON"]
+  .map((name) => {
+    const value = process.env[name] ?? "";
+    delete process.env[name];
+    return [name, value];
+  }));
 
 if (FEED_ARGS.length > 0) console.log(`remote-build feed: ${FEED_ARGS.join(" ")}`);
 
@@ -329,13 +345,44 @@ function buildAndroid() {
   releaseToolsCi();
   run(npm, ["run", "build:mobile"]);
   const versions = collectReleaseVersions("android-version-env");
-  run("./gradlew", [
-    ":app:assembleDebug",
+  const gradle = (task, env) => run("./gradlew", [
+    task,
     "--stacktrace",
     `-PpolythVersionName=${versions.POLYTH_VERSION}`,
     `-PpolythVersionCode=${versions.POLYTH_ANDROID_VERSION_CODE}`,
-  ], { cwd: join(ROOT, "apps/mobile/android") });
+  ], { cwd: join(ROOT, "apps/mobile/android"), env });
+  // The side-load APK of the GitHub Release.
+  gradle(":app:assembleDebug");
   copyFiles(walk(join(ROOT, "apps/mobile/android/app/build/outputs/apk/debug")).filter((p) => p.endsWith(".apk")));
+  if (SIGNED_ANDROID) buildSignedBundle(gradle, versions);
+}
+
+/** The release-signed App Bundle, uploaded to Google Play when a service account is set. */
+function buildSignedBundle(gradle, versions) {
+  const { ANDROID_KEYSTORE_BASE64, GOOGLE_PLAY_SERVICE_ACCOUNT_JSON, ...signing } = ANDROID_SECRETS;
+  // Outside the checkout, readable by this user only, gone once gradle returns.
+  const keyDir = mkdtempSync(join(process.env.RUNNER_TEMP || tmpdir(), "polyth-android-key-"));
+  try {
+    const keystore = join(keyDir, "upload.keystore");
+    writeFileSync(keystore, Buffer.from(ANDROID_KEYSTORE_BASE64, "base64"), { mode: 0o600, flag: "wx" });
+    gradle(":app:bundleRelease", { ...signing, ANDROID_KEYSTORE_PATH: keystore });
+  } finally {
+    rmSync(keyDir, { recursive: true, force: true });
+  }
+  const bundles = walk(join(ROOT, "apps/mobile/android/app/build/outputs/bundle/release"))
+    .filter((p) => p.endsWith(".aab"));
+  if (bundles.length !== 1) fail(`Expected one signed .aab, found ${bundles.length}`);
+  if (!GOOGLE_PLAY_SERVICE_ACCOUNT_JSON) {
+    console.log("remote-build android: GOOGLE_PLAY_SERVICE_ACCOUNT_JSON is unset, the bundle is not uploaded");
+    return;
+  }
+  run(process.execPath, ["scripts/ci/play-upload.mjs", bundles[0]], {
+    env: {
+      ...versions,
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON,
+      POLYTH_ANDROID_PLAY_SUMMARY: join(OUTPUT, "google-play.json"),
+    },
+  });
 }
 
 const IOS_APP_DIR = join(ROOT, "apps/mobile/ios/App");
