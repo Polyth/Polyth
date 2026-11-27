@@ -361,7 +361,14 @@ const diagnosticEvent = (type: string): boolean =>
 
 export function registerPolythSessionControl(
   host: ServerPackageHost,
-  options: { delegations?: { noteDelegation(parentSessionId: string): void } } = {},
+  options: {
+    delegations?: {
+      noteDelegation(parentSessionId: string): void;
+      /** After a merge, discard or resolve: drop a queued merge reminder whose
+       *  list no longer holds. */
+      revalidate?(parentSessionId: string): Promise<void>;
+    };
+  } = {},
 ) {
   const spaces = new Map<string, SpaceContext>();
   const registry = host.services.require(
@@ -815,6 +822,7 @@ export function registerPolythSessionControl(
             return invalid(`"${session.title}" has unmerged changes. Merge them with agent.merge, or pass force=true to drop them`);
           }
           const released = await isolation.discard(session.id);
+          await options.delegations?.revalidate?.(ctx.sessionId);
           return {
             output: JSON.stringify({
               sessionId: session.id,
@@ -830,6 +838,7 @@ export function registerPolythSessionControl(
             return invalid(`"${session.title}" has no merge conflict to resolve; call agent.merge`);
           }
           await isolation.resolveWithAgent(session.id);
+          await options.delegations?.revalidate?.(ctx.sessionId);
           let resolveWatch: ServerSessionWatchDto | undefined;
           if (parameters.watchCaller !== false) {
             resolveWatch = await watchService().create(space, {
@@ -852,6 +861,7 @@ export function registerPolythSessionControl(
         }
         try {
           const result = await isolation.mergeDelegated(session.id);
+          await options.delegations?.revalidate?.(ctx.sessionId);
           return {
             output: JSON.stringify({
               sessionId: session.id,
@@ -871,6 +881,7 @@ export function registerPolythSessionControl(
         } catch (error) {
           const failure = error as { code?: unknown; reason?: unknown; files?: unknown; message?: unknown };
           if (failure?.code !== "conflict") throw error;
+          await options.delegations?.revalidate?.(ctx.sessionId);
           const files = Array.isArray(failure.files) ? failure.files.filter((file): file is string => typeof file === "string").slice(0, 30) : [];
           const reason = failure.reason === "target-overlap" || failure.reason === "delegated-pending" ? failure.reason : "conflict";
           return {

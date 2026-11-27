@@ -625,7 +625,13 @@ test("agent.spawn can isolate a child in its own worktree, and the delegator mer
     services,
     forSpace: () => ({ projects: projectService, sessions }),
   } as unknown as ServerPackageHost;
-  const registration = registerPolythSessionControl(host, { delegations: { noteDelegation: (id) => noted.push(id) } });
+  const revalidated: string[] = [];
+  const registration = registerPolythSessionControl(host, {
+    delegations: {
+      noteDelegation: (id) => noted.push(id),
+      revalidate: async (id) => { revalidated.push(id); },
+    },
+  });
   registry.resolve(context);
   const execute = registry.executor("harness-runtime.polyth-control")!;
 
@@ -760,6 +766,9 @@ test("agent.spawn can isolate a child in its own worktree, and the delegator mer
   }, toolContext)).output) as { merged: boolean; commit: string; into: string; finalized: boolean };
   assert.deepEqual([merged.merged, merged.into, merged.finalized], [true, "polyth/isolate/caller", true]);
   assert.ok(calls.includes("merge:isolated-child"));
+  // Two structured conflicts, one resolve and the merge each revalidate a
+  // queued merge reminder before the tool returns (before the turn can end).
+  assert.deepEqual(revalidated.splice(0), ["caller", "caller", "caller", "caller"]);
 
   children.set("quiet-child", delegatedRow("quiet-child"));
   rows.set("quiet-child", { ...projection("quiet-child", "p1", "Quiet"), parentId: "caller" });
@@ -772,6 +781,7 @@ test("agent.spawn can isolate a child in its own worktree, and the delegator mer
     parameters: { sessionId: "quiet-child", force: true },
   }, toolContext)).output) as { discarded: boolean; droppedChanges: boolean };
   assert.deepEqual([dropped.discarded, dropped.droppedChanges], [true, true]);
+  assert.deepEqual(revalidated, ["caller"], "a discard revalidates the queued reminder too");
 
   await registration.dispose();
 });

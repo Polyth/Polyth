@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { DelegatedIsolationDto, SessionProjection, SessionService, UserTurnInput } from "@polyth/contracts";
+import type { DelegatedIsolationDto, QueueItemDto, SessionProjection, SessionService, UserTurnInput } from "@polyth/contracts";
 import {
   createServerServiceRegistry,
   SERVER_SESSION_ISOLATION,
@@ -43,13 +43,37 @@ function harness() {
   } as unknown as ServerSessionIsolationService);
   const statuses = new Map<string, SessionProjection["status"]>();
   const sends: Array<{ sessionId: string; input: UserTurnInput }> = [];
+  // Mirrors the canonical send path: with `queueing` on (a turn is being
+  // admitted), a normal send waits in the queue under its client operation id.
+  const queue = new Map<string, QueueItemDto[]>();
+  const queueing = new Set<string>();
+  const removed: string[] = [];
   const sessions = {
     async snapshot(id: string) {
       return { id, projectId: "p1", title: id, status: statuses.get(id) ?? "idle", createdAt: 1, updatedAt: 1 };
     },
     async send(sessionId: string, input: UserTurnInput) {
       sends.push({ sessionId, input });
-      return {};
+      if (!queueing.has(sessionId)) return {};
+      const id = input.clientOperationId ?? `q${sends.length}`;
+      const rows = queue.get(sessionId) ?? [];
+      if (!rows.some((row) => row.id === id)) {
+        rows.push({
+          id, sessionId, position: rows.length, text: input.text, delivery: "normal", createdAt: 1,
+          ...(input.hiddenUserMessage ? { hiddenUserMessage: true } : {}),
+        });
+      }
+      queue.set(sessionId, rows);
+      return { queueId: id, queued: true };
+    },
+    async queueList(sessionId: string) {
+      return [...(queue.get(sessionId) ?? [])];
+    },
+    async queueRemove(sessionId: string, queueId: string) {
+      const rows = queue.get(sessionId) ?? [];
+      if (!rows.some((row) => row.id === queueId)) throw Object.assign(new Error("queue item not found"), { code: "not-found" });
+      queue.set(sessionId, rows.filter((row) => row.id !== queueId));
+      removed.push(queueId);
     },
   } as unknown as SessionService;
   const host = { services, sessions } as unknown as ServerPackageHost;
@@ -57,7 +81,7 @@ function harness() {
   const stop = async (sessionId: string, reason: ServerTurnStoppedEvent["reason"] = "completed") => {
     for (const listener of [...listeners]) await listener({ sessionId, reason });
   };
-  return { reminder, pending, scans, statuses, sends, stop, listeners };
+  return { reminder, pending, scans, statuses, sends, stop, listeners, queue, queueing, removed };
 }
 
 test("a completed turn with settled unmerged isolated children wakes the delegator once per pending state", async () => {
@@ -111,6 +135,91 @@ test("sessions that never delegated in isolation are scanned once, until they de
   await h.stop("plain");
   assert.deepEqual(h.scans, ["plain", "plain"]);
   assert.equal(h.sends.length, 1);
+  await h.reminder.dispose();
+});
+
+test("a reminder queued behind a turn that merges its children is withdrawn before it is delivered", async () => {
+  // 2026-11-27: the parent's turn stopped with its child settled and
+  // unmerged while the child's watch wake was already being admitted, so the
+  // reminder queued behind it. That turn merged the child, and the queue then
+  // delivered the stale reminder as a new server turn.
+  const h = harness();
+  h.pending.set("parent", [child("c11")]);
+  h.queueing.add("parent");
+  await h.stop("parent");
+  const queued = h.queue.get("parent") ?? [];
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0]!.id, h.sends[0]!.input.clientOperationId);
+
+  // The woken turn merges the child (agent.merge revalidates).
+  h.pending.set("parent", []);
+  await h.reminder.revalidate("parent");
+  assert.deepEqual(h.queue.get("parent"), [], "the stale reminder never reaches the parent");
+  assert.deepEqual(h.removed, [queued[0]!.id]);
+
+  // Its turn ends with nothing unmerged: no new reminder either.
+  h.queueing.delete("parent");
+  await h.stop("parent");
+  assert.equal(h.sends.length, 1);
+  await h.reminder.dispose();
+});
+
+test("a queued reminder that still holds is kept; one listing a merged sibling is replaced by a fresh one", async () => {
+  const h = harness();
+  h.pending.set("parent", [child("a"), child("b")]);
+  h.queueing.add("parent");
+  await h.stop("parent");
+  await h.reminder.revalidate("parent");
+  assert.equal(h.queue.get("parent")?.length, 1, "unchanged state keeps the queued reminder");
+  assert.deepEqual(h.removed, []);
+
+  // Only "a" is merged: the queued list is wrong, and the turn's own end
+  // sends one naming just "b".
+  h.pending.set("parent", [child("b")]);
+  await h.reminder.revalidate("parent");
+  assert.equal(h.queue.get("parent")?.length, 0);
+  h.queueing.delete("parent");
+  await h.stop("parent");
+  assert.equal(h.sends.length, 2);
+  assert.doesNotMatch(h.sends[1]!.input.text, /Worker a/);
+  assert.match(h.sends[1]!.input.text, /Worker b/);
+  assert.notEqual(h.sends[1]!.input.clientOperationId, h.sends[0]!.input.clientOperationId);
+  await h.reminder.dispose();
+});
+
+test("any later turn stop withdraws a queued reminder that went stale outside agent.merge", async () => {
+  const h = harness();
+  h.pending.set("parent", [child("a")]);
+  h.queueing.add("parent");
+  await h.stop("parent");
+  assert.equal(h.queue.get("parent")?.length, 1);
+  // The child was merged elsewhere (its isolation card) and the turn ahead
+  // of the reminder was aborted.
+  h.pending.set("parent", []);
+  await h.stop("parent", "aborted");
+  assert.equal(h.queue.get("parent")?.length, 0);
+  assert.equal(h.sends.length, 1);
+  await h.reminder.dispose();
+});
+
+test("a withdrawn reminder whose state returns is sent again instead of replaying the withdrawn operation", async () => {
+  const h = harness();
+  h.pending.set("parent", [child("a")]);
+  h.queueing.add("parent");
+  await h.stop("parent");
+  const first = h.sends[0]!.input.clientOperationId;
+  // The delegator sends the child more work: running, so the queued list is wrong.
+  h.pending.set("parent", [child("a", { status: "working" })]);
+  await h.reminder.revalidate("parent");
+  assert.deepEqual(h.removed, [first]);
+  // It finishes without changing anything: the same state as before.
+  h.queueing.delete("parent");
+  h.pending.set("parent", [child("a")]);
+  await h.stop("parent");
+  assert.equal(h.sends.length, 2);
+  assert.notEqual(h.sends[1]!.input.clientOperationId, first, "a fresh operation, not a replay of the withdrawn one");
+  await h.stop("parent");
+  assert.equal(h.sends[2]!.input.clientOperationId, h.sends[1]!.input.clientOperationId, "repeats still dedupe");
   await h.reminder.dispose();
 });
 

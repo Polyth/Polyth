@@ -42,7 +42,7 @@ The delegator owns integration of every isolated child. `agent.list` reports eac
 
 Polyth enforces the duty in three places:
 
-- A delegator that completes a turn while all its isolated children have settled and one still holds an isolation record is woken once with the pending list. Each distinct pending state reminds at most once; aborted or failed turns and still-running children never trigger it.
+- A delegator that completes a turn while all its isolated children have settled and one still holds an isolation record is woken once with the pending list. Each distinct pending state reminds at most once; aborted or failed turns and still-running children never trigger it. The reminder can wait in the queue behind a turn that was already being admitted (a watch wake, a person's message), so `agent.merge`, `agent.discard` and `agent.resolve` — and every later turn stop of the delegator — revalidate a queued reminder against the children's current state and withdraw it when it no longer holds; the next completed turn sends a fresh one if work is still unmerged (`packages/harness-runtime/src/delegationMerge.ts`).
 - The control tool refuses to archive an isolated child that still holds work.
 - A managed checkout cannot merge, discard or be deleted while a delegated isolation still merges into it; its isolation status lists those children as `delegated` and the isolation card links to them. Lifecycle details: [workspace isolation](../dev/workspace.md#delegated-isolation).
 
