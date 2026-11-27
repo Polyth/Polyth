@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { CATALOG_DIR, MANIFEST_FILE, loadCatalog } from "../src/entries.ts";
+import { CATALOG_DIR, MANIFEST_FILE, loadCatalog, readAgentSkill } from "../src/entries.ts";
 import { catalogStats } from "../src/catalog.ts";
 
 const manifest = (id: string, extra: Record<string, unknown> = {}): string => JSON.stringify({
@@ -94,4 +94,27 @@ test("a summary fits one line of the list", async () => {
   const { entries } = await loadCatalog(CATALOG_DIR);
   const long = entries.filter((entry) => entry.summary.length > 42).map((entry) => `${entry.id}: ${entry.summary.length}`);
   assert.deepEqual(long, []);
+});
+
+test("an entry whose agent skill file is missing or empty is a problem, not a silent Connect failure", async (t) => {
+  const agentSkill = {
+    name: "blocked-pages",
+    description: "Open a page that a captcha or a bot wall blocks, after a plain fetch failed.",
+    file: "skill.md",
+  };
+  const root = await catalogDir(t, {
+    present: manifest("present", { agentSkill }),
+    absent: manifest("absent", { agentSkill }),
+    blank: manifest("blank", { agentSkill }),
+  });
+  await writeFile(join(root, "present", "skill.md"), "# Use it\n\nWhen a page is blocked.\n", "utf8");
+  await writeFile(join(root, "blank", "skill.md"), "  \n", "utf8");
+  const { entries, problems } = await loadCatalog(root);
+  assert.deepEqual(entries.map((entry) => entry.id), ["present"]);
+  assert.deepEqual(problems.sort(), [
+    "absent: agentSkill.file skill.md is missing",
+    "blank: agentSkill.file skill.md is empty",
+  ]);
+  const read = await readAgentSkill(entries[0]!, root);
+  assert.deepEqual(read, { ok: true, instructions: "# Use it\n\nWhen a page is blocked." });
 });

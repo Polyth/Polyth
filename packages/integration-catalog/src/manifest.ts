@@ -51,6 +51,35 @@ export interface IntegrationLocalEndpoint {
   /** First run downloads a package, so the default startup timeout is too tight. */
   timeoutMs?: number;
   requires?: Array<"node" | "python" | "docker">;
+  /** The server starts an app that may be a Linux snap, see {@link IntegrationSnapData}. */
+  snapData?: IntegrationSnapData;
+}
+
+/**
+ * A local server that starts a Linux snap app, a snap browser usually. A snap
+ * cannot write hidden home folders such as `~/.local/state`, so where the host
+ * has that snap the server is given a data folder the snap can reach,
+ * `~/snap/<snap>/common/<folder>`, through the variable it reads for one.
+ */
+export interface IntegrationSnapData {
+  /** Snap name, as in `/snap/bin/<snap>`. */
+  snap: string;
+  /** Environment variable that moves the server's data folder. */
+  env: string;
+  /** One folder name inside the snap's `common` folder. */
+  folder: string;
+}
+
+/** Instructions the catalog ships for agents next to an entry's server, so a
+ *  connected tool is also one the agent knows when to reach for. Connect
+ *  installs it as a Polyth skill beside the server; Disconnect removes it. */
+export interface IntegrationAgentSkill {
+  /** Skill name: letters, digits, `-` or `_`. */
+  name: string;
+  /** When an agent should use it; what a harness matches the skill by. */
+  description: string;
+  /** Markdown instructions, relative to the entry's folder. */
+  file: string;
 }
 
 /** One allowed value of a choice input. */
@@ -134,6 +163,7 @@ export interface IntegrationManifest {
   homepage: string;
   mcp: IntegrationMcp;
   skills?: IntegrationSkill[];
+  agentSkill?: IntegrationAgentSkill;
   evidence: IntegrationEvidence;
 }
 
@@ -215,6 +245,7 @@ export function validateManifest(value: unknown, expectedId: string): string[] {
 
   errors.push(...validateMcp(value.mcp));
   if (value.skills !== undefined) errors.push(...validateSkills(value.skills));
+  if (value.agentSkill !== undefined) errors.push(...validateAgentSkill(value.agentSkill));
   errors.push(...validateEvidence(value.evidence));
 
   return errors;
@@ -287,6 +318,7 @@ function validateMcp(value: unknown): string[] {
           errors.push("mcp.local.timeoutMs must be 1000..300000");
         }
       }
+      if (local.snapData !== undefined) errors.push(...validateSnapData(local.snapData));
     }
   }
 
@@ -490,6 +522,46 @@ function validateSkills(value: unknown): string[] {
     if (typeof skill.name !== "string" || !ID_PATTERN.test(skill.name) || skill.name.length > 64) {
       errors.push(`${at}.name must be a kebab-case skill name`);
     }
+  }
+  return errors;
+}
+
+/** A snap name, as `snap` accepts one. */
+const SNAP_NAME = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
+const ENV_NAME = /^[A-Z_][A-Z0-9_]{0,63}$/;
+/** One folder name: no separator, no `..`, not hidden (a snap cannot write it). */
+const FOLDER_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const AGENT_SKILL_DESCRIPTION = { min: 40, max: 600 };
+
+function validateSnapData(value: unknown): string[] {
+  if (!isObject(value)) return ["mcp.local.snapData must be an object"];
+  const errors: string[] = [];
+  if (typeof value.snap !== "string" || !SNAP_NAME.test(value.snap)) {
+    errors.push("mcp.local.snapData.snap must be a snap name");
+  }
+  if (typeof value.env !== "string" || !ENV_NAME.test(value.env)) {
+    errors.push("mcp.local.snapData.env must be an upper-case environment variable name");
+  }
+  if (typeof value.folder !== "string" || !FOLDER_NAME.test(value.folder) || value.folder.includes("..")) {
+    errors.push("mcp.local.snapData.folder must be one visible folder name");
+  }
+  return errors;
+}
+
+function validateAgentSkill(value: unknown): string[] {
+  if (!isObject(value)) return ["agentSkill must be an object"];
+  const errors: string[] = [];
+  if (typeof value.name !== "string" || !ID_PATTERN.test(value.name) || value.name.length > 64) {
+    errors.push("agentSkill.name must be a kebab-case skill name");
+  }
+  const description = value.description;
+  if (typeof description !== "string"
+    || description.trim().length < AGENT_SKILL_DESCRIPTION.min
+    || description.length > AGENT_SKILL_DESCRIPTION.max) {
+    errors.push(`agentSkill.description must say when to use it in ${AGENT_SKILL_DESCRIPTION.min}..${AGENT_SKILL_DESCRIPTION.max} characters`);
+  }
+  if (!isSafePath(value.file) || !String(value.file).endsWith(".md")) {
+    errors.push("agentSkill.file must be a Markdown file inside the entry's folder");
   }
   return errors;
 }

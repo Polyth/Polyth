@@ -273,11 +273,15 @@ p.icat-note { margin: 0; }
 .icat-confirm { display: flex; flex-direction: column; gap: var(--space-2); width: 100%; }
 .icat-confirm p { margin: 0; color: var(--text-dim); font-size: var(--font-label); line-height: 1.4; }
 
-.icat-outcome { font-size: var(--font-label); line-height: 1.4; }
-.icat-outcome p { margin: 0; }
-.icat-outcome[data-tone="done"] { color: var(--green-on-wash); }
-.icat-outcome[data-tone="error"] { color: var(--red-ink); }
-.icat-outcome ul { margin: var(--space-1) 0 0; padding-inline-start: var(--space-4); color: var(--text-dim); font-size: var(--font-meta); }
+/* What Connect set up, inside the host Notice: plain rows on the Notice's own
+   text column, no bullets hanging outside it. */
+.icat-outcome-notes { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.icat-notice-plain {
+  display: grid; gap: var(--space-1); padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--hair); border-radius: var(--radius-card);
+  color: var(--text-dim); font-size: var(--font-meta); line-height: var(--font-meta-lh);
+}
+.icat-notice-plain strong { color: var(--text); font-size: var(--font-label); }
 
 .icat-sec { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; padding-top: var(--space-4); border-top: 1px solid var(--hair); }
 .icat-sec h3 { margin: 0; color: var(--text-dim); font-size: var(--font-label); font-weight: 600; line-height: 1.3; }

@@ -18,6 +18,10 @@ export interface InstallRecord {
   projectId?: string;
   /** Who installed it; a person-scoped record belongs to them alone. */
   userId?: string;
+  /** The entry's agent skill, when this install created it (same scope and
+   *  project as the server). The revision it was created at lets Disconnect
+   *  leave alone a skill someone has since edited. */
+  skill?: { name: string; revision: number };
   at: number;
 }
 

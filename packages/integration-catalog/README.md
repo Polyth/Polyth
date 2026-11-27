@@ -4,7 +4,7 @@ A curated, typed list of outside services the agent can be connected to: the
 MCP endpoint, how it authenticates, and what was actually verified about it —
 plus the Integrations window that shows it.
 
-**Preview.** 212 services, each probed by this repository, with its own brand
+**Preview.** 213 services, each probed by this repository, with its own brand
 tile, a package window that adapts to its pane and connecting through the host's existing MCP
 service. Probing on a schedule, importing from an upstream registry and a
 generated skill per entry are the next slices.
@@ -92,12 +92,13 @@ only, and composes the host `TextInput`, `Tabs`, `Button` and `EmptyState`.
 | Needs a key | Connect waits for the key and says why; an optional key says Optional. |
 | Connecting / disconnecting | The button's own busy spinner; the rest of the window stays usable. |
 | Connected | A "Connected" tag, the word in the row, the Connected section and tab. |
+| Just connected | No "Connected." line: the tag and the Disconnect button say it. What Connect set up (a data folder, an added or kept skill) is a host `Notice` under the button; one Disconnect left behind is the same `Notice` without a heading. |
 | Connected, switched off | "Connected, turned off", the reason, and a way to MCP settings. |
 | Connected by hand | No Disconnect (the catalog never removes what it did not add); a way to MCP settings. |
 | Disconnecting a personal key | One in-place confirmation, because the stored key is deleted. |
 | Already connected elsewhere | A 409 from a second tab refreshes to the connected state instead of an error. |
 | No project open | "The whole Space — no project is open", and the install is recorded that way. |
-| Install refused | The server's own message (an unpinned command, a local server on a sandboxed host, a bad input). |
+| Install refused | The server's own message in an error `Notice` (an unpinned command, a local server on a sandboxed host, a bad input). |
 
 `openWorkspacePane("integration-catalog", "<entry id>")` opens one service
 directly: the host hands the content `resource` and `resourceSeq`. On a phone
@@ -128,6 +129,17 @@ normalize into this shape later.
   themselves.
 - Exactly one of `mcp.remote` (an `https` URL) and `mcp.local` (argv,
   prerequisites, a startup timeout for a first-run download).
+- `mcp.local.snapData`: `{ snap, env, folder }` for a local server that starts
+  a Linux snap app, a snap browser usually. A snap cannot write hidden home
+  folders such as `~/.local/state`, so on a machine where `/snap/bin/<snap>`
+  exists Connect hands the server `~/snap/<snap>/common/<folder>` through the
+  variable `env` names (Bladebro: `BLADE_HOME`). Elsewhere the server keeps its
+  own default.
+- `agentSkill`: `{ name, description, file }`, guidance the catalog ships for
+  agents next to the server: when to reach for it and how. `file` is Markdown in
+  the entry's folder; the loader reports a missing or empty file as a broken
+  entry. `skills` is different: skills a vendor publishes in its own repository,
+  listed but not installed.
 - `mcp.auth: "token"` requires `mcp.tokenHelpUrl` — a person must know where
   the key comes from. `tokenOptional: true` means it works without one.
 - `categories`: one or two from `CATEGORY_ORDER` (the window's filter order); the
@@ -214,6 +226,16 @@ Removal only touches installations this catalog made. The ledger
 (`<Space package dir>/installs.json`) records the entry, the MCP server id and
 its scope; a server a person created by hand with the same name is reported as
 `catalogManaged: false` and is left alone.
+
+An entry with an `agentSkill` also gets its skill on Connect, through the
+host's `skills` service, in the same scope and project as the server, so a
+connected tool is one the agent knows when to use. It never fails the install:
+a skill that already holds the name is kept as it is, a person-scoped
+connection gets no skill (skills reach a project or a Space, not one person),
+and a host without a skill library connects the server alone; the reply's
+notes say which happened. The ledger records the skill and the revision it was
+created at, and Disconnect removes it only at that revision, so a skill someone
+has edited since stays.
 
 ## Brand marks
 

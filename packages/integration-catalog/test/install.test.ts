@@ -176,3 +176,35 @@ test("live servers match entries by name, and only the ledger owns removal", () 
   assert.equal(installed[0]!.projectId, "p1");
   assert.equal(installed[1]!.enabled, false);
 });
+
+const snapLocal = entry("bladebro", {
+  name: "Bladebro",
+  mcp: {
+    auth: "none",
+    local: { command: ["npx", "-y", "bladebro@4.8.4", "mcp"], snapData: { snap: "chromium", env: "BLADE_HOME", folder: "bladebro" } },
+  },
+});
+
+test("a server that starts a snap browser gets a data folder the snap can write", () => {
+  const plan = planInstall(snapLocal, { host: { home: "/home/me/", snaps: ["chromium"] } });
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  assert.deepEqual(plan.input.transport, {
+    kind: "stdio",
+    command: "npx",
+    args: ["-y", "bladebro@4.8.4", "mcp"],
+    envKeys: ["BLADE_HOME"],
+  });
+  assert.deepEqual(plan.input.secrets, { BLADE_HOME: "/home/me/snap/chromium/common/bladebro" });
+  assert.ok(plan.notes.some((note) => note.includes("~/snap/chromium/common/bladebro")), plan.notes.join(" | "));
+});
+
+test("without that snap, or without host facts, the server keeps its own default folder", () => {
+  for (const host of [undefined, { home: "/home/me", snaps: [] }, { home: "relative", snaps: ["chromium"] }]) {
+    const plan = planInstall(snapLocal, host ? { host } : {});
+    assert.equal(plan.ok, true);
+    if (!plan.ok) return;
+    assert.deepEqual(plan.input.transport, { kind: "stdio", command: "npx", args: ["-y", "bladebro@4.8.4", "mcp"], envKeys: [] });
+    assert.equal(plan.input.secrets, undefined);
+  }
+});

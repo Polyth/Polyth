@@ -5,7 +5,8 @@
 // written through `mcp.project` with the request's own Space context — the
 // package never touches a config file, and never sees a secret it did not just
 // write.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { RouteHandler, SpaceContext } from "@polyth/contracts";
@@ -17,17 +18,19 @@ import {
 } from "@polyth/plugins";
 import { brandMarkFor } from "./brand.ts";
 import { catalogStats } from "./catalog.ts";
-import { loadCatalog, type CatalogLoad } from "./entries.ts";
+import { loadCatalog, readAgentSkill, type CatalogLoad } from "./entries.ts";
 import {
   installedFrom,
   planInstall,
   serverNameFor,
+  type InstallHost,
   type InstallScope,
   type InstalledIntegration,
   type LiveInstallation,
   type McpInstallInput,
 } from "./install.ts";
-import { createInstallLedger } from "./installLedger.ts";
+import { createInstallLedger, type InstallRecord } from "./installLedger.ts";
+import type { IntegrationManifest } from "./manifest.ts";
 
 export const INTEGRATION_CATALOG_PACKAGE_ID = "integration-catalog";
 
@@ -59,6 +62,30 @@ export interface CatalogMcpService {
 
 const MCP_SERVICE = serverServiceKey<CatalogMcpService>("mcp.project");
 
+/** The skill library, as the two methods Connect and Disconnect call. Optional:
+ *  without it a server still connects, only without its skill. */
+export interface CatalogSkillService {
+  save(
+    space: SpaceContext,
+    scope: "project" | "space",
+    input: { name: string; description: string; instructions: string; expectedRevision?: number },
+    projectId?: string,
+  ): Promise<{ revision?: number }>;
+  remove(space: SpaceContext, scope: "project" | "space", name: string, projectId?: string, expectedRevision?: number): Promise<boolean>;
+}
+
+const SKILL_SERVICE = serverServiceKey<CatalogSkillService>("skills");
+
+export interface CatalogServerOptions {
+  /** What this machine offers a local server; tests replace it. */
+  installHost?: (snaps: readonly string[]) => InstallHost;
+}
+
+const defaultInstallHost = (snaps: readonly string[]): InstallHost => ({
+  home: homedir(),
+  snaps: process.platform === "linux" ? snaps.filter((name) => existsSync(`/snap/bin/${name}`)) : [],
+});
+
 const errorCode = (cause: unknown): string => {
   const code = (cause as { code?: unknown })?.code;
   return typeof code === "string" ? code : "unavailable";
@@ -73,7 +100,8 @@ const failureStatus = (code: string): number => {
   return 502;
 };
 
-export default function registerPackage(host: ServerPackageHost): ServerPackage {
+export default function registerPackage(host: ServerPackageHost, options: CatalogServerOptions = {}): ServerPackage {
+  const installHost = options.installHost ?? defaultInstallHost;
   /** Loaded once per process: the manifests ship with the build, so they
    *  change only on deploy or reload. */
   let loaded: Promise<CatalogLoad> | undefined;
@@ -82,6 +110,57 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   const mcp = (): CatalogMcpService => host.services.require(MCP_SERVICE);
   const ledger = (space: SpaceContext) =>
     createInstallLedger(host.spaceStorage(space).packageDir(host.pluginId));
+  const skills = (): CatalogSkillService | undefined => host.services.get(SKILL_SERVICE);
+
+  /** Adds an entry's agent skill beside its new server. Never fails the
+   *  install: the server is connected either way, the note says what happened. */
+  const installAgentSkill = async (
+    space: SpaceContext,
+    entry: IntegrationManifest,
+    scope: InstallScope,
+    projectId: string | undefined,
+  ): Promise<{ skill?: NonNullable<InstallRecord["skill"]>; note: string }> => {
+    const spec = entry.agentSkill!;
+    if (scope === "person") {
+      return { note: `The ${spec.name} skill was not added: skills reach a whole project or Space, and this connection is yours alone.` };
+    }
+    const library = skills();
+    if (!library) return { note: `The ${spec.name} skill was not added: this Polyth has no skill library.` };
+    const read = await readAgentSkill(entry);
+    if (!read.ok) return { note: `The ${spec.name} skill was not added: ${read.problem}.` };
+    try {
+      const saved = await library.save(space, scope, {
+        name: spec.name,
+        description: spec.description,
+        instructions: read.instructions,
+        expectedRevision: 0,
+      }, scope === "project" ? projectId : undefined);
+      return {
+        skill: { name: spec.name, revision: saved.revision ?? 1 },
+        note: `Agents also get the ${spec.name} skill, which tells them when to use ${entry.name}.`,
+      };
+    } catch (cause) {
+      if (errorCode(cause) === "conflict") {
+        return { note: `A skill named ${spec.name} already exists here, so it was kept as it is.` };
+      }
+      return { note: `The ${spec.name} skill was not added: ${cause instanceof Error ? cause.message : "the skill library refused it"}.` };
+    }
+  };
+
+  /** Removes the skill an install created, unless someone has changed it since. */
+  const removeAgentSkill = async (space: SpaceContext, record: InstallRecord): Promise<string | undefined> => {
+    const skill = record.skill;
+    const library = skills();
+    if (!skill || !library || record.scope === "person") return undefined;
+    try {
+      await library.remove(space, record.scope, skill.name, record.scope === "project" ? record.projectId : undefined, skill.revision);
+      return undefined;
+    } catch (cause) {
+      return errorCode(cause) === "conflict"
+        ? `The ${skill.name} skill was edited after it was added, so it was kept.`
+        : `The ${skill.name} skill could not be removed: ${cause instanceof Error ? cause.message : "the skill library refused"}.`;
+    }
+  };
 
   /** Live servers that match a catalog entry, plus what the ledger owns, or
    *  null when the host cannot say: "nothing connected" and "cannot read the
@@ -209,10 +288,12 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       const inputs = body.inputs && typeof body.inputs === "object" && !Array.isArray(body.inputs)
         ? (body.inputs as Record<string, unknown>)
         : undefined;
+      const snap = entry?.mcp.local?.snapData?.snap;
       const plan = planInstall(entry, {
         ...(typeof body.token === "string" ? { token: body.token } : {}),
         ...(requestedScope ? { scope: requestedScope } : {}),
         ...(inputs ? { inputs } : {}),
+        ...(snap ? { host: installHost([snap]) } : {}),
       });
       if (!plan.ok) {
         json(plan.failure === "unknown-entry" ? 404 : 400, {
@@ -238,11 +319,19 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         const created = scope === "person"
           ? await mcp().createPersonal(rc.space, plan.input)
           : await mcp().create(rc.space, plan.input, scope === "project" ? projectId : undefined);
+        const notes = [...plan.notes];
+        let skill: InstallRecord["skill"];
+        if (entry!.agentSkill) {
+          const added = await installAgentSkill(rc.space, entry!, scope, projectId);
+          skill = added.skill;
+          notes.push(added.note);
+        }
         store.add({
           entryId: entry!.id,
           serverId: created.id,
           scope,
           ...(scope === "project" && projectId ? { projectId } : {}),
+          ...(skill ? { skill } : {}),
           at: Date.now(),
         });
         json(200, {
@@ -255,7 +344,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
             enabled: created.enabled !== false,
             catalogManaged: true,
           },
-          notes: plan.notes,
+          notes,
         });
       } catch (cause) {
         const code = errorCode(cause);
@@ -274,6 +363,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       return true;
     }
     let removed = 0;
+    const notes: string[] = [];
     for (const record of records) {
       try {
         const gone = record.scope === "person"
@@ -291,9 +381,11 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
           return true;
         }
       }
+      const note = await removeAgentSkill(rc.space, record);
+      if (note) notes.push(note);
       store.forget(record.serverId);
     }
-    json(200, { removed, installed: installedFor(rc.space, load.entries, projectId) });
+    json(200, { removed, installed: installedFor(rc.space, load.entries, projectId), notes });
     return true;
   };
 

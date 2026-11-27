@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "id": "bladebro",
+  "name": "Bladebro",
+  "publisher": "Bladebro",
+  "verified": true,
+  "summary": "A stealth browser for bot-guarded pages.",
+  "description": "Bladebro drives a real Chrome or Chromium on the machine Polyth runs on, with a consistent fingerprint and a headful virtual display, so the agent can read pages that answer plain fetches and headless browsers with a captcha or a bot wall, such as Cloudflare's \"Just a moment…\" check. Five compact tools (act, see, state, run and vision) return what changed on the page instead of the whole DOM, which keeps replies short. One persistent browser profile on the host keeps cookies between runs. It needs Node.js and an installed Chrome, Chromium, Brave or Edge; the prebuilt binary arrives with the npm package.",
+  "categories": [
+    "automation",
+    "data"
+  ],
+  "status": "beta",
+  "homepage": "https://github.com/dondai44423/bladebro",
+  "mcp": {
+    "auth": "none",
+    "local": {
+      "command": [
+        "npx",
+        "-y",
+        "bladebro@4.8.4",
+        "mcp"
+      ],
+      "requires": [
+        "node"
+      ],
+      "timeoutMs": 60000,
+      "snapData": {
+        "snap": "chromium",
+        "env": "BLADE_HOME",
+        "folder": "bladebro"
+      }
+    }
+  },
+  "agentSkill": {
+    "name": "bladebro-blocked-pages",
+    "description": "Open a web page that a captcha or bot protection blocks (Cloudflare \"Just a moment…\" or Turnstile, hCaptcha, reCAPTCHA, DataDome, PerimeterX, Akamai \"Access denied\", 403/429/503 bot walls) with the Bladebro stealth browser. Use it when a fetch or a headless browser cannot get the content; not as the first choice for ordinary pages.",
+    "file": "skill.md"
+  },
+  "evidence": {
+    "checkedAt": "2026-11-27",
+    "source": "https://github.com/dondai44423/bladebro",
+    "probe": {
+      "state": "documented",
+      "note": "Invocation from the vendor's README, pinned to bladebro@4.8.4, the newest release published on 2026-11-24; the platform binary carries npm provenance and the package has no install scripts. Started on a Linux arm64 host on 2026-11-27: the MCP handshake answered as bladebro 4.8.4 with its five tools, and it passed a Cloudflare Turnstile test page after one checkbox click."
+    }
+  }
+}

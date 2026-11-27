@@ -21,6 +21,7 @@ export const BRAND_MARKS: Readonly<Record<string, BrandMark>> = {
   "azure-devops": { file: "azure-devops.png", format: "png", source: "vendor" },
   "basecamp": { file: "basecamp.svg", format: "svg", source: "simple-icons" },
   "better-stack": { file: "better-stack.svg", format: "svg", source: "simple-icons" },
+  "bladebro": { file: "bladebro.png", format: "png", source: "vendor" },
   "braintrust": { file: "braintrust.svg", format: "svg", source: "simple-icons" },
   "brex": { file: "brex.svg", format: "svg", source: "simple-icons" },
   "browser-use": { file: "browser-use.png", format: "png", source: "vendor" },

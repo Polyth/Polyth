@@ -16,6 +16,7 @@ import registerPackage, {
   LOGO_PATH,
   UNINSTALL_PATH,
   type CatalogMcpService,
+  type CatalogSkillService,
 } from "../src/serverEntry.ts";
 import type { CatalogPayload } from "../src/catalog.ts";
 import type { InstalledIntegration, McpInstallInput } from "../src/install.ts";
@@ -47,11 +48,24 @@ interface Harness {
   ledger(): Promise<{ installs: Array<{ entryId: string; serverId: string; scope: string }> }>;
   /** Make the MCP service throw on list, as a Space without MCP does. */
   failList: boolean;
+  skills: {
+    saved: Array<{ scope: string; name: string; expectedRevision?: number; projectId?: string; instructions: string }>;
+    removed: Array<{ scope: string; name: string; projectId?: string; expectedRevision?: number }>;
+  };
+}
+
+interface HarnessOptions {
+  /** Provide the host's skill library. */
+  skills?: boolean;
+  /** The skill library already holds these names, so a create conflicts. */
+  existingSkills?: string[];
+  /** Snaps this pretend machine has. */
+  snaps?: string[];
 }
 
 /** A host with the one service this package uses, a temp Space directory and
  *  an MCP service that records what it was asked to do. */
-async function harness(t: { after(fn: () => unknown): void }): Promise<Harness> {
+async function harness(t: { after(fn: () => unknown): void }, options: HarnessOptions = {}): Promise<Harness> {
   const root = await mkdtemp(join(tmpdir(), "integration-catalog-routes-"));
   t.after(() => rm(root, { recursive: true, force: true }));
 
@@ -97,8 +111,25 @@ async function harness(t: { after(fn: () => unknown): void }): Promise<Harness> 
     },
   };
 
+  const skills: Harness["skills"] = { saved: [], removed: [] };
+  const existingSkills = new Set(options.existingSkills ?? []);
+  const skillService: CatalogSkillService = {
+    async save(_space, scope, input, projectId) {
+      if (existingSkills.has(input.name)) {
+        throw Object.assign(new Error("skill changed since you loaded it"), { code: "conflict" });
+      }
+      skills.saved.push({ scope, name: input.name, instructions: input.instructions, ...(input.expectedRevision !== undefined ? { expectedRevision: input.expectedRevision } : {}), ...(projectId ? { projectId } : {}) });
+      return { revision: 1 };
+    },
+    async remove(_space, scope, name, projectId, expectedRevision) {
+      skills.removed.push({ scope, name, ...(projectId ? { projectId } : {}), ...(expectedRevision !== undefined ? { expectedRevision } : {}) });
+      return true;
+    },
+  };
+
   const services = createServerServiceRegistry();
   services.provide(serverServiceKey<CatalogMcpService>("mcp.project"), service);
+  if (options.skills) services.provide(serverServiceKey<CatalogSkillService>("skills"), skillService);
   const host = {
     pluginId: "integration-catalog",
     services: bindPackageServices(services, "integration-catalog"),
@@ -107,7 +138,9 @@ async function harness(t: { after(fn: () => unknown): void }): Promise<Harness> 
     }),
   } as unknown as ServerPackageHost;
 
-  const pkg = registerPackage(host);
+  const pkg = registerPackage(host, {
+    installHost: (wanted) => ({ home: "/home/me", snaps: wanted.filter((name) => options.snaps?.includes(name)) }),
+  });
   assert.ok(pkg.routes);
 
   return {
@@ -115,6 +148,7 @@ async function harness(t: { after(fn: () => unknown): void }): Promise<Harness> 
     removed,
     servers,
     personal,
+    skills,
     get failList() { return state.failList; },
     set failList(value: boolean) { state.failList = value; },
     async ledger() {
@@ -380,4 +414,49 @@ test("a brand mark is served from the vendored assets", async (t) => {
   assert.equal((await h.call({ method: "GET", path: `${LOGO_PATH}/../package` })).status, 404);
   assert.equal((await h.call({ method: "GET", path: `${LOGO_PATH}/linear.svg` })).status, 404);
   assert.equal((await h.call({ method: "POST", path: `${LOGO_PATH}/linear` })).status, 405);
+});
+
+test("Connect adds the entry's skill beside its server and Disconnect takes back only that copy", async (t) => {
+  const h = await harness(t, { skills: true, snaps: ["chromium"] });
+  const installed = await h.call({ method: "POST", path: INSTALL_PATH, body: { entryId: "bladebro", projectId: "p1" } });
+  assert.equal(installed.status, 200, JSON.stringify(installed.body));
+  assert.equal(h.skills.saved.length, 1);
+  const saved = h.skills.saved[0]!;
+  assert.deepEqual({ scope: saved.scope, name: saved.name, expectedRevision: saved.expectedRevision, projectId: saved.projectId }, {
+    scope: "project", name: "bladebro-blocked-pages", expectedRevision: 0, projectId: "p1",
+  });
+  assert.match(saved.instructions, /^# Blocked pages: use Bladebro/);
+  // The machine has snap Chromium, so the server is told where its data goes.
+  const created = h.created[0]!.input;
+  assert.deepEqual(created.transport, { kind: "stdio", command: "npx", args: ["-y", "bladebro@4.8.4", "mcp"], envKeys: ["BLADE_HOME"] });
+  assert.deepEqual(created.secrets, { BLADE_HOME: "/home/me/snap/chromium/common/bladebro" });
+  const notes = (installed.body as { notes: string[] }).notes;
+  assert.ok(notes.some((note) => note.includes("bladebro-blocked-pages")), notes.join(" | "));
+  const ledger = await h.ledger();
+  assert.deepEqual((ledger.installs[0] as unknown as { skill?: unknown }).skill, { name: "bladebro-blocked-pages", revision: 1 });
+
+  const removed = await h.call({ method: "POST", path: UNINSTALL_PATH, body: { entryId: "bladebro", projectId: "p1" } });
+  assert.equal(removed.status, 200, JSON.stringify(removed.body));
+  assert.deepEqual(h.skills.removed, [{ scope: "project", name: "bladebro-blocked-pages", projectId: "p1", expectedRevision: 1 }]);
+});
+
+test("Connect keeps a skill that already holds the name and does not claim it", async (t) => {
+  const h = await harness(t, { skills: true, existingSkills: ["bladebro-blocked-pages"] });
+  const installed = await h.call({ method: "POST", path: INSTALL_PATH, body: { entryId: "bladebro" } });
+  assert.equal(installed.status, 200, JSON.stringify(installed.body));
+  // No snap here, so no environment either.
+  assert.deepEqual(h.created[0]!.input.transport, { kind: "stdio", command: "npx", args: ["-y", "bladebro@4.8.4", "mcp"], envKeys: [] });
+  assert.ok((installed.body as { notes: string[] }).notes.some((note) => /already exists here, so it was kept/.test(note)));
+  const ledger = await h.ledger();
+  assert.equal((ledger.installs[0] as unknown as { skill?: unknown }).skill, undefined);
+  await h.call({ method: "POST", path: UNINSTALL_PATH, body: { entryId: "bladebro" } });
+  assert.deepEqual(h.skills.removed, []);
+});
+
+test("without a skill library the server still connects and the note says the skill is missing", async (t) => {
+  const h = await harness(t);
+  const installed = await h.call({ method: "POST", path: INSTALL_PATH, body: { entryId: "bladebro", projectId: "p1" } });
+  assert.equal(installed.status, 200, JSON.stringify(installed.body));
+  assert.equal(h.created.length, 1);
+  assert.ok((installed.body as { notes: string[] }).notes.some((note) => /no skill library/.test(note)));
 });

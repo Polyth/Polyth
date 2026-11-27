@@ -56,6 +56,10 @@
  "better-stack": {
   "simpleIcons": "betterstack"
  },
+ "bladebro": {
+  "url": "https://raw.githubusercontent.com/dondai44423/bladebro/d95b3accb4743161c25c7507320e390a38b54829/Assets/logo.png",
+  "fit": "bleed"
+ },
  "braintrust": {
   "simpleIcons": "braintrust"
  },

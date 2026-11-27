@@ -103,9 +103,29 @@ export function resolveInputs(
  * person-owned, and asking for a Space copy of a personal key is refused
  * instead of silently downgraded.
  */
+/** What the server knows about the machine a local server will run on. The
+ *  browser plans without it; the server plans again with it before installing. */
+export interface InstallHost {
+  /** The home folder of the account Polyth runs local servers as. */
+  home: string;
+  /** Snap names installed here (`/snap/bin/<name>` exists). */
+  snaps: readonly string[];
+}
+
+/** The data folder a snap-launching local server gets on this host, if any. */
+export function snapDataEnv(
+  entry: IntegrationManifest,
+  host: InstallHost | undefined,
+): { env: Record<string, string>; folder: string } | undefined {
+  const snap = entry.mcp.local?.snapData;
+  if (!snap || !host || !host.home.startsWith("/") || !host.snaps.includes(snap.snap)) return undefined;
+  const folder = `snap/${snap.snap}/common/${snap.folder}`;
+  return { env: { [snap.env]: `${host.home.replace(/\/+$/, "")}/${folder}` }, folder: `~/${folder}` };
+}
+
 export function planInstall(
   entry: IntegrationManifest | undefined,
-  options: { token?: string; scope?: InstallScope; inputs?: Readonly<Record<string, unknown>> } = {},
+  options: { token?: string; scope?: InstallScope; inputs?: Readonly<Record<string, unknown>>; host?: InstallHost } = {},
 ): InstallPlan {
   if (!entry) {
     return { ok: false, failure: "unknown-entry", message: "No integration by that name." };
@@ -164,15 +184,23 @@ export function planInstall(
     // second gate, because an unpinned command must never reach an install.
     const unpinned = localPinningErrors(local.command)[0];
     if (unpinned) return { ok: false, failure: "local-unpinned", message: unpinned };
+    // The host passes environment values to a stdio server only as stored
+    // values named in `envKeys`; a folder path is no secret, but it travels
+    // the same way and is never shown back.
+    const snap = snapDataEnv(entry, options.host);
     return {
       ok: true,
       scope: options.scope === "space" ? "space" : "project",
       input: {
         name: serverNameFor(entry),
-        transport: { kind: "stdio", command: local.command[0]!, args: local.command.slice(1), envKeys: [] },
+        transport: { kind: "stdio", command: local.command[0]!, args: local.command.slice(1), envKeys: snap ? Object.keys(snap.env) : [] },
+        ...(snap ? { secrets: snap.env } : {}),
         enabled: true,
       },
-      notes: ["Runs on the machine Polyth runs on; the first start downloads the package."],
+      notes: [
+        "Runs on the machine Polyth runs on; the first start downloads the package.",
+        ...(snap ? [`${entry.name} keeps its data in ${snap.folder}: ${local.snapData!.snap} is a snap here, and a snap cannot write hidden folders.`] : []),
+      ],
     };
   }
 

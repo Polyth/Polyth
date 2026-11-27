@@ -311,3 +311,30 @@ test("the shipped catalog: every OAuth entry offers dynamic registration", async
     .map((entry) => entry.id);
   assert.deepEqual(offenders, []);
 });
+
+test("a snap data folder names a snap, an upper-case variable and one visible folder", () => {
+  const withSnap = (snapData: unknown) => {
+    const manifest = valid("bladebro");
+    manifest.mcp = { auth: "none", local: { command: ["npx", "-y", "bladebro@4.8.4", "mcp"], snapData } };
+    return errorsOf(manifest, "bladebro");
+  };
+  assert.deepEqual(withSnap({ snap: "chromium", env: "BLADE_HOME", folder: "bladebro" }), []);
+  assert.deepEqual(withSnap({ snap: "Chromium", env: "BLADE_HOME", folder: "bladebro" }), ["mcp.local.snapData.snap must be a snap name"]);
+  assert.deepEqual(withSnap({ snap: "chromium", env: "blade_home", folder: "bladebro" }), [
+    "mcp.local.snapData.env must be an upper-case environment variable name",
+  ]);
+  for (const folder of [".blade", "a/b", "..", ""]) {
+    assert.deepEqual(withSnap({ snap: "chromium", env: "BLADE_HOME", folder }), ["mcp.local.snapData.folder must be one visible folder name"], folder);
+  }
+});
+
+test("an agent skill has a skill name, a when-to-use description and a Markdown file inside the folder", () => {
+  const withSkill = (agentSkill: unknown) => errorsOf({ ...valid(), agentSkill });
+  const description = "Open a page that a captcha or a bot wall blocks, after a plain fetch failed.";
+  assert.deepEqual(withSkill({ name: "blocked-pages", description, file: "skill.md" }), []);
+  assert.deepEqual(withSkill({ name: "Blocked Pages", description, file: "skill.md" }), ["agentSkill.name must be a kebab-case skill name"]);
+  assert.match(withSkill({ name: "blocked-pages", description: "Short.", file: "skill.md" })[0]!, /agentSkill.description/);
+  for (const file of ["../skill.md", "/etc/skill.md", "skill.txt"]) {
+    assert.deepEqual(withSkill({ name: "blocked-pages", description, file }), ["agentSkill.file must be a Markdown file inside the entry's folder"], file);
+  }
+});

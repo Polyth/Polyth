@@ -60,9 +60,42 @@ export async function loadCatalog(directory: string = CATALOG_DIR): Promise<Cata
       problems.push(...errors.map((error) => `${id}: ${error}`));
       continue;
     }
-    entries.push(parsed as IntegrationManifest);
+    const manifest = parsed as IntegrationManifest;
+    if (manifest.agentSkill) {
+      // A skill Connect would fail to read is a broken entry, found here
+      // rather than on someone's click.
+      const skill = await readAgentSkill(manifest, directory);
+      if (!skill.ok) {
+        problems.push(`${id}: ${skill.problem}`);
+        continue;
+      }
+    }
+    entries.push(manifest);
   }
 
   problems.push(...validateCatalog(entries));
   return { entries, problems };
+}
+
+/** Longest instructions an entry may ship; a skill is guidance, not a manual. */
+export const MAX_AGENT_SKILL_BYTES = 16_000;
+
+/** The instructions of an entry's `agentSkill`, read from its folder. */
+export async function readAgentSkill(
+  entry: IntegrationManifest,
+  directory: string = CATALOG_DIR,
+): Promise<{ ok: true; instructions: string } | { ok: false; problem: string }> {
+  const skill = entry.agentSkill;
+  if (!skill) return { ok: false, problem: "no agentSkill" };
+  let text: string;
+  try {
+    text = await readFile(join(directory, entry.id, skill.file), "utf8");
+  } catch {
+    return { ok: false, problem: `agentSkill.file ${skill.file} is missing` };
+  }
+  if (!text.trim()) return { ok: false, problem: `agentSkill.file ${skill.file} is empty` };
+  if (Buffer.byteLength(text) > MAX_AGENT_SKILL_BYTES) {
+    return { ok: false, problem: `agentSkill.file ${skill.file} is over ${MAX_AGENT_SKILL_BYTES} bytes` };
+  }
+  return { ok: true, instructions: text.trim() };
 }

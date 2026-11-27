@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import type { WebPackageHost } from "@polyth/web-sdk";
+import type { WebNoticeProps, WebPackageHost } from "@polyth/web-sdk";
 import {
   catalogStats,
   directorySections,
@@ -37,7 +37,22 @@ type Action =
   | { kind: "connect"; scope: InstallScope; needsToken: boolean; tokenOptional: boolean }
   | { kind: "disconnect"; catalogManaged: boolean; enabled: boolean; personalKey: boolean }
   | { kind: "blocked"; reason: "token-header-missing" | "local-unpinned" };
-type Outcome = { tone: "error" | "done"; text: string; notes: string[] } | null;
+/** A host without `Notice` still shows the words, as a plain bordered block. */
+function PlainNotice({ heading, children, tone: _tone, actions: _actions, leading: _leading, icon: _icon, iconPosition: _position, ...rest }: WebNoticeProps) {
+  return (
+    <div className="icat-notice-plain" {...rest}>
+      {heading ? <strong>{heading}</strong> : null}
+      {children}
+    </div>
+  );
+}
+
+/** What the last Connect or Disconnect left to say. Success itself needs no
+ *  words: the Connected badge and the Disconnect button already show it. */
+type Outcome =
+  | { kind: "error"; text: string }
+  | { kind: "notes"; heading?: string; notes: string[] }
+  | null;
 
 function scopeLabel(scope: InstallScope, hasProject: boolean, s: CatalogStrings): string {
   if (scope === "project") return hasProject ? s.detailScopeProject : s.detailScopeSpaceNoProject;
@@ -289,7 +304,7 @@ export default function IntegrationsView({ ui, projectId, locale, resource, reso
     const tokenValue = token.trim();
     const plan = planInstall(selected, { token: tokenValue || undefined, inputs });
     if (!plan.ok) {
-      setOutcome({ tone: "error", text: plan.message, notes: [] });
+      setOutcome({ kind: "error", text: plan.message });
       return;
     }
     setBusy({ entryId: selected.id, kind: "install" });
@@ -308,15 +323,15 @@ export default function IntegrationsView({ ui, projectId, locale, resource, reso
         return;
       }
       if (!response.ok) {
-        setOutcome({ tone: "error", text: body.message || s.errorGeneric, notes: [] });
+        setOutcome({ kind: "error", text: body.message || s.errorGeneric });
         return;
       }
-      setOutcome({ tone: "done", text: s.connectedNow, notes: body.notes ?? [] });
+      setOutcome((body.notes?.length ?? 0) > 0 ? { kind: "notes", heading: s.setUpHeading, notes: body.notes! } : null);
       setToken("");
       setShowToken(false);
       setAttempt((value) => value + 1);
     } catch {
-      setOutcome({ tone: "error", text: s.errorGeneric, notes: [] });
+      setOutcome({ kind: "error", text: s.errorGeneric });
     } finally {
       setBusy(null);
     }
@@ -329,13 +344,15 @@ export default function IntegrationsView({ ui, projectId, locale, resource, reso
     try {
       const { response, body } = await postJson(UNINSTALL_PATH, { entryId: selected.id, ...(projectId ? { projectId } : {}) });
       if (!response.ok) {
-        setOutcome({ tone: "error", text: body.message || s.errorGeneric, notes: [] });
+        setOutcome({ kind: "error", text: body.message || s.errorGeneric });
         return;
       }
       setConfirming(false);
+      // Say what stayed behind, such as a skill someone edited after Connect.
+      if ((body.notes?.length ?? 0) > 0) setOutcome({ kind: "notes", notes: body.notes! });
       setAttempt((value) => value + 1);
     } catch {
-      setOutcome({ tone: "error", text: s.errorGeneric, notes: [] });
+      setOutcome({ kind: "error", text: s.errorGeneric });
     } finally {
       setBusy(null);
     }
@@ -588,7 +605,10 @@ function Detail(props: {
 }) {
   const { ui, entry, installed, action, hasProject, busy, token, inputs, confirming, outcome, onOpenMcpSettings, s } = props;
   const { Button } = ui.components;
+  const Notice = ui.components.Notice ?? PlainNotice;
   const local = isLocal(entry);
+  // The vendor's published skills and the one the catalog ships beside the server.
+  const skillNames = [...(entry.skills ?? []).map((skill) => skill.name), ...(entry.agentSkill ? [entry.agentSkill.name] : [])];
   // The endpoint as it will be installed, with the chosen site filled in.
   const template = endpoint(entry);
   const target = template && entry.mcp.inputs?.length
@@ -690,11 +710,11 @@ function Detail(props: {
           ) : null}
         </div>
 
-        {outcome ? (
-          <div className="icat-outcome" data-tone={outcome.tone} role={outcome.tone === "error" ? "alert" : "status"}>
-            <p>{outcome.text}</p>
-            {outcome.notes.length > 0 ? <ul>{outcome.notes.map((note) => <li key={note}>{note}</li>)}</ul> : null}
-          </div>
+        {outcome?.kind === "error" ? <Notice tone="error" role="alert">{outcome.text}</Notice> : null}
+        {outcome?.kind === "notes" ? (
+          <Notice tone="info" role="status" {...(outcome.heading ? { heading: outcome.heading } : {})}>
+            <ul className="icat-outcome-notes">{outcome.notes.map((note) => <li key={note}>{note}</li>)}</ul>
+          </Notice>
         ) : null}
       </section>
 
@@ -712,7 +732,7 @@ function Detail(props: {
           {entry.mcp.auth === "oauth" || registration === "none" ? (
             <Fact label={s.detailSignInMethod}>{registration === "none" ? s.registrationNone : s.registrationDynamic}</Fact>
           ) : null}
-          {(entry.skills?.length ?? 0) > 0 ? <Fact label={s.detailSkills}>{entry.skills!.map((skill) => skill.name).join(", ")}</Fact> : null}
+          {skillNames.length > 0 ? <Fact label={s.detailSkills}>{skillNames.join(", ")}</Fact> : null}
         </dl>
       </section>
 
