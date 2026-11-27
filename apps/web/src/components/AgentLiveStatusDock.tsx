@@ -16,8 +16,9 @@ import { toggleSessionStatusPopover, useSessionStatusPopover } from "../sessionS
 import type { RenderModel } from "../reduce.ts";
 import { useSpaces } from "../spaces.ts";
 import { useStore } from "../store.ts";
+import { usePendingStackToken } from "@polyth/web-sdk/pending-stack";
 import { SubagentBranchIsland } from "./SubagentActivityDock.tsx";
-import { AgentStatusDock } from "./ui/index.ts";
+import { AgentStatusDock, FileDiffIcon, Icon } from "./ui/index.ts";
 
 export interface AgentLiveStatusDockProps {
   activity: ReturnType<typeof resolveSessionActivity>;
@@ -60,18 +61,36 @@ export default function AgentLiveStatusDock({ activity, model, files, additions,
   const elapsed = replacingTurn || model.turn?.startedAt === undefined
     ? null
     : fmtDuration(now - model.turn.startedAt);
+  const logo = (
+    <ProviderLogo
+      providerID={descriptor?.providerID ?? modelRef?.providerID}
+      providerName={descriptor?.providerName}
+      harnessId={descriptor?.harnessId ?? runtimeHarnessId}
+      size="regular"
+      tint={tint}
+    />
+  );
+  // Folded, the running turn is the line that speaks; the edited files
+  // share its row.
+  const stackRef = usePendingStackToken({
+    id: "status",
+    icon: logo,
+    lead: { text: elapsed ? `${action} · ${elapsed}` : action, rank: 0 },
+    label: elapsed ? `${presentation.name}: ${action}, ${elapsed}` : `${presentation.name}: ${action}`,
+  });
+  const filesRef = usePendingStackToken(files ? {
+    id: "files",
+    icon: <Icon icon={FileDiffIcon} size="sm" />,
+    value: files,
+    label: files,
+    rows: 0,
+  } : null);
   // In the composer's status zone the chat's active subagents hang from this
   // line (SubagentBranchIsland); placed anywhere else it stays one line.
   return (
     <SubagentBranchIsland>
       <AgentStatusDock
-        icon={<ProviderLogo
-          providerID={descriptor?.providerID ?? modelRef?.providerID}
-          providerName={descriptor?.providerName}
-          harnessId={descriptor?.harnessId ?? runtimeHarnessId}
-          size="regular"
-          tint={tint}
-        />}
+        icon={<>{logo}<span ref={stackRef} hidden /><span ref={filesRef} hidden /></>}
         model={presentation.name}
         status={action}
         elapsed={elapsed}

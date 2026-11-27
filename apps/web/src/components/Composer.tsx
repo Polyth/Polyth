@@ -245,6 +245,8 @@ import { newChatPersonDefault, newChatRouteChosen, usePersonHarnessDefault } fro
 import { contextTokensUsed } from "../reduce.ts";
 import { effectiveAttachmentSupport, attachmentModality } from "@polyth/contracts";
 import { primaryPointerIsFine, useShellMode } from "../responsiveShell.ts";
+import { PENDING_STACK_CONTAINER, usePendingStackToken } from "@polyth/web-sdk/pending-stack";
+import PendingStackSpine from "./PendingStackSpine.tsx";
 import { focusOnChatOpen } from "./composerOpenFocus.ts";
 import {
   getGuardrails, guardedModelSwitcherVisible, guardedShellAllowed, useGuardrails,
@@ -3881,6 +3883,15 @@ function ComposerBody({
     working: working || session?.status === "working",
     blocked: shellMode || Boolean(queueEdit) || creatingSession || Boolean(activeMode),
   });
+  // Folded, the stack says the suggestion in words unless the agent works;
+  // Tab still takes it.
+  const suggestionStackRef = usePendingStackToken(promptSuggestion ? {
+    id: "suggestion",
+    icon: <UiIcon icon={AssistIcon} size="sm" />,
+    accent: true,
+    lead: { text: promptSuggestion, rank: 10, hint: "Tab" },
+    label: `${tr("composer.promptSuggestionLabel")}: ${promptSuggestion}`,
+  } : null);
   const acceptPromptSuggestion = () => {
     const input = inputRef.current;
     if (!promptSuggestion || !input) return;
@@ -4927,7 +4938,7 @@ function ComposerBody({
   // it, Tab is the shortcut. It is a line of the pending stack above the card
   // (styles.css, "The pending stack above the composer").
   const suggestionChip = promptSuggestion ? (
-    <div className="composer-suggestion" role="group" aria-label={tr("composer.promptSuggestionLabel")}>
+    <div ref={suggestionStackRef} className="composer-suggestion" role="group" aria-label={tr("composer.promptSuggestionLabel")}>
       <button
         type="button"
         className="composer-suggestion-use"
@@ -4990,6 +5001,8 @@ function ComposerBody({
       style={phoneLayout && bandHeight > 0 ? { "--composer-band": `${bandHeight}px` } as CSSProperties : undefined}
       className={`composer ${widgetMode ? "composer-widget" : "composer-chat"} composer-simple${widgetMode ? "" : " composer-focus-light"}${stateClass}`}
       aria-busy={creatingSession || undefined}
+      // Its stack lines (queue, suggestion) fold with the dock's.
+      {...{ [PENDING_STACK_CONTAINER]: "" }}
     >
       {/* The project/worktree pickers only make sense before a session exists:
           in an open session the location is fixed, and picking here silently
@@ -5053,6 +5066,8 @@ function ComposerBody({
           onLevel={setChosenMentionLevel}
         />
       )}
+      {/* The folded stack's one line, right on the card. */}
+      {!widgetMode && <PendingStackSpine />}
       <GlassDock
         className={`composer-card${selectingConversation ? " is-choosing-messages" : ""}${activeMode ? " is-composer-mode" : ""}${dropHint ? " is-drop-target" : windowDrag && activeProjectId ? " is-drop-ready" : ""}`}
         {...(activeMode ? { "data-composer-mode": activeMode.id } : {})}

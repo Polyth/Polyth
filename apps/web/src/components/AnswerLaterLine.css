@@ -7,15 +7,21 @@
 .answer-later {
   min-inline-size: 0; box-sizing: border-box;
   /* The composer card's column, so the grid is measured from its edge. */
-  inline-size: min(var(--chat-measure), calc(100% - 2 * var(--gutter)));
-  margin: 0 auto var(--space-2);
+  inline-size: min(
+    var(--chat-measure),
+    calc(100% - var(--conversation-frame-inline-start, var(--gutter)) - var(--conversation-frame-inline-end, var(--gutter)))
+  );
+  margin-block: 0;
+  margin-inline: var(--conversation-frame-inline-start, auto) var(--conversation-frame-inline-end, auto);
+  /* One stack row tall: the pill is a line among lines. */
+  display: flex;
 }
 .answer-later-open {
   --answer-later-wash: color-mix(in srgb, var(--accent) 13%, transparent);
   display: inline-flex; align-items: center;
   max-inline-size: 100%; min-inline-size: 0; box-sizing: border-box;
   gap: calc(var(--composer-stack-text) - var(--composer-stack-mark) - var(--icon-sm) / 2);
-  min-block-size: max(30px, var(--hit-min));
+  min-block-size: max(var(--composer-stack-row), var(--hit-min));
   margin: 0;
   padding-block: var(--space-1);
   padding-inline: calc(var(--composer-stack-mark) - var(--icon-sm) / 2) var(--space-2);

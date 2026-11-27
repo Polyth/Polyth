@@ -12,6 +12,7 @@ import {
 import { resolveSessionActivity } from "../../../apps/web/src/sessionActivity.ts";
 import { reportGitError } from "./gitRefusal.ts";
 import { api } from "@polyth/session/web-api";
+import { usePendingStackToken } from "@polyth/web-sdk/pending-stack";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import AgentLiveStatusDock from "../../../apps/web/src/components/AgentLiveStatusDock.tsx";
 import {
@@ -250,6 +251,17 @@ export default function PendingChangesBar() {
     ? tr("pendingchangesbar.showLess")
     : tr("pendingchangesbar.moreValue", { count: overflow });
 
+  // Folded, the edited files are their count (the running turn's own line
+  // says it while the agent works).
+  const settled = !working && !spawning && !awaitingTurn && count > 0;
+  const stackRef = usePendingStackToken(settled ? {
+    id: "files",
+    icon: <Icon icon={FileDiffIcon} size="sm" />,
+    value: String(count),
+    label: title,
+    rows: detailsOpen ? 1 + visible.length + (overflow > 0 ? 1 : 0) : 1,
+  } : null);
+
   if (working) {
     return (
       <AgentLiveStatusDock
@@ -295,7 +307,7 @@ export default function PendingChangesBar() {
 
   if (!detailsOpen) {
     return (
-      <section className="pending-changes-bar pending-changes-bar--collapsed">
+      <section ref={stackRef} className="pending-changes-bar pending-changes-bar--collapsed">
         <RunSummary
           title={title}
           state="completed"
@@ -314,7 +326,7 @@ export default function PendingChangesBar() {
   }
 
   return (
-    <section className="pending-changes-bar" aria-label={title}>
+    <section ref={stackRef} className="pending-changes-bar" aria-label={title}>
       <div className="pending-changes-body">
         <div className="pending-changes-lead">
           <span className="pending-changes-icon" aria-hidden="true">

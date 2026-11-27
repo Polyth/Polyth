@@ -6,6 +6,7 @@
 // State lives in @polyth/web-sdk/answer-later; docs/dev/ui.md "Answer later".
 import type { RenderModel } from "../reduce.ts";
 import { answerLaterKey, isDeferred, openAnswerLater, useAnswerLaterVersion } from "@polyth/web-sdk/answer-later";
+import { usePendingStackToken } from "@polyth/web-sdk/pending-stack";
 import { tr } from "../i18n/index.ts";
 import { ChevronRightIcon, HelpIcon, Icon } from "./ui/index.ts";
 import "./AnswerLaterLine.css";
@@ -40,12 +41,20 @@ export default function AnswerLaterLine({ sessionId, model }: {
   model: Pick<RenderModel, "questions" | "permissions">;
 }) {
   useAnswerLaterVersion();
-  if (!sessionId) return null;
-  const { questions, approvals } = waitingItems(sessionId, model);
-  if (questions.length + approvals.length === 0) return null;
-  const label = waitingLabel(questions.length, approvals.length);
+  const { questions, approvals } = sessionId ? waitingItems(sessionId, model) : { questions: [], approvals: [] };
+  const count = questions.length + approvals.length;
+  const label = count > 0 ? waitingLabel(questions.length, approvals.length) : "";
+  // Folded, the stack keeps them in sight: a count with an accent dot.
+  const stackRef = usePendingStackToken(count > 0 ? {
+    id: "answer-later",
+    icon: <Icon icon={HelpIcon} size="sm" />,
+    value: String(count),
+    attention: true,
+    label,
+  } : null);
+  if (count === 0) return null;
   return (
-    <div className="answer-later">
+    <div ref={stackRef} className="answer-later">
       <button
         type="button"
         className="answer-later-open"

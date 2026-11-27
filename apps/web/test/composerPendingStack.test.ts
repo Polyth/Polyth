@@ -47,11 +47,17 @@ async function fixture(): Promise<string> {
     import { api } from "@polyth/session/web-api";
     import Composer from "./components/Composer.tsx";
     import AgentLiveStatusDock from "./components/AgentLiveStatusDock.tsx";
+    import AnswerLaterLine from "./components/AnswerLaterLine.tsx";
+    import SessionWaitsLine from "./components/SessionWaitsLine.tsx";
+    import SubagentActivityDock, { SubagentBranchScope } from "./components/SubagentActivityDock.tsx";
+    import { answerLaterKey, deferAnswerLater } from "@polyth/web-sdk/answer-later";
     import { buildModel } from "./reduce.ts";
     import { resolveSessionActivity } from "./sessionActivity.ts";
     import * as store from "./store.ts";
     import { setUiSettings } from "./uiPrefs.ts";
     const SID = "s1";
+    // "#lines": a chat at rest with every host line of the stack at once.
+    const LINES = location.hash === "#lines";
     const OPUS = { providerID: "anthropic", modelID: "opus" };
     const QUEUE = [
       { id: "q1", sessionId: SID, position: 0, text: "First queued prompt with enough words to run off the row and truncate", delivery: "queue", createdAt: 1 },
@@ -72,6 +78,9 @@ async function fixture(): Promise<string> {
       const activity = resolveSessionActivity(session, model.turn, []);
       return h("div", { className: "focus-conversation" },
         h("div", { className: "conversation-composer-dock" },
+          LINES ? h(AnswerLaterLine, { sessionId: SID, model }) : null,
+          LINES ? h(SessionWaitsLine, { waits: session?.waits, idle: true }) : null,
+          LINES ? h(SubagentBranchScope, { sessionId: SID, model }, h(SubagentActivityDock)) : null,
           activity.working ? h(AgentLiveStatusDock, { activity, model }) : null,
           h(Composer)));
     }
@@ -79,14 +88,23 @@ async function fixture(): Promise<string> {
     store.publishProjectList(ticket, [{ id: "p1", path: "/repo", name: "Repo", createdAt: 0 }]);
     store.activateProject("p1");
     store.setModels([{ providerID: "anthropic", modelID: "opus", name: "Opus", connected: true, harnessId: "claude", context: 200000 }]);
+    const base = { projectId: "p1", updatedAt: Date.now(), attention: { questions: 0, permissions: 0, unread: 0 }, model: OPUS, resolvedHarnessId: "claude" };
     store.setSessions("p1", [{
-      id: SID, projectId: "p1", title: "Stack", status: "working", createdAt: 1, updatedAt: 1, lastTurnAt: 1,
-      attention: { questions: 0, permissions: 0, unread: 0 }, model: OPUS, resolvedHarnessId: "claude",
+      ...base, id: SID, title: "Stack", status: LINES ? "idle" : "working", createdAt: 1, lastTurnAt: 1,
       contextWindow: { limitTokens: 200000, usedTokens: 68000, source: "native", updatedAt: Date.now(), harnessId: "claude" },
-    }]);
+      ...(LINES ? { waits: [{ id: "w", kind: "seconds", deadline: Date.now() + 12360000 }], promptSuggestion: "Check the readings" } : {}),
+    }, ...(LINES ? [
+      { ...base, id: "c1", parentId: SID, title: "Check the sensors", status: "working", createdAt: Date.now() - 9000 },
+    ] : [])]);
     store.activateSession(SID);
     store.applyEvent({ id: "e1", sessionId: SID, seq: 1, time: Date.now(), type: "turn/started", data: { turnId: "t", model: OPUS, harnessId: "claude" }, v: 1 });
-    store.applyEvent({ id: "e2", sessionId: SID, seq: 2, time: Date.now(), type: "tool/call", data: { callId: "c", tool: "bash", input: { command: "npm test", description: "Run the tests" } }, v: 1 });
+    if (LINES) {
+      store.applyEvent({ id: "e2", sessionId: SID, seq: 2, time: Date.now(), type: "question/asked", data: { requestId: "qq", questions: [{ question: "Which zone?", header: "Zone", options: [{ label: "North" }] }] }, v: 1 });
+      store.applyEvent({ id: "e3", sessionId: SID, seq: 3, time: Date.now(), type: "turn/stopped", data: { turnId: "t", reason: "completed" }, v: 1 });
+      deferAnswerLater([answerLaterKey("question", SID, "qq")]);
+    } else {
+      store.applyEvent({ id: "e2", sessionId: SID, seq: 2, time: Date.now(), type: "tool/call", data: { callId: "c", tool: "bash", input: { command: "npm test", description: "Run the tests" } }, v: 1 });
+    }
     window.__look = (look, mode) => {
       store.updateSettings({ appearanceMode: mode, themeStyle: "liquid-glass" });
       setUiSettings({ shellLook: look });
@@ -116,17 +134,17 @@ async function fixture(): Promise<string> {
     </body></html>`;
 }
 
-async function open(phone: boolean, tablet = false): Promise<Page> {
+async function open(phone: boolean, tablet = false, hash = ""): Promise<Page> {
   assert.ok(browser);
   const context = await browser.newContext(phone
     ? { viewport: { width: tablet ? 820 : 390, height: tablet ? 1100 : 760 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true }
     : { viewport: { width: 1100, height: 760 } });
   await context.route(`${ORIGIN}/**`, (route) => route.fulfill({ contentType: "text/html", body: html }));
   const page = await context.newPage();
-  await page.goto(`${ORIGIN}/`);
+  await page.goto(`${ORIGIN}/${hash}`);
   await page.waitForFunction(() => (window as unknown as { __ready?: boolean }).__ready === true);
   await page.waitForSelector(".queue-chip[role='listitem']");
-  await page.waitForSelector(".composer-stop-primary");
+  if (!hash) await page.waitForSelector(".composer-stop-primary");
   return page;
 }
 
@@ -326,5 +344,128 @@ test("desktop: history never shows through the plateless lines, with animations 
     } finally {
       await context.close();
     }
+  }
+});
+
+// One family: every line of the stack shares the row, the columns, the type and
+// the inks, lines abut, and the one gap is between the last line and the card.
+const LINE_ROWS = [
+  [".answer-later-open", ".answer-later-mark", ".answer-later-count"],
+  [".session-waits-row", ".session-waits-mark", ".session-waits-text"],
+  [".agent-status-dock", ".agent-status-dock-icon", ".agent-status-dock-state"],
+  [".subagent-branch-row", ".subagent-branch-mark", ".subagent-branch-title"],
+  [".queue-chip[role='listitem']:nth-child(1)", ".queue-chip[role='listitem']:nth-child(1) .queue-mark", ".queue-chip[role='listitem']:nth-child(1) .queue-text"],
+  [".queue-chip[role='listitem']:nth-child(2)", ".queue-chip[role='listitem']:nth-child(2) .queue-mark", ".queue-chip[role='listitem']:nth-child(2) .queue-text"],
+  [".composer-suggestion", ".composer-suggestion-icon", ".composer-suggestion-text"],
+] as const;
+
+for (const device of ["desktop", "phone", "tablet"] as const) {
+  test(`${device}: every line shares one rhythm, grid, type and ink, in both directions`, { skip: !CHROME }, async () => {
+    const page = await open(device !== "desktop", device === "tablet", "#lines");
+    try {
+      await page.waitForSelector(".composer-suggestion");
+      await page.waitForSelector(".subagent-branch-row");
+      for (const dir of ["ltr", "rtl"] as const) {
+        await page.evaluate((next) => {
+          document.documentElement.dir = next;
+          // The interface and chat font sizes differ: the stack follows the chat's.
+          document.documentElement.style.setProperty("--ui-font-scale", ".9");
+        }, dir);
+        await page.waitForTimeout(500);
+        const facts = await page.evaluate(([rows, rtl]) => {
+          const card = document.querySelector(".composer-card")!.getBoundingClientRect();
+          const box = (selector: string) => document.querySelector(selector)!.getBoundingClientRect();
+          const fromStart = (r: DOMRect) => rtl ? card.right - r.right : r.left - card.left;
+          const centreFromStart = (r: DOMRect) => fromStart(r) + r.width / 2;
+          const centreFromEnd = (selector: string) => {
+            const r = box(selector);
+            return (rtl ? r.left - card.left : card.right - r.right) + r.width / 2;
+          };
+          const lines = rows.map(([row, mark, text]) => {
+            const style = getComputedStyle(document.querySelector(text!)!);
+            return {
+              name: row!,
+              top: box(row!).top,
+              bottom: box(row!).bottom,
+              height: box(row!).height,
+              inside: box(row!).left >= card.left - 0.5 && box(row!).right <= card.right + 0.5,
+              mark: centreFromStart(box(mark!)),
+              // The text box starts on the column whichever way its words run.
+              text: fromStart(box(text!)),
+              type: `${style.fontSize} ${style.fontWeight} ${style.lineHeight}`,
+              ink: style.color,
+            };
+          });
+          const phoneRow = getComputedStyle(document.querySelector(".subagent-branch-go")!).display === "none";
+          return {
+            lines,
+            toCard: card.top - lines.at(-1)!.bottom,
+            ends: [
+              centreFromEnd(".composer-suggestion-dismiss svg"),
+              centreFromEnd(phoneRow ? ".subagent-branch-stop svg" : ".subagent-branch-go svg"),
+              ...(document.querySelector(".queue-open svg") ? [centreFromEnd(".queue-open svg")] : []),
+            ],
+          };
+        }, [LINE_ROWS.map((row) => [...row]), dir === "rtl"] as const);
+        const at = `${device}/${dir}`;
+        const touch = device !== "desktop";
+        const [first, ...others] = facts.lines;
+        const step = 22;
+        for (const line of facts.lines) {
+          const branch = line.name === ".subagent-branch-row";
+          const queued = line.name.startsWith(".queue-chip");
+          assert.ok(line.inside, `${at} ${line.name}: stays in the card's column`);
+          if (!branch) {
+            const row = touch && !queued ? 44 : 28;
+            assert.ok(Math.abs(line.height - row) <= (line.name === ".composer-suggestion" && touch ? 8 : 0.5), `${at} ${line.name}: one row (${line.height} vs ${row})`);
+          }
+          // A subagent hangs one step in: its mark on the words' column.
+          const mark = branch ? first!.text + 8 : first!.mark;
+          const text = branch ? first!.text + step : first!.text;
+          assert.ok(Math.abs(line.mark - mark) <= 1, `${at} ${line.name}: mark column (${line.mark} vs ${mark})`);
+          assert.ok(Math.abs(line.text - text) <= 1, `${at} ${line.name}: text column (${line.text} vs ${text})`);
+        }
+        for (const line of others) {
+          assert.equal(line.type, first!.type, `${at} ${line.name}: one type`);
+          if (line.name !== ".agent-status-dock") assert.equal(line.ink, facts.lines[1]!.ink, `${at} ${line.name}: one ink`);
+        }
+        assert.equal(facts.lines[2]!.ink, facts.lines[1]!.ink, `${at}: the resting status words share the ink`);
+        // The queue block is one touch target around its rows; elsewhere lines abut.
+        facts.lines.slice(1).forEach((line, index) => {
+          const gap = line.top - facts.lines[index]!.bottom;
+          assert.ok(Math.abs(gap) <= 0.5, `${at}: no gap between ${facts.lines[index]!.name} and ${line.name} (${gap})`);
+        });
+        assert.ok(Math.abs(facts.toCard - 4) <= 0.5, `${at}: one gap to the card (${facts.toCard})`);
+        for (const end of facts.ends) assert.ok(Math.abs(end - first!.mark) <= 1, `${at}: trailing glyphs share the end column (${facts.ends.join(", ")} vs ${first!.mark})`);
+      }
+    } finally {
+      await page.context().close();
+    }
+  });
+}
+
+test("desktop: the card keeps the stack's gap under whichever line comes last", { skip: !CHROME }, async () => {
+  const page = await open(false, false, "#lines");
+  try {
+    await page.waitForSelector(".composer-suggestion");
+    const gaps = await page.evaluate(async () => {
+      const settle = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const gap = (selector: string) => document.querySelector(".composer-card")!.getBoundingClientRect().top
+        - document.querySelector(selector)!.getBoundingClientRect().bottom;
+      const result: number[] = [gap(".composer-suggestion")];
+      document.querySelector(".composer-suggestion")!.remove();
+      await settle();
+      result.push(gap(".queue-chip[role='listitem']:last-child"));
+      document.querySelector(".queue-list")!.remove();
+      await settle();
+      result.push(gap(".subagent-island"));
+      document.querySelector(".subagent-island")!.remove();
+      await settle();
+      result.push(gap(".session-waits-row"));
+      return result;
+    });
+    assert.deepEqual(gaps.map(Math.round), [4, 4, 4, 4]);
+  } finally {
+    await page.context().close();
   }
 });

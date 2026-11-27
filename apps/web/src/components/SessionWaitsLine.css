@@ -8,8 +8,12 @@
    at rest in any look; hover is the suggestion line's own. */
 .session-waits {
   min-inline-size: 0; box-sizing: border-box;
-  inline-size: min(var(--chat-measure), calc(100% - 2 * var(--gutter)));
-  margin: 0 auto var(--space-1);
+  inline-size: min(
+    var(--chat-measure),
+    calc(100% - var(--conversation-frame-inline-start, var(--gutter)) - var(--conversation-frame-inline-end, var(--gutter)))
+  );
+  margin-block: 0;
+  margin-inline: var(--conversation-frame-inline-start, auto) var(--conversation-frame-inline-end, auto);
   padding-inline-end: var(--composer-stack-end);
   color: var(--chat-ink-dim);
   font-size: var(--font-composer-stack);
@@ -21,7 +25,8 @@
   gap: var(--session-waits-gap);
   min-block-size: max(var(--composer-stack-row), var(--hit-min));
   margin: 0;
-  padding: var(--space-1) var(--space-2) var(--space-1) calc(var(--composer-stack-mark) - var(--icon-sm) / 2);
+  padding-block: var(--space-1);
+  padding-inline: calc(var(--composer-stack-mark) - var(--icon-sm) / 2) var(--space-2);
   border: 0; border-radius: var(--radius-control);
   background: none; color: inherit; text-align: start;
   font: inherit; line-height: 1.35;

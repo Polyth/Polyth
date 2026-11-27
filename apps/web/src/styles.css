@@ -3596,7 +3596,7 @@ body[data-desktop-low-resource="true"] .timeline > .rewind-leaving { animation: 
 .composer-suggestion {
   display: flex; align-items: center;
   min-inline-size: 0; box-sizing: border-box;
-  margin: 0 0 var(--space-1);
+  margin: 0;
   padding-inline-end: calc(var(--composer-stack-end) - (max(var(--composer-stack-control), var(--hit-min)) - var(--icon-sm)) / 2);
   color: var(--text-dim);
 }
@@ -3657,7 +3657,7 @@ body[data-desktop-low-resource="true"] .timeline > .rewind-leaving { animation: 
    The sentence is the question, so it wraps rather than ellipsises. */
 .mention-access {
   min-inline-size: 0; box-sizing: border-box;
-  margin: 0 0 var(--space-1);
+  margin: 0;
   padding-inline-start: calc(var(--composer-stack-mark) - var(--icon-sm) / 2);
   padding-inline-end: calc(var(--composer-stack-end) - (max(var(--composer-stack-control), var(--hit-min)) - var(--icon-sm)) / 2);
   color: var(--chat-ink-dim);
@@ -3675,7 +3675,7 @@ body[data-desktop-low-resource="true"] .timeline > .rewind-leaving { animation: 
   font-size: calc(var(--icon-sm) * .62);
 }
 .mention-access-check { display: inline-grid; flex: none; place-items: center; color: var(--chat-ink-green); }
-.mention-access-text { flex: 0 1 auto; min-inline-size: 0; line-height: 1.25; overflow-wrap: anywhere; text-wrap: pretty; }
+.mention-access-text { flex: 0 1 auto; min-inline-size: 0; line-height: 1.35; overflow-wrap: anywhere; text-wrap: pretty; }
 .mention-access[data-attention] .mention-access-text {
   color: color-mix(in srgb, var(--chat-wash-anchor) var(--chat-wash-dim), var(--text));
 }
@@ -7032,7 +7032,7 @@ body[data-chatwidth="ultrawide"] .bubble, body[data-chatwidth="ultrawide"] .reas
   min-width: 0;
   display: flex;
   flex-direction: column;
-  margin: 0 0 var(--space-1);
+  margin: 0;
 }
 .queue-block { position: relative; min-width: 0; }
 .queue-prompts {
@@ -7080,7 +7080,7 @@ body[data-chatwidth="ultrawide"] .bubble, body[data-chatwidth="ultrawide"] .reas
   inline-size: var(--icon-sm);
   display: grid;
   place-items: center;
-  color: var(--faint);
+  color: var(--muted);
 }
 .queue-chip .queue-grip {
   opacity: 0;
@@ -7100,9 +7100,9 @@ body[data-chatwidth="ultrawide"] .bubble, body[data-chatwidth="ultrawide"] .reas
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--font-composer-stack);
-  line-height: var(--font-response-lh);
+  line-height: 1.35;
 }
-.queue-chip .queue-text.queue-text-wrap { white-space: normal; text-wrap: pretty; line-height: 1.35; }
+.queue-chip .queue-text.queue-text-wrap { white-space: normal; text-wrap: pretty; }
 .queue-chip .queue-actions {
   flex: none;
   display: flex;
@@ -7170,7 +7170,6 @@ body[data-chatwidth="ultrawide"] .bubble, body[data-chatwidth="ultrawide"] .reas
   color: var(--muted);
   font: inherit;
   font-size: var(--font-meta);
-  font-weight: 500;
   cursor: pointer;
 }
 button.queue-fold:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
@@ -10633,23 +10632,52 @@ body:not([data-glass="off"]) .turn-rate-limit .turn-rate-limit-model .picker-chi
 }
 .conversation-composer-dock > * { pointer-events: auto; }
 /* The pending stack above the composer: lines of text, not cards. Top to bottom,
-   the agent's status or the edited files with any subagents, the queued prompts
-   and the suggested next prompt, then the composer card, the one surface here.
-   No line paints a plate, border, shadow or glass in any style or look, and all
-   of them share one grid (--composer-stack-*, tokens.css). The chat inks keep
-   them readable on any wallpaper. Under a status line the composer drops its
-   density's top padding: the line's own row is the air. */
+   the questions waiting for later, the waits, the agent's status or the edited
+   files with any subagents, the queued prompts and the suggested next prompt,
+   then the composer card, the one surface here. No line paints a plate, border,
+   shadow or glass in any style or look, and all of them share one grid
+   (--composer-stack-*, tokens.css): the same row, the same columns, one type
+   size, the words in --text-dim and their glyphs in --muted. The chat inks keep
+   them readable on any wallpaper. Lines abut; whichever line comes last, the
+   stack's one gap, --space-1, parts it from the card, in place of the
+   density's top padding. */
 .conversation-composer-dock:has(.agent-status-dock, .pending-changes-bar, .subagent-island) > .composer {
   padding-block-start: 0;
 }
+.conversation-composer-dock:has(.answer-later, .session-waits, .queue-list, .composer-suggestion, .mention-access) > .composer {
+  padding-block-start: 0;
+}
+.conversation-composer-dock:has(.answer-later, .session-waits, .agent-status-dock, .pending-changes-bar, .subagent-island, .queue-list, .composer-suggestion, .mention-access) > .composer > .composer-card {
+  margin-block-start: var(--space-1);
+}
+/* Only the first line may reach up into the timeline's bottom space; a line
+   under another would take that line's taps, so it stands its target tall. */
+.conversation-composer-dock > :is(.answer-later, .composer-notice-row, .pending-changes-bar, .placed-mini-widget:has(> .pending-changes-bar)) ~ * {
+  --composer-stack-pull: 0px;
+}
 :is(.conversation-composer-dock, .conversation-composer-dock > .placed-mini-widget) > .agent-status-dock {
   --agent-status-row: calc(var(--composer-stack-row) + var(--composer-stack-reach));
-  margin-block-start: calc(-1 * var(--composer-stack-reach));
-  padding-block: var(--composer-stack-reach) 0;
-  padding-inline: calc(var(--composer-stack-mark) - var(--icon-md) / 2) var(--composer-stack-end);
-  column-gap: calc(var(--composer-stack-text) - var(--composer-stack-mark) - var(--icon-md) / 2);
+  margin-block-start: calc(-1 * var(--composer-stack-pull, var(--composer-stack-reach)));
+  padding-block: var(--composer-stack-pull, var(--composer-stack-reach)) 0;
+  padding-inline: calc(var(--composer-stack-mark) - var(--icon-sm) / 2) var(--composer-stack-end);
+  column-gap: calc(var(--composer-stack-text) - var(--composer-stack-mark) - var(--icon-sm) / 2);
 }
-.conversation-composer-dock .agent-status-dock-state { font-size: var(--font-composer-stack); }
+/* The status primitive's own sizes give way to the stack's: its type follows
+   the chat's font size like every other line (elsewhere it follows the
+   interface's), its mark is --icon-sm, and its words, with the light through
+   them, are painted from --muted: here that is the stack's ink. */
+.conversation-composer-dock :is(.agent-status-dock, .subagent-island) { --text-scale: var(--chat-font-scale, 1); }
+.conversation-composer-dock .agent-status-dock-icon,
+.conversation-composer-dock .agent-status-dock-icon > :not(i),
+.conversation-composer-dock .agent-status-dock-icon :is(svg, img) {
+  inline-size: var(--icon-sm);
+  block-size: var(--icon-sm);
+}
+.conversation-composer-dock .agent-status-dock-state {
+  --muted: var(--text-dim);
+  font-size: var(--font-composer-stack);
+}
+.conversation-composer-dock .agent-status-dock-primary { line-height: 1.35; }
 .conversation-composer-dock .agent-status-dock-time { color: var(--faint); }
 /* Full widgets placed "Above the composer" share the composer's column. */
 .conversation-composer-dock > .placed-slot-widget {
@@ -20025,6 +20053,14 @@ body .ui-btn .ui-spinner {
       + var(--control-h-sm) + var(--space-5)
     );
   }
+  /* The pending stack stands in the composer's column, lane included, so its
+     trailing glyphs end on the card. */
+  .app-shell:not(:has(.railbar-open:not(.railbar-dynamic))):not(:has(.railbar[data-rail-motion="exiting"]:not(.railbar-dynamic))):not(:has(> .railbar[data-rail-strip="none"])) .conversation-composer-dock {
+    --conversation-frame-inline-end: calc(
+      max(var(--gutter), (100% - var(--chat-measure)) / 2)
+      + var(--control-h-sm) + var(--space-5)
+    );
+  }
   /* The transcript's strip lane (its scrollbar's border) is part of that
      clearance. */
   .app-shell:not(:has(.railbar-open:not(.railbar-dynamic))):not(:has(.railbar[data-rail-motion="exiting"]:not(.railbar-dynamic))):not(:has(> .railbar[data-rail-strip="none"])) .timeline-viewport > .timeline {
@@ -20840,6 +20876,11 @@ body[data-activity-style="chip"]:is(:not([data-shell-look]), [data-shell-look="s
   /* This frame is not capped by the reading measure, so neither is the status
      line: it ends with the composer under it. */
   .agent-status-dock {
+    width: calc(100% - var(--conversation-frame-inline-start) - var(--conversation-frame-inline-end));
+  }
+  /* Every other line of the pending stack ends with it too. */
+  :is(.conversation-composer-dock, .conversation-composer-dock > .placed-mini-widget) > :is(.answer-later, .subagent-island, .pending-changes-bar),
+  .conversation-composer-dock .session-waits {
     width: calc(100% - var(--conversation-frame-inline-start) - var(--conversation-frame-inline-end));
   }
   /* The bookmark rests under the floating session actions: the same frame edge,

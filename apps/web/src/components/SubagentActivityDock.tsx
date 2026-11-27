@@ -61,7 +61,8 @@ import {
 import { subagentActivityLabel } from "./sidebar/SubagentCount.tsx";
 import { AgentStatusDock, Button, IconButton } from "./ui/index.ts";
 import UiIcon from "./ui/Icon.tsx";
-import { PauseIcon, PlayIcon, ShieldAlertIcon, StopIcon } from "./ui/icons.ts";
+import { BranchIcon, PauseIcon, PlayIcon, ShieldAlertIcon, StopIcon } from "./ui/icons.ts";
+import { usePendingStackToken } from "@polyth/web-sdk/pending-stack";
 import PausedMark from "./PausedMark.tsx";
 import "./SubagentActivityDock.css";
 
@@ -699,9 +700,21 @@ function BranchTally({ tally }: { tally: SubagentTally }) {
  */
 export function SubagentBranchIsland({ children }: { children: ReactElement }) {
   const branch = useContext(BranchContext);
+  // Folded, the branch is its count; an ask below it keeps an accent dot.
+  const count = branch?.rows.length ?? 0;
+  const listed = branch ? (branch.showAll ? count : Math.min(count, LISTED_ROWS)) : 0;
+  const stackRef = usePendingStackToken(branch && count > 0 ? {
+    id: "subagents",
+    icon: <UiIcon icon={BranchIcon} size="sm" />,
+    value: String(count),
+    attention: branch.rows.some((row) => row.ask !== undefined),
+    label: tr("sidebar.sessionlist.subagentsCount", { count }),
+    rows: listed + (count > listed ? 1 : 0),
+  } : null);
   if (!branch) return children;
   return (
     <section
+      ref={stackRef}
       className="subagent-island"
       data-tone={branch.tone}
       aria-label={tr("sidebar.sessionlist.subagentsTitle")}
@@ -713,6 +726,12 @@ export function SubagentBranchIsland({ children }: { children: ReactElement }) {
       <BranchList branch={branch} />
     </section>
   );
+}
+
+/** The idle line's token, registered from inside the line it stands for. */
+function IdleStatusToken({ icon, text, label }: { icon: ReactElement; text: string; label: string }) {
+  const stackRef = usePendingStackToken({ id: "status", icon, lead: { text, rank: 0 }, label });
+  return <span ref={stackRef} hidden />;
 }
 
 /** The agent's own line while it idles and its subagents still work. */
@@ -728,17 +747,20 @@ export default function SubagentActivityDock() {
   // Only paused subagents left: nothing runs until the person continues one.
   const status = tr(branch.tone === "paused" ? "subagentdock.subagentsPaused" : "subagentdock.waitingForSubagents");
   const profileId = branch.parent?.resolvedHarnessId ?? presentation.descriptor?.harnessId;
+  const logo = (
+    <ProviderLogo
+      providerID={presentation.descriptor?.providerID ?? ref?.providerID}
+      providerName={presentation.descriptor?.providerName}
+      harnessId={presentation.descriptor?.harnessId ?? branch.parent?.resolvedHarnessId}
+      size="regular"
+      tint={profileId ? branch.harnessColors.get(profileId) : undefined}
+    />
+  );
   return (
     <SubagentBranchIsland>
       <AgentStatusDock
         idle
-        icon={<ProviderLogo
-          providerID={presentation.descriptor?.providerID ?? ref?.providerID}
-          providerName={presentation.descriptor?.providerName}
-          harnessId={presentation.descriptor?.harnessId ?? branch.parent?.resolvedHarnessId}
-          size="regular"
-          tint={profileId ? branch.harnessColors.get(profileId) : undefined}
-        />}
+        icon={<>{logo}<IdleStatusToken icon={logo} text={status} label={`${presentation.name}: ${status}`} /></>}
         model={presentation.name}
         status={status}
         label={`${presentation.name}: ${status}`}

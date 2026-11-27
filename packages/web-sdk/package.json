@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/public.ts",
     "./surface-content": "./src/surfaceContent.ts",
-    "./answer-later": "./src/answerLater.ts"
+    "./answer-later": "./src/answerLater.ts",
+    "./pending-stack": "./src/pendingStack.ts"
   },
   "dependencies": {
     "@polyth/contracts": "1.2.0"

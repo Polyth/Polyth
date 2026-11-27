@@ -3920,16 +3920,52 @@ restyles every block already in the transcript without a re-render.
 
 **The pending stack above the composer:** everything that waits on the composer
 is lines of text, not cards, with the composer card as the one surface. Top to
-bottom: the questions and approvals waiting for later (see "Answer later"), the
-agent's status or the edited files, any subagents hanging from them,
-the queued prompts and the suggested next prompt. No line paints a plate, border,
-shadow or glass in any platform style or look. Everything sits on one grid
-measured from the card's outer edge: marks are centred on the model logo's column
-(`--composer-stack-mark`), labels start at the model name
-(`--composer-stack-text`), trailing glyphs end where the marks start
-(`--composer-stack-end`). The phone's resting row, which shows no model line,
+bottom: the questions and approvals waiting for later (see "Answer later"), what
+the chat waits for, the edited files, the agent's status with any subagents
+hanging from it, the queued prompts and the suggested next prompt. No line paints
+a plate, border, shadow or glass in any platform style or look (the answer-later
+pill's accent wash is the one exception). Everything sits on one grid measured
+from the card's outer edge, in the composer's own column (the floating launcher's
+lane and the compact shell's uncapped frame included): marks are `--icon-sm`,
+centred on the model logo's column (`--composer-stack-mark`) and quiet ones
+`--muted`, labels start at the model name (`--composer-stack-text`), trailing
+glyphs are `--muted`, end where the marks start (`--composer-stack-end`) and so
+centre as far from that edge as the marks do from the other. A subagent row hangs
+one step in: its mark on the labels' column. Every line shares one type
+(`--font-composer-stack` at the chat's font size, line height 1.35,
+weight 400, `--text-dim`; stronger weight only for a line's action or waited-on
+object), trailing words take `--font-meta` in `--faint`. Lines abut, with no
+margin of their own; the stack's one gap, `--space-1`, lies between
+the last line and the card, replacing the composer's density top padding. The
+phone's resting row, which shows no model line,
 stands on the same grid: Add centres on the marks' column and the Stop/Send disc
 ends with the trailing column.
+
+**Folding the pending stack.** Once the stack takes two rows or more, the person
+can fold it into one spine line right above the card (`PendingStackSpine`) and
+open it again. The spine is a line of the stack: no plate, the first mark on the
+marks' column, a `--muted` chevron (up) on the trailing column, and the whole line
+is one button (`aria-expanded`, named after every hidden line). Each hidden
+line is its own mark plus its shortest value (`3h 26m`, `2`), in stack order;
+the most important line speaks in words instead (the agent's status, else the
+suggested prompt with its `Tab`, else the wait), and in a container ≤480px with
+four lines or more it shows its value too. Questions and approvals waiting for
+later, and a subagent's ask, keep an accent dot on their mark; nothing else is
+tinted. While open, a `--muted` chevron (down) on the trailing column of the
+stack's first line folds it; that line's own trailing words and glyphs step one
+slot inward. Folding closes the run details the status line opens; the focus
+follows a keyboard user to the control that undoes it, and a press never takes
+the composer's focus or a phone's keyboard. `Tab` still takes the suggestion
+while folded, and a new line arriving while folded joins the spine instead of
+opening the stack. A line folds only if it says what it holds: a line registers
+a token through `usePendingStackToken` (`@polyth/web-sdk/pending-stack`, with a
+ref on the line's own box on the grid), and lines that register none (package
+rows, the cleared-draft and mention lines, a queued prompt being edited) stay
+in sight. Lines fold and open by their own height in `--motion-surface`, the
+one nearest the card first, and not at all under reduced motion. The choice is
+a per-device preference (`polyth.composerStack.folded.v1`): a phone starts
+folded, a desktop open. `apps/web/test/pendingStackFold.test.ts` measures it in
+the real Composer.
 
 **Previous prompts and the cleared-draft line.** `Ctrl+Up` / `Cmd+Up` in the
 composer (free: plain Up/Down still step through history and ignore Ctrl/Cmd;
@@ -3971,10 +4007,14 @@ it. Every glyph-only item on that line, a package's included, is its glyph plus
 words keep their own padding. On a phone the engaged card keeps the resting row's geometry, so
 Add, the quick launcher and Send hold still while the card opens and closes.
 `apps/web/test/composerIconGrid.test.ts` measures these rules in the real
-Composer across looks, phone, tablet and desktop. In the compact shell's uncapped frame the status line
-spans the composer's full width. A line reads `--composer-stack-row` tall; on touch, a line
-that opens something keeps its full target by reaching up into the timeline's
-bottom space (`--composer-stack-reach`). Their inks follow the wallpaper wash
+Composer across looks, phone, tablet and desktop. A line reads
+`--composer-stack-row` tall (a queued prompt always; a subagent row has two lines
+of text). On touch, a line that opens something keeps its full target: the
+stack's first line reaches up into the timeline's bottom space
+(`--composer-stack-reach`, applied as `--composer-stack-pull`), and a line under
+another stands the whole target tall instead, so it never takes that line's taps.
+`apps/web/test/composerPendingStack.test.ts` measures the rows, gaps, columns,
+type and inks in both directions. Their inks follow the wallpaper wash
 ([styles](styles.md), "Wallpaper wash"), so they keep 4.5:1 on any preset theme and
 wallpaper. The transcript reaches under the dock by `--composer-height` (so a tail
 card's shadow is not cut) and a scroll-driven mask hides that overlap whenever the

@@ -23,6 +23,7 @@ import { setUiError, usePendingSends, useStore } from "../store.ts";
 import { announce } from "./a11y/live.tsx";
 import { markQueuedPromptLaunch, playQueueChipExit, queueChipExitAvailable } from "../queueLaunchMotion.ts";
 import { useShellMode } from "../responsiveShell.ts";
+import { usePendingStackToken } from "@polyth/web-sdk/pending-stack";
 import { tr } from "../i18n/index.ts";
 import Button from "./ui/Button.tsx";
 import IconButton from "./ui/IconButton.tsx";
@@ -535,6 +536,19 @@ export default function QueuedMessageList({
   const queueStalled = resumable !== null && !queuePaused
     && queueStalledOnRecovery(events ?? [], visibleItems);
   const editingItem = editingId ? items.find((item) => item.id === editingId && item.sessionId === sessionId) ?? null : null;
+  // Folded, the queue is its count. A prompt being edited in the composer
+  // keeps the queue open: its Cancel must stay in reach.
+  const queueStackRef = usePendingStackToken(visibleItems.length > 0 && !editingItem ? {
+    id: "queue",
+    icon: <Icon icon={QueueNextIcon} size="sm" />,
+    value: String(visibleItems.length),
+    label: tr("composer.stack.queued", { count: visibleItems.length }),
+    rows: touchQueue ? 1 : visibleItems.length,
+  } : null);
+  const setListRef = useCallback((element: HTMLDivElement | null) => {
+    listRef.current = element;
+    queueStackRef(element);
+  }, [queueStackRef]);
   if (visibleItems.length === 0 && scope.leaving.size === 0 && !editingItem) return null;
   const editingBefore = editingItem ? visibleItems.filter((item) => item.position < editingItem.position).length : 0;
   // A row edited from below the fold unfolds the list, so its place reads true.
@@ -681,7 +695,7 @@ export default function QueuedMessageList({
   );
 
   return (
-    <div ref={listRef} className="queue-list" data-touch={touchQueue ? "" : undefined}>
+    <div ref={setListRef} className="queue-list" data-touch={touchQueue ? "" : undefined}>
       {queuePaused && resumeRow("queue-chip-paused", PauseIcon, tr("queuedmessagelist.valueQueuedMessages", { length: visibleItems.length }), false)}
       {queueStalled && resumeRow("queue-chip-stalled", WarningIcon, tr("queuedmessagelist.stalledOnRecovery"), true)}
       <div className="queue-block">

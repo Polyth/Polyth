@@ -14,6 +14,7 @@ import { useStore } from "../store.ts";
 import ComposerNoticeRow from "./ui/ComposerNoticeRow.tsx";
 import UiIcon from "./ui/Icon.tsx";
 import { AwaitingIcon } from "./ui/icons.ts";
+import { usePendingStackToken } from "@polyth/web-sdk/pending-stack";
 import "./SessionWaitsLine.css";
 
 const NO_WAITS: readonly SessionWait[] = [];
@@ -124,6 +125,15 @@ export default function SessionWaitsLine({ waits, idle }: {
   // Only a timer's words move with the clock.
   const now = useNowTick(open && list.some(isTimer));
   const first = list[0];
+  // Folded, a timer shows the time left; any other wait its mark alone.
+  const stackLead = open && first ? sessionWaitText(first, sessions, now) : null;
+  const stackRef = usePendingStackToken(stackLead && first ? {
+    id: "waits",
+    icon: <UiIcon icon={AwaitingIcon} size="sm" />,
+    ...(isTimer(first) && stackLead.object ? { value: stackLead.object } : {}),
+    lead: { text: stackLead.text, rank: 30 },
+    label: stackLead.text,
+  } : null);
   const line = open && first ? (() => {
     const lead = sessionWaitText(first, sessions, now);
     const until = deadlineText(first, now);
@@ -138,7 +148,7 @@ export default function SessionWaitsLine({ waits, idle }: {
       </>
     );
     return (
-      <div className="session-waits" role="status" aria-label={detail}>
+      <div ref={stackRef} className="session-waits" role="status" aria-label={detail}>
         {lead.sourceSessionId ? (
           <button
             type="button"

@@ -1,0 +1,147 @@
+/* Folding the pending stack above the composer (docs/dev/ui.md "Folding the
+   pending stack"; state in @polyth/web-sdk/pending-stack). A folded line is
+   gone from the layout; one moving between open and folded clips to its
+   animated box and takes no pointer. */
+[data-stack-folded="true"] { display: none !important; }
+[data-stack-moving] { overflow: clip !important; pointer-events: none; }
+
+/* The open stack's first line carries the fold control on the trailing
+   column, in the line's own box on the stack's grid (its outermost token
+   anchor; never a control itself). The line's own trailing words and glyphs step one slot inward: the
+   line's end column moves by the control's room (tokens.css defines the
+   column; it is restated here because a property cannot read itself). */
+[data-stack-first] {
+  position: relative;
+  --composer-stack-fold-room: calc(var(--icon-sm) + var(--space-3));
+  --composer-stack-end: calc(var(--composer-stack-mark) - var(--icon-sm) / 2 + var(--composer-stack-fold-room));
+}
+/* A status line reaches up into the timeline for its touch target: its first
+   row starts below that reach. */
+:is(.subagent-island, .pending-changes-bar)[data-stack-first] {
+  --composer-stack-fold-top: var(--composer-stack-pull, var(--composer-stack-reach));
+  --composer-stack-fold-row: var(--composer-stack-row);
+}
+.pending-stack-fold {
+  position: absolute;
+  z-index: 1;
+  inset-block-start: calc(var(--composer-stack-fold-top, 0px) + (var(--composer-stack-fold-row, max(var(--composer-stack-row), var(--hit-min))) - var(--composer-stack-control)) / 2);
+  inset-inline-end: calc(var(--composer-stack-mark) - var(--icon-sm) / 2 - (var(--composer-stack-control) - var(--icon-sm)) / 2);
+  inline-size: var(--composer-stack-control);
+  block-size: var(--composer-stack-control);
+  min-inline-size: 0;
+  min-block-size: 0;
+  color: var(--muted);
+}
+@media (hover: hover) {
+  .pending-stack-fold:hover { color: var(--text); }
+}
+
+/* The spine: a line of the stack on the stack's grid. The first mark centres
+   on the marks' column, the chevron ends on the trailing column, and no
+   plate, border or shadow is painted in any look. */
+.pending-stack-spine {
+  --text-dim: var(--chat-ink-dim);
+  --muted: var(--chat-ink-muted);
+  --faint: var(--chat-ink-faint);
+  container-type: inline-size;
+  appearance: none;
+  box-sizing: border-box;
+  display: block;
+  inline-size: 100%;
+  min-block-size: max(var(--composer-stack-row), var(--hit-min));
+  margin: 0;
+  padding-block: 0;
+  padding-inline: calc(var(--composer-stack-mark) - var(--icon-sm) / 2) var(--composer-stack-end);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-composer-stack);
+  line-height: 1.35;
+  text-align: start;
+  cursor: pointer;
+}
+.pending-stack-row {
+  display: flex;
+  align-items: center;
+  column-gap: var(--space-4);
+  min-block-size: inherit;
+}
+.pending-stack-spine:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.pending-stack-spine:active { background: var(--surface-overlay-hover); }
+
+.pending-stack-token {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: calc(var(--composer-stack-text) - var(--composer-stack-mark) - var(--icon-sm) / 2);
+  min-inline-size: 0;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  transition: color var(--motion-fast) var(--motion-ease);
+}
+.pending-stack-token[data-lead] { flex: 0 1 auto; }
+.pending-stack-mark {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  inline-size: var(--icon-sm);
+  block-size: var(--icon-sm);
+  color: var(--muted);
+}
+.pending-stack-mark > *,
+.pending-stack-mark :is(svg, img) {
+  max-inline-size: var(--icon-sm);
+  max-block-size: var(--icon-sm);
+}
+.pending-stack-mark[data-accent] { color: var(--accent); }
+/* Something waits on the person: one accent dot on the mark, never a hue for
+   the whole token. */
+.pending-stack-token[data-attention] .pending-stack-mark::after {
+  content: "";
+  position: absolute;
+  inset-block-start: -1px;
+  inset-inline-end: -2px;
+  inline-size: 6px;
+  block-size: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.pending-stack-lead {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The speaking line says its words; its short value shows only where the
+   words do not fit (below). */
+.pending-stack-token[data-lead] .pending-stack-value { display: none; }
+.pending-stack-key {
+  flex: none;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: var(--font-meta);
+  line-height: 1.5;
+}
+.pending-stack-chevron {
+  flex: none;
+  margin-inline-start: auto;
+  color: var(--muted);
+  transition: color var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) {
+  .pending-stack-spine:hover :is(.pending-stack-token, .pending-stack-chevron) { color: var(--text); }
+  .pending-stack-spine:hover .pending-stack-mark:not([data-accent]) { color: var(--text-dim); }
+}
+@media (hover: none) {
+  .pending-stack-key { display: none; }
+}
+
+/* A narrow composer: the marks stand closer, and with four lines or more
+   the speaking line shows its short value instead of words cut to nothing. */
+@container (max-width: 480px) {
+  .pending-stack-row { column-gap: var(--space-3); }
+  .pending-stack-row[data-crowded] .pending-stack-token[data-lead] :is(.pending-stack-lead, .pending-stack-key) { display: none; }
+  .pending-stack-row[data-crowded] .pending-stack-token[data-lead] .pending-stack-value { display: inline; }
+}

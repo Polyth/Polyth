@@ -29,6 +29,7 @@ import { openPackageWindow, useWindowPackages } from "../../starterPackages.ts";
 import { requestComposerInsert } from "../../composerInsert.ts";
 import { useGitStatus } from "../../../../../packages/git/widgets/gitStatusStore.ts";
 import { useShellMode } from "../../responsiveShell.ts";
+import { PENDING_STACK_CONTAINER, PendingStackProvider, PendingStackStore } from "@polyth/web-sdk/pending-stack";
 import { useSpaces } from "../../spaces.ts";
 import { tapFeedback } from "../../haptics.ts";
 import { dismissKeyboard } from "../../mobileViewport.ts";
@@ -637,6 +638,15 @@ function ChatSessionSurface() {
   );
   const working = activity.working;
   const awaitingTurn = activity.awaitingTurn;
+  // The pending stack's fold (docs/dev/ui.md "Folding the pending stack"):
+  // one per surface, so the person's choice holds across chats; a phone
+  // starts folded.
+  const shellMode = useShellMode();
+  const [pendingStack] = useState(() => new PendingStackStore({
+    defaultFolded: shellMode === "phone",
+    motion: () => !sessionMotionDisabled(),
+  }));
+  useEffect(() => () => pendingStack.dispose(), [pendingStack]);
   const widgets = useWidgetCatalog();
   const layout = useWidgetLayout();
   const hasLiveFooterDock = (layout.slotPlacements["session.footer"] ?? []).some((instanceId) => {
@@ -827,7 +837,8 @@ function ChatSessionSurface() {
             <SlotHost slot="session.footer" context={{ projectId, sessionId, editing: false }} customizable />
             <ArchivedComposerGuard sessionId={sessionId} />
           </>
-        : <div className="conversation-composer-dock">
+        : <div className="conversation-composer-dock" {...{ [PENDING_STACK_CONTAINER]: "" }}>
+           <PendingStackProvider store={pendingStack}>
             {/* Above the package rows: the jump button floats up from here and must not lie on them. */}
             <div ref={setLatestRevealAnchor} className="timeline-latest-reveal-anchor" />
             {/* Questions and approvals folded for later wait here as one line. */}
@@ -862,6 +873,7 @@ function ChatSessionSurface() {
                 stands on it, never over the composer (portalled). */}
             <SessionActivityPanelHost sessionId={sessionId} model={model} />
             <Composer />
+           </PendingStackProvider>
           </div>}
     </div>
   );

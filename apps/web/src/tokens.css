@@ -183,8 +183,11 @@
      from the composer card's outer edge so nothing drifts from line to line.
      Marks are centred on the model logo's column, labels start at the model
      name, trailing glyphs end where the marks start. A line reads one row
-     tall; on touch, a line that opens something keeps its full target by
-     reaching up into the timeline's bottom space. */
+     tall and the lines abut, so their words keep one pitch; the only gap
+     (--space-1) is between the last line and the card. On touch, a line that
+     opens something keeps its full target: the first one reaches up into the
+     timeline's bottom space (--composer-stack-pull), a later one stands the
+     whole target tall. */
   --composer-stack-mark: calc(var(--space-4) + 2px + var(--icon-sm) / 2);
   --composer-stack-text: calc(var(--composer-stack-mark) + var(--icon-sm) / 2 + 6px);
   --composer-stack-end: calc(var(--composer-stack-mark) - var(--icon-sm) / 2);

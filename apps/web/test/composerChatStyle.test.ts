@@ -572,7 +572,7 @@ test("the pending stack above the composer: one grid and no surface but the card
   const stack = css.slice(css.indexOf("/* The pending stack above the composer"), css.indexOf('/* Full widgets placed "Above the composer"'));
   assert.ok(stack.length > 0, "pending stack section");
   // The status line sits on the grid and reaches up to its touch target.
-  assert.match(stack, /> \.agent-status-dock \{[^}]*margin-block-start:\s*calc\(-1 \* var\(--composer-stack-reach\)\);[^}]*padding-block:\s*var\(--composer-stack-reach\) 0;[^}]*padding-inline:\s*calc\(var\(--composer-stack-mark\) - var\(--icon-md\) \/ 2\) var\(--composer-stack-end\);/s);
+  assert.match(stack, /> \.agent-status-dock \{[^}]*margin-block-start:\s*calc\(-1 \* var\(--composer-stack-pull, var\(--composer-stack-reach\)\)\);[^}]*padding-block:\s*var\(--composer-stack-pull, var\(--composer-stack-reach\)\) 0;[^}]*padding-inline:\s*calc\(var\(--composer-stack-mark\) - var\(--icon-sm\) \/ 2\) var\(--composer-stack-end\);/s);
   assert.doesNotMatch(stack, /composer-tray|background|border:|backdrop-filter/, "no line paints a surface");
   // The status styles are gone, along with their material and rules.
   for (const source of [css, looks]) {

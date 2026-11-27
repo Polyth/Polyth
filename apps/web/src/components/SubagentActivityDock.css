@@ -17,8 +17,9 @@
   --branch-elbow: calc(var(--branch-inset) - var(--branch-x) - var(--space-1));
   /* The thread starts just under the mark, which sits centred in the line's
      row (the AgentStatusDock row: taller on touch screens). */
-  --branch-line-row: var(--composer-stack-row);
-  --branch-rise: calc(var(--branch-line-row) / 2 - var(--icon-md) / 2 - 2px);
+  /* The row the mark is centred in: taller where the line cannot reach up. */
+  --branch-line-row: calc(var(--composer-stack-row) + var(--composer-stack-reach) - var(--composer-stack-pull, var(--composer-stack-reach)));
+  --branch-rise: calc(var(--branch-line-row) / 2 - var(--icon-sm) / 2 - 2px);
   container: subagent-island / inline-size;
   position: relative;
   box-sizing: border-box;
@@ -27,7 +28,7 @@
     var(--chat-measure),
     calc(100% - var(--conversation-frame-inline-start, var(--conversation-chrome-inset)) - var(--conversation-frame-inline-end, var(--conversation-chrome-inset)))
   );
-  margin-block-start: calc(-1 * var(--composer-stack-reach));
+  margin-block-start: calc(-1 * var(--composer-stack-pull, var(--composer-stack-reach)));
   margin-inline-start: var(--conversation-frame-inline-start, auto);
   margin-inline-end: var(--conversation-frame-inline-end, auto);
 }
@@ -53,7 +54,7 @@
   display: inline-flex;
   gap: 0.6em;
   padding-inline-end: var(--composer-stack-end);
-  color: var(--text-dim);
+  color: var(--faint);
   font-size: var(--font-meta);
   white-space: nowrap;
 }
@@ -69,12 +70,12 @@
   flex: 1 1 auto;
   width: auto;
   min-width: 0;
-  --agent-status-row: calc(var(--branch-line-row) + var(--composer-stack-reach));
+  --agent-status-row: calc(var(--composer-stack-row) + var(--composer-stack-reach));
   min-height: var(--agent-status-row);
   margin: 0;
-  padding-block: var(--composer-stack-reach) 0;
-  padding-inline: calc(var(--composer-stack-mark) - var(--icon-md) / 2) var(--composer-stack-end);
-  column-gap: calc(var(--composer-stack-text) - var(--composer-stack-mark) - var(--icon-md) / 2);
+  padding-block: var(--composer-stack-pull, var(--composer-stack-reach)) 0;
+  padding-inline: calc(var(--composer-stack-mark) - var(--icon-sm) / 2) var(--composer-stack-end);
+  column-gap: calc(var(--composer-stack-text) - var(--composer-stack-mark) - var(--icon-sm) / 2);
   border-radius: var(--radius-control);
   background: transparent;
   box-shadow: none;
@@ -152,7 +153,7 @@
   flex: none;
   display: grid;
   place-items: center;
-  color: var(--faint);
+  color: var(--muted);
 }
 /* Media controls: Pause, Continue and Stop as solid glyphs (the composer's
    Stop is one too), a size under the outline icons so a filled shape keeps
@@ -188,7 +189,7 @@
 
 /* ---- The list: a row per active subagent on the thread ---- */
 .subagent-branch-list {
-  margin: 0 0 var(--space-1);
+  margin: 0;
   padding: 0;
   list-style: none;
 }
@@ -247,7 +248,8 @@
   align-items: center;
   gap: 0.6em;
   margin-inline: calc(var(--branch-inset) - var(--space-2)) var(--space-1);
-  padding-inline: var(--space-2) 0;
+  /* The row's last glyph ends on the stack's end column. */
+  padding-inline: var(--space-2) calc(var(--composer-stack-end) - var(--space-1));
   border-radius: var(--radius-control);
 }
 .subagent-branch-open {
@@ -255,7 +257,7 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: calc(var(--composer-stack-text) - var(--composer-stack-mark) - var(--icon-sm) / 2);
   padding: var(--space-1) 0;
   border: 0;
   background: none;
@@ -279,10 +281,9 @@
   gap: 1px;
 }
 .subagent-branch-copy > .subagent-branch-title {
-  color: var(--text);
-  font-size: var(--font-tool-label);
-  font-weight: 500;
-  line-height: var(--font-tool-label-lh);
+  color: var(--text-dim);
+  font-size: var(--font-composer-stack);
+  line-height: 1.35;
 }
 .subagent-branch-copy > .subagent-branch-detail {
   font-size: var(--font-meta);
@@ -327,6 +328,8 @@
   /* A phone row is the way into its chat by itself, and a running row keeps
      its action and time over the model. */
   .subagent-branch-go { display: none; }
+  /* Its last control then stands on the end column in the chevron's place. */
+  .subagent-branch-row > .subagent-branch-actions:not(.subagent-branch-actions--ask) { margin-inline-end: calc((var(--icon-sm) - 24px) / 2); }
   .subagent-branch-item[data-state="working"] .subagent-branch-detail > .subagent-branch-model { display: none; }
   /* A waiting row gives its decision a line of its own. */
   .subagent-branch-row[data-ask] { flex-wrap: wrap; }
@@ -336,7 +339,7 @@
   .subagent-branch-item[data-ask]:first-child:last-child::before { height: calc(max(40px, var(--hit-min)) / 2 + var(--branch-rise)); }
   .subagent-branch-row > .subagent-branch-actions--ask {
     flex-basis: 100%;
-    padding-inline-start: calc(var(--icon-sm) + var(--space-3));
+    padding-inline-start: calc(var(--composer-stack-text) - var(--composer-stack-mark) + var(--icon-sm) / 2);
     padding-block-end: var(--space-1);
   }
 }
