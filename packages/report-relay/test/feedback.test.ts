@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { join } from "node:path";
 import test from "node:test";
 
 import type { FeedbackPayload } from "@polyth/contracts/feedback";
 
 import { createReportRelay } from "../src/index.ts";
+import { FeedbackStore } from "../src/feedbackStore.ts";
 import { INBOX_TOKEN, fixture, screenshot, serve, uuid } from "./support.ts";
 
 const feedback = (n: number, overrides: Partial<FeedbackPayload> = {}): FeedbackPayload => ({
@@ -97,6 +99,42 @@ test("the inbox needs its token; a wrong token is counted and locks the source o
   assert.equal((await inbox(setup.url, "/v1/inbox", {}, "wrong-token")).status, 401);
   assert.equal((await inbox(setup.url, "/v1/inbox", {}, "wrong-token")).status, 401);
   assert.equal((await inbox(setup.url, "/v1/inbox", {}, INBOX_TOKEN)).status, 429, "locked out even with the right token");
+});
+
+test("the admin key makes, lists and revokes team keys; every use is recorded per key and address", async (t) => {
+  const setup = await serve();
+  t.after(() => setup.close());
+  const json = { "content-type": "application/json" };
+  assert.deepEqual(await (await inbox(setup.url, "/v1/inbox/me")).json(), { id: "admin", admin: true }, "inbox.scrypt is the admin key");
+  const created = await inbox(setup.url, "/v1/inbox/keys", { method: "POST", headers: json, body: JSON.stringify({ id: "anna", label: "Anna, PM" }) });
+  assert.equal(created.status, 200);
+  const { token } = await created.json() as { token: string };
+  assert.match(token, /^anna\.[A-Za-z0-9_-]{43}$/);
+  assert.equal((await inbox(setup.url, "/v1/inbox/keys", { method: "POST", headers: json, body: JSON.stringify({ id: "anna" }) })).status, 409);
+  assert.equal((await inbox(setup.url, "/v1/inbox/keys", { method: "POST", headers: json, body: JSON.stringify({ id: "admin" }) })).status, 400);
+
+  assert.equal((await inbox(setup.url, "/v1/inbox", {}, token)).status, 200);
+  assert.equal((await inbox(setup.url, "/v1/inbox", {}, token)).status, 200);
+  assert.deepEqual(await (await inbox(setup.url, "/v1/inbox/me", {}, token)).json(), { id: "anna", admin: false });
+  assert.equal((await inbox(setup.url, "/v1/inbox/keys", {}, token)).status, 403, "a team key cannot see or manage keys");
+  assert.equal((await inbox(setup.url, "/v1/inbox/keys/anna/revoke", { method: "POST" }, token)).status, 403);
+  assert.equal((await inbox(setup.url, "/v1/inbox", {}, "anna.wrong-secret")).status, 401);
+
+  const listed = await (await inbox(setup.url, "/v1/inbox/keys")).json() as { keys: Array<{ id: string; label: string; revokedAt: number | null; access: Array<{ address: string; hits: number }> }> };
+  assert.deepEqual(listed.keys.map(({ id, label, access }) => ({ id, label, access: access.map(({ address, hits }) => ({ address, hits })) })), [
+    { id: "admin", label: "Admin (inbox.scrypt)", access: [{ address: "127.0.0.1", hits: 5 }] },
+    { id: "anna", label: "Anna, PM", access: [{ address: "127.0.0.1", hits: 5 }] },
+  ]);
+  const store = new FeedbackStore(join(setup.fixture.data, "feedback.db"));
+  t.after(() => store.close());
+  assert.equal(store.keyRecord("anna")?.includes(token), false, "only the scrypt record is stored");
+  assert.equal(store.recordAccess("anna", "203.0.113.7", Date.now()), true, "a new address for a known key is flagged");
+
+  assert.equal((await inbox(setup.url, "/v1/inbox/keys/admin/revoke", { method: "POST" })).status, 404, "the admin key is rotated on the server, not here");
+  assert.equal((await inbox(setup.url, "/v1/inbox/keys/anna/revoke", { method: "POST" })).status, 200);
+  assert.equal((await inbox(setup.url, "/v1/inbox", {}, token)).status, 401, "a revoked key stops at once, cached or not");
+  assert.equal(store.revokeKey("anna", Date.now()), false);
+  assert.equal(store.addKey("anna", "again", "x", Date.now()), false, "a revoked id is never reused");
 });
 
 test("the team reads, filters, summarises and triages;", async (t) => {

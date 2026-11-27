@@ -47,6 +47,15 @@ pre{margin:0;max-height:320px;overflow:auto;background:var(--bg);border-radius:8
 textarea{width:100%;min-height:72px;resize:vertical}
 .empty{color:var(--soft);padding:24px;text-align:center}
 .pager{display:flex;gap:8px;align-items:center;justify-content:center;color:var(--soft)}
+#keys{padding:16px 20px;display:grid;gap:16px;max-width:1100px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;display:grid;gap:10px}
+.card h2{margin:0;font-size:15px}.card p{margin:0;color:var(--soft)}
+#key-form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.secret{display:flex;gap:8px;align-items:center}.secret input{flex:1;font-family:ui-monospace,monospace;font-size:13px}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px 10px;border-top:1px solid var(--line);vertical-align:top}
+th{color:var(--soft);font-weight:500;font-size:12px;border-top:0}
+.addr{font-family:ui-monospace,monospace;font-size:12px}.addr span{color:var(--soft);font-family:system-ui,sans-serif}
+.revoked{color:var(--soft)}
 `;
 
 const SCRIPT = `
@@ -70,6 +79,7 @@ let token = sessionStorage.getItem("inbox-token") || "";
 let offset = 0;
 let selected = null;
 let shotUrl = null;
+let me = null;
 
 async function api(path, init = {}) {
   const response = await fetch(path, { ...init, cache: "no-store", headers: { ...(init.headers || {}), authorization: "Bearer " + token } });
@@ -84,6 +94,8 @@ async function api(path, init = {}) {
 function signOut(message) {
   token = "";
   sessionStorage.removeItem("inbox-token");
+  $("new-token").value = "";
+  $("new-key").classList.add("hidden");
   $("app").classList.add("hidden");
   $("login").classList.remove("hidden");
   $("login-error").textContent = message || "";
@@ -211,9 +223,48 @@ async function open(ref) {
   }
 }
 
+function showKeys(on) {
+  $("keys").classList.toggle("hidden", !on);
+  for (const id of ["stats","filters","main"]) $(id).classList.toggle("hidden", on);
+  $("keys-toggle").textContent = on ? "Feedback" : "Keys";
+  if (on) loadKeys().catch(() => {});
+}
+
+async function loadKeys() {
+  const { keys } = await (await api("/v1/inbox/keys")).json();
+  const body = $("key-rows");
+  body.replaceChildren();
+  for (const key of keys) {
+    const addresses = el("td");
+    if (key.access.length === 0) addresses.append(el("span", { class: "revoked", text: "never used" }));
+    for (const row of key.access) addresses.append(el("div", { class: "addr", text: row.address + " " },
+      el("span", { text: "· first " + when(row.firstSeen) + " · last " + when(row.lastSeen) + " · " + row.hits + (row.hits === 1 ? " request" : " requests") })));
+    const action = el("td");
+    if (key.admin) action.append(el("span", { class: "revoked", text: "rotate on the server" }));
+    else if (key.revokedAt) action.append(el("span", { class: "revoked", text: "revoked " + when(key.revokedAt) }));
+    else {
+      const revoke = el("button", { type: "button", text: "Revoke" });
+      revoke.addEventListener("click", async () => {
+        if (!confirm("Revoke key " + key.id + "? Anyone using it is signed out at once.")) return;
+        revoke.disabled = true;
+        try { await api("/v1/inbox/keys/" + key.id + "/revoke", { method: "POST" }); await loadKeys(); } catch { revoke.disabled = false; }
+      });
+      action.append(revoke);
+    }
+    body.append(el("tr", key.revokedAt ? { class: "revoked" } : {},
+      el("td", {}, el("b", { text: key.id }), el("div", { class: "revoked", text: key.label })),
+      el("td", { text: key.createdAt ? when(key.createdAt) : "—" }),
+      addresses, action));
+  }
+}
+
 async function start() {
   $("login").classList.add("hidden");
   $("app").classList.remove("hidden");
+  try { me = await (await api("/v1/inbox/me")).json(); } catch (error) { if (error.message === "auth") return; }
+  $("keys-toggle").classList.toggle("hidden", !(me && me.admin));
+  $("who").textContent = me ? "Key: " + me.id : "";
+  showKeys(false);
   try { await refresh(); } catch (error) { if (error.message !== "auth") $("stats").replaceChildren(el("div", { class: "error", text: "Inbox unavailable (" + error.message + ")" })); }
 }
 
@@ -225,6 +276,24 @@ $("prev").addEventListener("click", () => { offset = Math.max(0, offset - PAGE);
 $("next").addEventListener("click", () => { offset += PAGE; loadList().catch(() => {}); });
 $("reload").addEventListener("click", () => refresh().catch(() => {}));
 $("signout").addEventListener("click", () => signOut(""));
+$("keys-toggle").addEventListener("click", () => showKeys($("keys").classList.contains("hidden")));
+$("key-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  $("key-error").textContent = "";
+  try {
+    const response = await fetch("/v1/inbox/keys", { method: "POST", cache: "no-store", headers: { "content-type": "application/json", authorization: "Bearer " + token },
+      body: JSON.stringify({ id: $("key-id").value.trim(), label: $("key-label").value.trim() }) });
+    if (!response.ok) { $("key-error").textContent = response.status === 409 ? "That name was already used." : "Not created (" + response.status + ")."; return; }
+    const created = await response.json();
+    $("key-id").value = ""; $("key-label").value = "";
+    $("new-token").value = created.token;
+    $("new-key-name").textContent = created.id;
+    $("new-key").classList.remove("hidden");
+    await loadKeys();
+  } catch { $("key-error").textContent = "Not created."; }
+});
+$("copy-token").addEventListener("click", () => { navigator.clipboard.writeText($("new-token").value).then(() => { $("copy-token").textContent = "Copied"; }, () => $("new-token").select()); });
+$("hide-token").addEventListener("click", () => { $("new-token").value = ""; $("new-key").classList.add("hidden"); $("copy-token").textContent = "Copy"; });
 $("login-form").addEventListener("submit", (event) => {
   event.preventDefault();
   token = $("token").value.trim();
@@ -256,15 +325,35 @@ const HTML = `<!doctype html>
   </form>
 </section>
 <section id="app" class="hidden">
-  <header><h1>Feedback inbox</h1><span class="grow"></span><button id="reload" type="button">Refresh</button><button id="signout" type="button">Sign out</button></header>
+  <header><h1>Feedback inbox</h1><span class="grow"></span><span id="who" class="revoked"></span><button id="keys-toggle" class="hidden" type="button">Keys</button><button id="reload" type="button">Refresh</button><button id="signout" type="button">Sign out</button></header>
   <div id="stats" class="stats"></div>
-  <div class="filters">
+  <section id="keys" class="hidden">
+    <div class="card">
+      <h2>New key</h2>
+      <p>One key per person or device, so each can be revoked alone. The key is shown once; the server keeps only its scrypt hash.</p>
+      <form id="key-form" autocomplete="off">
+        <input id="key-id" required pattern="[a-z0-9][a-z0-9\\-]{0,31}" maxlength="32" placeholder="name, e.g. anna-laptop" aria-label="Key name">
+        <input id="key-label" maxlength="80" placeholder="Who or what it is for" aria-label="Label">
+        <button class="primary" type="submit">Create key</button>
+        <span id="key-error" class="error" role="alert"></span>
+      </form>
+      <div id="new-key" class="hidden" role="status">
+        <p>Key <b id="new-key-name"></b> — copy it now, it will not be shown again.</p>
+        <div class="secret"><input id="new-token" readonly aria-label="New key"><button id="copy-token" type="button">Copy</button><button id="hide-token" type="button">Done</button></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Keys and where they were used</h2>
+      <table><thead><tr><th>Key</th><th>Created</th><th>Addresses</th><th></th></tr></thead><tbody id="key-rows"></tbody></table>
+    </div>
+  </section>
+  <div id="filters" class="filters">
     <select id="kind" aria-label="Kind"></select>
     <select id="status" aria-label="Status"></select>
     <select id="role" aria-label="Role"></select>
     <select id="days" aria-label="Period"><option value="">All time</option><option value="1">Last day</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option></select>
   </div>
-  <main>
+  <main id="main">
     <div>
       <div id="list"></div>
       <div class="pager"><button id="prev" type="button">Previous</button><span id="page"></span><button id="next" type="button">Next</button></div>

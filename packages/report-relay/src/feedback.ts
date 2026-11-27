@@ -1,10 +1,12 @@
+import { createHash, randomBytes } from "node:crypto";
+
 import { isTesterPassword } from "@polyth/contracts/bug-report";
 import {
   FEEDBACK_KINDS, FEEDBACK_ROLES, parseFeedback, type FeedbackKind, type FeedbackPayload, type FeedbackResult,
 } from "@polyth/contracts/feedback";
 
 import { cell, fenced, fileUrl, neutralize, quoted, RELEASE_REPO } from "./format.ts";
-import { verifyPassword, type ScryptRecord } from "./password.ts";
+import { hashPassword, parsePasswordLine, verifyPassword, type ScryptRecord } from "./password.ts";
 import {
   FEEDBACK_STATUSES, FeedbackStore, NOTE_CHARS, type FeedbackStatus, type InboxDetail, type InboxItem, type InboxQuery, type InboxSummary,
 } from "./feedbackStore.ts";
@@ -15,6 +17,7 @@ const MINUTE = 60_000;
 const TOKEN_WINDOW = 10 * MINUTE;
 const MAX_TOKEN_HEADER = 512;
 const MAX_FAILURE_KEYS = 20_000;
+const MAX_KEYS_CACHED = 100;
 const TITLE_LINE = 80;
 const MAX_PAGE = 100;
 
@@ -30,13 +33,24 @@ export interface FeedbackIntakeOptions {
   now: () => number;
   limits: FeedbackLimits;
   retentionDays: number;
-  /** The inbox token's scrypt record, or null when none is configured. */
+  /** The admin key: `inbox.scrypt` in the keys folder, or null when absent.
+   *  Team keys live in the store and are managed with it. */
   inboxRecord: () => ScryptRecord | null;
   /** The private GitHub target for "file as an issue", or null. */
   github: () => { client: RelayGitHub; repo: string; branch: string } | null;
 }
 
-export type InboxAuth = "ok" | "denied" | "rate" | "unavailable";
+/** Who a token proved to be: the admin (`inbox.scrypt`) or one team key. */
+export interface InboxKey {
+  id: string;
+  admin: boolean;
+}
+
+export type InboxAuth = InboxKey | "denied" | "rate" | "unavailable";
+
+export const ADMIN_KEY = "admin";
+const KEY_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
+const KEY_LABEL = 80;
 
 export type InboxUpdateResult = { ok: true; item: InboxDetail } | { ok: false; reason: "not-found" | "invalid" };
 
@@ -56,6 +70,9 @@ const bearer = (authorization: string | undefined): string | undefined => {
 export class FeedbackIntake {
   private readonly options: FeedbackIntakeOptions;
   private readonly failures = new Map<string, { startedAt: number; count: number }>();
+  /** sha256(token) → the key it verified against, so a page of requests costs
+   *  one scrypt. A hit still checks the key is live and unchanged. */
+  private readonly verified = new Map<string, { key: InboxKey; record: ScryptRecord | string }>();
 
   constructor(options: FeedbackIntakeOptions) {
     this.options = options;
@@ -96,13 +113,74 @@ export class FeedbackIntake {
     if (prior && now - prior.startedAt >= TOKEN_WINDOW) this.failures.delete(source);
     const current = this.failures.get(source);
     if (current && current.count > this.options.limits.tokenFailures) return "rate";
-    const record = this.options.inboxRecord();
-    if (!record) return "unavailable";
+    const admin = this.options.inboxRecord();
     const presented = bearer(authorization);
-    if (presented && verifyPassword(record, presented)) return "ok";
+    const key = presented ? this.verify(presented, admin) : null;
+    if (key) {
+      // ponytail: one small write per inbox request; batch it if the inbox ever gets busy.
+      try { this.options.store.recordAccess(key.id, source, now); } catch { /* tracking never blocks the team */ }
+      return key;
+    }
+    if (!admin && !this.options.store.hasLiveKeys()) return "unavailable";
     if (this.failures.size >= MAX_FAILURE_KEYS) this.failures.clear();
     this.failures.set(source, { startedAt: current?.startedAt ?? now, count: (current?.count ?? 0) + 1 });
     return "denied";
+  }
+
+  /** A team token is `<id>.<secret>`, so it costs one scrypt against that
+   *  key; anything else (or a miss) is tried as the admin token. */
+  private verify(presented: string, admin: ScryptRecord | null): InboxKey | null {
+    const digest = createHash("sha256").update(presented).digest("hex");
+    const cached = this.verified.get(digest);
+    if (cached) {
+      const live = cached.key.admin ? cached.record === admin : this.options.store.keyRecord(cached.key.id) === cached.record;
+      if (live) return cached.key;
+      this.verified.delete(digest);
+    }
+    const dot = presented.indexOf(".");
+    const id = dot > 0 ? presented.slice(0, dot) : "";
+    const stored = KEY_ID.test(id) ? this.options.store.keyRecord(id) : null;
+    const parsed = stored ? parsePasswordLine(stored) : null;
+    let found: { key: InboxKey; record: ScryptRecord | string } | null = null;
+    if (stored && parsed && verifyPassword(parsed, presented)) found = { key: { id, admin: false }, record: stored };
+    else if (admin && verifyPassword(admin, presented)) found = { key: { id: ADMIN_KEY, admin: true }, record: admin };
+    if (!found) return null;
+    if (this.verified.size >= MAX_KEYS_CACHED) this.verified.clear();
+    this.verified.set(digest, found);
+    return found.key;
+  }
+
+  /** Admin only: every key with where it was used from. */
+  keys(): { keys: Array<{ id: string; label: string; admin: boolean; createdAt: number | null; revokedAt: number | null; access: Array<{ address: string; firstSeen: number; lastSeen: number; hits: number }> }> } {
+    const access = this.options.store.access();
+    const of = (id: string) => access.filter((row) => row.key === id).map(({ key: _key, ...row }) => row);
+    return {
+      keys: [
+        { id: ADMIN_KEY, label: "Admin (inbox.scrypt)", admin: true, createdAt: null, revokedAt: null, access: of(ADMIN_KEY) },
+        ...this.options.store.keys().map((key) => ({ ...key, admin: false, access: of(key.id) })),
+      ],
+    };
+  }
+
+  /** Admin only: a new team key. The token is returned this once and never
+   *  stored; only its scrypt record is. */
+  createKey(raw: string): { ok: true; id: string; token: string } | { ok: false; reason: "invalid" | "taken" } {
+    let body: { id?: unknown; label?: unknown };
+    try { body = JSON.parse(raw) as typeof body; } catch { return { ok: false, reason: "invalid" }; }
+    if (typeof body !== "object" || body === null) return { ok: false, reason: "invalid" };
+    const { id, label } = body;
+    if (typeof id !== "string" || !KEY_ID.test(id) || id === ADMIN_KEY) return { ok: false, reason: "invalid" };
+    if (label !== undefined && typeof label !== "string") return { ok: false, reason: "invalid" };
+    const token = `${id}.${randomBytes(32).toString("base64url")}`;
+    const text = (label ?? "").trim().slice(0, KEY_LABEL) || id;
+    return this.options.store.addKey(id, text, hashPassword(token), this.options.now())
+      ? { ok: true, id, token }
+      : { ok: false, reason: "taken" };
+  }
+
+  /** Admin only. The admin key itself is rotated on the server, not here. */
+  revokeKey(id: string): boolean {
+    return id !== ADMIN_KEY && this.options.store.revokeKey(id, this.options.now());
   }
 
   list(query: URLSearchParams): { items: InboxItem[]; total: number } | null {

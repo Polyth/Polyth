@@ -3,6 +3,7 @@ import { startReportRelayHttpServer } from "./http.ts";
 import { hashPassword } from "./password.ts";
 import { DEFAULT_DAY_CAP, mint, parseTokens, tokenMap } from "./tokens.ts";
 import { ReportStats } from "./stats.ts";
+import { FeedbackStore } from "./feedbackStore.ts";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -13,7 +14,8 @@ import { join } from "node:path";
 // `token` mints one group token: the secret half goes to stderr (shown once),
 // the `tokens.json` entry with only its hash goes to stdout, so the two can be
 // captured separately. `list-tokens` and `stats` read-only inspect a keys or
-// data directory.
+// data directory; `inbox-access` prints which inbox key was used from which
+// address (one JSON line per pair).
 const command = process.argv[2] ?? "serve";
 const argv = process.argv.slice(3);
 
@@ -27,10 +29,14 @@ if (command === "hash-password") {
   listTokens();
 } else if (command === "stats") {
   printStats();
+} else if (command === "inbox-access") {
+  const store = new FeedbackStore(join(dataDirFrom(flags(argv, ["data"])), "feedback.db"));
+  for (const row of store.access()) process.stdout.write(`${JSON.stringify(row)}\n`);
+  store.close();
 } else if (command === "serve") {
   await serve();
 } else {
-  throw new Error(`unknown command: ${command} (serve, hash-password, token, list-tokens, stats)`);
+  throw new Error(`unknown command: ${command} (serve, hash-password, token, list-tokens, stats, inbox-access)`);
 }
 
 function keysDirFrom(values: Record<string, string | true>): string {

@@ -240,9 +240,17 @@ result. Answers: `received` 200 with the `ref` shown to the person, `invalid` 40
   user. Stage 2 (per-install quotas, proof of work, verified contact) is not built.
 - **Forget.** `POST /v1/feedback/forget` with `{version: 1, install}` deletes everything
   stored under that pseudonym and answers `forgotten` with the count.
-- **Inbox.** The team reads with an inbox token (the scrypt record `inbox.scrypt` in the
-  keys folder; written like the tester password with `hash-password`; more than the
-  failure limit per address in 10 minutes answers `429`): `GET /v1/inbox` (filter by `kind`, `status`, `role`, `days`;
+- **Inbox.** The team reads with an inbox key. The admin key is the scrypt record
+  `inbox.scrypt` in the keys folder (written like the tester password with
+  `hash-password`; rotated only by rewriting that file). Team keys live in `feedback.db`
+  table `inbox_keys` (id, label, scrypt record, created/revoked; a revoked row stays for
+  its history and its id is never reused). Only the admin key may `GET /v1/inbox/keys`
+  (every key with the addresses it was used from), `POST /v1/inbox/keys` (`{id, label}`;
+  answers the token `<id>.<43 random chars>` once, stores only its scrypt record) and
+  `POST /v1/inbox/keys/<id>/revoke`; a team key gets `403` there. `GET /v1/inbox/me` names
+  the key in use. Every accepted request updates table `inbox_access` (key, address,
+  first/last seen, hits); `report-relay.mjs inbox-access --data <dir>` prints it. More than
+  the failure limit per address in 10 minutes answers `429`. Routes: `GET /v1/inbox` (filter by `kind`, `status`, `role`, `days`;
   paged), `GET /v1/inbox/summary` (counts by kind, status and role, for
   the PM), `GET /v1/inbox/<ref>`, `GET /v1/inbox/<ref>/screenshot`, `POST /v1/inbox/<ref>`
   (status `new|seen|planned|done|dropped|keep` and a team note) and
@@ -252,7 +260,8 @@ result. Answers: `received` 200 with the `ref` shown to the person, `invalid` 40
   addition to `/v1/report` and `/v1/health`; the token is the only lock on the inbox.
 - **Inbox page.** `GET /inbox` (`src/inboxPage.ts`) is one self-contained page over that
   API: totals, filters, the list, a detail with the screenshot, status, note and "File to
-  GitHub". It holds no data; the token is typed on the page and kept in the tab's
+  GitHub", and for the admin key a "Keys" view (create a key, shown once; revoke; every
+  key's addresses). It holds no data; the token is typed on the page and kept in the tab's
   `sessionStorage` only. Feedback text is untrusted, so the page builds every node with
   `textContent`, and its CSP allows only its own script and style (by hash), same-origin
   fetches and `blob:` images, with no framing (`test/feedback.test.ts` checks both).

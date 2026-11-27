@@ -119,6 +119,21 @@ export class FeedbackStore {
       );
       CREATE INDEX IF NOT EXISTS feedback_received ON feedback (received_at);
       CREATE INDEX IF NOT EXISTS feedback_dup ON feedback (install, text_hash, received_at);
+      CREATE TABLE IF NOT EXISTS inbox_access (
+        key TEXT NOT NULL,
+        address TEXT NOT NULL,
+        first_seen INTEGER NOT NULL,
+        last_seen INTEGER NOT NULL,
+        hits INTEGER NOT NULL,
+        PRIMARY KEY (key, address)
+      );
+      CREATE TABLE IF NOT EXISTS inbox_keys (
+        id TEXT PRIMARY KEY,
+        label TEXT NOT NULL,
+        record TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        revoked_at INTEGER
+      );
     `);
   }
 
@@ -217,6 +232,53 @@ export class FeedbackStore {
   }
 
   /** The person asked to delete what they sent: by their install pseudonym. */
+  /** Which inbox key was used from which address. A pair seen for the first
+   *  time answers `true`; a watcher reads the table to flag a known key used
+   *  from a new address. */
+  recordAccess(key: string, address: string, now: number): boolean {
+    const seen = this.db.prepare("UPDATE inbox_access SET last_seen = ?, hits = hits + 1 WHERE key = ? AND address = ?").run(now, key, address);
+    if (Number(seen.changes) > 0) return false;
+    this.db.prepare("INSERT INTO inbox_access (key, address, first_seen, last_seen, hits) VALUES (?, ?, ?, ?, 1)").run(key, address, now, now);
+    return true;
+  }
+
+  /** Adds a team key (its scrypt record only); false when the id was ever used. */
+  addKey(id: string, label: string, record: string, now: number): boolean {
+    const result = this.db.prepare("INSERT OR IGNORE INTO inbox_keys (id, label, record, created_at) VALUES (?, ?, ?, ?)").run(id, label, record, now);
+    return Number(result.changes) > 0;
+  }
+
+  /** Revokes a live key; the row stays so its history keeps a name. */
+  revokeKey(id: string, now: number): boolean {
+    return Number(this.db.prepare("UPDATE inbox_keys SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").run(now, id).changes) > 0;
+  }
+
+  /** The scrypt record of a live key, or null. */
+  keyRecord(id: string): string | null {
+    const row = this.db.prepare("SELECT record FROM inbox_keys WHERE id = ? AND revoked_at IS NULL").get(id) as Row | undefined;
+    return row ? String(row.record) : null;
+  }
+
+  hasLiveKeys(): boolean {
+    return this.db.prepare("SELECT 1 FROM inbox_keys WHERE revoked_at IS NULL LIMIT 1").get() !== undefined;
+  }
+
+  keys(): Array<{ id: string; label: string; createdAt: number; revokedAt: number | null }> {
+    return (this.db.prepare("SELECT id, label, created_at, revoked_at FROM inbox_keys ORDER BY created_at").all() as Row[])
+      .map((row) => ({
+        id: String(row.id), label: String(row.label), createdAt: Number(row.created_at),
+        revokedAt: row.revoked_at === null ? null : Number(row.revoked_at),
+      }));
+  }
+
+  access(): Array<{ key: string; address: string; firstSeen: number; lastSeen: number; hits: number }> {
+    return (this.db.prepare("SELECT key, address, first_seen, last_seen, hits FROM inbox_access ORDER BY key, first_seen").all() as Row[])
+      .map((row) => ({
+        key: String(row.key), address: String(row.address),
+        firstSeen: Number(row.first_seen), lastSeen: Number(row.last_seen), hits: Number(row.hits),
+      }));
+  }
+
   deleteInstall(install: string): number {
     return Number(this.db.prepare("DELETE FROM feedback WHERE install = ?").run(install).changes);
   }

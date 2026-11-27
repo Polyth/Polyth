@@ -161,6 +161,7 @@ async function routeFeedback(
 }
 
 const INBOX_REF = /^\/v1\/inbox\/(\d{1,9})(\/screenshot|\/github)?$/;
+const INBOX_KEY = /^\/v1\/inbox\/keys(?:\/([a-z0-9][a-z0-9-]{0,31})\/revoke)?$/;
 
 /** The team's read side: every route needs the inbox token. The public proxy
  *  does not forward these paths; the team server reaches the relay on its
@@ -181,6 +182,25 @@ async function routeInbox(
   if (auth === "unavailable") { request.resume(); return finish(503, { result: "unavailable" }, "unavailable"); }
 
   const path = url.pathname;
+  if (request.method === "GET" && path === "/v1/inbox/me") return finish(200, auth, "ok");
+  const keyRoute = INBOX_KEY.exec(path);
+  if (keyRoute) {
+    if (!auth.admin) { request.resume(); return finish(403, { result: "admin" }, "admin"); }
+    if (request.method === "GET" && path === "/v1/inbox/keys") return finish(200, intake.keys(), "ok");
+    if (request.method === "POST" && path === "/v1/inbox/keys") {
+      const body = await readJsonBody(request, response, 1_024);
+      if (body === null) { relay.logRequest("inbox", "invalid", 400, elapsed()); return; }
+      const created = intake.createKey(body);
+      if (created.ok) return finish(200, { id: created.id, token: created.token }, "ok");
+      return finish(created.reason === "taken" ? 409 : 400, { result: created.reason }, created.reason);
+    }
+    if (request.method === "POST" && keyRoute[1]) {
+      request.resume();
+      return intake.revokeKey(keyRoute[1]) ? finish(200, { result: "revoked" }, "ok") : finish(404, { error: "not-found" }, "not-found");
+    }
+    request.resume();
+    return finish(404, { error: "not-found" }, "not-found");
+  }
   if (request.method === "GET" && path === "/v1/inbox") {
     const page = intake.list(url.searchParams);
     return page ? finish(200, page, "ok") : finish(400, { result: "invalid" }, "invalid");
