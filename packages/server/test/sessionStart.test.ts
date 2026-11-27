@@ -402,6 +402,30 @@ test("opening a chat whose start ended uncertain says nothing and starts no runt
   }
 });
 
+test("opening a chat created without a start whose create ended uncertain says nothing and refuses sends", async () => {
+  // 2026-11-27: a chat created directly (an automation's "Post-incident"
+  // chat) whose Claude create was never confirmed toasted "Open session:
+  // backend session creation outcome is unknown" every time it was opened.
+  const h = fixture({ createError: () => new Error("socket closed") });
+  try {
+    const created = await h.sessions.create({ projectId: "p1" }).catch(() => undefined);
+    const id = created?.id ?? (await h.store.projections())[0]!.id;
+    await waitFor(async () => (await h.store.operations(id))
+      .some((op) => op.mutationKind === "session-create" && op.state === "unknown"));
+    assert.equal((await h.store.projection(id))?.status, "unknown");
+    await h.sessions.activate!(id, { intent: "open" });
+    await h.sessions.activate!(id);
+    assert.equal((await h.store.projection(id))?.status, "unknown");
+    await assert.rejects(
+      h.sessions.send(id, { text: "hi" }, { author: AUTHOR }),
+      (error: { code?: string; mutationOutcome?: string }) => error.code === "conflict" && error.mutationOutcome === "not-started",
+    );
+    assert.equal(h.creates(), 1, "the uncertain create is never re-run");
+  } finally {
+    await h.close();
+  }
+});
+
 test("a restart while provisioning has not created the native session resumes it and delivers the first turn", async () => {
   const dir = mkdtempSync(join(tmpdir(), "polyth-session-start-restart-"));
   try {

@@ -13168,10 +13168,13 @@ export function createSessionService(deps: {
     deps.notify?.startFailed?.(sessionId);
   };
 
-  /** A started chat whose native create ended uncertain: the runtime threw or
-   *  timed out, or Polyth restarted while it ran. It has no native session and
-   *  that create is never re-run, so the chat cannot take a turn. `reported`
-   *  is whether `SESSION_START_FAILED_EVENT` already says so. */
+  /** A chat whose native create ended uncertain: the runtime threw or timed
+   *  out, or Polyth restarted while it ran. It has no native session and that
+   *  create is never re-run, so the chat cannot take a turn. This holds for a
+   *  chat created without a start too (an automation's or API's direct
+   *  create); requiring a start left those to answer "backend session creation
+   *  outcome is unknown" on every open (2026-11-27). `reported` is whether
+   *  `SESSION_START_FAILED_EVENT` already says so. */
   const uncertainStart = async (
     projection: SessionProjection,
   ): Promise<{ operation: DurableOperation; reported: boolean } | undefined> => {
@@ -13181,8 +13184,6 @@ export function createSessionService(deps: {
     if (operation?.state !== "unknown") return undefined;
     // Never-bound chats have a short log; this is not a hot path.
     const events = await store.events(projection.id);
-    const created = events.find((event) => event.type === "session/created");
-    if (!(created?.data as { start?: unknown } | undefined)?.start) return undefined;
     return { operation, reported: events.some((event) => event.type === SESSION_START_FAILED_EVENT) };
   };
 
@@ -13674,7 +13675,7 @@ export function createSessionService(deps: {
       // (the client does, as soon as the start replies) has nothing to warm,
       // nor does the start's own first send before its flight exists.
       if (startFlights.has(sessionId) || startAdmitting.has(sessionId)) return;
-      // A started chat that never got a native session has nothing to warm,
+      // A chat that never got a native session has nothing to warm,
       // and the chat already says why. A refused create provisions afresh on
       // its next send; an uncertain one is never re-run. Wiring either only
       // answered "backend session creation outcome is unknown" (2026-11-27).
