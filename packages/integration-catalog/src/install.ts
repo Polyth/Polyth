@@ -120,7 +120,10 @@ export function snapDataEnv(
   const snap = entry.mcp.local?.snapData;
   if (!snap || !host || !host.home.startsWith("/") || !host.snaps.includes(snap.snap)) return undefined;
   const folder = `snap/${snap.snap}/common/${snap.folder}`;
-  return { env: { [snap.env]: `${host.home.replace(/\/+$/, "")}/${folder}` }, folder: `~/${folder}` };
+  // Linear scan: `/\/+$/` is quadratic on a long run of `/` that is not at the end.
+  let end = host.home.length;
+  while (end > 0 && host.home[end - 1] === "/") end--;
+  return { env: { [snap.env]: `${host.home.slice(0, end)}/${folder}` }, folder: `~/${folder}` };
 }
 
 export function planInstall(

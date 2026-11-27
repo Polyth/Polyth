@@ -199,6 +199,16 @@ test("a server that starts a snap browser gets a data folder the snap can write"
   assert.ok(plan.notes.some((note) => note.includes("~/snap/chromium/common/bladebro")), plan.notes.join(" | "));
 });
 
+test("a home folder full of slashes is trimmed in linear time", () => {
+  const home = `/${"/".repeat(50_000)}x${"/".repeat(50_000)}`;
+  const started = performance.now();
+  const plan = planInstall(snapLocal, { host: { home, snaps: ["chromium"] } });
+  assert.ok(performance.now() - started < 500);
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  assert.equal(plan.input.secrets?.BLADE_HOME, `/${"/".repeat(50_000)}x/snap/chromium/common/bladebro`);
+});
+
 test("without that snap, or without host facts, the server keeps its own default folder", () => {
   for (const host of [undefined, { home: "/home/me", snaps: [] }, { home: "relative", snaps: ["chromium"] }]) {
     const plan = planInstall(snapLocal, host ? { host } : {});

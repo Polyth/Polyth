@@ -293,12 +293,12 @@ function chart(summary, period, key, f) {
   const data = periodPoints(summary.days, period, f);
   const max = niceMax(Math.max(...data.map((d) => d[key])) * 1.08);
   const week = data[0]?.week ?? false;
-  const tip = (d) => {
-    const n = f.num(d[key]);
+  const tip = (d, bare = false) => {
+    const n = bare ? f.num(d[key]) : `<strong>${f.num(d[key])}</strong>`;
     const template = key === "downloads" ? (week ? t.tipDownloadsWeek : t.tipDownloads) : week ? t.tipActiveWeek : t.tipActive;
-    return fill(esc(template), { n: `<strong>${n}</strong>`, downloads: esc(f.word(d[key], "downloads")), active: esc(f.word(d[key], "active")) });
+    return fill(esc(template), { n, downloads: esc(f.word(d[key], "downloads")), active: esc(f.word(d[key], "active")) });
   };
-  const plain = (d) => tip(d).replace(/<[^>]+>/g, "");
+  const plain = (d) => tip(d, true);
   const labelEvery = data.length > 20 ? 7 : data.length > 10 ? 3 : 1;
   const cols = data.map((d, i) => {
     const h = ((d[key] / max) * 100).toFixed(1);
@@ -731,7 +731,8 @@ export function createHandler({ keysDir, dataDir, now = () => Date.now(), lang: 
   return (req, res) => {
     const [path, search = ""] = (req.url ?? "").split("?");
     const params = new URLSearchParams(search.slice(0, 200));
-    const lang = LANGUAGES.includes(params.get("lang")) ? params.get("lang") : LANGUAGES.includes(defaultLang) ? defaultLang : "uk";
+    // The page's own constant, never the query string itself.
+    const lang = LANGUAGES.find((l) => l === params.get("lang")) ?? (LANGUAGES.includes(defaultLang) ? defaultLang : "uk");
     if (req.method !== "GET" && req.method !== "HEAD") return send(res, 405, "", { allow: "GET, HEAD" });
     if (path === "/robots.txt") return send(res, 200, "User-agent: *\nDisallow: /\n", { "content-type": "text/plain; charset=utf-8" });
     if (path !== "/" && path !== "/healthz") return send(res, 404);

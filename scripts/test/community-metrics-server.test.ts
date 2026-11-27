@@ -64,6 +64,8 @@ test("the page escapes data, carries no script and says what the numbers are not
   assert.ok(html.includes("&lt;b&gt;x&lt;/b&gt;"));
   assert.ok(html.includes("&lt;i&gt;Launch&lt;/i&gt;"));
   assert.match(html, /<html lang="uk">/);
+  // A bar's aria-label carries the tip's text without its <strong> markup.
+  assert.match(html, /aria-label="[^"<>]+: [^"<>]*\d[^"<>]*"/);
   // The "Polyth Statistics" mark is inlined (header lockup and favicon): the page still loads nothing.
   assert.match(html, /<header><svg class="logo" viewBox="0 0 64 40" aria-hidden="true" focusable="false"><defs>.*?<\/defs><image href="data:image\/png;base64,[A-Za-z0-9+/]+=*" width="40" height="40"\/>(<rect [^>]+\/>){3}<\/svg><h1>Polyth <span class="product">Статистика<\/span><\/h1>/);
   assert.match(html, /<link rel="icon" type="image\/png" href="data:image\/png;base64,[^"]+"><link rel="icon" type="image\/svg\+xml" href="data:image\/svg\+xml;base64,/);
@@ -154,6 +156,9 @@ test("closed by default: no password file, wrong password, lockout, then the pag
   const english = await fetch(`${b.url}/?lang=en`, { headers: basic("s3cret-pass") });
   assert.match(await english.text(), /Polyth · Statistics/);
   assert.match(await (await fetch(`${b.url}/?lang=xx`, { headers: basic("s3cret-pass") })).text(), /<html lang="uk">/);
+  const hostile = await (await fetch(`${b.url}/?lang=%22%3E%3Cscript%3E`, { headers: basic("s3cret-pass") })).text();
+  assert.match(hostile, /<html lang="uk">/);
+  assert.ok(!hostile.includes("<script>"));
   const csv = await fetch(`${b.url}/?export=csv&lang=en`, { headers: basic("s3cret-pass") });
   assert.equal(csv.status, 200);
   assert.match(csv.headers.get("content-type") ?? "", /^text\/csv/);
