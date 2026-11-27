@@ -64,9 +64,9 @@ test("the page escapes data, carries no script and says what the numbers are not
   assert.ok(html.includes("&lt;b&gt;x&lt;/b&gt;"));
   assert.ok(html.includes("&lt;i&gt;Launch&lt;/i&gt;"));
   assert.match(html, /<html lang="uk">/);
-  // The Polyth mark is inlined (header and favicon): the page still loads nothing.
-  assert.match(html, /<header><img class="logo" src="data:image\/png;base64,[A-Za-z0-9+/]+=*" width="34" height="34" alt="">/);
-  assert.match(html, /<link rel="icon" type="image\/png" href="data:image\/png;base64,/);
+  // The "Polyth Statistics" mark is inlined (header lockup and favicon): the page still loads nothing.
+  assert.match(html, /<header><svg class="logo" viewBox="0 0 64 40" aria-hidden="true" focusable="false"><defs>.*?<\/defs><image href="data:image\/png;base64,[A-Za-z0-9+/]+=*" width="40" height="40"\/>(<rect [^>]+\/>){3}<\/svg><h1>Polyth <span class="product">Статистика<\/span><\/h1>/);
+  assert.match(html, /<link rel="icon" type="image\/png" href="data:image\/png;base64,[^"]+"><link rel="icon" type="image\/svg\+xml" href="data:image\/svg\+xml;base64,/);
   assert.ok(!/(src|href)="(https?:)?\/\//.test(html));
   assert.match(html, /не стежить за людьми/);
   assert.match(html, /чому це не «кількість користувачів»/);
@@ -165,7 +165,7 @@ test("closed by default: no password file, wrong password, lockout, then the pag
   assert.equal(anonymousCsv.status, 401);
   const prompt = await anonymousCsv.text();
   assert.match(prompt, /Потрібен пароль команди/);
-  assert.match(prompt, /<img class="logo" src="data:image\/png;base64,/);
+  assert.match(prompt, /<svg class="logo" viewBox="0 0 64 40"/);
   assert.ok(!prompt.includes("2026-11-24"));
   assert.equal((await fetch(`${b.url}/healthz`)).status, 401);
   assert.equal((await fetch(`${b.url}/healthz`, { headers: basic("s3cret-pass") })).status, 200);
