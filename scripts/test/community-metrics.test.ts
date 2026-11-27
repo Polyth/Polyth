@@ -237,6 +237,8 @@ test("brief, note and goal work on a data directory and refuse bad input", (cont
   // The brief speaks in whole downloads: 11.5 still needed a day reads as 12.
   const pace = weeklyBrief(daily("2026-10-31", 12, 10), { goals: [{ month: "2026-11", metric: "downloads", target: 330 }] }).goals.items[0];
   assert.deepEqual([pace.expected, pace.perDay, pace.projected], [110, 12, 300]);
+  const later = [{ month: "2026-10", metric: "stars", target: 5 }, { month: "2026-12", metric: "downloads", target: 900 }];
+  assert.deepEqual(weeklyBrief(daily("2026-10-31", 12, 10), { goals: later }).plannedGoals, [later[1]]);
   // Snapshots Nov 1 .. Nov 16 count Nov 1 .. Nov 15: the brief's period is the last 7 counted days.
   writeFileSync(join(dir, "snapshots.jsonl"), daily("2026-11-01", 16, 10).map((l) => JSON.stringify(l)).join("\n"));
   assert.equal(cli(["goal", "--dir", dir, "--month", "2026-11", "--metric", "downloads", "--target", "300"]).status, 0);

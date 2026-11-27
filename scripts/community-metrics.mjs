@@ -550,6 +550,8 @@ export function weeklyBrief(lines, { goals = [], events = [], note = null, now =
         return [k, k === "perDay" ? Math.ceil(v) : Math.round(v)];
       }))),
     },
+    // Goals already set for later months, so a proposal for next month is made only when none exists.
+    plannedGoals: goals.filter((g) => g.month > to.slice(0, 7)),
     currentNote: note ? { from: note.from, to: note.to, writtenAt: note.writtenAt } : null,
   };
 }

@@ -110,7 +110,7 @@ Two optional files next to `snapshots.jsonl` add a row under the summary paragra
 
 - **`weekly.json`, the weekly note.** Three plain lines per language, written every Monday by a Polyth Agent
   from `brief` (the same figures the page shows: the last 7 counted days against the 7 before, platforms, releases
-  and events in the period, goal progress, and a `wording` reminder that downloads and active apps are not people).
+  and events in the period, goal progress, the goals already set for later months, and a `wording` reminder that downloads and active apps are not people).
   `note` accepts `{"from":"YYYY-MM-DD","to":"YYYY-MM-DD","uk":[…],"en":[…]}` with 1–3 lines of at most 240
   characters per language (either may be left out; an English page then shows the Ukrainian lines marked
   `lang="uk"`), strips control, line-separator and bidi characters, stamps `writtenAt` itself and replaces the file
