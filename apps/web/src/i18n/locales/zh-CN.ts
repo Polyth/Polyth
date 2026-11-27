@@ -1499,6 +1499,8 @@ export const zhCN: AppMessages = {
   "settings.pages.autoUpdateDone": "已从 {from} 更新到 {to}。",
   "settings.pages.autoUpdateFailed": "无法更新到 {to}：{message}",
   "settings.pages.autoUpdateOwnerOnly": "只有实例所有者可以更改此项。",
+  "settings.pages.autoUpdateCheckoutHint": "通过 git 快进 {source}，在没有对话运行时重新构建并重启此服务器。",
+  "settings.pages.autoUpdateProblem": "暂时无法更新。{message}",
   "settings.pages.active": "活跃",
   "settings.pages.adaExampleCom": "ada@example.com",
   "settings.pages.adaLovelace": "Ada Lovelace",

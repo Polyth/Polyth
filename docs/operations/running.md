@@ -136,13 +136,19 @@ with the command for this install: `polyth update`, Homebrew's
 `brew upgrade polyth && brew services restart polyth`, `docker compose pull` in a
 container, or the checkout's `git pull` sequence.
 
-### Automatic updates (npm and Homebrew)
+### Automatic updates (npm, Homebrew and source checkouts)
 
 Settings → About → **Update automatically** lets the instance owner have an npm or
-Homebrew install update itself (off by default; other accounts see the state, and
-release-archive, Docker and checkout servers do not show the row). The server owns
-it (`packages/server/src/serverAutoUpdate.ts`, drivers in
-`apps/server/src/selfUpdate.ts`, setting in `<data>/server-auto-update.json`):
+Homebrew install, or a source checkout, update itself (off by default; other
+accounts see the state, and release-archive and Docker servers do not show the
+row). The server owns when it happens (`packages/server/src/serverAutoUpdate.ts`,
+setting in `<data>/server-auto-update.json`); a driver says how. The packaged
+server passes its npm or Homebrew driver (`apps/server/src/selfUpdate.ts`); a
+package may contribute one for another kind of install through the
+`SERVER_SELF_UPDATE` service (`@polyth/plugins`), and the source checkout's
+comes from the removable `checkout-update` package
+([below](#source-checkouts-checkout-update-package)). The host's own driver wins,
+and a contributed one is used only when a service restarts the server:
 
 1. Every six hours it asks for the newest release of its channel: npm reads
    `npm view polyth@latest` (`@nightly` for a nightly install), Homebrew reads the
@@ -172,7 +178,41 @@ account cannot write the npm install, or when it runs as root under Homebrew. A
 failed release is retried after a day; a Homebrew tap that does not offer the new
 version yet is asked again at the next check. There is no automatic rollback after
 the restart: a release that does not start needs `polyth update --version <old>`
-(npm) or the previous keg (Homebrew), and the pre-migration copies below.
+(npm) or the previous keg (Homebrew), and the pre-migration copies below; a
+checkout goes back with `git reset --hard <commit>` and a rebuild.
+
+#### Source checkouts (`checkout-update` package)
+
+A server started from a git checkout (`node --experimental-strip-types
+packages/server/src/index.ts` under a systemd unit named `polyth.service` with
+`Restart=on-failure`, or with `POLYTH_SUPERVISED=1`) gets the driver from
+`packages/checkout-update` when its own script lives in the checkout the package
+was loaded from. It follows the checked-out branch's upstream (`origin/devel`
+follows the development branch, `origin/master` the release branch) and names
+what runs by its commit (12 characters):
+
+1. Every six hours it fetches that one branch and offers its head when it
+   fast-forwards `HEAD`. It never moves a checkout with commits of its own or with
+   changed tracked files (untracked builds and `node_modules` do not count); About
+   then says why (*Cannot update now. …*). Make changes in another clone (a
+   project), push them, and let this checkout follow the remote.
+2. It waits for no working chat like the npm driver, then `git merge --ff-only`,
+   `npm install --no-save --include=dev` (in place, so `node_modules` is never
+   wiped under the running server and the committed lockfile stays as it is),
+   `npm run build`, `cargo build --release -p polyth-link-host -p
+   polyth-link-client` when the Rust sources changed and a Link host was built
+   before (cargo from `PATH`, `CARGO_HOME` or `~/.cargo/bin`), and loads the new
+   server's module graph once without starting it.
+3. Any failing step resets the checkout to the previous commit (it was clean, so
+   only the update's changes go) and rebuilds it, so the next restart starts what
+   runs now. Then the same exit 75 and restart as above.
+
+The server's environment reaches every step, so put build-only settings the host
+needs (for example `CC=` for the runtime supervisor) in the unit's
+`EnvironmentFile`. The fetch uses the checkout's own remote configuration; keep a
+deployment checkout on a public HTTPS remote rather than signing the server's OS
+account in to GitHub, because every agent and terminal on the server runs as that
+account ([tenancy §14.7](../architecture/spaces-and-tenancy.md#147-the-execution-boundary)).
 
 Every server, however it was installed, copies a canonical database before it
 migrates its schema: the control plane (`control-plane/control.sqlite`) and the

@@ -9,7 +9,7 @@
 import { createHash } from "node:crypto";
 import { createConnection, createServer as createNetServer } from "node:net";
 import { DatabaseSync } from "node:sqlite";
-import { chmodSync, mkdirSync, readdirSync, realpathSync, rmSync } from "node:fs";
+import { chmodSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCapabilityContributionRegistry, createHarnessPool, createHarnessRegistry, releaseProcessExecution, type RuntimeAcquisitionInfo } from "@polyth/harness-runtime";
@@ -79,6 +79,7 @@ import {
   isJoinedSpaceId,
   SERVER_PERSON_DATA_VOLUME,
   SERVER_PERSON_NOTICES,
+  SERVER_SELF_UPDATE,
   SESSION_ATTENTION_SERVICE,
   SESSION_PURPOSES,
   SESSION_START_STEPS,
@@ -179,7 +180,14 @@ import { createPersonalMcpReprovisioner, type PersonalMcpReprovisioner } from ".
 import { assertRemoteOpenCodeUsable, type RemoteOpenCodeAccessDeps } from "./remoteOpenCodeAccess.ts";
 import { canonicalSecurity, isSourceEntrypoint } from "./runtimeSecurity.ts";
 import { serverVersion, updateCommand } from "./version.ts";
-import { createServerAutoUpdater, EXIT_FOR_UPDATE, serverAutoUpdateRoutes, type ServerSelfUpdater } from "./serverAutoUpdate.ts";
+import {
+  createSelfUpdateDrivers,
+  createServerAutoUpdater,
+  EXIT_FOR_UPDATE,
+  restartingService,
+  serverAutoUpdateRoutes,
+  type ServerSelfUpdater,
+} from "./serverAutoUpdate.ts";
 import { snapshotBeforeMigrations } from "./preMigrationSnapshot.ts";
 import { oneShot } from "./oneshot.ts";
 import {
@@ -223,6 +231,15 @@ import {
 import { createRuntimeStorageMaintenance } from "./runtimeStorageMaintenance.ts";
 
 /** POLYTH_SMALL_MODEL="provider/model-id" — cheap model for auditors/commit messages. */
+/** /proc/self/cgroup: which systemd unit runs this server, on Linux. */
+const readProcCgroup = (): string => {
+  try {
+    return readFileSync("/proc/self/cgroup", "utf8");
+  } catch {
+    return "";
+  }
+};
+
 const smallModel = (): { providerID: string; modelID: string } | undefined => {
   const raw = process.env.POLYTH_SMALL_MODEL;
   if (!raw || !raw.includes("/")) return undefined;
@@ -253,7 +270,9 @@ export interface BootOptions {
    *  it a container or a checkout is assumed (version.ts). */
   updateCommand?: string;
   /** A packaged install that can install its own releases (npm, Homebrew)
-   *  and is restarted by a service when it exits (serverAutoUpdate.ts). */
+   *  and is restarted by a service when it exits (serverAutoUpdate.ts). A
+   *  package may contribute a driver for another kind of install through
+   *  `SERVER_SELF_UPDATE`; this one wins over it. */
   selfUpdate?: ServerSelfUpdater;
   /** Why this host cannot update itself, shown in Settings → About when
    *  `selfUpdate` is absent. */
@@ -2823,6 +2842,14 @@ export async function boot(opts: BootOptions = {}) {
       return { dispose: () => { personDataMeasures.delete(measure); } };
     },
   });
+  // A package may contribute how this kind of install updates itself (a
+  // source checkout); the host's own driver (opts.selfUpdate) still wins.
+  const selfUpdateDrivers = createSelfUpdateDrivers(restartingService({
+    env: process.env,
+    platform: process.platform,
+    ...(process.platform === "linux" ? { cgroup: readProcCgroup() } : {}),
+  }));
+  services.provide(SERVER_SELF_UPDATE, selfUpdateDrivers);
   const purposeContexts = new Map<string, (session: SessionProjection) => string>();
   services.provide(SESSION_PURPOSES, {
     register(purpose, context) {
@@ -3681,8 +3708,9 @@ export async function boot(opts: BootOptions = {}) {
     file: join(dataDir, "server-auto-update.json"),
     version,
     ...(opts.selfUpdate ? { updater: opts.selfUpdate } : {}),
-    unavailable: opts.selfUpdateUnavailable
-      ?? "Automatic updates are for a packaged server installed with npm or Homebrew and run by its service.",
+    contributed: () => selfUpdateDrivers.current(),
+    restartingService: selfUpdateDrivers.restartingService,
+    ...(opts.selfUpdateUnavailable ? { unavailable: opts.selfUpdateUnavailable } : {}),
     busy: async () => {
       const at = Date.now();
       return (await store.projections()).filter((projection) =>

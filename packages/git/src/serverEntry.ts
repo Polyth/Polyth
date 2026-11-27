@@ -7,7 +7,9 @@ import { rmSync } from "node:fs";
 import { basename, posix, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import type {
+  AgentCapabilityContributionRegistry,
   AgentRuntime,
+  Disposable,
   CreateIsolatedSessionInput,
   JsonObject,
   ModelRef,
@@ -45,6 +47,7 @@ import {
   pathsUnder,
   type GitService,
 } from "./index.ts";
+import { agentSafePush, createGitPublishTool, gitCurrentBranch, gitPublishInstruction, gitToplevel } from "./agentPublish.ts";
 import { registerGitHandoffSources } from "./handoffSources.ts";
 import {
   createSourceControlAccountService,
@@ -1750,6 +1753,15 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     },
     accounts,
   });
+  const publishTool = createGitPublishTool({
+    projection: (sessionId) => host.store.projection(sessionId),
+    actingGit,
+    push: agentSafePush,
+    toplevel: gitToplevel,
+    currentBranch: gitCurrentBranch,
+    remoteProject: async (projectId) => !!(await host.projects.get(projectId))?.remote,
+  });
+  let registrations: Disposable[] = [];
   let routes: RouteHandler | null = null;
   return {
     remoteAccess: GIT_REMOTE_ACCESS,
@@ -1920,6 +1932,14 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
         }
         return (await isolationHandler(request)) || (await gitHandler(request));
       };
+      const capabilities = host.services.get(serverServiceKey<AgentCapabilityContributionRegistry>("harness.capabilities"));
+      registrations = capabilities
+        ? [capabilities.register("git", gitPublishInstruction), capabilities.register("git", publishTool)]
+        : [];
+    },
+    async onDisable() {
+      for (const registration of registrations.toReversed()) await registration.dispose();
+      registrations = [];
     },
   };
 }

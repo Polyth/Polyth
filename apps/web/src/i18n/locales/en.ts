@@ -1502,6 +1502,8 @@ export const en = {
   "settings.pages.autoUpdateDone": "Updated from {from} to {to}.",
   "settings.pages.autoUpdateFailed": "Could not update to {to}: {message}",
   "settings.pages.autoUpdateOwnerOnly": "Only the instance owner can change this.",
+  "settings.pages.autoUpdateCheckoutHint": "Fast-forwards {source} with git, rebuilds and restarts this server once no chat is working.",
+  "settings.pages.autoUpdateProblem": "Cannot update now. {message}",
   "settings.pages.active": "active",
   "settings.pages.adaExampleCom": "ada@example.com",
   "settings.pages.adaLovelace": "Ada Lovelace",

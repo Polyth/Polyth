@@ -1137,6 +1137,26 @@ in its own shell (and Terminal) runs in the one harness process the chat
 shares, with the host's default Git identity, credential helpers, `gh` logins
 and SSH keys. That is a deliberate scope decision, not an enforced boundary.
 
+So an agent that must push uses the git package's `polyth_git_publish` tool
+(`packages/git/src/agentPublish.ts`) instead of `git push`: it pushes the
+chat's checked-out branch through `actingGit` with no `requester`, so the
+credential is the session actor's own account (the turn's person must be that
+actor), never another member's, and the server's own logins only for the
+instance owner of a local-trusted install. Because that git process carries the
+person's credential in its environment and the agent controls the checkout,
+the push runs no hooks (`core.hooksPath=/dev/null`, `--no-verify`), uses an
+explicit non-force `refs/heads/<b>:refs/heads/<b>` refspec, and refuses when any
+config scope or proxy variable could redirect or intercept the transport
+(proxy, TLS verification or CA, `insteadOf`, `pushurl`, `vcs`/`receivepack`).
+Its name says *publish*, so Auto-Approve never answers it and the person is
+asked unless the chat has Full access. A shared server should therefore keep
+the OS account signed out of GitHub entirely. Known gap (source-inspected
+2026-11-27): Source control's own push and sync (`push`/`pushBranch` in
+`packages/git/src/index.ts`) still run repository hooks and honor repository
+transport settings with the person's credential in the environment, so a hook
+an agent planted in that checkout could read it; hardening them changes the
+behavior of a person's own pre-push hooks and is a separate decision.
+
 ### 14.8 People talking in sessions (implemented)
 
 Status: source-inspected, unit-tested and exercised on a local three-person

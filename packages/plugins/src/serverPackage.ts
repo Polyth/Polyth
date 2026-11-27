@@ -322,6 +322,51 @@ export interface ServerPersonDataVolume {
 export const SERVER_PERSON_DATA_VOLUME =
   serverServiceKey<ServerPersonDataVolume>("server.person-data-volume");
 
+/** What one automatic-update install attempt left behind. */
+export interface SelfUpdateResult {
+  ok: boolean;
+  /** What the install holds now (its version or revision), when readable. */
+  installed: string | null;
+  message: string;
+  /** The source does not offer that release yet (a tap behind GitHub). */
+  notYet?: boolean;
+}
+
+/** How this server installs its own updates. The packaged server's host passes
+ *  its npm or Homebrew driver; a package may contribute one for another kind
+ *  of install (a source checkout) through `SERVER_SELF_UPDATE`. The host
+ *  decides when (no chat working) and restarts through its service. */
+export interface ServerSelfUpdater {
+  kind: "npm" | "homebrew" | "checkout";
+  /** Why this install cannot update itself (no service restarts it, the
+   *  install is not writable…), or null. Read again at every check. */
+  readonly unavailable: string | null;
+  /** What runs now, when releases are not named by the server's version (a
+   *  checkout's revision). Also settles the previous update after a restart. */
+  current?(): Promise<string>;
+  /** Where updates come from, for the person (`origin/devel`). */
+  source?(): string | null;
+  /** The newest update this install's source offers. Throws with a plain
+   *  reason when it cannot update now (local changes, a diverged branch). */
+  newest(current: string): Promise<string | null>;
+  /** Whether `candidate` replaces `current`; release order when absent. */
+  isNewer?(candidate: string, current: string): boolean;
+  /** Installs `target` and checks the result. Never restarts anything. */
+  apply(target: string, current: string): Promise<SelfUpdateResult>;
+}
+
+/** Self-update drivers contributed by packages. The host uses one only when a
+ *  service restarts this process after it exits for an update, and never
+ *  over the driver its own host passed. One driver at a time. */
+export interface ServerSelfUpdateDrivers {
+  /** The service that restarts this server on an unsuccessful exit, or null. */
+  readonly restartingService: string | null;
+  contribute(driver: ServerSelfUpdater): Disposable;
+}
+
+export const SERVER_SELF_UPDATE =
+  serverServiceKey<ServerSelfUpdateDrivers>("server.self-update");
+
 /** A Space of another Polyth server that one person on this server joined
  *  through Polyth Link (docs/architecture/polyth-link.md "Joined Spaces").
  *  It belongs to that person alone: no one else on this server sees it. */

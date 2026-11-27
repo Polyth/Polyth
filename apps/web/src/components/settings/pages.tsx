@@ -2363,11 +2363,14 @@ function autoUpdateHint(state: ServerAutoUpdateDto): string {
     ? tr("settings.pages.autoUpdateWaiting", { version, count: String(state.busy) })
     : state.phase === "installing" && version ? tr("settings.pages.autoUpdateInstalling", { version })
     : state.phase === "restarting" && version ? tr("settings.pages.autoUpdateRestarting", { version })
+    : state.problem ? tr("settings.pages.autoUpdateProblem", { message: state.problem })
     : state.last
       ? state.last.ok
         ? tr("settings.pages.autoUpdateDone", { from: state.last.from, to: state.last.to })
         : tr("settings.pages.autoUpdateFailed", { to: state.last.to, message: state.last.message })
-      : tr("settings.pages.autoUpdateServerHint", { manager: state.install === "homebrew" ? "Homebrew" : "npm" });
+      : state.install === "checkout"
+        ? tr("settings.pages.autoUpdateCheckoutHint", { source: state.source || "git" })
+        : tr("settings.pages.autoUpdateServerHint", { manager: state.install === "homebrew" ? "Homebrew" : "npm" });
   return state.canChange ? now : `${now} ${tr("settings.pages.autoUpdateOwnerOnly")}`;
 }
 

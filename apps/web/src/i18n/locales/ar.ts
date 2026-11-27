@@ -1499,6 +1499,8 @@ export const ar: AppMessages = {
   "settings.pages.autoUpdateDone": "تم التحديث من {from} إلى {to}.",
   "settings.pages.autoUpdateFailed": "تعذّر التحديث إلى {to}: {message}",
   "settings.pages.autoUpdateOwnerOnly": "لا يمكن تغيير هذا إلا لمالك المثيل.",
+  "settings.pages.autoUpdateCheckoutHint": "يقدّم {source} عبر git ويعيد بناء هذا الخادم وتشغيله عندما لا تعمل أي محادثة.",
+  "settings.pages.autoUpdateProblem": "تعذّر التحديث الآن. {message}",
   "settings.pages.active": "نشيط",
   "settings.pages.adaExampleCom": "ada@example.com",
   "settings.pages.adaLovelace": "آدا لوفليس",

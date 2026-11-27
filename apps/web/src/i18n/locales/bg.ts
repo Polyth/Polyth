@@ -1499,6 +1499,8 @@ export const bg: AppMessages = {
   "settings.pages.autoUpdateDone": "Обновено от {from} до {to}.",
   "settings.pages.autoUpdateFailed": "Неуспешно обновяване до {to}: {message}",
   "settings.pages.autoUpdateOwnerOnly": "Само собственикът на инстанцията може да промени това.",
+  "settings.pages.autoUpdateCheckoutHint": "Превърта {source} напред с git, компилира наново и рестартира този сървър, когато няма работещ чат.",
+  "settings.pages.autoUpdateProblem": "В момента не може да се обнови. {message}",
   "settings.pages.active": "активен",
   "settings.pages.adaExampleCom": "ada@example.com",
   "settings.pages.adaLovelace": "Ада Лъвлейс",

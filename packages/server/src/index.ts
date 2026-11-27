@@ -24,6 +24,7 @@ import {
 export * from "./indexCore.ts";
 export type { BootOptions } from "./indexCore.ts";
 export type { SelfUpdateResult, ServerSelfUpdater } from "./serverAutoUpdate.ts";
+export { restartingService } from "./serverAutoUpdate.ts";
 
 const localOriginHost = (hostname: string): string => {
   const host = hostname.trim().toLowerCase();

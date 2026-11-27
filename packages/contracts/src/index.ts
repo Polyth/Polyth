@@ -7436,12 +7436,14 @@ export interface ReleaseDownloadsDto {
   update?: { version: string; command: string } | null;
 }
 
-/** `GET`/`PUT /api/system/auto-update`: a packaged server that installs its
- *  own new releases (npm or Homebrew) and restarts through its service once no
- *  chat is working. Absent (404) on older servers. */
+/** `GET`/`PUT /api/system/auto-update`: a server that installs its own
+ *  updates (a packaged npm or Homebrew install, or a source checkout through a
+ *  package's driver) and restarts through its service once no chat is
+ *  working. Absent (404) on older servers. */
 export interface ServerAutoUpdateDto {
-  /** The package manager this server updates through; null when it cannot. */
-  install: "npm" | "homebrew" | null;
+  /** How this server updates (its package manager, or `checkout`: git);
+   *  null when it cannot. */
+  install: "npm" | "homebrew" | "checkout" | null;
   /** Why this server cannot update itself, when it cannot. */
   unavailable: string | null;
   enabled: boolean;
@@ -7457,6 +7459,13 @@ export interface ServerAutoUpdateDto {
   checkedAt: number | null;
   /** The last update attempt, kept across the restart it caused. */
   last: { at: number; from: string; to: string; ok: boolean; message: string } | null;
+  /** Where updates come from (`origin/devel`), for the instance owner.
+   *  Absent from older servers. */
+  source?: string | null;
+  /** Why the last check could not offer an update (local changes, a
+   *  diverged branch); details for the instance owner only. Absent from
+   *  older servers. */
+  problem?: string | null;
 }
 
 const RELEASE_VERSION = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;

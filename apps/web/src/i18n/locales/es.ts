@@ -1499,6 +1499,8 @@ export const es: AppMessages = {
   "settings.pages.autoUpdateDone": "Actualizado de {from} a {to}.",
   "settings.pages.autoUpdateFailed": "No se pudo actualizar a {to}: {message}",
   "settings.pages.autoUpdateOwnerOnly": "Solo el propietario de la instancia puede cambiar esto.",
+  "settings.pages.autoUpdateCheckoutHint": "Avanza {source} con git, recompila y reinicia este servidor cuando ningún chat esté trabajando.",
+  "settings.pages.autoUpdateProblem": "No se puede actualizar ahora. {message}",
   "settings.pages.active": "activo",
   "settings.pages.adaExampleCom": "ada@example.com",
   "settings.pages.adaLovelace": "Ada Lovelace",

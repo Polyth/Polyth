@@ -1499,6 +1499,8 @@ export const uk: AppMessages = {
   "settings.pages.autoUpdateDone": "Оновлено з {from} до {to}.",
   "settings.pages.autoUpdateFailed": "Не вдалося оновити до {to}: {message}",
   "settings.pages.autoUpdateOwnerOnly": "Змінити це може лише власник інстансу.",
+  "settings.pages.autoUpdateCheckoutHint": "Підтягує нові коміти {source} через git, перезбирає й перезапускає цей сервер, коли жоден чат не працює.",
+  "settings.pages.autoUpdateProblem": "Зараз оновити неможливо. {message}",
   "settings.pages.active": "активно",
   "settings.pages.adaExampleCom": "ada@example.com",
   "settings.pages.adaLovelace": "Ada Lovelace",

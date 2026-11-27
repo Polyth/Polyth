@@ -1499,6 +1499,8 @@ export const fr: AppMessages = {
   "settings.pages.autoUpdateDone": "Mis à jour de {from} vers {to}.",
   "settings.pages.autoUpdateFailed": "Échec de la mise à jour vers {to} : {message}",
   "settings.pages.autoUpdateOwnerOnly": "Seul le propriétaire de l’instance peut modifier ce réglage.",
+  "settings.pages.autoUpdateCheckoutHint": "Avance {source} avec git, reconstruit et redémarre ce serveur dès qu'aucune discussion n'est en cours.",
+  "settings.pages.autoUpdateProblem": "Mise à jour impossible pour l'instant. {message}",
   "settings.pages.active": "actif",
   "settings.pages.adaExampleCom": "ada@example.com",
   "settings.pages.adaLovelace": "Ada Lovelace",

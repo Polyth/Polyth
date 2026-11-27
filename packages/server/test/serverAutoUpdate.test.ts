@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  createSelfUpdateDrivers,
   createServerAutoUpdater,
   serverAutoUpdateRoutes,
   type SelfUpdateResult,
@@ -74,7 +75,8 @@ test("installs a newer release and restarts once no chat is working", async () =
   await r.auto.tick();
   assert.deepEqual(r.applied, ["1.2.11"]);
   assert.equal(r.restarts(), 1);
-  assert.deepEqual(r.stored().pending, { from: "1.2.10", to: "1.2.11", at: 1_000_000 });
+  assert.deepEqual(r.stored().pending, { from: "1.2.10", to: "1.2.11", at: 1_000_000, kind: "npm" });
+  assert.equal((await r.auto.status(true)).last, null, "the attempt this process wrote waits for the next boot");
 });
 
 test("a chat that starts during the install delays only the restart", async () => {
@@ -171,4 +173,123 @@ test("only the owner reads install paths and package-manager output", async () =
   assert.equal(member.canChange, false);
   const blocked = rig({ unavailable: "This server's account cannot write /usr/lib/node_modules" });
   assert.doesNotMatch((await blocked.auto.status(false)).unavailable ?? "", /node_modules/);
+});
+
+/** A package's revision-named driver (a checkout) contributed through the seam. */
+function contributedRig(input: {
+  service?: string | null;
+  revision?: string;
+  newest?: string | (() => string);
+  stored?: object;
+  hostUpdater?: ServerSelfUpdater;
+}) {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-auto-update-contributed-"));
+  after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = join(dir, "server-auto-update.json");
+  if (input.stored) writeFileSync(file, JSON.stringify(input.stored));
+  let revision = input.revision ?? "aaaaaaaaaaaa";
+  let restarts = 0;
+  const applied: string[] = [];
+  const drivers = createSelfUpdateDrivers(input.service === undefined ? "polyth.service" : input.service);
+  const driver: ServerSelfUpdater = {
+    kind: "checkout",
+    unavailable: null,
+    current: async () => revision,
+    source: () => "origin/devel",
+    isNewer: (candidate, current) => candidate !== current,
+    newest: async () => typeof input.newest === "function" ? input.newest() : (input.newest ?? revision),
+    apply: async (target) => {
+      applied.push(target);
+      revision = target;
+      return { ok: true, installed: target, message: `Updated the checkout to ${target}.` };
+    },
+  };
+  const auto = createServerAutoUpdater({
+    file,
+    version: "1.2.0",
+    ...(input.hostUpdater ? { updater: input.hostUpdater } : {}),
+    contributed: () => drivers.current(),
+    restartingService: drivers.restartingService,
+    busy: async () => 0,
+    restart: () => { restarts += 1; },
+    now: () => 5_000,
+    log: () => {},
+  });
+  return {
+    auto,
+    drivers,
+    driver,
+    applied,
+    restarts: () => restarts,
+    stored: () => JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>,
+  };
+}
+
+test("contributed driver: one at a time, and gone when disposed", async () => {
+  const r = contributedRig({});
+  assert.equal((await r.auto.status(true)).install, null, "nothing contributed yet");
+  const contribution = r.drivers.contribute(r.driver);
+  assert.throws(() => r.drivers.contribute({ ...r.driver }), (error: { code?: string }) => error.code === "conflict");
+  assert.equal((await r.auto.status(true)).install, "checkout");
+  contribution.dispose();
+  assert.equal((await r.auto.status(true)).install, null);
+});
+
+test("contributed driver: needs a service that restarts the server", async () => {
+  const r = contributedRig({ service: null });
+  r.drivers.contribute(r.driver);
+  const status = await r.auto.status(true);
+  assert.equal(status.install, "checkout");
+  assert.equal(status.canChange, false);
+  assert.match(status.unavailable ?? "", /No service restarts this server/);
+  await assert.rejects(r.auto.setEnabled(true), /No service/);
+});
+
+test("contributed driver: updates by revision and the next boot settles it with the driver", async () => {
+  const r = contributedRig({ newest: "bbbbbbbbbbbb" });
+  r.drivers.contribute(r.driver);
+  await r.auto.setEnabled(true);
+  await r.auto.tick();
+  assert.deepEqual(r.applied, ["bbbbbbbbbbbb"]);
+  assert.equal(r.restarts(), 1);
+  assert.deepEqual(r.stored().pending, { from: "aaaaaaaaaaaa", to: "bbbbbbbbbbbb", at: 5_000, kind: "checkout", revision: true });
+  assert.equal((await r.auto.status(true)).source, "origin/devel");
+  assert.equal((await r.auto.status(false)).source, null, "the source is for the owner");
+
+  // The next boot: the package's driver is not there yet, so the pending
+  // update waits for it instead of comparing the server's version.
+  const next = contributedRig({ revision: "bbbbbbbbbbbb", stored: r.stored() });
+  assert.equal((await next.auto.status(true)).last ?? null, null);
+  assert.ok(next.stored().pending, "pending kept until its driver can read the revision");
+  next.drivers.contribute(next.driver);
+  const settled = await next.auto.status(true);
+  assert.equal(settled.last?.ok, true);
+  assert.match(settled.last?.message ?? "", /aaaaaaaaaaaa to bbbbbbbbbbbb/);
+  assert.equal(next.stored().pending, undefined);
+});
+
+test("contributed driver: a check that cannot offer an update says why, to the owner only", async () => {
+  const r = contributedRig({ newest: () => { throw new Error("This checkout has local changes (package-lock.json)."); } });
+  r.drivers.contribute(r.driver);
+  await r.auto.setEnabled(true);
+  await r.auto.tick();
+  assert.deepEqual(r.applied, []);
+  assert.match((await r.auto.status(true)).problem ?? "", /package-lock\.json/);
+  assert.doesNotMatch((await r.auto.status(false)).problem ?? "", /package-lock/);
+  await r.auto.setEnabled(false);
+  assert.equal((await r.auto.status(true)).problem, null);
+});
+
+test("the host's own driver wins over a contributed one", async () => {
+  const host: ServerSelfUpdater = {
+    kind: "npm",
+    unavailable: null,
+    newest: async () => null,
+    apply: async () => ({ ok: false, installed: null, message: "unused" }),
+  };
+  const r = contributedRig({ service: null, hostUpdater: host });
+  r.drivers.contribute(r.driver);
+  const status = await r.auto.status(true);
+  assert.equal(status.install, "npm");
+  assert.equal(status.unavailable, null, "the host's driver checked its own service");
 });

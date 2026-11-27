@@ -1,0 +1,32 @@
+{
+  "name": "@polyth/checkout-update",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "descriptor": {
+      "name": "Checkout updates",
+      "description": "Lets a server that runs from a git checkout update itself: Settings → About → Update automatically fast-forwards its branch, rebuilds and restarts once no chat is working.",
+      "core": false,
+      "enabled": true,
+      "maturity": "beta",
+      "settingsGroup": "System",
+      "icon": "update",
+      "hasSettings": false,
+      "category": "system"
+    }
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "typecheck": "node ../../node_modules/typescript/bin/tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@polyth/contracts": "1.2.0",
+    "@polyth/kernel": "0.1.0",
+    "@polyth/plugins": "0.1.0"
+  }
+}

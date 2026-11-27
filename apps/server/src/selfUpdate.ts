@@ -7,44 +7,15 @@
 import { execFile } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync } from "node:fs";
 import { dirname, join, sep } from "node:path";
-import type { SelfUpdateResult, ServerSelfUpdater } from "@polyth/server";
+import { restartingService, type SelfUpdateResult, type ServerSelfUpdater } from "@polyth/server";
 import { channelOf, type InstallKind } from "@polyth/cli/update";
 import { PACKAGE_NAME } from "./layout.ts";
+
+export { restartingService };
 
 const INSTALL_TIMEOUT_MS = 20 * 60_000;
 const QUERY_TIMEOUT_MS = 2 * 60_000;
 const OUTPUT_LIMIT = 4 * 1024 * 1024;
-
-/** The service names `polyth service install` and `brew services` give it. */
-const SYSTEMD_UNITS = new Set(["polyth.service", "homebrew.polyth.service"]);
-const LAUNCHD_LABELS = new Set(["app.polyth.server", "homebrew.mxcl.polyth"]);
-
-/**
- * The service that restarts this process when it exits unsuccessfully, or
- * null. `INVOCATION_ID` alone is not enough: a shell in a terminal that
- * systemd runs as a user service inherits it, so the process's own cgroup
- * must be one of Polyth's units. `POLYTH_SUPERVISED=1` vouches for any other
- * supervisor that restarts on a non-zero exit.
- */
-export function restartingService(input: {
-  env: NodeJS.ProcessEnv;
-  platform: NodeJS.Platform;
-  /** /proc/self/cgroup, on Linux. */
-  cgroup?: string;
-}): string | null {
-  if (input.env.POLYTH_SUPERVISED?.trim() === "1") return "POLYTH_SUPERVISED";
-  if (input.platform === "linux" && input.env.INVOCATION_ID && input.cgroup) {
-    for (const line of input.cgroup.split("\n")) {
-      const unit = line.trim().split("/").at(-1);
-      if (unit && SYSTEMD_UNITS.has(unit)) return unit;
-    }
-  }
-  if (input.platform === "darwin") {
-    const label = input.env.XPC_SERVICE_NAME?.trim();
-    if (label && LAUNCHD_LABELS.has(label)) return label;
-  }
-  return null;
-}
 
 /** `<prefix>/Cellar/polyth/<version>/libexec` → `<prefix>`. */
 export function homebrewPrefix(root: string): string | null {
