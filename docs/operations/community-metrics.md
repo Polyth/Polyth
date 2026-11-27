@@ -85,7 +85,8 @@ and re-reads each when its mtime changes. It is closed by default and is meant t
   any user name); 10 failures within 15 minutes lock the whole service for the rest of the window (`429`), so no client
   address is read or kept. A cancelled browser prompt leaves a short "team password needed" note with no data. Only
   `GET`/`HEAD` of `/` (with `?lang=`/`?export=csv`), `/healthz` and `/robots.txt` exist; every answer sets
-  `no-store`, `noindex`, and a CSP with no script source.
+  `no-store`, `noindex`, and a CSP with no script source; images come only from `data:` URLs (the Polyth mark from
+  polyth.app is inlined for the header and the favicon), so the page still loads nothing.
 - `hash-password` (password on stdin, never an argument) prints the same `scrypt$N$r$p$salt$hash` line the report
   relay uses; save it as `password.scrypt` in `METRICS_KEYS_DIR` (default `/keys`). Snapshots are read from
   `METRICS_DATA_DIR` (default `/data`). `METRICS_HOST`/`METRICS_PORT` default to `127.0.0.1:8789`; a non-loopback host
