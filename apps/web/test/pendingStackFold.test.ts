@@ -218,11 +218,57 @@ test("the open stack folds into one spine on the stack's grid and opens again", 
   }
 });
 
+test("the fold control lights every line it would fold, as one run on the card's column", { skip: !CHROME }, async () => {
+  const { page, context } = await open();
+  try {
+    await page.waitForSelector(".queue-chip[role='listitem']");
+    await page.waitForSelector(".pending-stack-fold");
+    const lit = () => page.evaluate(() => {
+      const card = document.querySelector(".composer-card")!.getBoundingClientRect();
+      return [...document.querySelectorAll<HTMLElement>("[data-stack-preview]")].map((element) => {
+        // The wash eases in from nothing: read where it settles.
+        for (const animation of element.getAnimations()) animation.finish();
+        const box = element.getBoundingClientRect();
+        return {
+          name: element.classList[0],
+          edge: element.dataset.stackPreview,
+          start: box.left - card.left,
+          end: card.right - box.right,
+          wash: getComputedStyle(element).backgroundColor,
+        };
+      });
+    });
+    assert.deepEqual(await lit(), [], "nothing is lit at rest");
+
+    await page.hover(".pending-stack-fold");
+    let shown = await lit();
+    assert.deepEqual(shown.map((line) => line.name), ["session-waits", "queue-list", "composer-suggestion"], "every line that folds, in stack order");
+    assert.deepEqual(shown.map((line) => line.edge), ["start", "mid", "end"], "one run, rounded at its ends");
+    for (const line of shown) {
+      assert.ok(Math.abs(line.start) <= 0.75 && Math.abs(line.end) <= 0.75,
+        `${line.name} lights its box on the card's column (${line.start}, ${line.end})`);
+      assert.notEqual(line.wash, "rgba(0, 0, 0, 0)", `${line.name} is washed`);
+    }
+
+    await page.mouse.move(1, 1);
+    assert.deepEqual(await lit(), [], "the light leaves with the pointer");
+
+    await page.hover(".pending-stack-fold");
+    await page.click(".pending-stack-fold");
+    await page.waitForFunction(() => document.querySelector(".pending-stack-spine")?.closest(".composer-notice-row")?.getAttribute("data-open") === "true");
+    shown = await lit();
+    assert.deepEqual(shown, [], "the folded lines keep no light");
+  } finally {
+    await context.close();
+  }
+});
+
 test("the keyboard folds and opens the stack, and the focus follows", { skip: !CHROME }, async () => {
   const { page, context } = await open();
   try {
     await page.waitForSelector(".pending-stack-fold");
     await page.focus(".pending-stack-fold");
+    assert.equal(await page.locator("[data-stack-preview]").count(), 3, "the keyboard's focus lights the lines too");
     await page.keyboard.press("Enter");
     await page.waitForFunction(() => document.activeElement?.classList.contains("pending-stack-spine") === true);
     await page.keyboard.press("Enter");

@@ -2286,6 +2286,8 @@ export const fr: AppMessages = {
   "subagentdock.pausing": "Mise en pause…",
   "subagentdock.continuing": "Reprise…",
   "subagentdock.subagentsPaused": "Sous-agents en pause",
+  "subagentdock.hideSubagents": "Masquer les sous-agents",
+  "subagentdock.showSubagents": "Afficher les sous-agents : {count}",
   "sessionMove.menu": "Déplacer vers un projet…",
   "sessionMove.pickTitle": "Déplacer la discussion vers un autre projet",
   "sessionMove.noOtherProjects": "Aucun autre projet ne peut accueillir cette discussion.",

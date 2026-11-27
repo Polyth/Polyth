@@ -2286,6 +2286,8 @@ export const es: AppMessages = {
   "subagentdock.pausing": "Pausando…",
   "subagentdock.continuing": "Continuando…",
   "subagentdock.subagentsPaused": "Subagentes en pausa",
+  "subagentdock.hideSubagents": "Ocultar subagentes",
+  "subagentdock.showSubagents": "Mostrar subagentes: {count}",
   "sessionMove.menu": "Mover a proyecto…",
   "sessionMove.pickTitle": "Mover chat a otro proyecto",
   "sessionMove.noOtherProjects": "No hay otro proyecto al que mover este chat.",

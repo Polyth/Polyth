@@ -2286,6 +2286,8 @@ export const ar: AppMessages = {
   "subagentdock.pausing": "جارٍ الإيقاف المؤقت…",
   "subagentdock.continuing": "جارٍ المتابعة…",
   "subagentdock.subagentsPaused": "الوكلاء الفرعيون متوقفون مؤقتًا",
+  "subagentdock.hideSubagents": "إخفاء الوكلاء الفرعيين",
+  "subagentdock.showSubagents": "إظهار الوكلاء الفرعيين: {count}",
   "sessionMove.menu": "نقل إلى مشروع…",
   "sessionMove.pickTitle": "نقل المحادثة إلى مشروع آخر",
   "sessionMove.noOtherProjects": "لا يوجد مشروع آخر لنقل هذه المحادثة إليه.",

@@ -2286,6 +2286,8 @@ export const uk: AppMessages = {
   "subagentdock.pausing": "Призупиняю…",
   "subagentdock.continuing": "Продовжую…",
   "subagentdock.subagentsPaused": "Субагентів призупинено",
+  "subagentdock.hideSubagents": "Сховати субагентів",
+  "subagentdock.showSubagents": "Показати субагентів: {count}",
   "sessionMove.menu": "Перенести в проєкт…",
   "sessionMove.pickTitle": "Перенести чат в інший проєкт",
   "sessionMove.noOtherProjects": "Немає іншого проєкту, куди можна перенести цей чат.",

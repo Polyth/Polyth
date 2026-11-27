@@ -2289,6 +2289,8 @@ export const en = {
   "subagentdock.pausing": "Pausing…",
   "subagentdock.continuing": "Continuing…",
   "subagentdock.subagentsPaused": "Subagents paused",
+  "subagentdock.hideSubagents": "Hide subagents",
+  "subagentdock.showSubagents": "Show subagents: {count}",
   "sessionMove.menu": "Move to project…",
   "sessionMove.pickTitle": "Move chat to another project",
   "sessionMove.noOtherProjects": "There is no other project to move this chat to.",

@@ -67,6 +67,9 @@ export const PENDING_STACK_CONTAINER = "data-pending-stack";
 const FOLDED = "data-stack-folded";
 const MOVING = "data-stack-moving";
 const FIRST = "data-stack-first";
+/** The fold control is under the pointer or keyboard: the lines it would
+ *  fold say so, as one run ("start", "mid", "end", or "both" for one line). */
+const PREVIEW = "data-stack-preview";
 const ANIMATION_ID = "pending-stack-fold";
 const PREFERENCE_KEY = "polyth.composerStack.folded.v1";
 const DURATION_MS = 240; // --motion-surface
@@ -135,6 +138,11 @@ function boxOf(line: HTMLElement): Keyframe {
   };
 }
 
+/** The words go before the box does: a line that folds is clear by half
+ *  way, one that opens shows from 40%, so squeezed lines never overlap. */
+const CLEAR: Keyframe = { offset: 0.5, opacity: 0 };
+const UNCLEAR: Keyframe = { offset: 0.4, opacity: 0 };
+
 const NONE: Keyframe = {
   height: "0px",
   paddingTop: "0px",
@@ -151,6 +159,11 @@ export class PendingStackStore {
   private readonly applied = new Set<HTMLElement>();
   private readonly intent = new WeakMap<HTMLElement, boolean>();
   private host: HTMLElement | null = null;
+  /** The lines the open stack would fold, in stack order, each with its box
+   *  on the grid; and the boxes lit now, by line. */
+  private foldable: Array<{ line: HTMLElement; box: HTMLElement }> = [];
+  private lit = new Map<HTMLElement, HTMLElement>();
+  private previewing = false;
   private seq = 0;
   private folded: boolean;
   private snapshot: PendingStackSnapshot;
@@ -190,7 +203,18 @@ export class PendingStackStore {
     if (folded === this.folded) return;
     this.folded = folded;
     writePreference(folded);
+    // The control that asked is gone: its preview ends with the fold, on
+    // each line as it finishes folding.
+    this.previewing = false;
     this.recompute(true);
+  }
+
+  /** The fold control is under the pointer or holds the keyboard's focus:
+   *  light the lines it would fold. */
+  setPreview(on: boolean): void {
+    if (on === this.previewing) return;
+    this.previewing = on;
+    this.paintPreview();
   }
 
   /** Releases every line it changed (the chat surface is leaving). */
@@ -198,6 +222,7 @@ export class PendingStackStore {
     for (const line of this.applied) {
       stopMotion(line);
       line.removeAttribute(FOLDED);
+      this.unlight(line);
     }
     this.applied.clear();
     this.setHost(null);
@@ -232,6 +257,14 @@ export class PendingStackStore {
       }
     }
     this.apply(lines, active, animate);
+    // A line's box on the grid is its outermost shown anchor; a line whose
+    // anchors are all hidden is its own box.
+    this.foldable = foldable && !active ? lines.map((line) => {
+      const boxes = live.filter((item) => item.line === line && !item.anchor.hidden).map((item) => item.anchor);
+      const box = boxes.length === 0 ? line : boxes.reduce((best, next) => depthIn(next, line) < depthIn(best, line) ? next : best);
+      return { line, box };
+    }) : [];
+    this.paintPreview();
     this.setHost(foldHost);
     const entries = live.map(({ key, token }) => ({ key, token }));
     const previous = this.snapshot;
@@ -244,6 +277,30 @@ export class PendingStackStore {
     ) return;
     this.snapshot = { folded: this.folded, foldable, active, entries, foldHost };
     this.notify();
+  }
+
+  /** Lights each foldable line's box on the grid while previewing. */
+  private paintPreview(): void {
+    const shown = this.previewing ? this.foldable : [];
+    const next = new Map<HTMLElement, HTMLElement>();
+    shown.forEach(({ line, box }, index) => {
+      const first = index === 0;
+      const last = index === shown.length - 1;
+      box.setAttribute(PREVIEW, first && last ? "both" : first ? "start" : last ? "end" : "mid");
+      next.set(line, box);
+    });
+    for (const [line, box] of this.lit) {
+      if (next.get(line) === box) continue;
+      // A line folding away keeps its light down into the spine.
+      if (line.isConnected && line.hasAttribute(MOVING) && this.intent.get(line)) next.set(line, box);
+      else box.removeAttribute(PREVIEW);
+    }
+    this.lit = next;
+  }
+
+  private unlight(line: HTMLElement): void {
+    this.lit.get(line)?.removeAttribute(PREVIEW);
+    this.lit.delete(line);
   }
 
   private setHost(host: HTMLElement | null): void {
@@ -259,6 +316,7 @@ export class PendingStackStore {
       if (current.has(line)) continue;
       stopMotion(line);
       line.removeAttribute(FOLDED);
+      this.unlight(line);
       this.applied.delete(line);
       this.intent.delete(line);
     }
@@ -280,17 +338,18 @@ export class PendingStackStore {
       line.setAttribute(MOVING, "");
       if (active) {
         const from = boxOf(line);
-        const motion = line.animate([from, NONE], { duration: DURATION_MS, easing: EASING, id: ANIMATION_ID });
+        const motion = line.animate([from, CLEAR, NONE], { duration: DURATION_MS, easing: EASING, id: ANIMATION_ID });
         motion.onfinish = () => {
           line.setAttribute(FOLDED, "true");
           line.removeAttribute(MOVING);
+          this.unlight(line);
           motion.cancel();
         };
       } else {
         line.removeAttribute(FOLDED);
         const to = boxOf(line);
         const delay = (lines.length - 1 - index) * STAGGER_MS;
-        const motion = line.animate([NONE, to], {
+        const motion = line.animate([NONE, UNCLEAR, to], {
           duration: DURATION_MS, delay, easing: EASING, fill: "backwards", id: ANIMATION_ID,
         });
         motion.onfinish = () => { line.removeAttribute(MOVING); };

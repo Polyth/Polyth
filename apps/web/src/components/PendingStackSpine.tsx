@@ -110,6 +110,12 @@ export default function PendingStackSpine() {
           variant="ghost"
           aria-expanded
           onMouseDown={keepFocus}
+          // What the press folds lights up first: under a mouse or a keyboard
+          // focus, never a tap (it would flash just before the fold).
+          onPointerEnter={(event) => { if (event.pointerType === "mouse") store.setPreview(true); }}
+          onPointerLeave={() => store.setPreview(false)}
+          onFocus={(event) => { if (event.currentTarget.matches(":focus-visible")) store.setPreview(true); }}
+          onBlur={() => store.setPreview(false)}
           onClick={fold}
         />,
         foldHost,

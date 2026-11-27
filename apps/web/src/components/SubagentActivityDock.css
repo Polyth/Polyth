@@ -53,7 +53,7 @@
   flex: none;
   display: inline-flex;
   gap: 0.6em;
-  padding-inline-end: var(--composer-stack-end);
+  padding-inline-end: var(--space-3);
   color: var(--faint);
   font-size: var(--font-meta);
   white-space: nowrap;
@@ -65,6 +65,76 @@
 }
 .subagent-island-tally-failed:hover { text-decoration: underline; }
 .subagent-island-tally-failed:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: var(--radius-control); }
+
+/* The branch's own fold at the end of the agent's line: its mark and count,
+   the spine's token for it, then a chevron that turns as the list folds up
+   into the line. Its chevron ends on the trailing column; the control reaches
+   up with the line for its touch target. */
+.subagent-island-fold {
+  flex: none;
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  margin-inline-end: calc(var(--composer-stack-end) - var(--space-2));
+  padding: var(--composer-stack-pull, var(--composer-stack-reach)) var(--space-2) 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--font-meta);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  cursor: pointer;
+  transition: color var(--motion-fast) var(--motion-ease);
+}
+.subagent-island-fold:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.subagent-island-fold-mark { position: relative; display: grid; place-items: center; }
+.subagent-island-fold-chevron {
+  margin-inline-start: calc(-1 * var(--space-1) / 2);
+  transition: transform var(--motion-surface) var(--motion-ease);
+}
+/* Folded, the chevron points up: the list comes back out of the line. */
+.subagent-island[data-compact] .subagent-island-fold-chevron { transform: rotate(180deg); }
+/* A subagent waiting on the person keeps the accent dot on the folded mark. */
+.subagent-island[data-compact] .subagent-island-fold[data-attention] .subagent-island-fold-mark::after {
+  content: "";
+  position: absolute;
+  inset-block-start: -1px;
+  inset-inline-end: -2px;
+  inline-size: 6px;
+  block-size: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+@media (hover: hover) {
+  .subagent-island-fold:hover { color: var(--text); background: none; }
+}
+
+/* The list rolls up into the line (grid rows 1fr ⇄ 0fr), its rows fading as
+   they pass under it. The container clips, not the track: between 0fr and
+   1fr Chrome sizes the track a second fraction smaller than the container,
+   so a clipping track would cut rows still in view. The clip box reaches up
+   by the thread's rise, so the first row's thread still meets the agent's
+   mark while the list moves. */
+.subagent-branch-fold {
+  display: grid;
+  grid-template-rows: 1fr;
+  overflow: clip;
+  margin-block-start: calc(-1 * var(--branch-rise));
+  padding-block-start: var(--branch-rise);
+  opacity: 1;
+  transition:
+    grid-template-rows var(--motion-surface) var(--motion-ease),
+    opacity var(--motion-surface) var(--motion-ease);
+}
+.subagent-island[data-compact] .subagent-branch-fold {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+.subagent-branch-fold-inner { min-height: 0; }
 
 .subagent-island .subagent-island-line > .agent-status-dock {
   flex: 1 1 auto;

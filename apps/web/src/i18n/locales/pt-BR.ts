@@ -2286,6 +2286,8 @@ export const ptBR: AppMessages = {
   "subagentdock.pausing": "Pausando…",
   "subagentdock.continuing": "Continuando…",
   "subagentdock.subagentsPaused": "Subagentes pausados",
+  "subagentdock.hideSubagents": "Ocultar subagentes",
+  "subagentdock.showSubagents": "Mostrar subagentes: {count}",
   "sessionMove.menu": "Mover para projeto…",
   "sessionMove.pickTitle": "Mover conversa para outro projeto",
   "sessionMove.noOtherProjects": "Não há outro projeto para onde mover esta conversa.",

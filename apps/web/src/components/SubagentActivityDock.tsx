@@ -61,7 +61,7 @@ import {
 import { subagentActivityLabel } from "./sidebar/SubagentCount.tsx";
 import { AgentStatusDock, Button, IconButton } from "./ui/index.ts";
 import UiIcon from "./ui/Icon.tsx";
-import { BranchIcon, PauseIcon, PlayIcon, ShieldAlertIcon, StopIcon } from "./ui/icons.ts";
+import { BranchIcon, ChevronDownIcon, PauseIcon, PlayIcon, ShieldAlertIcon, StopIcon } from "./ui/icons.ts";
 import { usePendingStackToken } from "@polyth/web-sdk/pending-stack";
 import PausedMark from "./PausedMark.tsx";
 import "./SubagentActivityDock.css";
@@ -73,6 +73,12 @@ const PEEK_EVENTS = 40;
 const PEEK_MS = 4000;
 /** Working children whose action is read at once (the visible rows). */
 const PEEK_LIMIT = 6;
+/** The branch folded into the agent's line, per device. */
+const COMPACT_KEY = "polyth.composerStack.subagentsCompact.v1";
+
+function readCompact(): boolean {
+  try { return localStorage.getItem(COMPACT_KEY) === "true"; } catch { return false; }
+}
 
 /** What a waiting row asks of the person. */
 type BranchAsk =
@@ -122,6 +128,9 @@ interface BranchState {
   tone: BranchRowState;
   showAll: boolean;
   setShowAll: (value: boolean) => void;
+  /** The list folds into the agent's line (a per-device preference). */
+  compact: boolean;
+  setCompact: (value: boolean) => void;
   /** Harness profile colors by harness id. */
   harnessColors: ReadonlyMap<string, string>;
   modelOf: (child: SessionProjection) => ModelBadge | undefined;
@@ -227,6 +236,11 @@ export function SubagentBranchScope({ sessionId, model, children }: {
   const models = useStore((state) => state.models);
   const mayAllow = guardedMayAllow(useGuardrails());
   const [showAll, setShowAll] = useState(false);
+  const [compact, setCompactState] = useState(readCompact);
+  const setCompact = useCallback((value: boolean) => {
+    setCompactState(value);
+    try { localStorage.setItem(COMPACT_KEY, String(value)); } catch { /* private mode */ }
+  }, []);
   // Replies sent from the branch: the ask leaves at the click, before the
   // resolved mirror arrives; a failed reply brings it back.
   const [answered, setAnswered] = useState<ReadonlySet<string>>(() => new Set());
@@ -398,6 +412,8 @@ export function SubagentBranchScope({ sessionId, model, children }: {
     tone,
     showAll,
     setShowAll,
+    compact,
+    setCompact,
     harnessColors,
     modelOf,
     actionOf,
@@ -703,13 +719,16 @@ export function SubagentBranchIsland({ children }: { children: ReactElement }) {
   // Folded, the branch is its count; an ask below it keeps an accent dot.
   const count = branch?.rows.length ?? 0;
   const listed = branch ? (branch.showAll ? count : Math.min(count, LISTED_ROWS)) : 0;
+  const asks = branch?.rows.some((row) => row.ask !== undefined) ?? false;
+  const compact = branch?.compact ?? false;
   const stackRef = usePendingStackToken(branch && count > 0 ? {
     id: "subagents",
     icon: <UiIcon icon={BranchIcon} size="sm" />,
     value: String(count),
-    attention: branch.rows.some((row) => row.ask !== undefined),
+    attention: asks,
     label: tr("sidebar.sessionlist.subagentsCount", { count }),
-    rows: listed + (count > listed ? 1 : 0),
+    // Compact, the branch is its count on the agent's own row.
+    rows: compact ? 0 : listed + (count > listed ? 1 : 0),
   } : null);
   if (!branch) return children;
   return (
@@ -717,13 +736,33 @@ export function SubagentBranchIsland({ children }: { children: ReactElement }) {
       ref={stackRef}
       className="subagent-island"
       data-tone={branch.tone}
+      {...(compact ? { "data-compact": "" } : {})}
       aria-label={tr("sidebar.sessionlist.subagentsTitle")}
     >
       <div className="subagent-island-line">
         {children}
         <BranchTally tally={branch.tally} />
+        <button
+          type="button"
+          className="subagent-island-fold"
+          aria-expanded={!compact}
+          aria-label={tr(compact ? "subagentdock.showSubagents" : "subagentdock.hideSubagents", { count })}
+          title={tr(compact ? "subagentdock.showSubagents" : "subagentdock.hideSubagents", { count })}
+          {...(asks ? { "data-attention": "" } : {})}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => branch.setCompact(!compact)}
+        >
+          <span className="subagent-island-fold-mark"><UiIcon icon={BranchIcon} size="sm" /></span>
+          <span className="subagent-island-fold-count">{count}</span>
+          <UiIcon icon={ChevronDownIcon} size="sm" className="subagent-island-fold-chevron" />
+        </button>
       </div>
-      <BranchList branch={branch} />
+      {/* The list folds up into the line by its own height, the thread with it. */}
+      <div className="subagent-branch-fold" inert={compact ? true : undefined} aria-hidden={compact ? true : undefined}>
+        <div className="subagent-branch-fold-inner">
+          <BranchList branch={branch} />
+        </div>
+      </div>
     </section>
   );
 }

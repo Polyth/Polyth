@@ -3962,7 +3962,9 @@ ends with the trailing column.
 can fold it into one spine line right above the card (`PendingStackSpine`) and
 open it again. The spine is a line of the stack: no plate, the first mark on the
 marks' column, a `--muted` chevron (up) on the trailing column, and the whole line
-is one button (`aria-expanded`, named after every hidden line). Each hidden
+is one button (`aria-expanded`, named after every hidden line); under the
+pointer it takes the subagent rows' quiet `--surface-overlay-hover` band, never
+the shell's button slab. Each hidden
 line is its own mark plus its shortest value (`3h 26m`, `2`), in stack order;
 the most important line speaks in words instead (the agent's status, else the
 suggested prompt with its `Tab`, else the wait), and in a container ≤480px with
@@ -3970,7 +3972,13 @@ four lines or more it shows its value too. Questions and approvals waiting for
 later, and a subagent's ask, keep an accent dot on their mark; nothing else is
 tinted. While open, a `--muted` chevron (down) on the trailing column of the
 stack's first line folds it; that line's own trailing words and glyphs step one
-slot inward. Folding closes the run details the status line opens; the focus
+slot inward. While that control is under a mouse or holds the keyboard's focus
+(never on a tap), every line it would fold lights up: the store marks each
+line's box on the grid (its outermost shown anchor, else the line) with
+`data-stack-preview` = `start` / `mid` / `end` / `both`, and one `--accent-wash`
+run, rounded at its two ends, eases in over them on the card's column; lines
+that do not fold stay as they are, and each line keeps its light as it folds
+into the spine. Folding closes the run details the status line opens; the focus
 follows a keyboard user to the control that undoes it, and a press never takes
 the composer's focus or a phone's keyboard. `Tab` still takes the suggestion
 while folded, and a new line arriving while folded joins the spine instead of
@@ -3979,7 +3987,9 @@ a token through `usePendingStackToken` (`@polyth/web-sdk/pending-stack`, with a
 ref on the line's own box on the grid), and lines that register none (package
 rows, the cleared-draft and mention lines, a queued prompt being edited) stay
 in sight. Lines fold and open by their own height in `--motion-surface`, the
-one nearest the card first, and not at all under reduced motion. The choice is
+one nearest the card first, and not at all under reduced motion; their words go
+before the box does (clear by half the fold, shown from 40% of an opening), so
+squeezed lines never overlap. The choice is
 a per-device preference (`polyth.composerStack.folded.v1`): a phone starts
 folded, a desktop open. `apps/web/test/pendingStackFold.test.ts` measures it in
 the real Composer.
@@ -4162,8 +4172,19 @@ Once the agent ends its turn the island keeps an idle line of its own
 *Waiting for subagents* (*Subagents paused* when only paused ones are left),
 so a parent that handed work off never looks idle.
 
-The branch is the list itself, shown at once: no head row, no fold and no
-*Stop all*. Each active or paused subagent is a row on the thread, waiting
+The branch is the list itself, shown at once: no head row and no *Stop all*.
+The agent's own line ends in the branch's fold (`.subagent-island-fold`): the
+branch mark and count, the spine's token for it, then a `--muted` chevron, its
+glyph ending on the trailing column. It folds the list up into the line and
+back (`aria-expanded`, *Hide subagents* / *Show subagents: n*), the chevron
+turning up as it goes; folded, the rows are `inert` and a subagent's ask keeps
+an accent dot on the mark. The rows roll up into the line in `--motion-surface`
+(grid rows 1fr ⇄ 0fr, fading with it; the container clips, never the track,
+because Chrome sizes a track a second fraction smaller mid-transition). Folded,
+the branch counts no rows of its own in the pending stack. The choice is a
+per-device preference (`polyth.composerStack.subagentsCompact.v1`), open by
+default, pinned in `apps/web/test/subagentBranch.test.ts`. Each active or
+paused subagent is a row on the thread, waiting
 ones first, then the rest in delegation order (a pause keeps its place, so the
 row the person acted on never jumps), with its state mark (running ring, reply
 question, approval shield, or `PausedMark`: the ring at rest with a pause

@@ -2286,6 +2286,8 @@ export const bg: AppMessages = {
   "subagentdock.pausing": "Поставяне на пауза…",
   "subagentdock.continuing": "Продължаване…",
   "subagentdock.subagentsPaused": "Подагентите са на пауза",
+  "subagentdock.hideSubagents": "Скрий подагентите",
+  "subagentdock.showSubagents": "Покажи подагентите: {count}",
   "sessionMove.menu": "Преместване в проект…",
   "sessionMove.pickTitle": "Преместване на чата в друг проект",
   "sessionMove.noOtherProjects": "Няма друг проект, в който да преместите този чат.",

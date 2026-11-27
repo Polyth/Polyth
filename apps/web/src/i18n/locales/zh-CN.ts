@@ -2286,6 +2286,8 @@ export const zhCN: AppMessages = {
   "subagentdock.pausing": "正在暂停…",
   "subagentdock.continuing": "正在继续…",
   "subagentdock.subagentsPaused": "子代理已暂停",
+  "subagentdock.hideSubagents": "隐藏子代理",
+  "subagentdock.showSubagents": "显示子代理：{count}",
   "sessionMove.menu": "移动到项目…",
   "sessionMove.pickTitle": "将聊天移动到其他项目",
   "sessionMove.noOtherProjects": "没有其他项目可供移动此聊天。",

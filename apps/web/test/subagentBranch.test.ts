@@ -1,6 +1,7 @@
 // The open chat's subagents hang from its status line above the composer:
 // one island with the agent's own line and, on a thread from its mark, a row
-// per active subagent at once: no head, no fold, no Stop all. The one that
+// per active subagent at once: no head row, no Stop all; the line's own
+// count folds the list into it and back, per device. The one that
 // needs the person comes first with Allow / Deny on its mirrored request;
 // every other row has its own Stop, and a running one Pause. A paused one
 // keeps its place with Continue until it goes on or is stopped, and both show
@@ -152,10 +153,10 @@ test("an idle agent's subagents hang from its still line, the waiting one first 
 
     // The list shows at once, straight under the agent's line.
     assert.equal(island!.querySelector(".subagent-branch-head, .subagent-branch-toggle, .subagent-cluster"), null,
-      "no head row, fold or cluster over the list");
+      "no head row or cluster over the list");
     assert.equal([...island!.querySelectorAll("button")].some((node) => /Stop all/.test(node.getAttribute("aria-label") ?? text(node))), false,
       "no Stop all");
-    const list = island!.querySelector<HTMLElement>(".subagent-island-line + .subagent-branch-list")!;
+    const list = island!.querySelector<HTMLElement>(".subagent-island-line + .subagent-branch-fold .subagent-branch-list")!;
     assert.equal(list.getAttribute("aria-label"), "Subagents: 3, Working: 2, Waiting for you: 1");
     const first = list.querySelector<HTMLElement>(".subagent-branch-item")!;
     assert.equal(text(first.querySelector(".subagent-branch-title")), "Data migration");
@@ -236,6 +237,45 @@ test("the branch lists every active subagent with its action, nested runs and St
       ["POST /api/sessions/p-b/abort"], "Stop stops that one subagent only");
   } finally {
     await view.unmount();
+  }
+});
+
+test("the agent's line folds its branch into its count and back, remembered on this device", async () => {
+  localStorage.removeItem("polyth.composerStack.subagentsCompact.v1");
+  seed();
+  const view = await mount(createElement(SubagentBranchScope, { sessionId: "p", model: buildModel([mirror()]) }, createElement(SubagentActivityDock)));
+  try {
+    const island = view.container.querySelector<HTMLElement>(".subagent-island")!;
+    const toggle = island.querySelector<HTMLButtonElement>(".subagent-island-line > .subagent-island-fold")!;
+    const fold = island.querySelector<HTMLElement>(".subagent-branch-fold")!;
+    assert.ok(toggle, "the fold sits on the agent's own line, not a head row");
+    assert.equal(toggle.getAttribute("aria-expanded"), "true", "a device starts open");
+    assert.equal(toggle.getAttribute("aria-label"), "Hide subagents");
+    assert.equal(text(toggle), "3", "the line's count is the branch's");
+    assert.equal(fold.hasAttribute("inert"), false);
+
+    await act(async () => { toggle.click(); });
+    assert.equal(island.hasAttribute("data-compact"), true);
+    assert.equal(toggle.getAttribute("aria-expanded"), "false");
+    assert.equal(toggle.getAttribute("aria-label"), "Show subagents: 3");
+    assert.equal(toggle.hasAttribute("data-attention"), true, "a waiting subagent keeps its dot on the folded count");
+    assert.equal(fold.hasAttribute("inert"), true, "the folded rows take no focus");
+    assert.equal(fold.getAttribute("aria-hidden"), "true");
+    assert.equal(localStorage.getItem("polyth.composerStack.subagentsCompact.v1"), "true");
+  } finally {
+    await view.unmount();
+  }
+
+  // Another chat on this device opens folded; the count opens it again.
+  const next = await mount(createElement(SubagentBranchScope, { sessionId: "p", model: buildModel([]) }, createElement(SubagentActivityDock)));
+  try {
+    const toggle = next.container.querySelector<HTMLButtonElement>(".subagent-island-fold")!;
+    assert.equal(toggle.getAttribute("aria-expanded"), "false");
+    await act(async () => { toggle.click(); });
+    assert.equal(next.container.querySelector(".subagent-island")!.hasAttribute("data-compact"), false);
+    assert.equal(localStorage.getItem("polyth.composerStack.subagentsCompact.v1"), "false");
+  } finally {
+    await next.unmount();
   }
 });
 
