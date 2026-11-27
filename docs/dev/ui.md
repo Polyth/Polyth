@@ -2029,8 +2029,11 @@ tells this server's Space from one joined on another server. The switcher
 - **Space marks.** Each row and the trigger carry the Space's monogram, a
   rounded square on its identity tone (`assignPersonTones` over every Space id,
   so up to four Spaces never share one) or on the Space's own colour. The
-  trigger adds the server chip beside joined Spaces.
-- **Actions** sit under a separator with their own glyphs: New space… (only
+  trigger adds the server chip beside joined Spaces. The current Space is
+  marked by its highlighted row, not a check: a `Menu` radio row with its own
+  icon reserves no check column, so the marks sit at the row's edge. Server
+  headings are sentence case (`.space-menu`), since they are names.
+- **Actions** sit under a separator with their own glyphs and muted labels: New space… (only
   with `canCreate`; prompts for a name and switches into it), Manage spaces…
   (Settings → Spaces) and Join another server… (only when a
   `settings.spaces.sections` contribution `joinsServers`). The phone adds the
