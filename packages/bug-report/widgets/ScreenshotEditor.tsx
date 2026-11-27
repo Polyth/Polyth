@@ -1,5 +1,5 @@
-// Marking up the report's screenshot: arrows, boxes, a pen and a crop, in one
-// of six colours, with undo. The marks stay in the screenshot's own pixels
+// Marking up the report's screenshot: arrows, boxes, a pen, blurred areas and
+// a crop, in one of six colours, with undo. The marks stay in the screenshot's own pixels
 // (src/annotate.ts) over the untouched original, so reopening the editor
 // changes them instead of drawing over burnt-in ones. `composeMarked` burns
 // them into the JPEG that is sent.
@@ -9,6 +9,8 @@ import type { BugReportMessageKey } from "../src/i18n/en.ts";
 import {
   MARK_COLORS,
   activeCrop,
+  blurCellFor,
+  blurRects,
   clampPoint,
   drawMarks,
   extendPen,
@@ -18,6 +20,7 @@ import {
   type Mark,
   type MarkTool,
   type Point,
+  type Rect,
 } from "../src/annotate.ts";
 
 export interface MarkImage {
@@ -37,7 +40,7 @@ const COLOR_KEYS: Record<(typeof MARK_COLORS)[number], BugReportMessageKey> = {
   "#111111": "bugreport.colorBlack",
 };
 
-// Tool glyphs: the host icon set has no drawing tools, so these four (and
+// Tool glyphs: the host icon set has no drawing tools, so these five (and
 // undo) are drawn here in its 24-unit, 1.75 stroke style.
 const glyph = (body: ReactNode) => () => (
   <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -48,12 +51,14 @@ const TOOL_GLYPHS: Record<MarkTool, () => ReactNode> = {
   arrow: glyph(<><path d="M5 19 19 5" /><path d="M10 5h9v9" /></>),
   box: glyph(<rect x="4.5" y="5.5" width="15" height="13" rx="1.5" />),
   pen: glyph(<><path d="M14.5 5.5l4 4L9 19H5v-4z" /><path d="M12.5 7.5l4 4" /></>),
+  blur: glyph(<><path d="M12 3.5c3.4 3.8 5.5 6.9 5.5 9.9a5.5 5.5 0 0 1-11 0c0-3 2.1-6.1 5.5-9.9z" /><path d="M9.5 14a2.5 2.5 0 0 0 2.5 2.5" /></>),
   crop: glyph(<><path d="M7 3v14h14" /><path d="M3 7h14v14" /></>),
 };
 const UndoGlyph = glyph(<><path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" /></>);
 
 const TOOLS: Array<{ tool: MarkTool; label: BugReportMessageKey }> = [
   { tool: "crop", label: "bugreport.toolCrop" },
+  { tool: "blur", label: "bugreport.toolBlur" },
   { tool: "pen", label: "bugreport.toolPen" },
   { tool: "box", label: "bugreport.toolBox" },
   { tool: "arrow", label: "bugreport.toolArrow" },
@@ -65,6 +70,36 @@ const loadImage = (src: string) => new Promise<HTMLImageElement>((resolve, rejec
   image.onerror = () => reject(new Error("image did not load"));
   image.src = src;
 });
+
+/** Blur each area by shrinking it to one pixel per cell and stretching that
+ *  back smoothly: what is left is colour, not letters, in every engine
+ *  (canvas `filter` is missing in WebKit). An area that cannot be drawn is
+ *  filled instead, so nothing private stays sharp. */
+function drawBlurs(context: CanvasRenderingContext2D, source: CanvasImageSource, rects: readonly Rect[], cell: number): void {
+  for (const rect of rects) {
+    const width = Math.max(1, Math.ceil(rect.width / cell));
+    const height = Math.max(1, Math.ceil(rect.height / cell));
+    const small = document.createElement("canvas");
+    small.width = width;
+    small.height = height;
+    const shrink = small.getContext("2d");
+    context.save();
+    context.beginPath();
+    context.rect(rect.x, rect.y, rect.width, rect.height);
+    context.clip();
+    if (shrink) {
+      shrink.imageSmoothingQuality = "high";
+      shrink.drawImage(source, rect.x, rect.y, rect.width, rect.height, 0, 0, width, height);
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = "high";
+      context.drawImage(small, 0, 0, width, height, rect.x, rect.y, rect.width, rect.height);
+    } else {
+      context.fillStyle = "#808080";
+      context.fillRect(rect.x, rect.y, rect.width, rect.height);
+    }
+    context.restore();
+  }
+}
 
 /** The original with its marks burnt in and its crop applied, as a JPEG the
  *  bridge re-encodes to the wire's limits; null when nothing could be drawn. */
@@ -78,6 +113,7 @@ export async function composeMarked(image: MarkImage, marks: readonly Mark[]): P
   if (!context) return null;
   context.translate(-crop.x, -crop.y);
   context.drawImage(source, 0, 0, image.width, image.height);
+  drawBlurs(context, source, blurRects(marks, image.width, image.height), blurCellFor(image.width, image.height));
   drawMarks(context, marks, strokeFor(image.width, image.height));
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
   return blob ? new Uint8Array(await blob.arrayBuffer()) : null;
@@ -88,10 +124,13 @@ export interface ScreenshotEditorProps {
   t: Translate;
   image: MarkImage;
   marks: Mark[];
+  /** Drawn under the person's marks but not theirs to undo: the private
+   *  areas the form blurs. */
+  fixed?: readonly Mark[];
   onMarksChange: (marks: Mark[]) => void;
 }
 
-export function ScreenshotEditor({ host, t, image, marks, onMarksChange }: ScreenshotEditorProps) {
+export function ScreenshotEditor({ host, t, image, marks, fixed = [], onMarksChange }: ScreenshotEditorProps) {
   const { IconButton } = host.ui.components;
   const [tool, setTool] = useState<MarkTool>("arrow");
   const [color, setColor] = useState<string>(MARK_COLORS[0]);
@@ -106,6 +145,9 @@ export function ScreenshotEditor({ host, t, image, marks, onMarksChange }: Scree
   const [box, setBox] = useState<{ width: number; height: number } | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const imageRef = useRef<HTMLImageElement | null>(null);
+  // Blurs are drawn from the image's own pixels, so they wait for it.
+  const [loaded, setLoaded] = useState(false);
   const pointerRef = useRef<number | null>(null);
 
   // Fit the whole screenshot in the stage, never upscaled past 1:1 by more
@@ -124,15 +166,17 @@ export function ScreenshotEditor({ host, t, image, marks, onMarksChange }: Scree
     return () => observer?.disconnect();
   }, [image.width, image.height]);
 
-  // Marks, the one being drawn, and outside a crop a veil: what is cut away
+  // Blurs, marks, the one being drawn, and outside a crop a veil: what is cut away
   // stays visible enough to adjust, but reads as gone.
   useEffect(() => {
     const canvas = canvasRef.current;
     const context = canvas?.getContext("2d");
     if (!canvas || !context) return;
     context.clearRect(0, 0, canvas.width, canvas.height);
-    const shown = draft && draft.kind !== "crop" ? [...marks, draft] : marks;
+    const shown = draft && draft.kind !== "crop" ? [...fixed, ...marks, draft] : [...fixed, ...marks];
     const stroke = strokeFor(image.width, image.height);
+    const source = imageRef.current;
+    if (loaded && source) drawBlurs(context, source, blurRects(shown, image.width, image.height), blurCellFor(image.width, image.height));
     drawMarks(context, shown, stroke);
     const crop = activeCrop(draft?.kind === "crop" ? [...marks, draft] : marks, image.width, image.height);
     if (crop) {
@@ -153,7 +197,7 @@ export function ScreenshotEditor({ host, t, image, marks, onMarksChange }: Scree
       context.strokeRect(rect.x, rect.y, rect.width, rect.height);
       context.restore();
     }
-  }, [marks, draft, image.width, image.height, box]);
+  }, [marks, fixed, draft, loaded, image.width, image.height, box]);
 
   const pointAt = (event: ReactPointerEvent<HTMLCanvasElement>): Point => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -170,7 +214,7 @@ export function ScreenshotEditor({ host, t, image, marks, onMarksChange }: Scree
     event.currentTarget.setPointerCapture(event.pointerId);
     const at = pointAt(event);
     setDraft(tool === "pen" ? { kind: "pen", color, points: [at] }
-      : tool === "crop" ? { kind: "crop", from: at, to: at }
+      : tool === "crop" || tool === "blur" ? { kind: tool, from: at, to: at }
         : { kind: tool, color, from: at, to: at });
   };
 
@@ -233,7 +277,7 @@ export function ScreenshotEditor({ host, t, image, marks, onMarksChange }: Scree
               aria-label={t(COLOR_KEYS[value])}
               title={t(COLOR_KEYS[value])}
               aria-pressed={color === value}
-              disabled={tool === "crop"}
+              disabled={tool === "crop" || tool === "blur"}
               onClick={() => setColor(value)}
             />
           ))}
@@ -244,7 +288,17 @@ export function ScreenshotEditor({ host, t, image, marks, onMarksChange }: Scree
       <div className="bug-report-editor__stage" ref={stageRef}>
         {box && (
           <div className="bug-report-editor__frame" style={{ width: box.width, height: box.height }}>
-            <img className="bug-report-editor__image" src={image.dataUrl} alt={t("bugreport.screenshotAlt")} draggable={false} />
+            <img
+              ref={(node) => {
+                imageRef.current = node;
+                if (node?.complete && node.naturalWidth > 0) setLoaded(true);
+              }}
+              className="bug-report-editor__image"
+              src={image.dataUrl}
+              alt={t("bugreport.screenshotAlt")}
+              draggable={false}
+              onLoad={() => setLoaded(true)}
+            />
             <canvas
               ref={canvasRef}
               className="bug-report-editor__canvas"

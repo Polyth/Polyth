@@ -22,7 +22,7 @@ import type { Mark } from "../src/annotate.ts";
 import type { ReportBridge, ReportCapture, ReportDraft, ReportOutcome } from "./bridge.ts";
 import { ScreenshotEditor, composeMarked, type MarkImage } from "./ScreenshotEditor.tsx";
 import {
-  CheckGlyph, ChevronGlyph, ClockGlyph, CloseGlyph, ImageGlyph, KIND_GLYPHS, LockGlyph,
+  CheckGlyph, ChevronGlyph, ClockGlyph, CloseGlyph, EyeOffGlyph, ImageGlyph, KIND_GLYPHS, LockGlyph,
   PencilGlyph, PersonGlyph, PulseGlyph, ReplyGlyph, ShieldGlyph,
 } from "./glyphs.tsx";
 
@@ -38,6 +38,10 @@ export interface ReportSheetProps {
   bridge: ReportBridge;
   capture: ReportCapture;
   page: PageReport;
+  /** Blur marks over the private content the captured screenshot shows (the
+   *  conversation, the draft, chat and project names); empty when none was
+   *  on screen or the image is not this window. */
+  privateAreas: Mark[];
   onClose: () => void;
 }
 
@@ -106,7 +110,7 @@ function Choice<T extends string>({ label, value, options, onPick, className, op
   );
 }
 
-export function ReportSheet({ host, bridge, capture, page, onClose }: ReportSheetProps) {
+export function ReportSheet({ host, bridge, capture, page, privateAreas, onClose }: ReportSheetProps) {
   const t = (key: BugReportMessageKey, values?: Record<string, string | number>) => host.ui.locale.translate(key, values);
   const { Button, Notice, Textarea, TextInput } = host.ui.components;
   const Dialog = host.ui.components.Dialog;
@@ -130,17 +134,27 @@ export function ReportSheet({ host, bridge, capture, page, onClose }: ReportShee
   const [experience, setExperience] = useState<FeedbackExperience | null>(saved?.experience ?? null);
   const [forgetting, setForgetting] = useState(false);
   const [shot, setShot] = useState(capture.screenshot);
-  const technicalDefault = kind === "bug" || kind === "pain";
-  const withTechnical = technicalChoice ?? technicalDefault;
-  const withScreenshot = shot !== null && (screenshotChoice ?? technicalDefault);
-  const [attaching, setAttaching] = useState(false);
-  const [attachFailed, setAttachFailed] = useState(false);
-  const fileRef = useRef<HTMLInputElement | null>(null);
-  const canAttach = typeof bridge.attach === "function";
   // Marks are drawn over the unmarked original, so reopening the editor moves
   // them instead of drawing over burnt-in ones; `shot` is what goes.
   const [original, setOriginal] = useState<MarkImage | null>(capture.screenshot);
   const [marks, setMarks] = useState<Mark[]>([]);
+  // Private content on the captured screenshot is blurred unless the person
+  // turns that off; an image of their own has no known private areas.
+  // `hidden` is what `shot` really shows, so a blur still on its way, or
+  // one that failed, keeps the screenshot from going sharp.
+  const autoBlurs = original === capture.screenshot ? privateAreas : [];
+  const [hidePrivate, setHidePrivate] = useState(true);
+  const [hidden, setHidden] = useState(false);
+  const [blurFailed, setBlurFailed] = useState(false);
+  const blurPending = autoBlurs.length > 0 && hidePrivate && !hidden;
+  const technicalDefault = kind === "bug" || kind === "pain";
+  const withTechnical = technicalChoice ?? technicalDefault;
+  const screenshotWanted = shot !== null && (screenshotChoice ?? technicalDefault);
+  const withScreenshot = screenshotWanted && !blurPending;
+  const [attaching, setAttaching] = useState(false);
+  const [attachFailed, setAttachFailed] = useState(false);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const canAttach = typeof bridge.attach === "function";
   const [editing, setEditing] = useState<Mark[] | null>(null);
   const [applying, setApplying] = useState(false);
   const [markFailed, setMarkFailed] = useState(false);
@@ -193,7 +207,7 @@ export function ReportSheet({ host, bridge, capture, page, onClose }: ReportShee
       : null,
   }, null, 2), [capture, kind, text, known, reply, technical, profile, shot, withScreenshot]);
 
-  const canSend = !busy && !attaching && editing === null && text.trim() !== "" && !contactInvalid;
+  const canSend = !busy && !attaching && !applying && editing === null && text.trim() !== "" && !contactInvalid;
 
   // Focus follows the view: its main control when it opens, the way back to
   // the privacy view's link when the person returns to the form.
@@ -259,31 +273,52 @@ export function ReportSheet({ host, bridge, capture, page, onClose }: ReportShee
     setMarkFailed(false);
   };
 
-  // Burn the marks in and hand the image to the bridge, which re-encodes it
-  // to the wire's limits; the thumbnail then shows exactly what goes.
+  // Burn the blurs and marks in and hand the image to the bridge, which
+  // re-encodes it to the wire's limits; the thumbnail then shows exactly what
+  // goes.
+  const burn = async (nextMarks: Mark[], hide: boolean): Promise<boolean> => {
+    if (!original || !bridge.annotate) return false;
+    const blurs = hide ? autoBlurs : [];
+    setApplying(true);
+    try {
+      const jpeg = await composeMarked(original, [...blurs, ...nextMarks]);
+      const next = jpeg ? await bridge.annotate(capture.captureId, jpeg) : null;
+      if (!next) return false;
+      setShot(next);
+      setMarks(nextMarks);
+      setHidden(blurs.length > 0);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  // Once, as the sheet opens: the private parts of the capture go blurred.
+  useEffect(() => {
+    if (autoBlurs.length === 0) return;
+    void burn([], true).then((done) => setBlurFailed(!done));
+  }, []);
+
+  const togglePrivate = async () => {
+    const hide = !hidePrivate;
+    setHidePrivate(hide);
+    setBlurFailed(!(await burn(marks, hide)));
+  };
+
   const applyMarks = async () => {
-    if (editing === null || !original || !bridge.annotate) return;
+    if (editing === null) return;
     if (editing === marks) {
       setEditing(null);
       return;
     }
-    setApplying(true);
     setMarkFailed(false);
-    try {
-      const jpeg = await composeMarked(original, editing);
-      const next = jpeg ? await bridge.annotate(capture.captureId, jpeg) : null;
-      if (!next) {
-        setMarkFailed(true);
-        return;
-      }
-      setShot(next);
-      setMarks(editing);
+    if (await burn(editing, hidePrivate)) {
       setScreenshotChoice(true);
       setEditing(null);
-    } catch {
+    } else {
       setMarkFailed(true);
-    } finally {
-      setApplying(false);
     }
   };
 
@@ -343,8 +378,8 @@ export function ReportSheet({ host, bridge, capture, page, onClose }: ReportShee
 
   const tray = (
     <div className="bug-report-sheet__tray">
-      {shot && withScreenshot ? (
-        <div className="bug-report-sheet__thumb">
+      {shot && screenshotWanted ? (
+        <div className="bug-report-sheet__thumb" data-pending={blurPending ? "true" : undefined}>
           <img className="bug-report-sheet__image" src={shot.dataUrl} width={shot.width} height={shot.height} alt={t("bugreport.screenshotAlt")} />
           {canMark && (
             <button type="button" className="bug-report-sheet__thumb-open" title={t(marks.length > 0 ? "bugreport.markEdit" : "bugreport.markUp")} onClick={openEditor}>
@@ -369,6 +404,19 @@ export function ReportSheet({ host, bridge, capture, page, onClose }: ReportShee
           <span>{t("bugreport.screenshotAdd")}</span>
         </button>
       ) : null}
+      {screenshotWanted && autoBlurs.length > 0 && (
+        <button
+          type="button"
+          className="bug-report-chip"
+          aria-pressed={hidePrivate}
+          disabled={applying}
+          title={t("bugreport.hidePrivateHint")}
+          onClick={() => void togglePrivate()}
+        >
+          {hidePrivate ? <CheckGlyph size={14} className="bug-report-chip__tick" /> : <EyeOffGlyph size={14} />}
+          <span>{t("bugreport.hidePrivate")}</span>
+        </button>
+      )}
       <button
         type="button"
         className="bug-report-chip"
@@ -432,6 +480,7 @@ export function ReportSheet({ host, bridge, capture, page, onClose }: ReportShee
           {tray}
         </div>
         {attachFailed && <p className="bug-report-sheet__error" role="alert">{t("bugreport.attachFailed")}</p>}
+        {blurFailed && screenshotWanted && <p className="bug-report-sheet__error" role="alert">{t("bugreport.blurFailed")}</p>}
         <div className="bug-report-sheet__extras">
           <button
             type="button"
@@ -540,7 +589,11 @@ export function ReportSheet({ host, bridge, capture, page, onClose }: ReportShee
       <dl className="bug-report-privacy__rows">
         {row(t("bugreport.row.text"), trimmed ? excerpt(trimmed) : t("bugreport.value.empty"), undefined, !trimmed)}
         {withScreenshot && shot
-          ? row(t("bugreport.row.screenshot"), t("bugreport.value.screenshot", { width: shot.width, height: shot.height }), t(marks.length > 0 ? "bugreport.value.marked" : "bugreport.value.markHint"))
+          ? row(
+            t("bugreport.row.screenshot"),
+            t("bugreport.value.screenshot", { width: shot.width, height: shot.height }),
+            [hidden && autoBlurs.length > 0 ? t("bugreport.value.privateHidden") : "", t(marks.length > 0 ? "bugreport.value.marked" : "bugreport.value.markHint")].filter(Boolean).join(" · "),
+          )
           : row(t("bugreport.row.screenshot"), t(shot || canAttach ? "bugreport.value.none" : "bugreport.screenshotMissing"), undefined, true)}
         {withTechnical
           ? row(t("bugreport.row.diagnostics"), t("bugreport.value.diagnostics", { version: capture.base.app.version, platform }), t("bugreport.value.diagnosticsMore", { errors: page.errors.length }))
@@ -607,7 +660,7 @@ export function ReportSheet({ host, bridge, capture, page, onClose }: ReportShee
   if (editing !== null && original) {
     const editor = (
       <div className="bug-report-editor-body">
-        <ScreenshotEditor host={host} t={t} image={original} marks={editing} onMarksChange={setEditing} />
+        <ScreenshotEditor host={host} t={t} image={original} marks={editing} fixed={hidePrivate ? autoBlurs : []} onMarksChange={setEditing} />
         {markFailed && <p className="bug-report-sheet__error" role="alert">{t("bugreport.markFailed")}</p>}
       </div>
     );

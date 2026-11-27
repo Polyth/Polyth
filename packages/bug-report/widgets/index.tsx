@@ -7,6 +7,7 @@ import "./styles.css";
 import { createElement, useSyncExternalStore } from "react";
 import { createApiTransport, defineWebPackage, type WebPackageHost } from "@polyth/web-sdk";
 import { BUG_REPORT_CAPABILITY_ID } from "../src/index.ts";
+import { viewportBlurs, type Mark, type Rect } from "../src/annotate.ts";
 import { enabledPackages, recentErrors, uiSettings, viewName, viewport, webFacts } from "../src/snapshot.ts";
 import { reportBridge, type ReportBridge, type ReportCapture } from "./bridge.ts";
 import { serverReportBridge } from "./serverBridge.ts";
@@ -18,6 +19,7 @@ interface OpenSheet {
   bridge: ReportBridge;
   capture: ReportCapture;
   page: PageReport;
+  privateAreas: Mark[];
 }
 
 let sheet: OpenSheet | null = null;
@@ -67,13 +69,55 @@ async function pageReport(host: WebPackageHost): Promise<PageReport> {
   };
 }
 
+/** Where the host's private content (`data-private`: the conversation, the
+ *  draft, chat and project names) is visible, in viewport CSS pixels: each
+ *  element grown by a little for overhanging glyphs, then cut to the viewport
+ *  and to every ancestor that clips it. Blurring a bit too much is fine;
+ *  missing a visible piece is not. */
+function privateAreas(): Rect[] {
+  if (typeof document === "undefined") return [];
+  const clips = new Map<Element, DOMRect | null>();
+  const clipOf = (node: Element) => {
+    let clip = clips.get(node);
+    if (clip === undefined) {
+      const style = getComputedStyle(node);
+      clip = style.overflowX !== "visible" || style.overflowY !== "visible" ? node.getBoundingClientRect() : null;
+      clips.set(node, clip);
+    }
+    return clip;
+  };
+  const areas: Rect[] = [];
+  for (const element of document.querySelectorAll("[data-private]")) {
+    const box = element.getBoundingClientRect();
+    if (box.width <= 0 || box.height <= 0) continue;
+    let left = Math.max(0, box.left - 2);
+    let top = Math.max(0, box.top - 2);
+    let right = Math.min(window.innerWidth, box.right + 2);
+    let bottom = Math.min(window.innerHeight, box.bottom + 2);
+    for (let node = element.parentElement; node && node !== document.body && right > left && bottom > top; node = node.parentElement) {
+      const clip = clipOf(node);
+      if (!clip) continue;
+      left = Math.max(left, clip.left);
+      top = Math.max(top, clip.top);
+      right = Math.min(right, clip.right);
+      bottom = Math.min(bottom, clip.bottom);
+    }
+    if (right > left && bottom > top) areas.push({ x: left, y: top, width: right - left, height: bottom - top });
+  }
+  return areas;
+}
+
 async function openReport(host: WebPackageHost, bridge: ReportBridge): Promise<void> {
   if (sheet || opening) return;
   opening = true;
   try {
-    // The screenshot first, while the window still shows what went wrong.
+    // The screenshot first, while the window still shows what went wrong;
+    // where private content sits is read in the same moment.
+    const areas = privateAreas();
+    const view = { width: window.innerWidth, height: window.innerHeight };
     const capture = await bridge.capture();
-    setSheet({ bridge, capture, page: await pageReport(host) });
+    const privateMarks = capture.screenshot ? viewportBlurs(areas, view, capture.screenshot) ?? [] : [];
+    setSheet({ bridge, capture, page: await pageReport(host), privateAreas: privateMarks });
   } catch {
     host.errors.show?.(host.ui.locale.translate("bugreport.openFailed"));
   } finally {
@@ -90,6 +134,7 @@ function ReportLayer({ host }: { host: WebPackageHost }) {
     bridge: open.bridge,
     capture: open.capture,
     page: open.page,
+    privateAreas: open.privateAreas,
     onClose: () => setSheet(null),
   });
 }

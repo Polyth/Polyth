@@ -1,10 +1,10 @@
-// Marks drawn on a report's screenshot: arrows, boxes, free pen lines and
-// one crop. Everything is kept in the screenshot's own pixels, so the editor
+// Marks drawn on a report's screenshot: arrows, boxes, free pen lines, blurred
+// areas and one crop. Everything is kept in the screenshot's own pixels, so the editor
 // can be reopened and the marks moved to a different scale; `drawMarks`
 // burns them into the image that is sent. No DOM here: the canvas context is
 // structural, so the geometry is tested in Node.
 
-export type MarkTool = "arrow" | "box" | "pen" | "crop";
+export type MarkTool = "arrow" | "box" | "pen" | "blur" | "crop";
 
 export interface Point {
   x: number;
@@ -15,6 +15,7 @@ export type Mark =
   | { kind: "arrow"; color: string; from: Point; to: Point }
   | { kind: "box"; color: string; from: Point; to: Point }
   | { kind: "pen"; color: string; points: Point[] }
+  | { kind: "blur"; from: Point; to: Point }
   | { kind: "crop"; from: Point; to: Point };
 
 export interface Rect {
@@ -65,7 +66,7 @@ export function isMeaningful(mark: Mark): boolean {
     const rect = rectOf(mark.from, mark.to);
     return rect.width >= MIN_CROP && rect.height >= MIN_CROP;
   }
-  if (mark.kind === "box") {
+  if (mark.kind === "box" || mark.kind === "blur") {
     const rect = rectOf(mark.from, mark.to);
     return rect.width >= MIN_MARK && rect.height >= MIN_MARK;
   }
@@ -133,12 +134,55 @@ export interface MarkContext {
   shadowBlur: number;
 }
 
-/** Draw the visible marks (crops are not drawn: they cut the image) in the
+/** The blurred areas, clamped to the image and rounded out to whole pixels
+ *  so no sliver of an edge stays sharp. */
+export function blurRects(marks: readonly Mark[], width: number, height: number): Rect[] {
+  const rects: Rect[] = [];
+  for (const mark of marks) {
+    if (mark.kind !== "blur") continue;
+    const from = clampPoint(mark.from, width, height);
+    const to = clampPoint(mark.to, width, height);
+    const x = Math.floor(Math.min(from.x, to.x));
+    const y = Math.floor(Math.min(from.y, to.y));
+    const rect = { x, y, width: Math.ceil(Math.max(from.x, to.x)) - x, height: Math.ceil(Math.max(from.y, to.y)) - y };
+    if (rect.width > 0 && rect.height > 0) rects.push(rect);
+  }
+  return rects;
+}
+
+/** A blurred area keeps one colour per cell this big: wider than a line of
+ *  text at any scale the wire allows, so words are gone, not just soft. */
+export function blurCellFor(width: number, height: number): number {
+  return Math.max(12, Math.round(Math.max(width, height) / 64));
+}
+
+/** Where private content sat on screen when the screenshot was taken
+ *  (viewport CSS pixels), as blur marks in the screenshot's pixels. Null
+ *  when the image is not this viewport (its shape differs), so nothing is
+ *  blurred in the wrong place. */
+export function viewportBlurs(
+  areas: readonly Rect[],
+  viewport: { width: number; height: number },
+  image: { width: number; height: number },
+): Mark[] | null {
+  if (viewport.width <= 0 || viewport.height <= 0 || image.width <= 0 || image.height <= 0) return null;
+  const sx = image.width / viewport.width;
+  const sy = image.height / viewport.height;
+  if (Math.abs(sx - sy) / Math.max(sx, sy) > 0.03) return null;
+  return areas.map((area) => ({
+    kind: "blur" as const,
+    from: { x: area.x * sx, y: area.y * sy },
+    to: { x: (area.x + area.width) * sx, y: (area.y + area.height) * sy },
+  }));
+}
+
+/** Draw the visible marks (crops and blurs are not drawn: they cut or
+ *  rework the image itself) in the
  *  screenshot's own coordinates. A soft shadow keeps white and black marks
  *  readable on any background. */
 export function drawMarks(context: MarkContext, marks: readonly Mark[], stroke: number): void {
   for (const mark of marks) {
-    if (mark.kind === "crop") continue;
+    if (mark.kind === "crop" || mark.kind === "blur") continue;
     context.save();
     context.lineWidth = stroke;
     context.lineCap = "round";
