@@ -272,6 +272,61 @@ and test information must already be filled in App Store Connect, or the
 submission fails with Apple's error in the job log. Production App Store review
 stays explicit.
 
+### Android / Google Play
+
+`buildAndroid()` in `scripts/ci/remote-build.mjs` always builds the debug APK
+(the release's side-load `Polyth-<version>-android.apk`). Its application id is
+`com.polyth.mobile.dev` (`versionName` suffix `-dev`), so it installs beside the
+Play app instead of clashing with its signature. Moving from an older debug
+install (`com.polyth.mobile`) to either app is a fresh install: the old one must
+be removed first, and its app data does not carry over. The debug build gets
+Firebase only when `google-services.json` also registers the `.dev` id.
+
+When all four upload-key secrets are present (`ANDROID_KEYSTORE_BASE64`,
+`ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`; a
+partial set fails the build), the job also builds `:app:bundleRelease`, signed
+with the **upload key**. The keystore is written to a 0600 temp directory and
+removed after Gradle returns, and the secrets are removed from the environment
+before npm, cargo or the debug build run. Google re-signs the bundle with the app
+signing key it holds (Play App Signing), so a lost upload key can be reset in
+Play Console instead of ending the app. The bundle is not a release asset.
+
+With `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` as well, `scripts/ci/play-upload.mjs`
+uploads the bundle through the Play Developer API (zero-dependency service-account
+JWT → `edits.insert` → `bundles.upload` → `tracks.update` → `edits.commit`):
+
+| Channel | Track | Release status |
+|---|---|---|
+| `nightly` | `internal` | `completed` |
+| `test` | `alpha` (closed testing) | `completed` |
+| `stable` | `production` | `draft`, released by hand in Play Console |
+
+Repository variables `POLYTH_ANDROID_PLAY_TRACK` and `POLYTH_ANDROID_PLAY_STATUS`
+(`draft` | `completed`) override the mapping. Until Play has approved the app's
+first release, the app is a *draft app* that accepts only `draft` releases, so
+set `POLYTH_ANDROID_PLAY_STATUS=draft` until then. An API error fails the
+`android-apk` job, and Google's message appears in the log. The versionCode comes
+from the shared build number (`X.Y.N`, see `POLYTH_BUILD_NUMBER`), so every
+channel's upload is newer than the last.
+
+Native libraries (Rust `polyth_link_uniffi` and the JNI shim) link with
+`-z max-page-size=16384`, because Play requires 16 KB page alignment.
+
+First-time setup, in order:
+
+1. Create the app in Play Console. Keep Play App Signing on.
+2. Generate the upload key and store the four secrets in `Polyth/Polyth`. Keep an
+   offline copy of the keystore and its password.
+3. Upload the first signed `.aab` **by hand** to Internal testing. The API cannot
+   create an app's first release.
+4. Create a Google Cloud service account with the *Google Play Android Developer
+   API* enabled, invite its email in Play Console → Users and permissions with
+   release rights for the app, and store its JSON key as
+   `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON`.
+5. A **personal** developer account created after 13 November 2023 must run a
+   closed test with at least 12 opted-in testers for 14 continuous days before it
+   can apply for production access. Organization accounts are exempt.
+
 ## Nightly builds from devel
 
 `nightly.yml` builds `devel` and publishes it as a `vX.Y.N-nightly` prerelease of this repository,
@@ -328,7 +383,8 @@ own runners; no deploy key or second repository is involved.
 - **Signing.** The same secrets as the builder sign macOS (`CSC_LINK`, `CSC_KEY_PASSWORD`,
   `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`) and iOS/TestFlight (the five App
   Store Connect secrets under [iOS / TestFlight](#ios--testflight)); without them the builds are
-  ad-hoc signed and the iOS job produces a simulator archive.
+  ad-hoc signed and the iOS job produces a simulator archive. The Android upload key and the Play
+  service account work the same way ([Android / Google Play](#android--google-play)).
 - **Packaged server.** Target `server` (remote-build.mjs) runs on `linux-x64`, `linux-arm64`,
   `darwin-arm64` and `darwin-x64` runners: `npm run build:server` with the release version, then
   `apps/server/smoke.ts` on the archive and on the npm packages (first run, setup, full server,
@@ -471,7 +527,7 @@ Platform behaviour of feed builds:
 - **Windows** (unsigned NSIS) and **Linux** (AppImage) download and install in place, as with official releases.
 - **macOS** builds are Developer ID signed and notarized when the builder has all of `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` (a partial set fails the build). Notarization runs in `scripts/ci/mac-notarize.mjs` (an `afterSign` hook, not electron-builder's `mac.notarize`): it submits without `notarytool --wait` and polls `notarytool info`, so a dropped connection to Apple retries instead of failing a submission Apple later accepts — only an `Invalid`/`Rejected` verdict, or about ten minutes without a verdict, fails the build (and a rejection prints Apple's log). Stapling retries for about seven minutes and then ships the notarized app unstapled with a workflow warning, because the Intel runners intermittently cannot reach Apple's ticket service. Such builds install in place. Without those secrets the builds are ad-hoc signed and cannot be installed in place: the app reports the new version, and **Download** opens the release page (see [Desktop](../dev/desktop.md#release-and-updates)). A running ad-hoc build stays in that manual mode, so moving to signed builds needs one manual reinstall.
 - Installs that predate the feed (version `0.1.0`) look for updates in `Polyth/Polyth`, whose releases were private then and hold none of the feed builds; they need one manual reinstall from the feed.
-- Android and iOS have no in-app update path from this feed. The release's `Polyth-<version>-android.apk` is a debug build, installed by hand; iOS ships through TestFlight.
+- Android and iOS have no in-app update path from this feed. The release's `Polyth-<version>-android.apk` is a debug build (`com.polyth.mobile.dev`), installed by hand. The store app ships through Google Play ([Android / Google Play](#android--google-play)), and iOS through TestFlight.
 
 ## Version metadata
 
