@@ -152,11 +152,32 @@ test("the suggested prompt stays a line in every look, in its quiet ink", async 
   // Neither the suggestion nor a queued prompt is an option chip any more.
   const options = find(".attachment-pill", /background: var\(--look-option\) !important;/);
   assert.doesNotMatch(options.sel, /\.composer-suggestion(?!-)|\.queue-chip/, "the pending stack has no plate in any look");
-  // Its text is the look's quiet ink, and its own use target hovers and
-  // presses in the look's hover rather than the base overlay.
+  // Its text is the look's quiet ink, and the whole line (× included) hovers
+  // and presses as one band in the look's hover; its use target never draws a
+  // second band of its own.
   assert.match(find(".composer-suggestion-text", /color: var\(--look-ink-dim\) !important;/).body, /--look-ink-dim/);
-  assert.match(find(".composer-suggestion-use:hover", /background: var\(--look-hover\) !important;/).body, /--look-hover/);
-  assert.match(find(".composer-suggestion-use:is(:active, :focus-visible)", /background: var\(--look-hover\) !important;/).body, /--look-hover/);
+  assert.match(find(".composer-suggestion)", /background: var\(--look-hover\) !important;/).sel, /:hover/, "the shared hover covers the whole line");
+  assert.match(find(".composer-suggestion:has(> .composer-suggestion-use:is(:active, :focus-visible)", /background: var\(--look-hover\) !important;/).body, /--look-hover/);
+  assert.ok(!rules.some((r) => /\.composer-suggestion-use:hover/.test(r.sel) && /background/.test(r.body)), "no second band on the use target");
+});
+
+test("the pending stack's lines hover as a tint without a ring", async () => {
+  const styles = stripComments(await read("../src/styles.css"));
+  const waits = stripComments(await read("../src/components/SessionWaitsLine.css"));
+  const rules = [...`${styles}\n${waits}`.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({ sel: m[1]!.trim(), body: m[2]! }));
+  const hover = (selector: string) => {
+    const found = rules.find((r) => r.sel === selector);
+    assert.ok(found, `no hover rule ${selector}`);
+    assert.match(found.body, /background: var\(--surface-overlay-hover\)/);
+    assert.doesNotMatch(found.body, /box-shadow|outline|border/, `${selector} hovers without a ring`);
+  };
+  hover(".composer-suggestion:hover");
+  hover("button.session-waits-row:hover");
+  // The use target paints nothing of its own, not even the base button's
+  // hover plate or press wash: the line is the one band.
+  const own = rules.filter((r) => /^\.composer-suggestion-use:(hover|active)[^ ]*$/.test(r.sel) && /background|box-shadow/.test(r.body));
+  assert.ok(own.length >= 2, "the use target clears the base button's hover and press");
+  for (const rule of own) assert.match(rule.body, /^\s*(background|box-shadow): none;\s*$/, `${rule.sel} paints no plate`);
 });
 
 test("every interface style is offered in Settings with translated copy", async () => {

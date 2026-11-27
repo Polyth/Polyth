@@ -430,9 +430,10 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.msg .bubbl
 
 /* The pending stack above the composer stays lines of text in every look: a
    queued prompt hovers in the look's hover, and the suggested prompt takes the
-   look's quiet ink and hovers and presses the same way. Focus stays visible
-   through the base outline, so its ink returns to the normal text colour with
-   hover. */
+   look's quiet ink and hovers (the shared hover above, on the whole line, ×
+   included) and presses the same way: one band, never a second one on its use
+   target. Focus stays visible through the base outline, so its ink returns to
+   the normal text colour with hover. */
 @media (hover: hover) {
   body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .queue-chip[role="listitem"]:hover:where(:not(.queue-chip-leaving)) {
     background: var(--look-hover) !important;
@@ -443,18 +444,12 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-sugge
   color: var(--look-ink-dim) !important;
 }
 
-@media (hover: hover) {
-  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-suggestion-use:hover:where(:not(:disabled)) {
-    background: var(--look-hover) !important;
-  }
-}
-
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-suggestion-use:is(:active, :focus-visible):where(:not(:disabled)) {
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-suggestion:has(> .composer-suggestion-use:is(:active, :focus-visible):where(:not(:disabled))) {
   background: var(--look-hover) !important;
 }
 
 @media (hover: hover) {
-  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-suggestion-use:hover:where(:not(:disabled)) .composer-suggestion-text {
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-suggestion:hover .composer-suggestion-text {
     color: var(--text) !important;
   }
 }

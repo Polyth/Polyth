@@ -54,11 +54,8 @@ button.session-waits-row {
 }
 .session-waits-meta::before { content: "·"; margin-inline-end: var(--space-2); }
 @media (hover: hover) {
-  /* The suggestion line's hover: tint plus its quiet ring (3:1 in both themes). */
-  button.session-waits-row:hover {
-    background: var(--surface-overlay-hover);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 55%, transparent);
-  }
+  /* The suggestion line's hover: the stack's tint, no ring. */
+  button.session-waits-row:hover { background: var(--surface-overlay-hover); }
 }
 button.session-waits-row:active { background: var(--surface-overlay-hover); }
 button.session-waits-row:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }

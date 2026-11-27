@@ -40,6 +40,8 @@
     "more more more";
   align-items: center;
   min-width: 0;
+  /* Free space folds the card (PendingChangesBar.tsx). */
+  cursor: pointer;
 }
 .pending-changes-lead {
   grid-area: lead;

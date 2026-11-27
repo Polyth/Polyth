@@ -327,7 +327,17 @@ export default function PendingChangesBar() {
 
   return (
     <section ref={stackRef} className="pending-changes-bar" aria-label={title}>
-      <div className="pending-changes-body">
+      {/* Free space folds the card as the folded line unfolds it; the controls
+          keep their own clicks, a text selection is not a click, and the
+          chevron stays the keyboard's fold. */}
+      <div
+        className="pending-changes-body"
+        onClick={(event) => {
+          if ((event.target as Element).closest("button, a, input, select, textarea, [role='button']")) return;
+          if (window.getSelection()?.toString()) return;
+          setDetailsOpen(false);
+        }}
+      >
         <div className="pending-changes-lead">
           <span className="pending-changes-icon" aria-hidden="true">
             <Icon icon={FileDiffIcon} size="sm" />

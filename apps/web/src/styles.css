@@ -3593,13 +3593,17 @@ body[data-desktop-low-resource="true"] .timeline > .rewind-leaving { animation: 
 /* The harness's suggested next prompt is one line of the pending stack above
    the composer (beside queued prompts), never text inside the editor: the line
    takes it as an editable draft, × dismisses it, Tab is the keyboard shortcut.
-   It wraps to two lines before it ellipsises. */
+   It wraps to two lines before it ellipsises. Hover and press tint the whole
+   line, × included, as one band in the stack's tint and nothing else (a queued
+   prompt, a planned task's line): no ring, so it never stops short of ×. */
 .composer-suggestion {
   display: flex; align-items: center;
   min-inline-size: 0; box-sizing: border-box;
   margin: 0;
   padding-inline-end: calc(var(--composer-stack-end) - (max(var(--composer-stack-control), var(--hit-min)) - var(--icon-sm)) / 2);
+  border-radius: var(--radius-control);
   color: var(--text-dim);
+  transition: background-color var(--motion-fast) var(--motion-ease);
 }
 .composer-suggestion-use {
   flex: 1 1 auto; min-inline-size: 0;
@@ -3612,18 +3616,15 @@ body[data-desktop-low-resource="true"] .timeline > .rewind-leaving { animation: 
   background: none; color: inherit; text-align: start;
   font: inherit; cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition: background-color var(--motion-fast) var(--motion-ease);
 }
 @media (hover: hover) {
-  /* The tint alone is ~1.1:1; the quiet ring (the --borderless-edge recipe,
-     stronger) marks hover at 3:1 or more in both themes. */
-  .composer-suggestion-use:hover:where(:not(:disabled)) {
-    background: var(--surface-overlay-hover);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 55%, transparent);
-  }
-  .composer-suggestion-use:hover:where(:not(:disabled)) .composer-suggestion-text { color: var(--text); }
+  .composer-suggestion:hover { background: var(--surface-overlay-hover); }
+  .composer-suggestion:hover .composer-suggestion-text { color: var(--text); }
+  /* Not the base button's hover plate either. */
+  .composer-suggestion-use:hover:where(:not(:disabled)) { background: none; }
 }
-.composer-suggestion-use:active:where(:not(:disabled)) { background: var(--surface-overlay-hover); }
+.composer-suggestion:has(> .composer-suggestion-use:active:where(:not(:disabled))) { background: var(--surface-overlay-hover); }
+.composer-suggestion-use:active:where(:not(:disabled)) { box-shadow: none; }
 .composer-suggestion-use:is(:active, :focus-visible):where(:not(:disabled)) .composer-suggestion-text { color: var(--text); }
 .composer-suggestion-use:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 .composer-suggestion-icon { flex: none; color: var(--accent); }
