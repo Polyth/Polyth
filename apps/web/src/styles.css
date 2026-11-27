@@ -9484,6 +9484,10 @@ color: var(--text-dim);
 .space-mark.ui-icon--lg { font-size: calc(var(--icon-lg) * .54); }
 /* A menu row tints its glyphs muted; a mark's letter keeps its ink. */
 :is(.ui-menu-item, .ui-menu-sheet-item) .space-mark.ui-icon { color: var(--person-tone-ink, var(--bg)); }
+/* The Space menu's headings name servers, so they read as names, not as
+   capitalised section labels; its actions stay quieter than the Spaces. */
+.space-menu .ui-menu-heading { color: var(--muted); font-weight: 600; letter-spacing: 0; text-transform: none; }
+.space-menu .ui-menu-item[role="menuitem"]:not(:hover, :focus-visible) { color: var(--muted); }
 .space-mark.is-row { width: 36px; height: 36px; border-radius: 10px; font-size: var(--font-label); }
 .spaces-page-server { display: inline-flex; align-items: center; gap: var(--space-2); }
 
@@ -19534,6 +19538,11 @@ body .ui-btn .ui-spinner {
 }
 .ui-menu-item-check .ui-icon,
 .ui-menu-item--checked .ui-menu-item-check .ui-icon { color: var(--accent); }
+/* A checked row without the check column (a radio with its own icon or mark)
+   is marked by its row. Shell looks paint every checked row their own way. */
+.ui-menu-item--checked:where(:not(:has(> .ui-menu-item-check))) {
+  background: var(--accent-wash);
+}
 /* Switch rows: a decorative trailing track (the row is the menuitemcheckbox);
    copy takes the free width so the track sits on the inline-end edge. */
 .ui-menu-item:has(> .ui-menu-item-switch) .ui-menu-item-copy,

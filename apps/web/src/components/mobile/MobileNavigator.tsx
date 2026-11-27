@@ -958,7 +958,7 @@ function NavigatorPlace() {
     onSelect: () => switchMobileServer(buttonRef.current),
   }] : []);
   return (
-    <Menu label={tr("spaces.switcherLabel", { name })} title={tr("spaces.title")} entries={entries} align="start">
+    <Menu label={tr("spaces.switcherLabel", { name })} title={tr("spaces.title")} entries={entries} align="start" className="space-menu">
       {(trigger) => (
         <button
           {...trigger}

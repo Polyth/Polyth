@@ -36,6 +36,7 @@ export default function SpaceSwitcher() {
       title={tr("spaces.title")}
       entries={spaceMenuEntries(state)}
       align="start"
+      className="space-menu"
     >
       {(trigger) => (
         <button {...trigger} className="space-switcher header-control" disabled={state.switching}>

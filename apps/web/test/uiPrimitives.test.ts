@@ -505,6 +505,29 @@ test("Menu switch entries: trailing track, no reserved check column, stay open",
   } finally { await view.unmount(); }
 });
 
+test("Menu radio rows with their own icon are marked by the row, not a check column", async () => {
+  media.compact = false;
+  media.phone = false;
+  const view = await mount(createElement(ui.Menu, {
+    label: "Space",
+    entries: [
+      { id: "a", label: "Personal", kind: "radio", checked: true, icon: ui.PlusIcon, onSelect: () => {} },
+      { id: "b", label: "Work", kind: "radio", checked: false, icon: ui.PlusIcon, onSelect: () => {} },
+      "separator",
+      { id: "manage", label: "Manage", icon: ui.SettingsIcon, onSelect: () => {} },
+    ],
+    children: (trigger: object) => createElement("button", { ...trigger, className: "menu-trigger" }, "Space"),
+  }));
+  try {
+    await act(async () => { view.container.querySelector<HTMLButtonElement>(".menu-trigger")!.click(); });
+    const menu = document.body.querySelector<HTMLElement>('[role="menu"]')!;
+    assert.equal(menu.querySelector(".ui-menu-item-check"), null, "no leading check column");
+    const radios = [...menu.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
+    assert.deepEqual(radios.map((r) => r.getAttribute("aria-checked")), ["true", "false"]);
+    assert.deepEqual(radios.map((r) => r.classList.contains("ui-menu-item--checked")), [true, false]);
+  } finally { await view.unmount(); }
+});
+
 test("Menu controlled open: external state opens it and focus returns to returnFocusRef", async () => {
   media.compact = false;
   media.phone = false;

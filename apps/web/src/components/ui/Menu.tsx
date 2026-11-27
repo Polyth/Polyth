@@ -7,7 +7,8 @@
 //
 // Entries can carry selection semantics: `kind: "radio"`/`"checkbox"` maps to
 // menuitemradio/menuitemcheckbox with aria-checked and a leading check glyph
-// rendered from `checked` (never a caller-passed icon). Checkbox entries keep
+// rendered from `checked` (never a caller-passed icon); a radio entry with its
+// own icon is marked by its highlighted row instead. Checkbox entries keep
 // the menu open so several can be toggled in one visit. `kind: "switch"` is an
 // on/off mode toggle: menuitemcheckbox semantics with a trailing switch track
 // instead of the leading check column, and it also keeps the menu open.
@@ -212,9 +213,12 @@ export default function Menu({
   };
 
   // Selection reserves a leading check column only when the list carries
-  // selectable entries, so plain action menus stay tight.
+  // selectable entries, so plain action menus stay tight. A radio row that
+  // draws its own icon or mark shows the choice by its highlighted row
+  // (`ui-menu-item--checked`) instead, so it never needs the column.
   const checkable = shownEntries.some((entry) =>
-    typeof entry === "object" && !isHeading(entry) && (entry.kind === "radio" || entry.kind === "checkbox"));
+    typeof entry === "object" && !isHeading(entry)
+    && (entry.kind === "checkbox" || (entry.kind === "radio" && !entry.icon)));
 
   const select = (action: MenuAction, row?: HTMLElement) => {
     if (action.disabled) return;
@@ -253,7 +257,9 @@ export default function Menu({
         <span className="ui-menu-item-check" aria-hidden="true">
           {/* A switch shows its state in its trailing track; beside radio or
               checkbox rows it keeps the column, so labels stay aligned. */}
-          {entry.checked && entry.kind !== "switch" ? <Icon icon={CheckIcon} size={iconSize} /> : null}
+          {entry.checked && entry.kind !== "switch" && !(entry.kind === "radio" && entry.icon)
+            ? <Icon icon={CheckIcon} size={iconSize} />
+            : null}
         </span>
       )}
       {entry.swatch && <span className="ui-menu-item-swatch" style={{ background: entry.swatch }} aria-hidden="true" />}
