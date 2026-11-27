@@ -235,6 +235,12 @@ test("the fold control lights every line it would fold, as one run on the card's
           start: box.left - card.left,
           end: card.right - box.right,
           wash: getComputedStyle(element).backgroundColor,
+          // Top corners, then bottom corners: rounded only where the run ends.
+          corners: (() => {
+            const style = getComputedStyle(element);
+            return [style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomRightRadius, style.borderBottomLeftRadius]
+              .map((value) => parseFloat(value) > 0);
+          })(),
         };
       });
     });
@@ -248,6 +254,10 @@ test("the fold control lights every line it would fold, as one run on the card's
       assert.ok(Math.abs(line.start) <= 0.75 && Math.abs(line.end) <= 0.75,
         `${line.name} lights its box on the card's column (${line.start}, ${line.end})`);
       assert.notEqual(line.wash, "rgba(0, 0, 0, 0)", `${line.name} is washed`);
+      const top = line.edge === "start" || line.edge === "both";
+      const bottom = line.edge === "end" || line.edge === "both";
+      assert.deepEqual(line.corners, [top, top, bottom, bottom],
+        `${line.name} (${line.edge}) is rounded only at the run's ends, whatever radius it has of its own`);
     }
 
     await page.mouse.move(1, 1);

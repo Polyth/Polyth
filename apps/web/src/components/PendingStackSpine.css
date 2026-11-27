@@ -39,21 +39,20 @@
 /* The fold control under the pointer or the keyboard lights every line it
    would fold: one soft accent wash over the run of their boxes on the grid
    (the store marks each line's outermost shown anchor), rounded at its two
-   ends, that eases in and stays on each line as it folds into the spine.
-   Lines that do not fold stay as they are. A transient answer to the
-   pointer, not a plate: nothing paints it at rest. */
+   ends only, that eases in and stays on each line as it folds into the spine.
+   Every corner is set here: a line's own radius (the suggestion's hover
+   band) would cut the run into pills. Lines that do not fold stay as they
+   are. A transient answer to the pointer, not a plate: nothing paints it at
+   rest. */
 :root [data-stack-preview] {
+  --stack-preview-top: 0px;
+  --stack-preview-bottom: 0px;
+  border-radius: var(--stack-preview-top) var(--stack-preview-top) var(--stack-preview-bottom) var(--stack-preview-bottom);
   background-color: var(--accent-wash);
   animation: pending-stack-preview-in var(--motion-fast) var(--motion-ease);
 }
-:root :is([data-stack-preview="start"], [data-stack-preview="both"]) {
-  border-start-start-radius: var(--radius-control);
-  border-start-end-radius: var(--radius-control);
-}
-:root :is([data-stack-preview="end"], [data-stack-preview="both"]) {
-  border-end-start-radius: var(--radius-control);
-  border-end-end-radius: var(--radius-control);
-}
+:root :is([data-stack-preview="start"], [data-stack-preview="both"]) { --stack-preview-top: var(--radius-control); }
+:root :is([data-stack-preview="end"], [data-stack-preview="both"]) { --stack-preview-bottom: var(--radius-control); }
 @keyframes pending-stack-preview-in { from { background-color: transparent; } }
 
 /* The spine: a line of the stack on the stack's grid. The first mark centres
