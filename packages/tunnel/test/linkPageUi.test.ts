@@ -219,15 +219,29 @@ test("the owner names this server for phones on the Link page", async () => {
 });
 
 async function mountLinkPage(props: Record<string, unknown> = {}) {
+  const { default: LinkPage } = await import("../widgets/LinkPage.tsx");
+  return mountComponent(LinkPage as never, props);
+}
+
+/** The other servers joined, and joining one: Settings → Spaces mounts it
+ *  through `settings.spaces.sections`, with the package's transport. */
+async function mountJoinedServers(props: Record<string, unknown> = {}) {
+  const { createApiTransport } = await import("@polyth/web-sdk");
+  const { createTranslate } = await import("../widgets/i18n.ts");
+  const { default: JoinedServers } = await import("../widgets/JoinedServers.tsx");
+  const api = createApiTransport({ fetch: (url, init) => fetch(url, { credentials: "include", ...init }) });
+  return mountComponent(JoinedServers as never, { api, t: createTranslate(), ...props });
+}
+
+async function mountComponent(Component: import("react").ComponentType<Record<string, unknown>>, props: Record<string, unknown>) {
   const { act, createElement } = await import("react");
   const { createRoot } = await import("react-dom/client");
-  const { default: LinkPage } = await import("../widgets/LinkPage.tsx");
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
   const flush = async () => { for (let i = 0; i < 12; i += 1) await act(async () => { await Promise.resolve(); }); };
   const render = async (next: Record<string, unknown>) => {
-    await act(async () => { root.render(createElement(LinkPage, next)); });
+    await act(async () => { root.render(createElement(Component, next)); });
     await flush();
   };
   const buttons = () => [...document.querySelectorAll("button")] as unknown as HTMLButtonElement[];
@@ -351,7 +365,7 @@ test("joining another server compares the safety words, then lists it with its S
   let approve!: () => void;
   approval = new Promise<void>((resolve) => { approve = resolve; });
   requests.length = 0;
-  const page = await mountLinkPage();
+  const page = await mountJoinedServers();
   assert.match(page.host.textContent ?? "", /Other Polyth servers/);
   assert.equal(page.button("Join")!.disabled, true, "nothing to join yet");
 
@@ -396,7 +410,7 @@ test("an invitation link skips the words and asks for one confirmation", async (
   let approve!: () => void;
   approval = new Promise<void>((resolve) => { approve = resolve; });
   requests.length = 0;
-  const page = await mountLinkPage();
+  const page = await mountJoinedServers();
   const link = "https://polyth.app/join#v=1&t=abc";
   await typeInto(page.host.querySelector("input[name='pairing-link']"), link);
   await page.click(page.button("Join"));
@@ -424,7 +438,7 @@ test("a refused pairing link shows the server's message", async () => {
   joined = { servers: [], spaces: [] };
   beginFailure = { error: "pairing-expired", message: "That pairing link has expired." };
   requests.length = 0;
-  const page = await mountLinkPage();
+  const page = await mountJoinedServers();
   await typeInto(page.host.querySelector("input[name='pairing-link']"), TICKET);
   await page.click(page.button("Join"));
   assert.equal(page.dialog(), null);
@@ -439,7 +453,7 @@ test("a refused pairing link shows the server's message", async () => {
 test("cancelling a pairing, or leaving the page, drops the attempt", async () => {
   joined = { servers: [], spaces: [] };
   requests.length = 0;
-  const page = await mountLinkPage();
+  const page = await mountJoinedServers();
   await typeInto(page.host.querySelector("input[name='pairing-link']"), TICKET);
   await page.click(page.button("Join"));
   await page.click(page.button("Cancel"));
@@ -457,7 +471,7 @@ test("leaving a server asks first, then removes it", async () => {
   const { act } = await import("react");
   joined = { servers: [otherServer], spaces: [otherSpace] };
   requests.length = 0;
-  const page = await mountLinkPage();
+  const page = await mountJoinedServers();
   const answer = async (value: boolean) => {
     await act(async () => { resolveAlert(value); });
     await page.flush();
@@ -482,7 +496,7 @@ test("leaving the server whose Space is open says so and reloads", async () => {
   let reloads = 0;
   const original = dom.location.reload;
   Object.defineProperty(dom.location, "reload", { value: () => { reloads += 1; }, configurable: true });
-  const page = await mountLinkPage();
+  const page = await mountJoinedServers();
   await page.click(page.button("Leave"));
   await act(async () => { resolveAlert(true); });
   await page.flush();
@@ -497,13 +511,25 @@ test("leaving the server whose Space is open says so and reloads", async () => {
 test("a join settings target focuses the pairing link field once", async () => {
   joined = { servers: [], spaces: [] };
   const settingsTarget = { sectionId: "join" };
-  const page = await mountLinkPage({ settingsTarget });
+  const page = await mountJoinedServers({ settingsTarget });
   const field = () => document.querySelector("input[name='pairing-link']");
   assert.equal(document.activeElement === field(), true);
   await page.unmount();
-  const again = await mountLinkPage({ settingsTarget });
+  const again = await mountJoinedServers({ settingsTarget });
   assert.equal(document.activeElement === field(), false, "a remount does not steal focus again");
   await again.unmount();
+});
+
+test("joining moved to Settings → Spaces: the Link page sends an old join link there", async () => {
+  joined = { servers: [], spaces: [] };
+  const opened: Array<[string, unknown]> = [];
+  const host = { navigation: { openSettingsPage: (id: string, target?: unknown) => { opened.push([id, target]); } } };
+  const settingsTarget = { sectionId: "join" };
+  const page = await mountLinkPage({ host, settingsTarget });
+  assert.doesNotMatch(page.host.textContent ?? "", /Other Polyth servers/);
+  assert.equal(document.querySelector("input[name='pairing-link']"), null);
+  assert.deepEqual(opened, [["spaces", settingsTarget]]);
+  await page.unmount();
 });
 
 test("no teammates are read in another server's Space", async () => {

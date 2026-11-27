@@ -397,6 +397,10 @@ export interface JoinedSpacesService {
     socket: import("node:stream").Duplex;
     head: Buffer;
   }): Promise<void>;
+  /** This server's own name, as its owner chose it; "" when none was chosen.
+   *  The Space switcher heads this server's Spaces with it beside the other
+   *  servers' names. Never the host name. */
+  serverName?(): string;
 }
 
 export const SERVER_JOINED_SPACES =

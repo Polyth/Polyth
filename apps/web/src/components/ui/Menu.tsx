@@ -62,6 +62,8 @@ export interface MenuSelectContext {
 /** Non-interactive section heading inside the entry list. */
 export interface MenuHeading {
   heading: string;
+  /** Quiet trailing note on the heading's line ("This server", "Offline"). */
+  detail?: string;
 }
 
 export type MenuEntry = MenuAction | MenuHeading | "separator";
@@ -281,7 +283,12 @@ export default function Menu({
         : <div key={`separator-${index}`} className="ui-separator ui-separator--horizontal" role="separator" />;
     }
     if (isHeading(entry)) {
-      return <div key={`heading-${index}`} className="ui-menu-heading" aria-hidden="true">{entry.heading}</div>;
+      return (
+        <div key={`heading-${index}`} className="ui-menu-heading" aria-hidden="true">
+          <span className="ui-menu-heading-label">{entry.heading}</span>
+          {entry.detail && <span className="ui-menu-heading-detail">{entry.detail}</span>}
+        </div>
+      );
     }
     const role = roleOf(entry);
     return (

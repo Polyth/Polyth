@@ -31,7 +31,7 @@ const FOREIGN = "rmt_fedcba9876543210fedcba98";
 
 async function withServer(
   fn: (base: string, seen: { forwarded: Array<{ userId: string; id: string; method: string; path: string; cookie?: string }>; localSpace: string[]; ownSpace: string }) => Promise<void>,
-  opts: { service?: boolean } = {},
+  opts: { service?: boolean; serverName?: string } = {},
 ): Promise<void> {
   const tenancy = await testTenancy();
   const owner = tenancy.gateway.store.users()[0]!;
@@ -49,6 +49,7 @@ async function withServer(
       input.res.end(JSON.stringify({ from: "other-server" }));
     },
     async forwardUpgrade() { /* not exercised over HTTP */ },
+    ...(opts.serverName !== undefined ? { serverName: () => opts.serverName! } : {}),
   };
   const webDist = tempDir(join(tmpdir(), "polyth-joined-space-"));
   writeFileSync(join(webDist, "index.html"), "<html>shell</html>");
@@ -152,6 +153,20 @@ test("an id that is not this person's joined Space, or no Link service, answers 
     assert.equal(none.status, 404);
     assert.equal(seen.forwarded.length, 0);
   }, { service: false });
+});
+
+test("beside joined Spaces the Space list names this server, only with the name its owner chose", async () => {
+  await withServer(async (base) => {
+    const state = await (await fetch(`${base}/api/spaces`)).json() as { joined?: unknown[]; serverName?: string };
+    assert.equal(state.joined?.length, 1);
+    assert.equal(state.serverName, "Home box");
+  }, { serverName: "  Home box " });
+  for (const serverName of ["", undefined]) {
+    await withServer(async (base) => {
+      const state = await (await fetch(`${base}/api/spaces`)).json() as { serverName?: string };
+      assert.equal("serverName" in state, false, "no chosen name: the switcher says \"This server\"");
+    }, serverName === undefined ? {} : { serverName });
+  }
 });
 
 test("the Space list carries the person's joined Spaces, and activating one sets only the cookie", async () => {

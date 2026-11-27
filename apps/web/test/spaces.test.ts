@@ -92,8 +92,10 @@ test("the switcher is quiet, server-driven, and reachable on phones", () => {
   // It hides itself in the single-Space installation that most users have
   // (one Space here and none joined on another server).
   assert.match(switcher, /state\.spaces\.length \+ state\.joined\.length < 2/);
-  // Menu entries come straight from the server payload — no client filtering.
-  assert.match(switcher, /state\.spaces\.map/);
+  // Menu entries come straight from the server payload — no client filtering
+  // — through the one menu the phone Navigator shares.
+  assert.match(switcher, /spaceMenuEntries\(state\)/);
+  assert.match(source("../src/components/mobile/MobileNavigator.tsx"), /spaceMenuEntries\(spaces,/);
   assert.ok(!switcher.includes("header-brand"), "it does not restyle the brand");
 });
 
@@ -126,12 +128,13 @@ test("a joined Space of another server is listed apart, can be active, and is ne
   }
   const switcher = source("../src/components/SpaceSwitcher.tsx");
   assert.match(switcher, /state\.spaces\.length \+ state\.joined\.length < 2/, "one own Space plus a joined one is a choice");
-  assert.match(switcher, /openSettingsPage\("tunnel", \{ sectionId: "join" \}\)/, "joining lives on the Polyth Link page");
+  const menu = source("../src/components/spaceMenu.tsx");
+  assert.match(menu, /openSettingsPage\(SPACES_SETTINGS_PAGE, \{ sectionId: "join" \}\)/, "joining lives on Settings → Spaces");
 });
 
 test("in another server's Space, settings list only the person's own pages, the projects and Polyth Link", async () => {
   const { joinedSpaceSettingsPageVisible } = await import("../src/joinedSpaceSettings.ts");
-  for (const page of ["appearance", "chat", "notifications", "projects", "tunnel"]) {
+  for (const page of ["appearance", "chat", "notifications", "projects", "spaces", "tunnel"]) {
     assert.equal(joinedSpaceSettingsPageVisible(true, page), true, page);
   }
   for (const page of ["harnesses", "behavior", "mcp", "packages", "users", "secure-safe", "ssh", "about"]) {

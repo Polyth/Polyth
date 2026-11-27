@@ -416,7 +416,8 @@
   font-weight: 650;
 }
 
-/* Other Polyth servers: paste a pairing link, then the servers joined. */
+/* Other Polyth servers (Settings → Spaces): the servers joined, then a
+   pairing link to join one more. */
 
 .pkg-tunnel-join {
   display: flex;

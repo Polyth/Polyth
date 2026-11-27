@@ -245,7 +245,9 @@ packages/server/src/index.ts              composition
 packages/server/src/remotePolicy.ts       paired devices may list/switch Spaces
 packages/server/src/routes/{org,control,context,queue,projects,runtimeEpoch,sessionRetention,agentSessions,browse}.ts
 apps/web/src/spaces.ts                    new — client state
-apps/web/src/components/SpaceSwitcher.tsx new — switcher + manage dialog
+apps/web/src/components/SpaceSwitcher.tsx new — header switcher
+apps/web/src/components/spaceMenu.tsx     its menu (Spaces by server), shared with the phone Navigator
+apps/web/src/components/settings/SpacesPage.tsx  Settings → Spaces (create, rename, delete; `settings.spaces.sections`)
 apps/web/src/components/{Header,Sidebar}.tsx  mount points
 apps/web/src/styles.css, i18n/locales/*   switcher styles and strings
 ```

@@ -3,174 +3,57 @@
 // It is deliberately quiet — a text button with a caret that sits beside the
 // brand, not a coloured card. Everything it shows is already authorized: the
 // server only ever returns Spaces this identity belongs to, so there is no
-// client-side filtering here to get wrong.
-import { useEffect, useState } from "react";
+// client-side filtering here to get wrong. The menu (spaceMenu.tsx) is the
+// phone Navigator's too; managing Spaces is Settings → Spaces.
+import { useEffect } from "react";
 import { tr } from "../i18n/index.ts";
-import {
-  activeJoinedSpace,
-  activeSpace,
-  createSpace,
-  deleteSpace,
-  loadSpaces,
-  renameSpace,
-  switchSpace,
-  useSpaces,
-} from "../spaces.ts";
-import { Button, Dialog, Menu, TextInput, type MenuEntry } from "./ui/index.ts";
-import { listSlots } from "../slots.ts";
+import { activeJoinedSpace, activeSpace, loadSpaces, useSpaces } from "../spaces.ts";
+import { Menu } from "./ui/index.ts";
 import { useSlotVersion } from "./slots/SlotHost.ts";
-import { openSettingsPage } from "../store.ts";
-
-function ManageSpaces({ onClose }: { onClose: () => void }) {
-  const state = useSpaces();
-  const [name, setName] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const run = async (action: () => Promise<void>) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await action();
-      setName("");
-    } catch (cause) {
-      setError((cause as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Dialog title={tr("spaces.manage")} onClose={onClose} size="sm">
-      <ul className="space-manage-list">
-        {state.spaces.map((space) => {
-          const isActive = space.id === state.activeSpaceId;
-          return (
-            <li key={space.id} className="space-manage-row">
-              <input
-                className="space-manage-name"
-                defaultValue={space.name}
-                aria-label={tr("spaces.renameLabel")}
-                disabled={busy || space.role === "viewer" || space.role === "member"}
-                onBlur={(event) => {
-                  const next = event.target.value.trim();
-                  if (next && next !== space.name) void run(() => renameSpace(space.id, next));
-                }}
-              />
-              <span className="space-manage-meta">
-                {isActive ? tr("spaces.current") : space.role}
-              </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                // The default Space is the fallback every device lands in, and
-                // the active one still owns this session's context.
-                disabled={busy || space.isDefault || isActive || space.role !== "owner"}
-                onClick={() => void run(() => deleteSpace(space.id))}
-              >
-                {tr("common.delete")}
-              </Button>
-            </li>
-          );
-        })}
-      </ul>
-      <form
-        className="space-manage-create"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (name.trim()) void run(() => createSpace(name.trim()));
-        }}
-      >
-        <TextInput
-          value={name}
-          placeholder={tr("spaces.newPlaceholder")}
-          aria-label={tr("spaces.newLabel")}
-          disabled={busy || !state.canCreate}
-          onChange={(event) => setName(event.target.value)}
-        />
-        <Button type="submit" size="sm" disabled={busy || !name.trim() || !state.canCreate}>
-          {tr("spaces.create")}
-        </Button>
-      </form>
-      {error && <p className="space-manage-error" role="alert">{error}</p>}
-    </Dialog>
-  );
-}
+import { SpaceMark, spaceMenuEntries, spaceTones } from "./spaceMenu.tsx";
 
 export default function SpaceSwitcher() {
   const state = useSpaces();
-  const [managing, setManaging] = useState(false);
-  // The Polyth Link page registers after boot: re-read the pages when it does.
-  const slotsAt = useSlotVersion();
+  // A package adds "Join another server…" after boot: re-read when it does.
+  useSlotVersion();
 
   useEffect(() => { void loadSpaces(); }, []);
 
   // A single Space is the default installation. Showing a switcher with one
   // entry would be noise, so it only appears once there is a choice to make:
   // another Space here, or one joined on another Polyth server.
-  if (state.status !== "ready" || state.spaces.length + state.joined.length < 2) {
-    return managing ? <ManageSpaces onClose={() => setManaging(false)} /> : null;
-  }
+  if (state.status !== "ready" || state.spaces.length + state.joined.length < 2) return null;
 
   const joinedCurrent = activeJoinedSpace(state);
   const current = activeSpace(state) ?? joinedCurrent;
-  // Joining happens on the Polyth Link page, when that package is on.
-  const canJoin = slotsAt >= 0 && listSlots("settings.pages").some((page) => page.id === "tunnel");
-  const entries: MenuEntry[] = [
-    ...state.spaces.map((space) => ({
-      id: space.id,
-      label: space.name,
-      kind: "radio" as const,
-      checked: space.id === state.activeSpaceId,
-      ...(space.color ? { swatch: space.color } : {}),
-      disabled: state.switching,
-      onSelect: () => { void switchSpace(space.id); },
-    })),
-    // Other servers' Spaces, each named with its server so the two never
-    // look alike; an offline one still opens and says so on its own.
-    ...(state.joined.length ? [{ heading: tr("spaces.joinedHeading") }] : []),
-    ...state.joined.map((space) => ({
-      id: space.id,
-      label: space.name,
-      detail: space.online ? space.serverLabel : tr("spaces.joinedOffline", { server: space.serverLabel }),
-      kind: "radio" as const,
-      checked: space.id === state.activeSpaceId,
-      ...(space.color ? { swatch: space.color } : {}),
-      disabled: state.switching,
-      onSelect: () => { void switchSpace(space.id); },
-    })),
-    "separator" as const,
-    {
-      id: "manage",
-      label: tr("spaces.manage"),
-      onSelect: () => setManaging(true),
-    },
-    ...(canJoin ? [{
-      id: "join",
-      label: tr("spaces.join"),
-      onSelect: () => openSettingsPage("tunnel", { sectionId: "join" }),
-    }] : []),
-  ];
+  // Beside another server's Spaces every Space names its server, this
+  // server's too when its owner named it: two "Personal"s never look alike.
+  const server = joinedCurrent?.serverLabel ?? (state.joined.length ? state.serverName : null);
 
   return (
-    <>
-      <Menu
-        label={tr("spaces.switcherLabel", { name: current?.name ?? "" })}
-        title={tr("spaces.title")}
-        entries={entries}
-        align="start"
-      >
-        {(trigger) => (
-          <button {...trigger} className="space-switcher header-control" disabled={state.switching}>
-            <span className="space-switcher-name">{current?.name ?? tr("spaces.title")}</span>
-            {joinedCurrent && <span className="space-switcher-server">{joinedCurrent.serverLabel}</span>}
-            <svg className="ui-icon ui-icon--sm" viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M4.5 6.5 8 10l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-        )}
-      </Menu>
-      {managing && <ManageSpaces onClose={() => setManaging(false)} />}
-    </>
+    <Menu
+      label={tr("spaces.switcherLabel", { name: current?.name ?? "" })}
+      title={tr("spaces.title")}
+      entries={spaceMenuEntries(state)}
+      align="start"
+    >
+      {(trigger) => (
+        <button {...trigger} className="space-switcher header-control" disabled={state.switching}>
+          {current && (
+            <SpaceMark
+              name={current.name}
+              tone={spaceTones(state).get(current.id)}
+              color={current.color}
+              className="space-switcher-mark"
+            />
+          )}
+          <span className="space-switcher-name">{current?.name ?? tr("spaces.title")}</span>
+          {server && <span className="space-switcher-server">{server}</span>}
+          <svg className="ui-icon ui-icon--sm" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M4.5 6.5 8 10l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      )}
+    </Menu>
   );
 }

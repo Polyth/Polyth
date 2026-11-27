@@ -13,6 +13,9 @@ export interface SpacesState {
   spaces: SpaceSummaryDto[];
   /** Spaces of other Polyth servers this person joined through Polyth Link. */
   joined: JoinedSpaceDto[];
+  /** This server's own name, when its owner chose one and there is another
+   *  server to tell it from. */
+  serverName: string | null;
   activeSpaceId: string | null;
   /** True while a switch is in flight — the switcher disables during it. */
   switching: boolean;
@@ -24,6 +27,7 @@ let state: SpacesState = {
   status: "idle",
   spaces: [],
   joined: [],
+  serverName: null,
   activeSpaceId: null,
   switching: false,
   canCreate: false,
@@ -40,6 +44,7 @@ const apply = (dto: SpacesStateDto): void => set({
   status: "ready",
   spaces: Array.isArray(dto.spaces) ? dto.spaces : [],
   joined: Array.isArray(dto.joined) ? dto.joined : [],
+  serverName: typeof dto.serverName === "string" && dto.serverName.trim() ? dto.serverName.trim() : null,
   activeSpaceId: typeof dto.activeSpaceId === "string" ? dto.activeSpaceId : null,
   canCreate: dto.canCreate === true,
   error: undefined,

@@ -2,7 +2,9 @@ import { defineWebPackage } from "@polyth/web-sdk";
 import { createApiTransport } from "@polyth/web-sdk";
 import type { TunnelStatusDto } from "@polyth/contracts";
 import { createElement } from "react";
+import type { SettingsNavigationTarget } from "@polyth/web-sdk";
 import LinkPage from "./LinkPage.tsx";
+import JoinedServers from "./JoinedServers.tsx";
 import { createTranslate } from "./i18n.ts";
 import { tunnelInviteMethod } from "./inviteMethod.ts";
 import { SmartphoneIcon } from "../../../apps/web/src/components/ui/index.ts";
@@ -109,6 +111,19 @@ export default defineWebPackage((host) => () => {
       order: 10,
       render: () => null,
       meta: { inviteMethod: tunnelInviteMethod(api, createTranslate(host), SmartphoneIcon, () => host.ui.locale.get?.()) },
+    }),
+    // Settings → Spaces: the other Polyth servers joined, and joining one.
+    // It handles the page's `join` target, so the Space menus offer joining.
+    host.slots.register({
+      slot: "settings.spaces.sections",
+      id: "tunnel.joined-servers",
+      order: 10,
+      render: ({ settingsTarget }) => createElement(JoinedServers, {
+        api,
+        t: createTranslate(host),
+        ...(settingsTarget ? { settingsTarget: settingsTarget as SettingsNavigationTarget } : {}),
+      }),
+      meta: { joinsServers: true },
     }),
     () => {
       unsubAvailability();

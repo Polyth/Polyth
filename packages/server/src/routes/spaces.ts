@@ -68,6 +68,9 @@ export function spaceRoutes(deps: SpaceRoutesDeps): RouteHandler {
     const user = store.user(userId);
     if (!user) throw Object.assign(new Error("unknown user"), { code: "unauthorized" });
     const spaces = store.spacesFor(userId);
+    // This server's name only matters beside another server's: it heads its
+    // own Spaces in the switcher once the person has joined one elsewhere.
+    const serverName = joined.length ? deps.joinedSpaces?.()?.serverName?.().trim() ?? "" : "";
     return {
       user,
       spaces,
@@ -75,6 +78,7 @@ export function spaceRoutes(deps: SpaceRoutesDeps): RouteHandler {
       deployment: resolver.deployment,
       canCreate: spaces.filter((s) => s.role === "owner").length < limit,
       ...(joined.length ? { joined } : {}),
+      ...(serverName ? { serverName } : {}),
     };
   };
 

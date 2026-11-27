@@ -2005,6 +2005,43 @@ Mounted coverage is in `apps/web/test/addUserWizard.test.ts` and
 `usersPairedDevice.test.ts`; source and CSS guards in `usersSettings.test.ts`;
 presets, addresses and invitation copy in `usersModel.test.ts`.
 
+### 3.7 Space switcher and Settings → Spaces
+
+Every Polyth server names its first Space "Personal", so a Space's name never
+tells this server's Space from one joined on another server. The switcher
+(`SpaceSwitcher.tsx`, header) and the phone Navigator's title share one menu
+(`spaceMenu.tsx` `spaceMenuEntries`):
+
+- **Grouped by server** once the person has joined another server: this
+  server's Spaces under the name its owner chose, with "This server" beside it
+  (or under "This server" alone when none was chosen), then each joined
+  server's under its own name, with "Offline" while it is unreachable
+  (`MenuHeading.detail`). With one server there are no headings.
+- **Space marks.** Each row and the trigger carry the Space's monogram, a
+  rounded square on its identity tone (`assignPersonTones` over every Space id,
+  so up to four Spaces never share one) or on the Space's own colour. The
+  trigger adds the server chip beside joined Spaces.
+- **Actions** sit under a separator with their own glyphs: New space… (only
+  with `canCreate`; prompts for a name and switches into it), Manage spaces…
+  (Settings → Spaces) and Join another server… (only when a
+  `settings.spaces.sections` contribution `joinsServers`). The phone adds the
+  app's Switch server.
+
+Settings → Spaces (`settings/SpacesPage.tsx`, System group) lists this
+server's Spaces in Users-list rows: mark, name, a Current badge, role and
+member count. Open switches; the ⋯ menu renames (a name prompt) and deletes (a
+destructive confirmation saying nobody can open it or its projects and chats
+any more). Delete stays in the menu disabled with its reason — only the owner,
+never the default Space, never the one in use — and the server refuses the same.
+The packages' sections follow (Polyth Link: the servers joined, rename and
+leave, then a pairing link to join one more). The page stays in a joined
+Space: `/api/spaces` and `/api/tunnel` are this server's.
+
+Coverage: `apps/web/test/spaceMenu.test.ts` (grouping, actions),
+`spaces.test.ts` (client state, source guards),
+`packages/tunnel/test/linkPageUi.test.ts` (joining, the forwarded `join`
+target), `packages/server/test/joinedSpaceHttp.test.ts` (`serverName`).
+
 ## 4. The seams in detail
 
 For repository scope, canonical file identity, preview tabs and workspace search,
@@ -2717,6 +2754,12 @@ contribution's `render` is never mounted. An optional `invitations()` returns
 merges every method's answer (`inviteStatuses`, joining wins over a newer link)
 and shows an **Invited** badge with "Invitation link until …" or "Joined …" in a
 person's meta line. A throw shows nothing.
+
+`settings.spaces.sections` adds a section to Settings → Spaces, below this
+server's Spaces (see *Settings → Spaces*). The host mounts `render` with
+`{ settingsTarget }`; a contribution whose `meta.joinsServers` is `true` handles
+the page's `join` target, and only then do the Space menus offer "Join another
+server…". Polyth Link contributes the other servers joined and joining one.
 
 `host.conversation.revealEvent` takes an optional `passage`: text inside the
 message to land on and light for a moment with the CSS Custom Highlight API,

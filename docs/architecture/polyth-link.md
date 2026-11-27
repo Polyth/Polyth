@@ -436,6 +436,13 @@ requests that follow a joined Space and calls `server.joined-spaces`.
   not in the paired-device table. Servers, pairing attempts and Space ids
   (`rmt_` + hash of account, connection and remote Space) answer 404 to anyone
   else.
+- **Where.** Settings → Spaces: the package's `settings.spaces.sections`
+  contribution (`JoinedServers.tsx`) lists the servers joined (rename, leave)
+  and joins one more from a pairing link; it handles the page's `join` target,
+  and the Link page forwards an older `join` link there. The Space switcher
+  groups Spaces by server and heads this server's with the name its owner chose
+  (`JoinedSpacesService.serverName()` → `SpacesStateDto.serverName`, sent only
+  beside joined Spaces; never the host name).
 - **Keys.** `<dataDir>/packages/tunnel/joined/<hash of account>/` (mode 0700,
   outside every Space): the client's device identities and a cached Space list.
   The client's environment carries no provider credentials. The other server

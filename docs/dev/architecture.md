@@ -1285,7 +1285,8 @@ the widget placement slots (`workspace.header/left/main/right/bottom/floating`,
 (`app.header.leading/center`, `app.statusbar.leading/trailing`,
 `workspace.rail`, `sidebar.toolbar`,
 `composer.meta/pending`, `composer.config`, `composer.context.details`, `session.footer`, `session.empty.widgets`,
-`project.create.options`, `settings.users.invite.notice`).
+`project.create.options`, `settings.users.invite.notice`,
+`settings.spaces.sections`).
 `settings.users.invite.methods` is a data-only slot for ways of connecting a
 person in the Add user wizard: a contribution gives a label and detail, an
 `available`/`preferred` check and an `issue` that returns the connection link

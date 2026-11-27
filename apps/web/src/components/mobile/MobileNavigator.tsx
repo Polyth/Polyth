@@ -91,10 +91,11 @@ import {
   SelectIcon,
   SharedIcon,
 } from "../ui/icons.ts";
-import { activeJoinedSpace, activeSpace, getSpacesState, loadSpaces, switchSpace, useSpaces } from "../../spaces.ts";
+import { activeJoinedSpace, activeSpace, getSpacesState, loadSpaces, useSpaces } from "../../spaces.ts";
+import { spaceMenuEntries } from "../spaceMenu.tsx";
 import { canSwitchMobileServer, switchMobileServer } from "../../nativeConnections.ts";
 import { MobileStatusIcon, type MobileStatusKind } from "./MobileStatusIcon.tsx";
-import { Menu, type MenuEntry } from "../ui/index.ts";
+import { GlobeIcon, Menu, type MenuEntry } from "../ui/index.ts";
 import SessionDateFilterControls from "../sidebar/SessionDateFilterControls.tsx";
 import SessionSelectionBar from "../sidebar/SessionSelectionBar.tsx";
 import { useSessionArrangementEntries } from "../sidebar/sessionArrangementEntries.ts";
@@ -947,35 +948,15 @@ function NavigatorPlace() {
       </button>
     );
   }
-  const entries: MenuEntry[] = [
-    ...spaces.spaces.map((space): MenuEntry => ({
-      id: `space:${space.id}`,
-      label: space.name,
-      kind: "radio",
-      checked: space.id === spaces.activeSpaceId,
-      ...(space.color ? { swatch: space.color } : {}),
-      disabled: spaces.switching,
-      onSelect: () => { void switchSpace(space.id); },
-    })),
-    // Spaces joined on other Polyth servers, named with their server.
-    ...(spaces.joined.length ? [{ heading: tr("spaces.joinedHeading") }] : []),
-    ...spaces.joined.map((space): MenuEntry => ({
-      id: `space:${space.id}`,
-      label: space.name,
-      detail: space.online ? space.serverLabel : tr("spaces.joinedOffline", { server: space.serverLabel }),
-      kind: "radio",
-      checked: space.id === spaces.activeSpaceId,
-      ...(space.color ? { swatch: space.color } : {}),
-      disabled: spaces.switching,
-      onSelect: () => { void switchSpace(space.id); },
-    })),
-    ...(servers ? ["separator" as const, {
-      id: "server",
-      label: tr("sidebar.switchServer"),
-      // The native menu opens at the title, as it does with one Space.
-      onSelect: () => switchMobileServer(buttonRef.current),
-    }] : []),
-  ];
+  // The header switcher's menu (spaceMenu.tsx): Spaces grouped by server,
+  // then the actions, here with the app's own "Switch server".
+  const entries: MenuEntry[] = spaceMenuEntries(spaces, servers ? [{
+    id: "server",
+    label: tr("sidebar.switchServer"),
+    icon: GlobeIcon,
+    // The native menu opens at the title, as it does with one Space.
+    onSelect: () => switchMobileServer(buttonRef.current),
+  }] : []);
   return (
     <Menu label={tr("spaces.switcherLabel", { name })} title={tr("spaces.title")} entries={entries} align="start">
       {(trigger) => (

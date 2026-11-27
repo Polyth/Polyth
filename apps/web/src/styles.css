@@ -9450,7 +9450,7 @@ color: var(--text-dim);
    workspace mode switch next to it. */
 .space-switcher {
   display: flex; flex: none; align-items: center; gap: 4px;
-  max-width: 168px; height: 26px; padding: 0 6px;
+  max-width: 220px; height: 26px; padding: 0 6px;
   border: none; border-radius: var(--radius-control);
   background: transparent; color: var(--muted);
   font-size: 12px; font-weight: 600; letter-spacing: -.01em;
@@ -9460,6 +9460,7 @@ color: var(--text-dim);
 }
 .space-switcher[disabled] { opacity: .6; }
 .space-switcher-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.space-switcher .space-switcher-mark { width: var(--icon-sm); height: var(--icon-sm); margin-inline-end: 2px; }
 /* Another server's Space names its server, so it never passes for one of
    this server's. A quiet chip: the Space name stays the label. */
 .space-switcher-server {
@@ -9468,17 +9469,24 @@ color: var(--text-dim);
   font-size: 10.5px; font-weight: 500; line-height: 16px;
 }
 
-.space-manage-list { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
-.space-manage-row { display: flex; align-items: center; gap: var(--space-2); }
-.space-manage-name {
-  flex: 1 1 auto; min-width: 0; height: var(--control-h-sm); padding: 0 8px;
-  border: 1px solid var(--hair); border-radius: var(--radius-control);
-  background: var(--sunken); color: var(--text); font: inherit;
+/* A Space's monogram (spaceMenu.tsx SpaceMark): its first letter on one of
+   the identity tones (`data-person-tone`), or on the Space's own colour. A
+   rounded square, so a Space never passes for a person's round monogram. In
+   a menu row it takes the row's icon box (`.ui-icon--sm/--lg`). */
+.space-mark {
+  display: inline-grid; flex: none; place-items: center;
+  width: var(--icon-md); height: var(--icon-md); border-radius: 28%;
+  background: var(--space-mark-fill, var(--person-tone, var(--muted)));
+  color: var(--person-tone-ink, var(--bg));
+  font-size: calc(var(--icon-md) * .56); font-weight: 700; line-height: 1;
+  user-select: none;
 }
-.space-manage-name:disabled { opacity: .6; }
-.space-manage-meta { flex: none; color: var(--muted); font-size: 12px; }
-.space-manage-create { display: flex; gap: var(--space-2); margin-top: 12px; }
-.space-manage-error { margin: 8px 0 0; color: var(--danger); font-size: 12px; }
+.space-mark.ui-icon--sm, .space-switcher .space-switcher-mark { font-size: calc(var(--icon-sm) * .6); }
+.space-mark.ui-icon--lg { font-size: calc(var(--icon-lg) * .54); }
+/* A menu row tints its glyphs muted; a mark's letter keeps its ink. */
+:is(.ui-menu-item, .ui-menu-sheet-item) .space-mark.ui-icon { color: var(--person-tone-ink, var(--bg)); }
+.space-mark.is-row { width: 36px; height: 36px; border-radius: 10px; font-size: var(--font-label); }
+.spaces-page-server { display: inline-flex; align-items: center; gap: var(--space-2); }
 
 .workspace-customize {
   flex: none; height: 30px; padding: 0 9px; border-color: transparent;
@@ -19527,12 +19535,24 @@ body .ui-btn .ui-spinner {
   border-radius: 50%;
 }
 .ui-menu-heading {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
   padding: var(--space-2) var(--control-pad-x-sm) var(--space-1);
   color: var(--faint);
   font-size: var(--font-meta);
   font-weight: 650;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+.ui-menu-heading-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A heading's note ("This server", "Offline") reads as a word, not a label. */
+.ui-menu-heading-detail {
+  flex: none;
+  margin-inline-start: auto;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .ui-menu-sheet-list { display: flex; flex-direction: column; padding: 0 var(--space-2) var(--space-2); }

@@ -9,10 +9,11 @@
 // - this computer's (harnesses, behavior, MCP, packages, users, Vault, SSH,
 //   updates…) — hidden: they would change this server, not the open Space.
 //
-// Polyth Link stays, because joining and leaving other servers lives there.
+// Spaces and Polyth Link stay: switching Spaces, and joining and leaving
+// other servers, live there (both answered by this server).
 export const JOINED_SPACE_SETTINGS_PAGES: ReadonlySet<string> = new Set([
   "general", "appearance", "chat", "notifications", "sessions", "voice", "voice-mode",
-  "shortcuts", "command-line", "projects", "tunnel",
+  "shortcuts", "command-line", "projects", "spaces", "tunnel",
 ]);
 
 export const joinedSpaceSettingsPageVisible = (joined: boolean, pageId: string): boolean =>

@@ -19,7 +19,6 @@ import { applyTunnelStatusToCapability, setPolythLinkCapabilityAvailable } from 
 import { createTranslate, type Translate } from "./i18n.ts";
 import { accessLabel, CAPABILITY_GROUPS, hasFullAccess, matchingPreset, PRESETS, withFullAccess } from "./permissions.ts";
 import { loadTeammates, type Teammate } from "./people.ts";
-import JoinedServers from "./JoinedServers.tsx";
 
 const api = createApiTransport({
   fetch: (url, init) => fetch(url, { credentials: "include", ...init }),
@@ -680,6 +679,12 @@ export default function LinkPage({ host, settingsTarget }: {
     // Runs once per target; the handlers it calls only use state setters and refs.
   }, [settingsTarget, refreshTeammates]);
 
+  // Joining another server moved to Settings → Spaces; an older link to
+  // this page's `join` target still lands there.
+  useEffect(() => {
+    if (settingsTarget?.sectionId === "join") host?.navigation.openSettingsPage("spaces", settingsTarget);
+  }, [settingsTarget, host]);
+
   const phrase = pairing?.safetyPhrase ?? null;
   const canAllow = Boolean(pairing?.deviceConfirmed) && pairing?.state !== "committed";
   const offerSeconds = secondsUntil(offer?.pairing.expiresAt, now);
@@ -798,8 +803,6 @@ export default function LinkPage({ host, settingsTarget }: {
           </ul>
         </Section>
       )}
-
-      <JoinedServers api={api} t={t} {...(settingsTarget ? { settingsTarget } : {})} />
 
       <details className="pkg-tunnel-advanced">
         <summary>{t("tunnel.advanced.summary")}</summary>

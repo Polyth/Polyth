@@ -826,7 +826,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
     deviceLabel: () => store.serverName() || "Polyth server",
     notices: () => host.services.get(SERVER_PERSON_NOTICES),
   });
-  host.services.provide(SERVER_JOINED_SPACES, joined.service);
+  host.services.provide(SERVER_JOINED_SPACES, { ...joined.service, serverName: () => store.serverName() });
 
   const syncTrust = async (): Promise<void> => {
     if (!linkHost?.available) return;

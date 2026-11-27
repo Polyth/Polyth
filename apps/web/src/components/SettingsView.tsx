@@ -28,6 +28,7 @@ import ViewErrorBoundary from "./ViewErrorBoundary.ts";
 import { ChatPage } from "./settings/ChatSettingsPage.tsx";
 import SessionsPage from "./settings/SessionsPage.tsx";
 import UsersPage from "./settings/UsersPage.tsx";
+import SpacesPage from "./settings/SpacesPage.tsx";
 import CommandLinePage from "./settings/CommandLinePage.tsx";
 import PackagesPage from "./settings/PackagesPage.tsx";
 import { PackageGlyph } from "./settings/packageIcons.tsx";
@@ -135,7 +136,7 @@ const NAV_LAYOUT: Readonly<Record<NavGroup, readonly string[]>> = {
   Code: ["projects", "files", "git", "ssh", "task-trackers", "monitoring"],
   Integrations: ["browser", "web-search", "secure-safe", "home-assistant"],
   Customize: ["shortcuts", "packages"],
-  System: ["users", "command-line", "tunnel", "about"],
+  System: ["users", "spaces", "command-line", "tunnel", "about"],
 };
 
 const PAGE_PLACEMENT: ReadonlyMap<string, { group: NavGroup; order: number }> = new Map(
@@ -159,6 +160,7 @@ const BUILTIN: PageDef[] = ([
   { id: "behavior", label: tr("settingsview.behavior"), declared: "Engineering", render: (target) => <BehaviorPage {...(target ? { settingsTarget: target } : {})} /> },
   { id: "packages", label: tr("settingsview.packages"), declared: "Customize", render: (target) => <PackagesPage {...(target?.itemId ? { targetPackageId: target.itemId } : {})} /> },
   { id: "users", label: tr("settingsview.users"), declared: "System", render: (target) => <UsersPage {...(target ? { settingsTarget: target } : {})} /> },
+  { id: "spaces", label: tr("spaces.title"), declared: "System", render: (target) => <SpacesPage {...(target ? { settingsTarget: target } : {})} /> },
   { id: "command-line", label: tr("settingsview.commandLine"), declared: "System", render: () => <CommandLinePage /> },
   { id: "about", label: tr("settingsview.about"), declared: "System", render: () => <AboutPage /> },
 ] as (Omit<PageDef, "group" | "order"> & { declared: DeclaredGroup })[]).map(({ declared, ...page }) => ({
@@ -212,6 +214,7 @@ const SETTINGS_ICON_BY_PAGE: Readonly<Record<string, string>> = {
   shortcuts: "keyboard",
   packages: "package",
   users: "user",
+  spaces: "layout-grid",
   "command-line": "terminal",
   tunnel: "qr",
   about: "info",

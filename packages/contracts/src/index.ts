@@ -363,6 +363,9 @@ export interface SpacesStateDto {
   canCreate: boolean;
   /** Spaces of other servers this person joined; `activeSpaceId` may name one. */
   joined?: JoinedSpaceDto[];
+  /** This server's own name, as its owner chose it. Sent only with `joined`
+   *  and only when chosen: it heads this server's Spaces in the switcher. */
+  serverName?: string;
 }
 
 /** Resolved, validated tenant context for one request, socket, or job.
@@ -7079,6 +7082,11 @@ export const UI_SLOTS = [
   // `meta.inviteMethod` (InviteMethodSlotMeta in @polyth/web-sdk); the flow
   // lists each as a choice and never mounts `render`.
   "settings.users.invite.methods",
+  // Settings → Spaces: a section below this server's Spaces (Polyth Link: the
+  // other servers joined, and joining one). Mounted with `{ settingsTarget }`;
+  // `meta.joinsServers: true` says it handles the page's `join` target, and
+  // the Space menus then offer "Join another server…".
+  "settings.spaces.sections",
   // Fresh-session widgets (starters, recents, or a plugin replacement). This
   // is deliberately a slot rather than a SessionHero import: idle-screen
   // information density is user-configurable and plugins can replace it.

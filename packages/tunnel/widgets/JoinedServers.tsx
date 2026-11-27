@@ -329,6 +329,25 @@ export default function JoinedServers({ api, settingsTarget, t }: {
   return (
     <>
       <Section title={t("tunnel.joined.title")} hint={t("tunnel.joined.hint")} itemId="tunnel.join">
+        {/* The servers joined first; joining one more below them. */}
+        {overview.servers.length > 0 && (
+          <ul className="pkg-tunnel-devices">
+            {overview.servers.map((server) => {
+              const spaces = overview.spaces.filter((space) => space.connectionId === server.connectionId);
+              return (
+                <ServerRow
+                  key={server.connectionId}
+                  server={server}
+                  spaces={spaces}
+                  leaving={leaving === server.connectionId}
+                  onRename={(label) => rename(server.connectionId, label)}
+                  onLeave={() => void leave(server, spaces)}
+                  t={t}
+                />
+              );
+            })}
+          </ul>
+        )}
         <form
           ref={formRef}
           className="pkg-tunnel-join"
@@ -360,24 +379,6 @@ export default function JoinedServers({ api, settingsTarget, t }: {
         </form>
         {error && <ErrorState compact title={error.title} error={error.text} />}
         {joined && <p className="pkg-tunnel-for-notice pkg-tunnel-joined-done" role="status">{t("tunnel.joined.success", { server: joined })}</p>}
-        {overview.servers.length > 0 && (
-          <ul className="pkg-tunnel-devices">
-            {overview.servers.map((server) => {
-              const spaces = overview.spaces.filter((space) => space.connectionId === server.connectionId);
-              return (
-                <ServerRow
-                  key={server.connectionId}
-                  server={server}
-                  spaces={spaces}
-                  leaving={leaving === server.connectionId}
-                  onRename={(label) => rename(server.connectionId, label)}
-                  onLeave={() => void leave(server, spaces)}
-                  t={t}
-                />
-              );
-            })}
-          </ul>
-        )}
       </Section>
 
       {flow && (
