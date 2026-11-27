@@ -626,6 +626,13 @@ export function contextTokensUsed(model: Partial<Pick<RenderModel, "contextUsage
   return tokens;
 }
 
+/** The streaming cursor says a working turn is producing this answer (`live`),
+ *  not that the row is unfinalized: a chunk-only answer of a stopped or failed
+ *  turn never finalizes. */
+export function showsStreamingCaret(m: Pick<AssistantMsg, "finalized">, live: boolean): boolean {
+  return live && !m.finalized;
+}
+
 /** The model an answer's footer names: what was recorded for the answer, then
  *  for its turn. The session's current selection only labels an answer still
  *  in flight; a settled answer without a record stays unrecorded (the footer

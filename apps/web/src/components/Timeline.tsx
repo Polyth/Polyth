@@ -133,6 +133,7 @@ import type {
   ToolMsg,
   UserMsg,
 } from "../reduce.ts";
+import { showsStreamingCaret } from "../reduce.ts";
 import { Icon } from "../icons.tsx";
 import ModelPicker from "@polyth/models/model-picker";
 import { useRuntimeCatalog } from "@polyth/models/runtime-catalog";
@@ -299,12 +300,12 @@ const openThoughts = new Set<string>();
 
 type TimelineResourceContext = { projectId: string; sessionId: string | null; repositoryId?: string };
 
-function AssistantProse({ m, entering = false, resourceContext }: { m: AssistantMsg; entering?: boolean; resourceContext?: TimelineResourceContext }) {
+function AssistantProse({ m, live, entering = false, resourceContext }: { m: AssistantMsg; live: boolean; entering?: boolean; resourceContext?: TimelineResourceContext }) {
   return (
     <div className={`msg assistant${entering ? " timeline-row-enter" : ""}`} data-message-seq={m.eventSeq}>
       <div className="bubble" dir="auto">
         {renderMarkdown(m.text, m.id, { conversation: true, ...(resourceContext ? { resourceContext } : {}) })}
-        {!m.finalized && <span className="caret" />}
+        {showsStreamingCaret(m, live) && <span className="caret" />}
       </div>
     </div>
   );
@@ -545,7 +546,7 @@ function AssistantView({
             ...(live && !m.finalized ? { streaming: true } : {}),
             ...(resourceContext ? { resourceContext } : {}),
           })}
-          {!m.finalized && <span className="caret" />}
+          {showsStreamingCaret(m, live) && <span className="caret" />}
         </div>
       )}
       {/* Only a turn's last answer carries the footer (model identity and
@@ -669,7 +670,7 @@ function activityItemNode(
       ? <Thinking key={`${item.id}-reasoning`} m={{ ...item, text: "" }} live={live} entering={entering} resourceContext={resourceContext} inActivity />
       : null;
     const prose = item.text.trim() !== ""
-      ? <AssistantProse key={`${item.id}-text`} m={item} entering={entering} resourceContext={resourceContext} />
+      ? <AssistantProse key={`${item.id}-text`} m={item} live={live} entering={entering} resourceContext={resourceContext} />
       : null;
     return thought && prose ? <Fragment key={item.id}>{thought}{prose}</Fragment> : thought ?? prose;
   }
@@ -4808,7 +4809,9 @@ export default function Timeline({
                 turn={r.kind === "assistant" && r.id === latestAssistantId && turn?.status !== "working" ? turn : undefined}
                 // The latest assistant row of a working turn owns the live
                 // thinking state; every row displays the received text directly.
-                live={r.kind === "assistant" && turnWorking && r.id === latestAssistantId}
+                // A new turn must not revive a partial answer an earlier one left.
+                live={r.kind === "assistant" && turnWorking && r.id === latestAssistantId
+                  && (r.finalized || r.eventSeq > (turnStart?.seq ?? -1))}
                 entering={r.id === latestRowId}
                 terminal={r.kind === "assistant" && terminalAnswers.has(r.eventSeq)}
                 progress={r.kind === "assistant" && nextRowIsActivity(chronologicalRows, index)}
