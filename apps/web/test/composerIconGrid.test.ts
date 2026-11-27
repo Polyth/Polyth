@@ -6,6 +6,8 @@
 // - The Send/Stop disc ends --composer-stack-end (18px) from the outer end edge.
 // - The model line centres --composer-row-mid (28px) below the card's top edge
 //   and the rail as far above its bottom edge.
+// - Where a look rules the model line off from the editor («Лінія»), the line
+//   centres between the row's top edge and that rule.
 // - Neighbouring rail glyphs are evenly spaced, and the disc keeps that space;
 //   on the model line the caret and every glyph after it keep that same space.
 // - A phone's resting row and its engaged card put Add, the quick launcher and
@@ -162,6 +164,8 @@ async function settle(page: Page, look: string): Promise<void> {
 
 interface Grid {
   logo: { x: number; y: number } | null;
+  /** The model line's band: the logo's centre from the row's top edge and from its bottom rule. */
+  band: { above: number; below: number; rule: number } | null;
   /** The model line's caret, then each glyph after it: frame edges from the card's start edge. */
   line: { name: string; left: number; right: number }[];
   /** Rail glyphs in reading order, edges and centres from the card's outer edges. */
@@ -178,6 +182,14 @@ const measure = (page: Page): Promise<Grid> => page.evaluate(() => {
   };
   const logo = document.querySelector(".composer-config-row .model-trigger-logo");
   const logoRect = shown(logo) ? logo.getBoundingClientRect() : null;
+  const row = document.querySelector(".composer-config-row");
+  let band = null;
+  if (shown(row) && logoRect) {
+    const rect = row.getBoundingClientRect();
+    const rule = parseFloat(getComputedStyle(row).borderBottomWidth);
+    const centre = logoRect.top + logoRect.height / 2;
+    band = { above: centre - rect.top, below: rect.bottom - rule - centre, rule };
+  }
   const line = ([
     ["caret", ".composer-config-row .config-chip-caret svg, .composer-config-row svg.config-chip-caret"],
     ["pie", ".composer-config-row .composer-context-pie svg"],
@@ -200,6 +212,7 @@ const measure = (page: Page): Promise<Grid> => page.evaluate(() => {
   const primary = [...document.querySelectorAll(".composer-card .composer-rail :is(.send, .stop)")].find(shown)!.getBoundingClientRect();
   return {
     logo: logoRect ? { x: logoRect.left + logoRect.width / 2 - card.left, y: logoRect.top + logoRect.height / 2 - card.top } : null,
+    band,
     line,
     glyphs: rail,
     disc: { right: card.right - primary.right, x: card.right - (primary.left + primary.width / 2), fromBottom: card.bottom - (primary.top + primary.height / 2), left: primary.left - card.left },
@@ -220,6 +233,13 @@ function assertGrid(grid: Grid, where: string, { engaged = true } = {}): void {
   assert.ok(grid.logo, `${where}: the model line shows its logo`);
   near(grid.logo.x, MARK, `${where}: the model logo centres on the leading column`);
   near(grid.logo.y, MID, `${where}: the model line centres below the card's top edge`);
+}
+
+/** «Лінія» draws a rule under the model line, so the line centres in that band. */
+function assertRuledLine(grid: Grid, where: string): void {
+  assert.ok(grid.band, `${where}: the model line shows its band`);
+  assert.ok(grid.band.rule > 0, `${where}: a rule closes the model line`);
+  near(grid.band.below, grid.band.above, `${where}: the model line centres between the row's top edge and its rule`);
 }
 
 /** The model line steps from the caret to each glyph by the rail's own space. */
@@ -248,6 +268,7 @@ test("desktop: one grid for the model line and the rail in every look", { skip: 
       await settle(page, look);
       const grid = await measure(page);
       assertGrid(grid, `desktop/${look}`);
+      if (look === "line") assertRuledLine(grid, `desktop/${look}`);
       const { runs, toDisc } = spacing(grid);
       assert.deepEqual(grid.glyphs.map((glyph) => glyph.name), ["add", "mic", "voice"], `desktop/${look}: Add and Dictate lead, Voice stands beside Stop`);
       assert.equal(runs.length, 1, `desktop/${look}: Add and Dictate are neighbours`);
@@ -282,6 +303,7 @@ test("phone: the engaged card keeps the grid with the launchers beside Stop, in 
       await settle(page, look);
       const grid = await measure(page);
       assertGrid(grid, `phone/${look}`);
+      if (look === "line") assertRuledLine(grid, `phone/${look}`);
       assert.deepEqual(grid.glyphs.map((glyph) => glyph.name), ["add", "voice", "mic"], `phone/${look}: Voice and Dictate stand beside Stop`);
       const { runs, toDisc } = spacing(grid);
       assert.equal(runs.length, 1, `phone/${look}: Voice and Dictate are neighbours`);

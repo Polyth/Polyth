@@ -1651,7 +1651,10 @@ body[data-shell-look="line"]:not(#\#) .composer-card {
   background: color-mix(in srgb, var(--bg) var(--look-a), transparent) !important;
 }
 
+/* A ruled band shows both edges: the model line takes the air below that it
+   has above (composerAdaptive.css), so it centres between card edge and rule. */
 body[data-shell-look="line"]:not(#\#) .composer-config-row {
+  padding-block-end: calc(var(--composer-row-mid) - 1px - var(--composer-line-h) / 2);
   border-bottom: 1px solid var(--look-line) !important;
 }
 

@@ -3939,7 +3939,10 @@ width, pointer, look and state (composerAdaptive.css "Composer icon grid"):
 the model logo and Add centre on `--composer-stack-mark`, the Stop/Send disc ends
 on `--composer-stack-end`, the model line centres `--composer-row-mid` (half the
 resting row) below the card's top edge and the rail the same distance above its
-bottom edge. Every quiet rail control centres one 20px glyph in one square box,
+bottom edge. The Line look (`line`) rules the model line off from the editor, so
+there the row keeps the same air below its controls as above and the model chip
+stands in the middle of that band (at compact density the card is 12px taller on
+desktop and 5px on a phone). Every quiet rail control centres one 20px glyph in one square box,
 so neighbouring glyphs are evenly spaced, and the disc stands off by the same
 visible space. The card names that space `--composer-glyph-gap` (24px on a
 phone, 28px on another touch screen, 12px with a mouse) and the model line keeps
