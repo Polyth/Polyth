@@ -1,51 +1,54 @@
-// Status marks on a project's rail icon. Each kind owns a corner, so the corner
-// names the kind before its colour does: question at the top start, permission
-// at the top end, result at the bottom end. The bottom start corner is free.
-// Corners follow the shell's direction; only the text inside stays "9+".
+// A project's status, in three channels that never cover one another:
+// - the seal (top end corner): chats that wait on a person, in the most
+//   urgent kind's tone, with a real cut-out in the icon under it;
+// - the halo (the tile's contour): light running round it while chats work,
+//   amber and slower while they reconnect, still while they will continue by
+//   themselves;
+// - the pip (the rail's start edge): a reply nobody has read.
+// The tree row (ProjectTreeStatus) reads the same projectStatusSignal.
 import type { ProjectRailStatus } from "../../sessionStatus.ts";
+import { projectStatusSignal } from "../../sessionStatus.ts";
 import { tr } from "../../i18n/index.ts";
-
-/** The server sends ten unread rows per project, which proves "9+". */
-const MAX_COUNT = 9;
-
-function countText(count: number): string {
-  return count > MAX_COUNT ? `${MAX_COUNT}+` : String(count);
-}
-
-/** One chat shows what it is; several show how many. */
-function blockingText(count: number, glyph: string): string {
-  return count > 1 ? countText(count) : glyph;
-}
+import { SEAL_MAX_COUNT, SealContent, sealCountText } from "../StatusSeal.tsx";
 
 export function ProjectRailMarks({ status }: { status: ProjectRailStatus }) {
-  const { permissions, questions, results, working } = status;
+  const { seal, activity, unread } = projectStatusSignal(status);
   return (
     <>
-      {questions > 0 && (
-        <span className="sidebar-project-rail-mark is-question" aria-hidden="true"><bdi dir="ltr">{blockingText(questions, "?")}</bdi></span>
+      {activity && (
+        <span className="sidebar-project-rail-halo" data-activity={activity} aria-hidden="true">
+          <span className="sidebar-project-rail-halo-ring"><span className="sidebar-project-rail-halo-comet" /></span>
+        </span>
       )}
-      {permissions > 0 && (
-        <span className="sidebar-project-rail-mark is-permission" aria-hidden="true"><bdi dir="ltr">{blockingText(permissions, "!")}</bdi></span>
+      {seal && (
+        <span
+          className="sidebar-project-rail-seal status-seal"
+          data-kind={seal.kind}
+          data-wide={seal.count > SEAL_MAX_COUNT ? "" : undefined}
+          aria-hidden="true"
+        >
+          <SealContent kind={seal.kind} count={seal.count} />
+        </span>
       )}
-      {results > 1 && (
-        <span className="sidebar-project-rail-mark is-result" aria-hidden="true"><bdi dir="ltr">{countText(results)}</bdi></span>
-      )}
-      {results === 1 && <span className="sidebar-project-rail-mark is-result is-dot" aria-hidden="true" />}
-      {results === 0 && working > 0 && (
-        <span className="sidebar-project-rail-mark is-working is-dot" aria-hidden="true" />
-      )}
+      {unread > 0 && <span className="sidebar-project-rail-pip" aria-hidden="true" />}
     </>
   );
 }
 
 /** Requests and running chats are always loaded, so their counts are exact.
- *  Results past the cap are only known to be more than it. */
+ *  Results past the cap are only known to be more than it. Most urgent first,
+ *  in the order the seal picks its tone. */
 function statusLines(status: ProjectRailStatus) {
   return [
     { kind: "is-permission", count: status.permissions, text: String(status.permissions), label: tr("sessionStatus.approvalRequired") },
     { kind: "is-question", count: status.questions, text: String(status.questions), label: tr("sessionStatus.replyNeeded") },
-    { kind: "is-result", count: status.results, text: countText(status.results), label: tr("sidebar.sessionlist.unreadActivity") },
+    { kind: "is-failed", count: status.failed, text: String(status.failed), label: tr("sessionStatus.failed") },
+    { kind: "is-runtime", count: status.runtime, text: String(status.runtime), label: tr("sessionStatus.runtimeChanged") },
     { kind: "is-working", count: status.working, text: String(status.working), label: tr("sessionStatus.working") },
+    { kind: "is-reconciling", count: status.reconciling, text: String(status.reconciling), label: tr("sessionStatus.reconnecting") },
+    { kind: "is-paused", count: status.limited, text: String(status.limited), label: tr("sessionStatus.resumesAfterLimit") },
+    { kind: "is-paused", count: status.awaiting, text: String(status.awaiting), label: tr("sessionStatus.awaiting") },
+    { kind: "is-result", count: status.results, text: sealCountText(status.results), label: tr("sidebar.sessionlist.unreadActivity") },
   ].filter((line) => line.count > 0);
 }
 
@@ -54,13 +57,18 @@ export function projectRailStatusLabel(name: string, status: ProjectRailStatus):
   return [name, ...statusLines(status).map((line) => `${line.label}: ${line.text}`)].join(". ");
 }
 
+/** The same lines without the name, for a row whose name is already read. */
+export function projectStatusSummary(status: ProjectRailStatus): string {
+  return statusLines(status).map((line) => `${line.label}: ${line.text}`).join(". ");
+}
+
 export function ProjectRailStatusLines({ status }: { status: ProjectRailStatus }) {
   const lines = statusLines(status);
   if (lines.length === 0) return null;
   return (
     <span className="sidebar-project-rail-tooltip-status">
       {lines.map((line) => (
-        <span key={line.kind} className="sidebar-project-rail-tooltip-line">
+        <span key={`${line.kind}:${line.label}`} className="sidebar-project-rail-tooltip-line">
           <span className={`sidebar-project-rail-tooltip-swatch ${line.kind}`} />
           <span className="sidebar-project-rail-tooltip-count">{line.text}</span>
           <span className="sidebar-project-rail-tooltip-label">{line.label}</span>

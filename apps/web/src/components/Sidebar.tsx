@@ -22,8 +22,9 @@ import SessionSelectionBar from "./sidebar/SessionSelectionBar.tsx";
 import { useSessionArrangementEntries } from "./sidebar/sessionArrangementEntries.ts";
 import { useShellMode } from "../responsiveShell.ts";
 import { useLaneSessions, useWorkbenchShellPresentation } from "../workbench/profileNavigation.ts";
-import { projectRailStatus } from "../sessionStatus.ts";
+import { EMPTY_PROJECT_RAIL_STATUS, projectRailStatus, type ProjectRailStatus } from "../sessionStatus.ts";
 import { ProjectRailMarks, ProjectRailStatusLines, projectRailStatusLabel } from "./sidebar/ProjectRailStatus.tsx";
+import { ProjectTreeStatus, ProjectTreeStatusLabel } from "./sidebar/ProjectTreeStatus.tsx";
 import { useModalSurface } from "./a11y/Dialog.tsx";
 import { isImeComposing } from "./input/editorCore.ts";
 import SlotHost, { SlotBoundary, type SlotContext } from "./slots/SlotHost.ts";
@@ -493,6 +494,21 @@ export default function Sidebar() {
     // The overlay derives attention from cached events only for the open session.
     [laneSessions, pendingSends, activeSessionId],
   );
+  // One status reading per root project (a private room's chats count for
+  // its parent), shared by the rail tile and the tree row so they agree.
+  const projectStatuses = useMemo(() => {
+    const byProject = new Map<string, SessionProjection[]>();
+    for (const session of sessions) {
+      const root = rootProjectId(registry.projects, session.projectId);
+      if (!root) continue;
+      const list = byProject.get(root);
+      if (list) list.push(session);
+      else byProject.set(root, [session]);
+    }
+    const statuses = new Map<string, ProjectRailStatus>();
+    for (const [projectId, list] of byProject) statuses.set(projectId, projectRailStatus(list));
+    return statuses;
+  }, [sessions, registry.projects]);
   const drawerOpen = useStore((s) => s.sidebarOpen);
   // Honest presentation state for app.nav contributions: on desktop the
   // sidebar is always expanded regardless of the mobile drawer flag.
@@ -1410,6 +1426,8 @@ export default function Sidebar() {
       );
     }
     const listOpen = effectiveViewMode === "tree" ? expandedTrees.has(p.id) : !railCollapsed || peek !== null;
+    // The rail view's header sits beside the rail tile, which already shows it.
+    const treeStatus = effectiveViewMode === "tree" ? projectStatuses.get(p.id) ?? EMPTY_PROJECT_RAIL_STATUS : null;
     return (
       <div
         className="project-card-shell"
@@ -1452,7 +1470,9 @@ export default function Sidebar() {
                 person picked; its path would only be noise. */}
             {!p.personal && <span className="project-path">{p.path}</span>}
           </span>
+          {treeStatus && <ProjectTreeStatusLabel status={treeStatus} />}
         </button>
+        {treeStatus && <ProjectTreeStatus status={treeStatus} />}
         <span className="project-actions" data-arrange-control="">
           <button
             className="project-new-session"
@@ -1588,7 +1608,7 @@ export default function Sidebar() {
               data-arranging={railArrange && arrange.draggingId ? "" : undefined}
             >
               {(soloPersonal ? [] : arrangedOrder(orderedProjects)).map((candidate) => {
-                const railStatus = projectRailStatus(sessions.filter((session) => rootProjectId(registry.projects, session.projectId) === candidate.id));
+                const railStatus = projectStatuses.get(candidate.id) ?? EMPTY_PROJECT_RAIL_STATUS;
                 return (
                   <Menu
                     key={candidate.id}

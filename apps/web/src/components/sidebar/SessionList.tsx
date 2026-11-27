@@ -38,6 +38,7 @@ import { worktreeLabel } from "../../worktreeSessions.ts";
 import SlotHost from "../slots/SlotHost.ts";
 import SessionHoverCard from "./SessionHoverCard.tsx";
 import ProjectGlyph from "../ProjectGlyph.tsx";
+import { SealGlyph } from "../StatusSeal.tsx";
 import { sessionNeedsAttention, type SessionProjectMark } from "../../pinnedSessions.ts";
 import {
   Button, Checkbox, Dialog, EmptyState, Menu, ResponsiveOverlay, TextInput,
@@ -53,7 +54,7 @@ import {
 import { Icon } from "../../icons.tsx";
 import UiIcon from "../ui/Icon.tsx";
 import Badge from "../ui/Badge.tsx";
-import { ArchiveIcon, AwaitingIcon, ChevronRightIcon, MentionIcon, NewWindowIcon, PeopleIcon, SharedIcon, ShieldAlertIcon, SplitViewIcon, TimerIcon } from "../ui/icons.ts";
+import { ArchiveIcon, AwaitingIcon, ChevronRightIcon, MentionIcon, NewWindowIcon, PeopleIcon, SharedIcon, SplitViewIcon, TimerIcon } from "../ui/icons.ts";
 import { getLocale, tr } from "../../i18n/index.ts";
 import {
   arrangeSessions, getVisibleSessionCount, isIsolatedSession, sessionGroupsOf, setVisibleSessionCount,
@@ -86,15 +87,15 @@ const isManagedIsolationBranch = (branch: string | null | undefined): boolean =>
   branch?.startsWith("polyth/isolate/") === true;
 
 /** Live states the project glyph keeps in sight: a running chat rings it and
- *  the others tint a dot at its corner in the rail's kind colours (a reply,
- *  an approval, an unread result: `--status-*`); a stale epoch or a provider
- *  limit is amber, a failure red. */
+ *  the others tint a dot at its corner in the seal tones (a reply, an
+ *  approval, a failure, a runtime to confirm: `--seal-*`), an unread result in
+ *  the unread dot's accent and a provider-limit pause in quiet ink. */
 const PROJECT_LEAD_RING: ReadonlySet<SessionLeadMark> = new Set(["working", "reconciling", "opening"]);
 const PROJECT_LEAD_DOT: Partial<Record<SessionLeadMark, string>> = {
   "needs-reply": "question",
   "needs-approval": "permission",
-  "epoch-pending": "attention",
-  "rate-limited": "attention",
+  "epoch-pending": "runtime",
+  "rate-limited": "paused",
   failed: "failed",
   unknown: "unknown",
   unread: "result",
@@ -138,14 +139,16 @@ function LeadMark({ mark, projectMark }: { mark: SessionLeadMark | null; project
     case "working":
     case "reconciling":
       return <span className={`session-lead-spinner ${mark}`} aria-hidden="true" />;
+    // The seal, as on the project's rail tile and tree row (StatusSeal.tsx).
     case "needs-reply":
-      return <span className="session-lead-mark reply" aria-hidden="true"><Icon.question /></span>;
+      return <span className="session-lead-mark reply status-seal" data-kind="question" aria-hidden="true"><SealGlyph kind="question" /></span>;
     case "needs-approval":
       // A shield, never a check: a check reads as "done" next to finished work.
-      return <span className="session-lead-mark approval" aria-hidden="true"><UiIcon icon={ShieldAlertIcon} size="sm" /></span>;
+      return <span className="session-lead-mark approval status-seal" data-kind="permission" aria-hidden="true"><SealGlyph kind="permission" /></span>;
     case "failed":
+      return <span className="session-lead-mark failed status-seal" data-kind="failed" aria-hidden="true"><SealGlyph kind="failed" /></span>;
     case "epoch-pending":
-      return <span className={`session-lead-mark ${mark}`} aria-hidden="true">!</span>;
+      return <span className="session-lead-mark epoch-pending status-seal" data-kind="runtime" aria-hidden="true"><SealGlyph kind="runtime" /></span>;
     case "unknown":
       return <span className="session-lead-mark unknown" aria-hidden="true">?</span>;
     case "rate-limited":

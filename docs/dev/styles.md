@@ -150,6 +150,14 @@ these inks.
 | `--red-wash` | Danger-tinted surface. |
 | `--blue-wash` | Information-tinted surface. |
 | `--purple-wash` | Auxiliary-tinted surface. |
+| `--seal-permission` | Seal tone for a chat that waits for an approval (and a runtime to confirm): the rail tile's corner seal, the tree row's capsule, the session row's disc, the Pinned corner dot and tooltip swatch. `theme.ts` (`sealCssVars`) derives every `--seal-*` tone from the palette's amber/blue/red per appearance: the lightest mark on a dark theme under near-black ink, the deepest on a light one under white ink, walking lightness from the saturated end until the glyph holds APCA Lc 76 (`SEAL_MIN_CONTRAST`); `sealTones.test.ts` checks every preset in both appearances. |
+| `--seal-permission-ink` | Glyph and count ink on `--seal-permission`. |
+| `--seal-question` | Seal tone for a chat that waits for a reply. |
+| `--seal-question-ink` | Glyph and count ink on `--seal-question`. |
+| `--seal-failed` | Seal tone for a failed chat: a deep red under white ink on both schemes, because a pale red reads as pink rather than an error. |
+| `--seal-failed-ink` | Glyph ink on `--seal-failed`. |
+| `--seal-sheen` | A seal's half-pixel inset top highlight. |
+| `--seal-drop` | A seal's soft drop onto the surface it sits on. |
 | `--surface-overlay` | Subtle theme-aware overlay. |
 | `--surface-overlay-hover` | Hover-strength theme-aware overlay. |
 | `--surface-overlay-strong` | Selected/pressed theme-aware overlay. |
@@ -292,27 +300,54 @@ both lists scroll and would clip an outside ring. Touch widens the gap to 8px
 (project tiles then sit on a `--tap` pitch) and a transparent `::after` reaches
 `--hit-min`.
 
-A project tile carries its status in its corners (`ProjectRailStatus.tsx`,
-counted by `projectRailStatus` in `sessionStatus.ts`), one corner per kind:
-question at the top start (blue), permission at the top end (amber), finished
-unread result at the bottom end (green); the colours are the
-`--status-question`/`--status-permission`/`--status-result` tokens, shared
-with the Pinned group's corner dots, and no other count (the launcher strip's
-neutral `.strip-badge`) uses them. A count is 12px and a dot 8px (times
-`--rail-scale-left`), so the 22px glyph's corners stay mostly clear. The bottom
-start corner is free for a later kind. Marks count chats: one question or permission shows `?` or `!`,
-several show a number up to `9+`; one result is a dot, several a number. A solid
-accent dot that breathes (`rail-working-breathe`: scale and opacity, never above
-its resting size) at the bottom end means the project is working and has no
-result to show; the motion, not only the colour, tells it from a result under a
-green accent, and reduced motion holds it still. Marks stay inside the tile,
-because the scrolling list clips past it (an animation must not grow a mark
-either), use `--panel` as their cut-out and pick black or white ink from the
-tone's lightness. The tooltip and the button's accessible name list every
-count; a tooltip swatch is a 7px dot that hangs from the text baseline and
-centres on half the x-height (`0.5ex`), so it sits in the band of the word
-beside it in any interface font (centred on the line box or the cap height it
-hung above the word).
+A project tile carries its status in three channels that never cover one
+another (`ProjectRailStatus.tsx`, counted by `projectRailStatus` and read by
+`projectStatusSignal` in `sessionStatus.ts`, which the tree row reads too):
+
+- **Seal**, top end corner: every chat that waits on a person (an approval, a
+  reply, a failure, an unplanned runtime change), in the most urgent kind's
+  `--seal-*` tone (approval, then reply, then failure, then runtime). One chat
+  shows its drawn glyph (shield with a punched "!", "?", "!"), several the
+  count up to `9+`. The seal is 15px (times `--rail-scale-left`, snapped to
+  whole pixels) and the icon and halo under it get a real cut-out of its shape
+  plus a 2px gap (a CSS mask; `:dir(rtl)` mirrors it), so it floats over the
+  plain rail, the hover wash, the active tile's glass or a wallpaper alike.
+  Glyph and count centre on the disc as it is painted. The glyph box keeps a
+  whole-pixel margin of the seal's parity. The count is drawn in the seal's own
+  SVG box (`SealCount`), with its baseline half a cap height below the middle.
+  This matters because a rail scaled off 100% puts tiles between pixels: the
+  disc and an SVG snap together, but HTML text snaps on its own and fell up to
+  a pixel off.
+- **Halo**, the tile's contour: a comet of light turns round the tile while a
+  chat works (`rail-halo-turn`, transform only), amber and slower while chats
+  reconnect, held still in quiet ink while they will continue by themselves (a
+  provider-limit pause, an auto-retry, an armed wait). No lit track under it:
+  a whole lit contour reads as the selected tile. It is masks, not borders, so
+  the borderless look keeps it; reduced motion and low-resource mode leave a
+  still arc.
+- **Pip**, the rail's start edge: a reply nobody has read, as a 3×8px capsule
+  in the unread dot's accent. The rail list reaches over the rail's inline
+  padding so the gutter, and the pip in it, are inside the box it clips to.
+
+Subagents' results and failures are their parent's to report and a muted chat
+does not call; a subagent's request still blocks and counts. The tooltip and
+the button's accessible name list every count, most urgent first; a tooltip
+swatch is a 7px dot (the pip's shape for unread) that hangs from the text
+baseline and centres on half the x-height (`0.5ex`), so it sits in the band
+of the word beside it in any interface font (centred on the line box or the
+cap height it hung above the word).
+
+A project's tree row (`ProjectTreeStatus.tsx`) shows the same reading where
+there is room for numbers: at the row's end a quiet counter of running chats
+(the session row's ring, with the count when more than one), a timer when
+everything continues by itself, and the seal as a capsule with its glyph and
+count. The capsule gives back the glyph's empty sides and the figure's end
+side bearing, so the pair centres ink to ink. The pip sits on the navigator's
+start edge. The status shares the
+actions' grid slot: with a fine pointer the actions take its place on hover or
+focus, on touch it stands before them. The rail view's header does not repeat
+it beside the rail tile. Session rows wear the same seal as a solid disc in
+their state column.
 
 | Token | Purpose |
 | --- | --- |

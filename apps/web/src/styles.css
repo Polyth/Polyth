@@ -677,7 +677,11 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .sidebar-project-rail,
 .sidebar-project-rail-list { flex-direction: column; }
 .sidebar-project-rail-list {
-  width: 100%;
+  /* The list reaches over the rail's inline padding, so the gutter beside the
+     tiles is inside it and the unread pip on the rail's edge is not clipped
+     (overflow-x clips at the list's box). The tiles stay centred. */
+  width: calc(100% + 2 * var(--space-1) * var(--rail-scale-left, 1));
+  margin-inline: calc(-1 * var(--space-1) * var(--rail-scale-left, 1));
   min-height: 0;
   display: flex;
   flex: 1;
@@ -812,66 +816,182 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Status marks: each kind owns a corner of the tile (ProjectRailStatus.tsx).
-   They stay inside the tile because the scrolling list clips anything past it.
-   The ink is black or white by the tone's own lightness: every theme sets its
-   signal colours differently, and neither --panel nor --text holds on all.
-   Each kind keeps its --status-* colour (tokens.css) everywhere it shows. A
-   12px count and an 8px dot leave the 22px glyph's corners mostly clear.
-   The rail scale is a percentage, so 0.9 gives a 7.2px dot that the browser
-   rasterizes as 7 or 8px depending on the tile's subpixel position: two
-   projects in the same state then wear differently sized marks. The box and
-   its ring snap to whole pixels (the plain calc stays as the fallback). */
-.sidebar-project-rail-mark {
-  --rail-mark-base: 12px;
-  --rail-mark: calc(var(--rail-mark-base) * var(--rail-scale-left, 1));
-  --rail-mark: round(calc(var(--rail-mark-base) * var(--rail-scale-left, 1)), 1px);
-  --rail-mark-ring: calc(2px * var(--rail-scale-left, 1));
-  --rail-mark-ring: round(calc(2px * var(--rail-scale-left, 1)), 1px);
-  --rail-mark-tone: var(--status-result);
+/* A project's status on its rail tile (ProjectRailStatus.tsx), in three
+   channels that never cover one another: the seal in the top end corner
+   (chats that wait on a person), the halo on the tile's contour (chats that
+   run) and the pip on the rail's start edge (an unread reply). Everything
+   stays inside the list's box, which clips past it, and scales with the rail;
+   the seal snaps to whole pixels (the plain calc stays as the fallback), or two
+   tiles in one state wear marks a pixel apart at 90%. The glyph box sits in
+   the tile's padding box (the tile less its 1px border); the cut-out under the
+   seal is drawn in its coordinates. */
+.sidebar-project-rail-item {
+  --rail-seal: calc(15px * var(--rail-scale-left, 1));
+  --rail-seal: round(calc(15px * var(--rail-scale-left, 1)), 1px);
+  --rail-seal-w: var(--rail-seal);
+  /* The glyph keeps a whole-pixel margin of the same parity as the seal, so it
+     sits on the seal's centre at every rail scale (15 → 9, 14 → 8, 17 → 11). */
+  --rail-seal-glyph: calc(var(--rail-seal) * 0.6);
+  --rail-seal-glyph: calc(var(--rail-seal) - 2 * round(calc(var(--rail-seal) * 0.2), 1px));
+  --rail-seal-gap: calc(2px * var(--rail-scale-left, 1));
+  --rail-tile-inner: calc(var(--rail-project-item) - 2px);
+  --rail-glyph-inset: calc((var(--rail-tile-inner) - var(--rail-project-glyph-box)) / 2);
+}
+.sidebar-project-rail-item:has(> .sidebar-project-rail-seal[data-wide]) {
+  --rail-seal-w: calc(var(--rail-seal) + 6px * var(--rail-scale-left, 1));
+  --rail-seal-w: calc(var(--rail-seal) + round(calc(6px * var(--rail-scale-left, 1)), 1px));
+}
+.sidebar-project-rail-seal {
   position: absolute;
-  display: grid;
-  place-items: center;
-  box-sizing: border-box;
-  min-width: var(--rail-mark);
-  height: var(--rail-mark);
-  padding-inline: var(--rail-mark-ring);
-  border-radius: var(--radius-round);
-  background: var(--rail-mark-tone);
-  box-shadow: 0 0 0 1px var(--panel);
-  color: var(--panel);
-  font-size: max(8px, calc(9px * var(--rail-scale-left, 1)));
-  font-weight: 750;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
+  top: 0;
+  inset-inline-end: 0;
+  z-index: 2;
+  width: var(--rail-seal-w);
+  height: var(--rail-seal);
+  font-size: max(8px, calc(10px * var(--rail-scale-left, 1)));
   pointer-events: none;
 }
-@supports (color: oklch(from red l c h)) {
-  .sidebar-project-rail-mark { color: oklch(from var(--rail-mark-tone) calc((0.56 - l) * 1000) 0 0); }
+.sidebar-project-rail-seal[data-wide] { font-size: max(8px, calc(9.5px * var(--rail-scale-left, 1))); letter-spacing: -0.03em; }
+.sidebar-project-rail-seal.status-seal > .status-seal-glyph { width: var(--rail-seal-glyph); height: var(--rail-seal-glyph); }
+/* A real cut-out, not a ring in --panel: the icon (and the halo) lose the
+   seal's shape plus a gap, so the seal floats over the plain rail, the hover
+   wash, the active tile's glass or a wallpaper alike. The hole is the seal's
+   round end facing the icon plus, for a wide seal, the band behind it (the
+   conic quadrant); in a mirrored shell the seal sits at the left. */
+.sidebar-project-rail-item:has(> .sidebar-project-rail-seal) > :is(.project-glyph, .sidebar-project-rail-halo) {
+  --rail-hole-r: calc(var(--rail-seal) / 2 + var(--rail-seal-gap));
+  -webkit-mask:
+    radial-gradient(circle at var(--rail-hole-x) var(--rail-hole-y), transparent var(--rail-hole-r), #000 calc(var(--rail-hole-r) + 0.5px)),
+    conic-gradient(from var(--rail-hole-from) at var(--rail-hole-x) calc(var(--rail-hole-y) + var(--rail-hole-r)), transparent 0 25%, #000 0);
+  -webkit-mask-composite: source-in;
+  mask:
+    radial-gradient(circle at var(--rail-hole-x) var(--rail-hole-y), transparent var(--rail-hole-r), #000 calc(var(--rail-hole-r) + 0.5px)),
+    conic-gradient(from var(--rail-hole-from) at var(--rail-hole-x) calc(var(--rail-hole-y) + var(--rail-hole-r)), transparent 0 25%, #000 0);
+  mask-composite: intersect;
 }
-.sidebar-project-rail-mark.is-question { --rail-mark-tone: var(--status-question); top: 0; inset-inline-start: 0; }
-.sidebar-project-rail-mark.is-permission { --rail-mark-tone: var(--status-permission); top: 0; inset-inline-end: 0; }
-.sidebar-project-rail-mark:is(.is-result, .is-working) { bottom: 0; inset-inline-end: 0; }
-.sidebar-project-rail-mark.is-dot {
-  --rail-mark-base: 8px;
-  min-width: var(--rail-mark);
-  padding: 0;
+.sidebar-project-rail-item:has(> .sidebar-project-rail-seal) > .project-glyph {
+  --rail-hole-from: 0deg;
+  --rail-hole-x: calc(var(--rail-tile-inner) - var(--rail-seal-w) + var(--rail-seal) / 2 - var(--rail-glyph-inset));
+  --rail-hole-y: calc(var(--rail-seal) / 2 - var(--rail-glyph-inset));
 }
-/* Working is a solid accent dot that breathes. It shares the result's corner,
-   so the motion, not only the colour, tells it from a result under a green
-   accent. It breathes inside its own box (scale never above 1, transform and
-   opacity only): the list clips past the tile, and a grown box would stretch
-   the list's scroll range on every beat. Reduced motion and low-resource mode
-   hold it still at full size (the global rules near the top). The tooltip's
-   swatch beats on the same clock. */
-.sidebar-project-rail-mark.is-working,
-.sidebar-project-rail-tooltip-swatch.is-working {
-  --rail-mark-tone: var(--accent);
-  animation: rail-working-breathe 2.4s cubic-bezier(0.37, 0, 0.63, 1) infinite;
+.sidebar-project-rail-item:has(> .sidebar-project-rail-seal) > .sidebar-project-rail-halo {
+  --rail-hole-from: 0deg;
+  --rail-hole-x: calc(var(--rail-tile-inner) - var(--rail-seal-w) + var(--rail-seal) / 2 + 1px);
+  --rail-hole-y: calc(var(--rail-seal) / 2 + 1px);
 }
-@keyframes rail-working-breathe {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(0.75); opacity: 0.6; }
+.sidebar-project-rail-item:dir(rtl):has(> .sidebar-project-rail-seal) > .project-glyph {
+  --rail-hole-from: 270deg;
+  --rail-hole-x: calc(var(--rail-seal-w) - var(--rail-seal) / 2 - var(--rail-glyph-inset));
+}
+.sidebar-project-rail-item:dir(rtl):has(> .sidebar-project-rail-seal) > .sidebar-project-rail-halo {
+  --rail-hole-from: 270deg;
+  --rail-hole-x: calc(var(--rail-seal-w) - var(--rail-seal) / 2 + 1px);
+}
+/* The halo: light running round the tile's contour while a chat works. No
+   lit track under it: a whole lit contour would read as the selected tile.
+   Amber and slower while chats reconnect (as the rows' ring); held still and
+   quiet while they will continue by themselves. It turns by transform only;
+   reduced motion and low-resource mode stop it where it stands (the global
+   rules near the top), which leaves a still arc. Masks, not borders, so a
+   borderless look keeps it. */
+.sidebar-project-rail-halo {
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.sidebar-project-rail-halo-ring {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  padding: calc(1.5px * var(--rail-scale-left, 1));
+  border-radius: inherit;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+.sidebar-project-rail-halo-comet {
+  --rail-halo-tone: var(--accent);
+  position: absolute;
+  inset: -60%;
+  background: conic-gradient(from 0deg, transparent 0 64%, color-mix(in srgb, var(--rail-halo-tone) 35%, transparent) 86%, var(--rail-halo-tone) 100%);
+  animation: rail-halo-turn 2.8s linear infinite;
+}
+.sidebar-project-rail-halo[data-activity="reconciling"] .sidebar-project-rail-halo-comet {
+  --rail-halo-tone: var(--amber);
+  animation-duration: 4.4s;
+}
+.sidebar-project-rail-halo[data-activity="paused"] .sidebar-project-rail-halo-comet {
+  --rail-halo-tone: var(--muted);
+  animation: none;
+  transform: rotate(40deg);
+}
+@keyframes rail-halo-turn { to { transform: rotate(1turn); } }
+/* The pip: a reply nobody has read, as a capsule on the rail's start edge (in
+   the gutter the tile leaves), in the unread dot's accent. It never touches
+   the icon. */
+.sidebar-project-rail-pip {
+  position: absolute;
+  inset-inline-start: calc(-1px - (var(--rail-project-track) - 1px - var(--rail-project-item)) / 2);
+  top: 50%;
+  width: calc(3px * var(--rail-scale-left, 1));
+  height: calc(8px * var(--rail-scale-left, 1));
+  translate: 0 -50%;
+  border-start-end-radius: var(--radius-circle);
+  border-end-end-radius: var(--radius-circle);
+  background: var(--session-blue, var(--accent));
+  pointer-events: none;
+}
+/* The seal itself (StatusSeal.tsx), shared by the rail tile, the tree row and
+   the session row: a solid tone per kind with its own ink (`--seal-*`, derived
+   per theme so the glyph keeps APCA Lc 76), a faint top sheen and a soft drop
+   so it sits on the surface rather than in it. A drawn glyph, not type. */
+.status-seal {
+  --seal-tone: var(--seal-permission);
+  --seal-ink: var(--seal-permission-ink);
+  display: grid;
+  /* One cell the seal's own size, so a drawn count's 100% box is the seal. */
+  grid-template: 100% / 100%;
+  place-items: center;
+  box-sizing: border-box;
+  border-radius: var(--radius-circle);
+  background: linear-gradient(180deg, color-mix(in oklab, var(--seal-tone) 91%, white), var(--seal-tone) 65%);
+  color: var(--seal-ink);
+  box-shadow: var(--seal-sheen), var(--seal-drop);
+  font-weight: 720;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+/* A count centres on its cap height, the band its lining figures fill: a
+   line box adds the font's ascent and descent unevenly and set every digit
+   most of a pixel low. The rail's count is drawn (StatusSeal.tsx SealCount),
+   its baseline half a cap below the middle; the tree capsule's runs in the
+   row's text, trimmed to the cap. Engines without the cap unit or text-box
+   trimming take the measured average of the interface fonts instead. */
+.status-seal > .status-seal-count {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  fill: currentColor;
+}
+.status-seal-count > text { transform: translateY(0.5cap); }
+@supports not (height: 1cap) {
+  .status-seal-count > text { transform: translateY(0.36em); }
+}
+.status-seal > bdi {
+  display: block;
+  text-box: trim-both cap alphabetic;
+}
+@supports not (text-box: trim-both cap alphabetic) {
+  .status-seal > bdi { translate: 0 -0.08em; }
+}
+.status-seal[data-kind="question"] { --seal-tone: var(--seal-question); --seal-ink: var(--seal-question-ink); }
+.status-seal[data-kind="failed"] { --seal-tone: var(--seal-failed); --seal-ink: var(--seal-failed-ink); }
+.status-seal > .status-seal-glyph {
+  display: block;
+  width: 60%;
+  height: 60%;
 }
 .sidebar-project-rail-tooltip-copy > .sidebar-project-rail-tooltip-status {
   display: grid;
@@ -896,18 +1016,37 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
    below the bold count. With no text of its own, the swatch's baseline is its
    bottom edge; the offset moves it from there. */
 .sidebar-project-rail-tooltip-swatch {
-  --rail-mark-tone: var(--status-result);
+  --rail-mark-tone: var(--accent);
   --rail-swatch: 7px;
   position: relative;
   top: calc(var(--rail-swatch) / 2 - 0.5ex);
   flex: none;
   width: var(--rail-swatch);
   height: var(--rail-swatch);
-  border-radius: var(--radius-round);
+  border-radius: var(--radius-circle);
   background: var(--rail-mark-tone);
 }
-.sidebar-project-rail-tooltip-swatch.is-question { --rail-mark-tone: var(--status-question); }
-.sidebar-project-rail-tooltip-swatch.is-permission { --rail-mark-tone: var(--status-permission); }
+/* Each line wears its channel's colour: a seal's tone, the halo's accent
+   (breathing while chats work), the pip's accent and shape for unread. */
+.sidebar-project-rail-tooltip-swatch:is(.is-permission, .is-runtime) { --rail-mark-tone: var(--seal-permission); }
+.sidebar-project-rail-tooltip-swatch.is-question { --rail-mark-tone: var(--seal-question); }
+.sidebar-project-rail-tooltip-swatch.is-failed { --rail-mark-tone: var(--seal-failed); }
+.sidebar-project-rail-tooltip-swatch.is-reconciling { --rail-mark-tone: var(--amber); }
+.sidebar-project-rail-tooltip-swatch.is-paused { --rail-mark-tone: var(--muted); }
+.sidebar-project-rail-tooltip-swatch.is-working {
+  animation: rail-working-breathe 2.4s cubic-bezier(0.37, 0, 0.63, 1) infinite;
+}
+@keyframes rail-working-breathe {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(0.75); opacity: 0.6; }
+}
+.sidebar-project-rail-tooltip-swatch.is-result {
+  width: 3px;
+  margin-inline: 2px;
+  border-radius: 0;
+  border-start-end-radius: var(--radius-circle);
+  border-end-end-radius: var(--radius-circle);
+}
 .sidebar-project-rail-tooltip-count {
   color: var(--text);
   font-weight: 650;
@@ -1492,7 +1631,8 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .project-card-shell {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  /* Row button, status (ProjectTreeStatus), actions. */
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   min-height: var(--nav-row-project);
   margin-bottom: 2px;
@@ -1705,6 +1845,79 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
     opacity: 1;
     pointer-events: auto;
   }
+}
+/* A project's status on its tree row (ProjectTreeStatus.tsx): the rail
+   tile's reading where the row has room for numbers. It ends on the chat
+   rows' trailing axis. With a fine pointer it shares the actions' slot and
+   gives it up while they show; on touch the actions stay, so it stands
+   before them. */
+.project-card-shell > .project-card { grid-column: 1; grid-row: 1; }
+.project-card-shell > .project-actions { grid-column: 3; grid-row: 1; }
+.project-status {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-inline: var(--space-1) var(--nav-trailing-inset);
+  pointer-events: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  .project-status { grid-column: 3; }
+  .project-card-shell:hover > .project-status,
+  .project-card-shell:has(:focus-visible) > .project-status,
+  .project-card-shell:has(.project-actions button[aria-expanded="true"]) > .project-status { opacity: 0; }
+}
+/* Running chats: the session row's ring, and how many when more than one. */
+.project-status-running {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--session-blue, var(--accent));
+  font-size: var(--font-meta);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.project-status-running[data-activity="reconciling"] { color: var(--amber); }
+.project-status-running > .project-status-spinner { width: 12px; height: 12px; flex: none; }
+/* Everything continues by itself: a quiet timer, as on the chat row. */
+.project-status-paused { display: grid; place-items: center; color: var(--muted); }
+.project-status-paused svg { width: var(--icon-sm); height: var(--icon-sm); }
+/* The seal as a capsule: its glyph, and how many chats wait when more than
+   one. A single chat is a round seal like the session row's. */
+.project-status-seal {
+  display: inline-flex;
+  gap: 3px;
+  height: 18px;
+  min-width: 18px;
+  /* The count's end gives back its figure's side bearing, so the end gap is
+     ink to edge as the start's is (the glyph's are trimmed below). */
+  padding-inline: 5px calc(5px - 0.04em);
+  font-size: calc(var(--font-meta) - 0.5px);
+  font-variant-numeric: proportional-nums;
+}
+.project-status-seal[data-solo] { width: 18px; padding: 0; justify-content: center; }
+.project-status-seal > .status-seal-glyph { width: 10px; height: 10px; flex: none; }
+/* Beside a count the glyph gives up its drawing box's empty sides (the "!"
+   is a 2-unit stroke in a 10-unit box), so padding and gap measure ink to
+   ink and the pair centres in the capsule whatever the kind. */
+.project-status-seal:not([data-solo]) > .status-seal-glyph { margin-inline: calc(-1 * var(--seal-glyph-side, 1px)); }
+.project-status-seal[data-kind="question"] { --seal-glyph-side: 2.2px; }
+.project-status-seal:is([data-kind="failed"], [data-kind="runtime"]) { --seal-glyph-side: 4px; }
+/* An unread reply: the rail's pip, on the navigator's start edge. */
+.project-card-shell > .project-status-pip {
+  position: absolute;
+  inset-inline-start: calc(-1 * var(--nav-gutter));
+  top: 50%;
+  width: 3px;
+  height: 8px;
+  translate: 0 -50%;
+  border-start-end-radius: var(--radius-circle);
+  border-end-end-radius: var(--radius-circle);
+  background: var(--session-blue, var(--accent));
+  pointer-events: none;
 }
 .project-glyph {
   position: relative;
@@ -2152,23 +2365,35 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   font-weight: 800;
   line-height: 1;
 }
-.session-lead-mark.reply { background: none; box-shadow: none; color: var(--session-blue, var(--accent)); }
-.session-lead-mark.reply svg { width: 100%; height: 100%; }
-.session-lead-mark.approval,
-.session-lead-mark.epoch-pending { color: var(--amber); }
-.session-lead-mark.failed { color: var(--red); }
+/* What waits on a person (a reply, an approval, a failure, a runtime to
+   confirm) wears the seal, as on the project's rail tile and tree row: a
+   solid disc in the kind's tone with a drawn glyph (.status-seal). */
+.session-lead-mark.status-seal {
+  /* Whole pixels, as on the rail: the state column is a fraction of the row's
+     text size (14.1px at 15px) and a fractional disc pushed its glyph half a
+     pixel off. The seal may reach a hair past the column; the grid centres it. */
+  --session-seal: calc(var(--session-lead-size) + 1px);
+  --session-seal: round(calc(var(--session-lead-size) + 1px), 1px);
+  --session-seal-glyph: calc(var(--session-seal) * 0.6);
+  --session-seal-glyph: calc(var(--session-seal) - 2 * round(calc(var(--session-seal) * 0.2), 1px));
+  width: var(--session-seal);
+  height: var(--session-seal);
+  flex: none;
+  background: linear-gradient(180deg, color-mix(in oklab, var(--seal-tone) 91%, white), var(--seal-tone) 65%);
+  box-shadow: var(--seal-sheen), var(--seal-drop);
+  color: var(--seal-ink);
+}
+.session-lead-mark.status-seal > .status-seal-glyph { width: var(--session-seal-glyph); height: var(--session-seal-glyph); }
 .session-lead-mark.unknown { color: var(--muted); }
-/* A provider-limit pause is a timer, not an alert: no badge disc. */
-.session-lead-mark.rate-limited { background: none; box-shadow: none; color: var(--amber); }
+/* A provider-limit pause is a timer, not an alert: no badge disc, and quiet
+   ink, because it continues by itself. */
+.session-lead-mark.rate-limited { background: none; box-shadow: none; color: var(--muted); }
 .session-lead-mark.rate-limited svg { width: 100%; height: 100%; }
 /* Armed to wake by itself (a watched chat, a polyth_wait): calm, not
    attention. A quiet glyph at the pin's size, lighter than the spinner, the
    unread dot or the amber marks it yields to; no disc. */
 .session-lead-mark.awaiting { background: none; box-shadow: none; color: var(--muted); }
 .session-lead-mark.awaiting svg { width: calc(var(--icon-sm) - 3px); height: calc(var(--icon-sm) - 3px); }
-/* Approval is a shield on its own, like the reply and timer marks. */
-.session-lead-mark.approval { background: none; box-shadow: none; }
-.session-lead-mark.approval svg { width: 100%; height: 100%; }
 /* A conversation's people glyph is a kind mark, not a status badge: no disc. */
 .session-lead-mark.people { background: none; box-shadow: none; }
 .session-lead-mark.people svg { width: 100%; height: 100%; }
@@ -2258,12 +2483,11 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   border-radius: 50%;
 }
 /* A reply, an approval and an unread result take the rail's kind colours. */
-.session-lead-project-dot.question { background: var(--status-question); }
-.session-lead-project-dot.permission { background: var(--status-permission); }
-.session-lead-project-dot.result { background: var(--status-result); }
-.session-lead-project-dot.attention { background: var(--amber); }
-.session-lead-project-dot.failed { background: var(--red); }
-.session-lead-project-dot.unknown { background: var(--muted); }
+.session-lead-project-dot:is(.permission, .runtime) { background: var(--seal-permission); }
+.session-lead-project-dot.question { background: var(--seal-question); }
+.session-lead-project-dot.failed { background: var(--seal-failed); }
+.session-lead-project-dot.result { background: var(--session-blue, var(--accent)); }
+.session-lead-project-dot:is(.paused, .unknown) { background: var(--muted); }
 
 /* Column 2 — title, with the subagent disclosure right after its text. */
 .session-row.archived .session-title { color: var(--muted); }

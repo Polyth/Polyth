@@ -624,6 +624,63 @@ function contrastRatio(a: string, b: string): number {
   return (lighter! + 0.05) / (darker! + 0.05);
 }
 
+/** APCA (0.0.98G-4g) lightness contrast of text on a background, as |Lc|.
+ *  WCAG 2 overrates a dark glyph on a mid-light colour; APCA tracks what a
+ *  9px badge glyph actually needs. */
+export function apcaContrast(text: string, background: string): number {
+  const luminanceOf = (hex: string): number => {
+    const [r, g, b] = hexToRgb(hex).map((channel) => (channel / 255) ** 2.4);
+    const y = 0.2126729 * r! + 0.7151522 * g! + 0.072175 * b!;
+    return y > 0.022 ? y : y + (0.022 - y) ** 1.414;
+  };
+  const yText = luminanceOf(text);
+  const yBackground = luminanceOf(background);
+  if (Math.abs(yBackground - yText) < 0.0005) return 0;
+  if (yBackground > yText) {
+    const s = (yBackground ** 0.56 - yText ** 0.57) * 1.14;
+    return s < 0.1 ? 0 : (s - 0.027) * 100;
+  }
+  const s = (yBackground ** 0.65 - yText ** 0.62) * 1.14;
+  return s > -0.1 ? 0 : Math.abs((s + 0.027) * 100);
+}
+
+/** The lightness contrast a seal's one-character glyph keeps in every theme. */
+export const SEAL_MIN_CONTRAST = 76;
+const SEAL_DARK_INK = "#0b0d12";
+const SEAL_LIGHT_INK = "#ffffff";
+
+/** A seal (a chat that waits on a person) is the most extreme mark of its
+ *  scheme: the lightest thing on a dark theme, the deepest on a light one, so
+ *  it never melts into the rail or a colourful project icon. A deep seal
+ *  carries white ink, a light one near-black ink; the lightness walks from the
+ *  most saturated end until the glyph reaches SEAL_MIN_CONTRAST, so any
+ *  palette (custom ones too) lands on a readable tone of its own hue. */
+function sealTone(source: string, deep: boolean): { tone: string; ink: string } {
+  const ink = deep ? SEAL_LIGHT_INK : SEAL_DARK_INK;
+  let lightness = deep ? 0.52 : 0.62;
+  let tone = withLightness(source, lightness);
+  while (apcaContrast(ink, tone) < SEAL_MIN_CONTRAST && lightness > 0.06 && lightness < 0.97) {
+    lightness += deep ? -0.01 : 0.01;
+    tone = withLightness(source, lightness);
+  }
+  return { tone, ink };
+}
+
+/** Seal colours for one appearance. Failure stays a deep red with white ink
+ *  on both schemes: a pale red reads as pink, not as an error. */
+export function sealCssVars(tokens: Pick<ThemeTokens, "amber" | "blue" | "red">, dark: boolean): Record<string, string> {
+  const permission = sealTone(tokens.amber, !dark);
+  const question = sealTone(tokens.blue, !dark);
+  const failed = sealTone(tokens.red, true);
+  return {
+    "--seal-permission": permission.tone, "--seal-permission-ink": permission.ink,
+    "--seal-question": question.tone, "--seal-question-ink": question.ink,
+    "--seal-failed": failed.tone, "--seal-failed-ink": failed.ink,
+    "--seal-sheen": `inset 0 0.5px 0 rgba(255, 255, 255, ${dark ? 0.35 : 0.3})`,
+    "--seal-drop": dark ? "0 1px 2px rgba(0, 0, 0, 0.4)" : "0 1px 2px rgba(20, 30, 45, 0.22)",
+  };
+}
+
 function readableInk(background: string): string {
   const darkInk = "#101216";
   const lightInk = "#ffffff";
@@ -880,6 +937,7 @@ export function themeCssVars(spec: ThemeSpec): Record<string, string> {
     // Red text (a removed-lines count) on a tinted or translucent surface:
     // the raw signal red falls under 4.5:1 there on dark themes.
     "--red-on-wash": signalOnWash(t.red, surfaces, dark),
+    ...sealCssVars(t, dark),
     "--surface-overlay": rgba(t.text, dark ? 0.022 : 0.025),
     "--surface-overlay-hover": rgba(t.text, dark ? 0.045 : 0.04),
     "--surface-overlay-strong": rgba(t.text, dark ? 0.09 : 0.08),

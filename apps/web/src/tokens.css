@@ -62,12 +62,23 @@
   --control-disabled-border: color-mix(in srgb, var(--text) 10%, transparent);
   --control-disabled-ink: color-mix(in srgb, var(--faint) 78%, transparent);
 
-  /* A chat's open request or result, by kind: one colour each wherever a
-     mark or count of it shows (project rail, its tooltip, the Pinned group's
-     corner dots), and none of them for a count of anything else. */
-  --status-question: var(--blue);
-  --status-permission: var(--amber);
-  --status-result: var(--green);
+  /* Seals: a chat that waits on a person, by kind, wherever it shows (rail
+     tile, project tree row, session row, Pinned corner dots, tooltip
+     swatches). theme.ts (`sealCssVars`) derives them from each palette's
+     amber/blue/red per appearance so the glyph keeps APCA Lc 76: the lightest
+     mark on a dark theme with near-black ink, the deepest on a light one with
+     white ink; failure is a deep red with white ink on both. These are the
+     base palette's values until a theme applies. A runtime that needs
+     confirming wears the permission tone. */
+  --seal-permission: #e9c795;
+  --seal-permission-ink: #0b0d12;
+  --seal-question: #8fd6ff;
+  --seal-question-ink: #0b0d12;
+  --seal-failed: #e20d35;
+  --seal-failed-ink: #ffffff;
+  /* A seal's half-pixel top sheen and its soft drop onto the surface. */
+  --seal-sheen: inset 0 0.5px 0 rgba(255, 255, 255, 0.35);
+  --seal-drop: 0 1px 2px rgba(0, 0, 0, 0.4);
 
   /* accent + signals */
   --accent: #7aa2f7;

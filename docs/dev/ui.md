@@ -2470,19 +2470,22 @@ The command palette
   folder when it has none; `projectMonogram`) at `--font-meta` on a disc
   washed with the project's colour, or with the default project ink when it
   has none. Symbols and emoji are skipped; a name without a letter or digit
-  keeps the folder. Live state stays on the glyph in the project rail's kind
-  colours (`--status-question`, `--status-permission`, `--status-result` in
-  `tokens.css`): a running or reconciling chat turns a thin ring around it, a
-  reply, an approval or an unread result a corner dot of its kind, a stale
-  epoch or a provider limit an amber one, a failure a red one. The group's
+  keeps the folder. Live state stays on the glyph in the seal tones
+  (`--seal-*` in `tokens.css`, see the rail in `styles.md`): a running or
+  reconciling chat turns a thin ring around it; a reply, an approval, a
+  failure or a runtime to confirm a corner dot of its seal tone, an unread
+  result one in the unread dot's accent and a provider-limit pause one in
+  quiet ink. The group's
   head is a dim caption on the navigator's axes (pin in the glyph column, like
   a server zone's head), with the same air below the group as above it. The
   phone navigator does not offer the option yet.
 - **Desktop session row geometry:** the open button (`.session-btn`) is an
   empty, full-row hit surface; `.session-row-body` paints above it with
   `pointer-events: none` in three fixed columns — a state mark reserved on
-  every row (running, needs reply/approval, failed, unread; a pinned chat at
-  rest shows its pin there; empty when an unpinned chat is idle), the title
+  every row (running; needs reply, needs approval, failed or a runtime to
+  confirm as the project's solid seal disc with its drawn glyph,
+  `StatusSeal.tsx`; a provider-limit pause as a quiet timer; unread; a pinned
+  chat at rest shows its pin there; empty when an unpinned chat is idle), the title
   followed directly by the subagent disclosure (a real button,
   ArrowRight/ArrowLeft on the row also toggles it), then meta: worktree pill,
   running clock, and the identity group (`session.list.badges`) at the

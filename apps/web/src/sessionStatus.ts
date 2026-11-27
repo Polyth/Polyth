@@ -144,13 +144,30 @@ export function resolveSessionStatus(
   return { kind: "regular", glyph: "○", label: tr("sessionStatus.idle") };
 }
 
-/** Chats behind each mark on a project's rail icon. */
+/** Chats behind each status a project's rail tile and tree row show. */
 export interface ProjectRailStatus {
+  /** Waiting for a person to approve a tool call. */
   permissions: number;
+  /** Waiting for a person's reply. */
   questions: number;
+  /** Ended in a failure a person should look at. */
+  failed: number;
+  /** Their runtime changed outside a planned handoff and needs confirming. */
+  runtime: number;
+  /** Finished with a reply nobody has read yet. */
   results: number;
   working: number;
+  reconciling: number;
+  /** Will continue by themselves: a provider-limit pause or auto-retry. */
+  limited: number;
+  /** Will continue by themselves: armed to wake on another chat or a wait. */
+  awaiting: number;
 }
+
+export const EMPTY_PROJECT_RAIL_STATUS: Readonly<ProjectRailStatus> = Object.freeze({
+  permissions: 0, questions: 0, failed: 0, runtime: 0, results: 0,
+  working: 0, reconciling: 0, limited: 0, awaiting: 0,
+});
 
 /** Counts chats, not requests, through the same resolver as their rows, so an
  * icon and the list it opens agree. A subagent's request blocks work and counts;
@@ -159,17 +176,63 @@ export function projectRailStatus(
   sessions: readonly SessionProjection[],
   now = Date.now(),
 ): ProjectRailStatus {
-  const status: ProjectRailStatus = { permissions: 0, questions: 0, results: 0, working: 0 };
+  const status: ProjectRailStatus = { ...EMPTY_PROJECT_RAIL_STATUS };
   for (const session of sessions) {
     if (session.status === "archived") continue;
     const { kind } = resolveSessionStatus(session, now);
+    const ownResult = (!session.parentId || !!session.forkOf) && !session.muted;
     if (kind === "needs-approval") status.permissions += 1;
     else if (kind === "needs-reply") status.questions += 1;
-    else if (kind === "working" || kind === "reconciling") status.working += 1;
-    // A waiting chat's row shows the waiting clock, but its unread reply is still
-    // a result to read.
-    else if ((kind === "unread" || (kind === "awaiting" && (session.attention?.unread ?? 0) > 0))
-      && (!session.parentId || session.forkOf) && !session.muted) status.results += 1;
+    else if (kind === "working") status.working += 1;
+    else if (kind === "reconciling") status.reconciling += 1;
+    // A subagent's failure or stale runtime is its parent's to report, like
+    // its result; a muted chat does not call.
+    else if (kind === "failed") { if (ownResult) status.failed += 1; }
+    else if (kind === "epoch-pending") { if (ownResult) status.runtime += 1; }
+    else if (kind === "rate-limited") status.limited += 1;
+    else if (kind === "awaiting") {
+      status.awaiting += 1;
+      // A waiting chat's row shows the waiting clock, but its unread reply is
+      // still a result to read.
+      if ((session.attention?.unread ?? 0) > 0 && ownResult) status.results += 1;
+    } else if (kind === "unread" && ownResult) status.results += 1;
   }
   return status;
+}
+
+/** What needs a person, most urgent first: the seal takes this kind's colour. */
+export type ProjectSealKind = "permission" | "question" | "failed" | "runtime";
+
+export interface ProjectStatusSignal {
+  /** One seal for everything that waits on a person: the most urgent kind,
+   *  and how many chats wait in all. */
+  seal: { kind: ProjectSealKind; count: number } | null;
+  /** The project's own motion: something runs, reconnects, or holds still
+   *  until it continues by itself. */
+  activity: "working" | "reconciling" | "paused" | null;
+  /** Chats running or reconnecting, for the tree row's counter. */
+  running: number;
+  /** Chats with a reply nobody has read. */
+  unread: number;
+}
+
+/** One reading of a project's chats for every place that summarises them
+ *  (rail tile, tree row), so they never disagree. */
+export function projectStatusSignal(status: ProjectRailStatus): ProjectStatusSignal {
+  const waiting = status.permissions + status.questions + status.failed + status.runtime;
+  const kind: ProjectSealKind | null = status.permissions > 0 ? "permission"
+    : status.questions > 0 ? "question"
+      : status.failed > 0 ? "failed"
+        : status.runtime > 0 ? "runtime"
+          : null;
+  const activity = status.working > 0 ? "working"
+    : status.reconciling > 0 ? "reconciling"
+      : status.limited + status.awaiting > 0 ? "paused"
+        : null;
+  return {
+    seal: kind ? { kind, count: waiting } : null,
+    activity,
+    running: status.working + status.reconciling,
+    unread: status.results,
+  };
 }
