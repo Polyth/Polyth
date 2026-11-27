@@ -13,3 +13,5 @@ set_target_properties(polyth_link_uniffi PROPERTIES
 add_library(polyth_link_jni SHARED polyth_link_jni.cpp)
 target_compile_features(polyth_link_jni PRIVATE cxx_std_17)
 target_link_libraries(polyth_link_jni PRIVATE polyth_link_uniffi log)
+# Google Play requires 16 KB page alignment; NDKs before r28 default to 4 KB.
+target_link_options(polyth_link_jni PRIVATE "-Wl,-z,max-page-size=16384")

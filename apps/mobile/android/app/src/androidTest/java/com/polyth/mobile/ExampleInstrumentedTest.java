@@ -13,6 +13,6 @@ public class ExampleInstrumentedTest {
     @Test
     public void appContextUsesPolythApplicationId() {
         Context appContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
-        assertEquals("com.polyth.mobile", appContext.getPackageName());
+        assertEquals("com.polyth.mobile.dev", appContext.getPackageName());
     }
 }
