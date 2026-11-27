@@ -2,10 +2,11 @@
 
 The feedback sheet. ⌘⇧B / Ctrl+Shift+B (the `reportBug` shortcut), **Help → Send
 Feedback…** on the desktop, or the command palette open it, on every channel. A person
-picks a kind (Bug, Idea, Awkward, Good), writes a note, and switches on only the parts
-they want to send: technical details, a screenshot, an "About me" profile (role, AI
-experience), a contact. The sheet shows exactly what will be sent, and nothing is sent
-until Send. In the desktop app the shell captures this window first and sends. In a
+picks a kind (Broken, Idea, Awkward, Like it) and writes a note in one large field that
+carries the optional screenshot and diagnostics as attachments; a way to reply and "Who I
+am" (role, AI experience) unfold under it. "What the team sees" lists every part in plain
+words with the exact payload under a disclosure, and nothing is sent until Send. In the
+desktop app the shell captures this window first and sends. In a
 browser, the page captures this tab (desktop Chromium, after the browser's prompt) or
 takes a pasted or attached image, and the Polyth server that served it sends. Behaviour,
 limits and identity rules: [docs/dev/desktop.md#feedback](../../docs/dev/desktop.md#feedback).
@@ -19,6 +20,9 @@ The package and capability ids (`bug-report`) are legacy names kept for compatib
   never imports the host's bridge module. `widgets/serverBridge.ts` implements the same
   interface for a browser: the tab capture, `attach` for a pasted or attached image, and
   the calls to the server routes.
+- `widgets/ReportSheet.tsx` is the sheet: the form, "What the team sees" and the outcome,
+  in one dialog. `widgets/glyphs.tsx` holds its own line glyphs (Lucide paths) for meanings
+  the host icon set does not carry.
 - `widgets/ScreenshotEditor.tsx` marks up the screenshot (crop, pen, box, arrow, six
   colours, undo) over the unmarked original; `src/annotate.ts` holds the marks'
   geometry and drawing, and `bridge.annotate` swaps in the marked JPEG.

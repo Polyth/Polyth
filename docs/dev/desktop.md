@@ -688,24 +688,36 @@ used by the app; the relay still answers it for older nightlies.
   screenshot shows the window as it was: `webContents.capturePage()` of this window only (no
   screen-recording permission, no other app), downscaled to 1600 px and re-encoded as JPEG
   until it is at most 1.5 MB (`encodeScreenshot`).
-- **The sheet** (`widgets/ReportSheet.tsx`): a kind (Bug, Idea, Awkward, Good), the person's
-  text (required), then one switch per optional part, each shown in the exact JSON preview
-  ("What will be sent", minus the image bytes):
-  - *Technical details*: build, OS, the web build and server version, view name (never a
-    session or project id), viewport, allowlisted `ui.*` settings from the page and
-    `desktop.*` from main (`bugReportDesktopSettings`), enabled package ids and the tab's
-    recent error notices (home folders replaced by `~`). Default on for Bug and Awkward.
-  - *Screenshot* of this window. Default on for Bug and Awkward, off for Idea and Good.
-  - *About me*: a role from a short list and how used they are to AI tools; saved on this
-    computer to prefill the next sheet. Off until the person turns it on.
-  - *Email or handle* for a reply (`isFeedbackContact`): a part of the feedback only when
-    typed and valid.
+- **The sheet** (`widgets/ReportSheet.tsx`, "Tell us") has three views in one dialog. The
+  form: a kind (Broken, Idea, Awkward, Like it) as one segmented control, then the person's
+  text (required) in a large field whose bottom row holds the optional attachments, then
+  two quiet extras that unfold in place. Its footer says whether the feedback is anonymous
+  and opens the second view; Send (⌘/Ctrl+Enter) is the only action, and the title bar and
+  Escape close it. The optional parts:
+  - *Diagnostics* (a chip in the field): build, OS, the web build and server version, view
+    name (never a session or project id), viewport, allowlisted `ui.*` settings from the
+    page and `desktop.*` from main (`bugReportDesktopSettings`), enabled package ids and the
+    tab's recent error notices (home folders replaced by `~`). Default on for Broken and
+    Awkward.
+  - *Screenshot* of this window, as a thumbnail in the field: a click marks it up, the
+    corner button leaves it out, a chip brings it back. Default on for Broken and Awkward,
+    off for Idea and Like it.
+  - *Who I am*: a role and how used they are to AI tools, as two rows of chips; sent when a
+    role is chosen (picking one shows "Sometimes" chosen if nothing was). The profile saved
+    on this computer fills it in for the next sheet.
+  - *I'd like a reply*: an email or handle (`isFeedbackContact`), a part of the feedback
+    only when typed and valid.
+
+  "What the team sees" lists each part in plain words, the exact payload (minus the image
+  bytes) under a disclosure, and **Forget my earlier feedback**; Escape there returns to the
+  form. After Send the dialog becomes one centred card without a title bar or footer, with the
+  outcome (received, or saved to send later), until **Done** or Escape.
 
   The wire always carries `basics` (version, channel, edition, language) so a remark can be
   tied to a build; everything else is present exactly when its `consent.*` flag is (the
   contract `@polyth/contracts/feedback` rejects any mismatch and any unknown field). Never
   paths, server addresses, names, chat text outside the screenshot, tokens or Vault values.
-- **Marking up.** **Mark up** (or a click on the thumbnail) grows the same dialog into an
+- **Marking up.** A click on the thumbnail grows the same dialog into an
   editor (`widgets/ScreenshotEditor.tsx`): crop, pen, box and arrow in six colours, with undo
   (⌘Z / Ctrl+Z). Marks live in the screenshot's own pixels over the unmarked original
   (`src/annotate.ts`). **Done** burns them into a JPEG and hands it to the bridge
@@ -715,7 +727,7 @@ used by the app; the relay still answers it for older nightlies.
   without `annotate` gets no editor rather than send the unmarked image.
 - **Identity.** Two pseudonyms, both 32 hex and neither derived from anything about the
   person. Anonymous feedback carries an HMAC of a local secret and the UTC date, so the team
-  cannot link two days. When the person turns on *About me* or gives a contact, it carries
+  cannot link two days. When the person says who they are or gives a contact, it carries
   the second one, stable until they press **Forget my earlier feedback** in the sheet
   (`desktop:report:forget`, bridge `forget`): the relay deletes everything stored under it
   (`POST /v1/feedback/forget`), the computer drops waiting copies and starts a new one.

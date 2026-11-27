@@ -7,159 +7,507 @@
   min-width: 0;
 }
 
-.bug-report-sheet__intro,
-.bug-report-sheet__note {
+.bug-report-sheet__lead {
   margin: 0;
-  color: var(--text-dim);
+  color: var(--muted);
   font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
 }
 
-/* The four kinds sit in one row; they wrap on a narrow window. */
-.bug-report-sheet__kinds {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
+.bug-report-sheet__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
-/* "About me": the switch, and its two choices only while it is on. */
-.bug-report-sheet__about {
+/* ---- Kind: one segmented control, glyph over label ------------------------ */
+
+.bug-report-kinds {
   display: grid;
-  gap: var(--space-3);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 2px;
+  padding: 3px;
+  border-radius: calc(var(--radius-control) + 3px);
+  background: var(--surface-overlay);
+}
+.bug-report-kind {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  min-width: 0;
+  min-height: max(52px, var(--hit-min));
+  padding: var(--space-2) var(--space-1);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--motion-ease),
+    color var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease);
+}
+.bug-report-kind__label {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: var(--font-meta);
+  font-weight: 500;
+  line-height: var(--font-meta-lh);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A phone-wide sheet: two by two, the glyph beside its label, so no label is
+   cut short. */
+@media (max-width: 480px) {
+  .bug-report-kinds { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .bug-report-kind {
+    flex-direction: row;
+    gap: var(--space-2);
+    min-height: max(var(--control-h), var(--hit-min));
+  }
+}
+.bug-report-kind:hover { color: var(--text-dim); }
+.bug-report-kind[aria-checked="true"] {
+  background: var(--raised);
+  color: var(--text);
+  box-shadow: var(--shadow-sm), inset 0 0 0 1px var(--hair);
+}
+.bug-report-kind:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* ---- The words, with their attachments inside the same field --------------- */
+
+/* Spaced by margins, not a grid gap: a closed reveal is a zero-height item,
+   and a gap before it would still take room. */
+.bug-report-sheet__compose {
+  display: grid;
   min-width: 0;
 }
 
-.bug-report-sheet__forget {
+/* A field well (docs/dev/styles.md, "Field wells"): platform styles and Looks
+   paint the well as their field; the textarea inside stays bare. */
+.bug-report-sheet__well {
+  display: grid;
+  min-width: 0;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-card);
+  background: var(--input-bg);
+  box-shadow: var(--inset-hi);
+  transition:
+    border-color var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease);
+}
+.bug-report-sheet__well:focus-within {
+  border-color: var(--accent-line);
+  box-shadow: var(--inset-hi), 0 0 0 3px var(--focus-wash);
+}
+.bug-report-sheet__well .ui-textarea {
+  padding: var(--space-3) var(--space-3) var(--space-1);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+  resize: none;
+}
+
+.bug-report-sheet__tray {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
-}
-.bug-report-sheet__forget .bug-report-sheet__hint {
-  margin: 0;
+  min-width: 0;
+  padding: var(--space-1) var(--space-2) var(--space-2);
 }
 
-.bug-report-sheet__field {
+/* The screenshot as it will be sent. The thumbnail opens the mark-up editor;
+   the corner button leaves it out. */
+.bug-report-sheet__thumb {
+  position: relative;
+  flex: none;
+  width: 64px;
+  height: 40px;
+  border-radius: var(--radius-control);
+  background: var(--surface-overlay);
+  box-shadow: 0 0 0 1px var(--hair-strong);
+}
+.bug-report-sheet__image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+.bug-report-sheet__thumb-open {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: transparent;
+  cursor: zoom-in;
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
+}
+/* On the image, which can be any colour: the media scrim and white ink. */
+.bug-report-sheet__thumb-open:hover,
+.bug-report-sheet__thumb-open:focus-visible {
+  background: color-mix(in srgb, var(--scrim-media) 55%, transparent);
+  color: rgb(255 255 255 / 0.95);
+}
+.bug-report-sheet__thumb-open:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.bug-report-sheet__thumb-remove {
+  position: absolute;
+  inset-block-start: -6px;
+  inset-inline-end: -6px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-circle);
+  background: var(--text);
+  color: var(--bg);
+  cursor: pointer;
+  opacity: 0;
+  box-shadow: var(--shadow-sm);
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+.bug-report-sheet__thumb:hover .bug-report-sheet__thumb-remove,
+.bug-report-sheet__thumb:focus-within .bug-report-sheet__thumb-remove {
+  opacity: 1;
+}
+.bug-report-sheet__thumb-remove:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* A chip: an attachment that is in (pressed) or can be added, and the answers
+   to "Who I am". The active state is the accent wash, like a pressed control. */
+.bug-report-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  min-height: calc(var(--control-h-sm) - var(--space-1));
+  padding: 0 var(--space-3);
+  border: 1px solid var(--hair-strong);
+  border-radius: var(--radius-round);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-meta);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease),
+    color var(--motion-fast) var(--motion-ease);
+}
+.bug-report-chip:hover:not(:disabled) {
+  background: var(--surface-overlay-hover);
+  color: var(--text);
+}
+.bug-report-chip:is([aria-pressed="true"], [aria-checked="true"]) {
+  border-color: var(--accent-line);
+  background: var(--accent-wash);
+  color: var(--text);
+}
+.bug-report-chip__tick { color: var(--accent-text); }
+.bug-report-chip:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.bug-report-chip:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* "Your own screenshot": the keys on a pointer, a file on a touch screen. */
+.bug-report-sheet__own {
+  position: relative;
+  margin-inline-start: auto;
+  padding: var(--space-1);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--font-meta);
+  cursor: pointer;
+}
+.bug-report-sheet__own:hover:not(:disabled) { color: var(--text-dim); }
+.bug-report-sheet__own:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.bug-report-sheet__own-coarse { display: none; }
+@media (pointer: coarse) {
+  /* A finger-sized chip that still reads as a chip: the control height, and
+     the last few pixels of the target outside its outline. */
+  .bug-report-chip { min-height: var(--control-h); }
+  .bug-report-chip::after {
+    position: absolute;
+    inset: calc((var(--control-h) - var(--hit-min)) / 2) 0;
+    content: "";
+  }
+  /* Text buttons: sized to their words, a full finger target around them. */
+  :is(.bug-report-link, .bug-report-sheet__privacy, .bug-report-sheet__own, .bug-report-privacy__details > summary)::after {
+    position: absolute;
+    inset-block: calc((100% - var(--hit-min)) / 2);
+    inset-inline: 0;
+    content: "";
+  }
+  .bug-report-sheet__own-fine { display: none; }
+  .bug-report-sheet__own-coarse { display: inline; }
+  .bug-report-sheet__thumb-remove { opacity: 1; }
+  /* The corner button keeps its small mark and gets a finger-sized target. */
+  .bug-report-sheet__thumb-remove::before {
+    position: absolute;
+    inset: -13px;
+    content: "";
+  }
+}
+.bug-report-sheet__file { display: none; }
+
+/* ---- Extras: a way to reply, who I am ---------------------------------------- */
+
+.bug-report-sheet__extras {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-5);
+  min-width: 0;
+  padding-inline: var(--space-1);
+}
+.bug-report-sheet__compose > * + * { margin-top: var(--space-2); }
+
+/* Text links sized to their words, so the rhythm around them is the type's;
+   on a touch screen the target reaches past the outline instead. */
+.bug-report-link {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 100%;
+  padding: var(--space-1) 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--font-meta);
+  font-weight: 500;
+  cursor: pointer;
+  transition: color var(--motion-fast) var(--motion-ease);
+}
+.bug-report-link > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bug-report-link[data-set="true"] { color: var(--text-dim); }
+.bug-report-link:hover,
+.bug-report-link[aria-expanded="true"] { color: var(--text); }
+.bug-report-link:focus-visible {
+  border-radius: var(--radius-control);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* A reveal grows from nothing to its content height; its inner padding keeps
+   the focus rings inside the clip while it is open. */
+.bug-report-reveal {
+  display: grid;
+  grid-template-rows: minmax(0, 0fr);
+  transition:
+    grid-template-rows var(--motion-normal) var(--motion-ease),
+    margin-top var(--motion-normal) var(--motion-ease);
+}
+.bug-report-reveal[data-open="true"] { grid-template-rows: minmax(0, 1fr); }
+/* A closed reveal takes no room, not even the space before it. */
+.bug-report-sheet__compose > .bug-report-reveal[data-open="false"] { margin-top: 0; }
+.bug-report-reveal__inner {
   display: grid;
   gap: var(--space-2);
-  min-width: 0;
+  min-height: 0;
+  margin-inline: calc(var(--space-1) * -1);
+  padding: 0 var(--space-1);
+  overflow: hidden;
+  transition: padding var(--motion-normal) var(--motion-ease);
+}
+.bug-report-reveal[data-open="true"] > .bug-report-reveal__inner {
+  padding-block: var(--space-1);
 }
 
-.bug-report-sheet__label {
-  color: var(--text-dim);
-  font-size: var(--font-label);
-  font-weight: 600;
+.bug-report-sheet__who { gap: var(--space-2); }
+.bug-report-sheet__question {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+.bug-report-sheet__question:not(:first-child) { margin-top: var(--space-1); }
+.bug-report-sheet__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
 .bug-report-sheet__hint {
   color: var(--muted);
   font-size: var(--font-meta);
 }
-
 .bug-report-sheet__error {
+  margin: 0;
   color: var(--red);
   font-size: var(--font-meta);
 }
 
-/* The capture beside its switches: the sheet stays short enough that the
-   password field is in view on a laptop-height window. */
-.bug-report-sheet__attachments {
-  display: grid;
-  grid-template-columns: minmax(0, 220px) minmax(0, 1fr);
-  align-items: start;
-  gap: var(--space-4);
-  min-width: 0;
-}
-.bug-report-sheet__attachments:not(:has(.bug-report-sheet__image)) {
-  grid-template-columns: minmax(0, 1fr);
-}
+/* ---- Footer: what goes, then the actions ------------------------------------- */
 
-.bug-report-sheet__toggles {
-  display: grid;
-  gap: var(--space-2);
-  min-width: 0;
-}
-
-/* In a browser: attach or replace the screenshot. The file input is the
-   picker the button opens; it is never shown. */
-.bug-report-sheet__attach {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  justify-self: start;
-}
-.bug-report-sheet__file {
-  display: none;
-}
-
-/* The capture as it will be sent: whole, never cropped. Where marks can be
-   drawn, the whole thumbnail opens the editor. */
-.bug-report-sheet__shot {
+/* The privacy line takes what the actions leave and wraps inside itself; the
+   actions never move to a second row on a wide sheet. */
+.bug-report-dialog .ui-dialog-foot { align-items: center; }
+.bug-report-dialog .ui-dialog-foot > .ui-btn { flex: none; }
+.bug-report-sheet__privacy {
   position: relative;
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: var(--space-2);
   min-width: 0;
-}
-.bug-report-sheet__shot-open {
-  position: absolute;
-  inset: 0;
-  padding: 0;
+  margin-inline-end: auto;
+  padding: var(--space-1) 0;
   border: 0;
-  border-radius: var(--radius-md);
   background: transparent;
-  cursor: zoom-in;
-}
-.bug-report-sheet__shot-open:hover {
-  background: color-mix(in srgb, var(--text) 6%, transparent);
-}
-
-.bug-report-sheet__image {
-  display: block;
-  width: 100%;
-  height: auto;
-  max-height: 150px;
-  object-fit: contain;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface-overlay);
-}
-
-.bug-report-sheet__image[data-included="false"] {
-  opacity: 0.35;
-}
-
-.bug-report-sheet__row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  /* Labels of different lengths: the inputs still share one baseline. */
-  align-items: end;
-  gap: var(--space-3);
-  min-width: 0;
-}
-.bug-report-sheet__row[data-columns="2"] {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.bug-report-sheet__hint,
-.bug-report-sheet__error {
-  margin: calc(var(--space-2) * -1) 0 0;
-}
-
-@media (max-width: 560px) {
-  .bug-report-sheet__attachments,
-  .bug-report-sheet__row[data-columns="2"] {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-/* A grid item sizes to its content: without this the preview's longest line
-   would widen the whole sheet instead of scrolling inside its box. */
-.bug-report-sheet__details {
-  min-width: 0;
-}
-
-.bug-report-sheet__details > summary {
-  color: var(--text-dim);
+  color: var(--muted);
+  font: inherit;
   font-size: var(--font-meta);
+  text-align: start;
   cursor: pointer;
 }
+.bug-report-sheet__privacy > svg { flex: none; }
+.bug-report-sheet__privacy-link {
+  color: var(--text-dim);
+  text-decoration: underline;
+  text-decoration-color: var(--hair-strong);
+  text-underline-offset: 3px;
+  transition: color var(--motion-fast) var(--motion-ease);
+}
+.bug-report-sheet__privacy:hover .bug-report-sheet__privacy-link { color: var(--text); }
+.bug-report-sheet__privacy:focus-visible {
+  border-radius: var(--radius-control);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.bug-report-sheet__kbd {
+  margin-inline-start: var(--space-2);
+  font: inherit;
+  font-size: var(--font-meta);
+  font-weight: 500;
+  opacity: 0.65;
+}
+@media (pointer: coarse) {
+  .bug-report-sheet__kbd { display: none; }
+}
+
+.bug-report-sheet__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+/* ---- What the team sees ------------------------------------------------------ */
+
+.bug-report-privacy { gap: var(--space-3); }
+.bug-report-privacy__rows {
+  display: grid;
+  margin: 0;
+}
+.bug-report-privacy__row {
+  display: grid;
+  grid-template-columns: minmax(0, 8.5rem) minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--hair);
+}
+/* The list starts where any body content starts, under the title. */
+.bug-report-privacy__row:first-child { padding-top: 0; }
+.bug-report-privacy__row > dt {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+.bug-report-privacy__row > dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-label);
+  overflow-wrap: anywhere;
+}
+.bug-report-privacy__row > dd[data-off="true"] { color: var(--muted); }
+.bug-report-privacy__more {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.bug-report-privacy__never {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+}
+.bug-report-privacy__never > svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--green);
+}
+
+/* A grid item sizes to its content: without this the payload's longest line
+   would widen the whole sheet instead of scrolling inside its box. */
+.bug-report-privacy__details { min-width: 0; }
+.bug-report-privacy__details > summary {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  list-style: none;
+  cursor: pointer;
+}
+.bug-report-privacy__details > summary::-webkit-details-marker { display: none; }
+.bug-report-privacy__details > summary:hover { color: var(--text-dim); }
+.bug-report-privacy__chevron { transition: transform var(--motion-fast) var(--motion-ease); }
+.bug-report-privacy__details[open] .bug-report-privacy__chevron { transform: rotate(90deg); }
+.bug-report-privacy__details > summary:focus-visible {
+  border-radius: var(--radius-control);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+:dir(rtl) .bug-report-privacy__chevron { transform: scaleX(-1); }
+:dir(rtl) .bug-report-privacy__details[open] .bug-report-privacy__chevron { transform: rotate(90deg); }
 
 .bug-report-sheet__json {
   box-sizing: border-box;
@@ -168,19 +516,82 @@
   margin: var(--space-2) 0 0;
   padding: var(--space-3);
   overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-card);
   background: var(--surface-overlay);
-  color: var(--text);
+  color: var(--text-dim);
   font-family: var(--mono);
   font-size: var(--font-code);
   white-space: pre;
 }
 
-.bug-report-sheet__actions {
+.bug-report-privacy__forget {
   display: flex;
-  justify-content: flex-end;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+
+/* ---- Thanks ------------------------------------------------------------------- */
+
+/* One centred card with no title bar or footer: the same space above the
+   mark and below the button, so the content sits in the middle. */
+.bug-report-thanks {
+  display: grid;
+  justify-items: center;
   gap: var(--space-2);
+  padding: var(--space-5) var(--space-4);
+  text-align: center;
+}
+.bug-report-thanks__mark {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  margin-bottom: var(--space-2);
+  border-radius: var(--radius-circle);
+  background: var(--green-wash);
+  color: var(--green);
+  animation: bug-report-mark-in var(--motion-surface) var(--motion-ease) both;
+}
+.bug-report-thanks__mark[data-tone="queued"] {
+  background: var(--surface-overlay);
+  color: var(--text-dim);
+}
+.bug-report-thanks__title {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-heading);
+  font-weight: 650;
+}
+.bug-report-thanks__body {
+  max-width: 38ch;
+  margin: 0;
+  color: var(--text-dim);
+}
+.bug-report-thanks__done {
+  min-width: 8rem;
+  margin-top: var(--space-4);
+}
+@keyframes bug-report-mark-in {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (max-width: 560px) {
+  .bug-report-dialog--form .ui-dialog-foot { flex-wrap: wrap; }
+  .bug-report-sheet__privacy { flex-basis: 100%; }
+  .bug-report-privacy__row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bug-report-reveal,
+  .bug-report-reveal__inner,
+  .bug-report-privacy__chevron { transition: none; }
+  .bug-report-thanks__mark { animation: none; }
 }
 
 /* The mark-up editor, in the same dialog grown to full size: a floating tool
