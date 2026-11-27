@@ -693,7 +693,7 @@ export function SessionRow({
           {s.pinned && <span className="sr-only" id={pinnedId}>{pinnedLabel}</span>}
           {projectMark && <span className="sr-only" id={projectMarkId}>{tr("sidebar.sessionlist.projectValue", { name: projectMark.name })}</span>}
           <span className="session-title">
-            <span className="session-title-text">{displayTitle}</span>
+            <span className="session-title-text" data-private="">{displayTitle}</span>
             {subagents && (
               <button
                 type="button"

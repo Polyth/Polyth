@@ -658,7 +658,7 @@ export function SessionQuickAccessSheet({
       {activeSession && (
         <section className="mobile-island-current-session" aria-label={tr("mobile.sessionmenu.sessionTitle")}>
           <span>{tr("mobile.sessionmenu.sessionTitle")}</span>
-          <h2>{sessionTitle}</h2>
+          <h2 data-private="">{sessionTitle}</h2>
           <SessionSharingLine session={activeSession} onOpen={onClose} />
         </section>
       )}
@@ -870,6 +870,7 @@ export default function MobileSessionHeader() {
           <button
             type="button"
             className="mobile-session-selector"
+            data-private=""
             data-conversation={conversation ? "" : undefined}
             aria-label={
               conversation

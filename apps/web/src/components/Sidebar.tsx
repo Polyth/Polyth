@@ -1442,7 +1442,7 @@ export default function Sidebar() {
           <ProjectGlyph project={p} />
           <span className="project-meta">
             <span className="project-name-line">
-              <span className="project-name" title={p.personal ? p.name : p.path}>{p.name || p.path}</span>
+              <span className="project-name" data-private="" title={p.personal ? p.name : p.path}>{p.name || p.path}</span>
               {/* An open project's chip row already lists its repositories
                   (and their paths in its tooltips), so the count shows only
                   while the list is closed or replaced by a search. */}

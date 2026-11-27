@@ -178,14 +178,15 @@ function SplitPaneHeader({ sessionId, focused, onClose, onPopOut }: {
           ref={titleRef}
           type="button"
           className="session-split-title session-split-title-button"
+          data-private=""
           title={title}
           aria-haspopup="dialog"
           aria-expanded={overview.open && overview.anchor === titleRef.current}
           aria-label={status ? tr("sessionStatus.sessionStatusValue", { title, status: status.label }) : title}
           onClick={(event) => { event.stopPropagation(); toggleSessionStatusPopover(titleRef.current, "header"); }}
         >{title}</button>
-      ) : <span className="session-split-title" title={title}>{title}</span>}
-      {projectName && activeProjectId && <span className="session-split-project">{projectName}</span>}
+      ) : <span className="session-split-title" data-private="" title={title}>{title}</span>}
+      {projectName && activeProjectId && <span className="session-split-project" data-private="">{projectName}</span>}
       <span className="session-split-actions">
         {onPopOut && sessionId && (
           <IconButton

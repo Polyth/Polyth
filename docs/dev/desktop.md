@@ -725,6 +725,19 @@ used by the app; the relay still answers it for older nightlies.
   refuses anything over 8 MB or not an image, re-encodes it with `encodeScreenshot` and
   replaces the held capture; in a browser it goes the way an attached image does. A shell
   without `annotate` gets no editor rather than send the unmarked image.
+- **Blurring.** The editor's **Blur** tool turns a dragged area into large soft cells
+  (`blurRects`/`blurCellFor` in `src/annotate.ts`, drawn by shrinking and stretching the
+  pixels, since WebKit has no canvas `filter`). Private content is blurred on its own: in the
+  same moment as the capture, `widgets/index.tsx` measures every visible host element marked
+  `data-private` (the timeline viewport, the composer input, chat and project names in the
+  navigator, the split-pane header and the phone header), clipped by its scrolling
+  ancestors, and `viewportBlurs` maps those boxes onto the image; an image of another shape
+  (not this viewport) gets none rather than blurs in the wrong place. A **Hide chats and
+  names** chip, on by default, appears in the tray when there is something to blur, and
+  turning it off sends the capture unblurred. Until the blurred JPEG is back the thumbnail is
+  shown blurred and the screenshot is not part of the feedback; if blurring fails it stays
+  out with a notice. The person's own pasted or attached image has no known private areas.
+  New host UI that shows conversation text or a chat/project name marks it `data-private`.
 - **Identity.** Two pseudonyms, both 32 hex and neither derived from anything about the
   person. Anonymous feedback carries an HMAC of a local secret and the UTC date, so the team
   cannot link two days. When the person says who they are or gives a contact, it carries

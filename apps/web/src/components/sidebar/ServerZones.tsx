@@ -83,7 +83,7 @@ function Zone({ zone, opening }: { zone: DesktopServerZone; opening: string | nu
                 onClick={() => serverZoneActions.open(zone, project.id)}
               >
                 <ProjectGlyph project={project} />
-                <span className="server-zone-row-name" dir="auto">{project.name}</span>
+                <span className="server-zone-row-name" dir="auto" data-private="">{project.name}</span>
               </button>
             </li>
           ))}

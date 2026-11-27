@@ -4666,7 +4666,7 @@ export default function Timeline({
     <PersonTones.Provider value={personTones}>
     <ConversationRepliesContext.Provider value={fenceReplies}>
     <div className="timeline-shell">
-      <div className="timeline-viewport">
+      <div className="timeline-viewport" data-private="">
       <div
         className="timeline"
         role="region"

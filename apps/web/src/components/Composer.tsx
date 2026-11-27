@@ -5153,7 +5153,7 @@ function ComposerBody({
         </div>
       )}
       {/* Choosing messages takes the editor's place; the draft stays mounted. */}
-      <div className="composer-input">
+      <div className="composer-input" data-private="">
         {activeMode && (
           <div className="composer-mode-chip-row">
             <span className="composer-mode-chip" data-mode={activeMode.id}>

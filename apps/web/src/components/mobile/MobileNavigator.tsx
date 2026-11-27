@@ -784,7 +784,7 @@ function SessionRow({
               <span className="mobile-nav-session-heading">
                 {/* dir="auto": a title in the other script direction truncates
                     at its own end, so it keeps its first words. */}
-                <span className="mobile-nav-session-title" dir="auto">{displayTitle}</span>
+                <span className="mobile-nav-session-title" dir="auto" data-private="">{displayTitle}</span>
                 {childActivity && childCount > 0 && (
                   <button
                     type="button"
@@ -1890,7 +1890,7 @@ export default function MobileNavigator() {
                         }
                       }}
                     >
-                      <span className="mobile-nav-project-name" dir="auto">{project.name || project.path}</span>
+                      <span className="mobile-nav-project-name" dir="auto" data-private="">{project.name || project.path}</span>
                       {/* One line in both states: the pills sit beside the
                           name instead of under it, so expanding never moves
                           the name and the row stays vertically centred.
