@@ -460,6 +460,57 @@ test("every look radius follows Corner rounding: no literal corner but pills and
   assert.doesNotMatch(css, /radius:\s*999px/);
 });
 
+test("the window layout's top bar island is a piece of each look's shell, never a menu-weight capsule", async () => {
+  const css = stripComments(await read("../src/shellLooks.css"));
+  const island = 'body[data-shell-look]:not([data-shell-look="standard"]):not(#\\#) .app > .header > .shell-island {';
+  const at = css.indexOf(island);
+  assert.ok(at >= 0, "the shared island rule");
+  const rule = css.slice(at, css.indexOf("}", at));
+  // One rule paints every look's bar from its --look-bar* tokens: the float
+  // material's wide drop and the 25px pill made Paper, Line, Editorial and the
+  // Monoliths all wear the same heavy capsule.
+  for (const declaration of [
+    "background: var(--look-bar) !important",
+    "backdrop-filter: var(--look-bar-blur) !important",
+    "border: 1px solid var(--look-bar-edge) !important",
+    "border-block-start-color: var(--look-bar-head, var(--look-bar-edge)) !important",
+    "border-block-end-color: var(--look-bar-foot, var(--look-bar-edge)) !important",
+    "box-shadow: var(--look-bar-shadow) !important",
+    "border-radius: var(--look-bar-radius) !important",
+  ]) assert.ok(rule.includes(declaration), `island rule lacks ${declaration}`);
+  assert.doesNotMatch(rule, /--look-float-shadow|--look-pill-radius/);
+  assert.match(css, /\.app > \.header > \.shell-island \.desktop-session-status \{\s*border-inline-color: var\(--look-bar-seg\) !important;/);
+  // A new look inherits a quiet card of its own float material in its column
+  // corner, with no drop, from the zero-specificity defaults.
+  const base = css.match(/:where\(body\[data-shell-look\]:not\(\[data-shell-look="standard"\]\)\) \{([^}]*)\}/)?.[1] ?? "";
+  assert.match(base, /--look-bar: color-mix\(in srgb, var\(--look-float\) var\(--look-float-a\), transparent\);/);
+  assert.match(base, /--look-bar-shadow: none;/);
+  assert.match(base, /--look-bar-radius: var\(--look-column-radius, var\(--look-float-radius\)\);/);
+  assert.doesNotMatch(base, /--look-bar-(?:head|foot):/, "head and foot fall back to the frame where the look sets it");
+  // A look states its bar on the bar, so its tokens reach nothing else.
+  const tokens = (look: string) => [...css.matchAll(new RegExp(`body(?:\\[data-shell-look="${look}"\\]|:is\\([^)]*"${look}"[^)]*\\)):not\\(#\\\\#\\) \\.app > \\.header \\{([^}]*)\\}`, "g"))]
+    .map((match) => match[1]!).find((body) => body.includes("--look-bar:")) ?? "";
+  // The ruled and flat looks draw the bar on their sheet: no card, no frost,
+  // no drop; only their own lines.
+  for (const look of ["paper", "line", "editorial", "monolith", "monolith-reverse"]) {
+    const block = tokens(look);
+    assert.match(block, /--look-bar: transparent;/, look);
+    assert.match(block, /--look-bar-blur: none;/, look);
+    assert.doesNotMatch(block, /--look-bar-shadow:/, `${look} keeps the default no-drop`);
+  }
+  assert.match(tokens("paper"), /--look-bar-edge: transparent;[^}]*--look-bar-foot: var\(--look-rule\);[^}]*--look-bar-radius: 0px;/);
+  // Line's header row ends on the grid's own hairline: the bar stands on it
+  // as a tab instead of drawing a second foot a pixel above it.
+  assert.match(css, /body\[data-shell-look="line"\]:not\(#\\#\) \.header \{\s*border-bottom: 1px solid var\(--look-line\) !important;/);
+  assert.match(tokens("line"), /--look-bar-edge: var\(--look-line\);\s*--look-bar-foot: transparent;\s*--look-bar-radius: var\(--look-r\) var\(--look-r\) 0 0;/);
+  assert.match(tokens("editorial"), /--look-bar-head: var\(--look-rule\);\s*--look-bar-foot: var\(--look-rule\);\s*--look-bar-radius: 0px;/);
+  assert.match(tokens("monolith"), /--look-bar-edge: transparent;\s*--look-bar-seg: transparent;/);
+  assert.equal(tokens("monolith"), tokens("monolith-reverse"), "both Monoliths share one chrome bar");
+  // The island looks keep an island in their own material and corner.
+  assert.match(tokens("air"), /--look-bar: var\(--look-island\);[^}]*--look-bar-shadow: var\(--look-shadow\);\s*--look-bar-radius: var\(--look-pill-radius\);\s*--look-bar-seg: transparent;/);
+  assert.match(tokens("obsidian"), /--look-bar: linear-gradient\(var\(--look-fill\), var\(--look-fill\)\) padding-box, var\(--look-rim\) border-box;[^}]*--look-bar-shadow: var\(--look-glass-inline-shadow\);\s*--look-bar-radius: var\(--look-strip-radius\);/);
+});
+
 test("Monolith column corners do not reference the rail radius Floating columns derive from them", async () => {
   const css = stripComments(await read("../src/shellLooks.css"));
   assert.match(css, /\[data-shell-floating="true"\]:not\(#\\#\) \{[^}]*--look-rail-radius: var\(--look-column-radius/);

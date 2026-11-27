@@ -136,8 +136,10 @@ test("in the full-height layouts the layout's column geometry outranks every loo
     'body[data-shell-floating="true"]:is([data-shell-layout="columns"], [data-shell-layout="bare"]):not(#\\#) .app-shell > .sidebar',
     "border-radius: var(--look-column-radius, var(--radius-surface)) !important",
   );
-  // Under a look the island is one capsule in the look's float material.
-  assert.match(looks, /\.app > \.header > \.shell-island \{\n  background: color-mix\(in srgb, var\(--look-float\) var\(--look-float-a\), transparent\) !important;/);
+  // Under a look the island takes the look's own bar material (shellLooks.css
+  // 3c), never a colour from this geometry layer.
+  assert.match(looks, /\.app > \.header > \.shell-island \{\n  background: var\(--look-bar\) !important;/);
+  assert.doesNotMatch(css, /--look-bar/, "the bar's material stays with the looks");
 });
 
 test("the bar between full-height columns stops a column gap before the strip and a floating window", () => {

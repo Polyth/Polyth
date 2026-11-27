@@ -749,6 +749,7 @@ class strength joins a role instead of getting a rule of its own:
 | 1f Fields | Every text field and select; a field well is the field and its input stays bare | navigator search, picker filter well, `.ui-field-well`, `.ui-input`, `.ui-textarea`, `.sel select`, the theme picker | `--look-field`, `--look-field-edge`, `--look-field-rule`, `--look-field-radius`, `--look-focus-ring` |
 | 1g Corners | One radius role per control | rows, menu items, icon buttons, segments → `--look-select-radius`; push buttons, chips, wells → `--look-control-radius` | — |
 | 1h Phone layers | The phone navigator and Workspace panel are one full-screen material; the navigator's current chat, titles and date captions speak the look's selection and quiet inks; launchers are the look's tile (Edit mode's tiles too, but not the drag hole or lifted copy); a widget is the look's panel card. Phone Settings is one too: the layer has no window corner, edge or scrim, each group of pages and the search results are the panel card, the ruled looks part its rows with `--look-rule`, and a current row is `--look-list-select` with `--look-select-mark` (the Monolith looks override it, because the navigator's plate is their card's own material) | `.mobile-navigator`, `.mobile-nav-session-row.is-active`, `.mobile-nav-date-divider`, `.mobile-nav-project-head` (its press plate), `.workspace-panel-sheet`, `.workspace-panel-launcher`, `.workspace-editor-item--launcher`, `.workspace-panel-item--widget` (all panel rules sit in the panel's phone media query) | `--look-phone-layer*`, `--look-phone-select*`, `--look-list-select*`, `--look-select-mark`, `--look-row-press*`, `--look-tile*`, `--look-widget*` |
+| 3c Top bar island | The window layout's island (Columns with the island bar) is a piece of the look's shell, not a float; one shared rule, per-look tokens (see Window layout) | `.app > .header > .shell-island` and the title's separators | `--look-bar`, `--look-bar-blur`, `--look-bar-edge`, `--look-bar-head`, `--look-bar-foot`, `--look-bar-shadow`, `--look-bar-radius`, `--look-bar-seg` |
 
 Role rules use `:is()` where the shared block owns the element; the button
 rules use `:where()` so a look that draws its own button (Line's hairline,
@@ -1071,11 +1072,33 @@ and the absence of colour literals.
   Editorial), the slab bar between the columns with the
   column radius. Line and Editorial columns have no fill, so when they float the
   look closes their hairline on every side.
-- Under a look the island is painted by `shellLooks.css` in the look's float
-  material (`--look-float*`, like a menu) as a pill, and the controls
-  inside drop the look's control plates. On any style the controls inside the
-  capsule also drop borderless mode's restored contour, so the capsule is the
-  only surface.
+- Under a look the island is painted by `shellLooks.css` §3c as a piece of
+  that look's shell, not as a float: it holds its place and nothing scrolls
+  under it, so a menu's material, wide drop and pill made it a heavy capsule
+  that belonged to no look. One shared rule reads the look's `--look-bar*`
+  tokens (fill, blur, frame, the line over and under it, drop, corner, and
+  the hairlines that part the title from the groups); a look that states none
+  gets a quiet card of its float material in its column corner with no drop.
+  Standard keeps today's glass capsule. Per look:
+
+  | Look | The bar |
+  | --- | --- |
+  | `paper` | A line of the sheet: no card, blur or drop; one ruled line under the controls (the twin of the composer's ruled line), square ends, hairlines part the title. |
+  | `line` | A tab of the hairline grid standing on the header row's own grid line: hairline top and sides in the 6px corner, no foot of its own, no fill. |
+  | `editorial` | A masthead: a rule over and a rule under the line of type, square, on the warm paper. |
+  | `monolith`, `monolith-reverse` | Part of the chrome plane that frames the sheet, like the navigator: no card, edge, drop or separators. |
+  | `air` | One of Air's islands: its island fill and frost, its diffuse island shadow, a pill, no lines. |
+  | `obsidian` | Rimmed glass like its launcher strip (the strip's pill), with the short inline drop, not the hovering window's. |
+
+  The controls inside drop the look's control plates; the ruled looks' lines
+  are the look's own, so they stay under Hide interface borders. On any style
+  the controls inside the capsule also drop borderless mode's restored
+  contour, so the capsule is the only surface. The capsule stays one element
+  (`Header.tsx` is unchanged): what made it heavy was its material, not the
+  groups it holds. In `bare` under a Monolith the title line sits on the
+  chrome above the sheet; that band is the chrome's margin carrying the
+  title, the same plane the Columns bar now sits on, so it keeps no surface
+  of its own and is not drawn as a bar.
 
 ### Chat and syntax
 
