@@ -480,7 +480,7 @@ export function ReportSheet({ host, bridge, capture, page, privateAreas, onClose
           {tray}
         </div>
         {attachFailed && <p className="bug-report-sheet__error" role="alert">{t("bugreport.attachFailed")}</p>}
-        {blurFailed && screenshotWanted && <p className="bug-report-sheet__error" role="alert">{t("bugreport.blurFailed")}</p>}
+        {blurFailed && screenshotWanted && blurPending && <p className="bug-report-sheet__error" role="alert">{t("bugreport.blurFailed")}</p>}
         <div className="bug-report-sheet__extras">
           <button
             type="button"

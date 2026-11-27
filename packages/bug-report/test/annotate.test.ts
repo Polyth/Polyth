@@ -5,10 +5,13 @@ import {
   MARK_COLORS,
   activeCrop,
   arrowGeometry,
+  blurCellFor,
+  blurRects,
   drawMarks,
   extendPen,
   isMeaningful,
   strokeFor,
+  viewportBlurs,
   type Mark,
   type MarkContext,
 } from "../src/annotate.ts";
@@ -76,4 +79,31 @@ test("marks draw in screenshot coordinates and crops draw nothing", () => {
     "save()", "beginPath()", "moveTo(1,2)", "lineTo(3,4)", "stroke()", "restore()",
   ]);
   assert.equal(context.lineWidth, 5);
+});
+
+test("blurred areas are clamped and rounded outward; crops, boxes and empty blurs are not blurs", () => {
+  const marks: Mark[] = [
+    { kind: "blur", from: { x: 10.6, y: 20.4 }, to: { x: -5, y: 30.2 } },
+    { kind: "blur", from: { x: 90, y: 40 }, to: { x: 150, y: 70 } },
+    { kind: "blur", from: { x: 200, y: 10 }, to: { x: 220, y: 20 } },
+    { kind: "box", color: red, from: { x: 0, y: 0 }, to: { x: 50, y: 50 } },
+    { kind: "crop", from: { x: 0, y: 0 }, to: { x: 50, y: 50 } },
+  ];
+  assert.deepEqual(blurRects(marks, 100, 50), [
+    { x: 0, y: 20, width: 11, height: 11 },
+    { x: 90, y: 40, width: 10, height: 10 },
+  ]);
+  assert.ok(blurCellFor(400, 300) >= 12);
+  assert.equal(blurCellFor(2560, 1600), 40);
+});
+
+test("private areas map onto a retina capture of this viewport, and onto nothing else", () => {
+  const areas = [{ x: 10, y: 20, width: 100, height: 30 }];
+  assert.deepEqual(viewportBlurs(areas, { width: 800, height: 600 }, { width: 1600, height: 1200 }), [
+    { kind: "blur", from: { x: 20, y: 40 }, to: { x: 220, y: 100 } },
+  ]);
+  // A capture of another shape (a whole screen, a window with its frame) is
+  // not this viewport: nothing is blurred in the wrong place.
+  assert.equal(viewportBlurs(areas, { width: 800, height: 600 }, { width: 1600, height: 900 }), null);
+  assert.equal(viewportBlurs(areas, { width: 0, height: 600 }, { width: 1600, height: 1200 }), null);
 });

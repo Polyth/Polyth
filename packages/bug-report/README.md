@@ -23,9 +23,12 @@ The package and capability ids (`bug-report`) are legacy names kept for compatib
 - `widgets/ReportSheet.tsx` is the sheet: the form, "What the team sees" and the outcome,
   in one dialog. `widgets/glyphs.tsx` holds its own line glyphs (Lucide paths) for meanings
   the host icon set does not carry.
-- `widgets/ScreenshotEditor.tsx` marks up the screenshot (crop, pen, box, arrow, six
+- `widgets/ScreenshotEditor.tsx` marks up the screenshot (crop, blur, pen, box, arrow, six
   colours, undo) over the unmarked original; `src/annotate.ts` holds the marks'
   geometry and drawing, and `bridge.annotate` swaps in the marked JPEG.
+- `widgets/index.tsx` measures the host's `data-private` elements (conversation, draft,
+  chat and project names) at capture time; the sheet blurs them unless the person turns
+  off **Hide chats and names** (see `docs/dev/desktop.md`, Feedback → Blurring).
 - `src/browserClient.ts` turns the user agent into the OS family and `Name major`, and
   decides whether this tab alone can be captured.
 - `src/snapshot.ts` builds the page's part of a feedback: allowlisted `ui.*` settings

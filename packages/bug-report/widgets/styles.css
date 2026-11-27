@@ -146,6 +146,8 @@
   border-radius: inherit;
   object-fit: cover;
 }
+/* The capture before its private parts are blurred: never shown sharp. */
+.bug-report-sheet__thumb[data-pending] .bug-report-sheet__image { filter: blur(6px); clip-path: inset(0 round var(--radius-control)); }
 .bug-report-sheet__thumb-open {
   position: absolute;
   inset: 0;
