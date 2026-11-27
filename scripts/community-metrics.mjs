@@ -543,7 +543,12 @@ export function weeklyBrief(lines, { goals = [], events = [], note = null, now =
     recentReleases: summary.releases,
     goals: summary.goals && {
       ...summary.goals,
-      items: summary.goals.items.map((g) => Object.fromEntries(Object.entries(g).map(([k, v]) => [k, typeof v === "number" && k !== "target" ? round1(v) : v]))),
+      // Whole numbers for counts (a still-needed pace rounds up); active apps keep one decimal like the page's estimate.
+      items: summary.goals.items.map((g) => Object.fromEntries(Object.entries(g).map(([k, v]) => {
+        if (typeof v !== "number" || k === "target") return [k, v];
+        if (g.metric === "active") return [k, round1(v)];
+        return [k, k === "perDay" ? Math.ceil(v) : Math.round(v)];
+      }))),
     },
     currentNote: note ? { from: note.from, to: note.to, writtenAt: note.writtenAt } : null,
   };
