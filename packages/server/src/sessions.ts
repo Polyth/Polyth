@@ -7947,9 +7947,20 @@ export function createSessionService(deps: {
       // exact protocol receipt. Listing/title similarity is deliberately not
       // enough and this path never issues another create.
       if (!attachedProjection.backendSessionId) {
-        const createOperation = (await durable.operations(sessionId)).find((operation) =>
-          operation.mutationKind === "session-create"
-          && (operation.state === "unknown" || operation.state === "confirmed"));
+        const creates = (await durable.operations(sessionId))
+          .filter((operation) => operation.mutationKind === "session-create");
+        const latestCreate = creates.at(-1);
+        // A refused create left nothing uncertain: the chat stays as its start
+        // failure left it, and its next send provisions afresh. Calling this
+        // "outcome unknown" (and marking the chat so) stranded it.
+        if (latestCreate?.state === "rejected" && !startFlights.has(sessionId)) {
+          throw Object.assign(
+            new Error(`this chat's native session was never created${latestCreate.message ? `: ${latestCreate.message}` : ""}`),
+            { code: "conflict" },
+          );
+        }
+        const createOperation = creates.find((operation) =>
+          operation.state === "unknown" || operation.state === "confirmed");
         const confirmedBackendId =
           createOperation?.state === "confirmed" ? createOperation.receipt : undefined;
         const matches = createOperation?.state === "unknown"
@@ -13175,6 +13186,15 @@ export function createSessionService(deps: {
     return { operation, reported: events.some((event) => event.type === SESSION_START_FAILED_EVENT) };
   };
 
+  /** A chat whose latest native create was refused (the harness could not run
+   *  it): nothing is uncertain, and nothing runs until a send provisions it
+   *  with a fresh create. */
+  const refusedStart = async (projection: SessionProjection): Promise<boolean> => {
+    if (projection.backendSessionId || projection.runtimeBinding || startFlights.has(projection.id)) return false;
+    const operation = (await durable.operations(projection.id)).filter((op) => op.mutationKind === "session-create").at(-1);
+    return operation?.state === "rejected";
+  };
+
   /** Run a start's provisioning once per chat; its failure is a start failure. */
   const launchStartFlight = (sessionId: string, plan: () => Promise<CreatedSessionRow | undefined>): Promise<boolean> => {
     const existing = startFlights.get(sessionId);
@@ -13654,6 +13674,11 @@ export function createSessionService(deps: {
       // (the client does, as soon as the start replies) has nothing to warm,
       // nor does the start's own first send before its flight exists.
       if (startFlights.has(sessionId) || startAdmitting.has(sessionId)) return;
+      // A started chat that never got a native session has nothing to warm,
+      // and the chat already says why. A refused create provisions afresh on
+      // its next send; an uncertain one is never re-run. Wiring either only
+      // answered "backend session creation outcome is unknown" (2026-11-27).
+      if (projection && (await refusedStart(projection) || await uncertainStart(projection))) return;
       if (options?.intent === "open" && !await openNeedsRuntime(sessionId)) return;
       try {
         await sessionJobs.enqueue(sessionId);

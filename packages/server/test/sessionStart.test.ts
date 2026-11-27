@@ -330,6 +330,78 @@ test("runtime failure leaves a failed chat with its first turn in the author's d
   }
 });
 
+test("opening or warming a chat whose start was refused says nothing and keeps it resendable", async () => {
+  // 2026-11-27: opening a chat whose start the harness refused ("Selected
+  // harness antigravity is unavailable") toasted "Open session: backend
+  // session creation outcome is unknown" and rewrote `failed` to `unknown`,
+  // after which a send no longer provisioned it again.
+  let refuse = true;
+  const h = fixture({ acquireError: () => refuse ? Object.assign(new Error("no runtime"), { code: "runtime-unavailable" }) : undefined });
+  try {
+    const result = await h.sessions.start!({
+      projectId: "p1", start: { firstTurn: { text: "hello" } }, clientOperationId: KEY,
+    }, { author: AUTHOR });
+    await waitFor(async () => (await h.store.projection(result.id))?.status === "failed");
+    // The harness is back by the time the person opens the chat.
+    refuse = false;
+    const acquisitions = h.acquisitions();
+    await h.sessions.activate!(result.id, { intent: "open" });
+    await h.sessions.activate!(result.id);
+    assert.equal((await h.store.projection(result.id))?.status, "failed");
+    assert.equal(h.acquisitions(), acquisitions, "nothing to warm: no runtime is started for it");
+    assert.equal(h.creates(), 0);
+
+    const sent = await h.sessions.send(result.id, { text: "try again" }, { author: AUTHOR });
+    assert.equal(sent.queued, true);
+    await waitFor(() => h.prompts.length === 1);
+    assert.deepEqual(h.prompts, ["try again"]);
+  } finally {
+    await h.close();
+  }
+});
+
+test("a refused create is never reported as an uncertain one, nor turns the chat unknown", async () => {
+  // Wiring reached by another path (boot recovery of a queued item) must not
+  // claim the refused create's outcome is unknown.
+  let refuse = true;
+  const h = fixture({ acquireError: () => refuse ? Object.assign(new Error("no runtime"), { code: "runtime-unavailable" }) : undefined });
+  const warnings: string[] = [];
+  const warn = console.warn;
+  console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(" ")); };
+  try {
+    const result = await h.sessions.start!({
+      projectId: "p1", start: { firstTurn: { text: "hello" } }, clientOperationId: KEY,
+    }, { author: AUTHOR });
+    await waitFor(async () => (await h.store.projection(result.id))?.status === "failed");
+    refuse = false;
+    await h.store.enqueue(result.id, "left over", "queue");
+    await h.sessions.recoverPendingWork!();
+    assert.deepEqual(warnings.filter((line) => /outcome is unknown/.test(line)), []);
+    assert.equal((await h.store.projection(result.id))?.status, "failed");
+  } finally {
+    console.warn = warn;
+    await h.close();
+  }
+});
+
+test("opening a chat whose start ended uncertain says nothing and starts no runtime", async () => {
+  const h = fixture({ createError: () => new Error("socket closed") });
+  try {
+    const result = await h.sessions.start!({
+      projectId: "p1", start: { firstTurn: { text: "hello" } }, clientOperationId: KEY,
+    }, { author: AUTHOR });
+    await waitFor(async () => ofType(await h.store.events(result.id), "session/start-failed").length === 1);
+    const acquisitions = h.acquisitions();
+    await h.sessions.activate!(result.id, { intent: "open" });
+    await h.sessions.activate!(result.id);
+    assert.equal((await h.store.projection(result.id))?.status, "unknown");
+    assert.equal(h.acquisitions(), acquisitions);
+    assert.equal(h.creates(), 1, "the uncertain create is never re-run");
+  } finally {
+    await h.close();
+  }
+});
+
 test("a restart while provisioning has not created the native session resumes it and delivers the first turn", async () => {
   const dir = mkdtempSync(join(tmpdir(), "polyth-session-start-restart-"));
   try {

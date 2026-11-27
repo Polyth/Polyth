@@ -208,6 +208,8 @@ A native create whose outcome is uncertain (the runtime threw or timed out, or P
 
 While a start's provisioning flight runs it owns the chat's create and status. `activate` (the web client opens the chat as soon as the start replies) returns without wiring, and the wiring path does not rewrite the status to `unknown` under the flight.
 
+A started chat that never got a native session is not wired by `activate` either: its latest `session-create` was refused (the `failed` chat above) or is an uncertain start. The chat already shows `session/start-failed`, so opening or warming it starts no runtime and reports nothing. Wiring reached another way (for example startup recovery of a queued item) answers a refused create with `conflict` carrying the refusal's message, never "backend session creation outcome is unknown", and leaves the chat `failed`, so its next send still provisions afresh (`refusedStart`, `packages/server/src/sessions.ts`).
+
 Before this, boot turned a `reconciling` row whose create was still `prepared` into `unknown`; startup recovery wired it, found no native session and no exact receipt, and left it `unknown` with any queued prompt stranded. Now startup recovery resumes provisioning for a started chat whose create is still `prepared` and delivers its queued first turn. An `executing`/`unknown` create keeps the exact-receipt recovery and is never created again; startup recovery reports it once as a start failure (`process-restarted`) and hands the queued first turn back to the draft.
 
 ## Safe switch algorithm
