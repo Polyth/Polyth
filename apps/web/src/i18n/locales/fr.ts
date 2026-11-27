@@ -4672,6 +4672,7 @@ export const fr: AppMessages = {
   "toolcall.readSavedResult": "Lire le résultat enregistré",
   "toolcall.readFile": "Lire le fichier",
   "toolcall.earlierToolOutput": "Sortie précédente d’un outil",
+  "toolcall.credentialRequest": "Demande d’identifiant",
   "toolcall.savedCredentials": "Identifiants enregistrés",
   "toolcall.noSavedCredentials": "Aucun identifiant enregistré",
   "toolcall.monitoring": "Supervision",

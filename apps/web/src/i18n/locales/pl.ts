@@ -4672,6 +4672,7 @@ export const pl: AppMessages = {
   "toolcall.readSavedResult": "Odczyt zapisanego wyniku",
   "toolcall.readFile": "Odczyt pliku",
   "toolcall.earlierToolOutput": "Wcześniejsze wyjście narzędzia",
+  "toolcall.credentialRequest": "Prośba o dane logowania",
   "toolcall.savedCredentials": "Zapisane dane logowania",
   "toolcall.noSavedCredentials": "Brak zapisanych danych logowania",
   "toolcall.monitoring": "Monitorowanie",

@@ -4672,6 +4672,7 @@ export const pt: AppMessages = {
   "toolcall.readSavedResult": "Ler resultado guardado",
   "toolcall.readFile": "Ler ficheiro",
   "toolcall.earlierToolOutput": "Saída anterior da ferramenta",
+  "toolcall.credentialRequest": "Pedido de credencial",
   "toolcall.savedCredentials": "Credenciais guardadas",
   "toolcall.noSavedCredentials": "Sem credenciais guardadas",
   "toolcall.monitoring": "Monitorização",

@@ -723,6 +723,15 @@ function describePolyth(call: McpCall, value: JsonValue | undefined, context: Mc
       result: text !== undefined ? mcpResultBodies(mcpResultValue(text)) : mcpResultBodies(value),
     };
   }
+  if (tool === "polyth_credential_vault_request") {
+    return {
+      title: tr("toolcall.credentialRequest"),
+      preview: "",
+      icon: "shield",
+      request: fieldsOf(call.args, new Set(["kind"]), 4),
+      result: mcpResultBodies(value),
+    };
+  }
   if (tool === "polyth_credential_vault_list") {
     const total = resultTotal(value);
     return {

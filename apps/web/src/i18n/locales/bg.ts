@@ -4672,6 +4672,7 @@ export const bg: AppMessages = {
   "toolcall.readSavedResult": "Четене на запазен резултат",
   "toolcall.readFile": "Четене на файл",
   "toolcall.earlierToolOutput": "Предишен изход от инструмент",
+  "toolcall.credentialRequest": "Заявка за ключ",
   "toolcall.savedCredentials": "Запазени идентификационни данни",
   "toolcall.noSavedCredentials": "Няма запазени идентификационни данни",
   "toolcall.monitoring": "Наблюдение",

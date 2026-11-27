@@ -4672,6 +4672,7 @@ export const uk: AppMessages = {
   "toolcall.readSavedResult": "Прочитати збережений результат",
   "toolcall.readFile": "Прочитати файл",
   "toolcall.earlierToolOutput": "Попередній вивід інструмента",
+  "toolcall.credentialRequest": "Запит ключа",
   "toolcall.savedCredentials": "Збережені облікові дані",
   "toolcall.noSavedCredentials": "Немає збережених облікових даних",
   "toolcall.monitoring": "Моніторинг",

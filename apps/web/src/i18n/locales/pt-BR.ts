@@ -4672,6 +4672,7 @@ export const ptBR: AppMessages = {
   "toolcall.readSavedResult": "Ler resultado salvo",
   "toolcall.readFile": "Ler arquivo",
   "toolcall.earlierToolOutput": "Saída anterior da ferramenta",
+  "toolcall.credentialRequest": "Solicitação de credencial",
   "toolcall.savedCredentials": "Credenciais salvas",
   "toolcall.noSavedCredentials": "Nenhuma credencial salva",
   "toolcall.monitoring": "Monitoramento",

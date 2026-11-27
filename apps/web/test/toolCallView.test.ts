@@ -217,3 +217,15 @@ test("Antigravity native tools read as the command or file they act on", () => {
   assert.equal(classifyTool("run_command", { CommandLine: "ls" }), "shell");
   assert.equal(executionGroupLabel([tool({ tool: "run_command", input: { CommandLine: "rg foo" } })]), "Repository inspection");
 });
+
+test("a Credential Vault request row names the request, not the raw tool id", () => {
+  const request = executionPresentation(tool({
+    tool: "mcp__polyth-agent-tools__polyth_credential_vault_request",
+    status: "running",
+    input: { handle: "openrouter-api-key", label: "OpenRouter API key", purpose: "Check the balance", kind: "api_key" },
+  }));
+  assert.equal(request.label, "Credential request");
+  assert.doesNotMatch(request.label, /vault request/i);
+  assert.equal(request.preview ?? "", "");
+  assert.doesNotMatch(JSON.stringify(request.mcp?.request ?? []), /api_key/);
+});

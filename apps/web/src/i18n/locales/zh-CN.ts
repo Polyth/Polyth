@@ -4672,6 +4672,7 @@ export const zhCN: AppMessages = {
   "toolcall.readSavedResult": "读取已保存的结果",
   "toolcall.readFile": "读取文件",
   "toolcall.earlierToolOutput": "先前的工具输出",
+  "toolcall.credentialRequest": "凭据请求",
   "toolcall.savedCredentials": "已保存的凭据",
   "toolcall.noSavedCredentials": "没有已保存的凭据",
   "toolcall.monitoring": "监控",

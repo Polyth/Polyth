@@ -4675,6 +4675,7 @@ export const en = {
   "toolcall.readSavedResult": "Read saved result",
   "toolcall.readFile": "Read file",
   "toolcall.earlierToolOutput": "Earlier tool output",
+  "toolcall.credentialRequest": "Credential request",
   "toolcall.savedCredentials": "Saved credentials",
   "toolcall.noSavedCredentials": "No saved credentials",
   "toolcall.monitoring": "Monitoring",

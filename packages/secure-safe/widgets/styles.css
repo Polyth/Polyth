@@ -1,135 +1,113 @@
-.pkg-credential-vault,
-.pkg-credential-vault.credential-vault-card {
+.pkg-credential-vault {
   container: credential-vault / inline-size;
 }
 
-.pkg-credential-vault.credential-vault-card {
+/* ---- Chat request ---------------------------------------------------------
+   A sibling of the agent's question card: the frame, head and foot are the
+   host's `.question-card` family, which every Look paints (docs/dev/ui.md,
+   "Agent request cards"). This block styles only the quiet content between
+   them: the key's name, the agent's purpose, one field well, one sentence. */
+.pkg-credential-vault.credential-vault-requests {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   gap: var(--space-3);
-  padding: var(--space-3) var(--gutter);
-  border-block: 1px solid var(--border-soft);
-  background: var(--panel);
 }
 
-.pkg-credential-vault.credential-vault-card .credential-vault-heading {
+.pkg-credential-vault .credential-vault-body {
+  display: grid;
+  min-width: 0;
+}
+
+.pkg-credential-vault .credential-vault-name {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
   flex-wrap: wrap;
-  gap: var(--space-1) var(--space-3);
+  gap: 2px var(--space-2);
+  min-width: 0;
 }
 
-.pkg-credential-vault.credential-vault-card .credential-vault-title {
+.pkg-credential-vault .credential-vault-title {
   margin: 0;
-  color: var(--green-on-wash);
-  font-size: var(--font-meta);
-  font-weight: 600;
+  font-weight: 550;
 }
 
-.pkg-credential-vault.credential-vault-card .credential-vault-count,
-.pkg-credential-vault.credential-vault-card .credential-vault-security {
+.pkg-credential-vault .credential-vault-replaces {
+  color: var(--muted);
+  font-size: var(--font-meta);
+}
+
+.pkg-credential-vault .credential-vault-purpose-line {
+  max-inline-size: 65ch;
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  overflow-wrap: anywhere;
+}
+
+/* The one field: the lock screen's recipe as a host field well (Looks paint
+   it as their field and keep the input inside bare). */
+.pkg-credential-vault .credential-vault-well {
+  --credential-vault-edge: var(--borderless-edge);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: max(var(--control-h-lg), var(--tap));
+  margin-top: var(--space-3);
+  padding-inline: var(--space-3) var(--space-1);
+  border-radius: var(--radius-surface);
+  background: var(--input-bg);
+  box-shadow: inset 0 0 0 1px var(--credential-vault-edge);
+  transition: box-shadow var(--motion-fast) var(--motion-ease);
+}
+@media (hover: hover) {
+  .pkg-credential-vault .credential-vault-well:hover:not(:focus-within) { --credential-vault-edge: var(--accent-line); }
+}
+.pkg-credential-vault .credential-vault-well:focus-within { box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 3px var(--focus-wash); }
+.pkg-credential-vault .credential-vault-well[data-invalid] { --credential-vault-edge: color-mix(in srgb, var(--red) 55%, transparent); }
+
+.pkg-credential-vault .credential-vault-lock { flex: none; color: var(--muted); }
+.pkg-credential-vault .credential-vault-well:focus-within .credential-vault-lock { color: var(--text-dim); }
+
+.pkg-credential-vault .credential-vault-well > .ui-input-reveal { display: flex; flex: 1 1 auto; align-items: center; min-width: 0; }
+.pkg-credential-vault .credential-vault-well .ui-input { width: 100%; min-width: 0; padding-inline-start: 0; color: var(--text); }
+.pkg-credential-vault .credential-vault-well .ui-input::placeholder { color: var(--faint); }
+.pkg-credential-vault .credential-vault-well .ui-input:not(:placeholder-shown) { font-family: var(--mono); letter-spacing: .08em; }
+.pkg-credential-vault .credential-vault-well .ui-input-reveal > .ui-icon-btn { color: var(--faint); }
+.pkg-credential-vault .credential-vault-well:not([data-filled]) .ui-input-reveal > .ui-icon-btn { display: none; }
+.pkg-credential-vault .credential-vault-well:not([data-filled]) .ui-input-reveal > .ui-input { padding-inline-end: var(--space-2); }
+
+.pkg-credential-vault .credential-vault-note {
+  min-width: 0;
+  margin: var(--space-2) 0 0;
   color: var(--muted);
   font-size: var(--font-meta);
   line-height: var(--font-meta-lh);
 }
+.pkg-credential-vault .credential-vault-note[role="status"] { color: var(--red-on-wash, var(--red)); }
+.pkg-credential-vault .credential-vault-sep { margin-inline: .45em; color: var(--faint); }
 
-.pkg-credential-vault.credential-vault-card .credential-vault-security {
-  max-inline-size: 65ch;
-  margin: 0;
+/* The destination is a word in the sentence, not a control box. */
+.pkg-credential-vault .credential-vault-scope { display: inline; }
+.pkg-credential-vault .credential-vault-scope .picker-chip {
+  width: auto;
+  min-height: 0;
+  height: auto;
+  padding: 0 1px;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: inherit;
+  line-height: inherit;
+  gap: 2px;
+}
+@media (hover: hover) {
+  .pkg-credential-vault .credential-vault-scope .picker-chip:hover:not(:disabled) { background: transparent; color: var(--text); }
 }
 
-.pkg-credential-vault.credential-vault-card .credential-vault-request {
-  display: grid;
-  min-inline-size: 0;
-  grid-template-columns: minmax(180px, 1fr) minmax(240px, 1.5fr) auto;
-  align-items: end;
-  gap: var(--space-3);
-  margin: 0;
-  padding: var(--space-3) 0;
-  border: 0;
-  border-top: 1px solid var(--border-soft);
-}
-
-.pkg-credential-vault.credential-vault-card .credential-vault-request-legend {
-  position: absolute;
-  inline-size: 1px;
-  block-size: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-  border: 0;
-}
-
-.pkg-credential-vault.credential-vault-card .credential-vault-details,
-.pkg-credential-vault.credential-vault-card .credential-vault-value {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.pkg-credential-vault.credential-vault-card .credential-vault-details > div {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  min-width: 0;
-  font-size: var(--font-meta);
-}
-
-.pkg-credential-vault.credential-vault-card .credential-vault-details > div > span {
-  flex: 0 0 auto;
-}
-
-.pkg-credential-vault.credential-vault-card .credential-vault-details > div > :is(strong, code, p) {
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
-.pkg-credential-vault.credential-vault-card .credential-vault-details span,
-.pkg-credential-vault.credential-vault-card .credential-vault-value > span {
-  color: var(--muted);
-  font-size: var(--font-meta);
-  letter-spacing: .04em;
-  text-transform: uppercase;
-}
-
-.pkg-credential-vault.credential-vault-card .credential-vault-details :is(strong, code, p) {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-.pkg-credential-vault.credential-vault-card .credential-vault-existing {
-  color: var(--amber-on-wash);
-  font-weight: 600;
-}
-
-.pkg-credential-vault.credential-vault-card .credential-vault-value {
-  gap: var(--space-2);
-}
-
-.pkg-credential-vault.credential-vault-card .credential-vault-value .ui-input {
-  width: 100%;
-}
-
-.pkg-credential-vault.credential-vault-card .credential-vault-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  min-width: 0;
-}
-
-.pkg-credential-vault.credential-vault-card .credential-vault-actions > .ui-btn {
-  min-width: 0;
-  max-width: 100%;
-  white-space: normal;
-}
-
-.pkg-credential-vault.credential-vault-card .credential-vault-status,
+/* ---- Settings page --------------------------------------------------------- */
 .pkg-credential-vault .credential-vault-status {
   display: block;
   min-width: 0;
@@ -142,10 +120,6 @@
   font-size: var(--font-meta);
   line-height: var(--font-meta-lh);
   overflow-wrap: anywhere;
-}
-
-.pkg-credential-vault.credential-vault-card .credential-vault-request > .credential-vault-status {
-  grid-column: 1 / -1;
 }
 
 .pkg-credential-vault .credential-vault-approval {
@@ -198,27 +172,12 @@
 }
 
 @container credential-vault (max-width: 700px) {
-  .pkg-credential-vault.credential-vault-card .credential-vault-request,
   .pkg-credential-vault .credential-vault-form-row {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .pkg-credential-vault.credential-vault-card .credential-vault-actions {
-    justify-content: flex-start;
-  }
-
-  .pkg-credential-vault.credential-vault-card .credential-vault-actions > .ui-btn {
-    flex: 1 1 12rem;
   }
 
   .pkg-credential-vault .credential-vault-form-actions > .ui-btn {
     flex: 1 1 10rem;
     min-height: var(--tap);
-  }
-}
-
-@container credential-vault (max-width: 420px) {
-  .pkg-credential-vault.credential-vault-card .credential-vault-actions > .ui-btn {
-    flex-basis: 100%;
   }
 }

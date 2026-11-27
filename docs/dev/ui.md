@@ -3661,6 +3661,25 @@ pressed button and a failed send stays in the card as an inline error;
 Cmd/Ctrl+Enter moves to the next step or submits. Choosing "Other" reveals its
 text field; a ticked-but-empty Other is neither a valid answer nor sent.
 
+**Agent request cards:** whatever an agent asks of the person in the chat
+reads as one family. A Credential Vault request (`packages/secure-safe`,
+`CredentialVaultCard` in `session.timeline.after`) is built from the
+question card's own frame classes, so every Look and theme style paints both
+alike with no package-specific Look rule: `.question-card` as the frame,
+`.question-head` with a `.question-badge` (a key instead of the help mark)
+and a `.question-eyebrow` ("Agent needs a key"), and `.question-actions` with
+`.question-reject` at the start and the one primary (Save) in
+`.question-actions-end`. Between them the request stays quiet: the key's name
+in `.question-prompt` (its handle only as the tooltip), the agent's purpose
+in muted meta, one `.ui-field-well` (lock, a bare password input, the reveal
+button only once something is typed) and one sentence, "The agent won't see
+the key · only for you", whose last words are the partition picker for a
+Space admin. Save stays disabled until there is a value; Enter saves, except
+while an IME is composing. It offers no Later. The tool row of
+`polyth_credential_vault_request` is titled "Credential request" with the
+shield glyph (`toolCallView.ts`). These host classes are a shared contract for
+framework packages: renaming one means updating its package users too.
+
 **Answer later:** background work never moves what a person is typing. An
 open question and the chat's approval banner both offer a quiet **Later**
 at the end of their title (never beside Submit, where it would read as a

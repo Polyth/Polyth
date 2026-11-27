@@ -4672,6 +4672,7 @@ export const ar: AppMessages = {
   "toolcall.readSavedResult": "قراءة نتيجة محفوظة",
   "toolcall.readFile": "قراءة ملف",
   "toolcall.earlierToolOutput": "ناتج أداة سابق",
+  "toolcall.credentialRequest": "طلب بيانات اعتماد",
   "toolcall.savedCredentials": "بيانات الاعتماد المحفوظة",
   "toolcall.noSavedCredentials": "لا توجد بيانات اعتماد محفوظة",
   "toolcall.monitoring": "المراقبة",

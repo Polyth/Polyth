@@ -1,14 +1,20 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useState, type FormEvent } from "react";
 import type { SecureSafePartition } from "@polyth/contracts";
 import { replySecret } from "../../../apps/web/src/init.ts";
 import type { PendingSecret } from "../../../apps/web/src/reduce.ts";
 import { formatNumber, tr } from "../../../apps/web/src/i18n/index.ts";
-import { Button, Select, TextInput } from "../../../apps/web/src/components/ui/index.ts";
+import { Button, Icon, KeyIcon, LockIcon, Select, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 import { isImeComposing } from "@polyth/web-sdk";
 import { vaultApi, type VaultAccess } from "./vaultApi.ts";
 
-function SecretRequest({ secret, access }: { secret: PendingSecret; access: VaultAccess | null }) {
-  const requestId = useId();
+// A chat request for a credential is a sibling of the agent's question card:
+// the same frame every Look paints (`.question-card`), the same head (badge +
+// eyebrow) and foot (Reject at the start, the one primary at the end). Inside
+// it stays quiet: the key's name, the agent's purpose, one field and one
+// sentence (docs/dev/ui.md, "Agent request cards").
+function SecretRequest({ secret, access, count }: { secret: PendingSecret; access: VaultAccess | null; count: number }) {
+  const titleId = useId();
+  const noteId = useId();
   const [value, setValue] = useState("");
   // Only an admin with a personal partition chooses; everyone else's save
   // lands in their own partition (the server decides either way).
@@ -17,7 +23,8 @@ function SecretRequest({ secret, access }: { secret: PendingSecret; access: Vaul
   const [submitted, setSubmitted] = useState(false);
   const [failure, setFailure] = useState<"save" | "dismiss" | null>(null);
 
-  const save = () => {
+  const save = (event?: FormEvent) => {
+    event?.preventDefault();
     if (!value || submitted || !secret.sessionId) return;
     const writeOnlyValue = value;
     setValue("");
@@ -44,70 +51,88 @@ function SecretRequest({ secret, access }: { secret: PendingSecret; access: Vaul
   };
 
   return (
-    <fieldset className="credential-vault-request" aria-labelledby={requestId}>
-      <legend id={requestId} className="credential-vault-request-legend">
-        {tr("securesafecard.requestFor", { label: secret.label })}
-      </legend>
-      <div className="credential-vault-details">
-        <div><span>{tr("securesafecard.label")}</span><strong>{secret.label}</strong></div>
-        <div><span>{tr("securesafecard.handle")}</span><code>{secret.handle}</code></div>
-        {secret.purpose && <div><span>{tr("securesafecard.purpose")}</span><p>{secret.purpose}</p></div>}
-        {secret.existing && <div className="credential-vault-existing">{tr("securesafecard.willUpdateExistingHandle")}</div>}
-      </div>
-      <label className="credential-vault-value">
-        <span>{tr("securesafecard.credentialValue")}</span>
-        <TextInput
-          type="password"
-          autoComplete="off"
-          value={value}
-          disabled={submitted}
-          placeholder={tr("securesafecard.enterValueItWillNotBeShown")}
-          aria-label={tr("securesafecard.credentialValueForValue", { label: secret.label })}
-          onChange={(event) => {
-            setValue(event.target.value);
-            setFailure(null);
-          }}
-          onKeyDown={(event) => {
-            if (isImeComposing(event)) return;
-            if (event.key === "Enter") {
-              event.preventDefault();
-              save();
-            }
-          }}
-        />
-      </label>
-      {choosing && (
-        <div className="credential-vault-value">
-          <span aria-hidden="true">{tr("securesafecard.saveTo")}</span>
-          <Select
-            label={tr("securesafecard.saveTo")}
-            value={partition}
+    <form
+      className="question-card credential-vault-request"
+      aria-labelledby={titleId}
+      aria-describedby={noteId}
+      onSubmit={save}
+    >
+      <header className="question-head">
+        <span className="question-badge" aria-hidden="true"><Icon icon={KeyIcon} size="sm" /></span>
+        <span className="question-head-copy">
+          <span className="question-eyebrow">{tr(count > 1 ? "securesafecard.eyebrowMany" : "securesafecard.eyebrow")}</span>
+          {count > 1 && <span className="question-progress">{formatNumber(count)}</span>}
+        </span>
+      </header>
+      <div className="credential-vault-body">
+        <div className="credential-vault-name">
+          <h3 id={titleId} className="question-prompt credential-vault-title" title={secret.handle}>{secret.label}</h3>
+          {secret.existing && <span className="credential-vault-replaces">{tr("securesafecard.replacesSaved")}</span>}
+        </div>
+        {secret.purpose && <p className="credential-vault-purpose-line">{secret.purpose}</p>}
+        <div
+          className="credential-vault-well ui-field-well"
+          data-filled={value ? "true" : undefined}
+          data-invalid={failure === "save" ? "true" : undefined}
+        >
+          <Icon icon={LockIcon} size="sm" className="credential-vault-lock" />
+          <TextInput
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            value={value}
             disabled={submitted}
-            options={[
-              { value: "personal", label: tr("securesafecard.saveToMe") },
-              { value: "space", label: tr("securesafecard.saveToSpace") },
-            ]}
-            onChange={(next) => setPartition(next === "space" ? "space" : "personal")}
+            placeholder={tr("securesafecard.placeholder")}
+            aria-label={tr("securesafecard.credentialValueForValue", { label: secret.label })}
+            invalid={failure === "save"}
+            onChange={(event) => {
+              setValue(event.target.value);
+              setFailure(null);
+            }}
+            onKeyDown={(event) => {
+              // Confirming an IME candidate must not submit the form.
+              if (event.key === "Enter" && isImeComposing(event)) event.preventDefault();
+            }}
           />
         </div>
-      )}
-      <div className="credential-vault-actions">
-        <Button variant="primary" disabled={!value || submitted} onClick={save}>
-          {submitted ? tr("securesafecard.submitted") : tr("securesafecard.saveToSecureSafe")}
-        </Button>
-        <Button disabled={submitted} onClick={dismiss}>{tr("securesafecard.dismiss")}</Button>
+        <p id={noteId} className="credential-vault-note" role={failure ? "status" : undefined} aria-live={failure ? "polite" : undefined}>
+          {failure ? tr(failure === "save" ? "securesafecard.saveFailed" : "securesafecard.dismissFailed") : (
+            <>
+              {tr("securesafecard.agentWontSee")}
+              <span className="credential-vault-sep" aria-hidden="true">·</span>
+              {choosing ? (
+                <Select
+                  className="credential-vault-scope"
+                  label={tr("securesafecard.saveTo")}
+                  value={partition}
+                  disabled={submitted}
+                  searchable={false}
+                  options={[
+                    { value: "personal", label: tr("securesafecard.saveToMe") },
+                    { value: "space", label: tr("securesafecard.saveToSpace") },
+                  ]}
+                  onChange={(next) => setPartition(next === "space" ? "space" : "personal")}
+                />
+              ) : tr("securesafecard.saveToMe")}
+            </>
+          )}
+        </p>
       </div>
-      {failure && (
-        <div className="credential-vault-status" role="status" aria-live="polite">
-          {tr(failure === "save" ? "securesafecard.saveFailed" : "securesafecard.dismissFailed")}
-        </div>
-      )}
-    </fieldset>
+      <footer className="question-actions">
+        <Button size="sm" variant="ghost" className="question-reject" disabled={submitted} onClick={dismiss}>
+          {tr("securesafecard.dismiss")}
+        </Button>
+        <span className="question-actions-end">
+          <Button type="submit" size="sm" variant="primary" disabled={!value || submitted}>
+            {submitted ? tr("securesafecard.submitted") : tr("securesafecard.save")}
+          </Button>
+        </span>
+      </footer>
+    </form>
   );
 }
 
 export default function CredentialVaultCard({ secrets }: { secrets: PendingSecret[] }) {
-  const titleId = useId();
   const [access, setAccess] = useState<VaultAccess | null>(null);
   const open = secrets.length > 0;
   useEffect(() => {
@@ -118,15 +143,10 @@ export default function CredentialVaultCard({ secrets }: { secrets: PendingSecre
   }, [open]);
   if (!open) return null;
   return (
-    <section className="pkg-credential-vault credential-vault-card" aria-labelledby={titleId}>
-      <div className="credential-vault-heading">
-        <h2 id={titleId} className="credential-vault-title">{tr("securesafecard.secureSafeSaveCredential")}</h2>
-        <span className="credential-vault-count">
-          {tr("securesafecard.pendingRequestsCount", { count: formatNumber(secrets.length) })}
-        </span>
-      </div>
-      <p className="credential-vault-security">{tr("securesafecard.writeOnlySecurityNote")}</p>
-      {secrets.map((secret) => <SecretRequest key={secret.requestId} secret={secret} access={access} />)}
-    </section>
+    <div className="pkg-credential-vault credential-vault-requests">
+      {secrets.map((secret) => (
+        <SecretRequest key={secret.requestId} secret={secret} access={access} count={secrets.length} />
+      ))}
+    </div>
   );
 }
