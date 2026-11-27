@@ -1024,10 +1024,13 @@ action off a narrow phone's composer. */
 /* Rows a harness switch or runtime recovery add above the composer. The dock
    lays its children out with no gap, so the row owns its own height
    transition: a notice that appears or resolves collapses instead of popping
-   the composer. The inner box clips the row's own margins while it folds. */
+   the composer. The row clips, not its inner box: between 0fr and 1fr Chrome
+   sizes the track a second fraction smaller than the row, so a clipping track
+   would hide words still in view. */
 .composer-notice-row {
   display: grid;
   grid-template-rows: 1fr;
+  overflow: hidden;
   opacity: 1;
   transition:
     grid-template-rows var(--motion-normal) var(--motion-ease),
@@ -1039,10 +1042,7 @@ action off a narrow phone's composer. */
   opacity: 0;
 }
 
-.composer-notice-row-inner {
-  min-height: 0;
-  overflow: hidden;
-}
+.composer-notice-row-inner { min-height: 0; }
 
 /* Each wave is a mask three button-heights tall with its waterline in the
    middle. A mask-position-y of 20% + fill × 0.6 keeps the crests just below
