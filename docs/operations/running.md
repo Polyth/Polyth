@@ -189,7 +189,9 @@ packages/server/src/index.ts` under a systemd unit named `polyth.service` with
 `packages/checkout-update` when its own script lives in the checkout the package
 was loaded from. It follows the checked-out branch's upstream (`origin/devel`
 follows the development branch, `origin/master` the release branch) and names
-what runs by its commit (12 characters):
+what runs by its commit (12 characters). The package is beta and ships
+disabled: turn on **Checkout updates** in Settings → Packages, then About →
+**Update automatically**.
 
 1. Every six hours it fetches that one branch and offers its head when it
    fast-forwards `HEAD`. It never moves a checkout with commits of its own or with

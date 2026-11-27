@@ -7,6 +7,9 @@ service; this package only contributes the driver that says how, through the
 host's `SERVER_SELF_UPDATE` service (`@polyth/plugins`). Remove the folder and
 the row says the server cannot update itself; nothing else changes.
 
+It is a beta package and ships disabled: turn on **Checkout updates** in
+Settings → Packages first, then the About toggle.
+
 It contributes the driver only when the server's own script
 (`process.argv[1]`) lives in the checkout this package was loaded from. A
 packaged build has no `.git` beside `packages/`, so there it contributes

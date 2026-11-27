@@ -12,7 +12,7 @@
       "name": "Checkout updates",
       "description": "Lets a server that runs from a git checkout update itself: Settings → About → Update automatically fast-forwards its branch, rebuilds and restarts once no chat is working.",
       "core": false,
-      "enabled": true,
+      "enabled": false,
       "maturity": "beta",
       "settingsGroup": "System",
       "icon": "update",
