@@ -259,6 +259,15 @@ export const Clock: IconNode = [
   ["path", { d: "M12 6v6l4 2", key: "mmk7yg" }],
 ];
 
+export const ClockFading: IconNode = [
+  ["path", { d: "M12 2a10 10 0 0 1 7.38 16.75", key: "path-0" }],
+  ["path", { d: "M12 6v6l4 2", key: "path-1" }],
+  ["path", { d: "M2.5 8.875a10 10 0 0 0-.5 3", key: "path-2" }],
+  ["path", { d: "M2.83 16a10 10 0 0 0 2.43 3.4", key: "path-3" }],
+  ["path", { d: "M4.636 5.235a10 10 0 0 1 .891-.857", key: "path-4" }],
+  ["path", { d: "M8.644 21.42a10 10 0 0 0 7.631-.38", key: "path-5" }],
+];
+
 export const Cloud: IconNode = [
   ["path", { d: "M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z", key: "p7xjir" }],
 ];
@@ -582,13 +591,6 @@ export const History: IconNode = [
   ["path", { d: "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", key: "1357e3" }],
   ["path", { d: "M3 3v5h5", key: "1xhq8a" }],
   ["path", { d: "M12 7v5l4 2", key: "1fdv2h" }],
-];
-
-export const Hourglass: IconNode = [
-  ["path", { d: "M5 22h14", key: "path-0" }],
-  ["path", { d: "M5 2h14", key: "path-1" }],
-  ["path", { d: "M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22", key: "path-2" }],
-  ["path", { d: "M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2", key: "path-3" }],
 ];
 
 export const House: IconNode = [

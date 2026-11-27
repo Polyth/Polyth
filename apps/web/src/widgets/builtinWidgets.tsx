@@ -7,7 +7,7 @@ import { openSession, prefetchSessionTail } from "../init.ts";
 import { friendlyError } from "../settings.ts";
 import { displaySessionTitle, isPlaceholderTitle } from "../format.ts";
 import { resolveSessionStatus } from "../sessionStatus.ts";
-import { Button, Icon as UiIcon, ShieldAlertIcon, Tabs } from "../components/ui/index.ts";
+import { AwaitingIcon, Button, Icon as UiIcon, ShieldAlertIcon, Tabs, TimerIcon } from "../components/ui/index.ts";
 import { requestComposerReplace } from "../composerInsert.ts";
 import { getLocale, tr } from "../i18n/index.ts";
 import { defineWidgetPlugin, registerWidgetPlugin, type WidgetDef, type WidgetPlugin } from "./catalog.ts";
@@ -58,7 +58,12 @@ export function ChatSessionTabs({ projectId }: { projectId: string | null }) {
               ? <span className="ui-spinner ui-spinner--sm" />
               : status.kind === "needs-approval"
                 ? <UiIcon icon={ShieldAlertIcon} size="sm" />
-                : status.glyph}
+                // The navigator's own marks, not their text glyphs.
+                : status.kind === "awaiting"
+                  ? <UiIcon icon={AwaitingIcon} size="sm" />
+                  : status.kind === "rate-limited"
+                    ? <UiIcon icon={TimerIcon} size="sm" />
+                    : status.glyph}
           </span>
         )}
         <span className="widget-chat-tab-title">{displaySessionTitle(session.title, session.id, draftTitleSource(session))}</span>

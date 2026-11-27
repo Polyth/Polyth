@@ -3127,6 +3127,8 @@ export const en = {
   "sessionStatus.awaiting": "Waiting · continues by itself",
   "sessionwaits.forChat": "Continues after {title}",
   "sessionwaits.forThing": "Continues after {label}",
+  "sessionwaits.forTimer": "Continues in {duration}",
+  "sessionwaits.timerDue": "Continues now",
   "sessionwaits.anotherChat": "another chat",
   "sessionwaits.until": "until {time}",
   "sessionwaits.more": "+{count} more",

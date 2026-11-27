@@ -39,7 +39,7 @@ test("nothing that needs no person reaches the icon", () => {
   ]), { permissions: 0, questions: 0, results: 0, working: 0 });
 });
 
-test("a chat armed to wake by itself shows an hourglass, but its unread reply is still a result", () => {
+test("a chat armed to wake by itself shows the waiting clock, but its unread reply is still a result", () => {
   const waits = [{ id: "w1", kind: "session" as const, sourceSessionId: "child", since: 1 }];
   assert.deepEqual(projectRailStatus([
     session({ waits, attention: attention({ unread: 1 }) }),

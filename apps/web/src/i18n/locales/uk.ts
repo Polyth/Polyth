@@ -3124,6 +3124,8 @@ export const uk: AppMessages = {
   "sessionStatus.awaiting": "Чекає · продовжить сама",
   "sessionwaits.forChat": "Продовжить після {title}",
   "sessionwaits.forThing": "Продовжить після {label}",
+  "sessionwaits.forTimer": "Продовжить через {duration}",
+  "sessionwaits.timerDue": "Зараз продовжить",
   "sessionwaits.anotherChat": "інший чат",
   "sessionwaits.until": "до {time}",
   "sessionwaits.more": "ще {count}",

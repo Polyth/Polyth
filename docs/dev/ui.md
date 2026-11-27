@@ -3360,20 +3360,26 @@ the session is opened instead of flipping once its full projection loads.
 
 **Waiting chats.** A chat with something armed to wake it
 (`SessionProjection.waits`: a chat it watches with `wake` delivery, a
-`polyth_wait`) resolves to `awaiting`: a calm Lucide `Hourglass` lead mark in
-`--muted` (no disc), drawn at the pin's size in the sidebar and at the running
-ring's 14px on the phone, so it reads quieter than live or attention marks, and
-"Waiting · continues by itself" in the sidebar, phone
-navigator, recent list and phone session header. Attention, live work, a
+`polyth_wait`) resolves to `awaiting`: a calm Lucide `ClockFading` lead mark
+(`AwaitingIcon`) in `--muted` (no disc), drawn at the pin's size in the sidebar
+and at the running ring's 14px on the phone, so it reads quieter than live or
+attention marks and keeps the round footprint of the running ring and the
+limit timer, and "Waiting · continues by itself" in the sidebar, phone
+navigator, recent list, canvas chat tabs and phone session header. Attention, live work, a
 rate-limit resume, a failure and a reconnect outrank it; it outranks an unread
 reply, which the project rail still counts as a result. At rest the pending
 stack above the composer shows one `SessionWaitsLine` under the answer-later
 line, built like the suggestion line on the stack's grid (composer card column,
-hourglass on `--composer-stack-mark`, words from `--composer-stack-text` in
+the waiting clock on `--composer-stack-mark`, words from `--composer-stack-text` in
 `--font-composer-stack`, no plate): "Continues after «Title»" with the title in
 `--text` at weight 550 as the line's one stronger ink, then faint
-"· until 14:30" for a bounded wait and "· +N more" for several (a
-`polyth_wait` reads "Continues after <label>"). The waited-on chat's title
+"· until 2:30 PM" for a bounded wait (the locale's clock without a leading
+zero; "tomorrow", a weekday or the date when it is not today) and "· +N more"
+for several (a `polyth_wait` reads "Continues after <label>"). A `polyth_wait`
+timer (`kind: "seconds"`) never shows its raw label ("14400 seconds"): it reads
+"Continues in 3h 52m · 1:20 PM", the time left in whole minutes rounded up
+(seconds only in the last minute) as the stronger ink, ticking on the shared
+one-second clock, and the time it continues; once due, "Continues now". The waited-on chat's title
 comes only from chats this client already holds, otherwise "another chat";
 when it is held the line hugs its words and is a button that opens it
 (cross-project too), with the suggestion line's hover. The line folds away with the other notice rows

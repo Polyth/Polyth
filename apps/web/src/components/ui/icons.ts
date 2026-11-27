@@ -53,6 +53,7 @@ const CirclePlus = createIcon("circle-plus", nodes.CirclePlus, ["plus-circle"]);
 const Clapperboard = createIcon("clapperboard", nodes.Clapperboard);
 const ClipboardCheck = createIcon("clipboard-check", nodes.ClipboardCheck);
 const Clock = createIcon("clock", nodes.Clock);
+const ClockFading = createIcon("clock-fading", nodes.ClockFading);
 const Cloud = createIcon("cloud", nodes.Cloud);
 const CloudCog = createIcon("cloud-cog", nodes.CloudCog);
 const Code = createIcon("code", nodes.Code);
@@ -104,7 +105,6 @@ const Heading = createIcon("heading", nodes.Heading);
 const Heart = createIcon("heart", nodes.Heart);
 const HeartPulse = createIcon("heart-pulse", nodes.HeartPulse);
 const History = createIcon("rotate-ccw-clock", nodes.History, ["history"]);
-const Hourglass = createIcon("hourglass", nodes.Hourglass);
 const House = createIcon("house", nodes.House, ["home"]);
 const Image = createIcon("image", nodes.Image);
 const Info = createIcon("info", nodes.Info);
@@ -266,7 +266,8 @@ export {
   SquareCheckBig as SelectIcon,
   CircleCheck as SuccessIcon,
   Timer as TimerIcon,
-  Hourglass as HourglassIcon,
+  // armed to continue by itself later (a polyth_wait, a watched chat)
+  ClockFading as AwaitingIcon,
   CircleAlert as ErrorIcon,
   TriangleAlert as WarningIcon,
   Info as InfoIcon,

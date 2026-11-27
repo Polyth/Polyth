@@ -3124,6 +3124,8 @@ export const ar: AppMessages = {
   "sessionStatus.awaiting": "في الانتظار · سيتابع تلقائيًا",
   "sessionwaits.forChat": "يتابع بعد {title}",
   "sessionwaits.forThing": "يتابع بعد {label}",
+  "sessionwaits.forTimer": "يتابع خلال {duration}",
+  "sessionwaits.timerDue": "يتابع الآن",
   "sessionwaits.anotherChat": "محادثة أخرى",
   "sessionwaits.until": "حتى {time}",
   "sessionwaits.more": "{count} أخرى",

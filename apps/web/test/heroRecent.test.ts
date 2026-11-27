@@ -215,7 +215,7 @@ test("the paging query narrows on the server only for exactly one project", () =
   assert.equal(heroRecentPageSize(prefs({ limit: 12 })), 12);
 });
 
-test("limit-waiting and awaiting recent rows use the navigator's timer and hourglass icons, not the emoji glyph", async () => {
+test("limit-waiting and awaiting recent rows use the navigator's timer and waiting-clock icons, not the emoji glyph", async () => {
   const surface = await readFile(new URL("../src/components/workspace/builtinSurfaces.tsx", import.meta.url), "utf8");
   const body = surface.slice(surface.indexOf("function RecentSessions"), surface.indexOf("// UX-TIMELINE-LAYOUT-01"));
   assert.match(body, /status\.kind === "rate-limited" \|\| status\.kind === "awaiting" \? \(\s*<span className="hero-recent-icon" aria-hidden><MobileStatusIcon kind=\{status\.kind\} \/><\/span>/);

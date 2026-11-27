@@ -1,10 +1,10 @@
 import UiIcon from "../ui/Icon.tsx";
 import Spinner from "../ui/Spinner.tsx";
 import {
+  AwaitingIcon,
   ChatIcon,
   ErrorIcon,
   HelpIcon,
-  HourglassIcon,
   RefreshIcon,
   ShieldIcon,
   SuccessIcon,
@@ -34,7 +34,7 @@ export function MobileStatusIcon({ kind }: { kind: MobileStatusKind }) {
     case "rate-limited":
       return <UiIcon icon={TimerIcon} size="sm" className="mobile-nav-state-icon" />;
     case "awaiting":
-      return <UiIcon icon={HourglassIcon} size="sm" className="mobile-nav-state-icon" />;
+      return <UiIcon icon={AwaitingIcon} size="sm" className="mobile-nav-state-icon" />;
     case "epoch-pending":
       return <UiIcon icon={WarningIcon} size="sm" className="mobile-nav-state-icon" />;
     case "reconciling":

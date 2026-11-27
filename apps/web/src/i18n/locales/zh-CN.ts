@@ -3124,6 +3124,8 @@ export const zhCN: AppMessages = {
   "sessionStatus.awaiting": "等待中 · 会自行继续",
   "sessionwaits.forChat": "{title} 完成后继续",
   "sessionwaits.forThing": "{label} 结束后继续",
+  "sessionwaits.forTimer": "{duration}后继续",
+  "sessionwaits.timerDue": "即将继续",
   "sessionwaits.anotherChat": "另一个聊天",
   "sessionwaits.until": "至 {time}",
   "sessionwaits.more": "另外 {count} 项",

@@ -53,7 +53,7 @@ import {
 import { Icon } from "../../icons.tsx";
 import UiIcon from "../ui/Icon.tsx";
 import Badge from "../ui/Badge.tsx";
-import { ArchiveIcon, ChevronRightIcon, MentionIcon, NewWindowIcon, PeopleIcon, SharedIcon, HourglassIcon, ShieldAlertIcon, SplitViewIcon, TimerIcon } from "../ui/icons.ts";
+import { ArchiveIcon, AwaitingIcon, ChevronRightIcon, MentionIcon, NewWindowIcon, PeopleIcon, SharedIcon, ShieldAlertIcon, SplitViewIcon, TimerIcon } from "../ui/icons.ts";
 import { getLocale, tr } from "../../i18n/index.ts";
 import {
   arrangeSessions, getVisibleSessionCount, isIsolatedSession, sessionGroupsOf, setVisibleSessionCount,
@@ -151,7 +151,7 @@ function LeadMark({ mark, projectMark }: { mark: SessionLeadMark | null; project
     case "rate-limited":
       return <span className="session-lead-mark rate-limited" aria-hidden="true"><UiIcon icon={TimerIcon} size="sm" /></span>;
     case "awaiting":
-      return <span className="session-lead-mark awaiting" aria-hidden="true"><UiIcon icon={HourglassIcon} size="sm" /></span>;
+      return <span className="session-lead-mark awaiting" aria-hidden="true"><UiIcon icon={AwaitingIcon} size="sm" /></span>;
     case "unread":
       return <span className="session-lead-dot" aria-hidden="true" />;
     case "pin":

@@ -3124,6 +3124,8 @@ export const bg: AppMessages = {
   "sessionStatus.awaiting": "Чака · ще продължи само",
   "sessionwaits.forChat": "Продължава след {title}",
   "sessionwaits.forThing": "Продължава след {label}",
+  "sessionwaits.forTimer": "Продължава след {duration}",
+  "sessionwaits.timerDue": "Продължава сега",
   "sessionwaits.anotherChat": "друг чат",
   "sessionwaits.until": "до {time}",
   "sessionwaits.more": "още {count}",

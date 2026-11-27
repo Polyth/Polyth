@@ -1,10 +1,10 @@
 /* "Continues after «Title»" (SessionWaitsLine.tsx): one plateless line of the
    pending stack above the composer (docs/dev/ui.md "Waiting chats"). It is
    the suggestion line's anatomy on the stack's grid: the composer card's
-   column (as the answer-later line above it), the hourglass centred on
+   column (as the answer-later line above it), the waiting clock centred on
    --composer-stack-mark, the words from --composer-stack-text in the stack's
-   type and wash-aware inks. The waited-on title is the line's one stronger
-   ink; time and "+N more" trail in the faint ink. No plate, border or shadow
+   type and wash-aware inks. The waited-on title (a timer's time left) is the
+   line's one stronger ink; time and "+N more" trail in the faint ink. No plate, border or shadow
    at rest in any look; hover is the suggestion line's own. */
 .session-waits {
   min-inline-size: 0; box-sizing: border-box;

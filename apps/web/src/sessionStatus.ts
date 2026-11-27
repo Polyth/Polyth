@@ -166,7 +166,7 @@ export function projectRailStatus(
     if (kind === "needs-approval") status.permissions += 1;
     else if (kind === "needs-reply") status.questions += 1;
     else if (kind === "working" || kind === "reconciling") status.working += 1;
-    // A waiting chat's row shows the hourglass, but its unread reply is still
+    // A waiting chat's row shows the waiting clock, but its unread reply is still
     // a result to read.
     else if ((kind === "unread" || (kind === "awaiting" && (session.attention?.unread ?? 0) > 0))
       && (!session.parentId || session.forkOf) && !session.muted) status.results += 1;

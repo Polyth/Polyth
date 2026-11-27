@@ -3124,6 +3124,8 @@ export const es: AppMessages = {
   "sessionStatus.awaiting": "Esperando · sigue por sí solo",
   "sessionwaits.forChat": "Continúa después de {title}",
   "sessionwaits.forThing": "Continúa después de {label}",
+  "sessionwaits.forTimer": "Continúa en {duration}",
+  "sessionwaits.timerDue": "Continúa ahora",
   "sessionwaits.anotherChat": "otro chat",
   "sessionwaits.until": "hasta las {time}",
   "sessionwaits.more": "{count} más",

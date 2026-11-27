@@ -3124,6 +3124,8 @@ export const pl: AppMessages = {
   "sessionStatus.awaiting": "Czeka · wznowi sam",
   "sessionwaits.forChat": "Wznowi po {title}",
   "sessionwaits.forThing": "Wznowi po {label}",
+  "sessionwaits.forTimer": "Wznowi za {duration}",
+  "sessionwaits.timerDue": "Wznawia teraz",
   "sessionwaits.anotherChat": "inny czat",
   "sessionwaits.until": "do {time}",
   "sessionwaits.more": "jeszcze {count}",
