@@ -110,33 +110,38 @@ function SessionHeroBody({ starterContext }: { starterContext: StarterContext })
 
   return (
     <div className="hero-body customize-zone" {...editGesture}>
-      {!showGreeting ? null : greeting === undefined && isPersonalProject(project)
-        // The personal project is not a place the person chose; don't name it.
-        ? <h2>{tr("personalproject.greeting")}</h2>
-        : greeting === undefined
-        ? <h2>{tr("workspace.builtinsurfaces.whatAreWeWorkingOnIn")}{" "}<span className="polyth-gradient">{name}</span>.</h2>
-        : greeting && <h2>{greeting.map((part, index) => part.kind === "name"
-          ? <span key={index} className="polyth-gradient">{name}</span>
-          : part.text)}</h2>}
-      <HeroWidgetHost projectId={projectId}>
-        <SlotHost
-          slot="session.empty.widgets"
-          context={{
-            projectId,
-            chips,
-            runStarter,
-          }}
-          customizable
-          placed={false}
-        />
-        <HeroBoardItems projectId={projectId} />
-      </HeroWidgetHost>
-      <HeroEditToolbar />
-      {/* The screen's Customize panel — greeting, widgets, Recent options and
-          the composer's rows and buttons. A mouse reaches its pencil with
-          Shift or the workspace Edit mode; touch with a long press on the
-          screen, which works even when every piece is switched off. */}
-      <HeroCustomizeButton />
+      {/* The stage is the screen's content column. Shift over the screen or
+          the workspace Edit mode frames it as one zone, with the zone's
+          Add widget / Customize bar right under it. */}
+      <div className="hero-stage">
+        {!showGreeting ? null : greeting === undefined && isPersonalProject(project)
+          // The personal project is not a place the person chose; don't name it.
+          ? <h2>{tr("personalproject.greeting")}</h2>
+          : greeting === undefined
+          ? <h2>{tr("workspace.builtinsurfaces.whatAreWeWorkingOnIn")}{" "}<span className="polyth-gradient">{name}</span>.</h2>
+          : greeting && <h2>{greeting.map((part, index) => part.kind === "name"
+            ? <span key={index} className="polyth-gradient">{name}</span>
+            : part.text)}</h2>}
+        <HeroWidgetHost projectId={projectId}>
+          <SlotHost
+            slot="session.empty.widgets"
+            context={{
+              projectId,
+              chips,
+              runStarter,
+            }}
+            customizable
+            placed={false}
+          />
+          <HeroBoardItems projectId={projectId} />
+        </HeroWidgetHost>
+        <HeroEditToolbar />
+        {/* The screen's Customize panel — greeting, widgets, Recent options
+            and the composer's rows and buttons. A mouse reaches its bar with
+            Shift or the workspace Edit mode; touch with a long press on the
+            screen, which works even when every piece is switched off. */}
+        <HeroCustomizeButton />
+      </div>
     </div>
   );
 }

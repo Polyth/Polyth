@@ -2228,6 +2228,7 @@ export const uk: AppMessages = {
   "sidebar.navigatorActions": "Швидкі дії",
   "sidebar.editNavigatorActions": "Змінити швидкі дії",
   "sidebar.navigatorActionsMore": "Ще…",
+  "sidebar.navigatorActionsNote": "Перші {count} видно рядками, решта чекає в «Ще…»",
   "sidebar.showInList": "Показувати в списку",
   "sidebar.navigatorActionsReset": "Скинути до типових",
   "sidebar.serverConnectionDetails": "Параметри підключення до сервера",

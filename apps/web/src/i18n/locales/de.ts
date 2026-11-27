@@ -2228,6 +2228,7 @@ export const de: AppMessages = {
   "sidebar.navigatorActions": "Schnellaktionen",
   "sidebar.editNavigatorActions": "Schnellaktionen bearbeiten",
   "sidebar.navigatorActionsMore": "Mehr…",
+  "sidebar.navigatorActionsNote": "Die ersten {count} erscheinen als Zeilen, der Rest unter „Mehr…“",
   "sidebar.showInList": "In der Liste zeigen",
   "sidebar.navigatorActionsReset": "Auf Standard zurücksetzen",
   "sidebar.serverConnectionDetails": "Serververbindungsdetails",

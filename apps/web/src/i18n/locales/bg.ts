@@ -2228,6 +2228,7 @@ export const bg: AppMessages = {
   "sidebar.navigatorActions": "Бързи действия",
   "sidebar.editNavigatorActions": "Редактиране на бързите действия",
   "sidebar.navigatorActionsMore": "Още…",
+  "sidebar.navigatorActionsNote": "Първите {count} се виждат като редове, останалите чакат в „Още…“",
   "sidebar.showInList": "Показване в списъка",
   "sidebar.navigatorActionsReset": "Възстановяване по подразбиране",
   "sidebar.serverConnectionDetails": "Подробности за връзката със сървъра",

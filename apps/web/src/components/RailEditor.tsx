@@ -84,7 +84,9 @@ export default function RailEditor({
   candidatesLabel,
   note,
 }: {
-  slot: UiSlot;
+  /** The zone's slot; a zone that is not a widget slot (the navigator's
+   *  quick actions) omits it and passes its own `dragId`. */
+  slot?: UiSlot;
   title: string;
   entries: readonly RailEditorEntry[];
   /** Persist a new order of the shown keys; omit for zones without order. */
@@ -108,7 +110,7 @@ export default function RailEditor({
   const byKey = new Map(sections.shown.map((entry) => [entry.key, entry]));
   const canReorder = reorder !== undefined && !query && shownKeys.length > 1;
   const drag = useRailDragZone({
-    id: dragId ?? `rail-editor:${slot}`,
+    id: dragId ?? `rail-editor:${slot ?? "zone"}`,
     axis: "y",
     ids: shownKeys,
     isDraggable: () => canReorder,

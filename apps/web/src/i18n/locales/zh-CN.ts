@@ -2228,6 +2228,7 @@ export const zhCN: AppMessages = {
   "sidebar.navigatorActions": "快捷操作",
   "sidebar.editNavigatorActions": "编辑快捷操作",
   "sidebar.navigatorActionsMore": "更多…",
+  "sidebar.navigatorActionsNote": "前 {count} 项显示为行，其余在“更多…”中",
   "sidebar.showInList": "在列表中显示",
   "sidebar.navigatorActionsReset": "恢复默认",
   "sidebar.serverConnectionDetails": "服务器连接详情",

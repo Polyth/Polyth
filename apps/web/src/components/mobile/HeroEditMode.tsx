@@ -17,7 +17,7 @@ import { Button, PlusIcon, ViewOptionsIcon } from "../ui/index.ts";
 export const HERO_LONG_PRESS_MS = 550;
 const MOVE_TOLERANCE = 6;
 /** A press here edits text or is already an edit control. */
-const NO_LONG_PRESS = "input, textarea, select, [contenteditable]:not([contenteditable='false']), [role='textbox'], .hero-widget-edit, .hero-edit-toolbar, .hero-customize-trigger";
+const NO_LONG_PRESS = "input, textarea, select, [contenteditable]:not([contenteditable='false']), [role='textbox'], .hero-widget-edit, .hero-edit-toolbar, .hero-zone-bar";
 
 /** True for a target inside the hero's own DOM. React events bubble through
  *  portals, so a press inside the Customize sheet reaches the hero's handlers
@@ -94,7 +94,7 @@ export function useHeroEditGesture(projectId: string | null) {
         return;
       }
       const target = ownTarget(event);
-      if (editing && target && !target.closest(".hero-widget, .hero-edit-toolbar, .hero-customize-trigger")) setHeroEditing(false);
+      if (editing && target && !target.closest(".hero-widget, .hero-edit-toolbar, .hero-zone-bar")) setHeroEditing(false);
     },
   };
 }

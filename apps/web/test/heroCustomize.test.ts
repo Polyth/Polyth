@@ -28,6 +28,7 @@ register("./tsxHooks.mjs", import.meta.url);
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { HeroCustomizeButton } = await import("../src/components/mobile/HeroCustomize.tsx");
+const { closeHeroPanel } = await import("../src/heroEditing.ts");
 const prefsModule = await import("../src/heroWidgetPrefs.ts");
 const { registerWidget } = await import("../src/widgets/catalog.ts");
 const { ensureWidgets, getWidgetLayout, updateWidgetLayout, applyWidgetLayoutMutations } = await import("../src/widgets/widgetLayout.ts");
@@ -77,14 +78,15 @@ const click = async (element: Element | null | undefined) => {
   await settle();
 };
 
-test("the pencil opens one panel that lists every piece of the new chat", async () => {
+test("the zone bar's Customize button opens one panel that lists every piece of the new chat", async () => {
   setHeroWidgetPrefs(defaultHeroWidgetPrefs());
   const { root } = await mount();
-  assert.equal(trigger().textContent, "", "the trigger is glyph-only, not a labelled pill");
-  assert.equal(trigger().getAttribute("aria-label"), "Customize new chat");
-  assert.ok(trigger().querySelector("svg"), "the pencil carries its glyph");
-  assert.equal(document.querySelectorAll(".hero-customize-trigger").length, 1, "one trigger, not a pill plus a pencil");
-  assert.ok(trigger().classList.contains("zone-customize-trigger"), "Shift or Edit mode reveals it, like every zone's pencil");
+  assert.equal(trigger().textContent, "Customize new chat", "the trigger says what it does, not a bare corner pencil");
+  assert.ok(trigger().querySelector("svg"), "the button keeps its pencil glyph");
+  assert.equal(document.querySelectorAll(".hero-customize-trigger").length, 1, "one Customize trigger");
+  const bar = trigger().closest(".hero-zone-bar");
+  assert.ok(bar?.classList.contains("zone-customize-trigger"), "Shift or Edit mode reveals the bar, like every zone's pencil");
+  assert.equal(bar?.getAttribute("role"), "toolbar");
   assert.equal(trigger().getAttribute("data-customized"), null);
   assert.equal(trigger().getAttribute("aria-expanded"), "false");
 
@@ -100,18 +102,38 @@ test("the pencil opens one panel that lists every piece of the new chat", async 
   document.body.innerHTML = "";
 });
 
-test("the pencil is the screen's only trigger and opens the same Customize panel", async () => {
+test("the zone bar is the screen's only trigger and opens the same Customize panel", async () => {
   setHeroWidgetPrefs(defaultHeroWidgetPrefs());
   const { root } = await mount();
   const pencil = trigger();
-  assert.ok(pencil, "the hero carries its customize pencil");
-  assert.equal(pencil.getAttribute("aria-label"), "Customize new chat");
+  assert.ok(pencil, "the hero carries its Customize button");
+  assert.equal(document.querySelectorAll(".hero-zone-bar").length, 1);
   assert.equal(document.querySelector(".hero-zone-edit-button"), null, "the old edit-mode duplicate is gone");
   await click(pencil);
   assert.equal(pencil.getAttribute("aria-expanded"), "true");
+  assert.equal(document.querySelector(".hero-zone-bar")?.getAttribute("data-open"), "true", "the bar stays up while its panel is open");
   assert.equal(document.querySelectorAll(".hero-customize-panel").length, 1);
   await act(async () => { root.unmount(); });
   document.body.innerHTML = "";
+});
+
+test("the zone bar's Add widget opens the panel with the widget list already unfolded", async () => {
+  setHeroWidgetPrefs(defaultHeroWidgetPrefs());
+  const { root } = await mount();
+  const add = document.querySelector(".hero-zone-add") as HTMLButtonElement;
+  assert.equal(add?.textContent, "Add widget");
+  try {
+    await click(add);
+    assert.equal(trigger().getAttribute("aria-expanded"), "true");
+    assert.equal(document.querySelector(".hero-customize-panel .hero-customize-add-row")?.getAttribute("aria-expanded"), "true",
+      "the Add widget row opens straight away");
+    assert.ok(document.querySelector(".hero-customize-add > .hero-customize-nested"));
+  } finally {
+    // The request is shared UI state; leave it closed for the next mount.
+    await act(async () => { closeHeroPanel(); });
+    await act(async () => { root.unmount(); });
+    document.body.innerHTML = "";
+  }
 });
 
 test("Shortcuts are managed from Customize: its button closes the panel and opens the picker", async () => {
@@ -328,16 +350,20 @@ test("sorting picks the nearest centre in a list or a grid, and keys clamp at th
   assert.equal(sortKeyTarget("Enter", 1, 3), null);
 });
 
-test("the Customize pencil sits in the hero's top-right corner", async () => {
+test("the zone bar hangs centred under the framed content column without moving it", async () => {
   const { readFile } = await import("node:fs/promises");
   const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
-  const rule = css.slice(css.indexOf(".hero-body > .hero-customize-trigger {"), css.indexOf(".hero-customize-trigger[data-customized"));
-  assert.match(rule, /position: absolute/);
-  assert.match(rule, /top: var\(--space-2\)/);
-  assert.match(rule, /inset-inline-end: calc\(var\(--rail-strip-width-right/);
+  const rule = css.slice(css.indexOf(".hero-stage > .hero-zone-bar {"), css.indexOf(".hero-zone-bar > .ui-btn"));
+  assert.match(rule, /position: absolute/, "revealing it never reflows the screen");
   assert.match(rule, /z-index: 1/);
-  assert.doesNotMatch(rule, /margin-inline-start: max/);
-  assert.doesNotMatch(rule, /align-self: flex-start/);
+  assert.match(rule, /margin-inline: auto/, "centred under the column, not lost in a corner");
+  assert.doesNotMatch(rule, /--rail-strip-width-right/, "no longer pinned beside the launcher strip");
+  // Hidden at rest it waits inside the column, so it never adds scroll
+  // height; revealed, it drops under the frame.
+  assert.match(css, /\.hero-stage > \.hero-zone-bar \{[^}]*inset-block-end: 0/);
+  assert.match(css, /body\[data-ui-editing\] \.hero-stage > \.hero-zone-bar[^{]*\{[^}]*inset-block-start: calc\(100% \+ var\(--hero-zone-pad\)/);
+  // The frame is the same accent wash and hairline as every other zone.
+  assert.match(css, /body\[data-ui-editing\] \.hero-body > \.hero-stage \{[^}]*var\(--accent-wash\)[^}]*var\(--accent-line\)/);
 });
 
 test("Apps tiles take every colour from the active theme", async () => {

@@ -1343,7 +1343,16 @@ open beside themselves so the rail stays visible); phones get a tall sheet.
 The panel shows "Shown here" as single-line rows in rail order (drag, or
 Alt+↑/↓ on the handle, through the shared `railDrag.ts` engine; minus removes),
 then compact tool and widget tiles. Search appears only past
-`RAIL_EDITOR_SEARCH_THRESHOLD` items.
+`RAIL_EDITOR_SEARCH_THRESHOLD` items. A zone that is not a widget slot (the
+navigator's New chat + quick actions block) omits `slot` and passes its own
+`dragId` and entries.
+
+The pencils are revealed by the workspace Edit mode or by Shift held with a
+mouse (`useShiftArmed.ts`, which raises `body[data-shift-held]`). While a text
+field has focus, Shift is mostly a capital letter or Shift+Enter, so there it
+arms only after `SHIFT_HOLD_IN_TEXT_MS` (500 ms) held alone; any other key
+cancels the hold. Without that, the new chat — whose composer keeps focus —
+could never be customized with Shift (`customizeZones.test.ts`).
 
 One home per icon (`railPlacement.ts`): a capability launcher lives in exactly
 one place — the top rail (primary tier), the right rail (more tier) or one
@@ -2957,11 +2966,16 @@ usable with the main checkout while branch/worktree choices refresh.
 
 **New Chat Customize** (`components/mobile/HeroCustomize.tsx`): the fresh
 chat's Customize panel has two entries, one per input. With a mouse, the
-hero's pencil (top-right corner, accent glyph once anything differs from
-default) is a customization-zone trigger (`zone-customize-trigger`): hidden at
-rest and shown while Shift is held over the screen or the workspace Edit mode
-is on, which also outline the tiles and let them reorder by drag; the screen
-gets no zone wash. On touch, a long press anywhere on the screen
+screen is one customization zone: Shift held over it or the workspace Edit
+mode frames its content column (`.hero-stage`: greeting and widgets) with the
+same accent wash and hairline as every other zone — drawn by a spread shadow and an outline,
+so nothing moves — instead of washing the whole empty screen, outlines the
+tiles and lets them reorder by drag. Centred under the frame hangs the zone
+bar (`.hero-zone-bar`, a `zone-customize-trigger`, absolute so revealing it
+never reflows; hidden, it waits inside the column and adds no scroll height):
+*Add widget* (opens the panel with Add widget folded out) and the labelled
+*Customize new chat* button, whose pencil turns accent once anything differs
+from default. The bar stays up while its panel is open. On touch, a long press anywhere on the screen
 (`HeroEditMode.tsx`, 550 ms, not on text fields, cancelled by a 6 px move)
 enters the **edit mode** (`heroEditing.ts`, UI state only): the click that
 ends the hold is swallowed, the tiles wobble and take no taps, each gets a
@@ -6259,9 +6273,14 @@ by `apps/web/test/sidebarFolderMode.test.ts`.
 one: `[collapse 28] [search] [filter 32]`, then a full-width New chat row, then
 the chosen package actions, each a full-width row with its icon and label
 (`Quick actions`; capability rows from `useResolvedCapabilities()`, default
-Agents `schedule` then `planner`, capped at four plus a `More…` row, edited from
-the block's pencil or the list options and stored device-locally under
-`polyth.sidebar.navigatorActions`). A row whose capability owns a package
+Agents `schedule` then `planner`, capped at four plus a `More…` row, stored
+device-locally under `polyth.sidebar.navigatorActions`). The New chat row and
+the actions are one customization zone (`.sidebar-nav-block.customize-zone`):
+Shift over it or the Edit mode washes it and shows its pencil on the New chat
+row's trailing edge in place of the key hint; the pencil opens the shared zone
+editor (`RailEditor`) — drag or Alt+Arrow to reorder, minus to remove, a tile
+to add, *Reset to default* in the footer. The list options keep a checkbox
+list of the same choices. A row whose capability owns a package
 section (`meta.navigatorSection`, e.g. Agents) unfolds that section under
 itself, so the project's list does not repeat it. The Project rail starts from its project
 row instead and drops the collapse toggle, which lives in the rail. The

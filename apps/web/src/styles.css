@@ -1331,23 +1331,33 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   flex-direction: column;
   gap: 2px;
 }
-/* The block's edit menu rides the first row's trailing edge (the child
-   selector outranks the icon button's own `position: relative`). */
-.sidebar-nav-actions > .sidebar-nav-actions-edit {
+/* The block is one customization zone (Sidebar.tsx): Shift over it or the
+   Edit mode washes it like every other zone and shows its pencil, which
+   rides the New chat row's trailing edge (the child selector outranks the
+   icon button's own `position: relative`). Absolute, so revealing it never
+   moves a row; the row's key hint makes way while it shows. */
+.sidebar-nav-block > .sidebar-nav-actions-edit {
   position: absolute;
-  inset-block-start: 2px;
-  inset-inline-end: 2px;
+  z-index: 1;
+  inset-block-start: 10px;
+  inset-inline-end: calc(var(--nav-gutter) + 4px);
   width: 28px;
   height: 28px;
   min-width: 28px;
-  color: var(--muted);
+  color: var(--accent-on-wash);
 }
 .sidebar-nav-actions-edit svg { width: 14px; height: 14px; }
-.sidebar-nav-actions:has(.sidebar-nav-actions-edit) > .sidebar-nav-row:first-child { --nav-row-end: 34px; }
+@media (hover: hover) and (pointer: fine) {
+  body[data-shift-held] .sidebar-nav-block:hover .sidebar-nav-hint,
+  body[data-ui-editing] .sidebar-nav-block .sidebar-nav-hint,
+  .sidebar-nav-block:has(> .sidebar-nav-actions-edit[aria-expanded="true"]) .sidebar-nav-hint { visibility: hidden; }
+}
+@media (min-width: 481px) and (any-pointer: coarse) {
+  body[data-ui-editing] .sidebar-nav-block .sidebar-nav-hint { visibility: hidden; }
+}
 /* An action row that owns a package section (agents): the row opens the
    capability, a chevron on its trailing edge unfolds the section under it,
-   and folded the row carries the section's short summary. On the first row
-   the chevron steps inside the block's edit button. */
+   and folded the row carries the section's short summary. */
 .sidebar-nav-item {
   position: relative;
   display: flex;
@@ -1355,9 +1365,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   min-width: 0;
 }
 .sidebar-nav-item > .sidebar-nav-row { --nav-row-end: 34px; }
-.sidebar-nav-actions:has(.sidebar-nav-actions-edit) > .sidebar-nav-item:first-child > .sidebar-nav-row { --nav-row-end: 64px; }
 .sidebar-nav-item[data-empty] > .sidebar-nav-row { --nav-row-end: 10px; }
-.sidebar-nav-actions:has(.sidebar-nav-actions-edit) > .sidebar-nav-item[data-empty]:first-child > .sidebar-nav-row { --nav-row-end: 34px; }
 .sidebar-nav-summary {
   display: inline-flex;
   flex: none;
@@ -1374,7 +1382,6 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   min-width: 28px;
   color: var(--muted);
 }
-.sidebar-nav-actions:has(.sidebar-nav-actions-edit) > .sidebar-nav-item:first-child > .sidebar-nav-disclosure { inset-inline-end: 32px; }
 .sidebar-nav-disclosure svg {
   width: 14px;
   height: 14px;
@@ -1404,12 +1411,6 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   .sidebar-nav-action[aria-expanded="true"] { background: var(--elevated); color: var(--text); }
   .sidebar-nav-actions-edit:hover:where(:not(:disabled)),
   .sidebar-nav-disclosure:hover:where(:not(:disabled)) { background: var(--elevated); color: var(--text); }
-}
-@media (hover: hover) and (pointer: fine) {
-  .sidebar-nav-actions-edit { opacity: 0; transition: opacity var(--motion-fast) var(--motion-ease); }
-  .sidebar-nav-actions:hover .sidebar-nav-actions-edit,
-  .sidebar-nav-actions:focus-within .sidebar-nav-actions-edit,
-  .sidebar-nav-actions-edit[aria-expanded="true"] { opacity: 1; }
 }
 /* Collapsed navigator rails: a soft square New chat under the expand toggle,
    then a short divider before the project glyphs. */
@@ -13439,27 +13440,63 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   .hero-widget-host { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .hero-widget[data-size="standard"] { grid-column: 1 / -1; }
 }
-/* The screen's pencil is a customization-zone trigger (hidden at rest, shown
-   by Shift over the screen or the workspace Edit mode; never on touch, which
-   long-presses into the edit mode below), pinned to the hero's top-right
-   corner. It carries an accent glyph once anything differs from default. */
-.hero-body > .hero-customize-trigger {
-  position: absolute;
-  top: var(--space-2);
-  /* Keep clear of the launcher strip, which overlays the workspace's edge. */
-  inset-inline-end: calc(var(--rail-strip-width-right, calc(var(--control-h-sm) + var(--space-3) + 1px)) + var(--space-3));
-  width: auto;
-  max-width: none;
-  z-index: 1;
+/* The content column (builtinSurfaces.tsx): greeting, widgets and the zone
+   bar. It takes the screen's old gap so nothing moves at rest. */
+.hero-stage {
+  --hero-zone-pad: var(--space-3);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  border-radius: var(--radius-card);
+  /* The zone's hairline rides the wash's outer edge; an outline, because a
+     second spread shadow would show through the translucent wash ring. */
+  outline: 1px solid transparent;
+  outline-offset: var(--hero-zone-pad);
+  transition: background-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease), outline-color var(--motion-fast) var(--motion-ease);
 }
+/* The zone bar is a customization-zone trigger (hidden at rest, shown by
+   Shift over the screen or the workspace Edit mode; never on touch, which
+   long-presses into the edit mode below). Revealed, it hangs centred under
+   the framed column, absolute so it never moves the content under the
+   pointer; hidden, it waits inside the column so a short window gets no
+   scroll height for it. Its Customize glyph turns accent once anything
+   differs from default. */
+.hero-stage > .hero-zone-bar {
+  position: absolute;
+  z-index: 1;
+  inset-block-end: 0;
+  inset-inline: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: max-content;
+  max-width: 100%;
+  margin-inline: auto;
+  padding: 3px;
+  border-radius: var(--radius-round);
+  background: var(--elevated);
+  box-shadow: 0 0 0 1px var(--hair), var(--shadow-sm);
+}
+.hero-zone-bar > .ui-btn { border-radius: var(--radius-round); }
 .hero-customize-trigger[data-customized="true"] .ui-icon { color: var(--accent); }
-/* The screen is mostly empty space, so arranging outlines its tiles instead
-   of washing the whole zone the way a compact rail is. */
+/* The touch edit mode brings its own toolbar under the tiles. */
+.hero-body[data-editing="true"] .hero-zone-bar { display: none; }
+/* The screen is mostly empty space, so arranging frames the content column
+   as the zone (the same accent wash and hairline as every other zone, drawn
+   around it by a spread shadow and an outline so nothing moves) instead of washing the whole
+   screen, and outlines each movable tile inside it. */
 @media (hover: hover) and (pointer: fine) {
   body[data-shift-held] .hero-body.customize-zone:hover,
   body[data-ui-editing] .hero-body.customize-zone {
     background: none;
     box-shadow: none;
+  }
+  body[data-shift-held] .hero-body:hover > .hero-stage,
+  body[data-ui-editing] .hero-body > .hero-stage {
+    background: var(--accent-wash);
+    box-shadow: 0 0 0 var(--hero-zone-pad) var(--accent-wash);
+    outline-color: var(--accent-line);
   }
   body[data-shift-held] .hero-body:hover .hero-widget,
   body[data-ui-editing] .hero-body .hero-widget {
@@ -13469,13 +13506,40 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   }
   body[data-shift-held] .hero-body:hover .hero-widget[data-size],
   body[data-ui-editing] .hero-body .hero-widget[data-size] { border-radius: var(--radius-card); }
+  body[data-shift-held] .hero-body:hover > .hero-stage > .hero-zone-bar,
+  body[data-ui-editing] .hero-stage > .hero-zone-bar,
+  .hero-stage > .hero-zone-bar[data-open="true"] {
+    inset-block-start: calc(100% + var(--hero-zone-pad) + var(--space-3));
+    inset-block-end: auto;
+  }
+  /* Its panel is open: the bar stays up after Shift is let go. */
+  .hero-zone-bar[data-open="true"] {
+    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+@media (min-width: 481px) and (any-pointer: coarse) {
+  body[data-ui-editing] .hero-body.customize-zone {
+    background: none;
+    box-shadow: none;
+  }
+  body[data-ui-editing] .hero-body > .hero-stage {
+    background: var(--accent-wash);
+    box-shadow: 0 0 0 var(--hero-zone-pad) var(--accent-wash);
+    outline-color: var(--accent-line);
+  }
+  body[data-ui-editing] .hero-stage > .hero-zone-bar {
+    inset-block-start: calc(100% + var(--hero-zone-pad) + var(--space-3));
+    inset-block-end: auto;
+  }
 }
 /* Touch edit mode (HeroEditMode.tsx): a long press enters it, so the hold
    must not raise the text callout; the tiles wobble, their content stops
    taking taps, and each gets a hide badge and a grip. */
 @media (pointer: coarse) {
   .hero-body { -webkit-touch-callout: none; }
-  .hero-body > h2 { -webkit-user-select: none; user-select: none; }
+  .hero-stage > h2 { -webkit-user-select: none; user-select: none; }
 }
 .hero-widget[data-editing="true"] {
   position: relative;
@@ -13540,9 +13604,6 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   flex-wrap: wrap;
   justify-content: center;
   gap: var(--space-2);
-}
-@media (max-width: 960px) {
-  .hero-body > .hero-customize-trigger { inset-inline-end: var(--space-2); }
 }
 .starter-chip {
   max-width: 100%;
@@ -14306,7 +14367,7 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   body[data-keyboard="open"] .hero-body { justify-content: flex-start; padding-top: var(--space-3); }
   body[data-keyboard="open"] .hero-sub,
   body[data-keyboard="open"] .hero-recent,
-  body[data-keyboard="open"] .hero-customize-trigger { display: none; }
+  body[data-keyboard="open"] .hero-zone-bar { display: none; }
   /* The attachment menu is a popover, not content in the widget column. */
   .stage-new .hero-dock:has(.add-menu) {
     position: relative;

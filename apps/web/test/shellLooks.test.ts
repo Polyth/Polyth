@@ -306,7 +306,7 @@ test("every look owns the chrome a platform style paints, each piece in its role
     assert.match(css, new RegExp(`body\\[data-shell-look="${look}"\\]:not\\(#\\\\#\\) \\{[^}]*--look-rule: var\\(--look-line\\)`), `${look} rules its regions`);
   }
   role("status bar rule", /border-block-start: 1px solid var\(--look-rule\) !important/, [".statusbar"]);
-  role("option chips", /background: var\(--look-option\) !important;[\s\S]*border: 1px solid var\(--look-option-edge\) !important/, [".starter-chip", ".hero-customize-trigger"]);
+  role("option chips", /background: var\(--look-option\) !important;[\s\S]*border: 1px solid var\(--look-option-edge\) !important/, [".starter-chip", ".hero-zone-bar"]);
   // Every text field and select is the look's field, and focus stays visible.
   role("fields", /background: var\(--look-field\) !important;[\s\S]*border-radius: var\(--look-field-radius\) !important/, [".sidebar-search", ".picker-search", ".ui-field-well", ".ui-input", ".ui-textarea", ".sel select", ".theme-picker-current"]);
   role("field focus", /0 0 0 2px var\(--look-focus-ring\) !important/, [".ui-input:focus", ".sidebar-search:focus-within", ".picker-search:focus-within", ".ui-field-well:focus-within"]);

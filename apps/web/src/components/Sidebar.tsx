@@ -59,10 +59,12 @@ import {
 import { useOrderedProjects } from "../projectRecency.ts";
 import EmptyState from "./EmptyState.tsx";
 import {
-  ChevronRightIcon, CloseIcon, ComposeIcon, EditIcon, FilterIcon, IconButton, Menu, MoreIcon, PlusIcon,
-  SearchIcon, SelectIcon, SidebarCollapseIcon, SidebarExpandIcon, SortIcon, Tooltip,
+  ChevronRightIcon, CloseIcon, ComposeIcon, EditIcon, FilterIcon, Icon as UiIcon, IconButton, Menu, MoreIcon, PlusIcon,
+  RefreshIcon, ResponsiveOverlay, SearchIcon, SelectIcon, SidebarCollapseIcon, SidebarExpandIcon, SortIcon, Tooltip,
   type MenuEntry,
 } from "./ui/index.ts";
+import RailEditor from "./RailEditor.tsx";
+import type { RailEditorEntry } from "../railEditorModel.ts";
 import {
   SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_RAIL_WIDTH,
   clampSidebarWidth, isAutomaticSidebarRailApplied, releaseAutomaticSidebarRail, setSidebarLayout,
@@ -171,9 +173,19 @@ export interface NavigatorActionsModel {
   shown: readonly CapabilityDescriptor[];
   /** Chosen past the visible cap; listed by the More… row. */
   rest: readonly CapabilityDescriptor[];
-  /** Checkbox list for the block's edit menu and the list options. */
+  /** Checkbox list for the list options menu. */
   editEntries: MenuEntry[];
+  /** The block's zone editor (RailEditor): chosen rows in their order, then
+   *  every other launchable capability as a tile to add. */
+  editorEntries: RailEditorEntry[];
+  /** Persist a new order of the chosen rows (editor keys). */
+  reorder: (keys: readonly string[]) => void;
+  reset: () => void;
 }
+
+/** Editor keys are namespaced so a row can never be taken for a launcher. */
+const NAV_ACTION_KEY_PREFIX = "nav-action:";
+const navActionKey = (id: string) => `${NAV_ACTION_KEY_PREFIX}${id}`;
 
 export function useNavigatorActions(): NavigatorActionsModel {
   const resolved = useResolvedCapabilities();
@@ -192,6 +204,34 @@ export function useNavigatorActions(): NavigatorActionsModel {
     ? chosen.filter((candidate) => candidate !== id)
     : [...chosen, id]);
   const choices = [...launchable].sort((a, b) => a.label.localeCompare(b.label));
+  const entryOf = (descriptor: CapabilityDescriptor, shown: boolean): RailEditorEntry => ({
+    key: navActionKey(descriptor.id),
+    kind: "tool",
+    label: descriptor.label,
+    ...(descriptor.plainDescription ? { description: descriptor.plainDescription } : {}),
+    keywords: descriptor.keywords,
+    icon: createElement(railIconFor(descriptor.id)),
+    shown,
+    add: () => writeNavigatorActions([...chosen.filter((id) => id !== descriptor.id), descriptor.id]),
+    remove: () => writeNavigatorActions(chosen.filter((id) => id !== descriptor.id)),
+  });
+  // A chosen row that is unavailable right now stays listed so it can be
+  // removed; one that is not chosen is offered only while it can open.
+  const chosenDescriptors = chosen.flatMap((id) => {
+    const descriptor = byId.get(id);
+    return descriptor ? [descriptor] : [];
+  });
+  const editorEntries = [
+    ...chosenDescriptors.map((descriptor) => entryOf(descriptor, true)),
+    ...choices.filter((descriptor) => !chosen.includes(descriptor.id) && descriptor.available())
+      .map((descriptor) => entryOf(descriptor, false)),
+  ];
+  const reorder = (keys: readonly string[]) => {
+    const ordered = keys.filter((key) => key.startsWith(NAV_ACTION_KEY_PREFIX))
+      .map((key) => key.slice(NAV_ACTION_KEY_PREFIX.length));
+    // Ids the registry does not know right now keep their place at the end.
+    writeNavigatorActions([...ordered, ...chosen.filter((id) => !ordered.includes(id))]);
+  };
   return {
     shown: overflow ? rows.slice(0, NAVIGATOR_ACTIONS_VISIBLE_MAX) : rows,
     rest: overflow ? rows.slice(NAVIGATOR_ACTIONS_VISIBLE_MAX) : [],
@@ -216,6 +256,9 @@ export function useNavigatorActions(): NavigatorActionsModel {
         onSelect: () => writeNavigatorActions(DEFAULT_NAVIGATOR_ACTIONS),
       },
     ],
+    editorEntries,
+    reorder,
+    reset: () => writeNavigatorActions(DEFAULT_NAVIGATOR_ACTIONS),
   };
 }
 
@@ -302,9 +345,9 @@ function NavigatorSectionItem({ descriptor, attached, onOpen }: {
   );
 }
 
-/** One row per chosen capability (capped, with More…), and the block's edit
- *  menu. Draws nothing when nothing is chosen; the list options keep the same
- *  edit list so the block can always come back. */
+/** One row per chosen capability (capped, with More…). Draws nothing when
+ *  nothing is chosen; the block's zone pencil and the list options can always
+ *  bring rows back. */
 function NavigatorActions({ model, onOpened, attached }: {
   model: NavigatorActionsModel;
   onOpened: () => void;
@@ -362,17 +405,65 @@ function NavigatorActions({ model, onOpened, attached }: {
           )}
         </Menu>
       )}
-      <Menu label={tr("sidebar.editNavigatorActions")} align="end" entries={model.editEntries}>
-        {(trigger) => (
-          <IconButton
-            icon={EditIcon}
-            label={tr("sidebar.editNavigatorActions")}
-            className="sidebar-nav-actions-edit"
-            {...trigger}
-          />
-        )}
-      </Menu>
     </div>
+  );
+}
+
+/** The navigator block's zone pencil: hidden at rest like every zone's,
+ *  revealed by Shift over the block or the workspace Edit mode. It opens the
+ *  shared zone editor — drag to reorder, minus to remove, a tile to add. */
+function NavigatorActionsEditButton({ model }: { model: NavigatorActionsModel }) {
+  const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  // The editor opens beside the block; keep the block live as its preview.
+  const zoneRef = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    zoneRef.current = open ? anchorRef.current?.closest<HTMLElement>(".sidebar-nav-block") ?? null : null;
+  }, [open]);
+  const label = tr("sidebar.editNavigatorActions");
+  const title = tr("sidebar.navigatorActions");
+  const sheet = useShellMode() === "phone";
+  return (
+    <>
+      <IconButton
+        ref={anchorRef}
+        icon={EditIcon}
+        size="sm"
+        variant="ghost"
+        label={label}
+        className="zone-customize-trigger sidebar-nav-actions-edit"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      />
+      <ResponsiveOverlay
+        open={open}
+        onClose={() => setOpen(false)}
+        title={label}
+        anchorRef={anchorRef}
+        align="start"
+        side="right"
+        phone="sheet"
+        sheetSize="tall"
+        className="rail-editor-overlay"
+        keepInteractiveRef={zoneRef}
+      >
+        <RailEditor
+          dragId="rail-editor:navigator-actions"
+          title={title}
+          entries={model.editorEntries}
+          reorder={model.reorder}
+          note={tr("sidebar.navigatorActionsNote", { count: NAVIGATOR_ACTIONS_VISIBLE_MAX })}
+          actions={[{
+            id: "navigator-actions-reset",
+            label: tr("sidebar.navigatorActionsReset"),
+            icon: <UiIcon icon={RefreshIcon} size="sm" />,
+            onSelect: () => { model.reset(); setOpen(false); },
+          }]}
+          sheet={sheet}
+        />
+      </ResponsiveOverlay>
+    </>
   );
 }
 
@@ -1795,9 +1886,11 @@ export default function Sidebar() {
         )}
         {/* Rows under the header row, the same in the tree and the rail: New
             chat, then the chosen package actions. The compact drawer starts
-            chats from its own toolbar. */}
+            chats from its own toolbar. The block is one customization zone:
+            Shift or the Edit mode washes it and shows its pencil, which sits
+            on the New chat row's trailing edge in place of the key hint. */}
         {!compact && project && (
-          <div className="sidebar-nav-block">
+          <div className="sidebar-nav-block customize-zone">
             <NavigatorNewChat
               label={soloPersonal ? tr("sidebar.newChat") : tr("sidebar.newChatInValue", { value: project.name || project.path })}
               onStart={() => {
@@ -1806,6 +1899,7 @@ export default function Sidebar() {
               }}
             />
             <NavigatorActions model={navActions} onOpened={closeDrawer} attached={attachedSection} />
+            <NavigatorActionsEditButton model={navActions} />
           </div>
         )}
         <div

@@ -34,7 +34,7 @@ test("bare Shift ignores text editing and disarms as soon as typing starts", asy
 
   const { act, createElement } = await import("react");
   const { createRoot } = await import("react-dom/client");
-  const { useShiftArmed } = await import("../src/useShiftArmed.ts");
+  const { SHIFT_HOLD_IN_TEXT_MS, useShiftArmed } = await import("../src/useShiftArmed.ts");
   const container = document.createElement("div");
   const input = document.createElement("textarea");
   const button = document.createElement("button");
@@ -46,6 +46,20 @@ test("bare Shift ignores text editing and disarms as soon as typing starts", asy
     await act(async () => root.render(createElement(Probe)));
     input.focus();
     await act(async () => input.dispatchEvent(new dom.KeyboardEvent("keydown", { key: "Shift", bubbles: true }) as unknown as Event));
+    assert.equal(container.textContent, "idle", "Shift in a text field is a capital letter first");
+    assert.equal(document.body.dataset.shiftHeld, undefined);
+    // Shift+letter while typing never arms, however the wait falls.
+    await act(async () => input.dispatchEvent(new dom.KeyboardEvent("keydown", { key: "A", shiftKey: true, bubbles: true }) as unknown as Event));
+    await act(async () => { await new Promise((done) => setTimeout(done, SHIFT_HOLD_IN_TEXT_MS + 60)); });
+    assert.equal(container.textContent, "idle", "a typed capital never arms");
+    // Held alone (auto-repeat included) it arms: the new chat's composer keeps focus.
+    await act(async () => input.dispatchEvent(new dom.KeyboardEvent("keydown", { key: "Shift", bubbles: true }) as unknown as Event));
+    await act(async () => { await new Promise((done) => setTimeout(done, SHIFT_HOLD_IN_TEXT_MS / 2)); });
+    await act(async () => input.dispatchEvent(new dom.KeyboardEvent("keydown", { key: "Shift", repeat: true, bubbles: true }) as unknown as Event));
+    await act(async () => { await new Promise((done) => setTimeout(done, SHIFT_HOLD_IN_TEXT_MS / 2 + 60)); });
+    assert.equal(container.textContent, "armed", "a deliberate Shift hold in a text field arms");
+    assert.equal(document.body.dataset.shiftHeld, "true");
+    await act(async () => input.dispatchEvent(new dom.KeyboardEvent("keyup", { key: "Shift", bubbles: true }) as unknown as Event));
     assert.equal(container.textContent, "idle");
     assert.equal(document.body.dataset.shiftHeld, undefined);
 
@@ -230,11 +244,14 @@ test("every rail and shell zone opens the one shared rail editor", async () => {
   assert.match(header, /<CustomizeZoneButton slot="app\.header\.center" tier="primary"/);
   assert.match(composer, /<CustomizeZoneButton slot="composer\.trailing"/);
   assert.match(sidebar, /<CustomizeZoneButton slot="sidebar\.toolbar"/);
+  // The navigator's New chat + quick actions block is a zone of its own.
+  assert.match(sidebar, /className="sidebar-nav-block customize-zone"/);
+  assert.match(sidebar, /<RailEditor\s+dragId="rail-editor:navigator-actions"/);
   assert.match(statusBar, /actions=\{\[hideAction\(\)\]\}/);
   assert.doesNotMatch(customize, /extraEntries|CatalogPicker/, "no second, unordered checkbox catalog");
   // The editor: ordered shown rows (drag + Alt+Arrow through the shared rail
   // drag engine), then compact tool/widget tiles that move, never copy.
-  assert.match(editor, /useRailDragZone\(\{[\s\S]*id: dragId \?\? `rail-editor:\$\{slot\}`[\s\S]*accepts: \(\) => false/);
+  assert.match(editor, /useRailDragZone\(\{[\s\S]*id: dragId \?\? `rail-editor:\$\{slot \?\? "zone"\}`[\s\S]*accepts: \(\) => false/);
   assert.match(editor, /data-rail-ghost="clone"/);
   assert.match(editor, /tr\("raileditor\.moveHere"/);
   assert.match(css, /\.rail-editor-grid\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fill, minmax\(84px, 1fr\)\)/s);

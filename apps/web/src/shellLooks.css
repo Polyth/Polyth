@@ -342,7 +342,7 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.workspace-
 }
 
 @media (hover: hover) {
-  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.view-icon, .workspace-mode-switch button, .rail-icon, .sidebar-project-rail-item, .header .ui-icon-btn, .header-actions-rail .capability-launcher, .ui-tabs:not(:is(.module-view, .rail-body, .panel-sheet) *) > .ui-tab, .seg:not(:is(.module-view, .rail-body, .panel-sheet) *) > button, .rail-tabs .tab, .ui-menu-item, .add-menu-item, .statusbar-cluster, .statusbar button, .ui-btn--quiet, .ui-icon-btn--quiet, .ui-btn--ghost, .settings-nav-item, .starter-chip, .hero-customize-trigger, .composer-suggestion):not(.active, .on, .ui-tab--selected, .ui-menu-item--checked, .ui-menu-item--danger):hover:where(:not(:disabled)) {
+  body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.view-icon, .workspace-mode-switch button, .rail-icon, .sidebar-project-rail-item, .header .ui-icon-btn, .header-actions-rail .capability-launcher, .ui-tabs:not(:is(.module-view, .rail-body, .panel-sheet) *) > .ui-tab, .seg:not(:is(.module-view, .rail-body, .panel-sheet) *) > button, .rail-tabs .tab, .ui-menu-item, .add-menu-item, .statusbar-cluster, .statusbar button, .ui-btn--quiet, .ui-icon-btn--quiet, .ui-btn--ghost, .settings-nav-item, .starter-chip, .composer-suggestion):not(.active, .on, .ui-tab--selected, .ui-menu-item--checked, .ui-menu-item--danger):hover:where(:not(:disabled)) {
     background: var(--look-hover) !important;
     color: var(--text) !important;
   }
@@ -390,10 +390,10 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) .composer-send-
   color: var(--look-ink-dim) !important;
 }
 
-/* Option chips: attachments, the New-session shortcuts and their customize
-   trigger and the add menu's tiles are one quiet chip, not the base's elevated
-   or glass pill. */
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.attachment-pill, .starter-chip, .hero-customize-trigger, .add-menu-tile) {
+/* Option chips: attachments, the New-session shortcuts, their zone bar
+   (Add widget, Customize) and the add menu's tiles are one quiet chip, not
+   the base's elevated or glass pill. */
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.attachment-pill, .starter-chip, .hero-zone-bar, .add-menu-tile) {
   background: var(--look-option) !important;
   backdrop-filter: none !important;
   border: 1px solid var(--look-option-edge) !important;
@@ -843,7 +843,7 @@ body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.session-bt
   border-radius: var(--look-select-radius) !important;
 }
 
-body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.workspace-mode-switch, .view-switcher-pill, .mobile-shortcut-track, .desktop-session-status-trigger, .ui-tabs:not(:is(.module-view, .rail-body, .panel-sheet) *), .seg:not(:is(.module-view, .rail-body, .panel-sheet) *), .ui-btn, .config-chip, .starter-chip, .hero-customize-trigger, .composer-suggestion, .add-menu-tile) {
+body[data-shell-look]:not([data-shell-look="standard"]):not(#\#) :is(.workspace-mode-switch, .view-switcher-pill, .mobile-shortcut-track, .desktop-session-status-trigger, .ui-tabs:not(:is(.module-view, .rail-body, .panel-sheet) *), .seg:not(:is(.module-view, .rail-body, .panel-sheet) *), .ui-btn, .config-chip, .starter-chip, .hero-zone-bar, .composer-suggestion, .add-menu-tile) {
   border-radius: var(--look-control-radius) !important;
 }
 

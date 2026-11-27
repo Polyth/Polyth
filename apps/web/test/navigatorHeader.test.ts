@@ -64,6 +64,7 @@ const {
 } = await import("../src/navigatorState.ts");
 
 const MouseEventCtor = (dom as unknown as { MouseEvent: typeof MouseEvent }).MouseEvent;
+const KeyboardEventCtor = (dom as unknown as { KeyboardEvent: typeof KeyboardEvent }).KeyboardEvent;
 const click = (el: Element) => el.dispatchEvent(new MouseEventCtor("click", { bubbles: true }));
 const project = (id: string): Project => ({ id, path: `/work/${id}`, name: id, createdAt: 1 });
 
@@ -160,26 +161,36 @@ test("package actions skip unavailable ones, cap at four and list the rest under
   }
 });
 
-test("the block's edit menu adds and removes rows and persists them device-locally", async () => {
+test("the block is a customization zone whose editor adds, removes and reorders rows device-locally", async () => {
   localStorage.removeItem(NAVIGATOR_ACTIONS_KEY);
   setSidebarViewMode("tree");
   const { container, unmount } = await render();
   try {
-    await act(async () => { click(container.querySelector(".sidebar-nav-actions-edit")!); });
-    const entries = () => [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')];
-    const labels = entries().map((item) => item.textContent?.trim());
-    assert.ok(labels.includes("Browser") && labels.includes("Agents"), "every launchable capability is offered");
-    assert.ok(!labels.includes("Chat"), "Chat is the New chat row, not a package action");
-    const offline = entries().find((item) => item.textContent?.trim() === "Offline tool")!;
-    assert.equal(offline.getAttribute("aria-disabled") ?? String((offline as HTMLButtonElement).disabled), "true",
-      "an unavailable capability cannot be added");
-    await act(async () => { click(entries().find((item) => item.textContent?.trim() === "Agents")!); });
+    const block = container.querySelector<HTMLElement>(".sidebar-nav-block")!;
+    assert.ok(block.classList.contains("customize-zone"), "Shift or the Edit mode washes the block like every zone");
+    const edit = block.querySelector<HTMLElement>(":scope > .sidebar-nav-actions-edit")!;
+    assert.ok(edit.classList.contains("zone-customize-trigger"), "its pencil is hidden at rest like every zone's");
+    await act(async () => { click(edit); });
+    assert.equal(edit.getAttribute("aria-expanded"), "true");
+    const shown = () => [...document.querySelectorAll(".rail-editor-row .rail-editor-row-label")].map((node) => node.textContent?.trim());
+    const tiles = () => [...document.querySelectorAll<HTMLElement>(".rail-editor-tile")];
+    const tileLabels = () => tiles().map((tile) => tile.querySelector(".rail-editor-tile-label")?.textContent?.trim());
+    assert.deepEqual(shown(), ["Agents", "Planner"], "the chosen rows, in their order");
+    assert.ok(tileLabels().includes("Browser"), "every other launchable capability is offered");
+    assert.ok(!tileLabels().includes("Chat"), "Chat is the New chat row, not a package action");
+    assert.ok(!tileLabels().includes("Offline tool"), "an unavailable capability is not offered");
+    await act(async () => { click(document.querySelector('.rail-editor-remove[aria-label="Remove Agents"]')!); });
     assert.equal(localStorage.getItem(NAVIGATOR_ACTIONS_KEY), '["planner"]');
     assert.deepEqual(rowLabels(container), ["Planner"]);
-    // Checkbox entries keep the menu open for several changes; reopen only if it closed.
-    if (entries().length === 0) await act(async () => { click(container.querySelector(".sidebar-nav-actions-edit")!); });
-    await act(async () => { click(entries().find((item) => item.textContent?.trim() === "Browser")!); });
+    await act(async () => { click(tiles().find((tile) => tile.textContent?.includes("Browser"))!); });
     assert.deepEqual(rowLabels(container), ["Planner", "Browser"], "an added row goes to the end");
+    const browserRow = [...document.querySelectorAll<HTMLElement>(".rail-editor-row")]
+      .find((item) => item.textContent?.includes("Browser"))!;
+    await act(async () => {
+      browserRow.dispatchEvent(new KeyboardEventCtor("keydown", { key: "ArrowUp", altKey: true, bubbles: true }));
+    });
+    assert.deepEqual(rowLabels(container), ["Browser", "Planner"], "Alt+Arrow reorders the rows");
+    assert.equal(localStorage.getItem(NAVIGATOR_ACTIONS_KEY), '["browser","planner"]');
   } finally {
     await unmount();
     localStorage.removeItem(NAVIGATOR_ACTIONS_KEY);

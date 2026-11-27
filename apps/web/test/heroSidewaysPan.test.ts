@@ -22,17 +22,17 @@ if (!CHROME && process.env.POLYTH_REQUIRE_CHROMIUM === "1") {
 register("./tsxHooks.mjs", import.meta.url);
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { EditIcon, IconButton } = await import("../src/components/ui/index.ts");
+const { Button, EditIcon, PlusIcon } = await import("../src/components/ui/index.ts");
 
 const css = readWebStylesSync() + "\n" + readFileSync(resolve(import.meta.dirname, "../src/mobileViewport.css"), "utf8");
-// The pencil exactly as HeroCustomizeButton renders it.
-const pencil = renderToStaticMarkup(createElement(IconButton, {
-  className: "hero-customize-trigger zone-customize-trigger",
-  icon: EditIcon,
-  size: "sm",
-  variant: "ghost",
-  label: "Customize new chat",
-}));
+// The zone bar exactly as HeroCustomizeButton renders it.
+const zoneBar = renderToStaticMarkup(createElement("div", {
+  className: "hero-zone-bar zone-customize-trigger",
+  role: "toolbar",
+  "aria-label": "Editing the new chat screen",
+},
+createElement(Button, { className: "hero-zone-add", size: "sm", variant: "ghost", iconStart: PlusIcon }, "Add widget"),
+createElement(Button, { className: "hero-customize-trigger", size: "sm", variant: "ghost", iconStart: EditIcon }, "Customize new chat")));
 const rows = ["Cat symptoms: possible causes", "Fix photo attachment issue", "Load is high on Polyth"]
   .map((title) => `<li><button type="button" class="hero-recent-row"><span class="hero-recent-title">${title}</span><span class="hero-recent-time">2h</span></button></li>`)
   .join("");
@@ -60,14 +60,14 @@ test("a sideways finger drag never pans the phone's new-chat screen", { skip: !C
       <style>${css}</style></head>
       <body data-keyboard="closed"><div id="root"><div class="app mode-chat view-session"><div class="app-shell"><div class="workspace"><main class="main">
         <div class="stage stage-new"><div class="hero">
-          <div class="hero-body customize-zone">
+          <div class="hero-body customize-zone"><div class="hero-stage">
             <h2>Let’s have some fun in <span class="polyth-gradient">Polyth</span>.</h2>
             <div class="hero-widget-host">
               <section class="hero-widget hero-widget-apps" style="order: 0"><ul class="hero-apps" data-labels="false">${apps}</ul></section>
               <section class="hero-widget hero-widget-recent" style="order: 1"><div class="hero-recent" data-size="md"><ul style="--hero-recent-rows: 3">${rows}</ul></div></section>
             </div>
-            ${pencil}
-          </div>
+            ${zoneBar}
+          </div></div>
           <div class="hero-dock"><div class="composer composer-chat composer-mobile composer-collapsed"><div class="composer-card"></div></div></div>
         </div></div>
       </main></div></div></div></div></body></html>`);
@@ -84,7 +84,7 @@ test("a sideways finger drag never pans the phone's new-chat screen", { skip: !C
 
     // A finger drags from right to left across the title, as on the phone.
     const title = await page.evaluate(() => {
-      const rect = document.querySelector(".hero-body > h2")!.getBoundingClientRect();
+      const rect = document.querySelector(".hero-stage > h2")!.getBoundingClientRect();
       return { x: rect.right - 20, y: rect.top + rect.height / 2 };
     });
     const cdp = await page.context().newCDPSession(page);

@@ -710,10 +710,12 @@ function HeroCustomizeActions({ projectId }: { projectId: string | null }) {
   );
 }
 
-/** The new chat's pencil, pinned to the hero's top-right corner. It is a
- *  customization-zone trigger: hidden at rest, shown by Shift over the screen
- *  or the workspace Edit mode. It also hosts the panel the touch edit mode
- *  opens, so it is mounted in every shell. */
+/** The new chat's zone bar, centred under the framed content column: Add
+ *  widget and the labelled Customize button. It is a customization-zone
+ *  trigger: hidden at rest, shown by Shift over the screen or the workspace
+ *  Edit mode (touch long-presses into its own edit mode instead). It also
+ *  hosts the panel the touch edit mode opens, so it is mounted in every
+ *  shell. */
 export function HeroCustomizeButton() {
   const request = useHeroPanel();
   const open = request !== false;
@@ -727,17 +729,30 @@ export function HeroCustomizeButton() {
   const title = tr("workspace.herocustomize.title");
   return (
     <>
-      <IconButton
-        className="hero-customize-trigger zone-customize-trigger"
-        icon={EditIcon}
-        size="sm"
-        variant="ghost"
-        label={title}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        data-customized={customized ? "true" : undefined}
-        onClick={() => setOpen(!open)}
-      />
+      <div
+        className="hero-zone-bar zone-customize-trigger"
+        role="toolbar"
+        aria-label={tr("workspace.herocustomize.editing")}
+        data-open={open ? "true" : undefined}
+      >
+        <Button
+          className="hero-zone-add"
+          size="sm"
+          variant="ghost"
+          iconStart={PlusIcon}
+          onClick={() => openHeroPanel("add")}
+        >{tr("workspace.herocustomize.addWidget")}</Button>
+        <Button
+          className="hero-customize-trigger"
+          size="sm"
+          variant="ghost"
+          iconStart={EditIcon}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          data-customized={customized ? "true" : undefined}
+          onClick={() => setOpen(!open)}
+        >{title}</Button>
+      </div>
       <ResponsiveOverlay
         open={open}
         onClose={() => setOpen(false)}

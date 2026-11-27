@@ -6,6 +6,11 @@ import { useSyncExternalStore } from "react";
 // then pointing at a row still arms it; keyup or window blur disarms.
 let shiftKeyDown = false;
 let listening = false;
+/** In a text field Shift is mostly a capital letter or Shift+Enter, so it
+ *  arms only once held alone this long. The new chat's composer keeps focus,
+ *  and without the hold its screen could never be edited with Shift. */
+export const SHIFT_HOLD_IN_TEXT_MS = 500;
+let pendingArm: ReturnType<typeof setTimeout> | null = null;
 const subscribers = new Set<() => void>();
 
 /** Fine hover-capable primary pointer — necessary but not sufficient for Shift. */
@@ -62,6 +67,12 @@ function setBodyShiftFlag(on: boolean): void {
   }
 }
 
+function cancelPendingArm(): void {
+  if (pendingArm === null) return;
+  clearTimeout(pendingArm);
+  pendingArm = null;
+}
+
 function setKeyDown(down: boolean): void {
   setBodyShiftFlag(down);
   if (shiftKeyDown === down) return;
@@ -70,6 +81,7 @@ function setKeyDown(down: boolean): void {
 }
 
 function disarmIfTouchPointer(event: Event): void {
+  if (event.type === "touchstart" || ("pointerType" in event && (event as PointerEvent).pointerType === "touch")) cancelPendingArm();
   if (event.type === "touchstart") {
     setKeyDown(false);
     return;
@@ -83,16 +95,32 @@ function ensureListeners(): void {
   if (listening || typeof window === "undefined") return;
   listening = true;
   window.addEventListener("keydown", (event) => {
+    // A held Shift auto-repeats on some platforms; a repeat keeps the hold.
+    if (event.key === "Shift" && event.repeat && (pendingArm !== null || shiftKeyDown)) return;
+    cancelPendingArm();
     if (!canArmShiftPointer()) {
       setKeyDown(false);
+      return;
+    }
+    if (event.key === "Shift" && isTextEditing(event.target)) {
+      setKeyDown(false);
+      pendingArm = setTimeout(() => {
+        pendingArm = null;
+        setKeyDown(true);
+      }, SHIFT_HOLD_IN_TEXT_MS);
       return;
     }
     setKeyDown(shouldArmShift(event.key, isTextEditing(event.target)));
   });
   window.addEventListener("keyup", (event) => {
-    if (event.key === "Shift") setKeyDown(false);
+    if (event.key !== "Shift") return;
+    cancelPendingArm();
+    setKeyDown(false);
   });
-  window.addEventListener("blur", () => setKeyDown(false));
+  window.addEventListener("blur", () => {
+    cancelPendingArm();
+    setKeyDown(false);
+  });
   window.addEventListener("pointerdown", disarmIfTouchPointer);
   window.addEventListener("touchstart", disarmIfTouchPointer);
   if (typeof window.matchMedia === "function") {
