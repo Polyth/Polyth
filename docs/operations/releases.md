@@ -289,7 +289,9 @@ with the **upload key**. The keystore is written to a 0600 temp directory and
 removed after Gradle returns, and the secrets are removed from the environment
 before npm, cargo or the debug build run. Google re-signs the bundle with the app
 signing key it holds (Play App Signing), so a lost upload key can be reset in
-Play Console instead of ending the app. The bundle is not a release asset.
+Play Console instead of ending the app. The bundle is not a release asset; it
+stays in the job's `products-android-apk` workflow artifact as
+`Polyth-<version>-android.aab` for a manual Play Console upload.
 
 With `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` as well, `scripts/ci/play-upload.mjs`
 uploads the bundle through the Play Developer API (zero-dependency service-account

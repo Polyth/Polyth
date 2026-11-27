@@ -372,6 +372,9 @@ function buildSignedBundle(gradle, versions) {
   const bundles = walk(join(ROOT, "apps/mobile/android/app/build/outputs/bundle/release"))
     .filter((p) => p.endsWith(".aab"));
   if (bundles.length !== 1) fail(`Expected one signed .aab, found ${bundles.length}`);
+  // A workflow artifact for a manual Play Console upload (an app's first release
+  // cannot go through the API); the release feed ignores .aab files.
+  copyFileAs(bundles[0], `Polyth-${versions.POLYTH_VERSION}-android.aab`);
   if (!GOOGLE_PLAY_SERVICE_ACCOUNT_JSON) {
     console.log("remote-build android: GOOGLE_PLAY_SERVICE_ACCOUNT_JSON is unset, the bundle is not uploaded");
     return;
