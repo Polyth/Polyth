@@ -40,7 +40,13 @@ no paid turn was involved. macOS and Windows have not been run.
 
 `vibe-acp` takes no flags, but Vibe reads every `VIBE_*` variable as a
 configuration layer above the person's `config.toml`
-([`src/launchEnv.ts`](src/launchEnv.ts)). Nothing in `~/.vibe` is edited.
+([`src/launchEnv.ts`](src/launchEnv.ts)). Polyth itself writes nothing in
+`~/.vibe`. Vibe does: a model or thinking change made over ACP
+(`session/set_config_option`) is saved to `config.toml` as the person's
+default, so a chat that picks a model also moves Vibe's own default. Model
+discovery tries every model on a throwaway session and then switches back to
+the one it started on ([`backend-acp` discovery](../backend-acp/src/discovery.ts)),
+so a catalog refresh leaves that default as it was.
 
 | Setting | Why |
 | --- | --- |
@@ -67,6 +73,14 @@ configuration layer above the person's `config.toml`
   `ModelDescriptor.aliases`, so a chat saved under either name keeps working
   and a row the select offers under an alias gets its catalog id. No catalog
   file means no aliases, never a guess.
+- The select lists only models the account can run. Vibe drops catalog models
+  that carry `requires` (for example `higher_plan`). On top of that, Mistral's
+  server-side GrowthBook flag `vibe_cli_model_catalog_filter` (cached in
+  `$VIBE_HOME/experiment_eval_cache.json`) can hide models and pick the
+  default. On 2026-11-27 it hid `mistral-medium-latest`, which left a free-plan
+  key with GLM 5.3 Flash only. The flag filters the catalog only, so a model
+  the person defines in full in `config.toml` (`name`, `provider`, `alias`)
+  is offered again.
 - Text and reasoning stream as deltas with a `messageId`. Vibe echoes each
   prompt as `user_message_chunk` before its first model request; that echo
   proves admission. While Vibe retries a 429 or 5xx (about five minutes) it

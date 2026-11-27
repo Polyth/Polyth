@@ -118,6 +118,39 @@ test("cold discovery probes dependent thinking controls per model", async () => 
     ]);
 });
 
+test("cold discovery leaves the agent on the model it started on", async () => {
+    invalidateAcpDiscovery();
+    // Mistral Vibe saves every model switch as the person's default model, even
+    // on the throwaway probe session.
+    const switches: string[] = [];
+    const probe = (session: unknown) => ({
+        async open() {
+            return {
+                result: session,
+                async setConfigOption(_id: string, value: string) {
+                    switches.push(value);
+                    return sessionConfigAt(value, "medium");
+                },
+                close: async () => {},
+            };
+        },
+    });
+    const result = await discoverAcpModels({ harnessId: "acp", version: "restore", authFingerprint: "true", probe: probe(configOptionsSession) });
+    assert.equal(result.state, "ready");
+    assert.deepEqual(switches, ["deep-2", "fast-1"]);
+
+    // One model: nothing to probe, so nothing is switched at all.
+    switches.length = 0;
+    const single = {
+        ...configOptionsSession,
+        configOptions: configOptionsSession.configOptions.map((option) => option.id === "model"
+            ? { ...option, options: option.options.slice(0, 1) }
+            : option),
+    };
+    await discoverAcpModels({ harnessId: "acp", version: "restore-single", authFingerprint: "true", probe: probe(single) });
+    assert.deepEqual(switches, []);
+});
+
 test("cold discovery probes models whose thinking levels appear only once selected", async () => {
     invalidateAcpDiscovery();
     // A fresh session that advertises no thought_level proves nothing about the

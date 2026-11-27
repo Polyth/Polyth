@@ -139,7 +139,8 @@ test("cold discovery probes each model with its native value and reports canonic
         ["flash", ["off", "high", "max"]],
         ["pro", ["off", "high", "max"]],
     ]);
-    assert.deepEqual(set, [JSON.stringify(["official", "pro"])]);
+    // The probe switches back to the starting model, by its native value too.
+    assert.deepEqual(set, [JSON.stringify(["official", "pro"]), JSON.stringify(["official", "flash"])]);
 });
 
 test("a classified admitted failure closes the turn with the agent's reason, code and retry hint", async () => {

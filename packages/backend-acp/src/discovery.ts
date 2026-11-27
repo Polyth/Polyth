@@ -78,18 +78,32 @@ const discoverDescriptors = async (
   // The fresh session's controls say nothing about the other models: selecting
   // one may add a thought-level select that was absent here, so every model is
   // probed. The timeout above, not a guess, bounds the cost.
-  if (!initial.model || !opened.setConfigOption) return models;
+  const select = initial.model;
+  if (!select || !opened.setConfigOption) return models;
+  let switched = false;
   for (const model of models) {
     try {
-      const result = initial.model.currentValue === model.modelID
-        ? opened.result
-        : await opened.setConfigOption(initial.model.id, nativeOptionValue(initial.model, model.modelID));
+      let result = opened.result;
+      if (select.currentValue !== model.modelID) {
+        switched = true;
+        result = await opened.setConfigOption(select.id, nativeOptionValue(select, model.modelID));
+      }
       const selected = acpModelDescriptors(parseSessionConfig(result, codec), harnessId, codec)
         .find((candidate) => candidate.modelID === model.modelID);
       if (selected?.variants?.length) model.variants = selected.variants;
     } catch {
       // Keep the model usable, but do not invent capabilities the agent did
       // not confirm for it.
+    }
+  }
+  // An agent may save a model switch as the person's default even on this
+  // throwaway session (Mistral Vibe writes `active_model` to its config.toml),
+  // so the probe ends on the model the agent started on.
+  if (switched && select.currentValue !== undefined) {
+    try {
+      await opened.setConfigOption(select.id, nativeOptionValue(select, select.currentValue));
+    } catch {
+      // The catalog is already known; a refused switch back changes nothing here.
     }
   }
   return models;
