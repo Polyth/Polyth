@@ -4349,7 +4349,9 @@ export type AuthFieldKind = "text" | "secret" | "url" | "email" | "otp" | "selec
 export type AuthProvenance =
   | "opencode-plugin"
   | "provider-metadata"
-  | "environment";
+  | "environment"
+  /** A method Polyth supplies itself, e.g. the first-party PKCE sign-in. */
+  | "polyth";
 
 export type AuthCapabilityStatus = "loaded" | "empty" | "unavailable" | "failed";
 

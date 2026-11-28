@@ -1,0 +1,85 @@
+/* Model privacy: the composer chip and the settings page. Row marks are
+   drawn by the models package (model-picker-styles.css). The chip is the
+   host's `.config-chip`; only its glyph colour and rhythm live here. */
+.model-privacy {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  min-width: 0;
+}
+
+.model-privacy-chip.config-chip {
+  gap: 5px;
+  max-width: 100%;
+  overflow: hidden;
+  color: inherit;
+  text-decoration: none;
+  padding-inline: calc(var(--composer-line-inset, 7px) - 1px) 8px;
+}
+
+.model-privacy-chip.config-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.model-privacy-glyph {
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.model-privacy-glyph svg {
+  width: 13px;
+  height: 13px;
+}
+
+.model-privacy-chip.tone-notice .model-privacy-glyph { color: var(--amber); }
+.model-privacy-chip.tone-warning .model-privacy-glyph { color: var(--red); }
+.model-privacy-chip.tone-neutral .model-privacy-glyph { color: var(--muted); }
+
+.model-privacy-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-privacy-tip {
+  display: grid;
+  gap: 2px;
+  max-width: 280px;
+}
+
+.model-privacy-tip small,
+.model-privacy-source-hint {
+  color: var(--muted);
+}
+
+.model-privacy-source-hint {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-meta);
+}
+
+.model-privacy-sources {
+  margin: 0;
+  padding-inline-start: 18px;
+  font-size: var(--font-meta);
+}
+
+.model-privacy-sources a {
+  color: var(--accent);
+}
+
+/* A narrow composer (phone, split pane) keeps the glyph only: the statement
+   stays in the chip's accessible name, tooltip and the linked source. */
+@container composer-widget (max-width: 520px) {
+  .model-privacy-text {
+    display: none;
+  }
+
+  .model-privacy-chip.config-chip {
+    padding-inline: 6px;
+  }
+}

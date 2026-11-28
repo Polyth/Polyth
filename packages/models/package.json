@@ -17,7 +17,8 @@
     "./auth/well-known": "./src/auth/wellKnown.ts",
     "./widgets": "./widgets/index.tsx",
     "./i18n/*": "./src/i18n/*.ts",
-    "./runtime-catalog": "./widgets/runtimeCatalog.ts"
+    "./runtime-catalog": "./widgets/runtimeCatalog.ts",
+    "./model-annotations": "./widgets/modelAnnotations.ts"
   },
   "polyth": {
     "editions": ["workstation"],

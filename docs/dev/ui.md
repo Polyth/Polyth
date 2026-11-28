@@ -2384,7 +2384,15 @@ host.slots.register({
   stays transient — never a second notice system (passing messages go through
   `host.notifications`, §4.8); the
   composer's `ModelPicker` (`@polyth/models/model-picker`) mounts
-  `modelPicker.header` for catalog-routing controls. It uses one anchored
+  `modelPicker.header` for catalog-routing controls. Per-model facts from
+  other packages (data handling, for example `packages/model-privacy`) enter
+  through `@polyth/models/model-annotations`, not a slot: a source registers
+  `{ id, annotate(model) }` in its enable hook and returns plain data (tone,
+  icon, label, detail, dated meta, https source link, `inline`), and the models
+  package draws it after the name in picker rows and Providers & Models rows
+  and as a row in the hover/phone details cards. A source that throws
+  contributes nothing; call `notifyModelAnnotationsChanged()` when answers
+  change. It uses one anchored
   catalog surface on desktop and phone with provider headings; desktop adds a
   compact search field, while the phone surface has none (harness tabs and
   provider groups are its navigation, and a catalog past the render cap pages

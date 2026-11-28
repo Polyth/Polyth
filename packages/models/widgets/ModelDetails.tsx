@@ -9,6 +9,7 @@ import { Icon } from "@polyth/web/icons";
 import { focusUnlessKeyboardHeld } from "@polyth/web/mobile-viewport";
 import { getLocale, tr } from "@polyth/web/i18n";
 import ProviderLogo from "./ProviderLogo.tsx";
+import { ModelAnnotationDetails, ModelAnnotationMarks, useModelAnnotationRows } from "./ModelAnnotationMarks.tsx";
 import {
   formatModelPrice,
   hasModelPricing,
@@ -39,6 +40,7 @@ export function ModelDetails({
     if (focusBack) focusUnlessKeyboardHeld(detailsRef.current?.querySelector<HTMLButtonElement>(".model-details-back"));
   }, [focusBack]);
   const presentation = modelDetailsPresentation(model);
+  const annotationRows = useModelAnnotationRows(model);
   const percent = selected && usage && model.context
     ? Math.min(100, Math.round((usage / model.context) * 100))
     : null;
@@ -55,6 +57,7 @@ export function ModelDetails({
       ? [[tr("modelpicker.availability"),
           <span key="na" className="model-details-warn">{presentation.availability}</span>] as [string, ReactNode]]
       : []),
+    ...annotationRows,
     ...(percent !== null
       ? [[tr("modelpicker.contextUsed"),
           <span key="ctx" className="model-details-usage">
@@ -79,7 +82,7 @@ export function ModelDetails({
           className="model-row-provider-logo"
         />
         <div className="model-details-title">
-          <strong>{model.name}</strong>
+          <strong>{model.name}<ModelAnnotationMarks model={model} /></strong>
           <small>{model.modelID}</small>
         </div>
       </div>
@@ -135,6 +138,7 @@ export function ModelHoverDetails({ model, favorite, showFavorite = true }: { mo
       </div>
       <p className="model-hover-context">◉ {model.context ? `${model.context.toLocaleString(getLocale())} ${tr("modelpicker.contextWindow").toLowerCase()}` : tr("modelpicker.contextUnknown")}</p>
       {prices}
+      <ModelAnnotationDetails model={model} />
     </div>
   );
 }

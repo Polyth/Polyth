@@ -363,6 +363,30 @@ flex: none;
 .model-hover-pricing span { display: flex; justify-content: space-between; gap: var(--space-2); }
 .model-hover-pricing b { font-weight: 620; white-space: nowrap; }
 .model-hover-pricing i { color: var(--muted); font-style: normal; font-weight: 400; }
+/* ---- model annotations (modelAnnotations.ts): marks + statements -------- */
+.model-annotation-marks { display: inline-flex; align-items: center; gap: 3px; margin-inline-start: 6px; vertical-align: -2px; flex: none; }
+.model-annotation-slot { display: inline-flex; }
+.model-annotation-mark { display: inline-grid; place-items: center; width: 14px; height: 14px; color: var(--faint); cursor: help; border-radius: 4px; }
+.model-annotation-mark svg { width: 13px; height: 13px; }
+.model-annotation-mark:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.model-annotation-mark.tone-positive, .model-annotation-statement.tone-positive .model-annotation-mark { color: var(--green); }
+.model-annotation-mark.tone-notice, .model-annotation-statement.tone-notice .model-annotation-mark { color: var(--amber); }
+.model-annotation-mark.tone-warning, .model-annotation-statement.tone-warning .model-annotation-mark { color: var(--red); }
+.model-annotation-mark.tone-neutral, .model-annotation-statement.tone-neutral .model-annotation-mark { color: var(--muted); }
+.model-annotation-tip { display: grid; gap: 2px; max-width: 260px; }
+.model-annotation-tip small { color: var(--muted); }
+.model-annotation-statement { display: grid; gap: 2px; min-width: 0; }
+.model-annotation-line { display: flex; align-items: flex-start; gap: 5px; }
+.model-annotation-line .model-annotation-mark { flex: none; margin-top: 1px; }
+.model-annotation-line b { font-weight: 560; }
+.model-annotation-statement .model-annotation-mark { cursor: default; }
+.model-annotation-detail { color: var(--text-dim); }
+.model-annotation-meta { color: var(--muted); }
+.model-annotation-meta a { color: var(--accent); text-decoration: none; }
+.model-annotation-meta a:hover { text-decoration: underline; }
+.model-hover-annotations { display: grid; gap: var(--space-2); padding: var(--space-2); border: 1px solid var(--border-soft); border-radius: var(--radius-card); background: var(--surface-overlay); font-size: var(--font-meta); }
+.model-hover-annotations > div { display: grid; gap: 3px; }
+.model-hover-annotation-heading { color: var(--muted); }
 @keyframes model-details-in { from { opacity: 0; transform: translateX(-2px); } to { opacity: 1; transform: none; } }
 /* ---- model details card (shared by popover and sheet) -------------------- */
 .model-details {

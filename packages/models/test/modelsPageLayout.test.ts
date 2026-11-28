@@ -116,3 +116,30 @@ test("populated catalog renders provider cards that expand to models", async () 
     await page.unmount();
   }
 });
+
+test("a registered model annotation draws its mark right after the model name", async () => {
+  catalog = [google];
+  const { registerModelAnnotationSource } = await import("../widgets/modelAnnotations.ts");
+  const off = registerModelAnnotationSource({
+    id: "test-annotations",
+    annotate: (model) => model.modelID === "gemini-flash" && model.harnessId === "opencode"
+      ? [{ key: "k", tone: "warning", icon: "eye", label: "Kept for training", heading: "Data", inline: true }]
+      : [],
+  });
+  const page = await mounted();
+  try {
+    // The previous test leaves the provider expanded (persisted); open it
+    // only when it is still collapsed.
+    if (page.container.querySelector(".set-model-row") === null) {
+      const expand = page.container.querySelector<HTMLButtonElement>(".provider-expand");
+      assert.ok(expand);
+      await act(async () => { expand.click(); });
+    }
+    const mark = page.container.querySelector(".set-model-title .set-model-name + .model-annotation-marks .model-annotation-mark");
+    assert.ok(mark !== null, page.container.querySelector(".set-model-row")?.outerHTML.slice(0, 300));
+    assert.equal(mark?.getAttribute("aria-label"), "Kept for training");
+  } finally {
+    off();
+    await page.unmount();
+  }
+});

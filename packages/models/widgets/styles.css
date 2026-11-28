@@ -8,6 +8,12 @@ background: var(--elevated);
 .set-model-name {
 flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.set-model-title {
+flex: 1; min-width: 0; display: flex; align-items: center;
+}
+.set-model-title .set-model-name {
+flex: 0 1 auto;
+}
 .set-model-meta {
 color: var(--muted); font-size: var(--font-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 44%;
 }

@@ -8,6 +8,7 @@ import type {
 import { allowsInteractiveProviderAuth } from "@polyth/contracts";
 import { requireInstanceOwnerAuthority } from "@polyth/contracts/instance-authority";
 import { assertInteractiveProviderAuth } from "./providerAuthTarget.ts";
+import { PKCE_CALLBACK_PATH } from "./providerPkce.ts";
 import type { ProviderAuthController } from "./providerAuth.ts";
 
 interface VisibilityService {
@@ -63,6 +64,62 @@ export function providerAuthRoutes(deps: {
     const { path } = request;
     if (!path.startsWith("/api/providers")) return false;
     const { method, json, body, space } = request;
+
+    // Vendor redirect target for first-party PKCE sign-in. It is a plain GET
+    // from the user's own browser, so it answers with a small HTML page. The
+    // code is single-use and useless without the server-held verifier; the
+    // state is the only lookup key, and it belongs to one attempt and Space.
+    if (path === PKCE_CALLBACK_PATH && method === "GET") {
+      // Writing a provider credential is owner-only, and this GET writes one.
+      // A member's navigation fails closed here; the callback URL still carries
+      // the code back to the owner's own paste field.
+      requireInstanceOwnerAuthority(request, "provider credential changes require the instance owner");
+      assertInteractiveProviderAuth(space);
+      const state = request.url.searchParams.get("state") ?? "";
+      const code = request.url.searchParams.get("code") ?? undefined;
+      const denied = request.url.searchParams.get("error") ?? undefined;
+      const page = (status: number, title: string, detail: string): void => {
+        const escape = (value: string) => value
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+        request.res.writeHead(status, {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+          "referrer-policy": "no-referrer",
+        });
+        request.res.end(
+          "<!doctype html><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+          + `<title>${escape(title)}</title>`
+          + "<style>body{font:16px/1.5 system-ui,sans-serif;margin:0;padding:48px 24px;max-width:40rem;margin-inline:auto}"
+          + "h1{font-size:1.25rem}code{background:#8882;padding:.1em .35em;border-radius:.3em}</style>"
+          + `<h1>${escape(title)}</h1><p>${escape(detail)}</p>`,
+        );
+      };
+      if (denied) {
+        page(200, "Authorization declined", "Nothing was connected. You can close this tab and return to Polyth.");
+        return true;
+      }
+      if (!state || !code) {
+        page(400, "Missing authorization details", "Open this flow again from Polyth → Providers & Models.");
+        return true;
+      }
+      try {
+        const attempt = await deps.auth.completePkceCallback(state, code, space);
+        page(
+          200,
+          attempt.phase === "configured_unverified" || attempt.phase === "connected" ? "Connected" : "Almost done",
+          attempt.phase === "configured_unverified" || attempt.phase === "connected"
+            ? "Polyth received a key for " + attempt.providerId + ". You can close this tab."
+            : "Polyth could not finish the exchange. Return to the tab where you started the sign-in.",
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        page(200, "Could not finish sign-in", message + " — return to Polyth and paste the callback URL there.");
+      }
+      return true;
+    }
     const runtime = () => deps.runtime(space);
     const requireGlobalMutation = () => requireInstanceOwnerAuthority(
       request,

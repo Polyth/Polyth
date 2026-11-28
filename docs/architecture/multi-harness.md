@@ -1443,6 +1443,45 @@ account route in the detail hero. Checks: `test/setupTerminal.test.ts`,
 `test/harnessAuthRecovery.test.ts`, terminal `terminal.test.ts` and
 `terminalAutoSpawn.test.ts`.
 
+### Provider sign-in methods (OpenCode providers)
+
+Provider credentials are OpenCode's, discovered per runtime: `providerAuthMethods()`
+returns one method list per provider, and Polyth normalizes each (`kind`
+`api`/`oauth`, prompt fields, fingerprint) into `NormalizedAuthMethod`. Starting an
+attempt needs owner authority; `AuthAttemptDto.phase` is the transport for
+everything the person has to do (`browser_action_required`, `awaiting_code`,
+`device_action_required`, `waiting`, then a terminal phase).
+
+A provider whose integration offers no OAuth (OpenRouter exposes only `key` and
+`env`) gets Polyth's own first-party PKCE method, appended to the view with
+`provenance: "polyth"` and `upstreamIndex: -1` so it is never mistaken for an
+upstream protocol. `providerPkce.ts` holds the small provider registry
+(`authorizeUrl` + `exchange`); the attempt carries the `code_verifier` in server
+memory only, and a successful exchange calls `setProviderApiKey`, so a minted
+key follows the same path as a pasted one and never enters a DTO, log line or
+model context.
+
+Two shapes, chosen by deployment rather than by a preference:
+
+- **Redirect** when `POLYTH_PUBLIC_ORIGIN` is an https origin: `callback_url` is
+  `<origin>/api/providers/auth/pkce/callback`, a plain `GET` that answers with a
+  small HTML page. It is a normal authenticated route, so the browser that
+  authorized must carry the Polyth session — the usual case, because the person
+  signs in to the vendor in the browser they already use for Polyth. If it does
+  not reach the route, the callback URL is still visible in the address bar and
+  the existing paste field (`parseAuthorizationCode` accepts a callback URL)
+  finishes the attempt. The state is single-use and bound to one attempt and
+  Space; the code is useless without the server-held verifier.
+- **Headless** without a public origin: no `callback_url`, so the vendor shows the
+  code on screen and the `awaiting_code` field takes it. This is also the only
+  shape that works from a phone or an SSH session, where a localhost redirect
+  never arrives.
+
+Checks: `packages/backend-opencode/test/providerPkce.test.ts` (pair/S256,
+authorize URL, exchange, view injection, both completion paths, single use) plus
+the existing `providerAuthFlow`/`providerAuthSession`/`providerAuthWellKnown`
+suites.
+
 ### One-click install
 
 **Install** does not open a terminal and needs no open project: the server

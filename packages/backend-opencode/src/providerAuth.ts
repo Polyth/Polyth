@@ -5,6 +5,7 @@ import type {
   AuthErrorDto,
   AuthPhase,
   AvailableProviderDescriptor,
+  NormalizedAuthMethod,
   ProviderAuthCapabilitiesDto,
   ProviderAuthMethod,
   ProviderAuthView,
@@ -41,6 +42,16 @@ import {
   withSelectDefaults,
 } from "@polyth/models/auth";
 import { createWellKnownFlow, runPinnedArgv } from "./providerAuthWellKnown.ts";
+import {
+  createPkcePair,
+  createPkceState,
+  isPkceFingerprint,
+  pkceAuthMethod,
+  pkceCallbackUrl,
+  pkceProvider,
+  pkceProviderFromFingerprint,
+  type PkceProvider,
+} from "./providerPkce.ts";
 
 const TERMINAL_TTL_MS = 2 * 60 * 1000;
 const CONNECTED_TTL_MS = 5 * 60 * 1000;
@@ -72,6 +83,8 @@ interface AuthAttemptInternal {
   error?: AuthErrorDto;
   secrets: string[];
   oauthMethod: "auto" | "code" | "api";
+  /** Present when Polyth itself mints the key through a PKCE provider. */
+  pkce?: { provider: PkceProvider; verifier: string; state: string; callbackUrl?: string };
   abort: AbortController;
   callbackState: CallbackState;
   callbackPromise?: Promise<void>;
@@ -107,6 +120,8 @@ export interface ProviderAuthController {
   }): Promise<AuthAttemptDto>;
   getAttempt(id: string, space: SpaceContext): AuthAttemptDto | undefined;
   completeAttempt(id: string, code: string | undefined, space: SpaceContext): Promise<AuthAttemptDto>;
+  /** Completes the attempt a PKCE redirect belongs to, matched by its state. */
+  completePkceCallback(state: string, code: string | undefined, space: SpaceContext): Promise<AuthAttemptDto>;
   cancelAttempt(id: string, space: SpaceContext): AuthAttemptDto;
   saveCredential(providerId: string, key: string, metadata: Record<string, string> | undefined, space: SpaceContext): Promise<ProviderAuthView>;
   disconnect(providerId: string, space: SpaceContext): Promise<{ ok: true; remaining?: ProviderAuthView["credential"] }>;
@@ -316,7 +331,7 @@ export function createProviderAuthController(deps: {
     const discoveryStatusValue = snap.status === "failed" || snap.status === "unavailable"
       ? snap.status
       : discoveryStatus(true, false, false, methods?.length ?? 0);
-    return buildProviderAuthView({
+    const view = buildProviderAuthView({
       providerId,
       methods,
       ...(metadata ? { metadata } : {}),
@@ -332,6 +347,14 @@ export function createProviderAuthController(deps: {
         ...(snap.error && !listed ? { error: snap.error } : {}),
       },
     });
+    // A provider whose upstream offers no OAuth still gets Polyth's own PKCE
+    // sign-in, so the key can be minted instead of pasted. It is additive: an
+    // upstream OAuth method keeps precedence when it exists.
+    const pkce = pkceProvider(providerId);
+    if (pkce && !view.methods.some((item) => item.kind === "oauth")) {
+      view.methods.unshift(pkceAuthMethod(pkce));
+    }
+    return view;
   };
 
   const publicAttempt = (attempt: AuthAttemptInternal): AuthAttemptDto => ({
@@ -426,6 +449,100 @@ export function createProviderAuthController(deps: {
     }
   };
 
+  const startPkceAttempt = async (args: {
+    providerId: string;
+    method: NormalizedAuthMethod;
+    snap: Snapshot;
+    space: SpaceContext;
+  }): Promise<AuthAttemptDto> => {
+    const { providerId, method, snap, space } = args;
+    const provider = pkceProviderFromFingerprint(method.fingerprint);
+    if (!provider) return throwAuthError(authError("AUTH_METHOD_UNAVAILABLE"));
+    const rt = await runtimeOf(space);
+    // The minted key lands exactly where a pasted one would, so the credential
+    // never travels through a DTO, a log line or the model context.
+    if (!rt.setProviderApiKey) return throwAuthError(authError("AUTH_CAPABILITY_UNAVAILABLE"));
+
+    const pair = createPkcePair();
+    const state = createPkceState();
+    const callbackUrl = pkceCallbackUrl(env);
+    const url = provider.authorizeUrl({
+      challenge: pair.challenge,
+      state,
+      keyLabel: "Polyth",
+      ...(callbackUrl ? { callbackUrl } : {}),
+    });
+
+    supersede(space.spaceId, snap.authorityId, providerId);
+    const attempt: AuthAttemptInternal = {
+      id: randomUUID(),
+      providerId,
+      methodId: method.id,
+      upstreamIndex: method.upstreamIndex,
+      fingerprint: method.fingerprint,
+      revision: snap.revision,
+      authorityId: snap.authorityId,
+      generation: snap.generation,
+      phase: "starting",
+      createdAt: now(),
+      instructions: provider.instructions,
+      url,
+      urlKind: "authorization",
+      secrets: [pair.verifier],
+      oauthMethod: "code",
+      callbackState: "idle",
+      spaceId: space.spaceId,
+      abort: new AbortController(),
+      pkce: { provider, verifier: pair.verifier, state, ...(callbackUrl ? { callbackUrl } : {}) },
+    };
+    attempts.set(attempt.id, attempt);
+    activeByProvider.set(activeKey(space.spaceId, snap.authorityId, providerId), attempt.id);
+    attempt.expiresAt = attempt.createdAt + ATTEMPT_MAX_AGE_MS;
+    assignPhase(attempt, "awaiting_code");
+    return publicAttempt(attempt);
+  };
+
+  const completePkceAttempt = async (
+    attempt: AuthAttemptInternal,
+    code: string | undefined,
+    space: SpaceContext,
+  ): Promise<AuthAttemptDto> => {
+    const pkce = attempt.pkce!;
+    const parsed = code !== undefined ? parseAuthorizationCode(code) : undefined;
+    if (!parsed || !parsed.ok) {
+      return throwAuthError(parsed && !parsed.ok ? parsed.error : authError("AUTH_INPUT_INVALID", { field: "code" }));
+    }
+    attempt.secrets.push(parsed.code);
+    const rt = await runtimeOf(space);
+    assignPhase(attempt, "validating");
+    try {
+      const key = await pkce.provider.exchange({
+        code: parsed.code,
+        verifier: pkce.verifier,
+        signal: attempt.abort.signal,
+        ...(deps.fetchImpl ? { fetch: deps.fetchImpl } : {}),
+      });
+      if (attempt.abort.signal.aborted || isTerminalPhase(attempt.phase)) return publicAttempt(attempt);
+      attempt.secrets.push(key);
+      // The verifier has served its one exchange; keep nothing to replay.
+      pkce.verifier = "";
+      await rt.setProviderApiKey!(attempt.providerId, key, { method: "polyth-pkce" });
+      const live = await identityOf(rt);
+      if (live.authorityId !== attempt.authorityId || live.generation !== attempt.generation) {
+        markTerminal(attempt, "stale", authError("AUTH_RUNTIME_RESTARTED"));
+        return publicAttempt(attempt);
+      }
+      markTerminal(attempt, "configured_unverified");
+      invalidate();
+      deps.invalidateModels();
+      return publicAttempt(attempt);
+    } catch (caught) {
+      if (attempt.abort.signal.aborted || isTerminalPhase(attempt.phase)) return publicAttempt(attempt);
+      markTerminal(attempt, "failed", mapUpstreamAuthError(caught, attempt.secrets));
+      return throwAuthError(attempt.error!);
+    }
+  };
+
   const startAttempt = async (input: {
     providerId: string;
     methodId: string;
@@ -454,6 +571,9 @@ export function createProviderAuthController(deps: {
     const method = view.methods.find((item) => item.id === input.methodId);
     if (!method) return throwAuthError(authError("AUTH_METHOD_UNAVAILABLE"));
     if (!method.usable) return throwAuthError(method.unavailability ?? authError("AUTH_METHOD_UNAVAILABLE"));
+    if (isPkceFingerprint(method.fingerprint)) {
+      return startPkceAttempt({ providerId: input.providerId, method, snap, space: input.space });
+    }
     const wire = snap.rawMethods[input.providerId]?.find((item) => item.upstreamIndex === method.upstreamIndex);
     if (!wire || fingerprintAuthMethod(wire) !== method.fingerprint) {
       return throwAuthError(authError("AUTH_PROVIDER_PROTOCOL_CHANGED"));
@@ -586,6 +706,7 @@ export function createProviderAuthController(deps: {
     if (!attempt || !attemptInSpace(attempt, space)) return throwAuthError(authError("AUTH_SESSION_STALE"));
     if (attempt.phase === "connected" || attempt.phase === "configured_unverified") return publicAttempt(attempt);
     if (isTerminalPhase(attempt.phase)) return throwAuthError(attempt.error ?? authError("AUTH_SESSION_STALE"));
+    if (attempt.pkce) return completePkceAttempt(attempt, code, space);
     const snap = await loadSnapshot(space);
     if (!methodStillMatches(snap, attempt)) {
       markTerminal(attempt, "stale", authError("AUTH_PROVIDER_PROTOCOL_CHANGED"));
@@ -621,6 +742,26 @@ export function createProviderAuthController(deps: {
       markTerminal(attempt, "cancelled", authError("AUTH_CANCELLED"));
     }
     return publicAttempt(attempt);
+  };
+
+  const completePkceCallback = async (
+    state: string,
+    code: string | undefined,
+    space: SpaceContext,
+  ): Promise<AuthAttemptDto> => {
+    sweep();
+    assertInteractiveProviderAuth(space);
+    const attempt = [...attempts.values()].find(
+      (item) => item.pkce?.state === state && attemptInSpace(item, space),
+    );
+    if (!attempt) return throwAuthError(authError("AUTH_SESSION_STALE"));
+    if (attempt.phase === "connected" || attempt.phase === "configured_unverified") return publicAttempt(attempt);
+    if (isTerminalPhase(attempt.phase)) return throwAuthError(attempt.error ?? authError("AUTH_SESSION_STALE"));
+    if (attempt.expiresAt && now() > attempt.expiresAt) {
+      markTerminal(attempt, "expired", authError("AUTH_EXPIRED"));
+      return throwAuthError(attempt.error!);
+    }
+    return completePkceAttempt(attempt, code, space);
   };
 
   const capabilities = async (connected: ReadonlySet<string>, space: SpaceContext): Promise<ProviderAuthCapabilitiesDto> => {
@@ -782,6 +923,7 @@ export function createProviderAuthController(deps: {
     startAttempt,
     getAttempt,
     completeAttempt,
+    completePkceCallback,
     cancelAttempt,
     saveCredential,
     disconnect,

@@ -31,6 +31,7 @@ import { createPortal } from "react-dom";
 import type { ModelDescriptor, ModelRef } from "@polyth/contracts";
 import { resolveModelContextLimit } from "@polyth/contracts/model-context";
 import { chatOverflowsModel } from "./chatFit.ts";
+import { ModelAnnotationMarks } from "./ModelAnnotationMarks.tsx";
 import { hiddenModelMatcher, isFavorite, modelKey, orderProviders, providerPreferenceKey } from "@polyth/models";
 import {
   getLastHarnessModels,
@@ -1072,6 +1073,7 @@ export default function ModelPicker({
         <span className="model-picker-copy">
           <strong>
             {model.name}
+            <ModelAnnotationMarks model={model} />
             {model.connected === false && (
               <em className="model-row-offline">{tr("modelpicker.notConnected")}</em>
             )}

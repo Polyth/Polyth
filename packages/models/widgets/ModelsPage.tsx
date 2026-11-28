@@ -30,6 +30,7 @@ import Picker from "../../../apps/web/src/components/Picker.tsx";
 import { confirmAlert } from "../../../apps/web/src/alerts.ts";
 import ProviderConnect, { OrganizationLogin } from "./ProviderConnect.tsx";
 import ProviderLogo from "./ProviderLogo.tsx";
+import { ModelAnnotationMarks } from "./ModelAnnotationMarks.tsx";
 import CustomProviderDialog from "./CustomProviderDialog.tsx";
 import MoveControls from "../../../apps/web/src/components/MoveControls.tsx";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
@@ -506,7 +507,10 @@ export default function ModelsPage() {
                           label={fav ? tr("settings.modelspage.removeFavorite") : tr("settings.modelspage.addFavorite")}
                           onClick={() => toggleModelFavorite(favoriteKey)}
                         />
-                        <span className="set-model-name" title={displayName}>{displayName}</span>
+                        <span className="set-model-title">
+                          <span className="set-model-name" title={displayName}>{displayName}</span>
+                          <ModelAnnotationMarks model={{ harnessId: "opencode", providerID: m.providerID, modelID: m.modelID, ...(m.cost ? { cost: m.cost } : {}) }} tooltip />
+                        </span>
                         {m.context !== undefined && <span className="set-model-ctx mono">{fmtContext(m.context)}</span>}
                         <span className="set-model-meta mono">{m.key}</span>
                         <Switch
