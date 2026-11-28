@@ -502,6 +502,11 @@ export function attachSendPress(control: HTMLElement, handlers: SendPressHandler
     const dx = x < rect.left ? x - rect.left : x > rect.right ? x - rect.right : 0;
     const dy = y < rect.top ? y - rect.top : y > rect.bottom ? y - rect.bottom : 0;
     if (Math.hypot(dx, dy) > NEAR_MISS_PX) return;
+    // Send stays mounted under sheets and windows (Settings over the chat on a
+    // phone). A press on whatever covers it is not a near miss, and would push
+    // the real presses out of the short trace.
+    const under = doc.elementFromPoint?.(rect.left + rect.width / 2, rect.top + rect.height / 2) ?? null;
+    if (under !== null && !inside(under)) return;
     remember({
       at: Date.now(), kind: "near", hold: 0, focus: describe(doc.activeElement),
       events: [`${name}@0`], outcome: `on ${describe(target)} ${Math.round(dx)},${Math.round(dy)}`,

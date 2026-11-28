@@ -353,6 +353,15 @@ test("a press that lands beside Send on something else is traced as a near miss"
   assert.deepEqual(r.calls, []);
 });
 
+test("a press on a sheet that covers Send is not traced as a near miss", (t) => {
+  const r = rig(t);
+  const before = sendPressTrace();
+  r.doc.elementFromPoint = () => r.elsewhere;
+  r.fire("pointerdown", { pointerId: 3, pointerType: "touch", button: 0, target: r.elsewhere, clientX: 118, clientY: 90 });
+  assert.equal(sendPressTrace(), before);
+  assert.deepEqual(r.calls, []);
+});
+
 test("the report a person copies names the build context and lists the presses, oldest first", (t) => {
   const r = rig(t);
   r.down();
