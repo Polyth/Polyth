@@ -145,6 +145,7 @@ is always present.
 - knowledge
 - limit-windows
 - memory
+- model-privacy
 - models
 - multirun
 - opencode
