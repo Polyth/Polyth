@@ -65,7 +65,18 @@ const BRACKET_SECTIONS = {
   debug: "fixes", investigate: "maintenance", investigation: "maintenance",
   analysis: "maintenance", analyse: "maintenance", analyze: "maintenance",
   research: "maintenance", question: "maintenance", idea: "maintenance",
+  // A reported problem and a design write-up name a change, not a tool: an
+  // issue is a bug, a design note ships as an improvement.
+  issue: "fixes", bugreport: "fixes", design: "improvements", mockup: "improvements",
 };
+/**
+ * A session's own commit title often starts with who wrote it —
+ * `Iryna — designer: the top bar island reads the same`. That prefix names a
+ * person and a role, not the change, so it never reaches the public notes.
+ * Only a short name followed by a known role word (designer, developer,
+ * agent…) is stripped, so prose that happens to contain an em dash stays.
+ */
+const SESSION_PREFIX = /^[\p{Lu}][\p{L}'’.-]*(?:\s+[\p{Lu}][\p{L}'’.-]*)?\s+—\s+(?:design|designer|dev|developer|engineer|agent|captain|reviewer|tester|researcher|writer|analyst)s?\s*:\s+(?=\S)/u;
 const VERB_SECTIONS = [
   ["features", /^(add|adds|added|introduce|introduces|support|supports|implement|implements|create|creates|enable|enables|offer|offers|ship|ships|launch|new|дода\S*|додай)$/i],
   ["fixes", /^(fix|fixes|fixed|stop|stops|prevent|prevents|repair|restore|restores|resolve|resolves|correct|avoid|recover|unblock|guard|keep|keeps|don't|never|handle|виправ\S*)$/i],
@@ -191,7 +202,7 @@ export function commitSummary(body) {
 
 /** { section, title } for a commit: conventional type, then leading verb, then the paths it touched. */
 export function classifyCommit(commit) {
-  let subject = commit.subject.trim();
+  let subject = commit.subject.trim().replace(SESSION_PREFIX, "");
   let section = null;
   const bracketed = BRACKET.exec(subject);
   const bracketSection = bracketed && BRACKET_SECTIONS[bracketed[1].trim().toLowerCase()];

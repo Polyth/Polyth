@@ -65,6 +65,10 @@ test("commits group by conventional type, leading verb and touched paths", () =>
     ["[Debug] Polyth app crash after server linking", ["apps/web/src/a.tsx"], "fixes", "Polyth app crash after server linking"],
     ["[Investigate] Auto-stop did not trigger", ["apps/web/src/a.tsx"], "maintenance", "Auto-stop did not trigger"],
     ["[Analysis] Prioritize ideas worth implementing", ["apps/web/src/a.tsx"], "maintenance", "Prioritize ideas worth implementing"],
+    ["[Issue] Mistral Harness lists only one non-Mistral model", ["apps/web/src/a.tsx"], "fixes", "Mistral Harness lists only one non-Mistral model"],
+    ["[Design] Polyth Statistics lockup: rising bars", ["apps/web/src/a.tsx"], "improvements", "Polyth Statistics lockup: rising bars"],
+    ["Iryna — designer: the Top bar island across shell looks", ["apps/web/src/a.tsx"], "improvements", "The Top bar island across shell looks"],
+    ["Settle — not a role: keep the dash", ["apps/web/src/a.tsx"], "improvements", "Settle — not a role: keep the dash"],
     ["Pin the native bridge", ["packages/link/Cargo.lock"], "maintenance", "Pin the native bridge"],
   ];
   for (const [subject, files, section, title] of cases) {
