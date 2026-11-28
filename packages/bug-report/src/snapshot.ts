@@ -32,6 +32,17 @@ export const UI_SETTING_KEYS = [
   "showArchived",
   "defaultVisibleSessionCount",
   "defaultModel",
+  // Shell appearance: enum tokens and switches that decide how the window looks.
+  "shellLook",
+  "shellLayout",
+  "shellBarStyle",
+  "floatingColumns",
+  "shellToolsDock",
+  "shellActionsDock",
+  "shellTitle",
+  "topRailSurface",
+  "statusBar",
+  "chatWidth",
 ] as const;
 
 /** Root `data-*` flags the shell sets for look and input mode. */
