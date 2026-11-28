@@ -1445,8 +1445,10 @@ export const api = {
   listProviders: () => jfetch<ProviderCatalogDto[]>("/api/providers"),
   setProviderEnabled: (id: string, enabled: boolean) =>
     pendingMutation(jfetch<VisibilityStateDto>(`/api/providers/${encodeURIComponent(id)}/enabled`, json("POST", { enabled }))),
-  setModelEnabled: (key: string, enabled: boolean) =>
-    pendingMutation(jfetch<VisibilityStateDto>(`/api/models/enabled`, json("POST", { key, enabled }))),
+  /** `siblings`: the provider's other model keys. Enabling a model of a
+   *  disabled provider re-enables the provider with only this model on. */
+  setModelEnabled: (key: string, enabled: boolean, siblings?: readonly string[]) =>
+    pendingMutation(jfetch<VisibilityStateDto>(`/api/models/enabled`, json("POST", siblings ? { key, enabled, siblings } : { key, enabled }))),
   /** ?refresh=1 busts the server-side model cache — use while polling for a
    *  connect/OAuth flow to finish; prefer listProviders() otherwise. */
   refreshProviders: () => jfetch<ProviderCatalogDto[]>("/api/providers?refresh=1"),

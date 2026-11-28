@@ -285,6 +285,29 @@ test("toggles persist and mirror into the backend config", async () => {
   assert.deepEqual(applied, { disabledProviders: [], blacklists: {} });
 });
 
+test("enabling a model of a disabled provider re-enables it with only that model on", async () => {
+  const dir = tmp();
+  const svc = createModelVisibilityService({
+    file: join(dir, "model-visibility.json"),
+    applier: { readConfig: async () => ({}), applyProviderVisibility: async () => {} },
+  });
+  await svc.seed();
+  await svc.setProviderEnabled("openrouter", false);
+  await svc.setModelEnabled("openai/gpt-mini", false);
+  const state = await svc.setModelEnabled(
+    "openrouter/a:free",
+    true,
+    undefined,
+    ["openrouter/a:free", "openrouter/b", "openrouter/c", "openai/gpt-x", "openrouter/"],
+  );
+  assert.deepEqual(state.disabledProviders, []);
+  assert.deepEqual([...state.disabledModels].sort(), ["openai/gpt-mini", "openrouter/b", "openrouter/c"]);
+
+  // Siblings only apply while reviving a disabled provider.
+  const next = await svc.setModelEnabled("openrouter/b", true, undefined, ["openrouter/c", "openrouter/d"]);
+  assert.deepEqual([...next.disabledModels].sort(), ["openai/gpt-mini", "openrouter/c"]);
+});
+
 test("a failed backend apply rolls the toggle back", async () => {
   const dir = tmp();
   const svc = createModelVisibilityService({

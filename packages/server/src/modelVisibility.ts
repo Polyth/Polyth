@@ -142,7 +142,11 @@ export interface ModelVisibilityService {
     userId?: string,
   ): AvailableProvider[];
   setProviderEnabled(providerID: string, enabled: boolean, userId?: string): Promise<VisibilityState>;
-  setModelEnabled(key: string, enabled: boolean, userId?: string): Promise<VisibilityState>;
+  /** Enabling a model of a disabled provider re-enables that provider and,
+   *  atomically, disables the given `siblings` (other keys of the same
+   *  provider), so "turn the provider off, then switch on the few models you
+   *  want" leaves exactly those models on. Siblings are ignored otherwise. */
+  setModelEnabled(key: string, enabled: boolean, userId?: string, siblings?: readonly string[]): Promise<VisibilityState>;
   /** Explicitly add a zero-model provider so it appears in catalog(); resets
    *  any stale disabled flag so a freshly-added row starts enabled. */
   addProvider(
@@ -712,14 +716,23 @@ export function createModelVisibilityService(opts: {
       return commit({ ...current, disabledProviders: [...set] }, userId);
     },
 
-    setModelEnabled(key, enabled, userId) {
+    setModelEnabled(key, enabled, userId, siblings) {
       const i = key.indexOf("/");
       if (i <= 0 || i === key.length - 1) throw err("invalid-input", `model key must be "providerID/modelID", got "${key}"`);
+      const providerID = key.slice(0, i);
       const current = stateOf(userId);
       const set = new Set(current.disabledModels);
+      let disabledProviders = current.disabledProviders;
+      if (enabled && disabledProviders.includes(providerID)) {
+        disabledProviders = disabledProviders.filter((id) => id !== providerID);
+        const prefix = `${providerID}/`;
+        for (const sibling of siblings ?? []) {
+          if (sibling !== key && sibling.startsWith(prefix) && sibling.length > prefix.length) set.add(sibling);
+        }
+      }
       if (enabled) set.delete(key);
       else set.add(key);
-      return commit({ ...current, disabledModels: [...set] }, userId);
+      return commit({ ...current, disabledProviders, disabledModels: [...set] }, userId);
     },
 
     addProvider(providerID, name, origin?: ProviderOrigin, meta?: {

@@ -101,7 +101,6 @@ export const ptBR: ModelsMessages = {
   "settings.modelspage.displayName": "Nome de exibição",
   "settings.modelspage.editProvider": "Editar provedor",
   "settings.modelspage.enableModel": "Ativar modelo",
-  "settings.modelspage.enableTheProviderFirst": "Primeiro, habilite o provedor.",
   "settings.modelspage.enableValue": "Ativar {value}",
   "settings.modelspage.expandValue": "Expandir {value}",
   "settings.modelspage.filterProviderModels": "Filtrar modelos de {name}…",

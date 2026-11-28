@@ -101,7 +101,6 @@ export const zhCN: ModelsMessages = {
   "settings.modelspage.displayName": "显示名称",
   "settings.modelspage.editProvider": "编辑提供商",
   "settings.modelspage.enableModel": "启用模型",
-  "settings.modelspage.enableTheProviderFirst": "首先启用提供商",
   "settings.modelspage.enableValue": "启用{value}",
   "settings.modelspage.expandValue": "展开{value}",
   "settings.modelspage.filterProviderModels": "筛选 {name} 的模型…",

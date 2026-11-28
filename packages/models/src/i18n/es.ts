@@ -101,7 +101,6 @@ export const es: ModelsMessages = {
   "settings.modelspage.displayName": "Nombre visible",
   "settings.modelspage.editProvider": "Editar proveedor",
   "settings.modelspage.enableModel": "Habilitar modelo",
-  "settings.modelspage.enableTheProviderFirst": "Habilitar primero al proveedor",
   "settings.modelspage.enableValue": "Habilitar {value}",
   "settings.modelspage.expandValue": "Expandir {value}",
   "settings.modelspage.filterProviderModels": "Filtrar modelos de {name}…",

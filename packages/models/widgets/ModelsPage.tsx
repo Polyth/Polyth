@@ -294,14 +294,30 @@ export default function ModelsPage() {
     );
   };
 
+  /** Switching a model on while its provider is off turns the provider back
+   *  on with only that model enabled, so "provider off, then pick the few
+   *  you want" works without re-enabling hundreds of models first. */
   const toggleModel = (providerID: string, modelKey: string, enabled: boolean) => {
+    const owner = providers?.find((provider) => provider.id === providerID);
+    const reviving = enabled && owner !== undefined && !owner.enabled;
+    const siblings = reviving ? owner.models.map((model) => model.key).filter((key) => key !== modelKey) : undefined;
+    if (reviving) {
+      setLocalProviderEnabled(providerID, true);
+      for (const key of siblings ?? []) setLocalModelEnabled(key, false);
+    }
     setLocalModelEnabled(modelKey, enabled);
     return mutate(
       modelKey,
       (catalog) => catalog.map((provider) => provider.id === providerID
-        ? { ...provider, models: provider.models.map((model) => model.key === modelKey ? { ...model, enabled } : model) }
+        ? {
+            ...provider,
+            ...(reviving ? { enabled: true, status: overlayStatus(provider, true) } : {}),
+            models: provider.models.map((model) => model.key === modelKey
+              ? { ...model, enabled }
+              : reviving ? { ...model, enabled: false } : model),
+          }
         : provider),
-      () => api.setModelEnabled(modelKey, enabled),
+      () => api.setModelEnabled(modelKey, enabled, siblings),
     );
   };
 
@@ -515,12 +531,10 @@ export default function ModelsPage() {
                         <span className="set-model-meta mono">{m.key}</span>
                         <Switch
                           checked={m.enabled}
-                          label={!p.enabled
-                            ? tr("settings.modelspage.enableTheProviderFirst")
-                            : m.enabled
+                          label={m.enabled
                             ? tr("settings.modelspage.disableValue", { value: displayName })
                             : tr("settings.modelspage.enableValue", { value: displayName })}
-                          disabled={busyKey === m.key || !p.enabled}
+                          disabled={busyKey === m.key}
                           onChange={(on) => void toggleModel(p.id, m.key, on)}
                         />
                       </div>

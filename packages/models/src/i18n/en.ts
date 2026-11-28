@@ -103,7 +103,6 @@ export const en = {
   "settings.modelspage.displayName": "Display name",
   "settings.modelspage.editProvider": "Edit provider",
   "settings.modelspage.enableModel": "Enable model",
-  "settings.modelspage.enableTheProviderFirst": "Enable the provider first",
   "settings.modelspage.enableValue": "Enable {value}",
   "settings.modelspage.expandValue": "Expand {value}",
   "settings.modelspage.filterProviderModels": "Filter {name} models…",

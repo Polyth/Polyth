@@ -101,7 +101,6 @@ export const bg: ModelsMessages = {
   "settings.modelspage.displayName": "Показвано име",
   "settings.modelspage.editProvider": "Редактиране на доставчик",
   "settings.modelspage.enableModel": "Активиране на модела",
-  "settings.modelspage.enableTheProviderFirst": "Първо активирайте доставчика",
   "settings.modelspage.enableValue": "Активиране на {value}",
   "settings.modelspage.expandValue": "Разгъване на {value}",
   "settings.modelspage.filterProviderModels": "Филтриране на моделите на {name}…",

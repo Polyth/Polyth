@@ -101,7 +101,6 @@ export const uk: ModelsMessages = {
   "settings.modelspage.displayName": "Назва",
   "settings.modelspage.editProvider": "Редагувати постачальника",
   "settings.modelspage.enableModel": "Увімкнути модель",
-  "settings.modelspage.enableTheProviderFirst": "Спочатку увімкніть постачальника",
   "settings.modelspage.enableValue": "Увімкнути {value}",
   "settings.modelspage.expandValue": "Розгорнути {value}",
   "settings.modelspage.filterProviderModels": "Фільтрувати моделі {name}…",

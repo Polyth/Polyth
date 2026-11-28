@@ -101,7 +101,6 @@ export const ar: ModelsMessages = {
   "settings.modelspage.displayName": "الاسم المعروض",
   "settings.modelspage.editProvider": "تعديل المزود",
   "settings.modelspage.enableModel": "تمكين النموذج",
-  "settings.modelspage.enableTheProviderFirst": "قم بتمكين الموفر أولاً",
   "settings.modelspage.enableValue": "تمكين {value}",
   "settings.modelspage.expandValue": "توسيع {value}",
   "settings.modelspage.filterProviderModels": "تصفية نماذج {name}…",

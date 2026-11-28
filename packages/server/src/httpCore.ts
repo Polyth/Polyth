@@ -1472,6 +1472,9 @@ async function dispatchHttp(
             String(b.key ?? ""),
             b.enabled !== false,
             space().ctx.userId,
+            Array.isArray(b.siblings)
+              ? b.siblings.filter((s: unknown): s is string => typeof s === "string").slice(0, 5000)
+              : undefined,
           );
           return json(res, 200, { ok: true, ...state });
         }
